@@ -1,0 +1,142 @@
+"""Register nested MCP server tools onto the IDE-facing FastMCP bridge.
+
+Enabled servers from ``mcp.json`` are proxied as ``prefix__tool`` on the shared
+``uefn-ducky`` server so Cursor/Claude only need one MCP connection.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Callable
+
+from backend.server import mcp
+
+_log = logging.getLogger("uefn_ducky.mcp_bridge_proxy")
+
+# Tool names currently registered as nested proxies (for remove on sync).
+_PROXY_TOOL_NAMES: set[str] = set()
+_SYNCING = False
+
+
+def _registered_tool_names() -> set[str]:
+    tm = getattr(mcp, "_tool_manager", None)
+    tools = getattr(tm, "_tools", None)
+    return set(tools.keys()) if isinstance(tools, dict) else set()
+
+
+def _remove_proxy_tool(name: str) -> None:
+    tm = getattr(mcp, "_tool_manager", None)
+    if tm is None:
+        return
+    try:
+        tm.remove_tool(name)
+    except Exception:
+        tools = getattr(tm, "_tools", None)
+        if isinstance(tools, dict):
+            tools.pop(name, None)
+    _PROXY_TOOL_NAMES.discard(name)
+
+
+def _make_proxy(namespaced_name: str, description: str) -> Callable[..., str]:
+    def _tool(params: dict[str, Any] | None = None, pretty: bool = False) -> str:
+        del pretty
+        from backend.mcp_plugins.client_pool import get_plugin_pool
+
+        async def _call() -> str:
+            return await get_plugin_pool().call_tool(namespaced_name, params or {})
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            # Bridge call_tool usually runs in an event loop — nest safely.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(_call())).result(timeout=180)
+        return asyncio.run(_call())
+
+    _tool.__name__ = namespaced_name.replace("__", "_")
+    _tool.__doc__ = (description or namespaced_name).strip() or namespaced_name
+    return _tool
+
+
+async def sync_nested_mcp_proxies_async() -> list[str]:
+    """Add/remove FastMCP proxy tools for currently enabled nested servers."""
+    global _SYNCING
+    if _SYNCING:
+        return []
+    _SYNCING = True
+    added: list[str] = []
+    try:
+        from backend.mcp_plugins.client_pool import get_plugin_pool
+        from backend.mcp_plugins.store import ensure_plugin_prefix_cache
+
+        ensure_plugin_prefix_cache()
+        pool = get_plugin_pool()
+        try:
+            wanted_tools = await pool.list_all_plugin_tools()
+        except Exception as exc:
+            _log.warning("nested MCP list failed: %s", exc)
+            wanted_tools = []
+
+        wanted_names = {t.name for t in wanted_tools}
+        # Remove proxies that are no longer enabled / available.
+        for name in list(_PROXY_TOOL_NAMES):
+            if name not in wanted_names:
+                _remove_proxy_tool(name)
+
+        existing = _registered_tool_names()
+        for tool in wanted_tools:
+            name = tool.name
+            if name in existing and name not in _PROXY_TOOL_NAMES:
+                # Collision with a real FastMCP tool — skip.
+                continue
+            if name in _PROXY_TOOL_NAMES:
+                continue
+            try:
+                fn = _make_proxy(name, tool.description or name)
+                mcp.tool(name=name)(fn)
+                _PROXY_TOOL_NAMES.add(name)
+                existing.add(name)
+                added.append(name)
+            except Exception as exc:
+                _log.warning("failed to proxy %s: %s", name, exc)
+        if added:
+            _log.info("nested MCP proxies: +%d (%s)", len(added), ", ".join(added[:8]))
+    finally:
+        _SYNCING = False
+    return added
+
+
+def sync_nested_mcp_proxies(log: Callable[[str], None] | None = None) -> list[str]:
+    """Sync proxy tools (safe at bridge start). Never raises."""
+    try:
+        added = asyncio.run(sync_nested_mcp_proxies_async())
+        if log is not None and added:
+            log(f"nested MCP proxies: +{len(added)}")
+        return added
+    except Exception as exc:
+        _log.warning("sync_nested_mcp_proxies failed: %s", exc)
+        return []
+
+
+def schedule_sync_nested_proxies() -> None:
+    """Best-effort resync after mcp.json changes in the panel process.
+
+    The IDE bridge is a separate process — it picks up changes on reconnect.
+    Syncing here keeps an in-process FastMCP (if any) aligned.
+    """
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            loop.create_task(sync_nested_mcp_proxies_async())
+        else:
+            sync_nested_mcp_proxies()
+    except Exception:
+        pass

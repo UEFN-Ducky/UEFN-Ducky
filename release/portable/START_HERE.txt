@@ -1,0 +1,37 @@
+UEFN Ducky — quick start (Windows)
+================================
+
+1) Unzip. You need UEFN-Ducky.exe, this file, THIRD_PARTY_NOTICES.txt, and LICENSE.txt.
+   UEFN-Ducky is free and open source (MIT) — use it, modify it, share it; just keep
+   the copyright notice. Source: https://github.com/UEFN-Ducky/UEFN-Ducky
+
+2) Run UEFN-Ducky.exe
+   - Click "Basics" in the app for the short on-screen checklist.
+   - Click "Apply all IDEs" (or Apply per IDE). Restart Cursor / Claude / Antigravity if needed.
+   - Use "Test" per IDE to verify the MCP bridge starts (see "Log" if it fails).
+   - The same EXE is used for setup; your IDE runs it as: UEFN-Ducky.exe bridge --port 4200
+
+3) Deploy listener into your UEFN project
+   - Click "Deploy…" and pick your project folder (.uefnproject or a Content folder).
+   - Default: "Ship editor files with Deploy" is OFF — only Content\Python\init_unreal.py is added.
+     Keep UEFN-Ducky.exe running (double-click the panel, and/or your IDE MCP bridge). The EXE serves
+     the bundle at http://127.0.0.1:<your listener port + 1000>/ (e.g. 5200 when port is 4200).
+     Then open UEFN. Files cache under %LOCALAPPDATA%\UEFN-Ducky\remote_editor_cache\<port>\
+   - Turn ON "Ship editor files with Deploy" to copy the full editor\ tree into the project (offline).
+
+4) Open the project in UEFN. Enable Python Editor Script Plugin in Project Settings.
+   If you used Deploy (init_unreal.py), the listener may auto-start.
+   Otherwise: Tools → Execute Python Script → Content\Python\editor\launch_listener.py
+
+5) Closing the main window
+   - Usually hides to the notification area (tray). Click the tray icon to open again.
+   - "Exit all" stops every UEFN-Ducky.exe (panel + IDE bridge workers). Use when you want a full stop.
+
+6) Default port is 4200. Bridge, listener, and Deploy must use the same port.
+
+Troubleshooting
+---------------
+- MCP failed in the IDE: use "Test" in the app and read the Log.
+- Remote deploy: start the IDE first, or restart UEFN after the bridge is up (init retries for ~90s).
+- Antigravity: see repo docs\antigravity_mcp.md.
+- Developer mode (git clone + Python): py -m pip install -r requirements\runtime.txt, py -m frontend

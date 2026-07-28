@@ -1,0 +1,66 @@
+.translation-lang-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.translation-lang-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.translation-lang-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.translation-lang-item:hover {
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+}
+
+.translation-lang-item.is-active {
+  border-color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--accent, #2563eb) 18%, transparent);
+}
+
+.translation-lang-item-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.translation-lang-item-meta {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.translation-lang-remove {
+  flex-shrink: 0;
+}
+
+.translation-lang-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.translation-lang-input {
+  flex: 1;
+  min-width: 0;
+}
+

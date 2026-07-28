@@ -1,0 +1,309 @@
+/* Plugin webview pane (Phase 2) — see src/plugin-ui/README.md */
+.plugin-ui-pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg, #1e1e1e);
+  position: relative;
+}
+.plugin-ui-pane--with-chat {
+  flex-direction: row;
+  overflow: hidden;
+}
+.plugin-ui-pane--with-chat > .plugin-ui-iframe {
+  flex: 1 1 40%;
+  min-width: 280px;
+  max-width: 100%;
+  border-right: 1px solid var(--border, #3a3a3a);
+}
+
+/* Duck-Tac-Toe chat-first shell: board aside + ChatPane */
+.ducktactoe-chat-shell {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg, #1e1e1e);
+}
+.ducktactoe-chat-shell__chat {
+  flex: 1 1 60%;
+  min-width: 280px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ducktactoe-chat-shell__chat .chat-pane-root {
+  flex: 1 1 auto;
+  height: 100%;
+}
+.ducktactoe-board-aside {
+  flex: 0 0 340px;
+  min-width: 220px;
+  max-width: 560px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border, #3a3a3a);
+  background: var(--bg, #1e1e1e);
+}
+.ducktactoe-chat-shell__splitter {
+  position: relative;
+  flex: 0 0 0;
+  width: 0;
+  align-self: stretch;
+  z-index: 6;
+}
+.ducktactoe-chat-shell__splitter .chat-column-resize-handle {
+  /* Always discoverable on the board/chat seam */
+  opacity: 0.55;
+}
+.ducktactoe-chat-shell__splitter .chat-column-resize-handle:hover,
+.ducktactoe-chat-shell__splitter .chat-column-resize-handle.is-dragging {
+  opacity: 1;
+}
+.ducktactoe-chat-shell:has(.chat-column-resize-handle.is-dragging) {
+  user-select: none;
+}
+.ducktactoe-chat-shell:has(.chat-column-resize-handle.is-dragging) iframe {
+  pointer-events: none;
+}
+.ducktactoe-board-aside--collapsed {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: none;
+  flex-direction: row;
+  align-items: center;
+  align-self: stretch;
+  gap: 8px;
+  margin: 10px 0 10px 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-right: 1px solid var(--border, #3a3a3a);
+  background: color-mix(in srgb, var(--bg, #1e1e1e) 92%, transparent);
+  color: var(--fg, #e8e8e8);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  height: fit-content;
+}
+.ducktactoe-board-aside--collapsed:hover {
+  border-color: var(--fg-dim, #9aa0a6);
+}
+.ducktactoe-board-aside__chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+}
+.ducktactoe-board-aside__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #e8e8e8);
+}
+.ducktactoe-board-aside__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #9aa0a6);
+  cursor: pointer;
+}
+.ducktactoe-board-aside__btn:hover {
+  background: color-mix(in srgb, var(--fg, #fff) 10%, transparent);
+  color: var(--fg, #e8e8e8);
+}
+.ducktactoe-board-aside__iframe {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ducktactoe-board-aside__missing {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  text-align: center;
+}
+@media (max-width: 720px) {
+  .ducktactoe-chat-shell {
+    flex-direction: column;
+  }
+  .ducktactoe-board-aside {
+    flex: 0 0 42% !important;
+    width: 100% !important;
+    min-width: 0;
+    max-width: none !important;
+    border-right: 0;
+    border-bottom: 1px solid var(--border, #3a3a3a);
+  }
+  .ducktactoe-chat-shell__splitter {
+    display: none;
+  }
+  .ducktactoe-chat-shell__chat {
+    min-width: 0;
+  }
+}
+
+/* Legacy dock classes (plugin tab redirect still uses similar chrome) */
+.ducktactoe-chat-dock {
+  flex: 1 1 60%;
+  min-width: 300px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #1e1e1e);
+  z-index: 2;
+}
+.ducktactoe-chat-dock--loading,
+.ducktactoe-chat-dock--error {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+}
+.ducktactoe-chat-dock--error {
+  color: #f87171;
+}
+.ducktactoe-chat-dock--collapsed {
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  align-self: stretch;
+  gap: 8px;
+  margin: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #3a3a3a);
+  background: color-mix(in srgb, var(--bg, #1e1e1e) 92%, transparent);
+  color: var(--fg, #e8e8e8);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  height: fit-content;
+}
+.ducktactoe-chat-dock--collapsed:hover {
+  border-color: var(--fg-dim, #9aa0a6);
+}
+.ducktactoe-chat-dock__chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+  background: color-mix(in srgb, var(--bg, #1e1e1e) 88%, transparent);
+}
+.ducktactoe-chat-dock__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ducktactoe-chat-dock__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ducktactoe-chat-dock__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #9aa0a6);
+  cursor: pointer;
+}
+.ducktactoe-chat-dock__btn:hover {
+  background: color-mix(in srgb, var(--fg, #fff) 10%, transparent);
+  color: var(--fg, #e8e8e8);
+}
+.ducktactoe-chat-dock__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ducktactoe-chat-dock__body .chat-pane-root {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+@media (max-width: 720px) {
+  .plugin-ui-pane--with-chat {
+    flex-direction: column;
+  }
+  .plugin-ui-pane--with-chat > .plugin-ui-iframe {
+    flex: 0 0 46%;
+    min-width: 0;
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border, #3a3a3a);
+  }
+  .ducktactoe-chat-dock {
+    min-width: 0;
+  }
+}
+
+.plugin-ui-pane--empty {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--muted, #9aa0a6);
+  font-size: 14px;
+  text-align: center;
+}
+.plugin-ui-iframe,
+.plugin-ui-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  display: block;
+}
+
+/* Settings tab embed — absolute-fill so the iframe can't collapse to default size. */
+.plugin-settings-embed {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+}
+.plugin-settings-embed .plugin-ui-iframe,
+.plugin-settings-embed .plugin-ui-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}

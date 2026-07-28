@@ -1,0 +1,405 @@
+.workspace-dock-layout {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.workspace-dock-center {
+  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-rail-shell {
+  flex-shrink: 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  transition: width 0.28s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.dock-rail-shell.is-open {
+  width: var(--dock-shell-width, 241px);
+}
+
+.dock-rail-shell.is-resizing {
+  transition: none;
+}
+
+.dock-rail {
+  /* Full width always; shell overflow clips during open/close. */
+  flex-shrink: 0;
+  width: var(--dock-rail-width, 240px);
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-header);
+  position: relative;
+}
+
+.dock-rail-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-rail-family-stack {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-rail-family-stack--split {
+  /* split handle sits between sidebar + verse sections */
+}
+
+.dock-rail-family-section,
+.dock-rail-sidebar-section {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+}
+
+.dock-rail-family-stack--split > .dock-rail-family-section {
+  flex: unset;
+}
+
+.dock-rail-family-split {
+  flex-shrink: 0;
+}
+
+.dock-rail-family-stack--split:has(> .dock-rail-family-split.is-dragging) > .dock-rail-family-section {
+  transition: none;
+}
+
+.dock-rail-shell.is-peek {
+  transition: width 0.15s ease;
+}
+
+.dock-rail.is-peek {
+  background: var(--panel-header);
+}
+
+.dock-rail-peek-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.dock-rail-drop-overlay {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  background-color: var(--blue-dim);
+  border: 2px dashed var(--blue);
+  opacity: 0.8;
+}
+
+.dock-rail-drop-overlay--top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+}
+
+.dock-rail-drop-overlay--bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+}
+
+.dock-rail-drop-overlay--center {
+  top: 25%;
+  bottom: 25%;
+  left: 8%;
+  right: 8%;
+  border-radius: 4px;
+}
+
+.dock-rail-tab-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dock-rail-tab-bodies {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dock-rail-tab-bodies > .sidebar-panel-content {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.verse-aux-dock-panels {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.verse-aux-dock-panels--single .verse-outline-body {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.verse-aux-dock-panels--tabs {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.dock-rail-resize-handle {
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.dock-rail-shell--left {
+  flex-direction: row;
+  justify-content: flex-start;
+}
+
+.dock-rail-shell--right {
+  /* Clip from center so reveal matches left (outer → inward). */
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+.chat-view-layout .workspace-dock-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-view-editor-area {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.focus-editor-area .workspace-dock-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Tester dock (right rail, next to Outline / History) */
+.tester-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px 14px;
+  min-height: 0;
+}
+.tester-dock-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tester-dock-pill {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--fg-muted, #aaa);
+}
+.tester-dock-pill.is-online {
+  color: #7dcea0;
+  background: rgba(125, 206, 160, 0.12);
+}
+.tester-dock-pill.is-offline,
+.tester-dock-pill.is-fail {
+  color: #f0a070;
+  background: rgba(240, 160, 112, 0.12);
+}
+.tester-dock-pill.muted {
+  opacity: 0.85;
+}
+.tester-dock-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+.tester-dock-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.tester-dock-section-head-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tester-dock-group-btn .tester-dock-muted {
+  margin-left: auto;
+}
+.tester-dock-muted {
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+.tester-dock-error {
+  color: #e88;
+  font-size: 12px;
+  margin: 0;
+}
+.tester-dock-note {
+  color: var(--fg-muted, #aaa);
+  font-size: 11px;
+  margin: 0;
+  line-height: 1.35;
+}
+.tester-dock-callout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: rgba(240, 160, 112, 0.1);
+  border: 1px solid rgba(240, 160, 112, 0.28);
+}
+.tester-dock-callout p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg, #ddd);
+}
+.tester-dock-callout.is-sim-note {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.tester-dock-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+}
+.tester-dock-group-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 2px;
+  cursor: pointer;
+  text-align: left;
+}
+.tester-dock-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 16px;
+}
+.tester-dock-row.is-selected {
+  background: var(--tab-active, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+}
+.tester-dock-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.tester-dock-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tester-dock-sim-btn,
+.tester-dock-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent, #8ab4f8);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+.tester-dock-sim-btn:hover,
+.tester-dock-link:hover {
+  text-decoration: underline;
+}
+.tester-dock-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-muted, #aaa);
+  flex-shrink: 0;
+}
+.tester-dock-badge.is-warn {
+  color: #f0a070;
+  background: rgba(240, 160, 112, 0.15);
+}
+.tester-dock-badge.is-ok {
+  color: #7dcea0;
+  background: rgba(125, 206, 160, 0.15);
+}
+.tester-dock-trace,
+.tester-dock-tests,
+.tester-dock-results {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  max-height: 160px;
+  overflow: auto;
+}
+.tester-dock-trace li.is-skip {
+  opacity: 0.55;
+}
+.tester-dock-results li.is-pass .tester-dock-badge {
+  color: #7dcea0;
+}
+.tester-dock-results li.is-fail .tester-dock-badge {
+  color: #e88;
+}

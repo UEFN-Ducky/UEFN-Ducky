@@ -1,0 +1,415 @@
+/* Rich chat content — assistant markdown + structured blocks */
+
+.rich-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rich-content--streaming {
+  /* A single pre-wrapped text node keeps long live responses cheap to update. */
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+}
+
+.rich-summary {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rich-markdown > :first-child {
+  margin-top: 0;
+}
+
+.rich-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* Headings */
+.rich-heading {
+  margin: 0;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.35;
+}
+
+.rich-heading--h1 {
+  font-size: 1.35em;
+  margin-top: 20px;
+  margin-bottom: 12px;
+}
+
+.rich-heading--h2 {
+  font-size: 1.2em;
+  margin-top: 18px;
+  margin-bottom: 10px;
+}
+
+.rich-heading--h3 {
+  font-size: 1.05em;
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+
+.rich-heading--h4 {
+  font-size: 0.95em;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  color: var(--fg-dim);
+}
+
+.rich-markdown > .rich-heading:first-child,
+.rich-block-list > .rich-heading:first-child {
+  margin-top: 0;
+}
+
+/* Paragraphs */
+.rich-paragraph {
+  margin: 0 0 12px;
+  line-height: 1.65;
+  color: var(--fg);
+}
+
+/* Lists */
+.rich-list {
+  margin: 0 0 14px;
+  padding-left: 1.4em;
+  line-height: 1.65;
+}
+
+.rich-list--ordered {
+  list-style-type: decimal;
+}
+
+.rich-list:not(.rich-list--ordered) {
+  list-style-type: disc;
+}
+
+.rich-list-item {
+  margin-bottom: 6px;
+}
+
+.rich-list-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Code */
+.rich-code--inline {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+.rich-code--block {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-mono-size, 13px);
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.rich-pre-wrap {
+  margin: 0 0 14px;
+}
+
+/* Links */
+.rich-md-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.rich-md-link:hover {
+  color: color-mix(in srgb, var(--accent) 80%, var(--fg));
+}
+
+.rich-md-link--external {
+  cursor: pointer;
+}
+
+.rich-md-link--static {
+  color: var(--accent);
+}
+
+/* Blockquote */
+.rich-blockquote {
+  margin: 0 0 14px;
+  padding: 8px 14px;
+  border-left: 3px solid var(--border);
+  color: var(--fg-dim);
+}
+
+/* HR */
+.rich-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* Tables */
+.rich-table-wrap {
+  margin: 0 0 14px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.rich-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rich-table-th {
+  text-align: left;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg-dim);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.rich-table-td {
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--fg);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.rich-table tbody tr:last-child .rich-table-td {
+  border-bottom: none;
+}
+
+/* Key-value — stacked (label above value) so long JSON never sits in a sideways column */
+.rich-key-value {
+  margin: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rich-key-value-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.rich-key-value-key {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rich-key-value-val {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* File link */
+.rich-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rich-file-link:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.rich-file-link--static {
+  cursor: default;
+  border: none;
+  padding: 0;
+  background: none;
+}
+
+.rich-file-link-icon {
+  display: flex;
+  width: 14px;
+  height: 14px;
+  opacity: 0.8;
+}
+
+/* Callouts */
+.rich-callout {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+}
+
+.rich-callout--info {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.rich-callout--warn {
+  background: color-mix(in srgb, #f5a623 12%, transparent);
+  border-color: color-mix(in srgb, #f5a623 35%, var(--border));
+}
+
+.rich-callout--error {
+  background: color-mix(in srgb, #e74c3c 12%, transparent);
+  border-color: color-mix(in srgb, #e74c3c 35%, var(--border));
+}
+
+.rich-callout--success {
+  background: color-mix(in srgb, #2ecc71 12%, transparent);
+  border-color: color-mix(in srgb, #2ecc71 35%, var(--border));
+}
+
+/* Accordion */
+.rich-accordion {
+  margin: 0 0 10px;
+}
+
+.rich-accordion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rich-accordion-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.rich-accordion-toggle--expanded {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.rich-accordion-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.rich-accordion-chevron {
+  display: flex;
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+  opacity: 0.7;
+}
+
+.rich-accordion-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+.rich-accordion-body {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-bottom-left-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.rich-block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.tool-result-rich-view {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/* Match Arguments <pre> so Result JSON is equally readable */
+.tool-result-rich-view .rich-code--block {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-dim);
+  background-color: color-mix(in srgb, var(--bg) 35%, transparent);
+  border-radius: 6px;
+  border: none;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-result-rich-view .rich-key-value {
+  margin: 0;
+  padding: 8px 10px;
+  background-color: color-mix(in srgb, var(--bg) 35%, transparent);
+  border-radius: 6px;
+}
+
+.tool-result-rich-view .rich-table {
+  margin: 0;
+}
+
+.tool-execution-card-raw-json-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 0;
+  margin-top: 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tool-execution-card-raw-json-toggle:hover {
+  color: var(--fg-dim);
+}

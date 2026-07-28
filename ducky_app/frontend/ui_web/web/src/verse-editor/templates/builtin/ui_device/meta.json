@@ -1,0 +1,6 @@
+{
+  "id": "ui_device",
+  "name": "UI Device",
+  "icon": "🖥️",
+  "description": "HUD canvas and UI widget scaffolding"
+}

@@ -1,0 +1,242 @@
+.md-block-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input-bg, var(--bg-elevated, #1c1c20));
+  overflow: hidden;
+}
+
+.md-block-editor.is-readonly {
+  border-color: transparent;
+  background: transparent;
+}
+
+.md-block-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated, #222228);
+}
+
+.md-block-toolbar-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.md-block-toolbar-btn:hover {
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+  border-color: var(--border);
+}
+
+.md-block-toolbar-btn--italic {
+  font-style: italic;
+}
+
+.md-block-editor-shell {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 10px 4px;
+  min-height: 100px;
+}
+
+.md-block-plus {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated, #222228);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.md-block-plus:hover {
+  color: var(--text);
+  border-color: var(--accent, #5b8def);
+}
+
+.md-block-editor-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.md-block-editable {
+  min-height: 96px;
+  outline: none;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+  caret-color: var(--accent, #5b8def);
+}
+
+.md-block-editable:focus {
+  outline: none;
+}
+
+.md-block-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  color: var(--muted);
+  font-size: 14px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.md-block-h1 {
+  margin: 0.4em 0 0.25em;
+  font-size: 1.55rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.md-block-h2 {
+  margin: 0.45em 0 0.2em;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.md-block-h3 {
+  margin: 0.4em 0 0.15em;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.md-block-p {
+  margin: 0.2em 0;
+}
+
+.md-block-ul,
+.md-block-ol {
+  margin: 0.25em 0;
+  padding-left: 1.4em;
+}
+
+.md-block-li {
+  margin: 0.1em 0;
+}
+
+.md-block-quote {
+  margin: 0.4em 0;
+  padding: 0.15em 0 0.15em 0.85em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.md-block-code {
+  display: block;
+  margin: 0.4em 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.35));
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.md-block-inline-code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.35));
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+
+.md-block-bold {
+  font-weight: 700;
+}
+
+.md-block-italic {
+  font-style: italic;
+}
+
+.md-block-link {
+  color: var(--accent, #5b8def);
+  text-decoration: underline;
+}
+
+.md-block-menu {
+  position: fixed;
+  z-index: 1300;
+  min-width: 200px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #1a1a1e;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+
+.md-block-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text, #eee);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.md-block-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.md-block-menu-hint {
+  color: var(--muted, #888);
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.md-block-plan-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  min-width: 0;
+}
+
+.md-block-plan-link-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.md-block-plan-link-select {
+  max-width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg, var(--bg-elevated, #1c1c20));
+  color: var(--text);
+  font-size: 12px;
+}

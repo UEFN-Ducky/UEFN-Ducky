@@ -1,0 +1,15 @@
+# Normalize text to LF in the repo; let Git pick per-platform working-tree endings.
+* text=auto
+
+# Windows scripts always check out with CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.ico binary
+*.webp binary
+*.jpg binary
+*.gif binary
+*.woff binary
+*.woff2 binary
