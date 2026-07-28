@@ -188,15 +188,21 @@ def _export_static_mesh_fbx(mesh: unreal.StaticMesh, asset_path: str, output_pat
     return found
 
 def create_folder(path: str) -> dict:
-    """Create a content folder (e.g. /Game/MyStuff)."""
+    """Create a content folder under the project mount (rewrites /Game/... when needed)."""
+    from listener.project_paths import normalize_project_folder
+
+    path = normalize_project_folder(path, default_subpath="")
     ok = unreal.EditorAssetLibrary.make_directory(path)
     return {"path": path, "created": bool(ok)}
 
 
 def import_asset(source_file: str, destination_path: str, replace_existing: bool = True) -> dict:
     """Import a file (fbx/png/wav/...) into a content path."""
+    from listener.project_paths import normalize_project_folder
+
     if not os.path.isfile(source_file):
         raise ValueError(f"Source file not found: {source_file}")
+    destination_path = normalize_project_folder(destination_path, default_subpath="Imported")
     task = unreal.AssetImportTask()
     task.filename = source_file
     task.destination_path = destination_path

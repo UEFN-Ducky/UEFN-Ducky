@@ -547,13 +547,16 @@ def retarget_animation_pipeline(
     source_mesh_path: str,
     target_mesh_path: str,
     anim_path: str,
-    dest_folder: str = "/Game/Retargeting",
+    dest_folder: str = "",
     source_preset: str = "auto",
     target_preset: str = "auto",
     suffix: str = "_Retargeted",
 ) -> dict:
     """Convenience: chain the primitives for the common single-animation case.
     For anything non-standard, call the primitives directly instead."""
+    from listener.project_paths import normalize_project_folder
+
+    dest_folder = normalize_project_folder(dest_folder, default_subpath="Retargeting")
     caps = _capabilities()
     if not all(caps[c] for c in _CORE_CLASSES) or not caps["IKRetargetBatchOperation"]:
         return {"ok": False, "error": "Full IK retarget pipeline not available in this build",
