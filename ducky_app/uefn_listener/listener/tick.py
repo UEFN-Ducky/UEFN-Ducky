@@ -193,6 +193,7 @@ def tick_handler(delta_time: float) -> None:
             response = {"success": False, "error": str(e), "traceback": traceback.format_exc()}
             metrics["total_errors"] += 1
             metrics["last_error"] = str(e)
+            result = None
         finally:
             unreal._mcp_dispatching = False
 
@@ -203,6 +204,33 @@ def tick_handler(delta_time: float) -> None:
         metrics["response_times_ms"].append(elapsed_ms)
         if len(metrics["response_times_ms"]) > 100:
             metrics["response_times_ms"].pop(0)
+
+        # Cross-tick screenshot: keep the HTTP waiter alive, free in_flight, finish later.
+        deferred = (
+            isinstance(result, dict)
+            and result.get("_ducky_defer")
+            and str(result.get("capture_id") or "").strip()
+        )
+        if deferred:
+            try:
+                from listener.registry.editor_control import bind_deferred_screenshot
+
+                bound = bind_deferred_screenshot(str(result["capture_id"]), req_id)
+            except Exception as e:
+                log_msg(f"Deferred screenshot bind failed: {e}", "error")
+                bound = False
+            if bound:
+                _clear_in_flight()
+                if command in _HEAVY_COMMANDS:
+                    heavy_processed += 1
+                processed += 1
+                continue
+            # Fall through to normal failure if bind failed.
+            response = {
+                "success": False,
+                "error": "Failed to defer screenshot capture",
+                "result": result,
+            }
 
         ev = None
         with responses_lock:
@@ -215,6 +243,13 @@ def tick_handler(delta_time: float) -> None:
         if command in _HEAVY_COMMANDS:
             heavy_processed += 1
         processed += 1
+
+    try:
+        from listener.registry.editor_control import pump_deferred_screenshots
+
+        pump_deferred_screenshots()
+    except Exception as e:
+        log_msg(f"Deferred screenshot pump error: {e}", "error")
 
     flush_pending_save()
 

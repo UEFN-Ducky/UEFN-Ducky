@@ -76,3 +76,25 @@ def test_save_capture_for_agents_mirrors_to_project(tmp_path, monkeypatch):
     assert copy_png_to_ducky_captures(_PNG, prefix="snip", filename="snip-x.png").endswith(
         "snip-x.png"
     )
+
+
+def test_save_capture_for_agents_without_project_root_keeps_appdata(tmp_path, monkeypatch):
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    class _Settings:
+        uefn_project_root = ""
+
+    monkeypatch.setattr(
+        "frontend.settings.PanelSettings.load",
+        staticmethod(lambda: _Settings()),
+    )
+    monkeypatch.setattr(
+        "frontend.ui_web.tool_captures.resolve_app_data_dir",
+        lambda for_write=False: appdata,
+    )
+    saved = save_capture_for_agents(_PNG, prefix="uefn_viewport")
+    assert "tool_captures" in str(saved["path"]).replace("\\", "/")
+    assert saved["capture_path"] == saved["path"]
+    assert str(saved["media_url"]).startswith("http://127.0.0.1:")
+    assert copy_png_to_ducky_captures(_PNG, prefix="snip") == ""

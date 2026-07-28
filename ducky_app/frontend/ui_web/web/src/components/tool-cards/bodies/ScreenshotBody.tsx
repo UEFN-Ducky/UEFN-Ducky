@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../../../icons/Icons";
 import type { ToolCardBodyProps } from "../toolCardTypes";
 
@@ -34,7 +34,9 @@ export function parseScreenshotResult(raw: string): Record<string, unknown> | nu
             dataObj.path ||
             dataObj.filepath ||
             dataObj.preview_file ||
-            dataObj.media_url)
+            dataObj.media_url ||
+            dataObj.capture_error ||
+            dataObj.error)
         ) {
           return dataObj;
         }
@@ -73,25 +75,54 @@ export function pickScreenshotMediaUrl(data: Record<string, unknown> | null): st
   return "";
 }
 
+function looksLikeFilesystemPath(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  if (/[/\\]/.test(v)) return true;
+  return /\.(png|jpe?g|webp)$/i.test(v);
+}
+
 export function pickScreenshotPath(
   data: Record<string, unknown> | null,
   args: Record<string, unknown>,
 ): string {
   if (data) {
-    for (const key of ["path", "filepath", "preview_file", "filename", "file", "asset_path"] as const) {
+    for (const key of ["path", "filepath", "preview_file", "file", "capture_path", "ue_screenshot_path"] as const) {
       const v = data[key];
-      if (typeof v === "string" && v.trim()) return v.trim();
+      if (typeof v === "string" && v.trim() && looksLikeFilesystemPath(v)) return v.trim();
     }
     const blender = asScreenshotRecord(data.blender_result);
     if (blender) {
-      for (const key of ["filepath", "path", "filename"] as const) {
+      for (const key of ["filepath", "path"] as const) {
         const v = blender[key];
-        if (typeof v === "string" && v.trim()) return v.trim();
+        if (typeof v === "string" && v.trim() && looksLikeFilesystemPath(v)) return v.trim();
       }
     }
+    // Bare filename only when it looks like an image file (not a user label arg).
+    const filename = data.filename;
+    if (typeof filename === "string" && /\.(png|jpe?g|webp)$/i.test(filename.trim())) {
+      return filename.trim();
+    }
   }
-  for (const key of ["path", "filename", "filepath", "asset_path"] as const) {
+  for (const key of ["path", "filepath"] as const) {
     const v = args[key];
+    if (typeof v === "string" && v.trim() && looksLikeFilesystemPath(v)) return v.trim();
+  }
+  return "";
+}
+
+export function pickScreenshotStatus(data: Record<string, unknown> | null): string {
+  if (!data) return "";
+  const status = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
+  if (status) return status;
+  if (data.ok === false || data.success === false) return "failed";
+  return "";
+}
+
+export function pickScreenshotError(data: Record<string, unknown> | null): string {
+  if (!data) return "";
+  for (const key of ["capture_error", "error", "preview_error", "project_mirror_warning"] as const) {
+    const v = data[key];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return "";
@@ -116,6 +147,8 @@ export function ScreenshotBody({
   const mediaUrl = showResult ? pickScreenshotMediaUrl(data) : "";
   const base64 = showResult && !mediaUrl ? pickScreenshotBase64(data) : "";
   const path = pickScreenshotPath(data, args);
+  const status = pickScreenshotStatus(data);
+  const captureError = pickScreenshotError(data);
   const mime = pickMime(data);
   const src = useMemo(() => {
     if (mediaUrl) return mediaUrl;
@@ -124,7 +157,19 @@ export function ScreenshotBody({
   }, [mediaUrl, base64, mime]);
   const [imgFailed, setImgFailed] = useState(false);
 
-  const showImage = !!src && !imgFailed && !isError;
+  useEffect(() => {
+    setImgFailed(false);
+  }, [src]);
+
+  const failedStatus = status === "failed" || status === "timed_out";
+  const showImage = !!src && !imgFailed && !isError && !failedStatus;
+  const badgeLabel = isError || imgFailed || failedStatus
+    ? "Failed"
+    : showImage
+      ? "Capture"
+      : showResult
+        ? "No image"
+        : "Capture";
 
   return (
     <div className="tool-card-screenshot-body">
@@ -146,7 +191,7 @@ export function ScreenshotBody({
           <Icons.Camera />
           <div className="tool-card-screenshot-badge">
             <span className="tool-card-screenshot-badge-dot" />
-            {isError || imgFailed ? "Failed" : showResult ? "No image" : "Capture"}
+            {badgeLabel}
           </div>
         </div>
       )}
@@ -158,10 +203,13 @@ export function ScreenshotBody({
           </span>
         </div>
       ) : null}
-      {showResult && !src && !path && !isError ? (
+      {showResult && !src && !path && !isError && !captureError ? (
         <div className="tool-execution-card-hint">
           Screenshot succeeded but no image preview was returned.
         </div>
+      ) : null}
+      {captureError ? (
+        <div className="tool-execution-card-hint">{captureError}</div>
       ) : null}
       {imgFailed ? (
         <div className="tool-execution-card-hint">

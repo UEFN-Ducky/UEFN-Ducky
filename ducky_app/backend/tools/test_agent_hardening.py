@@ -105,6 +105,7 @@ def test_enrich_screenshot_prefers_ducky_captures(tmp_path, monkeypatch):
         "frontend.ui_web.tool_captures.resolve_app_data_dir",
         lambda for_write=False: tmp_path / "appdata",
     )
+    monkeypatch.setattr(editor_mod, "_panel_media_server_reachable", lambda: True)
     out = editor_mod._enrich_screenshot({"path": str(project_png), "width": 1, "height": 1})
     assert "DuckyCaptures" in out["path"]
     assert Path(out["path"]).is_file()
@@ -127,6 +128,123 @@ def test_vision_attachments_from_capture_result(tmp_path):
     assert atts[0].kind == "image"
     assert atts[0].data_base64
     assert vision_attachments_from_capture_result("spawn_actor", {"path": str(png)}) == []
+
+
+def test_vision_attachments_skip_failed_status(tmp_path):
+    from backend.agent.capture_vision import vision_attachments_from_capture_result
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    assert (
+        vision_attachments_from_capture_result(
+            "take_high_res_screenshot",
+            {"status": "timed_out", "path": str(png), "error": "timeout"},
+        )
+        == []
+    )
+
+
+def test_vision_attachments_uses_ue_screenshot_fallback(tmp_path):
+    from backend.agent.capture_vision import vision_attachments_from_capture_result
+
+    png = tmp_path / "Saved" / "Screenshots" / "ue.png"
+    png.parent.mkdir(parents=True)
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    atts = vision_attachments_from_capture_result(
+        "take_high_res_screenshot",
+        {"status": "completed", "ue_screenshot_path": str(png)},
+    )
+    assert len(atts) == 1
+
+
+def test_await_screenshot_polls_until_completed(monkeypatch):
+    from backend.tools import editor as editor_mod
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(command, params=None, timeout=30.0):
+        calls.append((command, dict(params or {})))
+        if command == "take_high_res_screenshot":
+            return {
+                "status": "pending",
+                "capture_id": "abc123",
+                "filename": "shot_1.png",
+                "width": 64,
+                "height": 64,
+            }
+        if command == "poll_screenshot_capture":
+            # Complete on second poll
+            if sum(1 for c, _ in calls if c == "poll_screenshot_capture") >= 2:
+                return {
+                    "status": "completed",
+                    "capture_id": "abc123",
+                    "path": "C:/tmp/shot_1.png",
+                    "filename": "shot_1.png",
+                    "width": 64,
+                    "height": 64,
+                }
+            return {"status": "pending", "capture_id": "abc123", "filename": "shot_1.png"}
+        raise AssertionError(command)
+
+    monkeypatch.setattr(editor_mod, "send_command", fake_send)
+    monkeypatch.setattr(editor_mod, "_SCREENSHOT_POLL_INTERVAL_SEC", 0.0)
+    out = editor_mod._await_screenshot_result(64, 64, "shot.png")
+    assert out["status"] == "completed"
+    assert out["path"].endswith("shot_1.png")
+    assert calls[0][0] == "take_high_res_screenshot"
+    assert any(c == "poll_screenshot_capture" for c, _ in calls)
+
+
+def test_enrich_screenshot_warns_without_project_root(tmp_path, monkeypatch):
+    from backend.tools import editor as editor_mod
+
+    png = tmp_path / "Saved" / "Screenshots" / "uefn.png"
+    png.parent.mkdir(parents=True)
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    class _Settings:
+        uefn_project_root = ""
+
+    monkeypatch.setattr(
+        "frontend.settings.PanelSettings.load",
+        staticmethod(lambda: _Settings()),
+    )
+    monkeypatch.setattr(
+        "frontend.ui_web.tool_captures.resolve_app_data_dir",
+        lambda for_write=False: tmp_path / "appdata",
+    )
+    monkeypatch.setattr(editor_mod, "_panel_media_server_reachable", lambda: False)
+    out = editor_mod._enrich_screenshot({"path": str(png), "width": 1, "height": 1})
+    assert out["path"] == str(png)
+    assert "project_mirror_warning" in out
+    assert out.get("media_url") in ("", None)
+    assert "preview_error" in out
+
+
+def test_enrich_screenshot_keeps_media_url_when_panel_up(tmp_path, monkeypatch):
+    from backend.tools import editor as editor_mod
+
+    project_root = tmp_path / "MyIsland"
+    png = project_root / "Saved" / "Screenshots" / "uefn.png"
+    png.parent.mkdir(parents=True)
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    class _Settings:
+        uefn_project_root = str(project_root)
+
+    monkeypatch.setattr(
+        "frontend.settings.PanelSettings.load",
+        staticmethod(lambda: _Settings()),
+    )
+    monkeypatch.setattr(
+        "frontend.ui_web.tool_captures.resolve_app_data_dir",
+        lambda for_write=False: tmp_path / "appdata",
+    )
+    monkeypatch.setattr(editor_mod, "_panel_media_server_reachable", lambda: True)
+    out = editor_mod._enrich_screenshot({"path": str(png), "width": 1, "height": 1})
+    assert "DuckyCaptures" in out["path"]
+    assert out["media_url"].startswith("http://127.0.0.1:")
+    assert "preview_error" not in out
 
 
 if __name__ == "__main__":
