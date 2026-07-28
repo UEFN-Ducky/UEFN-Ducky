@@ -4,14 +4,21 @@ import json
 import sys
 import threading
 import time
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from socketserver import BaseServer
 from typing import Any
 
 import unreal
 
+from listener.accept_queue import (
+    ACCEPT_QUEUE_MAX,
+    busy_payload_dict,
+    can_accept_queued_command,
+    is_light_command,
+)
 from listener.config import HTTP_TIMEOUT_SEC, PROTOCOL_VERSION
-from listener.dispatch import handler_names
+from listener.dispatch import dispatch, handler_names
 from listener.state import accept_lock, command_queue, response_events, responses, responses_lock
 
 _CONN_ERRORS = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
@@ -27,14 +34,7 @@ def _is_client_disconnect(exc: BaseException) -> bool:
 
 def _busy_payload() -> bytes:
     return json.dumps(
-        {
-            "success": False,
-            "error": (
-                "Listener busy — one editor command at a time. "
-                "Wait for the previous MCP tool to finish before calling another wire/spawn/save."
-            ),
-            "queue_size": command_queue.qsize(),
-        }
+        busy_payload_dict(queue_size=command_queue.qsize(), max_queue=ACCEPT_QUEUE_MAX)
     ).encode()
 
 
@@ -86,8 +86,22 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "dispatching": dispatching,
             "in_flight_age_sec": round(in_flight_age, 1),
             "queue_size": qsize,
+            "max_queue": ACCEPT_QUEUE_MAX,
         }).encode()
         self._send_json(200, body)
+
+    def _dispatch_light(self, command: str, params: dict) -> None:
+        """Run a light command on this HTTP worker — never touches the editor slot."""
+        try:
+            result = dispatch(command, params if isinstance(params, dict) else {})
+            payload = {"success": True, "result": result}
+        except Exception as e:
+            payload = {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+        self._send_json(200, json.dumps(payload).encode())
 
     def do_POST(self) -> None:
         from listener.state import metrics
@@ -114,30 +128,53 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             self._send_json(400, json.dumps({"success": False, "error": "Missing 'command' field"}).encode())
             return
 
+        # Light commands never occupy the editor in-flight slot.
+        if is_light_command(str(command)):
+            self._dispatch_light(str(command), params if isinstance(params, dict) else {})
+            return
+
+        # Reject while a hot-reload is swapping modules.
+        if bool(getattr(unreal, "_mcp_reload_in_progress", False)):
+            self._send_json(503, _busy_payload())
+            return
+
         done = threading.Event()
 
-        # Atomic try-accept: check + set in_flight + enqueue under one lock so two
-        # ThreadingHTTPServer workers cannot both pass a non-atomic busy check.
+        # Bounded queue: multiple agents enqueue in order; 503 only when full.
         with accept_lock:
-            if unreal._mcp_in_flight or command_queue.qsize() > 0:
+            qsize = command_queue.qsize()
+            if not can_accept_queued_command(queue_size=qsize, max_queue=ACCEPT_QUEUE_MAX):
                 self._send_json(503, _busy_payload())
                 return
             unreal._mcp_request_counter += 1
             req_id = f"req_{unreal._mcp_request_counter}_{time.time_ns()}"
             with responses_lock:
                 response_events[req_id] = done
-            # Tick clears _mcp_in_flight when the command finishes. Never clear it
+            # Tick clears _mcp_in_flight when the queue drains. Never clear it
             # here on timeout — that let the next parallel MCP tool enqueue while the
             # editor was still running a heavy wire/spawn and froze UEFN.
             # Tick self-heals orphaned in_flight after STUCK_INFLIGHT_SEC when idle.
-            unreal._mcp_in_flight = True
-            unreal._mcp_in_flight_since = time.time()
+            if not unreal._mcp_in_flight:
+                unreal._mcp_in_flight = True
+                unreal._mcp_in_flight_since = time.time()
             command_queue.put((req_id, command, params))
 
         if not done.wait(timeout=HTTP_TIMEOUT_SEC):
             with responses_lock:
                 response_events.pop(req_id, None)
-            self._send_json(504, json.dumps({"success": False, "error": f"Command '{command}' timed out"}).encode())
+            self._send_json(
+                504,
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"Command '{command}' timed out — editor busy "
+                            "(Verse compile / save / PIE can stall the tick). "
+                            "Do NOT assume the listener is offline; wait and retry once."
+                        ),
+                    }
+                ).encode(),
+            )
             return
 
         with responses_lock:

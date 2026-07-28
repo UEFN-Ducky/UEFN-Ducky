@@ -111,7 +111,9 @@ HEAVY_MCP_TOOLS = frozenset(
 )
 
 BUSY_HINT = (
-    "Listener busy — another editor command is still running. "
+    "Listener busy — another editor command is still running or queued "
+    "(Verse compile / save / PIE can stall the tick). "
     "Call only ONE heavy editor tool per assistant message; wait for its result before the next. "
+    "Do NOT assume the listener is offline and do NOT reconnect/retry-spam. "
     "Never os.walk Fortnite/AppData from execute_python."
 )

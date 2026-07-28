@@ -124,10 +124,15 @@ from listener.state import accept_lock, command_queue, main_queue, metrics, resp
 
 
 def _clear_in_flight() -> None:
+    """Clear in_flight only when the queue is empty (work may still be queued)."""
     with accept_lock:
+        unreal._mcp_dispatching = False
+        if command_queue.qsize() > 0:
+            # Keep busy flag true while queued work remains so health/agents wait.
+            unreal._mcp_in_flight = True
+            return
         unreal._mcp_in_flight = False
         unreal._mcp_in_flight_since = 0.0
-        unreal._mcp_dispatching = False
 
 
 def _self_heal_stuck_inflight() -> None:
@@ -135,6 +140,7 @@ def _self_heal_stuck_inflight() -> None:
 
     Never clears while ``_mcp_dispatching`` is true — that means the editor is still
     inside dispatch() and clearing would let another heavy command pile on.
+    Never clears while the accept queue still has work.
     """
     with accept_lock:
         if not unreal._mcp_in_flight:
