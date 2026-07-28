@@ -1,0 +1,117 @@
+"""Listener commands and MCP tools that must not run in parallel."""
+
+from __future__ import annotations
+
+# MCP tool names (host / Cursor / Ducky agent). One of these per assistant step.
+# Keep in sync with listener tick._HEAVY_COMMANDS (listener command names differ slightly).
+HEAVY_MCP_TOOLS = frozenset(
+    {
+        # Verse wiring / editables
+        "inspect_verse_device",
+        "get_verse_editables",
+        "list_verse_property_hashes",
+        "wire_verse_device_ref",
+        "wire_verse_device_array",
+        "wire_verse_prop_assets",
+        "set_verse_editable",
+        "wire_player_spawners",
+        "resize_verse_array",
+        "patch_verse_array_entry",
+        "set_verse_texture_icon",
+        "set_currency_config_entries",
+        # Actors / level
+        "spawn_actor",
+        "delete_actors",
+        "duplicate_actor",
+        "set_actor_transform",
+        "set_actor_properties",
+        "set_actor_label",
+        "set_actor_folder",
+        "set_actor_tags",
+        "attach_actor",
+        "snap_actor_to_ground",
+        "snap_actor_to_grid",
+        "align_actors",
+        "distribute_actors",
+        "save_current_level",
+        "save_all_dirty",
+        # Creative devices
+        "set_creative_device_fields",
+        "set_device_settings",
+        "inspect_creative_device",
+        # Materials / Niagara / data / assets (editor mutations)
+        "create_material",
+        "create_material_instance",
+        "duplicate_material",
+        "connect_material_nodes",
+        "disconnect_material_nodes",
+        "connect_material_output",
+        "set_material_instance_scalar",
+        "set_material_instance_vector",
+        "set_material_instance_texture",
+        "recompile_material",
+        "assign_material_to_mesh",
+        "add_material_expression",
+        "delete_material_expression",
+        "clear_material_expressions",
+        "set_material_expression_property",
+        "set_material_flags",
+        "layout_material_expressions",
+        "create_niagara_system",
+        "set_niagara_component_parameter",
+        "control_niagara_actor",
+        "create_widget_blueprint",
+        "add_widget_to_tree",
+        "remove_widget_from_tree",
+        "set_widget_property",
+        "add_widget_binding",
+        "remove_widget_binding",
+        "get_widget_blueprint_info",
+        "fill_data_table_from_json",
+        "fill_data_table_from_csv",
+        "create_data_table",
+        "rename_asset",
+        "delete_asset",
+        "duplicate_asset",
+        "save_asset",
+        "import_asset",
+        "export_asset",
+        "preview_static_mesh",
+        "fixup_redirectors",
+        "save_directory",
+        "create_folder",
+        # Animation / PCG / editor control
+        "create_ik_rig_asset",
+        "create_ik_retargeter_asset",
+        "set_retarget_root",
+        "add_retarget_chains",
+        "remove_retarget_chains",
+        "auto_map_retarget_chains",
+        "retarget_animation",
+        "retarget_animation_pipeline",
+        "add_skeleton_socket",
+        "remove_skeleton_socket",
+        "pcg_generate",
+        "terrain_generate",
+        "terrain_remove_generated",
+        "foliage_scatter",
+        "foliage_clear_generated",
+        "landscape_sculpt",
+        "exec_console_command",
+        "take_high_res_screenshot",
+        "play_in_editor",
+        "stop_pie",
+        "set_object_property",
+        "set_viewport_camera",
+        # Arbitrary main-thread code
+        "execute_python",
+        "ai_generate_python",
+        "reload_listener",
+    }
+)
+
+BUSY_HINT = (
+    "Listener busy — another editor command is still running. "
+    "Call only ONE heavy editor tool per assistant message; wait for its result before the next. "
+    "Never os.walk Fortnite/AppData from execute_python."
+)

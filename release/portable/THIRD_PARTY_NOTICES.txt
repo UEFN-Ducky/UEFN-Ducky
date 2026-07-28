@@ -1,0 +1,20 @@
+Third-party notices — UEFN Ducky (Windows bundle)
+=================================================
+
+This archive may contain UEFN-Ducky.exe and text files. The application is built from
+open-source and commercially licensed components. Replace this file with a complete
+inventory for your shipping product.
+
+Typical components in a PyInstaller-frozen build (non-exhaustive):
+
+- Python standard library and runtime (PSF License; https://docs.python.org/3/license.html)
+- PyInstaller bootloader and bundling (GPL with exception; https://pyinstaller.org)
+- Transitive wheels from requirements.txt (each under its own license; run pip-licenses or similar for an exact list)
+
+Epic / UEFN
+-----------
+
+Your end users need Unreal Editor for Fortnite (UEFN) under Epic’s terms. This tool
+automates local workflows only; it is not endorsed by Epic Games. You are responsible
+for compliance with Epic’s UEFN and Fortnite Creator / EULA terms when distributing
+software that targets UEFN.

@@ -1,0 +1,186 @@
+.quick-open-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(280px, 42vw);
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: text;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.quick-open-bar:hover {
+  border-color: var(--border-light);
+  background: color-mix(in srgb, var(--tab-hover) 80%, transparent);
+  color: var(--fg-dim);
+}
+.quick-open-bar svg {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  opacity: 0.7;
+}
+.quick-open-bar-placeholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-open-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200000;
+  display: flex;
+  justify-content: center;
+  padding-top: 48px;
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+}
+.quick-open-palette {
+  display: flex;
+  flex-direction: column;
+  max-height: min(480px, 70vh);
+  background: var(--panel-header);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.quick-open-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.quick-open-palette-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+  outline: none;
+}
+.quick-open-palette-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.quick-open-palette-empty {
+  padding: 16px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.quick-open-palette-section {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--blue);
+  text-align: right;
+  text-transform: lowercase;
+}
+.quick-open-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.quick-open-palette-row:hover,
+.quick-open-palette-row.is-selected {
+  background: var(--blue);
+  color: var(--fg-inverse);
+}
+.quick-open-palette-row.is-selected .quick-open-palette-row-sub,
+.quick-open-palette-row:hover .quick-open-palette-row-sub {
+  color: color-mix(in srgb, var(--fg-inverse) 75%, transparent);
+}
+.quick-open-palette-row-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.quick-open-palette-row-icon.codicon {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 14px;
+}
+.quick-open-palette-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.quick-open-palette-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quick-open-palette-row-sub {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quick-open-palette-row-hint {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.quick-open-palette-recent-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--blue);
+  text-transform: lowercase;
+}
+.quick-open-palette-row.is-selected .quick-open-palette-recent-tag,
+.quick-open-palette-row:hover .quick-open-palette-recent-tag {
+  color: color-mix(in srgb, var(--fg-inverse) 85%, transparent);
+}
+
+body.layout-sidebar-only .app-header-center {
+  width: auto;
+  max-width: min(300px, calc(100% - 360px));
+}
+
+@media (max-width: 720px) {
+  .quick-open-bar-placeholder {
+    display: none;
+  }
+  .quick-open-bar {
+    width: 28px;
+    flex: 0 0 28px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+  body.layout-sidebar-only .app-header-center {
+    width: auto;
+    max-width: none;
+  }
+}
+
+body.layout-sidebar-only .app-header-project-label {
+  max-width: none;
+  flex: 1;
+  font-size: 15px;
+}

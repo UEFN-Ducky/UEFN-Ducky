@@ -1,0 +1,42 @@
+MIT License
+
+Copyright (c) 2026 UEFN-Ducky
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Name and branding
+
+The MIT license above covers this **source code**. It does not grant any right to use
+the "UEFN-Ducky" / "UEFN Ducky" name, the duck mascot, the logo, or other project
+branding, which remain the property of the project maintainers.
+
+You are free to use, modify, fork, redistribute, and sell this software — including
+commercially — provided the copyright notice above is retained. If you distribute a
+modified version, please release it under your own name and do not present it as the
+official UEFN-Ducky build or imply that it is endorsed by this project.
+
+---
+
+This project is not affiliated with, endorsed by, or sponsored by Epic Games, Inc.
+"Unreal", "Unreal Engine", "UEFN", "Verse", and "Fortnite" are trademarks or
+registered trademarks of Epic Games, Inc. Use of Unreal Editor for Fortnite (UEFN)
+and its bundled tooling is governed by Epic's own license terms; see
+THIRD_PARTY_NOTICES for details.

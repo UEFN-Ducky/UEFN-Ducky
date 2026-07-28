@@ -1,0 +1,122 @@
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  canSubmitQuestion,
+  draftToAnswer,
+  emptyDraft,
+  parseAskUserQuestions,
+} from "./types";
+import {
+  _resetAskUserForTests,
+  getAskUserSession,
+  getAskUserSessionForConv,
+  listAskUserSessions,
+  runAskUser,
+  settleAskUser,
+} from "./runAskUser";
+
+afterEach(() => {
+  _resetAskUserForTests();
+});
+
+describe("ask-user types", () => {
+  it("parses questions and defaults", () => {
+    const qs = parseAskUserQuestions([
+      {
+        id: "a",
+        prompt: "Pick one",
+        options: [{ id: "x", label: "X", description: "desc" }],
+      },
+    ]);
+    expect(qs).toHaveLength(1);
+    expect(qs[0].allow_free_text).toBe(true);
+    expect(qs[0].required).toBe(true);
+    expect(qs[0].options[0].description).toBe("desc");
+  });
+
+  it("requires selection or other text when required", () => {
+    const q = parseAskUserQuestions([
+      {
+        id: "a",
+        prompt: "Pick",
+        options: [{ id: "x", label: "X" }],
+      },
+    ])[0];
+    expect(canSubmitQuestion(q, emptyDraft())).toBe(false);
+    expect(canSubmitQuestion(q, { selected: ["x"], text: "", other: false })).toBe(true);
+    expect(canSubmitQuestion(q, { selected: [], text: "", other: true })).toBe(false);
+    expect(canSubmitQuestion(q, { selected: [], text: "custom", other: true })).toBe(true);
+  });
+
+  it("maps drafts to answers", () => {
+    expect(draftToAnswer({ selected: ["x"], text: "", other: false })).toEqual({
+      selected: ["x"],
+      text: "",
+      skipped: false,
+    });
+    expect(draftToAnswer({ selected: [], text: "hi", other: true })).toEqual({
+      selected: [],
+      text: "hi",
+      skipped: false,
+    });
+    expect(draftToAnswer(emptyDraft(), true).skipped).toBe(true);
+  });
+});
+
+describe("ask-user sessions", () => {
+  it("runs concurrent asks in different chats", async () => {
+    const a = runAskUser([{ id: "1", prompt: "One" }], "A", "chat-a");
+    const b = runAskUser([{ id: "2", prompt: "Two" }], "B", "chat-b");
+    expect(getAskUserSessionForConv("chat-a")?.title).toBe("A");
+    expect(getAskUserSessionForConv("chat-b")?.title).toBe("B");
+    expect(listAskUserSessions()).toHaveLength(2);
+    expect(getAskUserSession()).toBeNull();
+
+    const sessA = getAskUserSessionForConv("chat-a")!;
+    settleAskUser(
+      {
+        ok: true,
+        answers: { "1": { selected: [], text: "ok", skipped: false } },
+        skipped_all: false,
+      },
+      sessA.id,
+    );
+    await expect(a).resolves.toMatchObject({ ok: true });
+    expect(getAskUserSessionForConv("chat-a")).toBeNull();
+    expect(getAskUserSessionForConv("chat-b")?.title).toBe("B");
+
+    const sessB = getAskUserSessionForConv("chat-b")!;
+    settleAskUser(
+      {
+        ok: true,
+        answers: { "2": { selected: [], text: "", skipped: true } },
+        skipped_all: true,
+      },
+      sessB.id,
+    );
+    await expect(b).resolves.toMatchObject({ skipped_all: true });
+    expect(listAskUserSessions()).toHaveLength(0);
+  });
+
+  it("queues orphan asks (no conv) one at a time", async () => {
+    const first = runAskUser([{ id: "1", prompt: "One" }], "A");
+    const second = runAskUser([{ id: "2", prompt: "Two" }], "B");
+    expect(getAskUserSession()?.title).toBe("A");
+    expect(getAskUserSession()?.queueAhead).toBe(1);
+
+    settleAskUser({
+      ok: true,
+      answers: { "1": { selected: [], text: "ok", skipped: false } },
+      skipped_all: false,
+    });
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(getAskUserSession()?.title).toBe("B");
+
+    settleAskUser({
+      ok: true,
+      answers: { "2": { selected: [], text: "", skipped: true } },
+      skipped_all: true,
+    });
+    await expect(second).resolves.toMatchObject({ skipped_all: true });
+    expect(getAskUserSession()).toBeNull();
+  });
+});

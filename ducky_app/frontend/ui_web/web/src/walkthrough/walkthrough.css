@@ -1,0 +1,145 @@
+.walkthrough-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483100;
+  pointer-events: none;
+}
+
+.walkthrough-blocker {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.walkthrough-hole {
+  position: fixed;
+  left: var(--wt-x, 0);
+  top: var(--wt-y, 0);
+  width: var(--wt-w, 0);
+  height: var(--wt-h, 0);
+  border-radius: var(--wt-r, 8px);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  transition:
+    left 160ms ease,
+    top 160ms ease,
+    width 160ms ease,
+    height 160ms ease;
+}
+
+.walkthrough-ring {
+  position: fixed;
+  left: var(--wt-x, 0);
+  top: var(--wt-y, 0);
+  width: var(--wt-w, 0);
+  height: var(--wt-h, 0);
+  border-radius: var(--wt-r, 8px);
+  border: 2px solid var(--accent, #4c8dff);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.2),
+    0 0 16px 3px color-mix(in srgb, var(--accent, #4c8dff) 55%, transparent);
+  pointer-events: none;
+  /* Static ring — no pulse/scale (avoids bounce on the glow). */
+  transition:
+    left 160ms ease,
+    top 160ms ease,
+    width 160ms ease,
+    height 160ms ease;
+}
+
+.walkthrough-tooltip {
+  position: fixed;
+  left: var(--wt-tip-x, 16px);
+  top: var(--wt-tip-y, 16px);
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  background: var(--surface, #1c1f26);
+  color: var(--text, #f0f2f6);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.walkthrough-tooltip-skip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim, #9aa3b2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.walkthrough-tooltip-skip:hover {
+  color: var(--text, #f0f2f6);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.walkthrough-tooltip-title {
+  margin: 0 28px 6px 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.walkthrough-tooltip-body {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim, #c5ccd8);
+  white-space: pre-wrap;
+}
+
+.walkthrough-tooltip-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.walkthrough-tooltip-count {
+  font-size: 12px;
+  color: var(--text-dim, #9aa3b2);
+}
+
+.walkthrough-tooltip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.walkthrough-btn {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text, #f0f2f6);
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.walkthrough-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.walkthrough-btn-primary {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 70%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 28%, transparent);
+}
+
+.walkthrough-btn-primary:hover {
+  background: color-mix(in srgb, var(--accent, #4c8dff) 40%, transparent);
+}
+
+.walkthrough-missing {
+  font-size: 12px;
+  color: #e8a87c;
+  margin: -6px 0 10px;
+}

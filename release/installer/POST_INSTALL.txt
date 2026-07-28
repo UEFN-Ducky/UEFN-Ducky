@@ -1,0 +1,12 @@
+UEFN Ducky — installed copy
+===========================
+
+App files      : this folder (replaced in place on every update)
+Your data      : %LOCALAPPDATA%\UEFN-Ducky  (chats, settings, projects config)
+Updates        : the app checks uefnducky.org and offers one-click updates;
+                 you can also re-run a newer UEFN-Ducky-Setup-<version>.exe —
+                 it upgrades this same folder automatically.
+Uninstall      : Windows Settings > Apps > UEFN Ducky, or the Uninstall button
+                 in the app's Settings > General. The uninstaller asks whether
+                 to also delete your data folder — keep it (default) and a
+                 future install picks your chats and settings right back up.

@@ -1,0 +1,25 @@
+{
+  "default_style": "artist",
+  "duckies": [
+    {
+      "id": "artist",
+      "label": "Artist",
+      "file": "Artist.png"
+    },
+    {
+      "id": "cowboy",
+      "label": "Cowboy",
+      "file": "cowboy.png"
+    },
+    {
+      "id": "hacker",
+      "label": "Hacker",
+      "file": "hacker.png"
+    },
+    {
+      "id": "wizard",
+      "label": "Wizard",
+      "file": "wizard.png"
+    }
+  ]
+}

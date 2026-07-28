@@ -1,0 +1,18 @@
+# MCP bridge (host/mcp_server.py).
+# Install from repo root: py -m pip install -r requirements.txt
+mcp[cli]>=1.0
+tzdata>=2024.1
+# Control panel: hide to notification area (tray) on close (Windows).
+pystray>=0.19.5
+pywebview>=5.0
+Pillow>=10.0.0
+# Optional: enables the AI tools (ai_scene_command, ai_generate_python).
+# Safe to omit — those tools no-op with a message when anthropic / the API key is absent.
+anthropic>=0.40.0
+# Embedded agent chat (panel)
+openai>=1.40.0
+google-genai>=1.0
+pywinpty>=2.0.13
+# Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
+# PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
+toon_format @ git+https://github.com/toon-format/toon-python.git

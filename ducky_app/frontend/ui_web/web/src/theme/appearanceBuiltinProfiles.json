@@ -1,0 +1,11 @@
+{
+  "profiles": [
+    {
+      "id": "__default__",
+      "name": "Default",
+      "foundation": {},
+      "overrides": {},
+      "status_overrides": {}
+    }
+  ]
+}

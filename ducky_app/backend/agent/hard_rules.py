@@ -1,0 +1,38 @@
+"""Always-on agent hard rules shared by MCP instructions, BYOA bootstrap, and chat prompts."""
+
+AGENT_HARD_RULES = (
+    "**Agent hard rules (first-try):**\n"
+    "- `search_assets` uses **`search=`** (not `query` / `name_filter`). Creative "
+    "props/devices/prefab kits: `directory=\"/Game/Creative\"` (or BuildingActors / Sets / "
+    "Devices subfolders) — **never** `/Fortnite` (UI gallery only). Small `limit`; paginate "
+    "with `offset`/`limit`/`fields`. Catalog map: "
+    '`skill_read_subskill("leveldesign", "content_catalog")`.\n'
+    "- Verse `*_device` names are **API types** — never "
+    '`spawn_actor(actor_class="teleporter_device")`. Place built-ins via '
+    '`search_assets` under `/Game/Creative` → `spawn_actor(asset_path="…_C")`. '
+    "API: `search_verse_digest` / `get_verse_api`. Find types with "
+    "`list_verse_types(kind=\"class\", name_filter=…)` or `search_verse_digest` — "
+    "not unfiltered `list_verse_devices`.\n"
+    '- `inspect_creative_device(actor_path="<Outliner label>", keys=[…])` — never `label=`. '
+    "Island Settings / MaxPlayers: pass `keys` only (dumps are huge).\n"
+    "- Screenshots / snips: `take_high_res_screenshot` / chat snip → use returned "
+    "project ``path`` under ``Saved/DuckyCaptures`` (preferred) for file work. "
+    "``media_url`` / ``capture_path`` are AppData preview-only — never IDE-Read "
+    "AppData. Capture tools also return MCP image content / auto-attach vision "
+    "for the next turn. Never Bash `find`/`ls` for PNGs.\n"
+    "- Windows shell: use `py -3`, never `python3`. Prefer MCP over shell.\n"
+    "- Truncated MCP result → re-call with tighter args. Never Read/Grep "
+    "`**/tool-results/**` or `**/agent-tools/**` dumps.\n"
+    "- BEFORE Hub/level/device work: load matching skill (`uefn` / `islandsettings` / "
+    "`leveldesign`). Prefer `skill_read_subskill` — never IDE-Read `~/.claude/skills` / "
+    "`~/.cursor/skills` / `references/*.md`.\n"
+    "- Organize as you place: every spawn → `set_actor_label` + `set_actor_folder` "
+    "(never leave devices/props at Outliner root). Nested folders by area/system "
+    "(e.g. `Hub/Spawners`, `Hub/Teleporters`, `Area1/Combat`).\n"
+    "- **Verse folders:** NEVER dump new `.verse` at `Content/Verse/` root. One system "
+    "per folder (`Verse/Economy/…`, `Verse/Shop/…`, `Verse/PlayerCore/…`). Prefer "
+    "`verse_template_apply(id)` (creates the pack folder). Hand-write: "
+    '`workspace_list_dir("Verse")` then `workspace_write_file("Verse/<System>/<file>.verse", …)` '
+    "(parents auto-created). Only `module_declarations.verse` (+ tiny helpers) at Verse "
+    'root. Details: `skill_read_subskill("verse", "modules")`.\n'
+)

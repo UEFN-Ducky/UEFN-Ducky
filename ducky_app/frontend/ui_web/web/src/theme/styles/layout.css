@@ -1,0 +1,153 @@
+/* App shell — full bleed inside WebView2. Rounded corners are Win32 DWM only (see win_frameless.py). */
+body.native-window-chrome,
+body.native-window-chrome #root,
+body.native-window-chrome .app-container,
+body.native-window-chrome .focus-shell {
+  border-radius: 0;
+  background-color: var(--bg);
+}
+
+html,body,
+#root {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Background FX layer (matrix / plugin effects) — behind chrome, never captures input. */
+#ducky-fx-root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Plugin full-chrome skin portals — empty until appearance.skin mounts content. */
+.ducky-skin-slot {
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ducky-skin-slot--frame {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.ducky-skin-slot--header {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.app-header {
+  position: relative;
+}
+
+.ducky-skin-slot--left,
+.ducky-skin-slot--right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  z-index: 3;
+  overflow: visible;
+}
+
+.ducky-skin-slot--left {
+  left: 0;
+}
+
+.ducky-skin-slot--right {
+  right: 0;
+}
+
+.workspace-dock-layout {
+  position: relative;
+}
+
+/* Generic chrome paint suppression when a full skin is active (plugin paints instead). */
+body.appearance-skin-active .app-header.glass-panel {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body.appearance-skin-active .sidebar-stacked-panel,
+body.appearance-skin-active .dock-rail,
+body.appearance-skin-active .workspace-dock-layout .glass-panel {
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+
+#ducky-fx-root .ducky-fx-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.app-container {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  background-color: var(--bg);
+}
+
+/* Let the FX canvas show through shell surfaces when an effect is active. */
+body.appearance-fx-active {
+  background-color: transparent;
+}
+
+body.appearance-fx-active .app-container {
+  background-color: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+body.appearance-fx-active.native-window-chrome .app-container,
+body.appearance-fx-active.native-window-chrome .focus-shell {
+  background-color: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.app-main-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main-layer {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main-layer--behind-settings {
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.app-main-layer--settings {
+  position: relative;
+  z-index: 1;
+}
