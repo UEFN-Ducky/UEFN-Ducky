@@ -16,6 +16,12 @@ _CAPTURE_TOOLS = frozenset(
     }
 )
 _MAX_VISION_BYTES = 8 * 1024 * 1024
+_PATH_KEYS = (
+    "path",
+    "ue_screenshot_path",
+    "filepath",
+    "preview_file",
+)
 
 
 def is_capture_tool(name: str) -> bool:
@@ -50,6 +56,29 @@ def _parse_result_obj(data: Any) -> dict[str, Any] | None:
         return None
 
 
+def _unwrap_capture_obj(obj: dict[str, Any]) -> dict[str, Any]:
+    """Prefer nested capture payloads when envelopes wrap the real result."""
+    data = obj.get("data")
+    if isinstance(data, dict) and any(k in data for k in _PATH_KEYS):
+        return data
+    if isinstance(data, str) and data.strip().startswith("{"):
+        try:
+            inner = json.loads(data)
+            if isinstance(inner, dict) and any(k in inner for k in _PATH_KEYS):
+                return inner
+        except Exception:
+            pass
+    return obj
+
+
+def _pick_capture_path(obj: dict[str, Any]) -> str:
+    for key in _PATH_KEYS:
+        path = str(obj.get(key) or "").strip()
+        if path:
+            return path
+    return ""
+
+
 def vision_attachments_from_capture_result(
     tool_name: str,
     data: Any,
@@ -60,7 +89,13 @@ def vision_attachments_from_capture_result(
     obj = _parse_result_obj(data)
     if not obj:
         return []
-    path = str(obj.get("path") or "").strip()
+    obj = _unwrap_capture_obj(obj)
+    status = str(obj.get("status") or "").strip().lower()
+    if status in ("failed", "timed_out", "pending"):
+        return []
+    if obj.get("ok") is False or obj.get("success") is False:
+        return []
+    path = _pick_capture_path(obj)
     if not path:
         return []
     src = Path(path)

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   parseScreenshotResult,
   pickScreenshotBase64,
+  pickScreenshotError,
   pickScreenshotMediaUrl,
   pickScreenshotPath,
+  pickScreenshotStatus,
 } from "./ScreenshotBody";
 
 const TINY_PNG_B64 =
@@ -53,5 +55,31 @@ describe("ScreenshotBody result parsing", () => {
     const data = parseScreenshotResult(JSON.stringify({ ok: true, data: inner }));
     expect(pickScreenshotBase64(data)).toBe(TINY_PNG_B64);
     expect(pickScreenshotPath(data, {})).toBe("/tmp/a.png");
+  });
+
+  it("does not treat bare args.filename labels as filesystem paths", () => {
+    expect(
+      pickScreenshotPath({ status: "timed_out", error: "timeout" }, { filename: "city_00_foundation" }),
+    ).toBe("");
+  });
+
+  it("surfaces capture errors and failed status", () => {
+    const data = parseScreenshotResult(
+      JSON.stringify({
+        status: "timed_out",
+        error: "Screenshot timed out after 25s",
+        filename: "shot.png",
+      }),
+    );
+    expect(pickScreenshotStatus(data)).toBe("timed_out");
+    expect(pickScreenshotError(data)).toContain("timed out");
+  });
+
+  it("prefers capture_path when path is missing", () => {
+    const data = {
+      capture_path: "C:\\\\Users\\\\x\\\\AppData\\\\Local\\\\UEFN-Ducky\\\\tool_captures\\\\a.png",
+      filename: "a.png",
+    };
+    expect(pickScreenshotPath(data, {})).toContain("tool_captures");
   });
 });
