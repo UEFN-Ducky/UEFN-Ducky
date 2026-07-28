@@ -37,21 +37,24 @@ Material graph via MaterialEditingLibrary (UEFN)
 
 HINTS_MATERIAL_END_TO_END = """
 End-to-end: create a solid material that exists in Content (UEFN)
-1. ``folder = "/Game/Materials"`` — leading slash, ``/Game`` not ``Game``.
-2. ``EditorAssetLibrary.make_directory(folder)`` if missing.
-3. ``asset_tools.create_asset("M_MyName", folder, unreal.Material, unreal.MaterialFactoryNew())`` —
+1. Call get_project_info() — use content_root (e.g. /catland/), NEVER invent /Game/ for island assets.
+2. ``folder = content_root + "Materials"`` (e.g. "/catland/Materials") — leading slash required.
+   Creating under /Game/... in a /catland/ project causes unsaved packages and cook
+   "Disallowed reference to /Game/...".
+3. ``EditorAssetLibrary.make_directory(folder)`` if missing.
+4. ``asset_tools.create_asset("M_MyName", folder, unreal.Material, unreal.MaterialFactoryNew())`` —
    if this returns ``None``, stop and return that error (wrong path, read-only project, or name clash).
-4. ``MaterialEditingLibrary.delete_all_material_expressions(mat)`` on the new material.
-5. Add ``MaterialExpressionConstant3Vector``; set color with ``set_editor_property("constant", unreal.LinearColor(...))``.
-6. ``connect_material_property(const_expr, "", unreal.MaterialProperty.MP_BASE_COLOR)``.
-7. ``MaterialEditingLibrary.recompile_material(mat)`` then ``mat.modify(True)``.
-8. Save: ``EditorAssetLibrary.save_loaded_asset(mat, only_if_is_dirty=False)`` then
+5. ``MaterialEditingLibrary.delete_all_material_expressions(mat)`` on the new material.
+6. Add ``MaterialExpressionConstant3Vector``; set color with ``set_editor_property("constant", unreal.LinearColor(...))``.
+7. ``connect_material_property(const_expr, "", unreal.MaterialProperty.MP_BASE_COLOR)``.
+8. ``MaterialEditingLibrary.recompile_material(mat)`` then ``mat.modify(True)``.
+9. Save: ``EditorAssetLibrary.save_loaded_asset(mat, only_if_is_dirty=False)`` then
    ``EditorLoadingAndSavingUtils.save_dirty_packages(False, True)`` (or keyword form).
-9. Verify: ``EditorAssetLibrary.does_asset_exist(f"{folder}/M_MyName")`` should be True;
-   ``EditorAssetLibrary.load_asset(...)`` should return a ``Material``.
-10. If step 9 fails but no Python error: stale browser — try ``EditorAssetLibrary.delete_asset(path)`` and repeat,
+10. Verify: ``EditorAssetLibrary.does_asset_exist(f"{folder}/M_MyName")`` should be True;
+    ``EditorAssetLibrary.load_asset(...)`` should return a ``Material``.
+11. If step 10 fails but no Python error: stale browser — try ``EditorAssetLibrary.delete_asset(path)`` and repeat,
     or ask the user to **File > Save All** / **Save Current Level** once (UEFN sometimes defers disk flush).
-11. Assign to mesh with ``mesh.set_material(0, loaded_material)``; then save dirty packages again so the **level**
+12. Assign to mesh with ``mesh.set_material(0, loaded_material)``; then save dirty packages again so the **level**
     references persist.
 """
 
