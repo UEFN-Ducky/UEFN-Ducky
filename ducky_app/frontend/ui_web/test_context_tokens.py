@@ -10,7 +10,6 @@ from frontend.ui_web.context_tokens import (
     _cache_mode_for_provider,
     _coding_agent_context_limit,
     _message_image_tokens,
-    _provider_default_context,
     context_limit_for_model,
 )
 
@@ -50,22 +49,9 @@ def _settings(*, caching: bool = True, freeze: bool = True) -> SimpleNamespace:
     return SimpleNamespace(prompt_caching_enabled=caching, freeze_prompt_prefix=freeze)
 
 
-def test_provider_default_context_matches_known_providers():
-    assert _provider_default_context("anthropic") == 200_000
-    assert _provider_default_context("openai") == 400_000
-    assert _provider_default_context("gemini") == 1_000_000
-    assert _provider_default_context("ollama") == 32_768
-    assert _provider_default_context("cursor") == 200_000
-
-
-def test_provider_default_context_unknown_provider_falls_back_to_128k():
-    assert _provider_default_context("some-new-provider") == 128_000
-    assert _provider_default_context("") == 128_000
-
-
-def test_coding_agent_context_limit_cursor_uses_default_when_uncatalogued():
-    # No live model-catalog entry for an unrecognized model -> provider fallback.
-    assert _coding_agent_context_limit("cursor", "made-up-model") == 200_000
+def test_coding_agent_context_limit_unknown_is_none():
+    # No catalog entry → None (never invent a provider default).
+    assert _coding_agent_context_limit("cursor", "made-up-model") is None
 
 
 def test_cache_mode_for_provider_requires_freeze():
@@ -115,5 +101,4 @@ def test_message_image_tokens_no_attachments():
 
 
 def test_context_limit_for_model_unknown_returns_none():
-    # Unrecognized model/provider combo -> caller applies its own fallback.
     assert context_limit_for_model("totally-unknown-model-xyz", "anthropic") is None

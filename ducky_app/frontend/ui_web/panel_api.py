@@ -4593,7 +4593,7 @@ class PanelApi:
             logging.getLogger(__name__).exception("get_context_usage failed for %s: %s", conv_id, exc)
             from frontend.ui_web.context_tokens import context_limit_for_model
 
-            limit = context_limit_for_model(model) or 128_000
+            limit = context_limit_for_model(model) or 0
             return {
                 "used_tokens": 0,
                 "context_limit": limit,
