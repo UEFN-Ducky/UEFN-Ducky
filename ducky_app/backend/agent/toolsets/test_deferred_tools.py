@@ -61,6 +61,14 @@ def test_tool_index_groups_and_excludes_meta():
     assert "### nested:foo" in text
 
 
+def test_tool_index_local_desc_max_shorter():
+    tools = [_T("blender_status", "x" * 200)]
+    fat = build_tool_index_text(tools, desc_max=200)
+    slim = build_tool_index_text(tools, desc_max=70)
+    assert len(slim) < len(fat)
+    assert "… [truncated]" in slim or "... [truncated]" in slim
+
+
 def test_effective_tool_name_unwraps_call():
     assert effective_tool_name("workspace_read_file", {"path": "a"}) == "workspace_read_file"
     assert (

@@ -819,6 +819,39 @@ def build_skill_prompt(selection: SkillSelection | None = None) -> str:
     return "\n".join(lines)
 
 
+def build_skill_prompt_compact(selection: SkillSelection | None = None) -> str:
+    """Local/Ollama: pack + subskill titles only (no blurbs, no always-on bodies).
+
+    Full SKILL.md / refs stay lazy via ``skill_read_subskill`` — same architecture,
+    ~7k → ~2k tokens for a full pack install.
+    """
+    sel = selection or default_skill_selection()
+    lines: list[str] = [
+        "## Available skill packs (lazy-loaded)",
+        'Call skill_read_subskill("<pack_id>", "core") for SKILL.md; omit id to list refs.',
+        "Load only what the current task needs.",
+        "",
+    ]
+    any_pack = False
+    for pack_id in sel.enabled_packs:
+        manifest = load_pack_manifest(pack_id)
+        if not manifest:
+            continue
+        any_pack = True
+        pack_tag = _pack_origin_tag(manifest)
+        tag = _index_tag_label(pack_tag)
+        label = str(manifest.get("label") or pack_id)
+        lines.append(f"- `{pack_id}` [{tag}] — {label}")
+        for sub in list_subskills(manifest):
+            sid = str(sub.get("id") or "")
+            if not sid or not _subskill_allowed(pack_id, sub):
+                continue
+            lines.append(f"  - `{sid}`")
+    if not any_pack:
+        return "(no skill packs available)"
+    return "\n".join(lines)
+
+
 def _subskill_allowed(pid: str, sub: dict[str, Any]) -> bool:
     """True when the active allowlist permits this subskill (always_on / core always ok)."""
     sid = str(sub.get("id") or "").strip()

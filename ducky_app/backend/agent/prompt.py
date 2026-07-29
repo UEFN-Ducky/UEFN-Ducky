@@ -101,8 +101,14 @@ def get_system_prompt_parts(
     uefn_project_name: str = "",
     project_match: bool = True,
     conv_id: str = "",
+    local_slim: bool = False,
 ) -> dict[str, str]:
-    """Return system-prompt slices for context token breakdown."""
+    """Return system-prompt slices for context token breakdown.
+
+    ``local_slim`` (Ollama / cache_mode=local): shorter tool-index blurbs and a
+    titles-only skill index. Must feed the frozen prompt snapshot — do not slim
+    only at assemble time.
+    """
     if listener_wedged:
         status = "wedged (GET ok but commands not processing)"
     elif listener_online:
@@ -241,14 +247,40 @@ def get_system_prompt_parts(
     except Exception:
         pass
     skill_block = skill_text or ""
+    if local_slim:
+        try:
+            from backend.skill import build_skill_prompt_compact, resolve_conversation_selection
+            from frontend.settings import PanelSettings
+
+            sel = None
+            if conv_id:
+                try:
+                    from frontend.ui_web.project_chats import load_conversation
+
+                    conv = load_conversation(conv_id)
+                    if conv is not None:
+                        sel = resolve_conversation_selection(conv, PanelSettings.load())
+                except Exception:
+                    sel = None
+            skill_block = build_skill_prompt_compact(sel)
+            if mode_suffix:
+                skill_block = f"{skill_block}\n{mode_suffix}".strip()
+        except Exception:
+            pass
     static_rules = f"## Rules\n{_rules_body(listener_port)}{mode_suffix}"
     rules_block = f"{offline_rules}{static_rules}"
     personality_block = format_ducky_personality_block(ducky_name, ducky_personality)
     tool_index_block = ""
     try:
-        from backend.agent.toolsets.tool_index import tool_index_prompt_block_sync
+        from backend.agent.toolsets.tool_index import (
+            _DESC_MAX,
+            _DESC_MAX_LOCAL,
+            tool_index_prompt_block_sync,
+        )
 
-        tool_index_block = tool_index_prompt_block_sync()
+        tool_index_block = tool_index_prompt_block_sync(
+            desc_max=_DESC_MAX_LOCAL if local_slim else _DESC_MAX
+        )
     except Exception:
         pass
     return {
@@ -256,6 +288,7 @@ def get_system_prompt_parts(
         "mcp": mcp_block,
         "tool_index": tool_index_block,
         "skill": skill_block,
+        "local_slim": "1" if local_slim else "",
         "rules": rules_block,
         "static_rules": static_rules,
         "offline_rules": offline_rules,

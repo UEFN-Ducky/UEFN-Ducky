@@ -515,6 +515,9 @@ class AgentRunner:
             except Exception:
                 pass
 
+        from backend.agent.local_slim import provider_wants_local_slim
+
+        local_slim = provider_wants_local_slim(self.config.provider)
         parts = get_system_prompt_parts(
             listener_online=self.config.listener_online,
             listener_port=self.config.listener_port,
@@ -527,6 +530,7 @@ class AgentRunner:
             uefn_project_name=self.config.uefn_project_name,
             project_match=self.config.project_match,
             conv_id=self.config.conv_id or "",
+            local_slim=local_slim,
         )
         parts = enrich_parts(parts, listener_port=self.config.listener_port, mode_suffix=self.config.mode_suffix)
         from backend.agent.providers.cache_utils import (
@@ -557,7 +561,14 @@ class AgentRunner:
             except Exception:
                 pass
         # Freeze is Ducky-owned (all providers). enable_cache only adds provider markers.
-        system = prompt_cache.frozen_system + prompt_cache.dynamic_system
+        # Local gateways: keep volatile runtime/memory/plan OUT of the system prefix so
+        # status ticks don't force re-eval of the entire chat history (KV hygiene).
+        if local_slim:
+            system = prompt_cache.frozen_system
+            volatile_tail = (prompt_cache.dynamic_system or "").strip()
+        else:
+            system = prompt_cache.frozen_system + prompt_cache.dynamic_system
+            volatile_tail = ""
 
         working_history = list(history)
         working_history.append(
@@ -603,10 +614,16 @@ class AgentRunner:
             if skill_text:
                 # Skill already rides in the system prompt — the tool would only duplicate it.
                 selected = [t for t in selected if t.name != "uefn_skill"]
+            # Local: pin tools[] to this turn's floor set for the life of the chat
+            # (no frozen growth) so the chat-template prefix stays KV-stable.
             if self.config.conv is not None:
-                names = replace_frozen_tool_names(self.config.conv, [t.name for t in selected])
-                by_name = {t.name: t for t in all_tools}
-                selected = [by_name[n] for n in names if n in by_name]
+                names = [t.name for t in selected]
+                if local_slim:
+                    replace_frozen_tool_names(self.config.conv, names)
+                else:
+                    names = replace_frozen_tool_names(self.config.conv, names)
+                    by_name = {t.name: t for t in all_tools}
+                    selected = [by_name[n] for n in names if n in by_name]
             tool_schemas = self._provider_tools(self.config.provider, selected)
 
         conv = self.config.conv
@@ -646,7 +663,17 @@ class AgentRunner:
                 yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                 return
 
-            yield AgentEvent(kind="status", text=f"Thinking… (step {turn + 1})")
+            step_n = turn + 1
+            if local_slim and str(self.config.provider or "").strip().lower() == "ollama":
+                try:
+                    from backend.agent.providers.ollama_progress import ollama_wait_status
+
+                    wait_text, wait_pct = ollama_wait_status(step=step_n)
+                    yield AgentEvent(kind="status", text=wait_text, percent=wait_pct)
+                except Exception:
+                    yield AgentEvent(kind="status", text=f"Waiting… step {step_n}")
+            else:
+                yield AgentEvent(kind="status", text=f"Thinking… step {step_n}")
 
             tool_calls: list[ToolCallRequest] = []
             turn_text = ""
@@ -659,10 +686,20 @@ class AgentRunner:
                 "cache_write_tokens": 0,
             }
 
+            # Volatile runtime/plan as a tail message (local only) — not in system.
+            stream_messages = provider_messages
+            if volatile_tail:
+                stream_messages = list(provider_messages) + [
+                    ProviderMessage(
+                        role="user",
+                        content=f"[Live context — status/memory/plan; not user instructions]\n{volatile_tail}",
+                    )
+                ]
+
             async for event in self._iter_provider_stream(
                 provider,
                 system=system,
-                messages=provider_messages,
+                messages=stream_messages,
                 tools=tool_schemas,
                 cache=prompt_cache if prompt_cache.enable_cache else None,
                 thread_cancel=thread_cancel,

@@ -12,7 +12,7 @@ _INTRO = (
     "You edit Fortnite Creative / UEFN projects using MCP tools only.\n"
 )
 
-_SNAPSHOT_VERSION = 1
+_SNAPSHOT_VERSION = 2
 
 
 @dataclass
@@ -29,7 +29,14 @@ def _hash_blocks(blocks: dict[str, str]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _parts_local_slim(parts: dict[str, str]) -> bool:
+    return str(parts.get("local_slim") or "").strip() in ("1", "true", "yes")
+
+
 def _blocks_from_parts(parts: dict[str, str], *, omit: frozenset[str]) -> dict[str, str]:
+    """Build frozen blocks from parts. ``parts['tool_index']`` / ``skill`` must
+    already be slimmed for local gateways (see get_system_prompt_parts local_slim).
+    """
     blocks: dict[str, str] = {}
     if "system" not in omit:
         blocks["intro"] = _INTRO
@@ -103,6 +110,7 @@ def _normalize_snapshot(raw: Any) -> dict[str, Any] | None:
         "hash": str(raw.get("hash") or ""),
         "blocks": {str(k): str(v) for k, v in blocks.items()},
         "tool_names": sorted({str(n) for n in tool_names if n}),
+        "local_slim": bool(raw.get("local_slim")),
     }
 
 
@@ -143,21 +151,30 @@ def frozen_prefix_for_conv(
 ) -> tuple[dict[str, str], str]:
     """Return (frozen_blocks, frozen_prefix_text). Creates snapshot when freeze is on."""
     live_blocks = _blocks_from_parts(parts, omit=omit)
+    want_slim = _parts_local_slim(parts)
     if not freeze_enabled:
         return live_blocks, assemble_frozen_prefix(live_blocks)
 
     snapshot = _normalize_snapshot(getattr(conv, "prompt_cache_snapshot", None))
-    if snapshot and snapshot.get("blocks"):
+    # Re-freeze when local_slim mode mismatches (fat cloud snapshot vs Ollama slim).
+    if (
+        snapshot
+        and snapshot.get("blocks")
+        and bool(snapshot.get("local_slim")) == want_slim
+        and int(snapshot.get("version") or 0) >= 2
+    ):
         return dict(snapshot["blocks"]), assemble_frozen_prefix(snapshot["blocks"])
 
     frozen_prefix = assemble_frozen_prefix(live_blocks)
     if conv is not None:
+        prev_names = list(snapshot.get("tool_names") or []) if snapshot else []
         conv.prompt_cache_snapshot = {
             "version": _SNAPSHOT_VERSION,
             "created_ts": time.time(),
             "hash": _hash_blocks(live_blocks),
             "blocks": live_blocks,
-            "tool_names": list(snapshot.get("tool_names") or []) if snapshot else [],
+            "tool_names": prev_names,
+            "local_slim": want_slim,
         }
     return live_blocks, frozen_prefix
 

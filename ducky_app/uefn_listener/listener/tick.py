@@ -124,15 +124,10 @@ from listener.state import accept_lock, command_queue, main_queue, metrics, resp
 
 
 def _clear_in_flight() -> None:
-    """Clear in_flight only when the queue is empty (work may still be queued)."""
     with accept_lock:
-        unreal._mcp_dispatching = False
-        if command_queue.qsize() > 0:
-            # Keep busy flag true while queued work remains so health/agents wait.
-            unreal._mcp_in_flight = True
-            return
         unreal._mcp_in_flight = False
         unreal._mcp_in_flight_since = 0.0
+        unreal._mcp_dispatching = False
 
 
 def _self_heal_stuck_inflight() -> None:
@@ -140,7 +135,6 @@ def _self_heal_stuck_inflight() -> None:
 
     Never clears while ``_mcp_dispatching`` is true — that means the editor is still
     inside dispatch() and clearing would let another heavy command pile on.
-    Never clears while the accept queue still has work.
     """
     with accept_lock:
         if not unreal._mcp_in_flight:
@@ -199,7 +193,6 @@ def tick_handler(delta_time: float) -> None:
             response = {"success": False, "error": str(e), "traceback": traceback.format_exc()}
             metrics["total_errors"] += 1
             metrics["last_error"] = str(e)
-            result = None
         finally:
             unreal._mcp_dispatching = False
 
@@ -210,33 +203,6 @@ def tick_handler(delta_time: float) -> None:
         metrics["response_times_ms"].append(elapsed_ms)
         if len(metrics["response_times_ms"]) > 100:
             metrics["response_times_ms"].pop(0)
-
-        # Cross-tick screenshot: keep the HTTP waiter alive, free in_flight, finish later.
-        deferred = (
-            isinstance(result, dict)
-            and result.get("_ducky_defer")
-            and str(result.get("capture_id") or "").strip()
-        )
-        if deferred:
-            try:
-                from listener.registry.editor_control import bind_deferred_screenshot
-
-                bound = bind_deferred_screenshot(str(result["capture_id"]), req_id)
-            except Exception as e:
-                log_msg(f"Deferred screenshot bind failed: {e}", "error")
-                bound = False
-            if bound:
-                _clear_in_flight()
-                if command in _HEAVY_COMMANDS:
-                    heavy_processed += 1
-                processed += 1
-                continue
-            # Fall through to normal failure if bind failed.
-            response = {
-                "success": False,
-                "error": "Failed to defer screenshot capture",
-                "result": result,
-            }
 
         ev = None
         with responses_lock:
@@ -249,13 +215,6 @@ def tick_handler(delta_time: float) -> None:
         if command in _HEAVY_COMMANDS:
             heavy_processed += 1
         processed += 1
-
-    try:
-        from listener.registry.editor_control import pump_deferred_screenshots
-
-        pump_deferred_screenshots()
-    except Exception as e:
-        log_msg(f"Deferred screenshot pump error: {e}", "error")
 
     flush_pending_save()
 

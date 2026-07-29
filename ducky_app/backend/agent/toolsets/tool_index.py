@@ -9,10 +9,11 @@ import threading
 from typing import Any
 
 _DESC_MAX = 200
+_DESC_MAX_LOCAL = 70
 _META_TOOLS = frozenset({"ducky_get_tools", "ducky_call_tool", "ducky_find_tools"})
 _CACHE_LOCK = threading.Lock()
-_INDEX_CACHE: str = ""
-_INDEX_CACHE_KEY: tuple[str, ...] = ()
+# key: (desc_max, tool_name_tuple) → text
+_INDEX_CACHE: dict[tuple[int, tuple[str, ...]], str] = {}
 
 
 def truncate_desc(text: str, limit: int = _DESC_MAX) -> str:
@@ -39,15 +40,21 @@ def tool_group(name: str) -> str:
     return "core"
 
 
-def build_tool_index_text(tools: list[Any], *, exclude: frozenset[str] | None = None) -> str:
+def build_tool_index_text(
+    tools: list[Any],
+    *,
+    exclude: frozenset[str] | None = None,
+    desc_max: int = _DESC_MAX,
+) -> str:
     """Name + short blurb catalog. Full schemas stay out — use ducky_get_tools."""
     skip = exclude or _META_TOOLS
+    limit = max(0, int(desc_max))
     grouped: dict[str, list[tuple[str, str]]] = {}
     for t in tools:
         name = str(getattr(t, "name", "") or "").strip()
         if not name or name in skip:
             continue
-        desc = truncate_desc(str(getattr(t, "description", "") or ""))
+        desc = truncate_desc(str(getattr(t, "description", "") or ""), limit) if limit > 0 else ""
         grouped.setdefault(tool_group(name), []).append((name, desc))
 
     lines = [
@@ -79,29 +86,29 @@ def _list_tools_blocking() -> list[Any]:
         return pool.submit(lambda: asyncio.run(list_mcp_tools())).result(timeout=60)
 
 
-def tool_index_prompt_block_sync() -> str:
+def tool_index_prompt_block_sync(*, desc_max: int = _DESC_MAX) -> str:
     """Cached compact index for sync prompt builders (hot path / async-safe)."""
-    global _INDEX_CACHE, _INDEX_CACHE_KEY
-    with _CACHE_LOCK:
-        cached = _INDEX_CACHE
-        cached_key = _INDEX_CACHE_KEY
+    limit = max(0, int(desc_max))
     try:
         tools = _list_tools_blocking()
     except Exception:
-        return cached
-    key = tuple(sorted(str(getattr(t, "name", "") or "") for t in tools))
+        with _CACHE_LOCK:
+            for key, text in _INDEX_CACHE.items():
+                if key[0] == limit and text:
+                    return text
+        return ""
+    names = tuple(sorted(str(getattr(t, "name", "") or "") for t in tools))
+    cache_key = (limit, names)
     with _CACHE_LOCK:
-        if key == cached_key and cached:
-            return cached
-    text = build_tool_index_text(tools)
+        hit = _INDEX_CACHE.get(cache_key)
+        if hit:
+            return hit
+    text = build_tool_index_text(tools, desc_max=limit)
     with _CACHE_LOCK:
-        _INDEX_CACHE = text
-        _INDEX_CACHE_KEY = key
+        _INDEX_CACHE[cache_key] = text
     return text
 
 
 def clear_tool_index_cache() -> None:
-    global _INDEX_CACHE, _INDEX_CACHE_KEY
     with _CACHE_LOCK:
-        _INDEX_CACHE = ""
-        _INDEX_CACHE_KEY = ()
+        _INDEX_CACHE.clear()

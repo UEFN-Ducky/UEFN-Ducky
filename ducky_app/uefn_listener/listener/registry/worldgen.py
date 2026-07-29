@@ -323,9 +323,16 @@ def _place_mesh_actors(
 
 
 def _content_root() -> str:
-    from listener.project_paths import content_root
-
-    return content_root()
+    try:
+        # Prefer project mount; fall back to /Roguelike then /Game
+        dirs = unreal.EditorAssetLibrary.list_assets("/Roguelike/", recursive=False)  # type: ignore
+        if dirs is not None:
+            return "/Roguelike"
+    except Exception:
+        pass
+    if unreal.EditorAssetLibrary.does_directory_exist("/Roguelike"):
+        return "/Roguelike"
+    return "/Game"
 
 
 def _asset_folder(folder: str = "") -> str:

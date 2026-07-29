@@ -380,13 +380,10 @@ def get_widget_blueprint_info(widget_path: str) -> dict:
 
 def create_widget_blueprint(
     asset_name: str,
-    folder: str = "",
+    folder: str = "/Game/UI",
     parent_class: str = "UserWidget",
 ) -> dict:
     """Create an empty WidgetBlueprint asset (errors if it already exists)."""
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="UI")
     wbp_cls = _require("WidgetBlueprint")
     factory_cls = _require("WidgetBlueprintFactory")
     unreal.EditorAssetLibrary.make_directory(folder)
