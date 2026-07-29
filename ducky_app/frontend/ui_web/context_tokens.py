@@ -20,16 +20,6 @@ from backend.agent.prompt import compact_messages, format_ducky_personality_bloc
 from backend.agent.tool_router import select_tools
 from backend.agent.tools import list_mcp_tools, mcp_tool_to_anthropic, mcp_tool_to_gemini, mcp_tool_to_openai
 
-_DEFAULT_CONTEXT = 128_000
-# Fallback context windows used only when the live model catalog has no entry
-# for the selected model (e.g. offline, not yet fetched, or a brand-new model).
-_PROVIDER_DEFAULT_CONTEXT: dict[str, int] = {
-    "anthropic": 200_000,
-    "openai": 400_000,
-    "gemini": 1_000_000,
-    "ollama": 32_768,
-    "cursor": 200_000,
-}
 _KEEP_LAST_MESSAGES = 20
 # Flat per-image token heuristic (~1092x1092 image; Anthropic/OpenAI vision
 # average). Attachments are not decoded here (hot per-keystroke path), so this
@@ -85,13 +75,8 @@ _BREAKDOWN_LABELS: dict[str, str] = {
 
 
 
-def _provider_default_context(provider: str) -> int:
-    """Per-provider context-window fallback when the model catalog has no entry."""
-    return _PROVIDER_DEFAULT_CONTEXT.get((provider or "").strip().lower(), _DEFAULT_CONTEXT)
-
-
 def context_limit_for_model(model: str, provider: str = "") -> int | None:
-    """Context window from provider model API cache; None when unknown."""
+    """Context window from provider model API cache only. None when unknown — no invented sizes."""
     from backend.agent.model_fetch import get_model_info
 
     prov = (provider or "").strip().lower()
@@ -99,7 +84,7 @@ def context_limit_for_model(model: str, provider: str = "") -> int | None:
         prov = (PanelSettings.load().agent_provider or "").strip().lower()
     info = get_model_info(prov, model)
     if info and info.context_limit:
-        return info.context_limit
+        return int(info.context_limit)
     return None
 
 
@@ -547,17 +532,17 @@ def _external_agent_token_provider(agent_id: str) -> str:
     return agent_id or ""
 
 
-def _coding_agent_context_limit(agent_id: str, model: str) -> int:
-    """Best-effort context window for an external coding agent's model."""
+def _coding_agent_context_limit(agent_id: str, model: str) -> int | None:
+    """Context window from the model catalog only (no hardcoded provider defaults)."""
     m = (model or "").lower()
     provider = _external_agent_token_provider(agent_id)
     if provider:
-        return context_limit_for_model(model, provider) or _provider_default_context(provider)
+        return context_limit_for_model(model, provider)
     if "claude" in m or "sonnet" in m or "opus" in m or "haiku" in m:
-        return context_limit_for_model(model, "anthropic") or _provider_default_context("anthropic")
+        return context_limit_for_model(model, "anthropic")
     if "gpt" in m or "codex" in m or m.startswith("o"):
-        return context_limit_for_model(model, "openai") or _provider_default_context("openai")
-    return context_limit_for_model(model, "") or _DEFAULT_CONTEXT
+        return context_limit_for_model(model, "openai")
+    return context_limit_for_model(model, "")
 
 
 def _deployed_skill_token_report(
@@ -725,7 +710,8 @@ def _external_agent_report(
     real_model = str(stats.get("model") or model or "default").strip()
     stored_context = int(stats.get("context_tokens") or 0)
     stored_limit = int(stats.get("context_limit") or 0)
-    limit = stored_limit if stored_limit > 0 else _coding_agent_context_limit(agent_id, real_model)
+    catalog_limit = _coding_agent_context_limit(agent_id, real_model) or 0
+    limit = stored_limit if stored_limit > 0 else catalog_limit
     num_turns = int(stats.get("num_turns") or 0)
 
     agent_info: dict[str, Any] = {
@@ -852,11 +838,32 @@ def compute_context_report(
     would not reflect what that agent actually sent.
     """
     settings = PanelSettings.load()
-    provider = settings.agent_provider or ""
-    # Auto-fill from the selected agent model when the caller doesn't pass one.
-    model = (model or "").strip() or (settings.agent_model or "")
-    limit = context_limit_for_model(model, provider) or _provider_default_context(provider)
     conv = load_conversation(conv_id)
+
+    # This chat's gateway + model — never Settings → agent_provider (that was
+    # showing OpenAI's 400k while the composer ran ollama:qwen…).
+    turn_model = (model or "").strip()
+    if not turn_model and conv is not None:
+        turn_model = (getattr(conv, "model", None) or "").strip()
+    if not turn_model:
+        turn_model = (settings.agent_model or "").strip()
+    model = turn_model
+
+    provider = ""
+    if conv is not None:
+        provider = (getattr(conv, "provider", None) or "").strip().lower()
+    if not provider and model:
+        try:
+            from backend.agent.model_pricing import resolve_provider_for_model
+
+            provider = resolve_provider_for_model(model, settings.agent_provider or "")
+        except Exception:
+            provider = (settings.agent_provider or "").strip().lower()
+    if not provider:
+        provider = (settings.agent_provider or "").strip().lower()
+
+    # Catalog / API only — 0 when unknown (no invented provider defaults).
+    limit = context_limit_for_model(model, provider) or 0
 
     if not conv:
         return {
