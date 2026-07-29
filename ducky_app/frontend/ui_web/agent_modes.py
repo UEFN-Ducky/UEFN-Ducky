@@ -650,6 +650,22 @@ async def _run_ask_async(
     try:
         api_key = get_key(provider_name)
         if not api_key:
+            try:
+                from backend.uefn_plugins.host import (
+                    get_contributions,
+                    get_llm_provider_registration,
+                )
+
+                reg = get_llm_provider_registration(provider_name) or {}
+                if reg.get("key_optional"):
+                    for row in get_contributions().get("llm_providers") or []:
+                        if str(row.get("id") or "").strip().lower() == provider_name:
+                            api_key = str(row.get("default_url") or "").strip()
+                            break
+                    api_key = api_key or "http://localhost:11434"
+            except Exception:
+                api_key = ""
+        if not api_key:
             push({"type": "error", "text": f"No API key for {provider_name}", "conv_id": conv.id})
             return stop_reason
         provider = make_provider(
@@ -1159,14 +1175,29 @@ def run_message(
     if external:
         provider_name = (getattr(conv, "provider", None) or "").strip()
     else:
-        provider_name = (getattr(conv, "provider", None) or "").strip()
-        if not provider_name:
-            from backend.agent.model_pricing import infer_provider
+        from backend.agent.model_pricing import resolve_provider_for_model
 
-            provider_name = infer_provider(turn_model) or (settings.agent_provider or "")
+        provider_name = resolve_provider_for_model(
+            turn_model, (getattr(conv, "provider", None) or "").strip()
+        ) or (settings.agent_provider or "")
+        if provider_name and provider_name != (getattr(conv, "provider", None) or "").strip().lower():
+            conv.provider = provider_name
+            try:
+                save_conversation(conv)
+            except Exception:
+                pass
         if not get_key(provider_name):
-            push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
-            return ""
+            # URL gateways (Ollama) are key_optional — default localhost is fine.
+            try:
+                from backend.uefn_plugins.host import get_llm_provider_registration
+
+                reg = get_llm_provider_registration(provider_name) or {}
+                if not reg.get("key_optional"):
+                    push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
+                    return ""
+            except Exception:
+                push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
+                return ""
 
     try:
         content, _stored = prepare_outgoing_user_message(

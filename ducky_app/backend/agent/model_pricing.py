@@ -22,15 +22,112 @@ def price_for_model(model: str, provider: str = "") -> tuple[float, float, float
 
 
 def infer_provider(model: str) -> str:
-    """Best-effort provider from the model id (legacy calls without recorded provider)."""
-    m = (model or "").strip().lower()
+    """Best-effort provider from the model id (legacy calls without recorded provider).
+
+    Prefer a unique hit in the capability cache (seeded from models_cache.json /
+    last gateway fetch). Never assume OpenAI for Ollama-style ``name:tag`` ids —
+    that was routing local Qwen/Llama picks to api.openai.com (404).
+    """
+    raw = (model or "").strip()
+    if not raw:
+        return ""
+    m = raw.lower()
+
+    # Qualified "provider:model" (and "ollama:qwen3.6:latest" → provider=ollama).
+    known = (
+        "anthropic",
+        "openai",
+        "gemini",
+        "ollama",
+        "cursor",
+        "kimi",
+        "spacexai",
+    )
+    if ":" in raw:
+        prefix = raw.split(":", 1)[0].strip().lower()
+        if prefix in known:
+            return prefix
+
+    try:
+        from backend.agent.model_fetch import _CAPABILITY_CACHE
+
+        hits = sorted(
+            {
+                prov
+                for (prov, mid) in _CAPABILITY_CACHE
+                if mid == raw or str(mid).lower() == m
+            }
+        )
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            for preferred in (
+                "ollama",
+                "anthropic",
+                "openai",
+                "gemini",
+                "kimi",
+                "spacexai",
+                "cursor",
+            ):
+                if preferred in hits:
+                    return preferred
+            return hits[0]
+    except Exception:
+        pass
+
     if "claude" in m:
         return "anthropic"
     if "gemini" in m:
         return "gemini"
-    if m:
+    if m.startswith("grok"):
+        return "spacexai"
+    if m.startswith("kimi") or m.startswith("moonshot"):
+        return "kimi"
+    # Local Ollama tags (qwen3.6:latest, llama3.2:8b) — not OpenAI.
+    if ":" in raw and not m.startswith("ft:"):
+        return "ollama"
+    if m.startswith(("gpt-", "o1", "o3", "o4", "chatgpt")):
         return "openai"
-    return ""
+    return "openai"
+
+
+def resolve_provider_for_model(model: str, recorded_provider: str = "") -> str:
+    """Pick the gateway for a model, correcting stale mis-routes.
+
+    Recorded provider wins when it still owns the model in cache. Otherwise
+    fall back to ``infer_provider`` (fixes chats that stored ``openai`` for
+    ``qwen3.6:latest`` etc.).
+    """
+    mid = (model or "").strip()
+    recorded = (recorded_provider or "").strip().lower()
+    if not mid:
+        return recorded
+    inferred = infer_provider(mid)
+    if not recorded:
+        return inferred
+    if recorded == inferred:
+        return recorded
+    try:
+        from backend.agent.model_fetch import get_model_info
+
+        if get_model_info(recorded, mid) is not None:
+            return recorded
+        if inferred and get_model_info(inferred, mid) is not None:
+            return inferred
+    except Exception:
+        pass
+    # Ollama-style tags must not stay stuck on a cloud gateway.
+    if inferred == "ollama" and recorded in {
+        "openai",
+        "anthropic",
+        "gemini",
+        "kimi",
+        "spacexai",
+        "cursor",
+    }:
+        return "ollama"
+    return recorded or inferred
 
 
 def estimate_cost_usd(
