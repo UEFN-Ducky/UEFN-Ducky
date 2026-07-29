@@ -27,7 +27,7 @@ _PROVIDER_DEFAULT_CONTEXT: dict[str, int] = {
     "anthropic": 200_000,
     "openai": 400_000,
     "gemini": 1_000_000,
-    "ollama": 8_000,
+    "ollama": 32_768,
     "cursor": 200_000,
 }
 _KEEP_LAST_MESSAGES = 20

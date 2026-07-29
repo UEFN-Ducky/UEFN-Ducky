@@ -54,7 +54,7 @@ def test_provider_default_context_matches_known_providers():
     assert _provider_default_context("anthropic") == 200_000
     assert _provider_default_context("openai") == 400_000
     assert _provider_default_context("gemini") == 1_000_000
-    assert _provider_default_context("ollama") == 8_000
+    assert _provider_default_context("ollama") == 32_768
     assert _provider_default_context("cursor") == 200_000
 
 
