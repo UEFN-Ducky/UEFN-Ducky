@@ -173,14 +173,11 @@ def _parse_shading_model(raw: str):
 
 def create_material(
     asset_name: str,
-    folder: str = "",
+    folder: str = "/Game/Materials",
     base_color: Optional[List[float]] = None,
     two_sided: bool = False,
     blend_mode: str = "",
 ) -> dict:
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="Materials")
     unreal.EditorAssetLibrary.make_directory(folder)
     full = f"{folder.rstrip('/')}/{asset_name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
@@ -338,11 +335,8 @@ def list_material_expressions(material_path: str) -> dict:
     return {"material_path": material_path, "expressions": items, "count": len(items)}
 
 
-def create_material_instance(asset_name: str, parent_material_path: str, folder: str = "") -> dict:
+def create_material_instance(asset_name: str, parent_material_path: str, folder: str = "/Game/Materials") -> dict:
     """Create a MaterialInstanceConstant with the given parent (replaces an existing asset of the same name)."""
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="Materials")
     parent = _load_material_interface(parent_material_path)
     unreal.EditorAssetLibrary.make_directory(folder)
     full = f"{folder.rstrip('/')}/{asset_name}"
@@ -582,11 +576,8 @@ def list_uefn_material_expression_classes() -> dict:
     }
 
 
-def duplicate_material(source_path: str, asset_name: str, folder: str = "") -> dict:
+def duplicate_material(source_path: str, asset_name: str, folder: str = "/Game/Materials") -> dict:
     """Duplicate a material or material instance asset."""
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="Materials")
     if not unreal.EditorAssetLibrary.does_asset_exist(source_path):
         raise ValueError(f"Source not found: {source_path}")
     unreal.EditorAssetLibrary.make_directory(folder)

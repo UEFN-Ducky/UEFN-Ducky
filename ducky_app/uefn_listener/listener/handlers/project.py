@@ -81,14 +81,17 @@ def cmd_get_editor_log(
 
 @register("get_project_info")
 def cmd_get_project_info() -> dict:
-    from listener.project_paths import content_root
-
     world = unreal.EditorLevelLibrary.get_editor_world()
-    root = content_root()
-    project_name = root.strip("/") if root else ""
+    project_name = ""
+    content_root = ""
+    if world:
+        parts = world.get_path_name().split("/")
+        if len(parts) >= 2:
+            project_name = parts[1]
+            content_root = f"/{project_name}/"
     return {
         "project_name": project_name,
-        "content_root": f"{root}/" if root and not root.endswith("/") else root,
+        "content_root": content_root,
         "project_dir": str(unreal.Paths.project_dir()),
     }
 

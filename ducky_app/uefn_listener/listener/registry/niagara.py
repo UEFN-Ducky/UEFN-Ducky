@@ -160,11 +160,8 @@ def get_niagara_system_info(system_path: str) -> dict:
     return info
 
 
-def create_niagara_system(asset_name: str, folder: str = "") -> dict:
+def create_niagara_system(asset_name: str, folder: str = "/Game/VFX") -> dict:
     """Create an empty NiagaraSystem asset (errors if it already exists)."""
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="VFX")
     system_cls = _require("NiagaraSystem")
     factory_cls = _require("NiagaraSystemFactoryNew")
     unreal.EditorAssetLibrary.make_directory(folder)

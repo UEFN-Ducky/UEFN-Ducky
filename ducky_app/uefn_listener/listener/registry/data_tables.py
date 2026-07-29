@@ -218,11 +218,8 @@ def fill_data_table_from_csv(data_table_path: str, csv_string: str) -> dict:
     return {"data_table_path": data_table_path, "row_count": len(_row_names(table))}
 
 
-def create_data_table(asset_name: str, row_struct: str, folder: str = "") -> dict:
+def create_data_table(asset_name: str, row_struct: str, folder: str = "/Game/Data") -> dict:
     """Create a DataTable asset for ``row_struct`` (an unreal struct name or user-struct asset path)."""
-    from listener.project_paths import normalize_project_folder
-
-    folder = normalize_project_folder(folder, default_subpath="Data")
     factory_cls = getattr(unreal, "DataTableFactory", None)
     if factory_cls is None:
         raise ValueError(f"unreal.DataTableFactory is not exposed in this UEFN build. Capabilities: {_capabilities()}")

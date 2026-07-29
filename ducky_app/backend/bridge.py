@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import threading
 import time
 import urllib.error
@@ -65,16 +64,11 @@ _listener_lock = threading.Lock()
 # Last time any POST command got a response — status polls use this to skip
 # their ping while agents are actively (and successfully) running commands.
 _last_post_ok_at = 0.0
-# Depth of in-process POSTs currently holding the listener lock (heartbeat skips).
-_command_depth = 0
-_command_depth_lock = threading.Lock()
 
 
 _POST_TIMEOUT_COOLDOWN_SEC = 2.0
 _BUSY_RETRY_SLEEP_SEC = 0.15
 _BUSY_WAIT_POLL_SEC = 0.1
-_RECENT_POST_OK_SEC = 20.0
-_HEALTH_RETRY_TIMEOUT_SEC = 2.0
 
 
 def _record_bridge_error(message: str) -> None:
@@ -100,8 +94,7 @@ def _wait_listener_idle(port: int, *, deadline: float) -> None:
     while time.time() < deadline:
         if not _listener_is_busy(port):
             return
-        # Jitter so N agent processes don't align on the same poll cadence.
-        time.sleep(_BUSY_WAIT_POLL_SEC + random.uniform(0.0, 0.05))
+        time.sleep(_BUSY_WAIT_POLL_SEC)
 
 
 def _post_json_locked(
@@ -126,7 +119,7 @@ def _post_json_locked(
         remaining = deadline - time.time()
         if remaining <= 0:
             if last_http is not None:
-                _handle_listener_http_error(last_http, command=command)
+                _handle_listener_http_error(last_http)
             raise TimeoutError(f"Command '{command}' timed out waiting for listener idle")
         req = urllib.request.Request(
             url,
@@ -140,9 +133,9 @@ def _post_json_locked(
         except urllib.error.HTTPError as e:
             if e.code == 503:
                 last_http = e
-                time.sleep(_BUSY_RETRY_SLEEP_SEC + random.uniform(0.0, 0.1))
+                time.sleep(_BUSY_RETRY_SLEEP_SEC)
                 continue
-            _handle_listener_http_error(e, command=command)
+            _handle_listener_http_error(e)
             raise
         except Exception as e:
             if "timed out" in str(e).lower():
@@ -174,9 +167,8 @@ def configured_listener_port() -> int:
 def _listener_unreachable_error() -> ConnectionError:
     return ConnectionError(
         f"UEFN listener offline on port {configured_listener_port()}. "
-        "Do NOT retry until online. If a Verse compile / save / PIE just ran, wait — "
-        "that is editor-busy, not offline. Verse file edits / workspace_list_verse_errors / "
-        "digests / ducky_* / blender_* work without it. "
+        "Do NOT retry until online. Verse file edits / workspace_list_verse_errors / digests / "
+        "ducky_* / blender_* work without it. "
         "Start listener: Deploy in the panel, or Tools → Execute Python Script → "
         "ducky_app/uefn_listener/launch_listener.py"
     )
@@ -232,45 +224,20 @@ def listener_ping_port(port: int) -> bool:
     return _ping_port(port)
 
 
-def _handle_listener_http_error(e: urllib.error.HTTPError, *, command: str = "") -> None:
+def _handle_listener_http_error(e: urllib.error.HTTPError) -> None:
     if e.code == 503:
         try:
             err_body = json.loads(e.read().decode())
             msg = err_body.get("error", "Listener busy")
         except Exception:
-            msg = "Listener busy — queue full or editor command still running"
+            msg = "Listener busy — one editor command at a time"
         from backend.listener_serial import BUSY_HINT
 
         raise RuntimeError(f"{msg}. {BUSY_HINT}") from e
-    if e.code == 504:
-        label = command or "command"
-        raise TimeoutError(
-            f"Command '{label}' timed out — editor busy "
-            "(Verse compile / save / PIE can stall the tick). "
-            "Do NOT assume the listener is offline; wait and retry once."
-        ) from e
     raise e
 
 
 _HEALTH_FAIL_FAST_SEC = 0.35
-
-
-def _probe_listener_health(port: int) -> Optional[dict]:
-    """GET health with a short fail-fast, then one longer retry when recently busy/alive.
-
-    During a heavy game-thread Python handler the GIL can starve HTTP workers so
-    a 0.35s probe times out even though the listener is fine. A recent successful
-    POST (or an in-process command) means we should wait and retry once before
-    declaring offline.
-    """
-    health = listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC)
-    if health is not None:
-        return health
-    recent_ok = seconds_since_last_post_ok() < _RECENT_POST_OK_SEC
-    if not recent_ok and _command_depth <= 0:
-        return None
-    time.sleep(0.15 + random.uniform(0.0, 0.1))
-    return listener_get_health(port, timeout=_HEALTH_RETRY_TIMEOUT_SEC)
 
 
 def post_command_to_listener(
@@ -284,34 +251,22 @@ def post_command_to_listener(
 
     Returns the command ``result`` dict on success. Raises like :func:`send_command` on failure.
     """
-    global _last_post_ok_at, _command_depth
-    if _probe_listener_health(port) is None:
+    global _last_post_ok_at
+    if listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC) is None:
         raise ConnectionError(
             f"UEFN listener offline on port {port}. "
             "Do NOT retry until the listener is online — Verse file edits, digests, "
-            "panel tools (ducky_*), and blender_* work without it. Use workspace_* for Verse errors. "
-            "If a Verse compile / save just ran, wait — that is editor-busy, not offline."
+            "panel tools (ducky_*), and blender_* work without it. Use workspace_* for Verse errors."
         )
-    from backend.bridge_lock import LISTENER_BRIDGE_LOCK
-
     t_lock0 = time.perf_counter()
     try:
-        with LISTENER_BRIDGE_LOCK:
-            with _listener_lock:
-                with _command_depth_lock:
-                    _command_depth += 1
-                try:
-                    lock_wait_ms = (time.perf_counter() - t_lock0) * 1000.0
-                    t_http0 = time.perf_counter()
-                    body = _post_json_locked(port, command, params, timeout=timeout)
-                    http_ms = (time.perf_counter() - t_http0) * 1000.0
-                finally:
-                    with _command_depth_lock:
-                        _command_depth = max(0, _command_depth - 1)
+        with _listener_lock:
+            lock_wait_ms = (time.perf_counter() - t_lock0) * 1000.0
+            t_http0 = time.perf_counter()
+            body = _post_json_locked(port, command, params, timeout=timeout)
+            http_ms = (time.perf_counter() - t_http0) * 1000.0
         _last_post_ok_at = time.time()
     except TimeoutError:
-        raise
-    except urllib.error.HTTPError:
         raise
     except urllib.error.URLError as e:
         raise ConnectionError(f"UEFN listener not reachable on port {port}") from e
@@ -376,9 +331,9 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
     Raises:
         ConnectionError: Listener is not running.
         RuntimeError: Command failed on the UEFN side.
-        TimeoutError: Command timed out / editor busy (504).
+        TimeoutError: Command timed out.
     """
-    global _discovered_port, _last_post_ok_at, _command_depth
+    global _discovered_port, _last_post_ok_at
 
     cache_ttl = _CACHEABLE_COMMANDS.get(command)
     key = _cache_key(command, params)
@@ -397,11 +352,9 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
                     _response_cache.pop(k, None)
 
     # Always fail-fast when the configured/cached port is down — never sit on
-    # REQUEST_TIMEOUT (30s) discovering or POSTing a dead listener. Retry once
-    # with a longer probe when a recent POST succeeded (GIL starvation).
+    # REQUEST_TIMEOUT (30s) discovering or POSTing a dead listener.
     probe = configured_listener_port()
-    health = _probe_listener_health(probe)
-    if health is not None:
+    if listener_get_health(probe, timeout=_HEALTH_FAIL_FAST_SEC) is not None:
         port = probe
         _discovered_port = probe
     elif _pinned_port is not None:
@@ -417,39 +370,24 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
         except ConnectionError:
             _record_bridge_error(f"Listener not reachable for '{command}' (discovery failed)")
             raise
-
-    from backend.bridge_lock import LISTENER_BRIDGE_LOCK
-
     t_lock0 = time.perf_counter()
     try:
-        with LISTENER_BRIDGE_LOCK:
-            with _listener_lock:
-                with _command_depth_lock:
-                    _command_depth += 1
-                try:
-                    lock_wait_ms = (time.perf_counter() - t_lock0) * 1000.0
-                    t_http0 = time.perf_counter()
-                    body = _post_json_locked(port, command, params, timeout=timeout)
-                    http_ms = (time.perf_counter() - t_http0) * 1000.0
-                finally:
-                    with _command_depth_lock:
-                        _command_depth = max(0, _command_depth - 1)
+        with _listener_lock:
+            lock_wait_ms = (time.perf_counter() - t_lock0) * 1000.0
+            t_http0 = time.perf_counter()
+            body = _post_json_locked(port, command, params, timeout=timeout)
+            http_ms = (time.perf_counter() - t_http0) * 1000.0
         _last_post_ok_at = time.time()
     except TimeoutError as e:
         _record_bridge_error(str(e))
         raise
-    except urllib.error.HTTPError as e:
-        # Non-503/504 should be rare; treat remaining HTTP errors as runtime failures.
-        _record_bridge_error(f"Listener HTTP {e.code} for '{command}': {e}")
-        raise RuntimeError(f"UEFN listener HTTP {e.code} for '{command}': {e}") from e
     except urllib.error.URLError as e:
         if _discovered_port is not None and _pinned_port is None:
             _discovered_port = None
         _record_bridge_error(f"Listener not reachable for '{command}': {e}")
         raise ConnectionError(
             "UEFN listener is not running. "
-            "Start it in UEFN: Tools → Execute Python Script → ducky_app/uefn_listener/launch_listener.py, or Deploy in the panel. "
-            "If a Verse compile / save / PIE just ran, wait — that is editor-busy, not offline."
+            "Start it in UEFN: Tools → Execute Python Script → ducky_app/uefn_listener/launch_listener.py, or Deploy in the panel"
         ) from e
 
     try:
@@ -499,21 +437,16 @@ _HEARTBEAT_INTERVAL = 10.0
 
 
 def _heartbeat_loop() -> None:
-    time.sleep(3.0 + random.uniform(0.0, 2.0))
+    time.sleep(3.0)
     while True:
         try:
-            # Skip while this process is mid-command — an extra GET would only
-            # compete for the GIL / HTTP workers. Jitter so N processes don't align.
-            if _command_depth > 0:
-                time.sleep(1.0 + random.uniform(0.0, 1.0))
-                continue
             port = discover_port()
             req = urllib.request.Request(f"http://127.0.0.1:{port}", method="GET")
             with urllib.request.urlopen(req, timeout=2.0) as _resp:
                 _resp.read(64)
         except Exception:
             pass
-        time.sleep(_HEARTBEAT_INTERVAL + random.uniform(0.0, 3.0))
+        time.sleep(_HEARTBEAT_INTERVAL)
 
 
 threading.Thread(target=_heartbeat_loop, daemon=True).start()
