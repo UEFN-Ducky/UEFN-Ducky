@@ -3181,7 +3181,11 @@ class PanelApi:
 
     def get_key_status(self) -> dict[str, bool]:
         from backend.agent.secrets import has_key
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_contributions
+        from backend.uefn_plugins.host import (
+            ensure_plugins_loaded,
+            get_contributions,
+            get_llm_provider_registration,
+        )
 
         ensure_plugins_loaded()
         # Include every enabled gateway secret_key (and provider id) so saved keys
@@ -3190,12 +3194,22 @@ class PanelApi:
         for row in get_contributions().get("llm_providers") or []:
             if not isinstance(row, dict):
                 continue
+            pid = str(row.get("id") or "").strip().lower()
             for key in (
                 str(row.get("secret_key") or "").strip(),
-                str(row.get("id") or "").strip().lower(),
+                pid,
             ):
                 if key:
                     status[key] = has_key(key)
+            # URL gateways (Ollama) work with default localhost — treat as ready
+            # so the model catalog loads without requiring a saved secret.
+            if pid:
+                reg = get_llm_provider_registration(pid) or {}
+                if reg.get("key_optional") or str(row.get("kind") or "").strip().lower() == "url":
+                    status[pid] = True
+                    sk = str(row.get("secret_key") or "").strip()
+                    if sk:
+                        status[sk] = True
         status["cursor"] = has_key("cursor")
         return status
 
@@ -4496,16 +4510,20 @@ class PanelApi:
         turn_model = (model or "").strip()
         if turn_model and turn_model.lower() != "default":
             conv = load_conversation(conv_id)
-            if conv is not None and (conv.model or "").strip() != turn_model:
-                conv.model = turn_model
-                from backend.agent.model_pricing import infer_provider
+            if conv is not None:
                 from backend.agent.coding_agents.base import normalize_coding_agent
+                from backend.agent.model_pricing import resolve_provider_for_model
 
+                model_changed = (conv.model or "").strip() != turn_model
+                if model_changed:
+                    conv.model = turn_model
                 if normalize_coding_agent(getattr(conv, "coding_agent", None) or "ducky") == "ducky":
-                    inferred = infer_provider(turn_model)
-                    if inferred:
-                        conv.provider = inferred
-                save_conversation(conv)
+                    resolved = resolve_provider_for_model(turn_model, conv.provider or "")
+                    if resolved and resolved != (conv.provider or "").strip().lower():
+                        conv.provider = resolved
+                        model_changed = True
+                if model_changed:
+                    save_conversation(conv)
         conv = load_conversation(conv_id)
         # Subagents retired — every non-group chat is composable (group members included).
         if conv is not None and is_group_conversation(conv):
