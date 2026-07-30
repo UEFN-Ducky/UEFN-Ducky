@@ -1,15 +1,28 @@
-/* Cursor-style clarify card (ducky_ask_user) — inline in chat, modal only for orphans */
+/* Cursor-style clarify questionnaire — docked above the composer (not a modal). */
 
-.ask-user-inline {
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--border-subtle);
+.chat-pane-ask-dock {
+  position: relative;
+  z-index: 9;
+  margin: 0 0 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--input-bg, var(--bg-elevated, var(--bg))) 94%, transparent);
+  padding: 12px 14px 14px;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
+}
+
+.ask-user-tool-hint {
+  padding: 8px 12px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .ask-user-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px 2px 0;
+  padding: 0;
 }
 
 .ask-user-top {
@@ -61,7 +74,7 @@
 
 .ask-user-prompt {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
   line-height: 1.35;
   color: var(--text);
@@ -71,7 +84,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(52vh, 420px);
+  max-height: min(40vh, 360px);
   overflow: auto;
 }
 
@@ -82,8 +95,8 @@
   gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 12px 14px;
-  border-radius: 8px;
+  padding: 11px 13px;
+  border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-elevated, var(--bg)) 92%, transparent);
   color: var(--text);

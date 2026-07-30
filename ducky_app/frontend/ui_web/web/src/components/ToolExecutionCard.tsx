@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { AskUserForm, getAskUserSessionForConv, settleAskUser, subscribeAskUser } from "../ask-user";
+import { getAskUserSessionForConv, subscribeAskUser } from "../ask-user";
 import { Icons } from "../icons/Icons";
 import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../hooks/useChatCollapseState";
 import { ChatListPanel, SingleChatPanel } from "./ChatListPanel";
@@ -29,9 +29,9 @@ import { InlineStopButton } from "./InlineStopButton";
 interface ToolExecutionCardProps {
   intent: ChatMessage;
   result: ChatMessage | null;
-  /** Owning chat — required so ducky_ask_user can render inline per chat. */
+  /** Owning chat — used to detect a live ask docked above the composer. */
   convId?: string;
-  /** When true, this chat pane is visible (keyboard shortcuts for ask-user). */
+  /** When true, this chat pane is visible (unused for ask dock; kept for callers). */
   captureKeys?: boolean;
   onOpenChat?: (chat: ChatTab) => void;
   onStopLinked?: (childConvId: string) => void;
@@ -92,7 +92,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   intent,
   result,
   convId = "",
-  captureKeys = false,
+  captureKeys: _captureKeys = false,
   onOpenChat,
   onStopLinked,
   onStop,
@@ -208,7 +208,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const ms = meta.durationMs ?? 0;
   const relPath = meta.arguments?.relative_path ?? meta.arguments?.path;
   const runningSubtitle = liveAsk
-    ? "waiting for your answer…"
+    ? "answer above the composer…"
     : typeof relPath === "string" && relPath.trim()
       ? relPath.trim().replace(/\\/g, "/")
       : "running…";
@@ -328,14 +328,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {liveAsk && askSession ? (
-          <div className="ask-user-inline">
-            <AskUserForm
-              questions={askSession.questions}
-              title={askSession.title}
-              captureKeys={captureKeys}
-              onComplete={(result) => settleAskUser(result, askSession.id)}
-            />
+        {liveAsk ? (
+          <div className="tool-execution-card-waiting-row ask-user-tool-hint">
+            <div className="status-dot online tool-execution-card-waiting-dot" />
+            Answer the question above the composer to continue.
           </div>
         ) : null}
 
