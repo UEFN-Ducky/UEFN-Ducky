@@ -1548,9 +1548,14 @@ def ducky_create_plan(
 ) -> str:
     """Create a project Plan with an outline tree (main → subplans). In Plan mode, create then stop.
 
-    Prefer ``nodes``: list of {id?, content, status?, children?} (nested subplans).
-    Followable shape: Diagnose → Fix → Verify; each leaf = one concrete action + Done-when
-    (name the tool when known). Never leave only a chat prose Fix plan — call this tool.
+    Field roles (do NOT mix):
+    - ``overview``: short 1–3 sentence summary ONLY (plain text). Never paste JSON or XML here.
+    - ``body_markdown``: longer plan description (markdown). Optional but preferred for context.
+    - ``nodes``: REQUIRED for multi-step work — a real JSON **array** argument
+      ``[{id?, content, status?, children?}, …]``, NOT text inside overview.
+      Followable shape: Diagnose → Fix → Verify; each leaf = one concrete action + Done-when.
+
+    Never leave only a chat prose Fix plan — call this tool with ``nodes`` filled.
     Legacy ``todos`` (flat {id?, content, status?}) become root nodes.
     chat_id defaults to the active conversation. One plan per chat; hierarchy is inside nodes.
     Parents cannot be completed until nested subplans are done. Rearrange with ducky_plan_move_node.
@@ -1573,15 +1578,22 @@ def ducky_create_plan(
     except ValueError as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     push_plan_updated(plan)
-    return tool_json(
-        {
-            "ok": True,
-            "plan": plan,
-            "progress": todo_progress(plan),
-            "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
-        },
-        pretty=pretty,
-    )
+    prog = todo_progress(plan)
+    out: dict[str, Any] = {
+        "ok": True,
+        "plan": plan,
+        "progress": prog,
+        "outline": [
+            {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
+            for lab, n in outline_numbers(plan.get("nodes"))
+        ],
+    }
+    if prog.get("total", 0) == 0:
+        out["warning"] = (
+            "plan has 0 steps — pass nodes=[{id, content, children}] as a JSON array "
+            "argument (not inside overview). UI Steps stay empty until nodes are set."
+        )
+    return tool_json(out, pretty=pretty)
 
 
 @mcp.tool()
@@ -1596,8 +1608,11 @@ def ducky_update_plan(
     chat_id: str = "",
     pretty: bool = False,
 ) -> str:
-    """Update the active chat Plan outline/body. Prefer nodes= for full tree replace; todos+merge patches by id.
+    """Update the active chat Plan outline/body.
 
+    Field roles: ``overview`` = short summary only; ``body_markdown`` = description;
+    ``nodes`` = JSON array tree (never stringify nodes into overview).
+    Prefer nodes= for full tree replace; todos+merge patches by id.
     Cannot complete a node while nested subplans are unfinished. Prefer ducky_plan_*_node for surgical edits.
     """
     from backend.agent.coding_agents.plans import outline_numbers, push_plan_updated, todo_progress, update_plan
@@ -1620,15 +1635,22 @@ def ducky_update_plan(
     except ValueError as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     push_plan_updated(plan)
-    return tool_json(
-        {
-            "ok": True,
-            "plan": plan,
-            "progress": todo_progress(plan),
-            "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
-        },
-        pretty=pretty,
-    )
+    prog = todo_progress(plan)
+    out: dict[str, Any] = {
+        "ok": True,
+        "plan": plan,
+        "progress": prog,
+        "outline": [
+            {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
+            for lab, n in outline_numbers(plan.get("nodes"))
+        ],
+    }
+    if prog.get("total", 0) == 0 and (nodes is not None or overview):
+        out["warning"] = (
+            "plan still has 0 steps — pass nodes as a JSON array argument, "
+            "not pasted into overview text."
+        )
+    return tool_json(out, pretty=pretty)
 
 
 @mcp.tool()
