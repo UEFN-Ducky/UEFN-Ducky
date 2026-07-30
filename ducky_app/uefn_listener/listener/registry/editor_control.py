@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from typing import Any
 
 import unreal
@@ -16,49 +17,97 @@ def _editor_world():
     return unreal.EditorLevelLibrary.get_editor_world()
 
 
-def _resolve_screenshot_path(filename: str) -> str:
-    """Locate the PNG UE just wrote under Saved/Screenshots (or absolute path)."""
-    name = os.path.basename(filename or "")
-    if not name:
-        return ""
-    if os.path.isabs(filename) and os.path.isfile(filename):
-        return filename
+def _screenshots_dir() -> str:
     try:
         project_dir = unreal.Paths.project_saved_dir()
     except Exception:
         project_dir = ""
-    roots = []
-    if project_dir:
-        roots.append(os.path.join(project_dir, "Screenshots"))
-        roots.append(project_dir)
-    # Newest match by mtime within a short window after capture.
+    if not project_dir:
+        return ""
+    return os.path.join(project_dir, "Screenshots")
+
+
+def _expected_screenshot_path(filename: str) -> str:
+    name = os.path.basename(filename or "")
+    if not name:
+        return ""
+    root = _screenshots_dir()
+    return os.path.join(root, name) if root else name
+
+
+def _resolve_screenshot_path(filename: str, *, since: float = 0.0) -> str:
+    """Locate a fresh PNG under Saved/Screenshots only (never walk all of Saved)."""
+    name = os.path.basename(filename or "")
+    if not name:
+        return ""
+    if os.path.isabs(filename) and os.path.isfile(filename):
+        try:
+            if since <= 0.0 or os.path.getmtime(filename) >= since - 1.0:
+                return filename
+        except OSError:
+            return filename
+    root = _screenshots_dir()
+    if not root or not os.path.isdir(root):
+        return ""
+    # Non-recursive first (UE writes here directly).
+    direct = os.path.join(root, name)
+    if os.path.isfile(direct):
+        try:
+            if since <= 0.0 or os.path.getmtime(direct) >= since - 1.0:
+                return direct
+        except OSError:
+            return direct
+    # One level of subdirs only (Windows/UE sometimes nests by map name).
+    try:
+        for entry in os.listdir(root):
+            sub = os.path.join(root, entry)
+            if not os.path.isdir(sub):
+                continue
+            path = os.path.join(sub, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                if since <= 0.0 or os.path.getmtime(path) >= since - 1.0:
+                    return path
+            except OSError:
+                return path
+    except OSError:
+        pass
+    return ""
+
+
+def _newest_screenshot_since(since: float) -> str:
+    """Newest .png under Screenshots modified at/after ``since`` (shallow)."""
+    root = _screenshots_dir()
+    if not root or not os.path.isdir(root):
+        return ""
     newest = ""
     newest_mtime = 0.0
-    cutoff = time.time() - 120.0
-    for root in roots:
-        if not root or not os.path.isdir(root):
+    cutoff = since - 1.0
+    candidates: list[str] = []
+    try:
+        for entry in os.listdir(root):
+            path = os.path.join(root, entry)
+            if os.path.isfile(path) and entry.lower().endswith(".png"):
+                candidates.append(path)
+            elif os.path.isdir(path):
+                try:
+                    for child in os.listdir(path):
+                        if child.lower().endswith(".png"):
+                            candidates.append(os.path.join(path, child))
+                except OSError:
+                    continue
+    except OSError:
+        return ""
+    for path in candidates:
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
             continue
-        for dirpath, _dirnames, filenames in os.walk(root):
-            if name not in filenames:
-                continue
-            path = os.path.join(dirpath, name)
-            try:
-                mtime = os.path.getmtime(path)
-            except OSError:
-                continue
-            if mtime >= cutoff and mtime >= newest_mtime:
-                newest = path
-                newest_mtime = mtime
-    if newest:
-        return newest
-    # Fallback: any matching name under Screenshots
-    for root in roots:
-        if not root or not os.path.isdir(root):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(root):
-            if name in filenames:
-                return os.path.join(dirpath, name)
-    return ""
+        if mtime >= cutoff and mtime >= newest_mtime:
+            newest = path
+            newest_mtime = mtime
+    return newest
 
 
 def exec_console_command(command: str) -> dict:
@@ -72,34 +121,70 @@ def exec_console_command(command: str) -> dict:
 
 def save_all_dirty(content: bool = True, maps: bool = True) -> dict:
     """Save all dirty content packages and/or maps without prompting."""
-    ok = unreal.EditorLoadingAndSavingUtils.save_dirty_packages(save_map_packages=bool(maps), save_content_packages=bool(content))
+    ok = unreal.EditorLoadingAndSavingUtils.save_dirty_packages(
+        save_map_packages=bool(maps), save_content_packages=bool(content)
+    )
     return {"saved": bool(ok), "content": content, "maps": maps}
 
 
-def take_high_res_screenshot(width: int = 1920, height: int = 1080, filename: str = "") -> dict:
-    """Capture a high-resolution screenshot of the active viewport.
+def take_high_res_screenshot(width: int = 1280, height: int = 720, filename: str = "") -> dict:
+    """Capture the active viewport without freezing the editor.
 
-    Returns absolute ``path`` when the file can be resolved under Saved/Screenshots.
+    **Never** uses ``AutomationLibrary.take_high_res_screenshot`` / HighResShot —
+    those do a synchronous offscreen render on the Slate tick and can freeze UEFN
+    for tens of seconds on dense levels (then the host hits its 30s bridge timeout).
+
+    Captures the current viewport buffer via ``take_screenshot`` (or console
+    ``Shot``). ``width``/``height`` are recorded as requested size only — the PNG
+    matches the viewport. Does not sleep on the game thread; the host waits for
+    the file if the write lands on the next frame.
     """
-    fn = filename or "uefn_ducky_screenshot.png"
+    req_w, req_h = int(width), int(height)
+    # Unique name so resolve never picks a stale prior capture.
+    raw = os.path.basename((filename or "").strip())
+    if raw.lower().endswith(".png") and raw.lower() != ".png":
+        stem = raw[:-4]
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem)[:48] or "uefn_ducky"
+    else:
+        safe = "uefn_ducky"
+    fn = f"{safe}_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
+    started = time.time()
+    method = ""
     try:
-        unreal.AutomationLibrary.take_high_res_screenshot(int(width), int(height), fn)
+        take_fn = getattr(unreal.AutomationLibrary, "take_screenshot", None)
+        if callable(take_fn):
+            take_fn(fn)
+            method = "take_screenshot"
+        else:
+            world = _editor_world()
+            unreal.SystemLibrary.execute_console_command(world, "Shot")
+            method = "Shot"
+            fn = ""
     except Exception as e:
         raise RuntimeError(f"Screenshot failed: {e}") from e
-    # UE may finish the write slightly after the call returns.
+
+    # Do NOT time.sleep here — sleeping on the Slate tick freezes the entire editor
+    # and can prevent the async PNG write from finishing.
     path = ""
-    for _ in range(8):
-        path = _resolve_screenshot_path(fn)
-        if path:
-            break
-        time.sleep(0.05)
-    out = {"width": int(width), "height": int(height), "filename": os.path.basename(fn)}
-    if path:
-        out["path"] = path
-    else:
+    if fn:
+        path = _resolve_screenshot_path(fn, since=started)
+    if not path:
+        path = _newest_screenshot_since(started)
+    expected = path or (_expected_screenshot_path(fn) if fn else "")
+    out: dict[str, Any] = {
+        "width": req_w,
+        "height": req_h,
+        "filename": os.path.basename(expected or fn or "screenshot.png"),
+        "method": method,
+        "viewport_capture": True,
+    }
+    if expected:
+        out["path"] = expected
+    if not path:
+        out["await_path"] = True
         out["hint"] = (
-            "Screenshot taken but path not resolved — do not Bash-find; "
-            "re-call take_high_res_screenshot or check Project/Saved/Screenshots."
+            "Viewport capture kicked off — PNG may appear on the next editor frame. "
+            "Host waits briefly for path; do not Bash-find."
         )
     return out
 
@@ -133,7 +218,12 @@ def set_object_property(asset_path: str, property_name: str, value: Any, save: b
     obj.set_editor_property(property_name, value)
     if save:
         unreal.EditorAssetLibrary.save_loaded_asset(obj, only_if_is_dirty=False)
-    return {"asset_path": asset_path, "property": property_name, "value": serialize(value), "saved": bool(save)}
+    return {
+        "asset_path": asset_path,
+        "property": property_name,
+        "value": serialize(value),
+        "saved": bool(save),
+    }
 
 
 def get_editor_stats() -> dict:

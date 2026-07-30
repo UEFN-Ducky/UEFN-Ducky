@@ -36,6 +36,7 @@ from typing import Any, List, Optional
 import unreal
 
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 
 _HARD_LIST_CAP = 200
 
@@ -697,11 +698,13 @@ def destroy_entity(entity: str) -> dict:
     return {"destroyed": entity, "path": path}
 
 
-def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folder: str) -> dict:
+def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folder: str = "") -> dict:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 
-    folder is a content path in the PROJECT mount, e.g. /MyProject/Prefabs.
+    folder is a content path in the PROJECT mount, e.g. /MyProject/Prefabs
+    (never invent /Game/Prefabs — omit folder to auto-pin).
     """
+    folder = pin_project_folder(folder, default_leaf="Prefabs")
     ss = _subsystem()
     if not entity_names:
         raise ValueError("entity_names must not be empty")

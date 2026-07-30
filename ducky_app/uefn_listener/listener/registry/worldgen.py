@@ -23,11 +23,12 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
+from listener.project_paths import content_root, pin_project_folder
 from listener.serialize import is_live, serialize
 
 _WORLDGEN_TAG = "WorldgenGenerated"
 _DEFAULT_FOLDER = "Generated/WorldgenDemo"
-_DEFAULT_ASSET_FOLDER = "/Roguelike/Generated/Worldgen"
+_DEFAULT_ASSET_LEAF = "Generated/Worldgen"
 _MAX_RESOLUTION = 129  # (res-1) must be even-ish; 129x129 = ~32k tris
 _MAX_INSTANCES = 2500
 _MAX_TERRAIN_SIZE_UU = 51200.0  # 512 m
@@ -323,22 +324,21 @@ def _place_mesh_actors(
 
 
 def _content_root() -> str:
-    try:
-        # Prefer project mount; fall back to /Roguelike then /Game
-        dirs = unreal.EditorAssetLibrary.list_assets("/Roguelike/", recursive=False)  # type: ignore
-        if dirs is not None:
-            return "/Roguelike"
-    except Exception:
-        pass
-    if unreal.EditorAssetLibrary.does_directory_exist("/Roguelike"):
-        return "/Roguelike"
-    return "/Game"
+    """Active project mount (e.g. /VideoTest) — never invent /Game or /Roguelike."""
+    root = (content_root() or "").rstrip("/")
+    if root:
+        return root
+    raise RuntimeError(
+        "No active UEFN project content_root — open an island before worldgen asset creates"
+    )
 
 
 def _asset_folder(folder: str = "") -> str:
-    base = (folder or _DEFAULT_ASSET_FOLDER).rstrip("/")
-    if not base.startswith("/"):
-        base = f"{_content_root()}/Generated/Worldgen/{base}"
+    f = (folder or "").strip()
+    if not f:
+        base = pin_project_folder(_DEFAULT_ASSET_LEAF, default_leaf=_DEFAULT_ASSET_LEAF)
+    else:
+        base = pin_project_folder(f, default_leaf=_DEFAULT_ASSET_LEAF)
     unreal.EditorAssetLibrary.make_directory(base)
     return base
 
@@ -654,7 +654,7 @@ def terrain_remove_generated(folder_prefix: str = "", asset_name_prefix: str = "
 
     removed_assets = []
     prefix = asset_name_prefix or "SM_WG_Terrain"
-    folder = _asset_folder(_DEFAULT_ASSET_FOLDER)
+    folder = _asset_folder("")
     try:
         for ap in unreal.EditorAssetLibrary.list_assets(folder, recursive=True) or []:
             name = str(ap).rsplit("/", 1)[-1].split(".")[0]

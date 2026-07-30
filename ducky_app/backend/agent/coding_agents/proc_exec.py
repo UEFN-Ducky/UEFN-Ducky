@@ -72,8 +72,13 @@ def run_streaming_process(
     on_line: Callable[[str], None],
     timeout_s: float,
     cancel: threading.Event | None = None,
+    stdin_data: str | None = None,
 ) -> ProcResult:
-    """Run argv, feeding each stdout line to ``on_line``. Kills on timeout/cancel."""
+    """Run argv, feeding each stdout line to ``on_line``. Kills on timeout/cancel.
+
+    Pass long user prompts via ``stdin_data`` — never as argv — or Windows
+    CreateProcess raises WinError 206 on large pastes.
+    """
     env = dict(os.environ)
     for key, value in (env_extra or {}).items():
         if key:
@@ -83,12 +88,13 @@ def run_streaming_process(
     if not os.path.isdir(workdir):
         workdir = os.getcwd()
 
+    use_stdin = stdin_data is not None
     kwargs: dict = {
         "cwd": workdir,
         "env": env,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
-        "stdin": subprocess.DEVNULL,
+        "stdin": subprocess.PIPE if use_stdin else subprocess.DEVNULL,
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
@@ -97,9 +103,28 @@ def run_streaming_process(
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-    proc = subprocess.Popen(argv, **kwargs)
+    try:
+        proc = subprocess.Popen(argv, **kwargs)
+    except OSError as exc:
+        # WinError 206 / errno-equivalent: command line or env still too long.
+        win = getattr(exc, "winerror", None)
+        if win == 206 or "too long" in str(exc).lower():
+            raise OSError(
+                206,
+                "Prompt/command too long for Windows to launch the coding agent. "
+                "Ducky should pipe the prompt via stdin/file — restart UEFN-Ducky "
+                "and update the Anthropic (Claude Code) Store plugin if this persists.",
+            ) from exc
+        raise
     register_process(conv_id, proc)
     result = ProcResult(returncode=-1)
+
+    if use_stdin and proc.stdin is not None:
+        try:
+            proc.stdin.write(stdin_data or "")
+            proc.stdin.close()
+        except (OSError, ValueError, BrokenPipeError):
+            pass
 
     stderr_chunks: list[str] = []
 
@@ -135,14 +160,18 @@ def run_streaming_process(
     t_err.start()
     t_out.start()
 
-    deadline = time.time() + max(30.0, float(timeout_s))
+    # timeout_s <= 0 means no wall-clock limit — keep going until the CLI exits
+    # or the user cancels. Long UEFN builds (city blockouts, etc.) routinely need
+    # more than 15 minutes; killing them mid-turn is worse than waiting.
+    limit = float(timeout_s)
+    deadline = (time.time() + limit) if limit > 0 else None
     try:
         while proc.poll() is None:
             if cancel is not None and cancel.is_set():
                 result.cancelled = True
                 proc.kill()
                 break
-            if time.time() > deadline:
+            if deadline is not None and time.time() > deadline:
                 result.timed_out = True
                 proc.kill()
                 break

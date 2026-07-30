@@ -26,7 +26,7 @@ def get_niagara_system_info(system_path: str, pretty: bool = False) -> str:
 
 
 @plugin_mcp_tool("vfx")
-def create_niagara_system(asset_name: str, folder: str = "/Game/VFX", pretty: bool = False) -> str:
+def create_niagara_system(asset_name: str, folder: str = "", pretty: bool = False) -> str:
     """Create an empty NiagaraSystem asset (errors if it already exists). Place it with spawn_actor(asset_path=...)."""
     return tool_json(send_command("create_niagara_system", {"asset_name": asset_name, "folder": folder}), pretty=pretty)
 

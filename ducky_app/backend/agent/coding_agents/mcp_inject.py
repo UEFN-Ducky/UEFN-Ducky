@@ -266,10 +266,17 @@ def launch_env(
     project_root: str,
     extra: dict[str, str] | None = None,
 ) -> dict[str, str]:
+    """Build env for a coding-agent subprocess.
+
+    Never put multi-KB prompt/system bodies in the environment. On Windows,
+    CreateProcess fails with ``WinError 206`` (filename/extension too long) when
+    the combined env block + command line is oversized — common when the user
+    pastes a long brief. Prompt text lives in ``prompt_file``; adapters must
+    read that file or pipe stdin instead of stuffing argv/env.
+    """
+    del prompt, system_prompt  # file path only — see docstring
     env = {
-        "DUCKY_PROMPT": prompt,
         "DUCKY_PROMPT_TMP_FILE": str(prompt_file),
-        "DUCKY_SYSTEM_PROMPT": system_prompt,
         "DUCKY_CONV_ID": conv_id,
         "DUCKY_TASK_ID": conv_id,
         "DUCKY_PROJECT_ROOT": project_root or "",

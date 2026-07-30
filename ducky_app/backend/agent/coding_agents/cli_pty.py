@@ -59,7 +59,7 @@ def run_cli_in_terminal(
     title: str,
     env: dict[str, str],
     push: PushFn | None,
-    timeout_s: float = 600.0,
+    timeout_s: float = 0.0,
     skip_approval: bool = True,
 ) -> CodingAgentLaunchResult:
     """Open a panel terminal, run argv, wait for completion, return output."""
@@ -131,8 +131,9 @@ def run_cli_in_terminal(
 
         t = threading.Thread(target=_run, daemon=True, name=f"coding-agent-{session_id[:8]}")
         t.start()
-        deadline = time.time() + max(30.0, float(timeout_s))
-        while t.is_alive() and time.time() < deadline:
+        limit = float(timeout_s)
+        deadline = (time.time() + limit) if limit > 0 else None
+        while t.is_alive() and (deadline is None or time.time() < deadline):
             time.sleep(0.2)
         if t.is_alive():
             output = session.read_output_tail(16000)

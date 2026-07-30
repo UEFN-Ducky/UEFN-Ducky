@@ -243,7 +243,11 @@ def start_panel_ui_server(dist_root: Path) -> str:
                                 text,
                                 mode,
                                 model,
-                                timeout_sec=float(payload.get("timeout_sec") or 180.0),
+                                timeout_sec=(
+                                    180.0
+                                    if payload.get("timeout_sec") is None
+                                    else float(payload.get("timeout_sec"))
+                                ),
                                 cancel_on_timeout=bool(payload.get("cancel_on_timeout", True)),
                                 parent=str(payload.get("parent_conv_id") or ""),
                                 _local=True,

@@ -267,10 +267,14 @@ def run_coding_agent_message(
     model: str,
     push: PushFn,
     run_id: str = "",
-    timeout_s: float = 900.0,
+    timeout_s: float = 0.0,
     cancel: threading.Event | None = None,
 ) -> dict[str, Any]:
-    """Execute one external coding-agent turn; persist assistant reply on conv."""
+    """Execute one external coding-agent turn; persist assistant reply on conv.
+
+    ``timeout_s`` <= 0 means no wall-clock limit — the CLI runs until it finishes
+    or the user cancels. Long UEFN builds must not be killed at 15 minutes.
+    """
     agent_id = normalize_coding_agent(getattr(conv, "coding_agent", None) or "ducky")
     if agent_id == "ducky":
         return {"ok": False, "error": "not an external coding agent"}

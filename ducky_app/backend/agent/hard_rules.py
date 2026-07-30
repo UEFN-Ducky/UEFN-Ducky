@@ -35,4 +35,14 @@ AGENT_HARD_RULES = (
     '`workspace_list_dir("Verse")` then `workspace_write_file("Verse/<System>/<file>.verse", …)` '
     "(parents auto-created). Only `module_declarations.verse` (+ tiny helpers) at Verse "
     'root. Details: `skill_read_subskill("verse", "modules")`.\n'
+    "- **Project assets only:** `create_material` / `create_material_instance` / "
+    "`create_niagara_system` / `create_widget_blueprint` / `create_data_table` / "
+    "`create_folder` / `import_asset` / `duplicate_asset` / `rename_asset` / "
+    "`meshy_import_to_uefn` / `gdrive_import_to_uefn` / `create_level_sequence` / "
+    "`create_prefab_from_entities` MUST use `get_project_info().content_root` "
+    "(e.g. `/VideoTest/Materials/...`). **Never invent `/Game/Materials`**, `/Game/VFX`, "
+    "`/Game/UI`, `/Game/Data`, `/Game/Meshes`, `/Game/Meshy`, or `/Game/Retargeting` for "
+    "new island assets — that causes unsaved packages and cook "
+    "`Disallowed reference to /Game/...`. Omit `folder` / `destination_path` to let the "
+    "listener pin the project mount. `/Game/Creative` is read/search only.\n"
 )

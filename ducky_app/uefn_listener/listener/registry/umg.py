@@ -26,6 +26,7 @@ from typing import Any, List, Optional
 import unreal
 
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 from listener.registry.asset_registry import assets_by_class as _assets_by_class
 
 _UMG_CLASSES = (
@@ -380,10 +381,11 @@ def get_widget_blueprint_info(widget_path: str) -> dict:
 
 def create_widget_blueprint(
     asset_name: str,
-    folder: str = "/Game/UI",
+    folder: str = "",
     parent_class: str = "UserWidget",
 ) -> dict:
     """Create an empty WidgetBlueprint asset (errors if it already exists)."""
+    folder = pin_project_folder(folder, default_leaf="UI")
     wbp_cls = _require("WidgetBlueprint")
     factory_cls = _require("WidgetBlueprintFactory")
     unreal.EditorAssetLibrary.make_directory(folder)
