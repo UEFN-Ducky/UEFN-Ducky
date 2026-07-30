@@ -56,10 +56,8 @@ import { basename } from "../verse-editor/utils/isVerseFile";
 import { ChatInputResizeHandle } from "./ChatInputResizeHandle";
 import { ChatPlanPopup } from "./ChatPlanPopup";
 import {
-  AskUserForm,
   getAskUserSessionForConv,
   setFocusedChatForAsk,
-  settleAskUser,
   subscribeAskUser,
   type AskUserSession,
 } from "../ask-user";
@@ -1034,7 +1032,7 @@ export function ChatPane({
               storageKey={`uefn-panel-chat-zoom:${chat.id}`}
               onZoomChange={handleChatZoomChange}
             >
-              {isEmpty ? (
+              {isEmpty && !(askSession && visible) ? (
                 <ChatPaneEmptyState
                   hasApiKey={externalAgent || hasApiKey}
                   selectedModel={selectedModel}
@@ -1064,6 +1062,7 @@ export function ChatPane({
                   setComposerCodingAgent={setCodingAgent}
                   convId={chat.id}
                   captureAskKeys={visible}
+                  askSession={askSession && visible ? askSession : null}
                   onResend={handleResend}
                   onStop={agentRunning ? handleStop : undefined}
                   onAtBottomChange={onAtBottomChange}
@@ -1089,21 +1088,21 @@ export function ChatPane({
         <PromptQueueBar
           items={promptQueue}
           onEdit={(id, text) => setPromptQueue(chat.id, updatePromptText(promptQueue, id, text))}
-          onMoveToFront={(id) => setPromptQueue(chat.id, movePromptToFront(promptQueue, id))}
+          onSendNow={(id) => {
+            // Promote this prompt, then stop the live turn so the idle drain
+            // picks it up next — same end state as Stop, without a second click.
+            setPromptQueue(chat.id, movePromptToFront(promptQueue, id));
+            if (agentRunning) {
+              handleStop();
+              return;
+            }
+            // Idle: force-drain this prompt (clear a stuck lock if needed).
+            releasePromptDrainLock(chat.id);
+            const next = takeNextPromptForDrain(chat.id);
+            if (next) dispatchSend(next.text, next.attachments, next.mode, next.model);
+          }}
           onDelete={(id) => setPromptQueue(chat.id, removePrompt(promptQueue, id))}
         />
-        {askSession && visible ? (
-          <div className="chat-pane-ask-dock" data-ask-session={askSession.id}>
-            <AskUserForm
-              questions={askSession.questions}
-              title={askSession.title}
-              queueAhead={askSession.queueAhead}
-              captureKeys={visible}
-              showDismiss
-              onComplete={(result) => settleAskUser(result, askSession.id)}
-            />
-          </div>
-        ) : null}
         {chatPlan != null && !planAllDone ? (
           <div className="chat-pane-plan-dock">
             <ChatPlanPopup

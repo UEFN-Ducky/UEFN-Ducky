@@ -21,6 +21,23 @@ type Props = {
   onComplete: (result: AskUserResult) => void;
 };
 
+function OptionControl({
+  multiple,
+  selected,
+}: {
+  multiple: boolean;
+  selected: boolean;
+}) {
+  return (
+    <span
+      className={`ask-user-control ask-user-control--${multiple ? "checkbox" : "radio"}${
+        selected ? " is-checked" : ""
+      }`}
+      aria-hidden="true"
+    />
+  );
+}
+
 export function AskUserForm({
   questions,
   title,
@@ -41,6 +58,7 @@ export function AskUserForm({
   const draft = drafts[index] ?? emptyDraft();
   const total = questions.length;
   const canSubmit = question ? canSubmitQuestion(question, draft) : false;
+  const multiple = Boolean(question?.allow_multiple);
 
   const answersSoFar = useMemo(() => {
     const out: Record<string, AskUserAnswer> = {};
@@ -181,18 +199,24 @@ export function AskUserForm({
       </div>
       {title ? <p className="ask-user-session-title">{title}</p> : null}
       <h2 className="ask-user-prompt">{question.prompt}</h2>
-      <div className="ask-user-options" role="listbox" aria-label="Options">
+      <div
+        className="ask-user-options"
+        role={multiple ? "group" : "radiogroup"}
+        aria-label="Options"
+        aria-multiselectable={multiple || undefined}
+      >
         {question.options.map((opt, i) => {
           const selected = draft.selected.includes(opt.id) && !draft.other;
           return (
             <button
               key={opt.id}
               type="button"
-              role="option"
-              aria-selected={selected}
+              role={multiple ? "checkbox" : "radio"}
+              aria-checked={selected}
               className={`ask-user-option${selected ? " is-selected" : ""}`}
               onClick={() => toggleOption(opt.id)}
             >
+              <OptionControl multiple={multiple} selected={selected} />
               <div className="ask-user-option-main">
                 <span className="ask-user-option-label">{opt.label}</span>
                 {opt.description ? (
@@ -208,8 +232,11 @@ export function AskUserForm({
             <button
               type="button"
               className="ask-user-other-toggle"
+              role={multiple ? "checkbox" : "radio"}
+              aria-checked={draft.other}
               onClick={() => setDraft({ other: true, selected: [] })}
             >
+              <OptionControl multiple={multiple} selected={draft.other} />
               <span className="ask-user-option-label">Other</span>
               <span className="ask-user-option-key">{question.options.length + 1}</span>
             </button>

@@ -166,6 +166,7 @@ _SCENE_GRAPH_TOOLS = frozenset(
         "duplicate_entity",
         "destroy_entity",
         "create_prefab_from_entities",
+        "create_empty_prefab",
         "instantiate_prefab",
         "convert_actors_to_entities",
         # writing Verse components/prefab spawns needs digest ground truth

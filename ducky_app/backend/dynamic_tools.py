@@ -77,6 +77,7 @@ _NEVER_EXPOSE = frozenset(
         "create_level_sequence",
         "create_niagara_system",
         "create_prefab_from_entities",
+        "create_empty_prefab",
         "create_widget_blueprint",
         "data_table_capabilities",
         "delete_actors",

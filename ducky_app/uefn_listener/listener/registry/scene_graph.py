@@ -6,8 +6,8 @@ agent can chain them (probe, find an entity, add a component, tune a property):
   PROBE   scene_graph_capabilities
   READ    list_entities, get_entity_info, list_scene_component_classes,
           get_selected_entities
-  CREATE  create_entity, add_entity_component, create_prefab_from_entities,
-          instantiate_prefab
+  CREATE  create_entity, add_entity_component, create_empty_prefab,
+          create_prefab_from_entities, instantiate_prefab
   CHANGE  set_entity_transform, set_entity_component_property, rename_entity,
           set_entity_parent, duplicate_entity, remove_entity_component,
           select_entities
@@ -37,6 +37,11 @@ import unreal
 
 from listener.dispatch import register
 from listener.project_paths import pin_project_folder
+from listener.registry.scene_graph_filters import (
+    is_junk_entity_name,
+    is_proxy_shadow_path,
+    spatial_to_unreal_xyz,
+)
 
 _HARD_LIST_CAP = 200
 
@@ -45,6 +50,7 @@ _HARD_LIST_CAP = 200
 # VerseClass objects when an alias is missing on this build.
 _BUILTIN_COMPONENT_PATHS = {
     "transform_component": "/EntityFramework/_Verse/VNI/Entity.transform_component",
+    "mass_component": "/EntityFramework/_Verse/VNI/Entity.mass_component",
     "mesh_component": "/EntityFramework/_Verse/VNI/Component.mesh_component",
     "light_component": "/EntityFramework/_Verse/VNI/Component.light_component",
     "capsule_light_component": "/EntityFramework/_Verse/VNI/Component.capsule_light_component",
@@ -59,6 +65,9 @@ _BUILTIN_COMPONENT_PATHS = {
     "icon_component": "/EntityFramework/_Verse/VNI/Entity.icon_component",
     "rarity_component": "/EntityFramework/_Verse/VNI/Entity.rarity_component",
     "basic_stackable_component": "/EntityFramework/_Verse/VNI/Entity.basic_stackable_component",
+    "camera_component": "/VerseCamera/_Verse/VNI/VerseCamera.camera_component",
+    "interactable_component": "/EntityInteract/_Verse/VNI/EntityInteract.interactable_component",
+    "basic_interactable_component": "/EntityInteract/_Verse/VNI/EntityInteract.basic_interactable_component",
 }
 
 _ENTITY_CLASS_PATH = "/EntityFramework/_Verse/VNI/Entity.entity"
@@ -170,10 +179,27 @@ def _class_is_component(cls, component_base) -> bool:
     return False
 
 
+def _is_junk_entity_name(name: str) -> bool:
+    """CDOs, soft-deleted trash, and hot-reload reinstanced shells."""
+    return is_junk_entity_name(name)
+
+
+def _is_proxy_shadow_path(path: str) -> bool:
+    """EntityProxyActor embeds a shadow copy; canonical entity lives under LevelEntity."""
+    return is_proxy_shadow_path(path)
+
+
+def _spatial_to_unreal_location(translation: List[float]) -> Any:
+    """SpatialMath [forward, left, up] -> Unreal Vector (X, -Y-as-left, Z)."""
+    x, y, z = spatial_to_unreal_xyz(list(translation))
+    return unreal.Vector(x, y, z)
+
+
 def _entity_objects() -> List[Any]:
     """Live entity instances in the open editor world, cached for this tick.
 
-    Excludes CDOs, trash, and transient Prefab-Editor worlds.
+    Excludes CDOs, trash, REINST_ shells, EntityProxyActor shadow copies, and
+    transient Prefab-Editor worlds.
     """
     global _entities_cache
     if _entities_cache is not None:
@@ -186,8 +212,10 @@ def _entity_objects() -> List[Any]:
         path = obj.get_path_name()
         if ":PersistentLevel." not in path or not path.startswith(world_prefix):
             continue
+        if _is_proxy_shadow_path(path):
+            continue
         name = obj.get_name()
-        if name.startswith("Default__") or name.startswith("TRASH_"):
+        if _is_junk_entity_name(name):
             continue
         out.append(obj)
     _entities_cache = out
@@ -375,6 +403,8 @@ def scene_graph_capabilities() -> dict:
         "notes": [
             "Translations/scales are SpatialMath [forward, left, up]; rotations are quaternions [x,y,z,w].",
             "Prefab instances placed from the Content Browser and Verse-spawned entities are both visible here.",
+            "instantiate_prefab uses EditorActorSubsystem.spawn_actor_from_object (same as Content Browser drag) — creates an EntityProxyActor wrapping the entity.",
+            "create_empty_prefab makes a blank EntityPrefab asset; create_prefab_from_entities packages level entities into a new prefab.",
             "Nothing auto-saves — call save_current_level once after a batch of scene graph edits.",
         ],
     }
@@ -698,6 +728,37 @@ def destroy_entity(entity: str) -> dict:
     return {"destroyed": entity, "path": path}
 
 
+def create_empty_prefab(prefab_name: str, folder: str = "") -> dict:
+    """Create a blank EntityPrefab asset under the PROJECT content mount (no level entities yet).
+
+    folder is a content path in the PROJECT mount, e.g. /MyProject/SolarSystem
+    (never invent /Game/Prefabs — omit folder to auto-pin under Prefabs).
+    Fill it later via create_prefab_from_entities (new name) or by editing in UEFN /
+    building a hierarchy in the level and packaging.
+    """
+    folder = pin_project_folder(folder, default_leaf="Prefabs")
+    ss = _subsystem()
+    if not (prefab_name or "").strip():
+        raise ValueError("prefab_name must not be empty")
+    package_path = f"{folder.rstrip('/')}/{prefab_name}"
+    asset_path = f"{package_path}.{prefab_name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+        raise ValueError(f"Asset already exists: {package_path}")
+    prefab = ss.create_empty_prefab(prefab_name, package_path)
+    if prefab is None:
+        raise RuntimeError(f"create_empty_prefab failed for {package_path}")
+    unreal.EditorAssetLibrary.save_loaded_asset(prefab, only_if_is_dirty=False)
+    return {
+        "prefab_path": prefab.get_path_name(),
+        "package_path": package_path,
+        "note": (
+            "Blank EntityPrefab saved. Place with instantiate_prefab, or assemble entities "
+            "in the level and package with create_prefab_from_entities (use a new prefab_name "
+            "if this asset should stay empty). Verse class appears in Assets.digest after Verse build."
+        ),
+    }
+
+
 def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folder: str = "") -> dict:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 
@@ -714,11 +775,17 @@ def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folde
     # create_empty_prefab takes the FULL package path, not a folder.
     package_path = f"{folder.rstrip('/')}/{prefab_name}"
     if unreal.EditorAssetLibrary.does_asset_exist(f"{package_path}.{prefab_name}"):
-        raise ValueError(f"Asset already exists: {package_path}")
+        raise ValueError(
+            f"Asset already exists: {package_path}. Use a new prefab_name, or "
+            "instantiate_prefab / Content Browser for more instances of the existing asset."
+        )
     try:
         can = ss.can_create_prefab_from_entities(handles)
         if can is False:
-            raise ValueError("These entities cannot be packaged into a prefab (must share a level and not already be prefab internals)")
+            raise ValueError(
+                "These entities cannot be packaged into a prefab "
+                "(must share a level and not already be prefab internals)"
+            )
     except AttributeError:
         pass
     prefab = ss.create_empty_prefab(prefab_name, package_path)
@@ -733,51 +800,89 @@ def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folde
     return {
         "prefab_path": prefab.get_path_name(),
         "instance": _display_name(obj) if obj else entity_names[0],
-        "note": "The source entities became an instance of the new prefab. Its Verse class appears in Assets.digest.verse after the next Verse build (workspace_push_verse_changes / verse build).",
+        "path": obj.get_path_name() if obj else None,
+        "note": (
+            "The source entities became an instance of the new prefab. Its Verse class "
+            "appears in Assets.digest.verse after the next Verse build "
+            "(workspace_push_verse_changes / verse build)."
+        ),
     }
 
 
-def instantiate_prefab(prefab_path: str, name: str = "", parent_entity: str = "") -> dict:
-    """Place an instance of a Prefab asset into the level (best effort — prefab scripting is WIP in UEFN)."""
+def instantiate_prefab(
+    prefab_path: str,
+    name: str = "",
+    parent_entity: str = "",
+    translation: Optional[List[float]] = None,
+) -> dict:
+    """Place an EntityPrefab into the level (same path as Content Browser drag).
+
+    Uses EditorActorSubsystem.spawn_actor_from_object on the EntityPrefab asset,
+    which creates an EntityProxyActor wrapping the prefab entity under LevelEntity.
+    translation is SpatialMath [forward, left, up]. Optional name renames the entity.
+    """
     ss = _subsystem()
-    asset = unreal.EditorAssetLibrary.load_asset(prefab_path)
+    path = (prefab_path or "").strip()
+    if not path:
+        raise ValueError("prefab_path must not be empty")
+    asset = unreal.EditorAssetLibrary.load_asset(path)
     if asset is None:
-        raise ValueError(f"Prefab asset not found: {prefab_path}")
-    label = name or asset.get_name() + "_Instance"
-    errors: List[str] = []
-    handle = None
-    try:
-        gen = asset.generated_class()
-    except Exception as e:
-        gen = None
-        errors.append(f"generated_class: {e}")
-    if gen is not None:
-        # Instance the prefab's generated entity class under the level's entity container.
-        containers = [o for o in _entity_objects() if o.get_class().get_name() == "level_entity"]
-        if not containers:
-            errors.append("no level_entity container found in the level")
-        else:
-            try:
-                newobj = unreal.new_object(gen, containers[0], label)
-                h = unreal.new_object(unreal.EntityScriptHandle)
-                h.set_object_reference(newobj)
-                if h.is_valid_handle():
-                    handle = h
-                else:
-                    errors.append("instanced object did not produce a valid entity handle")
-            except Exception as e:
-                errors.append(f"new_object strategy: {e}")
-    if handle is None:
+        raise ValueError(f"Prefab asset not found: {path}")
+    if asset.get_class().get_name() != "EntityPrefab":
         raise ValueError(
-            "Could not instantiate this prefab from scripting on this build. "
-            "Place it by dragging from the Content Browser, or spawn it at runtime in Verse "
-            f"(instantiate its Assets.digest class and AddEntities). Details: {errors}"
+            f"{path} is a {asset.get_class().get_name()}, not EntityPrefab. "
+            "Pass an Entity Prefab asset path (e.g. /MyProject/Prefabs/EP_Thing)."
         )
+    loc = (
+        _spatial_to_unreal_location(translation)
+        if translation is not None
+        else unreal.Vector(0.0, 0.0, 0.0)
+    )
+    eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    actor = eas.spawn_actor_from_object(asset, loc)
+    if actor is None:
+        raise RuntimeError(f"spawn_actor_from_object failed for {path}")
     invalidate()
+    # Prefer the LevelEntity-backed entity (canonical), not the proxy shadow copy.
+    ent_obj = None
+    try:
+        ent_obj = actor.get_editor_property("entity")
+    except Exception:
+        ent_obj = None
+    handle = None
+    if ent_obj is not None:
+        try:
+            handle = _handle_for(ent_obj)
+        except Exception:
+            handle = None
+    if handle is None:
+        # Fallback: resolve by actor label / object name after spawn.
+        label = actor.get_actor_label()
+        try:
+            handle, ent_obj = _resolve_entity(label)
+        except Exception as e:
+            raise RuntimeError(
+                f"Spawned EntityProxyActor but could not resolve its entity ({e}). "
+                "list_entities and save_current_level; the instance may still be in the level."
+            ) from e
+    if name and (name or "").strip():
+        if not ss.rename_entity(handle, name.strip()):
+            # Non-fatal — instance exists under the engine-generated name.
+            pass
+        else:
+            invalidate()
+            ent_obj = handle.get_object_reference()
     if parent_entity:
         ss.set_entity_parent(handle, _resolve_entity(parent_entity)[0])
-    obj = handle.get_object_reference()
-    return {"prefab_path": prefab_path, "instance": _display_name(obj) if obj else label, "path": obj.get_path_name() if obj else None}
+        invalidate()
+        ent_obj = handle.get_object_reference()
+    return {
+        "prefab_path": path,
+        "instance": _display_name(ent_obj) if ent_obj else actor.get_actor_label(),
+        "path": ent_obj.get_path_name() if ent_obj else None,
+        "proxy_actor": actor.get_path_name(),
+        "note": "Placed via spawn_actor_from_object (EntityProxyActor). Call save_current_level.",
+    }
 
 
 def convert_actors_to_entities(actor_paths: List[str]) -> dict:
@@ -815,5 +920,6 @@ register("set_entity_parent")(set_entity_parent)
 register("duplicate_entity")(duplicate_entity)
 register("destroy_entity")(destroy_entity)
 register("create_prefab_from_entities")(create_prefab_from_entities)
+register("create_empty_prefab")(create_empty_prefab)
 register("instantiate_prefab")(instantiate_prefab)
 register("convert_actors_to_entities")(convert_actors_to_entities)

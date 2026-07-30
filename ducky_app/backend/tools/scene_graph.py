@@ -171,6 +171,19 @@ def destroy_entity(entity: str, pretty: bool = False) -> str:
 
 
 @plugin_mcp_tool("scenegraph")
+def create_empty_prefab(prefab_name: str, folder: str = "", pretty: bool = False) -> str:
+    """Create a blank EntityPrefab asset under the PROJECT mount (e.g. /MyProject/Prefabs).
+
+    Does not place anything in the level. Use instantiate_prefab to place, or
+    create_prefab_from_entities to package existing level entities into a NEW named prefab.
+    """
+    return tool_json(
+        send_command("create_empty_prefab", {"prefab_name": prefab_name, "folder": folder}),
+        pretty=pretty,
+    )
+
+
+@plugin_mcp_tool("scenegraph")
 def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folder: str = "", pretty: bool = False) -> str:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 
@@ -186,14 +199,22 @@ def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folde
 
 
 @plugin_mcp_tool("scenegraph")
-def instantiate_prefab(prefab_path: str, name: str = "", parent_entity: str = "", pretty: bool = False) -> str:
-    """Place an instance of a Prefab asset into the level (best effort — prefab scripting is WIP in UEFN)."""
-    return tool_json(
-        send_command(
-            "instantiate_prefab", {"prefab_path": prefab_path, "name": name, "parent_entity": parent_entity}
-        ),
-        pretty=pretty,
-    )
+def instantiate_prefab(
+    prefab_path: str,
+    name: str = "",
+    parent_entity: str = "",
+    translation: list[float] | None = None,
+    pretty: bool = False,
+) -> str:
+    """Place an EntityPrefab into the level (same as Content Browser drag → EntityProxyActor).
+
+    prefab_path: project asset path (e.g. /MyProject/SolarSystem/EP_SolarSystem).
+    translation: optional SpatialMath [forward, left, up]. name renames the entity after place.
+    """
+    params: dict = {"prefab_path": prefab_path, "name": name, "parent_entity": parent_entity}
+    if translation is not None:
+        params["translation"] = translation
+    return tool_json(send_command("instantiate_prefab", params), pretty=pretty)
 
 
 @plugin_mcp_tool("scenegraph")
