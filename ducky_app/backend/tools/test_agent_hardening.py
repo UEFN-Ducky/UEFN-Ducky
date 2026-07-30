@@ -83,6 +83,12 @@ def test_hard_rules_forbid_invented_game_asset_paths():
     assert "content_root" in AGENT_HARD_RULES
 
 
+def test_hard_rules_require_ask_user_modal():
+    assert "ducky_ask_user" in AGENT_HARD_RULES
+    assert "Your call" in AGENT_HARD_RULES
+    assert "plain chat" in AGENT_HARD_RULES.lower() or "A–B–C" in AGENT_HARD_RULES or "A-B-C" in AGENT_HARD_RULES
+
+
 def test_mcp_instructions_require_followable_plans():
     from backend.server import mcp
 
@@ -90,6 +96,7 @@ def test_mcp_instructions_require_followable_plans():
     assert "ducky_create_plan" in text
     assert "Followable" in text or "followable" in text
     assert "thrash" in text
+    assert "ducky_ask_user" in text or "Ask the user" in text
 
 
 def test_enrich_screenshot_prefers_ducky_captures(tmp_path, monkeypatch):
