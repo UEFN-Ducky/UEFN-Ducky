@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -377,6 +378,86 @@ class ResolvePlanChatIdTests(unittest.TestCase):
         with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value=None):
             os.environ.pop("DUCKY_CONV_ID", None)
             self.assertEqual(_resolve_plan_chat_id(""), "")
+
+
+class PlanArgRecoveryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_coerce_nodes_json_string(self) -> None:
+        plan = plans.create_plan(
+            "chat-json-str",
+            title="String nodes",
+            overview="Short summary",
+            nodes='[{"id":"a","content":"Do A","children":[{"id":"a1","content":"Sub"}]}]',
+            project_root=self.root,
+        )
+        self.assertEqual(len(plan["nodes"]), 1)
+        self.assertEqual(plan["nodes"][0]["id"], "a")
+        self.assertEqual(plan["nodes"][0]["children"][0]["content"], "Sub")
+        self.assertEqual(plan["overview"], "Short summary")
+
+    def test_recover_nodes_dumped_into_overview(self) -> None:
+        mangled = (
+            "Replace actors with Scene Graph entities after Verse build."
+            "</overview>\n"
+            '<parameter name="merge">false</parameter>\n'
+            '<parameter name="nodes">'
+            '[{"id": "prep", "content": "Groundwork", "children": '
+            '[{"id": "p1", "content": "Import mesh", "status": "completed"}]}, '
+            '{"id": "gate", "content": "GATE: Build Verse", "children": '
+            '[{"id": "g1", "content": "Confirm unlock"}]}]'
+        )
+        plan = plans.create_plan(
+            "chat-mangled",
+            title="Solar",
+            overview=mangled,
+            nodes=None,
+            project_root=self.root,
+        )
+        self.assertNotIn("<parameter", plan["overview"])
+        self.assertNotIn("</overview>", plan["overview"])
+        self.assertIn("Scene Graph", plan["overview"])
+        self.assertEqual(len(plan["nodes"]), 2)
+        self.assertEqual(plan["nodes"][0]["id"], "prep")
+        self.assertEqual(plan["nodes"][0]["children"][0]["status"], "completed")
+        prog = plans.todo_progress(plan)
+        self.assertGreater(prog["total"], 0)
+
+    def test_load_heals_and_persists_mangled_plan(self) -> None:
+        path = Path(self.root) / ".ducky" / "plans"
+        path.mkdir(parents=True)
+        mangled = (
+            "Short blurb.</overview>\n"
+            '<parameter name="nodes">'
+            '[{"id":"x","content":"Step X","children":[]}]'
+        )
+        (path / "heal-me.json").write_text(
+            json.dumps(
+                {
+                    "id": "abc",
+                    "chat_id": "heal-me",
+                    "title": "Broken",
+                    "overview": mangled,
+                    "body_markdown": "",
+                    "nodes": [],
+                    "status": "open",
+                }
+            ),
+            encoding="utf-8",
+        )
+        loaded = plans.load_plan("heal-me", project_root=self.root)
+        assert loaded is not None
+        self.assertEqual(loaded["overview"], "Short blurb.")
+        self.assertEqual(len(loaded["nodes"]), 1)
+        self.assertEqual(loaded["nodes"][0]["content"], "Step X")
+        on_disk = json.loads((path / "heal-me.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(on_disk["nodes"]), 1)
+        self.assertNotIn("<parameter", on_disk["overview"])
 
 
 if __name__ == "__main__":

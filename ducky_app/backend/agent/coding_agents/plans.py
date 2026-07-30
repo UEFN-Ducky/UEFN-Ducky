@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -15,6 +16,16 @@ _NODE_STATUSES = frozenset({"pending", "in_progress", "completed", "cancelled"})
 _DONE = frozenset({"completed", "cancelled"})
 _NODE_KINDS = frozenset({"step", "subplan"})
 _STARTED_NODE = frozenset({"in_progress", "completed"})
+
+# Agents sometimes dump sibling XML tool params into ``overview`` (wrong close
+# tag / slurped ``<parameter name="nodes">…``). Recover the tree + scrub prose.
+_OVERVIEW_TOOL_XML_RE = re.compile(
+    r"(?:</overview>\s*)?"
+    r"(?:<parameter\s+name=[\"']merge[\"']>.*?</parameter>\s*)?"
+    r"<parameter\s+name=[\"']nodes[\"']>\s*(.*)\s*(?:</parameter>\s*)?\s*$",
+    re.DOTALL | re.IGNORECASE,
+)
+_OVERVIEW_STRAY_CLOSE_RE = re.compile(r"</overview>\s*$", re.IGNORECASE)
 
 
 def _safe_id(raw: str, *, fallback: str = "") -> str:
@@ -111,15 +122,63 @@ def _normalize_node(raw: Any, *, fallback_id: str | None = None) -> dict[str, An
     }
 
 
+def _parse_nodes_json(raw: Any) -> list[Any] | None:
+    """Return a list if ``raw`` is a list or a JSON-encoded list string."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, list) else None
+    return None
+
+
 def _normalize_nodes(raw: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    if not isinstance(raw, list):
+    parsed = _parse_nodes_json(raw)
+    if parsed is None:
         return out
-    for item in raw:
+    for item in parsed:
         node = _normalize_node(item)
         if node:
             out.append(node)
     return out
+
+
+def scrub_overview_and_recover_nodes(
+    overview: str | None,
+    nodes: Any = None,
+) -> tuple[str, Any, bool]:
+    """Split mangled tool XML out of overview; recover ``nodes`` when possible.
+
+    Returns ``(clean_overview, nodes_or_recovered, recovered)``.
+    Prefer an explicit non-empty ``nodes`` list/JSON-string; otherwise parse
+    ``<parameter name="nodes">…`` that was accidentally written into overview.
+    """
+    text = str(overview or "")
+    coerced = _parse_nodes_json(nodes)
+    has_nodes = isinstance(coerced, list) and len(coerced) > 0
+    match = _OVERVIEW_TOOL_XML_RE.search(text)
+    if match:
+        clean = text[: match.start()].rstrip()
+        clean = _OVERVIEW_STRAY_CLOSE_RE.sub("", clean).rstrip()
+        if has_nodes:
+            return clean, coerced, False
+        recovered = _parse_nodes_json(match.group(1))
+        if recovered is not None:
+            return clean, recovered, True
+        return clean, nodes, False
+    # Soft scrub: stray </overview> with no parameter dump
+    if _OVERVIEW_STRAY_CLOSE_RE.search(text):
+        text = _OVERVIEW_STRAY_CLOSE_RE.sub("", text).rstrip()
+    if coerced is not None:
+        return text, coerced, False
+    return text, nodes, False
 
 
 def _todos_to_nodes(todos: Any) -> list[dict[str, Any]]:
@@ -293,14 +352,24 @@ def outline_numbers(nodes: list[dict[str, Any]] | None) -> list[tuple[str, dict[
 
 
 def _normalize_plan_doc(data: dict[str, Any], *, kind: str) -> dict[str, Any]:
-    """Migrate legacy todos/parent_chat_id into nodes tree."""
+    """Migrate legacy todos/parent_chat_id into nodes tree.
+
+    Also heals plans where agents dumped ``nodes`` XML into ``overview``.
+    """
     doc = dict(data)
     doc.pop("parent_chat_id", None)
-    nodes = doc.get("nodes")
-    if not isinstance(nodes, list) or (not nodes and doc.get("todos")):
+    overview, nodes_raw, recovered = scrub_overview_and_recover_nodes(
+        doc.get("overview"), doc.get("nodes")
+    )
+    doc["overview"] = overview
+    existing = doc.get("nodes")
+    has_tree = isinstance(existing, list) and bool(existing)
+    if recovered or (not has_tree and nodes_raw is not None):
+        nodes = _normalize_nodes(nodes_raw)
+    elif not has_tree and doc.get("todos"):
         nodes = _todos_to_nodes(doc.get("todos"))
     else:
-        nodes = _normalize_nodes(nodes)
+        nodes = _normalize_nodes(existing if isinstance(existing, list) else nodes_raw)
     doc["nodes"] = nodes
     # Compat shim: flat mirror of all outline nodes for older UI/tool paths.
     doc["todos"] = [
@@ -309,7 +378,6 @@ def _normalize_plan_doc(data: dict[str, Any], *, kind: str) -> dict[str, Any]:
     doc["kind"] = kind
     doc["template_id"] = str(doc.get("template_id") or "").strip() or None
     doc["title"] = str(doc.get("title") or "Plan").strip()[:200] or "Plan"
-    doc["overview"] = str(doc.get("overview") or "").strip()
     doc["body_markdown"] = str(doc.get("body_markdown") or "").strip()
     doc["status"] = str(doc.get("status") or "open").strip()[:40] or "open"
     return doc
@@ -336,7 +404,18 @@ def load_plan(chat_id: str, project_root: str | None = None) -> dict[str, Any] |
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        return _normalize_plan_doc(data, kind="project")
+        before_ov = str(data.get("overview") or "")
+        before_nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+        doc = _normalize_plan_doc(data, kind="project")
+        healed = (not before_nodes and bool(doc.get("nodes"))) or (
+            "<parameter" in before_ov.lower() and "<parameter" not in str(doc.get("overview") or "").lower()
+        )
+        if healed:
+            try:
+                return save_plan(doc, project_root)
+            except ValueError:
+                return doc
+        return doc
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -360,7 +439,7 @@ def create_plan(
     title: str = "",
     overview: str = "",
     body_markdown: str = "",
-    nodes: list[dict[str, Any]] | None = None,
+    nodes: Any = None,
     todos: list[dict[str, Any]] | None = None,
     template_id: str | None = None,
     project_root: str | None = None,
@@ -368,7 +447,11 @@ def create_plan(
     cid = (chat_id or "").strip()
     if not cid:
         raise ValueError("chat_id required")
-    tree = _normalize_nodes(nodes) if nodes is not None else _todos_to_nodes(todos or [])
+    overview, nodes, _ = scrub_overview_and_recover_nodes(overview, nodes)
+    if nodes is not None:
+        tree = _normalize_nodes(nodes)
+    else:
+        tree = _todos_to_nodes(todos or [])
     now = time.time()
     plan = {
         "id": uuid.uuid4().hex[:12],
@@ -392,7 +475,7 @@ def update_plan(
     title: str | None = None,
     overview: str | None = None,
     body_markdown: str | None = None,
-    nodes: list[dict[str, Any]] | None = None,
+    nodes: Any = None,
     todos: list[dict[str, Any]] | None = None,
     merge: bool = True,
     status: str | None = None,
@@ -405,6 +488,15 @@ def update_plan(
     plan = load_plan(cid, project_root)
     if not plan:
         raise ValueError("plan not found — call ducky_create_plan first")
+
+    # Heal mangled overview↔nodes before deciding what touched structure.
+    if overview is not None or nodes is not None:
+        base_overview = overview if overview is not None else str(plan.get("overview") or "")
+        clean, recovered_nodes, recovered = scrub_overview_and_recover_nodes(base_overview, nodes)
+        if overview is not None or recovered:
+            overview = clean
+        if nodes is not None or recovered:
+            nodes = recovered_nodes
 
     # Status ticks (todos merge / plan status) stay allowed while playing;
     # pause unlocks structure + prose. Finished stays locked.
@@ -425,8 +517,9 @@ def update_plan(
         plan["status"] = next_status
 
     if nodes is not None:
-        _assert_completed_tree_preserved(plan.get("nodes"), nodes)
-        plan["nodes"] = _normalize_nodes(nodes)
+        normalized = _normalize_nodes(nodes)
+        _assert_completed_tree_preserved(plan.get("nodes"), normalized)
+        plan["nodes"] = normalized
     elif todos is not None:
         incoming = _todos_to_nodes(todos)
         if not merge:

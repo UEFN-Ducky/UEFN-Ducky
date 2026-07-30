@@ -133,6 +133,10 @@ a prose "Fix plan" / markdown checklist in chat.
 - Templates (global, reusable): `ducky_list_plan_templates`, `ducky_create_plan_template`,
   `ducky_instantiate_plan_template` — instances are snapshots; edits never cross
 
+**Field roles:** `overview` = short summary only; `body_markdown` = description;
+`nodes` = JSON **array** argument (never paste nodes/XML into overview — empty nodes
+→ UI "0 of 0 steps").
+
 **Followable shape:** Diagnose → Fix → Verify; each leaf = one action + Done-when
 (name the tool when known). Parents cannot complete while nested subplans are unfinished.
 Work depth-first on open leaves; tick `in_progress` → `completed` with
