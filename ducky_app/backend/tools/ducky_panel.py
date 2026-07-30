@@ -1051,15 +1051,16 @@ def ducky_spawn_chat(
         base["coding_agent"] = getattr(fresh, "coding_agent", None) or base["coding_agent"]
 
     if wait_for_reply:
-        base_timeout = float(timeout_sec)
-        if str(base.get("coding_agent") or "ducky") != "ducky" and base_timeout <= 180.0:
-            base_timeout = 600.0
+        # External coding agents (Claude Code / Codex / Cursor) run until they
+        # finish or the user cancels — never wall-clock-kill at 15 minutes.
+        is_external = str(base.get("coding_agent") or "ducky") != "ducky"
+        wait_timeout = 0.0 if is_external else max(5.0, min(float(timeout_sec), 900.0))
         outcome = run_message_and_wait(
             conv_id,
             text,
             mode_norm,
-            timeout_sec=max(5.0, min(base_timeout, 900.0)),
-            cancel_on_timeout=not caller,
+            timeout_sec=wait_timeout,
+            cancel_on_timeout=False if is_external else (not caller),
             parent=caller or hub_id,
         )
         if outcome.get("status") == "timeout" and caller:
@@ -1071,7 +1072,7 @@ def ducky_spawn_chat(
                 on_agent_stopped(conv_id, "done")
             outcome["response_id"] = rid
             outcome["error"] = (
-                f"No reply within {base_timeout:.0f}s — the member is STILL WORKING. "
+                f"No reply within {float(timeout_sec):.0f}s — the member is STILL WORKING. "
                 f"Its result will arrive as a [ducky:agent-message] "
                 f"(response_id {rid}). Do NOT re-spawn; finish your turn."
             )
@@ -1213,11 +1214,13 @@ def ducky_recycle_member(
         "model": new_conv.model or "",
     }
     if wait_for_reply:
+        is_external = str(base.get("coding_agent") or "ducky") != "ducky"
         outcome = run_message_and_wait(
             new_conv.id,
             spawn_text,
             mode_norm,
-            timeout_sec=max(5.0, min(float(timeout_sec), 900.0)),
+            # External CLIs: wait until done (0 = no wall-clock limit).
+            timeout_sec=0.0 if is_external else max(5.0, min(float(timeout_sec), 900.0)),
             cancel_on_timeout=False,
             parent=parent_id,
         )

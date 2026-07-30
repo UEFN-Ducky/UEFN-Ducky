@@ -24,6 +24,7 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 from listener.serialize import serialize
 
 _NIAGARA_CLASSES = (
@@ -160,12 +161,13 @@ def get_niagara_system_info(system_path: str) -> dict:
     return info
 
 
-def create_niagara_system(asset_name: str, folder: str = "/Game/VFX") -> dict:
+def create_niagara_system(asset_name: str, folder: str = "") -> dict:
     """Create an empty NiagaraSystem asset (errors if it already exists)."""
+    folder = pin_project_folder(folder, default_leaf="VFX")
     system_cls = _require("NiagaraSystem")
     factory_cls = _require("NiagaraSystemFactoryNew")
     unreal.EditorAssetLibrary.make_directory(folder)
-    full = f"{folder}/{asset_name}"
+    full = f"{folder.rstrip('/')}/{asset_name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         raise ValueError(f"Asset already exists: {full} (delete_asset first to replace)")
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()

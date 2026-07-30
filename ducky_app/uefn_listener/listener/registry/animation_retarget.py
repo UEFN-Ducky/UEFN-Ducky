@@ -32,6 +32,7 @@ from typing import Any, List, Optional, Tuple
 import unreal
 
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 from listener.serialize import rotator_pyr
 
 _IK_CLASSES = (
@@ -340,6 +341,7 @@ def get_ik_retargeter_info(ik_retargeter_path: str) -> dict:
 def create_ik_rig_asset(skeletal_mesh_path: str, dest_folder: str, name: str) -> dict:
     """Create an IK Rig asset and bind its skeletal mesh. Returns bone_count and
     a preset_guess. Then set the root + chains with the CHANGE tools."""
+    dest_folder = pin_project_folder(dest_folder, default_leaf="Retargeting")
     caps = _capabilities()
     if not (caps["IKRigDefinition"] and caps["IKRigController"]):
         return {"ok": False, "error": "IK Rig API not available", "capabilities": caps,
@@ -376,6 +378,7 @@ def create_ik_retargeter_asset(
 ) -> dict:
     """Create an IK Retargeter and bind its source + target IK Rigs. Map chains
     separately with ``auto_map_retarget_chains``."""
+    dest_folder = pin_project_folder(dest_folder, default_leaf="Retargeting")
     caps = _capabilities()
     if not (caps["IKRetargeter"] and caps["IKRetargeterController"]):
         return {"ok": False, "error": "IK Retargeter API not available", "capabilities": caps}
@@ -547,13 +550,14 @@ def retarget_animation_pipeline(
     source_mesh_path: str,
     target_mesh_path: str,
     anim_path: str,
-    dest_folder: str = "/Game/Retargeting",
+    dest_folder: str = "",
     source_preset: str = "auto",
     target_preset: str = "auto",
     suffix: str = "_Retargeted",
 ) -> dict:
     """Convenience: chain the primitives for the common single-animation case.
     For anything non-standard, call the primitives directly instead."""
+    dest_folder = pin_project_folder(dest_folder, default_leaf="Retargeting")
     caps = _capabilities()
     if not all(caps[c] for c in _CORE_CLASSES) or not caps["IKRetargetBatchOperation"]:
         return {"ok": False, "error": "Full IK retarget pipeline not available in this build",

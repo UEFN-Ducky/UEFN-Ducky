@@ -171,7 +171,7 @@ def destroy_entity(entity: str, pretty: bool = False) -> str:
 
 
 @plugin_mcp_tool("scenegraph")
-def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folder: str, pretty: bool = False) -> str:
+def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folder: str = "", pretty: bool = False) -> str:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 
     folder is a content path in the PROJECT mount (e.g. /MyProject/Prefabs).

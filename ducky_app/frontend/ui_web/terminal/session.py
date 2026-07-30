@@ -348,7 +348,9 @@ class TerminalSession:
         done = self._pending_done
         if done is None:
             return {"ok": True, "status": "running"}
-        if not done.wait(timeout=max(1.0, float(timeout_s))):
+        # timeout_s <= 0: wait until the shell reports done (no wall-clock kill).
+        wait_timeout = None if float(timeout_s) <= 0 else max(1.0, float(timeout_s))
+        if not done.wait(timeout=wait_timeout):
             self.set_busy(False)
             return {
                 "ok": False,

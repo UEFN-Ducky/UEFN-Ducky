@@ -2,12 +2,47 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 from backend.bridge import send_command
 from backend.json_util import tool_json
 from backend.tools.plugin_gate import plugin_mcp_tool
+
+# Listener returns quickly (viewport buffer capture). PNG may land next frame —
+# wait here on the host, never inside the UE tick.
+_SCREENSHOT_FILE_WAIT_SEC = 8.0
+_SCREENSHOT_BRIDGE_TIMEOUT_SEC = 45.0
+
+
+def _wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
+    """Poll for the PNG on the host after a non-blocking viewport capture."""
+    if not isinstance(result, dict):
+        return result
+    path = str(result.get("path") or "").strip()
+    if not path:
+        return result
+    src = Path(path)
+    if src.is_file() and src.stat().st_size > 0:
+        out = {**result}
+        out.pop("await_path", None)
+        return out
+    deadline = time.time() + _SCREENSHOT_FILE_WAIT_SEC
+    while time.time() < deadline:
+        if src.is_file() and src.stat().st_size > 0:
+            out = {**result}
+            out.pop("await_path", None)
+            out.pop("hint", None)
+            return out
+        time.sleep(0.05)
+    return {
+        **result,
+        "error": (
+            f"Screenshot file not ready after {_SCREENSHOT_FILE_WAIT_SEC:.0f}s: {path}. "
+            "Retry once; if UEFN was frozen, reload the listener (viewport capture path)."
+        ),
+    }
 
 
 def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
@@ -18,6 +53,8 @@ def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
     have reliable access to AppData folders.
     """
     if not isinstance(result, dict):
+        return result
+    if result.get("error") and not Path(str(result.get("path") or "")).is_file():
         return result
     path = (result.get("path") or "").strip()
     if not path:
@@ -46,6 +83,7 @@ def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
             "Use project path for file work; media_url/capture_path are AppData "
             "preview-only. Image is also returned as MCP image content when available."
         )
+        out.pop("await_path", None)
         return out
     except Exception as exc:
         return {**result, "capture_error": str(exc)[:200]}
@@ -79,21 +117,30 @@ def save_all_dirty(content: bool = True, maps: bool = True, pretty: bool = False
 
 @plugin_mcp_tool("uefn")
 def take_high_res_screenshot(
-    width: int = 1920, height: int = 1080, filename: str = "", pretty: bool = False
+    width: int = 1280, height: int = 720, filename: str = "", pretty: bool = False
 ) -> Any:
-    """Capture a high-resolution screenshot of the active viewport.
+    """Capture the active viewport for visual verify (does not freeze UEFN).
 
-    Returns project ``path`` (under ``Saved/DuckyCaptures`` when project root is
-    set, else ``Saved/Screenshots``) + ``media_url`` for panel preview, and an
-    MCP image content block so vision-capable agents can see the capture.
+    Uses a fast viewport-buffer capture on the listener (not Unreal's high-res
+    offscreen path, which stalls the editor on dense levels). Returns project
+    ``path`` (under ``Saved/DuckyCaptures`` when project root is set, else
+    ``Saved/Screenshots``) + ``media_url`` for panel preview, and an MCP image
+    content block so vision-capable agents can see the capture.
     Use ``path`` for any file work; ``media_url`` / ``capture_path`` are
-    AppData preview-only. Never Bash-find for ``uefn_ducky_screenshot.png``.
+    AppData preview-only. Never Bash-find for screenshot PNGs.
+    ``width``/``height`` are advisory; the PNG matches the current viewport.
     """
     result = send_command(
         "take_high_res_screenshot",
         {"width": width, "height": height, "filename": filename},
+        timeout=_SCREENSHOT_BRIDGE_TIMEOUT_SEC,
     )
     if isinstance(result, dict):
+        if result.get("error") and not result.get("path"):
+            return tool_json(result, pretty=pretty)
+        result = _wait_for_screenshot_file(result)
+        if result.get("error") and not Path(str(result.get("path") or "")).is_file():
+            return tool_json(result, pretty=pretty)
         result = _enrich_screenshot(result)
         return _screenshot_mcp_payload(result, pretty=pretty)
     return tool_json(result, pretty=pretty)

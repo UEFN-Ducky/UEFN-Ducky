@@ -6,6 +6,7 @@ import unreal
 
 from listener.asset_resolve import resolve_asset_class
 from listener.dispatch import register
+from listener.project_paths import pin_project_asset_path
 from listener.serialize import serialize, serialize_asset_entry
 
 # Bounds for search_assets so it never scans every asset in /Game/ (that froze/timed
@@ -85,6 +86,8 @@ def cmd_get_selected_assets() -> dict:
 
 @register("rename_asset")
 def cmd_rename_asset(old_path: str, new_path: str) -> dict:
+    # Never move/rename into invented /Game/... — pin destination to content_root.
+    new_path = pin_project_asset_path(new_path, default_leaf="Assets")
     success = unreal.EditorAssetLibrary.rename_asset(old_path, new_path)
     return {"success": success, "old_path": old_path, "new_path": new_path}
 
@@ -97,6 +100,7 @@ def cmd_delete_asset(asset_path: str) -> dict:
 
 @register("duplicate_asset")
 def cmd_duplicate_asset(source_path: str, dest_path: str) -> dict:
+    dest_path = pin_project_asset_path(dest_path, default_leaf="Assets")
     result = unreal.EditorAssetLibrary.duplicate_asset(source_path, dest_path)
     return {"success": result is not None, "source": source_path, "dest": dest_path}
 

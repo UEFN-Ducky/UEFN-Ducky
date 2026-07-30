@@ -226,7 +226,7 @@ class CodingAgentAdapter(Protocol):
         session_id: str = "",
         run_id: str = "",
         cancel: Any = None,
-        timeout_s: float = 900.0,
+        timeout_s: float = 0.0,
         image_paths: list[str] | None = None,
     ) -> CodingAgentLaunchResult: ...
 

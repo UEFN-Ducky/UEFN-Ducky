@@ -71,7 +71,7 @@ def fill_data_table_from_csv(data_table_path: str, csv_string: str, pretty: bool
 
 
 @plugin_mcp_tool("uefn")
-def create_data_table(asset_name: str, row_struct: str, folder: str = "/Game/Data", pretty: bool = False) -> str:
+def create_data_table(asset_name: str, row_struct: str, folder: str = "", pretty: bool = False) -> str:
     """Create a DataTable asset for row_struct (an unreal struct name or user-struct asset path)."""
     return tool_json(
         send_command("create_data_table", {"asset_name": asset_name, "row_struct": row_struct, "folder": folder}),

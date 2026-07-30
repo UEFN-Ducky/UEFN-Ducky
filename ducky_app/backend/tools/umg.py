@@ -36,7 +36,7 @@ def get_widget_blueprint_info(widget_path: str, pretty: bool = False) -> str:
 @plugin_mcp_tool("verse")
 def create_widget_blueprint(
     asset_name: str,
-    folder: str = "/Game/UI",
+    folder: str = "",
     parent_class: str = "UserWidget",
     pretty: bool = False,
 ) -> str:

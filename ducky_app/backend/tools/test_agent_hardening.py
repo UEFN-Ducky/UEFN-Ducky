@@ -77,6 +77,12 @@ def test_hard_rules_require_project_copy_for_captures():
     assert "MCP image" in AGENT_HARD_RULES or "vision" in AGENT_HARD_RULES
 
 
+def test_hard_rules_forbid_invented_game_asset_paths():
+    assert "Project assets only" in AGENT_HARD_RULES
+    assert "/Game/Materials" in AGENT_HARD_RULES
+    assert "content_root" in AGENT_HARD_RULES
+
+
 def test_mcp_instructions_require_followable_plans():
     from backend.server import mcp
 
@@ -111,6 +117,38 @@ def test_enrich_screenshot_prefers_ducky_captures(tmp_path, monkeypatch):
     assert out["ue_screenshot_path"] == str(project_png)
     assert out["media_url"].startswith("http://")
     assert "tool_captures" in out["capture_path"].replace("\\", "/")
+
+
+def test_wait_for_screenshot_file_polls_until_ready(tmp_path, monkeypatch):
+    from backend.tools import editor as editor_mod
+
+    png = tmp_path / "shot.png"
+    state = {"n": 0}
+
+    def _fake_sleep(_sec: float) -> None:
+        state["n"] += 1
+        if state["n"] >= 2:
+            png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+
+    monkeypatch.setattr(editor_mod.time, "sleep", _fake_sleep)
+    monkeypatch.setattr(editor_mod, "_SCREENSHOT_FILE_WAIT_SEC", 2.0)
+    out = editor_mod._wait_for_screenshot_file(
+        {"path": str(png), "await_path": True, "hint": "pending"}
+    )
+    assert out["path"] == str(png)
+    assert "await_path" not in out
+    assert png.is_file()
+
+
+def test_wait_for_screenshot_file_errors_when_missing(tmp_path, monkeypatch):
+    from backend.tools import editor as editor_mod
+
+    monkeypatch.setattr(editor_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(editor_mod, "_SCREENSHOT_FILE_WAIT_SEC", 0.01)
+    missing = tmp_path / "missing.png"
+    out = editor_mod._wait_for_screenshot_file({"path": str(missing), "await_path": True})
+    assert "error" in out
+    assert "not ready" in out["error"]
 
 
 def test_vision_attachments_from_capture_result(tmp_path):

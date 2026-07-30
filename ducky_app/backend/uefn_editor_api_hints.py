@@ -37,7 +37,10 @@ Material graph via MaterialEditingLibrary (UEFN)
 
 HINTS_MATERIAL_END_TO_END = """
 End-to-end: create a solid material that exists in Content (UEFN)
-1. ``folder = "/Game/Materials"`` — leading slash, ``/Game`` not ``Game``.
+1. ``folder = "<content_root>Materials"`` from ``get_project_info().content_root``
+   (e.g. ``/VideoTest/Materials``). **Never invent ``/Game/Materials``** — cook fails with
+   Disallowed reference / unsaved ``/Game`` packages. Prefer ``create_material`` (omit folder;
+   listener pins the project mount).
 2. ``EditorAssetLibrary.make_directory(folder)`` if missing.
 3. ``asset_tools.create_asset("M_MyName", folder, unreal.Material, unreal.MaterialFactoryNew())`` —
    if this returns ``None``, stop and return that error (wrong path, read-only project, or name clash).
@@ -70,7 +73,7 @@ Saving materials / .uasset files (UEFN)
   ``mat.modify(True)`` (or ``mat.modify()``) so the outer package is dirty.
 - If ``EditorAssetLibrary.save_asset(path, only_if_is_dirty=False)`` returns False, still try:
   ``EditorAssetLibrary.save_loaded_asset(mat, only_if_is_dirty=False)``,
-  ``EditorAssetLibrary.save_directory("/Game/Materials", only_if_is_dirty=False)`` (if the API exists),
+  ``EditorAssetLibrary.save_directory("<content_root>Materials", only_if_is_dirty=False)`` (if the API exists),
   and ``EditorLoadingAndSavingUtils.save_dirty_packages(save_map_packages=False, save_content_packages=True)``.
   On TypeError, try positional ``save_dirty_packages(False, True)``.
 - ``EditorLoadingAndSavingUtils.save_packages(packages_to_save=[pkg], only_dirty=False)`` can return False
@@ -181,7 +184,8 @@ HINTS_UMG = """
 UMG / Widget Blueprints (registry tools; capability-guarded)
 - ``umg_capabilities`` FIRST — never call ToolsetRegistry.get_all_toolset_json_schemas /
   get_toolset_json_schema from execute_python (dumps crash UEFN with ACCESS_VIOLATION).
-- Create: ``create_widget_blueprint(asset_name="UW_MyHud", folder="/Game/UI")``.
+- Create: ``create_widget_blueprint(asset_name="UW_MyHud", folder="")`` (auto-pins
+  ``{content_root}UI`` — never invent ``/Game/UI``).
 - Inspect: ``list_widget_blueprints`` then ``get_widget_blueprint_info`` (member vars =
   Verse fields once authored; tree via UMGToolSet.GetWidgets; MVVM bindings).
 - Scaffold tree: ``add_widget_to_tree`` / ``set_widget_property`` / ``remove_widget_from_tree``.

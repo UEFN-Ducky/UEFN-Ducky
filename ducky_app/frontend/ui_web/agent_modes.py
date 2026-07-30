@@ -239,7 +239,7 @@ def _in_bridge_process() -> bool:
     return _panel_push is None
 
 
-def _post_panel_run(payload: dict[str, Any], *, http_timeout: float) -> dict[str, Any] | None:
+def _post_panel_run(payload: dict[str, Any], *, http_timeout: float | None) -> dict[str, Any] | None:
     """POST a run request to the panel.
 
     Returns the panel's JSON outcome on success; ``{"_delegation_timeout": True}``
@@ -1090,7 +1090,11 @@ def run_message_and_wait(
                 # Carry the spawning chat so the panel nests the child under it.
                 "parent_conv_id": parent,
             },
-            http_timeout=max(5.0, float(timeout_sec) + 15.0),
+            http_timeout=(
+                None
+                if float(timeout_sec) <= 0
+                else max(5.0, float(timeout_sec) + 15.0)
+            ),
         )
         if resp is not None:
             if resp.get("_delegation_timeout"):
@@ -1164,7 +1168,9 @@ def run_message_and_wait(
 
     try:
         run_message(conv_id, text, mode, model, push=collecting_push, force=True, parent=parent)
-        if not done.wait(timeout=max(1.0, float(timeout_sec))):
+        # timeout_sec <= 0: wait until the agent finishes (no wall-clock interrupt).
+        wait_timeout = None if float(timeout_sec) <= 0 else max(1.0, float(timeout_sec))
+        if not done.wait(timeout=wait_timeout):
             if cancel_on_timeout:
                 cancel_agent(conv_id)
             parent = _linked_parents.get(conv_id)

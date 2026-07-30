@@ -26,6 +26,7 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 
 _SEQUENCE_CLASSES = (
     "LevelSequence",
@@ -113,12 +114,15 @@ def anim_author_capabilities() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def create_level_sequence(dest_folder: str, name: str, fps: int = 30, length_seconds: float = 5.0) -> dict:
+def create_level_sequence(dest_folder: str = "", name: str = "", fps: int = 30, length_seconds: float = 5.0) -> dict:
     """Create a LevelSequence asset with the given display rate and playback length."""
+    dest_folder = pin_project_folder(dest_folder, default_leaf="Cinematics")
+    if not (name or "").strip():
+        raise ValueError("name is required")
     seq_cls = _require("LevelSequence")
     factory_cls = _require("LevelSequenceFactoryNew")
     unreal.EditorAssetLibrary.make_directory(dest_folder)
-    full = f"{dest_folder}/{name}"
+    full = f"{dest_folder.rstrip('/')}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         raise ValueError(f"Asset already exists: {full} (delete_asset first to replace)")
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -317,9 +321,16 @@ def _anim_controller(seq: Any):
 
 
 def create_anim_sequence(
-    skeletal_mesh_path: str, dest_folder: str, name: str, length_seconds: float = 1.0, fps: int = 30
+    skeletal_mesh_path: str,
+    dest_folder: str = "",
+    name: str = "",
+    length_seconds: float = 1.0,
+    fps: int = 30,
 ) -> dict:
     """Create an empty AnimSequence bound to a skeletal mesh's skeleton."""
+    dest_folder = pin_project_folder(dest_folder, default_leaf="Anims")
+    if not (name or "").strip():
+        raise ValueError("name is required")
     _require("AnimSequence")
     factory_cls = _require("AnimSequenceFactory")
     mesh = _load_asset(skeletal_mesh_path)
@@ -327,7 +338,7 @@ def create_anim_sequence(
     if skeleton is None:
         raise ValueError(f"No skeleton on mesh: {skeletal_mesh_path}")
     unreal.EditorAssetLibrary.make_directory(dest_folder)
-    full = f"{dest_folder}/{name}"
+    full = f"{dest_folder.rstrip('/')}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         raise ValueError(f"Asset already exists: {full} (delete_asset first to replace)")
     factory = factory_cls()

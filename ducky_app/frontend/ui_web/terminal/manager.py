@@ -315,8 +315,9 @@ class TerminalManager:
                 "session_id": session_id,
                 "status": "running",
             }
-        deadline = time.time() + max(1.0, float(command_timeout_s))
-        while session.is_busy() and time.time() < deadline:
+        limit = float(command_timeout_s)
+        deadline = (time.time() + max(1.0, limit)) if limit > 0 else None
+        while session.is_busy() and (deadline is None or time.time() < deadline):
             time.sleep(0.1)
         if session.is_busy():
             return {

@@ -52,12 +52,12 @@ def validate_uefn_asset(asset_path: str, usecase: str = "MANUAL", pretty: bool =
 
 
 @plugin_mcp_tool("uefn")
-def fixup_redirectors(directory: str = "/Game/", pretty: bool = False) -> str:
-    """Resolve and remove asset redirectors under a directory."""
+def fixup_redirectors(directory: str = "", pretty: bool = False) -> str:
+    """Resolve redirectors under a directory (empty = project content_root; never invent /Game/)."""
     return tool_json(send_command("fixup_redirectors", {"directory": directory}), pretty=pretty)
 
 
 @plugin_mcp_tool("uefn")
-def save_directory(directory: str = "/Game/", only_if_dirty: bool = True, pretty: bool = False) -> str:
-    """Save all assets under a content directory."""
+def save_directory(directory: str = "", only_if_dirty: bool = True, pretty: bool = False) -> str:
+    """Save assets under a directory (empty = project content_root; never invent /Game/)."""
     return tool_json(send_command("save_directory", {"directory": directory, "only_if_dirty": only_if_dirty}), pretty=pretty)

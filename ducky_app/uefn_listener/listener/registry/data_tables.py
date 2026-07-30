@@ -20,6 +20,7 @@ from typing import List, Optional
 import unreal
 
 from listener.dispatch import register
+from listener.project_paths import pin_project_folder
 
 _DT_CLASSES = ("DataTable", "DataTableFunctionLibrary", "DataTableFactory")
 
@@ -218,8 +219,9 @@ def fill_data_table_from_csv(data_table_path: str, csv_string: str) -> dict:
     return {"data_table_path": data_table_path, "row_count": len(_row_names(table))}
 
 
-def create_data_table(asset_name: str, row_struct: str, folder: str = "/Game/Data") -> dict:
+def create_data_table(asset_name: str, row_struct: str, folder: str = "") -> dict:
     """Create a DataTable asset for ``row_struct`` (an unreal struct name or user-struct asset path)."""
+    folder = pin_project_folder(folder, default_leaf="Data")
     factory_cls = getattr(unreal, "DataTableFactory", None)
     if factory_cls is None:
         raise ValueError(f"unreal.DataTableFactory is not exposed in this UEFN build. Capabilities: {_capabilities()}")
@@ -243,7 +245,7 @@ def create_data_table(asset_name: str, row_struct: str, folder: str = "/Game/Dat
             "(search_unreal_api to find one) or a full asset path to a user struct."
         )
     unreal.EditorAssetLibrary.make_directory(folder)
-    full = f"{folder}/{asset_name}"
+    full = f"{folder.rstrip('/')}/{asset_name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         raise ValueError(f"Asset already exists: {full} (delete_asset first to replace)")
     factory = factory_cls()

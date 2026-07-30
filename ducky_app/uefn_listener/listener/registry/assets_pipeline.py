@@ -9,6 +9,7 @@ import unreal
 
 from listener.asset_resolve import follow_redirector, load_asset_resolved
 from listener.dispatch import register
+from listener.project_paths import content_root, pin_project_folder
 
 
 def _asset_registry():
@@ -188,15 +189,22 @@ def _export_static_mesh_fbx(mesh: unreal.StaticMesh, asset_path: str, output_pat
     return found
 
 def create_folder(path: str) -> dict:
-    """Create a content folder (e.g. /Game/MyStuff)."""
+    """Create a content folder under the active project (never invent /Game/...)."""
+    if not (path or "").strip():
+        raise ValueError(
+            "path required — e.g. /VideoTest/Materials/City from get_project_info().content_root "
+            "(never /Game/... for new island assets)"
+        )
+    path = pin_project_folder(path, default_leaf="Materials")
     ok = unreal.EditorAssetLibrary.make_directory(path)
     return {"path": path, "created": bool(ok)}
 
 
 def import_asset(source_file: str, destination_path: str, replace_existing: bool = True) -> dict:
-    """Import a file (fbx/png/wav/...) into a content path."""
+    """Import a file (fbx/png/wav/...) into a content path under the active project."""
     if not os.path.isfile(source_file):
         raise ValueError(f"Source file not found: {source_file}")
+    destination_path = pin_project_folder(destination_path, default_leaf="Imported")
     task = unreal.AssetImportTask()
     task.filename = source_file
     task.destination_path = destination_path
@@ -392,11 +400,25 @@ def validate_uefn_asset(asset_path: str, usecase: str = "MANUAL") -> dict:
     }
 
 
-def fixup_redirectors(directory: str = "/Game/") -> dict:
-    """Resolve and remove asset redirectors under a directory."""
+def _project_directory(directory: str = "", *, default_leaf: str = "") -> str:
+    """Pin save/fixup directories to content_root; retarget invented ``/Game/...``."""
+    d = (directory or "").strip()
+    if not d or d in ("/Game", "/Game/"):
+        root = (content_root() or "").rstrip("/")
+        if not root:
+            raise RuntimeError("No project content_root — open an island project first")
+        return f"{root}/{default_leaf}".rstrip("/") if default_leaf else root
+    return pin_project_folder(d, default_leaf=default_leaf or "Content")
+
+
+def fixup_redirectors(directory: str = "") -> dict:
+    """Resolve and remove asset redirectors under a directory (defaults to project content_root)."""
+    d = _project_directory(directory)
+    if not d.endswith("/"):
+        d = d + "/"
     ar = _asset_registry()
     filt = unreal.ARFilter(
-        package_paths=[directory],
+        package_paths=[d],
         recursive_paths=True,
         class_names=["ObjectRedirector"],
     )
@@ -408,13 +430,14 @@ def fixup_redirectors(directory: str = "/Game/") -> dict:
             redirectors.append(obj)
     if redirectors:
         unreal.AssetToolsHelpers.get_asset_tools().fixup_referencers(redirectors)
-    return {"directory": directory, "fixed": len(redirectors)}
+    return {"directory": d, "fixed": len(redirectors)}
 
 
-def save_directory(directory: str = "/Game/", only_if_dirty: bool = True) -> dict:
-    """Save all assets under a content directory."""
-    ok = unreal.EditorAssetLibrary.save_directory(directory, only_if_is_dirty=bool(only_if_dirty), recursive=True)
-    return {"directory": directory, "saved": bool(ok)}
+def save_directory(directory: str = "", only_if_dirty: bool = True) -> dict:
+    """Save all assets under a content directory (defaults to project content_root)."""
+    d = _project_directory(directory)
+    ok = unreal.EditorAssetLibrary.save_directory(d, only_if_is_dirty=bool(only_if_dirty), recursive=True)
+    return {"directory": d, "saved": bool(ok)}
 
 
 register("create_folder")(create_folder)

@@ -94,7 +94,7 @@ def retarget_animation_pipeline(
     source_mesh_path: str,
     target_mesh_path: str,
     anim_path: str,
-    dest_folder: str = "/Game/Retargeting",
+    dest_folder: str = "",
     source_preset: str = "auto",
     target_preset: str = "auto",
     suffix: str = "_Retargeted",
