@@ -231,20 +231,23 @@ def ducky_ask_user(
 ) -> str:
     """Pause mid-task and ask the user one or more clarifying questions in this chat.
 
-    Use this when a choice would change architecture, delete data, spend money, or
-    fork the implementation — including mid-turn after partial work. Also use when
-    the same approach fails twice and one alternative also fails (or you have no
-    safe alternative left) — stop retrying and ask with what failed + next options.
-    Do not ask in plain chat text; call this tool so an inline chat card blocks
-    until answered (each chat keeps its own open question).
+    HARD: use this instead of writing "Your call", "A — … B — …", numbered path options,
+    or wait-vs-proceed choices in plain chat text. Ending a turn with prose A/B/C is wrong —
+    call this tool so an inline card blocks until answered.
+
+    Use when a choice would change architecture, delete data, spend money, fork the
+    implementation, or you are blocked (e.g. need Verse build before continuing) —
+    including mid-turn after partial work. Also use when the same approach fails twice
+    and one alternative also fails (or you have no safe alternative left).
 
     Batch related questions in one call (up to 8). Each question:
       {
-        "id": "table_owner",
-        "prompt": "Who owns the i18n tables?",
+        "id": "next_path",
+        "prompt": "How should I proceed?",
         "options": [
-          {"id": "plugin", "label": "Plugin owns tables", "description": "…"},
-          {"id": "core", "label": "Core keeps tables"}
+          {"id": "build_verse", "label": "Build Verse, then finish Scene Graph", "description": "…"},
+          {"id": "level_seq", "label": "Level Sequence (no Verse)", "description": "…"},
+          {"id": "blind", "label": "Build entities blind now", "description": "…"}
         ],
         "allow_multiple": false,
         "allow_free_text": true,

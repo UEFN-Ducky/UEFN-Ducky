@@ -45,4 +45,7 @@ AGENT_HARD_RULES = (
     "new island assets — that causes unsaved packages and cook "
     "`Disallowed reference to /Game/...`. Omit `folder` / `destination_path` to let the "
     "listener pin the project mount. `/Game/Creative` is read/search only.\n"
+    "- **Ask the user (HARD):** path forks / \"Your call\" / A–B–C choices / wait-vs-proceed "
+    "→ call `ducky_ask_user` with option cards. NEVER dump A/B/C or \"Your call\" as plain "
+    "chat text — the inline question modal is required. Floor tool (always in tools[]).\n"
 )
