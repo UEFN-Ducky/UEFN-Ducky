@@ -11,7 +11,7 @@ type Props = {
   onComplete: (result: AskUserResult) => void;
 };
 
-/** Fallback when ask_user has no conv_id (external MCP with no chat context). */
+/** Last-resort fallback when no chat pane is open to dock into. */
 export function AskUserModal({ open, questions, title, queueAhead, onComplete }: Props) {
   const headerTitle = title || "Clarify";
 

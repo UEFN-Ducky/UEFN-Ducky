@@ -13,9 +13,11 @@ import {
   runAskUser,
   settleAskUser,
 } from "./runAskUser";
+import { _resetFocusedChatForAsk, setFocusedChatForAsk } from "./focusedChatForAsk";
 
 afterEach(() => {
   _resetAskUserForTests();
+  _resetFocusedChatForAsk();
 });
 
 describe("ask-user types", () => {
@@ -118,5 +120,22 @@ describe("ask-user sessions", () => {
     });
     await expect(second).resolves.toMatchObject({ skipped_all: true });
     expect(getAskUserSession()).toBeNull();
+  });
+
+  it("binds empty conv_id to focused chat instead of modal", async () => {
+    setFocusedChatForAsk("focused-chat");
+    const p = runAskUser([{ id: "1", prompt: "Pick" }], "Title", "");
+    expect(getAskUserSession()).toBeNull();
+    expect(getAskUserSessionForConv("focused-chat")?.title).toBe("Title");
+    const sess = getAskUserSessionForConv("focused-chat")!;
+    settleAskUser(
+      {
+        ok: true,
+        answers: { "1": { selected: ["x"], text: "", skipped: false } },
+        skipped_all: false,
+      },
+      sess.id,
+    );
+    await expect(p).resolves.toMatchObject({ ok: true });
   });
 });

@@ -1,7 +1,8 @@
 /**
  * Promise broker for ducky_ask_user.
- * Sessions are concurrent per chat (conv_id). Orphans (no conv) share one modal queue.
+ * Sessions are concurrent per chat (conv_id). True orphans (no chat open) share one modal queue.
  */
+import { getFocusedChatForAsk } from "./focusedChatForAsk";
 import {
   parseAskUserQuestions,
   type AskUserQuestion,
@@ -124,7 +125,8 @@ export function settleAskUser(
 
 /**
  * Show ask-user UI. Resolves when the user finishes the batch (or errors).
- * With convId: concurrent with other chats. Without: queued in the orphan modal.
+ * With convId (or focused chat): docked above that chat's composer.
+ * Only when no chat is available: queued in the orphan modal.
  */
 export function runAskUser(
   rawQuestions: unknown,
@@ -135,7 +137,7 @@ export function runAskUser(
   if (!questions.length) {
     return Promise.resolve({ error: "questions must be a non-empty list" });
   }
-  const cid = String(convId || "").trim();
+  const cid = String(convId || "").trim() || getFocusedChatForAsk();
   return new Promise((resolve) => {
     const pending: Pending = {
       id: `ask-${nextId++}`,

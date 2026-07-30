@@ -83,9 +83,10 @@ def test_hard_rules_forbid_invented_game_asset_paths():
     assert "content_root" in AGENT_HARD_RULES
 
 
-def test_hard_rules_require_ask_user_modal():
+def test_hard_rules_require_ask_user_questionnaire():
     assert "ducky_ask_user" in AGENT_HARD_RULES
     assert "Your call" in AGENT_HARD_RULES
+    assert "questionnaire" in AGENT_HARD_RULES.lower() or "composer" in AGENT_HARD_RULES.lower()
     assert "plain chat" in AGENT_HARD_RULES.lower() or "A–B–C" in AGENT_HARD_RULES or "A-B-C" in AGENT_HARD_RULES
 
 

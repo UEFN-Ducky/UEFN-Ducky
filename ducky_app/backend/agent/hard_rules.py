@@ -47,5 +47,6 @@ AGENT_HARD_RULES = (
     "listener pin the project mount. `/Game/Creative` is read/search only.\n"
     "- **Ask the user (HARD):** path forks / \"Your call\" / A–B–C choices / wait-vs-proceed "
     "→ call `ducky_ask_user` with option cards. NEVER dump A/B/C or \"Your call\" as plain "
-    "chat text — the inline question modal is required. Floor tool (always in tools[]).\n"
+    "chat text — the inline chat questionnaire (above the composer) is required. "
+    "Floor tool (always in tools[]).\n"
 )

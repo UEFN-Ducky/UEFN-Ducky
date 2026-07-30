@@ -10,8 +10,8 @@ import {
 import type { AskUserResult } from "./types";
 
 /**
- * Mount once in App — orphan ask_user only (no conv_id).
- * Chat-scoped asks render inline on the tool card in that chat.
+ * Mount once in App — true orphan ask_user only (no open/focused chat).
+ * Chat-scoped asks dock above that chat's composer.
  */
 export function AskUserHost() {
   const [session, setSession] = useState<AskUserSession | null>(() => getAskUserSession());

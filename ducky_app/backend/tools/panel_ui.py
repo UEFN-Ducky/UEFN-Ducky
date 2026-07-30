@@ -4,8 +4,8 @@ Agents teach the user with :func:`ducky_walkthrough_run` (Next / Back / Skip +
 require_click) — the same product walkthrough overlay as first-run tours.
 
 Agents clarify mid-task with :func:`ducky_ask_user` — a Cursor-style stacked
-multi-choice card rendered in that chat (not a global modal) that blocks until
-the user answers.
+multi-choice questionnaire docked above the composer in that chat (not a modal)
+that blocks until the user answers.
 
 All work is delegated to the panel over loopback via :func:`backend.panel_rpc.panel_rpc`;
 nothing here touches the UEFN listener, so every tool works while UEFN is offline.
@@ -233,7 +233,7 @@ def ducky_ask_user(
 
     HARD: use this instead of writing "Your call", "A — … B — …", numbered path options,
     or wait-vs-proceed choices in plain chat text. Ending a turn with prose A/B/C is wrong —
-    call this tool so an inline card blocks until answered.
+    call this tool so an inline questionnaire docks above the composer until answered.
 
     Use when a choice would change architecture, delete data, spend money, fork the
     implementation, or you are blocked (e.g. need Verse build before continuing) —

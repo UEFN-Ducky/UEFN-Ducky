@@ -55,6 +55,14 @@ import {
 import { basename } from "../verse-editor/utils/isVerseFile";
 import { ChatInputResizeHandle } from "./ChatInputResizeHandle";
 import { ChatPlanPopup } from "./ChatPlanPopup";
+import {
+  AskUserForm,
+  getAskUserSessionForConv,
+  setFocusedChatForAsk,
+  settleAskUser,
+  subscribeAskUser,
+  type AskUserSession,
+} from "../ask-user";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { CtrlWheelZoomRoot } from "./CtrlWheelZoomRoot";
 import { useChatColumnWidth } from "../hooks/useChatColumnWidth";
@@ -119,6 +127,21 @@ export function ChatPane({
     const t = window.setTimeout(() => requestChatTranslateWalk(), 30);
     return () => window.clearTimeout(t);
   }, [translateMessages, visible, chat.id]);
+  useEffect(() => {
+    if (!visible) return;
+    setFocusedChatForAsk(chat.id);
+    return () => {
+      // Only clear if we still own focus (another pane may have taken over).
+      // getFocusedChatForAsk is checked after unmount of prior pane.
+    };
+  }, [visible, chat.id]);
+  const [askSession, setAskSession] = useState<AskUserSession | null>(() =>
+    getAskUserSessionForConv(chat.id),
+  );
+  useEffect(() => {
+    setAskSession(getAskUserSessionForConv(chat.id));
+    return subscribeAskUser(() => setAskSession(getAskUserSessionForConv(chat.id)));
+  }, [chat.id]);
   const cachedComposer = getCachedChatComposer(chat.id);
   const initialCodingAgent = chat.codingAgent || "ducky";
   const initialComposer =
@@ -1069,6 +1092,18 @@ export function ChatPane({
           onMoveToFront={(id) => setPromptQueue(chat.id, movePromptToFront(promptQueue, id))}
           onDelete={(id) => setPromptQueue(chat.id, removePrompt(promptQueue, id))}
         />
+        {askSession && visible ? (
+          <div className="chat-pane-ask-dock" data-ask-session={askSession.id}>
+            <AskUserForm
+              questions={askSession.questions}
+              title={askSession.title}
+              queueAhead={askSession.queueAhead}
+              captureKeys={visible}
+              showDismiss
+              onComplete={(result) => settleAskUser(result, askSession.id)}
+            />
+          </div>
+        ) : null}
         {chatPlan != null && !planAllDone ? (
           <div className="chat-pane-plan-dock">
             <ChatPlanPopup

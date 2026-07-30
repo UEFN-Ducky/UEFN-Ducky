@@ -120,12 +120,13 @@ If a spawn times out it is NOT dead: the result arrives later in your chat as a
 External coding agents must pass their own chat id as `sender=`/`conv_id=` (it is
 in their system prompt); embedded duckies may omit it.
 
-## Ask the user (question modal)
+## Ask the user (inline questionnaire)
 
 **HARD:** path forks / "Your call" / A–B–C / wait-vs-proceed → call
 `ducky_ask_user(questions=[{id, prompt, options:[{id,label,description}]}])`.
-Never dump those choices as plain chat text — the inline card is required.
-Floor tool (always in tools[]). Batch up to 8 questions per call.
+Never dump those choices as plain chat text — a questionnaire docks above the
+composer until answered. Floor tool (always in tools[]). Batch up to 8 questions
+per call.
 
 ## Plans (outline tree)
 
