@@ -32,6 +32,8 @@ class StreamEvent:
     usage: dict[str, int] = field(default_factory=dict)
     error: str = ""
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
+    # Optional 0–100 progress for STATUS events (Ollama prompt-eval, etc.).
+    percent: float | None = None
 
 
 from backend.agent.message_attachment import MessageAttachment

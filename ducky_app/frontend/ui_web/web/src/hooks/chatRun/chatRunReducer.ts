@@ -375,21 +375,18 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
           idSeq: flushed.idSeq,
         });
       }
-      // Fold whatever streamed before the crash into an "interrupted" bubble;
-      // fall back to a standalone error row only when nothing streamed.
+      // Always use an interrupted assistant bubble — role "error" alone is
+      // reserved for tool results and was invisible as a standalone chat row.
       const errText = event.text ?? "Error";
       const seq = state.idSeq;
-      const row: ChatMessage =
-        state.stream.trim() || state.thinking.trim()
-          ? {
-              id: optId(seq),
-              role: "assistant",
-              text: state.stream,
-              thinking: state.thinking || undefined,
-              incomplete: true,
-              error: errText,
-            }
-          : { id: optId(seq), role: "error", text: errText };
+      const row: ChatMessage = {
+        id: optId(seq),
+        role: "assistant",
+        text: state.stream,
+        thinking: state.thinking || undefined,
+        incomplete: true,
+        error: errText,
+      };
       return reset(state, {
         status: "idle",
         runId: null,

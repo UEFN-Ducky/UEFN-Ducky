@@ -240,14 +240,17 @@ describe("chatRunReducer — errors", () => {
     expect(s.status).toBe("idle");
   });
 
-  it("a crash with nothing streamed appends a standalone error row", () => {
+  it("a crash with nothing streamed appends an interrupted assistant bubble", () => {
     const s = run(
       initialRunState,
       { type: "send", text: "hi" },
       { type: "sendAccepted", runId: "r1" },
       ev({ type: "error", text: "boom" }),
     );
-    expect(lastRole(s)).toBe("error");
+    const last = s.messages.at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(last.incomplete).toBe(true);
+    expect(last.error).toBe("boom");
     expect(s.status).toBe("idle");
   });
 
