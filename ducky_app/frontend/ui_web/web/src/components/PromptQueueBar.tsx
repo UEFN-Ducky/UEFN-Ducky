@@ -5,11 +5,12 @@ import type { QueuedPrompt } from "../hooks/promptQueue";
 interface PromptQueueBarProps {
   items: QueuedPrompt[];
   onEdit: (id: string, text: string) => void;
-  onMoveToFront: (id: string) => void;
+  /** Stop the live turn (if any) and run this prompt next. */
+  onSendNow: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-export function PromptQueueBar({ items, onEdit, onMoveToFront, onDelete }: PromptQueueBarProps) {
+export function PromptQueueBar({ items, onEdit, onSendNow, onDelete }: PromptQueueBarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -101,10 +102,9 @@ export function PromptQueueBar({ items, onEdit, onMoveToFront, onDelete }: Promp
                   <button
                     type="button"
                     className="prompt-queue-icon-btn"
-                    title="Move to front"
-                    aria-label="Move queued prompt to front"
-                    disabled={items[0]?.id === item.id}
-                    onClick={() => onMoveToFront(item.id)}
+                    title="Send now (stops current turn)"
+                    aria-label="Send queued prompt now"
+                    onClick={() => onSendNow(item.id)}
                   >
                     <span className="prompt-queue-up-icon" aria-hidden>
                       ↑

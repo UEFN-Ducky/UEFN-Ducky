@@ -152,8 +152,12 @@ Scene Graph entities/components/prefabs (registry tools; capability-guarded)
   (left = -Y in Unreal terms). Use ``set_entity_transform``; there is no actor transform here.
 - Component property names are the case-sensitive Verse digest names (``Visible``, ``Collidable``);
   check with ``get_verse_api(<component class>)``. Mangled ``__verse_0x...`` names are handled internally.
-- Prefabs: ``create_prefab_from_entities`` packages level entities into an asset; its Verse class
-  lands in Assets.digest.verse on the next Verse build. ``instantiate_prefab`` is best-effort (WIP API).
+- Prefabs: ``create_empty_prefab`` makes a blank EntityPrefab under the project mount;
+  ``create_prefab_from_entities`` packages level entities into a new prefab (sources become
+  an instance). ``instantiate_prefab`` places via ``spawn_actor_from_object`` (same as
+  Content Browser drag → EntityProxyActor); pass SpatialMath ``translation`` to place.
+  Verse class lands in Assets.digest after the next Verse build. Use Verse ``P_*`` spawn
+  only for runtime dynamic spawn/despawn — static always-on instances stay in the level.
 - Verse-side work (custom components, runtime spawning) is code: query ``get_verse_api`` for
   entity/component/mesh_component signatures, then write .verse files via workspace tools.
 - Finish with ``save_current_level()`` — nothing auto-saves.

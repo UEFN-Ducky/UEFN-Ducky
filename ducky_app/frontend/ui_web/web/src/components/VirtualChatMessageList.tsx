@@ -30,6 +30,10 @@ import { ChatCollapseScopeProvider } from "../hooks/useChatCollapseState";
 
 import { ChatPlanPopup } from "./ChatPlanPopup";
 
+import { AskUserForm } from "../ask-user";
+import type { AskUserSession } from "../ask-user";
+import { settleAskUser } from "../ask-user";
+
 import type { AgentMode, ChatPlan, ChatTab, LinkedAgent, MessageAttachmentDto, PlanProgress } from "../types/panel";
 
 export interface VirtualChatMessageListHandle {
@@ -56,6 +60,8 @@ interface VirtualChatMessageListProps {
   convId: string;
   /** Bind ask-user number/Enter shortcuts only for the focused visible pane. */
   captureAskKeys?: boolean;
+  /** Live ask-user questionnaire — rendered inside the scrollable chat, not the composer dock. */
+  askSession?: AskUserSession | null;
   onResend: (text: string, mode: AgentMode, model: string, attachments?: MessageAttachmentDto[]) => void;
   /** Stop the live run (shown on sticky last question + collapsed live headers). */
   onStop?: () => void;
@@ -102,6 +108,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       setComposerCodingAgent,
       convId,
       captureAskKeys = true,
+      askSession = null,
       onResend,
       onStop,
       onAtBottomChange,
@@ -299,6 +306,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       activityLines,
       isWaitingOnLinked,
       waitingLinked,
+      askSession,
       scrollToBottom,
     ]);
 
@@ -378,6 +386,23 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
               ) : null}
             </div>
           ))}
+          {askSession ? (
+            <div
+              className="virtual-chat-message-list-row virtual-chat-ask-row"
+              data-ask-session={askSession.id}
+            >
+              <div className="virtual-chat-ask-panel">
+                <AskUserForm
+                  questions={askSession.questions}
+                  title={askSession.title}
+                  queueAhead={askSession.queueAhead}
+                  captureKeys={captureAskKeys}
+                  showDismiss
+                  onComplete={(result) => settleAskUser(result, askSession.id)}
+                />
+              </div>
+            </div>
+          ) : null}
           <div className="virtual-chat-message-list-footer">
             {showActivityPanel ? (
               <AgentActivityPanel
