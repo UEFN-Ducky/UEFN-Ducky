@@ -190,6 +190,24 @@ describe("buildCommittedChatRows + appendStreamRow", () => {
     { id: 2, role: "assistant", text: "hello" },
   ];
 
+  it("renders standalone LLM crash errors as interrupted bubbles", () => {
+    const rows = buildCommittedChatRows(
+      [
+        { id: 1, role: "user", text: "hi" },
+        { id: 2, role: "error", text: "LLM request timed out after 180s" },
+      ],
+      [],
+      false,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      kind: "bubble",
+      role: "assistant",
+      incomplete: true,
+      error: "LLM request timed out after 180s",
+    });
+  });
+
   it("groups history without stream text", () => {
     const rows = buildCommittedChatRows(msgs, [], true);
     expect(rows).toHaveLength(2);

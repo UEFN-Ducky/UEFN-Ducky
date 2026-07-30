@@ -176,7 +176,18 @@ export function groupChatMessages(messages: ChatMessage[]): ChatRow[] {
           result: null,
         });
       }
-    } else if (msg.role !== "success" && msg.role !== "error") {
+    } else if (msg.role === "error") {
+      // Standalone LLM/agent crash (not a tool result). Previously dropped here,
+      // so timeouts showed as empty "Done" with no message.
+      grouped.push({
+        kind: "bubble",
+        id: uniqueId(String(msg.id)),
+        role: "assistant",
+        text: "",
+        incomplete: true,
+        error: msg.text || msg.error || "Error",
+      });
+    } else if (msg.role !== "success") {
       grouped.push({
         kind: "bubble",
         id: uniqueId(String(msg.id)),

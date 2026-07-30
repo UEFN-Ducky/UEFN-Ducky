@@ -43,6 +43,10 @@ from backend.serialization import (
 )
 
 STREAM_TIMEOUT_SEC = 180
+# Local Ollama often spends many minutes on prompt eval (partial GPU offload).
+# The OpenAI client read timeout is open-ended; this host deadline must not kill
+# the turn before the first token while the model is still evaluating.
+OLLAMA_STREAM_TIMEOUT_SEC = 1800
 
 # Repeat-call guard: how many times an identical (tool, args) call may actually
 # run within a single user turn before further identical calls are short-circuited.
@@ -220,6 +224,8 @@ class AgentEvent:
     # On kind="error", the partial reasoning/answer streamed before the crash so
     # callers can persist it instead of discarding it. None when nothing streamed.
     partial_message: dict[str, Any] | None = None
+    # Optional 0–100 for kind="status" (prompt-eval progress).
+    percent: float | None = None
 
 
 ApprovalCallback = Callable[[list[ToolCallRecord]], bool]
@@ -259,7 +265,11 @@ class AgentRunner:
         bridge = _CancelBridge(self._cancel, thread_cancel)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Any] = asyncio.Queue()
-        deadline = time.monotonic() + STREAM_TIMEOUT_SEC
+        prov = str(self.config.provider or "").strip().lower()
+        timeout_sec = (
+            OLLAMA_STREAM_TIMEOUT_SEC if prov == "ollama" else STREAM_TIMEOUT_SEC
+        )
+        deadline = time.monotonic() + timeout_sec
         conv = self.config.conv
         usage_ctx = bind_usage_context(
             agent=str(getattr(conv, "coding_agent", "") or self.config.provider or "ducky"),
@@ -294,7 +304,7 @@ class AgentRunner:
             threading.Thread(target=producer, daemon=True).start()
 
             async for event in self._drain_provider_queue(
-                queue, bridge=bridge, deadline=deadline
+                queue, bridge=bridge, deadline=deadline, timeout_sec=timeout_sec
             ):
                 yield event
         finally:
@@ -306,6 +316,7 @@ class AgentRunner:
         *,
         bridge: Any,
         deadline: float,
+        timeout_sec: int = STREAM_TIMEOUT_SEC,
     ) -> AsyncIterator[StreamEvent]:
         while True:
             # Poll the queue in short slices so a Stop press is observed within
@@ -319,7 +330,12 @@ class AgentRunner:
                 if remaining <= 0:
                     yield StreamEvent(
                         kind=StreamEventKind.ERROR,
-                        error=f"LLM request timed out after {STREAM_TIMEOUT_SEC}s. Click Stop and try again.",
+                        error=(
+                            f"LLM request timed out after {timeout_sec}s "
+                            "(still waiting on the first token — local prompt eval "
+                            "can take a while). Click Stop and try again, or use a "
+                            "smaller context / more GPU layers."
+                        ),
                     )
                     return
                 try:
@@ -721,6 +737,13 @@ class AgentRunner:
                         ),
                     )
                     return
+                if event.kind == StreamEventKind.STATUS:
+                    yield AgentEvent(
+                        kind="status",
+                        text=event.text,
+                        percent=event.percent,
+                    )
+                    continue
                 if event.kind == StreamEventKind.TEXT_DELTA:
                     turn_text += event.text
                     yield AgentEvent(kind="text_delta", text=event.text)

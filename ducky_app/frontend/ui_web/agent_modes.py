@@ -136,6 +136,26 @@ _forward_started = False
 _forward_lock = threading.Lock()
 
 
+# #region agent log
+def _dbg_vis(hyp: str, location: str, message: str, data: dict[str, Any]) -> None:
+    """Debug-session instrumentation for spawned-chat visibility flow (bridge<->panel)."""
+    try:
+        import json as _j
+        import time as _t
+        _line = _j.dumps({
+            "sessionId": "77e3f2",
+            "hypothesisId": hyp,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(_t.time() * 1000),
+        })
+        with open(r"C:\Users\tas13\Documents\GitHub\UEFN-Ducky\debug-77e3f2.log", "a", encoding="utf-8") as _f:
+            _f.write(_line + "\n")
+            _f.flush()
+    except Exception:
+        pass
+# #endregion
 
 
 def _panel_event_url() -> str:
@@ -157,8 +177,17 @@ def _forward_sender() -> None:
                 url, data=data, headers={"Content-Type": "application/json"}, method="POST"
             )
             _urlreq.urlopen(req, timeout=2.0).close()
+            # #region agent log
+            _dbg_vis("V-A", "agent_modes.py:_forward_sender", "forward POST ok",
+                     {"url": url, "batch_len": len(batch),
+                      "types": [str(e.get("type")) for e in batch[:8] if isinstance(e, dict)]})
+            # #endregion
         except Exception as _exc:
             # Panel closed / not yet listening — drop this batch silently.
+            # #region agent log
+            _dbg_vis("V-A", "agent_modes.py:_forward_sender", "forward POST FAILED",
+                     {"url": url, "batch_len": len(batch), "err": repr(_exc)[:200]})
+            # #endregion
             pass
 
 
@@ -228,10 +257,22 @@ def _post_panel_run(payload: dict[str, Any], *, http_timeout: float) -> dict[str
         )
         with _urlreq.urlopen(req, timeout=http_timeout) as resp:
             body = resp.read().decode("utf-8")
+        # #region agent log
+        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation OK (panel ran it)",
+                 {"url": url, "conv_id": payload.get("conv_id")})
+        # #endregion
         return json.loads(body) if body else {}
     except (TimeoutError, socket.timeout):
+        # #region agent log
+        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation TIMEOUT (panel still running)",
+                 {"url": url, "conv_id": payload.get("conv_id")})
+        # #endregion
         return {"_delegation_timeout": True}
     except Exception as _exc:
+        # #region agent log
+        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation UNREACHABLE -> local fallback",
+                 {"url": url, "conv_id": payload.get("conv_id"), "err": repr(_exc)[:200]})
+        # #endregion
         return None
 
 
@@ -248,6 +289,11 @@ def notify_chats_changed(
         event["conv_id"] = conv_id
         event["title"] = title
         event["folder_id"] = folder_id
+    # #region agent log
+    _dbg_vis("V-B", "agent_modes.py:notify_chats_changed", "notify fired",
+             {"conv_id": conv_id, "in_bridge": _in_bridge_process(),
+              "route": ("explicit" if push is not None else ("panel" if _panel_push is not None else "forward"))})
+    # #endregion
     _resolve_push(push)(event)
 
 
@@ -357,8 +403,21 @@ class AgentSession:
     def prepare_run(self, run_id: str) -> None:
         self.cancel()
         old = self._thread
+        # #region agent log
+        join_started = time.perf_counter()
+        old_alive = bool(old is not None and old.is_alive())
+        # #endregion
         if old is not None and old.is_alive():
             old.join(SESSION_JOIN_TIMEOUT)
+        # #region agent log
+        _dbg_thread_state(
+            "agent session prepared",
+            runId=run_id,
+            oldAlive=old_alive,
+            oldStillAlive=bool(old is not None and old.is_alive()),
+            joinMs=round((time.perf_counter() - join_started) * 1000.0, 1),
+        )
+        # #endregion
         self._cancel = threading.Event()
         self.run_id = run_id
 
@@ -367,6 +426,9 @@ class AgentSession:
             self.prepare_run(run_id)
         self._thread = threading.Thread(target=target, daemon=True, name=f"agent-{run_id[:8]}")
         self._thread.start()
+        # #region agent log
+        _dbg_thread_state("agent thread started", runId=run_id, threadName=self._thread.name)
+        # #endregion
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -380,6 +442,31 @@ _sessions_lock = threading.Lock()
 _linked_parents: dict[str, str] = {}
 _child_waiters: dict[str, set[str]] = {}
 
+# #region agent log
+def _dbg_thread_state(message: str, **data: Any) -> None:
+    try:
+        threads = threading.enumerate()
+        with open(r"C:\Users\tas13\Documents\GitHub\UEFN-Ducky\debug-77e3f2.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "sessionId": "77e3f2", "runId": "thread-repro", "hypothesisId": "T-A,T-B,T-D",
+                "location": "frontend/ui_web/agent_modes.py:AgentSession",
+                "message": message,
+                "data": {
+                    **data,
+                    "threadCount": len(threads),
+                    "agentThreads": [t.name for t in threads if t.name.startswith("agent-")],
+                    "httpThreads": sum("process_request_thread" in t.name for t in threads),
+                    "sessionCount": len(_sessions),
+                    "liveSessions": sum(
+                        1 for session in _sessions.values()
+                        if session._thread is not None and session._thread.is_alive()
+                    ),
+                },
+                "timestamp": int(time.time() * 1000),
+            }) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 
 def is_agent_running(conv_id: str) -> bool:
@@ -867,6 +954,15 @@ async def _run_agent_loop(
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
                 _push_tool_done(push, conv.id, rec)
+            elif event.kind == "status":
+                payload: dict[str, Any] = {
+                    "type": "status",
+                    "text": event.text,
+                    "conv_id": conv.id,
+                }
+                if event.percent is not None:
+                    payload["percent"] = event.percent
+                push(payload)
             elif event.kind == "text_delta":
                 push({"type": "text_delta", "text": event.text, "conv_id": conv.id})
             elif event.kind == "thinking":
@@ -880,14 +976,28 @@ async def _run_agent_loop(
                     stop_reason = "cancelled"
                 else:
                     partial = event.partial_message
+                    err_text = event.text or "LLM error"
                     if partial:
                         append_message(conv, partial)
-                        save_conversation(conv)
+                    else:
+                        # Persist so reload / empty stream still shows the crash
+                        # (UI used to drop standalone role=error rows → empty Done).
+                        append_message(
+                            conv,
+                            {
+                                "role": "assistant",
+                                "content": "",
+                                "incomplete": True,
+                                "error": err_text,
+                                "ts": time.time(),
+                            },
+                        )
+                    save_conversation(conv)
                     _log_agent_crash(
                         conv,
                         provider=config.provider,
                         model=config.model,
-                        error=event.text or "LLM error",
+                        error=err_text,
                         partial=partial,
                         elapsed_s=time.monotonic() - t_start,
                         first_token_s=(t_first - t_start) if t_first is not None else None,
@@ -895,8 +1005,9 @@ async def _run_agent_loop(
                     push(
                         {
                             "type": "error",
-                            "text": event.text,
+                            "text": err_text,
                             "conv_id": conv.id,
+                            "run_id": run_id,
                             "kept_partial": bool(partial),
                         }
                     )
@@ -1263,6 +1374,12 @@ def run_message(
         parent_conv_id = active_parent
         _linked_parents[conv_id] = parent_conv_id
     child_title = conv.title or "Chat"
+    # #region agent log
+    _dbg_vis("N-A", "agent_modes.py:run_message", "parent link resolved",
+             {"child": conv_id, "explicit_parent": (parent or ""), "active": get_active_conv_id(),
+              "resolved_parent": parent_conv_id or "", "in_bridge": _in_bridge_process(),
+              "local": _local, "external": external})
+    # #endregion
 
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
@@ -1300,6 +1417,10 @@ def run_message(
                 push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
                 if session.run_id == run_id:
                     _push_agent_stopped(push, conv_id, run_id, "error")
+            # #region agent log
+            finally:
+                _dbg_thread_state("external agent thread finished", runId=run_id, convId=conv_id)
+            # #endregion
 
         session.start(work_external, run_id)
         return run_id
