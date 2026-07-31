@@ -18,6 +18,7 @@ If DUCKYOS_API_KEY is unset, the key is read from ~/.cursor/mcp.json
 Usage:
   py release/publish_app.py
   py release/publish_app.py --notes "Bug fixes"
+  py release/publish_app.py --set-version 1.1.0   # minor/major (patch bump cannot cross)
   py release/publish_app.py --require-sign   # refuse unsigned (Chrome/SmartScreen)
   py release/publish_app.py --no-bump --exe dist/UEFN-Ducky-Setup-1.0.450.exe
 """
@@ -232,14 +233,13 @@ def sync_local_at_least_store(base: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_setup(*, require_sign: bool = False) -> str:
-    """Bump once (via build_exes) and produce dist/UEFN-Ducky-Setup-<v>.exe."""
-    print("=== Build release EXE (bumps patch) ===")
-    subprocess.run(
-        [sys.executable, str(ROOT / "build" / "build_exes.py")],
-        check=True,
-        cwd=str(ROOT),
-    )
+def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
+    """Build (bumping patch unless ``bump`` is off) into dist/UEFN-Ducky-Setup-<v>.exe."""
+    print(f"=== Build release EXE ({'bumps patch' if bump else 'no bump'}) ===")
+    cmd = [sys.executable, str(ROOT / "build" / "build_exes.py")]
+    if not bump:
+        cmd.append("--no-bump")
+    subprocess.run(cmd, check=True, cwd=str(ROOT))
     version = read_version()
     # Sign payload before Inno packs it into Setup (embedded EXE stays signed).
     payload = ROOT / "dist" / f"UEFN-Ducky-{version}.exe"
@@ -393,6 +393,14 @@ def absolute_url(base: str, url: str) -> str:
 def _self_check() -> None:
     assert parse_version_tuple("1.0.450") == (1, 0, 450)
     assert parse_version_tuple("1.0.450") < parse_version_tuple("1.0.451")
+    # --set-version exists because a patch bump can never reach the next minor.
+    assert parse_version_tuple("1.1.0") > parse_version_tuple("1.0.660")
+    for bad in ("1.1", "1.1.0.0", "v1.1.0", ""):
+        try:
+            parse_version_tuple(bad)
+            raise AssertionError(f"expected {bad!r} to be rejected")
+        except ValueError:
+            pass
     assert assert_uefn_ducky_store_base("https://uefnducky.org").endswith("uefnducky.org")
     try:
         assert_uefn_ducky_store_base("https://duckyos.org")
@@ -407,6 +415,11 @@ def main() -> None:
     parser.add_argument("--exe", type=Path, default=None, help="Skip build; publish this Setup exe")
     parser.add_argument("--notes", default="", help="Release notes for the in-app toast")
     parser.add_argument("--version", default="", help="Override version (only with --no-bump)")
+    parser.add_argument(
+        "--set-version",
+        default="",
+        help="Build and publish this exact version instead of bumping patch (e.g. 1.1.0)",
+    )
     parser.add_argument(
         "--no-bump",
         action="store_true",
@@ -435,9 +448,35 @@ def main() -> None:
     if (args.version or "").strip() and not args.no_bump:
         raise SystemExit("--version only makes sense with --no-bump")
 
+    set_version = (args.set_version or "").strip()
+    if set_version:
+        if args.no_bump:
+            raise SystemExit(
+                "--set-version builds a fresh Setup, so it cannot pair with --no-bump.\n"
+                "To publish an already-built Setup at a given version use --no-bump --version."
+            )
+        try:
+            parse_version_tuple(set_version)
+        except ValueError as exc:
+            raise SystemExit(f"--set-version: {exc}") from exc
+
     if args.no_bump:
         version = (args.version or "").strip() or read_version()
         print(f"=== Publish without bump (version {version}) ===")
+    elif set_version:
+        # Patch bump can never cross a minor (1.0.660 → 1.0.661), so a minor/major
+        # release has to write the version before an unbumped build.
+        print("=== Publish to Store (explicit version) ===")
+        print(f"  base: {base}")
+        store_now = fetch_store_version(base)
+        if store_now and parse_version_tuple(set_version) <= parse_version_tuple(store_now):
+            raise SystemExit(
+                f"Refusing publish: {set_version} is not newer than Store {store_now}."
+            )
+        before = read_version()
+        write_version(set_version)
+        version = build_setup(require_sign=args.require_sign, bump=False)
+        print(f"  set {before} → {version}")
     else:
         print("=== Publish to Store (auto-bump) ===")
         print(f"  base: {base}")
