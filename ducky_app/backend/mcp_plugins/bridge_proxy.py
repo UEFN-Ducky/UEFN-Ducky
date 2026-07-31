@@ -119,8 +119,13 @@ def sync_nested_mcp_proxies(log: Callable[[str], None] | None = None) -> list[st
         if log is not None and added:
             log(f"nested MCP proxies: +{len(added)}")
         return added
-    except Exception as exc:
-        _log.warning("sync_nested_mcp_proxies failed: %s", exc)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:  # noqa: BLE001
+        # An unreachable nested server tears down mid-connect and surfaces as
+        # CancelledError, which is not an Exception — it used to kill this
+        # daemon thread with a full traceback dump.
+        _log.warning("sync_nested_mcp_proxies failed: %s: %s", type(exc).__name__, exc)
         return []
 
 

@@ -86,6 +86,33 @@ export function chatFolderSiblingNames(folders: FolderItem[], parentId: string):
   return parent ? parent.children.map((c) => c.name) : folders.map((f) => f.name);
 }
 
+/**
+ * Place a just-created folder into the tree without waiting for a reload, so the
+ * row is on screen (and namable by the next create) the moment the API returns.
+ */
+export function insertChatFolder(
+  folders: FolderItem[],
+  parentId: string,
+  folder: Omit<FolderItem, "parentId" | "sortOrder">,
+): FolderItem[] {
+  const asChildOf = (parent: string, siblings: FolderItem[]): FolderItem => ({
+    ...folder,
+    parentId: parent,
+    sortOrder: siblings.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 1,
+  });
+
+  if (parentId && findFolderById(folders, parentId)) {
+    const walk = (items: FolderItem[]): FolderItem[] =>
+      items.map((item) =>
+        item.id === parentId
+          ? { ...item, expanded: true, children: [...item.children, asChildOf(parentId, item.children)] }
+          : { ...item, children: walk(item.children) },
+      );
+    return walk(folders);
+  }
+  return [...folders, asChildOf("", folders)];
+}
+
 export function chatNamesInFolder(
   folders: FolderItem[],
   folderId: string,

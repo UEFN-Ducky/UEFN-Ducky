@@ -61,6 +61,7 @@ import {
   deriveHeroSlides,
   deriveSections,
   needsPurchase,
+  patchItemFromLocalPlugin,
 } from "./store/storeData";
 import { peekStoreCatalogCache, rememberStoreCatalog } from "../../hooks/storeCatalogCache";
 import { StoreHeroSkeleton, StoreSkeletonRows } from "./store/StoreSkeleton";
@@ -72,6 +73,13 @@ const MANUAL_REFRESH_COOLDOWN_MS = 5000;
 
 /** Bridge calls with no host timeout — never leave Enable/Uninstall stuck forever. */
 const STORE_MUTATION_TIMEOUT_MS = 30_000;
+
+/**
+ * One toggle pushes ``uefn_plugins_changed`` twice — once synchronously from
+ * ``set_uefn_plugin_enabled`` and once from the host's background enable thread.
+ * Trailing-edge them into a single refresh pass so a click repaints the Store once.
+ */
+const PLUGINS_CHANGED_DEBOUNCE_MS = 300;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -235,47 +243,9 @@ export function StoreTab() {
           if (itemKind(it) !== "plugin") return it;
           const slug = (it.slug || "").toLowerCase();
           if (!slug) return it;
-          const plug = byId.get(slug);
-          if (!plug) {
-            if (it.state === "installed" || it.state === "update" || it.enabled) {
-              changed = true;
-              return {
-                ...it,
-                enabled: false,
-                state: "available" as const,
-                installed_version: null,
-                source: it.source === "local" || it.source === "ai" ? it.source : null,
-              };
-            }
-            return it;
-          }
-          const enabled = Boolean(plug.enabled);
-          // Catalog uses numeric installed_version; plugin.version may be semver string.
-          const installedVersion =
-            typeof plug.version === "number"
-              ? plug.version
-              : typeof it.installed_version === "number"
-                ? it.installed_version
-                : null;
-          // Preserve "update" when catalog already knows a newer remote; otherwise mark installed.
-          const nextState = (it.state === "update" ? "update" : "installed") as
-            | "update"
-            | "installed";
-          if (
-            it.enabled === enabled &&
-            it.state === nextState &&
-            (it.installed_version ?? null) === installedVersion
-          ) {
-            return it;
-          }
-          changed = true;
-          return {
-            ...it,
-            enabled,
-            state: nextState,
-            installed_version: installedVersion,
-            source: plug.source || it.source,
-          };
+          const next = patchItemFromLocalPlugin(it, byId.get(slug));
+          if (next !== it) changed = true;
+          return next;
         });
         if (!changed) return prev;
         const next: DuckyOSStoreCatalog = { ...prev, items };
@@ -429,14 +399,22 @@ export function StoreTab() {
   // Local list_uefn_plugins first (disk truth), then best-effort network catalog.
   useEffect(() => {
     installPanelPushBus();
-    return subscribePanelPush((event) => {
-      if (event.type === "uefn_plugins_changed") {
+    let timer: number | undefined;
+    const unsubscribe = subscribePanelPush((event) => {
+      if (event.type !== "uefn_plugins_changed") return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
         void (async () => {
           await patchLocalPluginState();
           await refreshCatalogShared();
         })();
-      }
+      }, PLUGINS_CHANGED_DEBOUNCE_MS);
     });
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      unsubscribe();
+    };
   }, [patchLocalPluginState, refreshCatalogShared]);
 
   // Tell the Settings sidebar which plugin row to highlight on the Plugins page.

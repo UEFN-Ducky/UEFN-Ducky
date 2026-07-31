@@ -762,7 +762,8 @@ export interface DuckyOSStoreItemDto {
   repo_url?: string;
   latest_version?: string;
   pack_version?: number;
-  installed_version?: number | null;
+  /** Display version on disk ("1.0.11" or 37) — never compare, rank with pack_version. */
+  installed_version?: number | string | null;
   state?: DuckyOSStoreItemState | string;
   enabled?: boolean | null;
   source?: string | null;
@@ -1522,7 +1523,8 @@ export interface PanelApi {
   apply_sidebar_layout(patch: SidebarLayoutPatch): Promise<void>;
   create_folder(name: string, parent_id?: string): Promise<{ id: string; name: string }>;
   rename_folder(folder_id: string, name: string): Promise<void>;
-  delete_folder(folder_id: string): Promise<void>;
+  /** Resolves to the group hub chat ids deleted along with the folder. */
+  delete_folder(folder_id: string): Promise<string[]>;
   create_conversation(
     folder_id: string,
     ducky_style?: string,

@@ -99,6 +99,10 @@ export function DuckyArchiveDropdown({
                       >
                         {isRunning ? (
                           <span className="sidebar-agent-spinner" title="Agent working" />
+                        ) : chat.isGroup ? (
+                          <span className="sidebar-tree-row-icon sidebar-tree-row-icon--group" title="Group">
+                            <Icons.Users />
+                          </span>
                         ) : (
                           <DuckyAvatar
                             styleId={chat.duckyStyle}

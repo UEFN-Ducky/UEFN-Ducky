@@ -48,6 +48,8 @@ from frontend.ui_web.project_chats import (
     delete_folder,
     ensure_conversation_file_path,
     ensure_group_folder_hubs,
+    folder_subtree_ids,
+    group_hub_ids_in,
     list_all_conversation_metadata,
     list_conversations,
     list_conversations_for_file,
@@ -1729,21 +1731,19 @@ class PanelApi:
     def rename_folder(self, folder_id: str, name: str) -> None:
         rename_folder(folder_id, name)
 
-    def delete_folder(self, folder_id: str) -> None:
-        # Group delete archives the hub + members; stop runners first (same as Archive).
-        folders = load_folders()
-        hub_id = ""
-        for folder in folders:
-            if folder.id == folder_id:
-                hub_id = (getattr(folder, "group_hub_id", None) or "").strip()
-                break
-        if hub_id:
+    def delete_folder(self, folder_id: str) -> list[str]:
+        """Delete a folder. Returns the group hub chat ids it took with it."""
+        # Deleting a group takes its nested groups too, so stop every runner in
+        # the subtree first (same as Archive).
+        hub_ids = group_hub_ids_in(folder_subtree_ids(folder_id))
+        if hub_ids:
             from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
 
-            for target_id in [hub_id, *conversation_descendant_ids(hub_id)]:
-                if is_agent_running(target_id):
-                    cancel_agent(target_id)
-        delete_folder(folder_id)
+            for hub_id in hub_ids:
+                for target_id in [hub_id, *conversation_descendant_ids(hub_id)]:
+                    if is_agent_running(target_id):
+                        cancel_agent(target_id)
+        return delete_folder(folder_id)
 
     def create_conversation(
         self,

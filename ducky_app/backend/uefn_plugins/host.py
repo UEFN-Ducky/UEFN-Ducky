@@ -46,6 +46,12 @@ _LOAD_CALLBACKS: list[Callable[[], None]] = []
 _LOAD_CALLBACKS_LOCK = threading.Lock()
 # Re-entrancy guard for _repair_missing_backends (per thread; _LOCK is an RLock).
 _REPAIR_STATE = threading.local()
+# Marks the load thread and every register() worker it spawns. Those threads must
+# never wait on the load they are part of: unity-mcp register() → PanelSettings
+# .save() → validate() → contributed_coding_agents() → get_contributions() →
+# ensure_plugins_loaded() self-deadlocked, so _LOADED never flipped and the panel
+# stayed stuck in "plugins loading" (no gateways, no models, dead Store toggles).
+_LOAD_THREAD_STATE = threading.local()
 # Single-flight "scan missing backends" coordinator — never runs register() under _LOCK.
 _REPAIR_THREAD: threading.Thread | None = None
 _REPAIR_THREAD_LOCK = threading.Lock()
@@ -1394,14 +1400,19 @@ def plugins_ui_ready() -> bool:
     return _UI_READY or _LOADED
 
 
+def in_plugin_load_thread() -> bool:
+    """True on the load thread / a register() worker — never wait on our own load."""
+    return bool(getattr(_LOAD_THREAD_STATE, "in_load", False))
+
+
 def wait_plugins_loaded(timeout: float | None = None) -> bool:
     """Block until the first plugin load finishes.
 
     Returns True when ready. If ``timeout`` is set and elapses first, returns False
     (callers may still proceed with whatever tools are already registered).
     """
-    if _LOADED:
-        return True
+    if _LOADED or in_plugin_load_thread():
+        return _LOADED
     ensure_plugins_loaded_async()
     if timeout is None:
         _LOAD_DONE.wait()
@@ -1497,6 +1508,49 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
         _log.debug("UEFN plugin %s pre-import failed", pid, exc_info=True)
 
 
+# A single plugin's register() must never keep the whole app in "plugins
+# loading" — that state hides gateways, models, MCP rows and Store toggles.
+# Offenders block on the network: unity-mcp nested MCP sync (45s per server),
+# Discord gateway connect, Blender socket probe.
+_REGISTER_TIMEOUT_SEC = 20.0
+
+
+def _register_plugin_guarded(pid: str, root: Path, manifest: dict[str, Any]) -> bool:
+    """Run one register() on a watchdog thread. False when it overran the timeout.
+
+    The thread keeps running past the timeout — contributions land later and the
+    panel picks them up through the usual plugins-changed notify.
+    """
+    t0 = time.perf_counter()
+    done = threading.Event()
+
+    def _run() -> None:
+        _LOAD_THREAD_STATE.in_load = True
+        try:
+            _load_enabled_plugin(pid, root, manifest)
+        finally:
+            done.set()
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"uefn-plugin-register-{pid}",
+    ).start()
+    if not done.wait(_REGISTER_TIMEOUT_SEC):
+        _log.warning(
+            "UEFN plugin %s register() still running after %.0fs — continuing without it",
+            pid,
+            _REGISTER_TIMEOUT_SEC,
+        )
+        return False
+    _log.info(
+        "UEFN plugin %s register() done in %.0fms",
+        pid,
+        (time.perf_counter() - t0) * 1000.0,
+    )
+    return True
+
+
 def _run_first_plugin_load() -> None:
     """Import + register every enabled plugin. Caller owns single-flight.
 
@@ -1538,25 +1592,34 @@ def _run_first_plugin_load() -> None:
     # Do not flush load callbacks here — PanelApi still needs one notify after
     # register() so LLM/coding-agent factories refresh. Settings paints via
     # get_ui_contributions() + frontend poll while backends finish.
+    _log.info("UEFN plugins: %d enabled (%s)", len(jobs), ", ".join(j[0] for j in jobs))
     # Parallel pre-import: exec_module dominates boot; register stays serial after.
+    t_import = time.perf_counter()
     if len(jobs) > 1:
         from concurrent.futures import ThreadPoolExecutor
 
         workers = min(8, len(jobs))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="uefn-plugin-import") as pool:
             list(pool.map(lambda j: _warm_plugin_backend(j[0], j[1], j[2]), jobs))
+    _log.info("UEFN plugins: import phase %.0fms", (time.perf_counter() - t_import) * 1000.0)
     # Phase 2 — register() backends (may be slow; UI already has contribs).
-    for pid, child, manifest in jobs:
-        _load_enabled_plugin(pid, child, manifest)
+    t_register = time.perf_counter()
+    slow = [pid for pid, child, manifest in jobs if not _register_plugin_guarded(pid, child, manifest)]
     with _LOCK:
         _UI_READY = True
         _LOADED = True
+    _log.info(
+        "UEFN plugins ready: register phase %.0fms%s",
+        (time.perf_counter() - t_register) * 1000.0,
+        f" (still finishing: {', '.join(slow)})" if slow else "",
+    )
 
 
 def _plugin_load_worker() -> None:
     import time
 
     global _LOADED
+    _LOAD_THREAD_STATE.in_load = True
     t0 = time.perf_counter()
     try:
         if not _LOADED:
@@ -1605,7 +1668,13 @@ def ensure_plugins_loaded(timeout: float | None = None) -> bool:
 
     Missing-backend repair is always kicked on a background thread and never runs
     under ``_LOCK`` (a hung ``register()`` must not freeze Store toggles).
+
+    Called from inside the load pass itself (a plugin ``register()`` that saves
+    settings, reads contributions, …) it returns the current state instead of
+    waiting — waiting there deadlocks the load and wedges the whole panel.
     """
+    if in_plugin_load_thread():
+        return _LOADED
     if not _LOADED:
         ensure_plugins_loaded_async()
         if timeout is None:

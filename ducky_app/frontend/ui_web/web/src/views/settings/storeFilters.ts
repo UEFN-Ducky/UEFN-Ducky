@@ -47,6 +47,15 @@ export function isOwnedPurchase(item: DuckyOSStoreItemDto): boolean {
   return item.owned === true && item.paid === true;
 }
 
+/**
+ * Present on this PC. ``state`` counts too — keying only on installed_version
+ * made the Installed row depend on version formatting, so string-versioned
+ * plugins dropped out of it on every local patch.
+ */
+export function isInstalledItem(item: DuckyOSStoreItemDto): boolean {
+  return item.installed_version != null || item.state === "installed" || item.state === "update";
+}
+
 export function asLabelList(raw: string[] | undefined | null): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((x) => String(x || "").trim()).filter(Boolean);
@@ -79,7 +88,7 @@ export function filterStoreItems(
     const cats = itemCategories(item);
     const tags = asLabelList(item.tags).map((t) => t.toLowerCase());
     if (category === INSTALLED_CATEGORY) {
-      if (item.installed_version == null) return false;
+      if (!isInstalledItem(item)) return false;
     } else if (category === AI_MADE_CATEGORY) {
       if ((item.source || "").toLowerCase() !== "ai") return false;
     } else if (category === OWNED_CATEGORY) {

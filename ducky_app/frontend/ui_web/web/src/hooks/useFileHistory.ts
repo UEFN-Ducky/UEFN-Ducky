@@ -54,6 +54,14 @@ export function useFileHistory(
     }
   }, [filePath]);
 
+  // Closing or switching files must not leave the previous file's versions listed
+  // while the next load is in flight (or, with the panel collapsed, indefinitely).
+  useEffect(() => {
+    setEntries([]);
+    setActiveEntryId(null);
+    setCurrentPreview(null);
+  }, [filePath]);
+
   useEffect(() => {
     if (!enabled) return;
     void loadHistory();

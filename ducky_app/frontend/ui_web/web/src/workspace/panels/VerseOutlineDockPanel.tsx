@@ -79,13 +79,14 @@ function VerseOutlineHeaderActions({
         title={filterTitle}
         active={isFiltered}
         pressed={isFiltered}
+        disabled={!path}
         onClick={() => onFilterOpenChange(!filterOpen)}
       >
         <Icons.Filter />
       </OutlineHeaderButton>
       <DropdownPanel
         anchorRef={filterBtnRef}
-        open={filterOpen}
+        open={filterOpen && !!path}
         onClose={() => onFilterOpenChange(false)}
         minWidth={168}
         width={168}

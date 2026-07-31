@@ -257,10 +257,16 @@ class PanelSettings:
             normalize_coding_agent,
         )
 
-        self.default_coding_agent = normalize_coding_agent(self.default_coding_agent)
-        allowed = {"ducky", *contributed_coding_agents()}
-        if self.default_coding_agent not in allowed:
-            self.default_coding_agent = "ducky"
+        # Only clamp against a complete catalog. A plugin register() that saves
+        # settings mid-load would otherwise persist a silent reset to "ducky"
+        # just because the gateway owning the choice had not registered yet.
+        from backend.uefn_plugins.host import plugins_ready
+
+        if plugins_ready():
+            self.default_coding_agent = normalize_coding_agent(self.default_coding_agent)
+            allowed = {"ducky", *contributed_coding_agents()}
+            if self.default_coding_agent not in allowed:
+                self.default_coding_agent = "ducky"
         if self.coding_agents is None or not isinstance(self.coding_agents, dict):
             self.coding_agents = {}
         if not isinstance(self.walkthrough_completed, dict):

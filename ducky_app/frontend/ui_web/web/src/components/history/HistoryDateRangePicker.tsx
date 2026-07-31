@@ -149,10 +149,12 @@ export function HistoryDateRangeHeaderButton({
   range,
   onChange,
   onReset,
+  disabled = false,
 }: {
   range: HistoryDateRange;
   onChange: (range: HistoryDateRange) => void;
   onReset: () => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -168,13 +170,14 @@ export function HistoryDateRangeHeaderButton({
         title={title}
         aria-label={title}
         aria-pressed={isActive}
+        disabled={disabled}
         onClick={() => setOpen((v) => !v)}
       >
         <Icons.Calendar />
       </button>
       <DropdownPanel
         anchorRef={btnRef}
-        open={open}
+        open={open && !disabled}
         onClose={() => setOpen(false)}
         minWidth={240}
         width={240}
