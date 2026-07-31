@@ -637,6 +637,10 @@ export interface PanelSettingsDto {
   memory_compress_tokens?: number;
   memory_index_max_chars?: number;
   memory_summary_model?: string;
+  /** Rename a new ducky after the role its first message asks for. */
+  chat_auto_title?: boolean;
+  /** Cheap model that refines the auto role title (empty = keyword names only). */
+  chat_title_model?: string;
   /** Product walkthrough completion flags keyed by tour id. */
   walkthrough_completed?: Record<string, boolean>;
   coding_agents?: Record<

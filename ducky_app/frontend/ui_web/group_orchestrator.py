@@ -9,7 +9,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
-from frontend.ui_web.project_chats import append_message, auto_title, load_conversation, save_conversation
+from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
 
 PushFn = Callable[[dict[str, Any]], None]
 
@@ -858,7 +858,9 @@ def run_group_turn(
         {"role": "user", "content": text, "text": text, "ts": time.time()},
     )
     if sum(1 for m in conv.messages if m.get("role") == "user") == 1:
-        auto_title(conv, text)
+        from backend.agent.chat_title import start_auto_title
+
+        start_auto_title(conv, text, push=push_fn)
 
     def worker() -> None:
         try:

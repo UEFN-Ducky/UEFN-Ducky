@@ -3044,6 +3044,8 @@ class PanelApi:
             "memory_compress_tokens": int(s.memory_compress_tokens or 80_000),
             "memory_index_max_chars": int(s.memory_index_max_chars or 2_500),
             "memory_summary_model": s.memory_summary_model or "",
+            "chat_auto_title": bool(getattr(s, "chat_auto_title", True)),
+            "chat_title_model": getattr(s, "chat_title_model", "") or "",
             "walkthrough_completed": {
                 str(k): bool(v) for k, v in (s.walkthrough_completed or {}).items() if v
             },
@@ -3550,6 +3552,10 @@ class PanelApi:
                 s.memory_index_max_chars = 2_500
         if "memory_summary_model" in patch:
             s.memory_summary_model = str(patch.get("memory_summary_model") or "").strip()
+        if "chat_auto_title" in patch:
+            s.chat_auto_title = bool(patch.get("chat_auto_title"))
+        if "chat_title_model" in patch:
+            s.chat_title_model = str(patch.get("chat_title_model") or "").strip()
         if "walkthrough_completed" in patch:
             raw = patch.get("walkthrough_completed")
             if isinstance(raw, dict):
