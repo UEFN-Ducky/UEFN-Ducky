@@ -16,6 +16,7 @@ import {
   handleBridgeRequest,
   shouldForwardPluginPush,
 } from "./bridge";
+import { usePluginThemePush } from "./pluginTheme";
 import { isBridgeRequest, type PluginUiPanel } from "./types";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
@@ -53,6 +54,8 @@ export function PluginFilePane({ pluginId, panelId, relativePath }: Props) {
     const q = new URLSearchParams({ file: relativePath });
     return `/${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}?${q.toString()}`;
   }, [panel, pid, relativePath]);
+
+  usePluginThemePush(iframeRef, src);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

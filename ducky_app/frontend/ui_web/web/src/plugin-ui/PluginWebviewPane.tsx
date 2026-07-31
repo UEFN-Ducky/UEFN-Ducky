@@ -12,6 +12,7 @@ import {
   pushBrowserPaneBounds,
   shouldForwardPluginPush,
 } from "./bridge";
+import { usePluginThemePush } from "./pluginTheme";
 import { isBridgeRequest, parsePluginUiTabId, type PluginUiPanel } from "./types";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
@@ -66,6 +67,8 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
     !!chatOverlay &&
     !!parsed &&
     isDucktactoeBoardTab(parsed.pluginId, parsed.panelId);
+
+  usePluginThemePush(iframeRef, src);
 
   useEffect(() => {
     if (!parsed) return;
