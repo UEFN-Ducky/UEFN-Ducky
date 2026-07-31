@@ -1,16 +1,14 @@
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useMemo } from "react";
 import { Icons } from "../icons/Icons";
 import {
   chatCollapseKey,
-  readChatCollapseFlag,
   useChatCollapseScope,
   useChatCollapseState,
-  writeChatCollapseFlag,
 } from "../hooks/useChatCollapseState";
 import { ToolExecutionCard } from "./ToolExecutionCard";
 import type { ActivityItem } from "../utils/chatMessageGroups";
 import type { ChatTab, LinkedAgent } from "../types/panel";
-import { InlineStopButton } from "./InlineStopButton";
+import { InlineStopButton } from "./inlineStopButton";
 
 interface AgentActivityGroupProps {
   items: ActivityItem[];
@@ -56,6 +54,9 @@ function activityGroupLabel(items: ActivityItem[], live: boolean): string {
 /**
  * Cursor-style accordion: consecutive thoughts + tools share one collapsed header
  * so a long agent ladder doesn't eat the whole viewport.
+ *
+ * Open state is sticky (user click only). New tools / live↔idle must not
+ * auto-expand or auto-collapse — that caused constant open/close flicker.
  */
 export const AgentActivityGroup = memo(function AgentActivityGroup({
   items,
@@ -71,42 +72,14 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
 }: AgentActivityGroupProps) {
   const collapseScope = useChatCollapseScope();
   const openKey = chatCollapseKey(collapseScope, "activity-group");
-  const userToggledKey = chatCollapseKey(collapseScope, "activity-group-user");
 
-  // Live = a tool is still running. Do NOT treat streaming thoughts as live —
-  // that was opening the accordion when chat text started, then collapsing it.
   const live = useMemo(
     () => items.some((i) => i.kind === "tool" && toolRunning(i)),
     [items],
   );
 
-  const [open, setOpen] = useChatCollapseState(openKey, live);
-  const userToggled = useRef(readChatCollapseFlag(userToggledKey));
+  const [open, setOpen] = useChatCollapseState(openKey, false);
   const toolCount = items.reduce((n, i) => n + (i.kind === "tool" ? 1 : 0), 0);
-  const prevToolCount = useRef(toolCount);
-  const wasLive = useRef(live);
-
-  // New tool in the ladder → re-open (overrides a prior manual collapse).
-  useEffect(() => {
-    if (toolCount > prevToolCount.current) {
-      userToggled.current = false;
-      writeChatCollapseFlag(userToggledKey, false);
-      setOpen(true);
-    }
-    prevToolCount.current = toolCount;
-  }, [toolCount, setOpen, userToggledKey]);
-
-  // Tools running → expand; tools finished → collapse. Ignore chat/thinking stream.
-  useEffect(() => {
-    if (userToggled.current) {
-      wasLive.current = live;
-      return;
-    }
-    if (live && !wasLive.current) setOpen(true);
-    else if (!live && wasLive.current) setOpen(false);
-    wasLive.current = live;
-  }, [live, setOpen]);
-
   const label = activityGroupLabel(items, live);
 
   return (
@@ -115,11 +88,7 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
         <button
           type="button"
           className="agent-activity-group-header"
-          onClick={() => {
-            userToggled.current = true;
-            writeChatCollapseFlag(userToggledKey, true);
-            setOpen((v) => !v);
-          }}
+          onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
         >
           <span className={`agent-activity-group-caret${open ? " is-open" : ""}`}>

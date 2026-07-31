@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -17,20 +18,33 @@ from typing import Any
 # Parallelism for Store + LLM + skill draft + key tests at once.
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="bridge-job")
 _JOBS: dict[str, concurrent.futures.Future] = {}
+_JOB_STARTED_AT: dict[str, float] = {}
 _CANCELLED: set[str] = set()
 _LOCK = threading.Lock()
+
+# Instant jobs (Cursor key length-check) finish before the JS 100ms first poll.
+# Never drop a done Future until that grace window — otherwise poll returns
+# "unknown or expired job" and the UI shows bare "Test failed" after a real save.
+_STALE_GRACE_S = 120.0
 
 
 def job_start(fn: Callable[[], Any]) -> dict[str, Any]:
     """Submit ``fn`` on a worker; return immediately with ``job_id``."""
     job_id = uuid.uuid4().hex
     future = _EXECUTOR.submit(fn)
+    now = time.monotonic()
     with _LOCK:
-        stale = [jid for jid, fut in _JOBS.items() if fut.done()]
+        stale = [
+            jid
+            for jid, fut in _JOBS.items()
+            if fut.done() and (now - _JOB_STARTED_AT.get(jid, now)) >= _STALE_GRACE_S
+        ]
         for jid in stale[:48]:
             _JOBS.pop(jid, None)
+            _JOB_STARTED_AT.pop(jid, None)
             _CANCELLED.discard(jid)
         _JOBS[job_id] = future
+        _JOB_STARTED_AT[job_id] = now
     return {"ok": True, "job_id": job_id, "pending": True}
 
 
@@ -58,6 +72,7 @@ def job_poll(job_id: str) -> dict[str, Any]:
     if cancelled:
         with _LOCK:
             _JOBS.pop(jid, None)
+            _JOB_STARTED_AT.pop(jid, None)
             _CANCELLED.discard(jid)
         return {
             "ok": False,
@@ -76,6 +91,7 @@ def job_poll(job_id: str) -> dict[str, Any]:
         result = {"ok": False, "error": str(exc) or "job failed"}
     with _LOCK:
         _JOBS.pop(jid, None)
+        _JOB_STARTED_AT.pop(jid, None)
         _CANCELLED.discard(jid)
     if isinstance(result, dict):
         out = dict(result)
@@ -87,8 +103,6 @@ def job_poll(job_id: str) -> dict[str, Any]:
 
 def job_wait(job_id: str, *, timeout: float = 90.0, poll_s: float = 0.05) -> dict[str, Any]:
     """Sync wait for tests / legacy callers — still holds the calling thread."""
-    import time
-
     jid = (job_id or "").strip()
     if not jid:
         return {"ok": False, "error": "job_id required"}
@@ -100,6 +114,7 @@ def job_wait(job_id: str, *, timeout: float = 90.0, poll_s: float = 0.05) -> dic
         time.sleep(poll_s)
     with _LOCK:
         fut = _JOBS.pop(jid, None)
+        _JOB_STARTED_AT.pop(jid, None)
     if fut is not None:
         fut.cancel()
     return {"ok": False, "error": f"Job timed out after {int(timeout)}s"}

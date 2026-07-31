@@ -29,6 +29,16 @@ def main() -> None:
     cancelled = bj.job_poll(jid3)
     assert cancelled.get("cancelled") is True and cancelled.get("pending") is False
 
+    # Fast job + another job_start before first poll must NOT expire the result
+    # (Cursor API key test is a length check — finishes in ms; JS polls at 100ms).
+    started_fast = bj.job_start(lambda: {"ok": True, "detail": "OK"})
+    jid_fast = str(started_fast["job_id"])
+    time.sleep(0.05)  # let the worker finish
+    bj.job_start(lambda: {"ok": True, "n": 1})  # would formerly GC the fast job
+    polled_fast = bj.job_poll(jid_fast)
+    assert polled_fast.get("pending") is False, polled_fast
+    assert polled_fast.get("ok") is True and polled_fast.get("detail") == "OK", polled_fast
+
     print("test_bridge_jobs: ok")
 
 
