@@ -12,7 +12,7 @@ from typing import Any
 
 SESSION_JOIN_TIMEOUT = 2.0
 
-from frontend.ui_web.project_chats import append_message, auto_title, load_conversation, save_conversation
+from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
 from frontend.ui_web.token_usage import record_api_call, token_usage_report
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
 from backend.agent.attachments import attachments_from_message_dict, parse_attachment_dicts
@@ -1361,7 +1361,9 @@ def run_message(
         user_msg["attachments"] = stored_attachments
     append_message(conv, user_msg)
     if len(conv.messages) == 1:
-        auto_title(conv, user_text or content)
+        from backend.agent.chat_title import start_auto_title
+
+        start_auto_title(conv, user_text or content, push=push)
     history = list(conv.messages[:-1])
 
     from frontend.ui_web.context_omit import context_omit_set

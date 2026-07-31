@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import threading
 import time
@@ -922,30 +923,46 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
         release_conversation_lock(target_id)
 
 
-_PLACEHOLDER_TITLES = frozenset(
-    {
-        "",
-        "new ducky",
-        "new chat",
-        "chat",
-        "group",
-        "subagent",
-        "sub-agent",
-    }
+# The sidebar auto-numbers fresh duckies ("NewDucky1", "New ducky2"), so the
+# trailing digits have to count as unnamed too.
+_PLACEHOLDER_RE = re.compile(
+    r"^(new\s*ducky|new\s*chat|ducky|chat|group|sub-?agent)\s*\d*$", re.IGNORECASE
 )
 
 
-def auto_title(conv: Conversation, first_user_message: str, project_root: str | None = None) -> None:
-    """Set title from the first user message only when the chat still has a placeholder name."""
-    existing = (conv.title or "").strip()
-    if existing and existing.lower() not in _PLACEHOLDER_TITLES:
+def is_placeholder_title(title: str) -> bool:
+    """True when the chat still carries an auto-generated name the user never chose."""
+    text = (title or "").strip()
+    return not text or bool(_PLACEHOLDER_RE.match(text))
+
+
+def auto_title(conv: Conversation, title: str, project_root: str | None = None) -> bool:
+    """Apply ``title`` only while the chat still has a placeholder name. Returns True when set."""
+    if not is_placeholder_title(conv.title):
         # Named spawn / invite / rename already set a real title — keep it.
-        return
-    text = first_user_message.strip().replace("\n", " ")
+        return False
+    text = (title or "").strip().replace("\n", " ")
     if not text:
-        return
+        return False
     conv.title = text[:60] + ("…" if len(text) > 60 else "")
     save_conversation(conv, project_root)
+    return True
+
+
+def retitle_if_unchanged(
+    conv_id: str, expected: str, title: str, project_root: str | None = None
+) -> bool:
+    """Compare-and-swap the title so a background rename never overwrites a manual one."""
+    text = (title or "").strip()
+    if not text:
+        return False
+    with _conversation_lock(conv_id):
+        fresh = load_conversation(conv_id, project_root)
+        if fresh is None or (fresh.title or "").strip() != expected:
+            return False
+        fresh.title = text[:120]
+        save_conversation(fresh, project_root, touch_updated=False)
+    return True
 
 
 def append_message(conv: Conversation, message: dict[str, Any], project_root: str | None = None) -> None:

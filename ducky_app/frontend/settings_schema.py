@@ -135,6 +135,18 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Cheap API model for rolling summaries (empty = Voice / Default model).",
     ),
+    "chat_auto_title": FieldMeta(
+        "Auto-name new duckies",
+        "LLMs",
+        settable=True,
+        description="Rename a new ducky after the role its first message asks for.",
+    ),
+    "chat_title_model": FieldMeta(
+        "Chat title model",
+        "LLMs",
+        settable=True,
+        description="Cheap API model that refines the auto role title (empty = keyword names only).",
+    ),
     "prompt_caching_enabled": FieldMeta(
         "Legacy provider cache markers fallback", "LLMs", settable=True
     ),

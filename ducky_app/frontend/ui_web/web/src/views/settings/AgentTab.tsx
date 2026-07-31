@@ -175,6 +175,55 @@ function DefaultModelSection() {
   );
 }
 
+function ChatTitleSection() {
+  const [loaded, setLoaded] = useState(false);
+  const [autoTitle, setAutoTitle] = useState(true);
+  const [titleModel, setTitleModel] = useState("");
+
+  useEffect(() => {
+    return onApiReady((api) => {
+      void api.get_settings().then((settings) => {
+        if (typeof settings.chat_auto_title === "boolean") {
+          setAutoTitle(settings.chat_auto_title);
+        }
+        setTitleModel((settings.chat_title_model || "").trim());
+        setLoaded(true);
+      });
+    });
+  }, []);
+
+  return (
+    <div className="general-tab-toggle-card">
+      <SettingsToggleRow
+        id="toggle-chat-auto-title"
+        label="Auto-name new duckies by role"
+        checked={autoTitle}
+        disabled={!loaded}
+        onChange={(value) => {
+          setAutoTitle(value);
+          const api = getApi();
+          if (api) void api.save_agent_settings({ chat_auto_title: value });
+        }}
+      />
+      <div className="llms-default-model-picker">
+        <DuckyModelPicker
+          model={titleModel}
+          onChange={(model) => {
+            setTitleModel(model);
+            const api = getApi();
+            if (api) void api.save_agent_settings({ chat_title_model: model });
+          }}
+          label="Chat title model"
+          placeholder="Off — keyword names only"
+          hint="Refines the role name after the first message. Leave empty to keep the instant keyword guess."
+          allowClear
+          requireTools={false}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Ducky-owned freeze — works for every gateway. Provider cache markers live in plugins. */
 function PromptPrefixSection() {
   const [loaded, setLoaded] = useState(false);
@@ -519,6 +568,11 @@ export function AgentTab() {
                   </div>
                 ) : null}
               </div>
+            </section>
+
+            <section className="general-tab-section">
+              <GeneralSectionHeader icon={<Icons.Brain />} title="Chat naming" />
+              <ChatTitleSection />
             </section>
 
             <section className="general-tab-section">

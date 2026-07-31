@@ -159,6 +159,12 @@ class PanelSettings:
     memory_summary_model: str = ""
     """Cheap API model for chat summaries (empty = Voice / Default model fallback)."""
 
+    chat_auto_title: bool = True
+    """Rename a new ducky after the role its first message asks for."""
+
+    chat_title_model: str = ""
+    """Cheap API model that refines the auto role title (empty = keyword names only)."""
+
     prompt_caching_enabled: bool = True
     """Legacy fallback when Anthropic/OpenAI plugin prefs omit promptCaching."""
 
@@ -344,6 +350,8 @@ class PanelSettings:
             or self.memory_compress_tokens != 80_000
             or self.memory_index_max_chars != 2_500
             or self.memory_summary_model.strip()
+            or not self.chat_auto_title
+            or self.chat_title_model.strip()
             or not self.prompt_caching_enabled
             or not self.freeze_prompt_prefix
             or self.anthropic_extended_cache_ttl
