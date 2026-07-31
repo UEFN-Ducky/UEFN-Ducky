@@ -3247,17 +3247,49 @@ class PanelApi:
         return updated
 
     def get_key_status(self) -> dict[str, bool]:
+        """Key/gateway readiness — never sync-wait on plugin register().
+
+        Feeds LLMs → Providers and the Default Model catalog. A hung register()
+        used to pin this RPC and starve Appearance / create-conversation.
+        """
         from backend.agent.secrets import has_key
         from backend.uefn_plugins.host import (
-            ensure_plugins_loaded,
+            ensure_plugins_loaded_async,
             get_contributions,
             get_llm_provider_registration,
+            get_ui_contributions,
+            plugins_ready,
+            plugins_ui_ready,
         )
 
-        ensure_plugins_loaded()
+        # Built-in providers always available (no plugin wait).
+        status: dict[str, bool] = {p: has_key(p) for p in all_providers()}
+        status["cursor"] = has_key("cursor")
+
+        if not plugins_ready():
+            ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
+            # plugin.json llm_providers land before register(); use them so
+            # gateways appear while backends finish. Skip factory lookup.
+            if plugins_ui_ready():
+                for row in get_ui_contributions().get("llm_providers") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    pid = str(row.get("id") or "").strip().lower()
+                    for key in (
+                        str(row.get("secret_key") or "").strip(),
+                        pid,
+                    ):
+                        if key:
+                            status[key] = has_key(key)
+                    if pid and str(row.get("kind") or "").strip().lower() == "url":
+                        status[pid] = True
+                        sk = str(row.get("secret_key") or "").strip()
+                        if sk:
+                            status[sk] = True
+            return status
+
         # Include every enabled gateway secret_key (and provider id) so saved keys
         # still show after a Store Update even if factory registration races.
-        status: dict[str, bool] = {p: has_key(p) for p in all_providers()}
         for row in get_contributions().get("llm_providers") or []:
             if not isinstance(row, dict):
                 continue
@@ -3277,7 +3309,6 @@ class PanelApi:
                     sk = str(row.get("secret_key") or "").strip()
                     if sk:
                         status[sk] = True
-        status["cursor"] = has_key("cursor")
         return status
 
     def has_any_api_key(self) -> bool:
@@ -3659,8 +3690,15 @@ class PanelApi:
         aid = normalize_coding_agent(agent_id)
         if aid == "ducky":
             return {"ok": True, "id": "ducky", "available": True, "status": "Embedded agent", "cli_path": ""}
-        # Repair stuck "contrib without factory" before probing (Detect used to no-op).
-        ensure_plugins_loaded()
+        # Bound wait — a hung register() must not pin the panel HTTP connection.
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {
+                "ok": False,
+                "error": "Plugins still loading — try Detect again in a moment.",
+                "id": aid,
+                "available": False,
+                "status": "Plugins loading",
+            }
         invalidate_detect_cache()
         adapter = get_adapter(aid)
         if adapter is None and aid not in self._coding_agent_reload_tried:
@@ -5642,18 +5680,32 @@ class PanelApi:
         return self.list_mcp_servers()
 
     def list_mcp_servers(self) -> dict[str, Any]:
+        """MCP/tool catalog for Settings — never sync-wait on plugin register()."""
         from backend.agent.builtin_toolsets import builtin_group_rows
         from backend.mcp_plugins.store import list_mcp_servers, seed_mcp_plugins
-        from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_plugin_tool_group_rows
+        from backend.uefn_plugins.host import (
+            ensure_plugins_loaded_async,
+            plugins_ready,
+            uefn_plugin_tool_group_rows,
+        )
         from backend.uefn_plugins.store import seed_uefn_plugins
 
         seed_mcp_plugins()
         seed_uefn_plugins()
-        ensure_plugins_loaded()
+        servers = list_mcp_servers()
+        builtins = builtin_group_rows()
+        if plugins_ready():
+            return {
+                "ok": True,
+                "plugins": builtins + servers + uefn_plugin_tool_group_rows(),
+                "servers": servers,
+            }
+        ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
         return {
             "ok": True,
-            "plugins": builtin_group_rows() + list_mcp_servers() + uefn_plugin_tool_group_rows(),
-            "servers": list_mcp_servers(),
+            "plugins": builtins + servers,
+            "servers": servers,
+            "plugins_loading": True,
         }
 
     def set_mcp_plugin_enabled(self, plugin_id: str, enabled: bool) -> dict[str, Any]:
@@ -5795,18 +5847,27 @@ class PanelApi:
 
         Built-in tool groups (UEFN / Ducky app) and UEFN app-plugin agent.tools
         ride along as pseudo-plugin rows; the override list mixes their ids
-        with external MCP plugin ids.
+        with external MCP plugin ids. Never sync-wait on plugin register().
         """
         from backend.agent.builtin_toolsets import builtin_group_rows, get_enabled_builtin_group_ids
         from backend.mcp_plugins.store import get_enabled_plugin_ids, list_mcp_plugins
-        from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_agent_tool_rows
+        from backend.uefn_plugins.host import (
+            ensure_plugins_loaded_async,
+            plugins_ready,
+            uefn_agent_tool_rows,
+        )
         from backend.uefn_plugins.store import seed_uefn_plugins
 
         seed_uefn_plugins()
-        ensure_plugins_loaded()
         conv = load_conversation(conv_id)
         if not conv:
             return {"ok": False, "error": "Conversation not found"}
+
+        ready = plugins_ready()
+        if not ready:
+            ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
+        uefn_rows = uefn_agent_tool_rows() if ready else []
+
         override: list[str] | None = None
         if (
             conv.mcp_plugins is not None
@@ -5820,16 +5881,18 @@ class PanelApi:
             )
             plugin_part = conv.mcp_plugins if conv.mcp_plugins is not None else get_enabled_plugin_ids()
             # App-plugin tools: None = follow Store enable (same as nested MCP).
+            # While plugins load, skip unresolved Store defaults (empty uefn_part).
             uefn_part = (
                 conv.uefn_plugins
                 if conv.uefn_plugins is not None
-                else [str(r.get("id") or "") for r in uefn_agent_tool_rows() if r.get("id")]
+                else [str(r.get("id") or "") for r in uefn_rows if r.get("id")]
             )
             override = list(builtin_part) + list(plugin_part) + list(uefn_part)
         return {
             "ok": True,
             "override": override,
-            "plugins": builtin_group_rows() + list_mcp_plugins() + uefn_agent_tool_rows(),
+            "plugins": builtin_group_rows() + list_mcp_plugins() + uefn_rows,
+            "plugins_loading": not ready,
         }
 
     def set_chat_mcp_plugins(self, conv_id: str, plugin_ids: list[str] | None) -> dict[str, Any]:
