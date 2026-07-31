@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import "./plugin-ui.css";
 import { BRIDGE_CHANNEL, PLUGIN_UI_ROUTE_PREFIX, PLUGIN_UI_SANDBOX } from "./constants";
-import { handleBridgeRequest } from "./bridge";
+import { handleBridgeRequest, shouldForwardPluginPush } from "./bridge";
 import { isBridgeRequest } from "./types";
 import { usePluginContributions } from "../hooks/usePluginContributions";
+import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { PluginSurfaceBoundary } from "./PluginSurfaceBoundary";
 
 type Props = {
@@ -51,6 +52,17 @@ export function PluginSettingsEmbed({ pluginId, panelId }: Props) {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [pid, panelId, panel?.version, tabId]);
+
+  useEffect(() => {
+    installPanelPushBus();
+    return subscribePanelPush((event) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || typeof event.type !== "string") return;
+      if (shouldForwardPluginPush(tabId, pid, event.type)) {
+        win.postMessage({ channel: BRIDGE_CHANNEL, event }, "*");
+      }
+    });
+  }, [tabId, pid]);
 
   if (!src) {
     return (

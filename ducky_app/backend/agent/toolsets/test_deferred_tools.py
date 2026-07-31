@@ -78,7 +78,7 @@ def test_effective_tool_name_unwraps_call():
 
 
 def test_ducky_get_tools_name_and_pattern(monkeypatch):
-    from backend.tools import ducky_panel
+    from backend.tools.panel import ducky_panel
     import backend.agent.tools as tools_mod
 
     tools = [
@@ -101,7 +101,7 @@ def test_ducky_get_tools_name_and_pattern(monkeypatch):
 
 
 def test_ducky_call_tool_plan_blocks_mutator(monkeypatch):
-    from backend.tools import ducky_panel
+    from backend.tools.panel import ducky_panel
     import backend.agent.tools as tools_mod
 
     called: list[str] = []
@@ -123,7 +123,7 @@ def test_ducky_call_tool_plan_blocks_mutator(monkeypatch):
 
 
 def test_ducky_call_tool_dispatches(monkeypatch):
-    from backend.tools import ducky_panel
+    from backend.tools.panel import ducky_panel
     import backend.agent.tools as tools_mod
 
     async def _exec(name, arguments=None, **_kw):

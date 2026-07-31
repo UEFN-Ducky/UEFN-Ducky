@@ -14,6 +14,8 @@ export type BridgeContext = {
   /** Full editor tab id — pane identity; differs from pluginUiTabId for instance tabs. */
   tabId?: string;
   version?: number;
+  /** Project-relative path when this iframe is a file editor (PluginFilePane). */
+  filePath?: string;
   /** The hosting iframe — used to translate in-iframe rects to app-page coords. */
   iframe?: HTMLIFrameElement | null;
 };
@@ -294,6 +296,23 @@ export function clearBrowserPaneBounds(tabId: string): void {
   paneMountGen.delete(tabId);
 }
 
+/** tabId → push subscription for plugin iframes */
+export const pluginPushSubscriptions = new Map<
+  string,
+  { pluginId: string; types: Set<string> }
+>();
+
+export function shouldForwardPluginPush(
+  tabId: string,
+  pluginId: string,
+  eventType: string,
+): boolean {
+  const sub = pluginPushSubscriptions.get(tabId);
+  if (!sub || sub.pluginId !== pluginId) return false;
+  if (sub.types.size === 0) return true;
+  return sub.types.has(eventType);
+}
+
 /**
  * Allowlisted bridge methods. Add new capabilities here only.
  * Keys are what the plugin calls via `postMessage({ method: "…" })`.
@@ -303,6 +322,7 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     pluginId: ctx.pluginId,
     panelId: ctx.panelId,
     version: ctx.version ?? null,
+    filePath: ctx.filePath ?? null,
   }),
   // Native WebView2 browser pane (backend browser_overlay). Real Chromium pinned
   // over the panel's reported rect — no X-Frame-Options limits, and no pywebview
@@ -429,6 +449,34 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     if (!api?.plugin_cache_clear) throw new Error("plugin_cache_clear unavailable");
     const key = typeof params.key === "string" ? params.key : "";
     return await api.plugin_cache_clear(ctx.pluginId, key);
+  },
+  /** Call a panel RPC registered by the plugin via ``api.register_panel_rpc``. */
+  "plugin.call": async (ctx, params) => {
+    const api = getApi();
+    if (!api?.plugin_call) throw new Error("plugin_call unavailable");
+    const method = typeof params.method === "string" ? params.method : "";
+    if (!method) throw new Error("plugin.call requires method");
+    const callParams =
+      params.params && typeof params.params === "object" && !Array.isArray(params.params)
+        ? (params.params as Record<string, unknown>)
+        : {};
+    return await api.plugin_call(ctx.pluginId, method, callParams);
+  },
+  /**
+   * Subscribe this pane to host push events (e.g. discord_message).
+   * Events are forwarded as ``{ channel, event }`` postMessages (same as browser_pane_state).
+   */
+  "plugin.subscribe": (ctx, params) => {
+    const tabKey = ctx.tabId || `${ctx.pluginId}:${ctx.panelId}`;
+    const raw = params.types;
+    const types = Array.isArray(raw)
+      ? raw.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+      : [];
+    pluginPushSubscriptions.set(tabKey, {
+      pluginId: ctx.pluginId,
+      types: new Set(types),
+    });
+    return { ok: true, types };
   },
 };
 

@@ -1160,7 +1160,7 @@ def store_catalog() -> dict[str, Any]:
     installed_skills: dict[str, dict[str, Any]] = {}
     skill_denied: set[str] = set()
     try:
-        from backend.skill import list_skill_packs
+        from backend.skills.store import list_skill_packs
         from frontend.settings import PanelSettings
 
         skill_denied = set(PanelSettings.load().default_disabled_packs or [])
@@ -1644,7 +1644,7 @@ def _store_download_and_install_unlocked(
 
         result = import_plugin_from_bytes(raw, source="store", replace=bool(replace))
     else:
-        from backend.skill import import_skill_pack_from_bytes
+        from backend.skills.store import import_skill_pack_from_bytes
 
         result = import_skill_pack_from_bytes(
             raw,

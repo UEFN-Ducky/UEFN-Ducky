@@ -210,7 +210,7 @@ def _maybe_extract_durable(
     if not bullets:
         return
     try:
-        from backend.project_memory import append_entry, slugify_entry_name
+        from backend.memory.project import append_entry, slugify_entry_name
 
         who = ducky_name.strip()
         slug_who = slugify_entry_name(who).replace("/", "-")

@@ -139,6 +139,116 @@ def _dest_recency(dest: Path) -> float:
     return _source_recency(dest) if dest.is_dir() else 0.0
 
 
+def _overlay_plugin_listeners(listener_root: Path) -> bool:
+    """Copy enabled plugins' ``listener/`` folders into ``listener/plugins/<id>/``.
+
+    Returns True when the overlay tree changed (or was written). Safe to call on
+    an already-deployed AppData tree or a staging copy before atomic swap.
+    """
+    try:
+        from backend.uefn_plugins.store import (
+            appdata_uefn_plugins_dir,
+            get_enabled_plugin_ids,
+            load_plugin_manifest,
+        )
+    except Exception:
+        return False
+
+    plugins_pkg = listener_root / "listener" / "plugins"
+    plugins_pkg.mkdir(parents=True, exist_ok=True)
+    init_py = plugins_pkg / "__init__.py"
+    if not init_py.is_file():
+        # Staging from an older source tree — ensure the loader package exists.
+        init_py.write_text(
+            '"""Store plugin listener handlers (populated by deploy overlay)."""\n'
+            "from __future__ import annotations\n"
+            "import importlib\n"
+            "import pkgutil\n"
+            "from pathlib import Path\n"
+            "_ROOT = Path(__file__).resolve().parent\n"
+            "for _info in pkgutil.iter_modules([str(_ROOT)]):\n"
+            "    if not _info.name or _info.name.startswith('_'):\n"
+            "        continue\n"
+            "    try:\n"
+            "        importlib.import_module(f'listener.plugins.{_info.name}')\n"
+            "    except Exception:\n"
+            "        pass\n",
+            encoding="utf-8",
+        )
+
+    wanted: set[str] = set()
+    changed = False
+    root = appdata_uefn_plugins_dir()
+    for pid in get_enabled_plugin_ids():
+        manifest = load_plugin_manifest(pid)
+        if not manifest:
+            continue
+        src = root / pid / "listener"
+        if not src.is_dir():
+            continue
+        # Hyphens are valid plugin ids but not Python package names.
+        pkg_name = pid.replace("-", "_")
+        wanted.add(pkg_name)
+        dest = plugins_pkg / pkg_name
+        try:
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            # Ensure importable as listener.plugins.<pkg_name>
+            pkg_init = dest / "__init__.py"
+            if not pkg_init.is_file():
+                pkg_init.write_text(
+                    '"""Plugin listener handlers — import side effects register commands."""\n',
+                    encoding="utf-8",
+                )
+            changed = True
+        except OSError:
+            continue
+
+    # Drop overlays for plugins that are no longer enabled / no longer ship listener/.
+    try:
+        for child in list(plugins_pkg.iterdir()):
+            if not child.is_dir() or child.name.startswith("_"):
+                continue
+            if child.name not in wanted:
+                shutil.rmtree(child, ignore_errors=True)
+                changed = True
+    except OSError:
+        pass
+    return changed
+
+
+def overlay_plugin_listeners_to_appdata(*, reload: bool = True) -> bool:
+    """Re-apply plugin listener overlays into the live AppData listener tree.
+
+    Called after Store install/enable/disable so UEFN picks up new handlers
+    without waiting for the next full sync. Optionally fires ``reload_listener``.
+    """
+    dest = appdata_listener_dir()
+    if not (dest / "listener").is_dir():
+        # Nothing deployed yet — next sync_listener_to_appdata will overlay.
+        synced = sync_listener_to_appdata()
+        if synced is None:
+            return False
+        dest = synced
+    changed = _overlay_plugin_listeners(dest)
+    if changed:
+        # Bump stamp so ship_newest / ping comparisons see a new tree.
+        try:
+            stamp = dest / _DEPLOY_STAMP_NAME
+            stamp.write_text(f"{_source_recency(dest):.3f}", encoding="utf-8")
+        except OSError:
+            pass
+    if reload:
+        try:
+            from backend.bridge import send_command
+
+            send_command("reload_listener", timeout=6.0)
+        except Exception:
+            pass
+    return changed
+
+
 def sync_listener_to_appdata() -> Path | None:
     """Copy the listener source to ``%LOCALAPPDATA%/UEFN-Ducky/listener`` — NEWEST WINS.
 
@@ -146,6 +256,9 @@ def sync_listener_to_appdata() -> Path | None:
     code already in AppData (repo hot-deploys, a newer exe's deploy) — that race shipped
     stale crash-prone handlers mid-session on 2026-07-11. ``UEFN_DUCKY_LISTENER_SRC``
     stays authoritative (explicit pin → always overwrites).
+
+    After the core tree is in place, enabled Store plugins' ``listener/`` folders are
+    overlaid into ``listener/plugins/<plugin_id>/``.
     """
     src = _source_listener_dir()
     if src is None:
@@ -156,10 +269,10 @@ def sync_listener_to_appdata() -> Path | None:
     src_recency = _source_recency(src)
     if dest.is_dir():
         dest_recency = _dest_recency(dest)
-        if abs(dest_recency - src_recency) <= 0.001:
-            return dest  # Exact source is already deployed; do not create a swap race.
-        if not pinned and dest_recency > src_recency:
-            return dest  # AppData already has newer code — keep it.
+        if abs(dest_recency - src_recency) <= 0.001 or (not pinned and dest_recency > src_recency):
+            # Core tree already current — still refresh plugin overlays.
+            _overlay_plugin_listeners(dest)
+            return dest
 
     # Every panel and coding-agent bridge is a separate process. A shared
     # listener.tmp lets simultaneous startups delete/copy each other's partial
@@ -171,6 +284,7 @@ def sync_listener_to_appdata() -> Path | None:
         shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         if not (tmp / "listener" / "__init__.py").is_file() or not (tmp / "listener" / "config.py").is_file():
             raise OSError("Listener source copy is incomplete")
+        _overlay_plugin_listeners(tmp)
         (tmp / _DEPLOY_STAMP_NAME).write_text(f"{src_recency:.3f}", encoding="utf-8")
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)

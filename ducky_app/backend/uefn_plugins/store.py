@@ -7,11 +7,13 @@ import json
 import re
 import shutil
 import sys
+import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
 
-from backend.skill import appdata_dir
+from backend.skills.store import appdata_dir
 from backend.uefn_plugins.plugin_version import format_plugin_version, plugin_version_rank
 
 PLUGIN_MANIFEST = "plugin.json"
@@ -26,6 +28,14 @@ _TRUST_REQUIRED_SOURCES = frozenset({"local", "ai"})
 MAX_PLUGIN_ZIP_BYTES = 32 * 1024 * 1024
 # Zip-bomb guard: extraction happens at install, before the local-trust prompt.
 MAX_PLUGIN_UNCOMPRESSED_BYTES = 4 * MAX_PLUGIN_ZIP_BYTES
+
+# fingerprint -> plugin-owned skill rows (see list_plugin_owned_skills).
+_OWNED_SKILLS_CACHE: dict[tuple[tuple[str, int], ...], list[dict[str, str]]] = {}
+_OWNED_SKILLS_LOCK = threading.Lock()
+_FINGERPRINT: tuple[tuple[str, int], ...] | None = None
+_FINGERPRINT_ROOT = ""
+_FINGERPRINT_AT = 0.0
+_FINGERPRINT_TTL = 1.0
 
 
 def appdata_uefn_plugins_dir() -> Path:
@@ -413,11 +423,66 @@ def list_plugin_skill_dirs(plugin_root: Path) -> list[Path]:
     return out
 
 
+def _plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
+    """Cheap self-invalidating key: (name, mtime_ns) per plugin dir.
+
+    Re-stat'ing ~30 dirs is ~6ms here, and skill deploy probes this hundreds of
+    times per run — so the probe itself is memoized for ``_FINGERPRINT_TTL``.
+    Install/enable paths call ``invalidate_plugin_skill_caches()`` directly.
+    """
+    global _FINGERPRINT_AT, _FINGERPRINT, _FINGERPRINT_ROOT
+    key = str(root)
+    now = time.monotonic()
+    with _OWNED_SKILLS_LOCK:
+        fresh = _FINGERPRINT is not None and (now - _FINGERPRINT_AT) < _FINGERPRINT_TTL
+        if fresh and _FINGERPRINT_ROOT == key:
+            return _FINGERPRINT
+    try:
+        fingerprint = tuple(
+            sorted((c.name, c.stat().st_mtime_ns) for c in root.iterdir() if c.is_dir())
+        )
+    except OSError:
+        fingerprint = ()
+    with _OWNED_SKILLS_LOCK:
+        _FINGERPRINT = fingerprint
+        _FINGERPRINT_ROOT = key
+        _FINGERPRINT_AT = now
+    return fingerprint
+
+
+def invalidate_plugin_skill_caches() -> None:
+    """Drop plugin-owned-skill caches after install / uninstall / enable changes."""
+    global _FINGERPRINT, _FINGERPRINT_AT, _FINGERPRINT_ROOT
+    with _OWNED_SKILLS_LOCK:
+        _FINGERPRINT = None
+        _FINGERPRINT_ROOT = ""
+        _FINGERPRINT_AT = 0.0
+        _OWNED_SKILLS_CACHE.clear()
+    try:
+        from backend.skills.store import _OWNED_MAP_CACHE, _OWNED_MAP_LOCK
+
+        with _OWNED_MAP_LOCK:
+            _OWNED_MAP_CACHE.clear()
+    except Exception:
+        pass
+
+
 def list_plugin_owned_skills() -> list[dict[str, str]]:
-    """Installed plugin-owned skills: ``{pack_id, path, plugin_id}``."""
+    """Installed plugin-owned skills: ``{pack_id, path, plugin_id}``.
+
+    Cached on the plugin-tree mtime fingerprint: skill deploy calls this once per
+    pack per root (~200x per sync) and the uncached walk re-read every plugin.json
+    each time — 6.4s of a 9s deploy. Install/update rewrites the plugin dir, which
+    bumps its mtime and drops the entry.
+    """
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
         return []
+    fingerprint = _plugin_tree_fingerprint(root)
+    with _OWNED_SKILLS_LOCK:
+        cached = _OWNED_SKILLS_CACHE.get(fingerprint)
+    if cached is not None:
+        return [dict(row) for row in cached]
     out: list[dict[str, str]] = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -437,6 +502,9 @@ def list_plugin_owned_skills() -> list[dict[str, str]]:
                     "plugin_id": pid,
                 }
             )
+    with _OWNED_SKILLS_LOCK:
+        _OWNED_SKILLS_CACHE.clear()  # single entry — only the live tree matters
+        _OWNED_SKILLS_CACHE[fingerprint] = [dict(row) for row in out]
     return out
 
 
@@ -445,7 +513,7 @@ def validate_plugin_skills(plugin_root: Path, plugin_id: str) -> list[str]:
 
     Raises ``ValueError`` on path/id/collision problems.
     """
-    from backend.skill import appdata_skill_packs_dir, normalize_pack_id
+    from backend.skills.store import appdata_skill_packs_dir, normalize_pack_id
 
     pid = normalize_plugin_id(plugin_id)
     plugin_root = Path(plugin_root).resolve()
@@ -484,7 +552,7 @@ def validate_plugin_skills(plugin_root: Path, plugin_id: str) -> list[str]:
             )
         # Frontmatter name should match folder when present.
         try:
-            from backend.skill import parse_frontmatter
+            from backend.skills.store import parse_frontmatter
 
             raw = (skill_dir / PLUGIN_SKILL_FILE).read_text(encoding="utf-8")
             meta, _ = parse_frontmatter(raw)
@@ -522,17 +590,35 @@ def _refresh_plugin_skills() -> None:
         from frontend.skill_deploy import sync_skill_all_ides
         from frontend.settings import PanelSettings
 
+        invalidate_plugin_skill_caches()
         clear_skill_cache()
         sync_skill_all_ides(PanelSettings.load().antigravity_config_path)
     except Exception:
         pass
 
 
+def _refresh_plugin_skills_async() -> None:
+    """IDE skill sync is disk-heavy — never block the Store bridge call."""
+    threading.Thread(
+        target=_refresh_plugin_skills,
+        daemon=True,
+        name="uefn-plugin-skills-refresh",
+    ).start()
+
+
 def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[str, Any]:
+    """Remove a Store plugin from disk and return quickly.
+
+    Persistent work (disable + settings + ``rmtree``) runs on the caller thread.
+    Runtime teardown (``unload`` / strip contribs / skill redeploy) runs on a
+    daemon so a wedged ``register()`` / ``unload()`` cannot stick the UI on
+    ``Uninstalling…``.
+    """
     pid = normalize_plugin_id(plugin_id)
     dest = plugin_dir(pid)
     if not dest.is_dir():
         raise FileNotFoundError(f"UEFN plugin not found: {pid}")
+    had_skills = bool(list_plugin_skill_dirs(dest))
     erased_keys: list[str] = []
     if erase_data:
         labels = get_uefn_plugin_secret_labels(pid)
@@ -552,8 +638,21 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
                 duckyos_account.logout()
             except Exception:
                 pass
+    # Persist disabled before deleting files so a restart mid-teardown still shows off.
     set_uefn_plugin_enabled(pid, False)
-    shutil.rmtree(dest)
+    # Drop imported modules (bounded unload) *before* rmtree — Windows locks .py files
+    # while the module is still in sys.modules.
+    from backend.uefn_plugins.host import invalidate_plugin_runtime, reload_single_plugin
+
+    try:
+        invalidate_plugin_runtime(pid)
+    except Exception:
+        pass
+    shutil.rmtree(dest, ignore_errors=True)
+    if dest.is_dir():
+        # Rare: unload still holding a handle — retry once after a short pause.
+        time.sleep(0.05)
+        shutil.rmtree(dest, ignore_errors=True)
     from frontend.settings import PanelSettings, replace
 
     settings = PanelSettings.load()
@@ -561,10 +660,29 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
     enabled = [p for p in (getattr(settings, "enabled_uefn_plugins", None) or []) if p != pid]
     settings = replace(settings, trusted_local_uefn_plugins=trusted, enabled_uefn_plugins=enabled)
     settings.save()
-    from backend.uefn_plugins.host import reload_plugins
 
-    reload_plugins()
-    _refresh_plugin_skills()
+    def _teardown() -> None:
+        def _notify() -> None:
+            try:
+                from frontend.ui_web.agent_modes import push_ui_event
+
+                push_ui_event({"type": "uefn_plugins_changed"})
+            except Exception:
+                pass
+
+        try:
+            # Folder gone → strip leftovers / detect-cache only; does not re-register others.
+            reload_single_plugin(pid)
+            if had_skills:
+                _refresh_plugin_skills()
+        finally:
+            _notify()
+
+    threading.Thread(
+        target=_teardown,
+        daemon=True,
+        name=f"uefn-plugin-uninstall-{pid}",
+    ).start()
     return {
         "ok": True,
         "plugin_id": pid,
@@ -768,7 +886,7 @@ def import_plugin_from_bytes(
         reload_single_plugin(pid)
         enabled_now = pid in get_enabled_plugin_ids()
     if skill_ids:
-        _refresh_plugin_skills()
+        _refresh_plugin_skills_async()
     return {
         "ok": True,
         "id": pid,

@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 import threading
+import time
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
@@ -35,12 +36,32 @@ _ICON_MIME = {
 _log = logging.getLogger("uefn_plugins")
 _LOCK = threading.RLock()
 _LOADED = False
+# True once plugin.json UI rows are applied — Settings can paint before register().
+_UI_READY = False
 # Single-flight first load: splash must not wait; agent paths wait on this Event.
 _LOAD_DONE = threading.Event()
 _LOAD_THREAD: threading.Thread | None = None
 _LOAD_START_LOCK = threading.Lock()
 _LOAD_CALLBACKS: list[Callable[[], None]] = []
 _LOAD_CALLBACKS_LOCK = threading.Lock()
+# Re-entrancy guard for _repair_missing_backends (per thread; _LOCK is an RLock).
+_REPAIR_STATE = threading.local()
+# Single-flight "scan missing backends" coordinator — never runs register() under _LOCK.
+_REPAIR_THREAD: threading.Thread | None = None
+_REPAIR_THREAD_LOCK = threading.Lock()
+# plugin_id -> monotonic timestamp of last repair *attempt* (recorded before register).
+_REPAIR_ATTEMPTS: dict[str, float] = {}
+_REPAIR_BACKOFF_S = 60.0
+# Rotation for uefn_plugin_load_errors.jsonl (see _record_plugin_load_error).
+_LOAD_ERROR_LOG_MAX_BYTES = 256 * 1024
+_LOAD_ERROR_LOG_KEEP = 200
+# Deferred register_ide_hookup(auto_apply=True) work — never on the load thread.
+_IDE_APPLY_PENDING: list[tuple[str, Callable[[str], None]]] = []
+_IDE_APPLY_LOCK = threading.Lock()
+_IDE_APPLY_THREAD: threading.Thread | None = None
+# In-flight Store enable/disable background register()/unload() workers.
+_TOGGLE_THREADS: list[threading.Thread] = []
+_TOGGLE_THREADS_LOCK = threading.Lock()
 _REGISTERED: set[str] = set()
 _CONTRIBUTIONS: dict[str, Any] = {
     "settings_tabs": [],
@@ -95,6 +116,8 @@ _PLUGIN_TOOL_OWNER: dict[str, str] = {}
 _PLUGIN_HOST_ONLY_TOOLS: set[str] = set()
 # secret_key → {plugin_id, test_fn} — Settings "Test" for plugin API keys (e.g. Meshy).
 _SECRET_TESTERS: dict[str, dict[str, Any]] = {}
+# plugin_id → {method_name → callable} — PanelApi.plugin_call / bridge plugin.call
+_PANEL_RPC: dict[str, dict[str, Any]] = {}
 
 # Per-run allowlist for UEFN app-plugin tools.
 # None = follow Store enable; [] = none; non-empty = those plugin ids only.
@@ -169,8 +192,8 @@ def _dedupe_contrib_rows(
     return out
 
 
-def get_contributions() -> dict[str, Any]:
-    ensure_plugins_loaded()  # also repairs missing register() backends
+def get_ui_contributions() -> dict[str, Any]:
+    """Snapshot contrib registry for Settings UI — does not wait on register()."""
     enabled = list(get_enabled_plugin_ids())
     enabled_set = set(enabled)
     with _LOCK:
@@ -247,6 +270,11 @@ def get_contributions() -> dict[str, Any]:
             "walkthroughs": list(_CONTRIBUTIONS.get("walkthroughs") or []),
             "enabled_ids": enabled,
         }
+
+
+def get_contributions() -> dict[str, Any]:
+    ensure_plugins_loaded()  # also repairs missing register() backends
+    return get_ui_contributions()
 
 
 def get_tts_synthesizer(plugin_id: str) -> Any | None:
@@ -521,11 +549,14 @@ def registered_ide_hookup_kinds() -> tuple[str, ...]:
         return tuple(sorted(_IDE_HOOKUPS.keys()))
 
 
-def invalidate_plugin_runtime(plugin_id: str) -> None:
+def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) -> None:
     """Drop register()-side runtime for a plugin so the next load re-runs register().
 
     Call before Store install/update replaces AppData files. Keeps TTS/LLM factories
     from pointing at stale module objects after a zip overwrite.
+
+    ``unload()`` runs on a helper thread and is joined with ``unload_timeout`` so a
+    misbehaving plugin can never hang the Store bridge / uninstall path.
     """
     from backend.uefn_plugins.store import normalize_plugin_id
 
@@ -534,6 +565,34 @@ def invalidate_plugin_runtime(plugin_id: str) -> None:
     except ValueError:
         return
     mod_name = f"uefn_plugin_{pid}"
+    # Let the plugin stop background threads before modules are dropped.
+    mod = sys.modules.get(mod_name)
+    if mod is not None:
+        unload = getattr(mod, "unload", None)
+        if callable(unload):
+            err: list[BaseException] = []
+
+            def _run_unload() -> None:
+                try:
+                    unload()
+                except BaseException as exc:  # noqa: BLE001 — capture for log below
+                    err.append(exc)
+
+            t = threading.Thread(
+                target=_run_unload,
+                daemon=True,
+                name=f"uefn-plugin-unload-{pid}",
+            )
+            t.start()
+            t.join(timeout=max(0.0, float(unload_timeout)))
+            if t.is_alive():
+                _log.warning(
+                    "Plugin %s unload() still running after %.1fs — continuing teardown",
+                    pid,
+                    float(unload_timeout),
+                )
+            elif err:
+                _log.error("Plugin %s unload() failed: %s", pid, err[0], exc_info=err[0])
     with _LOCK:
         _REGISTERED.discard(pid)
         _TTS_SYNTHESIZERS.pop(pid, None)
@@ -546,6 +605,7 @@ def invalidate_plugin_runtime(plugin_id: str) -> None:
             _IDE_HOOKUPS.pop(key, None)
         for key in [k for k, v in _SECRET_TESTERS.items() if v.get("plugin_id") == pid]:
             _SECRET_TESTERS.pop(key, None)
+        _PANEL_RPC.pop(pid, None)
         _API_TOOL_REGISTRY.pop(pid, None)
         _API_INTENT_PATTERNS.pop(pid, None)
         for name in [n for n, owner in _PLUGIN_TOOL_OWNER.items() if owner == pid]:
@@ -586,6 +646,56 @@ def uefn_agent_tools_allowed(plugin_id: str) -> bool:
     if active is None:
         return True
     return plugin_id in active
+
+
+def register_panel_rpc(plugin_id: str, name: str, fn: Any) -> None:
+    """Register a PanelApi / bridge callable for ``plugin_call(plugin_id, name, params)``."""
+    from backend.uefn_plugins.store import normalize_plugin_id
+
+    pid = normalize_plugin_id(plugin_id)
+    method = str(name or "").strip()
+    if not method or not callable(fn):
+        raise ValueError("register_panel_rpc requires a non-empty name and callable")
+    with _LOCK:
+        slot = _PANEL_RPC.setdefault(pid, {})
+        slot[method] = fn
+
+
+def call_panel_rpc(plugin_id: str, method: str, params: dict[str, Any] | None = None) -> Any:
+    """Dispatch a plugin panel RPC. Raises ValueError when disabled / unknown.
+
+    Never calls ``ensure_plugins_loaded()`` — that path repairs every enabled
+    plugin (unity-mcp nested sync) and used to freeze Discord Settings on
+    ``Loading…`` for minutes.
+    """
+    from backend.uefn_plugins.store import load_plugin_manifest, normalize_plugin_id, plugin_dir
+
+    try:
+        pid = normalize_plugin_id(plugin_id)
+    except ValueError as e:
+        raise ValueError(str(e)) from e
+    if not is_plugin_enabled(pid):
+        raise ValueError(f"Plugin '{pid}' is disabled — enable it in Settings → Store")
+    name = str(method or "").strip()
+    with _LOCK:
+        fn = (_PANEL_RPC.get(pid) or {}).get(name)
+    if fn is None:
+        # Async Store enable may still be registering this plugin — wait for it,
+        # then load only this plugin (never the full repair storm).
+        wait_plugin_toggles(timeout=8.0)
+        with _LOCK:
+            fn = (_PANEL_RPC.get(pid) or {}).get(name)
+        if fn is None and pid not in _REGISTERED:
+            root = plugin_dir(pid)
+            manifest = load_plugin_manifest(pid)
+            if manifest is not None and root.is_dir():
+                _load_enabled_plugin(pid, root, manifest)
+            with _LOCK:
+                fn = (_PANEL_RPC.get(pid) or {}).get(name)
+    if fn is None:
+        raise ValueError(f"Unknown panel RPC: {pid}.{name}")
+    kwargs = dict(params or {})
+    return fn(**kwargs)
 
 
 def plugin_intent_rows() -> list[tuple[re.Pattern[str], frozenset[str]]]:
@@ -872,36 +982,121 @@ def count_uefn_plugin_tools(plugin_id: str) -> int:
     return len(_plugin_tool_names_for(pid, meta if isinstance(meta, dict) else None))
 
 
+def _notify_uefn_plugins_changed() -> None:
+    """Tell React the Store plugin registry changed (HTTP bus — never evaluate_js)."""
+    try:
+        from frontend.ui_web.agent_modes import push_ui_event
+
+        push_ui_event({"type": "uefn_plugins_changed"})
+    except Exception:
+        pass
+
+
+def _spawn_toggle_thread(target: Callable[[], None], *, name: str) -> None:
+    t = threading.Thread(target=target, daemon=True, name=name)
+    with _TOGGLE_THREADS_LOCK:
+        _TOGGLE_THREADS[:] = [x for x in _TOGGLE_THREADS if x.is_alive()]
+        _TOGGLE_THREADS.append(t)
+    t.start()
+
+
+def wait_plugin_toggles(timeout: float = 30.0) -> None:
+    """Join background Store enable/disable workers (reload / tests)."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        with _TOGGLE_THREADS_LOCK:
+            alive = [t for t in _TOGGLE_THREADS if t.is_alive()]
+        if not alive:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        alive[0].join(timeout=min(0.05, remaining))
+
+
 def apply_plugin_enabled_change(plugin_id: str, *, enabled: bool) -> None:
     """Fast Store enable/disable: touch only this plugin (no full reload).
 
-    Disable strips UI contributions; tools/TTS stay registered and gate on
-    ``is_plugin_enabled``. Enable reloads contrib rows; ``register()`` runs only
-    if the plugin was never registered this session (avoids re-deploying Blender
-    addon etc. when toggling unrelated plugins).
+    Returns quickly so the pywebview/MCP bridge never hangs on Discord
+    ``register()`` / ``unload()`` or a stuck first-boot ``ensure_plugins_loaded()``.
+
+    - Disable: strip UI contribs immediately; ``unload()`` / runtime drop on a daemon.
+    - Enable: apply plugin.json UI rows immediately; ``register()`` on a daemon.
+    Settings saves ``enabled_uefn_plugins`` *before* this runs, so a restart still
+    restores the toggle even if background register is slow.
     """
     from backend.uefn_plugins.store import load_plugin_manifest, normalize_plugin_id, plugin_dir
 
     pid = normalize_plugin_id(plugin_id)
-    ensure_plugins_loaded()
+    # Kick boot if needed, but never wait — Store toggles must not block the UI thread.
+    if not plugins_ready() and not plugins_ui_ready():
+        ensure_plugins_loaded_async()
+
     if not enabled:
         with _LOCK:
             _strip_contributions_for(pid)
+
+        def _disable_bg() -> None:
+            try:
+                # Re-enabled while we were queued — leave runtime alone.
+                if is_plugin_enabled(pid):
+                    return
+                invalidate_plugin_runtime(pid)
+                try:
+                    from frontend.deploy import overlay_plugin_listeners_to_appdata
+
+                    overlay_plugin_listeners_to_appdata(reload=True)
+                except Exception:
+                    _log.debug("Plugin %s listener overlay on disable failed", pid, exc_info=True)
+            except Exception:
+                _log.exception("Plugin %s disable unload failed", pid)
+            finally:
+                if not is_plugin_enabled(pid):
+                    _notify_uefn_plugins_changed()
+
+        _spawn_toggle_thread(_disable_bg, name=f"uefn-plugin-disable-{pid}")
         return
 
     root = plugin_dir(pid)
     manifest = load_plugin_manifest(pid)
     if manifest is None or not root.is_dir():
         return
-    with _LOCK:
-        _strip_contributions_for(pid)
-    _load_enabled_plugin(pid, root, manifest)
+    # Fast path: Settings tab / dock / header from plugin.json (no backend import).
     try:
-        from backend.agent.coding_agents.base import invalidate_detect_cache
+        _load_one(pid, root, manifest, register=False)
+    except Exception as exc:  # noqa: BLE001 — never kill Store toggle
+        _log.exception("UEFN plugin %s contrib load failed: %s", pid, exc)
+        _record_plugin_load_error(pid, exc)
 
-        invalidate_detect_cache()
-    except Exception:
-        pass
+    def _enable_bg() -> None:
+        try:
+            if not is_plugin_enabled(pid):
+                return
+            _load_enabled_plugin(pid, root, manifest)
+            try:
+                from frontend.deploy import overlay_plugin_listeners_to_appdata
+
+                overlay_plugin_listeners_to_appdata(reload=True)
+            except Exception:
+                _log.debug("Plugin %s listener overlay on enable failed", pid, exc_info=True)
+            try:
+                from backend.agent.coding_agents.base import invalidate_detect_cache
+
+                invalidate_detect_cache()
+            except Exception:
+                pass
+        finally:
+            # Enable raced with disable — drop whatever register() just attached.
+            if not is_plugin_enabled(pid):
+                try:
+                    invalidate_plugin_runtime(pid)
+                except Exception:
+                    _log.exception("Plugin %s enable-race cleanup failed", pid)
+                with _LOCK:
+                    _strip_contributions_for(pid)
+            _notify_uefn_plugins_changed()
+
+    _spawn_toggle_thread(_enable_bg, name=f"uefn-plugin-enable-{pid}")
 
 
 def reload_single_plugin(plugin_id: str) -> None:
@@ -910,6 +1105,12 @@ def reload_single_plugin(plugin_id: str) -> None:
     Full reload re-registers every plugin and races concurrent updates into
     duplicate header buttons / settings tabs. Single-plugin path is enough for
     zip overwrite + register().
+
+    Waits are bounded so a wedged first-boot load cannot freeze install/uninstall
+    (or hold ``_STORE_INSTALL_LOCK`` / host ``_LOCK`` indefinitely).
+
+    ``register()`` runs on a toggle daemon — a hung plugin backend must not stick
+    the Store install bridge on "Refreshing store…".
     """
     from backend.uefn_plugins.store import load_plugin_manifest, normalize_plugin_id, plugin_dir
 
@@ -917,7 +1118,10 @@ def reload_single_plugin(plugin_id: str) -> None:
         pid = normalize_plugin_id(plugin_id)
     except ValueError:
         return
-    ensure_plugins_loaded()
+    wait_plugin_toggles(timeout=5.0)
+    # If boot load is still running, skip repair and only touch this plugin —
+    # the loader will honor final enabled settings when it finishes.
+    ensure_plugins_loaded(timeout=10.0)
     invalidate_plugin_runtime(pid)
     root = plugin_dir(pid)
     manifest = load_plugin_manifest(pid)
@@ -927,16 +1131,46 @@ def reload_single_plugin(plugin_id: str) -> None:
         return
     with _LOCK:
         _strip_contributions_for(pid)
-    _load_enabled_plugin(pid, root, manifest)
+    # Fast path: UI contribs from plugin.json so install can paint before register().
     try:
-        from backend.agent.coding_agents.base import invalidate_detect_cache
+        _load_one(pid, root, manifest, register=False)
+    except Exception as exc:  # noqa: BLE001 — never kill Store install
+        _log.exception("UEFN plugin %s contrib reload failed: %s", pid, exc)
+        _record_plugin_load_error(pid, exc)
 
-        invalidate_detect_cache()
-    except Exception:
-        pass
+    def _reload_bg() -> None:
+        try:
+            if not is_plugin_enabled(pid):
+                return
+            _load_enabled_plugin(pid, root, manifest)
+            try:
+                from frontend.deploy import overlay_plugin_listeners_to_appdata
+
+                overlay_plugin_listeners_to_appdata(reload=True)
+            except Exception:
+                _log.debug("Plugin %s listener overlay on reload failed", pid, exc_info=True)
+            try:
+                from backend.agent.coding_agents.base import invalidate_detect_cache
+
+                invalidate_detect_cache()
+            except Exception:
+                pass
+        finally:
+            if not is_plugin_enabled(pid):
+                try:
+                    invalidate_plugin_runtime(pid)
+                except Exception:
+                    _log.exception("Plugin %s reload-race cleanup failed", pid)
+                with _LOCK:
+                    _strip_contributions_for(pid)
+            _notify_uefn_plugins_changed()
+
+    _spawn_toggle_thread(_reload_bg, name=f"uefn-plugin-reload-{pid}")
 
 
 def reload_plugins() -> None:
+    # Let Store toggle workers finish so we don't invalidate mid-register().
+    wait_plugin_toggles()
     # Capture who was registered / enabled before wiping contribution lists so we
     # can drop stale module objects and re-run register() (Store Update replaces
     # AppData files; keeping _REGISTERED skipped register and left detect/models broken).
@@ -945,12 +1179,13 @@ def reload_plugins() -> None:
     except Exception:
         previously = set(_REGISTERED)
     with _LOAD_START_LOCK:
-        global _LOADED, _LOAD_THREAD
+        global _LOADED, _UI_READY, _LOAD_THREAD
         # Wait for any in-flight first load before wiping (avoid racing the worker).
         if _LOAD_THREAD is not None and _LOAD_THREAD.is_alive():
             _LOAD_DONE.wait(timeout=120.0)
         with _LOCK:
             _LOADED = False
+            _UI_READY = False
             _LOAD_DONE.clear()
             _LOAD_THREAD = None
             _CONTRIBUTIONS["settings_tabs"] = []
@@ -1022,6 +1257,11 @@ def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
             {"ts": time.time(), "plugin_id": pid, "error": f"{type(exc).__name__}: {exc}"},
             ensure_ascii=False,
         )
+        # Repair retries append the same failure every ensure_plugins_loaded() —
+        # unrotated this reached 13.5k lines / 1.9MB. Keep the newest tail only.
+        if path.is_file() and path.stat().st_size > _LOAD_ERROR_LOG_MAX_BYTES:
+            kept = path.read_text(encoding="utf-8").splitlines()[-_LOAD_ERROR_LOG_KEEP:]
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except Exception:
@@ -1043,18 +1283,72 @@ def _load_enabled_plugin(pid: str, root: Path, manifest: dict[str, Any]) -> None
         # still lists the gateway; repair retries register() without wiping UI.
 
 
+def _repair_missing_backends_async() -> None:
+    """Kick a single-flight background pass that retries unfinished register().
+
+    Never blocks the caller and never runs under ``_LOCK`` — a hung plugin
+    ``register()`` (e.g. unity-mcp nested MCP sync) used to freeze every Store
+    enable/disable/uninstall that needed the host lock.
+    """
+    global _REPAIR_THREAD
+    with _REPAIR_THREAD_LOCK:
+        if _REPAIR_THREAD is not None and _REPAIR_THREAD.is_alive():
+            return
+        _REPAIR_THREAD = threading.Thread(
+            target=_repair_missing_backends_worker,
+            daemon=True,
+            name="uefn-plugins-repair",
+        )
+        _REPAIR_THREAD.start()
+
+
+def _repair_missing_backends_worker() -> None:
+    try:
+        _repair_missing_backends()
+    except Exception:  # noqa: BLE001 — never kill the app on repair
+        _log.exception("UEFN plugin backend repair failed")
+
+
 def _repair_missing_backends() -> None:
     """Re-register enabled Store plugins that contributed UI but never finished register().
 
     First-boot import blips used to leave llm_providers rows with no factories —
     Default Model empty + Coding Agents 'Backend not loaded' until full restart.
+
+    Safe to call from the repair worker only — never from a thread holding ``_LOCK``.
+    """
+    # A plugin whose register() reaches back into get_contributions() /
+    # ensure_plugins_loaded() re-enters here, and it is not in _REGISTERED yet
+    # (that happens only after register returns) — so it repairs itself forever.
+    # That RecursionError killed verse + vfx on every load and made every
+    # ensure_plugins_loaded() call pay a failed re-import.
+    if getattr(_REPAIR_STATE, "active", False):
+        return
+    _REPAIR_STATE.active = True
+    try:
+        _repair_missing_backends_once()
+    finally:
+        _REPAIR_STATE.active = False
+
+
+def _repair_missing_backends_once() -> None:
+    """Scan missing backends; kick each register() on its own daemon (not under _LOCK).
+
+    Per-plugin backoff prevents a permanently hung ``register()`` from being
+    re-kicked every sidebar poll. Each register runs off the coordinator so one
+    hung plugin cannot block repair of the others.
     """
     enabled = set(get_enabled_plugin_ids())
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
         return
+    now = time.monotonic()
     for pid in sorted(enabled):
         if pid in _REGISTERED:
+            _REPAIR_ATTEMPTS.pop(pid, None)
+            continue
+        last = float(_REPAIR_ATTEMPTS.get(pid) or 0.0)
+        if now - last < _REPAIR_BACKOFF_S:
             continue
         child = root / pid
         if not child.is_dir():
@@ -1062,14 +1356,42 @@ def _repair_missing_backends() -> None:
         manifest = _read_manifest(child)
         if not manifest:
             continue
-        # _load_one refreshes contribs; do not wipe first or a failed register
-        # leaves LLMs empty until the next app update.
-        _load_enabled_plugin(pid, child, manifest)
+        # Record *before* register so a hung call is not retried every poll.
+        _REPAIR_ATTEMPTS[pid] = now
+
+        def _repair_one(
+            repair_pid: str = pid,
+            repair_root: Path = child,
+            repair_manifest: dict[str, Any] = manifest,
+        ) -> None:
+            try:
+                if repair_pid in _REGISTERED or not is_plugin_enabled(repair_pid):
+                    return
+                # _load_one refreshes contribs; do not wipe first or a failed register
+                # leaves LLMs empty until the next app update.
+                _load_enabled_plugin(repair_pid, repair_root, repair_manifest)
+                if repair_pid in _REGISTERED:
+                    _REPAIR_ATTEMPTS.pop(repair_pid, None)
+                    _notify_uefn_plugins_changed()
+            except Exception:  # noqa: BLE001 — never kill repair coordinator siblings
+                _log.exception("Plugin %s repair register failed", repair_pid)
+
+        # Not a toggle thread — wait_plugin_toggles must not join hung repairs.
+        threading.Thread(
+            target=_repair_one,
+            daemon=True,
+            name=f"uefn-plugin-repair-{pid}",
+        ).start()
 
 
 def plugins_ready() -> bool:
     """True once the first ensure_plugins_loaded pass has finished."""
     return _LOADED
+
+
+def plugins_ui_ready() -> bool:
+    """True once plugin.json UI contributions are applied (backends may still register)."""
+    return _UI_READY or _LOADED
 
 
 def wait_plugins_loaded(timeout: float | None = None) -> bool:
@@ -1085,6 +1407,51 @@ def wait_plugins_loaded(timeout: float | None = None) -> bool:
         _LOAD_DONE.wait()
         return bool(_LOADED)
     return bool(_LOAD_DONE.wait(timeout=float(timeout)))
+
+
+def _ide_auto_apply_worker() -> None:
+    """Drain queued IDE applies once the load pass is done. One thread — applies
+    share skills roots, so they must not run concurrently."""
+    global _IDE_APPLY_THREAD
+    try:
+        from frontend.ide_apply import apply_ide_bridge
+        from frontend.ide_paths import IdeKind
+
+        _LOAD_DONE.wait(timeout=180.0)  # let coding-agent skills_dir registrations land
+        while True:
+            with _IDE_APPLY_LOCK:
+                if not _IDE_APPLY_PENDING:
+                    # Clear under the same lock as the emptiness check, or a queue
+                    # racing here would see a live thread and orphan its item.
+                    _IDE_APPLY_THREAD = None
+                    return
+                kind, log = _IDE_APPLY_PENDING.pop(0)
+            try:
+                log(f"IDE auto-apply → {apply_ide_bridge(IdeKind(kind))}")
+            except Exception as exc:  # noqa: BLE001 — IDE may be absent
+                log(f"IDE auto-apply skipped ({kind}): {exc}")
+    except Exception:  # noqa: BLE001 — never kill the app on a bad IDE import
+        _log.exception("IDE auto-apply worker failed")
+        with _IDE_APPLY_LOCK:
+            _IDE_APPLY_THREAD = None
+            _IDE_APPLY_PENDING.clear()
+
+
+def _queue_ide_auto_apply(kind: str, log: Callable[[str], None]) -> None:
+    key = (kind or "").strip().lower()
+    if not key:
+        return
+    global _IDE_APPLY_THREAD
+    with _IDE_APPLY_LOCK:
+        if any(k == key for k, _ in _IDE_APPLY_PENDING):
+            return
+        _IDE_APPLY_PENDING.append((key, log))
+        if _IDE_APPLY_THREAD is not None and _IDE_APPLY_THREAD.is_alive():
+            return
+        _IDE_APPLY_THREAD = threading.Thread(
+            target=_ide_auto_apply_worker, daemon=True, name="uefn-ide-auto-apply"
+        )
+        _IDE_APPLY_THREAD.start()
 
 
 def _flush_load_callbacks() -> None:
@@ -1131,8 +1498,12 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
 
 
 def _run_first_plugin_load() -> None:
-    """Import + register every enabled plugin. Caller owns single-flight."""
-    global _LOADED
+    """Import + register every enabled plugin. Caller owns single-flight.
+
+    Two-phase so Settings can show Installed tabs before slow register() work
+    (Blender addon deploy, Discord presence, gateway factories, …) finishes.
+    """
+    global _LOADED, _UI_READY
     try:
         seed_uefn_plugins()
     except Exception as exc:  # noqa: BLE001 — fail-soft
@@ -1141,6 +1512,7 @@ def _run_first_plugin_load() -> None:
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
         with _LOCK:
+            _UI_READY = True
             _LOADED = True
         return
     jobs: list[tuple[str, Path, dict[str, Any]]] = []
@@ -1154,16 +1526,30 @@ def _run_first_plugin_load() -> None:
         if pid not in enabled:
             continue
         jobs.append((pid, child, manifest))
-    # Parallel pre-import: exec_module dominates boot; contrib/register stay serial.
+    # Phase 1 — plugin.json UI rows only (fast). Settings polls / paints Installed.
+    for pid, child, manifest in jobs:
+        try:
+            _load_one(pid, child, manifest, register=False)
+        except Exception as exc:  # noqa: BLE001 — never kill app startup
+            _log.exception("UEFN plugin %s contrib load failed: %s", pid, exc)
+            _record_plugin_load_error(pid, exc)
+    with _LOCK:
+        _UI_READY = True
+    # Do not flush load callbacks here — PanelApi still needs one notify after
+    # register() so LLM/coding-agent factories refresh. Settings paints via
+    # get_ui_contributions() + frontend poll while backends finish.
+    # Parallel pre-import: exec_module dominates boot; register stays serial after.
     if len(jobs) > 1:
         from concurrent.futures import ThreadPoolExecutor
 
         workers = min(8, len(jobs))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="uefn-plugin-import") as pool:
             list(pool.map(lambda j: _warm_plugin_backend(j[0], j[1], j[2]), jobs))
+    # Phase 2 — register() backends (may be slow; UI already has contribs).
     for pid, child, manifest in jobs:
         _load_enabled_plugin(pid, child, manifest)
     with _LOCK:
+        _UI_READY = True
         _LOADED = True
 
 
@@ -1209,19 +1595,35 @@ def ensure_plugins_loaded_async(on_done: Callable[[], None] | None = None) -> No
         _LOAD_THREAD.start()
 
 
-def ensure_plugins_loaded() -> None:
-    """Block until plugins are loaded (agent/MCP). Safe if async load already started."""
+def ensure_plugins_loaded(timeout: float | None = None) -> bool:
+    """Block until plugins are loaded (agent/MCP). Safe if async load already started.
+
+    When ``timeout`` is set and the first load has not finished, return False without
+    kicking repair — Store install/uninstall must not wait forever on a hung plugin
+    ``register()`` at boot. Agent/MCP callers pass ``timeout=None`` (default) and
+    still wait until ready.
+
+    Missing-backend repair is always kicked on a background thread and never runs
+    under ``_LOCK`` (a hung ``register()`` must not freeze Store toggles).
+    """
     if not _LOADED:
         ensure_plugins_loaded_async()
-        _LOAD_DONE.wait()
-    with _LOCK:
-        if _LOADED:
-            # Retry any enabled plugin that never reached register() success.
-            _repair_missing_backends()
-        else:
-            # Should not happen; fail-soft so callers never hang forever.
-            _run_first_plugin_load()
-            _LOAD_DONE.set()
+        if timeout is None:
+            _LOAD_DONE.wait()
+        elif not _LOAD_DONE.wait(timeout=max(0.0, float(timeout))):
+            return False
+    if _LOADED:
+        # Never hold _LOCK across register() — repair is async + per-plugin backoff.
+        _repair_missing_backends_async()
+        return True
+    if timeout is not None:
+        # Boot still in flight (or never marked ready) — caller asked not to hang.
+        return False
+    # Should not happen; fail-soft so callers never hang forever.
+    _run_first_plugin_load()
+    _LOAD_DONE.set()
+    _repair_missing_backends_async()
+    return True
 
 
 _DEFAULT_ICON_FILES = (
@@ -1276,7 +1678,7 @@ def _resolve_contrib_icon(icon: Any, root: Path) -> str | None:
     return raw  # emoji / short label
 
 
-def _load_one(pid: str, root: Path, manifest: dict[str, Any]) -> None:
+def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool = True) -> None:
     contributes = manifest.get("contributes") if isinstance(manifest.get("contributes"), dict) else {}
     # Refresh this plugin's contrib rows (safe to re-run after a failed register).
     _strip_contributions_for(pid)
@@ -1665,7 +2067,7 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any]) -> None:
             _PLUGIN_TOOL_OWNER[name] = pid
         _rebuild_intent_row(pid, tool_names, intent_re)
 
-    if pid in _REGISTERED:
+    if not register or pid in _REGISTERED:
         return
     backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend.get("entry") or "backend").strip() or "backend"
@@ -1813,6 +2215,15 @@ class _PluginApi:
         register_secret_tester(self.plugin_id, secret_key, test_fn)
         self.log(f"Secret tester registered: {secret_key}")
 
+    def register_panel_rpc(self, name: str, fn: Any) -> None:
+        """Register a PanelApi / bridge method: ``plugin_call(plugin_id, name, params)``.
+
+        ``fn`` receives ``**params`` from the caller. Prefer returning plain dicts
+        (never raise across the JS bridge unless the host should surface an error).
+        """
+        register_panel_rpc(self.plugin_id, name, fn)
+        self.log(f"Panel RPC registered: {name}")
+
     def register_tts_voices(self, list_voices_fn: Any) -> None:
         """Register ``list_voices() -> [{id, label}]`` — dynamic voices for the picker.
 
@@ -1910,11 +2321,7 @@ class _PluginApi:
         if os.environ.get("UEFN_DUCKY_MCP_BRIDGE") == "1":
             self.log(f"IDE auto-apply skipped ({kind}): MCP bridge process")
             return
-        try:
-            from frontend.ide_apply import apply_ide_bridge
-            from frontend.ide_paths import IdeKind
-
-            path = apply_ide_bridge(IdeKind(kind.strip().lower()))
-            self.log(f"IDE auto-apply → {path}")
-        except Exception as exc:  # noqa: BLE001 — IDE may be absent
-            self.log(f"IDE auto-apply skipped ({kind}): {exc}")
+        # Off the plugin-load thread: config merge + skill deploy is disk-bound and
+        # nothing in the UI needs it. Inline, three gateways serialized ~60s of
+        # writes ahead of _LOADED, so the Store/Settings panes sat empty that long.
+        _queue_ide_auto_apply(kind, self.log)

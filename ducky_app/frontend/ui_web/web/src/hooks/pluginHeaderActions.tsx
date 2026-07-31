@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { requestOpenDiscordTab } from "../navigation/openDiscordTab";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { PANEL_ACTION_PREFIX, requestOpenPluginUiTab } from "../plugin-ui";
 import type { PluginHeaderButton } from "./usePluginContributions";
@@ -7,9 +6,7 @@ import type { PluginHeaderButton } from "./usePluginContributions";
 const SETTINGS_ACTION_PREFIX = "settings:";
 
 /** Phase-1 builtin actions for `contributes.header.buttons[].action`. */
-const BUILTIN_ACTIONS: Record<string, () => void> = {
-  "builtin:open-discord": () => requestOpenDiscordTab(),
-};
+const BUILTIN_ACTIONS: Record<string, () => void> = {};
 
 /** Named builtin keys → emoji (no line-icon SVGs in Settings / header). */
 const NAMED_EMOJI: Record<string, string> = {

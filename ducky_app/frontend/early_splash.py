@@ -11,12 +11,32 @@ from typing import Any
 
 # Color-keyed away so only the duck (or fallback text) is visible.
 _KEY = "#0a0a0a"
+_KEY_RGB = (0x0A, 0x0A, 0x0A)
+# Soft PNG edges composite onto the key and leave a dark halo that is *not*
+# exact #0a0a0a, so -transparentcolor cannot punch them out. Binary-matte first.
+_ALPHA_CUTOFF = 40
 _DUCK_PX = 220
 _PAD = 10
 
 _splash: Any | None = None
 _photo: Any | None = None  # keep PhotoImage alive
 _drag: dict[str, int] = {"x": 0, "y": 0}
+
+
+def _matte_for_colorkey(img: Any) -> Any:
+    """Hard-matte RGBA for Win32 ``-transparentcolor`` (no fringe / fake shadow)."""
+    rgba = img.convert("RGBA")
+    kr, kg, kb = _KEY_RGB
+    out: list[tuple[int, int, int, int]] = []
+    for r, g, b, a in rgba.getdata():
+        if int(a) < _ALPHA_CUTOFF:
+            out.append((kr, kg, kb, 255))
+            continue
+        if (int(r), int(g), int(b)) == (kr, kg, kb):
+            r = min(255, int(r) + 1)
+        out.append((int(r), int(g), int(b), 255))
+    rgba.putdata(out)
+    return rgba
 
 
 def _logo_png() -> Path | None:
@@ -85,8 +105,6 @@ def show() -> Any | None:
         root.attributes("-topmost", True)
     except Exception:
         pass
-    # ponytail: transparentcolor punches out the key; PNG edges blended against
-    # #0a0a0a can leave a faint dark fringe. Ceiling: win32 layered window.
     try:
         root.attributes("-transparentcolor", _KEY)
     except Exception:
@@ -102,6 +120,7 @@ def show() -> Any | None:
             from PIL import Image, ImageTk
 
             img = Image.open(logo).convert("RGBA").resize((_DUCK_PX, _DUCK_PX), Image.Resampling.LANCZOS)
+            img = _matte_for_colorkey(img)
             _photo = ImageTk.PhotoImage(img)
             label = tk.Label(frame, image=_photo, bg=_KEY, borderwidth=0, highlightthickness=0)
             label.pack()

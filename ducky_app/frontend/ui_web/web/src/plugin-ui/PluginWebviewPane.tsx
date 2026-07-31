@@ -10,6 +10,7 @@ import {
   handleBridgeRequest,
   hideBrowserPaneOnUnmount,
   pushBrowserPaneBounds,
+  shouldForwardPluginPush,
 } from "./bridge";
 import { isBridgeRequest, parsePluginUiTabId, type PluginUiPanel } from "./types";
 import { usePluginContributions } from "../hooks/usePluginContributions";
@@ -93,16 +94,25 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
   // Native browser pane plumbing (bridge `browser.*`): forward navigation-state
   // pushes into the sandbox, and hide the pane while this tab is unmounted (tab
   // switch). The native control is destroyed only when the tab CLOSES.
+  // Also forward plugin.subscribe event types (e.g. discord_message).
   useEffect(() => {
     installPanelPushBus();
     return subscribePanelPush((event) => {
-      if (event.type !== "browser_pane_state" || event.pane_id !== tabId) return;
-      iframeRef.current?.contentWindow?.postMessage(
-        { channel: BRIDGE_CHANNEL, event },
-        "*",
-      );
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return;
+      if (event.type === "browser_pane_state" && event.pane_id === tabId) {
+        win.postMessage({ channel: BRIDGE_CHANNEL, event }, "*");
+        return;
+      }
+      if (
+        parsed &&
+        typeof event.type === "string" &&
+        shouldForwardPluginPush(tabId, parsed.pluginId, event.type)
+      ) {
+        win.postMessage({ channel: BRIDGE_CHANNEL, event }, "*");
+      }
     });
-  }, [tabId]);
+  }, [tabId, parsed]);
 
   // Re-pin the native pane every frame from the live iframe rect (deduped inside
   // pushBrowserPaneBounds) — window resizes / sidebar toggles / split drags track

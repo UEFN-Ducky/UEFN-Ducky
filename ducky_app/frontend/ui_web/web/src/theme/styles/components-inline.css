@@ -1332,11 +1332,26 @@ body.focus-window .window-resize-grip--n {
   overflow: hidden;
 }
 
-/* Binary / asset files: centered "can't open" message + "View raw". */
+/* Binary / asset files: centered "can't open" message + actions. */
 .binary-file-pane {
   align-items: center;
   justify-content: center;
   gap: 12px;
+  text-align: center;
+  padding: 24px;
+}
+
+.binary-file-pane-hint {
+  max-width: 28rem;
+  line-height: 1.45;
+}
+
+.binary-file-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .file-editor-pre {

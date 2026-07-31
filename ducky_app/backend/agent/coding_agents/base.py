@@ -63,13 +63,17 @@ def contributed_coding_agents() -> tuple[str, ...]:
     """Enabled gateway coding-agent ids that also have a registered factory."""
     try:
         from backend.uefn_plugins.host import (
-            ensure_plugins_loaded,
+            ensure_plugins_loaded_async,
             get_coding_agent_registration,
             get_contributions,
+            plugins_ready,
         )
 
-        # Repair Store gateways whose register() failed on first boot.
-        ensure_plugins_loaded()
+        # Never block PanelSettings.save / Store enable on sync register repair.
+        # ensure_plugins_loaded() → unity-mcp nested MCP sync hung Discord toggles
+        # for minutes (UI snapped back). Boot still repairs via async load.
+        if not plugins_ready():
+            ensure_plugins_loaded_async()
         out: list[str] = []
         seen: set[str] = set()
         for row in get_contributions().get("llm_coding_agents") or []:

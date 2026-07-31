@@ -535,6 +535,10 @@
   cursor: not-allowed;
 }
 
+.ds-tool.is-spinning svg {
+  animation: spin-slow 0.8s linear infinite;
+}
+
 @media (max-width: 640px) {
   .ds-controls {
     flex-wrap: wrap;

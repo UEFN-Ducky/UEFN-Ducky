@@ -67,6 +67,24 @@ import { StoreHeroSkeleton, StoreSkeletonRows } from "./store/StoreSkeleton";
 import { useUiTarget } from "../../ui-targets/registry";
 import { maybeStartPluginWalkthrough } from "../../walkthrough";
 
+/** Manual catalog refresh cooldown — stop hammering the Store collect endpoint. */
+const MANUAL_REFRESH_COOLDOWN_MS = 5000;
+
+/** Bridge calls with no host timeout — never leave Enable/Uninstall stuck forever. */
+const STORE_MUTATION_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out — state will re-sync`));
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export function StoreTab() {
   const { confirm } = useConfirmModal();
   const storeRootRef = useUiTarget("settings.store.root", {
@@ -100,9 +118,11 @@ export function StoreTab() {
   });
   const fileRef = useRef<HTMLInputElement>(null);
   const sharedRefresh = useRef<Promise<boolean> | null>(null);
+  const lastManualRefreshAt = useRef(0);
   const sectionLayerRef = useRef<HTMLDivElement>(null);
   const detailLayerRef = useRef<HTMLDivElement>(null);
   const sawItemsRef = useRef(Boolean(peekStoreCatalogCache()?.items?.length));
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
 
   const setActionBusySlug = useCallback((slug: string, on: boolean) => {
     setActionBusy((prev) => {
@@ -191,6 +211,108 @@ export function StoreTab() {
     sharedRefresh.current = run;
     return run;
   }, [refreshCatalog]);
+
+  /** Local disk truth for plugin enabled/installed — no network catalog round-trip. */
+  const patchLocalPluginState = useCallback(async (): Promise<boolean> => {
+    const api = getApi();
+    if (!api || typeof api.list_uefn_plugins !== "function") return false;
+    try {
+      const res = await withTimeout(
+        api.list_uefn_plugins(),
+        STORE_MUTATION_TIMEOUT_MS,
+        "list_uefn_plugins",
+      );
+      if (res.ok === false) return false;
+      const byId = new Map(
+        (res.plugins || [])
+          .filter((p) => p?.id)
+          .map((p) => [String(p.id).toLowerCase(), p] as const),
+      );
+      setCatalog((prev) => {
+        if (!prev?.items?.length) return prev;
+        let changed = false;
+        const items = prev.items.map((it) => {
+          if (itemKind(it) !== "plugin") return it;
+          const slug = (it.slug || "").toLowerCase();
+          if (!slug) return it;
+          const plug = byId.get(slug);
+          if (!plug) {
+            if (it.state === "installed" || it.state === "update" || it.enabled) {
+              changed = true;
+              return {
+                ...it,
+                enabled: false,
+                state: "available" as const,
+                installed_version: null,
+                source: it.source === "local" || it.source === "ai" ? it.source : null,
+              };
+            }
+            return it;
+          }
+          const enabled = Boolean(plug.enabled);
+          // Catalog uses numeric installed_version; plugin.version may be semver string.
+          const installedVersion =
+            typeof plug.version === "number"
+              ? plug.version
+              : typeof it.installed_version === "number"
+                ? it.installed_version
+                : null;
+          // Preserve "update" when catalog already knows a newer remote; otherwise mark installed.
+          const nextState = (it.state === "update" ? "update" : "installed") as
+            | "update"
+            | "installed";
+          if (
+            it.enabled === enabled &&
+            it.state === nextState &&
+            (it.installed_version ?? null) === installedVersion
+          ) {
+            return it;
+          }
+          changed = true;
+          return {
+            ...it,
+            enabled,
+            state: nextState,
+            installed_version: installedVersion,
+            source: plug.source || it.source,
+          };
+        });
+        if (!changed) return prev;
+        const next: DuckyOSStoreCatalog = { ...prev, items };
+        rememberStoreCatalog(next);
+        notifyStoreCatalogItems(next.items);
+        return next;
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  /** Toolbar refresh: always hits the network, shows spinner, coalesces + cools down. */
+  const manualRefreshCatalog = useCallback(async () => {
+    if (catalogRefreshing || sharedRefresh.current) return;
+    const now = Date.now();
+    const elapsed = now - lastManualRefreshAt.current;
+    if (lastManualRefreshAt.current > 0 && elapsed < MANUAL_REFRESH_COOLDOWN_MS) {
+      const waitS = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - elapsed) / 1000);
+      setError(`Wait ${waitS}s before refreshing again`);
+      return;
+    }
+    lastManualRefreshAt.current = now;
+    setError("");
+    setCatalogRefreshing(true);
+    // Always show loading on user refresh (cached catalogs used to skip this → dead button).
+    setCatalogLoading(true);
+    try {
+      await refreshCatalogShared();
+      // Disk installed/enabled flags — catalog versions alone can look stale after updates.
+      await patchLocalPluginState();
+    } finally {
+      setCatalogRefreshing(false);
+      setCatalogLoading(false);
+    }
+  }, [catalogRefreshing, refreshCatalogShared, patchLocalPluginState]);
 
   // After Update All (or any update queue) drains, refresh catalog once.
   useEffect(() => {
@@ -304,12 +426,18 @@ export function StoreTab() {
   }, []);
 
   // Keep Installed in sync with the sidebar Plugins list (enable/disable/install).
+  // Local list_uefn_plugins first (disk truth), then best-effort network catalog.
   useEffect(() => {
     installPanelPushBus();
     return subscribePanelPush((event) => {
-      if (event.type === "uefn_plugins_changed") void refreshCatalogShared();
+      if (event.type === "uefn_plugins_changed") {
+        void (async () => {
+          await patchLocalPluginState();
+          await refreshCatalogShared();
+        })();
+      }
     });
-  }, [refreshCatalogShared]);
+  }, [patchLocalPluginState, refreshCatalogShared]);
 
   // Tell the Settings sidebar which plugin row to highlight on the Plugins page.
   useEffect(() => {
@@ -529,7 +657,11 @@ export function StoreTab() {
     setError("");
     try {
       if (isSkill && setSkillEnabled) {
-        const result = await setSkillEnabled(slug, enabled);
+        const result = await withTimeout(
+          setSkillEnabled(slug, enabled),
+          STORE_MUTATION_TIMEOUT_MS,
+          "Enable/disable skill",
+        );
         if (!result.ok) {
           patchItemEnabled(slug, prevEnabled);
           setError(result.error || "Update failed");
@@ -537,7 +669,11 @@ export function StoreTab() {
         return;
       }
       if (!setPluginEnabled) return;
-      const result = await setPluginEnabled(slug, enabled, trustLocal);
+      const result = await withTimeout(
+        setPluginEnabled(slug, enabled, trustLocal),
+        STORE_MUTATION_TIMEOUT_MS,
+        "Enable/disable plugin",
+      );
       if (result.needs_trust) {
         patchItemEnabled(slug, prevEnabled);
         const ok = await confirm({
@@ -550,7 +686,11 @@ export function StoreTab() {
         });
         if (ok) {
           patchItemEnabled(slug, true);
-          const trusted = await setPluginEnabled(slug, true, true);
+          const trusted = await withTimeout(
+            setPluginEnabled(slug, true, true),
+            STORE_MUTATION_TIMEOUT_MS,
+            "Enable/disable plugin",
+          );
           if (trusted.ok) {
             if (enabled) maybeStartPluginWalkthrough(slug);
           } else {
@@ -567,8 +707,10 @@ export function StoreTab() {
     } catch (err) {
       patchItemEnabled(slug, prevEnabled);
       setError(err instanceof Error ? err.message : String(err));
+      void patchLocalPluginState();
     } finally {
       setActionBusySlug(slug, false);
+      if (!isSkill) void patchLocalPluginState();
     }
   };
 
@@ -636,21 +778,32 @@ export function StoreTab() {
     try {
       let result: { ok?: boolean; error?: string };
       if (isSkill && deleteSkill) {
-        result = await deleteSkill(slug);
+        result = await withTimeout(
+          deleteSkill(slug),
+          STORE_MUTATION_TIMEOUT_MS,
+          "Uninstall skill",
+        );
       } else if (uninstallPlugin) {
-        result = await uninstallPlugin(slug, eraseData);
+        result = await withTimeout(
+          uninstallPlugin(slug, eraseData),
+          STORE_MUTATION_TIMEOUT_MS,
+          "Uninstall plugin",
+        );
       } else {
         return;
       }
       if (result.ok) {
         setUninstallItem(null);
         if (detailItem?.slug === slug) setDetailItem(null);
-        await refreshCatalog();
+        // Disk is already cleared — patch local flags immediately; network catalog is best-effort.
+        await patchLocalPluginState();
+        void refreshCatalogShared();
       } else {
         setError(result.error || "Uninstall failed");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      void patchLocalPluginState();
     } finally {
       setUninstallBusy(false);
     }
@@ -1037,13 +1190,12 @@ export function StoreTab() {
                 </button>
                 <button
                   type="button"
-                  className="ds-tool"
-                  title="Refresh catalog"
+                  className={`ds-tool${catalogRefreshing ? " is-spinning" : ""}`}
+                  title={catalogRefreshing ? "Refreshing…" : "Refresh catalog"}
                   aria-label="Refresh catalog"
-                  disabled={catalogLoading}
+                  disabled={catalogRefreshing || catalogLoading}
                   onClick={() => {
-                    setError("");
-                    void refreshCatalog();
+                    void manualRefreshCatalog();
                   }}
                 >
                   <Icons.Refresh />

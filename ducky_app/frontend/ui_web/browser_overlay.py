@@ -149,7 +149,7 @@ def _is_allowed_url(url: str) -> bool:
 
 
 def user_data_dir() -> str:
-    from backend.skill import appdata_dir
+    from backend.skills.store import appdata_dir
 
     p = appdata_dir() / "webview2_browser"
     p.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,20 @@
 import { useEffect, type DependencyList } from "react";
-import type { AgentEvent } from "../types/panel";
+import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { installPerfMonitor, noteFrameDelivery, notePendingDepth } from "./perfMonitor";
 import { getApi } from "./usePanelApi";
+
+/** PanelApi._push_panel events share the HTTP bus — do not treat as agent stream. */
+const PANEL_PUSH_TYPES = new Set<string>([
+  "key_test_done",
+  "key_test_progress",
+  "appearance_changed",
+  "project_changed",
+  "discord_changed",
+  "uefn_plugins_changed",
+  "uefn_plugin_trust_request",
+  "browser_pane_state",
+  "browser_pane_new_window",
+]);
 
 type AgentEventListener = (event: AgentEvent) => void;
 
@@ -118,7 +131,18 @@ function startHttpEventPoll() {
             });
           }
           // #endregion
-          for (const event of body.events) fanOut(event);
+          for (const event of body.events) {
+            const kind = String(event?.type || "");
+            if (PANEL_PUSH_TYPES.has(kind)) {
+              try {
+                window.__uefnPanelPush?.(event as unknown as PanelPushEvent);
+              } catch {
+                /* ignore */
+              }
+              continue;
+            }
+            fanOut(event);
+          }
         }
       } catch {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
@@ -132,8 +156,9 @@ export function installAgentEventBus() {
   if (busInstalled) return;
   busInstalled = true;
   installPerfMonitor();
-  // Agent streaming uses same-origin long polling instead of evaluate_js.
-  // This avoids deadlocks with pywebview's own API-return evaluate_js calls.
+  // Agent streaming + Store panel pushes use same-origin long polling instead of
+  // evaluate_js. This avoids deadlocks with pywebview's own API-return calls
+  // (Settings stuck on Uninstalling… / install progress frozen).
   startHttpEventPoll();
   const queue = (window as Window & { __uefnEventQueue?: AgentEvent[] }).__uefnEventQueue;
   window.__uefnPushEvent = fanOut;

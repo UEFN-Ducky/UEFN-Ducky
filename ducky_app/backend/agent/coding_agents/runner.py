@@ -299,7 +299,7 @@ def run_coding_agent_message(
     push({"type": "status", "text": f"Starting {adapter.label}…", "conv_id": conv.id, "run_id": rid})
 
     from backend.bridge import set_port_override
-    from backend.listener_status import fetch_listener_status
+    from backend.bridge.status import fetch_listener_status
     from frontend.settings import PANEL_LISTENER_PORT
 
     set_port_override(PANEL_LISTENER_PORT)

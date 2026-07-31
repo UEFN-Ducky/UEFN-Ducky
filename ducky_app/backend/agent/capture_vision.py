@@ -36,7 +36,7 @@ def _parse_result_obj(data: Any) -> dict[str, Any] | None:
                 text = line
                 break
     try:
-        from backend.serialization import parse_tool_result_envelope
+        from backend.agent.serialization import parse_tool_result_envelope
 
         obj = parse_tool_result_envelope(text)
         if isinstance(obj, dict):

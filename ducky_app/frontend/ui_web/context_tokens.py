@@ -130,7 +130,7 @@ def count_tokens(text: str, model: str = "", provider: str = "") -> int:
 
 
 def _message_text(message: dict[str, Any], *, tool_result_format: str = "toon") -> str:
-    from backend.serialization import format_tool_block_for_llm
+    from backend.agent.serialization import format_tool_block_for_llm
 
     parts: list[str] = []
     content = message.get("content")
@@ -883,7 +883,7 @@ def compute_context_report(
         )
 
     apply_workspace_env(settings.uefn_project_root)
-    from backend.skill import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
+    from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
 
     seed_skill_packs()
     from backend.mcp_plugins.store import seed_mcp_plugins
@@ -923,7 +923,7 @@ def compute_context_report(
     project_match = True
     if listener_online and not listener_wedged:
         global _LISTENER_PROJECT_CACHE
-        from backend.listener_status import listener_project_fields
+        from backend.bridge.status import listener_project_fields
 
         _, uefn_project_name, project_match, _LISTENER_PROJECT_CACHE = listener_project_fields(
             PANEL_LISTENER_PORT,

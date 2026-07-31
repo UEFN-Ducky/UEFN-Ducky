@@ -54,7 +54,7 @@ class ToolCallRecord:
     llm_tokens: int = 0
 
 
-from backend.mcp_content import mcp_content_to_text as _content_to_text
+from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
 
 
 def _hint_for_error(tool: str, text: str) -> str:
@@ -71,7 +71,7 @@ def _hint_for_error(tool: str, text: str) -> str:
 
 
 async def list_mcp_tools() -> list[Tool]:
-    from backend.builtin_toolsets import filter_builtin_tools
+    from backend.agent.builtin_toolsets import filter_builtin_tools
     from backend.uefn_plugins.host import filter_uefn_plugin_tools
 
     mcp = _ensure_mcp()
@@ -383,7 +383,7 @@ def shrink_structured_value(value: Any, keep: int = 6, _depth: int = 0) -> Any:
 
 def compact_tool_result_for_api(tool_name: str, payload_json: str) -> str:
     """Shrink tool results as compact JSON (legacy / json format path)."""
-    from backend.serialization import prepare_tool_result_envelope
+    from backend.agent.serialization import prepare_tool_result_envelope
 
     prepared = prepare_tool_result_envelope(tool_name, payload_json)
     if isinstance(prepared, str):
@@ -535,7 +535,7 @@ def _looks_like_tool_failure(name: str, text: str) -> bool:
         return stripped.startswith("ERROR:")
     if stripped.startswith("ERROR:"):
         return True
-    from backend.serialization import parse_tool_result_envelope
+    from backend.agent.serialization import parse_tool_result_envelope
 
     obj = parse_tool_result_envelope(stripped)
     if isinstance(obj, dict):

@@ -21,7 +21,6 @@ import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsCon
 import { Header } from "./components/Header";
 import { WindowDrag } from "./components/WindowDrag";
 import { WindowResize } from "./components/WindowResize";
-import { AssetPreviewCacheProvider } from "./asset-preview";
 import { ChatView } from "./views/ChatView";
 import { FocusView } from "./views/FocusView";
 import { SettingsView } from "./views/SettingsView";
@@ -32,6 +31,7 @@ import { useProject } from "./hooks/useProject";
 import { useVersionCheck } from "./hooks/useVersionCheck";
 import { useChatLayoutMode } from "./hooks/useChatLayoutMode";
 import { useOsFileDropGuard } from "./hooks/useOsFileDropGuard";
+import { installAgentEventBus } from "./hooks/useAgentEventBus";
 import { installPanelPushBus, subscribePanelPush } from "./hooks/usePanelPushBus";
 import { queuePluginTrustRequest } from "./hooks/pluginTrustRequest";
 import { UpdateAvailableModal } from "./components/UpdateAvailableModal";
@@ -69,6 +69,9 @@ function PluginPrefsHydrate() {
 /** Agent enable of AI/local plugin → open Store + queue user trust confirm. */
 function PluginTrustBridge() {
   useEffect(() => {
+    // HTTP poll must run even before ChatView mounts — Store enable/uninstall
+    // pushes uefn_plugins_changed over /__panel_events.
+    installAgentEventBus();
     installPanelPushBus();
     return subscribePanelPush((event) => {
       if (event.type !== "uefn_plugin_trust_request") return;
@@ -103,11 +106,7 @@ export default function App() {
   useOsFileDropGuard();
   useEffect(() => installPluginFaultGuards(), []);
   if (focusId) {
-    return (
-      <AssetPreviewCacheProvider>
-        <FocusView focusId={focusId} />
-      </AssetPreviewCacheProvider>
-    );
+    return <FocusView focusId={focusId} />;
   }
   const [currentView, setCurrentView] = useState<ViewId>("chat");
   const { mode: layoutMode, setMode: setLayoutMode } = useChatLayoutMode();
@@ -189,7 +188,6 @@ export default function App() {
       <TerminalsSettingsProvider>
       <ProjectFilesSettingsProvider>
       <VerseDiagnosticsSettingsProvider>
-      <AssetPreviewCacheProvider>
       <ThemeProvider />
       <AppearanceCssBridge />
       <AppearanceFxBridge />
@@ -238,7 +236,6 @@ export default function App() {
       <MicPermissionModal />
       </UndoHistoryProvider>
       </NavigationHistoryProvider>
-      </AssetPreviewCacheProvider>
       </VerseDiagnosticsSettingsProvider>
       </ProjectFilesSettingsProvider>
       </TerminalsSettingsProvider>

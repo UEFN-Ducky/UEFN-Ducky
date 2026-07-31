@@ -23,8 +23,11 @@ export type PluginDockPanel = {
 export type PluginEditorKind = {
   kind: string;
   title?: string;
+  /** Phase-2 panel reference, e.g. ``panel:asset``. */
   ui?: string;
   plugin_id?: string;
+  /** Optional exact extensions (``.uasset``, ``.fbx``). When set, match these over ``kind``. */
+  suffixes?: string[];
 };
 
 export type PluginHeaderButton = {
@@ -480,6 +483,16 @@ export function usePluginContributions(): PluginContributions {
     });
   }, [refresh]);
 
+  // Missed uefn_plugins_changed (push before bus / no window) left Installed empty
+  // forever — poll until the first successful contributions snapshot lands.
+  useEffect(() => {
+    if (contrib.ready) return;
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [contrib.ready, refresh]);
+
   return contrib;
 }
 
@@ -491,8 +504,55 @@ export function pluginContributesDockPanel(contrib: PluginContributions, panelId
   return contrib.dock_panels.some((p) => p.id === panelId);
 }
 
+/** Resolve ``ui: "panel:<panelId>"`` on a dock contribution (Phase-2 plugin HTML). */
+export function dockPanelPluginUi(
+  contrib: PluginContributions,
+  dockPanelId: string,
+): { pluginId: string; uiPanelId: string } | null {
+  const row = contrib.dock_panels.find((p) => p.id === dockPanelId);
+  if (!row) return null;
+  const ui = String(row.ui || "").trim();
+  if (!ui.startsWith("panel:")) return null;
+  const uiPanelId = ui.slice("panel:".length).trim().toLowerCase();
+  const pluginId = String(row.plugin_id || "").trim().toLowerCase();
+  if (!uiPanelId || !pluginId) return null;
+  return { pluginId, uiPanelId };
+}
+
 export function pluginContributesEditorKind(contrib: PluginContributions, kind: string): boolean {
   return contrib.editor_kinds.some((k) => k.kind === kind);
+}
+
+/** Resolve a plugin UI panel that claims this file path (suffixes first, then kind). */
+export function resolvePluginEditorForFile(
+  contrib: PluginContributions,
+  relativePath: string,
+  fileKind: string,
+): { pluginId: string; panelId: string } | null {
+  const lower = (relativePath || "").toLowerCase().replace(/\\/g, "/");
+  const dot = lower.lastIndexOf(".");
+  const suffix = dot >= 0 ? lower.slice(dot) : "";
+
+  let byKind: PluginEditorKind | undefined;
+  for (const row of contrib.editor_kinds) {
+    const pluginId = String(row.plugin_id || "").trim().toLowerCase();
+    const ui = String(row.ui || "").trim();
+    if (!pluginId || !ui.startsWith("panel:")) continue;
+    const suffixes = Array.isArray(row.suffixes)
+      ? row.suffixes.map((s) => String(s || "").toLowerCase())
+      : [];
+    if (suffix && suffixes.includes(suffix)) {
+      return { pluginId, panelId: ui.slice("panel:".length).trim().toLowerCase() };
+    }
+    if (!byKind && row.kind === fileKind) {
+      byKind = row;
+    }
+  }
+  if (!byKind) return null;
+  const pluginId = String(byKind.plugin_id || "").trim().toLowerCase();
+  const ui = String(byKind.ui || "").trim();
+  if (!pluginId || !ui.startsWith("panel:")) return null;
+  return { pluginId, panelId: ui.slice("panel:".length).trim().toLowerCase() };
 }
 
 export function pluginContributesHeaderButton(contrib: PluginContributions, buttonId: string): boolean {

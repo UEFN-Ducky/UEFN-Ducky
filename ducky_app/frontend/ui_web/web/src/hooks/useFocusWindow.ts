@@ -6,13 +6,12 @@ import {
   terminalTabId,
   settingsTabId,
   discordTabId,
-  discordBotIdFromTab,
   duckyProfileTabId,
   usageTabId,
   planTabId,
   type EditorTab,
 } from "../types/panel";
-import { parsePluginUiTabId } from "../plugin-ui/types";
+import { parsePluginUiTabId, pluginUiTabId } from "../plugin-ui/types";
 import { verseTranslatedTabId } from "../navigation/openVerseTranslatedTab";
 import { basename, isVerseFile } from "../verse-editor/utils/isVerseFile";
 
@@ -79,7 +78,6 @@ export type ParsedFocusId =
   | { kind: "file"; path: string }
   | { kind: "terminal"; sessionId: string }
   | { kind: "settings" }
-  | { kind: "discord"; botId: string }
   | { kind: "usage"; providerId: string }
   | { kind: "plan"; chatId: string }
   | { kind: "plugin"; tabId: string; pluginId: string; panelId: string }
@@ -106,7 +104,13 @@ export function parseFocusId(focusId: string): ParsedFocusId | null {
     return { kind: "settings" };
   }
   if (id === discordTabId() || id.startsWith("discord:")) {
-    return { kind: "discord", botId: discordBotIdFromTab(id) };
+    // Legacy host Discord tabs → plugin chat panel.
+    return {
+      kind: "plugin",
+      tabId: pluginUiTabId("discord", "discord-chat"),
+      pluginId: "discord",
+      panelId: "discord-chat",
+    };
   }
   if (id.startsWith("ducky-profile:")) {
     const profileId = id.slice("ducky-profile:".length);
@@ -160,12 +164,6 @@ export function focusIdToEditorTab(focusId: string, title: string): EditorTab | 
   }
   if (parsed.kind === "settings") {
     return { id: settingsTabId(), kind: "settings", name: title || "Settings" };
-  }
-  if (parsed.kind === "discord") {
-    const name =
-      title ||
-      (parsed.botId !== "default" ? `Discord · ${parsed.botId}` : "Discord Ducky");
-    return { id: discordTabId(parsed.botId), kind: "discord", name };
   }
   if (parsed.kind === "ducky-profile") {
     return {

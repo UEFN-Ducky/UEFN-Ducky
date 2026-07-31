@@ -16,7 +16,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from backend.skill import appdata_dir
+from backend.skills.store import appdata_dir
 
 PLUGIN_MANIFEST = "plugin.json"
 MCP_PLUGINS_DIR = "mcp_plugins"
@@ -640,7 +640,7 @@ def create_mcp_server(
     headers: dict[str, str] | None = None,
 ) -> Path:
     pid = normalize_server_id(server_id)
-    from backend.builtin_toolsets import is_builtin_group
+    from backend.agent.builtin_toolsets import is_builtin_group
 
     if is_builtin_group(pid):
         raise ValueError(f"Reserved id (built-in tool group): {pid}")

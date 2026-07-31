@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any, Callable
 
 from backend.server import mcp
@@ -128,6 +129,10 @@ def schedule_sync_nested_proxies() -> None:
 
     The IDE bridge is a separate process — it picks up changes on reconnect.
     Syncing here keeps an in-process FastMCP (if any) aligned.
+
+    Never run ``asyncio.run`` on the caller thread — unity-mcp ``register()``
+    used to call this during Store enable repair and freeze Discord toggles
+    while waiting on a dead Unity MCP HTTP session.
     """
     try:
         try:
@@ -136,7 +141,11 @@ def schedule_sync_nested_proxies() -> None:
             loop = None
         if loop is not None and loop.is_running():
             loop.create_task(sync_nested_mcp_proxies_async())
-        else:
-            sync_nested_mcp_proxies()
+            return
+        threading.Thread(
+            target=sync_nested_mcp_proxies,
+            daemon=True,
+            name="mcp-nested-proxy-sync",
+        ).start()
     except Exception:
         pass

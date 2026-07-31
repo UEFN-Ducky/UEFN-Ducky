@@ -109,8 +109,6 @@ def delete_project_appdata(slug: str, app_root: Path | None = None) -> int:
         "workspace/projects",
         "file_history",
         "verse_diagnostics",
-        "asset_previews/projects",
-        "mesh_previews/projects",
     ):
         project_dir = app_root / Path(area) / slug
         if project_dir.is_dir() and _safe_rmtree(project_dir):
@@ -139,8 +137,6 @@ def prune_empty_project_dirs(app_root: Path | None = None) -> int:
     for area in (
         "workspace/projects",
         "file_history",
-        "asset_previews/projects",
-        "mesh_previews/projects",
     ):
         root = app_root / Path(area)
         if not root.is_dir():

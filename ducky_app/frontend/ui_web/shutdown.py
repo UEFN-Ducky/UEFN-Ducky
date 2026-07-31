@@ -169,6 +169,10 @@ def fatal_error_and_exit(
     tk_root: Any = None,
 ) -> None:
     """Show a blocking error dialog when possible, then terminate the whole process."""
+    # SystemExit is a normal exit (e.g. second-launch handoff) — never show as a crash.
+    if isinstance(exc, SystemExit):
+        hard_exit(api=api)
+        return
     message = _format_fatal_message(exc) if not isinstance(exc, str) else exc
     try:
         import tkinter as tk

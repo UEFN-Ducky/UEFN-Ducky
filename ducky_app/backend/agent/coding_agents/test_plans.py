@@ -354,26 +354,26 @@ class PlansStoreTests(unittest.TestCase):
 
 class ResolvePlanChatIdTests(unittest.TestCase):
     def test_explicit_chat_id_wins(self) -> None:
-        from backend.tools.ducky_panel import _resolve_plan_chat_id
+        from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
         self.assertEqual(_resolve_plan_chat_id("explicit-id"), "explicit-id")
 
     def test_falls_back_to_ducky_conv_id_env(self) -> None:
-        from backend.tools.ducky_panel import _resolve_plan_chat_id
+        from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
         with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value=None):
             with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv-123"}, clear=False):
                 self.assertEqual(_resolve_plan_chat_id(""), "env-conv-123")
 
     def test_active_conv_beats_env(self) -> None:
-        from backend.tools.ducky_panel import _resolve_plan_chat_id
+        from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
         with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value="active-conv"):
             with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv"}, clear=False):
                 self.assertEqual(_resolve_plan_chat_id(""), "active-conv")
 
     def test_empty_when_no_sources(self) -> None:
-        from backend.tools.ducky_panel import _resolve_plan_chat_id
+        from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
         with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value=None):
             os.environ.pop("DUCKY_CONV_ID", None)
