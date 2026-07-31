@@ -471,12 +471,12 @@ export function AgentTab() {
 
     try {
       const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
-      const res = await runBridgeJob<{ ok: boolean; detail: string }>(
+      const res = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
         "test_key",
         [key, (value ?? "").trim()],
         300_000,
       );
-      applyKeyTestResult(key, res.ok, res.detail, {
+      applyKeyTestResult(key, res.ok, res.detail || res.error || "", {
         setKeySaved,
         setDraftKeys,
         setKeyStatus,
