@@ -8,7 +8,7 @@ import {
 import { ToolExecutionCard } from "./ToolExecutionCard";
 import type { ActivityItem } from "../utils/chatMessageGroups";
 import type { ChatTab, LinkedAgent } from "../types/panel";
-import { InlineStopButton } from "./inlineStopButton";
+import { InlineStopButton } from "./InlineStopButton";
 
 interface AgentActivityGroupProps {
   items: ActivityItem[];
