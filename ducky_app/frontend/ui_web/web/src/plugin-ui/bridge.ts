@@ -6,6 +6,7 @@
 
 import { BRIDGE_CHANNEL } from "./constants";
 import { getApi } from "../hooks/usePanelApi";
+import { getPluginThemeVars } from "./pluginTheme";
 import { pluginUiTabId, type BridgeRequest, type BridgeResponse } from "./types";
 
 export type BridgeContext = {
@@ -324,6 +325,8 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     version: ctx.version ?? null,
     filePath: ctx.filePath ?? null,
   }),
+  /** Appearance CSS custom properties (no leading --). Live updates: appearance_theme push. */
+  "theme.get": () => ({ vars: getPluginThemeVars() }),
   // Native WebView2 browser pane (backend browser_overlay). Real Chromium pinned
   // over the panel's reported rect — no X-Frame-Options limits, and no pywebview
   // JS bridge is injected into the visited page.

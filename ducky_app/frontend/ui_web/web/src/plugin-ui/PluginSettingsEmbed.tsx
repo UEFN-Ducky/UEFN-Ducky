@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import "./plugin-ui.css";
 import { BRIDGE_CHANNEL, PLUGIN_UI_ROUTE_PREFIX, PLUGIN_UI_SANDBOX } from "./constants";
 import { handleBridgeRequest, shouldForwardPluginPush } from "./bridge";
+import { usePluginThemePush } from "./pluginTheme";
 import { isBridgeRequest } from "./types";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
@@ -30,6 +31,8 @@ export function PluginSettingsEmbed({ pluginId, panelId }: Props) {
   }, [panel?.entry, pid]);
 
   const tabId = `settings-plugin:${pid}:${panelId}`;
+
+  usePluginThemePush(iframeRef, src);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

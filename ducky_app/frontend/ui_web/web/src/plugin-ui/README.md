@@ -57,8 +57,13 @@ await call("prefs.get", { id: "highScore" });
 | `plugin.info` | — | `{ pluginId, panelId, version }` |
 | `plugin.call` | `{ method, params? }` | result of `api.register_panel_rpc` |
 | `plugin.subscribe` | `{ types: string[] }` | `{ ok, types }` — host push events forwarded to iframe |
+| `theme.get` | — | `{ vars }` — Appearance CSS vars (keys without `--`) |
 | `prefs.get` | optional `{ id }` | `{ prefs }` or `{ id, value }` |
 | `prefs.set` | `{ id, value }` (bool/string/number/null) | `{ ok: true }` |
+
+The host also pushes `{ channel, event: { type: "appearance_theme", vars } }` on iframe
+load and whenever Appearance changes. Prefer `var(--bg)`, `var(--fg)`, `var(--accent)`,
+`var(--card)`, … — never hardcode theme colors in plugin HTML.
 
 To add a method: one entry in `bridge.ts` → `BRIDGE_HANDLERS`.
 
