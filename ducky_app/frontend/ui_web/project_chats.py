@@ -306,14 +306,18 @@ def ensure_group_folder_hubs(project_root: str | None = None) -> int:
     linked = {(getattr(f, "group_hub_id", None) or "").strip() for f in folders}
     linked.discard("")
     migrated = 0
-    for conv in list_conversations(project_root=project_root):
+    # Full load: list_conversations() strips messages, and these get saved back.
+    for conv in _load_all_conversations(project_root):
         if not getattr(conv, "is_group", False):
             continue
         if conv.id in linked:
             continue
         parent = (conv.folder_id or "").strip()
+        # An unlinked hub in Archive is a tombstone from an older delete, not a
+        # legacy group. Wrapping it in a folder resurrected deleted groups at the
+        # root on the very next sidebar load.
         if is_archive_folder_id(parent):
-            parent = ""
+            continue
         hub_folder = create_folder(conv.title or "Group", parent, project_root)
         conv.folder_id = hub_folder.id
         save_conversation(conv, project_root)
@@ -328,32 +332,104 @@ def ensure_group_folder_hubs(project_root: str | None = None) -> int:
     return migrated
 
 
-def delete_folder(folder_id: str, project_root: str | None = None) -> None:
+def folder_subtree_ids(folder_id: str, project_root: str | None = None) -> list[str]:
+    """The folder plus every folder nested under it, parents before children."""
+    folders = load_folders(project_root)
+    if not any(f.id == folder_id for f in folders):
+        return []
+    children: dict[str, list[str]] = {}
+    for folder in folders:
+        children.setdefault(folder.parent_id or "", []).append(folder.id)
+    out: list[str] = []
+    seen: set[str] = set()
+    queue = [folder_id]
+    while queue:
+        current = queue.pop(0)
+        if current in seen:
+            continue
+        seen.add(current)
+        out.append(current)
+        queue.extend(children.get(current, []))
+    return out
+
+
+def group_hub_ids_in(folder_ids: list[str], project_root: str | None = None) -> list[str]:
+    """Hub conversation ids for whichever of these folders are groups."""
+    wanted = set(folder_ids)
+    out: list[str] = []
+    for folder in load_folders(project_root):
+        if folder.id not in wanted:
+            continue
+        hub_id = (getattr(folder, "group_hub_id", None) or "").strip()
+        if hub_id:
+            out.append(hub_id)
+    return out
+
+
+def delete_folder(folder_id: str, project_root: str | None = None) -> list[str]:
+    """Delete a folder. Returns the hub conversation ids that went away with it."""
     assert_not_archive_folder(folder_id, action="delete")
     folders = load_folders(project_root)
-    hub_id = ""
-    for folder in folders:
-        if folder.id == folder_id:
-            hub_id = (getattr(folder, "group_hub_id", None) or "").strip()
-            break
-    for folder in folders:
-        if folder.parent_id == folder_id:
-            folder.parent_id = ""
-    folders = [f for f in folders if f.id != folder_id]
-    save_folders(folders, project_root)
-    if hub_id:
-        # Soft-delete like chat Archive — hard-deleting the hub used to cascade-wipe
-        # every member still parented to it (and skipped Archive entirely).
-        move_conversation(hub_id, ARCHIVE_FOLDER_ID, project_root)
-        for conv in list_conversations(project_root=project_root):
-            if conv.folder_id == folder_id:
-                move_conversation(conv.id, ARCHIVE_FOLDER_ID, project_root)
-        return
-    for conv in list_conversations(project_root=project_root):
-        if conv.folder_id != folder_id:
+    target = next((f for f in folders if f.id == folder_id), None)
+    if target is None:
+        return []
+
+    if not (getattr(target, "group_hub_id", None) or "").strip():
+        # Plain folder: its contents surface at the root rather than being deleted.
+        for folder in folders:
+            if folder.parent_id == folder_id:
+                folder.parent_id = ""
+        save_folders([f for f in folders if f.id != folder_id], project_root)
+        # Full load: list_conversations() strips messages, so saving those back
+        # would blank the chat history.
+        for conv in _load_all_conversations(project_root):
+            if conv.folder_id != folder_id:
+                continue
+            conv.folder_id = ""
+            save_conversation(conv, project_root)
+        return []
+
+    # A group folder *is* the group, so deleting it takes the whole subtree with
+    # it — nested groups used to survive by being re-parented to the root.
+    doomed_ids = set(folder_subtree_ids(folder_id, project_root))
+    hub_ids = set(group_hub_ids_in(sorted(doomed_ids), project_root))
+    save_folders([f for f in folders if f.id not in doomed_ids], project_root)
+
+    all_convs = _load_all_conversations(project_root)
+    by_parent: dict[str, list[Conversation]] = {}
+    for conv in all_convs:
+        by_parent.setdefault((conv.parent_conv_id or "").strip(), []).append(conv)
+
+    members: list[Conversation] = []
+    seen = set(hub_ids)
+    queue = [
+        conv
+        for conv in all_convs
+        if conv.id not in hub_ids
+        and (conv.folder_id in doomed_ids or (conv.parent_conv_id or "").strip() in hub_ids)
+    ]
+    while queue:
+        conv = queue.pop()
+        if conv.id in seen:
             continue
-        conv.folder_id = ""
+        seen.add(conv.id)
+        members.append(conv)
+        queue.extend(by_parent.get(conv.id, []))
+
+    # Members outlive their group as plain archived duckies. Unlink them from the
+    # hub first: delete_conversation() follows parent_conv_id and would wipe them.
+    for conv in members:
+        if (conv.parent_conv_id or "").strip() in hub_ids:
+            conv.parent_conv_id = ""
+        conv.leader_conv_id = ""
+        conv.folder_id = ARCHIVE_FOLDER_ID
         save_conversation(conv, project_root)
+
+    # The hub is the group itself, not a ducky — archiving it only left a ghost
+    # "Group1" row sitting in Archive forever.
+    for hub_id in hub_ids:
+        delete_conversation(hub_id, project_root)
+    return sorted(hub_ids)
 
 
 def list_conversations(folder_id: str | None = None, project_root: str | None = None) -> list[Conversation]:

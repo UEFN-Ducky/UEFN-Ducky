@@ -13,7 +13,7 @@ import {
 } from "react";
 import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
-import { SidebarFolderTree } from "./SidebarFolderTree";
+import { SidebarFolderTree, type DuckyDeleteTarget } from "./SidebarFolderTree";
 import { SidebarFileTree, type SidebarFileTreeHandle } from "./SidebarFileTree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { SidebarSectionHeader } from "./sidebar/SidebarSectionHeader";
@@ -59,6 +59,7 @@ import {
   expandFoldersById,
   findChatAncestorFolderIds,
   findFolderById,
+  insertChatFolder,
   maxExpandedFolderDepth,
   toggleChatFolderLevels,
 } from "../utils/sidebarTree";
@@ -332,6 +333,7 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       : legacyStackedLayout;
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
+  const groupCreateQueueRef = useRef<{ chain: Promise<void> }>({ chain: Promise.resolve() });
 
   const { createDucky } = useCreateDucky({
     folders,
@@ -523,37 +525,64 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     }
   }, [createDucky, markNew, onRequestCreateDucky, selectedChatFolderId]);
 
-  const createGroupFlow = useCallback(async () => {
-    const api = getApi();
-    if (!api?.group_create) return;
-    const parentId = selectedChatFolderId ?? "";
-    const siblings = chatFolderSiblingNames(foldersRef.current, parentId);
-    const name = numberedEntryName("Group", siblings);
-    const res = await api.group_create(name, parentId);
-    if (!res?.ok || !res.id) return;
-    const folderId = String((res as { folder_id?: string }).folder_id || "").trim();
-    if (folderId) markNew("folder", folderId);
-    markNew("chat", res.id);
-    await load();
-    // Cast: ChatSidebar's onChatSelect type is narrow; ChatView accepts ChatTab.
-    (onChatSelect as (chat: {
-      id: string;
-      name: string;
-      isGroup?: boolean;
-      groupMembers?: typeof res.group_members;
-    }) => void)({
-      id: res.id,
-      name: res.title || name,
-      isGroup: true,
-      groupMembers: res.group_members || [],
-    });
-    if (folderId) {
-      setSelectedChatFolderId(folderId);
-      setEditing({ kind: "folder", id: folderId, value: res.title || name });
-    } else {
-      setEditing({ kind: "chat", id: res.id, value: res.title || name });
-    }
-  }, [load, markNew, onChatSelect, selectedChatFolderId]);
+  const createGroup = useCallback(
+    async (parentId: string) => {
+      const api = getApi();
+      if (!api?.group_create) return;
+      const siblings = chatFolderSiblingNames(foldersRef.current, parentId);
+      const name = numberedEntryName("Group", siblings);
+      const res = await api.group_create(name, parentId);
+      if (!res?.ok || !res.id) return;
+      const folderId = String((res as { folder_id?: string }).folder_id || "").trim();
+      const title = res.title || name;
+      if (folderId) {
+        // Show the row straight away — load() below only reconciles it, so the
+        // group no longer waits on two extra bridge round-trips to appear.
+        const next = insertChatFolder(foldersRef.current, parentId, {
+          id: folderId,
+          name: title,
+          expanded: true,
+          chats: [],
+          children: [],
+          groupHubId: res.id,
+        });
+        foldersRef.current = next;
+        setFolders(next);
+        markNew("folder", folderId);
+      }
+      markNew("chat", res.id);
+      // Cast: ChatSidebar's onChatSelect type is narrow; ChatView accepts ChatTab.
+      (onChatSelect as (chat: {
+        id: string;
+        name: string;
+        isGroup?: boolean;
+        groupMembers?: typeof res.group_members;
+      }) => void)({
+        id: res.id,
+        name: title,
+        isGroup: true,
+        groupMembers: res.group_members || [],
+      });
+      // The tree selection deliberately stays where it was: it is the create
+      // target, and moving it into the new group would nest the next one.
+      if (folderId) setEditing({ kind: "folder", id: folderId, value: title });
+      else setEditing({ kind: "chat", id: res.id, value: title });
+      void load();
+    },
+    [load, markNew, onChatSelect, setFolders],
+  );
+
+  const createGroupFlow = useCallback(
+    (folderId?: string) => {
+      const parentId = folderId ?? selectedChatFolderId ?? "";
+      // Serialized: each create names itself from the tree the previous one left,
+      // instead of every click in a fast burst racing to the same "Group1".
+      const queue = groupCreateQueueRef.current;
+      queue.chain = queue.chain.then(() => createGroup(parentId)).catch(() => undefined);
+      return queue.chain;
+    },
+    [createGroup, selectedChatFolderId],
+  );
 
   const revealFileInSidebar = useCallback(
     (path: string) => {
@@ -802,14 +831,55 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     const folder = findFolderById(foldersRef.current, folderId);
     const hubId = (folder?.groupHubId || "").trim();
     const message = hubId
-      ? `Delete group "${folderName}"? Member duckies move to Archive (same as deleting a ducky).`
+      ? `Delete group "${folderName}" and any groups nested inside it? Member duckies move to Archive; the group chats are deleted for good.`
       : `Delete folder "${folderName}"? Duckies inside will move to the root.`;
     if (!(await confirm({ message, confirmLabel: "Delete", danger: true }))) return;
     const api = getApi();
     if (!api) return;
-    await api.delete_folder(folderId);
-    if (hubId) onChatDeleted?.(hubId);
+    const deletedHubIds = await api.delete_folder(folderId);
+    for (const id of deletedHubIds ?? []) onChatDeleted?.(id);
     void load();
+  };
+
+  const deleteDuckySelection = async (targets: DuckyDeleteTarget[]): Promise<boolean> => {
+    const chats = targets.filter((t) => t.kind === "chat");
+    const groups = targets.filter((t) => t.kind === "folder");
+    if (chats.length + groups.length < 2) return false;
+    const parts = [
+      groups.length ? `${groups.length} group${groups.length === 1 ? "" : "s"}` : "",
+      chats.length ? `${chats.length} ducky${chats.length === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
+    if (
+      !(await confirm({
+        message: `Delete all ${targets.length} selected items (${parts.join(" and ")})? Duckies move to Archive; groups and anything nested inside them are deleted for good.`,
+        confirmLabel: "Delete ALL",
+        danger: true,
+      }))
+    )
+      return false;
+    const api = getApi();
+    if (!api) return false;
+    for (const chat of chats) {
+      await api.move_conversation(chat.id, ARCHIVE_FOLDER_ID);
+      onChatDeleted?.(chat.id);
+    }
+    const groupIds = new Set(groups.map((g) => g.id));
+    const hasSelectedAncestor = (id: string) => {
+      let parentId = findFolderById(foldersRef.current, id)?.parentId || "";
+      while (parentId) {
+        if (groupIds.has(parentId)) return true;
+        parentId = findFolderById(foldersRef.current, parentId)?.parentId || "";
+      }
+      return false;
+    };
+    for (const group of groups) {
+      // Nested groups already went away with their parent's delete.
+      if (!findFolderById(foldersRef.current, group.id) || hasSelectedAncestor(group.id)) continue;
+      const deletedHubIds = await api.delete_folder(group.id);
+      for (const id of deletedHubIds ?? []) onChatDeleted?.(id);
+    }
+    void load();
+    return true;
   };
 
   const bumpFilesRefresh = useCallback(() => setFilesRefresh((n) => n + 1), []);
@@ -956,6 +1026,7 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
             onDeleteFolder={(id, name) => void deleteFolder(id, name)}
             onRenameChat={startRename.bind(null, "chat")}
             onDeleteChat={(id, name) => void deleteChat(id, name)}
+            onDeleteSelection={deleteDuckySelection}
             onFocusChat={onFocusChat ?? (() => {})}
             onEditDucky={onEditDucky ?? (() => {})}
             selectedChatFolderId={selectedChatFolderId}

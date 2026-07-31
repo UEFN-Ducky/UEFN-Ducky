@@ -1,7 +1,8 @@
-import type { DuckyOSStoreItemDto } from "../../../types/panel";
+import type { DuckyOSStoreItemDto, UefnPluginDto } from "../../../types/panel";
 import {
   categoryLabel,
   HIDDEN_BROWSE_CATEGORIES,
+  isInstalledItem,
   isOwnedPurchase,
   itemCategories,
   itemKind,
@@ -88,8 +89,50 @@ export function installCount(item: DuckyOSStoreItemDto): number {
     : -1;
 }
 
-export function isInstalled(item: DuckyOSStoreItemDto): boolean {
-  return item.installed_version != null;
+export const isInstalled = isInstalledItem;
+
+/**
+ * Merge one catalog row with local disk truth from ``list_uefn_plugins``.
+ * Returns the same reference when nothing changed so callers can diff by identity.
+ */
+export function patchItemFromLocalPlugin(
+  item: DuckyOSStoreItemDto,
+  plug: UefnPluginDto | undefined,
+): DuckyOSStoreItemDto {
+  if (!plug) {
+    // Gone from disk. Keep a sideloaded item's origin so it stays re-installable.
+    if (item.state !== "installed" && item.state !== "update" && !item.enabled) return item;
+    return {
+      ...item,
+      enabled: false,
+      state: "available",
+      installed_version: null,
+      source: item.source === "local" || item.source === "ai" ? item.source : null,
+    };
+  }
+  const enabled = Boolean(plug.enabled);
+  // On disk means installed, whatever the version looks like. Demanding a number
+  // here nulled installed_version for every semver plugin, so the Installed row
+  // shrank to the integer-versioned ones until the next network refresh put them
+  // back — the row visibly flip-flopped on each toggle.
+  const local = plug.version === "" || plug.version == null ? null : plug.version;
+  const installedVersion = local ?? item.installed_version ?? null;
+  // Preserve "update" when the catalog already knows a newer remote build.
+  const nextState = item.state === "update" ? "update" : "installed";
+  if (
+    item.enabled === enabled &&
+    item.state === nextState &&
+    (item.installed_version ?? null) === installedVersion
+  ) {
+    return item;
+  }
+  return {
+    ...item,
+    enabled,
+    state: nextState,
+    installed_version: installedVersion,
+    source: plug.source || item.source,
+  };
 }
 
 /** Paid cloud purchase for the signed-in account (excludes local unpaid installs). */

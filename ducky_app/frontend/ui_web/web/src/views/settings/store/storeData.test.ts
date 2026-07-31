@@ -7,10 +7,12 @@ import {
   formatInstalls,
   formatPrice,
   installProgressPct,
+  isInstalled,
   needsPurchase,
   pageCount,
   pageSlice,
   parsePageSizeChoice,
+  patchItemFromLocalPlugin,
   SCROLL_BATCH,
   sectionItems,
 } from "./storeData";
@@ -236,5 +238,75 @@ describe("labels", () => {
     expect(needsPurchase({ slug: "y", paid: true })).toBe(true);
     expect(needsPurchase({ slug: "y", paid: true, owned: true })).toBe(false);
     expect(needsPurchase({ slug: "z" })).toBe(false);
+  });
+});
+
+describe("patchItemFromLocalPlugin", () => {
+  const item: DuckyOSStoreItemDto = {
+    slug: "scenegraph",
+    kind: "plugin",
+    categories: ["plugins"],
+    name: "Scene Graph",
+    latest_version: "1.0.13",
+    installed_version: "1.0.13",
+    state: "installed",
+    enabled: true,
+  };
+
+  it("keeps a semver version so the item stays in the Installed row", () => {
+    const next = patchItemFromLocalPlugin(item, {
+      id: "scenegraph",
+      version: "1.0.13",
+      enabled: true,
+    });
+    expect(next.installed_version).toBe("1.0.13");
+    expect(isInstalled(next)).toBe(true);
+  });
+
+  it("stays installed when disabled locally", () => {
+    const next = patchItemFromLocalPlugin(item, {
+      id: "scenegraph",
+      version: "1.0.13",
+      enabled: false,
+    });
+    expect(next.enabled).toBe(false);
+    expect(next.state).toBe("installed");
+    expect(isInstalled(next)).toBe(true);
+  });
+
+  it("stays installed when the local plugin reports no version", () => {
+    const next = patchItemFromLocalPlugin({ ...item, installed_version: null }, {
+      id: "scenegraph",
+      enabled: true,
+    });
+    expect(isInstalled(next)).toBe(true);
+  });
+
+  it("keeps numeric versions and the update state", () => {
+    const next = patchItemFromLocalPlugin(
+      { ...item, installed_version: 37, latest_version: "39", state: "update" },
+      { id: "scenegraph", version: 37, enabled: true },
+    );
+    expect(next.installed_version).toBe(37);
+    expect(next.state).toBe("update");
+  });
+
+  it("returns the same reference when nothing changed", () => {
+    expect(patchItemFromLocalPlugin(item, { id: "scenegraph", version: "1.0.13", enabled: true })).toBe(
+      item,
+    );
+  });
+
+  it("clears install state when the plugin is gone from disk", () => {
+    const next = patchItemFromLocalPlugin(item, undefined);
+    expect(next.state).toBe("available");
+    expect(next.installed_version).toBeNull();
+    expect(isInstalled(next)).toBe(false);
+  });
+
+  it("keeps a sideloaded origin when it disappears from disk", () => {
+    const next = patchItemFromLocalPlugin({ ...item, source: "local" }, undefined);
+    expect(next.source).toBe("local");
+    expect(patchItemFromLocalPlugin({ ...item, source: "store" }, undefined).source).toBeNull();
   });
 });

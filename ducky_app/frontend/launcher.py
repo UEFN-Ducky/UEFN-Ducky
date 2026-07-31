@@ -167,6 +167,12 @@ def main() -> None:
         # Wall clock from process entry — webview_app boot traces use this for total_ms.
         os.environ["UEFN_DUCKY_BOOT_T0"] = str(_time.perf_counter())
         _ensure_repo_on_path()
+        try:
+            from frontend.app_logging import configure as configure_logging
+
+            configure_logging()
+        except Exception:
+            pass
         # Logo window before panel_api / webview imports — otherwise double-click is a blank wait.
         try:
             from frontend.early_splash import show as show_early_splash

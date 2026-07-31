@@ -131,6 +131,20 @@ export const VerseOutlineBody = forwardRef<
 
   const versePath = filePath && isVerseFile(filePath) ? filePath : undefined;
 
+  // Declared before the fetch effect so its generation bump can't cancel a fetch
+  // this render just started. Closing the file (or switching to another one) must
+  // drop the old tree instead of leaving the previous file's symbols on screen.
+  useEffect(() => {
+    fetchGenRef.current += 1;
+    prevTreeSigRef.current = "";
+    emptyRetryUsedRef.current = false;
+    nodesRef.current = [];
+    setNodes([]);
+    setActiveId(null);
+    setExpandedKeys(new Set());
+    setFetchStatus(versePath ? "loading" : "waiting");
+  }, [versePath]);
+
   useEffect(() => {
     if (!enabled || !model || model.isDisposed()) {
       setContentVersion(0);

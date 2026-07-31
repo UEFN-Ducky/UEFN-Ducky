@@ -88,6 +88,26 @@ import {
 const ChatTreeHoverPlacementContext = createContext<EditorTabHoverCardPlacement>("right");
 const DuckiesCompactContext = createContext(false);
 
+/** A row's view of the tree-wide multi-selection, so it can offer "Delete ALL". */
+type RowSelectionCtx = {
+  selected: ReadonlySet<string>;
+  /** Right-clicking a row outside the selection selects it (VS Code / Content). */
+  onContextSelect: (rowId: string) => void;
+};
+
+const RowSelectionContext = createContext<RowSelectionCtx>({
+  selected: new Set<string>(),
+  onContextSelect: () => {},
+});
+
+function useRowDeleteCount(rowId: string): number {
+  const { selected } = useContext(RowSelectionContext);
+  return selected.has(rowId) && selected.size > 1 ? selected.size : 1;
+}
+
+/** One row from the duckies tree targeted by a delete. */
+export type DuckyDeleteTarget = { kind: "folder" | "chat"; id: string; name: string };
+
 type EditTarget = { kind: "folder" | "chat"; id: string; value: string };
 type DropHint = { overId: string; position: DropPosition };
 type SelectMods = { ctrl: boolean; shift: boolean };
@@ -177,6 +197,10 @@ const ChatRow = memo(function ChatRow({
   const hoverPlacement = useContext(ChatTreeHoverPlacementContext);
   const compact = useContext(DuckiesCompactContext);
   const id = dragId("chat", chat.id);
+  const rowSelection = useContext(RowSelectionContext);
+  const deleteCount = useRowDeleteCount(id);
+  const deleteLabel =
+    deleteCount > 1 ? "Delete ALL" : archived ? "Delete permanently" : "Archive";
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id, ...SORTABLE_STATIC });
   const rowRef = useRef<HTMLDivElement | null>(null);
   const rowScopeClass = useScopedClass("dnd-row");
@@ -273,7 +297,7 @@ const ChatRow = memo(function ChatRow({
             onRename={onRename}
             onDelete={onDelete}
             activeChat={isActive}
-            deleteTitle={archived ? "Delete permanently" : "Archive"}
+            deleteTitle={deleteLabel}
           />
         }
         contextMenu={
@@ -318,12 +342,7 @@ const ChatRow = memo(function ChatRow({
                     ]
                   : []),
                 { id: "rename", label: "Rename", onClick: onRename },
-                {
-                  id: "delete",
-                  label: archived ? "Delete permanently" : "Archive",
-                  danger: true,
-                  onClick: onDelete,
-                },
+                { id: "delete", label: deleteLabel, danger: true, onClick: onDelete },
               ]}
             />
           ) : null
@@ -350,7 +369,10 @@ const ChatRow = memo(function ChatRow({
           onSelect();
         }}
         onDoubleClick={() => !isEditing && onSelectPersistent?.()}
-        onContextMenu={(e) => open(e, undefined)}
+        onContextMenu={(e) => {
+          rowSelection.onContextSelect(id);
+          open(e, undefined);
+        }}
       />
     </ChatTabHoverCard>
   );
@@ -496,6 +518,8 @@ function FolderHeader({
   dropHint: DropHint | null;
 }) {
   const id = dragId("folder", folder.id);
+  const rowSelection = useContext(RowSelectionContext);
+  const deleteLabel = useRowDeleteCount(id) > 1 ? "Delete ALL" : "Delete";
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id, ...SORTABLE_STATIC });
   const rowRef = useRef<HTMLDivElement | null>(null);
   const rowScopeClass = useScopedClass("dnd-row");
@@ -556,7 +580,7 @@ function FolderHeader({
         renameInput={
           <input {...renameInputProps(editing, setEditing, editInputRef, onCommitRename, onCancelRename)} />
         }
-        actions={<SidebarHoverActions onRename={onRename} onDelete={onDelete} />}
+        actions={<SidebarHoverActions onRename={onRename} onDelete={onDelete} deleteTitle={deleteLabel} />}
         contextMenu={
           menu ? (
             <ContextMenu
@@ -567,7 +591,7 @@ function FolderHeader({
                 ...duckyTreeCreateItems(onCreateDucky, onCreateGroup),
                 contextMenuSeparator("folder-sep"),
                 { id: "rename", label: "Rename", onClick: onRename },
-                { id: "delete", label: "Delete", danger: true, onClick: onDelete },
+                { id: "delete", label: deleteLabel, danger: true, onClick: onDelete },
               ]}
             />
           ) : null
@@ -597,7 +621,7 @@ function FolderHeader({
         }}
         onContextMenu={(e) => {
           e.preventDefault();
-          onSelectFolder();
+          rowSelection.onContextSelect(id);
           open(e, undefined);
         }}
       />
@@ -856,12 +880,14 @@ interface SidebarFolderTreeProps {
   onDeleteFolder: (id: string, name: string) => void;
   onRenameChat: (id: string, name: string) => void;
   onDeleteChat: (id: string, name: string) => void;
+  /** Delete every row in a multi-selection at once. Resolves true once they're gone. */
+  onDeleteSelection?: (targets: DuckyDeleteTarget[]) => Promise<boolean>;
   onFocusChat: (chat: { id: string; name: string }) => void;
   onEditDucky: (chat: { id: string; name: string; duckyStyle?: string; duckyPersonality?: string }) => void;
   selectedChatFolderId: string | null;
   onSelectChatFolder: (folderId: string) => void;
   onCreateDucky: () => void | Promise<void>;
-  onCreateGroup: () => void | Promise<void>;
+  onCreateGroup: (folderId?: string) => void | Promise<void>;
   filterQuery?: string;
   /** Chat dropped onto the editor area — open at the VS Code-style zone. */
   onOpenChatInEditor?: (
@@ -901,6 +927,7 @@ export function SidebarFolderTree({
   onDeleteFolder,
   onRenameChat,
   onDeleteChat,
+  onDeleteSelection,
   onFocusChat,
   onEditDucky,
   selectedChatFolderId,
@@ -997,7 +1024,9 @@ export function SidebarFolderTree({
   const createGroupIn = useCallback(
     (folderId: string) => {
       onSelectChatFolder(folderId);
-      void onCreateGroup();
+      // Pass the parent explicitly: the selection state set above isn't visible
+      // to onCreateGroup's closure until the next render.
+      void onCreateGroup(folderId);
     },
     [onCreateGroup, onSelectChatFolder],
   );
@@ -1006,7 +1035,7 @@ export function SidebarFolderTree({
     () =>
       duckyTreeCreateItems(
         () => void onCreateDucky(),
-        () => void onCreateGroup(),
+        () => void onCreateGroup(""),
       ),
     [onCreateDucky, onCreateGroup],
   );
@@ -1120,6 +1149,73 @@ export function SidebarFolderTree({
       );
     },
     [visibleOrder],
+  );
+
+  const rowNameById = useMemo(() => {
+    const names = new Map<string, string>();
+    const addChats = (chats: FolderItem["chats"]) => {
+      for (const chat of chats) names.set(dragId("chat", chat.id), chat.name);
+    };
+    const walk = (items: FolderItem[]) => {
+      for (const folder of items) {
+        names.set(dragId("folder", folder.id), folder.name);
+        addChats(folder.chats);
+        walk(folder.children);
+      }
+    };
+    addChats(rootChats);
+    addChats(archiveChats);
+    walk(folders);
+    return names;
+  }, [folders, rootChats, archiveChats]);
+
+  const contextSelectRow = useCallback(
+    (rowId: string) => {
+      // Already part of the selection: leave it alone so the menu can act on all of it.
+      if (selectionRef.current.selected.has(rowId)) return;
+      setSelection(selectOnly(rowId));
+      const parsed = parseDragId(rowId);
+      if (parsed?.kind === "folder") onSelectChatFolder(parsed.id);
+    },
+    [onSelectChatFolder],
+  );
+
+  const rowSelection = useMemo<RowSelectionCtx>(
+    () => ({ selected: selection.selected, onContextSelect: contextSelectRow }),
+    [selection.selected, contextSelectRow],
+  );
+
+  /** Route a row delete through the selection when that row is part of one. */
+  const deleteRow = useCallback(
+    (kind: "folder" | "chat", id: string, name: string) => {
+      const rowId = dragId(kind, id);
+      const selected = selectionRef.current.selected;
+      if (!onDeleteSelection || selected.size < 2 || !selected.has(rowId)) {
+        if (kind === "folder") onDeleteFolder(id, name);
+        else onDeleteChat(id, name);
+        return;
+      }
+      const targets: DuckyDeleteTarget[] = [];
+      for (const selectedId of selected) {
+        const parsed = parseDragId(selectedId);
+        if (!parsed) continue;
+        targets.push({ ...parsed, name: rowNameById.get(selectedId) ?? "" });
+      }
+      void onDeleteSelection(targets).then((deleted) => {
+        if (deleted) setSelection(emptySelection());
+      });
+    },
+    [onDeleteChat, onDeleteFolder, onDeleteSelection, rowNameById],
+  );
+
+  const deleteFolderRow = useCallback(
+    (id: string, name: string) => deleteRow("folder", id, name),
+    [deleteRow],
+  );
+
+  const deleteChatRow = useCallback(
+    (id: string, name: string) => deleteRow("chat", id, name),
+    [deleteRow],
   );
 
   const persistLayout = async (
@@ -1272,6 +1368,7 @@ export function SidebarFolderTree({
 
   return (
     <ChatTreeHoverPlacementContext.Provider value={hoverPlacement}>
+    <RowSelectionContext.Provider value={rowSelection}>
     <>
       {treeMenu ? (
         <ContextMenu x={treeMenu.x} y={treeMenu.y} onClose={closeTreeMenu} items={rootTreeMenuItems} />
@@ -1335,7 +1432,7 @@ export function SidebarFolderTree({
               onCommitRename={onCommitRename}
               onCancelRename={onCancelRename}
               onRename={() => onRenameChat(chat.id, chat.name)}
-              onDelete={() => onDeleteChat(chat.id, chat.name)}
+              onDelete={() => deleteChatRow(chat.id, chat.name)}
               onFocus={() => onFocusChat(chat)}
               onEditDucky={() => onEditDucky(chat)}
               isNew={newlyCreatedIds.has(`chat:${chat.id}`)}
@@ -1361,7 +1458,7 @@ export function SidebarFolderTree({
                   onSelectChatPersistent: selectChatPersistentOnly,
                   onModSelectChat: modSelectChat,
                   onRenameChat,
-                  onDeleteChat,
+                  onDeleteChat: deleteChatRow,
                   onFocusChat,
                   onEditDucky,
                   onCommitRename,
@@ -1392,9 +1489,9 @@ export function SidebarFolderTree({
               onSelectChatPersistent={selectChatPersistentOnly}
               onModSelectChat={modSelectChat}
               onRenameFolder={onRenameFolder}
-              onDeleteFolder={onDeleteFolder}
+              onDeleteFolder={deleteFolderRow}
               onRenameChat={onRenameChat}
-              onDeleteChat={onDeleteChat}
+              onDeleteChat={deleteChatRow}
               onFocusChat={onFocusChat}
               onEditDucky={onEditDucky}
               onCommitRename={onCommitRename}
@@ -1430,6 +1527,7 @@ export function SidebarFolderTree({
       </DragOverlay>
     </DndContext>
     </>
+    </RowSelectionContext.Provider>
     </ChatTreeHoverPlacementContext.Provider>
   );
 }

@@ -11,8 +11,15 @@ export function useVerseHistoryDockPanel(
   const { range, setRange, reset } = useHistoryDateRange();
 
   const actions = useMemo(
-    () => <HistoryDateRangeHeaderButton range={range} onChange={setRange} onReset={reset} />,
-    [range, setRange, reset],
+    () => (
+      <HistoryDateRangeHeaderButton
+        range={range}
+        onChange={setRange}
+        onReset={reset}
+        disabled={!versePath}
+      />
+    ),
+    [range, setRange, reset, versePath],
   );
 
   const children = (
