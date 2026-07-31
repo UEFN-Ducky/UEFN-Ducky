@@ -646,7 +646,7 @@ def main() -> None:
         uninstall_uefn_plugin("hookprobe")
 
         # Plugin-bundled skills: install → discover → uninstall removes from pack list.
-        from backend.skill import list_pack_ids, load_pack_manifest, plugin_owner_for_skill
+        from backend.skills.store import list_pack_ids, load_pack_manifest, plugin_owner_for_skill
         from backend.uefn_plugins.store import list_plugin_owned_skills
 
         sk_install = import_plugin_from_bytes(_zip_plugin_with_skills("skillpack"), source="local", replace=True)
@@ -662,7 +662,7 @@ def main() -> None:
         assert man.get("source_plugin_id") == "skillpack"
         assert man.get("license") == "All Rights Reserved"
         assert man.get("allow_redistribute") is False
-        from backend.skill import export_skill_pack_to_zip
+        from backend.skills.store import export_skill_pack_to_zip
 
         try:
             export_skill_pack_to_zip("demo-tips", Path(tmp) / "stolen.ducky-skill-pack")
@@ -787,7 +787,7 @@ def main() -> None:
 
         # AI-made plugins: trust gate + same-source overwrite guard.
         from backend.uefn_plugins.store import appdata_ai_plugins_dir
-        from backend.tools.panel_ai_plugins import (
+        from backend.tools.panel.panel_ai_plugins import (
             install_ai_plugin,
             scaffold_ai_plugin,
             write_ai_plugin_file,

@@ -154,7 +154,7 @@ def run() -> None:
 
     try:
         _run_panel(api_holder := {"api": None, "tk_root": None, "window_holder": {}})
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:
         from frontend.ui_web.shutdown import fatal_error_and_exit

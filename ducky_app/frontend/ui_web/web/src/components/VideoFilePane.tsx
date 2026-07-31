@@ -4,7 +4,7 @@ import { onApiReady } from "../hooks/onApiReady";
 import { useWatchProjectFile } from "../hooks/useWatchProjectFile";
 import { basename } from "../verse-editor/utils/isVerseFile";
 
-import "../asset-preview/asset-preview.css";
+import "../theme/styles/media-file.css";
 
 interface VideoFilePaneProps {
   relativePath: string;

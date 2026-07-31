@@ -336,6 +336,13 @@
   padding-left: 10px;
 }
 
+.settings-view-sidebar-tab--plugin.is-loading {
+  opacity: 0.65;
+  pointer-events: none;
+  cursor: default;
+  font-style: italic;
+}
+
 /* Narrow rail: icons only — drag the resize handle left until labels disappear. */
 .settings-view-sidebar-shell.is-icons-only .settings-view-sidebar {
   padding: 12px 6px;

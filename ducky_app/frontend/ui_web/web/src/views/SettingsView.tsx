@@ -26,7 +26,6 @@ import { useAppearance } from "../theme/AppearanceContext";
 import { AccountTab } from "./settings/AccountTab";
 import { AddToUefnTab } from "./settings/AddToUefnTab";
 import { AgentTab } from "./settings/AgentTab";
-import { DiscordTab, type DiscordSectionTab } from "./settings/DiscordTab";
 import { LanguagesTab } from "./settings/LanguagesTab";
 import { DuckiesTab } from "./settings/DuckiesTab";
 import { PlansTab, type PlansSectionTab } from "./settings/PlansTab";
@@ -120,11 +119,6 @@ const LOG_ERRORS_SECTION_TABS: { id: LogErrorsSectionTab; label: string }[] = [
 const PLANS_SECTION_TABS: { id: PlansSectionTab; label: string }[] = [
   { id: "templates", label: "Templates" },
   { id: "working", label: "Project Plans" },
-];
-
-const DISCORD_SECTION_TABS: { id: DiscordSectionTab; label: string }[] = [
-  { id: "bots", label: "Bots" },
-  { id: "commands", label: "Commands" },
 ];
 
 function readInitialLlmsSection(): LlmsSectionTab {
@@ -274,10 +268,6 @@ export function SettingsView({ version }: SettingsViewProps) {
     if (s === "output" || s === "voice") return s;
     return "input";
   });
-  const [discordSection, setDiscordSection] = useState<DiscordSectionTab>(() => {
-    const s = readLastSettingsSections().discord;
-    return s === "commands" ? "commands" : "bots";
-  });
   const [resolvedVersion, setResolvedVersion] = useState(version ?? "…");
   const { guardUnsavedChanges } = useAppearance();
   const sidebarScopeClass = useScopedClass("settings-view-sidebar-shell");
@@ -334,8 +324,7 @@ export function SettingsView({ version }: SettingsViewProps) {
     activeTab === "LLMs" ||
     activeTab === "Plans" ||
     activeTab === "General" ||
-    activeTab === "Audio" ||
-    activeTab === "Discord";
+    activeTab === "Audio";
   const showAppearanceProfileHeader = activeTab === "Appearance";
 
   const activePluginTab: PluginSettingsTab | undefined = useMemo(
@@ -366,32 +355,6 @@ export function SettingsView({ version }: SettingsViewProps) {
         rememberSettingsTab("Store");
       }
       window.dispatchEvent(new CustomEvent("ducky:store-navigate"));
-    })();
-  };
-
-  const openPluginInStore = (pluginId: string) => {
-    const slug = pluginId.trim().toLowerCase();
-    if (!slug) {
-      openPluginsPage();
-      return;
-    }
-    setPluginsNavOpen(true);
-    rememberPluginsNavOpen(true);
-    try {
-      sessionStorage.setItem(
-        "uefn-store-install",
-        JSON.stringify({ slug, install: false }),
-      );
-    } catch {
-      /* ignore */
-    }
-    void (async () => {
-      if (activeTab !== "Store") {
-        if (!(await guardUnsavedChanges())) return;
-        setActiveTab("Store");
-        rememberSettingsTab("Store");
-      }
-      window.dispatchEvent(new CustomEvent("ducky:store-install"));
     })();
   };
 
@@ -472,7 +435,6 @@ export function SettingsView({ version }: SettingsViewProps) {
       plans: plansSection,
       memory: memorySection,
       audio: audioSection,
-      discord: discordSection,
     });
   }, [
     llmsSection,
@@ -481,7 +443,6 @@ export function SettingsView({ version }: SettingsViewProps) {
     plansSection,
     memorySection,
     audioSection,
-    discordSection,
   ]);
 
   /** Leaf section for history: llms|skills|mcps|templates|working|entries|context|… */
@@ -495,7 +456,6 @@ export function SettingsView({ version }: SettingsViewProps) {
       return generalSection === "log_errors" ? logErrorsSection : generalSection;
     }
     if (activeTab === "Audio") return audioSection;
-    if (activeTab === "Discord") return discordSection;
     return undefined;
   }, [
     activeTab,
@@ -505,7 +465,6 @@ export function SettingsView({ version }: SettingsViewProps) {
     logErrorsSection,
     memorySection,
     audioSection,
-    discordSection,
   ]);
 
   // Tabs with master/detail slides record themselves (incl. root) so a tab-only
@@ -514,8 +473,7 @@ export function SettingsView({ version }: SettingsViewProps) {
     activeTab === "Store" ||
     activeTab === "Duckies" ||
     activeTab === "Plans" ||
-    activeTab === "LLMs" ||
-    (activeTab === "Discord" && discordSection === "bots");
+    activeTab === "LLMs";
   const settingsNavLoc = useMemo<SettingsNavLocation | null>(() => {
     if (drillOwnedTab) return null;
     return {
@@ -574,12 +532,6 @@ export function SettingsView({ version }: SettingsViewProps) {
         (loc.sectionTab === "input" || loc.sectionTab === "output" || loc.sectionTab === "voice")
       ) {
         setAudioSection(loc.sectionTab);
-      } else if (loc.tab === "Discord") {
-        if (loc.sectionTab === "commands" || loc.sectionTab === "bots") {
-          setDiscordSection(loc.sectionTab);
-        } else if (loc.drill?.type === "discord") {
-          setDiscordSection("bots");
-        }
       }
       // Child tabs may mount on this tick — publish after paint.
       const publishLoc: SettingsNavLocation =
@@ -630,13 +582,6 @@ export function SettingsView({ version }: SettingsViewProps) {
         (detail.section === "input" || detail.section === "output" || detail.section === "voice")
       ) {
         setAudioSection(detail.section as AudioSectionTab);
-        return;
-      }
-      if (
-        detail.tab === "Discord" &&
-        (detail.section === "bots" || detail.section === "commands")
-      ) {
-        setDiscordSection(detail.section);
       }
     };
     window.addEventListener("ducky:settings-section", onSection);
@@ -741,16 +686,20 @@ export function SettingsView({ version }: SettingsViewProps) {
                   </button>
                 );
               })}
-              {pluginTabs.length > 0 ? (
-                <div className={`settings-view-sidebar-plugins${pluginsNavOpen ? " is-open" : ""}`}>
+              {!pluginContrib.ready || pluginTabs.length > 0 ? (
+                <div
+                  className={`settings-view-sidebar-plugins${pluginsNavOpen || !pluginContrib.ready ? " is-open" : ""}`}
+                >
                   <button
                     type="button"
                     className={`settings-view-sidebar-tab settings-view-sidebar-plugins-toggle${activeIsPluginTab || storeIsPluginsPage ? " is-active-group" : ""}${storeIsPluginsPage && !storePluginFocus ? " is-active" : ""}`}
                     onClick={onPluginsHeaderClick}
-                    aria-expanded={pluginsNavOpen}
+                    aria-expanded={pluginsNavOpen || !pluginContrib.ready}
                     title={
                       sidebarIconsOnly
-                        ? `Plugins (${installedPluginCountLabel})`
+                        ? pluginContrib.ready
+                          ? `Plugins (${installedPluginCountLabel})`
+                          : "Loading plugins…"
                         : undefined
                     }
                   >
@@ -758,23 +707,41 @@ export function SettingsView({ version }: SettingsViewProps) {
                     <span>Installed</span>
                     <span
                       className="settings-view-sidebar-plugins-count"
-                      aria-label={`${installedPluginCount} plugins installed`}
+                      aria-label={
+                        pluginContrib.ready
+                          ? `${installedPluginCount} plugins installed`
+                          : "Loading plugins"
+                      }
                     >
-                      {installedPluginCountLabel}
+                      {pluginContrib.ready ? installedPluginCountLabel : "…"}
                     </span>
                     <span
                       className="settings-view-sidebar-plugins-chevron"
                       aria-hidden
                       onClick={onPluginsChevronClick}
                     >
-                      {pluginsNavOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                      {pluginsNavOpen || !pluginContrib.ready ? (
+                        <Icons.ChevronDown />
+                      ) : (
+                        <Icons.ChevronRight />
+                      )}
                     </span>
                   </button>
-                  {pluginsNavOpen ? (
+                  {pluginsNavOpen || !pluginContrib.ready ? (
                     <div className="settings-view-sidebar-plugins-list" role="group" aria-label="Installed plugins">
+                      {!pluginContrib.ready && pluginTabs.length === 0 ? (
+                        <div
+                          className="settings-view-sidebar-tab settings-view-sidebar-tab--plugin is-loading"
+                          aria-live="polite"
+                        >
+                          <span>Loading plugins…</span>
+                        </div>
+                      ) : null}
                       {pluginTabs.map((tab) => {
                         const label = tab.label || tab.id;
                         const pluginId = (tab.plugin_id || "").trim().toLowerCase();
+                        // Row is a settings.tabs contribution — highlight when that tab is open
+                        // (or when viewing its Store detail via Plugins header / browse).
                         const isActive =
                           activeTab === tab.id ||
                           (storeIsPluginsPage && Boolean(storePluginFocus) && storePluginFocus === pluginId);
@@ -788,7 +755,7 @@ export function SettingsView({ version }: SettingsViewProps) {
                             })}
                             type="button"
                             className={`settings-view-sidebar-tab settings-view-sidebar-tab--plugin${isActive ? " is-active" : ""}`}
-                            onClick={() => openPluginInStore(pluginId || tab.id)}
+                            onClick={() => void requestTab(tab.id)}
                             title={sidebarIconsOnly ? label : undefined}
                           >
                             {resolvePluginHeaderIcon(tab.icon)}
@@ -932,26 +899,6 @@ export function SettingsView({ version }: SettingsViewProps) {
                   </nav>
                 ) : null}
               </div>
-            ) : activeTab === "Discord" ? (
-              <nav className="settings-view-header-tabs no-drag" aria-label="Discord sections">
-                <div className="settings-view-header-tabs-scroll">
-                  {DISCORD_SECTION_TABS.map((tab) => (
-                    <button
-                      key={tab.id}
-                      ref={targetRef(`settings.discord.section.${tab.id}`, {
-                        kind: "tab",
-                        label: tab.label,
-                        route: "settings.discord",
-                      })}
-                      type="button"
-                      className={`settings-view-header-tab${discordSection === tab.id ? " is-active" : ""}`}
-                      onClick={() => setDiscordSection(tab.id)}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              </nav>
             ) : (
               <nav className="settings-view-header-tabs no-drag" aria-label="Section">
                 <div className="settings-view-header-tabs-scroll">
@@ -1004,11 +951,7 @@ export function SettingsView({ version }: SettingsViewProps) {
             {SOURCE_CONTROL_TAB_ENABLED && activeTab === "Source Control" && <SourceControlTab />}
             {activeTab === "Appearance" && <AppearanceTab />}
             {activeTab === "Audio" && <AudioTab sectionTab={audioSection} />}
-            {activePluginTab?.id === "Discord" ? (
-              <DiscordTab sectionTab={discordSection} />
-            ) : activePluginTab ? (
-              renderPluginTabBody(activePluginTab)
-            ) : null}
+            {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
           </section>
         </CtrlWheelZoomRoot>
       </div>

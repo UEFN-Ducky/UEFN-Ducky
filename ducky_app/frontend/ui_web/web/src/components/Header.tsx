@@ -4,7 +4,6 @@ import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
-import { DiscordHeaderDropdown } from "./groupchat/DiscordHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
 import { PluginSurfaceBoundary } from "../plugin-ui/PluginSurfaceBoundary";
 import { useAppHeaderActions } from "../contexts/AppHeaderActionsContext";
@@ -18,7 +17,6 @@ import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
 import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
-import { useDiscordTabOpen } from "../navigation/openDiscordTab";
 import {
   resolvePluginHeaderAction,
   resolvePluginHeaderIcon,
@@ -184,7 +182,6 @@ export function Header({
   const pluginContrib = usePluginContributions();
   const { prefs: discordUiPrefs } = useDiscordUiPrefs();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
-  const discordTabOpen = useDiscordTabOpen();
   const pluginHeaderButtons = useMemo(() => {
     if (!hasProject || isFocus || isSettingsOverlay) return [];
     return sortPluginHeaderButtons(pluginContrib.header_buttons).filter((btn) => {
@@ -348,26 +345,6 @@ export function Header({
           {pluginHeaderButtons.map((btn) => {
             const pluginId = (btn.plugin_id || btn.id || "plugin").trim().toLowerCase();
             const key = `${pluginId}:${btn.id}`;
-            const isDiscord =
-              btn.plugin_id === "discord" ||
-              btn.id === "discord" ||
-              btn.action === "builtin:open-discord";
-            if (isDiscord) {
-              return (
-                <PluginSurfaceBoundary
-                  key={key}
-                  pluginId={pluginId || "discord"}
-                  surface="header-button"
-                  compact
-                >
-                  <DiscordHeaderDropdown
-                    icon={resolvePluginHeaderIcon(btn.icon)}
-                    title={btn.title || btn.id}
-                    active={discordTabOpen}
-                  />
-                </PluginSurfaceBoundary>
-              );
-            }
             const isTranslation =
               btn.plugin_id === "translation" || btn.id === "translation";
             if (isTranslation) {

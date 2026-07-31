@@ -34,7 +34,7 @@ from backend.agent.tools import (
     mcp_tool_to_gemini,
     mcp_tool_to_openai,
 )
-from backend.serialization import (
+from backend.agent.serialization import (
     count_tool_llm_tokens,
     format_rejected_tool_result,
     format_tool_block_for_llm,
@@ -838,7 +838,7 @@ class AgentRunner:
                 )
             )
 
-            from backend.listener_serial import BUSY_HINT, HEAVY_MCP_TOOLS
+            from backend.bridge.serial import BUSY_HINT, HEAVY_MCP_TOOLS
 
             heavy_executed = 0
             for rec in pending_records:

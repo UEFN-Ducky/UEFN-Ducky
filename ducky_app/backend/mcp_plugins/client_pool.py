@@ -26,7 +26,7 @@ _TOOL_TIMEOUT_SEC = 180.0
 _IDLE_EVICT_SEC = 15 * 60.0
 
 
-from backend.mcp_content import mcp_content_to_text as _content_to_text
+from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
 
 
 @dataclass

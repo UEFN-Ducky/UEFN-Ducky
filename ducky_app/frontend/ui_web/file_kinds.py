@@ -27,7 +27,7 @@ IMAGE_SUFFIXES = frozenset(
     }
 )
 
-# 3D meshes previewed in ModelFilePane (Three.js loaders).
+# 3D meshes — preview UI owned by the uasset-preview Store plugin when installed.
 MODEL_SUFFIXES = frozenset(
     {
         ".fbx",

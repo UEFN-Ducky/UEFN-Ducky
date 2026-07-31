@@ -7,14 +7,13 @@ import { DockRailFamilyStack } from "./DockRailFamilyStack";
 import { useVerseOutlineDockPanel } from "./panels/VerseOutlineDockPanel";
 import { useVerseHistoryDockPanel } from "./panels/VerseHistoryDockPanel";
 import { useTesterDockPanel } from "./panels/TesterDockPanel";
-import { GroupChatPanel } from "../components/groupchat/GroupChatPanel";
-import { DiscordHubPanel } from "../components/groupchat/DiscordHubPanel";
 import { requestOpenDiscordTab, setDiscordTabOpen, useDiscordTabOpen } from "../navigation/openDiscordTab";
-import { discordTabId } from "../types/panel";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import {
+  dockPanelPluginUi,
   pluginContributesDockPanel,
   usePluginContributions,
+  type PluginContributions,
 } from "../hooks/usePluginContributions";
 import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
 import { isVerseFile } from "../verse-editor/utils/isVerseFile";
@@ -22,6 +21,8 @@ import { Icons } from "../icons/Icons";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { dockDropTargetSide } from "../utils/dockPanelDrag";
 import type { DockPanelId } from "./workspaceDockStorage";
+import { PluginWebviewPane } from "../plugin-ui/PluginWebviewPane";
+import { pluginUiTabId } from "../plugin-ui/types";
 
 type WorkspaceDockLayoutProps = {
   layoutMode: ChatLayoutMode;
@@ -80,12 +81,31 @@ function isVerseFamilyId(id: DockPanelId) {
   );
 }
 
+function discordDockPlaceholder() {
+  return (
+    <div className="dock-panel-placeholder" style={{ padding: 12, opacity: 0.7 }}>
+      Enable Discord plugin
+    </div>
+  );
+}
+
+function discordDockChildren(pluginContrib: PluginContributions) {
+  const pluginUi = dockPanelPluginUi(pluginContrib, "groupchat");
+  if (pluginUi) {
+    return (
+      <PluginWebviewPane tabId={pluginUiTabId(pluginUi.pluginId, pluginUi.uiPanelId)} />
+    );
+  }
+  return discordDockPlaceholder();
+}
+
 function useVersePanelDefs(
   versePath: string | undefined,
   outlineEnabled: boolean,
   historyEnabled: boolean,
   testerEnabled: boolean,
   historyRefreshKey: number,
+  pluginContrib: PluginContributions,
   onTearOffDiscord?: (at: { screenX: number; screenY: number }) => void,
 ) {
   const outline = useVerseOutlineDockPanel(versePath, outlineEnabled);
@@ -128,13 +148,13 @@ function useVersePanelDefs(
           </button>
         ),
         onTearOffOutside: onTearOffDiscord,
-        children: <GroupChatPanel />,
+        children: discordDockChildren(pluginContrib),
       },
       discordhub: {
         title: "Discord",
         icon: <Icons.Chat />,
         actions: undefined,
-        children: <DiscordHubPanel />,
+        children: discordDockPlaceholder(),
       },
     }),
     [
@@ -147,6 +167,7 @@ function useVersePanelDefs(
       tester.busy,
       tester.busyTitle,
       onTearOffDiscord,
+      pluginContrib,
     ],
   );
 }
@@ -248,7 +269,12 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       (at: { screenX: number; screenY: number }) => {
         // Hide dock immediately; focus window owns Discord while open.
         setDiscordTabOpen(true);
-        void openFocusAtPoint(discordTabId(), "Discord Ducky", at.screenX, at.screenY);
+        void openFocusAtPoint(
+          pluginUiTabId("discord", "discord-chat"),
+          "Discord Ducky",
+          at.screenX,
+          at.screenY,
+        );
       },
       [openFocusAtPoint],
     );
@@ -259,6 +285,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       leftOpen && !leftStack.collapsed.history,
       testerPluginOn && leftOpen && !leftStack.collapsed.tester,
       historyRefreshKey,
+      pluginContrib,
       tearOffDiscord,
     );
     const rightVersePanels = useVersePanelDefs(
@@ -267,6 +294,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       rightOpen && !rightStack.collapsed.history,
       testerPluginOn && rightOpen && !rightStack.collapsed.tester,
       historyRefreshKey,
+      pluginContrib,
       tearOffDiscord,
     );
 

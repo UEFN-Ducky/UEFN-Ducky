@@ -35,7 +35,7 @@ def main() -> None:
         patch.object(host, "ensure_plugins_loaded", _slow_ensure),
         patch("frontend.ship_newest.ship_newest_everywhere", lambda **_k: []),
         patch("frontend.appdata_maintenance.start_appdata_maintenance_async", lambda: None),
-        patch("backend.dynamic_tools.register_dynamic_listener_tools", lambda: None),
+        patch("backend.bridge.dynamic_tools.register_dynamic_listener_tools", lambda: None),
         patch("backend.mcp_plugins.bridge_proxy.sync_nested_mcp_proxies", lambda: []),
     ):
         t0 = time.perf_counter()

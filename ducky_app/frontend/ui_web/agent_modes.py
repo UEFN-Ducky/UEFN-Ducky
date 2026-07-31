@@ -1451,9 +1451,9 @@ def run_message(
     def work() -> None:
         # Scope MCP plugin + built-in tool group availability to this chat for
         # the whole run (worker thread context; asyncio.run below inherits it).
-        from backend.builtin_toolsets import set_active_builtin_groups
+        from backend.agent.builtin_toolsets import set_active_builtin_groups
         from backend.mcp_plugins.store import set_active_plugin_ids
-        from backend.skill import set_active_disabled_packs, set_active_enabled_subskills
+        from backend.skills.store import set_active_disabled_packs, set_active_enabled_subskills
         from backend.uefn_plugins.host import set_active_uefn_agent_plugin_ids
 
         set_active_plugin_ids(conv.mcp_plugins)
@@ -1474,7 +1474,7 @@ def run_message(
             # delay run_id (hence is_agent_running) long enough that the UI's
             # reconcile tore the fresh run down. The thread is already live now, so
             # the run reads as running the instant send_message returns.
-            from backend.skill import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
+            from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
             from backend.mcp_plugins.store import seed_mcp_plugins
             from backend.uefn_plugins.store import seed_uefn_plugins
             from backend.uefn_plugins.host import ensure_plugins_loaded
@@ -1495,7 +1495,7 @@ def run_message(
                 skill = "" if "skill" in omit else (conv.skill_snapshot or "")
 
             from backend.bridge import set_port_override
-            from backend.listener_status import fetch_listener_status
+            from backend.bridge.status import fetch_listener_status
 
             set_port_override(PANEL_LISTENER_PORT)
             listener_status = fetch_listener_status(

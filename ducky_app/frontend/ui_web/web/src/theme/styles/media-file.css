@@ -1,0 +1,92 @@
+/* Shared by ImageFilePane / AudioFilePane / VideoFilePane (was in asset-preview.css). */
+
+.asset-preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  height: 100%;
+  overflow: auto;
+}
+
+.asset-preview-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.asset-preview-class {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.asset-preview-meta {
+  font-size: 12px;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.asset-preview-path {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9aa0a6);
+  word-break: break-all;
+}
+
+.asset-preview-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: var(--surface-elevated, rgba(0, 0, 0, 0.2));
+  border-radius: 8px;
+  max-height: min(60vh, 480px);
+}
+
+.asset-preview-image {
+  max-width: 100%;
+  max-height: min(56vh, 440px);
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.media-file-pane {
+  align-items: stretch;
+}
+
+.media-file-player-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  background: var(--surface-elevated, rgba(0, 0, 0, 0.2));
+  border-radius: 8px;
+}
+
+.media-file-player-wrap--video {
+  padding: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+.media-file-audio {
+  width: 100%;
+  max-width: 640px;
+}
+
+.media-file-video {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.media-file-error {
+  padding: 8px 12px;
+  font-size: 12px;
+}

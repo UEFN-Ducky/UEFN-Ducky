@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from backend.skill import appdata_dir
+from backend.skills.store import appdata_dir
 
 log = logging.getLogger("uefn.plugin_host_api")
 
@@ -293,7 +293,7 @@ def translate_batch_start(
     model: str = "",
 ) -> dict[str, Any]:
     """Start a UI translate batch on a worker (same path as MCP ``translate_ui_batch``)."""
-    from backend.tools.translation_service import PLUGIN_ID, run_translate_ui_batch
+    from backend.tools.integrations.translation_service import PLUGIN_ID, run_translate_ui_batch
     from backend.uefn_plugins.host import is_plugin_enabled
     from frontend.ui_web.bridge_jobs import job_start
 

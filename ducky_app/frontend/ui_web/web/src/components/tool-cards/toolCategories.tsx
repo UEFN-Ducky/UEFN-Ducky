@@ -26,7 +26,6 @@ const SEARCH_TOOLS = new Set([
 const SCREENSHOT_TOOLS = new Set([
   "take_high_res_screenshot",
   "preview_asset",
-  "preview_static_mesh",
 ]);
 
 const SKILL_TOOLS = new Set(["uefn_skill", "skill_read_subskill", "Skill"]);

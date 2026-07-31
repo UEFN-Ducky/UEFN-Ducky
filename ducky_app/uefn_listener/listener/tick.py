@@ -13,7 +13,8 @@ from listener.registry import scene_graph
 
 # One editor transaction per call — batching several per frame freezes the Details panel.
 # Any command that mutates the editor or does heavy reflection belongs here.
-_HEAVY_COMMANDS = frozenset(
+# Mutable so Store plugin listener modules can call ``register_heavy(name)``.
+_HEAVY_COMMANDS: set[str] = set(
     {
         # Verse
         "get_verse_editables",
@@ -83,7 +84,6 @@ _HEAVY_COMMANDS = frozenset(
         "save_asset",
         "import_asset",
         "export_asset",
-        "preview_static_mesh",
         "fixup_redirectors",
         "save_directory",
         "create_folder",
@@ -117,6 +117,15 @@ _HEAVY_COMMANDS = frozenset(
         "reload_listener",
     }
 )
+
+
+def register_heavy(name: str) -> None:
+    """Opt a command into the heavy-command throttle (for plugin-shipped handlers)."""
+    cmd = (name or "").strip()
+    if cmd:
+        _HEAVY_COMMANDS.add(cmd)
+
+
 from listener.dispatch import dispatch
 from listener.logutil import log_msg
 from listener.save_coalesce import flush_pending_save

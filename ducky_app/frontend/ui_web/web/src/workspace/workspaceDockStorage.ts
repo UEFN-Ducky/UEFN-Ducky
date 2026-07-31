@@ -207,22 +207,32 @@ function migrateFromLegacy(): WorkspaceDockSnapshot {
   return base;
 }
 
+/** Map retired dock ids onto their successors before filtering. */
+function migrateDockPanelId(id: string): DockPanelId | null {
+  if (id === "discordhub") return "groupchat";
+  if (ALL_DOCK_PANELS.includes(id as DockPanelId)) return id as DockPanelId;
+  return null;
+}
+
 export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDockSnapshot {
   const base = defaultSnapshotForWindow(windowId);
   if (!raw || typeof raw !== "object") return base;
   const data = raw as Partial<WorkspaceDockSnapshot>;
 
   if (data.panelSide) {
-    for (const id of ALL_DOCK_PANELS) {
-      const side = data.panelSide[id];
-      if (side === "left" || side === "right") base.panelSide[id] = side;
+    for (const [rawId, side] of Object.entries(data.panelSide)) {
+      const id = migrateDockPanelId(rawId);
+      if (id && (side === "left" || side === "right")) base.panelSide[id] = side;
     }
   }
 
   const normalizeStack = (stack: Partial<DockRailStackState> | undefined, fallback: DockRailStackState) => {
     if (!stack) return fallback;
     const order = Array.isArray(stack.order)
-      ? stack.order.filter((id): id is DockPanelId => ALL_DOCK_PANELS.includes(id as DockPanelId))
+      ? (stack.order
+          .map((id) => migrateDockPanelId(String(id)))
+          .filter((id): id is DockPanelId => id != null)
+          .filter((id, i, arr) => arr.indexOf(id) === i) as DockPanelId[])
       : fallback.order;
     const splitRatio =
       typeof stack.splitRatio === "number" && Number.isFinite(stack.splitRatio)

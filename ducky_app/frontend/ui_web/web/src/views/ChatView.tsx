@@ -41,7 +41,6 @@ import {
 import type { ChatLayoutMode, ChatTab, EditorDropZone, EditorTab, FolderItem } from "../types/panel";
 import {
   chatTabId,
-  discordTabId,
   duckyProfileTabId,
   fileTabId,
   planTabId,
@@ -74,6 +73,7 @@ import {
   parsePluginUiTabId,
   pluginUiInstanceTabId,
   registerOpenPluginUiTab,
+  requestOpenPluginUiTab,
   setBrowserPaneInitialUrl,
   shouldSuppressRemoteChatOpen,
 } from "../plugin-ui";
@@ -291,19 +291,6 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     return registerOpenSettingsEditorTab(openSettingsTab);
   }, [openSettingsTab]);
 
-  const openDiscordTab = useCallback(
-    (botId?: string, label?: string) => {
-      const id = discordTabId(botId);
-      const name = label?.trim() || (botId && botId !== "default" ? `Discord · ${botId}` : "Discord Ducky");
-      void openOrFocusTab(id, () =>
-        openTab({ id, kind: "discord", name }, { activate: true }),
-      );
-    },
-    [openTab],
-  );
-
-  useEffect(() => registerOpenDiscordTab(openDiscordTab), [openDiscordTab]);
-
   const openDuckyProfileTab = useCallback(
     (req: { profileId: string; name: string; duckyStyle?: string }) => {
       const id = duckyProfileTabId(req.profileId);
@@ -394,6 +381,14 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   );
   useEffect(() => registerOpenPluginUiTab(openPluginUiTab), [openPluginUiTab]);
 
+  const openDiscordTab = useCallback(
+    (_botId?: string, _label?: string) => {
+      requestOpenPluginUiTab("discord", "discord-chat");
+    },
+    [],
+  );
+  useEffect(() => registerOpenDiscordTab(openDiscordTab), [openDiscordTab]);
+
   // "Open link in new tab" from a native browser pane: open a fresh instance tab
   // of the same plugin panel whose pane starts at the requested URL.
   useEffect(() => {
@@ -412,11 +407,14 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     });
   }, [openTab, pluginContrib.ui_panels]);
 
+  const isDiscordPluginTabId = (id: string) =>
+    id === "plugin:discord:discord-chat" || id.startsWith("plugin:discord:");
+
   // While Discord is open as a tab HERE or in any focus window, hide the dock
   // panel. Detaching to a focus window used to flip this off (main tabs only),
   // so the sidebar Discord panel "came back" the moment the editor tab left.
   const refreshDiscordOccupied = useCallback(() => {
-    const inMain = openTabsRef.current.some((t) => t.kind === "discord");
+    const inMain = openTabsRef.current.some((t) => isDiscordPluginTabId(t.id));
     if (inMain) {
       setDiscordTabOpen(true);
       return;
@@ -427,9 +425,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       return;
     }
     void api.list_focus_tab_ids().then((ids) => {
-      const occupied = (ids ?? []).some(
-        (id) => id === discordTabId() || id.startsWith("discord:"),
-      );
+      const occupied = (ids ?? []).some((id) => isDiscordPluginTabId(id));
       setDiscordTabOpen(occupied);
     });
   }, [openTabsRef]);
@@ -605,7 +601,9 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     }
     const doomedIds = new Set(doomed.map((t) => t.id));
     reportOpenTabsNow(openTabsRef.current.filter((t) => !doomedIds.has(t.id)).map((t) => t.id));
-    if (doomed.some((t) => t.kind === "discord")) refreshDiscordOccupied();
+    if (doomed.some((t) => isDiscordPluginTabId(t.id) || t.kind === "discord")) {
+      refreshDiscordOccupied();
+    }
   }, [
     pluginContrib.ready,
     pluginContrib.enabled_ids,
@@ -647,7 +645,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
         await openFocus(tab.id, tab.name, { solo: true });
       }
       closeTabInLayout(tab.id);
-      if (tab.kind === "discord") {
+      if (isDiscordPluginTabId(tab.id)) {
         // Keep the dock panel hidden while Discord lives in the focus window.
         setDiscordTabOpen(true);
       }
@@ -996,7 +994,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       window.setTimeout(() => {
         void getApi()?.claim_tab(tab.id, "main");
       }, 0);
-      if (tab.kind === "discord") setDiscordTabOpen(true);
+      if (isDiscordPluginTabId(tab.id)) setDiscordTabOpen(true);
     };
     return () => {
       delete window.__uefnFocusTabReturn;
@@ -1006,8 +1004,15 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   useEffect(() => {
     window.__uefnFocusTabActive = (event) => {
       setFocusWindowTab({ focusId: event.focus_id, title: event.title });
-      if (parseFocusId(event.focus_id)?.kind === "discord") setDiscordTabOpen(true);
-      else refreshDiscordOccupied();
+      const parsed = parseFocusId(event.focus_id);
+      if (
+        (parsed?.kind === "plugin" && parsed.pluginId === "discord") ||
+        isDiscordPluginTabId(event.focus_id)
+      ) {
+        setDiscordTabOpen(true);
+      } else {
+        refreshDiscordOccupied();
+      }
     };
     return () => {
       delete window.__uefnFocusTabActive;

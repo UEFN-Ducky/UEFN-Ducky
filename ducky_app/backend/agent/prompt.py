@@ -18,7 +18,7 @@ def clear_skill_cache() -> None:
 
 def _rules_body(listener_port: int) -> str:
     from backend.agent.hard_rules import AGENT_HARD_RULES
-    from backend.serialization import tool_result_format
+    from backend.agent.serialization import tool_result_format
 
     toon_hint = ""
     if tool_result_format() == "toon":
@@ -60,10 +60,10 @@ data:
 - **Actor paths:** use the actor's Outliner **label** exactly as returned by `find_devices`/`get_all_actors` — never `UAID_...` paths unless the label is rejected.
 - Do not claim success without an inspect read-back after writes.
 - **Bias to action:** when asked to create/build something, pick sensible defaults (file paths, names, labels) and proceed — state assumptions in one line instead of asking clarifying questions. Exception: the Blender-vs-UEFN modeling path question above. For Verse logic requests, start with `workspace_list_dir("Verse")` and read the matching `.verse` file in the same turn.
-- **Clarify with `ducky_ask_user` (HARD — never prose A/B/C):** when a choice would change architecture, delete data, spend money, fork the path (Verse build vs workaround, Scene Graph vs actors, wait vs proceed blind, etc.), or you would type "Your call" / "A — … B — …" / numbered options for the user — you MUST call `ducky_ask_user` with `questions=[{id, prompt, options:[{id,label,description}]}]`. Do **not** put the options in chat text. An inline questionnaire docks above the composer until answered. Batch related questions in one call (up to ~8). Ending a turn with prose choices is a failure — the tool is a floor tool (always available).
+- **Clarify with `ducky_ask_user` (HARD — never prose A/B/C):** when a choice would change architecture, delete data, spend money, fork the path (Verse build vs workaround, Scene Graph vs actors, wait vs proceed blind, etc.), or you would type "Your call" / "A — … B — …" / numbered options for the user — you MUST call `ducky_ask_user` with `questions=[{{id, prompt, options:[{{id,label,description}}]}}]`. Do **not** put the options in chat text. An inline questionnaire docks above the composer until answered. Batch related questions in one call (up to ~8). Ending a turn with prose choices is a failure — the tool is a floor tool (always available).
 - **Stuck / repeated failure → ask:** if the same approach fails twice, try one clear alternative once. If that also fails (or you are out of safe alternatives), stop looping — call `ducky_ask_user` with what failed, what you tried, and concrete next-step options (or free-text). Never burn the turn retrying the same broken path. Never dump those options as markdown in the reply.
 - **Place devices in level:** `search_assets(search=…)` → `spawn_actor(asset_path=…_C)` once per device → `set_actor_label` → `set_actor_folder` → `save_current_level`. Use `get_viewport_camera` for a default row. For large greybox/blockout, prefer one `execute_python` placement loop (see leveldesign skill) instead of hundreds of `spawn_actor` turns.
-- **Plans (HARD — use the tool, not chat prose):** Any multi-step diagnose/fix/build (≥2 tool rounds or branching paths) MUST call `ducky_create_plan` (or update the existing plan) — never substitute a markdown "Fix plan" / checklist in the reply. **Fields:** `overview` = short 1–3 sentence summary ONLY (never JSON/XML); `body_markdown` = longer description; `nodes` = real JSON **array** argument `[{id,content,children}]` — NEVER paste nodes into overview. Empty `nodes` → UI shows "0 of 0 steps". **Followable nodes:** each leaf = one concrete action (tool name or clear verb) + Done-when; group under Diagnose → Fix → Verify (add deeper rework only after verify). Prefer `nodes` trees (main → subplans → steps). **Execute:** if a plan exists, follow it depth-first on open leaves — `ducky_plan_update_node(status=in_progress|completed)`; parents cannot complete while nested subplans are unfinished. If findings flip the approach, rewrite the tree with `ducky_update_plan` / add/move/delete node tools BEFORE more mutators — never thrash off-plan. Templates: `ducky_create_plan_template` / `ducky_instantiate_plan_template` (snapshots — edits never cross). Plan mode: create/update the tree only, then stop.
+- **Plans (HARD — use the tool, not chat prose):** Any multi-step diagnose/fix/build (≥2 tool rounds or branching paths) MUST call `ducky_create_plan` (or update the existing plan) — never substitute a markdown "Fix plan" / checklist in the reply. **Fields:** `overview` = short 1–3 sentence summary ONLY (never JSON/XML); `body_markdown` = longer description; `nodes` = real JSON **array** argument `[{{id,content,children}}]` — NEVER paste nodes into overview. Empty `nodes` → UI shows "0 of 0 steps". **Followable nodes:** each leaf = one concrete action (tool name or clear verb) + Done-when; group under Diagnose → Fix → Verify (add deeper rework only after verify). Prefer `nodes` trees (main → subplans → steps). **Execute:** if a plan exists, follow it depth-first on open leaves — `ducky_plan_update_node(status=in_progress|completed)`; parents cannot complete while nested subplans are unfinished. If findings flip the approach, rewrite the tree with `ducky_update_plan` / add/move/delete node tools BEFORE more mutators — never thrash off-plan. Templates: `ducky_create_plan_template` / `ducky_instantiate_plan_template` (snapshots — edits never cross). Plan mode: create/update the tree only, then stop.
 - **One project at a time:** the "Project root" above is the *panel* project — where `workspace_*`/file edits land. `ducky_get_status` reports the *live* UEFN map plus `project_match`. If they differ, do not edit files or wire devices yet: call `ducky_sync_project_to_uefn` to point the panel at the open UEFN map, or ask the user to open the panel project in UEFN.
 - Never scan ports other than {listener_port}.
 - **Group swarms (subagents retired):** Any chat can own a swarm. Workers are group members. Build/extend with `ducky_group_create` → `ducky_group_add_member(group_id, your_conv_id, as_leader=true)` → nested groups (`ducky_group_create` with `parent_folder_id`) → `ducky_group_invite` / `ducky_spawn_chat(group_id=…)` (group_id required). REUSE via `ducky_group_members` + `ducky_send_chat_message`. Recycle bloated members with `ducky_recycle_member` (handoff → hard-delete → twin in same group). Multi-step / multi-ducky work: create a master plan first; leaders create hub + per-member plans before delegating. If a spawn times out, the result arrives later as `[ducky:agent-message]` — do NOT re-spawn.
@@ -164,7 +164,7 @@ def get_system_prompt_parts(
     # Index is filtered to shared (no author) + this ducky's authored entries.
     memory_block = ""
     try:
-        from backend.project_memory import index_markdown
+        from backend.memory.project import index_markdown
         from frontend.settings import PanelSettings
 
         max_chars = _MEMORY_INDEX_PROMPT_CHARS
@@ -249,7 +249,7 @@ def get_system_prompt_parts(
     skill_block = skill_text or ""
     if local_slim:
         try:
-            from backend.skill import build_skill_prompt_compact, resolve_conversation_selection
+            from backend.skills.store import build_skill_prompt_compact, resolve_conversation_selection
             from frontend.settings import PanelSettings
 
             sel = None
@@ -353,7 +353,7 @@ def get_system_prompt(
     skill = skill_override if skill_override is not None else _skill_cache
     if skill is None:
         try:
-            from backend.skill import load_skill_text
+            from backend.skills.store import load_skill_text
 
             skill = load_skill_text()
         except FileNotFoundError:

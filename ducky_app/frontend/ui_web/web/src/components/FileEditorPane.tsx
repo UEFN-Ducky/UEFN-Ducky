@@ -1,9 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
-import { isPreviewableBinary } from "../asset-preview";
-import { AssetPreviewPane } from "../asset-preview/AssetPreviewPane";
 import { onApiReady } from "../hooks/onApiReady";
+import {
+  resolvePluginEditorForFile,
+  usePluginContributions,
+} from "../hooks/usePluginContributions";
 import { useWatchProjectFile } from "../hooks/useWatchProjectFile";
+import { requestOpenStore } from "../navigation/deepLinks";
+import { PluginFilePane } from "../plugin-ui/PluginFilePane";
 
 import {
   isVerseFile,
@@ -23,7 +27,6 @@ import {
 import { AudioFilePane } from "./AudioFilePane";
 import { CtrlWheelZoomRoot } from "./CtrlWheelZoomRoot";
 import { ImageFilePane } from "./ImageFilePane";
-import { ModelFilePane } from "./ModelFilePane";
 import { VideoFilePane } from "./VideoFilePane";
 
 const TextEditorHost = lazy(() =>
@@ -113,9 +116,22 @@ function ReadOnlyFilePane({ relativePath }: FileEditorPaneProps) {
   );
 }
 
+/** Store slug that can preview .uasset / 3D models when installed. */
+const UASSET_PREVIEW_STORE_SLUG = "uasset-preview";
+
+function wantsAssetPreviewPlugin(relativePath: string, kindHint?: string): boolean {
+  if (kindHint === "unreal_asset" || kindHint === "model") return true;
+  const kind = classifyFilePath(relativePath);
+  return kind === "unreal_asset" || kind === "model" || isModelFilePath(relativePath);
+}
+
 /** Binary / Unreal asset files. Opt-in "View raw" shows the hex head, VS Code style. */
-function BinaryFilePane({ relativePath }: FileEditorPaneProps) {
+function BinaryFilePane({
+  relativePath,
+  suggestStorePlugin,
+}: FileEditorPaneProps & { suggestStorePlugin?: string | null }) {
   const [showRaw, setShowRaw] = useState(false);
+  const storeSlug = suggestStorePlugin || null;
 
   if (showRaw) {
     return <ReadOnlyFilePane relativePath={relativePath} />;
@@ -124,9 +140,25 @@ function BinaryFilePane({ relativePath }: FileEditorPaneProps) {
   return (
     <div className="file-editor-pane file-editor-pane-layout binary-file-pane">
       <div className="ui-status-muted">This file can’t be opened in the editor.</div>
-      <button type="button" className="settings-btn" onClick={() => setShowRaw(true)}>
-        View raw
-      </button>
+      {storeSlug ? (
+        <div className="ui-status-muted binary-file-pane-hint">
+          Check the Store for a plugin that can preview this file type.
+        </div>
+      ) : null}
+      <div className="binary-file-pane-actions">
+        {storeSlug ? (
+          <button
+            type="button"
+            className="settings-btn general-tab-btn-primary"
+            onClick={() => requestOpenStore({ slug: storeSlug })}
+          >
+            Open Store
+          </button>
+        ) : null}
+        <button type="button" className="settings-btn" onClick={() => setShowRaw(true)}>
+          View raw
+        </button>
+      </div>
     </div>
   );
 }
@@ -141,6 +173,7 @@ function GuardedTextEditor({
   projectRoot: string;
   readOnly: boolean;
 }) {
+  const contrib = usePluginContributions();
   const [gate, setGate] = useState<
     "loading" | "text" | "binary" | "image" | "model" | "audio" | "video"
   >("loading");
@@ -180,7 +213,22 @@ function GuardedTextEditor({
     return <div className="ui-status-muted">Loading…</div>;
   }
   if (gate === "model") {
-    return <ModelFilePane relativePath={relativePath} />;
+    const claimed = resolvePluginEditorForFile(contrib, relativePath, "model");
+    if (claimed) {
+      return (
+        <PluginFilePane
+          pluginId={claimed.pluginId}
+          panelId={claimed.panelId}
+          relativePath={relativePath}
+        />
+      );
+    }
+    return (
+      <BinaryFilePane
+        relativePath={relativePath}
+        suggestStorePlugin={UASSET_PREVIEW_STORE_SLUG}
+      />
+    );
   }
   if (gate === "image") {
     return <ImageFilePane relativePath={relativePath} />;
@@ -192,7 +240,14 @@ function GuardedTextEditor({
     return <VideoFilePane relativePath={relativePath} />;
   }
   if (gate === "binary") {
-    return <BinaryFilePane relativePath={relativePath} />;
+    return (
+      <BinaryFilePane
+        relativePath={relativePath}
+        suggestStorePlugin={
+          wantsAssetPreviewPlugin(relativePath) ? UASSET_PREVIEW_STORE_SLUG : null
+        }
+      />
+    );
   }
   return (
     <Suspense fallback={<div className="ui-status-muted">Loading editor…</div>}>
@@ -207,6 +262,7 @@ function GuardedTextEditor({
 }
 
 export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
+  const contrib = usePluginContributions();
   const [verseEnabled, setVerseEnabled] = useState<boolean | null>(null);
   const [projectRoot, setProjectRoot] = useState("");
 
@@ -225,12 +281,9 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
 
   const kind = classifyFilePath(relativePath);
 
-  // Images / 3D models / audio / video first — never open as hex/Monaco.
+  // Images / audio / video first — never open as hex/Monaco.
   if (kind === "image" || isImageFilePath(relativePath)) {
     return <ImageFilePane relativePath={relativePath} />;
-  }
-  if (kind === "model" || isModelFilePath(relativePath)) {
-    return <ModelFilePane relativePath={relativePath} />;
   }
   if (kind === "audio" || isAudioFilePath(relativePath)) {
     return <AudioFilePane relativePath={relativePath} />;
@@ -239,10 +292,37 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
     return <VideoFilePane relativePath={relativePath} />;
   }
 
+  // 3D models / Unreal assets — plugin-owned when contributed; else binary.
+  if (kind === "model" || isModelFilePath(relativePath) || kind === "unreal_asset") {
+    const claimed = resolvePluginEditorForFile(contrib, relativePath, kind === "unreal_asset" ? "unreal_asset" : "model");
+    if (claimed) {
+      return (
+        <PluginFilePane
+          pluginId={claimed.pluginId}
+          panelId={claimed.panelId}
+          relativePath={relativePath}
+        />
+      );
+    }
+    return (
+      <BinaryFilePane
+        relativePath={relativePath}
+        suggestStorePlugin={UASSET_PREVIEW_STORE_SLUG}
+      />
+    );
+  }
+
   // Files dragged in from Explorer (ext:).
   if (isExtEncodedPath(relativePath)) {
-    if (kind === "binary" || kind === "unreal_asset" || isBinaryProjectFile(relativePath)) {
-      return <BinaryFilePane relativePath={relativePath} />;
+    if (kind === "binary" || isBinaryProjectFile(relativePath)) {
+      return (
+        <BinaryFilePane
+          relativePath={relativePath}
+          suggestStorePlugin={
+            wantsAssetPreviewPlugin(relativePath, kind) ? UASSET_PREVIEW_STORE_SLUG : null
+          }
+        />
+      );
     }
     if (!projectRoot) {
       return <div className="ui-status-muted">Loading…</div>;
@@ -281,12 +361,15 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
     );
   }
 
-  if (isPreviewableBinary(relativePath) || kind === "unreal_asset") {
-    return <AssetPreviewPane relativePath={relativePath} />;
-  }
-
   if (kind === "binary") {
-    return <BinaryFilePane relativePath={relativePath} />;
+    return (
+      <BinaryFilePane
+        relativePath={relativePath}
+        suggestStorePlugin={
+          wantsAssetPreviewPlugin(relativePath, kind) ? UASSET_PREVIEW_STORE_SLUG : null
+        }
+      />
+    );
   }
 
   return <ReadOnlyFilePane relativePath={relativePath} />;

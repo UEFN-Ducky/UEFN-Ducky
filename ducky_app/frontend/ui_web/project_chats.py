@@ -446,7 +446,7 @@ def save_conversation(conv: Conversation, project_root: str | None = None, *, to
 
 def all_available_tool_ids() -> list[str]:
     """Globally available tool-group ids (builtins + MCP plugins + UEFN agent plugins)."""
-    from backend.builtin_toolsets import get_enabled_builtin_group_ids
+    from backend.agent.builtin_toolsets import get_enabled_builtin_group_ids
     from backend.mcp_plugins.store import get_enabled_plugin_ids
     from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_agent_tool_rows
 
@@ -489,7 +489,7 @@ def create_conversation(
     now = time.time()
     s = settings or PanelSettings.load()
     root = project_root if project_root is not None else s.uefn_project_root
-    from backend.skill import conversation_skill_text, merge_selection
+    from backend.skills.store import conversation_skill_text, merge_selection
     from backend.agent.coding_agents.base import normalize_coding_agent
     from backend.agent.thinking_effort import normalize_thinking_effort
 
@@ -539,7 +539,7 @@ def create_conversation(
 
 def _apply_tool_ids_to_conv(conv: Conversation, tool_ids: list[str]) -> None:
     """Legacy allowlist writer — prefer _apply_disabled_tool_ids_to_conv."""
-    from backend.builtin_toolsets import is_builtin_group
+    from backend.agent.builtin_toolsets import is_builtin_group
     from backend.mcp_plugins.store import load_plugin_manifest as load_mcp_manifest
     from backend.mcp_plugins.store import normalize_plugin_id
     from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
@@ -738,7 +738,7 @@ def set_conversation_disabled_packs(
         disabled_packs=disabled_packs,
     )
     del _packs, _subs
-    from backend.skill import merge_selection
+    from backend.skills.store import merge_selection
 
     return merge_selection(disabled_packs=disabled_packs).disabled_packs
 
@@ -752,7 +752,7 @@ def set_conversation_skill_selection(
     disabled_packs: list[str] | None = None,
 ) -> tuple[list[str], dict[str, list[str]]]:
     """Persist pack deny-list + optional per-pack subskill allowlists."""
-    from backend.skill import conversation_skill_text, merge_selection
+    from backend.skills.store import conversation_skill_text, merge_selection
 
     conv = load_conversation(conv_id, project_root)
     if not conv:

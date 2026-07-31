@@ -163,7 +163,7 @@ def try_serve_user_sound(handler: Any, rel_path: str) -> bool:
     if not match:
         return False
 
-    from backend.skill import appdata_dir
+    from backend.skills.store import appdata_dir
 
     name = unquote(match.group(1) or "")
     if not name or "/" in name or "\\" in name or name in (".", "..") or ".." in name:

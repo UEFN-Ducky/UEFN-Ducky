@@ -539,7 +539,7 @@ class PanelApi:
         self._sidebar_only_layout = False
         self._sidebar_only_saved_bounds: dict[str, int | float] | None = None
         self._tk_root: Any = None
-        from backend.listener_status import ListenerStatusState
+        from backend.bridge.status import ListenerStatusState
 
         self._listener_status_state = ListenerStatusState()
         self._last_listener_status: dict[str, Any] | None = None
@@ -550,8 +550,13 @@ class PanelApi:
         self._import_drop_target = ""
         self._import_drop_lock = threading.Lock()
         self._agent_push_lock = threading.Lock()
+        # Coding agents whose missing-backend repair already ran (see detect_coding_agent_cli).
+        self._coding_agent_reload_tried: set[str] = set()
         self._agent_push_pending: list[dict[str, Any]] = []
         self._agent_push_timer: threading.Timer | None = None
+        # uefn_plugins_changed (etc.) can fire before WebView exists — flush on bind.
+        self._pending_panel_pushes: list[dict[str, Any]] = []
+        self._pending_panel_push_lock = threading.Lock()
         self._verse_editor = VerseEditorApi()
         _load_model_cache_from_disk()
         # Plugins off the splash critical path — window paints, then contribs arrive.
@@ -586,6 +591,7 @@ class PanelApi:
         from frontend.ui_web.terminal import get_terminal_manager
 
         get_terminal_manager().set_push(self._push)
+        self._flush_pending_panel_pushes()
 
     def _resolve_window(self) -> Any | None:
         try:
@@ -691,8 +697,36 @@ class PanelApi:
         except Exception:
             return False
 
+    def _flush_pending_panel_pushes(self) -> None:
+        with self._pending_panel_push_lock:
+            pending = list(self._pending_panel_pushes)
+            self._pending_panel_pushes.clear()
+        for event in pending:
+            self._push_panel(event)
+
     def _push_panel(self, event: dict[str, Any]) -> None:
+        """Notify React of panel-level changes without WebView2 evaluate_js.
+
+        Store enable/disable/install/uninstall call this *inside* a pywebview JS→Python
+        API handler. evaluate_js from that path deadlocks WebView2 against the API
+        return (UI stuck on Uninstalling… / install at ~14% until app restart). Agent
+        streaming already uses the loopback HTTP bus for the same reason — join it.
+        """
+        try:
+            from frontend.ui_web.panel_httpd import publish_panel_events
+
+            publish_panel_events([dict(event)])
+            return
+        except Exception:
+            pass
+        # Fallback only when HTTP bus is unavailable (very early boot).
         if not self._all_windows():
+            with self._pending_panel_push_lock:
+                if event.get("type") == "uefn_plugins_changed":
+                    self._pending_panel_pushes = [
+                        e for e in self._pending_panel_pushes if e.get("type") != "uefn_plugins_changed"
+                    ]
+                self._pending_panel_pushes.append(dict(event))
             return
         try:
             payload = json.dumps(event, ensure_ascii=False)
@@ -750,7 +784,7 @@ class PanelApi:
 
     def _fetch_listener_status(self) -> dict[str, Any]:
         try:
-            from backend.listener_status import fetch_listener_status
+            from backend.bridge.status import fetch_listener_status
 
             settings = PanelSettings.load()
             return fetch_listener_status(
@@ -1454,20 +1488,25 @@ class PanelApi:
             from backend.uefn_plugins.host import (
                 ensure_plugins_loaded_async,
                 get_contributions,
+                get_ui_contributions,
                 plugins_ready,
+                plugins_ui_ready,
             )
 
             # Never sync-wait here — that re-blocks the UI for ~20s after paint.
-            if not plugins_ready():
-                ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
-                return {"ok": False, "error": "plugins_loading", **empty}
-            return {"ok": True, **get_contributions()}
+            # UI contribs (plugin.json) land before slow register(); expose them early.
+            if plugins_ready():
+                return {"ok": True, **get_contributions()}
+            ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
+            if plugins_ui_ready():
+                return {"ok": True, **get_ui_contributions()}
+            return {"ok": False, "error": "plugins_loading", **empty}
         except Exception as exc:
             return {"ok": False, "error": str(exc), **empty}
 
     def set_skill_pack_enabled(self, pack_id: str, enabled: bool) -> dict[str, Any]:
         """Enable/disable a standalone skill pack (global deny-list). Store UI uses this."""
-        from backend.tools.panel_skills import set_pack_scoped
+        from backend.tools.panel.panel_skills import set_pack_scoped
 
         result = set_pack_scoped(str(pack_id or ""), bool(enabled), scope="global")
         if result.get("ok"):
@@ -2169,33 +2208,60 @@ class PanelApi:
         return {"ok": True, "profile": duplicated}
 
     def get_agent_profile_editor_catalog(self) -> dict[str, Any]:
-        from backend.builtin_toolsets import builtin_group_rows
-        from backend.mcp_plugins.store import list_mcp_plugins, seed_mcp_plugins
-        from backend.skill import default_selection_from_settings, list_skill_packs, seed_skill_packs
-        from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_agent_tool_rows
+        """Duckies editor catalog — never sync-wait on plugin register().
+
+        Same non-blocking pattern as get_uefn_plugin_contributions: return packs/
+        builtins/MCP immediately; fill UEFN agent tool rows once plugins_ready.
+        """
+        from backend.agent.builtin_toolsets import (
+            builtin_group_rows,
+            get_enabled_builtin_group_ids,
+        )
+        from backend.mcp_plugins.store import (
+            get_enabled_plugin_ids,
+            list_mcp_plugins,
+            seed_mcp_plugins,
+        )
+        from backend.skills.store import default_selection_from_settings, list_skill_packs, seed_skill_packs
+        from backend.uefn_plugins.host import (
+            ensure_plugins_loaded_async,
+            plugins_ready,
+            uefn_agent_tool_rows,
+        )
         from backend.uefn_plugins.store import seed_uefn_plugins
         from frontend.ui_web.project_chats import all_available_tool_ids
 
         seed_skill_packs()
         seed_mcp_plugins()
         seed_uefn_plugins()
-        ensure_plugins_loaded()
         settings = PanelSettings.load()
         sel = default_selection_from_settings(settings)
-
-        # Empty deny-lists = everything available (lazy-loaded).
-        return {
+        base = {
             "packs": list_skill_packs(),
             "default_disabled_packs": list(sel.disabled_packs),
             "default_disabled_tool_ids": [],
             "default_enabled_packs": sel.enabled_packs,  # derived (all − denied)
             "default_enabled_subskills": {},
-            "tools": builtin_group_rows() + list_mcp_plugins() + uefn_agent_tool_rows(),
-            "default_tool_ids": all_available_tool_ids(),
+        }
+        if plugins_ready():
+            return {
+                **base,
+                "tools": builtin_group_rows() + list_mcp_plugins() + uefn_agent_tool_rows(),
+                "default_tool_ids": all_available_tool_ids(),
+                "plugins_loading": False,
+            }
+        # Kick background load; UI refreshes on uefn_plugins_changed.
+        ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
+        return {
+            **base,
+            "tools": builtin_group_rows() + list_mcp_plugins(),
+            "default_tool_ids": list(get_enabled_builtin_group_ids())
+            + list(get_enabled_plugin_ids()),
+            "plugins_loading": True,
         }
 
     def get_conversation_skills(self, conv_id: str) -> dict[str, Any]:
-        from backend.skill import list_skill_packs, resolve_conversation_selection, seed_skill_packs
+        from backend.skills.store import list_skill_packs, resolve_conversation_selection, seed_skill_packs
         from backend.mcp_plugins.store import seed_mcp_plugins
 
         seed_skill_packs()
@@ -2206,7 +2272,7 @@ class PanelApi:
         if conv:
             sel = resolve_conversation_selection(conv, settings)
         else:
-            from backend.skill import default_selection_from_settings
+            from backend.skills.store import default_selection_from_settings
 
             sel = default_selection_from_settings(settings)
         # For UI: packs with no stored allowlist show every toggleable root as on.
@@ -2264,7 +2330,7 @@ class PanelApi:
     ) -> dict[str, Any]:
         """Legacy API — clears the default deny-list (all packs available)."""
         del enabled_packs, enabled_subskills
-        from backend.skill import merge_selection
+        from backend.skills.store import merge_selection
 
         settings = PanelSettings.load()
         sel = merge_selection(disabled_packs=[])
@@ -2478,9 +2544,33 @@ class PanelApi:
         open_project_file(relative_path)
 
     def open_asset_in_uefn(self, relative_path: str) -> dict[str, object]:
-        from frontend.asset_preview.service import open_asset_in_uefn
+        """Reveal a project asset in UEFN (Content Browser). Rich preview UI is the Store plugin."""
+        from pathlib import Path
 
-        return open_asset_in_uefn(relative_path)
+        from frontend.settings import PANEL_LISTENER_PORT
+
+        rel = (relative_path or "").strip().replace("\\", "/")
+        content_rel = rel[8:] if rel.lower().startswith("content/") else rel
+        content_rel = Path(content_rel).with_suffix("").as_posix().lstrip("/")
+        asset_path = f"/Game/{content_rel}"
+        try:
+            from backend.bridge import post_command_to_listener
+
+            info = post_command_to_listener(PANEL_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
+            root = str((info or {}).get("content_root") or "").strip().rstrip("/")
+            if root:
+                asset_path = f"{root}/{content_rel}"
+            res = post_command_to_listener(
+                PANEL_LISTENER_PORT,
+                "open_asset_in_uefn",
+                {"asset_path": asset_path},
+                timeout=15.0,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "asset_path": asset_path}
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else True
+        opened = bool(res.get("opened")) if isinstance(res, dict) else None
+        return {"ok": ok, "asset_path": asset_path, "opened": opened}
 
     def read_project_file(self, relative_path: str) -> dict[str, str]:
         return read_project_file(relative_path)
@@ -2511,29 +2601,6 @@ class PanelApi:
                 out["media_base_url"] = result.get("media_base_url") or ""
                 out["media_filename"] = result.get("media_filename") or ""
         return out
-
-    def preview_project_asset(self, relative_path: str) -> dict[str, object]:
-        from frontend.asset_preview.service import preview_project_asset
-
-        return preview_project_asset(relative_path)
-
-    def load_static_mesh_preview(self, relative_path: str) -> dict[str, object]:
-        """On-demand StaticMesh FBX export for the in-panel 3D viewer (cached)."""
-        from frontend.asset_preview.service import load_static_mesh_preview
-
-        return load_static_mesh_preview(relative_path)
-
-    def load_material_preview(self, relative_path: str) -> dict[str, object]:
-        """On-demand material thumbnail from UEFN (cached)."""
-        from frontend.asset_preview.service import load_material_preview
-
-        return load_material_preview(relative_path)
-
-    def load_texture_preview(self, relative_path: str) -> dict[str, object]:
-        """On-demand Texture2D PNG from UEFN (cached per project)."""
-        from frontend.asset_preview.service import load_texture_preview
-
-        return load_texture_preview(relative_path)
 
     def stat_project_file(self, relative_path: str) -> dict[str, int | str | bool]:
         return stat_project_file(relative_path)
@@ -3218,259 +3285,116 @@ class PanelApi:
 
         return any(has_key(p) for p in all_providers())
 
-    # --- Discord group chat (multi-bot) -------------------------------------
-    # Profiles in backend.discord.bots; REST via client; one poller+gateway per
-    # enabled bot. Every method returns a plain dict and never raises across JS.
+    # --- Discord group chat (Store plugin owns implementation) -----------------
+    # Temporary shims: host React still calls discord_*; logic lives in
+    # uefn-plugin-discord via api.register_panel_rpc. Removed once UI is Phase-2 HTML.
 
-    def _discord_bot_id(self, bot_id: str | None = None) -> str:
-        from backend.discord import bots
-
-        return (bot_id or bots.DEFAULT_BOT_ID).strip() or bots.DEFAULT_BOT_ID
-
-    def discord_list_bots(self) -> dict[str, Any]:
+    def _discord_plugin_call(self, method: str, **params: Any) -> dict[str, Any]:
         from backend.uefn_plugins.host import is_plugin_enabled
-        from backend.discord import bots
 
         if not is_plugin_enabled("discord"):
             return {
                 "ok": False,
-                "bots": [],
                 "plugin_disabled": True,
+                "bots": [],
+                "groups": [],
+                "configured": False,
                 "error": "Discord plugin is disabled — enable it in Settings → Store",
             }
-        return {"ok": True, "bots": bots.public_list()}
+        result = self.plugin_call("discord", method, params)
+        if not isinstance(result, dict):
+            return {"ok": False, "error": str(result), "bots": [], "groups": [], "configured": False}
+        if result.get("ok") is not False:
+            return result
+        err = str(result.get("error") or "")
+        # register() skipped panel RPCs or race — call handlers in-process.
+        if "Unknown panel RPC" in err:
+            try:
+                return self._discord_panel_rpc_fallback(method, params)
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": str(exc),
+                    "bots": [],
+                    "groups": [],
+                    "configured": False,
+                }
+        return result
+
+    def _discord_panel_rpc_fallback(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Invoke uefn-plugin-discord panel_rpc handlers without host registry."""
+        import importlib
+        import sys
+
+        mod = sys.modules.get("uefn_plugin_discord")
+        if mod is None:
+            # Prefer AppData package already on sys.path via host import.
+            try:
+                mod = importlib.import_module("uefn_plugin_discord")
+            except Exception:
+                from backend.uefn_plugins.store import plugin_dir
+
+                root = plugin_dir("discord")
+                init_py = root / "backend" / "__init__.py"
+                if not init_py.is_file():
+                    raise FileNotFoundError("Discord plugin package not installed")
+                from backend.uefn_plugins.host import _import_backend
+
+                mod = _import_backend("discord", root, "backend")
+                if mod is None:
+                    raise RuntimeError("Discord plugin backend failed to import")
+        panel = importlib.import_module("uefn_plugin_discord.panel_rpc")
+        fn = getattr(panel, str(method or "").strip(), None)
+        if not callable(fn):
+            raise ValueError(f"Unknown Discord panel RPC: {method}")
+        out = fn(**dict(params or {}))
+        return out if isinstance(out, dict) else {"ok": True, "result": out}
+
+    def discord_list_bots(self) -> dict[str, Any]:
+        return self._discord_plugin_call("list_bots")
 
     def discord_save_bot(self, patch: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create or update a bot profile. Optional ``token``; blank keeps existing."""
-        from backend.discord import bots, poller, presence
-
-        p = patch if isinstance(patch, dict) else {}
-        create = bool(p.get("create"))
-        try:
-            profile = bots.save_bot(
-                bot_id=str(p.get("id") or p.get("bot_id") or "") or None,
-                label=str(p["label"]) if "label" in p else None,
-                guild_id=str(p["guild_id"]) if "guild_id" in p else None,
-                post_as=str(p["post_as"]) if "post_as" in p else None,
-                allowed_ids=str(p["allowed_ids"]) if "allowed_ids" in p else None,
-                prefix=str(p["prefix"]) if "prefix" in p else None,
-                enabled=bool(p["enabled"]) if "enabled" in p else None,
-                show_offline=bool(p["show_offline"]) if "show_offline" in p else None,
-                token=str(p.get("token") or "") or None,
-                create=create or not (p.get("id") or p.get("bot_id")),
-            )
-        except KeyError as e:
-            return {"ok": False, "error": str(e)}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-        # Kick runtime for this bot (or park it if disabled).
-        if profile.enabled and bots.get_token(profile.id):
-            # Re-assert Online (or invisible if Show offline) immediately on Save.
-            presence.bump_presence(profile.id)
-            cid = bots.get_channel_id(profile.id)
-            if cid:
-                poller.ensure_watching(cid, bot_id=profile.id)
-        else:
-            poller.stop_bot(profile.id)
-        self._push_panel({"type": "discord_changed"})
-        # Live connection test when a token/guild is present.
-        status: dict[str, Any] = {"ok": True, "bot": {**profile.to_dict(), "has_token": bool(bots.get_token(profile.id))}}
-        if bots.get_token(profile.id):
-            from backend.discord import client
-
-            st = client.bot_status(bot_id=profile.id)
-            status["status"] = st
-        return status
+        return self._discord_plugin_call("save_bot", patch=patch if isinstance(patch, dict) else {})
 
     def discord_delete_bot(self, bot_id: str) -> dict[str, Any]:
-        from backend.discord import bots, poller
-
-        bid = self._discord_bot_id(bot_id)
-        poller.stop_bot(bid)
-        try:
-            bots.delete_bot(bid)
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-        self._push_panel({"type": "discord_changed"})
-        return {"ok": True, "id": bid}
+        return self._discord_plugin_call("delete_bot", bot_id=str(bot_id or ""))
 
     def discord_status(self, bot_id: str = "") -> dict[str, Any]:
-        from backend.uefn_plugins.host import is_plugin_enabled
-
-        if not is_plugin_enabled("discord"):
-            return {
-                "ok": False,
-                "configured": False,
-                "plugin_disabled": True,
-                "error": "Discord plugin is disabled — enable it in Settings → Store",
-            }
-        from backend.discord import bots, client, poller, presence
-
-        bid = self._discord_bot_id(bot_id)
-        if not client.get_token(bid):
-            return {
-                "ok": False,
-                "configured": False,
-                "bot_id": bid,
-                "error": "No bot token set",
-                "post_name": bots.get_post_as(bid),
-                "allowed_ids": bots.get_allowed_ids(bid),
-                "prefix": bots.get_prefix(bid),
-                "label": (bots.get_bot(bid) or bots.BotProfile(id=bid)).label,
-            }
-        status = client.bot_status(bot_id=bid)
-        status["configured"] = True
-        status["guild_set"] = bool(client.get_guild_id(bid))
-        status["post_name"] = bots.get_post_as(bid)
-        status["allowed_ids"] = bots.get_allowed_ids(bid)
-        status["prefix"] = bots.get_prefix(bid)
-        status["label"] = (bots.get_bot(bid) or bots.BotProfile(id=bid)).label
-        status["enabled"] = bool((bots.get_bot(bid) or bots.BotProfile(id=bid)).enabled)
-        if status.get("ok"):
-            presence.ensure_started(bid)
-            # Also warm other enabled bots so commands work across servers.
-            presence.ensure_all_enabled()
-            poller.sync_enabled_bots()
-            if status["guild_set"]:
-                poller.ensure_watching(bots.get_channel_id(bid), bot_id=bid)
-        return status
+        return self._discord_plugin_call("status", bot_id=str(bot_id or ""))
 
     def discord_list_channels(self, bot_id: str = "") -> dict[str, Any]:
-        from backend.discord import client
-
-        bid = self._discord_bot_id(bot_id)
-        try:
-            return {"ok": True, "bot_id": bid, "channels": client.list_channels(text_only=True, bot_id=bid)}
-        except client.DiscordError as e:
-            return {"ok": False, "bot_id": bid, "error": str(e)}
+        return self._discord_plugin_call("list_channels", bot_id=str(bot_id or ""))
 
     def discord_debug(self, bot_id: str = "") -> dict[str, Any]:
         """Why aren't commands responding? Poller alive, watched channel, last message seen."""
-        from backend.discord import client, poller
-
-        bid = self._discord_bot_id(bot_id)
-        state = poller.debug_state(bid)
-        cid = str(state.get("watching_channel_id") or "")
-        if cid:
-            try:
-                for ch in client.list_channels(text_only=True, bot_id=bid):
-                    if ch.get("id") == cid:
-                        state["watching_channel_name"] = ch.get("name", "")
-                        break
-            except client.DiscordError:
-                pass
-        return state
+        return self._discord_plugin_call("debug", bot_id=str(bot_id or ""))
 
     def discord_open_channel(self, channel_id: str, bot_id: str = "") -> dict[str, Any]:
         """Load a channel's recent history AND point the poller at it (one round trip)."""
-        from backend.discord import bots, client, poller
-
-        bid = self._discord_bot_id(bot_id)
-        cid = str(channel_id or "").strip()
-        if not cid:
-            return {"ok": False, "error": "No channel id"}
-        try:
-            messages = client.fetch_messages(cid, limit=50, bot_id=bid)
-        except client.DiscordError as e:
-            return {"ok": False, "error": str(e)}
-        newest = messages[-1]["id"] if messages else None
-        poller.open_channel(cid, newest, bot_id=bid)
-        bots.set_channel_id(bid, cid)  # commands resume here next launch
-        return {"ok": True, "channel_id": cid, "bot_id": bid, "messages": messages}
+        return self._discord_plugin_call(
+            "open_channel",
+            channel_id=str(channel_id or ""),
+            bot_id=str(bot_id or ""),
+        )
 
     def discord_open_portal(self, bot_id: str = "") -> dict[str, Any]:
         """Open the bot's Dev Portal page (name + avatar editing) in the browser."""
-        import webbrowser
-
-        from backend.discord import client
-
-        bid = self._discord_bot_id(bot_id)
-        url = "https://discord.com/developers/applications"
-        try:
-            app_id = client.application_id(bot_id=bid)
-            if app_id:
-                url = f"{url}/{app_id}/bot"
-        except client.DiscordError:
-            pass  # fall back to the applications list
-        webbrowser.open(url)
-        return {"ok": True, "url": url, "bot_id": bid}
+        return self._discord_plugin_call("open_portal", bot_id=str(bot_id or ""))
 
     def discord_send(self, channel_id: str, text: str, bot_id: str = "") -> dict[str, Any]:
-        from backend.discord import bots, client
-
-        bid = self._discord_bot_id(bot_id)
-        body = str(text or "")
-        # Optional posting identity: "**Alice:** hi" — blank means post as the bot.
-        name = bots.get_post_as(bid)
-        if name:
-            body = f"**{name}:** {body}"
-        try:
-            msg = client.send_message(str(channel_id or ""), body, bot_id=bid)
-            return {"ok": True, "message": msg, "bot_id": bid}
-        except client.DiscordError as e:
-            return {"ok": False, "error": str(e), "bot_id": bid}
+        return self._discord_plugin_call(
+            "send",
+            channel_id=str(channel_id or ""),
+            text=str(text or ""),
+            bot_id=str(bot_id or ""),
+        )
 
     def discord_list_members(self, bot_id: str = "") -> dict[str, Any]:
         """Server member sidebar — gateway cache when warm, else REST fallback."""
-        from backend.discord import client, presence
-
-        bid = self._discord_bot_id(bot_id)
-        gid = client.get_guild_id(bid) or ""
-        if not client.get_token(bid):
-            return {"ok": False, "error": "No bot token set", "groups": [], "bot_id": bid}
-        presence.ensure_started(bid)
-        snap = presence.snapshot(gid, bot_id=bid)
-        if snap.get("ready") and snap.get("groups"):
-            return snap
-        # Gateway cache cold (intents / reconnect) — fill from REST so the sidebar
-        # isn't stuck on "Loading members…" forever. Status dots stay offline.
-        try:
-            members = client.list_guild_members(limit=100, bot_id=bid)
-        except client.DiscordError as e:
-            return {
-                "ok": True,
-                "guild_id": gid,
-                "bot_id": bid,
-                "groups": [],
-                "ready": False,
-                "error": str(e),
-            }
-        people = [
-            {
-                "id": m.get("id") or "",
-                "name": (m.get("nick") or m.get("username") or "unknown"),
-                "bot": bool(m.get("bot")),
-                "status": "offline",
-                "color": None,
-            }
-            for m in members
-            if m.get("id")
-        ]
-        people.sort(key=lambda p: (p["name"] or "").lower())
-        if not people:
-            # Empty list usually means Server Members Intent is off (or tiny guild).
-            return {
-                "ok": True,
-                "guild_id": gid,
-                "bot_id": bid,
-                "groups": [],
-                "ready": False,
-                "error": "No members returned — enable Server Members Intent in the Dev Portal, then restart.",
-            }
-        return {
-            "ok": True,
-            "guild_id": gid,
-            "bot_id": bid,
-            "ready": True,
-            "groups": [
-                {
-                    "id": "members",
-                    "name": "Members",
-                    "count": len(people),
-                    "members": people,
-                }
-            ],
-        }
+        return self._discord_plugin_call("list_members", bot_id=str(bot_id or ""))
 
     def save_agent_settings(self, patch: dict[str, Any]) -> str:
         from backend.agent.secrets import set_key
@@ -3616,48 +3540,38 @@ class PanelApi:
                 v = str(val or "").strip()
                 if v and v != "••••••••":
                     set_key(str(provider), v)
-        # Legacy Settings form → also mirror into the default multi-bot profile.
+        # Legacy Settings form → mirror into the Discord plugin's default bot profile.
         if (
             "discord_name" in patch
             or "discord_allowed_ids" in patch
             or any(str(k) in ("discord", "discord_guild") for k in (keys if isinstance(keys, dict) else {}))
         ):
             try:
-                from backend.discord import bots as _discord_bots
+                from backend.uefn_plugins.host import is_plugin_enabled
 
-                tok = ""
-                if isinstance(keys, dict):
-                    tok = str(keys.get("discord") or "").strip()
-                guild = ""
-                if isinstance(keys, dict):
-                    guild = str(keys.get("discord_guild") or "").strip()
-                existing = _discord_bots.list_bots()
-                if not existing:
-                    _discord_bots.save_bot(
-                        bot_id=_discord_bots.DEFAULT_BOT_ID,
-                        guild_id=guild or None,
-                        post_as=str(patch.get("discord_name") or "").strip() if "discord_name" in patch else None,
-                        allowed_ids=(
-                            str(patch.get("discord_allowed_ids") or "").strip()
-                            if "discord_allowed_ids" in patch
-                            else None
-                        ),
-                        token=tok or None,
-                        create=True,
-                    )
-                else:
-                    _discord_bots.save_bot(
-                        bot_id=_discord_bots.DEFAULT_BOT_ID,
-                        guild_id=guild if guild else None,
-                        post_as=str(patch.get("discord_name") or "").strip() if "discord_name" in patch else None,
-                        allowed_ids=(
-                            str(patch.get("discord_allowed_ids") or "").strip()
-                            if "discord_allowed_ids" in patch
-                            else None
-                        ),
-                        token=tok or None,
-                        create=False,
-                    )
+                if is_plugin_enabled("discord"):
+                    tok = ""
+                    if isinstance(keys, dict):
+                        tok = str(keys.get("discord") or "").strip()
+                    guild = ""
+                    if isinstance(keys, dict):
+                        guild = str(keys.get("discord_guild") or "").strip()
+                    listed = self.plugin_call("discord", "list_bots", {})
+                    bots = listed.get("bots") if isinstance(listed, dict) else None
+                    create = not (isinstance(bots, list) and bots)
+                    save_patch: dict[str, Any] = {
+                        "id": "default",
+                        "create": create,
+                    }
+                    if guild:
+                        save_patch["guild_id"] = guild
+                    if "discord_name" in patch:
+                        save_patch["post_as"] = str(patch.get("discord_name") or "").strip()
+                    if "discord_allowed_ids" in patch:
+                        save_patch["allowed_ids"] = str(patch.get("discord_allowed_ids") or "").strip()
+                    if tok:
+                        save_patch["token"] = tok
+                    self.plugin_call("discord", "save_bot", {"patch": save_patch})
             except Exception:
                 pass
         s.save()
@@ -3749,7 +3663,11 @@ class PanelApi:
         ensure_plugins_loaded()
         invalidate_detect_cache()
         adapter = get_adapter(aid)
-        if adapter is None:
+        if adapter is None and aid not in self._coding_agent_reload_tried:
+            # Last-resort repair, once per agent per session: a full reload
+            # re-registers all 28 plugins (~2.6s) and the Settings tab polls
+            # Detect — unguarded this fired ~100x a session.
+            self._coding_agent_reload_tried.add(aid)
             try:
                 reload_plugins()
                 invalidate_detect_cache()
@@ -4088,13 +4006,13 @@ class PanelApi:
     # ---- Project memory (named entries, skills-style; see backend/project_memory.py) ----
 
     def list_memory_entries(self, project_root: str | None = None) -> dict[str, Any]:
-        from backend.project_memory import list_entries, memory_dir
+        from backend.memory.project import list_entries, memory_dir
 
         root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
         return {"ok": True, "entries": list_entries(root), "dir": str(memory_dir(root))}
 
     def get_memory_entry(self, name: str, project_root: str | None = None) -> dict[str, Any]:
-        from backend.project_memory import read_entry
+        from backend.memory.project import read_entry
 
         root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
         try:
@@ -4113,7 +4031,7 @@ class PanelApi:
         author: str = "",
         project_root: str | None = None,
     ) -> dict[str, Any]:
-        from backend.project_memory import save_entry
+        from backend.memory.project import save_entry
 
         root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
         try:
@@ -4125,7 +4043,7 @@ class PanelApi:
         return {"ok": True, "entry": result}
 
     def delete_memory_entry(self, name: str, project_root: str | None = None) -> dict[str, Any]:
-        from backend.project_memory import delete_entry
+        from backend.memory.project import delete_entry
 
         root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
         try:
@@ -4136,7 +4054,7 @@ class PanelApi:
 
     def get_memory_settings(self) -> dict[str, Any]:
         from backend.agent.context_memory import estimate_tokens
-        from backend.project_memory import index_markdown
+        from backend.memory.project import index_markdown
 
         s = PanelSettings.load()
         index = index_markdown(s.uefn_project_root, max_chars=int(s.memory_index_max_chars or 2_500))
@@ -4770,7 +4688,7 @@ class PanelApi:
         import shutil
         import uuid
 
-        from backend.skill import appdata_dir
+        from backend.skills.store import appdata_dir
 
         allowed = {".mp3", ".wav", ".ogg", ".m4a", ".webm"}
         picked: str | None = None
@@ -4967,7 +4885,7 @@ class PanelApi:
 
     def get_skill_info(self) -> dict[str, Any]:
         from frontend.settings import default_app_data_dir
-        from backend.skill import (
+        from backend.skills.store import (
             appdata_skill_packs_dir,
             build_skill_prompt,
             default_selection_from_settings,
@@ -5041,7 +4959,7 @@ class PanelApi:
     def save_subskill(self, pack_id: str, subskill_id: str, text: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import save_subskill
+        from backend.skills.store import save_subskill
 
         path = save_subskill(pack_id, subskill_id, text)
         clear_skill_cache()
@@ -5060,7 +4978,7 @@ class PanelApi:
     def create_skill_pack(self, pack_id: str, label: str, description: str = "") -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import create_skill_pack
+        from backend.skills.store import create_skill_pack
 
         path = create_skill_pack(pack_id, label, description)
         clear_skill_cache()
@@ -5340,6 +5258,27 @@ class PanelApi:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def plugin_call(
+        self,
+        plugin_id: str,
+        method: str,
+        params: dict | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch a panel RPC registered by ``api.register_panel_rpc`` in a plugin."""
+        from backend.uefn_plugins.host import call_panel_rpc
+
+        try:
+            result = call_panel_rpc(
+                str(plugin_id or ""),
+                str(method or ""),
+                dict(params or {}) if isinstance(params, dict) else {},
+            )
+            if isinstance(result, dict):
+                return result
+            return {"ok": True, "result": result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def draft_skill_pack(self, description: str, model: str, provider: str = "") -> dict[str, Any]:
         from frontend.ui_web.skill_pack_draft import draft_skill_pack
 
@@ -5363,7 +5302,7 @@ class PanelApi:
     def delete_skill_pack(self, pack_id: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import delete_skill_pack
+        from backend.skills.store import delete_skill_pack
 
         try:
             ok = delete_skill_pack(pack_id)
@@ -5383,7 +5322,7 @@ class PanelApi:
         parent_id: str = "",
         load_condition: str = "",
     ) -> dict[str, Any]:
-        from backend.skill import create_subskill
+        from backend.skills.store import create_subskill
 
         path = create_subskill(
             pack_id,
@@ -5411,7 +5350,7 @@ class PanelApi:
     def save_pack_manifest(self, pack_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import save_pack_manifest
+        from backend.skills.store import save_pack_manifest
 
         try:
             path = save_pack_manifest(pack_id, patch or {})
@@ -5422,7 +5361,7 @@ class PanelApi:
         return {"ok": True, "path": str(path), "pack_id": pack_id}
 
     def get_skill_pack_graph(self, pack_id: str) -> dict[str, Any]:
-        from backend.skill import get_skill_pack_graph
+        from backend.skills.store import get_skill_pack_graph
 
         try:
             return {"ok": True, **get_skill_pack_graph(pack_id)}
@@ -5430,7 +5369,7 @@ class PanelApi:
             return {"ok": False, "error": str(e), "pack_id": pack_id}
 
     def get_skill_pack_files(self, pack_id: str) -> dict[str, Any]:
-        from backend.skill import get_skill_pack_files
+        from backend.skills.store import get_skill_pack_files
 
         try:
             return {"ok": True, **get_skill_pack_files(pack_id)}
@@ -5440,7 +5379,7 @@ class PanelApi:
     def save_skill_node(self, pack_id: str, node_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import save_skill_node
+        from backend.skills.store import save_skill_node
 
         try:
             path = save_skill_node(pack_id, node_id, patch)
@@ -5451,7 +5390,7 @@ class PanelApi:
             return {"ok": False, "error": str(e), "node_id": node_id}
 
     def save_skill_layout(self, pack_id: str, layout: dict[str, Any]) -> dict[str, Any]:
-        from backend.skill import save_skill_layout
+        from backend.skills.store import save_skill_layout
 
         try:
             path = save_skill_layout(pack_id, layout)
@@ -5519,7 +5458,7 @@ class PanelApi:
         return None
 
     def export_skill_pack(self, pack_id: str) -> dict[str, Any]:
-        from backend.skill import export_skill_pack_bytes, normalize_pack_id
+        from backend.skills.store import export_skill_pack_bytes, normalize_pack_id
 
         pid = normalize_pack_id(pack_id)
         default_name = f"{pid}.ducky-skill-pack"
@@ -5572,7 +5511,7 @@ class PanelApi:
         """Legacy path-based import (file dialog). Prefer import_skill_pack_bytes from the UI."""
         from pathlib import Path
 
-        from backend.skill import import_skill_pack_from_zip
+        from backend.skills.store import import_skill_pack_from_zip
 
         win = self._window
         src: str | None = None
@@ -5611,7 +5550,7 @@ class PanelApi:
     ) -> dict[str, Any]:
         import base64
 
-        from backend.skill import import_skill_pack_from_bytes
+        from backend.skills.store import import_skill_pack_from_bytes
 
         try:
             raw = base64.b64decode(data_base64 or "")
@@ -5636,7 +5575,7 @@ class PanelApi:
             return {"ok": False, "error": str(e)}
 
     def delete_subskill(self, pack_id: str, subskill_id: str) -> dict[str, Any]:
-        from backend.skill import delete_subskill
+        from backend.skills.store import delete_subskill
 
         try:
             ok = delete_subskill(pack_id, subskill_id)
@@ -5647,7 +5586,7 @@ class PanelApi:
     def reset_skill_pack(self, pack_id: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skill import reset_skill_pack
+        from backend.skills.store import reset_skill_pack
 
         dest = reset_skill_pack(pack_id)
         clear_skill_cache()
@@ -5658,7 +5597,7 @@ class PanelApi:
         self.open_skill_packs_folder()
 
     def open_skill_packs_folder(self) -> None:
-        from backend.skill import appdata_skill_packs_dir, seed_skill_packs
+        from backend.skills.store import appdata_skill_packs_dir, seed_skill_packs
 
         seed_skill_packs()
         d = appdata_skill_packs_dir()
@@ -5685,7 +5624,7 @@ class PanelApi:
         self.open_path_in_explorer(resolve_project_file_path(relative_path))
 
     def open_skill_pack_folder(self, pack_id: str) -> None:
-        from backend.skill import appdata_skill_packs_dir
+        from backend.skills.store import appdata_skill_packs_dir
 
         d = appdata_skill_packs_dir() / pack_id
         d.mkdir(parents=True, exist_ok=True)
@@ -5703,7 +5642,7 @@ class PanelApi:
         return self.list_mcp_servers()
 
     def list_mcp_servers(self) -> dict[str, Any]:
-        from backend.builtin_toolsets import builtin_group_rows
+        from backend.agent.builtin_toolsets import builtin_group_rows
         from backend.mcp_plugins.store import list_mcp_servers, seed_mcp_plugins
         from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_plugin_tool_group_rows
         from backend.uefn_plugins.store import seed_uefn_plugins
@@ -5722,7 +5661,7 @@ class PanelApi:
 
     def set_mcp_server_enabled(self, server_id: str, enabled: bool) -> dict[str, Any]:
         from frontend.ui_web.project_chats import invalidate_all_conversation_caches
-        from backend.builtin_toolsets import is_builtin_group, set_builtin_group_enabled
+        from backend.agent.builtin_toolsets import is_builtin_group, set_builtin_group_enabled
         from backend.mcp_plugins.store import set_mcp_server_enabled
         from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
         from backend.uefn_plugins.store import set_uefn_plugin_enabled
@@ -5746,7 +5685,7 @@ class PanelApi:
     def test_mcp_server(self, server_id: str) -> dict[str, Any]:
         import asyncio
 
-        from backend.builtin_toolsets import count_builtin_group_tools, is_builtin_group
+        from backend.agent.builtin_toolsets import count_builtin_group_tools, is_builtin_group
         from backend.mcp_plugins.client_pool import get_plugin_pool
         from backend.uefn_plugins.host import count_uefn_plugin_tools, is_uefn_agent_tool_plugin
 
@@ -5858,7 +5797,7 @@ class PanelApi:
         ride along as pseudo-plugin rows; the override list mixes their ids
         with external MCP plugin ids.
         """
-        from backend.builtin_toolsets import builtin_group_rows, get_enabled_builtin_group_ids
+        from backend.agent.builtin_toolsets import builtin_group_rows, get_enabled_builtin_group_ids
         from backend.mcp_plugins.store import get_enabled_plugin_ids, list_mcp_plugins
         from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_agent_tool_rows
         from backend.uefn_plugins.store import seed_uefn_plugins
@@ -5899,7 +5838,7 @@ class PanelApi:
         The list may mix builtin group ids, UEFN app-plugin ids, and MCP plugin
         ids — split into conv.builtin_toolsets / uefn_plugins / mcp_plugins.
         """
-        from backend.builtin_toolsets import is_builtin_group
+        from backend.agent.builtin_toolsets import is_builtin_group
         from backend.mcp_plugins.store import load_plugin_manifest as load_mcp_manifest
         from backend.mcp_plugins.store import normalize_plugin_id
         from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
@@ -5942,7 +5881,7 @@ class PanelApi:
         import subprocess
 
         from backend.mcp_plugins.store import mcp_config_path, seed_mcp_plugins
-        from backend.skill import appdata_dir
+        from backend.skills.store import appdata_dir
 
         seed_mcp_plugins()
         path = mcp_config_path()

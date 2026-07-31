@@ -5,7 +5,7 @@ import { useWatchProjectFile } from "../hooks/useWatchProjectFile";
 import { basename } from "../verse-editor/utils/isVerseFile";
 import { CtrlWheelZoomRoot } from "./CtrlWheelZoomRoot";
 
-import "../asset-preview/asset-preview.css";
+import "../theme/styles/media-file.css";
 
 interface ImageFilePaneProps {
   relativePath: string;

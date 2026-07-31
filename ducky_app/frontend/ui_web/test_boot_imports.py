@@ -59,7 +59,9 @@ def test_panel_api_init_does_not_await_plugins() -> None:
     try:
         # Force "not ready" so a regress that sync-waits would hang or take forever.
         was_loaded = plugins_host._LOADED
+        was_ui_ready = plugins_host._UI_READY
         plugins_host._LOADED = False
+        plugins_host._UI_READY = False
         t0 = time.perf_counter()
         api = panel_api.PanelApi()
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -72,6 +74,7 @@ def test_panel_api_init_does_not_await_plugins() -> None:
     finally:
         plugins_host.ensure_plugins_loaded_async = original_async  # type: ignore[assignment]
         plugins_host._LOADED = was_loaded
+        plugins_host._UI_READY = was_ui_ready
 
 
 def main() -> None:

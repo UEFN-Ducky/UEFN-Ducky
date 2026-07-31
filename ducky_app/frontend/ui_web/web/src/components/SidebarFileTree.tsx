@@ -30,9 +30,8 @@ import {
   type SetStateAction,
 } from "react";
 import { Icons } from "../icons/Icons";
-import { AssetThumbnailIcon } from "../asset-preview";
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
-import { isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, isBinaryProjectFile, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName } from "../verse-editor/utils/isVerseFile";
+import { isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName } from "../verse-editor/utils/isVerseFile";
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 import { getApi } from "../hooks/usePanelApi";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
@@ -451,16 +450,12 @@ const FileRow = memo(function FileRow({
           </span>
         ) : (
           <span className="sidebar-tree-row-icon">
-            {isBinaryProjectFile(entry.path) ? (
-              <AssetThumbnailIcon path={entry.path} size={15} />
-            ) : (
-              <FileTypeIcon
-                path={entry.path}
-                size={15}
-                diagnosticErrors={diagnosticErrors}
-                diagnosticWarnings={diagnosticWarnings}
-              />
-            )}
+            <FileTypeIcon
+              path={entry.path}
+              size={15}
+              diagnosticErrors={diagnosticErrors}
+              diagnosticWarnings={diagnosticWarnings}
+            />
           </span>
         )
       }

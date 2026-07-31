@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from backend.builtin_toolsets import BUILTIN_DUCKY, BUILTIN_UEFN
+from backend.agent.builtin_toolsets import BUILTIN_DUCKY, BUILTIN_UEFN
 
 DELEGATION_TOOL_NAMES = frozenset(
     {

@@ -7,9 +7,6 @@ import { Icons } from "../icons/Icons";
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
-import { AssetThumbnailIcon } from "../asset-preview";
-import { isBinaryProjectFile } from "../verse-editor/utils/isVerseFile";
-
 import type { ChatTab, EditorTab } from "../types/panel";
 
 import { ChatTabHoverCard, resolveEditorChatTab } from "./editor/ChatTabHoverCard";
@@ -408,16 +405,12 @@ export function EditorTabs({
                 }`}
               >
                 {tab.kind === "file" ? (
-                  isBinaryProjectFile(tab.path ?? "") ? (
-                    <AssetThumbnailIcon path={tab.path ?? ""} size={16} />
-                  ) : (
-                    <FileTypeIcon
-                      path={tab.path ?? ""}
-                      size={16}
-                      diagnosticErrors={diagnosticErrors}
-                      diagnosticWarnings={diagnosticWarnings}
-                    />
-                  )
+                  <FileTypeIcon
+                    path={tab.path ?? ""}
+                    size={16}
+                    diagnosticErrors={diagnosticErrors}
+                    diagnosticWarnings={diagnosticWarnings}
+                  />
                 ) : tab.kind === "terminal" ? (
                   <Icons.Terminal />
                 ) : tab.kind === "plan" ? (

@@ -26,7 +26,7 @@ import shutil
 from pathlib import Path
 from typing import Sequence
 
-import backend.skill as _skill
+import backend.skills.store as _skill
 
 PROJECT_SKILL_FILENAME = "UEFN-Ducky-SKILL.md"
 SKILLS_DIRNAME = "skills"
@@ -43,12 +43,17 @@ def seed_skill_appdata(force: bool = False) -> tuple[Path | None, bool]:
     return None, False
 
 
-def write_skill_beside_config(config_path: Path) -> Path | None:
-    """Write a reference copy of the combined skill text next to an IDE config file."""
+def write_skill_beside_config(config_path: Path, text: str | None = None) -> Path | None:
+    """Write a reference copy of the combined skill text next to an IDE config file.
+
+    ``text`` lets one sync run reuse a single build — ``load_skill_text()`` walks
+    every pack and is ~1s a call, and it used to run once per IDE config.
+    """
     try:
         dest = Path(config_path).parent / PROJECT_SKILL_FILENAME
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(_skill.load_skill_text(), encoding="utf-8")
+        body = _skill.load_skill_text() if text is None else text
+        _write_if_changed(dest, body.encode("utf-8"))
         return dest
     except OSError:
         return None
@@ -118,8 +123,66 @@ def _is_managed_skill_dir(path: Path) -> bool:
     return isinstance(md, dict) and md.get("managed_by") == MANAGED_BY
 
 
+def _write_if_changed(path: Path, data: bytes) -> bool:
+    """Write only when the bytes differ. Returns True when the file was touched."""
+    try:
+        if path.is_file() and path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    path.write_bytes(data)
+    return True
+
+
+def _sync_references(src: Path | None, dest: Path) -> bool:
+    """Mirror ``src`` into ``dest``, copying only changed files. True if anything moved.
+
+    Replaces a blind rmtree + copytree: that rewrote ~200 files on every Apply
+    (and on every plugin register auto-apply), which is what made a cold boot pay
+    tens of seconds of AV-scanned disk churn for byte-identical content.
+    """
+    if src is None or not src.is_dir():
+        if dest.is_dir():
+            shutil.rmtree(dest, ignore_errors=True)
+            return True
+        return False
+    dest.mkdir(parents=True, exist_ok=True)
+    touched = False
+    wanted: set[str] = set()
+    for child in src.rglob("*"):
+        rel = child.relative_to(src)
+        target = dest / rel
+        if child.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            wanted.add(str(rel))
+            continue
+        wanted.add(str(rel))
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if _write_if_changed(target, child.read_bytes()):
+                touched = True
+        except OSError:
+            touched = True
+    for child in sorted(dest.rglob("*"), reverse=True):
+        rel = str(child.relative_to(dest))
+        if rel in wanted:
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink()
+            touched = True
+        except OSError:
+            pass
+    return touched
+
+
 def deploy_skill_folders(skills_root: Path) -> list[str]:
-    """Copy every pack into ``skills_root/<pack_id>/``; prune stale managed folders."""
+    """Copy every pack into ``skills_root/<pack_id>/``; prune stale managed folders.
+
+    Content-compares before writing — an unchanged tree costs reads only.
+    """
     logs: list[str] = []
     pack_ids = _skill.list_pack_ids()
     try:
@@ -134,14 +197,13 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
         src_dir = _pack_source_dir(pack_id)
         try:
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / _skill.PACK_FILE).write_text(skill_md, encoding="utf-8")
+            touched = _write_if_changed(
+                dest / _skill.PACK_FILE, skill_md.encode("utf-8")
+            )
             refs_src = (src_dir / _skill.REFERENCES_DIR) if src_dir else None
-            refs_dest = dest / _skill.REFERENCES_DIR
-            if refs_dest.is_dir():
-                shutil.rmtree(refs_dest)
-            if refs_src is not None and refs_src.is_dir():
-                shutil.copytree(refs_src, refs_dest)
-            logs.append(f"Skill folder -> {dest}")
+            touched |= _sync_references(refs_src, dest / _skill.REFERENCES_DIR)
+            if touched:
+                logs.append(f"Skill folder -> {dest}")
         except OSError as e:
             logs.append(f"Skill folder failed ({dest}): {e}")
     try:
@@ -216,8 +278,10 @@ def sync_skill(
 
     # Gateway plugin skills dirs + every IDE config's sibling skills/ folder.
     skills_roots = set(registered_coding_agent_skills_roots())
-    for cfg in ide_config_paths or ():
-        beside = write_skill_beside_config(Path(cfg))
+    configs = list(ide_config_paths or ())
+    combined = _skill.load_skill_text() if configs else ""
+    for cfg in configs:
+        beside = write_skill_beside_config(Path(cfg), combined)
         if beside:
             logs.append(f"Skill copy -> {beside}")
         skills_roots.add(Path(cfg).parent / SKILLS_DIRNAME)

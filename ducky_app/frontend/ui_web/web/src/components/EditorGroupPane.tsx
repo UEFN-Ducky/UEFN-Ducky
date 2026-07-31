@@ -7,8 +7,6 @@ import { PlanPane } from "./PlanPane";
 import { ProviderUsageReport } from "./usage/ProviderUsageReport";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { SettingsView } from "../views/SettingsView";
-import { GroupChatPanel } from "./groupchat/GroupChatPanel";
-import { discordBotIdFromTab } from "../types/panel";
 import { PluginWebviewPane } from "../plugin-ui";
 import { DucktactoeChatShell } from "../plugin-ui/DucktactoeChatShell";
 import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
@@ -295,16 +293,6 @@ export function EditorGroupPane({
     }
     if (activeTab.kind === "settings") {
       return <SettingsView />;
-    }
-    if (activeTab.kind === "discord") {
-      // key forces a clean mount per bot — avoids stale "Connected as …" from the prior tab.
-      return (
-        <GroupChatPanel
-          key={activeTab.id}
-          variant="full"
-          botId={discordBotIdFromTab(activeTab.id)}
-        />
-      );
     }
     if (activeTab.kind === "plugin") {
       return (

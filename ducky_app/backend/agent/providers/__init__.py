@@ -34,12 +34,15 @@ def gateway_providers() -> tuple[str, ...]:
     """Enabled ``llm.providers`` ids that have a registered factory."""
     try:
         from backend.uefn_plugins.host import (
-            ensure_plugins_loaded,
+            ensure_plugins_loaded_async,
             get_contributions,
             get_llm_provider_registration,
+            plugins_ready,
         )
 
-        ensure_plugins_loaded()  # repair missing register() after first-boot blips
+        # Never block Store enable/disable on sync register repair (unity-mcp etc.).
+        if not plugins_ready():
+            ensure_plugins_loaded_async()
         out: list[str] = []
         seen: set[str] = set()
         for row in get_contributions().get("llm_providers") or []:

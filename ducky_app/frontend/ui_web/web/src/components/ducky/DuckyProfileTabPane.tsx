@@ -7,6 +7,7 @@ import {
   rememberAgentProfilesList,
 } from "../../hooks/agentProfilesCache";
 import { onApiReady } from "../../hooks/onApiReady";
+import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
 import { getApi } from "../../hooks/usePanelApi";
 import { useTimedMessage } from "../../hooks/useTimedMessage";
 import { Icons } from "../../icons/Icons";
@@ -72,6 +73,18 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
   const hasContentRef = useRef(Boolean(seeded.form));
   const loadGenRef = useRef(0);
 
+  const refreshCatalog = useCallback(async () => {
+    const api = getApi();
+    if (!api?.get_agent_profile_editor_catalog) return;
+    try {
+      const cat = await api.get_agent_profile_editor_catalog();
+      setCatalog(cat);
+      rememberAgentProfileCatalog(cat);
+    } catch {
+      /* keep prior catalog */
+    }
+  }, []);
+
   const loadProfile = useCallback(async () => {
     const api = getApi();
     if (!api?.list_agent_profiles) {
@@ -83,11 +96,10 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
     // Soft refresh: keep current form visible so tab switches / saves don't flash Loading…
     if (!hasContentRef.current) setLoading(true);
     setLoadError("");
+    // Catalog is independent — never block the profile form on plugin register().
+    void refreshCatalog();
     try {
-      const [listRes, cat] = await Promise.all([
-        api.list_agent_profiles(),
-        api.get_agent_profile_editor_catalog?.() ?? Promise.resolve(null),
-      ]);
+      const listRes = await api.list_agent_profiles();
       if (gen !== loadGenRef.current) return;
       const listed = listRes.profiles ?? [];
       rememberAgentProfilesList({
@@ -95,10 +107,6 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
         templateProfiles: listRes.template_profiles ?? [],
         blankProfileId: listRes.blank_profile_id,
       });
-      if (cat) {
-        setCatalog(cat);
-        rememberAgentProfileCatalog(cat);
-      }
       const found = listed.find((p) => p.id === profileId) ?? null;
       if (!found) {
         setProfile(null);
@@ -117,7 +125,7 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
     } finally {
       if (gen === loadGenRef.current) setLoading(false);
     }
-  }, [profileId]);
+  }, [profileId, refreshCatalog]);
 
   useEffect(() => {
     const next = seedFromCache(profileId);
@@ -131,6 +139,14 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
     setSectionTab("profile");
     return onApiReady(() => void loadProfile());
   }, [loadProfile, profileId]);
+
+  useEffect(() => {
+    installPanelPushBus();
+    return subscribePanelPush((event) => {
+      if (event.type !== "uefn_plugins_changed") return;
+      void refreshCatalog();
+    });
+  }, [refreshCatalog]);
 
   useEffect(() => {
     return onDuckyProfileChanged((ev) => {

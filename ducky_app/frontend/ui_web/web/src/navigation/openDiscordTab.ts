@@ -1,13 +1,11 @@
-// Open/focus a Discord Ducky editor tab (one per bot). The dock panel's "Open as
-// tab" button and the header dropdown call requestOpenDiscordTab(botId?).
-// ChatView registers the opener.
+// Open/focus the Discord plugin chat panel (Phase-2 HTML). Dock "Open as tab"
+// and legacy callers use requestOpenDiscordTab().
 //
-// Also tracks whether ANY Discord tab is occupied in THIS app session: while a
-// Discord tab is open in the main window OR any focus window, the dock rails
-// hide the Discord Ducky panel (one Discord chrome at a time) and restore it
-// where it was the moment Discord is closed everywhere.
+// Also tracks whether ANY Discord chat tab is occupied in THIS app session:
+// while open, dock rails hide the Discord Ducky panel (one chrome at a time).
 
 import { useSyncExternalStore } from "react";
+import { requestOpenPluginUiTab } from "../plugin-ui/openPluginUiTab";
 
 export type OpenDiscordTabFn = (botId?: string, label?: string) => void;
 
@@ -22,13 +20,17 @@ export function registerOpenDiscordTab(fn: OpenDiscordTabFn): () => void {
   };
 }
 
-export function requestOpenDiscordTab(botId?: string, label?: string): void {
-  const key = `${botId || "default"}|${label || ""}`;
+export function requestOpenDiscordTab(_botId?: string, _label?: string): void {
+  const key = "plugin:discord:discord-chat";
   const now = Date.now();
   if (key === lastRequestKey && now - lastRequestAt < 400) return;
   lastRequestAt = now;
   lastRequestKey = key;
-  opener?.(botId, label);
+  if (opener) {
+    opener(_botId, _label);
+    return;
+  }
+  requestOpenPluginUiTab("discord", "discord-chat");
 }
 
 let discordTabOpen = false;

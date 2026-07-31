@@ -98,7 +98,7 @@ def run_bridge() -> None:
             pass
         try:
             # Drop early tools/list cache so IDE clients see Discord/etc.
-            from backend.bridge_plugin_gate import clear_mcp_tool_cache
+            from backend.bridge.plugin_gate import clear_mcp_tool_cache
 
             clear_mcp_tool_cache(mcp)
         except Exception:
@@ -122,7 +122,7 @@ def run_bridge() -> None:
         except Exception:
             pass
         try:
-            from backend.dynamic_tools import register_dynamic_listener_tools
+            from backend.bridge.dynamic_tools import register_dynamic_listener_tools
 
             register_dynamic_listener_tools()
         except Exception:
@@ -137,7 +137,7 @@ def run_bridge() -> None:
     import threading
 
     try:
-        from backend.bridge_plugin_gate import install_bridge_plugin_gate
+        from backend.bridge.plugin_gate import install_bridge_plugin_gate
 
         # Keep mcp.run() instant; wait happens inside tools/list + tools/call.
         install_bridge_plugin_gate(mcp)
@@ -178,7 +178,9 @@ def main() -> None:
 
         try:
             run()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, SystemExit):
+            # SystemExit(0) is the normal second-launch handoff path
+            # (webview_app raises it after forwarding Open-with / deep links).
             raise
         except BaseException as exc:
             try:

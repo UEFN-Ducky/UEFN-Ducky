@@ -187,7 +187,7 @@ def draft_subskill(
     provider: str = "",
 ) -> dict[str, Any]:
     """Generate one reference/*.md draft for an existing pack."""
-    from backend.skill import get_skill_pack_files
+    from backend.skills.store import get_skill_pack_files
 
     pid = (pack_id or "").strip()
     file_label = (label or "").strip()

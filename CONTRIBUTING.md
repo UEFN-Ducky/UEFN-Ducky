@@ -39,11 +39,15 @@ cover (`test_*.py` beside the module).
 | Path | What |
 |---|---|
 | `ducky_app/` | Application code: `frontend/` (panel UI) + `backend/` (MCP server) + `uefn_listener/` (UEFN-side HTTP listener) |
-| `ducky_app/backend/` | Core MCP server: tools, agent, toolsets, skills |
+| `ducky_app/backend/` | Core MCP server — see [backend/README.md](ducky_app/backend/README.md) for the package tree (`bridge/`, `skills/`, `tools/<domain>/`, …) |
 | `ducky_app/frontend/` | Desktop app (Python) + web UI (`ui_web/`) |
 | `ducky_app/uefn_listener/` | In-UEFN listener (runs inside UEFN via Python Editor Script Plugin) |
 | `build/` | PyInstaller spec + build scripts |
 | `scripts/` | Verse/Epic asset extraction utility |
+
+Desktop Store plugins live in the separate **UEFN-Ducky** plugins repo
+(`plugins/uefn-plugin-<id>/`). Domain MCP tools in this app are activated from
+plugin `register()` via paths like `backend.tools.uefn.actors`.
 
 ## Pull requests
 

@@ -24,6 +24,7 @@ import {
   rememberAgentProfilesList,
 } from "../../hooks/agentProfilesCache";
 import { onApiReady } from "../../hooks/onApiReady";
+import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
 import { getApi } from "../../hooks/usePanelApi";
 import { Icons } from "../../icons/Icons";
 import {
@@ -120,17 +121,26 @@ export function DuckiesTab() {
     return res;
   }, []);
 
-  const loadAll = useCallback(async () => {
-    const hadCache = Boolean(peekAgentProfilesCache()?.profiles.length);
-    if (!hadCache) setLoading(true);
-    try {
-      await Promise.all([refreshProfiles(), refreshCatalog()]);
-    } finally {
-      setLoading(false);
-    }
-  }, [refreshCatalog, refreshProfiles]);
+  // Profiles and catalog independently — a slow/partial catalog must not block the list.
+  useEffect(
+    () =>
+      onApiReady(() => {
+        const hadCache = Boolean(peekAgentProfilesCache()?.profiles.length);
+        if (!hadCache) setLoading(true);
+        void refreshProfiles().finally(() => setLoading(false));
+        void refreshCatalog();
+      }),
+    [refreshCatalog, refreshProfiles],
+  );
 
-  useEffect(() => onApiReady(() => void loadAll()), [loadAll]);
+  // UEFN agent tool rows land after plugin register(); re-fetch when host signals ready.
+  useEffect(() => {
+    installPanelPushBus();
+    return subscribePanelPush((event) => {
+      if (event.type !== "uefn_plugins_changed") return;
+      void refreshCatalog();
+    });
+  }, [refreshCatalog]);
 
   // Deep-link from create-flow / group invite "Create new".
   useEffect(() => {

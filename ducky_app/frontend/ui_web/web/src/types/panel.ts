@@ -491,59 +491,6 @@ export interface ProjectFileStat {
   exists: boolean;
 }
 
-export interface AssetPreviewResult {
-  mode: string;
-  asset_class?: string;
-  asset_path?: string;
-  preview_url?: string;
-  preview_id?: string;
-  verse_source?: string | null;
-  metadata?: Record<string, unknown>;
-  listener_online: boolean;
-  fallback?: string;
-  listener_error?: string;
-  supports_mesh_preview?: boolean;
-  supports_material_preview?: boolean;
-  supports_texture_preview?: boolean;
-  preview_kind?: "static_mesh" | "material" | "texture" | "niagara" | "other" | string;
-  stale?: boolean;
-  from_cache?: boolean;
-}
-
-export interface StaticMeshPreviewResult {
-  ok: boolean;
-  error?: string;
-  cache_id?: string;
-  relative_path?: string;
-  asset_path?: string;
-  asset_class?: string;
-  media_url?: string;
-  media_base_url?: string;
-  media_filename?: string;
-  mime?: string;
-  kind?: string;
-  metadata?: Record<string, unknown>;
-  from_cache?: boolean;
-  listener_online?: boolean;
-  preview_kind?: string;
-  stale?: boolean;
-}
-
-export interface MaterialPreviewResult {
-  ok: boolean;
-  error?: string;
-  preview_url?: string;
-  preview_id?: string;
-  asset_path?: string;
-  asset_class?: string;
-  metadata?: Record<string, unknown>;
-  listener_online?: boolean;
-  preview_kind?: string;
-  from_uefn?: boolean;
-  from_cache?: boolean;
-  stale?: boolean;
-}
-
 export type SidebarPanelTab = "chats" | "files";
 
 export type WorkspaceSearchScope = "files" | "chats" | "both";
@@ -1684,10 +1631,6 @@ export interface PanelApi {
     mime: string;
     kind: string;
   }>;
-  preview_project_asset(relative_path: string): Promise<AssetPreviewResult>;
-  load_static_mesh_preview?(relative_path: string): Promise<StaticMeshPreviewResult>;
-  load_material_preview?(relative_path: string): Promise<MaterialPreviewResult>;
-  load_texture_preview?(relative_path: string): Promise<MaterialPreviewResult>;
   stat_project_file(relative_path: string): Promise<{ path: string; mtime_ns: number; size: number; exists: boolean }>;
   fingerprint_project_dirs(relative_paths: string[]): Promise<{ fingerprints: Record<string, string> }>;
   create_project_folder(parent_relative: string, name: string): Promise<{ path: string }>;
@@ -2262,6 +2205,12 @@ export interface PanelApi {
     plugin_id: string,
     prefs: Record<string, unknown>,
   ): Promise<{ ok: boolean; prefs?: Record<string, Record<string, unknown>>; error?: string }>;
+  /** Dispatch a plugin panel RPC registered via ``api.register_panel_rpc``. */
+  plugin_call?(
+    plugin_id: string,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
   draft_subskill(
     pack_id: string,
     label: string,
@@ -2615,6 +2564,8 @@ export interface AgentProfileEditorCatalogDto {
   tools: McpPluginDto[];
   /** All globally available tool-group ids (compat). */
   default_tool_ids?: string[];
+  /** True while UEFN Store plugins are still registering — tools list is partial. */
+  plugins_loading?: boolean;
 }
 
 export interface ConversationSkillSelectionResultDto {
