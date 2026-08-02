@@ -1511,6 +1511,11 @@ def export_skill_pack_to_zip(pack_id: str, dest_path: Path) -> Path:
         if refs_dir.is_dir():
             for md in sorted(refs_dir.glob("*.md")):
                 zf.write(md, f"{REFERENCES_DIR}/{md.name}")
+        # Store catalog icons (plugin-uefn-ducky-store extracts these from the zip).
+        for rel in ("icon.png", "icon.svg", "assets/icon.png", "assets/icon.svg"):
+            icon = src / rel
+            if icon.is_file():
+                zf.write(icon, rel.replace("\\", "/"))
     return dest_path
 
 
@@ -1541,6 +1546,7 @@ def import_skill_pack_from_bytes(
     replace: bool = False,
     source: str | None = None,
     store_slug: str | None = None,
+    store_version: str | int | None = None,
 ) -> dict[str, Any]:
     import tempfile
 
@@ -1554,6 +1560,7 @@ def import_skill_pack_from_bytes(
             replace=replace,
             source=source,
             store_slug=store_slug,
+            store_version=store_version,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -1574,6 +1581,18 @@ def _apply_export_meta_commercial(meta: dict[str, Any], export_meta: dict[str, A
             md[key] = str(export_meta[key])
     if "allow_redistribute" not in md and "allow_redistribute" in export_meta:
         md["allow_redistribute"] = bool(export_meta["allow_redistribute"])
+    # Store bumps often land in export.json while SKILL.md lags — local catalog
+    # reads metadata.version, so keep the higher of the two.
+    try:
+        export_ver = int(export_meta.get("version") or 0)
+    except (TypeError, ValueError):
+        export_ver = 0
+    try:
+        cur_ver = int(md.get("version") or 0)
+    except (TypeError, ValueError):
+        cur_ver = 0
+    if export_ver > cur_ver:
+        md["version"] = export_ver
 
 
 def import_skill_pack_from_zip(
@@ -1583,6 +1602,7 @@ def import_skill_pack_from_zip(
     replace: bool = False,
     source: str | None = None,
     store_slug: str | None = None,
+    store_version: str | int | None = None,
 ) -> dict[str, Any]:
     src_path = Path(src_path)
     info = validate_skill_pack_archive(src_path)
@@ -1604,14 +1624,25 @@ def import_skill_pack_from_zip(
             "error": "Cannot replace bundled pack — choose a different id",
         }
     owner = plugin_owner_for_skill(target_id)
+    src_kind = (source or "").strip().lower() or SOURCE_IMPORT
     if owner:
+        # Store Update All used to hard-fail here when a skill pack and a
+        # desktop plugin both claimed the same id. Plugin ownership wins:
+        # Store installs become a no-op success; local/import still errors.
+        if src_kind == SOURCE_STORE:
+            return {
+                "ok": True,
+                "skipped": True,
+                "pack_id": target_id,
+                "owned_by_plugin": owner,
+                "message": f"Skill {target_id!r} is provided by plugin {owner!r}",
+            }
         return {
             "ok": False,
             "conflict": True,
             "existing_id": target_id,
             "error": f"Skill {target_id!r} is owned by plugin {owner!r} — uninstall that plugin first",
         }
-    src_kind = (source or "").strip().lower() or SOURCE_IMPORT
     slug = (store_slug or "").strip() or (target_id if src_kind == SOURCE_STORE else "")
     ref_origin = ORIGIN_STORE
     # Fresh install may wipe; updates merge so user-created refs survive.
@@ -1622,6 +1653,13 @@ def import_skill_pack_from_zip(
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
     export_meta = info.get("export_meta") if isinstance(info.get("export_meta"), dict) else None
+    store_ver_int: int | None = None
+    if store_version is not None and str(store_version).strip():
+        try:
+            # Skill packs use integer versions; Store may send "4" or "4.0.0".
+            store_ver_int = int(str(store_version).strip().split(".", 1)[0])
+        except ValueError:
+            store_ver_int = None
     with zipfile.ZipFile(src_path, "r") as zf:
         for name in info["files"]:
             if name == PACK_FILE:
@@ -1632,6 +1670,13 @@ def import_skill_pack_from_zip(
                 if not isinstance(md, dict):
                     md = {}
                     meta["metadata"] = md
+                if store_ver_int is not None:
+                    try:
+                        cur = int(md.get("version") or 0)
+                    except (TypeError, ValueError):
+                        cur = 0
+                    if store_ver_int > cur:
+                        md["version"] = store_ver_int
                 md["source"] = src_kind
                 if slug:
                     md["store_slug"] = slug

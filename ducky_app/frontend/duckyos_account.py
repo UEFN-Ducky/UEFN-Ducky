@@ -1271,6 +1271,17 @@ def store_catalog() -> dict[str, Any]:
                     seen_slugs.add(slug)
                     continue
         else:
+            # Skill is shipped inside an installed desktop plugin — hide the
+            # standalone Store skill row so Update All cannot try (and fail) to
+            # overwrite a plugin-owned pack (physics / virtualpointer).
+            try:
+                from backend.skills.store import plugin_owner_for_skill
+
+                skill_owner = plugin_owner_for_skill(slug)
+            except Exception:
+                skill_owner = None
+            if skill_owner and skill_owner in installed_plugins:
+                continue
             sk = installed_skills.get(slug)
             if sk is not None:
                 sk_ver = int(sk.get("version") or 0)
@@ -1652,6 +1663,7 @@ def _store_download_and_install_unlocked(
             replace=bool(replace),
             source="store",
             store_slug=slug,
+            store_version=str(payload.get("version") or "").strip() or None,
         )
         if result.get("ok"):
             try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from pathlib import Path
 
@@ -121,3 +122,67 @@ def test_index_labels_yours_and_store(isolated_appdata: Path) -> None:
     assert "`demo-tips` [store]" in text
     assert "`my_notes` [yours]" in text
     assert "`extra` [store]" in text
+
+
+def test_store_import_syncs_version_from_export_meta(isolated_appdata: Path) -> None:
+    del isolated_appdata
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "SKILL.md",
+            "---\nname: lag-pack\ndescription: lag\nmetadata:\n  label: Lag\n  version: 3\n---\n\n# Lag\n",
+        )
+        zf.writestr(
+            "export.json",
+            json.dumps(
+                {
+                    "format": "ducky-skill-pack",
+                    "format_version": 3,
+                    "pack_id": "lag-pack",
+                    "label": "Lag",
+                    "version": 4,
+                }
+            ),
+        )
+    result = import_skill_pack_from_bytes(
+        buf.getvalue(),
+        pack_id="lag-pack",
+        replace=True,
+        source="store",
+        store_slug="lag-pack",
+        store_version="4",
+    )
+    assert result.get("ok"), result
+    man = load_pack_manifest("lag-pack")
+    assert man is not None
+    assert int(man.get("version") or 0) == 4
+
+
+def test_store_import_skips_when_plugin_owns_skill(
+    isolated_appdata: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del isolated_appdata
+    monkeypatch.setattr(
+        "backend.skills.store.plugin_owner_for_skill",
+        lambda pack_id: "uefn-physics" if pack_id == "physics" else None,
+    )
+    result = import_skill_pack_from_bytes(
+        _pack_zip("physics", version=3),
+        pack_id="physics",
+        replace=True,
+        source="store",
+        store_slug="physics",
+    )
+    assert result.get("ok") is True
+    assert result.get("skipped") is True
+    assert result.get("owned_by_plugin") == "uefn-physics"
+    assert not (appdata_skill_packs_dir() / "physics").exists()
+
+    blocked = import_skill_pack_from_bytes(
+        _pack_zip("physics", version=3),
+        pack_id="physics",
+        replace=True,
+        source="local",
+    )
+    assert blocked.get("ok") is False
+    assert "uefn-physics" in str(blocked.get("error") or "")
