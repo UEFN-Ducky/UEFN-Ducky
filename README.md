@@ -187,13 +187,10 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE) — free and open source. Use it, modify it, fork it, ship it in your own
-products, commercially or not. The only requirement is that you keep the copyright notice,
-so the code can't be passed off as someone else's work.
-
-The **name and branding are not covered by the MIT license**: "UEFN-Ducky", the logo, and
-the duck mascot stay with the project. Fork away — just ship it under your own name rather
-than as an official UEFN-Ducky build. See [LICENSE](LICENSE) for the full text.
+[Ducky Source-Available License v1.0](LICENSE) — source-available, not OSI open source.
+You may read, study, run official builds, and contribute. You may not redistribute,
+resell, or reuse the code in other products, and the "UEFN-Ducky" name, logo, and duck
+mascot remain with Mindful Path Company, LLC. See [LICENSE](LICENSE) for the full text.
 
 Not affiliated with Epic Games; UEFN and its bundled tooling are governed by Epic's own
 terms — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

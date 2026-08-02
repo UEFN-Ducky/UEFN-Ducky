@@ -2,8 +2,8 @@ UEFN Ducky — quick start (Windows)
 ================================
 
 1) Unzip. You need UEFN-Ducky.exe, this file, THIRD_PARTY_NOTICES.txt, and LICENSE.txt.
-   UEFN-Ducky is free and open source (MIT) — use it, modify it, share it; just keep
-   the copyright notice. Source: https://github.com/UEFN-Ducky/UEFN-Ducky
+   UEFN-Ducky is source-available under the Ducky Source-Available License v1.0 —
+   see LICENSE.txt. Source: https://github.com/UEFN-Ducky/UEFN-Ducky
 
 2) Run UEFN-Ducky.exe
    - Click "Basics" in the app for the short on-screen checklist.

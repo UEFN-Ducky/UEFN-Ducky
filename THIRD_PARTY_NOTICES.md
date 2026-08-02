@@ -1,9 +1,18 @@
 # Third-Party Notices
 
-UEFN-Ducky is licensed under the MIT License (see [LICENSE](LICENSE)). It bundles or
-depends on the third-party components below, each under its own license. This file
-also documents Epic Games components that are **not** redistributed but are loaded at
-runtime from the user's own installation.
+UEFN-Ducky is licensed under the Ducky Source-Available License v1.0 (see
+[LICENSE](LICENSE)). It bundles or depends on the third-party components below, each
+under its own license. This file also documents Epic Games components that are
+**not** redistributed but are loaded at runtime from the user's own installation.
+
+---
+
+## Epic Games / UEFN affiliation
+
+This project is not affiliated with, endorsed by, or sponsored by Epic Games, Inc.
+"Unreal", "Unreal Engine", "UEFN", "Verse", and "Fortnite" are trademarks or
+registered trademarks of Epic Games, Inc. Use of Unreal Editor for Fortnite (UEFN)
+and its bundled tooling is governed by Epic's own license terms.
 
 ---
 

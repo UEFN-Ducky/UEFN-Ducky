@@ -1,7 +1,7 @@
 ---
 name: ducky
 description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, chats"
-license: MIT
+license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
   version: 24
