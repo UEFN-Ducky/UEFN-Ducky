@@ -149,6 +149,107 @@ class DynamicInputBudgetTests(unittest.TestCase):
             )
 
 
+class ModulePrepTests(unittest.TestCase):
+    """The three assembly mistakes UEFN accepts silently and then plays wrong."""
+
+    INIT_V2 = "/Niagara/Modules/Spawn/Initialization/V2/InitializeParticle"
+
+    def _init(self, *param_names):
+        return {
+            "name": "InitializeParticle",
+            "module_path": self.INIT_V2,
+            "category": "particle_spawn",
+            "parameters": [{"name": n, "value": 1.0} for n in param_names],
+        }
+
+    def test_deprecated_initialize_particle_rewritten_to_v2(self):
+        mods, warnings = niagara._prepare_modules(
+            [
+                {
+                    "name": "InitializeParticle",
+                    "module_path": "/Niagara/Modules/Spawn/Initialization/InitializeParticle",
+                    "category": "particle_spawn",
+                    "parameters": [{"name": "Lifetime", "value": 2.0}],
+                }
+            ]
+        )
+        self.assertEqual(mods[0]["module_path"], self.INIT_V2)
+        self.assertTrue(any("deprecated" in w for w in warnings))
+
+    def test_caller_modules_not_mutated(self):
+        original = {
+            "module_path": "/Niagara/Modules/Spawn/Initialization/InitializeParticle",
+            "category": "particle_spawn",
+        }
+        niagara._prepare_modules([original])
+        self.assertNotIn("V2", original["module_path"])
+
+    def test_particle_state_injected_before_particle_update(self):
+        mods, warnings = niagara._prepare_modules(
+            [
+                self._init("Lifetime"),
+                {"module_path": "/Niagara/Modules/Update/Forces/GravityForce"},
+            ],
+            particle_state=True,
+        )
+        paths = [m["module_path"] for m in mods]
+        self.assertEqual(paths[1], niagara._PARTICLE_STATE_PATH)
+        self.assertTrue(any("ParticleState" in w for w in warnings))
+
+    def test_particle_state_skipped_when_present_or_disabled(self):
+        already = [self._init("Lifetime"), {"module_path": niagara._PARTICLE_STATE_PATH}]
+        mods, warnings = niagara._prepare_modules(already, particle_state=True)
+        self.assertEqual(len(mods), 2)
+        self.assertEqual(warnings, [])
+
+        mods, _ = niagara._prepare_modules([self._init("Lifetime")], particle_state=False)
+        self.assertEqual(len(mods), 1)
+
+    def test_particle_state_seen_on_an_earlier_call(self):
+        mods, _ = niagara._prepare_modules(
+            [{"module_path": "/Niagara/Modules/Update/Forces/GravityForce"}],
+            staged=[{"module_path": niagara._PARTICLE_STATE_PATH}],
+            particle_state=True,
+        )
+        self.assertEqual(len(mods), 1)
+
+    def test_scale_sprite_size_without_an_initialized_size_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            niagara._prepare_modules(
+                [
+                    self._init("Lifetime"),
+                    {"module_path": "/Niagara/Modules/Update/Size/ScaleSpriteSize"},
+                ]
+            )
+        self.assertIn("Sprite Size", str(ctx.exception))
+
+    def test_scale_sprite_size_allowed_once_initialized(self):
+        mods, _ = niagara._prepare_modules(
+            [
+                self._init("Lifetime", "Sprite Size"),
+                {"module_path": "/Niagara/Modules/Update/Size/ScaleSpriteSize"},
+            ]
+        )
+        self.assertEqual(len(mods), 2)
+
+    def test_scale_mesh_size_checks_its_own_dependency(self):
+        with self.assertRaises(ValueError) as ctx:
+            niagara._prepare_modules(
+                [
+                    self._init("Lifetime", "Sprite Size"),
+                    {"module_path": "/Niagara/Modules/Update/Size/ScaleMeshSize"},
+                ]
+            )
+        self.assertIn("Mesh Scale", str(ctx.exception))
+
+    def test_scale_dependency_may_come_from_an_earlier_call(self):
+        mods, _ = niagara._prepare_modules(
+            [{"module_path": "/Niagara/Modules/Update/Size/ScaleSpriteSize"}],
+            staged=[self._init("Lifetime", "Sprite Size")],
+        )
+        self.assertEqual(len(mods), 1)
+
+
 class ExecutionCategoryTests(unittest.TestCase):
     def test_unknown_category_lists_valid_ones(self):
         with self.assertRaises(ValueError) as ctx:

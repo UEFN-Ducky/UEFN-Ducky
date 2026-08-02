@@ -101,6 +101,7 @@ def add_niagara_emitter(
     local_space: bool = False,
     enabled: bool = True,
     emitter_state: bool = True,
+    particle_state: bool = True,
     loop_duration: float | None = None,
     finalize: bool = True,
     pretty: bool = False,
@@ -117,7 +118,12 @@ def add_niagara_emitter(
     "parameters": [...]}} (nesting capped at depth 4).
     renderers: [{"type": "mesh", "mesh": "/Proj/Fx/Meshes/SM_X", "scale": [1,1,1]}] or
     [{"type": "sprite", "material": "/Proj/Fx/MaterialInstances/MI_X"}].
-    An EmitterState module is added automatically unless emitter_state=false.
+    An EmitterState module is added automatically unless emitter_state=false, and a
+    ParticleState module (Particle Update) unless particle_state=false — without it
+    particles never die at Lifetime and pile up. The deprecated
+    /Niagara/Modules/Spawn/Initialization/InitializeParticle is rewritten to its V2;
+    both corrections come back in result "warnings". ScaleSpriteSize / ScaleMeshSize
+    are refused unless an upstream module sets Sprite Size / Mesh Scale.
     """
     return tool_json(
         send_command(
@@ -131,6 +137,7 @@ def add_niagara_emitter(
                 "local_space": local_space,
                 "enabled": enabled,
                 "emitter_state": emitter_state,
+                "particle_state": particle_state,
                 "loop_duration": loop_duration,
                 "finalize": finalize,
             },

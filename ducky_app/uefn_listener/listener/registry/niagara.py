@@ -80,6 +80,25 @@ _EXEC_CATEGORIES = {
     "particle_update": "PARTICLE_UPDATE",
 }
 
+# Deprecated stock scripts UEFN still resolves but that silently drop half their
+# inputs. Rewrite instead of letting an agent assemble a dead emitter.
+_DEPRECATED_MODULE_PATHS = {
+    "/Niagara/Modules/Spawn/Initialization/InitializeParticle": (
+        "/Niagara/Modules/Spawn/Initialization/V2/InitializeParticle"
+    ),
+}
+
+# Without this in Particle Update, particles never die: Lifetime is set but nothing
+# ever compares Age to it, so the sim piles up until the emitter is culled.
+_PARTICLE_STATE_PATH = "/Niagara/Modules/Update/Lifetime/ParticleState"
+
+# Scale modules multiply a value that something else must have initialized first.
+# module-name fragment -> the input an upstream module has to set.
+_SCALE_DEPENDENCIES = {
+    "ScaleSpriteSize": "Sprite Size",
+    "ScaleMeshSize": "Mesh Scale",
+}
+
 # value_type -> (NiagaraScriptInputType member, FXConverter literal factory)
 _INPUT_TYPES = {
     "float": ("FLOAT", "create_script_input_float"),
@@ -331,6 +350,9 @@ def niagara_capabilities() -> dict:
             "NiagaraToolset_* classes exist in dir(unreal) but expose no callable methods — ignore them.",
             "Mesh particles need a project StaticMesh (create_niagara_mesh). /Engine/BasicShapes "
             "cannot be duplicated in UEFN — duplicate_asset returns None.",
+            "add_niagara_emitter rewrites the deprecated Spawn/Initialization/InitializeParticle to "
+            "its V2 and auto-adds Update/Lifetime/ParticleState so particles die at Lifetime; "
+            "ScaleSpriteSize/ScaleMeshSize are refused unless an upstream module sets the size.",
             "Never assemble Niagara from execute_python: a monolithic builder crashed the editor "
             "and lost the unsaved system. One emitter per call; each call finalizes and saves.",
             "Place a system with spawn_actor(asset_path=<NiagaraSystem path>) — it yields a NiagaraActor.",
@@ -618,6 +640,9 @@ def _open_emitter(system_path: str, emitter_name: str):
             "further modules while the session that created it is open. Either build the whole "
             "emitter in one add_niagara_emitter call (modules=[...], renderers=[...]), or chain "
             "add_niagara_module calls with finalize=false and finish with finalize_niagara_system. "
+            "A finalized emitter cannot be reopened: rebuild it by delete_asset on the system, then "
+            "recreate it at the same path — record any placed actor's location first, because "
+            "deleting the asset leaves an orphaned NiagaraActor that has to be deleted and re-spawned. "
             f"Open emitters: {open_emitters}"
         )
     return sess, em
@@ -683,8 +708,93 @@ def _make_renderer(system, spec: dict):
     return name, props
 
 
-def _add_modules(em, sess: dict, modules: List[dict], results: dict) -> None:
-    mods = list(modules or [])
+def _module_leaf(spec: dict) -> str:
+    return _package_path(str(spec.get("module_path") or "")).rsplit("/", 1)[-1].lower()
+
+
+def _sets_input(spec: dict, input_name: str) -> bool:
+    """True if this module initializes ``input_name`` (by parameter or by identity)."""
+    wanted = input_name.lower()
+    for param in spec.get("parameters") or []:
+        if isinstance(param, dict) and wanted in str(param.get("name") or "").lower():
+            return True
+    leaf = _module_leaf(spec)
+    return wanted.replace(" ", "") in leaf and "scale" not in leaf
+
+
+def _prepare_modules(
+    modules: Optional[List[dict]],
+    staged: Optional[List[dict]] = None,
+    particle_state: bool = False,
+) -> tuple:
+    """Rewrite deprecated module paths, auto-add ParticleState, and refuse scalers
+    whose input was never initialized. Returns ``(modules, warnings)``.
+
+    Pure (no Unreal calls) so the three assembly failures it prevents — deprecated
+    InitializeParticle, immortal particles, ScaleSpriteSize with an unmet
+    dependency — are covered by unit tests instead of by editor sessions.
+    """
+    warnings: List[str] = []
+    mods: List[dict] = []
+    for spec in modules or []:
+        if not isinstance(spec, dict):
+            raise ValueError(f"each module must be an object with a 'module_path' (got {spec!r})")
+        spec = dict(spec)
+        path = _package_path(str(spec.get("module_path") or ""))
+        replacement = _DEPRECATED_MODULE_PATHS.get(path)
+        if replacement:
+            spec["module_path"] = replacement
+            warnings.append(f"{path} is deprecated in UEFN — rewrote to {replacement}")
+        mods.append(spec)
+
+    known = list(staged or []) + mods
+    if particle_state and not any("particlestate" in _module_leaf(m) for m in known):
+        at = next(
+            (
+                i
+                for i, m in enumerate(mods)
+                if str(m.get("category") or "particle_update").strip().lower().replace(" ", "_")
+                == "particle_update"
+            ),
+            len(mods),
+        )
+        mods.insert(
+            at,
+            {
+                "name": "ParticleState",
+                "module_path": _PARTICLE_STATE_PATH,
+                "category": "particle_update",
+                "parameters": [],
+            },
+        )
+        warnings.append(
+            f"added {_PARTICLE_STATE_PATH} so particles die at Lifetime (particle_state=false to skip)"
+        )
+        known = list(staged or []) + mods
+
+    for scaler, dependency in _SCALE_DEPENDENCIES.items():
+        if not any(scaler.lower() in _module_leaf(m) for m in known):
+            continue
+        if any(_sets_input(m, dependency) for m in known):
+            continue
+        raise ValueError(
+            f"{scaler} multiplies an existing {dependency!r}, and nothing on this emitter sets one — "
+            f"in UEFN it compiles to an unmet dependency. Either give "
+            f"{_DEPRECATED_MODULE_PATHS['/Niagara/Modules/Spawn/Initialization/InitializeParticle']} "
+            f"(particle_spawn) a {dependency!r} parameter, or drop {scaler} and set {dependency!r} "
+            "once on InitializeParticle for a constant size."
+        )
+    return mods, warnings
+
+
+def _add_modules(
+    em, sess: dict, modules: List[dict], results: dict, particle_state: bool = False
+) -> None:
+    emitter_name = str(results.get("emitter_name") or "")
+    staged = sess.setdefault("staged", {}).setdefault(emitter_name, [])
+    mods, warnings = _prepare_modules(modules, staged=staged, particle_state=particle_state)
+    if warnings:
+        results.setdefault("warnings", []).extend(warnings)
     if len(mods) > _MAX_MODULES_PER_EMITTER_CALL:
         raise ValueError(
             f"{len(mods)} modules in one call exceeds the cap of {_MAX_MODULES_PER_EMITTER_CALL} — "
@@ -710,6 +820,7 @@ def _add_modules(em, sess: dict, modules: List[dict], results: dict) -> None:
         results.setdefault("modules", []).append(
             {"name": name, "module_path": module_path, "parameters_applied": applied}
         )
+    staged.extend(mods)
     results["dynamic_nodes"] = budget["nodes"]
 
 
@@ -722,6 +833,7 @@ def add_niagara_emitter(
     local_space: bool = False,
     enabled: bool = True,
     emitter_state: bool = True,
+    particle_state: bool = True,
     loop_duration: Optional[float] = None,
     finalize: bool = True,
 ) -> dict:
@@ -735,6 +847,12 @@ def add_niagara_emitter(
     "value_type"}`` or ``{"name", "dynamic": {"module_path", "parameters"}}``.
     ``renderers`` entries are ``{"type": "mesh", "mesh": "/Proj/.../SM_X"}`` or
     ``{"type": "sprite", "material": "/Proj/.../MI_X"}``.
+
+    Assembly is corrected before anything is staged: the deprecated
+    ``Spawn/Initialization/InitializeParticle`` is rewritten to its ``V2``, and
+    ``ParticleState`` is added to Particle Update so particles actually die at
+    Lifetime (``particle_state=false`` for an intentionally immortal emitter).
+    Both show up in ``warnings`` on the result.
     """
     _reject_junk_path(system_path, "Niagara system")
     if not (emitter_name or "").strip():
@@ -775,7 +893,7 @@ def add_niagara_emitter(
                     {"name": "Loop Duration", "value_type": "float", "value": float(loop_duration)}
                 ]
             mods.insert(0, state)
-        _add_modules(em, sess, mods, results)
+        _add_modules(em, sess, mods, results, particle_state=particle_state)
 
         for spec in list(renderers or []):
             name, props = _make_renderer(sess["system"], spec)
