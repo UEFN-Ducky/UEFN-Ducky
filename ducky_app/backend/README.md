@@ -21,7 +21,7 @@ ducky_app/backend/
     uefn/                   # Store-gated: actors, assets, devices, editor, …
     verse/                  # Store-gated: Verse digests, diagnostics, UMG
     world/                  # Store-gated: level design, worldgen, PCG, Fortnite
-    animation/              # Store-gated: retargeting, sequencer
+    animation/              # Empty stubs — animation tools moved into the animation Store plugin
     modeling/               # Store-gated: modeling tools
     scene/                  # Store-gated: scene graph
     vfx/                    # Store-gated: Niagara
