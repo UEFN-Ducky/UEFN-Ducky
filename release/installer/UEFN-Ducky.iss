@@ -43,8 +43,8 @@ OutputBaseFilename=UEFN-Ducky-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; Show the project's actual MIT license on the install wizard's license page —
-; single source of truth, no second copy to drift.
+; Show the project's Ducky Source-Available License on the install wizard's
+; license page — single source of truth, no second copy to drift.
 LicenseFile=..\..\LICENSE
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}

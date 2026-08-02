@@ -10,8 +10,9 @@ UEFN workflows. Contributions of all sizes are welcome.
   from the user's own UEFN install and are git-ignored. Do not add anything from
   `…\Epic Games\Fortnite\VSCode\` (or a decompiled `.vsix`) to the repository. See the
   ["Verse editor & Epic assets"](README.md#verse-editor--epic-assets) section of the README.
-- **Keep it MIT-clean.** New dependencies must be under a permissive license (MIT, BSD,
-  Apache-2.0, ISC, PSF). Add anything vendored to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Dependencies must be permissively licensed.** New dependencies must be under a
+  permissive license (MIT, BSD, Apache-2.0, ISC, PSF). Add anything vendored to
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **No secrets.** Don't commit API keys, tokens, or machine-specific absolute paths.
 
 ## Dev setup
@@ -56,5 +57,6 @@ plugin `register()` via paths like `backend.tools.uefn.actors`.
    touched packaging.
 3. Describe what you changed and how you verified it.
 
-By contributing, you agree your contributions are licensed under the project's
-[MIT License](LICENSE).
+By contributing, you grant Mindful Path Company, LLC a perpetual, worldwide,
+irrevocable license to use, modify, distribute, and relicense your contributions
+under the project's [Ducky Source-Available License v1.0](LICENSE).
