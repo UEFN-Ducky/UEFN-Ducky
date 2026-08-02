@@ -91,6 +91,15 @@ covered by this license, unless they incorporate substantial portions of the
 Software's own source code. You are free to sell, license, or distribute your
 own plugins and skills under whatever terms you choose.
 
+## 5a. Official first-party skills
+
+Official first-party skill packs and skill directories published by Mindful Path
+Company, LLC (including any `skills/` tree or `.ducky-skill-pack` shipped with
+a UEFN-Ducky desktop plugin) are licensed under this Ducky Source-Available
+License v1.0. That remains true even when the host plugin's own plugin code is
+distributed under a different license such as MIT. The plugin LICENSE does not
+relicense those skills.
+
 ## 6. Contributions
 
 By submitting a contribution (including a pull request, patch, or other
