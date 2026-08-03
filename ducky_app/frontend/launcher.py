@@ -66,6 +66,67 @@ def _is_stdio_disconnect(exc: BaseException) -> bool:
     return False
 
 
+def _patch_mcp_request_responder_idempotent() -> None:
+    """Cancel-after-handler must not kill the stdio TaskGroup (mcp SDK race).
+
+    Upstream: python-sdk#2416 / #2949 — ``notifications/cancelled`` can set
+    ``_completed`` before ``respond()``; the assert then crashes the bridge.
+    No-op if the installed SDK already uses early-return guards.
+    """
+    try:
+        import inspect
+
+        from mcp.shared.session import RequestResponder
+        from mcp.types import ErrorData
+    except Exception:
+        return
+
+    if getattr(RequestResponder, "_ducky_idempotent_respond", False):
+        return
+
+    try:
+        respond_src = inspect.getsource(RequestResponder.respond)
+    except Exception:
+        respond_src = ""
+    if "assert not self._completed" not in respond_src and "if self._completed" in respond_src:
+        return
+
+    async def _respond(self, response):  # type: ignore[no-untyped-def]
+        if not getattr(self, "_entered", False):
+            raise RuntimeError("RequestResponder must be used as a context manager")
+        # Already completed (e.g. concurrent cancellation) — skip silently.
+        if getattr(self, "_completed", False):
+            return
+        if not getattr(self, "cancelled", False):
+            self._completed = True
+            await self._session._send_response(  # type: ignore[attr-defined]
+                request_id=self.request_id, response=response
+            )
+
+    async def _cancel(self):  # type: ignore[no-untyped-def]
+        if not getattr(self, "_entered", False):
+            raise RuntimeError("RequestResponder must be used as a context manager")
+        scope = getattr(self, "_cancel_scope", None)
+        if scope is None:
+            raise RuntimeError("No active cancel scope")
+        scope.cancel()
+        # Handler already responded — do not send a second JSON-RPC error.
+        if getattr(self, "_completed", False):
+            return
+        self._completed = True
+        await self._session._send_response(  # type: ignore[attr-defined]
+            request_id=self.request_id,
+            response=ErrorData(code=0, message="Request cancelled", data=None),
+        )
+
+    try:
+        RequestResponder.respond = _respond  # type: ignore[method-assign]
+        RequestResponder.cancel = _cancel  # type: ignore[method-assign]
+        RequestResponder._ducky_idempotent_respond = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
 def run_bridge() -> None:
     """Stdio MCP server for IDE-spawned MCP (``py -m frontend bridge``).
 
@@ -78,6 +139,8 @@ def run_bridge() -> None:
     _ensure_repo_on_path()
     # Plugin register() skips IDE mcp.json rewrites in this mode (reconnect loop).
     os.environ["UEFN_DUCKY_MCP_BRIDGE"] = "1"
+
+    _patch_mcp_request_responder_idempotent()
 
     from backend import bridge
     from backend.server import mcp
