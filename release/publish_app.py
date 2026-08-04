@@ -4,7 +4,8 @@
 Default flow (always bumps):
   0. Sync __version__ up to the live Store version if Store is ahead
   1. Build release EXE (build_exes.py bumps patch once) + Inno Setup
-  2. POST {Store site}/api/files/app-release  (multipart Setup exe)
+  2. Direct-to-S3: ticket → PUT Setup.exe → complete → poll job
+     (falls back to multipart POST /api/files/app-release if ticket API missing)
   3. MCP uds_app_release on that same site   (latest-only version + url + sha256)
 
 Env:
@@ -32,6 +33,8 @@ import os
 import re
 import subprocess
 import sys
+import http.client
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -299,7 +302,126 @@ def find_setup_exe(version: str, override: Path | None) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _presigned_put_file(upload_url: str, exe_path: Path, size: int) -> None:
+    """Stream the file handle to the presigned URL (no second in-memory copy)."""
+    parsed = urlparse(upload_url)
+    if parsed.scheme not in ("https", "http") or not parsed.hostname:
+        raise SystemExit(f"invalid uploadUrl scheme/host: {upload_url[:64]}…")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    headers = {
+        "Content-Length": str(size),
+        "Content-Type": "application/octet-stream",
+        "User-Agent": "UEFN-Ducky-PublishApp/1.0",
+    }
+    conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(parsed.hostname, parsed.port, timeout=600)
+    try:
+        with exe_path.open("rb") as fh:
+            conn.request("PUT", path, body=fh, headers=headers)
+            resp = conn.getresponse()
+            body = resp.read()
+            if resp.status >= 400:
+                detail = body.decode("utf-8", errors="replace")
+                raise SystemExit(f"Presigned PUT HTTP {resp.status}: {detail}")
+    finally:
+        conn.close()
+
+
+def _api_json(
+    base: str,
+    api_key: str,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    timeout: int = 120,
+) -> dict:
+    url = base.rstrip("/") + path
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "UEFN-Ducky-PublishApp/1.0",
+            "Origin": base.rstrip("/"),
+            **({"Content-Type": "application/json"} if body is not None else {}),
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"{method} {path} HTTP {exc.code}: {detail}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{method} {path} bad response: {payload!r}")
+    return payload
+
+
 def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
+    """Direct-to-S3: ticket → PUT file handle → complete → poll job status."""
+    filename = exe_path.name
+    size = exe_path.stat().st_size
+    digest = sha256_file(exe_path)
+    ticket_resp = _api_json(
+        base,
+        api_key,
+        "POST",
+        "/api/files/app-release/ticket",
+        {"filename": filename, "size": size, "sha256": digest},
+    )
+    upload_url = str(ticket_resp.get("uploadUrl") or "").strip()
+    ticket = str(ticket_resp.get("ticket") or "").strip()
+    if not upload_url or not ticket:
+        # Fall back to legacy multipart if the new endpoints are not deployed yet.
+        return _upload_app_release_multipart(base, api_key, exe_path)
+
+    print(f"  ticket ok — streaming {size} bytes direct to object storage")
+    _presigned_put_file(upload_url, exe_path, size)
+
+    complete = _api_json(
+        base,
+        api_key,
+        "POST",
+        "/api/files/app-release/complete",
+        {"ticket": ticket},
+    )
+    job_id = str(complete.get("jobId") or "").strip()
+    if not job_id:
+        raise SystemExit(f"complete missing jobId: {complete}")
+
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        status = _api_json(
+            base,
+            api_key,
+            "GET",
+            f"/api/files/app-release/status/{job_id}",
+            timeout=60,
+        )
+        state = str(status.get("status") or "").lower()
+        if state in ("complete", "completed", "succeeded", "ok"):
+            if not status.get("ok", True) and status.get("error"):
+                raise SystemExit(f"process failed: {status.get('error')}")
+            return {
+                "ok": True,
+                "fileId": status.get("fileId") or "",
+                "url": status.get("url") or f"/api/files/{status.get('fileId')}/content",
+                "sha256": status.get("sha256") or digest,
+                "size": status.get("size") or size,
+                "latestUrl": "/api/files/app-release/latest",
+            }
+        if state in ("failed", "fail", "error"):
+            raise SystemExit(f"process failed: {status.get('error') or status}")
+        time.sleep(2)
+    raise SystemExit(f"timed out waiting for job {job_id}")
+
+
+def _upload_app_release_multipart(base: str, api_key: str, exe_path: Path) -> dict:
     boundary = "----DuckyAppReleaseBoundary7MA4YWxkTrZu0gW"
     filename = exe_path.name
     file_bytes = exe_path.read_bytes()
@@ -516,7 +638,8 @@ def main() -> None:
     remote_sha = str(uploaded.get("sha256") or "").lower()
     if remote_sha and remote_sha != digest:
         raise SystemExit(f"Server sha256 mismatch: local={digest} remote={remote_sha}")
-    installer_url = absolute_url(base, str(uploaded.get("url") or f"/api/files/{file_id}/content"))
+    # Relative only — uds_app_release rejects absolute off-site URLs.
+    installer_url = f"/api/files/{file_id}/content" if file_id else "/api/files/app-release/latest"
     print(f"  uploaded fileId={file_id}")
     print(f"  installerUrl={installer_url}")
 
