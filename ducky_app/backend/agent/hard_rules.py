@@ -45,4 +45,9 @@ AGENT_HARD_RULES = (
     "new island assets — that causes unsaved packages and cook "
     "`Disallowed reference to /Game/...`. Omit `folder` / `destination_path` to let the "
     "listener pin the project mount. `/Game/Creative` is read/search only.\n"
+    "- **Persistence `weak_map` (HARD):** never remove player keys once added "
+    "(removing breaks saves). Replace values only via rebuild+`set`. Do not "
+    "add/remove persistable fields without "
+    '`skill_read_subskill("verse","persistence")` + `sys_persistence_migration` '
+    "(carry-all helpers). Session maps ≠ persist maps.\n"
 )
