@@ -83,6 +83,12 @@ def test_hard_rules_forbid_invented_game_asset_paths():
     assert "content_root" in AGENT_HARD_RULES
 
 
+def test_hard_rules_forbid_persist_weak_map_key_removal():
+    assert "weak_map" in AGENT_HARD_RULES
+    assert "persistence" in AGENT_HARD_RULES
+    assert "never remove" in AGENT_HARD_RULES.lower()
+
+
 def test_hard_rules_require_ask_user_questionnaire():
     # Ask-user questionnaire guidance lives in the embedded agent prompt body
     # (not the slim IDE-facing AGENT_HARD_RULES string).
