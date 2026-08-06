@@ -324,7 +324,7 @@ def _place_mesh_actors(
 
 
 def _content_root() -> str:
-    """Active project mount (e.g. /VideoTest) — never invent /Game or /Roguelike."""
+    """Active project mount (e.g. /MyProject) — never invent /Game or other islands."""
     root = (content_root() or "").rstrip("/")
     if root:
         return root
@@ -709,9 +709,14 @@ def foliage_list_sources(
     if folder:
         folders.append(folder)
     else:
+        # Prefer the open project's content root; then stock Fortnite foliage roots.
+        try:
+            root = _content_root().rstrip("/") + "/"
+            folders.append(root)
+        except RuntimeError:
+            pass
         folders.extend(
             [
-                "/Roguelike/",
                 "/Game/Environments/",
                 "/Game/Athena/Items/Environmental/",
                 "/BRCosmetics/",

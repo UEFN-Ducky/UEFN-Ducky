@@ -38,7 +38,7 @@ Material graph via MaterialEditingLibrary (UEFN)
 HINTS_MATERIAL_END_TO_END = """
 End-to-end: create a solid material that exists in Content (UEFN)
 1. ``folder = "<content_root>Materials"`` from ``get_project_info().content_root``
-   (e.g. ``/VideoTest/Materials``). **Never invent ``/Game/Materials``** — cook fails with
+   (e.g. ``/MyProject/Materials``). **Never invent ``/Game/Materials``** — cook fails with
    Disallowed reference / unsaved ``/Game`` packages. Prefer ``create_material`` (omit folder;
    listener pins the project mount).
 2. ``EditorAssetLibrary.make_directory(folder)`` if missing.

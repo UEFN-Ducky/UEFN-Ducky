@@ -46,7 +46,7 @@ AGENT_HARD_RULES = (
     "`create_folder` / `import_asset` / `duplicate_asset` / `rename_asset` / "
     "`meshy_import_to_uefn` / `gdrive_import_to_uefn` / `create_level_sequence` / "
     "`create_prefab_from_entities` / `create_empty_prefab` MUST use `get_project_info().content_root` "
-    "(e.g. `/VideoTest/Materials/...`). **Never invent `/Game/Materials`**, `/Game/VFX`, "
+    "(e.g. `/MyProject/Materials/...`). **Never invent `/Game/Materials`**, `/Game/VFX`, "
     "`/Game/UI`, `/Game/Data`, `/Game/Meshes`, `/Game/Meshy`, or `/Game/Retargeting` for "
     "new island assets — that causes unsaved packages and cook "
     "`Disallowed reference to /Game/...`. Omit `folder` / `destination_path` to let the "

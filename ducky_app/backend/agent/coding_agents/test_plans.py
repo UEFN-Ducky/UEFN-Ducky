@@ -273,7 +273,7 @@ class PlansStoreTests(unittest.TestCase):
 
     def test_template_instantiate_isolation(self) -> None:
         tpl = plans.create_template(
-            title="Roguelike kit",
+            title="Island kit",
             overview="Reusable",
             nodes=[
                 {
@@ -297,16 +297,16 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(inst["nodes"][0]["children"][0]["content"], "Combat")
 
         plans.update_node("chat-inst", "t1a", content="Melee combat", project_root=self.root)
-        plans.update_template(tid, title="Roguelike kit v2")
+        plans.update_template(tid, title="Island kit v2")
         tpl2 = plans.load_template(tid)
         assert tpl2 is not None
-        self.assertEqual(tpl2["title"], "Roguelike kit v2")
+        self.assertEqual(tpl2["title"], "Island kit v2")
         self.assertEqual(tpl2["nodes"][0]["children"][0]["content"], "Combat")
 
         inst2 = plans.load_plan("chat-inst", project_root=self.root)
         assert inst2 is not None
         self.assertEqual(inst2["nodes"][0]["children"][0]["content"], "Melee combat")
-        self.assertEqual(inst2["title"], "Roguelike kit")
+        self.assertEqual(inst2["title"], "Island kit")
 
         saved = plans.save_plan_as_template("chat-inst", project_root=self.root)
         self.assertEqual(saved["kind"], "template")

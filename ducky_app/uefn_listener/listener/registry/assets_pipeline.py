@@ -27,7 +27,7 @@ def create_folder(path: str) -> dict:
     """Create a content folder under the active project (never invent /Game/...)."""
     if not (path or "").strip():
         raise ValueError(
-            "path required — e.g. /VideoTest/Materials/City from get_project_info().content_root "
+            "path required — e.g. /MyProject/Materials/City from get_project_info().content_root "
             "(never /Game/... for new island assets)"
         )
     path = pin_project_folder(path, default_leaf="Materials")
