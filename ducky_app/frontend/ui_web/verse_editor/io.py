@@ -53,6 +53,7 @@ def write_file(relative_path: str, content: str) -> dict[str, object]:
     """Atomic write under project root; updates cache."""
     pf._require_writable_content_path(relative_path)  # noqa: SLF001
     pf._require_not_locked(relative_path)  # noqa: SLF001
+    pf._require_not_digest(relative_path)  # noqa: SLF001 — never mutate UEFN digests
     target = pf._resolve_relative(relative_path)  # noqa: SLF001 — shared path rules
     pf._require_under_content(target, relative_path)  # noqa: SLF001
     if not pf.is_editable_text_file(relative_path):

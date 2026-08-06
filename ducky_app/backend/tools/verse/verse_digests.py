@@ -42,6 +42,27 @@ DIGEST_PURPOSE: dict[str, str] = {
     ),
 }
 
+DIGEST_WRITE_FORBIDDEN = (
+    "UEFN digests are READ-ONLY — UEFN auto-edits them on Verse build. Never write, "
+    "edit, delete, rename, or patch any *.digest.verse. Run workspace_compile_verse "
+    "then search_verse_digest / get_verse_api / list_verse_types. Write project Verse "
+    "under Content/Verse/ only."
+)
+
+
+def is_uefn_digest_path(path: str) -> bool:
+    """True for Fortnite/Verse/UnrealEngine/Assets *.digest.verse (any path)."""
+    name = os.path.basename((path or "").replace("\\", "/")).lower()
+    if not name:
+        return False
+    return name.endswith(".digest.verse") or (name.endswith(".verse") and "digest" in name)
+
+
+def require_not_digest_path(path: str) -> None:
+    """Raise if *path* names a UEFN digest — digests must never be mutated."""
+    if is_uefn_digest_path(path):
+        raise ValueError(DIGEST_WRITE_FORBIDDEN)
+
 
 @dataclass
 class DeclEntry:

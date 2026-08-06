@@ -76,8 +76,15 @@ def workspace_read_file(relative_path: str, pretty: bool = False) -> str:
 
 @mcp.tool()
 def workspace_write_file(relative_path: str, content: str, pretty: bool = False) -> str:
-    """Write a text file under the VS Code workspace on host disk."""
+    """Write a text file under the VS Code workspace on host disk.
+
+    Never writes UEFN digests (*.digest.verse) — those are Epic/UEFN-generated READ-ONLY.
+    """
+    from backend.tools.verse.verse_digests import require_not_digest_path
+
+    require_not_digest_path(relative_path)
     file_path = resolve_workspace_path(relative_path)
+    require_not_digest_path(file_path)
     parent = os.path.dirname(file_path)
     if parent:
         os.makedirs(parent, exist_ok=True)

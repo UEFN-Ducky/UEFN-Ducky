@@ -50,4 +50,13 @@ AGENT_HARD_RULES = (
     "add/remove persistable fields without "
     '`skill_read_subskill("verse","persistence")` + `sys_persistence_migration` '
     "(carry-all helpers). Session maps ≠ persist maps.\n"
+    "- **UEFN digests are READ-ONLY (HARD — NEVER mutate):** never write, edit, "
+    "delete, rename, patch, or `workspace_write_file` any `*.digest.verse` "
+    "(Fortnite / Verse / UnrealEngine / Assets). **UEFN auto-edits digests itself** "
+    "on Verse build / import — you do not. Workflow: write project Verse under "
+    "`Content/Verse/**` → when UEFN is open run `workspace_compile_verse` (Verse "
+    "build) → then **look inside** digests with `list_verse_digests` / "
+    "`search_verse_digest` / `get_verse_api` / `list_verse_types` (Assets digest "
+    "especially after new materials/meshes/prefabs). Missing type? Build first, "
+    "then re-search — never invent by patching a digest.\n"
 )
