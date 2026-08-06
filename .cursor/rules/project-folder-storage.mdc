@@ -1,0 +1,21 @@
+---
+description: HARD — never store Ducky side-files in UEFN project except .ducky/**
+alwaysApply: true
+---
+
+# Project folder storage — `.ducky` only
+
+**NEVER** create Ducky side-files inside the UEFN project folder except under
+`.ducky/**` (tests, tasks).
+
+| Allowed in project | Forbidden |
+|--------------------|-----------|
+| `.ducky/**` | `Saved/DuckyCaptures`, `.uefn-ducky`, caches, temps |
+| `Content/**` game content the user asked for | Agent scratch, dumps, plugin junk |
+
+**Put everything else here:**
+
+- `%LOCALAPPDATA%/UEFN-Ducky/` (tool_captures, memory, diagnostics, plugins, …)
+- OS temp when truly ephemeral
+
+Captures / snips → AppData `tool_captures` only. Never mirror into the island.

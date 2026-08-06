@@ -1590,9 +1590,9 @@ class PanelApi:
     def snip_screen(self) -> dict[str, Any]:
         """Open the Windows region snipper and attach the result to the chat.
 
-        Accepted snips are saved under AppData chats/projects/<slug>/snips/ (panel
-        storage) AND copied into the active UEFN project's Saved/DuckyCaptures/
-        so agents can use the PNG without reading AppData.
+        Accepted snips are saved under AppData only (tool_captures / snips) —
+        never into the UEFN project folder (``.ducky/**`` is the only allowed
+        project-side Ducky storage).
         """
         if sys.platform != "win32":
             return {"ok": False, "reason": "unsupported"}
@@ -1610,7 +1610,6 @@ class PanelApi:
                 raw = _b64.b64decode(str(result["data_base64"]))
                 name = f"snip-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')[:-3]}.png"
 
-                # AppData panel copy (chat storage — agents should not rely on this path).
                 snips_dir = get_conversations_dir().parent / "snips"
                 snips_dir.mkdir(parents=True, exist_ok=True)
                 appdata_path = snips_dir / name
@@ -1618,9 +1617,9 @@ class PanelApi:
                 result["name"] = name
                 result["capture_path"] = str(appdata_path)
 
-                # Project copy — primary path agents can read/import.
-                project_path = copy_png_to_ducky_captures(raw, prefix="snip", filename=name)
-                result["path"] = project_path or str(appdata_path)
+                # AppData tool_captures (never project Saved/).
+                capture_path = copy_png_to_ducky_captures(raw, prefix="snip", filename=name)
+                result["path"] = capture_path or str(appdata_path)
             except Exception:
                 pass  # disk copy is best-effort; the composer attachment still works
         return result

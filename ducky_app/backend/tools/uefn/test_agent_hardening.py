@@ -71,10 +71,19 @@ def test_fortnite_directory_hint():
     assert "content_catalog" in AGENT_HARD_RULES
 
 
-def test_hard_rules_require_project_copy_for_captures():
-    assert "DuckyCaptures" in AGENT_HARD_RULES
-    assert "AppData" in AGENT_HARD_RULES
+def test_hard_rules_captures_use_appdata_not_project():
+    assert "tool_captures" in AGENT_HARD_RULES
+    assert "LOCALAPPDATA" in AGENT_HARD_RULES or "AppData" in AGENT_HARD_RULES
     assert "MCP image" in AGENT_HARD_RULES or "vision" in AGENT_HARD_RULES
+    assert ".ducky" in AGENT_HARD_RULES
+    assert "Never" in AGENT_HARD_RULES or "never" in AGENT_HARD_RULES
+
+
+def test_hard_rules_forbid_project_side_storage_except_ducky():
+    assert "Project folder storage" in AGENT_HARD_RULES
+    assert ".ducky" in AGENT_HARD_RULES
+    assert "DuckyCaptures" in AGENT_HARD_RULES  # named as forbidden
+    assert "LOCALAPPDATA" in AGENT_HARD_RULES or "AppData" in AGENT_HARD_RULES
 
 
 def test_hard_rules_forbid_invented_game_asset_paths():
@@ -134,13 +143,14 @@ def test_mcp_instructions_require_followable_plans():
     assert "ducky_ask_user" in _rules_body(4200)
 
 
-def test_enrich_screenshot_prefers_ducky_captures(tmp_path, monkeypatch):
+def test_enrich_screenshot_uses_appdata_not_project(tmp_path, monkeypatch):
     from backend.tools.uefn import editor as editor_mod
 
     project_root = tmp_path / "MyIsland"
     project_png = project_root / "Saved" / "Screenshots" / "uefn_ducky_screenshot.png"
     project_png.parent.mkdir(parents=True)
     project_png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    appdata = tmp_path / "appdata"
 
     class _Settings:
         uefn_project_root = str(project_root)
@@ -151,14 +161,15 @@ def test_enrich_screenshot_prefers_ducky_captures(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "frontend.ui_web.tool_captures.resolve_app_data_dir",
-        lambda for_write=False: tmp_path / "appdata",
+        lambda for_write=False: appdata,
     )
     out = editor_mod._enrich_screenshot({"path": str(project_png), "width": 1, "height": 1})
-    assert "DuckyCaptures" in out["path"]
+    assert "tool_captures" in out["path"].replace("\\", "/")
+    assert "DuckyCaptures" not in out["path"]
     assert Path(out["path"]).is_file()
     assert out["ue_screenshot_path"] == str(project_png)
     assert out["media_url"].startswith("http://")
-    assert "tool_captures" in out["capture_path"].replace("\\", "/")
+    assert not (project_root / "Saved" / "DuckyCaptures").exists()
 
 
 def test_wait_for_screenshot_file_polls_until_ready(tmp_path, monkeypatch):
@@ -217,7 +228,8 @@ if __name__ == "__main__":
     test_compact_keeps_keyed_inspect()
     test_compact_strips_huge_unkeyed_inspect()
     test_fortnite_directory_hint()
-    test_hard_rules_require_project_copy_for_captures()
+    test_hard_rules_captures_use_appdata_not_project()
+    test_hard_rules_forbid_project_side_storage_except_ducky()
     test_hard_rules_forbid_digest_mutation()
     test_digest_path_guard_blocks_writes()
     print("ok")

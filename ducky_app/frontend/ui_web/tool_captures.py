@@ -1,4 +1,9 @@
-"""Loopback URLs for tool screenshots — keep base64 out of MCP / agent context."""
+"""Loopback URLs for tool screenshots — keep base64 out of MCP / agent context.
+
+HARD: never write captures into the UEFN project folder. AppData only
+(%LOCALAPPDATA%/UEFN-Ducky/tool_captures). Project-side Ducky storage is
+``.ducky/**`` only.
+"""
 
 from __future__ import annotations
 
@@ -62,26 +67,22 @@ def _safe_capture_prefix(prefix: str) -> str:
 
 
 def copy_png_to_ducky_captures(raw: bytes, *, prefix: str = "capture", filename: str = "") -> str:
-    """Write PNG under active project's Saved/DuckyCaptures. Returns path or ''."""
+    """Write PNG under AppData tool_captures (never the UEFN project folder).
+
+    Name kept for callers; historically mirrored to Saved/DuckyCaptures — that
+    is forbidden now (project storage = ``.ducky/**`` only).
+    """
     if not raw:
         return ""
     try:
-        from frontend.settings import PanelSettings
-
-        root = (PanelSettings.load().uefn_project_root or "").strip()
-    except Exception:
-        root = ""
-    if not root:
-        return ""
-    try:
-        dest_dir = Path(root) / "Saved" / "DuckyCaptures"
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_dir = tool_captures_dir(for_write=True)
         if filename:
             name = Path(filename).name
         else:
             name = f"{_safe_capture_prefix(prefix)}_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
         dest = dest_dir / name
         dest.write_bytes(raw)
+        _prune_old_captures(dest_dir)
         return str(dest)
     except Exception:
         return ""
@@ -105,17 +106,8 @@ def save_tool_capture_png(raw: bytes, *, prefix: str = "capture") -> dict[str, o
 
 
 def save_capture_for_agents(raw: bytes, *, prefix: str = "capture") -> dict[str, object]:
-    """AppData preview + project DuckyCaptures copy.
-
-    ``path`` is the project file when available (agents use this). ``capture_path``
-    / ``media_url`` are AppData preview-only for the panel UI.
-    """
+    """AppData-only capture. Never mirrors into the UEFN project folder."""
     saved = save_tool_capture_png(raw, prefix=prefix)
-    project_path = copy_png_to_ducky_captures(
-        raw, prefix=prefix, filename=str(saved.get("filename") or "")
-    )
     out = dict(saved)
     out["capture_path"] = str(saved.get("path") or "")
-    if project_path:
-        out["path"] = project_path
     return out

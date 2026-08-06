@@ -113,8 +113,8 @@ def prepare_outgoing_user_message(
         if not supports_vision(provider, model):
             raise ValueError(f"Model {model!r} does not support images — pick a vision model or remove images.")
     content = merge_file_text_into_content(text, attachments)
-    # Mirror chat images into project Saved/DuckyCaptures so agents get a
-    # workspace-reachable path (AppData attachments stay preview-only).
+    # Persist chat images under AppData tool_captures (never the UEFN project
+    # folder — project-side Ducky storage is .ducky/** only).
     existing_paths: dict[str, str] = {}
     for raw in attachments_raw or []:
         if not isinstance(raw, dict) or str(raw.get("kind") or "") != "image":
