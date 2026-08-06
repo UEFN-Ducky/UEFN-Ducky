@@ -46,11 +46,10 @@ def _wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
-    """Attach media_url + project DuckyCaptures copy; keep base64 out of results.
+    """Attach media_url + AppData tool_captures copy; keep base64 out of results.
 
-    Agents must use the project ``path`` for file work (import, copy, py). AppData
-    ``capture_path`` / ``media_url`` are for chat UI preview only — agents do not
-    have reliable access to AppData folders.
+    HARD: never write captures into the UEFN project folder (``.ducky/**`` only).
+    ``path`` / ``capture_path`` live under ``%LOCALAPPDATA%/UEFN-Ducky/tool_captures``.
     """
     if not isinstance(result, dict):
         return result
@@ -68,10 +67,9 @@ def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
         raw = src.read_bytes()
         saved = save_capture_for_agents(raw, prefix="uefn_viewport")
         out = {**result}
-        # Prefer DuckyCaptures when project root is set; else keep UE Screenshots path.
-        project_path = str(saved.get("path") or "")
-        if project_path and Path(project_path).is_file():
-            out["path"] = project_path
+        appdata_path = str(saved.get("path") or "")
+        if appdata_path and Path(appdata_path).is_file():
+            out["path"] = appdata_path
             out["ue_screenshot_path"] = path
         else:
             out["path"] = path
@@ -80,8 +78,8 @@ def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:
         out["capture_filename"] = saved.get("filename") or ""
         out["bytes"] = saved.get("bytes")
         out["hint"] = (
-            "Use project path for file work; media_url/capture_path are AppData "
-            "preview-only. Image is also returned as MCP image content when available."
+            "Capture is AppData tool_captures (never the UEFN project folder). "
+            "Image is also returned as MCP image content when available."
         )
         out.pop("await_path", None)
         return out
@@ -122,13 +120,11 @@ def take_high_res_screenshot(
     """Capture the active viewport for visual verify (does not freeze UEFN).
 
     Uses a fast viewport-buffer capture on the listener (not Unreal's high-res
-    offscreen path, which stalls the editor on dense levels). Returns project
-    ``path`` (under ``Saved/DuckyCaptures`` when project root is set, else
-    ``Saved/Screenshots``) + ``media_url`` for panel preview, and an MCP image
-    content block so vision-capable agents can see the capture.
-    Use ``path`` for any file work; ``media_url`` / ``capture_path`` are
-    AppData preview-only. Never Bash-find for screenshot PNGs.
-    ``width``/``height`` are advisory; the PNG matches the current viewport.
+    offscreen path, which stalls the editor on dense levels). Returns ``path``
+    under ``%LOCALAPPDATA%/UEFN-Ducky/tool_captures`` (never the UEFN project
+    folder) + ``media_url`` for panel preview, and an MCP image content block.
+    Never Bash-find for screenshot PNGs. ``width``/``height`` are advisory;
+    the PNG matches the current viewport.
     """
     result = send_command(
         "take_high_res_screenshot",

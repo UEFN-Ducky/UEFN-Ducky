@@ -52,7 +52,8 @@ def test_resolve_tool_capture_rejects_path_escape(tmp_path, monkeypatch):
         resolve_tool_capture_path("not-a-png.txt")
 
 
-def test_save_capture_for_agents_mirrors_to_project(tmp_path, monkeypatch):
+def test_save_capture_for_agents_stays_in_appdata(tmp_path, monkeypatch):
+    """Never write captures into the UEFN project folder."""
     project = tmp_path / "island"
     project.mkdir()
     appdata = tmp_path / "appdata"
@@ -70,9 +71,13 @@ def test_save_capture_for_agents_mirrors_to_project(tmp_path, monkeypatch):
         lambda for_write=False: appdata,
     )
     saved = save_capture_for_agents(_PNG, prefix="uefn_viewport")
-    assert "DuckyCaptures" in str(saved["path"])
-    assert Path(str(saved["path"])).read_bytes() == _PNG
-    assert "tool_captures" in str(saved["capture_path"]).replace("\\", "/")
+    path = Path(str(saved["path"]))
+    assert path.is_file()
+    assert path.read_bytes() == _PNG
+    assert "tool_captures" in str(path).replace("\\", "/")
+    assert "DuckyCaptures" not in str(path)
+    assert not (project / "Saved").exists()
     assert copy_png_to_ducky_captures(_PNG, prefix="snip", filename="snip-x.png").endswith(
         "snip-x.png"
     )
+    assert not list(project.rglob("*.png"))
