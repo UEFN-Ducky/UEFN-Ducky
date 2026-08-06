@@ -267,6 +267,7 @@ def _resolve_file_path(relative_path: str) -> Path:
 def _require_writable_content_path(relative_path: str) -> None:
     if _is_workspace_locked_path(relative_path):
         raise ValueError(f"Locked workspace file cannot be modified: {relative_path}")
+    _require_not_digest(relative_path)
     target = _resolve_relative(relative_path)
     _require_under_content(target, relative_path)
 
@@ -356,9 +357,17 @@ def _require_not_locked(relative_path: str) -> None:
         raise ValueError(f"File is locked and cannot be modified: {relative_path}")
 
 
+def _require_not_digest(relative_path: str) -> None:
+    """UEFN digests are Epic-generated — never create/edit/delete via the panel."""
+    from backend.tools.verse.verse_digests import require_not_digest_path
+
+    require_not_digest_path(relative_path)
+
+
 def _require_writable_mutation(relative_path: str) -> None:
     _require_writable_content_path(relative_path)
     _require_not_locked(relative_path)
+    _require_not_digest(relative_path)
 
 
 def _is_uefn_engine_file(name: str) -> bool:
@@ -1054,6 +1063,7 @@ def rename_project_entry(source_relative: str, new_name: str) -> dict[str, str]:
     """Rename a file or folder in place under Content."""
     _require_writable_mutation(source_relative)
     safe_name = _validate_entry_name(new_name)
+    _require_not_digest(safe_name)
     source_rel = source_relative.strip().replace("\\", "/").strip("/")
     if not source_rel or source_rel == CONTENT_DIR:
         raise ValueError("Cannot rename Content root.")
@@ -1082,6 +1092,7 @@ def create_project_verse_file(parent_relative: str, name: str, content: str = ""
     safe_name = _validate_entry_name(name)
     if not safe_name.lower().endswith(".verse"):
         safe_name = f"{safe_name}.verse"
+    _require_not_digest(safe_name)
     rel = _join_content_path(parent_relative, safe_name)
     target = _resolve_relative(rel)
     _require_under_content(target, rel)

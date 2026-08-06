@@ -89,6 +89,28 @@ def test_hard_rules_forbid_persist_weak_map_key_removal():
     assert "never remove" in AGENT_HARD_RULES.lower()
 
 
+def test_hard_rules_forbid_digest_mutation():
+    assert "digest" in AGENT_HARD_RULES.lower()
+    assert "READ-ONLY" in AGENT_HARD_RULES or "read-only" in AGENT_HARD_RULES.lower()
+    assert "*.digest.verse" in AGENT_HARD_RULES or ".digest.verse" in AGENT_HARD_RULES
+    assert "workspace_compile_verse" in AGENT_HARD_RULES
+    assert "auto-edit" in AGENT_HARD_RULES.lower() or "auto-edits" in AGENT_HARD_RULES.lower()
+
+
+def test_digest_path_guard_blocks_writes():
+    from backend.tools.verse.verse_digests import is_uefn_digest_path, require_not_digest_path
+
+    assert is_uefn_digest_path("Fortnite.digest.verse")
+    assert is_uefn_digest_path(r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse")
+    assert is_uefn_digest_path("Verse/Verse.digest.verse")
+    assert not is_uefn_digest_path("Content/Verse/Economy/economy_manager.verse")
+    try:
+        require_not_digest_path("UnrealEngine.digest.verse")
+        raise AssertionError("expected ValueError for digest write")
+    except ValueError as exc:
+        assert "READ-ONLY" in str(exc)
+
+
 def test_hard_rules_require_ask_user_questionnaire():
     # Ask-user questionnaire guidance lives in the embedded agent prompt body
     # (not the slim IDE-facing AGENT_HARD_RULES string).
@@ -196,4 +218,6 @@ if __name__ == "__main__":
     test_compact_strips_huge_unkeyed_inspect()
     test_fortnite_directory_hint()
     test_hard_rules_require_project_copy_for_captures()
+    test_hard_rules_forbid_digest_mutation()
+    test_digest_path_guard_blocks_writes()
     print("ok")
