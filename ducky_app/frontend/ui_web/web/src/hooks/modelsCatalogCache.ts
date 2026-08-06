@@ -45,7 +45,19 @@ export function subscribeModelsCatalog(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/**
+ * Bust in-flight loads and refetch. Keeps the last catalog so UIs stay ready
+ * (stale-while-revalidate) — nulling used to flash "Loading models…" over
+ * active chats on every uefn_plugins_changed.
+ */
 export function invalidateModelsCatalog(): void {
+  catalogEpoch += 1;
+  loadPromise = null;
+  emit();
+}
+
+/** Hard-clear ready state (tests / rare blank). Prefer refreshModelsCatalog. */
+export function clearModelsCatalog(): void {
   catalogEpoch += 1;
   cachedModels = null;
   cachedDefaultModel = "";
@@ -78,8 +90,8 @@ export function installModelsCatalogAutoRefresh(): void {
   installPanelPushBus();
   subscribePanelPush((event) => {
     if (event.type === "uefn_plugins_changed") {
-      // Clear immediately so a removed gateway (e.g. OpenAI) disappears from the
-      // picker before the debounced refetch finishes — keep-data leaves the key.
+      // Refetch so install/remove updates the picker; keep stale rows until then
+      // so chats don't block on "Loading models…".
       invalidateModelsCatalog();
       scheduleModelsCatalogRefresh();
       return;

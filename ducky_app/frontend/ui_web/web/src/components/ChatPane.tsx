@@ -1004,12 +1004,6 @@ export function ChatPane({
         onDragLeave={attachDropEnabled ? handleAttachDragLeave : undefined}
         onDrop={attachDropEnabled ? handleDrop : undefined}
       >
-      {visible && modelsLoading && !chat.isGroup && (
-        <div className="chat-pane-models-loading-overlay">
-          <div className="chat-pane-models-loading-spinner" />
-          <span className="chat-pane-models-loading-label">Loading models…</span>
-        </div>
-      )}
       <div ref={shellRef} className="chat-column-shell">
         <div className="chat-column-gutter chat-column-gutter--left">
         </div>
