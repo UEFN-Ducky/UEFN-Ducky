@@ -85,7 +85,7 @@ def listener_project_fields(
     try:
         info = post_command_to_listener(port, "get_project_info", {}, timeout=3.0)
         if isinstance(info, dict):
-            # The live editor's identity is its content-root NAME (e.g. "Roguelike").
+            # The live editor's identity is its content-root NAME (e.g. "MyProject").
             # project_dir is always the shared FortniteGame folder, so it can't tell
             # user projects apart — match by name against the panel project's folder.
             uefn_project_name = str(info.get("project_name") or "").strip()

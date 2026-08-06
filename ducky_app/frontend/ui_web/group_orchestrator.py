@@ -634,7 +634,7 @@ def build_member_prompt(
         "1) create or update a real Plan with ducky_create_plan / ducky_update_plan "
         "on THIS conversation (not chat-only text); "
         "2) then reply in the group in 1–3 short lines: what you own, the exact plan title, "
-        "and that it's ready to open — e.g. 'Plan ready: Roguelike room kit (open my Plan tab)'. "
+        "and that it's ready to open — e.g. 'Plan ready: Island room kit (open my Plan tab)'. "
         "Do not invent URLs; the UI links the plan from your create_plan call.",
     ]
     if is_leader:

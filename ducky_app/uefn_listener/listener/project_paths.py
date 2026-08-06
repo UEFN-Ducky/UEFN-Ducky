@@ -14,7 +14,7 @@ import unreal
 
 
 def content_root() -> str:
-    """Active project Content Browser mount, e.g. ``/VideoTest/`` (trailing slash)."""
+    """Active project Content Browser mount, e.g. ``/MyProject/`` (trailing slash)."""
     try:
         world = unreal.EditorLevelLibrary.get_editor_world()
     except Exception:
@@ -37,7 +37,7 @@ def content_root() -> str:
 
 
 def pin_folder_string(folder: str, root: str, *, default_leaf: str = "Materials") -> str:
-    """Pure path pin (no UE). ``root`` is ``/VideoTest`` or ``/VideoTest/``."""
+    """Pure path pin (no UE). ``root`` is ``/MyProject`` or ``/MyProject/``."""
     root = (root or "").rstrip("/")
     if not root:
         raise RuntimeError(
@@ -86,7 +86,7 @@ def pin_project_folder(folder: str = "", *, default_leaf: str = "Materials") -> 
 
 
 def pin_asset_path_string(asset_path: str, root: str, *, default_leaf: str = "Assets") -> str:
-    """Pin a full asset path (``/Game/Materials/M_X`` → ``/VideoTest/Materials/M_X``)."""
+    """Pin a full asset path (``/Game/Materials/M_X`` → ``/MyProject/Materials/M_X``)."""
     p = (asset_path or "").strip().replace("\\", "/")
     if not p:
         raise ValueError("asset path required")
