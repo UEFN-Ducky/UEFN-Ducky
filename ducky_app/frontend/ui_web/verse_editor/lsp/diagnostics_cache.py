@@ -23,7 +23,20 @@ CACHE_FILE_NAME = ".ducky_verse_scan.json"
 
 _mem_lock = threading.Lock()
 _MEM: dict[str, dict[str, Any]] = {}
+# Disk-file fingerprint (mtime_ns, size) observed when _MEM was last loaded/saved —
+# so an external clear/rescan (another process) is picked up instead of resurrecting
+# poisoned RAM over a clean on-disk snapshot.
+_MEM_DISK_FP: dict[str, tuple[int, int]] = {}
 _legacy_purged = False
+
+
+def _disk_fingerprint(project_root: str) -> tuple[int, int] | None:
+    path = _disk_path(project_root)
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return int(st.st_mtime_ns), int(st.st_size)
 
 
 def cache_enabled() -> bool:
@@ -112,16 +125,26 @@ def load(project_root: str) -> dict[str, Any]:
     key = _norm_root(project_root)
     with _mem_lock:
         store = _MEM.get(key)
+        disk_fp = _disk_fingerprint(project_root)
+        mem_fp = _MEM_DISK_FP.get(key)
         disk = _read_disk(project_root)
-        if store is None:
-            store = disk if disk is not None else _empty()
-            prune_deleted(project_root, store)
-            _MEM[key] = store
-        elif disk is None and (store.get("files") or {}):
+        if store is not None and disk_fp is not None and mem_fp == disk_fp:
+            return store
+        if store is not None and disk is None and (store.get("files") or {}):
             # Disk cache was deleted (maintenance / manual clear) — drop RAM zombies
             # so the next Problems read cannot resurrect stale errors.
             store = _empty()
             _MEM[key] = store
+            _MEM_DISK_FP.pop(key, None)
+            return store
+        # Cold start, or disk changed under us (another process wrote a cleaner scan).
+        store = disk if disk is not None else _empty()
+        prune_deleted(project_root, store)
+        _MEM[key] = store
+        if disk_fp is not None:
+            _MEM_DISK_FP[key] = disk_fp
+        else:
+            _MEM_DISK_FP.pop(key, None)
         return store
 
 
@@ -138,6 +161,11 @@ def save(project_root: str, data: dict[str, Any]) -> None:
             _MEM[key] = store
         prune_deleted(project_root, store)
         _write_disk(project_root, store)
+        disk_fp = _disk_fingerprint(project_root)
+        if disk_fp is not None:
+            _MEM_DISK_FP[key] = disk_fp
+        else:
+            _MEM_DISK_FP.pop(key, None)
 
 
 def clear(project_root: str | None = None) -> None:
@@ -145,6 +173,7 @@ def clear(project_root: str | None = None) -> None:
     with _mem_lock:
         if project_root is None:
             _MEM.clear()
+            _MEM_DISK_FP.clear()
             try:
                 shutil.rmtree(_cache_dir(), ignore_errors=True)
             except Exception:
@@ -152,6 +181,7 @@ def clear(project_root: str | None = None) -> None:
             return
         key = _norm_root(project_root)
         _MEM.pop(key, None)
+        _MEM_DISK_FP.pop(key, None)
     try:
         path = _disk_path(project_root)
         path.unlink(missing_ok=True)
@@ -189,6 +219,14 @@ def is_fresh(entry: dict[str, Any], abs_path: Path) -> bool:
 
 
 def stale_keys(project_root: str, cache: dict[str, Any] | None = None) -> list[str]:
+    """Keys that need a verse-lsp recheck.
+
+    Unchanged clean files stay fresh (mtime+size). Cached *problems* are never
+    sticky: a flaky/false-positive diagnosis used to pin red Problems forever
+    because the file's fingerprint never changed and incremental scans skipped it
+    — while UEFN's real compile stayed green. Always revalidate error/warning
+    entries so the next open/edit/rescan can clear ghosts.
+    """
     cache = cache if cache is not None else load(project_root)
     cached = cache.get("files") or {}
     disk = _disk_files(project_root)
@@ -196,6 +234,9 @@ def stale_keys(project_root: str, cache: dict[str, Any] | None = None) -> list[s
     for key, path in disk.items():
         entry = cached.get(key)
         if not isinstance(entry, dict) or not is_fresh(entry, path):
+            stale.append(key)
+            continue
+        if int(entry.get("errors") or 0) > 0 or int(entry.get("warnings") or 0) > 0:
             stale.append(key)
     return stale
 

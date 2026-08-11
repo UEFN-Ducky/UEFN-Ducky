@@ -47,10 +47,38 @@ def test_mtime_change_marks_stale(tmp_path: Path):
         cache,
         "content/ok.verse",
         diagnostics_cache.fingerprint(abs_path),
-        {"errors": 1, "warnings": 0, "items": []},
+        {"errors": 0, "warnings": 0, "items": []},
     )
     abs_path.write_text("# changed\n", encoding="utf-8")
     assert diagnostics_cache.stale_keys(str(root), cache) == ["content/ok.verse"]
+
+
+def test_cached_errors_always_stale_even_when_mtime_fresh(tmp_path: Path):
+    """False-positive Problems must not pin forever on an unchanged fingerprint."""
+    root = _make_project(tmp_path, ["bad.verse", "ok.verse"])
+    diagnostics_cache.clear(str(root))
+    cache = diagnostics_cache.load(str(root))
+    bad = root / "Content" / "bad.verse"
+    ok = root / "Content" / "ok.verse"
+    diagnostics_cache.apply_file(
+        str(root),
+        cache,
+        "content/bad.verse",
+        diagnostics_cache.fingerprint(bad),
+        {
+            "errors": 1,
+            "warnings": 0,
+            "items": [{"line": 1, "column": 1, "message": "ghost", "severity": "error"}],
+        },
+    )
+    diagnostics_cache.apply_file(
+        str(root),
+        cache,
+        "content/ok.verse",
+        diagnostics_cache.fingerprint(ok),
+        {"errors": 0, "warnings": 0, "items": []},
+    )
+    assert diagnostics_cache.stale_keys(str(root), cache) == ["content/bad.verse"]
 
 
 def test_load_for_ui_prunes_deleted(tmp_path: Path):
@@ -131,3 +159,56 @@ def test_deleted_disk_cache_drops_memory_zombies(tmp_path: Path, monkeypatch):
     ui = diagnostics_cache.load_for_ui(str(root))
     assert ui["files"] == []
     assert ui["stale_count"] == 1
+
+
+def test_external_disk_rewrite_reloads_memory(tmp_path: Path, monkeypatch):
+    """Another process writing a clean cache must win over poisoned RAM."""
+    import json
+    import time
+
+    root = _make_project(tmp_path, ["ok.verse"])
+    cache_root = tmp_path / "appdata"
+    cache_root.mkdir()
+    monkeypatch.setattr(
+        "frontend.settings.default_app_data_dir",
+        lambda: cache_root,
+    )
+    diagnostics_cache.clear(str(root))
+    cache = diagnostics_cache.load(str(root))
+    abs_path = root / "Content" / "ok.verse"
+    diagnostics_cache.apply_file(
+        str(root),
+        cache,
+        "content/ok.verse",
+        diagnostics_cache.fingerprint(abs_path),
+        {
+            "errors": 1,
+            "warnings": 0,
+            "items": [{"line": 1, "column": 1, "message": "ghost", "severity": "error"}],
+        },
+        persist=True,
+    )
+    assert diagnostics_cache.load_for_ui(str(root))["files"][0]["errors"] == 1
+
+    disk = diagnostics_cache._disk_path(str(root))
+    time.sleep(0.02)  # ensure mtime_ns changes on Windows
+    disk.write_text(
+        json.dumps(
+            {
+                "v": diagnostics_cache.CACHE_VERSION,
+                "files": {
+                    "content/ok.verse": {
+                        "mtime_ns": diagnostics_cache.fingerprint(abs_path)[0],
+                        "size": diagnostics_cache.fingerprint(abs_path)[1],
+                        "errors": 0,
+                        "warnings": 0,
+                        "items": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    ui = diagnostics_cache.load_for_ui(str(root))
+    assert ui["files"][0]["errors"] == 0
+    assert ui["stale_count"] == 0

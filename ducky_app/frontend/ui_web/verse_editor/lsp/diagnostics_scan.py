@@ -497,6 +497,26 @@ def _run_scan(
                 items = _diagnostics_to_items(diags)
                 errors = sum(1 for i in items if i["severity"] == "error")
                 warnings = sum(1 for i in items if i["severity"] == "warning")
+                # verse-lsp intermittently emits false positives (named-arg / literal
+                # tuple mismatches) that UEFN's compiler rejects. A second didChange
+                # pass on the same text usually comes back clean — don't pin Problems
+                # on a one-shot flake. Transport death mid-confirm keeps the first read.
+                if (errors or warnings) and session.is_alive():
+                    try:
+                        diags2 = _refresh_document_diagnostics(
+                            session,
+                            doc_uri,
+                            content,
+                            settle_s=refresh_settle_s,
+                        )
+                    except Exception:
+                        diags2 = None
+                    if diags2 is not None:
+                        items2 = _diagnostics_to_items(diags2)
+                        if not items2:
+                            items = items2
+                            errors = 0
+                            warnings = 0
                 file_result = {
                     "path": key,
                     "errors": errors,
