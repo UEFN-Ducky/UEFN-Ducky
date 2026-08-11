@@ -444,9 +444,9 @@ export const fileDiagnosticRegistry = {
     notify();
   },
 
-  /** Merge live verse-lsp results that reported ERRORS (open/recheck/save).
-   * Clean/empty payloads are ignored here — verse-lsp false empties must not wipe
-   * Problems or lie to the AI. True clears come only from publishDiagnostics push. */
+  /** Merge live verse-lsp results from another window / cache persist.
+   * Clean payloads clear that file — otherwise a fixed buffer stays red in every
+   * window that never received the local publishDiagnostics push. */
   mergeLiveResults(
     files: Array<{
       path: string;
@@ -458,7 +458,6 @@ export const fileDiagnosticRegistry = {
     for (const file of files) {
       const errors = file.errors ?? 0;
       const warnings = file.warnings ?? 0;
-      if (errors === 0 && warnings === 0) continue;
       const key = registryKey(file.path);
       liveUpdateAt.set(key, Date.now());
       setEntry(key, {
@@ -477,8 +476,9 @@ export const fileDiagnosticRegistry = {
    * ghost Problems for files that no longer exist (the old add-only merge kept them
    * forever because only a live LSP push could remove an entry).
    *
-   * Preserve live ERROR entries so a poisoned all-clear cache cannot hide squiggles
-   * from Problems/AI. Live-cleared files may still receive scan-found errors. */
+   * Files the snapshot marks clean drop sticky live errors too — otherwise a
+   * one-shot false-positive from an open tab outlived every full project rescan.
+   * Live-cleared files (liveUpdateAt set, no entry) still reject scan-found errors. */
   setScanResults(
     files: Array<{
       path: string;
@@ -489,11 +489,19 @@ export const fileDiagnosticRegistry = {
     scanId?: number,
   ): void {
     if (scanId !== undefined && scanId !== activeScanId) return;
+    const cleanKeys = new Set<string>();
+    for (const file of files) {
+      if ((file.errors ?? 0) === 0 && (file.warnings ?? 0) === 0) {
+        cleanKeys.add(registryKey(file.path));
+      }
+    }
+    for (const key of cleanKeys) {
+      liveUpdateAt.delete(key);
+    }
     const liveErrors = new Map<string, FileDiagnosticEntry>();
     for (const [key, entry] of entries) {
-      if (key.startsWith("content/") && liveUpdateAt.has(key)) {
-        liveErrors.set(key, entry);
-      }
+      if (!key.startsWith("content/") || !liveUpdateAt.has(key) || cleanKeys.has(key)) continue;
+      liveErrors.set(key, entry);
     }
     for (const key of [...entries.keys()]) {
       if (key.startsWith("content/")) entries.delete(key);
