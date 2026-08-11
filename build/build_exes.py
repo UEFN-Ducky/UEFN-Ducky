@@ -165,13 +165,18 @@ def main() -> int:
     root = here.parent
     req = root / "requirements.txt"
     spec = here / "unified.spec"
-    work = here / "unified-work"
-    if work.is_dir():
-        try:
-            shutil.rmtree(work)
-            print(f"Cleaned PyInstaller work dir: {work}")
-        except OSError as exc:
-            print(f"Note: could not clean {work} ({exc})", file=sys.stderr)
+    # Prefer AppData/temp workpath — Documents/GitHub builds can lose
+    # build/unified-work mid-Analysis (OneDrive/AV) → FileNotFoundError on base_library.zip.
+    local_app = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir())
+    work = local_app / "UEFN-Ducky" / "pyinstaller-work" / "unified-work"
+    legacy_work = here / "unified-work"
+    for stale in (work, legacy_work):
+        if stale.is_dir():
+            try:
+                shutil.rmtree(stale)
+                print(f"Cleaned PyInstaller work dir: {stale}")
+            except OSError as exc:
+                print(f"Note: could not clean {stale} ({exc})", file=sys.stderr)
 
     for p in (req, spec):
         if not p.is_file():
