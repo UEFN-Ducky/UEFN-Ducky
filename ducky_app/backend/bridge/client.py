@@ -31,6 +31,10 @@ _CACHEABLE_COMMANDS: dict[str, float] = {
     "get_level_info": 15.0,
     "does_asset_exist": 10.0,
     "ping": 5.0,
+    # Mutation paths invalidate the whole cache; short TTL is enough for agent loops.
+    "search_assets": 12.0,
+    "list_assets": 12.0,
+    "get_all_actors": 10.0,
 }
 
 _READ_COMMANDS = frozenset(
@@ -68,7 +72,10 @@ _last_post_ok_at = 0.0
 
 _POST_TIMEOUT_COOLDOWN_SEC = 2.0
 _BUSY_RETRY_SLEEP_SEC = 0.15
+_BUSY_RETRY_SLEEP_MAX_SEC = 1.0
 _BUSY_WAIT_POLL_SEC = 0.1
+# Fail fast instead of silently queueing for the full command timeout (was 30–50s).
+_BUSY_FAIL_FAST_SEC = 10.0
 
 
 def _record_bridge_error(message: str) -> None:
@@ -81,20 +88,46 @@ def _record_bridge_error(message: str) -> None:
         pass
 
 
+def _listener_health(port: int) -> Optional[dict]:
+    return listener_get_health(port, timeout=0.5)
+
+
 def _listener_is_busy(port: int) -> bool:
     """True when GET health reports an in-flight / queued command."""
-    health = listener_get_health(port, timeout=0.5)
+    health = _listener_health(port)
     if not health:
         return False
     return bool(health.get("busy")) or int(health.get("queue_size") or 0) > 0
 
 
-def _wait_listener_idle(port: int, *, deadline: float) -> None:
-    """Poll GET / until not busy, or until deadline (then POST anyway)."""
+def _busy_error_message(port: int, command: str) -> str:
+    health = _listener_health(port) or {}
+    current = str(health.get("current_command") or health.get("last_command") or "").strip()
+    running = f" running `{current}`" if current else ""
+    from backend.bridge.serial import BUSY_HINT
+
+    return (
+        f"Editor busy{running} — do not re-issue `{command}`, wait for the current "
+        f"command to finish. {BUSY_HINT}"
+    )
+
+
+def busy_backoff_sleep(attempt: int) -> float:
+    """Exponential backoff for 503 busy retries (unit-tested). Caps at 1s."""
+    return min(_BUSY_RETRY_SLEEP_MAX_SEC, _BUSY_RETRY_SLEEP_SEC * (2 ** max(0, attempt)))
+
+
+def _wait_listener_idle(port: int, *, deadline: float, command: str) -> None:
+    """Poll GET / until not busy, or raise after ``_BUSY_FAIL_FAST_SEC`` of waiting."""
+    wait_started = time.time()
+    attempt = 0
     while time.time() < deadline:
         if not _listener_is_busy(port):
             return
-        time.sleep(_BUSY_WAIT_POLL_SEC)
+        if time.time() - wait_started >= _BUSY_FAIL_FAST_SEC:
+            raise RuntimeError(_busy_error_message(port, command))
+        time.sleep(busy_backoff_sleep(attempt))
+        attempt += 1
 
 
 def _post_json_locked(
@@ -106,20 +139,23 @@ def _post_json_locked(
 ) -> dict:
     """POST one command under ``_listener_lock``, waiting out 503 busy replies.
 
-    Caller must already hold ``_listener_lock``. Retries 503 until the overall
-    timeout budget is spent so parallel MCP tools serialize instead of failing.
+    Caller must already hold ``_listener_lock``. Retries 503 with exponential
+    backoff; after ``_BUSY_FAIL_FAST_SEC`` of busy waiting, fails with a
+    structured "do not re-issue" error instead of silently queueing for 30–50s.
     """
     url = f"http://127.0.0.1:{port}"
     payload = json.dumps({"command": command, "params": params or {}}).encode()
     deadline = time.time() + max(timeout, 1.0)
-    _wait_listener_idle(port, deadline=deadline)
+    _wait_listener_idle(port, deadline=deadline, command=command)
 
     last_http: Optional[urllib.error.HTTPError] = None
+    busy_started: Optional[float] = None
+    attempt = 0
     while True:
         remaining = deadline - time.time()
         if remaining <= 0:
             if last_http is not None:
-                _handle_listener_http_error(last_http)
+                raise RuntimeError(_busy_error_message(port, command)) from last_http
             raise TimeoutError(f"Command '{command}' timed out waiting for listener idle")
         req = urllib.request.Request(
             url,
@@ -133,7 +169,12 @@ def _post_json_locked(
         except urllib.error.HTTPError as e:
             if e.code == 503:
                 last_http = e
-                time.sleep(_BUSY_RETRY_SLEEP_SEC)
+                if busy_started is None:
+                    busy_started = time.time()
+                elif time.time() - busy_started >= _BUSY_FAIL_FAST_SEC:
+                    raise RuntimeError(_busy_error_message(port, command)) from e
+                time.sleep(busy_backoff_sleep(attempt))
+                attempt += 1
                 continue
             _handle_listener_http_error(e)
             raise

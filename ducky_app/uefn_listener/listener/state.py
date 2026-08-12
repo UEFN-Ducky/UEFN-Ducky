@@ -27,6 +27,15 @@ def _init_shared_state() -> None:
         "_mcp_in_flight": False,
         "_mcp_in_flight_since": 0.0,
         "_mcp_dispatching": False,
+        # Slate post-tick heartbeat — GET /health reads this; never POST ping for status.
+        "_mcp_last_tick_at": 0.0,
+        # Cached project identity for GET health (refreshed on the game thread).
+        "_mcp_project_cache": {
+            "at": 0.0,
+            "project_name": "",
+            "project_dir": "",
+            "content_root": "",
+        },
         "_mcp_reload_in_progress": False,
         "_mcp_log_ring": [],
         "_mcp_metrics": {
@@ -38,6 +47,8 @@ def _init_shared_state() -> None:
             "last_error": "",
             "last_client_ping": 0.0,
             "response_times_ms": [],
+            # Per-command ring: [{"name": str, "ms": float, "ts": float}, ...]
+            "command_timings": [],
         },
         "_mcp_status_window": None,
     }

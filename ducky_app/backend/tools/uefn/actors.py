@@ -75,12 +75,17 @@ def spawn_actor(
     location: Optional[list[float]] = None,
     rotation: Optional[list[float]] = None,
     select: bool = True,
+    label: str = "",
+    folder: str = "",
+    tags: Optional[list[str]] = None,
     pretty: bool = False,
 ) -> str:
     """Place an actor (asset_path or actor_class) — meshes, Blueprints, Verse devices.
 
-    New actor is selected by default. Do not pass Verse ``*_device`` names as
-    ``actor_class`` — search under ``/Game/Creative`` for the Blueprint path.
+    Prefer ``label`` + ``folder`` here (same tick) instead of separate
+    set_actor_label / set_actor_folder calls. New actor is selected by default.
+    Do not pass Verse ``*_device`` names as ``actor_class`` — search under
+    ``/Game/Creative`` for the Blueprint path.
     """
     # Teach before the listener round-trip when the mistake is obvious.
     if not asset_path and actor_class:
@@ -102,6 +107,12 @@ def spawn_actor(
         params["location"] = location
     if rotation is not None:
         params["rotation"] = rotation
+    if label:
+        params["label"] = label
+    if folder:
+        params["folder"] = folder
+    if tags:
+        params["tags"] = tags
     try:
         result = send_command("spawn_actor", params)
     except Exception as exc:

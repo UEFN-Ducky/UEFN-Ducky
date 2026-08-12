@@ -8,38 +8,40 @@ from backend.bridge.status import ListenerStatusState, fetch_listener_status
 def test_busy_listener_stays_online(monkeypatch):
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
-        lambda _port: {"status": "ok", "busy": True, "uptime_sec": 12},
+        lambda _port: {
+            "status": "ok",
+            "busy": True,
+            "uptime_sec": 12,
+            "tick_age_sec": 0.1,
+            "current_command": "spawn_actor",
+        },
     )
 
     def _fail_ping(*_a, **_k):
-        raise AssertionError("ping must not run while busy")
+        raise AssertionError("status must never POST ping")
 
     monkeypatch.setattr("backend.bridge.status.ping_listener", _fail_ping)
+    monkeypatch.setattr(
+        "backend.bridge.status.post_command_to_listener",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no POST from status")),
+    )
 
     status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
     assert status["online"] is True
     assert status["wedged"] is False
     assert status["busy"] is True
     assert "busy" in status["status_text"].lower()
+    assert status["current_command"] == "spawn_actor"
 
 
-def test_ping_failure_keeps_online_and_wedges_after_streak(monkeypatch):
+def test_stale_tick_wedges_after_streak(monkeypatch):
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
-        lambda _port: {"status": "ok", "busy": False, "uptime_sec": 30},
+        lambda _port: {"status": "ok", "busy": False, "uptime_sec": 30, "tick_age_sec": 25.0},
     )
     monkeypatch.setattr(
         "backend.bridge.status.ping_listener",
-        lambda *_a, **_k: (False, None),
-    )
-    # No recent successful POST — the wedge probe must actually ping.
-    monkeypatch.setattr(
-        "backend.bridge.status.seconds_since_last_post_ok",
-        lambda: float("inf"),
-    )
-    monkeypatch.setattr(
-        "backend.bridge.status.listener_project_fields",
-        lambda *_a, **_k: ("", "", True, None),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no POST ping")),
     )
     state = ListenerStatusState()
 
@@ -66,45 +68,41 @@ def test_get_failure_is_offline(monkeypatch):
     assert status["status_text"].startswith("Offline")
 
 
-def test_healthy_ping_is_online(monkeypatch):
+def test_fresh_tick_is_online(monkeypatch):
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
-        lambda _port: {"status": "ok", "busy": False},
+        lambda _port: {
+            "status": "ok",
+            "busy": False,
+            "uptime_sec": 90,
+            "tick_age_sec": 0.05,
+            "project_name": "MyIsland",
+            "project_dir": "C:/proj",
+        },
     )
     monkeypatch.setattr(
         "backend.bridge.status.ping_listener",
-        lambda *_a, **_k: (True, {"uptime_sec": 90}),
-    )
-    monkeypatch.setattr(
-        "backend.bridge.status.seconds_since_last_post_ok",
-        lambda: float("inf"),
-    )
-    monkeypatch.setattr(
-        "backend.bridge.status.listener_project_fields",
-        lambda *_a, **_k: ("", "", True, None),
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no POST ping")),
     )
 
     status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
     assert status["online"] is True
     assert status["wedged"] is False
     assert status["uptime_sec"] == 90.0
+    assert status["uefn_project_name"] == "MyIsland"
 
 
-def test_recent_agent_command_skips_status_ping(monkeypatch):
+def test_legacy_listener_without_tick_age_stays_online(monkeypatch):
+    """Old listeners lack tick_age_sec — do not POST; stay online without wedging."""
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
         lambda _port: {"status": "ok", "busy": False, "uptime_sec": 45},
     )
-
-    def _fail_ping(*_a, **_k):
-        raise AssertionError("ping must not run when an agent command just succeeded")
-
-    monkeypatch.setattr("backend.bridge.status.ping_listener", _fail_ping)
-    monkeypatch.setattr("backend.bridge.status.seconds_since_last_post_ok", lambda: 2.0)
     monkeypatch.setattr(
-        "backend.bridge.status.listener_project_fields",
-        lambda *_a, **_k: ("", "", True, None),
+        "backend.bridge.status.ping_listener",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no POST ping")),
     )
+    monkeypatch.setattr("backend.bridge.status.seconds_since_last_post_ok", lambda: 2.0)
 
     status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
     assert status["online"] is True

@@ -29,14 +29,52 @@ def listener_command(command: str, params: Optional[dict[str, Any]] = None, pret
     return tool_json(result, pretty=pretty)
 
 
+# Heavy / binary / derived UEFN dirs — listing or grepping these freezes the machine.
+_WORKSPACE_SKIP_NAMES = frozenset(
+    {
+        "Saved",
+        "Intermediate",
+        "DerivedDataCache",
+        "Binaries",
+        ".git",
+        "__pycache__",
+        ".vs",
+        ".idea",
+    }
+)
+_WORKSPACE_SKIP_SUFFIXES = (".uasset", ".umap", ".dll", ".pdb", ".exe")
+
+
+def _workspace_entry_allowed(name: str) -> bool:
+    if name in _WORKSPACE_SKIP_NAMES:
+        return False
+    lower = name.lower()
+    return not any(lower.endswith(suf) for suf in _WORKSPACE_SKIP_SUFFIXES)
+
+
 @mcp.tool()
 def workspace_list_dir(relative_path: str = ".", pretty: bool = False) -> str:
-    """List files under VS Code workspace folders on host disk."""
-    dir_path = resolve_workspace_path((relative_path or "").strip() or ".")
+    """List files under VS Code workspace folders on host disk.
+
+    Skips Saved/, Intermediate/, DerivedDataCache/, and binary ``*.uasset`` /
+    ``*.umap`` entries by default — grepping those freezes the machine.
+    Prefer ``Content/Verse`` for Verse work.
+    """
+    rel = (relative_path or "").strip() or "."
+    dir_path = resolve_workspace_path(rel)
     if not os.path.isdir(dir_path):
         raise ValueError(f"Not a directory: {dir_path}")
-    names = sorted(os.listdir(dir_path))
-    return tool_json({"path": dir_path, "entries": names}, pretty=pretty)
+    names = sorted(n for n in os.listdir(dir_path) if _workspace_entry_allowed(n))
+    hint = ""
+    base = os.path.basename(dir_path.rstrip("\\/"))
+    if base and base not in ("Verse", "Content") and "Verse" not in names:
+        # Root-ish listing — steer agents away from binary Content/*.uasset greps.
+        if any(x in names for x in ("Content", "Saved", "Intermediate")) or not names:
+            hint = "Prefer Content/Verse for Verse searches — never grep *.uasset or Saved/."
+    payload: dict[str, Any] = {"path": dir_path, "entries": names}
+    if hint:
+        payload["hint"] = hint
+    return tool_json(payload, pretty=pretty)
 
 
 @mcp.tool()

@@ -83,6 +83,8 @@ def cmd_status() -> dict:
     from listener.capabilities import listener_capabilities
     from listener.dispatch import handler_names
 
+    last_tick = float(getattr(unreal, "_mcp_last_tick_at", 0.0) or 0.0)
+    tick_age = (time.time() - last_tick) if last_tick > 0 else None
     return {
         "running": unreal._mcp_server is not None,
         "version": config.PROTOCOL_VERSION,
@@ -96,6 +98,8 @@ def cmd_status() -> dict:
         "last_error": metrics["last_error"],
         "last_client_ping": metrics["last_client_ping"],
         "queue_size": command_queue.qsize(),
+        "tick_age_sec": round(tick_age, 2) if tick_age is not None else None,
+        "command_timings": list(metrics.get("command_timings") or [])[-40:],
         "commands": handler_names(),
         "listener_capabilities": listener_capabilities(),
     }

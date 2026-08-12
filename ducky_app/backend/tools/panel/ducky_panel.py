@@ -359,7 +359,8 @@ def ducky_perf_report(clear: bool = False, pretty: bool = False) -> str:
 
     Always-on tracing writes to %LOCALAPPDATA%/UEFN-Ducky/perf/latest-report.json.
     Host-side; no UEFN listener required. Pass clear=true to reset the in-memory ring
-    between experiments (session files on disk are kept).
+    between experiments (session files on disk are kept). When the listener is online,
+    also attaches per-command editor timings from GET health (names the exact freeze).
     """
     from frontend.perf_trace import clear as clear_ring
     from frontend.perf_trace import read_latest_report, write_report
@@ -372,6 +373,48 @@ def ducky_perf_report(clear: bool = False, pretty: bool = False) -> str:
         disk = read_latest_report()
         if disk:
             report = disk
+
+    # Attach editor-side per-command timings when available (zero-cost GET).
+    try:
+        from backend.bridge import configured_listener_port, listener_get_health
+
+        health = listener_get_health(configured_listener_port(), timeout=0.5)
+        if health and health.get("status") == "ok":
+            timings = list(health.get("command_timings") or [])
+            if timings:
+                by_name: dict[str, list[float]] = {}
+                for row in timings:
+                    name = str(row.get("name") or "?")
+                    by_name.setdefault(name, []).append(float(row.get("ms") or 0))
+                editor_cmds = []
+                for name, ms_list in by_name.items():
+                    editor_cmds.append(
+                        {
+                            "name": name,
+                            "count": len(ms_list),
+                            "max_ms": round(max(ms_list), 2),
+                            "mean_ms": round(sum(ms_list) / len(ms_list), 2),
+                        }
+                    )
+                editor_cmds.sort(key=lambda r: -float(r["max_ms"]))
+                report = {
+                    **report,
+                    "editor_command_timings": timings[-20:],
+                    "editor_commands_by_name": editor_cmds[:15],
+                    "tick_age_sec": health.get("tick_age_sec"),
+                    "current_command": health.get("current_command") or "",
+                }
+                if editor_cmds and float(editor_cmds[0]["max_ms"]) >= 500:
+                    hints = list(report.get("hints") or [])
+                    hints.insert(
+                        0,
+                        f"Editor command `{editor_cmds[0]['name']}` max "
+                        f"{editor_cmds[0]['max_ms']}ms — main-thread freeze source.",
+                    )
+                    report["hints"] = hints
+    except Exception:
+        pass
+
     return tool_json(report, pretty=pretty)
 
 

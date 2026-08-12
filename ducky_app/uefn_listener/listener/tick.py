@@ -7,7 +7,16 @@ import traceback
 import unreal
 
 from listener import lookup
-from listener.config import STALE_CLEANUP_SEC, STUCK_INFLIGHT_SEC, heavy_tick_limit, tick_batch_limit
+from listener.config import (
+    COMMAND_TIMINGS_RING,
+    PROJECT_CACHE_REFRESH_SEC,
+    STALE_CLEANUP_SEC,
+    STUCK_INFLIGHT_SEC,
+    heavy_tick_limit,
+    should_stop_tick_drain,
+    tick_batch_limit,
+    tick_budget_ms,
+)
 from listener.registry import scene_graph
 
 
@@ -44,6 +53,10 @@ _HEAVY_COMMANDS: set[str] = set(
         "distribute_actors",
         "save_current_level",
         "save_all_dirty",
+        # Heavy reads — registry / full level scans (never share a tick with other work)
+        "search_assets",
+        "list_assets",
+        "get_all_actors",
         # Creative
         "set_device_settings",
         "set_creative_device_fields",
@@ -145,6 +158,36 @@ def _clear_in_flight() -> None:
         unreal._mcp_dispatching = False
 
 
+def _refresh_project_cache() -> None:
+    """Stamp project identity for GET health — runs on the game thread only."""
+    now = time.time()
+    cache = getattr(unreal, "_mcp_project_cache", None) or {}
+    age = now - float(cache.get("at", 0.0) or 0.0)
+    # Full refresh every PROJECT_CACHE_REFRESH_SEC; if still empty, retry sooner (5s).
+    ttl = PROJECT_CACHE_REFRESH_SEC if cache.get("project_name") else 5.0
+    if age < ttl:
+        return
+    project_name = ""
+    content_root = ""
+    project_dir = ""
+    try:
+        world = unreal.EditorLevelLibrary.get_editor_world()
+        if world:
+            parts = world.get_path_name().split("/")
+            if len(parts) >= 2:
+                project_name = parts[1]
+                content_root = f"/{project_name}/"
+        project_dir = str(unreal.Paths.project_dir())
+    except Exception:
+        pass
+    unreal._mcp_project_cache = {
+        "at": now,
+        "project_name": project_name,
+        "project_dir": project_dir,
+        "content_root": content_root,
+    }
+
+
 def _self_heal_stuck_inflight() -> None:
     """Clear orphaned in_flight after HTTP client timeout (command finished or never ran).
 
@@ -171,9 +214,12 @@ def _self_heal_stuck_inflight() -> None:
 
 
 def tick_handler(delta_time: float) -> None:
+    # Heartbeat for zero-cost GET health (status polls must never POST ping).
+    unreal._mcp_last_tick_at = time.time()
     lookup.invalidate()
     scene_graph.invalidate()
     _self_heal_stuck_inflight()
+    _refresh_project_cache()
 
     while not main_queue.empty():
         try:
@@ -188,7 +234,17 @@ def tick_handler(delta_time: float) -> None:
     heavy_processed = 0
     batch_limit = tick_batch_limit()
     heavy_limit = heavy_tick_limit()
-    while not command_queue.empty() and processed < batch_limit:
+    budget_ms = float(tick_budget_ms())
+    tick_t0 = time.perf_counter()
+    while not command_queue.empty():
+        elapsed_ms = (time.perf_counter() - tick_t0) * 1000.0
+        if should_stop_tick_drain(
+            processed=processed,
+            batch_limit=batch_limit,
+            elapsed_ms=elapsed_ms,
+            budget_ms=budget_ms,
+        ):
+            break
         try:
             req_id, command, params = command_queue.get_nowait()
         except queue.Empty:
@@ -218,6 +274,10 @@ def tick_handler(delta_time: float) -> None:
         metrics["response_times_ms"].append(elapsed_ms)
         if len(metrics["response_times_ms"]) > 100:
             metrics["response_times_ms"].pop(0)
+        timings = metrics.setdefault("command_timings", [])
+        timings.append({"name": command, "ms": round(elapsed_ms, 2), "ts": time.time()})
+        if len(timings) > COMMAND_TIMINGS_RING:
+            del timings[: len(timings) - COMMAND_TIMINGS_RING]
 
         ev = None
         with responses_lock:
