@@ -26,8 +26,10 @@ import time
 import uuid
 from typing import Any
 
-# A slot lives at most this long before it is swept, so a panel that never
-# answers (window closed mid-request) cannot leak slots forever.
+# A slot is swept only after nobody has polled it for this long, so a caller
+# that vanished (process killed mid-request) cannot leak slots forever.
+# Actively-polled waits (e.g. ducky_ask_user, which never times out) refresh
+# the timestamp on every poll and live until answered.
 _MAX_TTL_S = 15 * 60.0
 
 
@@ -78,6 +80,8 @@ def wait(request_id: str, timeout: float) -> dict[str, Any] | None:
     """
     with _lock:
         slot = _pending.get(request_id)
+        if slot is not None:
+            slot.created = time.monotonic()  # keep-alive: sweep idles, not active polls
     if slot is None:
         return {"error": "unknown request_id"}
     if slot.event.wait(max(0.0, float(timeout))):

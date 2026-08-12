@@ -13,6 +13,7 @@ import { AppearanceSkinBridge } from "./theme/AppearanceSkinBridge";
 import { SoundFxBridge } from "./sfx/SoundFxBridge";
 import { MicPermissionModal } from "./voice/MicPermissionModal";
 import { loadAudioSettings } from "./voice/audioSettings";
+import { loadFollowCodeSettings } from "./verse-editor/queue/followCodeSettings";
 import { DuckyCatalogProvider } from "./components/ducky/DuckyCatalogContext";
 import { AppHeaderActionsProvider } from "./contexts/AppHeaderActionsContext";
 import { VerseDiagnosticsSettingsProvider } from "./contexts/VerseDiagnosticsSettingsContext";
@@ -146,6 +147,7 @@ export default function App() {
 
   useEffect(() => {
     void loadAudioSettings();
+    void loadFollowCodeSettings();
   }, []);
 
   // uefn-ducky:// deep links (website Store "Install in app") — live + cold start.

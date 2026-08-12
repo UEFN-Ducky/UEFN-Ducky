@@ -229,6 +229,15 @@ class PanelSettings:
     walkthrough_completed: dict[str, bool] = field(default_factory=dict)
     """Product tour completion flags keyed by tour id (app.shell, settings.store, plugin.*)."""
 
+    follow_code_enabled: bool = True
+    """Play the agent's file walkthrough in the editor (content sync always happens)."""
+
+    follow_code_speed: str = "normal"
+    """Walkthrough delay scale: slow | normal | fast | instant."""
+
+    follow_code_split_beside_chat: bool = True
+    """Agent-opened files land in a tab group beside the chat."""
+
     def validate(self) -> None:
         if self.port < 1 or self.port > 65535:
             raise ValueError("port must be 1-65535")
@@ -246,6 +255,8 @@ class PanelSettings:
             raise ValueError("tool_result_format must be toon or json")
         if self.voice_spoken_style not in ("summary", "speak_along"):
             self.voice_spoken_style = "summary"
+        if self.follow_code_speed not in ("slow", "normal", "fast", "instant"):
+            self.follow_code_speed = "normal"
         if self.mic_permission not in ("ask", "allow", "block"):
             self.mic_permission = "ask"
         try:
@@ -362,6 +373,9 @@ class PanelSettings:
             or not self.allow_settings_write
             or self.allow_agent_clicks
             or bool(self.walkthrough_completed)
+            or not self.follow_code_enabled
+            or self.follow_code_speed != "normal"
+            or not self.follow_code_split_beside_chat
         )
 
     def save(self) -> None:

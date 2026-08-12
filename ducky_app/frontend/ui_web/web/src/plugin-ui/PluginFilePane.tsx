@@ -111,7 +111,6 @@ export function PluginFilePane({ pluginId, panelId, relativePath }: Props) {
           title={panel.title || panel.id}
           src={src}
           sandbox={PLUGIN_UI_SANDBOX}
-          allow="pointer-lock"
         />
       </div>
     </PluginSurfaceBoundary>

@@ -3045,6 +3045,16 @@ class PanelApi:
             "memory_summary_model": s.memory_summary_model or "",
             "chat_auto_title": bool(getattr(s, "chat_auto_title", True)),
             "chat_title_model": getattr(s, "chat_title_model", "") or "",
+            "follow_code_enabled": bool(getattr(s, "follow_code_enabled", True)),
+            "follow_code_speed": (
+                s.follow_code_speed
+                if getattr(s, "follow_code_speed", "normal")
+                in ("slow", "normal", "fast", "instant")
+                else "normal"
+            ),
+            "follow_code_split_beside_chat": bool(
+                getattr(s, "follow_code_split_beside_chat", True)
+            ),
             "walkthrough_completed": {
                 str(k): bool(v) for k, v in (s.walkthrough_completed or {}).items() if v
             },
@@ -3555,6 +3565,15 @@ class PanelApi:
             s.chat_auto_title = bool(patch.get("chat_auto_title"))
         if "chat_title_model" in patch:
             s.chat_title_model = str(patch.get("chat_title_model") or "").strip()
+        if "follow_code_enabled" in patch:
+            s.follow_code_enabled = bool(patch.get("follow_code_enabled"))
+        if "follow_code_speed" in patch:
+            speed = str(patch.get("follow_code_speed") or "normal").strip()
+            s.follow_code_speed = (
+                speed if speed in ("slow", "normal", "fast", "instant") else "normal"
+            )
+        if "follow_code_split_beside_chat" in patch:
+            s.follow_code_split_beside_chat = bool(patch.get("follow_code_split_beside_chat"))
         if "walkthrough_completed" in patch:
             raw = patch.get("walkthrough_completed")
             if isinstance(raw, dict):

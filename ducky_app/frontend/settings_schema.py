@@ -151,6 +151,23 @@ FIELD_META: dict[str, FieldMeta] = {
         "Legacy provider cache markers fallback", "LLMs", settable=True
     ),
     "freeze_prompt_prefix": FieldMeta("Freeze prompt prefix (all providers)", "LLMs", settable=True),
+    "follow_code_enabled": FieldMeta(
+        "Follow agent edits in the editor",
+        "LLMs",
+        settable=True,
+        description="Play the agent's file walkthrough in the editor.",
+    ),
+    "follow_code_speed": FieldMeta(
+        "Follow Code walkthrough speed",
+        "LLMs",
+        settable=True,
+        enum=("slow", "normal", "fast", "instant"),
+    ),
+    "follow_code_split_beside_chat": FieldMeta(
+        "Open Follow Code files beside chat",
+        "LLMs",
+        settable=True,
+    ),
     "anthropic_extended_cache_ttl": FieldMeta(
         "Legacy Anthropic 1h cache TTL fallback", "LLMs", settable=True
     ),

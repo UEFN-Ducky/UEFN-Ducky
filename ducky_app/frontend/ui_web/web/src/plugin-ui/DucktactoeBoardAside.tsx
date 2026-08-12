@@ -113,7 +113,6 @@ export function DucktactoeBoardAside({ hostId, collapsed, onToggle, widthPx }: P
           title="Duck-Tac-Toe board"
           src={src}
           sandbox={PLUGIN_UI_SANDBOX}
-          allow="pointer-lock"
         />
       )}
     </aside>

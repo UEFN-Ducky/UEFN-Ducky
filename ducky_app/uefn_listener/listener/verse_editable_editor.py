@@ -29,11 +29,11 @@ from listener.serialize import is_live
 
 _VERSE_PROP_RE = re.compile(rb"__verse_0x[0-9A-Fa-f]{8}_[A-Za-z0-9_]+")
 _EDITABLE_RE = re.compile(
-    r"^\s*@editable(?:\s+<[^>]+>)?\s*\n\s*([A-Za-z_][A-Za-z0-9_]*)\s*:",
+    r"^\s*@editable(?:\s+<[^>]+>)?\s*\n\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)*\s*:",
     re.MULTILINE,
 )
 _EDITABLE_INLINE_RE = re.compile(
-    r"@editable\s+(?:<[^>]+>\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+    r"@editable\s+(?:<[^>]+>\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)?"
 )
 
 # VerseClass asset paths discovered at runtime via asset registry (no project hardcoding).
@@ -63,8 +63,9 @@ _WRAPPER_REGISTRY: Dict[str, Tuple[str, str]] = {
     ),
 }
 
+# Inline `@editable Chunks <public>: []rgd_chunk_entry` and multiline `Chunks: …`.
 _FIELD_TYPE_RE = re.compile(
-    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=\n]+)",
+    r"^\s*(?:@editable\s+(?:<[^>]+>\s+)?)?([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)*\s*:\s*([^=\n]+)",
     re.MULTILINE,
 )
 
@@ -647,7 +648,8 @@ def _read_verse_file(fp: str) -> str:
 def _find_verse_source_by_stems(stems: List[str]) -> Tuple[str, str]:
     """Search Verse trees for ``stem := class`` definitions."""
     for stem in stems:
-        class_re = re.compile(rf"(?i)\b{re.escape(stem)}\s*:=\s*class\b")
+        # Allow Verse access/specifiers between name and := e.g. `foo <public> := class`
+        class_re = re.compile(rf"(?i)\b{re.escape(stem)}(?:\s*<[^>]+>)*\s*:=\s*class\b")
         for verse_root in _verse_search_dirs():
             for dirpath, _dn, filenames in os.walk(verse_root):
                 for fn in filenames:
@@ -723,7 +725,8 @@ def _verse_source_for_actor(
     content = str(unreal.Paths.project_content_dir())
     project = str(unreal.Paths.project_dir())
     for stem in stems:
-        class_re = re.compile(rf"(?i)\b{re.escape(stem)}\s*:=\s*class\b")
+        # Allow Verse access/specifiers between name and := e.g. `foo <public> := class`
+        class_re = re.compile(rf"(?i)\b{re.escape(stem)}(?:\s*<[^>]+>)*\s*:=\s*class\b")
         for base in (content, project, os.path.join(project, "Content") if project else ""):
             if not base or not os.path.isdir(base):
                 continue
