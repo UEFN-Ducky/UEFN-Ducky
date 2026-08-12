@@ -194,13 +194,14 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
         : "error";
   // Pretty-print JSON only when the card is open — formatting large tool results on
   // every flood of collapsed cards stalls the WebView2 UI thread.
+  // Ask-user always needs the result payload so Q&A stays visible without expand.
   const argsText = useMemo(
-    () => (expanded ? formatPayload(meta.arguments) : ""),
-    [expanded, meta.arguments],
+    () => (expanded || isAskUser ? formatPayload(meta.arguments) : ""),
+    [expanded, isAskUser, meta.arguments],
   );
   const resultText = useMemo(
-    () => (expanded ? formatPayload(meta.result) : ""),
-    [expanded, meta.result],
+    () => (expanded || isAskUser ? formatPayload(meta.result) : ""),
+    [expanded, isAskUser, meta.result],
   );
   const llmTokens = meta.llmTokens ?? 0;
   const tokenSuffix =
@@ -208,10 +209,12 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const ms = meta.durationMs ?? 0;
   const relPath = meta.arguments?.relative_path ?? meta.arguments?.path;
   const runningSubtitle = liveAsk
-    ? "answer above the composer…"
-    : typeof relPath === "string" && relPath.trim()
-      ? relPath.trim().replace(/\\/g, "/")
-      : "running…";
+    ? "paused — answer in chat, then Submit…"
+    : isAskUser && isRunning
+      ? "paused — waiting for Submit…"
+      : typeof relPath === "string" && relPath.trim()
+        ? relPath.trim().replace(/\\/g, "/")
+        : "running…";
 
   const displayName =
     category.label?.(meta.name) ?? humanToolLabel(meta.name);
@@ -328,15 +331,32 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {liveAsk ? (
-          <div className="tool-execution-card-waiting-row ask-user-tool-hint">
-            <div className="status-dot online tool-execution-card-waiting-dot" />
-            Answer the question above the composer to continue.
+        {/* Ask-user Q&A stays visible in the chat stream (not behind expand). */}
+        {isAskUser && !isCancelled && !isGuardBlocked ? (
+          <div className="tool-execution-card-body tool-execution-card-body--ask-user">
+            {liveAsk || isRunning ? (
+              <div className="tool-execution-card-waiting-row ask-user-tool-hint">
+                <div className="status-dot online tool-execution-card-waiting-dot" />
+                Agent paused — answer the questionnaire in chat, then Submit to continue.
+              </div>
+            ) : null}
+            <Body
+              toolName={meta.name}
+              args={meta.arguments}
+              argsText={argsText}
+              resultText={resultText}
+              isSuccess={isSuccess}
+              isError={!isSuccess && !isRunning}
+              showResult={!isRunning && !hideRawResult}
+              hideArgs={false}
+              hint={!isRunning ? meta.hint : undefined}
+              onOpenFile={onOpenFile}
+            />
           </div>
         ) : null}
 
         <div className={`tool-card-collapse${expanded ? " is-open" : ""}`}>
-          {expanded && !liveAsk ? (
+          {expanded && !isAskUser ? (
           <div className="tool-card-collapse-inner">
             {(chatList || listedChat) && onOpenChat && !isRunning ? (
               <div className="tool-execution-card-chat-list-wrap">
@@ -349,7 +369,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
             ) : null}
 
             <div className="tool-execution-card-body">
-              {isRunning && !isChatTool && !isAskUser && (
+              {isRunning && !isChatTool && (
                 <div className="tool-execution-card-waiting-row">
                   <div className="status-dot online tool-execution-card-waiting-dot" />
                   {externalAgent

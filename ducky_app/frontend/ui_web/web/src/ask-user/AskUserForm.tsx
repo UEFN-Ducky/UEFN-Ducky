@@ -38,6 +38,16 @@ function OptionControl({
   );
 }
 
+function draftSummary(question: AskUserQuestion, draft: AskUserDraft): string {
+  if (draft.other || (!question.options.length && question.allow_free_text)) {
+    const text = draft.text.trim();
+    return text || "…";
+  }
+  if (!draft.selected.length) return "";
+  const byId = new Map(question.options.map((o) => [o.id, o.label]));
+  return draft.selected.map((id) => byId.get(id) || id).join(", ");
+}
+
 export function AskUserForm({
   questions,
   title,
@@ -48,10 +58,13 @@ export function AskUserForm({
 }: Props) {
   const [index, setIndex] = useState(0);
   const [drafts, setDrafts] = useState<AskUserDraft[]>(() => questions.map(() => emptyDraft()));
+  /** Questions the user has explicitly Submitted (not just drafted). */
+  const [committed, setCommitted] = useState<boolean[]>(() => questions.map(() => false));
 
   useEffect(() => {
     setIndex(0);
     setDrafts(questions.map(() => emptyDraft()));
+    setCommitted(questions.map(() => false));
   }, [questions]);
 
   const question = questions[index] ?? null;
@@ -59,16 +72,18 @@ export function AskUserForm({
   const total = questions.length;
   const canSubmit = question ? canSubmitQuestion(question, draft) : false;
   const multiple = Boolean(question?.allow_multiple);
+  const isLast = index + 1 >= total;
+  const canSkip = Boolean(question && !question.required);
 
   const answersSoFar = useMemo(() => {
     const out: Record<string, AskUserAnswer> = {};
     for (let i = 0; i < drafts.length && i < questions.length; i++) {
-      if (i < index) {
+      if (committed[i]) {
         out[questions[i].id] = draftToAnswer(drafts[i]);
       }
     }
     return out;
-  }, [drafts, questions, index]);
+  }, [drafts, questions, committed]);
 
   const setDraft = (patch: Partial<AskUserDraft>) => {
     setDrafts((prev) => {
@@ -85,31 +100,49 @@ export function AskUserForm({
 
   const handleSubmit = () => {
     if (!question || !canSubmit) return;
+    const nextDrafts = [...drafts];
+    nextDrafts[index] = draft;
+    const nextCommitted = [...committed];
+    nextCommitted[index] = true;
+    setDrafts(nextDrafts);
+    setCommitted(nextCommitted);
+
     const answers = { ...answersSoFar, [question.id]: draftToAnswer(draft) };
-    if (index + 1 >= total) {
+    if (isLast) {
+      // Fill any never-reached optional slots as skipped (shouldn't happen in order).
+      for (let i = 0; i < questions.length; i++) {
+        if (!nextCommitted[i] && i !== index) {
+          answers[questions[i].id] = { selected: [], text: "", skipped: true };
+        }
+      }
       finish(answers);
       return;
     }
-    setDrafts((prev) => {
-      const next = [...prev];
-      next[index] = draft;
-      return next;
-    });
     setIndex((i) => i + 1);
   };
 
   const handleSkip = () => {
-    if (!question) return;
-    const answers = { ...answersSoFar, [question.id]: draftToAnswer(draft, true) };
-    if (index + 1 >= total) {
+    if (!question || !canSkip) return;
+    const nextDrafts = [...drafts];
+    nextDrafts[index] = emptyDraft();
+    const nextCommitted = [...committed];
+    nextCommitted[index] = true;
+    setDrafts(nextDrafts);
+    setCommitted(nextCommitted);
+
+    const answers = {
+      ...answersSoFar,
+      [question.id]: draftToAnswer(emptyDraft(), true),
+    };
+    if (isLast) {
+      for (let i = 0; i < questions.length; i++) {
+        if (!nextCommitted[i] && i !== index) {
+          answers[questions[i].id] = { selected: [], text: "", skipped: true };
+        }
+      }
       finish(answers);
       return;
     }
-    setDrafts((prev) => {
-      const next = [...prev];
-      next[index] = emptyDraft();
-      return next;
-    });
     setIndex((i) => i + 1);
   };
 
@@ -120,8 +153,10 @@ export function AskUserForm({
 
   const handleClose = () => {
     const answers: Record<string, AskUserAnswer> = { ...answersSoFar };
-    for (let i = index; i < questions.length; i++) {
-      answers[questions[i].id] = { selected: [], text: "", skipped: true };
+    for (let i = 0; i < questions.length; i++) {
+      if (!answers[questions[i].id]) {
+        answers[questions[i].id] = { selected: [], text: "", skipped: true };
+      }
     }
     finish(answers);
   };
@@ -135,6 +170,7 @@ export function AskUserForm({
       setDraft({ selected, other: false });
       return;
     }
+    // Selection alone never continues the agent — only Submit does.
     setDraft({ selected: [optionId], other: false, text: "" });
   };
 
@@ -172,7 +208,7 @@ export function AskUserForm({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers close over latest draft
-  }, [captureKeys, question, draft, canSubmit, index]);
+  }, [captureKeys, question, draft, canSubmit, index, isLast]);
 
   if (!question) return null;
 
@@ -186,6 +222,7 @@ export function AskUserForm({
           {index + 1}/{total}
         </span>
         {queueAhead > 0 ? <span className="ask-user-queue">+{queueAhead} waiting</span> : null}
+        <span className="ask-user-pause-hint">Agent paused until Submit</span>
         {showDismiss ? (
           <button
             type="button"
@@ -198,6 +235,39 @@ export function AskUserForm({
         ) : null}
       </div>
       {title ? <p className="ask-user-session-title">{title}</p> : null}
+
+      {total > 1 ? (
+        <ol className="ask-user-batch" aria-label="All questions">
+          {questions.map((q, i) => {
+            const done = committed[i];
+            const current = i === index;
+            const summary = done
+              ? draftToAnswer(drafts[i]).skipped
+                ? "Skipped"
+                : draftSummary(q, drafts[i]) || "Answered"
+              : current
+                ? "Answering…"
+                : "Not answered";
+            return (
+              <li
+                key={q.id}
+                className={[
+                  "ask-user-batch-item",
+                  done ? "is-done" : "",
+                  current ? "is-current" : "",
+                  done && draftToAnswer(drafts[i]).skipped ? "is-skipped" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <span className="ask-user-batch-prompt">{q.prompt}</span>
+                <span className="ask-user-batch-status">{summary}</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+
       <h2 className="ask-user-prompt">{question.prompt}</h2>
       <div
         className="ask-user-options"
@@ -287,16 +357,18 @@ export function AskUserForm({
           Back
         </button>
         <div className="ask-user-footer-right">
-          <button type="button" className="settings-btn" onClick={handleSkip}>
-            Skip
-          </button>
+          {canSkip ? (
+            <button type="button" className="settings-btn" onClick={handleSkip}>
+              Skip
+            </button>
+          ) : null}
           <button
             type="button"
             className={`settings-btn modal-confirm-btn${canSubmit ? "" : " is-disabled"}`}
             onClick={handleSubmit}
             disabled={!canSubmit}
           >
-            Submit Enter
+            {isLast ? "Submit Enter" : "Next Enter"}
           </button>
         </div>
       </div>

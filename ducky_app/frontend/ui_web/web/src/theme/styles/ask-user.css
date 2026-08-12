@@ -67,10 +67,63 @@
   color: var(--text-muted);
 }
 
+.ask-user-pause-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .ask-user-session-title {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.ask-user-batch {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.ask-user-batch-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.ask-user-batch-item.is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ask-user-batch-item.is-done .ask-user-batch-status {
+  color: var(--text);
+}
+
+.ask-user-batch-item.is-skipped .ask-user-batch-status {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ask-user-batch-prompt {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.ask-user-batch-status {
+  flex: 0 1 auto;
+  opacity: 0.9;
 }
 
 .ask-user-prompt {

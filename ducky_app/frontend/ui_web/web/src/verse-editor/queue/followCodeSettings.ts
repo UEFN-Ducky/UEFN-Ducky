@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getApi } from "../../hooks/usePanelApi";
 
 export type FollowCodeSpeed = "slow" | "normal" | "fast" | "instant";
 
@@ -15,6 +16,14 @@ const KEY_ENABLED = "uefn-follow-code-enabled";
 const KEY_SPEED = "uefn-follow-code-speed";
 const KEY_SPLIT = "uefn-follow-code-split";
 const CHANGE_EVENT = "uefn-follow-code-settings";
+/** One-shot: copy legacy localStorage into panel_settings.json. */
+const KEY_MIGRATED = "uefn-follow-code-migrated-v1";
+
+const DEFAULTS: FollowCodeSettings = {
+  enabled: true,
+  speed: "normal",
+  splitBesideChat: true,
+};
 
 const SPEED_MULTIPLIERS: Record<FollowCodeSpeed, number> = {
   slow: 1.75,
@@ -44,12 +53,37 @@ function readSpeed(): FollowCodeSpeed {
   return "normal";
 }
 
-export function getFollowCodeSettings(): FollowCodeSettings {
+function readLocal(): FollowCodeSettings {
   return {
-    enabled: readBool(KEY_ENABLED, true),
+    enabled: readBool(KEY_ENABLED, DEFAULTS.enabled),
     speed: readSpeed(),
-    splitBesideChat: readBool(KEY_SPLIT, true),
+    splitBesideChat: readBool(KEY_SPLIT, DEFAULTS.splitBesideChat),
   };
+}
+
+function writeLocal(settings: FollowCodeSettings): void {
+  try {
+    localStorage.setItem(KEY_ENABLED, String(settings.enabled));
+    localStorage.setItem(KEY_SPEED, settings.speed);
+    localStorage.setItem(KEY_SPLIT, String(settings.splitBesideChat));
+  } catch {
+    // WebView2 storage can be flaky — in-memory cache + panel_settings still win.
+  }
+}
+
+/** In-memory source of truth for sync readers (editor queue). Survives localStorage failures. */
+let cache: FollowCodeSettings = readLocal();
+/** Bumps on every local write so a slow get_settings can't clobber a newer toggle. */
+let writeGen = 0;
+const listeners = new Set<() => void>();
+
+function notify(): void {
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  for (const cb of listeners) cb();
+}
+
+export function getFollowCodeSettings(): FollowCodeSettings {
+  return cache;
 }
 
 export function followCodeSpeedMultiplier(speed: FollowCodeSpeed): number {
@@ -57,29 +91,104 @@ export function followCodeSpeedMultiplier(speed: FollowCodeSpeed): number {
 }
 
 export function setFollowCodeSettings(patch: Partial<FollowCodeSettings>): void {
-  try {
-    if (patch.enabled !== undefined) localStorage.setItem(KEY_ENABLED, String(patch.enabled));
-    if (patch.speed !== undefined) localStorage.setItem(KEY_SPEED, patch.speed);
-    if (patch.splitBesideChat !== undefined) localStorage.setItem(KEY_SPLIT, String(patch.splitBesideChat));
-  } catch {
-    // ignore storage errors
+  writeGen += 1;
+  cache = {
+    enabled: patch.enabled ?? cache.enabled,
+    speed: patch.speed ?? cache.speed,
+    splitBesideChat: patch.splitBesideChat ?? cache.splitBesideChat,
+  };
+  writeLocal(cache);
+  notify();
+  const api = getApi();
+  if (api?.save_agent_settings) {
+    void api.save_agent_settings({
+      follow_code_enabled: cache.enabled,
+      follow_code_speed: cache.speed,
+      follow_code_split_beside_chat: cache.splitBesideChat,
+    });
   }
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
 }
 
-/** Live view of the follow-code settings (same-window edits + cross-window storage events). */
+/**
+ * Hydrate from panel_settings.json (durable). Migrates legacy localStorage once
+ * when the disk file still has defaults but localStorage was turned off.
+ */
+export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
+  const api = getApi();
+  if (!api?.get_settings) return cache;
+  const genAtStart = writeGen;
+  const s = await api.get_settings();
+  if (genAtStart !== writeGen) return cache;
+  const fromApi: FollowCodeSettings = {
+    enabled: s.follow_code_enabled !== false,
+    speed:
+      s.follow_code_speed === "slow" ||
+      s.follow_code_speed === "normal" ||
+      s.follow_code_speed === "fast" ||
+      s.follow_code_speed === "instant"
+        ? s.follow_code_speed
+        : "normal",
+    splitBesideChat: s.follow_code_split_beside_chat !== false,
+  };
+
+  let migrated = false;
+  try {
+    migrated = localStorage.getItem(KEY_MIGRATED) === "1";
+  } catch {
+    /* ignore */
+  }
+  const local = readLocal();
+  // User disabled via the old localStorage-only toggle — push that into panel_settings once.
+  if (
+    !migrated &&
+    fromApi.enabled &&
+    fromApi.speed === "normal" &&
+    fromApi.splitBesideChat &&
+    (!local.enabled || local.speed !== "normal" || !local.splitBesideChat)
+  ) {
+    if (genAtStart !== writeGen) return cache;
+    writeGen += 1;
+    cache = local;
+    writeLocal(cache);
+    try {
+      localStorage.setItem(KEY_MIGRATED, "1");
+    } catch {
+      /* ignore */
+    }
+    if (api.save_agent_settings) {
+      await api.save_agent_settings({
+        follow_code_enabled: cache.enabled,
+        follow_code_speed: cache.speed,
+        follow_code_split_beside_chat: cache.splitBesideChat,
+      });
+    }
+    notify();
+    return cache;
+  }
+
+  if (genAtStart !== writeGen) return cache;
+  cache = fromApi;
+  writeLocal(cache);
+  try {
+    localStorage.setItem(KEY_MIGRATED, "1");
+  } catch {
+    /* ignore */
+  }
+  notify();
+  return cache;
+}
+
+/** Live view of the follow-code settings (same-window edits + panel hydrate). */
 export function useFollowCodeSettings() {
   const [settings, setSettings] = useState<FollowCodeSettings>(() => getFollowCodeSettings());
 
   useEffect(() => {
     const refresh = () => setSettings(getFollowCodeSettings());
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key || e.key === KEY_ENABLED || e.key === KEY_SPEED || e.key === KEY_SPLIT) refresh();
-    };
-    window.addEventListener("storage", onStorage);
+    listeners.add(refresh);
     window.addEventListener(CHANGE_EVENT, refresh);
+    void loadFollowCodeSettings().then(refresh);
     return () => {
-      window.removeEventListener("storage", onStorage);
+      listeners.delete(refresh);
       window.removeEventListener(CHANGE_EVENT, refresh);
     };
   }, []);

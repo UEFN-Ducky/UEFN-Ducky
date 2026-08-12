@@ -44,7 +44,10 @@ _ROUTES = (
 
 # User-paced UI budget (Skip / Got it / answers end earlier).
 _MAX_WALKTHROUGH_WAIT_S = 300.0
-_MAX_ASK_USER_WAIT_S = 300.0
+# Asks NEVER time out: the agent suspends until the user answers (or Stop /
+# panel close). A timed-out ask left the questionnaire on screen while the
+# agent "proceeded anyway" and the eventual answer resolved into nothing.
+_MAX_ASK_USER_WAIT_S = float("inf")
 _MAX_ASK_USER_QUESTIONS = 8
 
 

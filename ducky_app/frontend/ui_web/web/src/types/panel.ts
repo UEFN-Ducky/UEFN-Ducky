@@ -641,6 +641,10 @@ export interface PanelSettingsDto {
   chat_auto_title?: boolean;
   /** Cheap model that refines the auto role title (empty = keyword names only). */
   chat_title_model?: string;
+  /** Follow agent file edits in the editor (walkthrough). */
+  follow_code_enabled?: boolean;
+  follow_code_speed?: "slow" | "normal" | "fast" | "instant" | string;
+  follow_code_split_beside_chat?: boolean;
   /** Product walkthrough completion flags keyed by tour id. */
   walkthrough_completed?: Record<string, boolean>;
   coding_agents?: Record<
