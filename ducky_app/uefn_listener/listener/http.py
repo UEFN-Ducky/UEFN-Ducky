@@ -67,25 +67,39 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         from listener.state import metrics
 
-        metrics["last_client_ping"] = time.time()
+        now = time.time()
+        metrics["last_client_ping"] = now
         with accept_lock:
             qsize = command_queue.qsize()
             in_flight = bool(getattr(unreal, "_mcp_in_flight", False))
             dispatching = bool(getattr(unreal, "_mcp_dispatching", False))
             since = float(getattr(unreal, "_mcp_in_flight_since", 0.0) or 0.0)
-            in_flight_age = (time.time() - since) if in_flight and since > 0 else 0.0
+            in_flight_age = (now - since) if in_flight and since > 0 else 0.0
+            last_tick = float(getattr(unreal, "_mcp_last_tick_at", 0.0) or 0.0)
+            current_command = str(metrics.get("last_command") or "") if (in_flight or dispatching) else ""
+        tick_age = (now - last_tick) if last_tick > 0 else -1.0
+        started = float(metrics.get("started_at") or 0.0)
+        uptime = (now - started) if started > 0 else 0.0
+        project = getattr(unreal, "_mcp_project_cache", None) or {}
         body = json.dumps({
             "status": "ok",
             "version": PROTOCOL_VERSION,
             "port": unreal._mcp_bound_port,
             "commands": handler_names(),
             # Busy = a command is on the main thread or queued. Agents must not
-            # treat this as "wedged" — wedged is GET ok + POST ping failing twice.
+            # treat this as "wedged" — wedged is GET ok + tick_age stale while idle.
             "busy": in_flight or qsize > 0 or dispatching,
             "in_flight": in_flight,
             "dispatching": dispatching,
             "in_flight_age_sec": round(in_flight_age, 1),
             "queue_size": qsize,
+            "tick_age_sec": round(tick_age, 2) if tick_age >= 0 else None,
+            "uptime_sec": round(uptime, 1),
+            "current_command": current_command,
+            "project_name": str(project.get("project_name") or ""),
+            "project_dir": str(project.get("project_dir") or ""),
+            "content_root": str(project.get("content_root") or ""),
+            "command_timings": list(metrics.get("command_timings") or [])[-20:],
         }).encode()
         self._send_json(200, body)
 

@@ -1,4 +1,9 @@
-"""Shared UEFN listener health / status checks (panel UI, MCP tools, agent)."""
+"""Shared UEFN listener health / status checks (panel UI, MCP tools, agent).
+
+Status polls use GET /health only — never POST ping or get_project_info.
+Those POST commands queue on the UEFN Slate tick and were the #1 freeze source
+(~thousands of game-thread commands per session).
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from backend.bridge import listener_get_health, post_command_to_listener, seconds_since_last_post_ok
+
+# GET ok + tick_age above this while not busy ⇒ Slate tick stopped (wedged).
+_WEDGE_TICK_AGE_SEC = 10.0
 
 
 @dataclass
@@ -48,7 +56,10 @@ def ping_listener(
     attempts: int = 3,
     timeout: float = 3.0,
 ) -> tuple[bool, dict[str, Any] | None]:
-    """POST ping with short retries — UEFN main thread can miss a single request when busy."""
+    """POST ping with short retries — kept for explicit agent/tool use only.
+
+    Status polling must NOT call this; use GET health + tick_age_sec instead.
+    """
     last: dict[str, Any] | None = None
     for attempt in range(max(1, attempts)):
         try:
@@ -60,6 +71,25 @@ def ping_listener(
     return False, last
 
 
+def _project_from_health(
+    health: dict[str, Any],
+    *,
+    selected_project_root: str = "",
+) -> tuple[str, str, bool]:
+    """Derive (uefn_project_dir, uefn_project_name, project_match) from GET health."""
+    from frontend.ui_web.project_chats import project_display_name
+
+    uefn_project_name = str(health.get("project_name") or "").strip()
+    raw_dir = str(health.get("project_dir") or "").strip()
+    uefn_project_dir = _normalize_project_path(raw_dir) if raw_dir else ""
+    project_match = True
+    selected = _normalize_project_path(selected_project_root)
+    if uefn_project_name and selected:
+        selected_name = project_display_name(selected)
+        project_match = uefn_project_name.casefold() == selected_name.casefold()
+    return uefn_project_dir, uefn_project_name, project_match
+
+
 def listener_project_fields(
     port: int,
     *,
@@ -67,9 +97,11 @@ def listener_project_fields(
     cache: dict[str, Any] | None = None,
     cache_ttl_sec: float = 20.0,
 ) -> tuple[str, str, bool, dict[str, Any] | None]:
-    """Return (uefn_project_dir, uefn_project_name, project_match, updated_cache)."""
-    from frontend.ui_web.project_chats import project_display_name
+    """Return (uefn_project_dir, uefn_project_name, project_match, updated_cache).
 
+    Reads project identity from GET health (zero game-thread cost). Never POSTs
+    get_project_info for status — that used to hammer the Slate tick.
+    """
     now = time.time()
     if cache and now - float(cache.get("at", 0)) < cache_ttl_sec:
         return (
@@ -82,22 +114,12 @@ def listener_project_fields(
     uefn_project_dir = ""
     uefn_project_name = ""
     project_match = True
-    try:
-        info = post_command_to_listener(port, "get_project_info", {}, timeout=3.0)
-        if isinstance(info, dict):
-            # The live editor's identity is its content-root NAME (e.g. "MyProject").
-            # project_dir is always the shared FortniteGame folder, so it can't tell
-            # user projects apart — match by name against the panel project's folder.
-            uefn_project_name = str(info.get("project_name") or "").strip()
-            raw_dir = str(info.get("project_dir") or "").strip()
-            if raw_dir:
-                uefn_project_dir = _normalize_project_path(raw_dir)
-            selected = _normalize_project_path(selected_project_root)
-            if uefn_project_name and selected:
-                selected_name = project_display_name(selected)
-                project_match = uefn_project_name.casefold() == selected_name.casefold()
-    except Exception:
-        pass
+    health = listener_get_health(port)
+    if health and health.get("status") == "ok":
+        uefn_project_dir, uefn_project_name, project_match = _project_from_health(
+            health,
+            selected_project_root=selected_project_root,
+        )
 
     updated = {
         "at": now,
@@ -119,6 +141,16 @@ def is_listener_ready(port: int, *, require_ping: bool = False) -> bool:
     return ok
 
 
+def _tick_age_sec(health: dict[str, Any]) -> float | None:
+    raw = health.get("tick_age_sec")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_listener_status(
     port: int,
     *,
@@ -128,55 +160,56 @@ def fetch_listener_status(
 ) -> dict[str, Any]:
     """Full listener status: online, wedged, uptime, UEFN project match.
 
-    Online is GET-health authoritative: a reachable listener stays online even when
-    busy or when a command ping times out (MCP traffic can block POST briefly).
-    Wedged = GET ok but POST ping fails twice while not busy — icons show wedged,
-    not offline. When a long command finishes, the next status poll clears the streak.
+    Online is GET-health authoritative. Wedged = GET ok, not busy, and the Slate
+    tick heartbeat is stale (``tick_age_sec`` > threshold). Never POSTs ping or
+    get_project_info — those queue on the editor game thread.
     """
     st = state if state is not None else ListenerStatusState()
 
     health = listener_get_health(port)
     get_ok = health is not None and health.get("status") == "ok"
     busy = bool(health.get("busy")) if get_ok and isinstance(health, dict) else False
-    commands_ok = False
-    ping_result: dict[str, Any] | None = None
-    if get_ok:
-        if busy:
-            # Editor is still processing — do not count as wedge; treat as online/busy.
-            commands_ok = True
-            ping_result = {"uptime_sec": float(health.get("uptime_sec", 0) or 0), "busy": True}
-        elif seconds_since_last_post_ok() < 10.0:
-            # An agent command just succeeded — the listener is provably processing
-            # commands. Skip the status ping so it doesn't queue on the UEFN main
-            # thread behind (and ahead of) agent tool calls.
-            commands_ok = True
-            ping_result = {"uptime_sec": float(health.get("uptime_sec", 0) or 0)}
-        else:
-            commands_ok, ping_result = ping_listener(port)
+    tick_age = _tick_age_sec(health) if get_ok and isinstance(health, dict) else None
+    current_command = (
+        str(health.get("current_command") or "") if get_ok and isinstance(health, dict) else ""
+    )
 
     if get_ok:
         online = True
-        if commands_ok:
+        # Legacy listeners without tick_age: fall back to recent successful POST
+        # as proof of life (never POST from here).
+        if busy:
+            st.ping_fail_streak = 0
+            wedged = False
+        elif tick_age is not None:
+            if tick_age > _WEDGE_TICK_AGE_SEC:
+                st.ping_fail_streak += 1
+                wedged = st.ping_fail_streak >= 2
+            else:
+                st.ping_fail_streak = 0
+                wedged = False
+        elif seconds_since_last_post_ok() < 30.0:
             st.ping_fail_streak = 0
             wedged = False
         else:
-            st.ping_fail_streak += 1
-            wedged = st.ping_fail_streak >= 2
+            # No tick_age (old listener) and no recent agent traffic — stay online,
+            # do not wedge from silence alone (would require a POST probe).
+            st.ping_fail_streak = 0
+            wedged = False
     else:
         st.ping_fail_streak = 0
         online = False
         wedged = False
 
     uptime = 0.0
-    if ping_result and isinstance(ping_result, dict):
-        uptime = float(ping_result.get("uptime_sec", 0) or 0)
-    elif get_ok and isinstance(health, dict):
+    if get_ok and isinstance(health, dict):
         uptime = float(health.get("uptime_sec", 0) or 0)
 
     if wedged:
         status_text = "Listener wedged — restart UEFN (commands not processing)"
     elif online and busy:
-        status_text = "Online · busy (editor command running)"
+        cmd = f" · {current_command}" if current_command else ""
+        status_text = f"Online · busy (editor command running{cmd})"
     elif online and uptime:
         status_text = f"Online · up {_sec_to_uptime(uptime)}"
     elif online:
@@ -187,16 +220,23 @@ def fetch_listener_status(
     uefn_project_dir = ""
     uefn_project_name = ""
     project_match = True
-    if online and not busy:
-        uefn_project_dir, uefn_project_name, project_match, st.project_cache = listener_project_fields(
-            port,
+    if online and isinstance(health, dict):
+        # Prefer live GET fields; cache for panel consumers that call separately.
+        uefn_project_dir, uefn_project_name, project_match = _project_from_health(
+            health,
             selected_project_root=selected_project_root,
-            cache=st.project_cache,
         )
-    elif online and st.project_cache:
-        uefn_project_dir = str(st.project_cache.get("uefn_project_dir", ""))
-        uefn_project_name = str(st.project_cache.get("uefn_project_name", ""))
-        project_match = bool(st.project_cache.get("project_match", True))
+        if uefn_project_name or uefn_project_dir:
+            st.project_cache = {
+                "at": time.time(),
+                "uefn_project_dir": uefn_project_dir,
+                "uefn_project_name": uefn_project_name,
+                "project_match": project_match,
+            }
+        elif st.project_cache:
+            uefn_project_dir = str(st.project_cache.get("uefn_project_dir", ""))
+            uefn_project_name = str(st.project_cache.get("uefn_project_name", ""))
+            project_match = bool(st.project_cache.get("project_match", True))
 
     return {
         "online": online,
@@ -209,4 +249,6 @@ def fetch_listener_status(
         "uefn_project_name": uefn_project_name,
         "project_match": project_match,
         "port": port,
+        "tick_age_sec": tick_age,
+        "current_command": current_command,
     }

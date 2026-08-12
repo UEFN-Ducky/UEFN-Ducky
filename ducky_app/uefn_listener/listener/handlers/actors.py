@@ -116,7 +116,15 @@ def cmd_spawn_actor(
     location: Optional[List[float]] = None,
     rotation: Optional[List[float]] = None,
     select: bool = True,
+    label: str = "",
+    folder: str = "",
+    tags: Optional[List[str]] = None,
 ) -> dict:
+    """Place an actor. Optional label/folder/tags apply in the same tick/transaction.
+
+    Prefer passing label+folder here instead of separate set_actor_label /
+    set_actor_folder calls (3 round-trips → 1).
+    """
     loc = unreal.Vector(*location) if location else unreal.Vector(0, 0, 0)
     rot = rotator_pyr(*rotation) if rotation else rotator_pyr(0, 0, 0)
 
@@ -146,6 +154,24 @@ def cmd_spawn_actor(
 
     if actor is None:
         raise RuntimeError("Failed to spawn actor")
+
+    # Same-tick organize-as-you-place (avoids 2–3 extra heavy commands).
+    if label:
+        try:
+            actor.set_actor_label(str(label))
+        except Exception:
+            pass
+    if folder:
+        try:
+            actor.set_folder_path(unreal.Name(str(folder)))
+        except Exception:
+            pass
+    if tags:
+        try:
+            actor.set_editor_property("tags", [unreal.Name(str(t)) for t in tags])
+        except Exception:
+            pass
+
     # The level changed; drop the per-tick index so later lookups see this actor.
     lookup.invalidate()
     # Select the new actor so it is highlighted and ready to move in the viewport.

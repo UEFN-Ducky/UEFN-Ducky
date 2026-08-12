@@ -373,7 +373,8 @@ def _resolve_field_prop_for_wire(actor: unreal.Actor, script: Any, field: str) -
 
     raise ValueError(
         f"Field {field!r} is in Verse source but has no compiled hash on this device yet. "
-        "Build Verse Code in UEFN, then reload_listener and retry."
+        "STALE REFLECTION — run Verse build in UEFN, then reload_listener, then retry "
+        "ONCE. Further retries cannot fix this; do not hammer wire_*/set_verse_editable."
     )
 
 
@@ -1277,11 +1278,12 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
             "can_wire": False,
             "message": (
                 f"Found {len(verse_fields)} @editable field(s) in .verse source but zero mangled "
-                "property hashes — Verse is not compiled yet."
+                "property hashes — Verse is not compiled yet. STALE REFLECTION — do not retry "
+                "wire_* in a loop; further retries cannot fix this."
             ),
             "next_step": (
-                "STOP. Tell the user: Build Verse Code in UEFN (Verse Explorer → Build). "
-                "After build: list_verse_property_hashes(refresh=true), then wire with wire_verse_* tools."
+                "STOP. Build Verse Code in UEFN, then reload_listener, then "
+                "list_verse_property_hashes(refresh=true), then retry wire ONCE."
             ),
             "fields_from_source": verse_fields,
         }

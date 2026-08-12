@@ -1,18 +1,62 @@
 """Content browser / asset registry."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import unreal
 
 from listener.asset_resolve import resolve_asset_class
 from listener.dispatch import register
 from listener.project_paths import pin_project_asset_path
-from listener.serialize import serialize, serialize_asset_entry
+from listener.serialize import serialize
 
-# Bounds for search_assets so it never scans every asset in /Game/ (that froze/timed
-# out on large projects). Agents paginate, so we only need the current page.
-_SEARCH_SCAN_CAP = 20000  # max registry lookups per call
+# Bounds so a bad call never walks the entire Fortnite install.
+_SEARCH_SCAN_CAP = 20000  # max AssetData rows considered per call
 _SEARCH_RESULT_CAP = 200  # max matches gathered when the caller passes no limit
+
+
+def _asset_path_from_data(ad: Any) -> str:
+    return f"{ad.package_name}.{ad.asset_name}"
+
+
+def _normalize_registry_dir(directory: str) -> str:
+    """ARFilter package_paths want '/Game' not '/Game/' — trailing slash matches nothing."""
+    path = (directory or "").strip().rstrip("/")
+    return path or "/Game"
+
+
+def _registry_assets(directory: str, recursive: bool, class_name: str = "") -> list:
+    """Single AssetRegistry query — never list_assets + per-path find_asset_data."""
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    package_path = _normalize_registry_dir(directory)
+    kwargs: dict[str, Any] = {
+        "package_paths": [package_path],
+        "recursive_paths": recursive,
+    }
+    if class_name:
+        kwargs["class_names"] = [class_name]
+    ar_filter = unreal.ARFilter(**kwargs)
+    found = list(registry.get_assets(ar_filter) or [])
+    # Registry order is unspecified — sort so offset pagination is stable.
+    found.sort(
+        key=lambda ad: (
+            str(getattr(ad, "package_name", "") or ""),
+            str(getattr(ad, "asset_name", "") or ""),
+        )
+    )
+    return found
+
+
+def _serialize_from_data(ad: Any, path_str: str, fields: Optional[List[str]]) -> Any:
+    if not fields or fields == ["path"]:
+        return path_str
+    full = serialize(ad)
+    if not isinstance(full, dict):
+        return {"path": path_str}
+    out: dict = {"path": path_str}
+    for field in fields:
+        if field in full:
+            out[field] = full[field]
+    return out
 
 
 @register("list_assets")
@@ -24,33 +68,23 @@ def cmd_list_assets(
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
 ) -> dict:
-    truncated = False
-    if class_filter:
-        # Registry-indexed class lookup instead of listing every asset then
-        # calling find_asset_data per path (each a separate registry hit).
-        registry = unreal.AssetRegistryHelpers.get_asset_registry()
-        ar_filter = unreal.ARFilter(
-            package_paths=[directory],
-            recursive_paths=recursive,
-            class_names=[class_filter],
-        )
-        found = registry.get_assets(ar_filter) or []
-        truncated = len(found) > _SEARCH_SCAN_CAP
-        assets = [f"{ad.package_name}.{ad.asset_name}" for ad in found[:_SEARCH_SCAN_CAP]]
-    else:
-        assets = [str(a) for a in unreal.EditorAssetLibrary.list_assets(directory, recursive=recursive)]
-    total = len(assets)
+    found = _registry_assets(directory, recursive, class_filter)
+    truncated = len(found) > _SEARCH_SCAN_CAP
+    found = found[:_SEARCH_SCAN_CAP]
+    total = len(found)
     if offset > 0:
-        assets = assets[offset:]
+        found = found[offset:]
     if limit is not None and limit >= 0:
-        assets = assets[:limit]
+        found = found[:limit]
     if fields:
-        serialized = [serialize_asset_entry(p, fields) for p in assets]
+        serialized = [
+            _serialize_from_data(ad, _asset_path_from_data(ad), fields) for ad in found
+        ]
     else:
-        serialized = assets
+        serialized = [_asset_path_from_data(ad) for ad in found]
     return {
         "assets": serialized,
-        "count": len(assets),
+        "count": len(found),
         "total": total,
         "offset": offset,
         "limit": limit,
@@ -151,34 +185,33 @@ def cmd_search_assets(
     fields: Optional[List[str]] = None,
     search: str = "",
 ) -> dict:
-    assets = unreal.EditorAssetLibrary.list_assets(directory, recursive=recursive)
-    needle = (search or class_name or "").strip().lower()
-    # Stop once we have enough for the requested page, or after a hard scan cap.
+    """One AssetRegistry ARFilter query, then filter names in Python.
+
+    Never list_assets + per-path find_asset_data (that was a 20k-hit freeze path).
+    """
+    found = _registry_assets(directory, recursive, class_name)
+    needle = (search or "").strip().lower()
     want = (offset + limit) if (limit is not None and limit >= 0) else _SEARCH_RESULT_CAP
     results = []
     scanned = 0
     truncated = False
-    for asset_path in assets:
-        if len(results) >= want or scanned >= _SEARCH_SCAN_CAP:
+    for ad in found:
+        if scanned >= _SEARCH_SCAN_CAP:
             truncated = True
             break
         scanned += 1
-        path_str = str(asset_path)
-        data = unreal.EditorAssetLibrary.find_asset_data(path_str)
-        if data is None:
-            continue
-        if class_name:
-            cls = str(data.asset_class_path.asset_name) if hasattr(data, "asset_class_path") else str(getattr(data, "asset_class", ""))
-            if cls != class_name:
-                continue
-        if search and needle not in path_str.lower():
-            asset_name = str(getattr(data, "asset_name", ""))
-            if needle not in asset_name.lower():
+        path_str = _asset_path_from_data(ad)
+        if needle:
+            asset_name = str(getattr(ad, "asset_name", "") or "")
+            if needle not in path_str.lower() and needle not in asset_name.lower():
                 continue
         if fields:
-            results.append(serialize_asset_entry(path_str, fields))
+            results.append(_serialize_from_data(ad, path_str, fields))
         else:
-            results.append(serialize(data))
+            results.append(serialize(ad))
+        if len(results) >= want:
+            truncated = truncated or scanned < len(found)
+            break
     total = len(results)
     if offset > 0:
         results = results[offset:]
