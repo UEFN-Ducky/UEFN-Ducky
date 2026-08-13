@@ -1,5 +1,5 @@
 /**
- * Cursor Composer / SDK often wraps MCP calls as CallMcpTool
+ * Cursor Composer / SDK often wraps MCP calls as CallMcpTool / mcp / tool
  * { toolName, args } instead of emitting the real tool name.
  * Ducky's embedded agent uses ducky_call_tool { name, arguments } the same way.
  * Unwrap so tool cards (Read, walkthrough Replay, verse, …) still match.
@@ -13,8 +13,9 @@ export function unwrapCodingAgentTool(
     args && typeof args === "object" && !Array.isArray(args)
       ? (args as Record<string, unknown>)
       : {};
-  const isCursorWrap = n === "CallMcpTool" || n === "call_mcp_tool";
   const isDuckyWrap = n === "ducky_call_tool";
+  const isCursorWrap =
+    n === "CallMcpTool" || n === "call_mcp_tool" || n === "mcp" || n === "tool";
   if (!isCursorWrap && !isDuckyWrap) {
     return { name: n, arguments: a };
   }

@@ -362,7 +362,7 @@ export function EditorGroupPane({
         </div>
       ) : null}
       <div
-        className="no-drag editor-group-body"
+        className={`${variant === "focus" ? "" : "no-drag "}editor-group-body`}
         onMouseDownCapture={promoteActiveIfPreview}
         onKeyDownCapture={promoteActiveIfPreview}
         onDragOver={handleDragOver}

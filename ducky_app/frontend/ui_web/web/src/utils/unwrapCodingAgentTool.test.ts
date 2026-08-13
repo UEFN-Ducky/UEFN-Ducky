@@ -58,4 +58,36 @@ describe("unwrapCodingAgentTool", () => {
       arguments: { pretty: false },
     });
   });
+
+  it("unwraps Cursor SDK mcp discriminator", () => {
+    expect(
+      unwrapCodingAgentTool("mcp", {
+        providerIdentifier: "uefn",
+        toolName: "workspace_read_file",
+        args: { path: "a.verse" },
+      }),
+    ).toEqual({
+      name: "workspace_read_file",
+      arguments: { path: "a.verse" },
+    });
+  });
+
+  it("unwraps generic tool name when args carry toolName", () => {
+    expect(
+      unwrapCodingAgentTool("tool", {
+        toolName: "find_devices",
+        args: { label_filter: "Player" },
+      }),
+    ).toEqual({
+      name: "find_devices",
+      arguments: { label_filter: "Player" },
+    });
+  });
+
+  it("keeps generic tool when there is no inner MCP name", () => {
+    expect(unwrapCodingAgentTool("tool", { path: "C:/proj/Content/Verse" })).toEqual({
+      name: "tool",
+      arguments: { path: "C:/proj/Content/Verse" },
+    });
+  });
 });

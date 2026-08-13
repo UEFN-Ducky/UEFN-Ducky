@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 24
+  version: 25
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -25,7 +25,9 @@ This skill covers **using the app** — where things live, setup, and recovery.
   `references/` (standard Agent Skills folders). On Apply they deploy to
   `~/.claude/skills/`, `~/.cursor/skills/`, and each IDE's `<config dir>/skills/`.
 - **Panel settings:** `%LOCALAPPDATA%/UEFN-Ducky/panel_settings.json`.
-- Nothing is written into the UEFN project's `Content/` folder.
+- No Ducky side-files go in the UEFN project except `.ducky/**` (tests, tasks).
+  Game content the user asked for (`Content/Verse/**`, assets) is expected.
+  Scratch / captures / memory → `%LOCALAPPDATA%/UEFN-Ducky/`.
 
 ## Loading skill references (hard rule)
 

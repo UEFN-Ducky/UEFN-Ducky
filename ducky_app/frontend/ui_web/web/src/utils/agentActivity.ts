@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../types/panel";
+import { unwrapCodingAgentTool } from "./unwrapCodingAgentTool";
 
 export interface ActivityLine {
   id: string;
@@ -54,8 +55,16 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   spawn_actor: "Spawn Actor in Level",
   get_level_bounds: "Level Bounds",
   Skill: "Agent Knowledge Retrieval",
+  read: "Read file",
+  edit: "Edit file",
+  write: "Write file",
   Glob: "Glob Scan",
   Grep: "Search File Content",
+  ls: "List Directories",
+  grep: "Search File Content",
+  glob: "Glob Scan",
+  semSearch: "Semantic Search",
+  shell: "Bash Shell",
   ToolSearch: "Tool Registry Search",
   Bash: "Bash Shell",
   PowerShell: "PowerShell",
@@ -75,10 +84,17 @@ export function humanToolLabel(toolName: string): string {
 }
 
 function toolLineText(msg: ChatMessage): string {
-  const name = msg.tool?.name;
+  const rawArgs = msg.tool?.arguments ?? {};
+  const unwrapped = unwrapCodingAgentTool(
+    msg.tool?.name ?? "",
+    rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+      ? (rawArgs as Record<string, unknown>)
+      : {},
+  );
+  const name = unwrapped.name;
+  const args = unwrapped.arguments;
   if (name) {
     const label = humanToolLabel(name);
-    const args = msg.tool?.arguments ?? {};
     const path = args.relative_path ?? args.path;
     if (typeof path === "string" && path.trim()) {
       return `${label} · ${path.trim().replace(/\\/g, "/")}`;

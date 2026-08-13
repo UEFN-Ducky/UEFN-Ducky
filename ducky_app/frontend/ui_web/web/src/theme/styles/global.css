@@ -3255,8 +3255,8 @@ button.sidebar-chat-nest-toggle {
   overflow: hidden;
   background: var(--bg);
   --focus-header-peek: 0;
-  /* Thin top strip for hover-reveal + drag; absolute so it does not reserve empty space. */
-  --focus-header-hover-band: 8px;
+  /* Top caption strip for hover-reveal + drag; absolute so it does not reserve empty space. */
+  --focus-header-hover-band: 32px;
   --focus-header-toolbar: 32px;
   --focus-header-tab-row: calc(32px * var(--tab-scale, 1));
   --focus-header-expanded: var(--focus-header-toolbar);
@@ -3471,7 +3471,7 @@ body.focus-window .focus-header-chrome .focus-header-tabs {
   width: 100%;
   height: var(--focus-header-hover-band);
   min-height: var(--focus-header-hover-band);
-  z-index: 2;
+  z-index: 20;
   pointer-events: auto;
 }
 .focus-editor-area > :not(.focus-header-reveal-band) {

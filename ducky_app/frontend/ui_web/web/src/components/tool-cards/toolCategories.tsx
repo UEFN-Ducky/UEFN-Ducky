@@ -19,6 +19,10 @@ const SEARCH_TOOLS = new Set([
   "workspace_list_dir",
   "Glob",
   "Grep",
+  "ls",
+  "glob",
+  "grep",
+  "semSearch",
   "ToolSearch",
   "web_search",
 ]);

@@ -13,6 +13,8 @@ interface ChatPaneEmptyStateProps {
   duckyStyle?: string;
   /** Group roundtable — no per-tab model picker. */
   isGroup?: boolean;
+  /** Focus window empty pane: padding around the mascot is a caption drag surface. */
+  allowWindowDrag?: boolean;
 }
 const MODE_HINTS: Record<AgentMode, string> = {
   agent: "Agent mode can run tools, edit files, and control UEFN.",
@@ -29,6 +31,7 @@ export function ChatPaneEmptyState({
   agentMode,
   duckyStyle,
   isGroup = false,
+  allowWindowDrag = false,
 }: ChatPaneEmptyStateProps) {
   let headline = isGroup ? "Group chat" : "New ducky";
   let message: string;
@@ -54,8 +57,10 @@ export function ChatPaneEmptyState({
   }
 
   return (
-    <div className="chat-pane-empty-state-root">
-      <div>
+    <div
+      className={`chat-pane-empty-state-root${allowWindowDrag ? " drag-region app-drag-surface" : ""}`}
+    >
+      <div className={allowWindowDrag ? "no-drag" : undefined}>
         <div className="chat-pane-empty-state-avatar-wrap">
           {isGroup ? (
             <span className="chat-pane-empty-state-group-icon" aria-hidden>

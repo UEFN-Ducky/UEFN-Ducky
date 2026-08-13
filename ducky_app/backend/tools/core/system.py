@@ -52,6 +52,33 @@ def _workspace_entry_allowed(name: str) -> bool:
     return not any(lower.endswith(suf) for suf in _WORKSPACE_SKIP_SUFFIXES)
 
 
+WRITE_OUTSIDE_CONTENT_FORBIDDEN = (
+    "workspace_write_file may only write under the UEFN project's Content/ or "
+    ".ducky/ folders. Never touch UEFN core files, digests, Saved/, Intermediate/, "
+    "or the project root. Scratch files belong in %LOCALAPPDATA%/UEFN-Ducky/ "
+    "(or OS temp). Allowed: Content/** (Verse, assets) and .ducky/** (tests, tasks)."
+)
+
+_WRITE_BLOCKED_ANCESTORS = frozenset({"Saved", "Intermediate", "DerivedDataCache"})
+_WRITE_ALLOWED_ANCESTORS = frozenset({"Content", ".ducky"})
+
+
+def require_writable_project_path(file_path: str) -> None:
+    """Refuse writes outside Content/** and .ducky/** of a UEFN project.
+
+    Digests are blocked separately by require_not_digest_path. This guard stops
+    the rest: Saved/, Intermediate/, project-root junk, and UEFN core files.
+    """
+    parts = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").split("/")
+    names = [p for p in parts if p and p != "."]
+    for i, name in enumerate(names):
+        if name in _WRITE_BLOCKED_ANCESTORS:
+            raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
+        if name in _WRITE_ALLOWED_ANCESTORS and i < len(names) - 1:
+            return
+    raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
+
+
 @mcp.tool()
 def workspace_list_dir(relative_path: str = ".", pretty: bool = False) -> str:
     """List files under VS Code workspace folders on host disk.
@@ -116,13 +143,15 @@ def workspace_read_file(relative_path: str, pretty: bool = False) -> str:
 def workspace_write_file(relative_path: str, content: str, pretty: bool = False) -> str:
     """Write a text file under the VS Code workspace on host disk.
 
-    Never writes UEFN digests (*.digest.verse) — those are Epic/UEFN-generated READ-ONLY.
+    Only Content/** and .ducky/**. Never writes UEFN digests (*.digest.verse)
+    or anything outside those two roots (Saved/, Intermediate/, project root).
     """
     from backend.tools.verse.verse_digests import require_not_digest_path
 
     require_not_digest_path(relative_path)
     file_path = resolve_workspace_path(relative_path)
     require_not_digest_path(file_path)
+    require_writable_project_path(file_path)
     parent = os.path.dirname(file_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -191,7 +220,11 @@ def reload_listener(pretty: bool = False) -> str:
 
 @mcp.tool()
 def execute_python(code: str) -> str:
-    """Run arbitrary Python in UEFN (escape hatch). Call uefn_editor_python_hints first for materials/Fort*."""
+    """Run arbitrary Python in UEFN (escape hatch). Call uefn_editor_python_hints first for materials/Fort*.
+
+    Never write files outside the project's Content/** or .ducky/**. Never mutate
+    *.digest.verse. Never loop spawn/import/prefab packaging — that freezes UEFN.
+    """
     result = send_command("execute_python", {"code": code}, timeout=120.0)
     parts = []
     if result.get("stdout"):

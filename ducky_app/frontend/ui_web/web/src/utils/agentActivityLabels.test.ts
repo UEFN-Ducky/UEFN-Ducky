@@ -8,6 +8,9 @@ describe("humanToolLabel / formatToolDuration", () => {
     expect(humanToolLabel("Skill")).toBe("Agent Knowledge Retrieval");
     expect(humanToolLabel("take_high_res_screenshot")).toBe("Capture Screenshot");
     expect(humanToolLabel("workspace_list_dir")).toBe("List Directories");
+    expect(humanToolLabel("ls")).toBe("List Directories");
+    expect(humanToolLabel("grep")).toBe("Search File Content");
+    expect(humanToolLabel("read")).toBe("Read file");
   });
 
   it("formats durations like the prototype", () => {
