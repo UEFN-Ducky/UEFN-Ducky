@@ -46,8 +46,10 @@ def find_devices(
     limit: int = 200,
     pretty: bool = False,
 ) -> str:
-    """Find devices in the level. Result ``kind`` routes the next call:
+    """Find devices in the level. One call for a census — do not inspect-loop.
 
+    Each row has ``kind`` and, for Verse devices, ``script_class``.
+    Inspect only the ONE device you are about to write:
     verse_script → inspect_verse_device; creative_device → inspect_creative_device.
     Prefer this over get_all_actors for "find my wallet / granter / button".
     """

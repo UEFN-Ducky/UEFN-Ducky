@@ -25,22 +25,16 @@ def _annotate_stale_listener(result: dict) -> dict:
                 "Fix: keep UEFN-Ducky.exe running, call reload_listener; if that fails, fully restart UEFN."
             ),
         }
-        try:
-            ping = send_command("ping", {}, timeout=5.0)
-            cmds = ping.get("commands") or []
-            caps = ping.get("listener_capabilities")
-            if "resize_verse_array_field" not in cmds:
-                result["diagnostics"]["missing_commands"] = ["resize_verse_array_field"]
-            if not isinstance(caps, dict) or "features" not in caps:
-                result["diagnostics"]["missing_capabilities"] = True
-        except Exception:
-            pass
     return result
 
 
 @plugin_mcp_tool("verse")
 def inspect_verse_device(actor_path: str, pretty: bool = False) -> str:
-    """READ any Verse device — always call this before writing.
+    """READ one Verse device — only the device you are about to write.
+
+    Do NOT loop this over the level (each call hits the UEFN game thread and
+    freezes the editor). Census: ``find_devices`` (returns ``kind`` + ``script_class``).
+    Field names: ``workspace_read_file`` of that class's ``.verse``.
 
     Returns every @editable field, wiring.tool, verse_type, array_length, STOP flag.
     Pass the Outliner **label** exactly as returned by find_devices — not the long UAID path.
