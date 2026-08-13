@@ -1,22 +1,7 @@
 import { useEffect } from "react";
 import { getApi } from "../hooks/usePanelApi";
 import { isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
-
-const DRAG_ROOT =
-  ".drag-region, .pywebview-drag-region, .focus-drag-bar, .focus-header-reveal-band";
-const INTERACTIVE =
-  "button, input, textarea, select, option, a, label, summary, [role='button'], [contenteditable='true']";
-
-function isWindowDragTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target.closest(".dropdown-panel")) return false;
-  if (target.closest(".no-drag")) return false;
-  if (target.closest(INTERACTIVE)) return false;
-  const inFocusShell = target.closest(".focus-shell");
-  if (!inFocusShell && target.closest(".selectable-text")) return false;
-  if (inFocusShell && target.closest(".verse-editor-host")) return false;
-  return !!target.closest(DRAG_ROOT);
-}
+import { beginNativeWindowMove, isWindowDragTarget } from "../utils/windowDrag";
 
 /** Frameless drag: sync native move on mousedown (Aero Snap). JS fallback on other platforms. */
 export function WindowDrag() {
@@ -65,9 +50,13 @@ export function WindowDrag() {
       if (e.button !== 0) return;
       if (!isWindowDragTarget(e.target)) return;
 
-      // Windows: WebView2 -webkit-app-region handles drag natively. Evaluated live so a
-      // late-injected pywebview never leaves us on the JS drag path (which could stick).
-      if (isNativeWindowChrome()) return;
+      // Windows: WebView2 -webkit-app-region handles drag when the hit-tester is in
+      // sync (those regions never reach JS). Focus overlay captions are often missed
+      // (auto-hide header / max-height:0), so hand off to Win32 while LMB is down.
+      if (isNativeWindowChrome()) {
+        beginNativeWindowMove(e.screenX, e.screenY);
+        return;
+      }
 
       dragging = false;
       pointerDown = true;

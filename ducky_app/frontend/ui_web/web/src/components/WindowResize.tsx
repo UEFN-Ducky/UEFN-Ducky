@@ -138,8 +138,11 @@ export function WindowResize({ focusMode = false, compactMode = false }: WindowR
     });
   };
 
-  // Windows: OS frame handles every edge/corner except the top (caption stripped).
-  const edges = useNative ? (["n"] as Edge[]) : GRIPS;
+  // Windows: OS frame handles L/R/B. Main window keeps a thin top grip (caption
+  // stripped). Focus windows skip it — that strip sat on top of the hover/drag
+  // band and stole press-and-hold as a resize instead of a move.
+  const edges = useNative ? (focusMode ? [] : (["n"] as Edge[])) : GRIPS;
+  if (edges.length === 0) return null;
 
   return createPortal(
     <>

@@ -1036,6 +1036,7 @@ export function ChatPane({
                   agentMode={agentMode}
                   duckyStyle={chat.duckyStyle}
                   isGroup={Boolean(chat.isGroup)}
+                  allowWindowDrag={isFocus}
                 />
               ) : (
                 <VirtualChatMessageList

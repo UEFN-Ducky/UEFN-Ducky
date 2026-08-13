@@ -46,6 +46,9 @@ Flow: `ducky_plugin_scaffold` → write files → `ducky_plugin_validate` → `d
 ```
 
 Id: `^[a-z][a-z0-9_-]{0,63}$`. Never edit core app files — only this draft + contributions.
+Never write into a UEFN project outside `Content/**` and `.ducky/**`. Never mutate
+`*.digest.verse` (UEFN auto-edits those on Verse build). Scratch files go in
+`%LOCALAPPDATA%/UEFN-Ducky/`, not `Saved/` or the project root.
 
 ## Contribution hooks (when plugin enabled)
 

@@ -106,6 +106,21 @@ def test_hard_rules_forbid_digest_mutation():
     assert "auto-edit" in AGENT_HARD_RULES.lower() or "auto-edits" in AGENT_HARD_RULES.lower()
 
 
+def test_hard_rules_write_boundary_content_and_ducky():
+    assert "Write boundary" in AGENT_HARD_RULES
+    assert "Content/" in AGENT_HARD_RULES
+    assert ".ducky" in AGENT_HARD_RULES
+    assert "execute_python" in AGENT_HARD_RULES
+
+
+def test_hard_rules_verse_build_lifecycle():
+    assert "WinError 10054" in AGENT_HARD_RULES
+    assert "VERSE_DEAD" in AGENT_HARD_RULES
+    assert "9002" in AGENT_HARD_RULES
+    assert "verse_build_lifecycle" in AGENT_HARD_RULES
+    assert "never retry" in AGENT_HARD_RULES.lower()
+
+
 def test_digest_path_guard_blocks_writes():
     from backend.tools.verse.verse_digests import is_uefn_digest_path, require_not_digest_path
 
@@ -118,6 +133,27 @@ def test_digest_path_guard_blocks_writes():
         raise AssertionError("expected ValueError for digest write")
     except ValueError as exc:
         assert "READ-ONLY" in str(exc)
+
+
+def test_writable_project_path_allowlist():
+    from backend.tools.core.system import require_writable_project_path
+
+    require_writable_project_path(r"C:\Fortnite Projects\Roguelike\Content\Verse\Foo\foo.verse")
+    require_writable_project_path(r"C:\Fortnite Projects\Roguelike\.ducky\tests\x.json")
+    refused = (
+        r"C:\Fortnite Projects\Roguelike\Saved\x.txt",
+        r"C:\Fortnite Projects\Roguelike\Intermediate\x.txt",
+        r"C:\Fortnite Projects\Roguelike\notes.md",
+        r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse",
+        r"C:\Fortnite Projects\Roguelike\Saved\VerseProject\P\Content\sneak.verse",
+    )
+    for path in refused:
+        try:
+            require_writable_project_path(path)
+            raise AssertionError(f"expected ValueError for {path}")
+        except ValueError as exc:
+            assert "Content/" in str(exc)
+            assert ".ducky" in str(exc)
 
 
 def test_hard_rules_require_ask_user_questionnaire():
@@ -231,5 +267,8 @@ if __name__ == "__main__":
     test_hard_rules_captures_use_appdata_not_project()
     test_hard_rules_forbid_project_side_storage_except_ducky()
     test_hard_rules_forbid_digest_mutation()
+    test_hard_rules_write_boundary_content_and_ducky()
+    test_hard_rules_verse_build_lifecycle()
     test_digest_path_guard_blocks_writes()
+    test_writable_project_path_allowlist()
     print("ok")
