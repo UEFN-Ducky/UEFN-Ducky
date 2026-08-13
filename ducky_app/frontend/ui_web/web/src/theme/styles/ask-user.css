@@ -67,6 +67,16 @@
   color: var(--text-muted);
 }
 
+.ask-user-author {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--member-color, var(--accent));
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ask-user-pause-hint {
   font-size: 11px;
   color: var(--text-muted);

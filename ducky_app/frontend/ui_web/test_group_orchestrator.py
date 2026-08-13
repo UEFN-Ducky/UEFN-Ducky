@@ -18,6 +18,7 @@ from frontend.ui_web.group_orchestrator import (
     normalize_member,
     pick_member_for_question,
     resolve_nested_representative,
+    author_payload,
     sync_group_members_from_folder,
     wants_all_speakers,
 )
@@ -289,6 +290,21 @@ def test_resolve_nested_representative_badge():
     run_as, pub = resolve_nested_representative(leaf, "hi", profiles=[])
     assert run_as is leaf
     assert pub is leaf
+
+
+def test_author_payload_carries_group_path():
+    payload = author_payload(
+        {
+            "name": "Art Team — Verse Coder",
+            "member_conv_id": "c1",
+            "color": "#f59e0b",
+            "group_path": ["Art Team"],
+            "group_id_path": ["subgroup"],
+        }
+    )
+    assert payload["group_path"] == ["Art Team"]
+    assert payload["group_id_path"] == ["subgroup"]
+    assert payload["member_conv_id"] == "c1"
 
 
 def test_is_group_turn_prompt():

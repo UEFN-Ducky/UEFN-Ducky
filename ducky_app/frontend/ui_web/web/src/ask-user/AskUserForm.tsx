@@ -9,11 +9,13 @@ import {
   type AskUserQuestion,
   type AskUserResult,
 } from "./types";
+import type { MessageAuthorDto } from "../types/panel";
 
 type Props = {
   questions: AskUserQuestion[];
   title: string;
   queueAhead?: number;
+  author?: MessageAuthorDto;
   /** When false, number/Enter shortcuts are not bound (other chats may be asking too). */
   captureKeys?: boolean;
   /** Inline chat card shows ×; modal uses its own floating close. */
@@ -52,6 +54,7 @@ export function AskUserForm({
   questions,
   title,
   queueAhead = 0,
+  author,
   captureKeys = true,
   showDismiss = true,
   onComplete,
@@ -222,6 +225,14 @@ export function AskUserForm({
           {index + 1}/{total}
         </span>
         {queueAhead > 0 ? <span className="ask-user-queue">+{queueAhead} waiting</span> : null}
+        {author?.name?.trim() ? (
+          <span
+            className="ask-user-author"
+            style={{ ["--member-color" as string]: author.color || "var(--accent)" }}
+          >
+            {author.name.trim()}
+          </span>
+        ) : null}
         <span className="ask-user-pause-hint">Agent paused until Submit</span>
         {showDismiss ? (
           <button

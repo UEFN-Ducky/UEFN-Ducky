@@ -533,4 +533,42 @@ describe("chatRunReducer — status / thinking footer", () => {
     expect(withThink.thinking).toBe("hmm");
     expect(withThink.statusText).toBe("");
   });
+
+  it("copies event.author onto tool and tool_done rows", () => {
+    const author = { name: "Rigging Ducky", member_conv_id: "m1", color: "#f59e0b" };
+    const s = run(
+      initialRunState,
+      { type: "send", text: "hi" },
+      { type: "sendAccepted", runId: "r1" },
+      ev({
+        type: "tool",
+        text: "inspect",
+        tool: { name: "inspect_verse_device", arguments: {} },
+        author,
+      }),
+      ev({
+        type: "tool_done",
+        success: true,
+        text: "ok",
+        tool: { name: "inspect_verse_device", arguments: {} },
+        author,
+      }),
+    );
+    expect(s.messages[1].author).toEqual(author);
+    expect(s.messages[2].author).toEqual(author);
+  });
+
+  it("keeps statusAuthor on status events until content arrives", () => {
+    const author = { name: "Material Artist", member_conv_id: "m2" };
+    const s = run(
+      initialRunState,
+      { type: "send", text: "hi" },
+      { type: "sendAccepted", runId: "r1" },
+      ev({ type: "status", text: "Starting Cursor…", author }),
+    );
+    expect(s.statusText).toBe("Starting Cursor…");
+    expect(s.statusAuthor).toEqual(author);
+    const withThink = chatRunReducer(s, ev({ type: "thinking", text: "hmm" }));
+    expect(withThink.statusAuthor).toBeNull();
+  });
 });

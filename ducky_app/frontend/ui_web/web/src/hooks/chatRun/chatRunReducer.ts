@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatMessage, MessageAttachmentDto } from "../../types/panel";
+import type { AgentEvent, ChatMessage, MessageAttachmentDto, MessageAuthorDto } from "../../types/panel";
 
 /**
  * The one chat-run flow, as a pure state machine.
@@ -45,6 +45,8 @@ export interface RunState {
   thinking: string;
   /** Last backend status line (e.g. "Starting Cursor…") for the activity footer. */
   statusText: string;
+  /** Group feed: which member last wrote statusText. */
+  statusAuthor: MessageAuthorDto | null;
   atBottom: boolean;
   hasNewBelow: boolean;
   /** Bumped whenever a transition wants the wrapping hook to reload from backend. */
@@ -76,6 +78,7 @@ export const initialRunState: RunState = {
   stream: "",
   thinking: "",
   statusText: "",
+  statusAuthor: null,
   atBottom: true,
   hasNewBelow: false,
   reloadToken: 0,
@@ -211,7 +214,11 @@ export function isRunActive(state: RunState): boolean {
 }
 
 function reset(state: RunState, patch: Partial<RunState>): RunState {
-  return { ...state, ...patch };
+  const next = { ...state, ...patch };
+  if (patch.statusText === "" && patch.statusAuthor === undefined) {
+    next.statusAuthor = null;
+  }
+  return next;
 }
 
 function startTurn(state: RunState, messages: ChatMessage[]): RunState {
@@ -255,6 +262,7 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
       return reset(state, {
         status: state.status === "idle" ? "running" : state.status,
         statusText: text,
+        statusAuthor: event.author ?? null,
       });
     }
 
@@ -263,13 +271,14 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
       // they stay interleaved *above* the tool (Cursor-style) while still live.
       const flushed: ChatMessage[] = [];
       let seq = state.idSeq;
+      const author = event.author ? { author: event.author } : {};
       if (state.thinking.trim()) {
-        flushed.push({ id: optId(seq++), role: "assistant", text: "", thinking: state.thinking });
+        flushed.push({ id: optId(seq++), role: "assistant", text: "", thinking: state.thinking, ...author });
       }
       if (state.stream.trim()) {
-        flushed.push({ id: optId(seq++), role: "assistant", text: state.stream });
+        flushed.push({ id: optId(seq++), role: "assistant", text: state.stream, ...author });
       }
-      const toolRow: ChatMessage = { id: optId(seq++), role: "tool", text: event.text ?? "", tool: event.tool };
+      const toolRow: ChatMessage = { id: optId(seq++), role: "tool", text: event.text ?? "", tool: event.tool, ...author };
       return reset(state, {
         status: "running",
         messages: [...state.messages, ...flushed, toolRow],
@@ -288,6 +297,7 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
         role: event.success ? "success" : "error",
         text: event.text ?? "",
         tool: event.tool,
+        ...(event.author ? { author: event.author } : {}),
       };
       return reset(state, {
         messages: [...state.messages, row],

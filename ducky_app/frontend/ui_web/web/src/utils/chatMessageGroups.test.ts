@@ -243,3 +243,49 @@ describe("buildCommittedChatRows + appendStreamRow", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe("coalesceActivityRows — group speakers", () => {
+  const authored = (id: string, member: string, name: string): ChatRow => ({
+    kind: "tool",
+    id,
+    intent: {
+      id,
+      role: "tool",
+      text: "",
+      tool: { name: `search_${id}`, arguments: {}, status: "success" },
+      author: { name, member_conv_id: member },
+    },
+    result: { id: `${id}-r`, role: "success", text: "ok" },
+  });
+
+  it("keeps consecutive tools from the same speaker in one block", () => {
+    const rows = coalesceActivityRows([
+      authored("1", "a", "Rigging Ducky"),
+      authored("2", "a", "Rigging Ducky"),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "activity", author: { member_conv_id: "a" } });
+    if (rows[0].kind !== "activity") throw new Error("expected activity");
+    expect(rows[0].items.map((i) => i.id)).toEqual(["1", "2"]);
+  });
+
+  it("splits the accordion when the speaker changes", () => {
+    const rows = coalesceActivityRows([
+      authored("1", "a", "Rigging Ducky"),
+      authored("2", "a", "Rigging Ducky"),
+      authored("3", "b", "Material Artist"),
+      authored("4", "a", "Rigging Ducky"),
+    ]);
+    expect(rows.map((r) => (r.kind === "activity" ? r.author?.member_conv_id : r.kind))).toEqual([
+      "a",
+      "b",
+      "a",
+    ]);
+    if (rows[0].kind !== "activity" || rows[1].kind !== "activity" || rows[2].kind !== "activity") {
+      throw new Error("expected three activity blocks");
+    }
+    expect(rows[0].items.map((i) => i.id)).toEqual(["1", "2"]);
+    expect(rows[1].items.map((i) => i.id)).toEqual(["3"]);
+    expect(rows[2].items.map((i) => i.id)).toEqual(["4"]);
+  });
+});

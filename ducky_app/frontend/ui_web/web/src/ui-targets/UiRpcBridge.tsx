@@ -6,7 +6,7 @@
  * via `PanelApi.ui_rpc_respond`, which unblocks the tool waiting over loopback.
  */
 import { useEffect } from "react";
-import type { AgentEvent } from "../types/panel";
+import type { AgentEvent, MessageAuthorDto } from "../types/panel";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
@@ -73,10 +73,18 @@ async function dispatch(method: string, params: Record<string, unknown>): Promis
       return await runAgentWalkthrough(params.steps);
     }
     if (method === "ask_user") {
+      const rawIds = params.group_ids;
+      const groupIds = Array.isArray(rawIds) ? rawIds.map((id) => String(id)) : [];
+      const rawAuthor = params.author;
+      const author =
+        rawAuthor && typeof rawAuthor === "object" && !Array.isArray(rawAuthor)
+          ? (rawAuthor as MessageAuthorDto)
+          : undefined;
       return await runAskUser(
         params.questions,
         String(params.title ?? ""),
         String(params.conv_id ?? ""),
+        { groupIds, author },
       );
     }
     return { error: `unknown method: ${method}` };

@@ -1725,6 +1725,33 @@
   white-space: nowrap;
 }
 
+.agent-activity-group-speaker {
+  flex-shrink: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: var(--member-color, var(--accent));
+}
+
+.agent-activity-group-speaker + .agent-activity-group-label::before {
+  content: "·";
+  margin: 0 0.4em 0 0.15em;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.agent-activity-group-crumb {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.agent-activity-group-crumb-sep {
+  margin: 0 0.28em;
+  opacity: 0.7;
+}
+
 .agent-activity-group-meta {
   flex-shrink: 0;
   font-size: 11px;

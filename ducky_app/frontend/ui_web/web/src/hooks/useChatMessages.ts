@@ -12,6 +12,7 @@ import {
   type RunState,
 } from "./chatRun/chatRunReducer";
 import { markChatTurnIdle, markChatTurnRunning } from "./chatTurnTimer";
+import { prefixSpeaker } from "../utils/agentActivity";
 
 /**
  * The one chat message pipeline — a thin controller around {@link chatRunReducer}.
@@ -220,7 +221,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     messages: state.messages,
     streamBuffer: state.stream,
     streamThinking: state.thinking,
-    streamStatus: state.statusText,
+    streamStatus: prefixSpeaker(state.statusAuthor, state.statusText),
     agentRunning: isRunActive(state),
     optimisticRunning: state.status !== "idle",
     hasNewBelow: state.hasNewBelow,

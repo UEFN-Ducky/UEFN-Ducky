@@ -34,12 +34,13 @@ _MAX_TTL_S = 15 * 60.0
 
 
 class _Pending:
-    __slots__ = ("event", "result", "created")
+    __slots__ = ("event", "result", "created", "conv_id")
 
-    def __init__(self) -> None:
+    def __init__(self, conv_id: str = "") -> None:
         self.event = threading.Event()
         self.result: dict[str, Any] | None = None
         self.created = time.monotonic()
+        self.conv_id = conv_id
 
 
 _pending: dict[str, _Pending] = {}
@@ -60,9 +61,10 @@ def submit(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     event) to the panel and then calling :func:`wait`.
     """
     request_id = uuid.uuid4().hex
+    conv_id = str((params or {}).get("conv_id") or "").strip()
     with _lock:
         _sweep_locked()
-        _pending[request_id] = _Pending()
+        _pending[request_id] = _Pending(conv_id)
     payload = {
         "type": "ui_rpc_request",
         "request_id": request_id,
@@ -106,3 +108,12 @@ def cancel(request_id: str) -> None:
     """Drop a pending slot (e.g. no panel available to answer it)."""
     with _lock:
         _pending.pop(request_id, None)
+
+
+def has_pending_for_conv(conv_id: str) -> bool:
+    """True while an unanswered ui_rpc (e.g. ask_user) is bound to this chat."""
+    cid = (conv_id or "").strip()
+    if not cid:
+        return False
+    with _lock:
+        return any(slot.conv_id == cid for slot in _pending.values())
