@@ -9,6 +9,7 @@ export type ActivityItem =
       text: string;
       isStreaming?: boolean;
       incomplete?: boolean;
+      author?: ChatMessage["author"];
     }
   | { kind: "tool"; id: string; intent: ChatMessage; result: ChatMessage | null };
 
@@ -27,7 +28,7 @@ export type ChatRow =
     }
   | { kind: "tool"; id: string; intent: ChatMessage; result: ChatMessage | null }
   /** Consecutive tools + thinking-only bubbles, collapsed like Cursor's activity accordion. */
-  | { kind: "activity"; id: string; items: ActivityItem[] };
+  | { kind: "activity"; id: string; items: ActivityItem[]; author?: ChatMessage["author"] };
 
 function isThinkingOnlyBubble(row: ChatRow): row is Extract<ChatRow, { kind: "bubble" }> {
   return (
@@ -62,6 +63,16 @@ function isGroupableRow(row: ChatRow): boolean {
   return !isStandaloneToolCard(toolNameFromRow(row));
 }
 
+function activityAuthorOf(item: ActivityItem): ChatMessage["author"] | undefined {
+  if (item.kind === "tool") return item.intent.author ?? item.result?.author;
+  return item.author;
+}
+
+function activityAuthorKey(item: ActivityItem | undefined): string {
+  if (!item) return "";
+  return activityAuthorOf(item)?.member_conv_id ?? "";
+}
+
 function toActivityItem(row: ChatRow): ActivityItem | null {
   if (row.kind === "tool") {
     return { kind: "tool", id: row.id, intent: row.intent, result: row.result };
@@ -73,6 +84,7 @@ function toActivityItem(row: ChatRow): ActivityItem | null {
       text: row.thinking!,
       isStreaming: row.isStreaming,
       incomplete: row.incomplete,
+      author: row.author,
     };
   }
   return null;
@@ -82,6 +94,7 @@ function flushActivityBuffer(buffer: ActivityItem[]): ChatRow | null {
   if (buffer.length === 0) return null;
   const toolCount = buffer.reduce((n, i) => n + (i.kind === "tool" ? 1 : 0), 0);
   const thinkCount = buffer.length - toolCount;
+  const author = activityAuthorOf(buffer[0]);
   // Lone thinking (no tools) stays a normal bubble — don't wrap "Thinking…" alone.
   if (toolCount === 0 && thinkCount === 1) {
     const th = buffer[0] as Extract<ActivityItem, { kind: "thinking" }>;
@@ -93,15 +106,17 @@ function flushActivityBuffer(buffer: ActivityItem[]): ChatRow | null {
       thinking: th.text,
       isStreaming: th.isStreaming,
       incomplete: th.incomplete,
+      author,
     };
   }
   // Even a single tool becomes "1 tool" accordion — never a bare card between chat.
-  return { kind: "activity", id: `activity-${buffer[0].id}`, items: buffer };
+  return { kind: "activity", id: `activity-${buffer[0].id}`, items: buffer, author };
 }
 
 /**
  * Collapse consecutive tool rows and thinking-only assistant bubbles into one
  * activity accordion so a long tool/thought ladder doesn't dominate the chat.
+ * Consecutive events from different group speakers become separate blocks.
  */
 export function coalesceActivityRows(rows: ChatRow[]): ChatRow[] {
   const out: ChatRow[] = [];
@@ -117,7 +132,6 @@ export function coalesceActivityRows(rows: ChatRow[]): ChatRow[] {
   for (const row of rows) {
     if (row.kind === "activity") {
       flush();
-      // Extend a trailing activity when more groupable rows follow later in this pass.
       out.push(row);
       continue;
     }
@@ -125,10 +139,19 @@ export function coalesceActivityRows(rows: ChatRow[]): ChatRow[] {
       const item = toActivityItem(row);
       if (!item) continue;
       const last = out[out.length - 1];
+      const incomingKey = activityAuthorKey(item);
       if (buffer.length === 0 && last?.kind === "activity") {
-        // Clone — never mutate a memoized prior activity row in place.
-        out[out.length - 1] = { ...last, items: [...last.items, item] };
+        const lastKey = last.author?.member_conv_id ?? activityAuthorKey(last.items[0]);
+        if (incomingKey === lastKey) {
+          // Clone — never mutate a memoized prior activity row in place.
+          out[out.length - 1] = { ...last, items: [...last.items, item] };
+          continue;
+        }
+        buffer.push(item);
         continue;
+      }
+      if (buffer.length > 0 && incomingKey !== activityAuthorKey(buffer[0])) {
+        flush();
       }
       buffer.push(item);
       continue;

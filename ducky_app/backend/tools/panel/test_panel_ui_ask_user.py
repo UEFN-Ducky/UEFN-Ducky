@@ -81,6 +81,17 @@ def test_ui_rpc_active_poll_survives_sweep():
     ui_rpc.cancel(rid2)
 
 
+def test_ui_rpc_has_pending_for_conv():
+    from frontend.ui_web import ui_rpc
+
+    rid, _ = ui_rpc.submit("ask_user", {"conv_id": "member-1"})
+    assert ui_rpc.has_pending_for_conv("member-1") is True
+    assert ui_rpc.has_pending_for_conv("other") is False
+    ui_rpc.respond(rid, {"ok": True})
+    ui_rpc.wait(rid, 0.0)
+    assert ui_rpc.has_pending_for_conv("member-1") is False
+
+
 if __name__ == "__main__":
     test_normalize_questions()
     test_normalize_rejects_empty()
@@ -88,4 +99,5 @@ if __name__ == "__main__":
     test_normalize_rejects_bad_option()
     test_ask_user_never_times_out()
     test_ui_rpc_active_poll_survives_sweep()
+    test_ui_rpc_has_pending_for_conv()
     print("ok")

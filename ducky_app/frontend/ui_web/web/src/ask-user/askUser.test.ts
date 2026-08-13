@@ -7,6 +7,7 @@ import {
 } from "./types";
 import {
   _resetAskUserForTests,
+  countAskUserSessionsForConv,
   getAskUserSession,
   getAskUserSessionForConv,
   listAskUserSessions,
@@ -137,5 +138,50 @@ describe("ask-user sessions", () => {
       sess.id,
     );
     await expect(p).resolves.toMatchObject({ ok: true });
+  });
+
+  it("queues member asks on a shared group hub oldest-first", async () => {
+    const authorA = { name: "Rigging Ducky", member_conv_id: "m-a" };
+    const authorB = { name: "Material Artist", member_conv_id: "m-b" };
+    const a = runAskUser([{ id: "1", prompt: "One" }], "A", "m-a", {
+      groupIds: ["group-1"],
+      author: authorA,
+    });
+    const b = runAskUser([{ id: "2", prompt: "Two" }], "B", "m-b", {
+      groupIds: ["group-1"],
+      author: authorB,
+    });
+    expect(getAskUserSessionForConv("m-a")?.title).toBe("A");
+    expect(getAskUserSessionForConv("m-b")?.title).toBe("B");
+    const hub = getAskUserSessionForConv("group-1");
+    expect(hub?.title).toBe("A");
+    expect(hub?.author?.name).toBe("Rigging Ducky");
+    expect(hub?.queueAhead).toBe(1);
+    expect(countAskUserSessionsForConv("group-1")).toBe(2);
+
+    settleAskUser(
+      {
+        ok: true,
+        answers: { "1": { selected: [], text: "ok", skipped: false } },
+        skipped_all: false,
+      },
+      hub!.id,
+    );
+    await expect(a).resolves.toMatchObject({ ok: true });
+    const next = getAskUserSessionForConv("group-1");
+    expect(next?.title).toBe("B");
+    expect(next?.queueAhead).toBe(0);
+    expect(next?.author?.name).toBe("Material Artist");
+
+    settleAskUser(
+      {
+        ok: true,
+        answers: { "2": { selected: [], text: "", skipped: true } },
+        skipped_all: true,
+      },
+      next!.id,
+    );
+    await expect(b).resolves.toMatchObject({ skipped_all: true });
+    expect(getAskUserSessionForConv("group-1")).toBeNull();
   });
 });

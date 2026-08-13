@@ -334,6 +334,10 @@ def resolve_nested_representative(
         badge["name"] = f"{group_label} — {badge.get('name')}"
     badge["color"] = str(speaker.get("color") or badge.get("color") or "")
     badge["is_group"] = False
+    inner_path = [str(x).strip() for x in (badge.get("group_path") or []) if str(x).strip()]
+    inner_ids = [str(x).strip() for x in (badge.get("group_id_path") or []) if str(x).strip()]
+    badge["group_path"] = [group_label] + [x for x in inner_path if x != group_label]
+    badge["group_id_path"] = [gid] + [x for x in inner_ids if x != gid]
     return run_as, badge
 
 
@@ -762,8 +766,8 @@ def wants_all_speakers(question: str) -> bool:
     return bool(_ROUNDTABLE_RE.search(question or ""))
 
 
-def author_payload(member: dict[str, Any]) -> dict[str, str]:
-    return {
+def author_payload(member: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "name": member_display_name(member),
         "member_conv_id": str(member.get("member_conv_id") or ""),
         "tts_voice": str(member.get("tts_voice") or ""),
@@ -771,6 +775,13 @@ def author_payload(member: dict[str, Any]) -> dict[str, str]:
         "color": str(member.get("color") or ""),
         "profile_id": str(member.get("profile_id") or ""),
     }
+    path = member.get("group_path")
+    if isinstance(path, list) and path:
+        payload["group_path"] = [str(x).strip() for x in path if str(x).strip()]
+    id_path = member.get("group_id_path")
+    if isinstance(id_path, list) and id_path:
+        payload["group_id_path"] = [str(x).strip() for x in id_path if str(x).strip()]
+    return payload
 
 
 def append_group_assistant(
@@ -795,6 +806,36 @@ def append_group_assistant(
 
 _group_sessions: dict[str, threading.Event] = {}
 _group_lock = threading.Lock()
+# member_conv_id → (hub id chain outer→inner, author badge) while a group turn runs.
+_member_hubs: dict[str, tuple[list[str], dict[str, Any]]] = {}
+
+
+def register_member_hub(member_id: str, group_ids: list[str], author: dict[str, Any]) -> None:
+    mid = (member_id or "").strip()
+    if not mid:
+        return
+    ids = [str(g).strip() for g in group_ids if str(g).strip()]
+    with _group_lock:
+        _member_hubs[mid] = (ids, dict(author))
+
+
+def unregister_member_hub(member_id: str) -> None:
+    mid = (member_id or "").strip()
+    if not mid:
+        return
+    with _group_lock:
+        _member_hubs.pop(mid, None)
+
+
+def lookup_member_hub(member_id: str) -> tuple[list[str], dict[str, Any]] | None:
+    mid = (member_id or "").strip()
+    if not mid:
+        return None
+    with _group_lock:
+        hit = _member_hubs.get(mid)
+        if hit is None:
+            return None
+        return list(hit[0]), dict(hit[1])
 
 
 def is_group_running(group_id: str) -> bool:
@@ -941,21 +982,22 @@ def _member_push_to_group(
     *,
     group_id: str,
     run_id: str,
-    author: dict[str, str],
+    author: dict[str, Any],
     push: PushFn,
     lock: threading.Lock,
+    relay_thinking: bool = True,
 ) -> PushFn:
     """Relay member tool/status/plan events onto the group feed so thinking is visible."""
-    relay_kinds = frozenset(
-        {
-            "tool",
-            "tool_done",
-            "status",
-            "plan_updated",
-            "thinking",
-            "thinking_delta",
-        }
-    )
+    relay_kinds = {
+        "tool",
+        "tool_done",
+        "status",
+        "plan_updated",
+        "thinking",
+        "thinking_delta",
+    }
+    if not relay_thinking:
+        relay_kinds -= {"thinking", "thinking_delta"}
 
     def relay(event: dict[str, Any]) -> None:
         kind = str(event.get("type") or "")
@@ -1019,6 +1061,9 @@ def _run_member_turn(
     # on "waiting for linked agent" while the reply already finished.
     member_id = str(speaker["member_conv_id"])
     author = author_payload(badge)
+    nested_ids = [str(x).strip() for x in (badge.get("group_id_path") or []) if str(x).strip()]
+    hub_ids = [group_id] + [x for x in nested_ids if x != group_id]
+    register_member_hub(member_id, hub_ids, author)
     member_push: PushFn | None = None
     if push is not None and run_id:
         member_push = _member_push_to_group(
@@ -1027,17 +1072,21 @@ def _run_member_turn(
             author=author,
             push=push,
             lock=publish_lock or threading.Lock(),
+            relay_thinking=not roundtable,
         )
-    result = run_message_and_wait(
-        member_id,
-        prompt,
-        mode=mode or "agent",
-        model=member_model or (model or ""),
-        timeout_sec=timeout_sec,
-        push=member_push,
-        cancel_on_timeout=True,
-        parent="",
-    )
+    try:
+        result = run_message_and_wait(
+            member_id,
+            prompt,
+            mode=mode or "agent",
+            model=member_model or (model or ""),
+            timeout_sec=timeout_sec,
+            push=member_push,
+            cancel_on_timeout=True,
+            parent="",
+        )
+    finally:
+        unregister_member_hub(member_id)
     if cancel.is_set():
         return badge, "", "cancelled"
     reply = str(result.get("assistant_text") or "").strip()

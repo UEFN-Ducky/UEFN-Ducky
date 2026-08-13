@@ -1169,22 +1169,36 @@ def run_message_and_wait(
     try:
         run_message(conv_id, text, mode, model, push=collecting_push, force=True, parent=parent)
         # timeout_sec <= 0: wait until the agent finishes (no wall-clock interrupt).
-        wait_timeout = None if float(timeout_sec) <= 0 else max(1.0, float(timeout_sec))
-        if not done.wait(timeout=wait_timeout):
-            if cancel_on_timeout:
-                cancel_agent(conv_id)
-            parent = _linked_parents.get(conv_id)
-            if parent:
-                conv = load_conversation(conv_id)
-                title = conv.title if conv else "Chat"
-                _push_linked_agent(_resolve_push(push), parent, conv_id, title, "timeout")
-                _linked_parents.pop(conv_id, None)
-            result["status"] = "timeout"
-            result["error"] = (
-                f"No reply within {timeout_sec}s"
-                if cancel_on_timeout
-                else f"No reply within {timeout_sec}s — the agent is still working; its reply will arrive in your inbox"
-            )
+        # A pending ask_user pauses the clock — the agent is waiting on the user, not stalled.
+        if float(timeout_sec) <= 0:
+            done.wait()
+        else:
+            from frontend.ui_web.ui_rpc import has_pending_for_conv
+
+            remaining = max(1.0, float(timeout_sec))
+            while remaining > 0 and not done.is_set():
+                if has_pending_for_conv(conv_id):
+                    done.wait(timeout=1.0)
+                    continue
+                t0 = time.monotonic()
+                if done.wait(timeout=min(1.0, remaining)):
+                    break
+                remaining -= time.monotonic() - t0
+            if not done.is_set():
+                if cancel_on_timeout:
+                    cancel_agent(conv_id)
+                parent = _linked_parents.get(conv_id)
+                if parent:
+                    conv = load_conversation(conv_id)
+                    title = conv.title if conv else "Chat"
+                    _push_linked_agent(_resolve_push(push), parent, conv_id, title, "timeout")
+                    _linked_parents.pop(conv_id, None)
+                result["status"] = "timeout"
+                result["error"] = (
+                    f"No reply within {timeout_sec}s"
+                    if cancel_on_timeout
+                    else f"No reply within {timeout_sec}s — the agent is still working; its reply will arrive in your inbox"
+                )
     finally:
         if parent_active and parent_active != conv_id:
             with _sessions_lock:

@@ -78,6 +78,14 @@ export function formatToolDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Group feed: "Rigging Ducky · Inspecting Verse device". */
+export function prefixSpeaker(author: ChatMessage["author"] | null | undefined, text: string): string {
+  const name = author?.name?.trim();
+  const t = (text || "").trim();
+  if (!name || !t) return t;
+  return `${name} · ${t}`;
+}
+
 export function humanToolLabel(toolName: string): string {
   const bare = toolName.replace(/^mcp__uefn__/i, "").replace(/^mcp__[^_]+__/i, "");
   return TOOL_ACTIVITY_LABELS[toolName] ?? TOOL_ACTIVITY_LABELS[bare] ?? bare.replace(/_/g, " ");
@@ -142,7 +150,7 @@ export function buildActivityLines(
     const hasResult = next && (next.role === "success" || next.role === "error");
     lines.push({
       id: String(msg.id),
-      text: toolLineText(msg),
+      text: prefixSpeaker(msg.author, toolLineText(msg)),
       status: hasResult ? (next.role === "success" ? "success" : "error") : "pending",
     });
     if (hasResult) i++;

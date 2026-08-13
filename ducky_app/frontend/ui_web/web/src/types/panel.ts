@@ -103,6 +103,8 @@ export interface MessageAuthorDto {
   tts_speed?: number;
   color?: string;
   profile_id?: string;
+  /** Nested-group labels, outer to inner (e.g. ["Art Team", "Rigging Swarm"]). */
+  group_path?: string[];
 }
 
 export interface ChatTab {

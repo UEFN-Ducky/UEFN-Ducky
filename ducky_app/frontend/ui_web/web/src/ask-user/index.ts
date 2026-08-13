@@ -6,6 +6,7 @@ export {
   settleAskUser,
   getAskUserSession,
   getAskUserSessionForConv,
+  countAskUserSessionsForConv,
   listAskUserSessions,
   subscribeAskUser,
 } from "./runAskUser";

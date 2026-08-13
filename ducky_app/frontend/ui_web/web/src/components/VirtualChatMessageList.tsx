@@ -220,6 +220,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         body = (
           <AgentActivityGroup
             items={row.items}
+            author={row.author}
             convId={convId}
             captureAskKeys={captureAskKeys}
             onOpenChat={onOpenChat}
@@ -396,6 +397,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
                   questions={askSession.questions}
                   title={askSession.title}
                   queueAhead={askSession.queueAhead}
+                  author={askSession.author}
                   captureKeys={captureAskKeys}
                   showDismiss
                   onComplete={(result) => settleAskUser(result, askSession.id)}

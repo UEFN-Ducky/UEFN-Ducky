@@ -1,7 +1,9 @@
 /**
  * Promise broker for ducky_ask_user.
  * Sessions are concurrent per chat (conv_id). True orphans (no chat open) share one modal queue.
+ * Group hubs match member asks via groupIds and show the oldest first.
  */
+import type { MessageAuthorDto } from "../types/panel";
 import { getFocusedChatForAsk } from "./focusedChatForAsk";
 import {
   parseAskUserQuestions,
@@ -15,8 +17,15 @@ export type AskUserSession = {
   title: string;
   /** Owning chat; empty → modal fallback. */
   convId: string;
-  /** Orphans only: how many other orphan asks are waiting behind this one. */
+  /** How many other asks wait behind this one (orphans or group queue). */
   queueAhead: number;
+  groupIds: string[];
+  author?: MessageAuthorDto;
+};
+
+export type AskUserRunOpts = {
+  groupIds?: string[];
+  author?: MessageAuthorDto;
 };
 
 type Pending = {
@@ -24,6 +33,8 @@ type Pending = {
   questions: AskUserQuestion[];
   title: string;
   convId: string;
+  groupIds: string[];
+  author?: MessageAuthorDto;
   resolve: (result: AskUserResult | { error: string }) => void;
 };
 
@@ -52,6 +63,18 @@ function pumpOrphan(): void {
   notify();
 }
 
+function toSession(p: Pending, queueAhead: number): AskUserSession {
+  return {
+    id: p.id,
+    questions: p.questions,
+    title: p.title,
+    convId: p.convId,
+    queueAhead,
+    groupIds: p.groupIds,
+    author: p.author,
+  };
+}
+
 export function subscribeAskUser(cb: () => void): () => void {
   listeners.add(cb);
   return () => {
@@ -63,33 +86,41 @@ export function subscribeAskUser(cb: () => void): () => void {
 export function listAskUserSessions(): AskUserSession[] {
   const out: AskUserSession[] = [];
   for (const p of sessions.values()) {
-    out.push({
-      id: p.id,
-      questions: p.questions,
-      title: p.title,
-      convId: p.convId,
-      queueAhead: p.convId ? 0 : orphanQueueAhead(),
-    });
+    out.push(toSession(p, p.convId ? 0 : orphanQueueAhead()));
   }
   return out;
 }
 
-/** Active ask for a chat, if any. */
+function matchingGroupSessions(cid: string): Pending[] {
+  const out: Pending[] = [];
+  for (const p of sessions.values()) {
+    if (p.groupIds.includes(cid)) out.push(p);
+  }
+  return out;
+}
+
+/** Active ask for a chat, if any. Exact conv first; else oldest group-hub match. */
 export function getAskUserSessionForConv(convId: string): AskUserSession | null {
   const cid = (convId || "").trim();
   if (!cid) return null;
   for (const p of sessions.values()) {
     if (p.convId === cid) {
-      return {
-        id: p.id,
-        questions: p.questions,
-        title: p.title,
-        convId: p.convId,
-        queueAhead: 0,
-      };
+      return toSession(p, 0);
     }
   }
-  return null;
+  const matching = matchingGroupSessions(cid);
+  if (!matching.length) return null;
+  return toSession(matching[0], matching.length - 1);
+}
+
+export function countAskUserSessionsForConv(convId: string): number {
+  const cid = (convId || "").trim();
+  if (!cid) return 0;
+  let n = 0;
+  for (const p of sessions.values()) {
+    if (p.convId === cid || p.groupIds.includes(cid)) n++;
+  }
+  return n;
 }
 
 /** Current orphan (modal) session, if any. */
@@ -97,13 +128,7 @@ export function getAskUserSession(): AskUserSession | null {
   if (!orphanActiveId) return null;
   const p = sessions.get(orphanActiveId);
   if (!p) return null;
-  return {
-    id: p.id,
-    questions: p.questions,
-    title: p.title,
-    convId: "",
-    queueAhead: orphanQueueAhead(),
-  };
+  return toSession(p, orphanQueueAhead());
 }
 
 export function settleAskUser(
@@ -132,18 +157,22 @@ export function runAskUser(
   rawQuestions: unknown,
   title = "",
   convId = "",
+  opts?: AskUserRunOpts,
 ): Promise<AskUserResult | { error: string }> {
   const questions = parseAskUserQuestions(rawQuestions);
   if (!questions.length) {
     return Promise.resolve({ error: "questions must be a non-empty list" });
   }
   const cid = String(convId || "").trim() || getFocusedChatForAsk();
+  const groupIds = (opts?.groupIds ?? []).map((id) => String(id).trim()).filter(Boolean);
   return new Promise((resolve) => {
     const pending: Pending = {
       id: `ask-${nextId++}`,
       questions,
       title: String(title || "").trim(),
       convId: cid,
+      groupIds,
+      author: opts?.author,
       resolve,
     };
     if (cid) {

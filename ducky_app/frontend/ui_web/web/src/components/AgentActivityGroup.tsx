@@ -7,11 +7,12 @@ import {
 } from "../hooks/useChatCollapseState";
 import { ToolExecutionCard } from "./ToolExecutionCard";
 import type { ActivityItem } from "../utils/chatMessageGroups";
-import type { ChatTab, LinkedAgent } from "../types/panel";
+import type { ChatTab, LinkedAgent, MessageAuthorDto } from "../types/panel";
 import { InlineStopButton } from "./InlineStopButton";
 
 interface AgentActivityGroupProps {
   items: ActivityItem[];
+  author?: MessageAuthorDto;
   convId?: string;
   captureAskKeys?: boolean;
   onOpenChat?: (chat: ChatTab) => void;
@@ -51,6 +52,18 @@ function activityGroupLabel(items: ActivityItem[], live: boolean): string {
   return parts.join(" · ") || "Activity";
 }
 
+/** Nested hubs as a breadcrumb, leaf name last. Strips a "Group — " prefix already baked into name. */
+function speakerParts(author?: MessageAuthorDto): { path: string[]; name: string } {
+  if (!author) return { path: [], name: "" };
+  const path = (author.group_path ?? []).map((s) => s.trim()).filter(Boolean);
+  let name = (author.name ?? "").trim();
+  for (const group of path) {
+    const prefix = `${group} — `;
+    if (name.startsWith(prefix)) name = name.slice(prefix.length);
+  }
+  return { path, name };
+}
+
 /**
  * Cursor-style accordion: consecutive thoughts + tools share one collapsed header
  * so a long agent ladder doesn't eat the whole viewport.
@@ -60,6 +73,7 @@ function activityGroupLabel(items: ActivityItem[], live: boolean): string {
  */
 export const AgentActivityGroup = memo(function AgentActivityGroup({
   items,
+  author,
   convId = "",
   captureAskKeys = false,
   onOpenChat,
@@ -81,6 +95,7 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
   const [open, setOpen] = useChatCollapseState(openKey, false);
   const toolCount = items.reduce((n, i) => n + (i.kind === "tool" ? 1 : 0), 0);
   const label = activityGroupLabel(items, live);
+  const speaker = speakerParts(author);
 
   return (
     <div className={`agent-activity-group${live ? " agent-activity-group--live" : ""}`}>
@@ -94,6 +109,22 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
           <span className={`agent-activity-group-caret${open ? " is-open" : ""}`}>
             <Icons.ChevronDown />
           </span>
+          {speaker.name ? (
+            <span
+              className="agent-activity-group-speaker"
+              style={{ ["--member-color" as string]: author?.color || "var(--accent)" }}
+            >
+              {speaker.path.map((crumb, i) => (
+                <span key={`${i}-${crumb}`} className="agent-activity-group-crumb">
+                  {crumb}
+                  <span className="agent-activity-group-crumb-sep" aria-hidden="true">
+                    ›
+                  </span>
+                </span>
+              ))}
+              {speaker.name}
+            </span>
+          ) : null}
           <span className="agent-activity-group-label">{label}</span>
           {!open && toolCount > 0 ? (
             <span className="agent-activity-group-meta">{toolCount}</span>

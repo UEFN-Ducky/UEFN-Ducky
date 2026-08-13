@@ -271,6 +271,18 @@ def ducky_ask_user(
     conv_id = _resolve_ask_user_conv_id()
     if conv_id:
         payload["conv_id"] = conv_id
+        try:
+            from frontend.ui_web.group_orchestrator import lookup_member_hub
+
+            hub = lookup_member_hub(conv_id)
+            if hub:
+                group_ids, author = hub
+                if group_ids:
+                    payload["group_ids"] = group_ids
+                if author:
+                    payload["author"] = author
+        except Exception:
+            pass
     out = panel_rpc("ask_user", payload, timeout=_MAX_ASK_USER_WAIT_S)
     if isinstance(out, dict) and not out.get("error"):
         out = {**out, "questions": cleaned}
