@@ -718,36 +718,7 @@ def _verse_source_for_actor(
     stems = _script_class_stems(cls_name)
 
     text, fp = _find_verse_source_by_stems(stems)
-    if text:
-        result = (cls_name, text, fp)
-        _VERSE_SOURCE_CACHE[cls_name] = result
-        return result
-
-    content = str(unreal.Paths.project_content_dir())
-    project = str(unreal.Paths.project_dir())
-    for stem in stems:
-        # Allow Verse access/specifiers between name and := e.g. `foo <public> := class`
-        class_re = re.compile(rf"(?i)\b{re.escape(stem)}(?:\s*<[^>]+>)*\s*:=\s*class\b")
-        for base in (content, project, os.path.join(project, "Content") if project else ""):
-            if not base or not os.path.isdir(base):
-                continue
-            try:
-                for dirpath, _dn, filenames in os.walk(base):
-                    if dirpath.count(os.sep) - base.count(os.sep) > 10:
-                        continue
-                    for fn in filenames:
-                        if not fn.endswith(".verse"):
-                            continue
-                        fp = os.path.join(dirpath, fn)
-                        text = _read_verse_file(fp)
-                        if text and class_re.search(text):
-                            result = (cls_name, text, fp)
-                            _VERSE_SOURCE_CACHE[cls_name] = result
-                            return result
-            except OSError:
-                continue
-
-    result = (cls_name, "", "")
+    result = (cls_name, text, fp) if text else (cls_name, "", "")
     _VERSE_SOURCE_CACHE[cls_name] = result
     return result
 
@@ -1326,26 +1297,15 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     resolved_hashes = dict(hashes)
     resolved_hashes.update(script_props)
 
-    # Cheap-only pass first (reflection + cache, no disk); then one combined
-    # disk walk for whatever is still missing instead of one walk per field.
+    # Cheap-only: reflection + cache. Never os.walk .uasset/.umap here — that
+    # freezes the Slate tick for seconds per inspect (agents then census-loop
+    # it and lock UEFN). Wiring tools resolve one field's hash on write.
     prelim: Dict[str, Optional[str]] = {}
-    missing_fields: List[str] = []
     for field in verse_fields:
         prop = _resolve_field_prop_cheap(script, field, resolved_hashes)
         prelim[field] = prop
         if prop:
             resolved_hashes[field] = prop
-        else:
-            missing_fields.append(field)
-    if missing_fields:
-        found = _lookup_many_field_hashes_in_dirs(
-            missing_fields, _wire_hash_search_dirs(script), max_files=200
-        )
-        for f, prop in found.items():
-            prelim[f] = prop
-            resolved_hashes[f] = prop
-            _augment_hash_cache(f, prop)
-            _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[f] = prop
 
     settings: Dict[str, dict] = {}
     for field in verse_fields:

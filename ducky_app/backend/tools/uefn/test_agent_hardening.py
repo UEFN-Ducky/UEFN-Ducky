@@ -113,6 +113,28 @@ def test_hard_rules_write_boundary_content_and_ducky():
     assert "execute_python" in AGENT_HARD_RULES
 
 
+def test_hard_rules_inspect_is_not_census():
+    assert "Inspect is not a census" in AGENT_HARD_RULES
+    assert "inspect_verse_device" in AGENT_HARD_RULES
+    assert "script_class" in AGENT_HARD_RULES
+    assert "find_devices" in AGENT_HARD_RULES
+
+
+def test_get_verse_editables_skips_uasset_walk():
+    src = (
+        Path(__file__).resolve().parents[3]
+        / "uefn_listener"
+        / "listener"
+        / "verse_editable_editor.py"
+    ).read_text(encoding="utf-8")
+    start = src.index("def get_verse_editables")
+    end = src.index("\ndef set_verse_editable")
+    body = src[start:end]
+    assert "_lookup_many_field_hashes_in_dirs" not in body
+    assert "_resolve_field_prop_cheap" in body
+    assert "_lookup_many_field_hashes_in_dirs" in src  # still used on the write path
+
+
 def test_hard_rules_verse_build_lifecycle():
     assert "WinError 10054" in AGENT_HARD_RULES
     assert "VERSE_DEAD" in AGENT_HARD_RULES

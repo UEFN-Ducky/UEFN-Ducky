@@ -254,15 +254,24 @@ def list_creative_devices(
             continue
         if label_filter and label_filter.lower() not in label.lower():
             continue
+        kind = _device_kind(actor)
         comp = _get_toy_options(actor)
         option_count = len(_overrides_map(comp)) if comp else 0
-        devices.append({
+        row = {
             "label": label,
             "class": cls,
             "path": actor.get_path_name(),
-            "kind": _device_kind(actor),
+            "kind": kind,
             "option_count": option_count,
-        })
+        }
+        if kind == "verse_script":
+            try:
+                script = actor.get_editor_property("Script")
+                if script is not None:
+                    row["script_class"] = script.get_class().get_name()
+            except Exception:
+                pass
+        devices.append(row)
         if len(devices) >= limit:
             break
     return {"devices": devices, "count": len(devices)}
