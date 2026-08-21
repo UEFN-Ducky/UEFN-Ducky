@@ -80,14 +80,18 @@ def require_writable_project_path(file_path: str) -> None:
 
 
 @mcp.tool()
-def workspace_list_dir(relative_path: str = ".", pretty: bool = False) -> str:
+def workspace_list_dir(relative_path: str = ".", path: str = "", pretty: bool = False) -> str:
     """List files under VS Code workspace folders on host disk.
 
     Skips Saved/, Intermediate/, DerivedDataCache/, and binary ``*.uasset`` /
     ``*.umap`` entries by default — grepping those freezes the machine.
     Prefer ``Content/Verse`` for Verse work.
     """
-    rel = (relative_path or "").strip() or "."
+    # Agents habitually pass path= — honor it instead of silently listing ".".
+    rel = (relative_path or "").strip()
+    if (not rel or rel == ".") and (path or "").strip():
+        rel = path.strip()
+    rel = rel or "."
     dir_path = resolve_workspace_path(rel)
     if not os.path.isdir(dir_path):
         raise ValueError(f"Not a directory: {dir_path}")
@@ -105,8 +109,12 @@ def workspace_list_dir(relative_path: str = ".", pretty: bool = False) -> str:
 
 
 @mcp.tool()
-def workspace_read_file(relative_path: str, pretty: bool = False) -> str:
+def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = False) -> str:
     """Read a text file from the VS Code workspace on host disk."""
+    rel_in = (relative_path or "").strip() or (path or "").strip()
+    if not rel_in:
+        raise ValueError("relative_path is required (path= also accepted)")
+    relative_path = rel_in
     file_path = resolve_workspace_path(relative_path)
     if not os.path.isfile(file_path):
         # A weak model that guesses a wrong path otherwise re-flails on the same

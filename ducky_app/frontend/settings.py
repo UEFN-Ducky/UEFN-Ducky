@@ -171,8 +171,14 @@ class PanelSettings:
     freeze_prompt_prefix: bool = True
     """Freeze skills/rules/MCP on turn 1 for every provider (Ducky-owned stable prefix)."""
 
-    anthropic_extended_cache_ttl: bool = False
-    """Legacy fallback when Anthropic plugin prefs omit extendedCacheTtl."""
+    anthropic_extended_cache_ttl: bool = True
+    """Legacy fallback when Anthropic plugin prefs omit extendedCacheTtl.
+
+    Defaults ON: agent turns are minutes apart (tool loops, PIE tests, human
+    replies), so the 5-minute window expires between turns and the whole
+    prefix re-bills at full price. A 1h write costs ~2x base vs ~1.25x, but a
+    read costs ~0.1x — one re-read pays for it, and agent chats re-read many.
+    """
 
     tool_result_format: str = "toon"
     """Tool results sent to the LLM: toon (default) or json."""
