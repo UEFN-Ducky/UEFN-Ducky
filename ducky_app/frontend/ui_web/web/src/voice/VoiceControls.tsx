@@ -350,7 +350,12 @@ export function SpeakMessageButton({
         type="button"
         className="voice-btn voice-btn--tiny voice-speak-msg"
         title="Speak this reply"
-        onClick={() => ttsEngine.speak(text, resolveVoiceId(voiceId), resolveSpeed(speed))}
+        // Defer so this click cannot land on the Pause control that replaces this button.
+        onClick={() => {
+          const voice = resolveVoiceId(voiceId);
+          const rate = resolveSpeed(speed);
+          window.setTimeout(() => ttsEngine.speak(text, voice, rate), 0);
+        }}
         aria-label="Speak reply"
       >
         <Icons.Speaker />

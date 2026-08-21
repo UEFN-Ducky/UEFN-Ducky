@@ -56,6 +56,9 @@ let pauseResolve: (() => void) | null = null;
 let sessionGen = 0;
 /** Plugin synth in flight (download + generate). */
 let loadingVoice = false;
+/** True only after the user (or UI) calls pause() — browser auto-pauses must still resume. */
+let userPaused = false;
+let synthWatchdog: ReturnType<typeof setInterval> | null = null;
 
 /** Multi-speaker queue: each item is a full reply with its own voice. */
 export type TtsUtterance = {
@@ -110,6 +113,45 @@ function clearPauseGate() {
   pauseResolve?.();
   pauseGate = null;
   pauseResolve = null;
+}
+
+/** Chromium/WebView2: once paused, later speak() utterances often start paused until resume(). */
+function clearSynthPausedLatch() {
+  if (typeof speechSynthesis === "undefined") return;
+  try {
+    if (speechSynthesis.paused) speechSynthesis.resume();
+  } catch {
+    /* ignore */
+  }
+}
+
+function stopSynthWatchdog() {
+  if (synthWatchdog != null) {
+    clearInterval(synthWatchdog);
+    synthWatchdog = null;
+  }
+}
+
+/**
+ * Keep builtin speech moving: Chromium freezes on the first word (or ~15s in) by
+ * flipping speechSynthesis.paused without firing pause events we track.
+ */
+function startSynthWatchdog(gen: number) {
+  stopSynthWatchdog();
+  if (typeof speechSynthesis === "undefined") return;
+  synthWatchdog = setInterval(() => {
+    if (gen !== sessionGen || userPaused) {
+      if (gen !== sessionGen) stopSynthWatchdog();
+      return;
+    }
+    try {
+      if (speechSynthesis.speaking && speechSynthesis.paused) {
+        speechSynthesis.resume();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, 200);
 }
 
 function waitIfPaused(): Promise<void> {
@@ -224,7 +266,11 @@ function playBuiltin(text: string, voiceName: string, offset: number, gen: numbe
     }
     u.volume = vol;
     u.rate = clampRate(currentRate);
+    let settled = false;
     const done = () => {
+      if (settled) return;
+      settled = true;
+      stopSynthWatchdog();
       if (gen === sessionGen) {
         highlightIndex = offset + text.length;
         emitProgress();
@@ -237,10 +283,37 @@ function playBuiltin(text: string, voiceName: string, offset: number, gen: numbe
         highlightIndex = offset + ev.charIndex;
         emitProgress();
       }
+      // First boundary often fires then Chromium parks paused — kick it.
+      if (!userPaused && speechSynthesis.paused) {
+        try {
+          speechSynthesis.resume();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    u.onstart = () => {
+      if (gen !== sessionGen || userPaused) return;
+      try {
+        if (speechSynthesis.paused) speechSynthesis.resume();
+      } catch {
+        /* ignore */
+      }
     };
     u.onend = done;
     u.onerror = done;
+    clearSynthPausedLatch();
+    startSynthWatchdog(gen);
     speechSynthesis.speak(u);
+    // Some WebViews queue the utterance already-paused after a prior cancel/pause.
+    queueMicrotask(() => {
+      if (gen !== sessionGen || userPaused || settled) return;
+      try {
+        if (speechSynthesis.paused) speechSynthesis.resume();
+      } catch {
+        /* ignore */
+      }
+    });
   });
 }
 
@@ -448,6 +521,7 @@ export const ttsEngine = {
     const cleaned = (text || "").trim();
     if (!cleaned) return;
     sessionGen += 1;
+    userPaused = false;
     activeSourceText = cleaned;
     highlightIndex = 0;
     queue.clear();
@@ -561,6 +635,8 @@ export const ttsEngine = {
     if (voiceId != null) this.setVoice(voiceId);
     if (rate != null) this.setRate(rate);
     sessionGen += 1;
+    userPaused = false;
+    stopSynthWatchdog();
     clearPauseGate();
     if (typeof speechSynthesis !== "undefined") {
       try {
@@ -568,6 +644,7 @@ export const ttsEngine = {
       } catch {
         /* ignore */
       }
+      clearSynthPausedLatch();
     }
     if (audioEl) {
       try {
@@ -611,6 +688,7 @@ export const ttsEngine = {
 
   pause() {
     if (playbackState !== "speaking") return;
+    userPaused = true;
     playbackState = "paused";
     speaking = false;
     try {
@@ -628,6 +706,7 @@ export const ttsEngine = {
 
   resume() {
     if (playbackState !== "paused") return;
+    userPaused = false;
     playbackState = "speaking";
     speaking = true;
     try {
@@ -650,6 +729,8 @@ export const ttsEngine = {
 
   cancel() {
     sessionGen += 1;
+    userPaused = false;
+    stopSynthWatchdog();
     clearPauseGate();
     queue.clear();
     utterQueue = [];
@@ -667,6 +748,8 @@ export const ttsEngine = {
       } catch {
         /* ignore */
       }
+      // Clear Chromium's sticky paused latch so the next speak() actually audibly starts.
+      clearSynthPausedLatch();
     }
     if (audioEl) {
       try {

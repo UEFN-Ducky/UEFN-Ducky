@@ -8,7 +8,12 @@ import {
   clearLiveSpeakQueue,
   enqueueFinalSpeak,
   enqueueProcessSpeak,
+  liveSpeakQueueLength,
 } from "./liveSpeakQueue";
+import {
+  shouldAcceptLiveFinal,
+  shouldReturnToListeningAfterAnswer,
+} from "./liveTurnGates";
 import {
   shouldNarrateTool,
   speakableThinkingLine,
@@ -131,6 +136,15 @@ export function useLiveVoiceMode(opts: {
     try {
       await session.start({
         onInterim: (text) => {
+          // Ignore speaker-echo drafts while Ducky is talking.
+          if (
+            !shouldAcceptLiveFinal({
+              isSpeaking: ttsEngine.isSpeaking(),
+              queueLength: liveSpeakQueueLength(),
+            })
+          ) {
+            return;
+          }
           onInterimRef.current(text);
           publish({ userInterim: text, status: "listening" });
         },
@@ -139,6 +153,15 @@ export function useLiveVoiceMode(opts: {
           const trimmed = text.trim();
           if (!trimmed) {
             publish({ userInterim: "" });
+            return;
+          }
+          // Speaker echo must not auto-send a fake user turn over TTS.
+          if (
+            !shouldAcceptLiveFinal({
+              isSpeaking: ttsEngine.isSpeaking(),
+              queueLength: liveSpeakQueueLength(),
+            })
+          ) {
             return;
           }
           if (manualSendRef.current) {
@@ -369,26 +392,39 @@ export function useLiveVoiceMode(opts: {
         publish({ status: "thinking" });
         return;
       }
-      // Finished speaking → back to listening (unless more group utterances queued).
+      // Finished speaking the answer → always back to listening (mic stays open for talk-back).
+      // Do not wait for agentRunning to clear — that race left live stuck on "speaking".
       if (speakingAfterDoneRef.current) {
         const more =
           ttsEngine.getUtteranceQueueLength() > 0 || pendingGroupSpeaksRef.current > 1;
         if (isGroupRef.current) {
           pendingGroupSpeaksRef.current = Math.max(0, pendingGroupSpeaksRef.current - 1);
         }
-        if (more) {
+        if (
+          !shouldReturnToListeningAfterAnswer({
+            speakingAfterAnswer: true,
+            moreUtterancesQueued: more,
+          })
+        ) {
           setStatus("speaking");
           publish({ status: "speaking" });
           return;
         }
         speakingAfterDoneRef.current = false;
         pendingGroupSpeaksRef.current = 0;
-        if (!opts.agentRunning) {
-          setStatus("listening");
-          publish({ status: "listening", speakerName: "", nextSpeaker: "" });
-        }
+        setStatus("listening");
+        publish({ status: "listening", speakerName: "", nextSpeaker: "" });
       }
     });
+  }, [opts.enabled, opts.agentRunning, publish]);
+
+  // Agent finished and nothing left to say → ensure listening (covers empty-reply / failed speak).
+  useEffect(() => {
+    if (!opts.enabled || opts.agentRunning) return;
+    if (speakingAfterDoneRef.current) return;
+    if (ttsEngine.isSpeaking() || liveSpeakQueueLength() > 0) return;
+    setStatus((prev) => (prev === "listening" || prev === "off" || prev === "error" ? prev : "listening"));
+    publish({ status: "listening", speakerName: "", nextSpeaker: "" });
   }, [opts.enabled, opts.agentRunning, publish]);
 
   useEffect(() => {
