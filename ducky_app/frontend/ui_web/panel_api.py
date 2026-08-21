@@ -79,6 +79,9 @@ from frontend.skill_deploy import sync_skill_for_ide, sync_skill_on_mcp_update
 from frontend.stdio_probe import probe_stdio_mcp
 from frontend.ui_web.agent_modes import cancel_agent, list_running_agents, notify_chats_changed, run_message, wait_for_idle
 from frontend.ui_web.project_files import (
+    content_entry_exists,
+    content_entry_needs_uefn_delete,
+    content_package_rel,
     copy_project_entry,
     create_project_file,
     create_project_folder,
@@ -2570,13 +2573,9 @@ class PanelApi:
 
     def open_asset_in_uefn(self, relative_path: str) -> dict[str, object]:
         """Reveal a project asset in UEFN (Content Browser). Rich preview UI is the Store plugin."""
-        from pathlib import Path
-
         from frontend.settings import PANEL_LISTENER_PORT
 
-        rel = (relative_path or "").strip().replace("\\", "/")
-        content_rel = rel[8:] if rel.lower().startswith("content/") else rel
-        content_rel = Path(content_rel).with_suffix("").as_posix().lstrip("/")
+        content_rel = content_package_rel(relative_path)
         asset_path = f"/Game/{content_rel}"
         try:
             from backend.bridge import post_command_to_listener
@@ -2597,6 +2596,69 @@ class PanelApi:
         opened = bool(res.get("opened")) if isinstance(res, dict) else None
         return {"ok": ok, "asset_path": asset_path, "opened": opened}
 
+    def _uefn_asset_path_for_content(self, relative_path: str) -> str:
+        """Map ``Content/...`` to ``/{Project}/...`` package/folder path for EditorAssetLibrary."""
+        from frontend.settings import PANEL_LISTENER_PORT
+
+        from backend.bridge import post_command_to_listener
+
+        content_rel = content_package_rel(relative_path)
+        asset_path = f"/Game/{content_rel}"
+        info = post_command_to_listener(PANEL_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
+        root = str((info or {}).get("content_root") or "").strip().rstrip("/")
+        if root:
+            asset_path = f"{root}/{content_rel}"
+        return asset_path
+
+    def _uefn_delete_content_entry(self, relative_path: str) -> None:
+        """Delete uassets/umaps (or a folder of them) through UEFN — disk-only delete leaves ghosts."""
+        from frontend.settings import PANEL_LISTENER_PORT
+
+        from backend.bridge import post_command_to_listener
+
+        rel = (relative_path or "").strip().replace("\\", "/").strip("/")
+        asset_path = self._uefn_asset_path_for_content(rel)
+        is_file = rel.lower().endswith((".uasset", ".umap"))
+        try:
+            if is_file:
+                res = post_command_to_listener(
+                    PANEL_LISTENER_PORT,
+                    "delete_asset",
+                    {"asset_path": asset_path},
+                    timeout=60.0,
+                )
+            else:
+                res = post_command_to_listener(
+                    PANEL_LISTENER_PORT,
+                    "delete_directory",
+                    {"directory": asset_path},
+                    timeout=120.0,
+                )
+        except ConnectionError as exc:
+            raise ValueError(
+                "UEFN listener offline — open this island in UEFN to delete Content assets. "
+                "Disk-only delete leaves them in the Content Browser."
+            ) from exc
+        if isinstance(res, dict) and res.get("success") is False:
+            kind = "asset" if is_file else "folder"
+            raise ValueError(f"UEFN refused to delete {kind}: {asset_path}")
+
+    def delete_project_entry(self, relative_path: str) -> dict[str, str]:
+        rel = (relative_path or "").strip().replace("\\", "/")
+        needs_uefn = content_entry_needs_uefn_delete(rel)
+        if needs_uefn:
+            self._uefn_delete_content_entry(rel)
+        if content_entry_exists(rel):
+            # Soft-trash leftovers (verse/text, or non-asset deletes). After a full UEFN
+            # folder delete the path is usually gone — skip soft-trash then.
+            result = delete_project_entry(rel)
+        else:
+            from pathlib import Path
+
+            result = {"path": rel.strip("/"), "name": Path(rel).name}
+        # All windows purge diagnostics for the dead path and close the LSP document.
+        self._push({"type": "file_deleted", "old_path": rel.replace("\\", "/")})
+        return result
     def read_project_file(self, relative_path: str) -> dict[str, str]:
         return read_project_file(relative_path)
 
@@ -2650,12 +2712,6 @@ class PanelApi:
                 "new_path": str(result.get("path") or "").replace("\\", "/"),
             }
         )
-        return result
-
-    def delete_project_entry(self, relative_path: str) -> dict[str, str]:
-        result = delete_project_entry(relative_path)
-        # All windows purge diagnostics for the dead path and close the LSP document.
-        self._push({"type": "file_deleted", "old_path": relative_path.replace("\\", "/")})
         return result
 
     def restore_trashed_entry(self, trash_token: str) -> dict[str, str]:
