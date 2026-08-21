@@ -982,8 +982,58 @@ def import_external_entries(
 # dot-prefixed root dir is skipped by both our tree walk and UEFN). The token→metadata map
 # is in-memory: undo is a within-session action, so a restart legitimately forgets it (and
 # purge_undo_trash clears the now-unrestorable files on startup).
+#
+# .uasset / .umap must ALSO be deleted via the UEFN listener (EditorAssetLibrary) — a
+# disk-only move leaves ghosts in the Content Browser. See panel_api.delete_project_entry.
 TRASH_DIR_NAME = ".undo-trash"
 _trash_registry: dict[str, dict[str, object]] = {}
+_UEFN_ASSET_SUFFIXES = frozenset({".uasset", ".umap"})
+
+
+def content_disk_rel(relative_path: str) -> str:
+    """``Content/Foo/Bar.uasset`` → ``Foo/Bar.uasset`` (posix, no leading slash)."""
+    rel = (relative_path or "").strip().replace("\\", "/").strip("/")
+    if rel.lower().startswith("content/"):
+        rel = rel[8:]
+    return rel.lstrip("/")
+
+
+def content_package_rel(relative_path: str) -> str:
+    """Disk Content path → package-relative path without ``.uasset``/``.umap`` suffix."""
+    rel = content_disk_rel(relative_path)
+    lower = rel.lower()
+    for suf in (".uasset", ".umap"):
+        if lower.endswith(suf):
+            return rel[: -len(suf)]
+    return rel.rstrip("/")
+
+
+def content_entry_needs_uefn_delete(relative_path: str) -> bool:
+    """True when deleting this entry requires EditorAssetLibrary (not disk-only trash)."""
+    try:
+        target = _resolve_relative(relative_path.strip().replace("\\", "/").strip("/"))
+        _require_under_content(target, relative_path)
+    except (ValueError, OSError):
+        return False
+    if not target.exists():
+        return False
+    if target.is_file():
+        return target.suffix.lower() in _UEFN_ASSET_SUFFIXES
+    if target.is_dir():
+        for p in target.rglob("*"):
+            if p.is_file() and p.suffix.lower() in _UEFN_ASSET_SUFFIXES:
+                return True
+    return False
+
+
+def content_entry_exists(relative_path: str) -> bool:
+    """Whether the Content-relative path still exists on disk."""
+    try:
+        target = _resolve_relative(relative_path.strip().replace("\\", "/").strip("/"))
+        _require_under_content(target, relative_path)
+    except (ValueError, OSError):
+        return False
+    return target.exists()
 
 
 def _trash_dir() -> Path:

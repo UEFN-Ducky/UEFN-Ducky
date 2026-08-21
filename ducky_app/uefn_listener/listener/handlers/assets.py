@@ -132,6 +132,16 @@ def cmd_delete_asset(asset_path: str) -> dict:
     return {"success": success, "asset_path": asset_path}
 
 
+@register("delete_directory")
+def cmd_delete_directory(directory: str) -> dict:
+    """Delete a Content Browser folder and every asset under it (UEFN-owned delete)."""
+    path = (directory or "").strip().rstrip("/")
+    if not path or path == "/":
+        raise ValueError("Refusing to delete Content root")
+    success = unreal.EditorAssetLibrary.delete_directory(path)
+    return {"success": bool(success), "directory": path}
+
+
 @register("duplicate_asset")
 def cmd_duplicate_asset(source_path: str, dest_path: str) -> dict:
     dest_path = pin_project_asset_path(dest_path, default_leaf="Assets")

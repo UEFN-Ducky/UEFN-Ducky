@@ -99,6 +99,7 @@ _HEAVY_COMMANDS: set[str] = set(
         "create_data_table",
         "rename_asset",
         "delete_asset",
+        "delete_directory",
         "duplicate_asset",
         "save_asset",
         "import_asset",
