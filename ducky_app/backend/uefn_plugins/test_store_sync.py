@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import sys
 import tempfile
 import threading
@@ -286,6 +287,76 @@ def test_reload_single_plugin_register_is_async() -> None:
     assert started.wait(2.0), "background register never started"
 
 
+def test_rmtree_retry_recovers_from_winerror_32() -> None:
+    from backend.uefn_plugins import store as st
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "verse"
+        target.mkdir()
+        (target / "modules.md").write_text("x", encoding="utf-8")
+        hits = {"n": 0}
+        real = shutil.rmtree
+
+        def flaky(path, *a, **k):
+            hits["n"] += 1
+            if hits["n"] == 1:
+                err = OSError(32, "The process cannot access the file")
+                err.winerror = 32
+                err.filename = str(Path(path) / "modules.md")
+                raise err
+            return real(path, *a, **k)
+
+        with patch.object(st.shutil, "rmtree", flaky):
+            st._rmtree_retry(target, attempts=4)
+        assert not target.exists()
+        assert hits["n"] >= 2
+
+
+def test_parallel_plugin_replaces_do_not_overlap_rmtree() -> None:
+    """Update All used to rmtree plugin B while skill-sync still had B's files open."""
+    import os
+    from backend.uefn_plugins import store as st
+
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["LOCALAPPDATA"] = tmp
+        os.environ["USERPROFILE"] = tmp
+        os.environ["HOME"] = tmp
+        with patch.object(st, "_refresh_plugin_skills_async", lambda: None):
+            assert st.import_plugin_from_bytes(
+                _zip_plugin("alpha", 1), source="local", replace=True
+            ).get("ok")
+            assert st.import_plugin_from_bytes(
+                _zip_plugin("beta", 1), source="local", replace=True
+            ).get("ok")
+
+            order: list[str] = []
+            real = st._rmtree_retry
+
+            def slow_rmtree(path, **kwargs):
+                order.append("start")
+                time.sleep(0.12)
+                real(path, **kwargs)
+                order.append("end")
+
+            results: list[dict] = []
+
+            def _replace(pid: str) -> None:
+                results.append(
+                    st.import_plugin_from_bytes(_zip_plugin(pid, 2), source="local", replace=True)
+                )
+
+            with patch.object(st, "_rmtree_retry", slow_rmtree):
+                t1 = threading.Thread(target=_replace, args=("alpha",))
+                t2 = threading.Thread(target=_replace, args=("beta",))
+                t1.start()
+                t2.start()
+                t1.join(8)
+                t2.join(8)
+
+        assert all(r.get("ok") for r in results), results
+        assert "".join(order) == "startendstartend", order
+
+
 if __name__ == "__main__":
     test_invalidate_plugin_runtime_bounds_hanging_unload()
     test_ensure_plugins_loaded_timeout_returns_false()
@@ -293,4 +364,6 @@ if __name__ == "__main__":
     test_reload_single_plugin_bounds_boot_wait()
     test_hung_register_does_not_wedge_store_toggles()
     test_reload_single_plugin_register_is_async()
+    test_rmtree_retry_recovers_from_winerror_32()
+    test_parallel_plugin_replaces_do_not_overlap_rmtree()
     print("store_sync self-check OK")

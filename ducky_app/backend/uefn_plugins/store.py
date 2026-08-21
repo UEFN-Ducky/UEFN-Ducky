@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
 import re
@@ -36,6 +37,15 @@ _FINGERPRINT: tuple[tuple[str, int], ...] | None = None
 _FINGERPRINT_ROOT = ""
 _FINGERPRINT_AT = 0.0
 _FINGERPRINT_TTL = 1.0
+
+# One plugin tree mutation at a time. Update All used to overlap the previous
+# install's skill-sync (open modules.md) with the next plugin's rmtree → WinError 32.
+_PLUGIN_TREE_LOCK = threading.RLock()
+_SKILL_REFRESH_LOCK = threading.Lock()
+_SKILL_REFRESH_WANTED = False
+_SKILL_REFRESH_THREAD: threading.Thread | None = None
+# Windows: 32 sharing violation, 33 lock violation, 5 access denied (Defender).
+_WIN_LOCK_CODES = frozenset({5, 32, 33})
 
 
 def appdata_uefn_plugins_dir() -> Path:
@@ -87,6 +97,48 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def _is_win_lock_error(exc: BaseException) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    if not isinstance(exc, OSError):
+        return False
+    if getattr(exc, "winerror", None) in _WIN_LOCK_CODES:
+        return True
+    return getattr(exc, "errno", None) in (errno.EACCES, errno.EPERM, errno.EBUSY)
+
+
+def _rmtree_retry(path: Path, *, attempts: int = 10, ignore_final: bool = False) -> None:
+    """Delete a plugin folder; retry Windows sharing violations from skill-sync / AV."""
+    last: OSError | None = None
+    for i in range(max(1, attempts)):
+        try:
+            if not path.exists():
+                return
+            shutil.rmtree(path)
+            return
+        except OSError as exc:
+            last = exc
+            if not _is_win_lock_error(exc) or i == attempts - 1:
+                break
+            time.sleep(0.05 * (2 ** min(i, 4)))
+    if ignore_final:
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    if last is not None:
+        raise last
+
+
+def _write_bytes_retry(path: Path, payload: bytes, *, attempts: int = 8) -> None:
+    for i in range(max(1, attempts)):
+        try:
+            path.write_bytes(payload)
+            return
+        except OSError as exc:
+            if not _is_win_lock_error(exc) or i == attempts - 1:
+                raise
+            time.sleep(0.05 * (2 ** min(i, 4)))
+
+
 def load_plugin_manifest(plugin_id: str) -> dict[str, Any] | None:
     pid = normalize_plugin_id(plugin_id)
     return _read_json(appdata_uefn_plugins_dir() / pid / PLUGIN_MANIFEST)
@@ -97,9 +149,9 @@ def plugin_dir(plugin_id: str) -> Path:
 
 
 def _copy_plugin_tree(src: Path, dest: Path) -> None:
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+    with _PLUGIN_TREE_LOCK:
+        _rmtree_retry(dest)
+        shutil.copytree(src, dest)
 
 
 def seed_uefn_plugins(*, force: bool = False) -> list[str]:
@@ -134,14 +186,14 @@ def seed_uefn_plugins(*, force: bool = False) -> list[str]:
         for junk in ("scripts", "deploy", ".git"):
             junk_path = dest_plugin / junk
             if junk_path.is_dir():
-                shutil.rmtree(junk_path, ignore_errors=True)
+                _rmtree_retry(junk_path, ignore_final=True)
         seeded = _read_json(dest_plugin / PLUGIN_MANIFEST) or {}
         seeded["source"] = "bundled"
         _write_json(dest_plugin / PLUGIN_MANIFEST, seeded)
         try:
             skill_ids = validate_plugin_skills(dest_plugin, plugin_id)
         except ValueError as exc:
-            shutil.rmtree(dest_plugin, ignore_errors=True)
+            _rmtree_retry(dest_plugin, ignore_final=True)
             logs.append(f"UEFN plugin {plugin_id} seed rejected: {exc}")
             continue
         logs.append(f"UEFN plugin {plugin_id} v{bundled_ver} seeded -> {dest_plugin}")
@@ -585,25 +637,48 @@ def validate_plugin_skills(plugin_root: Path, plugin_id: str) -> list[str]:
 
 def _refresh_plugin_skills() -> None:
     """Re-deploy IDE skill folders after plugin install/uninstall changes owned skills."""
-    try:
-        from backend.agent.prompt import clear_skill_cache
-        from frontend.skill_deploy import sync_skill_all_ides
-        from frontend.settings import PanelSettings
+    with _PLUGIN_TREE_LOCK:
+        try:
+            from backend.agent.prompt import clear_skill_cache
+            from frontend.skill_deploy import sync_skill_all_ides
+            from frontend.settings import PanelSettings
 
-        invalidate_plugin_skill_caches()
-        clear_skill_cache()
-        sync_skill_all_ides(PanelSettings.load().antigravity_config_path)
-    except Exception:
-        pass
+            invalidate_plugin_skill_caches()
+            clear_skill_cache()
+            sync_skill_all_ides(PanelSettings.load().antigravity_config_path)
+        except Exception:
+            pass
+
+
+def _skill_refresh_worker() -> None:
+    global _SKILL_REFRESH_WANTED
+    while True:
+        with _SKILL_REFRESH_LOCK:
+            if not _SKILL_REFRESH_WANTED:
+                return
+            _SKILL_REFRESH_WANTED = False
+        _refresh_plugin_skills()
 
 
 def _refresh_plugin_skills_async() -> None:
-    """IDE skill sync is disk-heavy — never block the Store bridge call."""
-    threading.Thread(
-        target=_refresh_plugin_skills,
-        daemon=True,
-        name="uefn-plugin-skills-refresh",
-    ).start()
+    """IDE skill sync is disk-heavy — never block this Store bridge call.
+
+    Still serialize against the next plugin's rmtree: the worker takes
+    ``_PLUGIN_TREE_LOCK`` so Update All cannot delete modules.md while we copy it.
+    Coalesce so N installs share one sync instead of N overlapping walkers.
+    """
+    global _SKILL_REFRESH_WANTED, _SKILL_REFRESH_THREAD
+    with _SKILL_REFRESH_LOCK:
+        _SKILL_REFRESH_WANTED = True
+        t = _SKILL_REFRESH_THREAD
+        if t is not None and t.is_alive():
+            return
+        _SKILL_REFRESH_THREAD = threading.Thread(
+            target=_skill_refresh_worker,
+            daemon=True,
+            name="uefn-plugin-skills-refresh",
+        )
+        _SKILL_REFRESH_THREAD.start()
 
 
 def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[str, Any]:
@@ -648,11 +723,11 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
         invalidate_plugin_runtime(pid)
     except Exception:
         pass
-    shutil.rmtree(dest, ignore_errors=True)
-    if dest.is_dir():
-        # Rare: unload still holding a handle — retry once after a short pause.
-        time.sleep(0.05)
-        shutil.rmtree(dest, ignore_errors=True)
+    with _PLUGIN_TREE_LOCK:
+        _rmtree_retry(dest, ignore_final=True)
+        if dest.is_dir():
+            time.sleep(0.05)
+            _rmtree_retry(dest, ignore_final=True)
     from frontend.settings import PanelSettings, replace
 
     settings = PanelSettings.load()
@@ -832,39 +907,42 @@ def import_plugin_from_bytes(
         pass
 
     # Only wipe the old install after the new zip fully validated in memory.
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True, exist_ok=True)
+    # Hold the tree lock so a sibling Update All / skill-sync cannot keep
+    # modules.md open while we delete this plugin folder (WinError 32).
     try:
-        wrote_manifest = False
-        for rel_parts, payload in planned:
-            target = dest.joinpath(*rel_parts)
-            try:
-                if not target.resolve().is_relative_to(dest.resolve()):
-                    continue  # zip-slip / absolute — skip member, do not abort
-            except (OSError, ValueError):
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(payload)
-            if rel_parts[-1] == PLUGIN_MANIFEST and len(rel_parts) == 1:
-                wrote_manifest = True
-        if not wrote_manifest and not (dest / PLUGIN_MANIFEST).is_file():
-            raise OSError("plugin.json missing after extract")
+        with _PLUGIN_TREE_LOCK:
+            if dest.exists():
+                _rmtree_retry(dest)
+            dest.mkdir(parents=True, exist_ok=True)
+            wrote_manifest = False
+            for rel_parts, payload in planned:
+                target = dest.joinpath(*rel_parts)
+                try:
+                    if not target.resolve().is_relative_to(dest.resolve()):
+                        continue  # zip-slip / absolute — skip member, do not abort
+                except (OSError, ValueError):
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _write_bytes_retry(target, payload)
+                if rel_parts[-1] == PLUGIN_MANIFEST and len(rel_parts) == 1:
+                    wrote_manifest = True
+            if not wrote_manifest and not (dest / PLUGIN_MANIFEST).is_file():
+                raise OSError("plugin.json missing after extract")
+            written = _read_json(dest / PLUGIN_MANIFEST) or dict(manifest)
+            written["id"] = pid
+            written["kind"] = str(written.get("kind") or "plugin")
+            written["source"] = source
+            _write_json(dest / PLUGIN_MANIFEST, written)
+            skill_ids = validate_plugin_skills(dest, pid)
     except OSError as exc:
-        if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+        with _PLUGIN_TREE_LOCK:
+            if dest.exists():
+                _rmtree_retry(dest, ignore_final=True)
         return {"ok": False, "error": f"Install failed: {exc}"}
-
-    written = _read_json(dest / PLUGIN_MANIFEST) or dict(manifest)
-    written["id"] = pid
-    written["kind"] = str(written.get("kind") or "plugin")
-    written["source"] = source
-    _write_json(dest / PLUGIN_MANIFEST, written)
-    try:
-        skill_ids = validate_plugin_skills(dest, pid)
     except ValueError as exc:
-        if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+        with _PLUGIN_TREE_LOCK:
+            if dest.exists():
+                _rmtree_retry(dest, ignore_final=True)
         return {"ok": False, "error": str(exc)}
 
     was_installed = existing is not None
