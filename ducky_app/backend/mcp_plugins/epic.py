@@ -26,7 +26,9 @@ _PROBE_CACHE_SEC = 5.0
 EPIC_MCP_SETUP_STEPS: tuple[str, ...] = (
     "Enable this island in Ducky. That turns on Python and starts Epic MCP.",
     "Open the project in UEFN (restart once if Epic MCP is still off).",
-    "If port 8000 is taken, set Editor Preferences → Model Context Protocol port, "
+    "In Settings → MCPs keep only one HTTP server on port 8000 "
+    "(UEFN MCP (Epic) / unreal-mcp). Disable any duplicate custom entry on the same port.",
+    "If port 8000 is taken by something else, set Editor Preferences → Model Context Protocol port, "
     "then Settings → MCPs unreal-mcp URL to match.",
 )
 

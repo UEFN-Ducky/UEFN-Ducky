@@ -83,12 +83,31 @@ def ship_newest_everywhere(
 
     if skip_if_recently_shipped and not force_skills and _recent_ship_stamp():
         _log("ship_newest: skipped (same exe/version shipped recently)")
+        # Fortnite updates wipe Engine/Plugins — still re-pin the Toolset boot hook.
+        try:
+            from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+
+            install_user_init_unreal()
+            msg = install_toolset_listener_boot()
+            if msg:
+                _log(msg)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"toolset boot refresh failed: {exc}")
         return out
 
     with _ship_lock:
         now = time.time()
         if now - _last_ship_at < _MIN_SHIP_INTERVAL_SEC:
             _log("ship_newest: skipped (recent)")
+            try:
+                from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+
+                install_user_init_unreal()
+                msg = install_toolset_listener_boot()
+                if msg:
+                    _log(msg)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"toolset boot refresh failed: {exc}")
             return out
         _last_ship_at = now
 
@@ -99,6 +118,17 @@ def ship_newest_everywhere(
             _log(f"listener → {dest}" if dest else "listener sync skipped")
         except Exception as exc:  # noqa: BLE001
             _log(f"listener sync failed: {exc}")
+
+        # Always re-assert Toolset boot (even if listener tree was already current).
+        try:
+            from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+
+            install_user_init_unreal()
+            msg = install_toolset_listener_boot()
+            if msg:
+                _log(msg)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"toolset boot failed: {exc}")
 
         # Running listener older than the deployed source? Auto-reload so every
         # panel/bridge open lands on fresh handlers (reload self-heals its tick).

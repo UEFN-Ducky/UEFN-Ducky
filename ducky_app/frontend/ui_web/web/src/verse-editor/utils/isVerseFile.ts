@@ -267,14 +267,20 @@ export function registryLookupKeys(path: string): string[] {
 /** VS Code-style red label for system-managed workspace roots. */
 export function isSystemWorkspaceRootName(name: string): boolean {
   const n = name.trim();
-  return n === "vproject - DO NOT MODIFY" || n === "/Verse.org";
+  return (
+    n === "vproject - DO NOT MODIFY" ||
+    /^vproject\b/i.test(n) ||
+    n === "/Verse.org" ||
+    /^built-?in digests$/i.test(n)
+  );
 }
 
 /** Friendly sidebar label for a UEFN multi-root workspace folder (paths unchanged). */
 export function workspaceRootDisplayName(entry: { name: string; read_only?: boolean }): string {
   if (entry.read_only === false) return "Content";
   const name = entry.name.trim();
-  if (name === "vproject - DO NOT MODIFY") return "vproject";
+  if (name === "vproject - DO NOT MODIFY" || /^vproject\b/i.test(name)) return "vproject";
+  if (/^built-?in digests$/i.test(name)) return "Built-in Digests";
   if (/\(Assets\)\s*$/i.test(name)) return "Assets";
   if (name.startsWith("/")) return name.slice(1);
   const slash = name.lastIndexOf("/");

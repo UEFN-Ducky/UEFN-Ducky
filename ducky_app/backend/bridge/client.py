@@ -246,7 +246,10 @@ def discover_port() -> int:
 
     raise ConnectionError(
         f"UEFN listener not found on ports {DEFAULT_PORT}-{MAX_PORT}. "
-        "Start it in UEFN: Tools → Execute Python Script → ducky_app/uefn_listener/launch_listener.py, or Deploy in the panel"
+        "Start it in UEFN: Tools → Execute Python Script → "
+        "%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py "
+        "(UEFN ForceEnablePython often skips project Content/Python/init_unreal.py). "
+        "Or restart UEFN after Ducky installs Documents/UnrealEngine/Python/init_unreal.py"
     )
 
 
@@ -428,7 +431,10 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
         _record_bridge_error(f"Listener not reachable for '{command}': {e}")
         raise ConnectionError(
             "UEFN listener is not running. "
-            "Start it in UEFN: Tools → Execute Python Script → ducky_app/uefn_listener/launch_listener.py, or Deploy in the panel"
+            "Start it in UEFN: Tools → Execute Python Script → "
+            "%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py "
+            "(UEFN ForceEnablePython often skips project Content/Python/init_unreal.py). "
+            "Or restart UEFN after Ducky installs Documents/UnrealEngine/Python/init_unreal.py"
         ) from e
 
     try:

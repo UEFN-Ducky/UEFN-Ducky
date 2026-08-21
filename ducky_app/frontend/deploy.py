@@ -271,8 +271,16 @@ def sync_listener_to_appdata() -> Path | None:
     if dest.is_dir():
         dest_recency = _dest_recency(dest)
         if abs(dest_recency - src_recency) <= 0.001 or (not pinned and dest_recency > src_recency):
-            # Core tree already current — still refresh plugin overlays.
+            # Core tree already current — still refresh plugin overlays + user init.
             _overlay_plugin_listeners(dest)
+            try:
+                install_user_init_unreal()
+            except Exception:
+                pass
+            try:
+                install_toolset_listener_boot()
+            except Exception:
+                pass
             return dest
 
     # Every panel and coding-agent bridge is a separate process. A shared
@@ -293,6 +301,14 @@ def sync_listener_to_appdata() -> Path | None:
     except OSError:
         shutil.rmtree(tmp, ignore_errors=True)
         return None
+    try:
+        install_user_init_unreal()
+    except Exception:
+        pass
+    try:
+        install_toolset_listener_boot()
+    except Exception:
+        pass
     return dest
 
 
@@ -341,6 +357,123 @@ def enable_uefn_project_python(project_root: Path) -> str | None:
     return f"Enabled Python Editor Scripting in {path.name}"
 
 
+def _user_init_text() -> str:
+    return _resolve_frontend_file("user_init_unreal.py").read_text(encoding="utf-8")
+
+
+def documents_unreal_python_dir() -> Path:
+    """Editor default path that auto-runs ``init_unreal.py`` (UE / UEFN)."""
+    home = Path.home()
+    return home / "Documents" / "UnrealEngine" / "Python"
+
+
+_TOOLSET_BOOT_MARKER = "UEFN-Ducky listener boot (managed)"
+_TOOLSET_BOOT_MODULE = "ducky_listener_boot"
+_TOOLSET_BOOT_HOOK = (
+    f"\n# --- {_TOOLSET_BOOT_MARKER} ---\n"
+    "try:\n"
+    f"    import {_TOOLSET_BOOT_MODULE}  # noqa: F401\n"
+    "except Exception:\n"
+    "    pass\n"
+    f"# --- end {_TOOLSET_BOOT_MARKER} ---\n"
+)
+
+
+def _fortnite_engine_roots() -> list[Path]:
+    roots: list[Path] = []
+    env = (os.environ.get("UEFN_DUCKY_FORTNITE_ROOT") or "").strip()
+    if env:
+        roots.append(Path(env))
+    for base in (
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ):
+        if base:
+            roots.append(Path(base) / "Epic Games" / "Fortnite")
+    return roots
+
+
+def editor_toolset_python_dir() -> Path | None:
+    """Epic EditorToolset Content/Python — the only init_unreal UEFN runs on ForceEnablePython."""
+    rel = Path("Engine") / "Plugins" / "Experimental" / "Toolsets" / "EditorToolset" / "Content" / "Python"
+    for root in _fortnite_engine_roots():
+        candidate = root / rel
+        if candidate.is_dir() and (candidate / "init_unreal.py").is_file():
+            return candidate
+    return None
+
+
+def install_toolset_listener_boot() -> str | None:
+    """Hook Epic EditorToolset init_unreal so Ducky starts when Toolsets ForceEnable Python.
+
+    With UEFN MCP Toolsets, ForceEnablePythonAtRuntime only runs Engine plugin
+    ``init_unreal.py`` scripts — not Documents/UnrealEngine/Python and not the
+    island ``Content/Python/init_unreal.py``. Re-install on every deploy/launch
+    (Fortnite updates wipe Engine/Plugins).
+    """
+    toolset_py = editor_toolset_python_dir()
+    if toolset_py is None:
+        return None
+    try:
+        boot_text = _user_init_text()
+    except FileNotFoundError:
+        return None
+    boot_path = toolset_py / f"{_TOOLSET_BOOT_MODULE}.py"
+    boot_path.write_text(boot_text, encoding="utf-8")
+    init_path = toolset_py / "init_unreal.py"
+    existing = init_path.read_text(encoding="utf-8")
+    if _TOOLSET_BOOT_MARKER in existing and f"import {_TOOLSET_BOOT_MODULE}" in existing:
+        return f"Toolset listener boot ok: {boot_path}"
+    # Strip a previous broken hook then append a clean one.
+    if _TOOLSET_BOOT_MARKER in existing:
+        start = existing.find(f"# --- {_TOOLSET_BOOT_MARKER}")
+        end = existing.find(f"# --- end {_TOOLSET_BOOT_MARKER}")
+        if start >= 0 and end > start:
+            end = existing.find("\n", end)
+            existing = (existing[:start] + existing[end + 1 if end >= 0 else len(existing) :]).rstrip() + "\n"
+    init_path.write_text(existing.rstrip() + _TOOLSET_BOOT_HOOK, encoding="utf-8")
+    return f"Hooked UEFN-Ducky into EditorToolset init_unreal.py (+ {boot_path.name})"
+
+
+def install_user_init_unreal() -> str | None:
+    """Install Documents/UnrealEngine/Python/init_unreal.py so ForceEnablePython still starts us.
+
+    UEFN often enables Python before the island Content mount, so project
+    ``Content/Python/init_unreal.py`` never runs. The Documents path is on the
+    editor's default Python search list and runs at ForceEnable time.
+    """
+    dest_dir = documents_unreal_python_dir()
+    dest = dest_dir / "init_unreal.py"
+    try:
+        text = _user_init_text()
+    except FileNotFoundError:
+        return None
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if dest.is_file() and dest.read_text(encoding="utf-8").strip() == text.strip():
+        return None
+    # Preserve a non-Ducky init if the user already has one (append import once).
+    if dest.is_file():
+        existing = dest.read_text(encoding="utf-8")
+        marker = "UEFN-Ducky user-level Python startup"
+        if marker not in existing and "from listener.bootstrap import run" not in existing:
+            alt = dest_dir / "ducky_init_unreal.py"
+            alt.write_text(text, encoding="utf-8")
+            if "import ducky_init_unreal" not in existing:
+                shim = (
+                    existing.rstrip()
+                    + "\n\n# UEFN-Ducky — load AppData listener (ForceEnablePython race fix)\n"
+                    "try:\n"
+                    "    import ducky_init_unreal  # noqa: F401\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                )
+                dest.write_text(shim, encoding="utf-8")
+                return f"Hooked UEFN-Ducky into existing {dest}"
+            return f"Updated {alt}"
+    dest.write_text(text, encoding="utf-8")
+    return f"Installed user init_unreal.py -> {dest}"
+
+
 def ensure_frozen_init(project_root: Path) -> list[str]:
     """Install frozen ``init_unreal.py`` when content differs from the bundled stub."""
     dest_py = content_python_dir(project_root)
@@ -368,6 +501,18 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
     if py_log:
         logs.append(py_log)
     try:
+        user_log = install_user_init_unreal()
+        if user_log:
+            logs.append(user_log)
+    except Exception:
+        pass
+    try:
+        toolset_log = install_toolset_listener_boot()
+        if toolset_log:
+            logs.append(toolset_log)
+    except Exception as exc:
+        logs.append(f"Toolset listener boot hook failed: {exc}")
+    try:
         from backend.mcp_plugins.epic import ensure_editor_auto_start
 
         if ensure_editor_auto_start():
@@ -375,7 +520,12 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
     except Exception:
         pass
     logs.append(f"Listener port fixed at {int(listener_port)}")
-    logs.append("Listener source: start UEFN-Ducky.exe (panel or IDE bridge), then restart UEFN or reload_listener")
+    logs.append(
+        "Listener: with UEFN MCP Toolsets, ForceEnablePython only runs Engine "
+        "EditorToolset init_unreal — Ducky hooks that file (ducky_listener_boot). "
+        "Restart UEFN after Deploy, or Tools → Execute Python Script → "
+        "%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py"
+    )
 
     from frontend.skill_deploy import sync_skill_on_mcp_update
 

@@ -80,23 +80,32 @@ async function buildIndex(folders: readonly string[]): Promise<DigestIndex> {
       if (!base) return;
       // "<Folder>/<Folder>.digest.verse", except the assets folder where
       // "MCPTest-Assets" holds "Assets.digest.verse" — try the "-" suffix too.
-      const names = [...new Set([base, base.split("-").pop() ?? ""])].filter(Boolean);
-      for (const name of names) {
-        const digestPath = `abs:${normalized}/${name}.digest.verse`;
-        try {
-          // Optional probe: most workspace folders (Content, vproject) have no digest, and
-          // the Assets folder's digest is "Assets.digest.verse" not "<Project>-Assets…", so
-          // the first guess misses. Read quietly — these expected misses shouldn't log as errors.
-          const { content } = await readVerseFile(digestPath, { quiet: true });
-          if (content.length > MAX_DIGEST_BYTES) {
-            verseLspWarn("digest-docs", "digest too large — skipped", { digestPath });
-            return;
+      // Digests/BuiltIn (new UEFN) nests packages one level deeper.
+      const packageBases =
+        base.toLowerCase() === "builtin"
+          ? ["Fortnite", "UnrealEngine", "Verse"]
+          : [base];
+      for (const pkg of packageBases) {
+        const names = [...new Set([pkg, pkg.split("-").pop() ?? ""])].filter(Boolean);
+        const prefix = base.toLowerCase() === "builtin" ? `${normalized}/${pkg}` : normalized;
+        for (const name of names) {
+          const digestPath = `abs:${prefix}/${name}.digest.verse`;
+          try {
+            // Optional probe: most workspace folders (Content, vproject) have no digest, and
+            // the Assets folder's digest is "Assets.digest.verse" not "<Project>-Assets…", so
+            // the first guess misses. Read quietly — these expected misses shouldn't log as errors.
+            const { content } = await readVerseFile(digestPath, { quiet: true });
+            if (content.length > MAX_DIGEST_BYTES) {
+              verseLspWarn("digest-docs", "digest too large — skipped", { digestPath });
+              return;
+            }
+            const added = parseDigest(content, index);
+            verseLspLog("digest-docs", "digest parsed", { digestPath, entries: added });
+            if (base.toLowerCase() !== "builtin") return;
+            break;
+          } catch {
+            // Most workspace folders (Content, vproject) have no digest — expected.
           }
-          const added = parseDigest(content, index);
-          verseLspLog("digest-docs", "digest parsed", { digestPath, entries: added });
-          return;
-        } catch {
-          // Most workspace folders (Content, vproject) have no digest — expected.
         }
       }
     }),

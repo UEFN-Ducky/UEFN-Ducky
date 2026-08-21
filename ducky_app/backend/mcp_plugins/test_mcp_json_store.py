@@ -236,3 +236,105 @@ def test_retire_blender_nested_mcp(tmp_path: Path, monkeypatch) -> None:
         assert "blender" not in servers
         assert "keep_me" in servers
         assert not legacy.is_dir()
+
+
+def test_http_bind_key_normalizes_localhost() -> None:
+    assert store.http_bind_key("http://127.0.0.1:8000/mcp") == "127.0.0.1:8000"
+    assert store.http_bind_key("http://localhost:8000/other") == "127.0.0.1:8000"
+    assert store.http_bind_key("https://example.com/mcp") == "example.com:443"
+    assert store.http_bind_key("") is None
+
+
+def test_refuse_enable_second_http_on_same_port(tmp_path: Path, monkeypatch) -> None:
+    appdata = tmp_path / "UEFN-Ducky"
+    appdata.mkdir(parents=True)
+    cfg = {
+        "mcpServers": {
+            "unreal-mcp": {
+                "type": "http",
+                "url": "http://127.0.0.1:8000/mcp",
+                "label": "UEFN MCP (Epic)",
+                "kind": "custom",
+            },
+            "dup": {
+                "type": "http",
+                "url": "http://localhost:8000/also",
+                "label": "Dup",
+                "kind": "custom",
+                "disabled": True,
+            },
+        }
+    }
+    (appdata / "mcp.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
+    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
+    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+
+    with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
+        pool.return_value.invalidate_tools_cache = lambda: None
+        pool.return_value.close_plugin = lambda _pid: None
+        result = store.set_mcp_server_enabled("dup", True)
+        assert result["ok"] is False
+        assert result.get("port_conflict") is True
+        assert "8000" in str(result.get("error") or "")
+        assert "dup" not in store.get_enabled_plugin_ids()
+        assert "unreal-mcp" in store.get_enabled_plugin_ids()
+
+
+def test_heal_disables_duplicate_enabled_http_ports(tmp_path: Path, monkeypatch) -> None:
+    appdata = tmp_path / "UEFN-Ducky"
+    appdata.mkdir(parents=True)
+    cfg = {
+        "mcpServers": {
+            "unreal-mcp": {
+                "type": "http",
+                "url": "http://127.0.0.1:8000/mcp",
+                "kind": "custom",
+                "label": "UEFN MCP (Epic)",
+            },
+            "custom-epic": {
+                "type": "http",
+                "url": "http://127.0.0.1:8000/mcp",
+                "kind": "custom",
+                "label": "Custom Epic",
+            },
+        }
+    }
+    (appdata / "mcp.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
+    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
+    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+
+    with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
+        pool.return_value.invalidate_tools_cache = lambda: None
+        store.ensure_mcp_config()
+        servers = store.load_mcp_config()["mcpServers"]
+        assert servers["unreal-mcp"].get("disabled") is not True
+        assert servers["custom-epic"].get("disabled") is True
+        rows = {r["id"]: r for r in store.list_mcp_servers()}
+        assert rows["custom-epic"]["enable_blocked_by_port"] is True
+        assert "unreal-mcp" in rows["custom-epic"]["port_conflict_with"]
+
+
+def test_save_mcp_config_rejects_enabled_port_collision(tmp_path: Path, monkeypatch) -> None:
+    appdata = tmp_path / "UEFN-Ducky"
+    appdata.mkdir(parents=True)
+    (appdata / "mcp.json").write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
+    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
+    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+
+    with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
+        pool.return_value.invalidate_tools_cache = lambda: None
+        try:
+            store.save_mcp_config(
+                {
+                    "mcpServers": {
+                        "a": {"type": "http", "url": "http://127.0.0.1:9000/mcp"},
+                        "b": {"type": "http", "url": "http://127.0.0.1:9000/x"},
+                    }
+                }
+            )
+            raise AssertionError("expected ValueError")
+        except ValueError as exc:
+            assert "9000" in str(exc)

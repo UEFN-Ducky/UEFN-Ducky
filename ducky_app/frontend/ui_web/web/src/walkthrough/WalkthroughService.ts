@@ -165,7 +165,7 @@ export async function prevStep(): Promise<void> {
   emit();
 }
 
-const HOST_CHAIN = ["app.shell", "settings.core", "settings.store"] as const;
+const HOST_CHAIN = ["app.shell", "settings.core", "settings.store", "llms.setup"] as const;
 
 async function finishTour(reason: "complete" | "skip"): Promise<void> {
   const id = activeTourId;
@@ -216,7 +216,7 @@ export async function redoTour(tourId: string): Promise<boolean> {
 /** Clear host chain completions and restart `app.shell`. */
 export async function redoAppWalkthrough(): Promise<boolean> {
   const next = { ...completed };
-  for (const id of ["app.shell", "settings.core", "settings.store"]) {
+  for (const id of HOST_CHAIN) {
     delete next[id];
   }
   writeCompleted(next);

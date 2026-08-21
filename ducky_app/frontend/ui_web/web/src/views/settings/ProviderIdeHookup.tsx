@@ -77,10 +77,16 @@ export function ProviderIdeHookup({ pluginId }: { pluginId: string }) {
   if (!hookup || !kind) return null;
 
   const showTestOk = !!status?.ok && status.text === "OK" && !testing;
-  const walkthroughTarget = kind === "cursor";
 
   return (
-    <section className="general-tab-section">
+    <section
+      className="general-tab-section"
+      ref={targetRef("settings.llms.provider.ide", {
+        kind: "settings_field",
+        label: "IDE / MCP",
+        route: "settings.llms",
+      })}
+    >
       <GeneralSectionHeader
         icon={<LaptopCodeIcon />}
         title="IDE / MCP"
@@ -95,15 +101,11 @@ export function ProviderIdeHookup({ pluginId }: { pluginId: string }) {
             </div>
             <div style={{ flex: 1 }} />
             <button
-              ref={
-                walkthroughTarget
-                  ? targetRef("settings.mcp.apply", {
-                      kind: "button",
-                      label: "Apply",
-                      route: "settings.llms",
-                    })
-                  : undefined
-              }
+              ref={targetRef("settings.llms.provider.ide.apply", {
+                kind: "button",
+                label: "Apply",
+                route: "settings.llms",
+              })}
               type="button"
               className="settings-btn llms-provider-btn"
               disabled={applying || testing || verifying}

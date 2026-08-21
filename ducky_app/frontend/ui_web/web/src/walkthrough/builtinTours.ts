@@ -1,5 +1,11 @@
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { getTargetElement, settingsTabTargetId } from "../ui-targets/registry";
+import {
+  ensureStarterLlmGateways,
+  markStarterPluginToursCompleted,
+  selectLlmsProvider,
+  setSuppressStarterPluginTours,
+} from "./starterLlmGateways";
 import type { WalkthroughDef, WalkthroughStep } from "./types";
 
 function wait(ms: number): Promise<void> {
@@ -473,6 +479,7 @@ export const SETTINGS_STORE_TOUR: WalkthroughDef = {
   id: "settings.store",
   title: "Store tour",
   autoStart: "never",
+  onCompleteStart: "llms.setup",
   steps: [
     {
       target: "settings.content",
@@ -493,12 +500,160 @@ export const SETTINGS_STORE_TOUR: WalkthroughDef = {
       mode: "rect",
     },
     {
-      target: "settings.store.root",
-      title: "Plugins get their own tours",
-      body: "When you enable a plugin that has a tutorial, it will walk you through its Settings tab the first time.",
+      target: "settings.store.catalog",
+      title: "Starter gateways",
+      body: "First launch only — downloading Anthropic, Cursor, and OpenAI from the Store so you can pick a model.",
       advance: "next",
       mode: "rect",
+      onEnter: async () => {
+        requestOpenSettings("Store");
+        await ensureStarterLlmGateways();
+        await wait(400);
+      },
     },
+    {
+      target: settingsTabTargetId("LLMs"),
+      title: "Open LLMs",
+      body: "Press LLMs in the sidebar. Anthropic, Cursor, and OpenAI are installed — next we set up each one.",
+      advance: "require_click",
+      mode: "rect",
+      onEnter: async () => {
+        requestOpenSettings();
+        await wait(200);
+      },
+    },
+  ],
+};
+
+function enterProvider(id: string): () => Promise<void> {
+  return async () => {
+    await openLlmsSection("llms");
+    selectLlmsProvider(id);
+    // Detail slide + IDE / coding-agent / plugin sections need a beat to mount.
+    await wait(450);
+  };
+}
+
+function llmProviderSetupSteps(opts: {
+  id: "anthropic" | "cursor" | "openai";
+  label: string;
+  keyBody: string;
+  ideBody?: string;
+  agentBody: string;
+  cachingBody?: string;
+}): WalkthroughStep[] {
+  const open = enterProvider(opts.id);
+  const steps: WalkthroughStep[] = [
+    clickStep(
+      `settings.llms.provider.${opts.id}`,
+      opts.label,
+      `Press ${opts.label} in the list to open it.`,
+      async () => {
+        await openLlmsSection("llms");
+        selectLlmsProvider(null);
+        await wait(280);
+      },
+    ),
+    nextStep(
+      "settings.llms.provider.key",
+      `${opts.label} API key`,
+      opts.keyBody,
+      open,
+    ),
+    nextStep(
+      "settings.llms.provider.save",
+      "Test & Save",
+      "After you paste a key, press Test & Save. Skip ahead if you do not have a key yet — you can come back later.",
+      open,
+    ),
+  ];
+  if (opts.ideBody) {
+    steps.push(
+      nextStep("settings.llms.provider.ide", "IDE / MCP connection", opts.ideBody, open),
+      nextStep(
+        "settings.llms.provider.ide.apply",
+        "Apply connection",
+        "Press Apply (or Re-apply) so UEFN MCP and Ducky skills land in this IDE. Then use Test — a green check means the connection is good. Press Next when you are ready.",
+        open,
+      ),
+    );
+  }
+  steps.push(
+    nextStep("settings.llms.provider.agent", "Coding agent", opts.agentBody, open),
+    nextStep(
+      "settings.llms.provider.agent.detect",
+      "Detect CLI",
+      "Press Detect to find the CLI on this machine. Leave the toggle on so this agent appears in the chat picker. Press Next when you are ready.",
+      open,
+    ),
+  );
+  if (opts.cachingBody) {
+    steps.push(nextStep("settings.llms.provider.plugin", "Prompt caching", opts.cachingBody, open));
+  }
+  steps.push(
+    clickStep("settings.llms.back", "Back", "Press Back to return to the provider list.", open),
+  );
+  return steps;
+}
+
+export const LLMS_SETUP_TOUR: WalkthroughDef = {
+  id: "llms.setup",
+  title: "Set up LLM providers",
+  autoStart: "never",
+  steps: [
+    clickStep(
+      settingsTabTargetId("LLMs"),
+      "Open LLMs",
+      "Press LLMs in the sidebar. Anthropic, Cursor, and OpenAI show up here after the Store install.",
+      async () => {
+        setSuppressStarterPluginTours(false);
+        markStarterPluginToursCompleted();
+        requestOpenSettings();
+        await wait(200);
+      },
+    ),
+    nextStep(
+      "settings.llms.section.llms",
+      "Providers",
+      "Each row is one gateway. Press into Anthropic, Cursor, then OpenAI — we cover the key, IDE connection, coding agent, and caching on every page.",
+      async () => {
+        await openLlmsSection("llms");
+        selectLlmsProvider(null);
+        await wait(280);
+      },
+    ),
+    ...llmProviderSetupSteps({
+      id: "anthropic",
+      label: "Anthropic",
+      keyBody:
+        "Paste your Anthropic API key here, then Test & Save. That unlocks Claude models in Ducky chats.",
+      ideBody:
+        "IDE / MCP wires UEFN tools and Ducky skills into Claude globally (every project). Apply once, then Test. Green check = up to date.",
+      agentBody:
+        "Claude Code is the coding agent. Detect finds the CLI (often under .local\\bin). Keep the toggle on to pick Claude Code in chat.",
+      cachingBody:
+        "Cache markers discount repeated Anthropic prefixes. Extended TTL keeps that cache for an hour — leave both on unless you have a reason not to.",
+    }),
+    ...llmProviderSetupSteps({
+      id: "cursor",
+      label: "Cursor",
+      keyBody:
+        "Paste your Cursor API key here, then Test & Save. That unlocks Cursor models in Ducky chats.",
+      ideBody:
+        "IDE / MCP applies UEFN MCP and Ducky skills into Cursor globally. Apply, then Test. Green check means Cursor is connected.",
+      agentBody:
+        "This is the Cursor coding agent. Detect finds the CLI; keep the toggle on so it shows up in the chat picker.",
+    }),
+    ...llmProviderSetupSteps({
+      id: "openai",
+      label: "OpenAI",
+      keyBody:
+        "Paste your OpenAI API key here, then Test & Save. That unlocks GPT models in Ducky chats.",
+      agentBody:
+        "Codex is OpenAI's coding agent. Detect finds the CLI (often under npm). Default args like --full-auto are optional — keep the toggle on for chat.",
+      cachingBody:
+        "Cache markers let OpenAI reuse the stable system prefix across turns. Leave Enable OpenAI cache markers on to save input tokens.",
+    }),
   ],
 };
 
@@ -506,4 +661,5 @@ export function registerBuiltinTours(register: (def: WalkthroughDef) => void): v
   register(APP_SHELL_TOUR);
   register(SETTINGS_CORE_TOUR);
   register(SETTINGS_STORE_TOUR);
+  register(LLMS_SETUP_TOUR);
 }

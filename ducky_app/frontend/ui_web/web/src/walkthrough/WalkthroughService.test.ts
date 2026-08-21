@@ -72,21 +72,19 @@ describe("WalkthroughService", () => {
     expect(isCompleted("app.shell")).toBe(true);
     expect(isCompleted("settings.core")).toBe(true);
     expect(isCompleted("settings.store")).toBe(true);
+    expect(isCompleted("llms.setup")).toBe(true);
     await vi.advanceTimersByTimeAsync(500);
     expect(getWalkthroughState().active).toBe(false);
   });
 
-  it("autoStartPending marks complete before showing so relaunch will not re-offer", async () => {
+  it("autoStartPending is a no-op; first-run starts from starter LLM onboard", () => {
     registerTour({
       id: "app.shell",
       steps: [{ target: "a", title: "A", body: "a", advance: "next" }],
       autoStart: "first_incomplete",
     });
     autoStartPending();
-    expect(isCompleted("app.shell")).toBe(true);
-    expect(getWalkthroughState().tourId).toBe("app.shell");
-    await skipTour();
-    autoStartPending();
+    expect(isCompleted("app.shell")).toBe(false);
     expect(getWalkthroughState().active).toBe(false);
   });
 
@@ -120,6 +118,7 @@ describe("WalkthroughService", () => {
       "app.shell": true,
       "settings.core": true,
       "settings.store": true,
+      "llms.setup": true,
       "plugin.translation": true,
     });
     await redoAppWalkthrough();
@@ -127,6 +126,7 @@ describe("WalkthroughService", () => {
     expect(map["app.shell"]).toBeFalsy();
     expect(map["settings.core"]).toBeFalsy();
     expect(map["settings.store"]).toBeFalsy();
+    expect(map["llms.setup"]).toBeFalsy();
     expect(map["plugin.translation"]).toBe(true);
     expect(getWalkthroughState().tourId).toBe("app.shell");
   });

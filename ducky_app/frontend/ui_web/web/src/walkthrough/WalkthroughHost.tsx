@@ -11,15 +11,14 @@ import {
   pluginManifestToTour,
   pluginTourId,
 } from "./pluginWalkthroughs";
-import {
-  autoStartPending,
-  isCompleted,
-  markTourCompleted,
-  registerTour,
-  startTour,
-  unregisterTour,
-} from "./WalkthroughService";
+import { autoStartPending, isCompleted, markTourCompleted, registerTour, startTour, unregisterTour } from "./WalkthroughService";
 import { WalkthroughOverlay } from "./WalkthroughOverlay";
+import {
+  ensureStarterLlmGateways,
+  peekStarterLlmOnboard,
+  setSuppressStarterPluginTours,
+  shouldSuppressPluginWalkthrough,
+} from "./starterLlmGateways";
 
 const registeredPluginTourIds = new Set<string>();
 
@@ -62,6 +61,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
     if (!prev) return; // skip initial hydrate — only react to transitions
     for (const id of enabled) {
       if (prev.has(id)) continue;
+      if (shouldSuppressPluginWalkthrough(id)) continue;
       const tourId = pluginTourId(id);
       if (isCompleted(tourId)) continue;
       const rows = parsePluginWalkthroughs(contrib.walkthroughs);
@@ -93,6 +93,16 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
       // Small delay so shell targets (header/docks) finish mounting.
       await new Promise((r) => window.setTimeout(r, 400));
       if (cancelled) return;
+      const onboard = await peekStarterLlmOnboard();
+      if (cancelled) return;
+      if (onboard.pending) {
+        setSuppressStarterPluginTours(true);
+        void ensureStarterLlmGateways();
+        if (!isCompleted("app.shell")) {
+          await startTour("app.shell");
+          return;
+        }
+      }
       autoStartPending();
     })();
     return () => {
@@ -105,6 +115,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
 
 /** Call after Store enable succeeds so a tour can start even if contrib refresh is slow. */
 export function maybeStartPluginWalkthrough(pluginId: string): void {
+  if (shouldSuppressPluginWalkthrough(pluginId)) return;
   const tourId = pluginTourId(pluginId);
   if (isCompleted(tourId)) return;
   markTourCompleted(tourId);

@@ -338,13 +338,19 @@ def apply_update() -> dict[str, Any]:
         return _result(ok=False, error="Update feed has no installerUrl.", stage="check")
     if not url.lower().startswith("https://"):
         return _result(ok=False, error=f"Refusing non-HTTPS installer URL: {url}", stage="check")
+    sha256 = status["installer_sha256"]
+    if not sha256:
+        return _result(
+            ok=False,
+            error="Update feed is missing installerSha256 — refusing to install.",
+            stage="check",
+        )
 
     _stop_all_agents()
     if _cancelled():
         return _result(ok=False, error=_CANCELLED, stage="stopping_agents")
 
     dest = _installer_download_path(str(status["remote_version"]))
-    sha256 = status["installer_sha256"]
 
     # Reuse a prior download when the feed digest still matches (declined UAC, etc.).
     if _cached_installer_usable(dest, sha256):
@@ -366,15 +372,14 @@ def apply_update() -> dict[str, Any]:
             _unlink_quiet(dest)
             return _result(ok=False, error=_CANCELLED, stage="download")
 
-        if sha256:
-            _set_progress(stage="verify", error=None)
-            if _cancelled():
-                _unlink_quiet(dest)
-                return _result(ok=False, error=_CANCELLED, stage="verify")
-            error = _verify_sha256(dest, sha256)
-            if error:
-                _unlink_quiet(dest)
-                return _result(ok=False, error=error, stage="verify")
+        _set_progress(stage="verify", error=None)
+        if _cancelled():
+            _unlink_quiet(dest)
+            return _result(ok=False, error=_CANCELLED, stage="verify")
+        error = _verify_sha256(dest, sha256)
+        if error:
+            _unlink_quiet(dest)
+            return _result(ok=False, error=error, stage="verify")
 
     if _cancelled():
         return _result(ok=False, error=_CANCELLED, stage="verify")

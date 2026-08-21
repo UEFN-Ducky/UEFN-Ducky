@@ -1439,6 +1439,32 @@ class PanelApi:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error"}
 
+    def starter_llm_onboard_pending(self) -> dict[str, Any]:
+        from frontend.starter_llm_gateways import starter_llm_onboard_pending
+
+        try:
+            return starter_llm_onboard_pending()
+        except Exception as exc:
+            return {"ok": False, "pending": False, "error": str(exc)}
+
+    def ensure_starter_llm_gateways(self) -> dict[str, Any]:
+        from frontend.starter_llm_gateways import ensure_starter_llm_gateways
+
+        try:
+            result = ensure_starter_llm_gateways()
+            if result.get("installed"):
+                self._push_panel({"type": "uefn_plugins_changed"})
+            return result
+        except Exception as exc:
+            return {
+                "ok": False,
+                "first_run": False,
+                "error": str(exc),
+                "installed": [],
+                "skipped": [],
+                "errors": [],
+            }
+
     def duckyos_store_checkout(self, slug: str) -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, store_checkout
         import webbrowser
@@ -5058,6 +5084,7 @@ class PanelApi:
         method = (name or "").strip()
         allow = {
             "duckyos_store_download",
+            "ensure_starter_llm_gateways",
             "draft_skill_pack",
             "draft_subskill",
             "test_key",

@@ -559,6 +559,7 @@ function FocusViewMain({
             isOnline={listener.online}
             isWedged={listener.wedged}
             statusText={listener.status_text}
+            listenerStatus={listener}
             projectMatch={listener.project_match}
             project={project}
             hasProject={hasProject}

@@ -125,7 +125,7 @@ def test_legacy_listener_without_tick_age_stays_online(monkeypatch):
     assert status["online"] is True
     assert status["wedged"] is False
     assert status["epic_mcp_online"] is True
-    assert "Epic MCP online" in status["status_text"]
+    assert "UEFN MCP online" in status["status_text"]
 
 
 def test_epic_mcp_offline_includes_setup_steps(monkeypatch):
@@ -136,4 +136,4 @@ def test_epic_mcp_offline_includes_setup_steps(monkeypatch):
     assert status["epic_mcp_online"] is False
     assert status["epic_mcp_reason"] == "unreachable"
     assert status["epic_mcp_setup_steps"]
-    assert "Epic MCP off" in status["status_text"]
+    assert "UEFN MCP offline" in status["status_text"]

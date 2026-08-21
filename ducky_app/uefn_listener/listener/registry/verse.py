@@ -26,10 +26,10 @@ def _verse_project_dir() -> str:
     """UEFN's generated Verse workspace for the open project (where the digests live).
 
     Layout: %LOCALAPPDATA%/UnrealEditorFortnite/Saved/VerseProject/<Project>/
-      Verse/Verse.digest.verse            (/Verse.org: SceneGraph, Simulation, SpatialMath, ...)
-      Fortnite/Fortnite.digest.verse      (/Fortnite.com: devices, characters, ...)
-      UnrealEngine/UnrealEngine.digest.verse
-      <Project>-Assets/Assets.digest.verse (project prefabs + asset-generated component classes)
+      Digests/BuiltIn/Verse/Verse.digest.verse            (also legacy: Verse/…)
+      Digests/BuiltIn/Fortnite/Fortnite.digest.verse
+      Digests/BuiltIn/UnrealEngine/UnrealEngine.digest.verse
+      Digests/<Project>-Assets/<Project>-Assets.digest.verse
     """
     name = _uefn_project_name()
     if not name:

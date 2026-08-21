@@ -1,0 +1,36 @@
+"""EditorToolset boot hook for ForceEnablePython + Toolsets."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from frontend import deploy
+
+
+def test_install_toolset_listener_boot_hooks_init(tmp_path: Path, monkeypatch):
+    toolset_py = tmp_path / "EditorToolset" / "Content" / "Python"
+    toolset_py.mkdir(parents=True)
+    init = toolset_py / "init_unreal.py"
+    init.write_text("import unreal\n\ntoolsets._registration.register()\n", encoding="utf-8")
+    user_init = tmp_path / "user_init_unreal.py"
+    user_init.write_text("# boot\nprint('ducky')\n", encoding="utf-8")
+
+    monkeypatch.setattr(deploy, "editor_toolset_python_dir", lambda: toolset_py)
+    monkeypatch.setattr(deploy, "_user_init_text", lambda: user_init.read_text(encoding="utf-8"))
+
+    msg = deploy.install_toolset_listener_boot()
+    assert msg is not None
+    assert "Hooked" in msg or "boot ok" in msg
+    boot = toolset_py / "ducky_listener_boot.py"
+    assert boot.is_file()
+    assert "print('ducky')" in boot.read_text(encoding="utf-8")
+    text = init.read_text(encoding="utf-8")
+    assert "import ducky_listener_boot" in text
+    assert deploy._TOOLSET_BOOT_MARKER in text
+
+    # Idempotent
+    msg2 = deploy.install_toolset_listener_boot()
+    assert msg2 is not None
+    assert text.count("import ducky_listener_boot") == init.read_text(encoding="utf-8").count(
+        "import ducky_listener_boot"
+    )

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
-import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
+import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
@@ -11,7 +11,7 @@ import { useNavigationHistoryOptional } from "../navigation/NavigationHistoryCon
 import { useRightRailOpen } from "../hooks/useRightRailOpen";
 import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
-import type { ChatLayoutMode, ProjectInfo, ViewId } from "../types/panel";
+import type { ChatLayoutMode, ListenerStatus, ProjectInfo, ViewId } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
@@ -31,6 +31,7 @@ interface HeaderProps {
   isOnline: boolean;
   isWedged?: boolean;
   statusText?: string;
+  listenerStatus?: ListenerStatus;
   projectMatch?: boolean;
   uefnProjectName?: string;
   project?: ProjectInfo;
@@ -41,30 +42,6 @@ interface HeaderProps {
   onCloseWindow?: () => void;
   onProblemsOpenChange?: (open: boolean) => void;
   showQuickOpen?: boolean;
-}
-
-function statusTooltip(
-  isOnline: boolean,
-  isWedged: boolean,
-  statusText: string | undefined,
-  project: ProjectInfo,
-  projectMatch: boolean | undefined,
-): string {
-  const projectName = project.path?.trim() ? project.name : null;
-
-  if (statusText?.trim()) {
-    if (isOnline && projectMatch === false && projectName) {
-      return `${statusText} — open ${projectName} in UEFN to use this project`;
-    }
-    return statusText;
-  }
-  if (isWedged) return "Listener wedged — restart UEFN (commands not processing)";
-  if (!isOnline) {
-    return projectName
-      ? `Offline — open ${projectName} in UEFN to connect`
-      : "Offline — open UEFN + deploy listener";
-  }
-  return "Online";
 }
 
 const LAYOUT_TOGGLE_META: Record<ChatLayoutMode, { title: string; Icon: () => JSX.Element }> = {
@@ -84,6 +61,7 @@ export function Header({
   isOnline,
   isWedged = false,
   statusText,
+  listenerStatus,
   projectMatch,
   uefnProjectName,
   project = { name: "", path: "", slug: "" },
@@ -96,7 +74,6 @@ export function Header({
   showQuickOpen = false,
 }: HeaderProps) {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [isDuckyHovered, setIsDuckyHovered] = useState(false);
   const isFocus = variant === "focus";
   // Full-page settings overlay only when no project (welcome). With a project, Settings is an editor tab.
   const isSettingsOverlay = !isFocus && !hasProject && currentView === "settings";
@@ -173,7 +150,14 @@ export function Header({
     };
   }, []);
 
-  const tooltip = statusTooltip(isOnline, isWedged, statusText, project, projectMatch);
+  const connectionStatus: ListenerStatus = listenerStatus ?? {
+    online: isOnline,
+    wedged: isWedged,
+    version: "",
+    status_text: statusText,
+    project_match: projectMatch,
+    uefn_project_name: uefnProjectName,
+  };
   const nav = useNavigationHistoryOptional();
   const showNav = !isFocus && !!nav;
   const sidebarEnabled = (isFocus || !isSettingsOverlay) && hasProject;
@@ -257,38 +241,14 @@ export function Header({
         {!isSettingsOverlay ? (
           <>
           <div className="app-header-status-row">
-            {isFocus ? (
-              <span className="connection-status-btn connection-status-btn--readonly" title={tooltip}>
-                <ConnectionStatusIcon isOnline={isOnline} isWedged={isWedged} />
-              </span>
-            ) : (
-              <button
-                ref={settingsTargetRef}
-                type="button"
-                className={`no-drag connection-status-btn${hasStoreUpdates ? " has-store-update" : ""}`}
-                title={
-                  isDuckyHovered
-                    ? "Settings"
-                    : hasStoreUpdates
-                      ? `${tooltip} — Store updates available`
-                      : tooltip
-                }
-                onClick={() => void handleSettingsToggle()}
-                onMouseEnter={() => setIsDuckyHovered(true)}
-                onMouseLeave={() => setIsDuckyHovered(false)}
-              >
-                {isDuckyHovered ? (
-                  <span className="connection-status-gear">
-                    <Icons.Settings />
-                  </span>
-                ) : (
-                  <ConnectionStatusIcon isOnline={isOnline} isWedged={isWedged} />
-                )}
-                {hasStoreUpdates ? (
-                  <span className="store-update-dot" aria-label="Store updates available" />
-                ) : null}
-              </button>
-            )}
+            <span ref={settingsTargetRef}>
+              <ConnectionStatusDropdown
+                status={connectionStatus}
+                projectName={project.path?.trim() ? project.name : undefined}
+                hasStoreUpdates={hasStoreUpdates}
+                onOpenSettings={() => void handleSettingsToggle()}
+              />
+            </span>
             {isFocus ? (
               project.path?.trim() ? (
                 <span className="app-header-project-label" title={project.path}>

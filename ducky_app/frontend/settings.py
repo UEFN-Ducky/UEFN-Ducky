@@ -229,6 +229,9 @@ class PanelSettings:
     walkthrough_completed: dict[str, bool] = field(default_factory=dict)
     """Product tour completion flags keyed by tour id (app.shell, settings.store, plugin.*)."""
 
+    starter_llm_gateways_seeded: bool = False
+    """First-run Store install of Anthropic / Cursor / OpenAI already attempted."""
+
     follow_code_enabled: bool = True
     """Play the agent's file walkthrough in the editor (content sync always happens)."""
 
@@ -373,6 +376,7 @@ class PanelSettings:
             or not self.allow_settings_write
             or self.allow_agent_clicks
             or bool(self.walkthrough_completed)
+            or self.starter_llm_gateways_seeded
             or not self.follow_code_enabled
             or self.follow_code_speed != "normal"
             or not self.follow_code_split_beside_chat

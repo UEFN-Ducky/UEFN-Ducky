@@ -5,6 +5,7 @@ interface QuickOpenBarProps {
   className?: string;
 }
 
+/** Header icon that opens the Go to File palette (Ctrl+P). Compact — never a fake search field. */
 export function QuickOpenBar({ className }: QuickOpenBarProps) {
   const { openPalette } = useQuickOpenBridge();
 
@@ -17,7 +18,6 @@ export function QuickOpenBar({ className }: QuickOpenBarProps) {
       aria-label="Go to File"
     >
       <Icons.Search />
-      <span className="quick-open-bar-placeholder">Search…</span>
     </button>
   );
 }

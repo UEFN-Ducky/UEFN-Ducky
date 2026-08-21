@@ -1,36 +1,27 @@
 .quick-open-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: min(280px, 42vw);
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  background: transparent;
   color: var(--muted);
-  font-size: 11px;
-  cursor: text;
-  text-align: left;
-  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .quick-open-bar:hover {
-  border-color: var(--border-light);
-  background: color-mix(in srgb, var(--tab-hover) 80%, transparent);
-  color: var(--fg-dim);
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+  color: var(--fg-dim, var(--fg));
 }
 .quick-open-bar svg {
   flex-shrink: 0;
-  width: 13px;
-  height: 13px;
-  opacity: 0.7;
-}
-.quick-open-bar-placeholder {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 14px;
+  height: 14px;
+  opacity: 0.85;
 }
 
 .quick-open-overlay {
@@ -163,16 +154,6 @@ body.layout-sidebar-only .app-header-center {
 }
 
 @media (max-width: 720px) {
-  .quick-open-bar-placeholder {
-    display: none;
-  }
-  .quick-open-bar {
-    width: 28px;
-    flex: 0 0 28px;
-    padding: 0;
-    justify-content: center;
-    gap: 0;
-  }
   body.layout-sidebar-only .app-header-center {
     width: auto;
     max-width: none;

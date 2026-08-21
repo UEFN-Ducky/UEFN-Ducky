@@ -215,6 +215,7 @@ export default function App() {
           isOnline={listener.online}
           isWedged={listener.wedged}
           statusText={listener.status_text}
+          listenerStatus={listener}
           projectMatch={listener.project_match}
           uefnProjectName={listener.uefn_project_name}
           project={project}
