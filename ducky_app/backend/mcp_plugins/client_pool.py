@@ -230,10 +230,38 @@ class PluginClientPool:
         if not parsed:
             raise ValueError(f"Not a plugin tool: {namespaced_name}")
         plugin_id, original_name = parsed
-        conn = await self._get_or_create(plugin_id)
-        session = await self._ensure_session(conn)
         args = arguments or {}
-        raw = await asyncio.wait_for(session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC)
+        # Empty-str exceptions (bare TimeoutError/ConnectionError) surface to agents as
+        # "Error executing tool X:" with no detail — always raise with a real message.
+        try:
+            conn = await self._get_or_create(plugin_id)
+            session = await self._ensure_session(conn)
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            raise RuntimeError(
+                f"Nested MCP '{plugin_id}' session unavailable for tool "
+                f"'{original_name}': {detail}. The server may answer TCP but have a "
+                "dead MCP session — use the Ducky fallback tool for this step and "
+                "reconnect this MCP in Settings → MCPs when the task is done."
+            ) from e
+        try:
+            raw = await asyncio.wait_for(
+                session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
+                f"{_TOOL_TIMEOUT_SEC:.0f}s — server reachable but unresponsive. Use "
+                "the Ducky fallback tool for this step; reconnect this MCP in "
+                "Settings → MCPs when the task is done."
+            ) from None
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            raise RuntimeError(
+                f"Nested MCP '{plugin_id}' tool '{original_name}' failed: {detail}. "
+                "Use the Ducky fallback tool for this step; reconnect this MCP in "
+                "Settings → MCPs when the task is done."
+            ) from e
         conn.last_used = time.time()
         if hasattr(raw, "content"):
             return _content_to_text(raw.content)
