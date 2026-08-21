@@ -143,18 +143,6 @@ def take_high_res_screenshot(
 
 
 @plugin_mcp_tool("uefn")
-def play_in_editor(pretty: bool = False) -> str:
-    """Start Play-In-Editor (best effort; may be restricted in some UEFN builds)."""
-    return tool_json(send_command("play_in_editor", {}), pretty=pretty)
-
-
-@plugin_mcp_tool("uefn")
-def stop_pie(pretty: bool = False) -> str:
-    """Stop Play-In-Editor / simulation (best effort)."""
-    return tool_json(send_command("stop_pie", {}), pretty=pretty)
-
-
-@plugin_mcp_tool("uefn")
 def set_object_property(
     asset_path: str, property_name: str, value: Any, save: bool = True, pretty: bool = False
 ) -> str:

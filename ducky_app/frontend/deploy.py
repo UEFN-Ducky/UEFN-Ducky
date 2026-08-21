@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -314,6 +315,32 @@ def content_python_dir(project_root: Path) -> Path:
     return project_root / "Content" / "Python"
 
 
+def enable_uefn_project_python(project_root: Path) -> str | None:
+    """Flip Beta Access Python in ``*.uefnproject`` so ``init_unreal.py`` actually runs."""
+    matches = sorted(project_root.glob("*.uefnproject"))
+    if not matches:
+        return None
+    path = matches[0]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    py = (
+        data.setdefault("dataSets", {})
+        .setdefault("experimental", {})
+        .setdefault("pythonExperimental", {})
+    )
+    if not isinstance(py, dict):
+        return None
+    if py.get("bEnablePythonForProject") is True:
+        return None
+    py["bEnablePythonForProject"] = True
+    path.write_text(json.dumps(data, indent="\t") + "\n", encoding="utf-8")
+    return f"Enabled Python Editor Scripting in {path.name}"
+
+
 def ensure_frozen_init(project_root: Path) -> list[str]:
     """Install frozen ``init_unreal.py`` when content differs from the bundled stub."""
     dest_py = content_python_dir(project_root)
@@ -337,6 +364,16 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
     ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch — not written here.
     """
     logs = ensure_frozen_init(project_root)
+    py_log = enable_uefn_project_python(project_root)
+    if py_log:
+        logs.append(py_log)
+    try:
+        from backend.mcp_plugins.epic import ensure_editor_auto_start
+
+        if ensure_editor_auto_start():
+            logs.append("Enabled Epic MCP Auto Start in UEFN Editor.ini")
+    except Exception:
+        pass
     logs.append(f"Listener port fixed at {int(listener_port)}")
     logs.append("Listener source: start UEFN-Ducky.exe (panel or IDE bridge), then restart UEFN or reload_listener")
 

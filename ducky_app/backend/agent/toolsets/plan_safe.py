@@ -239,8 +239,6 @@ _BLOCK_EXACT: frozenset[str] = frozenset(
     {
         "reload_listener",  # mild side effect; keep Agent unless already in PLAN_TOOLS
         "shutdown",
-        "play_in_editor",
-        "stop_pie",
         "take_high_res_screenshot",
         "exec_console_command",
         "save_all_dirty",

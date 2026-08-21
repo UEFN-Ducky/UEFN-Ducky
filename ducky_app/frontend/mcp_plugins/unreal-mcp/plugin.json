@@ -1,0 +1,33 @@
+{
+  "id": "unreal-mcp",
+  "label": "UEFN MCP (Epic)",
+  "description": "Official in-editor Unreal MCP (Verse, Scene Graph entities, Creative devices, PIC play sessions). Nested under uefn-ducky — do not add a second IDE mcp.json entry.",
+  "kind": "catalog",
+  "version": 1,
+  "default_enabled": true,
+  "tool_prefix": "unreal",
+  "tags": ["uefn", "epic", "verse", "devices", "session"],
+  "server": {
+    "type": "http",
+    "url": "http://127.0.0.1:8000/mcp"
+  },
+  "intents": [
+    "unreal-mcp",
+    "uefn mcp",
+    "scene graph",
+    "entity",
+    "entities",
+    "device",
+    "devices",
+    "creative device",
+    "play session",
+    "play in client",
+    "pic session"
+  ],
+  "requirements_note": "Enable the island in Ducky, then open it in UEFN. Default bind http://127.0.0.1:8000/mcp.",
+  "setup_steps": [
+    "Enable this island in Ducky. That turns on Python and starts Epic MCP.",
+    "Open the project in UEFN (restart once if Epic MCP is still off).",
+    "If port 8000 is taken, set Editor Preferences → Model Context Protocol port, then Settings → MCPs unreal-mcp URL to match."
+  ]
+}

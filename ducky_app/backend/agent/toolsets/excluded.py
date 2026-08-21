@@ -21,7 +21,6 @@ EXCLUDED_TOOLS = frozenset(
         "get_verse_editables",
         "get_device_settings",
         "list_creative_devices",
-        # Prefer set_creative_device_fields wrapper
         "set_device_settings",
         "wire_player_spawners",
     }

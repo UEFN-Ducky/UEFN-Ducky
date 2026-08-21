@@ -116,8 +116,16 @@ def test_hard_rules_write_boundary_content_and_ducky():
 def test_hard_rules_inspect_is_not_census():
     assert "Inspect is not a census" in AGENT_HARD_RULES
     assert "inspect_verse_device" in AGENT_HARD_RULES
-    assert "script_class" in AGENT_HARD_RULES
+    assert "unreal__" in AGENT_HARD_RULES
     assert "find_devices" in AGENT_HARD_RULES
+
+
+def test_hard_rules_epic_mcp_nested():
+    assert "Epic UEFN MCP" in AGENT_HARD_RULES
+    assert "epic_mcp_online" in AGENT_HARD_RULES
+    assert "unreal__" in AGENT_HARD_RULES
+    assert "epic_mcp_setup_steps" in AGENT_HARD_RULES
+    assert "XYZ" in AGENT_HARD_RULES
 
 
 def test_get_verse_editables_skips_uasset_walk():

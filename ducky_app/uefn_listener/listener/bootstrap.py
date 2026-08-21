@@ -36,6 +36,45 @@ def run() -> None:
         # UEFN_DUCKY_STATUS_WINDOW=1 to restore the floating window (debug only).
         _show = os.environ.get("UEFN_DUCKY_STATUS_WINDOW", "").strip().lower() in ("1", "true", "yes")
         start_listener(show_status=_show)
+        try:
+            _ensure_epic_mcp()
+        except Exception:
+            pass
     except Exception as e:
         unreal.log_error(f"[MCP] Failed to start listener: {e}")
         traceback.print_exc()
+
+
+def _ensure_epic_mcp() -> None:
+    """Start Epic's in-editor MCP (:8000) and persist Auto Start on known settings CDOs."""
+    try:
+        world = unreal.EditorLevelLibrary.get_editor_world()
+    except Exception:
+        world = None
+    try:
+        unreal.SystemLibrary.execute_console_command(world, "ModelContextProtocol.StartServer")
+        log_msg("Epic MCP StartServer")
+    except Exception:
+        pass
+    # ponytail: named CDOs only — dir(unreal) is tens of thousands of types.
+    for name in (
+        "ModelContextProtocolEditorSettings",
+        "ModelContextProtocolSettings",
+        "MCPEditorSettings",
+        "UEFNMcpSettings",
+        "UEFNMcpToolsetsSettings",
+    ):
+        cls = getattr(unreal, name, None)
+        if cls is None:
+            continue
+        try:
+            obj = unreal.get_default_object(cls)
+        except Exception:
+            continue
+        for attr in ("auto_start_server", "b_auto_start_server", "auto_start"):
+            try:
+                if getattr(obj, attr) is False:
+                    setattr(obj, attr, True)
+                    log_msg(f"Epic MCP {name}.{attr}=True")
+            except Exception:
+                pass

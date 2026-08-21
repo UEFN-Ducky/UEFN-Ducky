@@ -22,6 +22,8 @@ from backend.mcp_plugins.store import (
 )
 
 _CONNECT_TIMEOUT_SEC = 45.0
+_HTTP_CONNECT_TIMEOUT_SEC = 2.0
+_HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
 _IDLE_EVICT_SEC = 15 * 60.0
 
@@ -45,6 +47,7 @@ class PluginClientPool:
         self._pool_lock = asyncio.Lock()
         self._tools_cache: list[Tool] | None = None
         self._tools_cache_ids: tuple[str, ...] | None = None
+        self._failed_until: dict[str, float] = {}
 
     def invalidate_tools_cache(self) -> None:
         self._tools_cache = None
@@ -61,15 +64,41 @@ class PluginClientPool:
                 self._connections[plugin_id] = conn
             return conn
 
+    def _http_skip_until(self, plugin_id: str) -> float:
+        return float(self._failed_until.get(plugin_id) or 0)
+
+    def _mark_http_fail(self, plugin_id: str) -> None:
+        self._failed_until[plugin_id] = time.time() + _HTTP_FAIL_CACHE_SEC
+        self.invalidate_tools_cache()
+
+    def _clear_http_fail(self, plugin_id: str) -> None:
+        self._failed_until.pop(plugin_id, None)
+
     async def _ensure_session(self, conn: PluginConnection) -> ClientSession:
         async with conn.lock:
             if conn.session is not None:
                 conn.last_used = time.time()
                 return conn.session
+            skip_until = self._http_skip_until(conn.plugin_id)
+            if skip_until and time.time() < skip_until:
+                raise ConnectionError(
+                    f"MCP HTTP {conn.plugin_id} recently unreachable; retry after "
+                    f"{max(0.0, skip_until - time.time()):.0f}s"
+                )
+            ttype = ""
             try:
                 block = resolve_server_block(conn.manifest)
                 stack = AsyncExitStack()
-                ttype = block["type"]
+                ttype = str(block.get("type") or "")
+                init_timeout = _CONNECT_TIMEOUT_SEC
+                if ttype in ("http", "sse"):
+                    from backend.mcp_plugins.epic import tcp_probe_url
+
+                    url = str(block.get("url") or "")
+                    if not tcp_probe_url(url):
+                        self._mark_http_fail(conn.plugin_id)
+                        raise ConnectionError(f"MCP HTTP unreachable: {url}")
+                    init_timeout = _HTTP_CONNECT_TIMEOUT_SEC
                 if ttype == "http":
                     from mcp.client.streamable_http import streamablehttp_client
 
@@ -93,24 +122,30 @@ class PluginClientPool:
                 # get_session_id callback we don't need — index instead of unpack.
                 read, write = transport[0], transport[1]
                 session = await stack.enter_async_context(ClientSession(read, write))
-                await asyncio.wait_for(session.initialize(), timeout=_CONNECT_TIMEOUT_SEC)
+                await asyncio.wait_for(session.initialize(), timeout=init_timeout)
                 conn.stack = stack
                 conn.session = session
                 conn.last_used = time.time()
+                self._clear_http_fail(conn.plugin_id)
                 return session
             except Exception:
-                await self._close_connection(conn)
+                await self._close_connection_unlocked(conn)
+                if ttype in ("http", "sse"):
+                    self._mark_http_fail(conn.plugin_id)
                 raise
+
+    async def _close_connection_unlocked(self, conn: PluginConnection) -> None:
+        conn.session = None
+        if conn.stack is not None:
+            try:
+                await conn.stack.aclose()
+            except Exception:
+                pass
+            conn.stack = None
 
     async def _close_connection(self, conn: PluginConnection) -> None:
         async with conn.lock:
-            conn.session = None
-            if conn.stack is not None:
-                try:
-                    await conn.stack.aclose()
-                except Exception:
-                    pass
-                conn.stack = None
+            await self._close_connection_unlocked(conn)
 
     def close_plugin(self, plugin_id: str) -> None:
         self.invalidate_tools_cache()
@@ -175,13 +210,16 @@ class PluginClientPool:
         if self._tools_cache is not None and self._tools_cache_ids == ids:
             return list(self._tools_cache)
         out: list[Tool] = []
+        failed = False
         for pid in ids:
             try:
                 out.extend(await self.list_tools_for_plugin(pid))
             except Exception:
+                failed = True
                 continue
-        self._tools_cache = out
-        self._tools_cache_ids = ids
+        if not failed:
+            self._tools_cache = out
+            self._tools_cache_ids = ids
         return list(out)
 
     async def call_tool(self, namespaced_name: str, arguments: dict[str, Any] | None) -> str:

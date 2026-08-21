@@ -5,7 +5,20 @@ from __future__ import annotations
 from backend.bridge.status import ListenerStatusState, fetch_listener_status
 
 
+def _patch_epic(monkeypatch, *, online: bool = False) -> None:
+    monkeypatch.setattr(
+        "backend.mcp_plugins.epic.probe_epic_mcp",
+        lambda **_k: {
+            "epic_mcp_online": online,
+            "epic_mcp_reason": "" if online else "unreachable",
+            "epic_mcp_url": "http://127.0.0.1:8000/mcp",
+            "epic_mcp_setup_steps": [] if online else ["enable Auto Start"],
+        },
+    )
+
+
 def test_busy_listener_stays_online(monkeypatch):
+    _patch_epic(monkeypatch, online=True)
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
         lambda _port: {
@@ -35,6 +48,7 @@ def test_busy_listener_stays_online(monkeypatch):
 
 
 def test_stale_tick_wedges_after_streak(monkeypatch):
+    _patch_epic(monkeypatch)
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
         lambda _port: {"status": "ok", "busy": False, "uptime_sec": 30, "tick_age_sec": 25.0},
@@ -56,6 +70,7 @@ def test_stale_tick_wedges_after_streak(monkeypatch):
 
 
 def test_get_failure_is_offline(monkeypatch):
+    _patch_epic(monkeypatch)
     monkeypatch.setattr("backend.bridge.status.listener_get_health", lambda _port: None)
     monkeypatch.setattr(
         "backend.bridge.status.ping_listener",
@@ -69,6 +84,7 @@ def test_get_failure_is_offline(monkeypatch):
 
 
 def test_fresh_tick_is_online(monkeypatch):
+    _patch_epic(monkeypatch, online=True)
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
         lambda _port: {
@@ -94,6 +110,7 @@ def test_fresh_tick_is_online(monkeypatch):
 
 def test_legacy_listener_without_tick_age_stays_online(monkeypatch):
     """Old listeners lack tick_age_sec — do not POST; stay online without wedging."""
+    _patch_epic(monkeypatch, online=True)
     monkeypatch.setattr(
         "backend.bridge.status.listener_get_health",
         lambda _port: {"status": "ok", "busy": False, "uptime_sec": 45},
@@ -107,3 +124,16 @@ def test_legacy_listener_without_tick_age_stays_online(monkeypatch):
     status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
     assert status["online"] is True
     assert status["wedged"] is False
+    assert status["epic_mcp_online"] is True
+    assert "Epic MCP online" in status["status_text"]
+
+
+def test_epic_mcp_offline_includes_setup_steps(monkeypatch):
+    _patch_epic(monkeypatch, online=False)
+    monkeypatch.setattr("backend.bridge.status.listener_get_health", lambda _port: None)
+    status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
+    assert status["online"] is False
+    assert status["epic_mcp_online"] is False
+    assert status["epic_mcp_reason"] == "unreachable"
+    assert status["epic_mcp_setup_steps"]
+    assert "Epic MCP off" in status["status_text"]

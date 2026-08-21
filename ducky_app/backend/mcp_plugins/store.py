@@ -143,6 +143,12 @@ def save_mcp_config(data: dict[str, Any]) -> Path:
 
     get_plugin_pool().invalidate_tools_cache()
     try:
+        from backend.mcp_plugins.epic import invalidate_epic_mcp_probe
+
+        invalidate_epic_mcp_probe()
+    except Exception:
+        pass
+    try:
         from backend.mcp_plugins.bridge_proxy import schedule_sync_nested_proxies
 
         schedule_sync_nested_proxies()

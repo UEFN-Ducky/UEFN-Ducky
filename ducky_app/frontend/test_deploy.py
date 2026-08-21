@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from frontend import deploy
@@ -48,3 +49,17 @@ def test_listener_sync_uses_process_unique_staging_tree(tmp_path, monkeypatch) -
     assert len(staged) == 1
     assert staged[0].name.startswith("listener.tmp.")
     assert staged[0].name != "listener.tmp"
+
+
+def test_enable_uefn_project_python_flips_flag(tmp_path: Path) -> None:
+    path = tmp_path / "Island.uefnproject"
+    path.write_text('{"dataSets": {"experimental": {}}}\n', encoding="utf-8")
+    msg = deploy.enable_uefn_project_python(tmp_path)
+    assert msg and "Island.uefnproject" in msg
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["dataSets"]["experimental"]["pythonExperimental"]["bEnablePythonForProject"] is True
+    assert deploy.enable_uefn_project_python(tmp_path) is None
+
+
+def test_enable_uefn_project_python_skips_missing_file(tmp_path: Path) -> None:
+    assert deploy.enable_uefn_project_python(tmp_path) is None

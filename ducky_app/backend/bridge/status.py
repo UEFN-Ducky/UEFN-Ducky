@@ -205,6 +205,11 @@ def fetch_listener_status(
     if get_ok and isinstance(health, dict):
         uptime = float(health.get("uptime_sec", 0) or 0)
 
+    from backend.mcp_plugins.epic import probe_epic_mcp
+
+    epic = probe_epic_mcp()
+    epic_online = bool(epic.get("epic_mcp_online"))
+    epic_reason = str(epic.get("epic_mcp_reason") or "")
     if wedged:
         status_text = "Listener wedged — restart UEFN (commands not processing)"
     elif online and busy:
@@ -216,6 +221,12 @@ def fetch_listener_status(
         status_text = "Online"
     else:
         status_text = "Offline — open UEFN + deploy listener"
+    if epic_online:
+        status_text = f"{status_text} · Epic MCP online"
+    elif epic_reason == "disabled":
+        status_text = f"{status_text} · Epic MCP disabled (Settings → MCPs)"
+    else:
+        status_text = f"{status_text} · Epic MCP off — enable the project in Ducky, open UEFN"
 
     uefn_project_dir = ""
     uefn_project_name = ""
@@ -251,4 +262,8 @@ def fetch_listener_status(
         "port": port,
         "tick_age_sec": tick_age,
         "current_command": current_command,
+        "epic_mcp_online": epic_online,
+        "epic_mcp_reason": epic_reason,
+        "epic_mcp_url": str(epic.get("epic_mcp_url") or ""),
+        "epic_mcp_setup_steps": list(epic.get("epic_mcp_setup_steps") or []),
     }
