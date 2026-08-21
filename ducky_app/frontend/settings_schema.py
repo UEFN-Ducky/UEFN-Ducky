@@ -224,6 +224,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Walkthrough completions", "General",
         description="Per-tour completion map for the product walkthrough service.",
     ),
+    "starter_llm_gateways_seeded": FieldMeta(
+        "Starter LLM gateways seeded", "internal",
+        description="First-run Store install of Anthropic, Cursor, and OpenAI already ran once.",
+    ),
 }
 
 

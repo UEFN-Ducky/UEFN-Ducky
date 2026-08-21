@@ -4,6 +4,10 @@ Loads the in-editor listener from ``%LOCALAPPDATA%/UEFN-Ducky/listener``, which 
 overwrites with the latest plaintext listener source on every launch. No HTTP, no cache, no
 bundle — start UEFN-Ducky.exe once, then restart UEFN (or call ``reload_listener``).
 
+With UEFN MCP Toolsets, ForceEnablePython often skips this file — the panel also hooks
+Engine EditorToolset ``init_unreal.py`` (``ducky_listener_boot``). This project stub still
+matters when Python starts after Content mounts.
+
 Port: 4200 (fixed). Override with env ``UEFN_DUCKY_LISTENER_PORT``. Disable with ``UEFN_DUCKY_DISABLE=1``.
 """
 
@@ -32,11 +36,13 @@ def _run() -> None:
             pass
         return
     os.environ.setdefault("UEFN_DUCKY_LISTENER_PORT", "4200")
+    # Coexistence: Toolsets own :8000 — never thrash Epic StartServer from project init.
+    os.environ.setdefault("UEFN_DUCKY_ENSURE_EPIC", "0")
     if str(ed) not in sys.path:
         sys.path.insert(0, str(ed))
     from listener.bootstrap import run
 
-    run()
+    run(ensure_epic=False)
 
 
 try:

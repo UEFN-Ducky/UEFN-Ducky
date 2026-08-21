@@ -3,7 +3,7 @@ import { Header } from "./Header";
 import { EditorTabs } from "./EditorTabs";
 import { getApi } from "../hooks/usePanelApi";
 import { useTerminalsSettings } from "../contexts/TerminalsSettingsContext";
-import type { ChatTab, EditorLayoutState, EditorTab } from "../types/panel";
+import type { ChatTab, EditorLayoutState, EditorTab, ListenerStatus } from "../types/panel";
 
 interface FocusHeaderBarProps {
   onCloseWindow: () => void;
@@ -11,6 +11,7 @@ interface FocusHeaderBarProps {
   isOnline: boolean;
   isWedged?: boolean;
   statusText?: string;
+  listenerStatus?: ListenerStatus;
   projectMatch?: boolean;
   project?: { name: string; path: string; slug: string };
   hasProject: boolean;
@@ -41,6 +42,7 @@ export function FocusHeaderBar({
   isOnline,
   isWedged = false,
   statusText,
+  listenerStatus,
   projectMatch,
   project = { name: "", path: "", slug: "" },
   hasProject,
@@ -95,6 +97,7 @@ export function FocusHeaderBar({
           isOnline={isOnline}
           isWedged={isWedged}
           statusText={statusText}
+          listenerStatus={listenerStatus}
           projectMatch={projectMatch}
           project={project}
           layoutMode="full"

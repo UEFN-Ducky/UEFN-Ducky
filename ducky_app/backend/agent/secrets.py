@@ -1,4 +1,4 @@
-"""DPAPI-encrypted API key storage (Windows). Falls back to noop encrypt on other OS (dev/tests)."""
+"""DPAPI-encrypted API key storage (Windows). Non-Windows keeps secrets in memory only."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _dpapi_available() -> bool:
 
 def _protect(plaintext: bytes) -> bytes:
     if not _dpapi_available():
-        return plaintext
+        raise OSError("Credential persist requires Windows DPAPI")
     import ctypes
     import ctypes.wintypes
 
@@ -62,7 +62,7 @@ def _protect(plaintext: bytes) -> bytes:
 
 def _unprotect(ciphertext: bytes) -> bytes:
     if not _dpapi_available():
-        return ciphertext
+        raise OSError("Credential persist requires Windows DPAPI")
     import ctypes
     import ctypes.wintypes
 
@@ -117,6 +117,10 @@ def load_keys(*, use_cache: bool = True) -> dict[str, str]:
     global _memory_cache
     if use_cache and _memory_cache is not None:
         return dict(_memory_cache)
+    if not _dpapi_available():
+        # ponytail: Windows-only persist; tests/dev keep the process cache.
+        _memory_cache = {} if _memory_cache is None else _memory_cache
+        return dict(_memory_cache)
     path = credentials_path()
     if not path.is_file():
         _memory_cache = {}
@@ -132,10 +136,12 @@ def load_keys(*, use_cache: bool = True) -> dict[str, str]:
 def save_keys(keys: dict[str, str]) -> None:
     global _memory_cache
     cleaned = {k: v.strip() for k, v in keys.items() if v and v.strip()}
+    _memory_cache = dict(cleaned)
+    if not _dpapi_available():
+        return
     path = credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_serialize_keys(cleaned))
-    _memory_cache = dict(cleaned)
 
 
 def set_key(provider: str, value: str) -> None:

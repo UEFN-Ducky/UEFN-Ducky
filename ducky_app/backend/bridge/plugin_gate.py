@@ -58,6 +58,14 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
 
     async def list_tools_after_plugins(req: Any) -> Any:
         await asyncio.to_thread(wait_until_plugins_loaded, timeout)
+        # Nested Epic/HTTP proxies register after Store plugins — wait once so
+        # Cursor's first tools/list includes unreal__* when Epic :8000 is up.
+        try:
+            from backend.mcp_plugins.bridge_proxy import wait_until_nested_proxies_synced
+
+            await asyncio.to_thread(wait_until_nested_proxies_synced, min(20.0, timeout))
+        except Exception:
+            pass
         clear_mcp_tool_cache(mcp)
         return await orig_list(req)
 

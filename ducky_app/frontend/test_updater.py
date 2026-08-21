@@ -200,6 +200,32 @@ def test_apply_update_dev_sets_check_error() -> None:
         _reset_progress()
 
 
+def test_apply_update_requires_sha256() -> None:
+    _reset_progress()
+
+    def fake_status() -> dict:
+        return {
+            "channel": "installed",
+            "installed": True,
+            "update_available": True,
+            "installer_url": "https://example.test/Setup.exe",
+            "installer_sha256": None,
+            "remote_version": "9.9.9",
+            "install_scope": "user",
+        }
+
+    original = updater.get_app_update_status
+    updater.get_app_update_status = fake_status  # type: ignore[assignment]
+    try:
+        result = updater.apply_update()
+        assert result["ok"] is False
+        assert result["stage"] == "check"
+        assert "sha256" in str(result["error"]).lower()
+    finally:
+        updater.get_app_update_status = original
+        _reset_progress()
+
+
 def test_sweep_installer_cache_keeps_pending_newer() -> None:
     """After a successful install, drop Setup <= current; keep a newer pending cache."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -283,6 +309,7 @@ if __name__ == "__main__":
     test_silent_install_args_force_close()
     test_shutdown_after_delay_always_exits()
     test_apply_update_dev_sets_check_error()
+    test_apply_update_requires_sha256()
     test_sweep_installer_cache_keeps_pending_newer()
     test_cached_installer_usable_requires_sha()
     test_remove_installer_file()

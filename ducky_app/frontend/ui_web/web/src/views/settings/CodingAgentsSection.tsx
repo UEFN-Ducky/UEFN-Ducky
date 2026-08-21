@@ -8,6 +8,7 @@ import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
 import { usePluginContributions } from "../../hooks/usePluginContributions";
 import type { CodingAgentDto } from "../../types/panel";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
+import { targetRef } from "../../ui-targets/registry";
 
 function BotIcon() {
   return (
@@ -174,6 +175,11 @@ function CodingAgentRows({
                 <button
                   type="button"
                   className="settings-btn llms-provider-btn"
+                  ref={targetRef("settings.llms.provider.agent.detect", {
+                    kind: "button",
+                    label: "Detect",
+                    route: "settings.llms",
+                  })}
                   disabled={detecting}
                   onClick={() => {
                     const api = getApi();
@@ -264,7 +270,14 @@ export function ProviderCodingAgents({ pluginId }: { pluginId: string }) {
   });
 
   return (
-    <section className="general-tab-section">
+    <section
+      className="general-tab-section"
+      ref={targetRef("settings.llms.provider.agent", {
+        kind: "settings_field",
+        label: "Coding agent",
+        route: "settings.llms",
+      })}
+    >
       <GeneralSectionHeader icon={<BotIcon />} title="Coding agent" />
       <CodingAgentRows
         rows={mine}

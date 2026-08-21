@@ -1,6 +1,12 @@
-"""First import: register commands, replace stale listener, start server."""
+"""First import: register commands, replace stale listener, start server.
+
+Coexistence with Epic UEFN MCP Toolsets (port 8000): start Ducky on 4200 only.
+Never thrash Epic's MCP when it is already listening — StartServer / settings
+flips from here interfere with Beta Access → UEFN MCP Toolsets.
+"""
 
 import os
+import socket
 import traceback
 
 import unreal
@@ -9,7 +15,22 @@ from listener.logutil import log_msg
 from listener.runtime import start_listener, stop_listener
 
 
-def run() -> None:
+def _epic_mcp_tcp_up(host: str = "127.0.0.1", port: int = 8000, timeout: float = 0.2) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def run(*, ensure_epic: bool | None = None) -> None:
+    """Start the Ducky listener.
+
+    ``ensure_epic``:
+      - None / auto: only touch Epic MCP if :8000 is down
+      - False: never call Epic StartServer (preferred when Toolsets already own MCP)
+      - True: always try StartServer (legacy)
+    """
     import listener.state  # noqa: F401 — attach shared state to unreal
     import listener.handlers  # noqa: F401 — register commands
 
@@ -36,17 +57,33 @@ def run() -> None:
         # UEFN_DUCKY_STATUS_WINDOW=1 to restore the floating window (debug only).
         _show = os.environ.get("UEFN_DUCKY_STATUS_WINDOW", "").strip().lower() in ("1", "true", "yes")
         start_listener(show_status=_show)
-        try:
-            _ensure_epic_mcp()
-        except Exception:
-            pass
+
+        env = (os.environ.get("UEFN_DUCKY_ENSURE_EPIC") or "").strip().lower()
+        if ensure_epic is None:
+            if env in ("0", "false", "no", "never"):
+                ensure_epic = False
+            elif env in ("1", "true", "yes", "always"):
+                ensure_epic = True
+            else:
+                # auto: do not interfere when Epic UEFN MCP Toolsets already bound :8000
+                ensure_epic = not _epic_mcp_tcp_up()
+        if ensure_epic:
+            try:
+                _ensure_epic_mcp()
+            except Exception:
+                pass
+        elif _epic_mcp_tcp_up():
+            log_msg("Epic MCP already on :8000 — Ducky listener coexistence (skip StartServer)")
     except Exception as e:
         unreal.log_error(f"[MCP] Failed to start listener: {e}")
         traceback.print_exc()
 
 
 def _ensure_epic_mcp() -> None:
-    """Start Epic's in-editor MCP (:8000) and persist Auto Start on known settings CDOs."""
+    """Start Epic's in-editor MCP (:8000) only when it is not already up."""
+    if _epic_mcp_tcp_up():
+        log_msg("Epic MCP already listening — skip StartServer")
+        return
     try:
         world = unreal.EditorLevelLibrary.get_editor_world()
     except Exception:
@@ -57,6 +94,7 @@ def _ensure_epic_mcp() -> None:
     except Exception:
         pass
     # ponytail: named CDOs only — dir(unreal) is tens of thousands of types.
+    # Only flip Auto Start when currently False; never fight Toolsets that already own MCP.
     for name in (
         "ModelContextProtocolEditorSettings",
         "ModelContextProtocolSettings",

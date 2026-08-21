@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.skills.store import appdata_dir
+from urllib.parse import urlparse
 
 PLUGIN_MANIFEST = "plugin.json"
 MCP_PLUGINS_DIR = "mcp_plugins"
@@ -49,10 +50,150 @@ _META_KEYS = frozenset(
 # Drop leftover mcp.json entries + AppData mcp_plugins/<id> folders.
 _MOVED_TO_DESKTOP_PLUGIN_MCP = frozenset({"blender"})
 
+# Prefer keeping this catalog id when healing same-port HTTP conflicts.
+_PORT_CONFLICT_KEEP_IDS = frozenset({"unreal-mcp"})
+
 
 def appdata_mcp_plugins_dir() -> Path:
     """Legacy folder (migration / Open folder). Prefer :func:`mcp_config_path`."""
     return appdata_dir() / MCP_PLUGINS_DIR
+
+
+def http_bind_key(url: str) -> str | None:
+    """Normalize an HTTP(S) URL to ``host:port`` for conflict checks.
+
+    Path/query are ignored — two MCPs on ``http://127.0.0.1:8000/mcp`` and
+    ``http://localhost:8000/other`` still collide on the TCP bind.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    scheme = (parsed.scheme or "http").lower()
+    if scheme not in ("http", "https"):
+        return None
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return None
+    if host in ("localhost", "::1"):
+        host = "127.0.0.1"
+    if parsed.port:
+        port = int(parsed.port)
+    else:
+        port = 443 if scheme == "https" else 80
+    return f"{host}:{port}"
+
+
+def _block_is_enabled(block: dict[str, Any]) -> bool:
+    return block.get("disabled") is not True
+
+
+def _block_http_bind(block: dict[str, Any]) -> str | None:
+    transport = str(block.get("type") or "").strip().lower()
+    url = str(block.get("url") or "").strip()
+    if transport == "stdio":
+        return None
+    if transport in ("http", "sse") or (url and not transport):
+        return http_bind_key(url)
+    return None
+
+
+def _prefer_keep_http_sid(a: str, b: str, servers: dict[str, Any]) -> str:
+    if a in _PORT_CONFLICT_KEEP_IDS and b not in _PORT_CONFLICT_KEEP_IDS:
+        return a
+    if b in _PORT_CONFLICT_KEEP_IDS and a not in _PORT_CONFLICT_KEEP_IDS:
+        return b
+    ka = str((servers.get(a) or {}).get("kind") or "")
+    kb = str((servers.get(b) or {}).get("kind") or "")
+    if ka == "catalog" and kb != "catalog":
+        return a
+    if kb == "catalog" and ka != "catalog":
+        return b
+    return a if a <= b else b
+
+
+def find_enabled_http_port_conflicts(servers: dict[str, Any]) -> dict[str, list[str]]:
+    """Map ``host:port`` → enabled server ids when more than one share the bind."""
+    by_bind: dict[str, list[str]] = {}
+    for sid, block in servers.items():
+        if not isinstance(block, dict) or not _block_is_enabled(block):
+            continue
+        bind = _block_http_bind(block)
+        if not bind:
+            continue
+        by_bind.setdefault(bind, []).append(str(sid))
+    return {bind: sorted(ids) for bind, ids in by_bind.items() if len(ids) > 1}
+
+
+def heal_http_port_conflicts(servers: dict[str, Any]) -> list[str]:
+    """Disable extras when several enabled HTTP/SSE servers share a port. Mutates ``servers``."""
+    messages: list[str] = []
+    for bind, ids in find_enabled_http_port_conflicts(servers).items():
+        keep = ids[0]
+        for sid in ids[1:]:
+            keep = _prefer_keep_http_sid(keep, sid, servers)
+        for sid in ids:
+            if sid == keep:
+                continue
+            block = dict(servers[sid])
+            block["disabled"] = True
+            servers[sid] = block
+            messages.append(
+                f"Disabled '{sid}' — same TCP port as '{keep}' ({bind}). "
+                "Only one nested HTTP/SSE MCP may use a host:port."
+            )
+    return messages
+
+
+def http_port_conflict_message(
+    enabling_id: str,
+    servers: dict[str, Any],
+    *,
+    treat_as_enabled: bool = True,
+) -> str | None:
+    """If enabling ``enabling_id`` would share a port with another enabled server, explain why."""
+    pid = str(enabling_id)
+    block = servers.get(pid)
+    if not isinstance(block, dict):
+        return None
+    probe = dict(block)
+    if treat_as_enabled:
+        probe.pop("disabled", None)
+    bind = _block_http_bind(probe)
+    if not bind:
+        return None
+    others: list[str] = []
+    for sid, other in servers.items():
+        if str(sid) == pid or not isinstance(other, dict):
+            continue
+        if not _block_is_enabled(other):
+            continue
+        if _block_http_bind(other) != bind:
+            continue
+        label = str(other.get("label") or sid)
+        others.append(f"{label} ({sid})")
+    if not others:
+        return None
+    return (
+        f"Cannot enable '{pid}' — port {bind} is already used by "
+        + ", ".join(others)
+        + ". Disable the other server first, or change one URL "
+        "(Epic: Editor Preferences → Model Context Protocol port)."
+    )
+
+
+def _format_port_conflict_save_error(conflicts: dict[str, list[str]]) -> str:
+    parts = [
+        f"{bind}: " + ", ".join(ids) for bind, ids in sorted(conflicts.items())
+    ]
+    return (
+        "Multiple enabled HTTP/SSE MCP servers share the same TCP port. "
+        "Only one may be enabled per host:port. Conflicts: "
+        + "; ".join(parts)
+        + ". Disable extras or change a URL before saving."
+    )
 
 
 def mcp_config_path() -> Path:
@@ -137,6 +278,10 @@ def load_mcp_config() -> dict[str, Any]:
 
 def save_mcp_config(data: dict[str, Any]) -> Path:
     normalized = validate_mcp_config(data)
+    servers = normalized.get("mcpServers") if isinstance(normalized.get("mcpServers"), dict) else {}
+    conflicts = find_enabled_http_port_conflicts(servers)
+    if conflicts:
+        raise ValueError(_format_port_conflict_save_error(conflicts))
     path = mcp_config_path()
     _write_json(path, normalized)
     from backend.mcp_plugins.client_pool import get_plugin_pool
@@ -209,6 +354,24 @@ def _server_block_from_legacy_manifest(manifest: dict[str, Any]) -> dict[str, An
     return block
 
 
+def _catalog_ui_meta(manifest: dict[str, Any]) -> dict[str, Any]:
+    """UI metadata from a bundled catalog plugin.json (persisted into mcp.json)."""
+    out: dict[str, Any] = {
+        "kind": "catalog",
+        "label": str(manifest.get("label") or manifest.get("id") or "").strip(),
+        "description": str(manifest.get("description") or "").strip(),
+        "tool_prefix": str(manifest.get("tool_prefix") or "").strip(),
+    }
+    if manifest.get("tags"):
+        out["tags"] = list(manifest.get("tags") or [])
+    if manifest.get("version") is not None:
+        try:
+            out["version"] = int(manifest.get("version") or 0)
+        except (TypeError, ValueError):
+            pass
+    return {k: v for k, v in out.items() if v not in ("", None, [], 0)}
+
+
 def _migrate_legacy_folders_into_config() -> dict[str, Any]:
     """Build mcpServers from AppData mcp_plugins/*/plugin.json + enabled list."""
     servers: dict[str, Any] = {}
@@ -258,7 +421,7 @@ def _migrate_legacy_folders_into_config() -> dict[str, Any]:
 
 
 def _seed_catalog_into_servers(servers: dict[str, Any]) -> None:
-    """Ensure bundled catalog ids exist; refresh connection defaults when disabled."""
+    """Ensure bundled catalog ids exist; refresh UI meta + missing connection defaults."""
     for manifest in _list_bundled_catalog_manifests():
         pid = str(manifest.get("id") or "").strip()
         if not pid:
@@ -271,17 +434,20 @@ def _seed_catalog_into_servers(servers: dict[str, Any]) -> None:
             default_block = _server_block_from_legacy_manifest(manifest)
         except ValueError:
             continue
+        ui_meta = _catalog_ui_meta(manifest)
         existing = servers.get(pid)
         if not isinstance(existing, dict):
             block = dict(default_block)
+            block.update(ui_meta)
             if not bool(manifest.get("default_enabled")):
                 block["disabled"] = True
             servers[pid] = block
             continue
-        # Keep user connection edits; only fill missing connection keys from catalog.
+        # Keep user connection edits; fill missing connection keys + always refresh UI meta.
         for key, value in default_block.items():
             if key not in existing:
                 existing[key] = value
+        existing.update(ui_meta)
 
 
 def _retire_moved_to_desktop_plugin_mcp(servers: dict[str, Any]) -> None:
@@ -319,6 +485,7 @@ def ensure_mcp_config() -> Path:
                     continue
                 if sid not in bundled_ids and str(servers[sid].get("kind") or "") == "catalog":
                     del servers[sid]
+            heal_http_port_conflicts(servers)
             if json.dumps(servers, sort_keys=True) != before:
                 _write_json(path, {"mcpServers": servers})
             return path
@@ -328,6 +495,7 @@ def ensure_mcp_config() -> Path:
     servers = dict(migrated.get("mcpServers") or {})
     _seed_catalog_into_servers(servers)
     _retire_moved_to_desktop_plugin_mcp(servers)
+    heal_http_port_conflicts(servers)
     _write_json(path, {"mcpServers": servers})
     return path
 
@@ -458,6 +626,17 @@ def set_mcp_server_enabled(server_id: str, enabled: bool) -> dict[str, Any]:
         raise FileNotFoundError(f"MCP server not found: {pid}")
     block = dict(block)
     if enabled:
+        conflict = http_port_conflict_message(pid, servers, treat_as_enabled=True)
+        if conflict:
+            return {
+                "ok": False,
+                "error": conflict,
+                "plugin_id": pid,
+                "server_id": pid,
+                "enabled": False,
+                "port_conflict": True,
+                "enabled_mcp_plugins": get_enabled_plugin_ids(),
+            }
         block.pop("disabled", None)
     else:
         block["disabled"] = True
@@ -575,12 +754,30 @@ def list_mcp_plugins() -> list[dict[str, Any]]:
 def list_mcp_servers() -> list[dict[str, Any]]:
     ensure_mcp_config()
     enabled = set(get_enabled_plugin_ids())
-    rows: list[dict[str, Any]] = []
     cfg = load_mcp_config()
-    for sid, block in sorted(cfg.get("mcpServers", {}).items()):
+    servers = cfg.get("mcpServers", {}) if isinstance(cfg.get("mcpServers"), dict) else {}
+    conflicts = find_enabled_http_port_conflicts(servers)
+    bind_owners: dict[str, list[str]] = {}
+    for sid, block in servers.items():
+        if not isinstance(block, dict):
+            continue
+        bind = _block_http_bind(block)
+        if bind:
+            bind_owners.setdefault(bind, []).append(str(sid))
+
+    rows: list[dict[str, Any]] = []
+    for sid, block in sorted(servers.items()):
         if not isinstance(block, dict):
             continue
         manifest = _manifest_from_server_block(sid, block)
+        bind = _block_http_bind(block)
+        conflict_with: list[str] = []
+        if bind:
+            peers = [other for other in bind_owners.get(bind, []) if other != sid]
+            # Prefer listing currently-enabled peers (the ones that block enable).
+            enabled_peers = [p for p in peers if p in enabled]
+            conflict_with = enabled_peers or peers
+        url = str(block.get("url") or "").strip()
         rows.append(
             {
                 "id": sid,
@@ -597,6 +794,13 @@ def list_mcp_servers() -> list[dict[str, Any]]:
                 "tool_prefix": str(manifest.get("tool_prefix") or sid),
                 "intents": list(manifest.get("intents") or []),
                 "path": str(mcp_config_path()),
+                "url": url,
+                "http_bind": bind or "",
+                "port_conflict": bool(bind and bind in conflicts and sid in enabled),
+                "port_conflict_with": conflict_with,
+                "enable_blocked_by_port": bool(
+                    sid not in enabled and bind and any(p in enabled for p in conflict_with)
+                ),
             }
         )
     return rows

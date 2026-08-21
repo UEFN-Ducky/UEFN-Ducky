@@ -1,12 +1,12 @@
 {
   "id": "unreal-mcp",
   "label": "UEFN MCP (Epic)",
-  "description": "Official in-editor Unreal MCP (Verse, Scene Graph entities, Creative devices, PIC play sessions). Nested under uefn-ducky — do not add a second IDE mcp.json entry.",
+  "description": "Official Epic in-editor MCP nested under Ducky. UI shows three tools: unreal__list_toolsets, unreal__describe_toolset, unreal__call_tool — then call Valkyrie Device/Entity/Verse/Session toolsets (and editor_toolset.*). Do not add a second IDE mcp.json entry.",
   "kind": "catalog",
-  "version": 1,
+  "version": 2,
   "default_enabled": true,
   "tool_prefix": "unreal",
-  "tags": ["uefn", "epic", "verse", "devices", "session"],
+  "tags": ["uefn", "epic", "verse", "devices", "session", "entities"],
   "server": {
     "type": "http",
     "url": "http://127.0.0.1:8000/mcp"
@@ -14,6 +14,7 @@
   "intents": [
     "unreal-mcp",
     "uefn mcp",
+    "epic mcp",
     "scene graph",
     "entity",
     "entities",
@@ -24,10 +25,12 @@
     "play in client",
     "pic session"
   ],
-  "requirements_note": "Enable the island in Ducky, then open it in UEFN. Default bind http://127.0.0.1:8000/mcp.",
+  "requirements_note": "Enable the island in Ducky, then open it in UEFN. Default bind http://127.0.0.1:8000/mcp. In Settings → MCPs look for \"UEFN MCP (Epic)\" (id unreal-mcp). Do not enable a second custom HTTP MCP on the same port.",
   "setup_steps": [
     "Enable this island in Ducky. That turns on Python and starts Epic MCP.",
     "Open the project in UEFN (restart once if Epic MCP is still off).",
+    "In Settings → MCPs confirm \"UEFN MCP (Epic)\" is Enabled (slug unreal-mcp).",
+    "Do not enable another HTTP/SSE MCP on the same host:port — Ducky blocks that and will disable duplicates.",
     "If port 8000 is taken, set Editor Preferences → Model Context Protocol port, then Settings → MCPs unreal-mcp URL to match."
   ]
 }

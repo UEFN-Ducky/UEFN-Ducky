@@ -217,14 +217,28 @@ def _parse_ws_index(relative_path: str) -> int:
     return index
 
 
+def _norm_path_key(path: Path | str) -> str:
+    """Comparable path key — case-insensitive on Windows (BuiltIn vs builtin)."""
+    text = str(path)
+    if os.name == "nt":
+        return os.path.normcase(os.path.normpath(text))
+    return os.path.normpath(text)
+
+
+def _is_path_under(child: Path, ancestor: Path) -> bool:
+    """True if child is ancestor or under it (Windows-safe casing)."""
+    try:
+        common = os.path.commonpath([str(child.resolve()), str(ancestor.resolve())])
+    except (ValueError, OSError):
+        return False
+    return _norm_path_key(common) == _norm_path_key(ancestor)
+
+
 def _is_under_any_workspace_folder(target: Path) -> bool:
     resolved = target.resolve()
     for folder_path in _workspace_folder_paths():
-        try:
-            if os.path.commonpath([str(resolved), str(folder_path)]) == str(folder_path):
-                return True
-        except ValueError:
-            continue
+        if _is_path_under(resolved, folder_path):
+            return True
     return False
 
 
@@ -298,11 +312,8 @@ def _resolve_relative(relative_path: str) -> Path:
     rel = (relative_path or "").strip().replace("\\", "/").strip("/")
     target = (root / rel).resolve() if rel else root.resolve()
     root_r = root.resolve()
-    try:
-        if os.path.commonpath([str(target), str(root_r)]) != str(root_r):
-            raise ValueError(f"Path escapes project root: {relative_path!r}")
-    except ValueError as exc:
-        raise ValueError(f"Path escapes project root: {relative_path!r}") from exc
+    if not _is_path_under(target, root_r):
+        raise ValueError(f"Path escapes project root: {relative_path!r}")
     return target
 
 
@@ -315,9 +326,8 @@ def _content_dir() -> Path:
 
 
 def _is_under_content(target: Path) -> bool:
-    content = _content_dir()
     try:
-        return os.path.commonpath([str(target.resolve()), str(content)]) == str(content)
+        return _is_path_under(target, _content_dir())
     except ValueError:
         return False
 
@@ -820,10 +830,7 @@ def create_project_folder(parent_relative: str, name: str) -> dict[str, str]:
 
 
 def _is_descendant_or_self(ancestor: Path, candidate: Path) -> bool:
-    try:
-        return os.path.commonpath([str(candidate.resolve()), str(ancestor.resolve())]) == str(ancestor.resolve())
-    except ValueError:
-        return False
+    return _is_path_under(candidate, ancestor)
 
 
 def move_project_entry(source_relative: str, dest_parent_relative: str) -> dict[str, str]:

@@ -453,12 +453,23 @@ export type ComposerAttachment =
 export interface ListenerStatus {
   online: boolean;
   wedged?: boolean;
+  busy?: boolean;
   version: string;
   uptime_sec?: number;
   status_text?: string;
   uefn_project_dir?: string;
   uefn_project_name?: string;
   project_match?: boolean;
+  port?: number;
+  epic_mcp_online?: boolean;
+  epic_mcp_reason?: string;
+  epic_mcp_url?: string;
+  epic_mcp_setup_steps?: string[];
+  uefn_python_editor_scripting?: boolean;
+  uefn_mcp_toolsets?: boolean;
+  python_and_toolsets?: boolean;
+  listener_init_race?: boolean;
+  beta_access_note?: string;
 }
 
 export interface ProjectInfo {
@@ -1487,6 +1498,22 @@ export interface PanelApi {
     version?: string,
     isUpdate?: boolean,
   ): Promise<DuckyOSStoreInstallResult>;
+  starter_llm_onboard_pending?(): Promise<{
+    ok?: boolean;
+    pending?: boolean;
+    grandfathered?: boolean;
+    error?: string;
+  }>;
+  ensure_starter_llm_gateways?(): Promise<{
+    ok?: boolean;
+    first_run?: boolean;
+    grandfathered?: boolean;
+    installed?: string[];
+    skipped?: string[];
+    present?: string[];
+    errors?: Array<{ slug: string; error: string; code: string }>;
+    error?: string;
+  }>;
   duckyos_store_checkout?(slug: string): Promise<{ ok?: boolean; error?: string; code?: string; url?: string; slug?: string }>;
   duckyos_store_grant?(sessionId: string, slug?: string): Promise<{ ok?: boolean; error?: string; code?: string; slug?: string; alreadyOwned?: boolean }>;
   list_uefn_plugins?(): Promise<{ ok?: boolean; error?: string; plugins?: UefnPluginDto[] }>;
@@ -2715,6 +2742,16 @@ export interface McpPluginDto {
   tool_names?: string[];
   intents: string[];
   path: string;
+  /** HTTP/SSE URL from mcp.json (empty for stdio). */
+  url?: string;
+  /** Normalized host:port for HTTP/SSE servers. */
+  http_bind?: string;
+  /** True when this enabled server shares a TCP port with another enabled HTTP/SSE MCP. */
+  port_conflict?: boolean;
+  /** Peer server ids on the same host:port. */
+  port_conflict_with?: string[];
+  /** True when enable is blocked because another enabled server owns this port. */
+  enable_blocked_by_port?: boolean;
 }
 
 export interface McpPluginListDto {

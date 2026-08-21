@@ -167,7 +167,6 @@ export function McpPluginsSection() {
   const refreshPlugins = useCallback(() => {
     const api = getApi();
     if (!api?.list_mcp_plugins) return;
-    setLoadError("");
     void api
       .list_mcp_plugins()
       .then((res) => setPlugins(res.plugins ?? []))
@@ -232,6 +231,13 @@ export function McpPluginsSection() {
   const toggleEnabled = async (server: McpPluginDto) => {
     const api = getApi();
     if (!api?.set_mcp_plugin_enabled) return;
+    if (!server.enabled && server.enable_blocked_by_port) {
+      const peers = (server.port_conflict_with || []).join(", ") || "another server";
+      setLoadError(
+        `Cannot enable "${server.label}" — port ${server.http_bind || "?"} is already used by ${peers}. Disable that server first, or change one URL.`,
+      );
+      return;
+    }
     setBusyId(server.id);
     try {
       const result = await api.set_mcp_plugin_enabled(server.id, !server.enabled);
@@ -242,6 +248,8 @@ export function McpPluginsSection() {
             ? "Confirm trust for this desktop plugin in Settings → Store first."
             : "Failed to update server");
         setLoadError(err);
+      } else {
+        setLoadError("");
       }
       refreshPlugins();
       refreshCatalog();
@@ -458,6 +466,8 @@ export function McpPluginsSection() {
   const renderServerRow = (server: McpPluginDto) => {
     const busy = busyId === server.id;
     const toggleId = `mcp-server-enabled-${server.id}`;
+    const enableBlocked = Boolean(server.enable_blocked_by_port);
+    const portConflict = Boolean(server.port_conflict);
     return (
       <CatalogListRow
         key={server.id}
@@ -472,10 +482,19 @@ export function McpPluginsSection() {
             {server.transport && server.transport !== "stdio" && server.transport !== "builtin" ? (
               <span>· {server.transport}</span>
             ) : null}
+            {server.http_bind ? <span>· {server.http_bind}</span> : null}
             <span>· {server.enabled ? "Enabled" : "Disabled"}</span>
+            {portConflict ? <span>· port conflict</span> : null}
+            {enableBlocked ? <span>· port in use</span> : null}
           </>
         }
-        overview={server.description?.trim() || undefined}
+        overview={
+          enableBlocked
+            ? `Port ${server.http_bind} is used by ${(server.port_conflict_with || []).join(", ") || "another MCP"}. Disable that server before enabling this one.`
+            : portConflict
+              ? `Shares TCP port ${server.http_bind} with ${(server.port_conflict_with || []).join(", ")}. Only one HTTP/SSE MCP may own a port — disable extras.`
+              : server.description?.trim() || undefined
+        }
         onOpen={() => handleOpenServer(server)}
         actions={
           <label className="mcp-plugin-enable" htmlFor={toggleId} onClick={(e) => e.stopPropagation()}>
@@ -490,7 +509,12 @@ export function McpPluginsSection() {
                 id={toggleId}
                 className="general-tab-switch-input"
                 checked={server.enabled}
-                disabled={busy}
+                disabled={busy || enableBlocked}
+                title={
+                  enableBlocked
+                    ? `Port ${server.http_bind} already used by ${(server.port_conflict_with || []).join(", ")}`
+                    : undefined
+                }
                 onChange={() => void toggleEnabled(server)}
               />
               <span className="general-tab-switch-track" aria-hidden />
@@ -504,6 +528,14 @@ export function McpPluginsSection() {
   const isHttpTransport = createTransport === "http" || createTransport === "sse";
   const selectedTest = selectedServer ? testResults[selectedServer.id] : undefined;
   const hasAnyServers = plugins.length > 0;
+  const portConflictBanner = useMemo(() => {
+    const hits = nestedServers.filter((s) => s.port_conflict || s.enable_blocked_by_port);
+    if (!hits.length) return "";
+    const binds = Array.from(
+      new Set(hits.map((s) => s.http_bind).filter((b): b is string => Boolean(b))),
+    );
+    return `Only one nested HTTP/SSE MCP may use a host:port. Conflict on ${binds.join(", ") || "shared port"} — disable extras or change a URL (Epic: Editor Preferences → Model Context Protocol).`;
+  }, [nestedServers]);
 
   return (
     <CatalogSlideShell
@@ -571,12 +603,16 @@ export function McpPluginsSection() {
         </div>
       }
       listBody={
-        loadError ? (
-          <div className="skills-mcp-load-error">{loadError}</div>
-        ) : !hasAnyServers ? (
+        !hasAnyServers && !loadError ? (
           <div className="catalog-slide-empty">No MCP servers configured yet.</div>
         ) : (
           <>
+            {loadError ? <div className="skills-mcp-load-error">{loadError}</div> : null}
+            {portConflictBanner && !loadError ? (
+              <div className="skills-mcp-load-error" role="status">
+                {portConflictBanner}
+              </div>
+            ) : null}
             {filterServers(nestedServers).length > 0 ? (
               <ListSection title="MCP servers (nested)">
                 {filterServers(nestedServers).map(renderServerRow)}
@@ -592,7 +628,8 @@ export function McpPluginsSection() {
                 {filterServers(desktopPluginTools).map(renderServerRow)}
               </ListSection>
             ) : null}
-            {listQuery.trim() &&
+            {hasAnyServers &&
+            listQuery.trim() &&
             filterServers(nestedServers).length === 0 &&
             filterServers(builtinGroups).length === 0 &&
             filterServers(desktopPluginTools).length === 0 ? (
@@ -616,7 +653,14 @@ export function McpPluginsSection() {
                       id={`mcp-detail-enabled-${selectedServer.id}`}
                       className="general-tab-switch-input"
                       checked={selectedServer.enabled}
-                      disabled={busyId === selectedServer.id}
+                      disabled={
+                        busyId === selectedServer.id || Boolean(selectedServer.enable_blocked_by_port)
+                      }
+                      title={
+                        selectedServer.enable_blocked_by_port
+                          ? `Port ${selectedServer.http_bind} already used by ${(selectedServer.port_conflict_with || []).join(", ")}`
+                          : undefined
+                      }
                       onChange={() => void toggleEnabled(selectedServer)}
                     />
                     <span className="general-tab-switch-track" aria-hidden />
@@ -667,6 +711,13 @@ export function McpPluginsSection() {
             </div>
             {selectedServer.description?.trim() ? (
               <p className="catalog-slide-detail-overview">{selectedServer.description.trim()}</p>
+            ) : null}
+            {selectedServer.enable_blocked_by_port || selectedServer.port_conflict ? (
+              <p className="catalog-slide-detail-overview skills-mcp-load-error" role="status">
+                {selectedServer.enable_blocked_by_port
+                  ? `Enable blocked: port ${selectedServer.http_bind} is already used by ${(selectedServer.port_conflict_with || []).join(", ")}. Disable that server first, or change a URL.`
+                  : `Port conflict on ${selectedServer.http_bind} with ${(selectedServer.port_conflict_with || []).join(", ")}. Only one HTTP/SSE MCP may own a host:port.`}
+              </p>
             ) : null}
 
             {selectedServer.setup_steps.length > 0 ? (

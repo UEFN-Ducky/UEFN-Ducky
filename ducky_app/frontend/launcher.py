@@ -191,9 +191,13 @@ def run_bridge() -> None:
         except Exception:
             pass
         try:
-            from backend.mcp_plugins.bridge_proxy import sync_nested_mcp_proxies
+            from backend.mcp_plugins.bridge_proxy import (
+                schedule_nested_proxy_retries,
+                sync_nested_mcp_proxies,
+            )
 
             sync_nested_mcp_proxies()
+            schedule_nested_proxy_retries()
         except Exception:
             pass
 

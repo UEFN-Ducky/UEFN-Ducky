@@ -55,7 +55,7 @@ data:
 - **Desktop plugins (Blender, etc.):** Settings → Skills & MCP / the **Enabled Store desktop plugins** block is ground truth. Blender READY does **not** need the UEFN listener — never say “UEFN MCP reconnecting” or stall on Fortnite. Teach Connect only when Blender is **NOT READY**. Nested MCP ≠ Store desktop plugins.
 - **Modeling path (Blender vs UEFN):** You can model in **Blender** (`blender_*`) or **UEFN** (Static Mesh / Geometry Scripting). When the user asks to model/build a mesh and Blender is READY (or enabled) **and** they did not already say Blender or UEFN, ask **one** short question: Blender or UEFN? Then proceed on their answer. If they already named a path, or only one path is available, do not ask — just use it.
 - **Assets:** discover with `list_assets`/`search_assets`/`get_asset_info`; mutate with `save_asset`/`duplicate_asset`/`rename_asset` (`delete_asset` needs approval). Materials (Store plugin **Materials**): `create_material`, `connect_material_nodes`, `assign_material_to_mesh` when that plugin is enabled.
-- **Devices:** Creative devices / PIC / Scene Graph entities → nested Epic `unreal__*` tools when `ducky_get_status.epic_mcp_online`. If that flag is false, stop and recites Epic setup steps — never `find_devices` / `inspect_creative_device` / `play_in_editor` / `create_entity`. VerseDevice `@editable` wires still use `inspect_verse_device` then `wire_verse_device_ref` / `set_verse_editable` (one field per call). Verify → `save_current_level`.
+- **Prefer official UEFN MCP first:** when `epic_mcp_online`, ALWAYS use nested Epic `unreal__*` for Creative devices / PIC / Scene Graph entities / in-editor Verse / actors / Epic materials-Niagara-UMG — do not use the Ducky listener for those. If Epic is offline, stop and recite Epic setup steps — never `find_devices` / `inspect_creative_device` / `play_in_editor` / `create_entity`. Listener second: VerseDevice `@editable` wires (`inspect_verse_device` / `wire_verse_device_ref` / `set_verse_editable`), offline `workspace_*`, prefabs, screenshots/Meshy. Verify → `save_current_level`.
 - **One heavy tool per step:** never request multiple `unreal__*`, `wire_verse_device_ref`, `spawn_actor`, `execute_python`, or `save_current_level` in the same assistant message — UEFN freezes. One `execute_python` that places many actors inside its loop is fine (single call).
 - **Actor paths:** use the actor's Outliner **label** exactly as returned by Epic device tools / `get_all_actors` — never `UAID_...` paths unless the label is rejected.
 - Do not claim success without an inspect read-back after writes.
@@ -151,10 +151,42 @@ def get_system_prompt_parts(
             + "\n"
         )
     )
+    beta_line = ""
+    try:
+        from frontend.uefn_project_beta import read_uefn_beta_access
+
+        beta = read_uefn_beta_access(project_root)
+        if beta.get("ok") and beta.get("agent_note"):
+            beta_line = (
+                f"- Beta Access: Python={'on' if beta.get('python_editor_scripting') else 'off'}, "
+                f"UEFN MCP Toolsets={'on' if beta.get('uefn_mcp_toolsets') else 'off'}"
+            )
+            if beta.get("python_and_toolsets"):
+                beta_line += " (both on — coexistence mode; Epic :8000 ≠ Ducky :4200)"
+            if not listener_online and beta.get("listener_init_race"):
+                beta_line += (
+                    "\n- ⚠ **Listener init race:** both Beta flags on → project "
+                    "`Content/Python/init_unreal.py` often never runs. Tell the user once: "
+                    "Tools → Execute Python Script → "
+                    "`%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py` "
+                    "(or restart UEFN so Documents/UnrealEngine/Python hook runs). "
+                    "Do **not** disable UEFN MCP Toolsets to “fix” Ducky. "
+                    "Continue Verse/`workspace_*` offline; Epic `unreal__*` if epic_mcp_online."
+                )
+            elif beta.get("python_and_toolsets") and listener_online:
+                beta_line += (
+                    "\n- Coexistence OK: Ducky listener :4200 + Epic MCP :8000. "
+                    "Never restart Epic MCP from Ducky tools; prefer unreal__* for "
+                    "devices/entities/PIC."
+                )
+            beta_line += f"\n- Beta note: {beta.get('agent_note')}\n"
+    except Exception:
+        beta_line = ""
     runtime_context = (
         "## Runtime context\n"
         f"- Listener: {status} on port {listener_port}\n"
         f"{epic_line}"
+        f"{beta_line}"
         f"- Project root: {project_line}"
         f"{project_context_line}\n"
     )

@@ -100,7 +100,7 @@ export function AddToUefnTab() {
         <GeneralSectionHeader
           icon={<TourIcon />}
           title="Walkthrough"
-          description="Replay the first-run tour of the app layout, Settings tabs, and Store."
+          description="Replay the first-run tour of the app layout, Settings tabs, Store, and LLM keys."
         />
         <div className="general-tab-btn-row" style={{ marginTop: 4 }}>
           <button

@@ -206,10 +206,12 @@ def fetch_listener_status(
         uptime = float(health.get("uptime_sec", 0) or 0)
 
     from backend.mcp_plugins.epic import probe_epic_mcp
+    from frontend.uefn_project_beta import read_uefn_beta_access
 
     epic = probe_epic_mcp()
     epic_online = bool(epic.get("epic_mcp_online"))
     epic_reason = str(epic.get("epic_mcp_reason") or "")
+    beta = read_uefn_beta_access(selected_project_root)
     if wedged:
         status_text = "Listener wedged — restart UEFN (commands not processing)"
     elif online and busy:
@@ -221,12 +223,14 @@ def fetch_listener_status(
         status_text = "Online"
     else:
         status_text = "Offline — open UEFN + deploy listener"
+        if beta.get("listener_init_race"):
+            status_text = "Offline — restart UEFN to reconnect Ducky listener"
     if epic_online:
-        status_text = f"{status_text} · Epic MCP online"
+        status_text = f"{status_text} · UEFN MCP online"
     elif epic_reason == "disabled":
-        status_text = f"{status_text} · Epic MCP disabled (Settings → MCPs)"
+        status_text = f"{status_text} · UEFN MCP disabled (Settings → MCPs)"
     else:
-        status_text = f"{status_text} · Epic MCP off — enable the project in Ducky, open UEFN"
+        status_text = f"{status_text} · UEFN MCP offline"
 
     uefn_project_dir = ""
     uefn_project_name = ""
@@ -249,6 +253,10 @@ def fetch_listener_status(
             uefn_project_name = str(st.project_cache.get("uefn_project_name", ""))
             project_match = bool(st.project_cache.get("project_match", True))
 
+    # Race is only "active" when Toolsets+Python are on AND the listener failed to start.
+    coexistence = bool(beta.get("python_and_toolsets"))
+    init_race_active = bool(coexistence and not online)
+
     return {
         "online": online,
         "wedged": wedged,
@@ -266,4 +274,9 @@ def fetch_listener_status(
         "epic_mcp_reason": epic_reason,
         "epic_mcp_url": str(epic.get("epic_mcp_url") or ""),
         "epic_mcp_setup_steps": list(epic.get("epic_mcp_setup_steps") or []),
+        "uefn_python_editor_scripting": bool(beta.get("python_editor_scripting")),
+        "uefn_mcp_toolsets": bool(beta.get("uefn_mcp_toolsets")),
+        "python_and_toolsets": coexistence,
+        "listener_init_race": init_race_active,
+        "beta_access_note": str(beta.get("agent_note") or "") if init_race_active else "",
     }

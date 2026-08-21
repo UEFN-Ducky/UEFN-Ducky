@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from typing import Any, Callable
 
 from backend.server import mcp
@@ -18,12 +19,32 @@ _log = logging.getLogger("uefn_ducky.mcp_bridge_proxy")
 # Tool names currently registered as nested proxies (for remove on sync).
 _PROXY_TOOL_NAMES: set[str] = set()
 _SYNCING = False
+_FIRST_SYNC_ATTEMPTED = threading.Event()
+
+
+def nested_proxy_tool_names() -> set[str]:
+    """Names currently registered as nested MCP proxies on this bridge process."""
+    return set(_PROXY_TOOL_NAMES)
+
+
+def wait_until_nested_proxies_synced(timeout: float = 20.0) -> bool:
+    """Block until the first nested-proxy sync attempt finishes (success or fail)."""
+    return _FIRST_SYNC_ATTEMPTED.wait(timeout=timeout)
 
 
 def _registered_tool_names() -> set[str]:
     tm = getattr(mcp, "_tool_manager", None)
     tools = getattr(tm, "_tools", None)
     return set(tools.keys()) if isinstance(tools, dict) else set()
+
+
+def _clear_list_tools_cache() -> None:
+    try:
+        from backend.bridge.plugin_gate import clear_mcp_tool_cache
+
+        clear_mcp_tool_cache(mcp)
+    except Exception:
+        pass
 
 
 def _remove_proxy_tool(name: str) -> None:
@@ -107,8 +128,10 @@ async def sync_nested_mcp_proxies_async() -> list[str]:
                 _log.warning("failed to proxy %s: %s", name, exc)
         if added:
             _log.info("nested MCP proxies: +%d (%s)", len(added), ", ".join(added[:8]))
+            _clear_list_tools_cache()
     finally:
         _SYNCING = False
+        _FIRST_SYNC_ATTEMPTED.set()
     return added
 
 
@@ -126,6 +149,7 @@ def sync_nested_mcp_proxies(log: Callable[[str], None] | None = None) -> list[st
         # CancelledError, which is not an Exception — it used to kill this
         # daemon thread with a full traceback dump.
         _log.warning("sync_nested_mcp_proxies failed: %s: %s", type(exc).__name__, exc)
+        _FIRST_SYNC_ATTEMPTED.set()
         return []
 
 
@@ -154,3 +178,28 @@ def schedule_sync_nested_proxies() -> None:
         ).start()
     except Exception:
         pass
+
+
+def schedule_nested_proxy_retries(*, delays_sec: tuple[float, ...] = (2.0, 6.0, 15.0)) -> None:
+    """If Epic MCP was offline at first sync, retry until unreal__ tools appear."""
+
+    def _worker() -> None:
+        for delay in delays_sec:
+            time.sleep(delay)
+            try:
+                from backend.mcp_plugins.epic import epic_mcp_enabled, probe_epic_mcp
+
+                if not epic_mcp_enabled():
+                    return
+                if not probe_epic_mcp(ttl_sec=0).get("epic_mcp_online"):
+                    continue
+                if any(n.startswith("unreal__") for n in _PROXY_TOOL_NAMES):
+                    return
+                sync_nested_mcp_proxies()
+                if any(n.startswith("unreal__") for n in _PROXY_TOOL_NAMES):
+                    _log.info("nested MCP proxies: unreal tools registered after retry")
+                    return
+            except Exception as exc:
+                _log.warning("nested proxy retry failed: %s", exc)
+
+    threading.Thread(target=_worker, daemon=True, name="mcp-nested-proxy-retry").start()

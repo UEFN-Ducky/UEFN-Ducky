@@ -256,6 +256,123 @@ input, textarea, select, button {
   white-space: nowrap;
   line-height: 1;
 }
+
+.connection-status-root {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.connection-status-menu {
+  width: 300px;
+  background: var(--dropdown-bg, var(--panel, #1e1e1e));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: 0 8px 24px var(--overlay, rgba(0, 0, 0, 0.35));
+  overflow: hidden;
+  padding: 6px 0 4px;
+}
+
+.connection-status-menu--portaled {
+  position: fixed;
+  z-index: 10000;
+}
+
+.connection-status-menu-head {
+  padding: 4px 12px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, var(--text-muted));
+}
+
+.connection-status-menu-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 12px;
+}
+
+.connection-status-menu-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted, #888);
+}
+
+.connection-status-menu-row.is-ok .connection-status-menu-dot {
+  background: var(--success, #3ecf8e);
+}
+
+.connection-status-menu-row.is-warn .connection-status-menu-dot {
+  background: var(--amber, #e8a317);
+}
+
+.connection-status-menu-row.is-off .connection-status-menu-dot {
+  background: var(--danger, #e85d5d);
+}
+
+.connection-status-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.connection-status-menu-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.connection-status-menu-detail {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted, var(--text-muted));
+  word-break: break-word;
+}
+
+.connection-status-menu-note {
+  margin: 4px 12px 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted, var(--text-muted));
+  background: var(--panel-elevated, rgba(255, 255, 255, 0.04));
+  border-radius: 6px;
+}
+
+.connection-status-menu-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 6px 8px 4px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+
+.connection-status-menu-settings:hover {
+  background: var(--hover, rgba(255, 255, 255, 0.06));
+}
+
+.connection-status-menu-settings svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 .icon-btn {
   background: transparent; border: none; color: var(--muted);
   width: 28px; height: 28px; border-radius: 6px;
@@ -382,8 +499,7 @@ input, textarea, select, button {
   flex-shrink: 0;
 }
 .app-header-center .quick-open-bar {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 28px;
 }
 .app-header-center .sidebar-toggle-btn {
   flex-shrink: 0;
@@ -3342,9 +3458,10 @@ body.focus-window:has(.focus-top-edge-grip:hover) .focus-header-chrome,
   height: 18px;
 }
 .focus-header-chrome .app-header--focus .quick-open-bar {
-  height: 22px;
-  padding: 0 6px;
-  font-size: 10px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  padding: 0;
 }
 .focus-header-chrome .app-header--focus .app-header-save-btn {
   padding: 2px 8px;

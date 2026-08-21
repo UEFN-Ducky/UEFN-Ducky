@@ -2,17 +2,21 @@
 
 Opens the system browser to the tenant (default ``https://uefnducky.org``).
 If you are already signed in there, the page mints a ``dky_v1_`` device API key
-(scope ``uefn-ducky.app``) and redirects to a local ``http://127.0.0.1`` callback.
-Credentials are stored DPAPI-encrypted in ``credentials.dat``. Passwords never
-enter the app.
+(scope ``uefn-ducky.app``), parks it server-side, and redirects to a local
+``http://127.0.0.1`` callback with a one-time code. The app exchanges that
+code over HTTPS (PKCE) for the key. Credentials are stored DPAPI-encrypted in
+``credentials.dat``. Passwords never enter the app.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import html as html_lib
 import json
 import platform
 import re
+import secrets as secrets_mod
 import socket
 import urllib.error
 import urllib.request
@@ -101,6 +105,23 @@ def _clear_blob() -> None:
     from backend.agent.secrets import clear_key
 
     clear_key(_CREDENTIALS_KEY)
+
+
+def pkce_pair() -> tuple[str, str]:
+    """RFC 7636 S256: ``(code_verifier, code_challenge)``."""
+    verifier = secrets_mod.token_urlsafe(32)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def _clear_expired_auth() -> None:
+    """Device key 401 — drop local credentials so the UI asks for sign-in."""
+    try:
+        stop_presence_heartbeat()
+    except Exception:
+        pass
+    _clear_blob()
 
 
 def _parse_set_cookie(headers: Any) -> dict[str, str]:
@@ -275,7 +296,7 @@ def mint_device_key(blob: dict[str, Any] | None = None) -> dict[str, Any]:
     base = str(blob.get("base_url") or "").rstrip("/")
     if not base or not blob.get("session_value"):
         return blob
-    body = {"name": _device_key_name(), "permissions": [DEVICE_SCOPE]}
+    body = {"name": _device_key_name(), "permissions": [DEVICE_SCOPE], "expiresInDays": 90}
     status, cookies, payload, raw = _request(
         "POST",
         f"{base}/api/auth/api-keys",
@@ -413,7 +434,7 @@ def _browser_callback_page(*, ok: bool, email: str = "") -> str:
     body = (
         "You can close this tab and return to UEFN Ducky."
         if ok
-        else "State mismatch or missing token. Close this tab and try again from the app."
+        else "State mismatch or missing code. Close this tab and try again from the app."
     )
     tone = "ok" if ok else "err"
     mark = "✓" if ok else "!"
@@ -493,7 +514,6 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
     signed in there, the page mints a device key and redirects to a local
     ``http://127.0.0.1`` callback. No password is typed in the app.
     """
-    import secrets
     import threading
     import webbrowser
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -502,7 +522,8 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
     base = normalize_base_url(base_url or resolve_base_url())
     _persist_base_url(base)
 
-    state = secrets.token_hex(16)
+    state = secrets_mod.token_hex(16)
+    verifier, challenge = pkce_pair()
     result: dict[str, Any] = {"done": False}
 
     class Handler(BaseHTTPRequestHandler):
@@ -517,10 +538,12 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
                 return
             qs = parse_qs(parsed.query)
             got_state = (qs.get("state") or [""])[0]
+            code = (qs.get("code") or [""])[0]
+            # ponytail: token= still accepted for one release while tenants update.
             token = (qs.get("token") or [""])[0]
             key_id = (qs.get("key_id") or [""])[0]
             email = (qs.get("email") or [""])[0]
-            ok = got_state == state and token.startswith("dky_v1_")
+            ok = got_state == state and (bool(code) or token.startswith("dky_v1_"))
             body = _browser_callback_page(ok=ok, email=email if ok else "")
             self.send_response(200 if ok else 400)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -532,6 +555,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
                     {
                         "done": True,
                         "ok": True,
+                        "code": code,
                         "token": token,
                         "key_id": key_id,
                         "email": email,
@@ -548,7 +572,10 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
     try:
         httpd = HTTPServer(("127.0.0.1", 0), Handler)
         port = int(httpd.server_address[1])
-        auth_url = f"{base}/admin/plugins/uefn-ducky/desktop-auth?q={state}.{port}"
+        auth_url = (
+            f"{base}/admin/plugins/uefn-ducky/desktop-auth"
+            f"?q={state}.{port}&challenge={challenge}"
+        )
 
         thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.25}, daemon=True)
         thread.start()
@@ -570,11 +597,31 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
                 code="browser_timeout",
             )
 
+        code = str(result.get("code") or "")
+        token = str(result.get("token") or "")
+        key_id = str(result.get("key_id") or "")
+        email = str(result.get("email") or "")
+        if code:
+            payload = _plugin_collect(
+                "uefn-ducky",
+                "desktop-exchange",
+                {"code": code, "codeVerifier": verifier, "state": state},
+                unavailable_code="auth_unavailable",
+                unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+                error_code="pkce_exchange_failed",
+                allow_anonymous=True,
+                timeout=20.0,
+            )
+            token = str(payload.get("token") or "")
+            key_id = str(payload.get("keyId") or payload.get("key_id") or key_id)
+            email = str(payload.get("email") or email)
+        if not token.startswith("dky_v1_"):
+            raise DuckyOSAccountError("Login handoff did not return a device key", code="pkce_exchange_failed")
         blob: dict[str, Any] = {
             "base_url": base,
-            "email": str(result.get("email") or ""),
-            "device_key": str(result["token"]),
-            "device_key_id": str(result.get("key_id") or ""),
+            "email": email,
+            "device_key": token,
+            "device_key_id": key_id,
             "device_key_error": "",
         }
         _save_blob(blob)
@@ -749,6 +796,9 @@ def api_request(
                     parsed = obj
             except (TypeError, ValueError, json.JSONDecodeError):
                 parsed = None
+        if int(exc.code) == 401 and (blob.get("device_key") or blob.get("session_value")):
+            _clear_expired_auth()
+            raise DuckyOSAccountError("Session expired — log in again", code="session_expired") from exc
         return int(exc.code), parsed, raw
     except (OSError, urllib.error.URLError, ValueError) as exc:
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc
@@ -1638,10 +1688,11 @@ def _store_download_and_install_unlocked(
     except Exception as exc:
         raise DuckyOSAccountError(f"Invalid zip data: {exc}", code="store_bad_zip") from exc
     expected = str(payload.get("sha256") or "").strip().lower()
-    if expected:
-        got = hashlib.sha256(raw).hexdigest()
-        if got != expected:
-            raise DuckyOSAccountError("Downloaded zip failed hash check", code="store_hash_mismatch")
+    if not expected:
+        raise DuckyOSAccountError("Store download missing sha256", code="store_hash_missing")
+    got = hashlib.sha256(raw).hexdigest()
+    if got != expected:
+        raise DuckyOSAccountError("Downloaded zip failed hash check", code="store_hash_mismatch")
 
     is_plugin = False
     try:

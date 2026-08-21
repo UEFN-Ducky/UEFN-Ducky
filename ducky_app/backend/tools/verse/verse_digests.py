@@ -1,7 +1,9 @@
 """Offline-first Verse digest reader — disk cache + decl index for AI tools.
 
 Digests live under %LOCALAPPDATA%/UnrealEditorFortnite/Saved/VerseProject/<Project>/
-and do not need the UEFN listener. Listener copies of the same tools remain as fallback.
+(Digests/BuiltIn/{Fortnite,Verse,UnrealEngine}/ and Digests/<Project>-Assets/, or the
+legacy top-level folders) and do not need the UEFN listener. Listener copies of the
+same tools remain as fallback.
 """
 
 from __future__ import annotations

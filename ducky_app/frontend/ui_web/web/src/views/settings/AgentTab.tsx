@@ -23,6 +23,7 @@ import {
 } from "../../hooks/usePluginContributions";
 import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
+import { targetRef, useUiTarget } from "../../ui-targets/registry";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
 import {
   useApplySettingsDrill,
@@ -393,6 +394,41 @@ export function AgentTab() {
   );
   useApplySettingsDrill("LLMs", applyLlmsDrill);
 
+  useEffect(() => {
+    const onSelect = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: string | null }>).detail?.id;
+      if (!id) {
+        setSelectedId(null);
+        setUsageTarget(null);
+        return;
+      }
+      setSelectedId(String(id));
+      setUsageTarget(null);
+    };
+    window.addEventListener("ducky:llms-select-provider", onSelect);
+    return () => window.removeEventListener("ducky:llms-select-provider", onSelect);
+  }, []);
+
+  const llmsBackRef = useUiTarget("settings.llms.back", {
+    kind: "button",
+    label: "Back",
+    route: "settings.llms",
+  });
+  const llmsKeyRef = useUiTarget("settings.llms.provider.key", {
+    kind: "input",
+    label: "API key",
+    route: "settings.llms",
+  });
+  const llmsSaveRef = useUiTarget("settings.llms.provider.save", {
+    kind: "button",
+    label: "Test & Save",
+    route: "settings.llms",
+  });
+  const llmsKeySectionRef = useUiTarget("settings.llms.provider.key_section", {
+    kind: "settings_field",
+    label: "API key",
+    route: "settings.llms",
+  });
   const backFromDetail = useSettingsHistoryBack(() => {
     setUsageTarget(null);
     setSelectedId(null);
@@ -529,6 +565,11 @@ export function AgentTab() {
                       key={row.id}
                       type="button"
                       className="llms-provider-nav-row"
+                      ref={targetRef(`settings.llms.provider.${row.id}`, {
+                        kind: "button",
+                        label: row.label,
+                        route: "settings.llms",
+                      })}
                       onClick={() => setSelectedId(row.id)}
                     >
                       <span className={`llms-provider-label${rowSaved ? " is-saved" : ""}`}>
@@ -609,6 +650,7 @@ export function AgentTab() {
                   <button
                     type="button"
                     className="duckies-tab-detail-back"
+                    ref={llmsBackRef}
                     onClick={backFromDetail}
                     aria-label="Back to LLM settings"
                   >
@@ -641,7 +683,7 @@ export function AgentTab() {
               <div className="duckies-tab-detail-scroll">
                 {/* API key / URL only when this Store plugin contributes an llm.providers row. */}
                 {selected.secret_key || selected.kind === "url" ? (
-                  <section className="general-tab-section">
+                  <section className="general-tab-section" ref={llmsKeySectionRef}>
                     <GeneralSectionHeader
                       icon={<KeyIcon />}
                       title={isUrl ? "Server URL" : "API key"}
@@ -659,6 +701,7 @@ export function AgentTab() {
                           </div>
                           <input
                             className="settings-input llms-provider-input"
+                            ref={llmsKeyRef}
                             type={isUrl ? "text" : "password"}
                             value={draftValue}
                             placeholder={
@@ -677,6 +720,7 @@ export function AgentTab() {
                           <button
                             type="button"
                             className={`settings-btn llms-provider-btn${justSaved ? " is-saved" : ""}`}
+                            ref={llmsSaveRef}
                             disabled={testing || !canTest}
                             onClick={() => void testKey(selected)}
                           >
@@ -713,7 +757,15 @@ export function AgentTab() {
 
                 <ProviderCodingAgents pluginId={selected.plugin_id} />
 
-                <PluginSettingsSections pluginId={selected.plugin_id} compact />
+                <div
+                  ref={targetRef("settings.llms.provider.plugin", {
+                    kind: "settings_field",
+                    label: "Provider settings",
+                    route: "settings.llms",
+                  })}
+                >
+                  <PluginSettingsSections pluginId={selected.plugin_id} compact />
+                </div>
               </div>
             </div>
           ) : null}
