@@ -191,7 +191,16 @@ class PluginClientPool:
     async def list_tools_for_plugin(self, plugin_id: str) -> list[Tool]:
         conn = await self._get_or_create(plugin_id)
         session = await self._ensure_session(conn)
-        result = await asyncio.wait_for(session.list_tools(), timeout=_CONNECT_TIMEOUT_SEC)
+        try:
+            result = await asyncio.wait_for(session.list_tools(), timeout=_CONNECT_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            raise
+        except Exception:
+            # Same self-heal as call_tool: a dead pooled stream would otherwise
+            # hide this plugin's tools from the registry until app restart.
+            await self._close_connection(conn)
+            session = await self._ensure_session(conn)
+            result = await asyncio.wait_for(session.list_tools(), timeout=_CONNECT_TIMEOUT_SEC)
         tools = list(result.tools or [])
         namespaced: list[Tool] = []
         for tool in tools:
@@ -255,13 +264,33 @@ class PluginClientPool:
                 "the Ducky fallback tool for this step; reconnect this MCP in "
                 "Settings → MCPs when the task is done."
             ) from None
-        except Exception as e:
-            detail = str(e).strip() or type(e).__name__
-            raise RuntimeError(
-                f"Nested MCP '{plugin_id}' tool '{original_name}' failed: {detail}. "
-                "Use the Ducky fallback tool for this step; reconnect this MCP in "
-                "Settings → MCPs when the task is done."
-            ) from e
+        except Exception:
+            # Dead pooled stream (ClosedResourceError etc.): the server restarted
+            # since we cached this session, while status probes open fresh sockets
+            # and still say "online". Self-heal — drop the session, reconnect,
+            # retry ONCE — instead of failing every call until app restart.
+            try:
+                await self._close_connection(conn)
+                session = await self._ensure_session(conn)
+                raw = await asyncio.wait_for(
+                    session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
+                )
+                self.invalidate_tools_cache()  # server restart may have changed tools
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
+                    f"{_TOOL_TIMEOUT_SEC:.0f}s on a fresh session. Use the Ducky "
+                    "fallback tool for this step; reconnect this MCP in "
+                    "Settings → MCPs when the task is done."
+                ) from None
+            except Exception as e2:
+                detail = str(e2).strip() or type(e2).__name__
+                raise RuntimeError(
+                    f"Nested MCP '{plugin_id}' tool '{original_name}' failed even "
+                    f"after an automatic reconnect: {detail}. Use the Ducky fallback "
+                    "tool for this step; toggle this MCP in Settings → MCPs when the "
+                    "task is done."
+                ) from e2
         conn.last_used = time.time()
         if hasattr(raw, "content"):
             return _content_to_text(raw.content)
