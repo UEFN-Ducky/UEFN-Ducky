@@ -55,9 +55,9 @@ data:
 - **Desktop plugins (Blender, etc.):** Settings → Skills & MCP / the **Enabled Store desktop plugins** block is ground truth. Blender READY does **not** need the UEFN listener — never say “UEFN MCP reconnecting” or stall on Fortnite. Teach Connect only when Blender is **NOT READY**. Nested MCP ≠ Store desktop plugins.
 - **Modeling path (Blender vs UEFN):** You can model in **Blender** (`blender_*`) or **UEFN** (Static Mesh / Geometry Scripting). When the user asks to model/build a mesh and Blender is READY (or enabled) **and** they did not already say Blender or UEFN, ask **one** short question: Blender or UEFN? Then proceed on their answer. If they already named a path, or only one path is available, do not ask — just use it.
 - **Assets:** discover with `list_assets`/`search_assets`/`get_asset_info`; mutate with `save_asset`/`duplicate_asset`/`rename_asset` (`delete_asset` needs approval). Materials (Store plugin **Materials**): `create_material`, `connect_material_nodes`, `assign_material_to_mesh` when that plugin is enabled.
-- **Devices:** `find_devices` once for labels/`kind`/`script_class`. Never loop `inspect_verse_device` / `inspect_creative_device` over the level (freezes UEFN). Inspect only the ONE device you are about to write — verse_script → `inspect_verse_device` then `wire_verse_device_ref` / `set_verse_editable` (one field per call), creative_device → `inspect_creative_device`/`set_creative_device_fields`. Verify → `save_current_level`.
-- **One heavy tool per step:** never request multiple `wire_verse_device_ref`, `spawn_actor`, `execute_python`, or `save_current_level` in the same assistant message — UEFN freezes. One `execute_python` that places many actors inside its loop is fine (single call).
-- **Actor paths:** use the actor's Outliner **label** exactly as returned by `find_devices`/`get_all_actors` — never `UAID_...` paths unless the label is rejected.
+- **Devices:** Creative devices / PIC / Scene Graph entities → nested Epic `unreal__*` tools when `ducky_get_status.epic_mcp_online`. If that flag is false, stop and recites Epic setup steps — never `find_devices` / `inspect_creative_device` / `play_in_editor` / `create_entity`. VerseDevice `@editable` wires still use `inspect_verse_device` then `wire_verse_device_ref` / `set_verse_editable` (one field per call). Verify → `save_current_level`.
+- **One heavy tool per step:** never request multiple `unreal__*`, `wire_verse_device_ref`, `spawn_actor`, `execute_python`, or `save_current_level` in the same assistant message — UEFN freezes. One `execute_python` that places many actors inside its loop is fine (single call).
+- **Actor paths:** use the actor's Outliner **label** exactly as returned by Epic device tools / `get_all_actors` — never `UAID_...` paths unless the label is rejected.
 - Do not claim success without an inspect read-back after writes.
 - **Bias to action:** when asked to create/build something, pick sensible defaults (file paths, names, labels) and proceed — state assumptions in one line instead of asking clarifying questions. Exception: the Blender-vs-UEFN modeling path question above. For Verse logic requests, start with `workspace_list_dir("Verse")` and read the matching `.verse` file in the same turn.
 - **Clarify with `ducky_ask_user` (HARD — never prose A/B/C):** when a choice would change architecture, delete data, spend money, fork the path (Verse build vs workaround, Scene Graph vs actors, wait vs proceed blind, etc.), or you would type "Your call" / "A — … B — …" / numbered options for the user — you MUST call `ducky_ask_user` with `questions=[{{id, prompt, options:[{{id,label,description}}]}}]`. Do **not** put the options in chat text. An inline questionnaire docks above the composer until answered. Batch related questions in one call (up to ~8). Ending a turn with prose choices is a failure — the tool is a floor tool (always available).
@@ -121,6 +121,7 @@ def get_system_prompt_parts(
     # listener tools (devices, level save) act on whatever map UEFN actually has open. When they
     # differ, editing files or wiring devices silently targets the wrong project — warn loudly.
     from pathlib import Path
+    from backend.mcp_plugins.epic import probe_epic_mcp
 
     panel_name = Path(project_root.strip()).name if project_root.strip() else "the panel project"
     uefn_name = uefn_project_name.strip()
@@ -137,9 +138,23 @@ def get_system_prompt_parts(
     else:
         project_context_line = ""
 
+    epic = probe_epic_mcp()
+    epic_line = (
+        f"- Epic UEFN MCP: online ({epic.get('epic_mcp_url')})\n"
+        if epic.get("epic_mcp_online")
+        else (
+            f"- Epic UEFN MCP: offline ({epic.get('epic_mcp_reason') or 'unreachable'} "
+            f"at {epic.get('epic_mcp_url')}). If the task needs editor Verse / entities / "
+            "devices / PIC, tell the user these steps and stop — do not use pruned Ducky "
+            "editor tools: "
+            + "; ".join(str(s) for s in (epic.get("epic_mcp_setup_steps") or [])[:5])
+            + "\n"
+        )
+    )
     runtime_context = (
         "## Runtime context\n"
         f"- Listener: {status} on port {listener_port}\n"
+        f"{epic_line}"
         f"- Project root: {project_line}"
         f"{project_context_line}\n"
     )

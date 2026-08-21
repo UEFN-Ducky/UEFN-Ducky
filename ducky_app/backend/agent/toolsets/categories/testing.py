@@ -23,17 +23,13 @@ EXTENDED_TOOLS = frozenset(
         "verse_test_run",
         "actor_state_snapshot",
         "actor_state_diff",
-        "play_in_editor",
-        "stop_pie",
         "get_editor_log",
         "workspace_compile_verse",
         "workspace_push_verse_changes",
         "workspace_list_verse_errors",
         "workspace_read_file",
         "workspace_write_file",
-        "find_devices",
         "inspect_verse_device",
-        "inspect_creative_device",
         "take_high_res_screenshot",
     }
 )

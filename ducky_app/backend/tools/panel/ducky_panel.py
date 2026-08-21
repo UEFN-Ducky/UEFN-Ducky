@@ -264,7 +264,12 @@ async def ducky_find_tools(query: str, limit: int = 20, pretty: bool = False) ->
 
 @mcp.tool()
 def ducky_get_status(pretty: bool = False) -> str:
-    """Panel + UEFN listener status (online, wedged, uptime, project match). Works while UEFN is offline."""
+    """Panel + listener + Epic UEFN MCP status. Works while UEFN is offline.
+
+    ``epic_mcp_online`` is TCP to the nested unreal-mcp URL (default :8000/mcp).
+    If false and the task needs editor Verse / entities / devices / PIC, tell the
+    user ``epic_mcp_setup_steps`` — do not fall back to pruned Ducky editor tools.
+    """
     from frontend import __version__
 
     settings = PanelSettings.load()

@@ -23,9 +23,6 @@ LISTENER_ONLINE_CORE: frozenset[str] = frozenset(
 # Low-level listener command names → agent-facing MCP tool names.
 _AGENT_TOOL_ALIASES: dict[str, str] = {
     "get_verse_editables": "inspect_verse_device",
-    "get_device_settings": "inspect_creative_device",
-    "set_device_settings": "set_creative_device_fields",
-    "list_creative_devices": "find_devices",
 }
 
 PLACEMENT_WORKFLOW: frozenset[str] = frozenset(
@@ -36,7 +33,6 @@ PLACEMENT_WORKFLOW: frozenset[str] = frozenset(
         "get_viewport_camera",
         "set_actor_transform",
         "save_current_level",
-        "find_devices",
     }
 )
 
@@ -48,7 +44,6 @@ WIRING_WORKFLOW: frozenset[str] = frozenset(
         "set_verse_editable",
         "resize_verse_array",
         "patch_verse_array_entry",
-        "find_devices",
         "save_current_level",
     }
 )
