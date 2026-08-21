@@ -21,7 +21,25 @@ _CLASS_PARENT_RE = re.compile(
     r"^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^>]*>\s*)*:=\s*class\s*\(([^)]*)\)"
 )
 _EXT_METHOD_RE = re.compile(
-    r"^\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*[^)]*\)\.([A-Za-z_][A-Za-z0-9_]*)\s*<"
+    # Receiver type may be module-qualified with one paren level:
+    # (Rotation:(/UnrealEngine.com/Temporary/SpatialMath:)rotation).RotateVector<...>
+    r"^\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?:\([^)]*\)|[^()])*\)\.([A-Za-z_][A-Za-z0-9_]*)\s*<"
+)
+# Module-qualified free function: (/UnrealEngine.com/Temporary/SpatialMath:)Distance<public>(...)
+_QUAL_FUNC_RE = re.compile(
+    r"^\s*\(/[^)]*:\)([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^>]*>\s*)*\("
+)
+# Plain function / method / parametric decl: Distance<public>(V1:vector3, ...)<reads>:float
+_FUNC_RE = re.compile(
+    r"^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^>]*>\s*)*\("
+)
+_FUNC_SIG_TAIL_RE = re.compile(r"\)\s*(?:<[^>]*>\s*)*:")
+_VERSE_KEYWORDS = frozenset(
+    {
+        "if", "for", "loop", "case", "set", "var", "return", "using", "block",
+        "race", "spawn", "branch", "defer", "then", "else", "not", "and", "or",
+        "option", "array", "map", "tuple", "sync", "rush", "do", "profile",
+    }
 )
 _GET_API_MAX_CHARS = 24000
 
@@ -192,21 +210,34 @@ def _build_index(path: str, mtime: float, lines: list[str]) -> DigestFile:
     for i, line in enumerate(lines):
         m = _DECL_RE.match(line)
         if not m:
+            name = ""
+            kind = ""
             em = _EXT_METHOD_RE.match(line)
             if em:
+                name = em.group(1)
+                kind = "extension_function"
+            else:
+                qm = _QUAL_FUNC_RE.match(line)
+                if qm:
+                    name = qm.group(1)
+                    kind = "function"
+                else:
+                    fm = _FUNC_RE.match(line)
+                    if (
+                        fm
+                        and fm.group(2) not in _VERSE_KEYWORDS
+                        and _FUNC_SIG_TAIL_RE.search(line)
+                    ):
+                        name = fm.group(2)
+                        kind = "function"
+            if name:
                 indent = len(line) - len(line.lstrip())
                 while stack and stack[-1][0] >= indent:
                     stack.pop()
-                name = em.group(1)
                 module = ".".join(s[1] for s in stack)
                 idx = len(decls)
                 decls.append(
-                    DeclEntry(
-                        name=name,
-                        kind="extension_function",
-                        line=i + 1,
-                        module=module,
-                    )
+                    DeclEntry(name=name, kind=kind, line=i + 1, module=module)
                 )
                 by_name.setdefault(name.lower(), []).append(idx)
             continue
@@ -449,7 +480,7 @@ def get_verse_api(
                 else:
                     break
             end = i + 1
-            if decl.kind != "extension_function":
+            if decl.kind not in ("extension_function", "function"):
                 while end < len(d.lines):
                     nxt = d.lines[end]
                     if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= indent:
@@ -473,13 +504,38 @@ def get_verse_api(
                 return {"name": q, "matches": blocks, "count": len(blocks), "truncated": True}
 
     if not blocks:
+        suggestions: list[str] = []
+        if len(q_lower) >= 3:
+            seen: set[str] = set()
+            for d in digests:
+                for key, idxs in d.by_name.items():
+                    if q_lower in key or (len(key) >= 3 and key in q_lower):
+                        nm = d.decls[idxs[0]].name
+                        if nm not in seen:
+                            seen.add(nm)
+                            suggestions.append(nm)
+            suggestions.sort(key=lambda s: (len(s), s.lower()))
+        if suggestions:
+            return {
+                "name": q,
+                "matches": [],
+                "count": 0,
+                "suggestions": suggestions[:10],
+                "hint": (
+                    f"No exact declaration for '{q}'. Closest digest names: "
+                    + ", ".join(suggestions[:10])
+                    + ". Re-call get_verse_api with ONE exact name from this list — "
+                    "do not free-text search these."
+                ),
+            }
         return {
             "name": q,
             "matches": [],
             "count": 0,
             "hint": (
-                "No declaration found — try search_verse_digest for free-text matches, "
-                "list_verse_types, or list_verse_modules."
+                "No declaration found — one search_verse_digest for free-text, or "
+                "list_verse_types(name_filter=…). Two misses = the API does not "
+                "exist; use the closest alternative instead of retrying variants."
             ),
         }
     return {"name": q, "matches": blocks, "count": len(blocks), "truncated": False}

@@ -142,8 +142,38 @@ async def ducky_get_tools(
     if n:
         t = by_name.get(n)
         if t is None:
+            import re as _re
+
+            q = n.lower()
+            close = sorted(
+                (tn for tn in by_name if q in tn.lower() or tn.lower() in q),
+                key=len,
+            )[:10]
+            if not close:
+                toks = [tok for tok in _re.split(r"[^a-z0-9]+", q) if len(tok) >= 3]
+                if toks:
+                    close = sorted(
+                        (
+                            tn
+                            for tn in by_name
+                            if any(tok in tn.lower() for tok in toks)
+                        ),
+                        key=len,
+                    )[:10]
             return tool_json(
-                {"ok": False, "error": f"unknown tool: {n}", "hint": "ducky_get_tools(pattern=…)"},
+                {
+                    "ok": False,
+                    "error": f"unknown tool: {n}",
+                    "close_matches": close,
+                    "hint": (
+                        "This registry spans core + desktop plugins + nested MCP "
+                        "({prefix}__*); nested names appear only while that MCP's "
+                        "session is connected. Pick one close_matches name (or one "
+                        "ducky_get_tools(pattern=…) search) — two misses means the "
+                        "tool does not exist: use the closest match, never retry "
+                        "name variants."
+                    ),
+                },
                 pretty=pretty,
             )
         return tool_json(
@@ -176,12 +206,20 @@ async def ducky_get_tools(
             )
         scored.sort(key=lambda item: (-item[0], item[1]["name"]))
         matches = [row for _, row in scored[:lim]]
+        hint = "Fetch one schema with ducky_get_tools(name=…) then ducky_call_tool."
+        if not matches:
+            hint = (
+                "No matches. Registry spans core + desktop plugins + nested MCP "
+                "({prefix}__*, connected sessions only). Try ONE broader single-word "
+                "pattern — two misses means the tool does not exist: use the closest "
+                "known tool instead of retrying variants."
+            )
         return tool_json(
             {
                 "pattern": p,
                 "matches": matches,
                 "count": len(matches),
-                "hint": "Fetch one schema with ducky_get_tools(name=…) then ducky_call_tool.",
+                "hint": hint,
             },
             pretty=pretty,
         )
