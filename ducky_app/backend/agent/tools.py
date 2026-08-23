@@ -41,6 +41,20 @@ class ToolCallResult:
         return json.dumps(payload, ensure_ascii=False)
 
 
+def _with_plan_tick_nudge(name: str, result: ToolCallResult) -> ToolCallResult:
+    if not result.ok or not result.data:
+        return result
+    try:
+        from backend.agent.coding_agents.plans import format_plan_tick_nudge_for_tool
+
+        extra = format_plan_tick_nudge_for_tool(name)
+    except Exception:
+        extra = ""
+    if extra and extra not in result.data:
+        result.data = (result.data + "\n" + extra)[:12000]
+    return result
+
+
 @dataclass
 class ToolCallRecord:
     id: str
@@ -608,6 +622,22 @@ async def execute_tool(
         ms = int((time.time() - t0) * 1000)
         return ToolCallResult(ok=False, tool=name, error="Cancelled", duration_ms=ms)
 
+    try:
+        from backend.agent.coding_agents.plans import plan_mutator_block_reason
+
+        blocked = plan_mutator_block_reason(name)
+    except Exception:
+        blocked = None
+    if blocked:
+        ms = int((time.time() - t0) * 1000)
+        return ToolCallResult(
+            ok=False,
+            tool=name,
+            error=blocked,
+            hint="Call ducky_plan_update_node(node_id, status=\"in_progress\") first, then retry.",
+            duration_ms=ms,
+        )
+
     from backend.mcp_plugins.registry import PLUGIN_TOOL_SEP, is_plugin_tool
     from backend.mcp_plugins.store import ensure_plugin_prefix_cache
 
@@ -628,7 +658,9 @@ async def execute_tool(
             ms = int((time.time() - t0) * 1000)
             if _looks_like_tool_failure(name, text):
                 return ToolCallResult(ok=False, tool=name, error=text[:8000], duration_ms=ms)
-            return ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+            return _with_plan_tick_nudge(
+                name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+            )
         except asyncio.CancelledError:
             ms = int((time.time() - t0) * 1000)
             return ToolCallResult(ok=False, tool=name, error="Cancelled", duration_ms=ms)
@@ -667,7 +699,9 @@ async def execute_tool(
         if _looks_like_tool_failure(name, text):
             hint = _hint_for_error(name, text)
             return ToolCallResult(ok=False, tool=name, error=text[:8000], hint=hint, duration_ms=ms)
-        return ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+        return _with_plan_tick_nudge(
+            name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+        )
     except asyncio.CancelledError:
         ms = int((time.time() - t0) * 1000)
         return ToolCallResult(ok=False, tool=name, error="Cancelled", duration_ms=ms)

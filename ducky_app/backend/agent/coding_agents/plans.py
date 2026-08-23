@@ -738,6 +738,167 @@ def todo_progress(plan: dict[str, Any] | None) -> dict[str, int]:
     }
 
 
+PLAN_CRUD_TOOLS = frozenset(
+    {
+        "ducky_create_plan",
+        "ducky_update_plan",
+        "ducky_get_plan",
+        "ducky_list_plans",
+        "ducky_plan_add_node",
+        "ducky_plan_update_node",
+        "ducky_plan_delete_node",
+        "ducky_plan_move_node",
+        "ducky_list_plan_templates",
+        "ducky_get_plan_template",
+        "ducky_create_plan_template",
+        "ducky_update_plan_template",
+        "ducky_instantiate_plan_template",
+    }
+)
+
+_PLAN_TICK_SKIP = PLAN_CRUD_TOOLS | frozenset(
+    {
+        "ducky_call_tool",
+        "ducky_get_tools",
+        "ducky_find_tools",
+        "ducky_get_status",
+        "ducky_ask_user",
+    }
+)
+
+
+def _is_leaf_node(node: dict[str, Any]) -> bool:
+    kids = node.get("children") or []
+    return not (isinstance(kids, list) and kids)
+
+
+def next_open_leaf(plan: dict[str, Any] | None) -> tuple[str, dict[str, Any]] | None:
+    """Depth-first: the in_progress leaf, else the first pending leaf."""
+    if not plan or not isinstance(plan, dict):
+        return None
+    pending: tuple[str, dict[str, Any]] | None = None
+    for lab, node in outline_numbers(plan.get("nodes")):
+        if not _is_leaf_node(node):
+            continue
+        status = str(node.get("status") or "pending")
+        if status == "in_progress":
+            return (lab, node)
+        if status == "pending" and pending is None:
+            pending = (lab, node)
+    return pending
+
+
+def next_tick_dict(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Exact ducky_plan_update_node call the agent should make next."""
+    leaf = next_open_leaf(plan)
+    if not leaf:
+        return None
+    lab, node = leaf
+    nid = str(node.get("id") or "")
+    status = str(node.get("status") or "pending")
+    content = str(node.get("content") or "").strip().replace("\n", " ")[:160]
+    if status == "in_progress":
+        action = "completed"
+        call = f'ducky_plan_update_node(node_id="{nid}", status="completed")'
+    else:
+        action = "in_progress"
+        call = f'ducky_plan_update_node(node_id="{nid}", status="in_progress")'
+    return {
+        "n": lab,
+        "id": nid,
+        "status": status,
+        "content": content,
+        "action": action,
+        "call": call,
+    }
+
+
+def format_plan_tick_nudge(plan: dict[str, Any] | None) -> str:
+    tick = next_tick_dict(plan)
+    if not tick:
+        return ""
+    return (
+        f"[PLAN TICK] CHECK OFF NOW: {tick['n']} `{tick['id']}` [{tick['status']}] "
+        f"— {tick['content']}. Call {tick['call']} this turn. "
+        "Re-check the plan every step; never leave done work pending."
+    )
+
+
+def active_plan_chat_id() -> str:
+    try:
+        from frontend.ui_web.agent_modes import get_active_conv_id
+
+        cid = (get_active_conv_id() or "").strip()
+        if cid:
+            return cid
+    except Exception:
+        pass
+    import os
+
+    return (os.environ.get("DUCKY_CONV_ID") or "").strip()
+
+
+def load_active_plan() -> dict[str, Any] | None:
+    cid = active_plan_chat_id()
+    if not cid:
+        return None
+    try:
+        return load_plan(cid, None)
+    except Exception:
+        return None
+
+
+def plan_mutator_block_reason(tool_name: str) -> str | None:
+    """Block mutators until an open plan leaf is marked in_progress."""
+    n = (tool_name or "").strip()
+    if not n or n in _PLAN_TICK_SKIP:
+        return None
+    try:
+        from backend.agent.toolsets.plan_safe import is_plan_safe_tool
+
+        if is_plan_safe_tool(n):
+            return None
+    except Exception:
+        pass
+    plan = load_active_plan()
+    if not plan:
+        return None
+    tick = next_tick_dict(plan)
+    if not tick:
+        return None
+    if tick["status"] == "in_progress":
+        return None
+    return (
+        f"Plan tick required before `{n}`: no leaf is in_progress. "
+        f"Call {tick['call']} first, then retry. "
+        f"Next leaf {tick['n']} `{tick['id']}` — {tick['content']}"
+    )
+
+
+def format_plan_tick_nudge_for_tool(tool_name: str) -> str:
+    n = (tool_name or "").strip()
+    if not n or n in _PLAN_TICK_SKIP:
+        return ""
+    try:
+        from backend.agent.toolsets.plan_safe import is_plan_safe_tool
+
+        if is_plan_safe_tool(n):
+            return ""
+    except Exception:
+        pass
+    return format_plan_tick_nudge(load_active_plan())
+
+
+def attach_next_tick(payload: dict[str, Any], plan: dict[str, Any] | None) -> dict[str, Any]:
+    """Add next_tick + tick_now onto a plan-tool JSON payload."""
+    out = dict(payload)
+    tick = next_tick_dict(plan)
+    if tick:
+        out["next_tick"] = tick
+        out["tick_now"] = format_plan_tick_nudge(plan)
+    return out
+
+
 def format_plan_prompt_block(
     plan: dict[str, Any] | None,
     *,
@@ -759,11 +920,14 @@ def format_plan_prompt_block(
             + (f", {prog['in_progress']} in progress" if prog["in_progress"] else "")
         ),
     ]
+    nudge = format_plan_tick_nudge(plan)
+    if nudge:
+        lines.append(nudge)
     if overview:
         lines.append(overview[:400])
     lines.append("")
     lines.append(
-        "Outline (depth-first open leaves; tick with `ducky_plan_update_node`):"
+        "Outline (depth-first open leaves). CHECK OFF every step with `ducky_plan_update_node`:"
     )
     for i, (lab, n) in enumerate(outline_numbers(nodes)):
         if i >= max_nodes:
@@ -774,7 +938,9 @@ def format_plan_prompt_block(
         content = str(n.get("content") or "").strip().replace("\n", " ")[:160]
         lines.append(f"- {lab} [{status}] `{nid}` — {content}")
     lines.append(
-        "Protocol: mark leaf `in_progress` → do the step → `completed`. "
+        "Protocol (every tool round): mark the current leaf `in_progress` BEFORE the "
+        "work, `completed` when Done-when is met, then mark the next leaf `in_progress`. "
+        "Re-read this outline constantly. Leaving finished work pending is a failure. "
         "If diagnosis changes the approach, update the tree first — never thrash off-plan."
     )
     return "\n".join(lines) + "\n"

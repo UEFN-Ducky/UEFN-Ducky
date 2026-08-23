@@ -101,8 +101,62 @@ class PlansStoreTests(unittest.TestCase):
         self.assertIn("`d-actors`", block)
         self.assertIn("[in_progress]", block)
         self.assertIn("ducky_plan_update_node", block)
+        self.assertIn("CHECK OFF NOW", block)
+        self.assertIn("`f-instance`", block)
         self.assertEqual(plans.format_plan_prompt_block(None), "")
         self.assertEqual(plans.format_plan_prompt_block({"title": "x", "nodes": []}), "")
+
+    def test_next_open_leaf_prefers_in_progress(self) -> None:
+        plan = {
+            "nodes": [
+                {
+                    "id": "a",
+                    "content": "pending leaf",
+                    "status": "pending",
+                    "children": [],
+                },
+                {
+                    "id": "b",
+                    "content": "doing",
+                    "status": "in_progress",
+                    "children": [],
+                },
+            ]
+        }
+        lab, node = plans.next_open_leaf(plan)
+        self.assertEqual(node["id"], "b")
+        tick = plans.next_tick_dict(plan)
+        assert tick is not None
+        self.assertEqual(tick["action"], "completed")
+        self.assertIn("status=\"completed\"", tick["call"])
+
+    def test_plan_mutator_gate_requires_in_progress(self) -> None:
+        plan = plans.create_plan(
+            "chat-tick",
+            title="Tick me",
+            overview="Must check off",
+            nodes=[{"id": "write", "content": "Write verse", "status": "pending"}],
+            project_root=self.root,
+        )
+        with patch("backend.agent.coding_agents.plans.load_active_plan", return_value=plan):
+            reason = plans.plan_mutator_block_reason("workspace_write_file")
+            self.assertIsNotNone(reason)
+            assert reason is not None
+            self.assertIn("in_progress", reason)
+            self.assertIn("write", reason)
+            self.assertIsNone(plans.plan_mutator_block_reason("workspace_read_file"))
+            self.assertIsNone(plans.plan_mutator_block_reason("ducky_plan_update_node"))
+            self.assertIsNone(plans.plan_mutator_block_reason("ducky_call_tool"))
+
+        plan["nodes"][0]["status"] = "in_progress"
+        with patch("backend.agent.coding_agents.plans.load_active_plan", return_value=plan):
+            self.assertIsNone(plans.plan_mutator_block_reason("workspace_write_file"))
+            nudge = plans.format_plan_tick_nudge_for_tool("workspace_write_file")
+            self.assertIn("CHECK OFF NOW", nudge)
+            self.assertIn("completed", nudge)
+
+        with patch("backend.agent.coding_agents.plans.load_active_plan", return_value=None):
+            self.assertIsNone(plans.plan_mutator_block_reason("spawn_actor"))
 
     def test_legacy_todos_migrate_on_load(self) -> None:
         path = Path(self.root) / ".ducky" / "plans"

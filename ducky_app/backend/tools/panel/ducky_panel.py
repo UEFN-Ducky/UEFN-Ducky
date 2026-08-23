@@ -1679,7 +1679,9 @@ def ducky_create_plan(
             "plan has 0 steps — pass nodes=[{id, content, children}] as a JSON array "
             "argument (not inside overview). UI Steps stay empty until nodes are set."
         )
-    return tool_json(out, pretty=pretty)
+    from backend.agent.coding_agents.plans import attach_next_tick
+
+    return tool_json(attach_next_tick(out, plan), pretty=pretty)
 
 
 @mcp.tool()
@@ -1701,7 +1703,13 @@ def ducky_update_plan(
     Prefer nodes= for full tree replace; todos+merge patches by id.
     Cannot complete a node while nested subplans are unfinished. Prefer ducky_plan_*_node for surgical edits.
     """
-    from backend.agent.coding_agents.plans import outline_numbers, push_plan_updated, todo_progress, update_plan
+    from backend.agent.coding_agents.plans import (
+        attach_next_tick,
+        outline_numbers,
+        push_plan_updated,
+        todo_progress,
+        update_plan,
+    )
 
     cid = _resolve_plan_chat_id(chat_id)
     if not cid:
@@ -1736,13 +1744,13 @@ def ducky_update_plan(
             "plan still has 0 steps — pass nodes as a JSON array argument, "
             "not pasted into overview text."
         )
-    return tool_json(out, pretty=pretty)
+    return tool_json(attach_next_tick(out, plan), pretty=pretty)
 
 
 @mcp.tool()
 def ducky_get_plan(chat_id: str = "", pretty: bool = False) -> str:
     """Load the project Plan for this conversation (or chat_id). Returns outline numbering 1, 1.1, 1.1.1, …"""
-    from backend.agent.coding_agents.plans import load_plan, outline_numbers, todo_progress
+    from backend.agent.coding_agents.plans import attach_next_tick, load_plan, outline_numbers, todo_progress
 
     cid = _resolve_plan_chat_id(chat_id)
     if not cid:
@@ -1755,12 +1763,15 @@ def ducky_get_plan(chat_id: str = "", pretty: bool = False) -> str:
             pretty=pretty,
         )
     return tool_json(
-        {
-            "ok": True,
-            "plan": plan,
-            "progress": todo_progress(plan),
-            "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
-        },
+        attach_next_tick(
+            {
+                "ok": True,
+                "plan": plan,
+                "progress": todo_progress(plan),
+                "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
+            },
+            plan,
+        ),
         pretty=pretty,
     )
 
@@ -1818,7 +1829,13 @@ def ducky_plan_update_node(
     pretty: bool = False,
 ) -> str:
     """Update a node's content, status, kind, and/or body_markdown. Status-only updates allowed after start."""
-    from backend.agent.coding_agents.plans import outline_numbers, push_plan_updated, todo_progress, update_node
+    from backend.agent.coding_agents.plans import (
+        attach_next_tick,
+        outline_numbers,
+        push_plan_updated,
+        todo_progress,
+        update_node,
+    )
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""
     try:
@@ -1837,12 +1854,15 @@ def ducky_plan_update_node(
     if plan.get("kind") != "template":
         push_plan_updated(plan)
     return tool_json(
-        {
-            "ok": True,
-            "plan": plan,
-            "progress": todo_progress(plan) if plan.get("kind") != "template" else None,
-            "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
-        },
+        attach_next_tick(
+            {
+                "ok": True,
+                "plan": plan,
+                "progress": todo_progress(plan) if plan.get("kind") != "template" else None,
+                "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
+            },
+            plan if plan.get("kind") != "template" else None,
+        ),
         pretty=pretty,
     )
 

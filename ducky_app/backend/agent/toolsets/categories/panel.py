@@ -108,5 +108,12 @@ PLAN_TOOLS = frozenset(
         "ducky_call_tool",
         "ducky_find_tools",
         "ducky_ask_user",
+        "ducky_create_plan",
+        "ducky_update_plan",
+        "ducky_get_plan",
+        "ducky_plan_add_node",
+        "ducky_plan_update_node",
+        "ducky_plan_delete_node",
+        "ducky_plan_move_node",
     }
 )

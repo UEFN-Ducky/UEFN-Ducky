@@ -149,8 +149,10 @@ a prose "Fix plan" / markdown checklist in chat.
 
 **Followable shape:** Diagnose → Fix → Verify; each leaf = one action + Done-when
 (name the tool when known). Parents cannot complete while nested subplans are unfinished.
-Work depth-first on open leaves; tick `in_progress` → `completed` with
-`ducky_plan_update_node`. If findings flip the approach, update the tree before more
+Work depth-first on open leaves. **CHECK OFF every step** — `in_progress` BEFORE
+the work, `completed` when Done-when is met — with `ducky_plan_update_node`.
+Re-check the plan every tool round. Mutators are blocked until a leaf is
+`in_progress`. If findings flip the approach, update the tree before more
 mutators — never thrash off-plan.
 
 Settings → Plans has **Templates** | **Project Plans** tabs (like Skills | MCPs).

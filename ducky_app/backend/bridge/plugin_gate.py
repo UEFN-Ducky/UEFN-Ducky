@@ -80,6 +80,28 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
         cache = getattr(server, "_tool_cache", None)
         if name and isinstance(cache, dict) and name not in cache:
             clear_mcp_tool_cache(mcp)
+        try:
+            from backend.agent.coding_agents.plans import plan_mutator_block_reason
+
+            blocked = plan_mutator_block_reason(name)
+        except Exception:
+            blocked = None
+        if blocked:
+            try:
+                from mcp.types import CallToolResult, TextContent
+
+                result = CallToolResult(
+                    content=[TextContent(type="text", text=blocked)],
+                    isError=True,
+                )
+                try:
+                    from mcp.types import ServerResult
+
+                    return ServerResult(root=result)
+                except Exception:
+                    return result
+            except Exception:
+                _log.warning("plan tick gate could not format MCP error for %s", name)
         return await orig_call(req)
 
     handlers[ListToolsRequest] = list_tools_after_plugins
