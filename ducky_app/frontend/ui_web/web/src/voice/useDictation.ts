@@ -10,6 +10,7 @@ export type DictationStatus = TranscriptionState;
 
 /**
  * Push-to-talk dictation for the chat composer (batch Whisper).
+ * Stop → text in the box. Never sends — the user presses Send.
  */
 export function useDictation(opts: {
   onTranscript: (text: string) => void;

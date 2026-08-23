@@ -20,38 +20,37 @@ export type VoiceOverlayProps = {
   hasPrev?: boolean;
   hasNext?: boolean;
   hasNewer?: boolean;
-  onSend?: () => void;
-  canSend?: boolean;
-  manualSend?: boolean;
-  setManualSend?: (value: boolean) => void;
   voiceId?: string;
   speed?: number;
   setVoiceId?: (value: string) => void;
   setSpeed?: (value: number) => void;
-  /** Fill the composer slot instead of floating over the chat. */
+  processTalk?: number;
+  setProcessTalk?: (value: number) => void;
+  /** Sit above the composer textarea instead of floating over the chat. */
   inline?: boolean;
-  /** When false, voice/speed/auto-send are rendered elsewhere (composer toolbar). */
+  /** When false, voice/speed/auto-send stay off this panel. */
   showPickers?: boolean;
+  /** Mic off — type only; replies still speak. */
+  muted?: boolean;
 };
 
 function statusLabel(
   status: LiveVoiceUiStatus,
   error: string,
-  manualSend: boolean,
   loadingVoice: boolean,
+  muted: boolean,
 ): string {
   if (status === "error") return error || "Something went wrong";
   if (loadingVoice) return "Downloading voice…";
   if (status === "thinking") return "Thinking…";
   if (status === "speaking") return "Speaking…";
-  if (status === "listening") {
-    return manualSend ? "Listening… (press Send when ready)" : "Listening…";
-  }
+  if (muted || status === "muted") return "Muted — type to chat";
+  if (status === "listening") return "Listening…";
   return "";
 }
 
 /**
- * Live-voice panel. Inline mode replaces the composer textarea; floating is legacy.
+ * Live-voice panel. Inline mode slides in above the composer; floating is legacy.
  */
 export function VoiceOverlay({
   chatId,
@@ -63,16 +62,15 @@ export function VoiceOverlay({
   hasPrev = false,
   hasNext = false,
   hasNewer = false,
-  onSend,
-  canSend = false,
-  manualSend = false,
-  setManualSend,
   voiceId = "",
   speed = 1,
   setVoiceId,
   setSpeed,
+  processTalk,
+  setProcessTalk,
   inline = false,
   showPickers = true,
+  muted = false,
 }: VoiceOverlayProps) {
   const [state, setState] = useState<LiveVoiceState>(() => getLiveVoiceState(chatId));
   const [tts, setTts] = useState<TtsProgress>(() => ttsEngine.getProgress());
@@ -87,11 +85,13 @@ export function VoiceOverlay({
   if (!open) return null;
 
   const loadingVoice = tts.loading;
-  const label = statusLabel(state.status, state.error, manualSend, loadingVoice);
+  const micMuted = muted || state.muted || state.status === "muted";
+  const label = statusLabel(state.status, state.error, loadingVoice, micMuted);
   const youText = state.userInterim || state.lastUserText;
   const duckyText = state.spokenText;
   const pickers = showPickers && Boolean(setVoiceId && setSpeed);
-  const orbStatus = loadingVoice ? "thinking" : state.status;
+  const busyOrb = state.status === "thinking" || state.status === "speaking" || state.status === "error";
+  const orbStatus = loadingVoice ? "thinking" : busyOrb ? state.status : micMuted ? "muted" : state.status;
   const speaking = tts.state === "speaking";
   const paused = tts.state === "paused";
   const canToggleSpeak = speaking || paused;
@@ -178,17 +178,7 @@ export function VoiceOverlay({
                 <Icons.SkipToEnd />
               </button>
             ) : null}
-            {manualSend && onSend ? (
-              <button
-                type="button"
-                className="voice-btn voice-btn--tiny voice-btn--send"
-                title="Send what you said"
-                disabled={!canSend}
-                onClick={onSend}
-              >
-                <Icons.Send />
-              </button>
-            ) : null}
+            {/* Speech writes into the composer — user presses Send there. */}
             <span className="voice-overlay-transport-split" aria-hidden />
             <button
               type="button"
@@ -207,8 +197,8 @@ export function VoiceOverlay({
               speed={speed}
               setVoiceId={setVoiceId}
               setSpeed={setSpeed}
-              manualSend={manualSend}
-              setManualSend={setManualSend}
+              processTalk={processTalk}
+              setProcessTalk={setProcessTalk}
             />
           </div>
         ) : null}

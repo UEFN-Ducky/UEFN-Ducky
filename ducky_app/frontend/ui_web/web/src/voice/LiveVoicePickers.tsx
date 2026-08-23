@@ -13,8 +13,6 @@ export type LiveVoicePickersProps = {
   speed: number;
   setVoiceId: (value: string) => void;
   setSpeed: (value: number) => void;
-  manualSend?: boolean;
-  setManualSend?: (value: boolean) => void;
   processTalk?: number;
   setProcessTalk?: (value: number) => void;
 };
@@ -27,14 +25,12 @@ function openAudioIoSettings() {
   );
 }
 
-/** Voice / speed / process-talk / auto-send — composer toolbar next to the agent picker. */
+/** Voice / speed / process-talk / auto-send — lives in the sliding voice panel. */
 export function LiveVoicePickers({
   voiceId,
   speed,
   setVoiceId,
   setSpeed,
-  manualSend = false,
-  setManualSend,
   processTalk = 0.7,
   setProcessTalk,
 }: LiveVoicePickersProps) {
@@ -89,21 +85,7 @@ export function LiveVoicePickers({
           <span className="live-voice-process-talk-value">{talkPct}%</span>
         </label>
       ) : null}
-      {setManualSend ? (
-        <button
-          type="button"
-          className={`voice-overlay-manual-toggle${manualSend ? " is-on" : ""}`}
-          title={
-            manualSend
-              ? "Manual send on — talk as long as you want, then press Send"
-              : "Auto-send on pause — click to wait for Send instead"
-          }
-          aria-pressed={manualSend}
-          onClick={() => setManualSend(!manualSend)}
-        >
-          <Icons.Send />
-        </button>
-      ) : null}
+      {/* Auto-send removed — speech always writes into the composer. */}
       <button
         type="button"
         className="voice-btn voice-btn--tiny live-voice-io-settings"
