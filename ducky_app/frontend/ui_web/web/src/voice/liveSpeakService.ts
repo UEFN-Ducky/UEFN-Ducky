@@ -5,7 +5,7 @@
 
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import type { AgentEvent, MessageAuthorDto, ToolCallData } from "../types/panel";
-import { patchLiveVoiceState, setLiveVoiceChat } from "./liveChats";
+import { getLiveVoiceState, patchLiveVoiceState, setLiveVoiceChat } from "./liveChats";
 import {
   clearLiveSpeakQueueForChat,
   enqueueAnswerSpeak,
@@ -251,7 +251,8 @@ function onTtsState(s: "idle" | "speaking" | "paused") {
       continue;
     }
     session.speakingAfterDone = false;
-    publish(session, { status: "listening", speakerName: "", nextSpeaker: "" });
+    const idle = getLiveVoiceState(session.chatId).muted ? "muted" : "listening";
+    publish(session, { status: idle, speakerName: "", nextSpeaker: "" });
   }
 }
 
@@ -280,7 +281,7 @@ export function startLiveChat(chatId: string, opts: LiveChatOpts): void {
     speakingAfterDone: false,
   });
   setLiveVoiceChat(id, true);
-  patchLiveVoiceState(id, { status: "listening", error: "" });
+  patchLiveVoiceState(id, { status: "listening", error: "", muted: false });
   ensureBus();
 }
 

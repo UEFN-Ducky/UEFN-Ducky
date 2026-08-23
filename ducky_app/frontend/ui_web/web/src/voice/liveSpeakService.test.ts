@@ -97,6 +97,17 @@ describe("liveSpeakService", () => {
     expect(isLiveChat("chat-a")).toBe(true);
   });
 
+  it("keeps the live session when the mic is muted", async () => {
+    const { startLiveChat, isLiveChat, releaseMic } = await import("./liveSpeakService");
+    const { patchLiveVoiceState, getLiveVoiceState } = await import("./liveChats");
+    startLiveChat("chat-a", { voiceId: "v", speed: 1 });
+    patchLiveVoiceState("chat-a", { muted: true, status: "muted" });
+    releaseMic("chat-a");
+    expect(isLiveChat("chat-a")).toBe(true);
+    expect(getLiveVoiceState("chat-a").muted).toBe(true);
+    expect(getLiveVoiceState("chat-a").status).toBe("muted");
+  });
+
   it("flushes mid-turn assistant text before the next tool", async () => {
     const { startLiveChat } = await import("./liveSpeakService");
     startLiveChat("chat-a", { voiceId: "v", speed: 1 });

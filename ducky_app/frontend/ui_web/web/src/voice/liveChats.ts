@@ -3,7 +3,7 @@
  * Spoken-summary skips chats that are currently live.
  */
 
-export type LiveVoiceUiStatus = "off" | "listening" | "thinking" | "speaking" | "error";
+export type LiveVoiceUiStatus = "off" | "listening" | "thinking" | "speaking" | "error" | "muted";
 
 export type LiveVoiceState = {
   status: LiveVoiceUiStatus;
@@ -11,6 +11,8 @@ export type LiveVoiceState = {
   lastUserText: string;
   spokenText: string;
   error: string;
+  /** Mic off — type only; replies still speak. */
+  muted: boolean;
   /** Current group-chat speaker name (empty for solo chats). */
   speakerName: string;
   /** Short hint like "2 more" when more duckies are queued to speak. */
@@ -23,6 +25,7 @@ const EMPTY: LiveVoiceState = {
   lastUserText: "",
   spokenText: "",
   error: "",
+  muted: false,
   speakerName: "",
   nextSpeaker: "",
 };

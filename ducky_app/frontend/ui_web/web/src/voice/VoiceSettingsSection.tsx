@@ -27,7 +27,6 @@ export function VoiceSettingsSection() {
   const [model, setModel] = useState("");
   const [voice, setVoice] = useState("");
   const [speed, setSpeed] = useState(1);
-  const [liveManualSend, setLiveManualSend] = useState(false);
   const [processTalk, setProcessTalk] = useState(0.7);
   const voices = useTtsVoiceOptions();
 
@@ -38,7 +37,6 @@ export function VoiceSettingsSection() {
       setModel(s.summaryModel);
       setVoice(s.defaultVoice);
       setSpeed(s.defaultSpeed);
-      setLiveManualSend(s.liveManualSend);
       setProcessTalk(s.processTalk);
     });
     return subscribeVoiceSettings(() => {
@@ -48,7 +46,6 @@ export function VoiceSettingsSection() {
       setModel(s.summaryModel);
       setVoice(s.defaultVoice);
       setSpeed(s.defaultSpeed);
-      setLiveManualSend(s.liveManualSend);
       setProcessTalk(s.processTalk);
     });
   }, []);
@@ -138,16 +135,10 @@ export function VoiceSettingsSection() {
       <section className="general-tab-section">
         <GeneralSectionHeader icon={<Icons.Mic />} title="Live Voice" />
         <div className="general-tab-toggle-card">
-          <SettingsToggleRow
-            id="toggle-voice-live-manual-send"
-            label="Wait for Send"
-            description="Keep listening through pauses; send only when you press Send."
-            checked={liveManualSend}
-            onChange={(value) => {
-              setLiveManualSend(value);
-              void saveVoiceSettings({ liveManualSend: value });
-            }}
-          />
+          <p className="general-tab-section-desc">
+            Dictation and live speech always write into the chat box. Nothing sends until you press
+            Send.
+          </p>
           <div className="voice-settings-row">
             <label className="voice-settings-label" htmlFor="voice-process-talk">
               Process talk

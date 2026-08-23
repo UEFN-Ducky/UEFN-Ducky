@@ -25,7 +25,7 @@ import {
 import { ttsEngine } from "./ttsEngine";
 import { getVoiceSettings, resolveSpeed, resolveVoiceId } from "./voiceSettings";
 
-export type LiveVoiceStatus = "off" | "listening" | "thinking" | "speaking" | "error";
+export type LiveVoiceStatus = "off" | "listening" | "thinking" | "speaking" | "error" | "muted";
 
 /**
  * Mic + composer + transport for a mounted live chat.
@@ -37,8 +37,11 @@ export function useLiveVoiceMode(opts: {
   voiceId?: string;
   speed?: number;
   manualSend?: boolean;
+  /** Mic off — type only; replies still speak. */
+  muted?: boolean;
   onInterim: (text: string) => void;
-  onAutoSend: (text: string) => void;
+  /** Final speech → composer only. Never send. */
+  onTranscript: (text: string) => void;
   agentRunning?: boolean;
   isGroup?: boolean;
 }) {
@@ -51,20 +54,22 @@ export function useLiveVoiceMode(opts: {
   const [transport, setTransport] = useState(() => getLiveSpeakTransport());
   const bargeTimerRef = useRef<number | null>(null);
   const onInterimRef = useRef(opts.onInterim);
-  const onAutoSendRef = useRef(opts.onAutoSend);
+  const onTranscriptRef = useRef(opts.onTranscript);
   const voiceIdRef = useRef(opts.voiceId);
   const speedRef = useRef(opts.speed);
   const chatIdRef = useRef(opts.chatId);
   const enabledRef = useRef(opts.enabled);
   const manualSendRef = useRef(Boolean(opts.manualSend));
+  const mutedRef = useRef(Boolean(opts.muted));
   const pendingTextRef = useRef("");
   onInterimRef.current = opts.onInterim;
-  onAutoSendRef.current = opts.onAutoSend;
+  onTranscriptRef.current = opts.onTranscript;
   voiceIdRef.current = opts.voiceId;
   speedRef.current = opts.speed;
   chatIdRef.current = opts.chatId;
   enabledRef.current = opts.enabled;
   manualSendRef.current = Boolean(opts.manualSend);
+  mutedRef.current = Boolean(opts.muted);
 
   const publish = useCallback((patch: Parameters<typeof patchLiveVoiceState>[1]) => {
     patchLiveVoiceState(chatIdRef.current, patch);
@@ -91,6 +96,7 @@ export function useLiveVoiceMode(opts: {
   }, [setPending]);
 
   const startMic = useCallback(async () => {
+    if (mutedRef.current) return;
     if (!claimMic(chatIdRef.current)) return;
     setError("");
     setPending("");
@@ -131,16 +137,11 @@ export function useLiveVoiceMode(opts: {
           ) {
             return;
           }
-          if (manualSendRef.current) {
-            const next = appendLiveUtterance(pendingTextRef.current, trimmed);
-            setPending(next);
-            publish({ userInterim: "", lastUserText: next, status: "listening" });
-            setStatus("listening");
-            return;
-          }
-          publish({ userInterim: "", lastUserText: trimmed, status: "thinking" });
-          setStatus("thinking");
-          onAutoSendRef.current(trimmed);
+          const next = appendLiveUtterance(pendingTextRef.current, trimmed);
+          setPending(next);
+          publish({ userInterim: "", lastUserText: next, status: "listening" });
+          setStatus("listening");
+          onTranscriptRef.current(trimmed);
         },
         onSpeechStarted: () => {
           clearBargeTimer();
@@ -166,14 +167,23 @@ export function useLiveVoiceMode(opts: {
         },
         onStateChange: (s) => {
           if (s === "listening") {
+            if (mutedRef.current) return;
             setStatus("listening");
-            publish({ status: "listening" });
+            publish({ status: "listening", muted: false });
           }
           if (s === "error") setStatus("error");
         },
       });
+      if (mutedRef.current) {
+        session.abort();
+        sessionRef.current = null;
+        releaseMic(chatIdRef.current);
+        setStatus("muted");
+        publish({ status: "muted", muted: true });
+        return;
+      }
       setStatus("listening");
-      publish({ status: "listening" });
+      publish({ status: "listening", muted: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -197,11 +207,17 @@ export function useLiveVoiceMode(opts: {
       setStatus(isLiveChat(opts.chatId) ? getLiveVoiceState(opts.chatId).status : "off");
       return;
     }
+    if (opts.muted) {
+      stopMic();
+      setStatus("muted");
+      publish({ status: "muted", muted: true, userInterim: "", error: "" });
+      return;
+    }
     void startMic();
     return () => {
       stopMic();
     };
-  }, [opts.enabled, opts.chatId, startMic, stopMic]);
+  }, [opts.enabled, opts.muted, opts.chatId, startMic, stopMic, publish]);
 
   useEffect(() => {
     if (!opts.enabled) return;
@@ -224,6 +240,11 @@ export function useLiveVoiceMode(opts: {
         return;
       }
       if (s === "idle" && !opts.agentRunning) {
+        if (mutedRef.current) {
+          setStatus("muted");
+          publish({ status: "muted", muted: true });
+          return;
+        }
         if (
           shouldReturnToListeningAfterAnswer({
             speakingAfterAnswer: true,
@@ -243,6 +264,11 @@ export function useLiveVoiceMode(opts: {
   const interrupt = useCallback(() => {
     clearBargeTimer();
     interruptLiveSpeak();
+    if (mutedRef.current) {
+      setStatus("muted");
+      publish({ status: "muted", speakerName: "", nextSpeaker: "" });
+      return;
+    }
     setStatus("listening");
     publish({ status: "listening", speakerName: "", nextSpeaker: "" });
   }, [publish]);
@@ -268,14 +294,9 @@ export function useLiveVoiceMode(opts: {
   const replay = back;
 
   const sendNow = useCallback(() => {
-    const text = pendingTextRef.current.trim();
-    if (!text || !enabledRef.current) return false;
-    setPending("");
-    publish({ userInterim: "", lastUserText: text, status: "thinking" });
-    setStatus("thinking");
-    onAutoSendRef.current(text);
-    return true;
-  }, [publish, setPending]);
+    // Speech is already in the composer. User presses Send themselves.
+    return false;
+  }, []);
 
   return {
     status,

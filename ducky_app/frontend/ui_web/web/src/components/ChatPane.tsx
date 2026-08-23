@@ -73,7 +73,6 @@ import { requestChatTranslateWalk } from "../navigation/openTranslatedChat";
 import { readTranslationUiLang } from "../navigation/openVerseTranslatedTab";
 import { isEnglishLang } from "../views/settings/translationLanguages";
 import { VoiceControls, type LiveVoiceUiHandlers } from "../voice/VoiceControls";
-import { LiveVoicePickers } from "../voice/LiveVoicePickers";
 import { VoiceOverlay } from "../voice/VoiceOverlay";
 import { SnipButton } from "./SnipButton";
 import { GroupMemberStrip } from "./GroupMemberStrip";
@@ -941,7 +940,7 @@ export function ChatPane({
     ? "No models"
     : selectedModelDisplayName || selectedModel || "model";
 
-  const attachDropEnabled = !liveVoice;
+  const attachDropEnabled = true;
 
   const armChatAttachDrop = useCallback(() => {
     getApi()?.set_import_drop_target?.(CHAT_ATTACH_TARGET)?.catch?.(() => {});
@@ -1113,10 +1112,34 @@ export function ChatPane({
           ref={inputBoxRef}
           className={`no-drag chat-pane-input-box${isFocused ? " chat-pane-input-box--focused" : ""}${isDragOver ? " chat-pane-input-box--drag-over" : ""}${liveVoice ? " chat-pane-input-box--voice" : ""}`}
         >
-          <div
-            className={`chat-pane-composer-pane chat-pane-composer-pane--type${liveVoice ? " is-hidden" : ""}`}
-            aria-hidden={liveVoice}
-          >
+          <div className={`voice-panel-wrapper${liveVoice ? " is-open" : ""}`}>
+            <div className="voice-panel-inner">
+              {liveVoice && liveVoiceHandlers ? (
+                <VoiceOverlay
+                  chatId={chat.id}
+                  open
+                  inline
+                  showPickers
+                  onClose={liveVoiceHandlers.onClose}
+                  onBack={liveVoiceHandlers.onBack}
+                  onForward={liveVoiceHandlers.onForward}
+                  onNewest={liveVoiceHandlers.onNewest}
+                  hasPrev={liveVoiceHandlers.hasPrev}
+                  hasNext={liveVoiceHandlers.hasNext}
+                  hasNewer={liveVoiceHandlers.hasNewer}
+                  voiceId={liveVoiceHandlers.voiceId}
+                  speed={liveVoiceHandlers.speed}
+                  setVoiceId={liveVoiceHandlers.setVoiceId}
+                  setSpeed={liveVoiceHandlers.setSpeed}
+                  processTalk={liveVoiceHandlers.processTalk}
+                  setProcessTalk={liveVoiceHandlers.setProcessTalk}
+                  muted={liveVoiceHandlers.muted}
+                />
+              ) : null}
+            </div>
+          </div>
+
+          <div className="chat-pane-composer-pane chat-pane-composer-pane--type">
             {(noModelsAvailable || visionBlocked || attachmentError) && (
               <div className={`composer-attach-warning${visionBlocked ? " is-vision-blocked" : ""}`}>
                 {noModelsAvailable
@@ -1159,20 +1182,22 @@ export function ChatPane({
                 }
               }}
               placeholder={
-                chat.isGroup
-                  ? groupMembers.length === 0
-                    ? "Invite a ducky above to start the roundtable…"
-                    : agentRunning
-                      ? "Add a follow-up… (Shift+Enter for newline)"
-                      : "Message the group… (Shift+Enter for newline)"
-                  : noModelsAvailable
-                    ? "No models available — use the button below to open Settings → LLMs"
-                    : agentRunning
-                      ? "Add a follow-up… (Shift+Enter for newline)"
-                      : `Ask ${displayModelLabel}... (Shift+Enter for newline)`
+                liveVoice && liveVoiceHandlers?.muted
+                  ? "You're muted — type to chat (Shift+Enter for newline)"
+                  : chat.isGroup
+                    ? groupMembers.length === 0
+                      ? "Invite a ducky above to start the roundtable…"
+                      : agentRunning
+                        ? "Add a follow-up… (Shift+Enter for newline)"
+                        : "Message the group… (Shift+Enter for newline)"
+                    : noModelsAvailable
+                      ? "No models available — use the button below to open Settings → LLMs"
+                      : agentRunning
+                        ? "Add a follow-up… (Shift+Enter for newline)"
+                        : `Ask ${displayModelLabel}... (Shift+Enter for newline)`
               }
               className="chat-pane-textarea"
-              disabled={liveVoice || (!chat.isGroup && noModelsAvailable)}
+              disabled={!chat.isGroup && noModelsAvailable}
               style={
                 textareaHeight != null
                   ? {
@@ -1187,67 +1212,30 @@ export function ChatPane({
             />
           </div>
 
-          <div
-            className={`chat-pane-composer-pane chat-pane-composer-pane--voice${liveVoice ? " is-shown" : ""}`}
-            aria-hidden={!liveVoice}
-          >
-            {liveVoice && liveVoiceHandlers ? (
-              <VoiceOverlay
-                chatId={chat.id}
-                open
-                inline
-                showPickers={false}
-                onClose={liveVoiceHandlers.onClose}
-                onBack={liveVoiceHandlers.onBack}
-                onForward={liveVoiceHandlers.onForward}
-                onNewest={liveVoiceHandlers.onNewest}
-                hasPrev={liveVoiceHandlers.hasPrev}
-                hasNext={liveVoiceHandlers.hasNext}
-                hasNewer={liveVoiceHandlers.hasNewer}
-                onSend={liveVoiceHandlers.onSend}
-                canSend={liveVoiceHandlers.canSend}
-                manualSend={liveVoiceHandlers.manualSend}
-              />
-            ) : null}
-          </div>
-
-          <div className={`chat-pane-input-toolbar${liveVoice ? " chat-pane-input-toolbar--voice" : ""}`}>
+          <div className="chat-pane-input-toolbar">
             <div className="chat-pane-input-toolbar-left">
-              {!liveVoice && !chat.isGroup ? (
+              {!chat.isGroup ? (
                 <ModeSelector activeMode={agentMode} setMode={setAgentMode} />
               ) : null}
-              {!liveVoice ? (
-                <ContextMeter
-                  usedTokens={contextUsage.used_tokens}
-                  contextLimit={contextUsage.context_limit}
-                  inputTokens={contextUsage.input_tokens}
-                  outputTokens={contextUsage.output_tokens}
-                  usage={contextUsage}
-                  sessionFiles={sessionFiles}
-                  convId={chat.id}
-                  omitted={contextUsage.omitted}
-                  agentMode={agentMode}
-                  model={selectedModel}
-                  agentRunning={agentRunning}
-                  panelOpen={contextPanelOpen}
-                  onTogglePanel={handleToggleContextPanel}
-                  onClosePanel={() => setContextPanelOpen(false)}
-                  onOpenFile={handleOpenFile}
-                  onContextChanged={handleContextChanged}
-                  onClearDraft={() => setInputText("")}
-                />
-              ) : liveVoiceHandlers ? (
-                <LiveVoicePickers
-                  voiceId={liveVoiceHandlers.voiceId}
-                  speed={liveVoiceHandlers.speed}
-                  setVoiceId={liveVoiceHandlers.setVoiceId}
-                  setSpeed={liveVoiceHandlers.setSpeed}
-                  manualSend={liveVoiceHandlers.manualSend}
-                  setManualSend={liveVoiceHandlers.setManualSend}
-                  processTalk={liveVoiceHandlers.processTalk}
-                  setProcessTalk={liveVoiceHandlers.setProcessTalk}
-                />
-              ) : null}
+              <ContextMeter
+                usedTokens={contextUsage.used_tokens}
+                contextLimit={contextUsage.context_limit}
+                inputTokens={contextUsage.input_tokens}
+                outputTokens={contextUsage.output_tokens}
+                usage={contextUsage}
+                sessionFiles={sessionFiles}
+                convId={chat.id}
+                omitted={contextUsage.omitted}
+                agentMode={agentMode}
+                model={selectedModel}
+                agentRunning={agentRunning}
+                panelOpen={contextPanelOpen}
+                onTogglePanel={handleToggleContextPanel}
+                onClosePanel={() => setContextPanelOpen(false)}
+                onOpenFile={handleOpenFile}
+                onContextChanged={handleContextChanged}
+                onClearDraft={() => setInputText("")}
+              />
               {!chat.isGroup ? (
                 <>
                   <div className="chat-pane-toolbar-divider" />
@@ -1273,17 +1261,15 @@ export function ChatPane({
             </div>
 
             <div className="chat-pane-input-toolbar-right">
-              {!liveVoice ? (
-                <SnipButton
-                  disabled={noModelsAvailable}
-                  onCaptured={(file, meta) =>
-                    void addFiles([file], {
-                      imagesOnly: true,
-                      projectPath: meta?.projectPath,
-                    })
-                  }
-                />
-              ) : null}
+              <SnipButton
+                disabled={noModelsAvailable}
+                onCaptured={(file, meta) =>
+                  void addFiles([file], {
+                    imagesOnly: true,
+                    projectPath: meta?.projectPath,
+                  })
+                }
+              />
               <VoiceControls
                 chatId={chat.id}
                 disabled={
@@ -1302,7 +1288,7 @@ export function ChatPane({
               />
               {agentRunning ? (
                 <>
-                  {hasContent && !liveVoice ? (
+                  {hasContent ? (
                     <button
                       type="button"
                       onClick={() => handleSend()}
@@ -1317,17 +1303,7 @@ export function ChatPane({
                     <div className="chat-pane-stop-btn-icon" />
                   </button>
                 </>
-              ) : liveVoice && liveVoiceHandlers?.manualSend ? (
-                <button
-                  type="button"
-                  onClick={liveVoiceHandlers.onSend}
-                  disabled={!liveVoiceHandlers.canSend}
-                  title="Send what you said"
-                  className={sendBtnClass}
-                >
-                  <Icons.Send />
-                </button>
-              ) : !liveVoice ? (
+              ) : (
                 <button
                   type="button"
                   onClick={() => handleSend()}
@@ -1337,7 +1313,7 @@ export function ChatPane({
                 >
                   {noModelsAvailable ? <Icons.Settings /> : <Icons.Send />}
                 </button>
-              ) : null}
+              )}
             </div>
           </div>
         </div>

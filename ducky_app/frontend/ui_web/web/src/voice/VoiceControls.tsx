@@ -27,6 +27,7 @@ export type LiveVoiceUiHandlers = {
   canSend: boolean;
   manualSend: boolean;
   setManualSend: (value: boolean) => void;
+  muted: boolean;
   voiceId: string;
   speed: number;
   setVoiceId: (value: string) => void;
@@ -49,7 +50,7 @@ export type VoiceControlsProps = {
   duckySpeed?: number;
   /** Multi-ducky group chat — enqueue each speaker's voice. */
   isGroup?: boolean;
-  /** Composer swaps textarea ↔ live panel; parent renders VoiceOverlay. */
+  /** Composer slides the live panel above the textarea; parent renders VoiceOverlay. */
   onLiveChange?: (live: boolean, handlers: LiveVoiceUiHandlers | null) => void;
 };
 
@@ -59,9 +60,9 @@ export type VoiceControlsProps = {
 export function VoiceControls({
   chatId,
   disabled,
-  inputText,
+  inputText: _inputText,
   setInputText,
-  onSend,
+  onSend: _onSend,
   streamText,
   agentRunning,
   duckyVoice,
@@ -75,7 +76,7 @@ export function VoiceControls({
   const [sessionVoice, setSessionVoice] = useState(() => resolveVoiceId(duckyVoice));
   const [sessionSpeed, setSessionSpeed] = useState(() => resolveSpeed(duckySpeed));
   const [processTalk, setProcessTalkState] = useState(() => getVoiceSettings().processTalk);
-  const baseTextRef = useRef("");
+  const [muted, setMuted] = useState(false);
   const onLiveChangeRef = useRef(onLiveChange);
   onLiveChangeRef.current = onLiveChange;
 
@@ -124,36 +125,24 @@ export function VoiceControls({
     voiceId: sessionVoice,
     speed: sessionSpeed,
     manualSend,
+    muted,
     agentRunning,
     isGroup,
-    onInterim: (text) => {
-      if (!live) return;
-      const base = baseTextRef.current;
-      setInputText(text ? (base ? `${base} ${text}` : text) : base);
+    onInterim: () => {
+      // Interim stays in the live panel — never overwrite the typed draft.
     },
-    onAutoSend: (text) => {
-      baseTextRef.current = "";
-      setInputText(text);
-      onSend(text);
-    },
+    onTranscript: appendTranscript,
   });
 
   useEffect(() => {
     setLive(isLiveChat(chatId));
+    setMuted(false);
   }, [chatId]);
 
-  const { skip, back, newest, sendNow, canSend, pendingText, hasPrev, hasNext, hasNewer } = liveMode;
-
-  useEffect(() => {
-    if (!live) return;
-    baseTextRef.current = pendingText;
-    if (!pendingText) return;
-    // Keep composer draft in sync when a VAD segment lands (manual mode).
-    setInputText(pendingText);
-  }, [live, pendingText, setInputText]);
+  const { skip, back, newest, sendNow, canSend, hasPrev, hasNext, hasNewer } = liveMode;
 
   const exitLive = useCallback(() => {
-    baseTextRef.current = "";
+    setMuted(false);
     stopLiveChat(chatId);
     setLive(false);
   }, [chatId]);
@@ -198,6 +187,7 @@ export function VoiceControls({
         canSend: canSend && !agentRunning,
         manualSend,
         setManualSend,
+        muted,
         voiceId: sessionVoice,
         speed: sessionSpeed,
         setVoiceId,
@@ -222,6 +212,7 @@ export function VoiceControls({
     agentRunning,
     manualSend,
     setManualSend,
+    muted,
     sessionVoice,
     sessionSpeed,
     setVoiceId,
@@ -267,15 +258,15 @@ export function VoiceControls({
     setLive((v) => {
       const next = !v;
       if (next) {
-        baseTextRef.current = inputText.trim();
         const voice = resolveVoiceId(duckyVoice);
         const rate = resolveSpeed(duckySpeed);
         setSessionVoice(voice);
         setSessionSpeed(rate);
+        setMuted(false);
         dictation.abort();
         startLiveChat(chatId, { voiceId: voice, speed: rate, isGroup });
       } else {
-        baseTextRef.current = "";
+        setMuted(false);
         stopLiveChat(chatId);
       }
       return next;
@@ -285,7 +276,9 @@ export function VoiceControls({
   const micTitle = dictation.error
     ? dictation.error
     : live
-      ? liveMode.error || "Live voice on — speak to interrupt"
+      ? muted
+        ? "Unmute mic — type-only right now"
+        : liveMode.error || "Mute mic — keep hearing replies"
       : dictation.isRecording
         ? "Stop recording"
         : dictation.status === "transcribing"
@@ -296,15 +289,27 @@ export function VoiceControls({
     <div className="voice-controls">
       <button
         type="button"
-        className={`voice-btn${dictation.isRecording ? " voice-btn--recording" : ""}${
-          dictation.status === "transcribing" ? " voice-btn--busy" : ""
-        }`}
+        className={`voice-btn${
+          live
+            ? muted
+              ? " voice-btn--muted"
+              : " voice-btn--recording"
+            : dictation.isRecording
+              ? " voice-btn--recording"
+              : ""
+        }${dictation.status === "transcribing" ? " voice-btn--busy" : ""}`}
         title={micTitle}
-        disabled={!!disabled || live || dictation.status === "transcribing"}
-        onClick={() => void dictation.toggle()}
-        aria-label="Dictate"
+        disabled={!!disabled || (!live && dictation.status === "transcribing")}
+        onClick={() => {
+          if (live) {
+            setMuted((m) => !m);
+            return;
+          }
+          void dictation.toggle();
+        }}
+        aria-label={live ? (muted ? "Unmute microphone" : "Mute microphone") : "Dictate"}
       >
-        <Icons.Mic />
+        {live && muted ? <Icons.MicOff /> : <Icons.Mic />}
       </button>
       <button
         type="button"
@@ -333,14 +338,13 @@ export function VoiceControls({
           hasPrev={hasPrev}
           hasNext={hasNext}
           hasNewer={hasNewer}
-          onSend={() => sendNow()}
-          canSend={canSend && !agentRunning}
-          manualSend={manualSend}
-          setManualSend={setManualSend}
           voiceId={sessionVoice}
           speed={sessionSpeed}
           setVoiceId={setVoiceId}
           setSpeed={setSpeed}
+          processTalk={processTalk}
+          setProcessTalk={setProcessTalk}
+          muted={muted}
         />
       ) : null}
     </div>
