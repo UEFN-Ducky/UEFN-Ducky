@@ -44,9 +44,11 @@ _PLAN_SUFFIX = (
 _AGENT_SUFFIX = (
     "\n\n[Mode: Agent] Multi-step work: if this chat has no plan yet, create one with "
     "`ducky_create_plan` after brief discovery (a few inspects), BEFORE mutators. "
-    "If a plan is already in context / `ducky_get_plan`, FOLLOW it — depth-first open "
-    "leaves, `ducky_plan_update_node` in_progress→completed. Never replace the tool "
-    "plan with chat prose. Off-plan thrashing (retrying diagnoses without updating "
+    "If a plan is already in context / `ducky_get_plan`, FOLLOW it and CHECK OFF every "
+    "leaf — `ducky_plan_update_node(node_id, status=in_progress)` BEFORE the step, "
+    "`completed` when Done-when is met, then the next leaf. Re-check the plan every "
+    "tool round. Mutators are blocked until a leaf is in_progress. Never replace the "
+    "tool plan with chat prose. Off-plan thrashing (retrying diagnoses without updating "
     "the tree) is forbidden — rewrite the outline first when the approach changes."
 )
 

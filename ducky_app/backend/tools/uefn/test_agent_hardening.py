@@ -151,6 +151,22 @@ def test_hard_rules_verse_build_lifecycle():
     assert "never retry" in AGENT_HARD_RULES.lower()
 
 
+def test_hard_rules_agent_does_the_editor_work():
+    assert "You do the editor work" in AGENT_HARD_RULES
+    assert "create_npc_character_definition" in AGENT_HARD_RULES
+    assert "Write the game, don't paste it" in AGENT_HARD_RULES
+    assert "never ask the user to click details" in AGENT_HARD_RULES.lower()
+    assert "ducky_get_tools" in AGENT_HARD_RULES
+    assert "npc_ecosystem" in AGENT_HARD_RULES
+
+
+def test_hard_rules_check_off_the_plan():
+    assert "Check off the plan" in AGENT_HARD_RULES
+    assert "ducky_plan_update_node" in AGENT_HARD_RULES
+    assert "in_progress" in AGENT_HARD_RULES
+    assert "0 completed" in AGENT_HARD_RULES
+
+
 def test_digest_path_guard_blocks_writes():
     from backend.tools.verse.verse_digests import is_uefn_digest_path, require_not_digest_path
 
