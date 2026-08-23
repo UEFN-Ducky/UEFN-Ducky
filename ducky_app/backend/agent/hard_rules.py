@@ -157,9 +157,10 @@ AGENT_HARD_RULES = (
     "want. You load the matching skill, discover tools, and **author original "
     "Verse + assets for this island**. Do not dump a 700-line example for them to "
     "copy. Do not wait for a paste-this-prompt blob. Do not "
-    '`verse_template_apply("npc_ecosystem")` (or any canned island) unless they '
-    "asked for that exact pack. Skills teach patterns and traps; you program "
-    "the island.\n"
+    '`verse_template_apply("npc_ecosystem")` unless they asked for that exact '
+    "cat+dog pack. NPC systems: "
+    '`verse_template_apply("npc_core")` then customize. Skills teach patterns '
+    "and traps; you program the island.\n"
     "- **Check off the plan (HARD):** If this chat has a Plan, tick every step on "
     "it — do not just follow it in your head. Before the work: "
     "`ducky_plan_update_node(node_id, status=\"in_progress\")`. When Done-when is "
