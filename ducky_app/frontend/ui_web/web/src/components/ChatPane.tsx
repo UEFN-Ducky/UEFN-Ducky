@@ -1198,8 +1198,12 @@ export function ChatPane({
                 inline
                 showPickers={false}
                 onClose={liveVoiceHandlers.onClose}
-                onSkip={liveVoiceHandlers.onSkip}
-                onReplay={liveVoiceHandlers.onReplay}
+                onBack={liveVoiceHandlers.onBack}
+                onForward={liveVoiceHandlers.onForward}
+                onNewest={liveVoiceHandlers.onNewest}
+                hasPrev={liveVoiceHandlers.hasPrev}
+                hasNext={liveVoiceHandlers.hasNext}
+                hasNewer={liveVoiceHandlers.hasNewer}
                 onSend={liveVoiceHandlers.onSend}
                 canSend={liveVoiceHandlers.canSend}
                 manualSend={liveVoiceHandlers.manualSend}
@@ -1207,7 +1211,7 @@ export function ChatPane({
             ) : null}
           </div>
 
-          <div className="chat-pane-input-toolbar">
+          <div className={`chat-pane-input-toolbar${liveVoice ? " chat-pane-input-toolbar--voice" : ""}`}>
             <div className="chat-pane-input-toolbar-left">
               {!liveVoice && !chat.isGroup ? (
                 <ModeSelector activeMode={agentMode} setMode={setAgentMode} />

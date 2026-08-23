@@ -1167,11 +1167,16 @@ def create_project_verse_file(parent_relative: str, name: str, content: str = ""
 
 
 def create_project_file(parent_relative: str, name: str, content: str = "") -> dict[str, str]:
-    """Create a new text file under Content (any editable extension)."""
+    """Create a new text file under Content (any editable extension except .py)."""
     _require_writable_content_path(parent_relative)
     safe_name = _validate_entry_name(name)
     if not Path(safe_name).suffix:
         safe_name = f"{safe_name}.txt"
+    if Path(safe_name).suffix.lower() in {".py", ".pyc"}:
+        raise ValueError(
+            "Never create .py in a UEFN project — Epic rejects the upload "
+            "(ContainsPythonData). Scratch → %LOCALAPPDATA%/UEFN-Ducky/."
+        )
     if _is_binary_file_name(safe_name):
         raise ValueError(f"Cannot create binary file: {safe_name}")
     rel = _join_content_path(parent_relative, safe_name)

@@ -36,9 +36,10 @@ def inspect_verse_device(actor_path: str, pretty: bool = False) -> str:
     freezes the editor). Census: ``find_devices`` (returns ``kind`` + ``script_class``).
     Field names: ``workspace_read_file`` of that class's ``.verse``.
 
-    Returns every @editable field, wiring.tool, verse_type, array_length, STOP flag.
-    Pass the Outliner **label** exactly as returned by find_devices — not the long UAID path.
-    If STOP is true, check diagnostics.stale_listener — may need reload_listener (not always compile).
+    Returns every @editable field, wiring.tool, verse_type, array_length, mangled_name,
+    resolution_tried, STOP flag. STOP is advisory — resolve hashes and wire; do not
+    ask the user to Build Verse. Pass the Outliner **label** exactly as returned
+    by find_devices — not the long UAID path. If diagnostics.stale_listener, reload_listener.
     """
     result = send_command(
         "get_verse_editables",

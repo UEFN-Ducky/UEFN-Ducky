@@ -1,4 +1,4 @@
-"""Deploy init_unreal.py to every recently opened project."""
+"""Deploy listener hooks and quarantine island .py on every recently opened project."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from frontend.ui_web.recent_projects import add_recent_project, load_recent_proj
 
 
 def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> list[str]:
-    """Refresh frozen init stubs for all known project paths (startup + after updates)."""
+    """Refresh listener hooks and quarantine island .py on known project paths."""
     lines: list[str] = []
     paths: list[str] = []
     seen: set[str] = set()

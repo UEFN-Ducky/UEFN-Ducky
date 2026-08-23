@@ -21,7 +21,7 @@ from frontend.ui_web.recent_projects import (
     remove_recent_project,
 )
 
-# Roots whose one-time deploy (frozen init_unreal.py + skill sync) already ran in this
+# Roots whose one-time deploy (Python quarantine + skill sync) already ran in this
 # process — so switching back and forth, from either the UI or MCP, never redoes it.
 _deployed_roots: set[str] = set()
 _deploy_lock = threading.Lock()
@@ -165,8 +165,9 @@ def switch_panel_project(
     Resolves a `path` or recent `name` (empty → clear the active project), updates settings
     + recent list, pushes the ``project_changed`` UI event, and runs the one-time-per-project
     deploy (deduplicated). ``background_deploy=True`` keeps the deploy off the caller's thread
-    so the UI switch returns instantly; MCP callers run it inline so init_unreal.py exists
-    before the tool returns. Returns the new project info (path/name/slug).
+    so the UI switch returns instantly; MCP callers run it inline so the listener
+    hooks and Python quarantine finish before the tool returns. Returns the new
+    project info (path/name/slug).
     """
     if path.strip() or name.strip():
         resolved = resolve_panel_project_ref(path=path, name=name)
@@ -222,10 +223,10 @@ def delete_panel_project(path: str, *, push_ui: bool = True) -> dict[str, str]:
         _deployed_roots.discard(norm)
 
     from frontend.appdata_maintenance import delete_project_appdata
-    from frontend.deploy import remove_project_init_script
+    from frontend.deploy import quarantine_project_python
 
     delete_project_appdata(slug)
-    remove_project_init_script(Path(norm))
+    quarantine_project_python(Path(norm), deep=True)
 
     if was_active:
         next_path = load_recent_projects()[0] if load_recent_projects() else ""

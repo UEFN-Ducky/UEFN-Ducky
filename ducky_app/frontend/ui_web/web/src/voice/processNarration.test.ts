@@ -5,6 +5,7 @@ import {
   shouldNarrateThinking,
   shouldNarrateThinkingDetail,
   shouldNarrateTool,
+  shouldNarrateToolResult,
   speakableThinkingLine,
   speakableToolLine,
   thinkingTopic,
@@ -24,10 +25,12 @@ describe("processNarration", () => {
     expect(shouldNarrateThinking(0.4)).toBe(true);
     expect(shouldNarrateThinkingDetail(0.6)).toBe(false);
     expect(shouldNarrateThinkingDetail(0.7)).toBe(true);
+    expect(shouldNarrateToolResult(0.3)).toBe(false);
+    expect(shouldNarrateToolResult(0.4)).toBe(true);
   });
 
   it("builds short tool lines", () => {
-    expect(speakableToolLine("workspace_read_file")).toBe("Running tool to reading file.");
+    expect(speakableToolLine("workspace_read_file")).toBe("Running tool to read file.");
     expect(speakableToolLine("ping")).toBe("Running tool to checking uefn listener.");
   });
 

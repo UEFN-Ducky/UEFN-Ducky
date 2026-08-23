@@ -119,7 +119,7 @@ export function AddToUefnTab() {
         <GeneralSectionHeader
           icon={<ProjectFilesIcon />}
           title="Project Files"
-          description="Sidebar file tree. Engine folders stay hidden by default; init_unreal.py stays visible and read-only."
+          description="Sidebar file tree. Engine folders stay hidden by default."
         />
         <div className="general-tab-toggle-card">
           <SettingsToggleRow
@@ -149,8 +149,8 @@ export function AddToUefnTab() {
         />
         <div className="add-to-uefn-auto-card">
           <p className="add-to-uefn-auto-lead">
-            You do not deploy from here. Ducky writes <code>init_unreal.py</code> into the active
-            project on open / app start, then UEFN loads the listener from AppData.
+            You do not deploy from here. Ducky writes <code>Content/Python/init_unreal.py</code>{" "}
+            into the active project on open / app start (listener boot). Do not delete that file.
           </p>
           <h4 className="add-to-uefn-steps-title">What you need to do</h4>
           <ol className="add-to-uefn-steps">

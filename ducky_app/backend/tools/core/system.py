@@ -55,20 +55,33 @@ def _workspace_entry_allowed(name: str) -> bool:
 WRITE_OUTSIDE_CONTENT_FORBIDDEN = (
     "workspace_write_file may only write under the UEFN project's Content/ or "
     ".ducky/ folders. Never touch UEFN core files, digests, Saved/, Intermediate/, "
-    "or the project root. Scratch files belong in %LOCALAPPDATA%/UEFN-Ducky/ "
-    "(or OS temp). Allowed: Content/** (Verse, assets) and .ducky/** (tests, tasks)."
+    "or the project root. Never write .py/.pyc into the island (Epic rejects "
+    "the upload with ContainsPythonData). Scratch files belong in "
+    "%LOCALAPPDATA%/UEFN-Ducky/ (or OS temp). Allowed: Content/** (Verse, assets) "
+    "and .ducky/** (tests, tasks) — never Python."
+)
+
+WRITE_PYTHON_IN_PROJECT_FORBIDDEN = (
+    "Never write extra .py/.pyc into a UEFN project. Ducky auto-manages "
+    "Content/Python/init_unreal.py (listener boot) — never delete that file. "
+    "Scratch → %LOCALAPPDATA%/UEFN-Ducky/. execute_python is in-memory only."
 )
 
 _WRITE_BLOCKED_ANCESTORS = frozenset({"Saved", "Intermediate", "DerivedDataCache"})
 _WRITE_ALLOWED_ANCESTORS = frozenset({"Content", ".ducky"})
+_WRITE_BLOCKED_SUFFIXES = (".py", ".pyc")
 
 
 def require_writable_project_path(file_path: str) -> None:
     """Refuse writes outside Content/** and .ducky/** of a UEFN project.
 
     Digests are blocked separately by require_not_digest_path. This guard stops
-    the rest: Saved/, Intermediate/, project-root junk, and UEFN core files.
+    the rest: Saved/, Intermediate/, project-root junk, UEFN core files, and
+    any .py/.pyc (Epic ContainsPythonData).
     """
+    lowered = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").lower()
+    if lowered.endswith(_WRITE_BLOCKED_SUFFIXES):
+        raise ValueError(WRITE_PYTHON_IN_PROJECT_FORBIDDEN)
     parts = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").split("/")
     names = [p for p in parts if p and p != "."]
     for i, name in enumerate(names):
@@ -151,8 +164,9 @@ def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = 
 def workspace_write_file(relative_path: str, content: str, pretty: bool = False) -> str:
     """Write a text file under the VS Code workspace on host disk.
 
-    Only Content/** and .ducky/**. Never writes UEFN digests (*.digest.verse)
-    or anything outside those two roots (Saved/, Intermediate/, project root).
+    Only Content/** and .ducky/**. Never writes UEFN digests (*.digest.verse),
+    .py/.pyc (Epic ContainsPythonData), or anything outside those two roots
+    (Saved/, Intermediate/, project root). Python scratch → %LOCALAPPDATA%/UEFN-Ducky/.
     """
     from backend.tools.verse.verse_digests import require_not_digest_path
 
@@ -230,8 +244,9 @@ def reload_listener(pretty: bool = False) -> str:
 def execute_python(code: str) -> str:
     """Run arbitrary Python in UEFN (escape hatch). Call uefn_editor_python_hints first for materials/Fort*.
 
-    Never write files outside the project's Content/** or .ducky/**. Never mutate
-    *.digest.verse. Never loop spawn/import/prefab packaging — that freezes UEFN.
+    In-memory only — never write any file to disk, especially not .py into the
+    island (Epic ContainsPythonData). Never mutate *.digest.verse. Never loop
+    spawn/import/prefab packaging — that freezes UEFN.
     """
     result = send_command("execute_python", {"code": code}, timeout=120.0)
     parts = []

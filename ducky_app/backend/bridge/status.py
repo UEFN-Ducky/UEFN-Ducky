@@ -8,7 +8,7 @@ Those POST commands queue on the UEFN Slate tick and were the #1 freeze source
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ from backend.bridge import listener_get_health, post_command_to_listener, second
 
 # GET ok + tick_age above this while not busy ⇒ Slate tick stopped (wedged).
 _WEDGE_TICK_AGE_SEC = 10.0
+_PYTHON_SWEEP_INTERVAL_SEC = 60.0
 
 
 @dataclass
@@ -24,6 +25,8 @@ class ListenerStatusState:
 
     ping_fail_streak: int = 0
     project_cache: dict[str, Any] | None = None
+    last_python_sweep_at: float = 0.0
+    python_quarantined: list[str] = field(default_factory=list)
 
 
 def _sec_to_uptime(sec: float) -> str:
@@ -257,6 +260,19 @@ def fetch_listener_status(
     coexistence = bool(beta.get("python_and_toolsets"))
     init_race_active = bool(coexistence and not online)
 
+    now = time.time()
+    if selected_project_root and now - st.last_python_sweep_at >= _PYTHON_SWEEP_INTERVAL_SEC:
+        try:
+            from frontend.deploy import quarantine_project_python, resolve_uefn_project_root
+
+            root = resolve_uefn_project_root(Path(selected_project_root))
+            moved = quarantine_project_python(root, deep=False)
+            if moved:
+                st.python_quarantined = moved
+            st.last_python_sweep_at = now
+        except Exception:
+            st.last_python_sweep_at = now
+
     return {
         "online": online,
         "wedged": wedged,
@@ -279,4 +295,5 @@ def fetch_listener_status(
         "python_and_toolsets": coexistence,
         "listener_init_race": init_race_active,
         "beta_access_note": str(beta.get("agent_note") or "") if init_race_active else "",
+        "project_python_quarantined": list(st.python_quarantined),
     }

@@ -21,6 +21,11 @@ export function shouldNarrateThinking(processTalk: number): boolean {
   return clampProcessTalk(processTalk) >= 0.4;
 }
 
+/** Tool results — same threshold as thinking. */
+export function shouldNarrateToolResult(processTalk: number): boolean {
+  return clampProcessTalk(processTalk) >= 0.4;
+}
+
 /** Include a short topic snippet (vs bare "Thinking.") at high processTalk. */
 export function shouldNarrateThinkingDetail(processTalk: number): boolean {
   return clampProcessTalk(processTalk) >= 0.7;

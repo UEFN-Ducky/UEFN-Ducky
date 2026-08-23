@@ -129,17 +129,20 @@ def _execute_python_blocked(code: str) -> str | None:
     if "for name in dir(unreal)" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables; if STOP is true, tell user to Build Verse Code in UEFN."
+            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Do not ask the user to Build Verse."
         )
     if "valkyrie" in low and ("compile" in low or "build" in low):
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables; if STOP is true, tell user to Build Verse Code in UEFN."
+            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Do not ask the user to Build Verse."
         )
     if "scriptpropertyoverrides" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables; if STOP is true, tell user to Build Verse Code in UEFN."
+            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Do not ask the user to Build Verse."
         )
     if "add_unique_transient_override" in low:
         return (
@@ -191,39 +194,47 @@ def _execute_python_blocked(code: str) -> str | None:
             "call execute_tool with small known payloads only."
         )
     # Disk storms freeze the editor: execute_python runs on the Slate main thread.
-    # Agents must use list_verse_property_hashes / get_verse_editables / workspace_* instead.
-    freeze_needles = (
+    # A one-object get_editor_property("__verse_0x…") is allowed. Block only when
+    # a mangled-name literal is paired with a real filesystem / install scan.
+    walk_needles = (
         "os.walk(",
-        "pathlib.path.rglob",
         "path.rglob(",
-        "__verse_0x",
+        "pathlib.path.rglob",
         "unrealeditorfortnite",
+        "epic games\\fortnite",
+        "epic games/fortnite",
         "program files\\epic games\\fortnite",
         "program files/epic games/fortnite",
         "deriveddatacache",
         ".uasset",
         ".umap",
     )
-    if any(n in compact or n in low for n in freeze_needles):
-        # Allow tiny single-file reads of project Content; block install/AppData walks + hash scans.
-        scanning = any(
-            n in compact or n in low
-            for n in (
-                "os.walk(",
-                "path.rglob(",
-                "pathlib.path.rglob",
-                "__verse_0x",
-                "unrealeditorfortnite",
-                "epic games\\fortnite",
-                "epic games/fortnite",
-            )
+    walking = any(n in compact or n in low for n in walk_needles)
+    mentions_hash = "__verse_0x" in compact or "__verse_0x" in low
+    if walking and mentions_hash:
+        return (
+            "STOP: execute_python blocked — filesystem walks / Verse-hash binary scans freeze UEFN "
+            "(runs on the editor main thread). Reading or writing a mangled "
+            "`__verse_0x<HASH>_<Field>` property on one Script object is allowed. "
+            "Use list_verse_property_hashes(refresh=true), get_verse_editables, or "
+            "wire_verse_* instead of scanning disk."
         )
-        if scanning:
-            return (
-                "STOP: execute_python blocked — filesystem walks / Verse-hash binary scans freeze UEFN "
-                "(runs on the editor main thread). Use list_verse_property_hashes(refresh=true), "
-                "get_verse_editables, or workspace_* tools instead."
-            )
+    if walking and any(
+        n in compact or n in low
+        for n in (
+            "os.walk(",
+            "path.rglob(",
+            "pathlib.path.rglob",
+            "unrealeditorfortnite",
+            "epic games\\fortnite",
+            "epic games/fortnite",
+        )
+    ):
+        return (
+            "STOP: execute_python blocked — filesystem walks freeze UEFN "
+            "(runs on the editor main thread). Use list_verse_property_hashes(refresh=true), "
+            "get_verse_editables, or workspace_* tools instead."
+        )
     return None
 
 
