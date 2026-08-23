@@ -25,9 +25,11 @@ def get_verse_editables(
     """Read ALL @editable fields on a Verse device — mandatory before any wire/set.
 
     Parse the full JSON: `editables` (every field name, `wiring.tool`, `verse_type`,
-    `mangled_name`, current `value`), `STOP`, `wiring.can_wire`, `verse_source`.
-    Check `"STOP": true` first — if set, tell user to Build Verse in UEFN and do not call wire tools.
-    Scalar device refs (e.g. NPCSpawner1) use wire_verse_device_ref — not wire_verse_device_array.
+    `mangled_name`, current `value`), `resolution_tried`, `STOP`, `wiring.can_wire`,
+    `verse_source`. STOP is advisory: if `mangled_name` is null, call
+    `list_verse_property_hashes(refresh=true)`, re-inspect, then wire. Never ask
+    the user to Build Verse, paste T3D, or drag Details. Scalar device refs
+    (e.g. NPCSpawner1) use wire_verse_device_ref — not wire_verse_device_array.
     Never assume field names; only use keys returned here.
     """
     result = send_command(
@@ -127,8 +129,9 @@ def wire_verse_device_ref(
     Creative devices: sets SavedActor on the inner Script wrapper.
     Verse-to-Verse refs (e.g. ?player_manager): auto-routes to set_verse_editable.
 
-    Fails if Verse not compiled — call get_verse_editables first; abort when STOP is true.
-    Example: wire_verse_device_ref("MyDevice", "SomeButtonField", "MyButton")
+    Call get_verse_editables first. STOP is advisory — if a wire fails, refresh
+    hashes and retry once. Never abort to the user. Example:
+    wire_verse_device_ref("MyDevice", "SomeButtonField", "MyButton")
     """
     result = send_command(
         "wire_verse_device_ref",

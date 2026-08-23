@@ -111,6 +111,10 @@ def test_hard_rules_write_boundary_content_and_ducky():
     assert "Content/" in AGENT_HARD_RULES
     assert ".ducky" in AGENT_HARD_RULES
     assert "execute_python" in AGENT_HARD_RULES
+    assert "No Python in the island" in AGENT_HARD_RULES
+    assert "Never delete" in AGENT_HARD_RULES
+    assert "init_unreal.py" in AGENT_HARD_RULES
+    assert "ContainsPythonData" in AGENT_HARD_RULES
 
 
 def test_hard_rules_inspect_is_not_census():
@@ -140,7 +144,19 @@ def test_get_verse_editables_skips_uasset_walk():
     body = src[start:end]
     assert "_lookup_many_field_hashes_in_dirs" not in body
     assert "_resolve_field_prop_cheap" in body
+    assert "_class_scoped_hash_scan" in body
+    assert "resolution_tried" in body
+    assert "forbidden_until_compiled" in body
+    assert '"execute_python"' not in body.split("forbidden_until_compiled", 1)[1][:400]
     assert "_lookup_many_field_hashes_in_dirs" in src  # still used on the write path
+    assert "if found:" in src
+    assert "_SCRIPT_PROPS_CACHE[cls_name] = found" in src
+    # Empty reflection must not be cached (the assignment is inside `if found:`).
+    empty_cache = "_SCRIPT_PROPS_CACHE[cls_name] = found\n    return found"
+    # The old poison-cache pattern: assign then return with no `if found`.
+    fn = src[src.index("def _script_verse_properties") : src.index("def _class_scoped_hash_scan")]
+    assert "if found:" in fn
+    assert empty_cache not in fn.replace("    if found:\n        _SCRIPT_PROPS_CACHE[cls_name] = found\n    return found", "")
 
 
 def test_hard_rules_verse_build_lifecycle():
@@ -158,6 +174,21 @@ def test_hard_rules_agent_does_the_editor_work():
     assert "never ask the user to click details" in AGENT_HARD_RULES.lower()
     assert "ducky_get_tools" in AGENT_HARD_RULES
     assert "npc_ecosystem" in AGENT_HARD_RULES
+
+
+def test_hard_rules_never_hand_verse_wiring_to_user():
+    assert "Never ask the user to Build Verse" in AGENT_HARD_RULES
+    assert "__verse_0x" in AGENT_HARD_RULES
+    assert "STOP is advisory" in AGENT_HARD_RULES
+    assert "tell user to Build Verse" not in AGENT_HARD_RULES
+    from backend.agent.prompt import _rules_body
+    from backend.server import mcp
+
+    rules = _rules_body(4200)
+    mcp_text = mcp.instructions or ""
+    for text in (AGENT_HARD_RULES, rules, mcp_text):
+        assert "tell user to Build Verse" not in text
+        assert "Never ask the user to Build Verse" in text or "never ask the user to Build Verse" in text.lower()
 
 
 def test_hard_rules_check_off_the_plan():
@@ -200,6 +231,14 @@ def test_writable_project_path_allowlist():
         except ValueError as exc:
             assert "Content/" in str(exc)
             assert ".ducky" in str(exc)
+    try:
+        require_writable_project_path(
+            r"C:\Fortnite Projects\Roguelike\Content\Python\init_unreal.py"
+        )
+        raise AssertionError("expected ValueError for .py in project")
+    except ValueError as exc:
+        assert "init_unreal.py" in str(exc)
+        assert "never delete" in str(exc).lower() or "LOCALAPPDATA" in str(exc)
 
 
 def test_hard_rules_require_ask_user_questionnaire():

@@ -69,6 +69,8 @@ import {
 import { useSidebarDragPointerTracking } from "../hooks/useSidebarDragPointerTracking";
 import { SidebarTreeChildren } from "./sidebar/SidebarTreeChildren";
 import { SidebarTreeRow } from "./sidebar/SidebarTreeRow";
+import { LiveChatDot } from "../voice/LiveChatMark";
+import { useIsLiveChat } from "../voice/useLiveChatPresence";
 import { ChatTabHoverCard } from "./editor/ChatTabHoverCard";
 import { FolderTabHoverCard } from "./editor/FolderTabHoverCard";
 import {
@@ -222,6 +224,7 @@ const ChatRow = memo(function ChatRow({
       : "en";
   const showChatTranslate =
     pluginContributesSettingsTab(pluginContrib, "Languages") && !isEnglishLang(uiLang);
+  const live = useIsLiveChat(chat.id);
 
   const mergeRowRef = (node: HTMLDivElement | null) => {
     setNodeRef(node);
@@ -260,8 +263,8 @@ const ChatRow = memo(function ChatRow({
               </button>
             ) : null}
             <span
-              className={`sidebar-tree-row-icon sidebar-tree-row-icon--chat${hasCompletionAlert && !isRunning ? " chat-completion-alert" : ""}${chat.isLeader ? " sidebar-tree-row-icon--leader" : ""}`}
-              title={chat.isLeader ? "Group leader" : undefined}
+              className={`sidebar-tree-row-icon sidebar-tree-row-icon--chat${hasCompletionAlert && !isRunning ? " chat-completion-alert" : ""}${chat.isLeader ? " sidebar-tree-row-icon--leader" : ""}${live ? " is-live-chat" : ""}`}
+              title={live ? "Live chat" : chat.isLeader ? "Group leader" : undefined}
             >
               {isRunning ? (
                 <span className="sidebar-agent-spinner" title="Agent working" />
@@ -272,6 +275,7 @@ const ChatRow = memo(function ChatRow({
                   className="ducky-avatar--sidebar"
                 />
               )}
+              {live ? <LiveChatDot className="live-chat-dot--sidebar" /> : null}
               {chat.isLeader && !isRunning ? (
                 <span className="sidebar-leader-badge" title="Group leader" aria-label="Group leader">
                   <Icons.Star />

@@ -86,9 +86,13 @@ _FIELD_SNIPPET_CACHE: Dict[str, Tuple[str, str]] = {}
 _STRUCT_CLASS_PATH_CACHE: Dict[str, str] = {}
 
 _SCRIPT_PROP_RE = re.compile(r"__verse_0x[0-9A-Fa-f]{8}_(.+)")
+# Tight name match for T3D / export-text (the capture regex is greedy).
+_SCRIPT_PROP_NAME_RE = re.compile(r"__verse_0x[0-9A-Fa-f]{8}_[A-Za-z0-9_]+")
 # Cap a single .uasset/.umap read while hash-scanning — the mangled property
 # name is near the export table, not deep in binary payload data.
 _MAX_HASH_SCAN_FILE_BYTES = 4 * 1024 * 1024
+# Per Script class: field -> mangled name from one bounded class-folder walk.
+_CLASS_SCAN_CACHE: Dict[str, Dict[str, str]] = {}
 
 
 def _disk_project_content_dir() -> str | None:
@@ -509,17 +513,10 @@ def _script_class_stems(cls_name: str) -> List[str]:
     return stems
 
 
-def _script_verse_properties(script: Any) -> Dict[str, str]:
-    """Map @editable field name -> mangled property on this device's Script."""
-    cls_name = script.get_class().get_name()
-    cached = _SCRIPT_PROPS_CACHE.get(cls_name)
-    if cached is not None:
-        return cached
-
+def _collect_readable_verse_props(script: Any, names: List[str]) -> Dict[str, str]:
+    """Keep only mangled names that ``get_editor_property`` can read on *script*."""
     found: Dict[str, str] = {}
-    for name in dir(script):
-        if not name.startswith("__verse_0x"):
-            continue
+    for name in names:
         m = _SCRIPT_PROP_RE.match(name)
         if not m:
             continue
@@ -529,27 +526,123 @@ def _script_verse_properties(script: Any) -> Dict[str, str]:
             found.setdefault(field, name)
         except Exception:
             continue
-
-    if not found:
-        try:
-            for prop in script.get_class().properties():
-                pname = str(prop.get_fname())
-                if not pname.startswith("__verse_0x"):
-                    continue
-                m = _SCRIPT_PROP_RE.match(pname)
-                if not m:
-                    continue
-                field = m.group(1)
-                try:
-                    script.get_editor_property(pname)
-                    found.setdefault(field, pname)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-    _SCRIPT_PROPS_CACHE[cls_name] = found
     return found
+
+
+def _script_export_text_properties(script: Any) -> Dict[str, str]:
+    """Single-object T3D / export-text of the Script UObject — no disk walk.
+
+    UEFN Python does not always expose ``export_text``; each API is tried and
+    failures are logged. Empty result is not an error — caller falls back to
+    a class-scoped hash scan.
+    """
+    text = ""
+    for attr in ("export_text", "get_export_text"):
+        fn = getattr(script, attr, None)
+        if not callable(fn):
+            continue
+        try:
+            raw = fn()
+            if isinstance(raw, str) and raw:
+                text = raw
+                break
+        except Exception as exc:
+            unreal.log_warning(f"Ducky: Script.{attr}() failed: {exc}")
+    if not text:
+        sys_lib = getattr(unreal, "SystemLibrary", None)
+        getter = getattr(sys_lib, "get_export_text", None) if sys_lib is not None else None
+        if callable(getter):
+            try:
+                raw = getter(script)
+                if isinstance(raw, str) and raw:
+                    text = raw
+            except Exception as exc:
+                unreal.log_warning(f"Ducky: SystemLibrary.get_export_text failed: {exc}")
+    if not text:
+        return {}
+    names = _SCRIPT_PROP_NAME_RE.findall(text)
+    return _collect_readable_verse_props(script, names)
+
+
+def _iter_class_property_names(script: Any) -> List[str]:
+    """Enumerate FNames on the Script class. Logs — never swallows — why it fails."""
+    names: List[str] = []
+    try:
+        cls = script.get_class()
+    except Exception as exc:
+        unreal.log_warning(f"Ducky: Script.get_class() failed: {exc}")
+        return names
+    for method_name in ("properties", "get_properties"):
+        method = getattr(cls, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            for prop in method():
+                fname = getattr(prop, "get_fname", None)
+                pname = str(fname()) if callable(fname) else str(getattr(prop, "name", "") or prop)
+                if pname.startswith("__verse_0x"):
+                    names.append(pname)
+        except Exception as exc:
+            unreal.log_warning(
+                f"Ducky: Script class.{method_name}() failed on {cls.get_name()}: {exc}"
+            )
+    return names
+
+
+def _script_verse_properties(script: Any, *, tried: Optional[List[str]] = None) -> Dict[str, str]:
+    """Map @editable field name -> mangled property on this device's Script.
+
+    Never caches an empty result — a missed early call must not poison the session.
+    """
+    cls_name = script.get_class().get_name()
+    cached = _SCRIPT_PROPS_CACHE.get(cls_name)
+    if cached:
+        if tried is not None:
+            tried.append("reflection")
+        return cached
+
+    if tried is not None:
+        tried.append("reflection")
+    found = _collect_readable_verse_props(
+        script, [n for n in dir(script) if n.startswith("__verse_0x")]
+    )
+    if not found:
+        found = _collect_readable_verse_props(script, _iter_class_property_names(script))
+    if not found:
+        export_found = _script_export_text_properties(script)
+        if export_found:
+            found = export_found
+            if tried is not None:
+                tried.append("export_text")
+
+    if found:
+        _SCRIPT_PROPS_CACHE[cls_name] = found
+    return found
+
+
+def _class_scoped_hash_scan(script: Any, *, max_files: int = 120) -> Dict[str, str]:
+    """One bounded walk of this Script class's folders — all ``__verse_0x`` names at once."""
+    try:
+        cls_name = script.get_class().get_name()
+    except Exception:
+        cls_name = ""
+    if cls_name:
+        cached = _CLASS_SCAN_CACHE.get(cls_name)
+        if cached is not None:
+            return dict(cached)
+    found: Dict[str, str] = {}
+    visited: set[str] = set()
+    seen = 0
+    dirs = _script_hash_scan_dirs(script)
+    if not dirs:
+        dirs = _wire_hash_search_dirs(script)
+    for d in dirs:
+        seen = _scan_tree_for_hashes(d, found, visited, seen, max_files)
+        if seen > max_files:
+            break
+    if cls_name:
+        _CLASS_SCAN_CACHE[cls_name] = found
+    return dict(found)
 
 
 def _verse_search_dirs() -> List[str]:
@@ -1161,6 +1254,7 @@ def list_verse_property_hashes(refresh: bool = False) -> dict:
         _VERSE_SOURCE_CACHE.clear()
         _FIELD_TYPE_CACHE.clear()
         _SCRIPT_PROPS_CACHE.clear()
+        _CLASS_SCAN_CACHE.clear()
         _FIELD_SNIPPET_CACHE.clear()
         _STRUCT_CLASS_PATH_CACHE.clear()
     hashes = _scan_property_hashes()
@@ -1240,7 +1334,10 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
                 "Could not read @editable fields from Content/Verse/*.verse for this Script class. "
                 "Check the Verse source file exists and the device Script class matches."
             ),
-            "next_step": "Fix Verse source path or Script class; do not use execute_python to probe.",
+            "next_step": (
+                "Read the class .verse for @editable names, then list_verse_property_hashes"
+                "(refresh=true) and retry get_verse_editables. Do not ask the user."
+            ),
         }
     hashed = [f for f in verse_fields if hashes.get(f)]
     if not hashed:
@@ -1249,12 +1346,13 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
             "can_wire": False,
             "message": (
                 f"Found {len(verse_fields)} @editable field(s) in .verse source but zero mangled "
-                "property hashes — Verse is not compiled yet. STALE REFLECTION — do not retry "
-                "wire_* in a loop; further retries cannot fix this."
+                "property hashes after reflection, export-text, cache, class-scoped scan, and "
+                "direct probes. The fields exist — resolve hashes, then wire."
             ),
             "next_step": (
-                "STOP. Build Verse Code in UEFN, then reload_listener, then "
-                "list_verse_property_hashes(refresh=true), then retry wire ONCE."
+                "list_verse_property_hashes(refresh=true), then get_verse_editables, then "
+                "wire_verse_* once. Do not ask the user to Build Verse, paste T3D, or drag "
+                "Details refs."
             ),
             "fields_from_source": verse_fields,
         }
@@ -1286,7 +1384,10 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     script = _verse_script(actor)
     cls_name = script.get_class().get_name()
     hashes = _cached_hashes()
-    script_props = _script_verse_properties(script)
+    resolution_tried: List[str] = []
+    script_props = _script_verse_properties(script, tried=resolution_tried)
+    if hashes and "hash_cache" not in resolution_tried:
+        resolution_tried.append("hash_cache")
     _cls, verse_text, verse_file = _verse_source_for_actor(actor)
     verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
     if not verse_fields:
@@ -1297,15 +1398,32 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     resolved_hashes = dict(hashes)
     resolved_hashes.update(script_props)
 
-    # Cheap-only: reflection + cache. Never os.walk .uasset/.umap here — that
-    # freezes the Slate tick for seconds per inspect (agents then census-loop
-    # it and lock UEFN). Wiring tools resolve one field's hash on write.
+    # Cheap first: reflection + cache + export-text. A class-scoped scan runs
+    # only when that resolves zero fields — one bounded walk, not a global
+    # os.walk of Content/.
     prelim: Dict[str, Optional[str]] = {}
     for field in verse_fields:
         prop = _resolve_field_prop_cheap(script, field, resolved_hashes)
         prelim[field] = prop
         if prop:
             resolved_hashes[field] = prop
+
+    if verse_fields and not any(prelim.values()):
+        scanned = _class_scoped_hash_scan(script)
+        resolution_tried.append("class_scan")
+        for field in verse_fields:
+            prop = scanned.get(field) or _probe_script_for_field(script, field, scanned)
+            if not prop:
+                continue
+            try:
+                script.get_editor_property(prop)
+            except Exception:
+                continue
+            prelim[field] = prop
+            resolved_hashes[field] = prop
+            _augment_hash_cache(field, prop)
+            _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
+        resolution_tried.append("probe")
 
     settings: Dict[str, dict] = {}
     for field in verse_fields:
@@ -1336,8 +1454,8 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
         else:
             entry["mangled_name"] = None
             entry["note"] = (
-                "Property hash not on Script yet — Build Verse if STOP is true; "
-                "otherwise field exists in source only."
+                "Mangled name not resolved yet — list_verse_property_hashes(refresh=true) "
+                "then retry. Do not ask the user to Build Verse or paste T3D."
             )
         if include_wiring_hints:
             spec = _wrapper_spec_for_type(verse_type) if verse_type else None
@@ -1356,10 +1474,19 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
         "verse_source_mode": source_mode,
         "editables": settings,
         "field_count": len(settings),
+        "resolution_tried": resolution_tried,
         "wiring": readiness,
         "STOP": not readiness.get("can_wire", False),
         "allowed_next_tools": (
-            ["list_verse_property_hashes", "get_verse_editables", "ping", "reload_listener"]
+            [
+                "list_verse_property_hashes",
+                "get_verse_editables",
+                "wire_verse_device_ref",
+                "wire_verse_device_array",
+                "set_verse_editable",
+                "ping",
+                "reload_listener",
+            ]
             if not readiness.get("can_wire")
             else [
                 "wire_verse_device_ref",
@@ -1374,11 +1501,9 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
                 "save_current_level",
             ]
         ),
-        "forbidden_until_compiled": (
-            ["execute_python", "wire_verse_device_ref", "wire_verse_device_array", "wire_verse_prop_assets"]
-            if not readiness.get("can_wire")
-            else []
-        ),
+        # execute_python is never forbidden — it is the escape hatch for a
+        # one-object mangled-property read/write. Do not ask the user instead.
+        "forbidden_until_compiled": [],
     }
 
 

@@ -34,6 +34,9 @@ import {
 } from "../hooks/usePluginContributions";
 import { contextMenuSeparator } from "../utils/sidebarContextMenuItems";
 
+import { LiveChatDot } from "../voice/LiveChatMark";
+import { useLiveChatIds } from "../voice/useLiveChatPresence";
+
 import { TruncatedText } from "./TruncatedText";
 
 import { useTabScale } from "../hooks/useTabScale";
@@ -126,6 +129,7 @@ export function EditorTabs({
       ? translationPrefs.language.trim()
       : "en";
   // Translation plugin on + non-English UI language → offer Translate on file/chat tabs.
+  const liveChatIds = useLiveChatIds();
   const translationReady =
     pluginContributesSettingsTab(pluginContrib, "Languages") && !isEnglishLang(uiLang);
   const canVisualTranslateTab =
@@ -394,6 +398,7 @@ export function EditorTabs({
             const diagnosticErrors = diagnosticSummary?.errors ?? 0;
             const diagnosticWarnings = diagnosticSummary?.warnings ?? 0;
 
+            const tabLive = tab.kind === "chat" && tab.chatId ? liveChatIds.has(tab.chatId) : false;
             const tabIcon = (
               <div
                 className={`editor-tab-icon${
@@ -402,7 +407,7 @@ export function EditorTabs({
                   completionAlertChatIds?.has(tab.chatId)
                     ? " chat-completion-alert"
                     : ""
-                }`}
+                }${tabLive ? " is-live-chat" : ""}`}
               >
                 {tab.kind === "file" ? (
                   <FileTypeIcon
@@ -424,6 +429,7 @@ export function EditorTabs({
                 ) : (
                   <DuckyAvatar styleId={tab.duckyStyle} size={DUCKY_AVATAR_SIZES.tab} />
                 )}
+                {tabLive ? <LiveChatDot className="live-chat-dot--tab" /> : null}
               </div>
             );
 

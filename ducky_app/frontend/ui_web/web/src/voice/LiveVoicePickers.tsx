@@ -40,35 +40,39 @@ export function LiveVoicePickers({
 }: LiveVoicePickersProps) {
   const voices = useTtsVoiceOptions();
   const talk = clampProcessTalk(processTalk);
+  const talkPct = Math.round(talk * 100);
 
   return (
     <div className="live-voice-pickers">
-      <ChoiceDropdown
-        id="live-voice-picker"
-        aria-label="Voice"
-        mode="radio"
-        size="compact"
-        placement="top"
-        minWidth={180}
-        value={voiceId}
-        options={[
-          { value: "", label: "AI Voice default" },
-          ...voices.map((v) => ({ value: v.id, label: v.label })),
-        ]}
-        onChange={setVoiceId}
-      />
-      <SpeedDropdown
-        id="live-voice-speed"
-        aria-label="Talking speed"
-        size="compact"
-        placement="top"
-        minWidth={160}
-        value={speed || 1}
-        onChange={(next) => setSpeed(next || 1)}
-      />
+      <div className="live-voice-combo">
+        <ChoiceDropdown
+          id="live-voice-picker"
+          aria-label="Voice"
+          mode="radio"
+          size="compact"
+          placement="top"
+          minWidth={180}
+          value={voiceId}
+          options={[
+            { value: "", label: "AI Voice default" },
+            ...voices.map((v) => ({ value: v.id, label: v.label })),
+          ]}
+          onChange={setVoiceId}
+        />
+        <span className="live-voice-combo-split" aria-hidden />
+        <SpeedDropdown
+          id="live-voice-speed"
+          aria-label="Talking speed"
+          size="compact"
+          placement="top"
+          minWidth={160}
+          value={speed || 1}
+          onChange={(next) => setSpeed(next || 1)}
+        />
+      </div>
       {setProcessTalk ? (
         <label className="live-voice-process-talk" title="How much to narrate tools and thinking (0 = mute process talk)">
-          <span className="live-voice-process-talk-label">Process</span>
+          <Icons.Settings />
           <input
             type="range"
             className="live-voice-process-talk-input"
@@ -78,8 +82,11 @@ export function LiveVoicePickers({
             value={talk}
             aria-label="Process talk amount"
             onChange={(e) => setProcessTalk(clampProcessTalk(Number(e.target.value)))}
+            style={{
+              background: `linear-gradient(to right, var(--accent, #3b82f6) ${talkPct}%, color-mix(in srgb, var(--fg) 14%, transparent) ${talkPct}%)`,
+            }}
           />
-          <span className="live-voice-process-talk-value">{talk <= 0 ? "Off" : `${Math.round(talk * 100)}%`}</span>
+          <span className="live-voice-process-talk-value">{talkPct}%</span>
         </label>
       ) : null}
       {setManualSend ? (
@@ -94,7 +101,7 @@ export function LiveVoicePickers({
           aria-pressed={manualSend}
           onClick={() => setManualSend(!manualSend)}
         >
-          {manualSend ? "Wait for Send" : "Auto-send"}
+          <Icons.Send />
         </button>
       ) : null}
       <button
@@ -104,7 +111,7 @@ export function LiveVoicePickers({
         aria-label="Input / Output settings"
         onClick={openAudioIoSettings}
       >
-        <Icons.Settings />
+        <Icons.Sliders />
       </button>
     </div>
   );

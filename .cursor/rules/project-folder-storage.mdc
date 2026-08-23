@@ -10,8 +10,9 @@ alwaysApply: true
 
 | Allowed in project | Forbidden |
 |--------------------|-----------|
-| `.ducky/**` | `Saved/DuckyCaptures`, `.uefn-ducky`, caches, temps |
-| `Content/**` game content the user asked for | Agent scratch, dumps, plugin junk |
+| `.ducky/**` (JSON/tasks — never `.py`) | `Saved/DuckyCaptures`, `.uefn-ducky`, caches, temps, extra `*.py` / `*.pyc` |
+| `Content/**` game content (Verse, assets) | Agent scratch, dumps, plugin junk |
+| `Content/Python/init_unreal.py` only (Ducky-managed listener — **never delete**) | Any other `Content/Python/**` file |
 
 **Put everything else here:**
 

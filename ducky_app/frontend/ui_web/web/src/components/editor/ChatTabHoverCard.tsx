@@ -23,6 +23,9 @@ import {
 import type { AgentMode, ChatTab } from "../../types/panel";
 import { fmtCompactTokens } from "../../utils/contextFormat";
 import { isEnglishLang } from "../../views/settings/translationLanguages";
+import { LiveChatDot, LiveChatPill } from "../../voice/LiveChatMark";
+import { stopLiveChat } from "../../voice/liveSpeakService";
+import { useIsLiveChat } from "../../voice/useLiveChatPresence";
 import { ElapsedTimer } from "../ElapsedTimer";
 import { EditorTabHoverCardShell } from "./EditorTabHoverCardShell";
 
@@ -86,6 +89,7 @@ export function ChatTabHoverCard({
   // Group members (parent = hub) hide mode/model in the hover strip.
   const hideComposerMeta = Boolean(chat.parentConvId);
   const showModelMeta = !hideComposerMeta && Boolean(modeLabel || modelLabel);
+  const live = useIsLiveChat(chat.id);
 
   const enableAndWalk = () => {
     if (!autoOn) toggleAutoTranslateChat(chat.id, prefs, setPref);
@@ -100,34 +104,38 @@ export function ChatTabHoverCard({
       card={
         <>
           <div className="editor-tab-hover-card-header">
-            <button
-              type="button"
-              className="editor-tab-hover-card-avatar-btn"
-              title={`Open ${duckyName} in Settings → Duckies`}
-              aria-label={`Open ${duckyName} in Settings → Duckies`}
-              onClick={(e) => {
-                e.stopPropagation();
-                requestOpenDuckyEditor({
-                  id: chat.id,
-                  name: chat.name,
-                  duckyStyle: chat.duckyStyle,
-                  duckyName: chat.duckyName,
-                  profileId: chat.profileId,
-                  duckyPersonality: chat.duckyPersonality,
-                  ttsVoice: chat.ttsVoice,
-                  ttsSpeed: chat.ttsSpeed,
-                  thinkingEffort: chat.thinkingEffort,
-                });
-              }}
-            >
-              <DuckyAvatar styleId={chat.duckyStyle} size={44} title={duckyName} />
-            </button>
+            <div className={`editor-tab-hover-card-avatar-wrap${live ? " is-live-chat" : ""}`}>
+              <button
+                type="button"
+                className="editor-tab-hover-card-avatar-btn"
+                title={`Open ${duckyName} in Settings → Duckies`}
+                aria-label={`Open ${duckyName} in Settings → Duckies`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestOpenDuckyEditor({
+                    id: chat.id,
+                    name: chat.name,
+                    duckyStyle: chat.duckyStyle,
+                    duckyName: chat.duckyName,
+                    profileId: chat.profileId,
+                    duckyPersonality: chat.duckyPersonality,
+                    ttsVoice: chat.ttsVoice,
+                    ttsSpeed: chat.ttsSpeed,
+                    thinkingEffort: chat.thinkingEffort,
+                  });
+                }}
+              >
+                <DuckyAvatar styleId={chat.duckyStyle} size={44} title={duckyName} />
+              </button>
+              {live ? <LiveChatDot className="live-chat-dot--card" /> : null}
+            </div>
             <div className="editor-tab-hover-card-titles">
               <div className="editor-tab-hover-card-name">{duckyName}</div>
             </div>
           </div>
-          {showModelMeta ? (
+          {showModelMeta || live ? (
             <div className="editor-tab-hover-card-meta">
+              {live ? <LiveChatPill /> : null}
               {modeLabel ? (
                 <span className="editor-tab-hover-card-mode" data-mode={composer?.agentMode}>
                   {modeLabel}
@@ -178,8 +186,24 @@ export function ChatTabHoverCard({
               className="editor-tab-hover-card-status editor-tab-hover-card-status--idle-timer elapsed-timer--hover"
             />
           )}
-          {langReady ? (
+          {live || langReady ? (
             <div className="editor-tab-hover-card-actions">
+              {live ? (
+                <button
+                  type="button"
+                  className="editor-tab-hover-card-action-btn editor-tab-hover-card-action-btn--live-off"
+                  title="Turn off live chat"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    stopLiveChat(chat.id);
+                  }}
+                >
+                  <Icons.Mic />
+                  <span>End live chat</span>
+                </button>
+              ) : null}
+              {langReady ? (
+                <>
               <button
                 type="button"
                 className={`editor-tab-hover-card-action-btn${autoOn ? " is-active" : ""}`}
@@ -225,6 +249,8 @@ export function ChatTabHoverCard({
                       : "Auto translate"}
                 </span>
               </button>
+                </>
+              ) : null}
             </div>
           ) : null}
         </>

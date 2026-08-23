@@ -911,6 +911,17 @@ body.focus-window .window-resize-grip--n {
   min-width: 0;
 }
 
+.editor-tab-hover-card-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.editor-tab-hover-card-avatar-wrap.is-live-chat {
+  outline: 1.5px solid color-mix(in srgb, var(--red) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
 .editor-tab-hover-card-avatar-btn {
   flex-shrink: 0;
   display: flex;
@@ -1095,6 +1106,15 @@ body.focus-window .window-resize-grip--n {
 
 .editor-tab-hover-card-action-btn.is-active:hover {
   filter: brightness(1.08);
+}
+
+.editor-tab-hover-card-action-btn--live-off {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, var(--border));
+}
+
+.editor-tab-hover-card-action-btn--live-off:hover {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
 }
 
 .editor-tab-hover-card-action-btn.is-busy,
@@ -1450,6 +1470,70 @@ body.focus-window .window-resize-grip--n {
   height: 9px;
   fill: currentColor;
   stroke: none;
+}
+
+@keyframes live-chat-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+  }
+}
+
+.live-chat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 70%, transparent);
+  animation: live-chat-pulse 1.4s ease-out infinite;
+  pointer-events: none;
+}
+
+.live-chat-dot--card {
+  position: absolute;
+  left: -3px;
+  top: -2px;
+}
+
+.live-chat-dot--sidebar {
+  position: absolute;
+  left: -4px;
+  top: -2px;
+}
+
+.live-chat-dot--tab {
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  width: 7px;
+  height: 7px;
+}
+
+.live-chat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--red);
+  line-height: 1;
+}
+
+.live-chat-pill .live-chat-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.editor-tab-icon.is-live-chat,
+.sidebar-tree-row-icon.is-live-chat {
+  position: relative;
+  overflow: visible;
 }
 
 .sidebar-section-header-busy {

@@ -74,13 +74,19 @@ from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
 def _hint_for_error(tool: str, text: str) -> str:
     low = text.lower()
     if "verse_compile_required" in low or ("stop" in low and "wiring blocked" in low):
-        return "reload_listener first; only ask user to Build Verse if inspect shows STOP true."
+        return (
+            "STOP is advisory. list_verse_property_hashes(refresh=true), "
+            "re-inspect, then wire_verse_* once. Do not ask the user to Build Verse."
+        )
     if tool.startswith("blender_"):
         return "Open Blender (addon auto-starts). Restart Blender once after first plugin install."
     if "listener" in low or "connection" in low:
         return _LISTENER_OFFLINE_HINT
     if tool.startswith("wire_verse"):
-        return "Check get_verse_editables STOP and wiring.can_wire before wiring."
+        return (
+            "Check get_verse_editables mangled_name / resolution_tried, then wire. "
+            "STOP is advisory — do not abort or ask the user to Build Verse."
+        )
     return ""
 
 

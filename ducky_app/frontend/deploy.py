@@ -1,4 +1,4 @@
-"""Deploy frozen init_unreal.py into a UEFN project (once). Bootstrap lives in AppData."""
+"""Deploy the listener stub + AppData listener. Quarantine stray island .py only."""
 
 from __future__ import annotations
 
@@ -29,6 +29,10 @@ def _panel_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _frozen_init_text() -> str:
+    return _resolve_frontend_file("frozen_init_unreal.py").read_text(encoding="utf-8")
+
+
 def _resolve_frontend_file(name: str) -> Path:
     """Dev: ``frontend/<name>``. Frozen: ``<_MEIPASS>/frontend/<name>``."""
     if is_packaged_runtime():
@@ -46,10 +50,6 @@ def _resolve_frontend_file(name: str) -> Path:
     if candidate.is_file():
         return candidate
     raise FileNotFoundError(f"frontend/{name} not found (rebuild UEFN-Ducky.exe)")
-
-
-def _frozen_init_text() -> str:
-    return _resolve_frontend_file("frozen_init_unreal.py").read_text(encoding="utf-8")
 
 
 def appdata_uefn_ducky_dir() -> Path:
@@ -327,12 +327,128 @@ def resolve_uefn_project_root(user_selection: Path) -> Path:
     )
 
 
+_SWEEP_SKIP_DIRS = frozenset({"Saved", "Intermediate", "DerivedDataCache", ".git"})
+_PY_FILE_SUFFIXES = frozenset({".py", ".pyc"})
+# The only .py Ducky is allowed to keep in the island — listener boot after Content mounts.
+_KEEP_ISLAND_PYTHON = frozenset({"content/python/init_unreal.py"})
+
+
 def content_python_dir(project_root: Path) -> Path:
     return project_root / "Content" / "Python"
 
 
+def _is_kept_island_python(project_root: Path, path: Path) -> bool:
+    try:
+        rel = path.relative_to(project_root.resolve()).as_posix().lower()
+    except ValueError:
+        return False
+    return rel in _KEEP_ISLAND_PYTHON
+
+
+def quarantine_python_root() -> Path:
+    return appdata_uefn_ducky_dir() / "quarantined_python"
+
+
+def _project_slug_for_quarantine(project_root: Path) -> str:
+    try:
+        from frontend.ui_web.project_chats import project_slug
+
+        return project_slug(str(project_root))
+    except Exception:
+        name = project_root.name or "project"
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40]
+        return safe or "project"
+
+
+def _is_python_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _PY_FILE_SUFFIXES
+
+
+def _walk_python_artifacts(base: Path, found: list[Path], project_root: Path) -> None:
+    if not base.is_dir():
+        return
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _SWEEP_SKIP_DIRS]
+        for name in list(dirnames):
+            if name == "__pycache__":
+                found.append(Path(dirpath) / name)
+                dirnames.remove(name)
+        for name in filenames:
+            path = Path(dirpath) / name
+            if _is_python_file(path) and not _is_kept_island_python(project_root, path):
+                found.append(path)
+
+
+def _collect_python_artifacts(project_root: Path, *, deep: bool) -> list[Path]:
+    root = project_root.resolve()
+    found: list[Path] = []
+    if deep:
+        _walk_python_artifacts(root, found, root)
+        return found
+    # ponytail: shallow = project-root files + Content/Python/** + .ducky/**
+    # Ceiling: a .py dropped deeper than depth 1 outside those two trees is only
+    # caught by the next deploy sweep (deep=True). Upgrade: walk the whole
+    # project on a background timer if agents keep dropping scratch mid-session.
+    try:
+        for child in root.iterdir():
+            if child.is_dir() and child.name == "__pycache__":
+                found.append(child)
+            elif _is_python_file(child) and not _is_kept_island_python(root, child):
+                found.append(child)
+    except OSError:
+        pass
+    _walk_python_artifacts(root / "Content" / "Python", found, root)
+    _walk_python_artifacts(root / ".ducky", found, root)
+    return found
+
+
+def _unique_quarantine_dest(dest: Path) -> Path:
+    if not dest.exists():
+        return dest
+    stem, suffix = dest.stem, dest.suffix
+    n = 1
+    while True:
+        candidate = dest.with_name(f"{stem}__{n}{suffix}" if suffix else f"{dest.name}__{n}")
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def quarantine_project_python(project_root: Path, *, deep: bool) -> list[str]:
+    """Move every ``.py`` / ``.pyc`` / ``__pycache__`` out of the island into AppData.
+
+    Leaves Ducky's managed ``Content/Python/init_unreal.py`` in place. Extra
+    ``.py`` / ``.pyc`` / ``__pycache__`` (agent scratch) is moved, never deleted.
+    """
+    try:
+        root = Path(project_root).resolve()
+    except OSError:
+        return []
+    if not root.is_dir():
+        return []
+    dest_root = quarantine_python_root() / _project_slug_for_quarantine(root)
+    logs: list[str] = []
+    for src in _collect_python_artifacts(root, deep=deep):
+        if _is_kept_island_python(root, src):
+            continue
+        try:
+            rel = src.relative_to(root)
+        except ValueError:
+            continue
+        dest = dest_root / rel
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest = _unique_quarantine_dest(dest)
+            shutil.move(str(src), str(dest))
+        except OSError as exc:
+            logs.append(f"Failed to quarantine {rel.as_posix()}: {exc}")
+            continue
+        logs.append(f"Quarantined {rel.as_posix()} -> {dest}")
+    return logs
+
+
 def enable_uefn_project_python(project_root: Path) -> str | None:
-    """Flip Beta Access Python in ``*.uefnproject`` so ``init_unreal.py`` actually runs."""
+    """Flip Beta Access Python in ``*.uefnproject`` so the listener can run."""
     matches = sorted(project_root.glob("*.uefnproject"))
     if not matches:
         return None
@@ -407,9 +523,8 @@ def install_toolset_listener_boot() -> str | None:
     """Hook Epic EditorToolset init_unreal so Ducky starts when Toolsets ForceEnable Python.
 
     With UEFN MCP Toolsets, ForceEnablePythonAtRuntime only runs Engine plugin
-    ``init_unreal.py`` scripts — not Documents/UnrealEngine/Python and not the
-    island ``Content/Python/init_unreal.py``. Re-install on every deploy/launch
-    (Fortnite updates wipe Engine/Plugins).
+    ``init_unreal.py`` scripts — not Documents/UnrealEngine/Python. Re-install
+    on every deploy/launch (Fortnite updates wipe Engine/Plugins).
     """
     toolset_py = editor_toolset_python_dir()
     if toolset_py is None:
@@ -438,9 +553,10 @@ def install_toolset_listener_boot() -> str | None:
 def install_user_init_unreal() -> str | None:
     """Install Documents/UnrealEngine/Python/init_unreal.py so ForceEnablePython still starts us.
 
-    UEFN often enables Python before the island Content mount, so project
-    ``Content/Python/init_unreal.py`` never runs. The Documents path is on the
-    editor's default Python search list and runs at ForceEnable time.
+    UEFN often enables Python before the island Content mount. The Documents
+    path is on the editor's default Python search list and runs at ForceEnable
+    time. The island ``Content/Python/init_unreal.py`` stub is still installed
+    on project open for when Content mounts first.
     """
     dest_dir = documents_unreal_python_dir()
     dest = dest_dir / "init_unreal.py"
@@ -475,12 +591,11 @@ def install_user_init_unreal() -> str | None:
 
 
 def ensure_frozen_init(project_root: Path) -> list[str]:
-    """Install frozen ``init_unreal.py`` when content differs from the bundled stub."""
+    """Install the island ``Content/Python/init_unreal.py`` listener stub."""
     dest_py = content_python_dir(project_root)
     dest_py.mkdir(parents=True, exist_ok=True)
     dest_init = dest_py / "init_unreal.py"
     frozen = _frozen_init_text()
-
     logs: list[str] = []
     if dest_init.is_file() and dest_init.read_text(encoding="utf-8").strip() == frozen.strip():
         logs.append(f"init_unreal.py already up to date: {dest_init}")
@@ -491,12 +606,14 @@ def ensure_frozen_init(project_root: Path) -> list[str]:
 
 
 def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
-    """Write ``init_unreal.py`` that loads the listener from AppData.
+    """Write the island listener stub, then quarantine any other project ``.py``.
 
     Listener source is refreshed into ``%LOCALAPPDATA%/UEFN-Ducky/listener`` by
-    ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch — not written here.
+    ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch. The only
+    island Python file is ``Content/Python/init_unreal.py``.
     """
     logs = ensure_frozen_init(project_root)
+    logs.extend(quarantine_project_python(project_root, deep=True))
     py_log = enable_uefn_project_python(project_root)
     if py_log:
         logs.append(py_log)
@@ -531,27 +648,3 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
 
     logs.extend(sync_skill_on_mcp_update())
     return logs
-
-
-def _is_ducky_init_script(text: str) -> bool:
-    markers = (
-        "UEFN-Ducky",
-        "UEFN_DUCKY",
-        "listener.bootstrap",
-        "[MCP] init_unreal",
-    )
-    return any(m in text for m in markers)
-
-
-def remove_project_init_script(project_root: Path) -> bool:
-    """Remove Ducky's ``init_unreal.py`` from the project (script only — not Content/Python/)."""
-    dest_init = content_python_dir(project_root) / "init_unreal.py"
-    try:
-        if dest_init.is_file():
-            existing = dest_init.read_text(encoding="utf-8")
-            if _is_ducky_init_script(existing):
-                dest_init.unlink()
-                return True
-    except OSError:
-        pass
-    return False

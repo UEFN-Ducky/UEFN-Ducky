@@ -16,8 +16,8 @@ def read_uefn_beta_access(project_root: str | Path | None) -> dict[str, Any]:
     """Return Beta Access flags for the island.
 
     When both Python Editor Scripting and UEFN MCP Toolsets are on, UEFN often
-    ForceEnablePythonAtRuntime *before* Content mounts — project
-    ``Content/Python/init_unreal.py`` never runs (Ducky listener race).
+    ForceEnablePythonAtRuntime *before* Content mounts — the Documents /
+    EditorToolset hooks are what start Ducky (never an island ``.py``).
     """
     out: dict[str, Any] = {
         "ok": False,

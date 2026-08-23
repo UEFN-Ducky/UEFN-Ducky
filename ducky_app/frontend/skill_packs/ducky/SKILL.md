@@ -25,9 +25,11 @@ This skill covers **using the app** — where things live, setup, and recovery.
   `references/` (standard Agent Skills folders). On Apply they deploy to
   `~/.claude/skills/`, `~/.cursor/skills/`, and each IDE's `<config dir>/skills/`.
 - **Panel settings:** `%LOCALAPPDATA%/UEFN-Ducky/panel_settings.json`.
-- No Ducky side-files go in the UEFN project except `.ducky/**` (tests, tasks).
-  Game content the user asked for (`Content/Verse/**`, assets) is expected.
-  Scratch / captures / memory → `%LOCALAPPDATA%/UEFN-Ducky/`.
+- No Ducky side-files go in the UEFN project except `.ducky/**` (tests, tasks)
+  and Ducky's managed `Content/Python/init_unreal.py` (listener boot — auto
+  written on project open). **Never delete that init.** Do not add any other
+  `.py`. `execute_python` is in-memory only. Scratch / captures / memory →
+  `%LOCALAPPDATA%/UEFN-Ducky/`.
 
 ## Loading skill references (hard rule)
 

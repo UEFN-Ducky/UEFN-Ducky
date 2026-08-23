@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icons } from "../icons/Icons";
+import { isLiveChat, startLiveChat, stopLiveChat } from "./liveSpeakService";
 import { useDictation } from "./useDictation";
 import { useLiveVoiceMode } from "./useLiveVoiceMode";
 import { VoiceOverlay } from "./VoiceOverlay";
@@ -16,8 +17,12 @@ import {
 
 export type LiveVoiceUiHandlers = {
   onClose: () => void;
-  onSkip: () => void;
-  onReplay: () => void;
+  onBack: () => void;
+  onForward: () => void;
+  onNewest: () => void;
+  hasPrev: boolean;
+  hasNext: boolean;
+  hasNewer: boolean;
   onSend: () => void;
   canSend: boolean;
   manualSend: boolean;
@@ -64,7 +69,7 @@ export function VoiceControls({
   isGroup,
   onLiveChange,
 }: VoiceControlsProps) {
-  const [live, setLive] = useState(false);
+  const [live, setLive] = useState(() => isLiveChat(chatId));
   const [voiceOn, setVoiceOn] = useState(() => getVoiceSettings().enabled);
   const [manualSend, setManualSendState] = useState(() => getVoiceSettings().liveManualSend);
   const [sessionVoice, setSessionVoice] = useState(() => resolveVoiceId(duckyVoice));
@@ -133,7 +138,11 @@ export function VoiceControls({
     },
   });
 
-  const { skip, replay, sendNow, canSend, pendingText } = liveMode;
+  useEffect(() => {
+    setLive(isLiveChat(chatId));
+  }, [chatId]);
+
+  const { skip, back, newest, sendNow, canSend, pendingText, hasPrev, hasNext, hasNewer } = liveMode;
 
   useEffect(() => {
     if (!live) return;
@@ -145,9 +154,9 @@ export function VoiceControls({
 
   const exitLive = useCallback(() => {
     baseTextRef.current = "";
-    ttsEngine.cancel();
+    stopLiveChat(chatId);
     setLive(false);
-  }, []);
+  }, [chatId]);
 
   const setManualSend = useCallback((value: boolean) => {
     setManualSendState(value);
@@ -177,8 +186,12 @@ export function VoiceControls({
     if (live) {
       notify(true, {
         onClose: exitLive,
-        onSkip: skip,
-        onReplay: replay,
+        onBack: back,
+        onForward: skip,
+        onNewest: newest,
+        hasPrev,
+        hasNext,
+        hasNewer,
         onSend: () => {
           sendNow();
         },
@@ -199,7 +212,11 @@ export function VoiceControls({
     live,
     exitLive,
     skip,
-    replay,
+    back,
+    newest,
+    hasPrev,
+    hasNext,
+    hasNewer,
     sendNow,
     canSend,
     agentRunning,
@@ -251,12 +268,15 @@ export function VoiceControls({
       const next = !v;
       if (next) {
         baseTextRef.current = inputText.trim();
-        setSessionVoice(resolveVoiceId(duckyVoice));
-        setSessionSpeed(resolveSpeed(duckySpeed));
+        const voice = resolveVoiceId(duckyVoice);
+        const rate = resolveSpeed(duckySpeed);
+        setSessionVoice(voice);
+        setSessionSpeed(rate);
         dictation.abort();
+        startLiveChat(chatId, { voiceId: voice, speed: rate, isGroup });
       } else {
         baseTextRef.current = "";
-        ttsEngine.cancel();
+        stopLiveChat(chatId);
       }
       return next;
     });
@@ -307,8 +327,12 @@ export function VoiceControls({
           chatId={chatId}
           open={live}
           onClose={exitLive}
-          onSkip={() => liveMode.skip()}
-          onReplay={() => liveMode.replay()}
+          onBack={() => liveMode.back()}
+          onForward={() => liveMode.skip()}
+          onNewest={() => liveMode.newest()}
+          hasPrev={hasPrev}
+          hasNext={hasNext}
+          hasNewer={hasNewer}
           onSend={() => sendNow()}
           canSend={canSend && !agentRunning}
           manualSend={manualSend}

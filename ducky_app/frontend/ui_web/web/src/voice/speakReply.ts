@@ -58,13 +58,11 @@ export async function loadLastAssistantText(convId: string, attempts = 6): Promi
   return "";
 }
 
-/** Summarize assistant text for speech (shared by speak + enqueue paths). */
-export async function prepareSpokenText(text: string): Promise<string> {
+/** LLM (or truncate) path — used by prepareSpokenText and tool-result thunks. */
+export async function summarizeForSpeech(text: string): Promise<string> {
   const cleaned = (text || "").trim();
   if (!cleaned) return "";
   const settings = getVoiceSettings();
-  const looksCodey = /```|^\s*(def |class |function |import |from |const |let |#include)/m.test(cleaned);
-  if (cleaned.length <= 200 && !looksCodey) return cleaned;
   const model = settings.summaryModel || "";
   const result = await runBridgeJob<{
     ok?: boolean;
@@ -75,6 +73,15 @@ export async function prepareSpokenText(text: string): Promise<string> {
     return cleaned.length > 280 ? `${cleaned.slice(0, 280).trim()}…` : cleaned;
   }
   return String(result.text).trim();
+}
+
+/** Summarize assistant text for speech (shared by speak + enqueue paths). */
+export async function prepareSpokenText(text: string): Promise<string> {
+  const cleaned = (text || "").trim();
+  if (!cleaned) return "";
+  const looksCodey = /```|^\s*(def |class |function |import |from |const |let |#include)/m.test(cleaned);
+  if (cleaned.length <= 200 && !looksCodey) return cleaned;
+  return summarizeForSpeech(cleaned);
 }
 
 /**

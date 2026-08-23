@@ -56,6 +56,7 @@ data:
 - **Modeling path (Blender vs UEFN):** You can model in **Blender** (`blender_*`) or **UEFN** (Static Mesh / Geometry Scripting). When the user asks to model/build a mesh and Blender is READY (or enabled) **and** they did not already say Blender or UEFN, ask **one** short question: Blender or UEFN? Then proceed on their answer. If they already named a path, or only one path is available, do not ask — just use it.
 - **Assets:** discover with `list_assets`/`search_assets`/`get_asset_info`; mutate with `save_asset`/`duplicate_asset`/`rename_asset` (`delete_asset` needs approval). Materials (Store plugin **Materials**): `create_material`, `connect_material_nodes`, `assign_material_to_mesh` when that plugin is enabled.
 - **Prefer official UEFN MCP first:** when `epic_mcp_online`, ALWAYS use nested Epic `unreal__*` for Creative devices / PIC / Scene Graph entities / in-editor Verse / actors / Epic materials-Niagara-UMG — do not use the Ducky listener for those. If Epic is offline, stop and recite Epic setup steps — never `find_devices` / `inspect_creative_device` / `play_in_editor` / `create_entity`. Listener second: VerseDevice `@editable` wires (`inspect_verse_device` / `wire_verse_device_ref` / `set_verse_editable`), offline `workspace_*`, prefabs, screenshots/Meshy. Verify → `save_current_level`.
+- **Verse `@editable` wiring:** fields are `__verse_0x<HASH>_<Field>` on the Script object. `get_verse_editables` STOP is advisory — resolve hashes, wire, verify. Never ask the user to Build Verse, paste T3D, or drag Details refs.
 - **One heavy tool per step (mutators only):** never request multiple `unreal__*`, `wire_verse_device_ref`, `spawn_actor`, `execute_python`, or `save_current_level` in the same assistant message — UEFN freezes. One `execute_python` that places many actors inside its loop is fine (single call). Disk/host reads (digests, skill reads, workspace reads/errors, project memory) are cheap — batch every independent one in a single message instead of one per turn. Listener/editor reads (`search_assets`, `get_asset_info`, `inspect_*`, `get_all_actors`) still go one per message — the editor processes one command at a time.
 - **Actor paths:** use the actor's Outliner **label** exactly as returned by Epic device tools / `get_all_actors` — never `UAID_...` paths unless the label is rejected.
 - Do not claim success without an inspect read-back after writes.
@@ -165,13 +166,14 @@ def get_system_prompt_parts(
                 beta_line += " (both on — coexistence mode; Epic :8000 ≠ Ducky :4200)"
             if not listener_online and beta.get("listener_init_race"):
                 beta_line += (
-                    "\n- ⚠ **Listener init race:** both Beta flags on → project "
-                    "`Content/Python/init_unreal.py` often never runs. Tell the user once: "
-                    "Tools → Execute Python Script → "
-                    "`%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py` "
-                    "(or restart UEFN so Documents/UnrealEngine/Python hook runs). "
+                    "\n- ⚠ **Listener init race:** both Beta flags on → Engine "
+                    "EditorToolset / Documents hooks may skip. Tell the user once: "
+                    "restart UEFN, or Tools → Execute Python Script → the island "
+                    "`Content/Python/init_unreal.py` (Ducky-managed — **never delete "
+                    "it**) or `%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py`. "
                     "Do **not** disable UEFN MCP Toolsets to “fix” Ducky. "
-                    "Continue Verse/`workspace_*` offline; Epic `unreal__*` if epic_mcp_online."
+                    "Continue Verse/`workspace_*` offline; Epic `unreal__*` if "
+                    "epic_mcp_online."
                 )
             elif beta.get("python_and_toolsets") and listener_online:
                 beta_line += (
