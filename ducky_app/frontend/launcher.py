@@ -11,6 +11,21 @@ import os
 import sys
 from pathlib import Path
 
+# Bootloader leftovers. After Python starts, this process uses sys._MEIPASS;
+# children that inherit these think they are still inside our extract dir.
+_PYI_BOOT_ENV_KEYS = (
+    "_PYI_APPLICATION_HOME_DIR",
+    "_PYI_ARCHIVE_FILE",
+    "_PYI_PARENT_PROCESS_LEVEL",
+    "_PYI_SPLASH_IPC",
+    "_MEIPASS2",
+)
+
+
+def scrub_pyinstaller_boot_env() -> None:
+    for key in _PYI_BOOT_ENV_KEYS:
+        os.environ.pop(key, None)
+
 
 def _ensure_repo_on_path() -> str:
     """Return repo / MEIPASS root; ensure ``ducky_app`` is on sys.path for ``frontend`` / ``backend``."""
@@ -223,6 +238,9 @@ def run_bridge() -> None:
 
 
 def main() -> None:
+    # Before ANY subprocess can be spawned —
+    # panel and bridge modes both fork children.
+    scrub_pyinstaller_boot_env()
     if len(sys.argv) > 1 and sys.argv[1] == "bridge":
         run_bridge()
     else:

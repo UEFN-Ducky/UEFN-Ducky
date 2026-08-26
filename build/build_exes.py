@@ -125,6 +125,45 @@ def _build_react_panel(root: Path) -> None:
     print(f"Verified React panel dist: {dist}")
 
 
+def _version_info_text(app_version: str, exe_stem: str) -> str:
+    """PyInstaller VSVersionInfo file (EXE(version=...) input)."""
+    parts = [int(p) for p in app_version.split(".")]
+    while len(parts) < 4:
+        parts.append(0)
+    vers = tuple(parts[:4])
+    ver4 = ".".join(str(n) for n in vers)
+    year = time.strftime("%Y")
+    return f"""\
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={vers!r},
+    prodvers={vers!r},
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'UEFN Ducky'),
+        StringStruct('FileDescription', 'UEFN Ducky - AI toolkit for Unreal Editor for Fortnite'),
+        StringStruct('FileVersion', '{ver4}'),
+        StringStruct('InternalName', '{exe_stem}'),
+        StringStruct('LegalCopyright', '(c) {year} UEFN Ducky. All rights reserved.'),
+        StringStruct('OriginalFilename', '{exe_stem}.exe'),
+        StringStruct('ProductName', 'UEFN Ducky'),
+        StringStruct('ProductVersion', '{ver4}'),
+      ]),
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+  ],
+)
+"""
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build frozen UEFN-Ducky.exe into dist/")
     p.add_argument(
@@ -225,6 +264,13 @@ def main() -> int:
     os.environ["UEFN_DUCKY_EXE_BASENAME"] = exe_stem
     print(f"Staged PyInstaller icon -> {stage_ico}")
     print(f"PyInstaller EXE basename -> {exe_stem}")
+
+    # Windows VERSIONINFO resource: EXEs with no company/product/version metadata
+    # are a top trigger for Defender ML false positives (Wacatac.B!ml).
+    version_file = Path(tempfile.gettempdir()) / "uefn_ducky_version_info.txt"
+    version_file.write_text(_version_info_text(app_version, exe_stem), encoding="utf-8")
+    os.environ["UEFN_DUCKY_BUILD_VERSION_FILE"] = str(version_file)
+    print(f"Staged VERSIONINFO -> {version_file}")
 
     pip = [sys.executable, "-m", "pip", "install", "pyinstaller", "-r", str(req)]
     print(">", " ".join(pip))
