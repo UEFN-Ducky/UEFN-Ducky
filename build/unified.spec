@@ -275,6 +275,15 @@ pyz = PYZ(a.pure)
 
 _exe_basename = os.environ.get("UEFN_DUCKY_EXE_BASENAME", "UEFN-Ducky").strip() or "UEFN-Ducky"
 
+# VERSIONINFO resource (build_exes.py stages it). Metadata-less EXEs trip
+# Defender ML heuristics — refuse to freeze without it.
+_version_file = os.environ.get("UEFN_DUCKY_BUILD_VERSION_FILE", "").strip()
+if not _version_file or not Path(_version_file).is_file():
+    raise RuntimeError(
+        "unified.spec: UEFN_DUCKY_BUILD_VERSION_FILE missing — run via build_exes.py "
+        "so the EXE gets a Windows VERSIONINFO resource."
+    )
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -293,4 +302,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(_app_icon),
+    version=_version_file,
 )

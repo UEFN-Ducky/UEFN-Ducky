@@ -25,6 +25,14 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
+AppCopyright=(c) UEFN Ducky. All rights reserved.
+; Full VERSIONINFO on Setup.exe itself — metadata-less installers trip
+; Defender ML heuristics (Wacatac.B!ml false positives).
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoProductName={#MyAppName}
+VersionInfoCopyright=(c) UEFN Ducky. All rights reserved.
 DefaultDirName={autopf}\UEFN Ducky
 DisableProgramGroupPage=yes
 ; Per-user by default; the dialog lets the user pick per-machine (admin) instead.
@@ -146,18 +154,10 @@ begin
   LaunchCheckBox.Checked := True;
 end;
 
-// Setup cannot delete its own running EXE. After a successful install, schedule
-// a delayed del so in-app update caches under %TEMP%\UEFN-Ducky\Setup-*.exe
-// (and Download-folder copies) do not accumulate when UAC was previously declined.
-procedure DeleteSetupLater();
-var
-  ErrorCode: Integer;
-begin
-  ShellExec('',
-    ExpandConstant('{cmd}'),
-    '/c ping 127.0.0.1 -n 4 >nul & del /f /q "' + ExpandConstant('{srcexe}') + '"',
-    '', SW_HIDE, ewNoWait, ErrorCode);
-end;
+// No self-delete of {srcexe} here: a hidden cmd.exe running a delayed
+// "del" on the running installer is classic dropper behavior and triggered
+// Defender ML (Trojan:Win32/Wacatac.B!ml) on releases. The app prunes its
+// own %TEMP%\UEFN-Ducky\Setup-*.exe cache on startup (updater.sweep_installer_cache).
 
 // ssDone is SUCCESS ONLY (never after UAC No / abort). Launch when the
 // checkbox is ticked, or always for silent in-app updates — that is the only
@@ -168,7 +168,6 @@ begin
   begin
     if WizardSilent or ((LaunchCheckBox <> nil) and LaunchCheckBox.Checked) then
       LaunchApp();
-    DeleteSetupLater();
   end;
 end;
 
