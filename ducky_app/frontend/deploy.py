@@ -29,8 +29,12 @@ def _panel_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _frozen_init_text() -> str:
-    return _resolve_frontend_file("frozen_init_unreal.py").read_text(encoding="utf-8")
+_INIT_NAME = "init_unreal.py"
+_DUCKY_INIT_MARKER = "UEFN-Ducky managed init"
+
+
+def _init_text() -> str:
+    return _resolve_frontend_file(_INIT_NAME).read_text(encoding="utf-8")
 
 
 def _resolve_frontend_file(name: str) -> Path:
@@ -274,11 +278,7 @@ def sync_listener_to_appdata() -> Path | None:
             # Core tree already current — still refresh plugin overlays + user init.
             _overlay_plugin_listeners(dest)
             try:
-                install_user_init_unreal()
-            except Exception:
-                pass
-            try:
-                install_toolset_listener_boot()
+                refresh_inits()
             except Exception:
                 pass
             return dest
@@ -302,11 +302,7 @@ def sync_listener_to_appdata() -> Path | None:
         shutil.rmtree(tmp, ignore_errors=True)
         return None
     try:
-        install_user_init_unreal()
-    except Exception:
-        pass
-    try:
-        install_toolset_listener_boot()
+        refresh_inits()
     except Exception:
         pass
     return dest
@@ -473,10 +469,6 @@ def enable_uefn_project_python(project_root: Path) -> str | None:
     return f"Enabled Python Editor Scripting in {path.name}"
 
 
-def _user_init_text() -> str:
-    return _resolve_frontend_file("user_init_unreal.py").read_text(encoding="utf-8")
-
-
 def documents_unreal_python_dir() -> Path:
     """Editor default path that auto-runs ``init_unreal.py`` (UE / UEFN)."""
     home = Path.home()
@@ -528,13 +520,14 @@ def install_toolset_listener_boot() -> str | None:
     """
     toolset_py = editor_toolset_python_dir()
     if toolset_py is None:
-        return None
+        return "Toolset listener boot skipped: EditorToolset Python dir not found"
     try:
-        boot_text = _user_init_text()
+        boot_text = _init_text()
     except FileNotFoundError:
-        return None
+        return "Toolset listener boot skipped: init_unreal.py missing from EXE"
     boot_path = toolset_py / f"{_TOOLSET_BOOT_MODULE}.py"
     boot_path.write_text(boot_text, encoding="utf-8")
+    _clear_python_cache(toolset_py)
     init_path = toolset_py / "init_unreal.py"
     existing = init_path.read_text(encoding="utf-8")
     if _TOOLSET_BOOT_MARKER in existing and f"import {_TOOLSET_BOOT_MODULE}" in existing:
@@ -550,6 +543,25 @@ def install_toolset_listener_boot() -> str | None:
     return f"Hooked UEFN-Ducky into EditorToolset init_unreal.py (+ {boot_path.name})"
 
 
+def _clear_python_cache(folder: Path) -> None:
+    cache = folder / "__pycache__"
+    if cache.is_dir():
+        shutil.rmtree(cache, ignore_errors=True)
+
+
+def _is_ducky_owned_init(text: str) -> bool:
+    """True when the whole file is ours (old stub or current managed init).
+
+    Do not match a shim comment / ``import ducky_init_unreal`` — that lives in
+    a user's own Documents init and must not be overwritten.
+    """
+    return (
+        _DUCKY_INIT_MARKER in text
+        or "from listener.bootstrap import run" in text
+        or "UEFN-Ducky user-level Python startup" in text
+    )
+
+
 def install_user_init_unreal() -> str | None:
     """Install Documents/UnrealEngine/Python/init_unreal.py so ForceEnablePython still starts us.
 
@@ -560,48 +572,144 @@ def install_user_init_unreal() -> str | None:
     """
     dest_dir = documents_unreal_python_dir()
     dest = dest_dir / "init_unreal.py"
+    alt = dest_dir / "ducky_init_unreal.py"
     try:
-        text = _user_init_text()
+        text = _init_text()
     except FileNotFoundError:
         return None
     dest_dir.mkdir(parents=True, exist_ok=True)
-    if dest.is_file() and dest.read_text(encoding="utf-8").strip() == text.strip():
-        return None
-    # Preserve a non-Ducky init if the user already has one (append import once).
+
+    def _sync_leftover_alt() -> str | None:
+        if not alt.is_file():
+            return None
+        if alt.read_text(encoding="utf-8").strip() == text.strip():
+            return None
+        alt.write_text(text, encoding="utf-8")
+        return f"Updated leftover {alt}"
+
     if dest.is_file():
         existing = dest.read_text(encoding="utf-8")
-        marker = "UEFN-Ducky user-level Python startup"
-        if marker not in existing and "from listener.bootstrap import run" not in existing:
-            alt = dest_dir / "ducky_init_unreal.py"
+        if existing.strip() == text.strip():
+            extra = _sync_leftover_alt()
+            _clear_python_cache(dest_dir)
+            return extra
+        if _is_ducky_owned_init(existing):
+            dest.write_text(text, encoding="utf-8")
+            extra = _sync_leftover_alt()
+            _clear_python_cache(dest_dir)
+            return extra or f"Replaced stale Documents init_unreal.py -> {dest}"
+        # Preserve a non-Ducky init; keep the helper current.
+        if not alt.is_file() or alt.read_text(encoding="utf-8").strip() != text.strip():
             alt.write_text(text, encoding="utf-8")
-            if "import ducky_init_unreal" not in existing:
-                shim = (
-                    existing.rstrip()
-                    + "\n\n# UEFN-Ducky — load AppData listener (ForceEnablePython race fix)\n"
-                    "try:\n"
-                    "    import ducky_init_unreal  # noqa: F401\n"
-                    "except Exception:\n"
-                    "    pass\n"
-                )
-                dest.write_text(shim, encoding="utf-8")
-                return f"Hooked UEFN-Ducky into existing {dest}"
-            return f"Updated {alt}"
+        if "import ducky_init_unreal" not in existing:
+            shim = (
+                existing.rstrip()
+                + "\n\n# UEFN-Ducky — load AppData listener (ForceEnablePython race fix)\n"
+                "try:\n"
+                "    import ducky_init_unreal  # noqa: F401\n"
+                "except Exception:\n"
+                "    pass\n"
+            )
+            dest.write_text(shim, encoding="utf-8")
+            _clear_python_cache(dest_dir)
+            return f"Hooked UEFN-Ducky into existing {dest}"
+        _clear_python_cache(dest_dir)
+        return f"Updated {alt}"
     dest.write_text(text, encoding="utf-8")
+    _sync_leftover_alt()
+    _clear_python_cache(dest_dir)
     return f"Installed user init_unreal.py -> {dest}"
 
 
-def ensure_frozen_init(project_root: Path) -> list[str]:
-    """Install the island ``Content/Python/init_unreal.py`` listener stub."""
-    dest_py = content_python_dir(project_root)
+def ensure_project_init(project_root: Path) -> list[str]:
+    """Install/replace the island ``Content/Python/init_unreal.py`` listener stub."""
+    root = Path(project_root)
+    if not root.is_dir():
+        return []
+    dest_py = content_python_dir(root)
     dest_py.mkdir(parents=True, exist_ok=True)
     dest_init = dest_py / "init_unreal.py"
-    frozen = _frozen_init_text()
+    text = _init_text()
     logs: list[str] = []
-    if dest_init.is_file() and dest_init.read_text(encoding="utf-8").strip() == frozen.strip():
+    if dest_init.is_file() and dest_init.read_text(encoding="utf-8").strip() == text.strip():
         logs.append(f"init_unreal.py already up to date: {dest_init}")
     else:
-        dest_init.write_text(frozen, encoding="utf-8")
+        dest_init.write_text(text, encoding="utf-8")
         logs.append(f"Installed init_unreal.py -> {dest_init}")
+    _clear_python_cache(dest_py)
+    return logs
+
+
+def remove_project_init(project_root: Path) -> list[str]:
+    """Delete Ducky's island init when the project is removed from the panel."""
+    dest_py = content_python_dir(project_root)
+    dest_init = dest_py / "init_unreal.py"
+    logs: list[str] = []
+    if dest_init.is_file():
+        try:
+            text = dest_init.read_text(encoding="utf-8")
+        except OSError as exc:
+            return [f"Failed to read {dest_init}: {exc}"]
+        if _is_ducky_owned_init(text):
+            try:
+                dest_init.unlink()
+                logs.append(f"Removed {dest_init}")
+            except OSError as exc:
+                logs.append(f"Failed to remove {dest_init}: {exc}")
+    cache = dest_py / "__pycache__"
+    if cache.is_dir():
+        shutil.rmtree(cache, ignore_errors=True)
+    try:
+        if dest_py.is_dir() and not any(dest_py.iterdir()):
+            dest_py.rmdir()
+            logs.append(f"Removed empty {dest_py}")
+    except OSError:
+        pass
+    return logs
+
+
+def refresh_inits(project_root: Path | None = None) -> list[str]:
+    """Rewrite Ducky init on every recent island, Documents Python, and the Engine hook."""
+    logs: list[str] = []
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(p)
+
+    if project_root is not None:
+        _add(Path(project_root))
+    try:
+        from frontend.ui_web.recent_projects import load_recent_projects
+
+        for raw in load_recent_projects():
+            _add(Path(raw))
+    except Exception:
+        pass
+    for root in roots:
+        try:
+            logs.extend(ensure_project_init(root))
+        except Exception as exc:
+            logs.append(f"init refresh failed for {root}: {exc}")
+    try:
+        msg = install_user_init_unreal()
+        if msg:
+            logs.append(msg)
+    except Exception as exc:
+        logs.append(f"Documents init failed: {exc}")
+    try:
+        msg = install_toolset_listener_boot()
+        if msg:
+            logs.append(msg)
+    except Exception as exc:
+        logs.append(f"Toolset listener boot hook failed: {exc}")
     return logs
 
 
@@ -612,23 +720,11 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
     ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch. The only
     island Python file is ``Content/Python/init_unreal.py``.
     """
-    logs = ensure_frozen_init(project_root)
+    logs = refresh_inits(project_root)
     logs.extend(quarantine_project_python(project_root, deep=True))
     py_log = enable_uefn_project_python(project_root)
     if py_log:
         logs.append(py_log)
-    try:
-        user_log = install_user_init_unreal()
-        if user_log:
-            logs.append(user_log)
-    except Exception:
-        pass
-    try:
-        toolset_log = install_toolset_listener_boot()
-        if toolset_log:
-            logs.append(toolset_log)
-    except Exception as exc:
-        logs.append(f"Toolset listener boot hook failed: {exc}")
     try:
         from backend.mcp_plugins.epic import ensure_editor_auto_start
 

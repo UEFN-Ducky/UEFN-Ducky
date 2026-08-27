@@ -83,16 +83,14 @@ def ship_newest_everywhere(
 
     if skip_if_recently_shipped and not force_skills and _recent_ship_stamp():
         _log("ship_newest: skipped (same exe/version shipped recently)")
-        # Fortnite updates wipe Engine/Plugins — still re-pin the Toolset boot hook.
+        # Fortnite updates wipe Engine/Plugins — still re-pin init + Toolset boot.
         try:
-            from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+            from frontend.deploy import refresh_inits
 
-            install_user_init_unreal()
-            msg = install_toolset_listener_boot()
-            if msg:
-                _log(msg)
+            for line in refresh_inits():
+                _log(line)
         except Exception as exc:  # noqa: BLE001
-            _log(f"toolset boot refresh failed: {exc}")
+            _log(f"init refresh failed: {exc}")
         return out
 
     with _ship_lock:
@@ -100,14 +98,12 @@ def ship_newest_everywhere(
         if now - _last_ship_at < _MIN_SHIP_INTERVAL_SEC:
             _log("ship_newest: skipped (recent)")
             try:
-                from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+                from frontend.deploy import refresh_inits
 
-                install_user_init_unreal()
-                msg = install_toolset_listener_boot()
-                if msg:
-                    _log(msg)
+                for line in refresh_inits():
+                    _log(line)
             except Exception as exc:  # noqa: BLE001
-                _log(f"toolset boot refresh failed: {exc}")
+                _log(f"init refresh failed: {exc}")
             return out
         _last_ship_at = now
 
@@ -119,16 +115,14 @@ def ship_newest_everywhere(
         except Exception as exc:  # noqa: BLE001
             _log(f"listener sync failed: {exc}")
 
-        # Always re-assert Toolset boot (even if listener tree was already current).
+        # Always re-assert island + Toolset boot (even if listener tree was already current).
         try:
-            from frontend.deploy import install_toolset_listener_boot, install_user_init_unreal
+            from frontend.deploy import refresh_inits
 
-            install_user_init_unreal()
-            msg = install_toolset_listener_boot()
-            if msg:
-                _log(msg)
+            for line in refresh_inits():
+                _log(line)
         except Exception as exc:  # noqa: BLE001
-            _log(f"toolset boot failed: {exc}")
+            _log(f"init refresh failed: {exc}")
 
         # Running listener older than the deployed source? Auto-reload so every
         # panel/bridge open lands on fresh handlers (reload self-heals its tick).

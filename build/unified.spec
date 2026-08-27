@@ -91,9 +91,10 @@ if _listener.is_dir():
         _parent = rel.parent.as_posix()
         _dest_dir = "bundle/uefn_listener" if _parent == "." else f"bundle/uefn_listener/{_parent}"
         _datas.append((str(path), _dest_dir))
-_frozen = FRONTEND / "frozen_init_unreal.py"
-if _frozen.is_file():
-    _datas.append((str(_frozen), "frontend"))
+# One boot file — island stub, Documents Python, and Engine Toolset hook.
+_init = FRONTEND / "init_unreal.py"
+if _init.is_file():
+    _datas.append((str(_init), "frontend"))
 _skill = FRONTEND / "uefn_skill.md"
 if _skill.is_file():
     _datas.append((str(_skill), "frontend"))

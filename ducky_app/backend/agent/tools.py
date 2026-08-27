@@ -110,6 +110,24 @@ _HIDDEN_PARAMS = frozenset({"pretty"})
 
 _TRIVIAL_DEFAULTS = ("", None, False, 0, 0.0, [], {})
 
+# Gemini FunctionDeclaration Schema proto has no these JSON Schema fields
+# (they arrive as additional_properties and 400 INVALID_ARGUMENT).
+_SCHEMA_DROP_KEYS = frozenset(
+    {
+        "title",
+        "additionalProperties",
+        "additional_properties",
+        "$schema",
+        "$id",
+        "$ref",
+        "$defs",
+        "definitions",
+        "unevaluatedProperties",
+        "examples",
+        "prefixItems",
+    }
+)
+
 
 def _slim_schema(node: Any) -> Any:
     """Strip FastMCP schema noise: titles, anyOf-null wrappers, trivial defaults."""
@@ -119,7 +137,7 @@ def _slim_schema(node: Any) -> Any:
         return node
     out: dict[str, Any] = {}
     for key, value in node.items():
-        if key == "title":
+        if key in _SCHEMA_DROP_KEYS:
             continue
         if key == "default" and any(value is d or value == d for d in _TRIVIAL_DEFAULTS):
             continue
