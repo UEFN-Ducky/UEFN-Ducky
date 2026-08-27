@@ -753,16 +753,16 @@ export function ModelSelector({
   }, [twoLevel, codingAgent, singleAgent, agentModels, visibleModels, query]);
 
   return (
-    <div className="ui-relative">
+    <div className="ui-relative model-selector">
       <button
         ref={anchorRef}
         type="button"
         className={`no-drag model-selector-btn${isOpen ? " is-open" : ""}`}
         onClick={() => (isOpen ? requestClose() : openDropdown())}
         disabled={!canOpen}
-        title={codingAgent !== "ducky" ? `${agentLabel}` : undefined}
+        title={displayName}
       >
-        <span>{displayName}</span>
+        <span className="model-selector-btn-label">{displayName}</span>
         {(canOpen || selectedModel) && <Icons.ChevronDown />}
       </button>
 

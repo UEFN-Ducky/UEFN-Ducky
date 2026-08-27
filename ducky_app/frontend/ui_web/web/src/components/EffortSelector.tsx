@@ -4,14 +4,14 @@ import { getApi } from "../hooks/usePanelApi";
 
 export type ThinkingEffort = "off" | "low" | "medium" | "high";
 
-const OPTIONS: { id: ThinkingEffort; label: string; hint: string }[] = [
+export const EFFORT_OPTIONS: { id: ThinkingEffort; label: string; hint: string }[] = [
   { id: "off", label: "Off", hint: "No extended thinking" },
   { id: "low", label: "Low", hint: "~2k thinking tokens" },
   { id: "medium", label: "Med", hint: "~8k thinking tokens" },
   { id: "high", label: "High", hint: "~16k thinking tokens" },
 ];
 
-function normalizeEffort(value: string | undefined | null): ThinkingEffort {
+export function normalizeEffort(value: string | undefined | null): ThinkingEffort {
   const v = (value || "").trim().toLowerCase();
   if (v === "low" || v === "medium" || v === "high") return v;
   return "off";
@@ -42,7 +42,7 @@ export function EffortSelector({ convId, provider, value, onChange }: EffortSele
   // Also show for empty provider (default Anthropic) — Claude models are the common case.
   if (!show) return null;
 
-  const current = OPTIONS.find((o) => o.id === effort) ?? OPTIONS[0];
+  const current = EFFORT_OPTIONS.find((o) => o.id === effort) ?? EFFORT_OPTIONS[0];
 
   const pick = async (next: ThinkingEffort) => {
     setEffort(next);
@@ -70,7 +70,7 @@ export function EffortSelector({ convId, provider, value, onChange }: EffortSele
       </button>
       <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} placement="top">
         <div className="effort-selector-menu">
-          {OPTIONS.map((opt) => (
+          {EFFORT_OPTIONS.map((opt) => (
             <button
               key={opt.id}
               type="button"

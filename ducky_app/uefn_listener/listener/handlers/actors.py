@@ -186,20 +186,11 @@ def cmd_spawn_actor(
 
 @register("delete_actors")
 def cmd_delete_actors(actor_paths: List[str]) -> dict:
-    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    deleted = []
-    for path in actor_paths:
-        # Re-resolve every iteration: destroying an actor cascades to its attached
-        # children, so a ref cached before the loop may already be destroyed. Calling
-        # destroy_actor on that stale ref is an uncatchable native access violation.
-        actor = lookup.find_actor(path)
-        if not is_live(actor):
-            continue
-        actor_sub.destroy_actor(actor)
-        deleted.append(path)
-        # Drop the per-tick index so the next find_actor sees the post-cascade level.
-        lookup.invalidate()
-    return {"deleted": deleted, "count": len(deleted)}
+    raise ValueError(
+        "Refused: never delete island actors. Fix the asset/device instead. "
+        "Remove actors only in the UEFN Outliner. "
+        "Editor offline is not a delete queue — do not restart UEFN to delete."
+    )
 
 
 @register("set_actor_transform")

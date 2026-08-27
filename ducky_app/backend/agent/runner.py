@@ -25,6 +25,7 @@ from backend.agent.providers.base import ProviderMessage, StreamEvent, StreamEve
 from backend.agent.secrets import get_key
 from backend.agent.run_context import reset_plan_only, set_plan_only
 from backend.agent.tool_router import is_destructive, select_tools
+from backend.agent.toolsets.destructive import allow_destructive_execution
 from backend.agent.toolsets import effective_tool_name
 from backend.agent.tools import (
     ToolCallRecord,
@@ -817,13 +818,16 @@ class AgentRunner:
                 for r in pending_records
                 if is_destructive(effective_tool_name(r.name, r.arguments))
             ]
-            if destructive and self._approval_callback is not None:
-                yield AgentEvent(
-                    kind="approval_needed",
-                    tools_pending=destructive,
-                    text="Approve destructive tool calls?",
+            if destructive:
+                if self._approval_callback is not None:
+                    yield AgentEvent(
+                        kind="approval_needed",
+                        tools_pending=destructive,
+                        text="Approve destructive tool calls?",
+                    )
+                approved_destructive = allow_destructive_execution(
+                    destructive, self._approval_callback
                 )
-                approved_destructive = self._approval_callback(destructive)
                 if not approved_destructive:
                     for r in destructive:
                         r.status = "rejected"

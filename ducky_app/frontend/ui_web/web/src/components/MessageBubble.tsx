@@ -2,7 +2,7 @@ import { memo, useEffect, useState } from "react";
 import type { MessageAuthorDto } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
 import { SpeakMessageButton } from "../voice/VoiceControls";
-import { TtsReadAlong } from "../voice/TtsReadAlong";
+import { mapReadAlong, TtsReadAlong } from "../voice/TtsReadAlong";
 import { ttsEngine, type TtsProgress } from "../voice/ttsEngine";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -49,7 +49,9 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (role === "user") return null;
 
-  const ttsActive = !isStreaming && tts.sourceText === text && tts.state !== "idle";
+  const readAlong =
+    tts.state !== "idle" ? mapReadAlong(text, tts.spokenText, tts.sourceText, tts.charIndex) : null;
+  const ttsActive = Boolean(readAlong);
   const speakVoice = author?.tts_voice || voiceId;
   const speakSpeed = author?.tts_speed ?? speed;
   const authorName = author?.name?.trim();
@@ -77,8 +79,8 @@ export const MessageBubble = memo(function MessageBubble({
             onStop={isStreaming ? onStop : undefined}
           />
         ) : null}
-        {ttsActive ? (
-          <TtsReadAlong spokenText={tts.spokenText || text} charIndex={tts.charIndex} />
+        {readAlong ? (
+          <TtsReadAlong spokenText={readAlong.spokenText} charIndex={readAlong.charIndex} />
         ) : (
           <RichContentRenderer
             text={text}

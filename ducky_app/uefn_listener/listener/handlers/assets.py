@@ -128,18 +128,20 @@ def cmd_rename_asset(old_path: str, new_path: str) -> dict:
 
 @register("delete_asset")
 def cmd_delete_asset(asset_path: str) -> dict:
-    success = unreal.EditorAssetLibrary.delete_asset(asset_path)
-    return {"success": success, "asset_path": asset_path}
+    raise ValueError(
+        "Refused: never delete island content. Fix broken refs "
+        "(search / reimport / relink / duplicate). Delete only in the Content Browser. "
+        "Editor offline is not a delete queue — do not restart UEFN to delete."
+    )
 
 
 @register("delete_directory")
 def cmd_delete_directory(directory: str) -> dict:
-    """Delete a Content Browser folder and every asset under it (UEFN-owned delete)."""
-    path = (directory or "").strip().rstrip("/")
-    if not path or path == "/":
-        raise ValueError("Refusing to delete Content root")
-    success = unreal.EditorAssetLibrary.delete_directory(path)
-    return {"success": bool(success), "directory": path}
+    raise ValueError(
+        "Refused: never delete island content. Fix broken refs "
+        "(search / reimport / relink / duplicate). Delete only in the Content Browser. "
+        "Editor offline is not a delete queue — do not restart UEFN to delete."
+    )
 
 
 @register("duplicate_asset")

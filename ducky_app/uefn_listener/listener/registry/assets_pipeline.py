@@ -177,7 +177,11 @@ def _project_directory(directory: str = "", *, default_leaf: str = "") -> str:
 
 
 def fixup_redirectors(directory: str = "") -> dict:
-    """Resolve and remove asset redirectors under a directory (defaults to project content_root)."""
+    """Resolve ObjectRedirector assets under a directory (defaults to project content_root).
+
+    Prefer a method that exists on this UEFN Python build (`getattr`); fall back to
+    the Content Browser console command. Never delete leftover redirectors.
+    """
     d = _project_directory(directory)
     if not d.endswith("/"):
         d = d + "/"
@@ -187,15 +191,63 @@ def fixup_redirectors(directory: str = "") -> dict:
         recursive_paths=True,
         class_names=["ObjectRedirector"],
     )
-    found = ar.get_assets(filt)
+    found = list(ar.get_assets(filt) or [])
+    if not found:
+        return {"directory": d, "found": 0, "fixed": 0, "method": "none"}
     redirectors = []
-    for data in found or []:
+    for data in found:
         obj = unreal.AssetRegistryHelpers.get_asset(data)
         if obj is not None:
             redirectors.append(obj)
-    if redirectors:
-        unreal.AssetToolsHelpers.get_asset_tools().fixup_referencers(redirectors)
-    return {"directory": d, "fixed": len(redirectors)}
+
+    def _try_call(owner, name: str, *args) -> bool:
+        fn = getattr(owner, name, None)
+        if not callable(fn):
+            return False
+        fn(*args)
+        return True
+
+    method = None
+    last_error = None
+    try:
+        asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
+        if redirectors and _try_call(asset_tools, "fixup_redirectors", redirectors):
+            method = "asset_tools"
+    except Exception as exc:
+        last_error = str(exc)
+    if method is None:
+        try:
+            eas = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+            if eas is not None:
+                if _try_call(eas, "fixup_redirectors", d) or _try_call(eas, "fixup_redirectors"):
+                    method = "editor_asset_subsystem"
+        except Exception as exc:
+            last_error = str(exc)
+    if method is None:
+        world = None
+        try:
+            world = unreal.EditorLevelLibrary.get_editor_world()
+        except Exception:
+            world = None
+        try:
+            unreal.SystemLibrary.execute_console_command(world, "FixupRedirectors")
+            method = "console"
+        except Exception as exc:
+            last_error = str(exc)
+    if method is None:
+        return {
+            "directory": d,
+            "found": len(found),
+            "fixed": 0,
+            "error": last_error or "no redirector API on this UEFN Python build",
+            "hint": "Content Browser: right-click the folder → Fix Up Redirectors in Folder. Never delete leftover redirectors.",
+        }
+    return {
+        "directory": d,
+        "found": len(found),
+        "fixed": len(found),
+        "method": method,
+    }
 
 
 def save_directory(directory: str = "", only_if_dirty: bool = True) -> dict:

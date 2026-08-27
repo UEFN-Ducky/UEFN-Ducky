@@ -18,6 +18,7 @@ import {
   subscribeLiveSpeakTransport,
 } from "./liveSpeakQueue";
 import { shouldNarrateTool, shouldNarrateToolResult, speakableThinkingLine } from "./processNarration";
+import { pullSentences } from "./sentenceQueue";
 import { loadLastAssistantText, prepareSpokenText, summarizeForSpeech } from "./speakReply";
 import { needsLlmSummary, spokenToolResult, spokenToolStart } from "./toolNarration";
 import { ttsEngine } from "./ttsEngine";
@@ -42,6 +43,9 @@ type LiveSession = {
   thinkingTimer: number | null;
   lastThinkingAt: number;
   speakingAfterDone: boolean;
+  /** Assistant is still streaming — do not return to listening between sentences. */
+  replyOpen: boolean;
+  streamedThisTurn: boolean;
 };
 
 const sessions = new Map<string, LiveSession>();
@@ -93,14 +97,15 @@ function speakOpts(session: LiveSession, speaker?: string) {
   };
 }
 
-function speakableAnswerLine(text: string): string {
-  const clean = (text || "")
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[`*_#>[\]()]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!clean) return "";
-  return clean.length > 280 ? `${clean.slice(0, 279).trim()}…` : clean;
+function enqueueAnswerSentences(session: LiveSession, force: boolean): void {
+  const { sentences, remainder } = pullSentences(session.assistantText, force);
+  session.assistantText = remainder;
+  if (!sentences.length) return;
+  session.streamedThisTurn = true;
+  for (const line of sentences) {
+    session.lastFlushedAnswer = line;
+    enqueueAnswerSpeak(line, speakOpts(session));
+  }
 }
 
 function flushThinking(session: LiveSession) {
@@ -120,11 +125,7 @@ function flushThinking(session: LiveSession) {
 }
 
 function flushAssistant(session: LiveSession) {
-  const spoken = speakableAnswerLine(session.assistantText);
-  session.assistantText = "";
-  if (!spoken) return;
-  session.lastFlushedAnswer = spoken;
-  enqueueAnswerSpeak(spoken, speakOpts(session));
+  enqueueAnswerSentences(session, true);
 }
 
 function enqueueToolResult(session: LiveSession, tool: ToolCallData | undefined) {
@@ -146,7 +147,14 @@ function onAgentEvent(event: AgentEvent) {
 
   if (event.type === "text_delta") {
     const chunk = typeof event.text === "string" ? event.text : "";
-    if (chunk) session.assistantText += chunk;
+    if (!chunk) return;
+    if (!session.replyOpen) {
+      session.replyOpen = true;
+      session.streamedThisTurn = false;
+      session.lastFlushedAnswer = "";
+    }
+    session.assistantText += chunk;
+    enqueueAnswerSentences(session, false);
     return;
   }
 
@@ -182,6 +190,7 @@ function onAgentEvent(event: AgentEvent) {
 
   flushThinking(session);
   flushAssistant(session);
+  session.replyOpen = false;
   session.speakingAfterDone = true;
   publish(session, { status: "thinking" });
 
@@ -190,6 +199,11 @@ function onAgentEvent(event: AgentEvent) {
   if (author?.name) session.speakerName = author.name;
   if (author?.tts_voice) session.voiceId = author.tts_voice;
   if (author?.tts_speed) session.speed = author.tts_speed;
+
+  if (session.streamedThisTurn) {
+    session.streamedThisTurn = false;
+    return;
+  }
 
   void (async () => {
     if (!sessions.has(session.chatId)) return;
@@ -239,6 +253,10 @@ function onTtsState(s: "idle" | "speaking" | "paused") {
   }
   if (s !== "idle") return;
   for (const session of sessions.values()) {
+    if (session.replyOpen) {
+      publish(session, { status: liveSpeakQueueLength() > 0 ? "speaking" : "thinking" });
+      continue;
+    }
     if (!session.speakingAfterDone) {
       if (current?.chatId !== session.chatId) {
         publish(session, { status: "thinking" });
@@ -279,6 +297,8 @@ export function startLiveChat(chatId: string, opts: LiveChatOpts): void {
     thinkingTimer: null,
     lastThinkingAt: 0,
     speakingAfterDone: false,
+    replyOpen: false,
+    streamedThisTurn: false,
   });
   setLiveVoiceChat(id, true);
   patchLiveVoiceState(id, { status: "listening", error: "", muted: false });
@@ -289,8 +309,7 @@ export function stopLiveChat(chatId: string): void {
   const id = (chatId || "").trim();
   if (!id) return;
   const session = sessions.get(id);
-  if (!session) return;
-  if (session.thinkingTimer != null) window.clearTimeout(session.thinkingTimer);
+  if (session?.thinkingTimer != null) window.clearTimeout(session.thinkingTimer);
   sessions.delete(id);
   clearLiveSpeakQueueForChat(id);
   if (micOwner === id) micOwner = null;

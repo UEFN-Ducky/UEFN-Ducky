@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icons } from "../icons/Icons";
-import { isLiveChat, startLiveChat, stopLiveChat } from "./liveSpeakService";
+import { startLiveChat, stopLiveChat } from "./liveSpeakService";
 import { useDictation } from "./useDictation";
+import { useIsLiveChat } from "./useLiveChatPresence";
 import { useLiveVoiceMode } from "./useLiveVoiceMode";
 import { VoiceOverlay } from "./VoiceOverlay";
+import { mapReadAlong } from "./TtsReadAlong";
 import { ttsEngine, type TtsProgress } from "./ttsEngine";
 import {
   getVoiceSettings,
@@ -70,7 +72,7 @@ export function VoiceControls({
   isGroup,
   onLiveChange,
 }: VoiceControlsProps) {
-  const [live, setLive] = useState(() => isLiveChat(chatId));
+  const live = useIsLiveChat(chatId);
   const [voiceOn, setVoiceOn] = useState(() => getVoiceSettings().enabled);
   const [manualSend, setManualSendState] = useState(() => getVoiceSettings().liveManualSend);
   const [sessionVoice, setSessionVoice] = useState(() => resolveVoiceId(duckyVoice));
@@ -135,16 +137,13 @@ export function VoiceControls({
   });
 
   useEffect(() => {
-    setLive(isLiveChat(chatId));
-    setMuted(false);
-  }, [chatId]);
+    if (!live) setMuted(false);
+  }, [live]);
 
   const { skip, back, newest, sendNow, canSend, hasPrev, hasNext, hasNewer } = liveMode;
 
   const exitLive = useCallback(() => {
-    setMuted(false);
     stopLiveChat(chatId);
-    setLive(false);
   }, [chatId]);
 
   const setManualSend = useCallback((value: boolean) => {
@@ -255,22 +254,16 @@ export function VoiceControls({
   }, [live, voiceOn, streamText, agentRunning, duckyVoice, duckySpeed]);
 
   const toggleLive = () => {
-    setLive((v) => {
-      const next = !v;
-      if (next) {
-        const voice = resolveVoiceId(duckyVoice);
-        const rate = resolveSpeed(duckySpeed);
-        setSessionVoice(voice);
-        setSessionSpeed(rate);
-        setMuted(false);
-        dictation.abort();
-        startLiveChat(chatId, { voiceId: voice, speed: rate, isGroup });
-      } else {
-        setMuted(false);
-        stopLiveChat(chatId);
-      }
-      return next;
-    });
+    if (live) {
+      stopLiveChat(chatId);
+      return;
+    }
+    const voice = resolveVoiceId(duckyVoice);
+    const rate = resolveSpeed(duckySpeed);
+    setSessionVoice(voice);
+    setSessionSpeed(rate);
+    dictation.abort();
+    startLiveChat(chatId, { voiceId: voice, speed: rate, isGroup });
   };
 
   const micTitle = dictation.error
@@ -367,7 +360,9 @@ export function SpeakMessageButton({
 
   if (!text.trim()) return null;
 
-  const active = progress.sourceText === text && progress.state !== "idle";
+  const active =
+    progress.state !== "idle" &&
+    Boolean(mapReadAlong(text, progress.spokenText, progress.sourceText, progress.charIndex));
   const paused = active && progress.state === "paused";
   const speaking = active && progress.state === "speaking";
   const loading = active && progress.loading;

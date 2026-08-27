@@ -3,7 +3,6 @@ import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
 import { ModelSelector } from "./ModelSelector";
-import { EffortSelector } from "./EffortSelector";
 import { modelShowsThinkingEffort } from "./ducky/duckyProfileForm";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
@@ -1215,7 +1214,14 @@ export function ChatPane({
           <div className="chat-pane-input-toolbar">
             <div className="chat-pane-input-toolbar-left">
               {!chat.isGroup ? (
-                <ModeSelector activeMode={agentMode} setMode={setAgentMode} />
+                <ModeSelector
+                  activeMode={agentMode}
+                  setMode={setAgentMode}
+                  showEffort={showThinkingEffort}
+                  convId={chat.id}
+                  effort={thinkingEffort}
+                  onEffortChange={setThinkingEffort}
+                />
               ) : null}
               <ContextMeter
                 usedTokens={contextUsage.used_tokens}
@@ -1248,14 +1254,6 @@ export function ChatPane({
                     preserveSelection
                     onModelMetaChange={handleModelMetaChange}
                   />
-                  {showThinkingEffort ? (
-                    <EffortSelector
-                      convId={chat.id}
-                      provider={chat.provider || codingAgent || "anthropic"}
-                      value={thinkingEffort}
-                      onChange={setThinkingEffort}
-                    />
-                  ) : null}
                 </>
               ) : null}
             </div>

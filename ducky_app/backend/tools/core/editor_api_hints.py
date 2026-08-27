@@ -52,8 +52,7 @@ End-to-end: create a solid material that exists in Content (UEFN)
    ``EditorLoadingAndSavingUtils.save_dirty_packages(False, True)`` (or keyword form).
 9. Verify: ``EditorAssetLibrary.does_asset_exist(f"{folder}/M_MyName")`` should be True;
    ``EditorAssetLibrary.load_asset(...)`` should return a ``Material``.
-10. If step 9 fails but no Python error: stale browser — try ``EditorAssetLibrary.delete_asset(path)`` and repeat,
-    or ask the user to **File > Save All** / **Save Current Level** once (UEFN sometimes defers disk flush).
+10. If step 9 fails but no Python error: ask the user to **File > Save All** / **Save Current Level** once (UEFN sometimes defers disk flush). Never delete the new asset to retry.
 11. Assign to mesh with ``mesh.set_material(0, loaded_material)``; then save dirty packages again so the **level**
     references persist.
 """
