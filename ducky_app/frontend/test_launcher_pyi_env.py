@@ -10,6 +10,20 @@ import sys
 from pathlib import Path
 
 
+def test_cancel_scope_runtimeerror_is_stdio_disconnect() -> None:
+    from frontend.launcher import _is_stdio_disconnect
+
+    err = RuntimeError(
+        "Attempted to exit a cancel scope that isn't the current tasks's current cancel scope"
+    )
+    assert _is_stdio_disconnect(err)
+    inner = ExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [err])
+    mid = ExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [inner])
+    outer = ExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [mid])
+    assert _is_stdio_disconnect(outer)
+    assert not _is_stdio_disconnect(RuntimeError("disk full"))
+
+
 def main() -> None:
     from frontend.launcher import _PYI_BOOT_ENV_KEYS, scrub_pyinstaller_boot_env
 

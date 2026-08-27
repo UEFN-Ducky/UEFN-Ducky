@@ -20,7 +20,7 @@ def is_packaged_runtime() -> bool:
 
 def packaged_data_root() -> Path | None:
     """
-    Directory that contains ``bundle/uefn_listener`` and ``frontend/user_init_unreal.py``
+    Directory that contains ``bundle/uefn_listener`` and ``frontend/init_unreal.py``
     in release layouts (PyInstaller ``_MEIPASS`` or Nuitka onefile extraction dir).
     """
     meipass = getattr(sys, "_MEIPASS", None)

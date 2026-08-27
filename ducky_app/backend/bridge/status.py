@@ -263,12 +263,20 @@ def fetch_listener_status(
     now = time.time()
     if selected_project_root and now - st.last_python_sweep_at >= _PYTHON_SWEEP_INTERVAL_SEC:
         try:
-            from frontend.deploy import quarantine_project_python, resolve_uefn_project_root
+            from frontend.deploy import (
+                quarantine_project_python,
+                refresh_inits,
+                resolve_uefn_project_root,
+            )
 
             root = resolve_uefn_project_root(Path(selected_project_root))
             moved = quarantine_project_python(root, deep=False)
             if moved:
                 st.python_quarantined = moved
+            try:
+                refresh_inits(root)
+            except Exception:
+                pass
             st.last_python_sweep_at = now
         except Exception:
             st.last_python_sweep_at = now

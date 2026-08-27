@@ -3,7 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from frontend import deploy
+
+
+@pytest.fixture(autouse=True)
+def _isolate_init_refresh(monkeypatch, tmp_path_factory) -> None:
+    monkeypatch.setattr("frontend.ui_web.recent_projects.load_recent_projects", lambda: [])
+    monkeypatch.setattr(
+        deploy, "documents_unreal_python_dir", lambda: tmp_path_factory.mktemp("docs_python")
+    )
+    monkeypatch.setattr(deploy, "install_toolset_listener_boot", lambda: None)
 
 
 def _listener_source(root: Path) -> Path:
@@ -67,7 +78,6 @@ def test_deploy_listener_writes_init_and_keeps_it(tmp_path, monkeypatch) -> None
     (project / "_junk.py").write_text("x\n", encoding="utf-8")
     monkeypatch.setattr(deploy, "quarantine_python_root", lambda: tmp_path / "q")
     monkeypatch.setattr(deploy, "enable_uefn_project_python", lambda _p: None)
-    monkeypatch.setattr(deploy, "install_user_init_unreal", lambda: None)
     monkeypatch.setattr(deploy, "install_toolset_listener_boot", lambda: None)
     monkeypatch.setattr(
         "backend.mcp_plugins.epic.ensure_editor_auto_start", lambda: False
@@ -136,3 +146,91 @@ def test_quarantine_project_python_shallow_catches_root_and_content_python(
     assert (project / "Content" / "Verse" / "nested.py").is_file()
     assert (project / "Content" / "Verse" / "foo.verse").is_file()
     assert (project / "Saved" / "x.py").is_file()
+
+
+def test_ensure_project_init_replaces_stale(tmp_path: Path) -> None:
+    project = tmp_path / "Island"
+    dest = project / "Content" / "Python"
+    dest.mkdir(parents=True)
+    (dest / "init_unreal.py").write_text("# old stub\n", encoding="utf-8")
+    cache = dest / "__pycache__"
+    cache.mkdir()
+    (cache / "init_unreal.cpython-311.pyc").write_bytes(b"stale")
+    logs = deploy.ensure_project_init(project)
+    text = (dest / "init_unreal.py").read_text(encoding="utf-8")
+    assert deploy._DUCKY_INIT_MARKER in text
+    assert "from listener.bootstrap import run" in text
+    assert any("Installed" in line for line in logs)
+    assert not cache.exists()
+
+
+def test_ensure_project_init_replaces_old_bootstrap_stub(tmp_path: Path) -> None:
+    project = tmp_path / "Island"
+    dest = project / "Content" / "Python"
+    dest.mkdir(parents=True)
+    (dest / "init_unreal.py").write_text(
+        "from listener.bootstrap import run\nrun()\n", encoding="utf-8"
+    )
+    deploy.ensure_project_init(project)
+    text = (dest / "init_unreal.py").read_text(encoding="utf-8")
+    assert deploy._DUCKY_INIT_MARKER in text
+    assert "UEFN-Ducky managed init" in text
+
+
+def test_install_user_init_replaces_old_ducky_file(tmp_path: Path, monkeypatch) -> None:
+    py_dir = tmp_path / "UnrealEngine" / "Python"
+    py_dir.mkdir(parents=True)
+    (py_dir / "init_unreal.py").write_text(
+        "# UEFN-Ducky user-level Python startup\nfrom listener.bootstrap import run\n",
+        encoding="utf-8",
+    )
+    (py_dir / "ducky_init_unreal.py").write_text("# leftover helper\n", encoding="utf-8")
+    cache = py_dir / "__pycache__"
+    cache.mkdir()
+    (cache / "init_unreal.cpython-311.pyc").write_bytes(b"stale")
+    monkeypatch.setattr(deploy, "documents_unreal_python_dir", lambda: py_dir)
+    msg = deploy.install_user_init_unreal()
+    text = (py_dir / "init_unreal.py").read_text(encoding="utf-8")
+    assert deploy._DUCKY_INIT_MARKER in text
+    leftover = (py_dir / "ducky_init_unreal.py").read_text(encoding="utf-8")
+    assert leftover.strip() == text.strip()
+    assert not cache.exists()
+    assert msg is not None
+
+
+def test_install_user_init_shims_foreign_file(tmp_path: Path, monkeypatch) -> None:
+    py_dir = tmp_path / "UnrealEngine" / "Python"
+    py_dir.mkdir(parents=True)
+    init = py_dir / "init_unreal.py"
+    init.write_text("import unreal\nprint('mine')\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "documents_unreal_python_dir", lambda: py_dir)
+    msg = deploy.install_user_init_unreal()
+    existing = init.read_text(encoding="utf-8")
+    assert "print('mine')" in existing
+    assert "import ducky_init_unreal" in existing
+    helper = (py_dir / "ducky_init_unreal.py").read_text(encoding="utf-8")
+    assert deploy._DUCKY_INIT_MARKER in helper
+    assert msg is not None and "Hooked" in msg
+
+def test_remove_project_init_deletes_ducky_file(tmp_path: Path) -> None:
+    project = tmp_path / "Island"
+    dest = project / "Content" / "Python"
+    dest.mkdir(parents=True)
+    (dest / "init_unreal.py").write_text(
+        f"# {deploy._DUCKY_INIT_MARKER}\nfrom listener.bootstrap import run\n",
+        encoding="utf-8",
+    )
+    logs = deploy.remove_project_init(project)
+    assert not (dest / "init_unreal.py").exists()
+    assert not dest.exists()
+    assert any("Removed" in line for line in logs)
+
+
+def test_remove_project_init_leaves_foreign_file(tmp_path: Path) -> None:
+    project = tmp_path / "Island"
+    dest = project / "Content" / "Python"
+    dest.mkdir(parents=True)
+    init = dest / "init_unreal.py"
+    init.write_text("# my own python\nprint('hi')\n", encoding="utf-8")
+    deploy.remove_project_init(project)
+    assert init.is_file()

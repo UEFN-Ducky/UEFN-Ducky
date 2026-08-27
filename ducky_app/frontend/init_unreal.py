@@ -1,11 +1,12 @@
-"""UEFN-Ducky boot module for Epic EditorToolset ForceEnablePython.
+# UEFN-Ducky managed init — do not edit
+"""One boot file. Ducky writes this same text to:
 
-With UEFN MCP Toolsets enabled, UEFN only runs Engine plugin init_unreal scripts
-(not Documents/UnrealEngine/Python and not island Content/Python). This module is
-imported from EditorToolset's init_unreal.py (hook installed by UEFN-Ducky deploy).
+- island ``Content/Python/init_unreal.py``
+- ``Documents/UnrealEngine/Python/init_unreal.py``
+- Engine EditorToolset ``ducky_listener_boot.py`` (imported from its init_unreal)
 
-Starts the Ducky listener on :4200 after a short deferred tick so Epic MCP can
-bind :8000 first. Never restarts Epic MCP when it is already up.
+Loads the listener from ``%LOCALAPPDATA%/UEFN-Ducky/listener``. Defers ~45 ticks
+so Epic MCP Toolsets can bind :8000 first. Port 4200. Disable: ``UEFN_DUCKY_DISABLE=1``.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import sys
 import traceback
 from pathlib import Path
 
-_DEFER_TICKS = 45  # ~0.5–1s after ForceEnable — let Epic MCP Toolsets bind first
+_DEFER_TICKS = 45
 _handle = None
 _ticks = 0
 
@@ -30,15 +31,13 @@ def _start_ducky() -> None:
             import unreal
 
             unreal.log_warning(
-                "[MCP] UEFN-Ducky listener source missing in AppData. "
-                "Start UEFN-Ducky.exe once, then restart UEFN. "
+                "[MCP] Listener source not found in AppData. Start UEFN-Ducky.exe once, then restart UEFN. "
                 f"Expected: {ed}"
             )
         except Exception:
             pass
         return
     os.environ.setdefault("UEFN_DUCKY_LISTENER_PORT", "4200")
-    # Coexistence: never StartServer Epic MCP from this path — Toolsets own :8000.
     os.environ.setdefault("UEFN_DUCKY_ENSURE_EPIC", "0")
     if str(ed) not in sys.path:
         sys.path.insert(0, str(ed))
@@ -73,7 +72,6 @@ def _tick(_dt: float) -> None:
 
 def _run() -> None:
     global _handle
-    # Immediate path if slate ticks are unavailable.
     try:
         import unreal
 
@@ -95,6 +93,6 @@ except Exception:
     try:
         import unreal
 
-        unreal.log_error("[MCP] UEFN-Ducky user init_unreal:\n" + traceback.format_exc())
+        unreal.log_error("[MCP] init_unreal:\n" + traceback.format_exc())
     except Exception:
         pass

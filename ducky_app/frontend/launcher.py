@@ -60,6 +60,9 @@ def _ensure_repo_on_path() -> str:
 
 def _is_stdio_disconnect(exc: BaseException) -> bool:
     """True when Cursor/IDE closed the MCP stdio pipe (normal on reconnect)."""
+    if isinstance(exc, RuntimeError) and "cancel scope" in str(exc).lower():
+        # anyio/mcp race on reconnect: RequestResponder.__exit__ vs cancelled task.
+        return True
     name = exc.__class__.__name__
     if name in ("BrokenResourceError", "BrokenPipeError", "EOFError", "ConnectionResetError"):
         return True
@@ -71,8 +74,8 @@ def _is_stdio_disconnect(exc: BaseException) -> bool:
         msg = str(exc).lower()
         if "invalid argument" in msg or "broken pipe" in msg:
             return True
-    if name == "ExceptionGroup":
-        subs = getattr(exc, "exceptions", ())
+    if name in ("ExceptionGroup", "BaseExceptionGroup"):
+        subs = getattr(exc, "exceptions", ()) or ()
         return bool(subs) and all(_is_stdio_disconnect(sub) for sub in subs)
     # Unwrap nested causes (anyio / TaskGroup wrappers)
     cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
@@ -86,7 +89,7 @@ def _patch_mcp_request_responder_idempotent() -> None:
 
     Upstream: python-sdk#2416 / #2949 — ``notifications/cancelled`` can set
     ``_completed`` before ``respond()``; the assert then crashes the bridge.
-    No-op if the installed SDK already uses early-return guards.
+    Reconnect also trips anyio ``cancel scope`` on ``RequestResponder.__exit__``.
     """
     try:
         import inspect
@@ -95,6 +98,25 @@ def _patch_mcp_request_responder_idempotent() -> None:
         from mcp.types import ErrorData
     except Exception:
         return
+
+    if not getattr(RequestResponder, "_ducky_cancel_scope_exit", False):
+        orig_exit = getattr(RequestResponder, "__exit__", None)
+
+        def _exit(self, exc_type, exc, tb):  # type: ignore[no-untyped-def]
+            try:
+                if orig_exit is not None:
+                    return orig_exit(self, exc_type, exc, tb)
+            except RuntimeError as err:
+                if "cancel scope" in str(err).lower():
+                    return False
+                raise
+            return False
+
+        try:
+            RequestResponder.__exit__ = _exit  # type: ignore[method-assign]
+            RequestResponder._ducky_cancel_scope_exit = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     if getattr(RequestResponder, "_ducky_idempotent_respond", False):
         return
