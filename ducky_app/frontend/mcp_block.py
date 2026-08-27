@@ -2,12 +2,41 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime
 from frontend.settings import PanelSettings
+
+# Windows MCP clients that declare an explicit ``env`` block for a stdio server
+# typically REPLACE the child process's environment instead of merging it with
+# the parent's. A frozen PyInstaller exe cannot boot without these — no
+# SystemRoot/TEMP means the Python runtime/DLL loader fails before it can even
+# open its stdio pipes, so the client just sees an instant CONNECTION_CLOSED.
+_REQUIRED_ENV_KEYS = (
+    "SystemRoot",
+    "windir",
+    "TEMP",
+    "TMP",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "ComSpec",
+    "PATHEXT",
+    "PATH",
+)
+
+
+def _base_os_env() -> dict[str, str]:
+    """Essential Windows env vars, read from this (healthy) process's own env."""
+    out: dict[str, str] = {}
+    for key in _REQUIRED_ENV_KEYS:
+        val = os.environ.get(key, "")
+        if val:
+            out[key] = val
+    return out
 
 VERSIONED_EXE_RE = re.compile(
     r"^UEFN-Ducky-(\d+)\.(\d+)\.(\d+)\.exe$",
@@ -72,9 +101,8 @@ def resolve_bridge_args(settings: PanelSettings) -> list[str]:
 
 def build_uefn_server_block(settings: PanelSettings) -> dict:
     """Return dict suitable for mcpServers['uefn'] (stdio)."""
-    env = {
-        "UEFN_DUCKY_PORT": str(settings.port),
-    }
+    env = _base_os_env()
+    env["UEFN_DUCKY_PORT"] = str(settings.port)
     return {
         "type": "stdio",
         "command": resolve_bridge_command(),
