@@ -1934,6 +1934,10 @@ body.focus-window .window-resize-grip--n {
 }
 
 /* ── ModelSelector ── */
+.model-selector {
+  min-width: 0;
+}
+
 .model-selector-btn {
   display: flex;
   align-items: center;
@@ -1944,6 +1948,19 @@ body.focus-window .window-resize-grip--n {
   border-radius: var(--radius-sm);
   font-size: 11px;
   transition: all 0.15s;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-selector-btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-btn svg {
+  flex-shrink: 0;
 }
 
 /* ── EffortSelector (Anthropic thinking) ── */
@@ -2271,20 +2288,35 @@ body.focus-window .window-resize-grip--n {
 }
 
 /* ── ModeSelector ── */
+.mode-selector {
+  flex-shrink: 0;
+}
+
 .mode-selector-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
+  border-radius: 8px;
   cursor: pointer;
-  font-weight: 400;
   transition: all 0.15s;
+}
+
+.mode-selector-popup {
+  padding: 4px;
+}
+
+.mode-selector-popup-label {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: var(--muted);
 }
 
 .mode-selector-btn.is-open {

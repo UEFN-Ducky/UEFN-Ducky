@@ -89,6 +89,16 @@ describe("liveSpeakService", () => {
     expect(String(line)).toMatch(/writing the file prey dot verse/i);
   });
 
+  it("clears presence when End live chat runs with no session", async () => {
+    const { stopLiveChat } = await import("./liveSpeakService");
+    const { setLiveVoiceChat, getLiveVoiceChatIds, patchLiveVoiceState } = await import("./liveChats");
+    setLiveVoiceChat("orphan", true);
+    stopLiveChat("orphan");
+    expect(getLiveVoiceChatIds().has("orphan")).toBe(false);
+    patchLiveVoiceState("orphan", { status: "speaking" });
+    expect(getLiveVoiceChatIds().has("orphan")).toBe(false);
+  });
+
   it("keeps isLiveChat true after a simulated unmount (mic release)", async () => {
     const { startLiveChat, isLiveChat, releaseMic, claimMic } = await import("./liveSpeakService");
     startLiveChat("chat-a", { voiceId: "v", speed: 1 });
@@ -106,6 +116,35 @@ describe("liveSpeakService", () => {
     expect(isLiveChat("chat-a")).toBe(true);
     expect(getLiveVoiceState("chat-a").muted).toBe(true);
     expect(getLiveVoiceState("chat-a").status).toBe("muted");
+  });
+
+  it("starts speaking a finished sentence before the reply is done", async () => {
+    const { startLiveChat } = await import("./liveSpeakService");
+    startLiveChat("chat-a", { voiceId: "v", speed: 1 });
+    eventHandler?.({
+      type: "text_delta",
+      conv_id: "chat-a",
+      text: "Hey — good timing, I'd just finished verifying your list. ",
+    });
+    expect(enqueueAnswerSpeak).toHaveBeenCalledWith(
+      "Hey — good timing, I'd just finished verifying your list.",
+      expect.objectContaining({ chatId: "chat-a" }),
+    );
+    expect(enqueueFinalSpeak).not.toHaveBeenCalled();
+    eventHandler?.({ type: "assistant_done", conv_id: "chat-a", text: "" });
+    expect(enqueueFinalSpeak).not.toHaveBeenCalled();
+  });
+
+  it("holds an unfinished sentence until more text or the turn ends", async () => {
+    const { startLiveChat } = await import("./liveSpeakService");
+    startLiveChat("chat-a", { voiceId: "v", speed: 1 });
+    eventHandler?.({ type: "text_delta", conv_id: "chat-a", text: "Hey — good timing" });
+    expect(enqueueAnswerSpeak).not.toHaveBeenCalled();
+    eventHandler?.({ type: "assistant_done", conv_id: "chat-a", text: "" });
+    expect(enqueueAnswerSpeak).toHaveBeenCalledWith(
+      "Hey — good timing",
+      expect.objectContaining({ chatId: "chat-a" }),
+    );
   });
 
   it("flushes mid-turn assistant text before the next tool", async () => {

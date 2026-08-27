@@ -126,6 +126,17 @@ def cmd_get_log(last_n: int = 50) -> dict:
 def _execute_python_blocked(code: str) -> str | None:
     low = code.lower()
     compact = low.replace(" ", "").replace("\n", "").replace("\t", "")
+    if (
+        "delete_asset(" in compact
+        or "delete_directory(" in compact
+        or "editorassetlibrary.delete_" in compact
+    ):
+        return (
+            "STOP: execute_python blocked — never delete island content. "
+            "Fix broken refs (search / reimport / relink / duplicate). "
+            "Delete only in the Content Browser. "
+            "Editor offline is not a delete queue — do not restart UEFN to delete."
+        )
     if "for name in dir(unreal)" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "

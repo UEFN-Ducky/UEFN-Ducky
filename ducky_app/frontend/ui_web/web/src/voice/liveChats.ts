@@ -75,7 +75,6 @@ export function patchLiveVoiceState(chatId: string, patch: Partial<LiveVoiceStat
   if (!id) return;
   const prev = ensure(id);
   states.set(id, { ...prev, ...patch });
-  if (patch.status && patch.status !== "off") live.add(id);
   notify();
 }
 

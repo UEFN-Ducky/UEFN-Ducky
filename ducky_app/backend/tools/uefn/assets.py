@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from backend.agent.toolsets.destructive import delete_refused_payload
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
@@ -88,9 +89,11 @@ def rename_asset(old_path: str, new_path: str, pretty: bool = False) -> str:
 
 @plugin_mcp_tool("uefn")
 def delete_asset(asset_path: str, pretty: bool = False) -> str:
-    """Delete an asset."""
-    result = send_command("delete_asset", {"asset_path": asset_path})
-    return tool_json(result, pretty=pretty)
+    """Blocked: never delete island content. Fix refs / reimport / relink instead."""
+    return tool_json(
+        delete_refused_payload("delete_asset", asset_path=asset_path),
+        pretty=pretty,
+    )
 
 
 @plugin_mcp_tool("uefn")

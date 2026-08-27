@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from backend.agent.toolsets.destructive import delete_refused_payload
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
@@ -130,9 +131,11 @@ def spawn_actor(
 
 @plugin_mcp_tool("uefn")
 def delete_actors(actor_paths: list[str], pretty: bool = False) -> str:
-    """Delete actors by path or label."""
-    result = send_command("delete_actors", {"actor_paths": actor_paths})
-    return tool_json(result, pretty=pretty)
+    """Blocked: never delete island actors. Fix the asset/device instead."""
+    return tool_json(
+        delete_refused_payload("delete_actors", actor_paths=actor_paths),
+        pretty=pretty,
+    )
 
 
 @plugin_mcp_tool("uefn")

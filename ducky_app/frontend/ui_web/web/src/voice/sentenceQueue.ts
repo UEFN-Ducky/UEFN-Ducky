@@ -16,6 +16,8 @@ export function stripForSpeech(raw: string): string {
   text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   // Images
   text = text.replace(/!\[[^\]]*\]\([^)]+\)/g, " ");
+  // Markdown tables — speak the prose, not the grid.
+  text = text.replace(/^\s*\|.*\|\s*$/gm, " ");
   // Headings / bold / italic markers
   text = text.replace(/^#{1,6}\s+/gm, "");
   text = text.replace(/(\*\*|__)(.*?)\1/g, "$2");

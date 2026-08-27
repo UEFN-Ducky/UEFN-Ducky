@@ -54,3 +54,18 @@ def test_uasset_plus_hash_is_blocked():
     blocked = _load_blocked()
     msg = blocked('open("Foo.uasset", "rb").read(); print("__verse_0xDE71A4D4_Cat")')
     assert msg is not None
+
+
+def test_execute_python_delete_asset_is_blocked():
+    blocked = _load_blocked()
+    msg = blocked("unreal.EditorAssetLibrary.delete_asset('/Game/Foo')")
+    assert msg is not None
+    assert "never delete" in msg.lower()
+    assert "delete queue" in msg.lower()
+
+
+def test_execute_python_delete_directory_is_blocked():
+    blocked = _load_blocked()
+    msg = blocked("unreal.EditorAssetLibrary.delete_directory('/Game/Foo')")
+    assert msg is not None
+    assert "never delete" in msg.lower()

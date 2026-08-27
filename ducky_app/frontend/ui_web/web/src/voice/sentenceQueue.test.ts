@@ -10,6 +10,10 @@ describe("stripForSpeech", () => {
   it("keeps link labels", () => {
     expect(stripForSpeech("See [docs](https://example.com) now")).toBe("See docs now");
   });
+
+  it("drops markdown table rows", () => {
+    expect(stripForSpeech("Intro.\n| A | B |\n| x | y |\nOut.")).toMatch(/Intro\.\s+Out\./);
+  });
 });
 
 describe("pullSentences", () => {

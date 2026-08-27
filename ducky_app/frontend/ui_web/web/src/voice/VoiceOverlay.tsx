@@ -87,8 +87,6 @@ export function VoiceOverlay({
   const loadingVoice = tts.loading;
   const micMuted = muted || state.muted || state.status === "muted";
   const label = statusLabel(state.status, state.error, loadingVoice, micMuted);
-  const youText = state.userInterim || state.lastUserText;
-  const duckyText = state.spokenText;
   const pickers = showPickers && Boolean(setVoiceId && setSpeed);
   const busyOrb = state.status === "thinking" || state.status === "speaking" || state.status === "error";
   const orbStatus = loadingVoice ? "thinking" : busyOrb ? state.status : micMuted ? "muted" : state.status;
@@ -116,22 +114,6 @@ export function VoiceOverlay({
               >
                 {label}
               </div>
-              {youText ? (
-                <div className="voice-overlay-line">
-                  <span className="voice-overlay-who">You</span>
-                  <span
-                    className={`voice-overlay-text${state.userInterim ? " voice-overlay-text--interim" : ""}`}
-                  >
-                    {youText}
-                  </span>
-                </div>
-              ) : null}
-              {duckyText ? (
-                <div className="voice-overlay-line">
-                  <span className="voice-overlay-who">{state.speakerName || "Ducky"}</span>
-                  <span className="voice-overlay-text">{duckyText}</span>
-                </div>
-              ) : null}
               {state.nextSpeaker ? (
                 <div className="voice-overlay-next">{state.nextSpeaker}</div>
               ) : null}
