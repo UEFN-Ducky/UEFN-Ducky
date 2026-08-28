@@ -1,0 +1,150 @@
+# Manual Store app publish (Setup.exe). Never on push / PR / cron.
+# Admins only: environment store-publish + collaborator permission == admin.
+# Put DUCKYOS_API_KEY on that environment. Azure secrets optional — unsigned upload if absent.
+name: store-publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Store release notes (in-app toast)"
+        required: false
+        default: ""
+        type: string
+      set_version:
+        description: "Optional exact semver (else patch bump)"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: store-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    name: build and publish Setup
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: store-publish
+    env:
+      DUCKYOS_API_KEY: ${{ secrets.DUCKYOS_API_KEY }}
+      DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+    steps:
+      - name: Admins only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          perm=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" --jq .permission)
+          echo "actor=${{ github.actor }} permission=${perm}"
+          test "${perm}" = "admin"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Python venv + Inno Setup
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python -m pip install --upgrade pip
+          .venv/Scripts/python -m pip install -r requirements.txt pyinstaller
+          choco install innosetup --no-progress -y
+
+      - name: Require Store API key
+        shell: bash
+        run: |
+          if [ -z "${DUCKYOS_API_KEY}" ]; then
+            echo "Missing DUCKYOS_API_KEY (environment secret store-publish)."
+            exit 1
+          fi
+          if [ -z "${DUCKYOS_BASE_URL}" ]; then
+            echo "DUCKYOS_BASE_URL=https://uefnducky.org" >> "$GITHUB_ENV"
+          fi
+
+      - name: Publish unsigned (no Azure)
+        if: env.AZURE_CLIENT_ID == ''
+        shell: bash
+        run: |
+          extra=()
+          if [ -n "${{ inputs.set_version }}" ]; then
+            extra+=(--set-version "${{ inputs.set_version }}")
+          fi
+          .venv/Scripts/python release/publish_app.py --notes "${{ inputs.notes }}" "${extra[@]}"
+
+      - name: Build Setup (Azure sign next)
+        if: env.AZURE_CLIENT_ID != ''
+        shell: bash
+        run: |
+          extra=()
+          if [ -n "${{ inputs.set_version }}" ]; then
+            extra+=(--set-version "${{ inputs.set_version }}")
+          fi
+          .venv/Scripts/python release/publish_app.py --build-only --notes "${{ inputs.notes }}" "${extra[@]}"
+
+      - name: Azure login
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Azure Artifact Signing
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          exclude-environment-credential: true
+          exclude-managed-identity-credential: true
+          exclude-workload-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Upload signed Setup
+        if: env.AZURE_CLIENT_ID != ''
+        shell: bash
+        run: |
+          ver=$(.venv/Scripts/python release/publish_app.py --print-version)
+          exe="dist/UEFN-Ducky-Setup-${ver}.exe"
+          .venv/Scripts/python release/publish_app.py --no-bump --exe "${exe}" --notes "${{ inputs.notes }}"
+
+      - name: Commit version bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ducky_app/frontend/__init__.py
+          if git diff --cached --quiet; then
+            echo "no version bump to commit"
+            exit 0
+          fi
+          ver=$(.venv/Scripts/python release/publish_app.py --print-version)
+          git commit -m "Bump app version to ${ver} (Store publish)"
+          git push
