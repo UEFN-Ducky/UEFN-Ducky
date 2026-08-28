@@ -1,4 +1,4 @@
-"""Assert Ducky SAL + free-plugin MIT split is consistent across repos.
+"""Assert Ducky SAL on the app/OS + MIT on every UEFN desktop plugin.
 
 Run from UEFN-Ducky-Release repo root (or any cwd; paths are absolute-sibling).
   py scripts/check_licenses.py
@@ -6,7 +6,6 @@ Run from UEFN-Ducky-Release repo root (or any cwd; paths are absolute-sibling).
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import sys
 from pathlib import Path
@@ -17,31 +16,8 @@ DUCKYOS = RELEASE.parent / "DuckyOS"
 CANON = RELEASE / "LICENSE"
 SPDX = "LicenseRef-Ducky-SAL-1.0"
 LICENSE_NAME = "Ducky Source-Available License v1.0"
-
-# Short plugin ids whose plugin code is MIT; skills stay SAL.
-FREE_PLUGIN_IDS = frozenset(
-    {
-        "light",
-        "hacker",
-        "vim",
-        "openai",
-        "anthropic",
-        "google",
-        "googledrive",
-        "ollama",
-        "kimi",
-        "spacexai",
-        "elevenlabs",
-        "cursor",
-        "discord",
-        "warcraft",
-        "galaxycraft",
-        "meshy",
-        "blender",
-        "studio3d",
-        "piper",
-    }
-)
+MIT_MARKER = "MIT License"
+MINDFUL = "Mindful Path Company, LLC"
 
 CLAIM_SCAN_ROOTS = [
     RELEASE / "README.md",
@@ -55,55 +31,30 @@ CLAIM_SCAN_ROOTS = [
 FORBIDDEN_CLAIM = re.compile(
     r"(?i)\bfree and open source\b|\b\[MIT\]\(LICENSE\)|\blicensed under the MIT\b"
 )
-SKILLS_CARVEOUT = re.compile(r"(?i)bundled skills")
 
 
 def _md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def _plugin_id(plugin_dir: Path) -> str:
-    pj = plugin_dir / "plugin.json"
-    if pj.is_file():
-        try:
-            data = json.loads(pj.read_text(encoding="utf-8"))
-            pid = str(data.get("id") or "").strip()
-            if pid:
-                return pid
-        except json.JSONDecodeError:
-            pass
-    return plugin_dir.name.removeprefix("uefn-plugin-")
-
-
-def _is_free_plugin(plugin_dir: Path) -> bool:
-    pid = _plugin_id(plugin_dir)
-    folder = plugin_dir.name.removeprefix("uefn-plugin-")
-    return bool({pid, folder, folder.removeprefix("uefn-")} & FREE_PLUGIN_IDS)
-
-
 def _collect_sal_paths() -> list[Path]:
     paths: list[Path] = [CANON, DUCKY / "LICENSE"]
-    paths.extend(sorted(DUCKY.glob("plugins/_skill_packs/*/LICENSE.txt")))
     paths.append(RELEASE / "ducky_app" / "frontend" / "skill_packs" / "ducky" / "LICENSE.txt")
     paths.append(DUCKYOS / "LICENSE")
     paths.append(DUCKYOS / "duckyos" / "LICENSE")
-    paths.extend(sorted(DUCKYOS.glob("plugins/*/LICENSE")))
-    for plugin_dir in sorted(DUCKY.glob("plugins/uefn-plugin-*")):
-        if plugin_dir.is_dir() and not _is_free_plugin(plugin_dir):
-            paths.append(plugin_dir / "LICENSE")
-    # Skill LICENSE.txt under free plugins that ship skills
-    for plugin_dir in sorted(DUCKY.glob("plugins/uefn-plugin-*")):
-        if not _is_free_plugin(plugin_dir):
-            continue
-        paths.extend(sorted(plugin_dir.glob("skills/*/LICENSE.txt")))
+    paths.extend(sorted(DUCKYOS.glob("plugins/plugin-*/LICENSE")))
     return paths
 
 
-def _collect_free_plugin_licenses() -> list[Path]:
+def _plugin_dirs() -> list[Path]:
+    return [p for p in sorted(DUCKY.glob("plugins/uefn-plugin-*")) if p.is_dir()]
+
+
+def _collect_plugin_mit_paths() -> list[Path]:
     out: list[Path] = []
-    for plugin_dir in sorted(DUCKY.glob("plugins/uefn-plugin-*")):
-        if plugin_dir.is_dir() and _is_free_plugin(plugin_dir):
-            out.append(plugin_dir / "LICENSE")
+    for plugin_dir in _plugin_dirs():
+        out.append(plugin_dir / "LICENSE")
+        out.extend(sorted(plugin_dir.glob("skills/*/LICENSE.txt")))
     return out
 
 
@@ -116,12 +67,29 @@ def _collect_cargo_tomls() -> list[Path]:
     return paths
 
 
+def _assert_mit(path: Path) -> str | None:
+    if not path.is_file():
+        return f"missing MIT LICENSE: {path}"
+    text = path.read_text(encoding="utf-8")
+    if MIT_MARKER not in text:
+        return f"{path}: missing MIT License"
+    if MINDFUL not in text:
+        return f"{path}: missing {MINDFUL}"
+    if LICENSE_NAME in text or "Source-Available" in text:
+        return f"{path}: still SAL / source-available"
+    if "bundled skills" in text.lower():
+        return f"{path}: leftover skills carve-out"
+    if "SPDX-License-Identifier: LicenseRef-Ducky-SAL-1.0" in text:
+        return f"{path}: leftover SAL SPDX"
+    return None
+
+
 def main() -> int:
     assert CANON.is_file(), f"canonical LICENSE missing: {CANON}"
     canon_hash = _md5(CANON)
     body = CANON.read_text(encoding="utf-8")
     assert LICENSE_NAME in body, "canonical LICENSE missing license name"
-    assert "Mindful Path Company, LLC" in body, "canonical LICENSE missing copyright holder"
+    assert MINDFUL in body, "canonical LICENSE missing copyright holder"
     assert SPDX in body, f"canonical LICENSE missing {SPDX}"
     assert "Official first-party skills" in body, "canonical LICENSE missing §5a skills section"
 
@@ -133,38 +101,26 @@ def main() -> int:
         str(p) for p in bad_hash
     )
 
-    free_paths = _collect_free_plugin_licenses()
-    assert len(free_paths) == len(FREE_PLUGIN_IDS), (
-        f"expected {len(FREE_PLUGIN_IDS)} free plugin LICENSEs, got {len(free_paths)}"
-    )
-    free_bad = []
-    for p in free_paths:
-        text = p.read_text(encoding="utf-8")
-        if "MIT License" not in text:
-            free_bad.append(f"{p}: missing MIT License")
-        elif not SKILLS_CARVEOUT.search(text):
-            free_bad.append(f"{p}: missing bundled-skills carve-out")
-        elif LICENSE_NAME in text and "NOT covered" not in text:
-            free_bad.append(f"{p}: looks like SAL body, not MIT+carve-out")
-        elif _md5(p) == canon_hash:
-            free_bad.append(f"{p}: identical to SAL canonical (should be MIT)")
-    assert not free_bad, "free plugin LICENSE problems:\n" + "\n".join(free_bad)
+    plugin_dirs = _plugin_dirs()
+    assert len(plugin_dirs) >= 38, f"expected >=38 uefn plugins, got {len(plugin_dirs)}"
+    mit_paths = _collect_plugin_mit_paths()
+    mit_bad = [msg for p in mit_paths if (msg := _assert_mit(p))]
+    assert not mit_bad, "plugin MIT LICENSE problems:\n" + "\n".join(mit_bad)
 
-    # Free plugins with skills must ship SAL LICENSE.txt beside SKILL.md
-    for plugin_dir in sorted(DUCKY.glob("plugins/uefn-plugin-*")):
-        if not _is_free_plugin(plugin_dir):
-            continue
+    skill_bad: list[str] = []
+    for plugin_dir in plugin_dirs:
         for skill_md in plugin_dir.glob("skills/*/SKILL.md"):
-            lic = skill_md.parent / "LICENSE.txt"
-            assert lic.is_file(), f"missing skill LICENSE.txt: {lic}"
-            assert _md5(lic) == canon_hash, f"skill LICENSE.txt not SAL: {lic}"
             fm = skill_md.read_text(encoding="utf-8")
-            assert "license: Ducky Source-Available License v1.0" in fm, (
-                f"SKILL.md license field not SAL: {skill_md}"
-            )
-
-    uefn_plugins = list(DUCKY.glob("plugins/uefn-plugin-*/LICENSE"))
-    assert len(uefn_plugins) >= 38, f"expected >=38 uefn plugin LICENSEs, got {len(uefn_plugins)}"
+            if "license: MIT" not in fm:
+                skill_bad.append(f"SKILL.md license not MIT: {skill_md}")
+            if "allow_redistribute: true" not in fm:
+                skill_bad.append(f"SKILL.md allow_redistribute not true: {skill_md}")
+            if MINDFUL not in fm:
+                skill_bad.append(f"SKILL.md missing {MINDFUL}: {skill_md}")
+            lic = skill_md.parent / "LICENSE.txt"
+            if not lic.is_file():
+                skill_bad.append(f"missing skill LICENSE.txt: {lic}")
+    assert not skill_bad, "plugin skill license problems:\n" + "\n".join(skill_bad)
 
     cargo_paths = _collect_cargo_tomls()
     cargo_bad = [
@@ -186,9 +142,9 @@ def main() -> int:
     )
 
     print(f"ok: {len(sal_paths)} SAL LICENSE copies match {canon_hash[:12]}…")
-    print(f"ok: {len(free_paths)} free plugins use MIT + skills carve-out")
+    print(f"ok: {len(plugin_dirs)} plugins + {len(mit_paths)} MIT LICENSE files")
     print(f"ok: {len(cargo_paths)} Cargo.toml files use {SPDX}")
-    print("ok: no first-party MIT / free-and-open-source project claims")
+    print("ok: app/OS docs do not claim MIT / free-and-open-source")
     return 0
 
 
