@@ -1,10 +1,6 @@
 import { useMemo, useRef, type ReactNode } from "react";
 
-import {
-  isCodingAgentFavoriteId,
-  parseFavoriteSelection,
-  qualifyFavorite,
-} from "../../hooks/favoriteModelsCatalog";
+import { parseFavoriteSelection, qualifyFavorite } from "../../hooks/favoriteModelsCatalog";
 import { getCachedModels } from "../../hooks/modelsCatalogCache";
 import { codingAgentFromModel } from "./duckyProfileForm";
 import { ModelSelector } from "../ModelSelector";
@@ -39,7 +35,12 @@ function normalizeAgentModelId(_agentId: string, modelId: string): string {
 export function qualifyModelPick(agent: string, modelId: string): string {
   const mid = normalizeAgentModelId(agent, (modelId || "").trim());
   if (!mid) return "";
-  if (isCodingAgentFavoriteId(agent)) return qualifyFavorite(agent, mid);
+  // The caller (ModelSelector.pickModel) only ever passes "ducky" or a real,
+  // live coding-agent id here — isCodingAgentFavoriteId(agent) with no live
+  // agents list always defaults to [] and never matches, silently dropping
+  // every coding-agent pick (Claude Code, Codex, Cursor…) back to "".
+  const normAgent = agent.trim().toLowerCase().replace(/-/g, "_");
+  if (normAgent && normAgent !== "ducky") return qualifyFavorite(normAgent, mid);
   const bare = mid.includes(":") ? mid.slice(mid.indexOf(":") + 1) : mid;
   const row = (getCachedModels() ?? []).find((r) => r.id === bare || r.id === mid);
   const backend = (row?.providerKey || "").trim().toLowerCase().replace(/-/g, "_");

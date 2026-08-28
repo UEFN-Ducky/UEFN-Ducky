@@ -3,6 +3,7 @@ import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
 import { ModelSelector } from "./ModelSelector";
+import { EffortSelector } from "./EffortSelector";
 import { modelShowsThinkingEffort } from "./ducky/duckyProfileForm";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
@@ -728,16 +729,33 @@ export function ChatPane({
   const noModelsAvailable = codingAgent === "ducky" && catalogReady && modelsCount === 0;
   const externalAgent = codingAgent !== "ducky";
 
+  // True when every invited member runs an external coding agent (Claude Code,
+  // Codex, …) or delegates to a nested group — none of them need an Anthropic/
+  // OpenAI API key, so the group must not be gated on hasApiKey/noModelsAvailable.
+  const groupUsesExternalOnly =
+    !!chat.isGroup &&
+    groupMembers.length > 0 &&
+    groupMembers.every((m) => {
+      if (m.is_group) return true;
+      const agent = (m.coding_agent || "").trim().toLowerCase();
+      return !!agent && agent !== "ducky";
+    });
+
   const hasText = !!inputText.trim();
   // Group chats ignore attachments — members only get the text prompt.
   const hasContent = hasText || (!chat.isGroup && attachments.length > 0);
   const visionBlocked = hasImages && !modelSupportsVision && !externalAgent;
   const canCompose =
     (chat.isGroup
-      ? groupMembers.length > 0 && hasApiKey && !noModelsAvailable
+      ? groupMembers.length > 0 && (groupUsesExternalOnly || (hasApiKey && !noModelsAvailable))
       : externalAgent || (!noModelsAvailable && hasApiKey && !!selectedModel)) &&
     hasContent &&
     !visionBlocked;
+  // UI-facing "no models" state — suppressed for groups whose every member
+  // already runs an external coding agent (Claude Code, …), which needs no
+  // API key. Distinct from noModelsAvailable, which single-chat canCompose
+  // still uses as-is.
+  const modelsUnavailable = noModelsAvailable && !(chat.isGroup && groupUsesExternalOnly);
   const canSend = canCompose && !agentRunning;
   const canQueue = canCompose && agentRunning;
   const isEmpty = messages.length === 0 && !streamBuffer && !agentRunning;
@@ -753,7 +771,7 @@ export function ChatPane({
 
   const paneFlex = flexGrow != null ? `${flexGrow} 1 0%` : "1 1 0%";
 
-  const sendBtnTitle = noModelsAvailable
+  const sendBtnTitle = modelsUnavailable
     ? "Open Settings → LLMs to add an API key and configure models"
     : canQueue
       ? "Queue follow-up (runs when this turn finishes)"
@@ -763,7 +781,7 @@ export function ChatPane({
           : "Send"
         : "Add API key, model, and message or attachments";
 
-  const sendBtnClass = noModelsAvailable
+  const sendBtnClass = modelsUnavailable
     ? "chat-pane-send-btn chat-pane-send-btn--settings-cta"
     : hasContent
       ? canSend || canQueue
@@ -1139,9 +1157,9 @@ export function ChatPane({
           </div>
 
           <div className="chat-pane-composer-pane chat-pane-composer-pane--type">
-            {(noModelsAvailable || visionBlocked || attachmentError) && (
+            {(modelsUnavailable || visionBlocked || attachmentError) && (
               <div className={`composer-attach-warning${visionBlocked ? " is-vision-blocked" : ""}`}>
-                {noModelsAvailable
+                {modelsUnavailable
                   ? "No models available — open Settings → LLMs to add an API key and configure a provider."
                   : visionBlocked
                     ? `${displayModelLabel} cannot use images — switch to a vision model or remove images.`
@@ -1214,14 +1232,7 @@ export function ChatPane({
           <div className="chat-pane-input-toolbar">
             <div className="chat-pane-input-toolbar-left">
               {!chat.isGroup ? (
-                <ModeSelector
-                  activeMode={agentMode}
-                  setMode={setAgentMode}
-                  showEffort={showThinkingEffort}
-                  convId={chat.id}
-                  effort={thinkingEffort}
-                  onEffortChange={setThinkingEffort}
-                />
+                <ModeSelector activeMode={agentMode} setMode={setAgentMode} />
               ) : null}
               <ContextMeter
                 usedTokens={contextUsage.used_tokens}
@@ -1254,13 +1265,21 @@ export function ChatPane({
                     preserveSelection
                     onModelMetaChange={handleModelMetaChange}
                   />
+                  {showThinkingEffort ? (
+                    <EffortSelector
+                      convId={chat.id}
+                      provider={chat.provider || codingAgent || "anthropic"}
+                      value={thinkingEffort}
+                      onChange={setThinkingEffort}
+                    />
+                  ) : null}
                 </>
               ) : null}
             </div>
 
             <div className="chat-pane-input-toolbar-right">
               <SnipButton
-                disabled={noModelsAvailable}
+                disabled={modelsUnavailable}
                 onCaptured={(file, meta) =>
                   void addFiles([file], {
                     imagesOnly: true,
@@ -1271,7 +1290,7 @@ export function ChatPane({
               <VoiceControls
                 chatId={chat.id}
                 disabled={
-                  noModelsAvailable ||
+                  modelsUnavailable ||
                   (Boolean(chat.isGroup) && groupMembers.length === 0)
                 }
                 inputText={inputText}
@@ -1305,11 +1324,11 @@ export function ChatPane({
                 <button
                   type="button"
                   onClick={() => handleSend()}
-                  disabled={!noModelsAvailable && !canSend}
+                  disabled={!modelsUnavailable && !canSend}
                   title={sendBtnTitle}
                   className={sendBtnClass}
                 >
-                  {noModelsAvailable ? <Icons.Settings /> : <Icons.Send />}
+                  {modelsUnavailable ? <Icons.Settings /> : <Icons.Send />}
                 </button>
               )}
             </div>
