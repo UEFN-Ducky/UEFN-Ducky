@@ -1,10 +1,9 @@
-# Daily security check for UEFN-Ducky (the EXE).
+# Daily / PR secret+dep check for UEFN-Ducky (the EXE).
+# Does NOT run on Store publish. store-publish.yml is workflow_dispatch only.
 # Never upload artifacts, EXE builds, Store payloads, or credentials.
 name: security
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
   schedule:
     # Once a day 06:00 UTC
@@ -23,21 +22,26 @@ jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      # CLI is MIT/free. gitleaks-action@v2 requires a paid/org license key.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: false
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
-          GITLEAKS_ENABLE_SUMMARY: true
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: gitleaks
+        run: gitleaks detect --source . --verbose --redact
 
   pip-audit:
     name: pip-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
