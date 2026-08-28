@@ -1,0 +1,62 @@
+# Daily security check for UEFN-Ducky (the EXE).
+# Never upload artifacts, EXE builds, Store payloads, or credentials.
+name: security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Once a day 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_SUMMARY: true
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Audit PyPI pins (no git VCS lines, no artifact upload)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          python - <<'PY'
+          from pathlib import Path
+          out = Path("${{ runner.temp }}") / "requirements-audit.txt"
+          lines = []
+          for src in (Path("requirements.txt"), Path("requirements-dev.txt")):
+              if not src.is_file():
+                  continue
+              for line in src.read_text(encoding="utf-8").splitlines():
+                  s = line.strip()
+                  if not s or s.startswith("#") or s.startswith("-r ") or "git+" in s:
+                      continue
+                  lines.append(s)
+          out.write_text("\n".join(dict.fromkeys(lines)) + "\n", encoding="utf-8")
+          print(out.read_text(encoding="utf-8"))
+          PY
+          pip-audit -r "${{ runner.temp }}/requirements-audit.txt"

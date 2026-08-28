@@ -548,15 +548,24 @@ def main() -> None:
         help="Do not bump/rebuild — publish existing Setup at current __version__",
     )
     parser.add_argument("--self-check", action="store_true", help="Run version helper asserts and exit")
+    parser.add_argument("--print-version", action="store_true", help="Print __version__ and exit")
     parser.add_argument(
         "--require-sign",
         action="store_true",
         help="Fail if Authenticode signing is not configured",
     )
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        help="Bump/build Setup.exe and stop (CI Azure sign, then --no-bump --exe)",
+    )
     args = parser.parse_args()
 
     if args.self_check:
         _self_check()
+        return
+    if args.print_version:
+        print(read_version())
         return
 
     _load_dotenv()
@@ -567,6 +576,8 @@ def main() -> None:
             "--exe skips the rebuild, so it requires --no-bump.\n"
             "Default publish always bumps + builds Setup, then uploads."
         )
+    if args.build_only and (args.no_bump or args.exe is not None):
+        raise SystemExit("--build-only always builds Setup; omit --no-bump and --exe")
     if (args.version or "").strip() and not args.no_bump:
         raise SystemExit("--version only makes sense with --no-bump")
 
@@ -606,6 +617,14 @@ def main() -> None:
         before = read_version()
         version = build_setup(require_sign=args.require_sign)
         print(f"  bumped {before} → {version}")
+
+    if args.build_only:
+        if args.exe is not None:
+            raise SystemExit("--build-only cannot pair with --exe")
+        exe_path = find_setup_exe(version, None)
+        print(f"build-only {exe_path}")
+        print(f"VERSION={version}")
+        return
 
     exe_path = find_setup_exe(version, args.exe)
     # --no-bump / --exe: sign the Setup we are about to upload (payload already baked in).
