@@ -2,7 +2,9 @@
 # Open-source PRs never get DUCKYOS_API_KEY. Fork workflows cannot publish.
 # Environment store-publish requires UEFN-Ducky/officers approval — Write
 # maintainers can merge PRs but cannot finish a Store publish without an officer.
-# Azure secrets optional — unsigned upload if absent.
+# Officers may Run this workflow from main. They cannot merge edits to this file
+# (CODEOWNERS @UEFN-Ducky/admins + required code-owner review). Secrets inject
+# only after officers approval, and only for the main branch.
 name: Ducky Plugin Library Publish
 
 on:

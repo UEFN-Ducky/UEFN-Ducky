@@ -1,2 +1,3 @@
-# Officers review workflow / publish-path changes. Open-source PRs still welcome.
+# Officers may Run Ducky Plugin Library Publish. They cannot own workflow YAML.
 .github/ @UEFN-Ducky/officers
+.github/workflows/ @UEFN-Ducky/admins
