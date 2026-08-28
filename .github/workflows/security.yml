@@ -1,7 +1,7 @@
 # Daily / PR secret+dep check for UEFN-Ducky (the EXE).
 # Does NOT run on Store publish. store-publish.yml is workflow_dispatch only.
 # Never upload artifacts, EXE builds, Store payloads, or credentials.
-name: security
+name: Daily Security Check
 
 on:
   pull_request:
