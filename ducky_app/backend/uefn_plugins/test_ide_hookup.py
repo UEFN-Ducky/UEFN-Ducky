@@ -5,6 +5,18 @@ from __future__ import annotations
 from unittest.mock import patch
 
 
+def test_plugin_api_http_conduit(tmp_path):
+    from backend.uefn_plugins.host import _PluginApi
+    from backend.util import http as http_util
+
+    api = _PluginApi("conduit")
+    png = tmp_path / "a.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    assert api.encode_image(str(png)) == http_util.encode_image(str(png))
+    assert api.resolve_image("https://example.com/a.png") == "https://example.com/a.png"
+    assert callable(api.http_json) and callable(api.poll)
+
+
 def test_ide_hookup_register_and_clear():
     from backend.uefn_plugins import host as h
 

@@ -19,18 +19,18 @@ export function SupportTab() {
 
       <div className="support-tab-card">
         <p className="support-tab-body">
-          UEFN Ducky is built and maintained by a <strong>one-person team</strong>. Every feature, fix,
-          MCP tool, and update comes from nights and weekends spent making creative workflows in UEFN
-          a little less painful.
+          UEFN Ducky is <strong>maintained by the community</strong> and <strong>powered by AI</strong>.
+          Features, fixes, PRs, and day-to-day upkeep are increasingly automated — this isn't a
+          one-person project anymore.
         </p>
         <p className="support-tab-body">
           If UEFN Ducky saves you time or helps you ship something cool, consider supporting on Patreon.
-          Pledges help cover hosting, API costs, and the hours it takes to keep everything running and
-          improving.
+          Pledges go to continued maintenance: the website, AI bills, hosting, and keeping the automated
+          pipeline running.
         </p>
         <p className="support-tab-body support-tab-body--muted">
           No pressure — sharing the project with a friend or leaving feedback is support too. But if you
-          want to chip in, Patreon is the best way to keep this project sustainable.
+          want to chip in, Patreon is the best way to keep this going.
         </p>
 
         <button type="button" className="support-tab-cta" onClick={handleOpenPatreon}>

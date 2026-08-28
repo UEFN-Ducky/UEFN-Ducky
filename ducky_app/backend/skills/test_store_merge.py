@@ -186,3 +186,10 @@ def test_store_import_skips_when_plugin_owns_skill(
     )
     assert blocked.get("ok") is False
     assert "uefn-physics" in str(blocked.get("error") or "")
+
+
+def test_appdata_dir_aliases_canonical() -> None:
+    from backend.skills.store import appdata_dir
+    from frontend.app_paths import resolve_app_data_dir
+
+    assert appdata_dir() == resolve_app_data_dir()

@@ -57,8 +57,9 @@ def _resolve_frontend_file(name: str) -> Path:
 
 
 def appdata_uefn_ducky_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "UEFN-Ducky"
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir()
 
 
 def appdata_listener_dir() -> Path:

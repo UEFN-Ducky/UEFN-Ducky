@@ -226,6 +226,12 @@ def test_remove_project_init_deletes_ducky_file(tmp_path: Path) -> None:
     assert any("Removed" in line for line in logs)
 
 
+def test_appdata_uefn_ducky_dir_aliases_canonical() -> None:
+    from frontend.app_paths import resolve_app_data_dir
+
+    assert deploy.appdata_uefn_ducky_dir() == resolve_app_data_dir()
+
+
 def test_remove_project_init_leaves_foreign_file(tmp_path: Path) -> None:
     project = tmp_path / "Island"
     dest = project / "Content" / "Python"

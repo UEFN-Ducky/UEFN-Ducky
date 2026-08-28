@@ -1494,12 +1494,10 @@ def run_message(
             # the run reads as running the instant send_message returns.
             from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
             from backend.mcp_plugins.store import seed_mcp_plugins
-            from backend.uefn_plugins.store import seed_uefn_plugins
             from backend.uefn_plugins.host import ensure_plugins_loaded
 
             seed_skill_packs()
             seed_mcp_plugins()
-            seed_uefn_plugins()
             ensure_plugins_loaded()
             try:
                 if "skill" in omit:

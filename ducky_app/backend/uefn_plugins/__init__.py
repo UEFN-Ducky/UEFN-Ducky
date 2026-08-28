@@ -11,7 +11,6 @@ from backend.uefn_plugins.host import (
 from backend.uefn_plugins.store import (
     import_plugin_from_bytes,
     list_uefn_plugins,
-    seed_uefn_plugins,
     set_uefn_plugin_enabled,
     uninstall_uefn_plugin,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "is_plugin_enabled",
     "list_uefn_plugins",
     "reload_plugins",
-    "seed_uefn_plugins",
     "set_uefn_plugin_enabled",
     "uninstall_uefn_plugin",
 ]
