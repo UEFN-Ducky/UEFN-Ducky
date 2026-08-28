@@ -3,7 +3,7 @@
 # Environment store-publish requires UEFN-Ducky/officers approval — Write
 # maintainers can merge PRs but cannot finish a Store publish without an officer.
 # Azure secrets optional — unsigned upload if absent.
-name: UEFN Plugin Library Publish
+name: Ducky Plugin Library Publish
 
 on:
   workflow_dispatch:
