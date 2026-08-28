@@ -1,6 +1,7 @@
 # Manual Store app publish (Setup.exe). Never on push / PR / cron.
-# Admins only: environment store-publish + collaborator permission == admin.
-# Put DUCKYOS_API_KEY on that environment. Azure secrets optional — unsigned upload if absent.
+# DUCKYOS_API_KEY lives on environment store-publish — GitHub never shows the value.
+# Write collaborators can Run workflow and publish without knowing the key.
+# Azure secrets optional — unsigned upload if absent.
 name: store-publish
 
 on:
@@ -41,15 +42,6 @@ jobs:
       AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
       AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
     steps:
-      - name: Admins only
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          perm=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" --jq .permission)
-          echo "actor=${{ github.actor }} permission=${perm}"
-          test "${perm}" = "admin"
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
