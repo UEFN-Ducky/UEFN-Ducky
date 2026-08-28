@@ -7,7 +7,6 @@ import io
 import json
 import re
 import shutil
-import sys
 import threading
 import time
 import zipfile
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.skills.store import appdata_dir
-from backend.uefn_plugins.plugin_version import format_plugin_version, plugin_version_rank
+from backend.uefn_plugins.plugin_version import format_plugin_version
 
 PLUGIN_MANIFEST = "plugin.json"
 UEFN_PLUGINS_DIR = "uefn_plugins"
@@ -55,24 +54,6 @@ def appdata_uefn_plugins_dir() -> Path:
 def appdata_ai_plugins_dir() -> Path:
     """Shared per-install draft workspace for AI-authored plugins (not loaded directly)."""
     return appdata_dir() / AI_PLUGINS_DIR
-
-
-def bundled_uefn_plugins_dir() -> Path | None:
-    """Legacy single-dir seed root (frontend/uefn_plugins). Prefer iter_bundled_plugin_dirs()."""
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        p = Path(meipass) / "frontend" / UEFN_PLUGINS_DIR
-        if p.is_dir():
-            return p
-    repo = Path(__file__).resolve().parent.parent.parent / "frontend" / UEFN_PLUGINS_DIR
-    if repo.is_dir():
-        return repo
-    return None
-
-
-def iter_bundled_plugin_dirs() -> list[Path]:
-    """No EXE/repo seeding — plugins install only via Store (import_plugin_from_bytes)."""
-    return []
 
 
 def normalize_plugin_id(plugin_id: str) -> str:
@@ -148,103 +129,6 @@ def plugin_dir(plugin_id: str) -> Path:
     return appdata_uefn_plugins_dir() / normalize_plugin_id(plugin_id)
 
 
-def _copy_plugin_tree(src: Path, dest: Path) -> None:
-    with _PLUGIN_TREE_LOCK:
-        _rmtree_retry(dest)
-        shutil.copytree(src, dest)
-
-
-def seed_uefn_plugins(*, force: bool = False) -> list[str]:
-    """Copy bundled plugins into AppData. Never overwrites local (source=local) packs."""
-    logs: list[str] = []
-    sources = iter_bundled_plugin_dirs()
-    if not sources:
-        logs.append("Bundled uefn_plugins/ not found")
-        return logs
-    dest_root = appdata_uefn_plugins_dir()
-    dest_root.mkdir(parents=True, exist_ok=True)
-    for src_plugin in sources:
-        manifest = _read_json(src_plugin / PLUGIN_MANIFEST)
-        if not manifest:
-            continue
-        try:
-            plugin_id = normalize_plugin_id(str(manifest.get("id") or src_plugin.name))
-        except ValueError:
-            continue
-        dest_plugin = dest_root / plugin_id
-        dest_manifest = _read_json(dest_plugin / PLUGIN_MANIFEST) if dest_plugin.is_dir() else None
-        if dest_manifest and str(dest_manifest.get("source") or "") == "local":
-            logs.append(f"Skip seed {plugin_id}: local plugin occupies id")
-            continue
-        bundled_ver = plugin_version_rank(manifest.get("version"))
-        dest_ver = plugin_version_rank(dest_manifest.get("version")) if dest_manifest else 0
-        if dest_plugin.is_dir() and not force and dest_ver >= bundled_ver:
-            logs.append(f"UEFN plugin {plugin_id} v{dest_ver} current")
-            continue
-        _copy_plugin_tree(src_plugin, dest_plugin)
-        # Drop scripts/deploy from standalone packages if copied.
-        for junk in ("scripts", "deploy", ".git"):
-            junk_path = dest_plugin / junk
-            if junk_path.is_dir():
-                _rmtree_retry(junk_path, ignore_final=True)
-        seeded = _read_json(dest_plugin / PLUGIN_MANIFEST) or {}
-        seeded["source"] = "bundled"
-        _write_json(dest_plugin / PLUGIN_MANIFEST, seeded)
-        try:
-            skill_ids = validate_plugin_skills(dest_plugin, plugin_id)
-        except ValueError as exc:
-            _rmtree_retry(dest_plugin, ignore_final=True)
-            logs.append(f"UEFN plugin {plugin_id} seed rejected: {exc}")
-            continue
-        logs.append(f"UEFN plugin {plugin_id} v{bundled_ver} seeded -> {dest_plugin}")
-        if skill_ids:
-            logs.append(f"UEFN plugin {plugin_id} skills: {', '.join(skill_ids)}")
-        _ensure_default_enabled(plugin_id, seeded)
-    return logs
-
-
-def _ensure_default_enabled(plugin_id: str, manifest: dict[str, Any]) -> None:
-    """First seed with default_enabled: add to enabled list once."""
-    if not bool(manifest.get("default_enabled", True)):
-        return
-    from frontend.settings import PanelSettings, replace
-
-    settings = PanelSettings.load()
-    current = list(getattr(settings, "enabled_uefn_plugins", None) or [])
-    # None marker means "never initialized" — treat default_enabled plugins as on.
-    raw = getattr(settings, "enabled_uefn_plugins", None)
-    if raw is None:
-        # Fresh settings field: enable all default_enabled installed plugins.
-        enabled = [plugin_id]
-        for child in appdata_uefn_plugins_dir().iterdir() if appdata_uefn_plugins_dir().is_dir() else []:
-            if not child.is_dir():
-                continue
-            m = _read_json(child / PLUGIN_MANIFEST)
-            if not m:
-                continue
-            try:
-                pid = normalize_plugin_id(str(m.get("id") or child.name))
-            except ValueError:
-                continue
-            if bool(m.get("default_enabled", True)) and pid not in enabled:
-                enabled.append(pid)
-        settings = replace(settings, enabled_uefn_plugins=enabled)
-        settings.save()
-        return
-    if plugin_id not in current and bool(manifest.get("default_enabled", True)):
-        # Only auto-enable on first appearance of this id.
-        marker = appdata_uefn_plugins_dir() / plugin_id / ".enabled_once"
-        if marker.is_file():
-            return
-        current.append(plugin_id)
-        settings = replace(settings, enabled_uefn_plugins=current)
-        settings.save()
-        try:
-            marker.write_text("1\n", encoding="utf-8")
-        except OSError:
-            pass
-
-
 def get_enabled_plugin_ids() -> list[str]:
     from frontend.settings import PanelSettings
 
@@ -282,7 +166,6 @@ def is_plugin_installed(plugin_id: str) -> bool:
 
 
 def list_uefn_plugins() -> list[dict[str, Any]]:
-    seed_uefn_plugins()
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
         return []

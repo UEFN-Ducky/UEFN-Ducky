@@ -41,7 +41,6 @@ def test_reentrant_register_does_not_deadlock_first_load() -> None:
         with (
             patch.object(host, "appdata_uefn_plugins_dir", lambda: root),
             patch.object(host, "get_enabled_plugin_ids", lambda: ["reenter"]),
-            patch.object(host, "seed_uefn_plugins", lambda: None),
             patch.object(host, "_LOADED", False),
             patch.object(host, "_UI_READY", False),
             patch.object(host, "_LOAD_DONE", threading.Event()),

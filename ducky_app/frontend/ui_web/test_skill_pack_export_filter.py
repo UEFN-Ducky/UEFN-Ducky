@@ -32,9 +32,10 @@ def test_zip_filter_accepted():
 
 
 def test_export_filters_used_by_panel_api():
-    # Guard against regressing to the broken hyphenated filter in panel_api.py.
+    # Guard against regressing to the broken hyphenated filter (lives on the store mixin).
     from pathlib import Path
 
-    src = Path(__file__).with_name("panel_api.py").read_text(encoding="utf-8")
+    here = Path(__file__).parent
+    src = "".join(p.read_text(encoding="utf-8") for p in sorted(here.glob("panel_api*.py")))
     assert "Skill packs (*.zip)" in src
     assert "*.ducky-skill-pack;*.zip" not in src

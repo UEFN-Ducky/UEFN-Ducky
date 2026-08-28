@@ -1228,9 +1228,8 @@ def store_catalog() -> dict[str, Any]:
 
     installed_plugins: dict[str, dict[str, Any]] = {}
     try:
-        from backend.uefn_plugins.store import list_uefn_plugins, seed_uefn_plugins
+        from backend.uefn_plugins.store import list_uefn_plugins
 
-        seed_uefn_plugins()
         for plug in list_uefn_plugins():
             pid = str(plug.get("id") or "")
             if pid:

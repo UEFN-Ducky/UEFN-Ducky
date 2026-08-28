@@ -19,7 +19,6 @@ from backend.uefn_plugins.store import (
     PLUGIN_MANIFEST,
     appdata_uefn_plugins_dir,
     get_enabled_plugin_ids,
-    seed_uefn_plugins,
 )
 
 # ponytail: inline plugin icon assets as data URLs for settings/header; 256KB ceiling.
@@ -1558,10 +1557,6 @@ def _run_first_plugin_load() -> None:
     (Blender addon deploy, Discord presence, gateway factories, …) finishes.
     """
     global _LOADED, _UI_READY
-    try:
-        seed_uefn_plugins()
-    except Exception as exc:  # noqa: BLE001 — fail-soft
-        _log.warning("seed_uefn_plugins failed: %s", exc)
     enabled = set(get_enabled_plugin_ids())
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
@@ -2214,6 +2209,58 @@ class _PluginApi:
             params or {},
             timeout=REQUEST_TIMEOUT if timeout is None else float(timeout),
         )
+
+    def http_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
+        timeout: float = 60,
+    ) -> Any:
+        """JSON HTTP call (stdlib urllib). Vendor URLs and status enums stay in the plugin."""
+        from backend.util.http import http_json as _http_json
+
+        return _http_json(
+            method,
+            url,
+            headers=headers,
+            json_body=json_body,
+            timeout=timeout,
+        )
+
+    def poll(
+        self,
+        get_status: Callable[..., Any],
+        *,
+        done: Callable[..., bool],
+        failed: Callable[..., bool],
+        interval: float = 5,
+        max_attempts: int = 120,
+    ) -> Any:
+        """Poll get_status until done/failed. Raises TimeoutError."""
+        from backend.util.http import poll as _poll
+
+        return _poll(
+            get_status,
+            done=done,
+            failed=failed,
+            interval=interval,
+            max_attempts=max_attempts,
+        )
+
+    def encode_image(self, path: str) -> str:
+        """Local image path → data URI."""
+        from backend.util.http import encode_image as _encode_image
+
+        return _encode_image(path)
+
+    def resolve_image(self, image: str) -> str:
+        """Pass through http(s)/data URIs; encode local paths."""
+        from backend.util.http import resolve_image as _resolve_image
+
+        return _resolve_image(image)
 
     def tool(
         self,
