@@ -1,6 +1,7 @@
 # Manual Store app publish (Setup.exe). Never on push / PR / cron.
-# DUCKYOS_API_KEY lives on environment store-publish — GitHub never shows the value.
-# Write collaborators can Run workflow and publish without knowing the key.
+# Open-source PRs never get DUCKYOS_API_KEY. Fork workflows cannot publish.
+# Environment store-publish requires UEFN-Ducky/officers approval — Write
+# maintainers can merge PRs but cannot finish a Store publish without an officer.
 # Azure secrets optional — unsigned upload if absent.
 name: store-publish
 
