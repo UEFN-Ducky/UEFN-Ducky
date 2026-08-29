@@ -75,6 +75,8 @@ interface ModelSelectorProps {
   menuPlacement?: "top" | "bottom";
   /** Trigger text when nothing is selected. */
   placeholder?: string;
+  /** Bump to open the dropdown from outside (the composer's `/model` command). */
+  openSignal?: number;
 }
 
 export function ModelSelector({
@@ -90,6 +92,7 @@ export function ModelSelector({
   preserveSelection = false,
   menuPlacement = "top",
   placeholder = "Pick a model",
+  openSignal = 0,
 }: ModelSelectorProps) {
   const contrib = usePluginContributions();
   const [isOpen, setIsOpen] = useState(false);
@@ -408,6 +411,15 @@ export function ModelSelector({
     pushHist();
     void loadAgents();
   };
+
+  const openDropdownRef = useRef(openDropdown);
+  openDropdownRef.current = openDropdown;
+  const lastOpenSignal = useRef(openSignal);
+  useEffect(() => {
+    if (openSignal === lastOpenSignal.current) return;
+    lastOpenSignal.current = openSignal;
+    openDropdownRef.current();
+  }, [openSignal]);
 
   useEffect(() => {
     const onPop = () => {
