@@ -325,6 +325,57 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(extra["kind"], "subplan")
         self.assertEqual(extra["body_markdown"], "# note")
 
+    def test_completing_leaves_auto_completes_parent_subplan(self) -> None:
+        plans.create_plan(
+            "chat-rollup",
+            title="Fix links",
+            nodes=[
+                {
+                    "id": "diagnose",
+                    "content": "Diagnose",
+                    "status": "pending",
+                    "kind": "subplan",
+                    "children": [
+                        {"id": "d1", "content": "Look", "status": "pending", "kind": "step", "children": []},
+                        {"id": "d2", "content": "Names", "status": "pending", "kind": "step", "children": []},
+                    ],
+                },
+                {
+                    "id": "fix",
+                    "content": "Fix",
+                    "status": "pending",
+                    "kind": "subplan",
+                    "children": [
+                        {"id": "f1", "content": "Rebuild", "status": "pending", "kind": "step", "children": []},
+                    ],
+                },
+            ],
+            project_root=self.root,
+        )
+        empty = {"id": "e", "content": "Empty", "status": "pending", "kind": "subplan", "children": []}
+        plans._rollup_completed_parents([empty])
+        self.assertEqual(empty["status"], "pending")
+
+        plans.update_node("chat-rollup", "d1", status="completed", project_root=self.root)
+        loaded = plans.load_plan("chat-rollup", project_root=self.root)
+        assert loaded is not None
+        diagnose = next(n for n in loaded["nodes"] if n["id"] == "diagnose")
+        self.assertEqual(diagnose["status"], "pending")
+
+        plans.update_node("chat-rollup", "d2", status="completed", project_root=self.root)
+        loaded = plans.load_plan("chat-rollup", project_root=self.root)
+        assert loaded is not None
+        diagnose = next(n for n in loaded["nodes"] if n["id"] == "diagnose")
+        self.assertEqual(diagnose["status"], "completed")
+        self.assertNotEqual(loaded["status"], "finished")
+
+        plans.update_node("chat-rollup", "f1", status="completed", project_root=self.root)
+        loaded = plans.load_plan("chat-rollup", project_root=self.root)
+        assert loaded is not None
+        fix = next(n for n in loaded["nodes"] if n["id"] == "fix")
+        self.assertEqual(fix["status"], "completed")
+        self.assertEqual(loaded["status"], "finished")
+
     def test_template_instantiate_isolation(self) -> None:
         tpl = plans.create_template(
             title="Island kit",

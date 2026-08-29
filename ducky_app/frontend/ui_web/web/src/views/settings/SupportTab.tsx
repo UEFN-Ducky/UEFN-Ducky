@@ -19,14 +19,13 @@ export function SupportTab() {
 
       <div className="support-tab-card">
         <p className="support-tab-body">
-          UEFN Ducky is <strong>maintained by the community</strong> and <strong>powered by AI</strong>.
-          Features, fixes, PRs, and day-to-day upkeep are increasingly automated — this isn't a
-          one-person project anymore.
+          UEFN Ducky is run by a <strong>community of UEFN creators</strong> — not one developer.
+          Features, fixes, and day-to-day upkeep come from people who build islands, plus AI that
+          helps the group ship faster.
         </p>
         <p className="support-tab-body">
           If UEFN Ducky saves you time or helps you ship something cool, consider supporting on Patreon.
-          Pledges go to continued maintenance: the website, AI bills, hosting, and keeping the automated
-          pipeline running.
+          Pledges go to the community: the website, AI bills, hosting, and keeping the project running.
         </p>
         <p className="support-tab-body support-tab-body--muted">
           No pressure — sharing the project with a friend or leaving feedback is support too. But if you

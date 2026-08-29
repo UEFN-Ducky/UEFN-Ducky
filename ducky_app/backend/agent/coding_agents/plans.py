@@ -291,6 +291,26 @@ def _descendants_done(node: dict[str, Any]) -> bool:
     return True
 
 
+def _rollup_completed_parents(nodes: list[dict[str, Any]] | None) -> None:
+    """Mark a subplan completed when every child (and descendant) is done.
+
+    Empty subplans stay pending. Already-cancelled parents are left alone.
+    """
+
+    def walk(n: dict[str, Any]) -> None:
+        kids = [c for c in (n.get("children") or []) if isinstance(c, dict)]
+        for child in kids:
+            walk(child)
+        if not kids or str(n.get("status")) in _DONE:
+            return
+        if all(str(c.get("status")) in _DONE and _descendants_done(c) for c in kids):
+            n["status"] = "completed"
+
+    for node in nodes or []:
+        if isinstance(node, dict):
+            walk(node)
+
+
 def _apply_status_gate(node: dict[str, Any], status: str) -> str:
     """Refuse completed unless all descendants are done; return effective status."""
     st = _normalize_status(status)
@@ -370,6 +390,7 @@ def _normalize_plan_doc(data: dict[str, Any], *, kind: str) -> dict[str, Any]:
         nodes = _todos_to_nodes(doc.get("todos"))
     else:
         nodes = _normalize_nodes(existing if isinstance(existing, list) else nodes_raw)
+    _rollup_completed_parents(nodes)
     doc["nodes"] = nodes
     # Compat shim: flat mirror of all outline nodes for older UI/tool paths.
     doc["todos"] = [
@@ -415,6 +436,7 @@ def load_plan(chat_id: str, project_root: str | None = None) -> dict[str, Any] |
                 return save_plan(doc, project_root)
             except ValueError:
                 return doc
+        _rollup_completed_parents(doc.get("nodes"))
         return doc
     except (OSError, json.JSONDecodeError):
         return None
@@ -428,6 +450,7 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
     if not _resolve_project_root(project_root):
         raise ValueError("project_root required for project plans")
     plan["updated_at"] = time.time()
+    _rollup_completed_parents(plan.get("nodes"))
     _roll_plan_status(plan)
     write_json_atomic(_plan_path(chat_id, project_root), plan)
     return plan
