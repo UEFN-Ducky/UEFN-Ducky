@@ -75,6 +75,16 @@ import { isEnglishLang } from "../views/settings/translationLanguages";
 import { VoiceControls, type LiveVoiceUiHandlers } from "../voice/VoiceControls";
 import { VoiceOverlay } from "../voice/VoiceOverlay";
 import { SnipButton } from "./SnipButton";
+import { captureSnipFile } from "./snipCapture";
+import { SlashCommandMenu } from "./SlashCommandMenu";
+import {
+  commandsForScope,
+  composerPlaceholder,
+  filterCommands,
+  matchSlashCommand,
+  readSlashQuery,
+  type SlashCommand,
+} from "./slashCommands";
 import { GroupMemberStrip } from "./GroupMemberStrip";
 import type { GroupMemberDto } from "../types/panel";
 import {
@@ -193,6 +203,10 @@ export function ChatPane({
     initialComposer?.selectedModelDisplayName ?? chat.model ?? "",
   );
   const [isDragOver, setIsDragOver] = useState(false);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const [slashStatus, setSlashStatus] = useState("");
+  const [modelPickerSignal, setModelPickerSignal] = useState(0);
   const [chatPlan, setChatPlan] = useState<ChatPlan | null>(null);
   const [chatPlanProgress, setChatPlanProgress] = useState<PlanProgress | null>(null);
   const planAllDone = useMemo(() => {
@@ -823,12 +837,87 @@ export function ChatPane({
     ],
   );
 
+  const availableCommands = useMemo(
+    () => commandsForScope({ codingAgent, isGroup: Boolean(chat.isGroup) }),
+    [codingAgent, chat.isGroup],
+  );
+  const slashQuery = readSlashQuery(inputText);
+  const slashMatches = useMemo(
+    () => (slashQuery === null ? [] : filterCommands(availableCommands, slashQuery)),
+    [availableCommands, slashQuery],
+  );
+  const slashMenuOpen = !slashDismissed && slashMatches.length > 0;
+
+  useEffect(() => {
+    setSlashActiveIndex(0);
+    if (slashQuery === null) setSlashDismissed(false);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    if (!slashStatus) return;
+    const t = window.setTimeout(() => setSlashStatus(""), 5000);
+    return () => window.clearTimeout(t);
+  }, [slashStatus]);
+
+  const runSlashCommand = useCallback(
+    (command: SlashCommand, argument: string) => {
+      void command.run({
+        chatId: chat.id,
+        argument,
+        setAgentMode,
+        openModelPicker: () => setModelPickerSignal((n) => n + 1),
+        captureSnip: () => {
+          void (async () => {
+            const snip = await captureSnipFile();
+            if (!snip) {
+              setSlashStatus("Snip cancelled — nothing captured.");
+              return;
+            }
+            await addFiles([snip.file], { imagesOnly: true, projectPath: snip.projectPath });
+          })();
+        },
+        // Re-opening the bare prefix lists everything this chat supports.
+        showHelp: () => setInputText("/"),
+        report: setSlashStatus,
+      });
+    },
+    [chat.id, addFiles],
+  );
+
+  /** Menu pick: commands taking an argument only get completed, not run. */
+  const completeSlashCommand = useCallback(
+    (command: SlashCommand) => {
+      if (command.requiresArgument) {
+        setInputText(`/${command.name} `);
+        textareaRef.current?.focus();
+        return;
+      }
+      setInputText("");
+      runSlashCommand(command, "");
+    },
+    [runSlashCommand],
+  );
+
   const handleSend = (overrideText?: string) => {
+    const text = (overrideText ?? inputText).trim();
+
+    // A recognised command acts on the panel — it never reaches the ducky, so
+    // it runs before the "no models" gate (that is when /model matters most).
+    const slash = overrideText ? null : matchSlashCommand(text, availableCommands);
+    if (slash) {
+      if (slash.command.requiresArgument && !slash.argument) {
+        setSlashStatus(`/${slash.command.name} needs ${slash.command.args ?? "an argument"}.`);
+        return;
+      }
+      setInputText("");
+      runSlashCommand(slash.command, slash.argument);
+      return;
+    }
+
     if (!chat.isGroup && noModelsAvailable) {
       requestOpenSettings("LLMs");
       return;
     }
-    const text = (overrideText ?? inputText).trim();
     const apiAttachments = overrideText ? [] : toApiAttachments();
     if (!text && apiAttachments.length === 0) return;
 
@@ -1125,6 +1214,15 @@ export function ChatPane({
             />
           </div>
         ) : null}
+        <div className="chat-pane-composer-host">
+          {slashMenuOpen ? (
+            <SlashCommandMenu
+              commands={slashMatches}
+              activeIndex={slashActiveIndex}
+              onHover={setSlashActiveIndex}
+              onSelect={completeSlashCommand}
+            />
+          ) : null}
         <div
           ref={inputBoxRef}
           className={`no-drag chat-pane-input-box${isFocused ? " chat-pane-input-box--focused" : ""}${isDragOver ? " chat-pane-input-box--drag-over" : ""}${liveVoice ? " chat-pane-input-box--voice" : ""}`}
@@ -1166,6 +1264,7 @@ export function ChatPane({
                     : attachmentError}
               </div>
             )}
+            {slashStatus ? <div className="slash-command-status">{slashStatus}</div> : null}
             <ComposerAttachmentChips
               attachments={attachments}
               onRemove={removeAttachment}
@@ -1193,26 +1292,43 @@ export function ChatPane({
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {
                 if (!chat.isGroup && noModelsAvailable) return;
+                if (slashMenuOpen) {
+                  const count = slashMatches.length;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSlashActiveIndex((i) => (i + 1) % count);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSlashActiveIndex((i) => (i - 1 + count) % count);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSlashDismissed(true);
+                    return;
+                  }
+                  const picked = slashMatches[slashActiveIndex];
+                  if (picked && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+                    e.preventDefault();
+                    completeSlashCommand(picked);
+                    return;
+                  }
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              placeholder={
-                liveVoice && liveVoiceHandlers?.muted
-                  ? "You're muted — type to chat (Shift+Enter for newline)"
-                  : chat.isGroup
-                    ? groupMembers.length === 0
-                      ? "Invite a ducky above to start the roundtable…"
-                      : agentRunning
-                        ? "Add a follow-up… (Shift+Enter for newline)"
-                        : "Message the group… (Shift+Enter for newline)"
-                    : noModelsAvailable
-                      ? "No models available — use the button below to open Settings → LLMs"
-                      : agentRunning
-                        ? "Add a follow-up… (Shift+Enter for newline)"
-                        : `Ask ${displayModelLabel}... (Shift+Enter for newline)`
-              }
+              placeholder={composerPlaceholder({
+                liveVoiceMuted: Boolean(liveVoice && liveVoiceHandlers?.muted),
+                isGroup: Boolean(chat.isGroup),
+                groupEmpty: groupMembers.length === 0,
+                agentRunning,
+                noModelsAvailable,
+                modelLabel: displayModelLabel,
+              })}
               className="chat-pane-textarea"
               disabled={!chat.isGroup && noModelsAvailable}
               style={
@@ -1263,6 +1379,7 @@ export function ChatPane({
                     setCodingAgent={setCodingAgent}
                     convId={chat.id}
                     preserveSelection
+                    openSignal={modelPickerSignal}
                     onModelMetaChange={handleModelMetaChange}
                   />
                   {showThinkingEffort ? (
@@ -1333,6 +1450,7 @@ export function ChatPane({
               )}
             </div>
           </div>
+        </div>
         </div>
           </div>
         </div>
