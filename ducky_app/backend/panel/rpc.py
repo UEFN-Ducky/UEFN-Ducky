@@ -17,6 +17,7 @@ the panel answers or the overall ``timeout`` budget runs out.
 from __future__ import annotations
 
 import json
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -27,13 +28,16 @@ from frontend.settings import PANEL_LISTENER_PORT
 # Same loopback control port the event/run bridges already use (panel UI HTTP).
 _RPC_URL = f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_rpc"
 
-# Cap per-HTTP-round wait so a long require_click never blocks one connection
-# for minutes; must stay below the handler's own wait so a round trip completes.
-_ROUND_TIMEOUT_S = 25.0
+# Must exceed panel_httpd._RPC_HANDLER_WAIT_S (20s) so {pending} returns first.
+_ROUND_TIMEOUT_S = 45.0
 
 
 class _Unreachable(Exception):
-    """Panel control port refused the connection (no panel open)."""
+    """Panel control port refused, or a poll socket timed out (``timed_out``)."""
+
+    def __init__(self, message: str = "", *, timed_out: bool = False) -> None:
+        super().__init__(message)
+        self.timed_out = timed_out
 
 
 def _http(method: str, url: str, body: bytes | None, timeout: float) -> dict[str, Any]:
@@ -44,10 +48,12 @@ def _http(method: str, url: str, body: bytes | None, timeout: float) -> dict[str
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.URLError as exc:
-        # Connection refused / DNS / socket → no reachable panel.
-        raise _Unreachable(str(exc)) from exc
+        reason = getattr(exc, "reason", None)
+        timed_out = isinstance(reason, (TimeoutError, socket.timeout))
+        raise _Unreachable(str(exc), timed_out=timed_out) from exc
     except (TimeoutError, OSError) as exc:
-        raise _Unreachable(str(exc)) from exc
+        timed_out = isinstance(exc, (TimeoutError, socket.timeout))
+        raise _Unreachable(str(exc), timed_out=timed_out) from exc
     return json.loads(raw) if raw else {}
 
 
@@ -74,7 +80,11 @@ def panel_rpc(method: str, params: dict[str, Any] | None = None, *, timeout: flo
         poll_url = f"{_RPC_URL}?id={urllib.request.quote(request_id)}"
         try:
             resp = _http("GET", poll_url, None, timeout=min(_ROUND_TIMEOUT_S, remaining + 2.0))
-        except _Unreachable:
+        except _Unreachable as exc:
+            if exc.timed_out:
+                # ponytail: retry one slow poll; inf wait already keeps remaining > 0
+                resp = {"pending": True, "request_id": request_id}
+                continue
             return {"error": "panel not open"}
 
     result = resp.get("result")

@@ -368,6 +368,108 @@ class AgentRunner:
         # anthropic or unknown — Anthropic-shaped tools are the historical default.
         return [mcp_tool_to_anthropic(t) for t in tools]
 
+    def _tool_result_message(
+        self,
+        tc: ToolCallRequest,
+        block: dict[str, Any],
+        stub_tools: frozenset[str],
+    ) -> ProviderMessage:
+        if block.get("name") in stub_tools:
+            content = (
+                '{"ok":true,"tool":"%s","data":"(content already present in the '
+                'system prompt — see the operator skill section)"}' % block["name"]
+            )
+        else:
+            content = _tool_block_result_for_llm(block, fmt=self.config.tool_result_format)
+        return ProviderMessage(role="tool", tool_call_id=tc.id, content=content)
+
+    def _assistant_turn_to_provider(
+        self,
+        message: dict[str, Any],
+        *,
+        stub_tools: frozenset[str],
+    ) -> list[ProviderMessage]:
+        """Replay one stored turn as assistant → tool results → assistant.
+
+        Storing the final reply on the same assistant message as the tool_calls made
+        the next user line land right after tool results, so follow-ups looked new.
+        """
+        blocks = [b for b in (message.get("blocks") or []) if isinstance(b, dict)]
+        final = str(message.get("content") or message.get("text") or "")
+        out: list[ProviderMessage] = []
+        text_parts: list[str] = []
+        tool_batch: list[dict[str, Any]] = []
+        thinking = ""
+
+        def flush_tools() -> None:
+            nonlocal tool_batch, text_parts, thinking
+            if not tool_batch:
+                return
+            tcs: list[ToolCallRequest] = []
+            seen: set[str] = set()
+            kept: list[dict[str, Any]] = []
+            for block in tool_batch:
+                if not block.get("name"):
+                    continue
+                tid = str(block.get("id") or "").strip() or str(uuid.uuid4())
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                kept.append(block)
+                tcs.append(
+                    ToolCallRequest(
+                        id=tid,
+                        name=block["name"],
+                        arguments=dict(block.get("arguments") or {}),
+                    )
+                )
+            if not tcs:
+                tool_batch = []
+                return
+            out.append(
+                ProviderMessage(
+                    role="assistant",
+                    content="\n".join(text_parts),
+                    tool_calls=tcs,
+                    thinking=thinking,
+                )
+            )
+            for tc, block in zip(tcs, kept):
+                out.append(self._tool_result_message(tc, block, stub_tools))
+            tool_batch = []
+            text_parts = []
+            thinking = ""
+
+        for block in blocks:
+            btype = str(block.get("type") or "")
+            if btype == "thinking" and str(block.get("text") or "").strip():
+                thinking = str(block.get("text") or "")
+            elif btype == "text" and str(block.get("text") or "").strip():
+                if tool_batch:
+                    flush_tools()
+                text_parts.append(str(block.get("text") or "").strip())
+            elif btype == "tool_call":
+                tool_batch.append(block)
+        flush_tools()
+
+        if final.strip():
+            out.append(
+                ProviderMessage(
+                    role="assistant",
+                    content=final,
+                    thinking=str(message.get("thinking") or thinking or ""),
+                )
+            )
+        elif not out:
+            out.append(
+                ProviderMessage(
+                    role="assistant",
+                    content="\n".join(text_parts),
+                    thinking=str(message.get("thinking") or thinking or ""),
+                )
+            )
+        return out
+
     def _history_to_provider(
         self,
         messages: list[dict[str, Any]],
@@ -378,59 +480,7 @@ class AgentRunner:
         for m in messages:
             role = m.get("role", "user")
             if role == "assistant":
-                tool_blocks: list[dict[str, Any]] = []
-                seen_ids: set[str] = set()
-                for block in m.get("blocks") or []:
-                    if block.get("type") != "tool_call" or not block.get("name"):
-                        continue
-                    tid = str(block.get("id") or "").strip()
-                    if tid and tid in seen_ids:
-                        continue
-                    if tid:
-                        seen_ids.add(tid)
-                    tool_blocks.append(block)
-                if tool_blocks:
-                    tcs: list[ToolCallRequest] = []
-                    for block in tool_blocks:
-                        tid = str(block.get("id") or "").strip() or str(uuid.uuid4())
-                        tcs.append(
-                            ToolCallRequest(
-                                id=tid,
-                                name=block["name"],
-                                arguments=dict(block.get("arguments") or {}),
-                            )
-                        )
-                    out.append(
-                        ProviderMessage(
-                            role="assistant",
-                            content=m.get("content", ""),
-                            tool_calls=tcs,
-                            thinking=str(m.get("thinking") or ""),
-                        )
-                    )
-                    for tc, block in zip(tcs, tool_blocks):
-                        if block.get("name") in stub_tools:
-                            content = (
-                                '{"ok":true,"tool":"%s","data":"(content already present in the '
-                                'system prompt — see the operator skill section)"}' % block["name"]
-                            )
-                        else:
-                            content = _tool_block_result_for_llm(block, fmt=self.config.tool_result_format)
-                        out.append(
-                            ProviderMessage(
-                                role="tool",
-                                tool_call_id=tc.id,
-                                content=content,
-                            )
-                        )
-                    continue
-                out.append(
-                    ProviderMessage(
-                        role="assistant",
-                        content=m.get("content", ""),
-                        thinking=str(m.get("thinking") or ""),
-                    )
-                )
+                out.extend(self._assistant_turn_to_provider(m, stub_tools=stub_tools))
                 continue
             if role == "tool":
                 out.append(
@@ -444,7 +494,7 @@ class AgentRunner:
             out.append(
                 ProviderMessage(
                     role="user",
-                    content=str(m.get("content", "")),
+                    content=str(m.get("content") or m.get("text") or ""),
                     attachments=image_attachments(
                         attachments_from_message_dict(
                             m,
@@ -795,9 +845,8 @@ class AgentRunner:
                 return
 
             # Preserve this step's reasoning and narration as ordered blocks so
-            # they stay interleaved with the tools in history (Cursor-style),
-            # instead of being collapsed into one block or dropped when
-            # assistant_text is reset below.
+            # they stay interleaved with the tools in history, instead of being
+            # collapsed into one block or dropped when assistant_text is reset.
             if turn_thinking.strip():
                 assistant_blocks.append({"type": "thinking", "text": turn_thinking})
             if turn_text.strip():

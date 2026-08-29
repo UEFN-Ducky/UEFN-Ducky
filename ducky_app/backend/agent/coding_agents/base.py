@@ -122,7 +122,12 @@ class CodingAgentCapabilities:
     needs_api_key: bool = False
     needs_cli: bool = False
     resume: bool = False
-    """True when the CLI/SDK can resume an upstream session across turns."""
+    """Plugin-owned: True if this adapter resumes an upstream session.
+
+    Core only stores the id the plugin returns and passes it back on
+    launch(). Vendor flags (--resume, Agent.resume, exec resume, …)
+    live in the plugin, not here.
+    """
 
 
 @dataclass

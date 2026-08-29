@@ -1,8 +1,7 @@
-"""Run a BYOA coding-agent turn for a conversation (Claude/Codex/Cursor).
+"""Run a BYOA coding-agent turn for a conversation.
 
-Traycer-style semantics: adapters stream events live and resume a persisted
-upstream session (`claude --resume` / `codex exec resume`), so an external
-coding agent keeps its memory across every turn of the same panel chat.
+Adapters stream events live. If the plugin opts into resume, core only
+passes and stores a session_id — how resume works is the plugin's job.
 """
 
 from __future__ import annotations
@@ -415,7 +414,7 @@ def run_coding_agent_message(
             except OSError:
                 pass
 
-    # Persist the upstream session so the next turn resumes with full memory.
+    # Persist whatever session id the plugin returned. How it resumes is plugin-owned.
     if adapter.capabilities.resume:
         new_sid = (result.upstream_session_id or "").strip()
         if new_sid != session_id:

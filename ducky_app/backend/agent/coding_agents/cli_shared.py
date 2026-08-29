@@ -1,9 +1,8 @@
-"""Shared helpers for the streaming-CLI adapters (claude_code.py, codex.py).
+"""Shared helpers for streaming-CLI coding-agent plugins.
 
-Both adapters shell out to a CLI via ``run_streaming_process``, parse a JSON
-event stream into text/tool blocks, then translate the finished
-``ProcResult`` into a ``CodingAgentLaunchResult``. This module holds the bits
-of that pipeline that were byte-for-byte (or near enough) duplicated.
+Plugins shell out via ``run_streaming_process``, parse a JSON event stream
+into text/tool blocks, then translate the finished ``ProcResult`` into a
+``CodingAgentLaunchResult``. Vendor resume flags stay in the plugin.
 """
 
 from __future__ import annotations
