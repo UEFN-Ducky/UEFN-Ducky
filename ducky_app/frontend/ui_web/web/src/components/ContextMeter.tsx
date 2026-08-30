@@ -60,6 +60,12 @@ export function ContextMeter({
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - ratio);
   const tone = ringTone(ratio);
+  const lastCall = usage?.calls?.length ? usage.calls[usage.calls.length - 1] : undefined;
+  const lastRead = lastCall?.cache_read_tokens ?? 0;
+  const lastWrite = lastCall?.cache_write_tokens ?? 0;
+  const lastIn = lastCall?.input_tokens ?? 0;
+  const cacheChip =
+    lastRead > 0 ? `${fmtTokens(lastRead)} cached` : lastWrite > 0 ? "cache write" : lastIn > 0 ? "cache miss" : "";
 
   const reportUsage: ContextUsage = usage ?? {
     used_tokens: used,
@@ -97,10 +103,12 @@ export function ContextMeter({
         ref={anchorRef}
         type="button"
         onClick={() => onTogglePanel?.()}
-        aria-label={`Context ${fmtTokens(used)} of ${fmtTokens(limit)} tokens`}
+        aria-label={`Context ${fmtTokens(used)} of ${fmtTokens(limit)} tokens${cacheChip ? ` · ${cacheChip}` : ""}`}
         aria-expanded={panelOpen}
         className="context-meter-btn"
+        title={cacheChip || undefined}
       >
+        {cacheChip ? <span className="context-meter-cache-chip">{cacheChip}</span> : null}
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
           <circle
             cx={size / 2}

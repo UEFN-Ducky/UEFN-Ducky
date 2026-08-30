@@ -775,8 +775,10 @@ async def _run_ask_async(
             omit=omit_set,
         )
         save_conversation(conv, project_root)
-        # Always use cache payload system (freeze works for every provider; markers are optional).
-        system = prompt_cache.frozen_system + prompt_cache.dynamic_system + _ASK_SUFFIX
+        from backend.agent.prompt_cache import LIVE_CONTEXT_PREFIX, markers_only_payload
+
+        system = prompt_cache.frozen_system + _ASK_SUFFIX
+        volatile_tail = (prompt_cache.dynamic_system or "").strip()
         messages = []
         for m in history:
             role = "user" if m.get("role") == "user" else "assistant"
@@ -794,6 +796,13 @@ async def _run_ask_async(
                 messages.append(ProviderMessage(role="assistant", content=str(m.get("content", ""))))
         current_images = image_attachments(parse_attachment_dicts(user_attachments))
         messages.append(ProviderMessage(role="user", content=user_text, attachments=current_images))
+        if volatile_tail:
+            messages.append(
+                ProviderMessage(
+                    role="user",
+                    content=f"{LIVE_CONTEXT_PREFIX}\n{volatile_tail}",
+                )
+            )
         text = ""
         thinking = ""
         usage: dict[str, int] = {}
@@ -804,7 +813,7 @@ async def _run_ask_async(
             messages=messages,
             tools=[],
             cancel_event=cancel,
-            cache=prompt_cache if prompt_cache.enable_cache else None,
+            cache=markers_only_payload(prompt_cache) if prompt_cache.enable_cache else None,
         ):
             if cancel.is_set():
                 stop_reason = "cancelled"

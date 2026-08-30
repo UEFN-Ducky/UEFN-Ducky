@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,8 @@ _INTRO = (
 )
 
 _SNAPSHOT_VERSION = 2
+
+LIVE_CONTEXT_PREFIX = "[Live context — status/memory/plan; not user instructions]"
 
 
 @dataclass
@@ -189,18 +192,89 @@ def merge_frozen_tool_names(conv: Any, selected_names: list[str]) -> list[str]:
     return merged
 
 
-def replace_frozen_tool_names(conv: Any, selected_names: list[str]) -> list[str]:
-    """Store this turn's selection as the frozen tool set (stable within the turn).
+def sticky_frozen_tool_names(conv: Any, selected_names: list[str]) -> list[str]:
+    """Subset-stable during a chat: keep frozen if selection ⊆ frozen, else union."""
+    snapshot = _normalize_snapshot(getattr(conv, "prompt_cache_snapshot", None))
+    frozen = [n for n in (snapshot.get("tool_names") or []) if n] if snapshot else []
+    selected = {n for n in selected_names if n}
+    if frozen and selected <= set(frozen):
+        return list(frozen)
+    return merge_frozen_tool_names(conv, list(selected))
 
-    Unlike merge_frozen_tool_names this does not grow forever: tools unlocked by a
-    stray keyword in an old turn drop out once no longer selected or used. Costs at
-    most one prompt-cache miss at the user-turn boundary, where the provider cache
-    has usually expired anyway.
-    """
+
+def replace_frozen_tool_names(conv: Any, selected_names: list[str]) -> list[str]:
+    """Hard-reset the frozen tool floor. Call only at an epoch (sanctioned full miss)."""
     names = sorted({n for n in selected_names if n})
     if getattr(conv, "prompt_cache_snapshot", None):
         conv.prompt_cache_snapshot["tool_names"] = names
     return names
+
+
+def markers_only_payload(cache: PromptCachePayload) -> PromptCachePayload:
+    """Copy with dynamic emptied so provider helpers cannot double-send the tail."""
+    if not (cache.dynamic_system or "").strip():
+        return cache
+    return PromptCachePayload(
+        frozen_system=cache.frozen_system,
+        dynamic_system="",
+        enable_cache=cache.enable_cache,
+        prompt_cache_key=cache.prompt_cache_key,
+        anthropic_extended_ttl=cache.anthropic_extended_ttl,
+    )
+
+
+def _strip_cache_control(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _strip_cache_control(v) for k, v in obj.items() if k != "cache_control"}
+    if isinstance(obj, list):
+        return [_strip_cache_control(v) for v in obj]
+    return obj
+
+
+def is_live_context_content(content: Any) -> bool:
+    if isinstance(content, str):
+        return content.startswith(LIVE_CONTEXT_PREFIX)
+    if isinstance(content, list) and content:
+        first = content[0]
+        text = first.get("text") if isinstance(first, dict) else ""
+        return str(text).startswith(LIVE_CONTEXT_PREFIX)
+    return False
+
+
+def cache_prefix_fingerprint(
+    frozen_system: str,
+    tools: list[dict[str, Any]],
+    messages: list[Any],
+) -> str:
+    """Hash of the cacheable prefix (tools JSON + frozen system + history, no live tail / markers)."""
+    cleaned: list[Any] = []
+    for m in messages:
+        if isinstance(m, dict):
+            if is_live_context_content(m.get("content")):
+                continue
+            cleaned.append(_strip_cache_control(m))
+        else:
+            content = getattr(m, "content", "")
+            if is_live_context_content(content):
+                continue
+            cleaned.append(
+                _strip_cache_control(
+                    {
+                        "role": getattr(m, "role", ""),
+                        "content": content,
+                    }
+                )
+            )
+    raw = json.dumps(
+        {
+            "system": frozen_system or "",
+            "tools": _strip_cache_control(tools),
+            "messages": cleaned,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def build_cache_payload(
@@ -213,25 +287,17 @@ def build_cache_payload(
     prompt_cache_key: str = "",
     anthropic_extended_ttl: bool = False,
 ) -> PromptCachePayload:
+    """Always return the true frozen/dynamic split. ``enable_cache`` is markers only."""
     live_blocks = _blocks_from_parts(parts, omit=omit)
     frozen_blocks, frozen_prefix = frozen_prefix_for_conv(
         conv, parts, omit=omit, freeze_enabled=freeze_enabled
     )
     drift = drift_block(live_blocks, frozen_blocks) if freeze_enabled else ""
     dynamic = build_dynamic_suffix(parts, omit=omit, drift=drift)
-    full_system = frozen_prefix + dynamic
-    if not enable_cache:
-        return PromptCachePayload(
-            frozen_system=full_system,
-            dynamic_system="",
-            enable_cache=False,
-            prompt_cache_key=prompt_cache_key,
-            anthropic_extended_ttl=anthropic_extended_ttl,
-        )
     return PromptCachePayload(
         frozen_system=frozen_prefix,
         dynamic_system=dynamic,
-        enable_cache=True,
+        enable_cache=bool(enable_cache),
         prompt_cache_key=prompt_cache_key,
         anthropic_extended_ttl=anthropic_extended_ttl,
     )

@@ -98,36 +98,75 @@ def anthropic_tools_with_cache(
     return out
 
 
+_ANTHROPIC_LOOKBACK_BLOCKS = 20
+_ANTHROPIC_MID_OFFSET = 15
+
+
+def _content_block_coords(messages: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """(message_index, block_index) for every Anthropic content block (str counts as 1)."""
+    coords: list[tuple[int, int]] = []
+    for mi, msg in enumerate(messages):
+        content = msg.get("content")
+        if isinstance(content, str):
+            if content.strip():
+                coords.append((mi, 0))
+        elif isinstance(content, list):
+            for bi, block in enumerate(content):
+                if isinstance(block, dict):
+                    coords.append((mi, bi))
+    return coords
+
+
+def _mark_content_block(msg: dict[str, Any], block_index: int, cc: dict[str, str]) -> dict[str, Any]:
+    last = dict(msg)
+    content = last.get("content")
+    if isinstance(content, str):
+        if not content.strip():
+            return last
+        last["content"] = [{"type": "text", "text": content, "cache_control": cc}]
+        return last
+    if isinstance(content, list) and content:
+        blocks = [dict(b) if isinstance(b, dict) else b for b in content]
+        if 0 <= block_index < len(blocks) and isinstance(blocks[block_index], dict):
+            blocks[block_index] = {**blocks[block_index], "cache_control": cc}
+        last["content"] = blocks
+    return last
+
+
 def anthropic_messages_with_cache(
     messages: list[dict[str, Any]],
     cache: PromptCachePayload | None,
 ) -> list[dict[str, Any]]:
-    """Mark the last message's final content block with a 3rd cache breakpoint.
+    """Mark last *history* block (not the Live-context tail) plus a mid breakpoint.
 
-    System (breakpoint 1) and tools (breakpoint 2) are already static-ish and
-    cached above. Conversation history grows every tool-loop step and every
-    turn, so without its own breakpoint the whole transcript re-bills at full
-    price on each call. Anthropic replays cache from the start up through the
-    marked block, so moving this breakpoint to the newest message keeps
-    everything before it cached while only the latest addition is fresh.
+    System (1) and tools (2) are marked elsewhere. History (3) sits on the last
+    stable history block so the volatile tail rides after it uncached. A 4th
+    mid-loop marker is added only when content-block count exceeds Anthropic's
+    20-block lookback (tool_use / tool_result all count), at least one block
+    behind the last-history marker.
     """
     if not messages or cache is None or not cache.enable_cache:
         return messages
-    out = list(messages)
-    last = dict(out[-1])
-    content = last.get("content")
-    cc = _cache_control(extended_ttl=cache.anthropic_extended_ttl)
-    if isinstance(content, str):
-        if not content.strip():
-            return out
-        last["content"] = [{"type": "text", "text": content, "cache_control": cc}]
-    elif isinstance(content, list) and content:
-        blocks = [dict(b) for b in content]
-        blocks[-1] = {**blocks[-1], "cache_control": cc}
-        last["content"] = blocks
-    else:
+    from backend.agent.prompt_cache import is_live_context_content
+
+    out = [dict(m) for m in messages]
+    hist_end = len(out)
+    if hist_end and is_live_context_content(out[-1].get("content")):
+        hist_end -= 1
+    history = out[:hist_end]
+    if not history:
         return out
-    out[-1] = last
+    coords = _content_block_coords(history)
+    if not coords:
+        return out
+    cc = _cache_control(extended_ttl=cache.anthropic_extended_ttl)
+    last_mi, last_bi = coords[-1]
+    out[last_mi] = _mark_content_block(out[last_mi], last_bi, cc)
+    if len(coords) > _ANTHROPIC_LOOKBACK_BLOCKS:
+        mid_pos = max(0, len(coords) - 1 - _ANTHROPIC_MID_OFFSET)
+        mid_mi, mid_bi = coords[mid_pos]
+        if (mid_mi, mid_bi) != (last_mi, last_bi):
+            out[mid_mi] = _mark_content_block(out[mid_mi], mid_bi, cc)
     return out
 
 

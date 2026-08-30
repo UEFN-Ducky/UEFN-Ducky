@@ -430,7 +430,7 @@ def compact_messages(
     context_summary: str = "",
     context_summary_through: int = 0,
 ) -> list[dict[str, Any]]:
-    """Prompt view of history: rolling summary + live tail. Never deletes messages."""
+    """Prompt view of history: frozen epoch head + append-only tail. Never deletes messages."""
     from backend.agent.context_memory import build_compacted_messages
 
     return build_compacted_messages(
