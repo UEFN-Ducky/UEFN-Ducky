@@ -15,10 +15,14 @@ from backend.agent.attachments import attachments_from_message_dict
 from backend.agent.multimodal_content import image_attachments
 from backend.agent.prompt import compact_messages, get_system_prompt_parts
 from backend.agent.prompt_cache import (
+    LIVE_CONTEXT_PREFIX,
     PromptCachePayload,
     build_cache_payload,
     enrich_parts,
+    invalidate_conv_cache,
+    markers_only_payload,
     replace_frozen_tool_names,
+    sticky_frozen_tool_names,
 )
 from backend.agent.providers import make_provider
 from backend.agent.providers.base import ProviderMessage, StreamEvent, StreamEventKind, ToolCallRequest
@@ -563,8 +567,9 @@ class AgentRunner:
         # Full SKILL.md bodies load on demand via skill_read_subskill.
         skill_text = self.config.skill_override or ""
 
-        # Rolling per-chat summary: compress older turns when over threshold.
-        # Full messages stay on disk; only the prompt view shrinks.
+        # Epoch compaction: one sanctioned full miss. Auto-off still mechanical-epochs
+        # at high-water so the append-only view cannot grow past the model window.
+        epoched = False
         if self.config.conv is not None:
             try:
                 from backend.agent.context_memory import compress_conversation, should_compress
@@ -572,13 +577,16 @@ class AgentRunner:
 
                 settings = PanelSettings.load()
                 if should_compress(self.config.conv, settings=settings):
-                    compress_conversation(
+                    result = compress_conversation(
                         self.config.conv,
                         settings=settings,
                         project_root=self.config.project_root,
                         force=False,
-                        use_llm=True,
+                        use_llm=bool(getattr(settings, "memory_auto_compress", True)),
                     )
+                    epoched = bool(result.get("compressed"))
+                    if epoched:
+                        invalidate_conv_cache(self.config.conv)
             except Exception:
                 pass
 
@@ -627,15 +635,11 @@ class AgentRunner:
                 save_conversation(self.config.conv, self.config.project_root or None)
             except Exception:
                 pass
-        # Freeze is Ducky-owned (all providers). enable_cache only adds provider markers.
-        # Local gateways: keep volatile runtime/memory/plan OUT of the system prefix so
-        # status ticks don't force re-eval of the entire chat history (KV hygiene).
-        if local_slim:
-            system = prompt_cache.frozen_system
-            volatile_tail = (prompt_cache.dynamic_system or "").strip()
-        else:
-            system = prompt_cache.frozen_system + prompt_cache.dynamic_system
-            volatile_tail = ""
+        # Frozen/dynamic split is host-owned and unconditional. enable_cache
+        # only adds provider markers. Volatile memory/plan/status is a tail message.
+        system = prompt_cache.frozen_system
+        volatile_tail = (prompt_cache.dynamic_system or "").strip()
+        stream_cache = markers_only_payload(prompt_cache) if prompt_cache.enable_cache else None
 
         working_history = list(history)
         working_history.append(
@@ -681,16 +685,14 @@ class AgentRunner:
             if skill_text:
                 # Skill already rides in the system prompt — the tool would only duplicate it.
                 selected = [t for t in selected if t.name != "uefn_skill"]
-            # Local: pin tools[] to this turn's floor set for the life of the chat
-            # (no frozen growth) so the chat-template prefix stays KV-stable.
             if self.config.conv is not None:
                 names = [t.name for t in selected]
-                if local_slim:
-                    replace_frozen_tool_names(self.config.conv, names)
-                else:
+                if epoched:
                     names = replace_frozen_tool_names(self.config.conv, names)
-                    by_name = {t.name: t for t in all_tools}
-                    selected = [by_name[n] for n in names if n in by_name]
+                else:
+                    names = sticky_frozen_tool_names(self.config.conv, names)
+                by_name = {t.name: t for t in all_tools}
+                selected = [by_name[n] for n in names if n in by_name]
             tool_schemas = self._provider_tools(self.config.provider, selected)
 
         conv = self.config.conv
@@ -753,13 +755,12 @@ class AgentRunner:
                 "cache_write_tokens": 0,
             }
 
-            # Volatile runtime/plan as a tail message (local only) — not in system.
             stream_messages = provider_messages
             if volatile_tail:
                 stream_messages = list(provider_messages) + [
                     ProviderMessage(
                         role="user",
-                        content=f"[Live context — status/memory/plan; not user instructions]\n{volatile_tail}",
+                        content=f"{LIVE_CONTEXT_PREFIX}\n{volatile_tail}",
                     )
                 ]
 
@@ -768,7 +769,7 @@ class AgentRunner:
                 system=system,
                 messages=stream_messages,
                 tools=tool_schemas,
-                cache=prompt_cache if prompt_cache.enable_cache else None,
+                cache=stream_cache,
                 thread_cancel=thread_cancel,
             ):
                 if bridge.is_set():

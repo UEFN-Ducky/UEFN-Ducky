@@ -217,6 +217,15 @@ export function ContextUsagePanel({
   const apiTotal = Math.max(0, usage.total_tokens ?? sentTotal + receivedTotal);
   const cacheReadTotal = Math.max(0, usage.total_cache_read ?? 0);
   const cacheWriteTotal = Math.max(0, usage.total_cache_write ?? 0);
+  const lastCall = calls.length ? calls[calls.length - 1] : undefined;
+  const lastTurnCache =
+    lastCall == null
+      ? ""
+      : (lastCall.cache_read_tokens ?? 0) > 0
+        ? `${fmtTokens(lastCall.cache_read_tokens ?? 0)} cached`
+        : (lastCall.cache_write_tokens ?? 0) > 0
+          ? "cache write"
+          : "cache miss";
   const cacheHitRate = usage.cache_hit_rate ?? 0;
   const cacheHitRateCumulative = usage.cache_hit_rate_cumulative ?? 0;
   const callCount = Math.max(0, usage.call_count ?? calls.length);
@@ -420,6 +429,12 @@ export function ContextUsagePanel({
               {fmtTokens(cacheReadTotal)}
             </span>
           </div>
+          {lastTurnCache ? (
+            <div className="context-usage-panel-api-total-row">
+              <span className="context-usage-panel-api-total-label">Last turn</span>
+              <span className="context-usage-panel-api-total-value">{lastTurnCache}</span>
+            </div>
+          ) : null}
           <div className="context-usage-panel-api-total-row">
             <span className="context-usage-panel-api-total-label">Cache writes</span>
             <span className="context-usage-panel-api-total-value">{fmtTokens(cacheWriteTotal)}</span>

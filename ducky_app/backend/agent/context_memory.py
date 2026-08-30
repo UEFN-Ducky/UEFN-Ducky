@@ -1,15 +1,26 @@
-"""Rolling per-chat context summaries — shrink prompt view without deleting history."""
+"""Epoch-based per-chat context summaries — append-only prompt view, fold only at high-water."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Any
+
+CONTEXT_MEMORY_PREFIX = (
+    "[Context memory — compressed older turns; full history remains saved in this chat]"
+)
+HIGH_WATER_FRACTION = 0.65
+OUTPUT_HEADROOM_TOKENS = 4_096
+_PRUNE_RESULT_CHARS = 160
 
 _SUMMARY_SYSTEM = (
     "You compress chat history for an AI coding agent working in UEFN/Verse. "
     "Write a dense markdown digest that preserves: goals, decisions, file/device paths, "
-    "errors fixed, open TODOs, and user preferences. Omit chit-chat and raw code dumps. "
+    "errors fixed, open TODOs, and user preferences. "
+    "Always carry the original user goal verbatim. "
+    "Carry the current state of files and devices touched so the agent does not re-read them. "
+    "Omit chit-chat and raw code dumps. "
     "Keep under ~800 words. Do not invent facts."
 )
 
@@ -19,22 +30,42 @@ def estimate_tokens(text: str) -> int:
     return max(0, (len(text or "") + 3) // 4)
 
 
+def _json_tokens(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return estimate_tokens(value)
+    try:
+        return estimate_tokens(json.dumps(value, default=str))
+    except Exception:
+        return 8
+
+
 def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
+    """Count the same bytes the provider receives (full tool results, no 2k cap)."""
     total = 0
     for m in messages or []:
         content = m.get("content")
         if isinstance(content, str):
             total += estimate_tokens(content)
+        elif isinstance(content, list):
+            total += _json_tokens(content)
         for block in m.get("blocks") or []:
             if not isinstance(block, dict):
                 continue
             name = str(block.get("name") or "")
             total += estimate_tokens(name) + 8
+            if block.get("arguments") is not None:
+                total += _json_tokens(block.get("arguments"))
+            text = block.get("text")
+            if isinstance(text, str):
+                total += estimate_tokens(text)
             result = block.get("result")
             if isinstance(result, dict):
                 data = result.get("data")
-                if isinstance(data, str):
-                    total += estimate_tokens(data[:2000])
+                total += _json_tokens(data) if data is not None else _json_tokens(result)
+            elif result is not None:
+                total += _json_tokens(result)
     return total
 
 
@@ -54,38 +85,87 @@ def compress_thresholds(settings: Any = None) -> tuple[int, int]:
     return msgs, toks
 
 
+def token_high_water(
+    settings: Any = None,
+    *,
+    conv: Any = None,
+    context_limit: int | None = None,
+) -> int:
+    """Token high-water: min(setting, ~65% of advertised model window)."""
+    _, toks = compress_thresholds(settings)
+    limit = context_limit
+    if limit is None and conv is not None:
+        try:
+            from frontend.ui_web.context_tokens import context_limit_for_model
+
+            limit = context_limit_for_model(
+                str(getattr(conv, "model", "") or ""),
+                str(getattr(conv, "provider", "") or ""),
+            )
+        except Exception:
+            limit = None
+    if limit is not None and int(limit) > 0:
+        return min(toks, max(1000, int(int(limit) * HIGH_WATER_FRACTION)))
+    return toks
+
+
+def epoch_num_ctx(model_max: int, settings: Any = None) -> int:
+    """One-shot Ollama num_ctx: high-water + output headroom, capped at model max."""
+    max_ctx = max(1, int(model_max))
+    hw = token_high_water(settings, context_limit=max_ctx)
+    return min(max_ctx, hw + OUTPUT_HEADROOM_TOKENS)
+
+
+def _snap_boundary(messages: list[dict[str, Any]], through: int) -> int:
+    """Don't start the live tail on a tool-result message (keep call+result together)."""
+    n = len(messages)
+    idx = max(0, min(int(through), n))
+    while idx < n and str(messages[idx].get("role") or "") == "tool":
+        idx += 1
+    return idx
+
+
 def should_compress(
     conv: Any,
     *,
     settings: Any = None,
     force: bool = False,
 ) -> bool:
-    """True when there are uncovered older turns past keep_last (or force)."""
+    """True at high-water (or force) when there is something to fold past keep_last.
+
+    ``memory_auto_compress`` does not block this: when auto is off the runner
+    still mechanical-epochs so the append-only view cannot grow past the window.
+    """
     from frontend.settings import PanelSettings
 
     s = settings or PanelSettings.load()
     messages = list(getattr(conv, "messages", None) or [])
     keep = keep_last_from_settings(s)
-    if len(messages) <= keep:
-        return False
     through = int(getattr(conv, "context_summary_through", 0) or 0)
-    uncovered_end = len(messages) - keep
-    has_new = uncovered_end > through
+    foldable_end = max(0, len(messages) - keep)
+    if foldable_end <= 0:
+        return False
     if force:
-        return has_new or (uncovered_end > 0 and not str(getattr(conv, "context_summary", "") or "").strip())
-    if not has_new:
+        return foldable_end > through or (
+            foldable_end > 0 and not str(getattr(conv, "context_summary", "") or "").strip()
+        )
+    if foldable_end <= through:
         return False
-    if not bool(getattr(s, "memory_auto_compress", True)):
-        return False
-    msg_thresh, tok_thresh = compress_thresholds(s)
-    if len(messages) >= msg_thresh:
+    msg_thresh, _ = compress_thresholds(s)
+    msg_thresh = max(msg_thresh, keep + 1)
+    if (len(messages) - through) >= msg_thresh:
         return True
-    est = estimate_messages_tokens(messages) + estimate_tokens(str(getattr(conv, "context_summary", "") or ""))
-    return est >= tok_thresh
+    view = build_compacted_messages(
+        messages,
+        keep_last=keep,
+        context_summary=str(getattr(conv, "context_summary", "") or ""),
+        context_summary_through=through,
+    )
+    return estimate_messages_tokens(view) >= token_high_water(s, conv=conv)
 
 
 def _slice_for_summary(messages: list[dict[str, Any]], through: int, keep_last: int) -> list[dict[str, Any]]:
-    end = max(0, len(messages) - keep_last)
+    end = _snap_boundary(messages, max(0, len(messages) - keep_last))
     start = max(0, min(through, end))
     return messages[start:end]
 
@@ -104,6 +184,13 @@ def mechanical_digest(messages: list[dict[str, Any]], *, max_lines: int = 40) ->
     return "Earlier conversation (mechanical digest):\n" + "\n".join(lines)
 
 
+def context_memory_head(summary: str) -> dict[str, Any]:
+    return {
+        "role": "user",
+        "content": f"{CONTEXT_MEMORY_PREFIX}\n\n{(summary or '').strip()}",
+    }
+
+
 def build_compacted_messages(
     messages: list[dict[str, Any]],
     *,
@@ -111,29 +198,17 @@ def build_compacted_messages(
     context_summary: str = "",
     context_summary_through: int = 0,
 ) -> list[dict[str, Any]]:
-    """Prompt view: optional rolling summary + live tail. Never mutates ``messages``."""
-    if len(messages) <= keep_last:
-        return list(messages)
-    tail = messages[-keep_last:]
+    """Append-only prompt view: frozen epoch head + messages[through:]. Never mutates ``messages``.
+
+    ``keep_last`` is the epoch low-water (used at compress time), not a sliding window.
+    """
+    del keep_last
     summary = (context_summary or "").strip()
     through = int(context_summary_through or 0)
-    uncovered = messages[through : max(0, len(messages) - keep_last)]
-    chunks: list[str] = []
-    if summary:
-        chunks.append(summary)
-    if uncovered:
-        # Turns not yet in the rolling summary — mechanical bridge so nothing is dropped from the prompt view.
-        chunks.append(mechanical_digest(uncovered, max_lines=30))
-    if not chunks:
-        chunks.append(mechanical_digest(messages[:-keep_last], max_lines=30))
-    head = {
-        "role": "user",
-        "content": (
-            "[Context memory — compressed older turns; full history remains saved in this chat]\n\n"
-            + "\n\n".join(chunks)
-        ),
-    }
-    return [head] + list(tail)
+    if through > 0 and summary:
+        through = min(through, len(messages))
+        return [context_memory_head(summary)] + list(messages[through:])
+    return list(messages)
 
 
 def _resolve_summary_model(settings: Any) -> tuple[str, str]:
@@ -151,6 +226,43 @@ def _resolve_summary_model(settings: Any) -> tuple[str, str]:
     return _resolve_api_model(model="")
 
 
+def _original_user_goal(messages: list[dict[str, Any]]) -> str:
+    for m in messages or []:
+        if str(m.get("role") or "") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()[:2000]
+    return ""
+
+
+def _prune_tool_results_for_summary(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stub large tool payloads in the fold slice only — does not mutate stored history."""
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        copied = dict(m)
+        blocks = copied.get("blocks")
+        if isinstance(blocks, list):
+            pruned_blocks: list[Any] = []
+            for block in blocks:
+                if not isinstance(block, dict):
+                    pruned_blocks.append(block)
+                    continue
+                b2 = dict(block)
+                result = b2.get("result")
+                if isinstance(result, dict) and isinstance(result.get("data"), str):
+                    data = result["data"]
+                    if len(data) > _PRUNE_RESULT_CHARS:
+                        b2["result"] = {
+                            **result,
+                            "data": data[:_PRUNE_RESULT_CHARS] + "…[pruned]",
+                        }
+                pruned_blocks.append(b2)
+            copied["blocks"] = pruned_blocks
+        out.append(copied)
+    return out
+
+
 def _format_messages_for_llm(messages: list[dict[str, Any]], *, max_chars: int = 24_000) -> str:
     parts: list[str] = []
     for m in messages:
@@ -161,7 +273,11 @@ def _format_messages_for_llm(messages: list[dict[str, Any]], *, max_chars: int =
         tools: list[str] = []
         for block in m.get("blocks") or []:
             if isinstance(block, dict) and block.get("type") == "tool_call" and block.get("name"):
-                tools.append(f"- {block['name']} ({block.get('status', '?')})")
+                stub = f"- {block['name']} ({block.get('status', '?')})"
+                result = block.get("result")
+                if isinstance(result, dict) and isinstance(result.get("data"), str):
+                    stub += f": {result['data'][:120]}"
+                tools.append(stub)
         if tools:
             parts.append("tools:\n" + "\n".join(tools[:40]))
     text = "\n\n".join(parts)
@@ -170,7 +286,13 @@ def _format_messages_for_llm(messages: list[dict[str, Any]], *, max_chars: int =
     return text
 
 
-async def _llm_digest(prior_summary: str, new_slice: list[dict[str, Any]], settings: Any) -> str:
+async def _llm_digest(
+    prior_summary: str,
+    new_slice: list[dict[str, Any]],
+    settings: Any,
+    *,
+    original_goal: str = "",
+) -> str:
     from frontend.ui_web.plugin_llm import _complete_text
 
     from backend.agent.batch_backends import supports_batch_complete
@@ -179,6 +301,8 @@ async def _llm_digest(prior_summary: str, new_slice: list[dict[str, Any]], setti
     if not supports_batch_complete(provider_name):
         raise ValueError("Summary needs an API model (Settings → LLMs gateway)")
     user_parts = []
+    if original_goal.strip():
+        user_parts.append("## Original user goal (carry verbatim)\n" + original_goal.strip())
     if prior_summary.strip():
         user_parts.append("## Existing digest (merge / update)\n" + prior_summary.strip()[:6000])
     user_parts.append("## New turns to fold in\n" + _format_messages_for_llm(new_slice))
@@ -200,7 +324,6 @@ def _maybe_extract_durable(
     """Best-effort: stash a short durable note under agent/<ducky>/session-notes."""
     if not digest.strip() or not (ducky_name or "").strip():
         return
-    # Pull bullet-like durable lines (conventions/paths), skip if none.
     bullets = [
         ln.strip()
         for ln in digest.splitlines()
@@ -264,18 +387,21 @@ def compress_conversation(
         }
 
     prior = str(getattr(conv, "context_summary", "") or "")
+    goal = _original_user_goal(messages)
+    pruned = _prune_tool_results_for_summary(new_slice)
     digest = ""
     method = "mechanical"
-    if use_llm and new_slice:
+    if use_llm and pruned:
         try:
-            digest = asyncio.run(_llm_digest(prior, new_slice, s)).strip()
+            digest = asyncio.run(_llm_digest(prior, pruned, s, original_goal=goal)).strip()
             method = "llm"
         except RuntimeError:
-            # Already in an event loop (agent worker) — use a fresh loop via to_thread pattern.
             try:
                 loop = asyncio.new_event_loop()
                 try:
-                    digest = loop.run_until_complete(_llm_digest(prior, new_slice, s)).strip()
+                    digest = loop.run_until_complete(
+                        _llm_digest(prior, pruned, s, original_goal=goal)
+                    ).strip()
                     method = "llm"
                 finally:
                     loop.close()
@@ -284,12 +410,14 @@ def compress_conversation(
         except Exception:
             digest = ""
     if not digest:
-        merged_src = new_slice or messages[: max(0, len(messages) - keep)]
+        merged_src = pruned or messages[: max(0, len(messages) - keep)]
         bridge = mechanical_digest(merged_src)
+        if goal:
+            bridge = f"Original goal: {goal}\n\n{bridge}"
         digest = (prior.strip() + "\n\n" + bridge).strip() if prior.strip() else bridge
         method = "mechanical"
 
-    new_through = max(through, len(messages) - keep)
+    new_through = _snap_boundary(messages, max(through, len(messages) - keep))
     conv.context_summary = digest
     conv.context_summary_through = new_through
     conv.context_summary_tokens = estimate_tokens(digest)
@@ -332,6 +460,12 @@ def chat_context_memory_status(conv: Any, *, settings: Any = None) -> dict[str, 
     summary = str(getattr(conv, "context_summary", "") or "")
     through = int(getattr(conv, "context_summary_through", 0) or 0)
     tokens = int(getattr(conv, "context_summary_tokens", 0) or 0) or estimate_tokens(summary)
+    view = build_compacted_messages(
+        messages,
+        keep_last=keep,
+        context_summary=summary,
+        context_summary_through=through,
+    )
     return {
         "ok": True,
         "conv_id": str(getattr(conv, "id", "") or ""),
@@ -342,7 +476,7 @@ def chat_context_memory_status(conv: Any, *, settings: Any = None) -> dict[str, 
         "context_summary": summary,
         "context_summary_through": through,
         "context_summary_tokens": tokens,
-        "estimated_history_tokens": estimate_messages_tokens(messages),
+        "estimated_history_tokens": estimate_messages_tokens(view),
         "compress_recommended": should_compress(conv, settings=s, force=False),
         "auto_compress": bool(getattr(s, "memory_auto_compress", True)),
     }

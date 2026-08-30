@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.agent.prompt_cache import PromptCachePayload
+from backend.agent.prompt_cache import LIVE_CONTEXT_PREFIX, PromptCachePayload
 from backend.agent.providers.cache_utils import (
     anthropic_messages_with_cache,
     anthropic_tools_with_cache,
@@ -86,6 +86,44 @@ def test_anthropic_tools_with_cache_marks_last_tool_only():
     out = anthropic_tools_with_cache(tools, _cache())
     assert "cache_control" not in out[0]
     assert out[1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_anthropic_marks_last_history_not_live_tail():
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": f"{LIVE_CONTEXT_PREFIX}\nplan tick"},
+    ]
+    out = anthropic_messages_with_cache(messages, _cache())
+    assert out[1]["content"] == [
+        {"type": "text", "text": "second", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert out[2]["content"] == f"{LIVE_CONTEXT_PREFIX}\nplan tick"
+
+
+def test_anthropic_mid_breakpoint_only_when_over_lookback():
+    short = [{"role": "user", "content": f"m{i}"} for i in range(5)]
+    short_out = anthropic_messages_with_cache(short, _cache())
+    marked = 0
+    for m in short_out[:-1]:
+        content = m.get("content")
+        if isinstance(content, list) and content and content[0].get("cache_control"):
+            marked += 1
+    assert marked == 0
+
+    long = [{"role": "user", "content": [{"type": "text", "text": f"b{i}"}]} for i in range(22)]
+    long.append({"role": "user", "content": f"{LIVE_CONTEXT_PREFIX}\ntail"})
+    long_out = anthropic_messages_with_cache(long, _cache())
+    hist = long_out[:-1]
+    marked_idxs = []
+    for i, m in enumerate(hist):
+        content = m.get("content")
+        if isinstance(content, list) and content and content[-1].get("cache_control"):
+            marked_idxs.append(i)
+    assert len(marked_idxs) == 2
+    assert marked_idxs[-1] == 21
+    assert marked_idxs[0] != marked_idxs[-1]
+    assert marked_idxs[-1] - marked_idxs[0] >= 1
 
 
 def test_parse_gemini_usage_reads_cached_content_tokens():

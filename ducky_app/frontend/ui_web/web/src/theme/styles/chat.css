@@ -4797,12 +4797,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  gap: 4px;
+  min-width: 18px;
   height: 18px;
   padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
+}
+
+.context-meter-cache-chip {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .context-meter-ring-progress {

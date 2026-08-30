@@ -86,6 +86,26 @@ Also: `api.listener(cmd, params)`, `api.is_enabled()`, `api.log()`, `api.plugin_
 Enable/disable/uninstall the installed copy with `ducky_store_set_enabled` /
 `ducky_store_remove`. First enable of an AI plugin needs a user trust confirm
 (agents cannot auto-trust).
+
+## Gateway prompt caching
+
+Bytes before the growth point change only at an epoch.
+
+Host guarantees: byte-stable frozen system, append-only message view, sticky
+tool set (union during a chat; floor reset only at an epoch), and
+`prompt_cache_key` = conversation id. Volatile memory/plan/status is a last
+user message (`[Live context — …]`), never the system prefix. `enable_cache`
+on the payload only means “emit provider markers”; the frozen/dynamic split
+is unconditional.
+
+Plugin must:
+
+| Family | You do | Verify with |
+|--------|--------|-------------|
+| Anthropic-style | Use host `cache_utils` as-is (tools + system + last-history + mid-loop every ~15 content blocks when over 20) | `cache_read_input_tokens` grows turn over turn |
+| OpenAI-compatible | `openai_system_messages` + forward `cache.prompt_cache_key` | `prompt_tokens_details.cached_tokens` |
+| Ollama / local | Long `keep_alive`; `num_ctx` = host high-water + output headroom, allocated once, never resized; serialize identically | `prompt_eval_count` ≈ tail size on warm turns |
+| Gemini | Nothing — implicit; parse usage with the host helper | `cached_content_token_count` |
 """
 
 
