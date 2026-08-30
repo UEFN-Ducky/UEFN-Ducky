@@ -2,8 +2,8 @@
 
 Two sources are supported:
   1. Provider reasoning fields on the streaming delta (``reasoning`` /
-     ``reasoning_content``) — used by Ollama's OpenAI-compatible endpoint and
-     DeepSeek-style models.
+     ``reasoning_content`` / ``thinking``) — Ollama OpenAI-compat, qwen3.5
+     parser, and DeepSeek-style models.
   2. Inline ``<think>…</think>`` tags embedded in the visible content stream —
      emitted by many local models (e.g. qwen3). ``ThinkSplitter`` separates
      these from the user-visible answer, handling tags split across chunks.
@@ -19,13 +19,13 @@ _CLOSE = "</think>"
 
 def reasoning_from_delta(delta: Any) -> str:
     """Best-effort reasoning text from a streaming chat delta, or ""."""
-    for attr in ("reasoning", "reasoning_content"):
+    for attr in ("reasoning", "reasoning_content", "thinking"):
         val = getattr(delta, attr, None)
         if isinstance(val, str) and val:
             return val
     extra = getattr(delta, "model_extra", None)
     if isinstance(extra, dict):
-        for key in ("reasoning", "reasoning_content"):
+        for key in ("reasoning", "reasoning_content", "thinking"):
             val = extra.get(key)
             if isinstance(val, str) and val:
                 return val
