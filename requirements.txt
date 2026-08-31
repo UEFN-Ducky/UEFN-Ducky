@@ -1,6 +1,7 @@
 # MCP bridge (host/mcp_server.py).
 # Install from repo root: py -m pip install -r requirements.txt
-mcp[cli]>=1.0
+# The bridge still uses the v1 FastMCP API (renamed in MCP 2.x).
+mcp[cli]>=1.0,<2
 tzdata>=2024.1
 # Control panel: hide to notification area (tray) on close (Windows).
 pystray>=0.19.5
@@ -12,7 +13,8 @@ anthropic>=0.40.0
 # Embedded agent chat (panel)
 openai>=1.40.0
 google-genai>=1.0
-pywinpty>=2.0.13
+# Windows terminal backend; pywinpty cannot build on macOS/Linux.
+pywinpty>=2.0.13; platform_system == "Windows"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
 toon_format @ git+https://github.com/toon-format/toon-python.git
