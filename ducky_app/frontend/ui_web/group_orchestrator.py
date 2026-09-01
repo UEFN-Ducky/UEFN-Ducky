@@ -843,10 +843,50 @@ def is_group_running(group_id: str) -> bool:
     return bool(ev and not ev.is_set())
 
 
-def cancel_group_run(group_id: str) -> None:
-    ev = _group_sessions.get(group_id)
+def dedupe_prepared_speakers(
+    prepared: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Keep the first speaker per leaf conv_id.
+
+    A folder leaf that is also a nested-group leader would otherwise start two
+    parallel ``run_message_and_wait(force=True)`` turns on the same chat; the
+    second ``prepare_run`` cancels the first → Interrupted: Cancelled.
+    """
+    seen: set[str] = set()
+    unique: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for run_as, pub_as in prepared:
+        key = str(run_as.get("member_conv_id") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append((run_as, pub_as))
+    return unique
+
+
+def cancel_group_run(group_id: str, *, _seen: set[str] | None = None) -> None:
+    gid = (group_id or "").strip()
+    if not gid:
+        return
+    seen = _seen if _seen is not None else set()
+    if gid in seen:
+        return
+    seen.add(gid)
+    ev = _group_sessions.get(gid)
     if ev:
         ev.set()
+    group = load_conversation(gid)
+    if not group or not is_group_conversation(group):
+        return
+    from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
+
+    for member in group_members(group):
+        mid = str(member.get("member_conv_id") or "").strip()
+        if not mid:
+            continue
+        if member.get("is_group"):
+            cancel_group_run(mid, _seen=seen)
+        if is_agent_running(mid):
+            cancel_agent(mid)
 
 
 def run_group_turn(
@@ -1080,9 +1120,12 @@ def _run_member_turn(
             prompt,
             mode=mode or "agent",
             model=member_model or (model or ""),
-            timeout_sec=timeout_sec,
+            # Wait until the member finishes or the user hits Stop. A 180s
+            # wall-clock kill was showing up as Interrupted: Cancelled on
+            # folder/group duckies (especially Cursor / Claude Code).
+            timeout_sec=0.0,
             push=member_push,
-            cancel_on_timeout=True,
+            cancel_on_timeout=False,
             parent="",
         )
     finally:
@@ -1188,6 +1231,7 @@ def _run_group_turn_body(
                 )
                 continue
             prepared.append((run_as, pub_as))
+        prepared = dedupe_prepared_speakers(prepared)
         workers = min(8, max(1, len(prepared)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futs = [

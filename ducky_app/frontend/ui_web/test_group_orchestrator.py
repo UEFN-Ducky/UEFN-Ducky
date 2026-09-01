@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 from frontend.settings import PanelSettings
+from frontend.ui_web import group_orchestrator as go
 from frontend.ui_web.group_orchestrator import (
     _MENTION_HOP_BUDGET,
     announce_private_member_talk,
@@ -403,3 +406,91 @@ def test_announce_skips_orchestrated_group_turns():
         hub = load_conversation(group.id, project_root=root)
         assert hub is not None
         assert hub.messages == []
+
+
+def test_group_member_turn_does_not_kill_on_wait_timeout(monkeypatch):
+    """Folder/group members must keep working past the wait window.
+
+    Killing them with cancel_on_timeout=True is what the panel shows as
+    Interrupted: Cancelled when a dossier with duckies on it runs a long turn.
+    """
+    captured: dict = {}
+
+    def fake_wait(conv_id, prompt, mode, model, **kwargs):
+        captured["kwargs"] = kwargs
+        return {"status": "done", "assistant_text": "hello"}
+
+    monkeypatch.setattr("frontend.ui_web.agent_modes.run_message_and_wait", fake_wait)
+    monkeypatch.setattr(
+        go,
+        "load_conversation",
+        lambda cid, **k: SimpleNamespace(
+            id=cid, messages=[], model="gpt-4o", leader_conv_id="", ducky_name="A"
+        ),
+    )
+    monkeypatch.setattr(go, "register_member_hub", lambda *a, **k: None)
+    monkeypatch.setattr(go, "unregister_member_hub", lambda *a, **k: None)
+    monkeypatch.setattr(go, "build_member_prompt", lambda **k: "prompt")
+
+    speaker = {"member_conv_id": "m1", "name": "A"}
+    _badge, reply, err = go._run_member_turn(
+        group_id="g1",
+        speaker=speaker,
+        members=[speaker],
+        pending_text="hi",
+        pending_from="User",
+        mode="agent",
+        model="gpt-4o",
+        timeout_sec=180.0,
+        roundtable=False,
+        cancel=threading.Event(),
+    )
+    assert err == ""
+    assert reply == "hello"
+    assert captured["kwargs"]["cancel_on_timeout"] is False
+    assert captured["kwargs"]["timeout_sec"] == 0.0
+
+
+def test_roundtable_dedupes_same_member_as_leaf_and_nested_rep():
+    """A folder leaf that is also a nested-group leader must run once.
+
+    Two parallel run_message_and_wait(force=True) on the same conv_id makes
+    prepare_run() cancel the first turn → Interrupted: Cancelled.
+    """
+    leaf = {"member_conv_id": "m1", "name": "Verse Coder", "is_group": False}
+    nested_badge = {
+        "member_conv_id": "m1",
+        "name": "Squad — Verse Coder",
+        "is_group": False,
+    }
+    unique = go.dedupe_prepared_speakers([(leaf, leaf), (leaf, nested_badge)])
+    assert len(unique) == 1
+    assert unique[0][0]["member_conv_id"] == "m1"
+
+
+def test_cancel_group_run_stops_running_members(monkeypatch):
+    """Stop on the folder hub must cancel in-flight member agents."""
+    cancelled: list[str] = []
+    group = SimpleNamespace(
+        id="g1",
+        is_group=True,
+        group_members=[{"member_conv_id": "m1", "is_group": False}],
+    )
+    monkeypatch.setattr(go, "load_conversation", lambda cid, **k: group if cid == "g1" else None)
+    monkeypatch.setattr(go, "group_members", lambda g: list(g.group_members))
+    monkeypatch.setattr(
+        "frontend.ui_web.agent_modes.cancel_agent",
+        lambda cid: cancelled.append(cid),
+    )
+    monkeypatch.setattr(
+        "frontend.ui_web.agent_modes.is_agent_running",
+        lambda cid: cid == "m1",
+    )
+    ev = threading.Event()
+    go._group_sessions["g1"] = ev
+    try:
+        go.cancel_group_run("g1")
+        assert ev.is_set()
+        assert cancelled == ["m1"]
+    finally:
+        go._group_sessions.pop("g1", None)
