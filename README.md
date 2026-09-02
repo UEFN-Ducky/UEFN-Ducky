@@ -15,8 +15,10 @@ toolset you want.
 
 > **No official cryptocurrency or token.** There is no official UEFN Ducky or DuckyOS coin.
 > Tokens on pump.fun, bump.fun, or similar that use our name, logo, GitHub, or contributor
-> list are unofficial. Contributors are not founders. We do not endorse, operate, or receive
-> those coins. Official support is Patreon and [uefnducky.org](https://uefnducky.org) — not crypto.
+> list are unofficial. The Contributors graph is a commit list, **not founders**.
+> **AnasInno** is a pull-request author only — not a founder, not an officer, not authorized
+> to claim creator fees. See [UNOFFICIAL_TOKENS.md](UNOFFICIAL_TOKENS.md).
+> Official support is Patreon and [uefnducky.org](https://uefnducky.org) — not crypto.
 
 > **Platform:** Windows. macOS is not bundled yet.
 
