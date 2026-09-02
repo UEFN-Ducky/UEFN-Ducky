@@ -280,7 +280,6 @@ function FollowCodeSection() {
         id="toggle-follow-tabs"
         label="Open files in a tab group beside the chat"
         checked={settings.splitBesideChat}
-        disabled={!settings.enabled}
         onChange={(checked) => update({ splitBesideChat: checked })}
       />
       <div className="general-tab-toggle-row">

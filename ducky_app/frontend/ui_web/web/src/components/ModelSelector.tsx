@@ -574,7 +574,12 @@ export function ModelSelector({
     );
   };
 
-  const renderFlatOrVendor = (rows: CatalogModelRow[], agentId: string, selectedId: string | null) => {
+  const renderFlatOrVendor = (
+    rows: CatalogModelRow[],
+    agentId: string,
+    selectedId: string | null,
+    opts?: { hideEmpty?: boolean },
+  ) => {
     const groups = groupByVendor(rows);
     const single = groups.length <= 1;
     let firstHit = true;
@@ -612,7 +617,7 @@ export function ModelSelector({
             </div>
           );
         })}
-        {rows.length === 0 && (
+        {rows.length === 0 && !opts?.hideEmpty && (
           <div className="model-selector-empty">{query ? `No models match “${search}”.` : "No models."}</div>
         )}
       </>
@@ -627,7 +632,9 @@ export function ModelSelector({
         : null;
     return (
       <>
-        {renderFlatOrVendor(viewApiRows, apiAgentId, apiSelected)}
+        {renderFlatOrVendor(viewApiRows, apiAgentId, apiSelected, {
+          hideEmpty: gw.nestedAgents.length > 0,
+        })}
         {gw.nestedAgents.map((agent) => {
           const rows = agentModels(agent.id);
           const filtered = query ? rows.filter((m) => m.name.toLowerCase().includes(query)) : rows;

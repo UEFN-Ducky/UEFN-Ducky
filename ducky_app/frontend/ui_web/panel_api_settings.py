@@ -8,7 +8,7 @@ import frontend.ui_web.panel_api as _pa
 
 
 class PanelApiSettingsMixin:
-    def get_settings(self) -> dict[str, str]:
+    def get_settings(self) -> dict[str, Any]:
         s = _pa.PanelSettings.load()
         from backend.agent.coding_agents.settings_helpers import coding_agents_dict
 
@@ -570,14 +570,16 @@ class PanelApiSettingsMixin:
         if "chat_title_model" in patch:
             s.chat_title_model = str(patch.get("chat_title_model") or "").strip()
         if "follow_code_enabled" in patch:
-            s.follow_code_enabled = bool(patch.get("follow_code_enabled"))
+            s.follow_code_enabled = _pa._patch_bool(patch.get("follow_code_enabled"))
         if "follow_code_speed" in patch:
             speed = str(patch.get("follow_code_speed") or "normal").strip()
             s.follow_code_speed = (
                 speed if speed in ("slow", "normal", "fast", "instant") else "normal"
             )
         if "follow_code_split_beside_chat" in patch:
-            s.follow_code_split_beside_chat = bool(patch.get("follow_code_split_beside_chat"))
+            s.follow_code_split_beside_chat = _pa._patch_bool(
+                patch.get("follow_code_split_beside_chat")
+            )
         if "walkthrough_completed" in patch:
             raw = patch.get("walkthrough_completed")
             if isinstance(raw, dict):

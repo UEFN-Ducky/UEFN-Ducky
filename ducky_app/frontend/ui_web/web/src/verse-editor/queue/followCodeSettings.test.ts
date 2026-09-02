@@ -51,9 +51,35 @@ describe("followCodeSettings persistence", () => {
     const mod = await import("./followCodeSettings");
     mod.setFollowCodeSettings({ enabled: false });
     expect(mod.getFollowCodeSettings().enabled).toBe(false);
+    expect(mod.getFollowCodeSettings().splitBesideChat).toBe(false);
+    expect(mod.shouldSplitFollowTabs()).toBe(false);
     expect(saveAgentSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ follow_code_enabled: false }),
+      expect.objectContaining({
+        follow_code_enabled: false,
+        follow_code_split_beside_chat: false,
+      }),
     );
+  });
+
+  it("treats string false from get_settings as off", async () => {
+    getSettings.mockResolvedValue({
+      follow_code_enabled: "false",
+      follow_code_speed: "normal",
+      follow_code_split_beside_chat: "false",
+    });
+    const mod = await import("./followCodeSettings");
+    await mod.loadFollowCodeSettings();
+    expect(mod.getFollowCodeSettings().enabled).toBe(false);
+    expect(mod.getFollowCodeSettings().splitBesideChat).toBe(false);
+  });
+
+  it("does not open a tab group when follow is off even if split is still on", async () => {
+    const mod = await import("./followCodeSettings");
+    mod.setFollowCodeSettings({ enabled: true, splitBesideChat: true });
+    // Force the cache into the old trapped state (follow off, split still checked).
+    mod.setFollowCodeSettings({ enabled: false, splitBesideChat: true });
+    expect(mod.getFollowCodeSettings().enabled).toBe(false);
+    expect(mod.shouldSplitFollowTabs()).toBe(false);
   });
 
   it("does not let a stale load overwrite a newer toggle", async () => {

@@ -14,6 +14,9 @@ UEFN workflows. Contributions of all sizes are welcome.
   permissive license (MIT, BSD, Apache-2.0, ISC, PSF). Add anything vendored to
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **No secrets.** Don't commit API keys, tokens, or machine-specific absolute paths.
+- **No unofficial tokens.** There is no official UEFN Ducky / DuckyOS cryptocurrency.
+  A merged PR does not make you a founder and does not authorize claiming creator fees
+  on pump.fun, bump.fun, or similar. Do not launch or promote coins in this project's name.
 
 ## Dev setup
 

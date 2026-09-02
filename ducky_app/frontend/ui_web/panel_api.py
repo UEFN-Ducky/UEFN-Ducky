@@ -436,6 +436,17 @@ def _reset_appearance_to_defaults(s: Any) -> None:
     apply_built_in_appearance(s, DEFAULT_APPEARANCE_PROFILE_ID)
 
 
+def _patch_bool(value: Any) -> bool:
+    """Coerce a settings patch value. ``bool("false")`` is True — never use that."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
 def _coerce_mapping(value: Any, *, label: str = "object") -> dict[str, Any]:
     if value is None:
         return {}

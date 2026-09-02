@@ -37,6 +37,7 @@ import { formatAskDraft } from "../utils/formatAskDraft";
 import { openChatBesideFile } from "../utils/openChatBesideFile";
 import { enqueueComposerDraft } from "../hooks/chatComposerCache";
 import { syncAskAiMenuItems } from "../verse-editor/monaco/registerAskAiContextMenu";
+import { shouldSplitFollowTabs } from "../verse-editor/queue/followCodeSettings";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { TerminalHeaderBridge } from "../components/TerminalHeaderBridge";
 import { DEFAULT_TERMINAL_SHELL, type TerminalShell } from "../terminal/types";
@@ -299,6 +300,7 @@ function FocusViewContent({ focusId }: FocusViewProps) {
   useRegisterQuickOpenHandlers(quickOpenHandlers);
 
   const handleRequestSplit = useCallback(() => {
+    if (!shouldSplitFollowTabs()) return;
     const layoutTabIds = collectTabIds(layout);
     const fileTab = openTabs.find((t) => t.kind === "file" && layoutTabIds.includes(t.id));
     const chatTab = openTabs.find((t) => t.kind === "chat" && layoutTabIds.includes(t.id));

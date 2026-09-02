@@ -32,11 +32,21 @@ const SPEED_MULTIPLIERS: Record<FollowCodeSpeed, number> = {
   instant: 0,
 };
 
+/** pywebview / JSON / localStorage can hand back a real bool or "false"/"0". */
+export function readApiBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const raw = value.trim().toLowerCase();
+    if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") return true;
+    if (raw === "false" || raw === "0" || raw === "no" || raw === "off") return false;
+  }
+  return fallback;
+}
+
 function readBool(key: string, fallback: boolean): boolean {
   try {
-    const raw = localStorage.getItem(key);
-    if (raw === "true") return true;
-    if (raw === "false") return false;
+    return readApiBool(localStorage.getItem(key), fallback);
   } catch {
     // ignore storage errors
   }
@@ -86,16 +96,28 @@ export function getFollowCodeSettings(): FollowCodeSettings {
   return cache;
 }
 
+/** Agent opens land beside chat only when Follow Code is on AND the tab-group switch is on. */
+export function shouldSplitFollowTabs(): boolean {
+  return cache.enabled && cache.splitBesideChat;
+}
+
 export function followCodeSpeedMultiplier(speed: FollowCodeSpeed): number {
   return SPEED_MULTIPLIERS[speed] ?? 1;
 }
 
 export function setFollowCodeSettings(patch: Partial<FollowCodeSettings>): void {
   writeGen += 1;
+  const enabled = patch.enabled ?? cache.enabled;
+  // Follow off ⇒ tab-group open off. Leaving split checked+disabled was why
+  // files still opened beside chat after the user unchecked Follow Code.
+  const splitBesideChat =
+    enabled === false
+      ? (patch.splitBesideChat ?? false)
+      : (patch.splitBesideChat ?? cache.splitBesideChat);
   cache = {
-    enabled: patch.enabled ?? cache.enabled,
+    enabled,
     speed: patch.speed ?? cache.speed,
-    splitBesideChat: patch.splitBesideChat ?? cache.splitBesideChat,
+    splitBesideChat,
   };
   writeLocal(cache);
   notify();
@@ -120,7 +142,7 @@ export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
   const s = await api.get_settings();
   if (genAtStart !== writeGen) return cache;
   const fromApi: FollowCodeSettings = {
-    enabled: s.follow_code_enabled !== false,
+    enabled: readApiBool(s.follow_code_enabled, DEFAULTS.enabled),
     speed:
       s.follow_code_speed === "slow" ||
       s.follow_code_speed === "normal" ||
@@ -128,7 +150,7 @@ export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
       s.follow_code_speed === "instant"
         ? s.follow_code_speed
         : "normal",
-    splitBesideChat: s.follow_code_split_beside_chat !== false,
+    splitBesideChat: readApiBool(s.follow_code_split_beside_chat, DEFAULTS.splitBesideChat),
   };
 
   let migrated = false;
@@ -186,7 +208,8 @@ export function useFollowCodeSettings() {
     const refresh = () => setSettings(getFollowCodeSettings());
     listeners.add(refresh);
     window.addEventListener(CHANGE_EVENT, refresh);
-    void loadFollowCodeSettings().then(refresh);
+    // App.tsx hydrates once. Reloading here on every Settings remount raced the
+    // fire-and-forget save and snapped the checkbox back to on.
     return () => {
       listeners.delete(refresh);
       window.removeEventListener(CHANGE_EVENT, refresh);

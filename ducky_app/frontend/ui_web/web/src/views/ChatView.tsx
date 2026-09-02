@@ -94,7 +94,7 @@ import { formatAskDraft } from "../utils/formatAskDraft";
 import { openChatBesideFile } from "../utils/openChatBesideFile";
 import { enqueueComposerDraft } from "../hooks/chatComposerCache";
 import { syncAskAiMenuItems } from "../verse-editor/monaco/registerAskAiContextMenu";
-import { getFollowCodeSettings } from "../verse-editor/queue/followCodeSettings";
+import { shouldSplitFollowTabs } from "../verse-editor/queue/followCodeSettings";
 import { VerseEditorProvider, useVerseEditorOptional } from "../verse-editor";
 import { useUiTarget } from "../ui-targets/registry";
 
@@ -141,7 +141,6 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     dropTabOnGroup,
     remapTabId,
     initLayoutState,
-    splitFocusedGroupWithTab,
     openTabBeside,
     openTabInZone,
     openTabsRef,
@@ -504,7 +503,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       const id = fileTabId(norm);
       const tabName = isVerseFile(norm) ? basename(norm) : name;
       void openOrFocusTab(id, () => {
-        if (!getFollowCodeSettings().splitBesideChat) {
+        if (!shouldSplitFollowTabs()) {
           openTab({ id, kind: "file", name: tabName, path: norm }, options);
           return;
         }
@@ -860,26 +859,6 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       })),
     );
   }, [allChats, resolveUrl]);
-
-  const handleRequestSplit = useCallback(() => {
-    // Beside-chat placement already puts agent files in their own group —
-    // the legacy focused-group split would reshuffle the layout on every open.
-    if (getFollowCodeSettings().splitBesideChat) return;
-    // Read layout/tabs from refs so this callback stays STABLE across renders.
-    // It feeds VerseEditorProvider's `queue` memo; depending on openTabs/layout
-    // here rebuilt the EditorActionQueue on every layout change (and, before the
-    // useVerseLsp ref fix, drove the verse-lsp bind/unbind loop).
-    const lay = layoutRef.current;
-    const tabs = openTabsRef.current;
-    const idsInLayout = new Set(collectTabIds(lay));
-    const fileTab = tabs.find((t) => t.kind === "file" && idsInLayout.has(t.id));
-    const chatTab = tabs.find((t) => t.kind === "chat" && idsInLayout.has(t.id));
-    if (fileTab && chatTab && fileTab.id !== chatTab.id) {
-      splitFocusedGroupWithTab(
-        fileTab.id === lay.groups[lay.focusedGroupId]?.activeTabId ? chatTab.id : fileTab.id,
-      );
-    }
-  }, [splitFocusedGroupWithTab]);
 
   const [filesRefresh, setFilesRefresh] = useState(0);
   const handleFileSync = useCallback(() => setFilesRefresh((n) => n + 1), []);
@@ -1325,7 +1304,6 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     <VerseEditorProvider
       onOpenFile={openFileTab}
       onAgentOpenFile={openAgentFileTab}
-      onRequestSplit={handleRequestSplit}
       onFileSync={handleFileSync}
       projectPath={projectPath}
     >

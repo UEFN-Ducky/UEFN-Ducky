@@ -12,6 +12,13 @@ auth bypasses.
 
 We aim to acknowledge reports within 72 hours.
 
+## Unofficial tokens
+
+There is no official UEFN Ducky or DuckyOS cryptocurrency. Coins on pump.fun,
+bump.fun, or similar that use our name, logo, GitHub, or contributor list are
+unofficial. This project did not launch them and does not claim creator rewards.
+A GitHub profile appearing on a coin is not affiliation.
+
 ## What we will not treat as a vulnerability
 
 - Client-side Store UI gates (`needsPurchase`) that the server already enforces

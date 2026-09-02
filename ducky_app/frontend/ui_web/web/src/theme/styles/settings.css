@@ -1802,6 +1802,23 @@
   font-size: 12px;
 }
 
+.support-tab-warn {
+  border: 1px solid color-mix(in srgb, var(--amber, #d4a017) 45%, var(--border));
+  background: color-mix(in srgb, var(--amber, #d4a017) 10%, var(--card));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.support-tab-warn-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--amber, #d4a017);
+}
+
 .support-tab-cta {
   position: relative;
   display: inline-flex;
