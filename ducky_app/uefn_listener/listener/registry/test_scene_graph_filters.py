@@ -7,14 +7,7 @@ from pathlib import Path
 
 import pytest
 
-_FILTERS = (
-    Path(__file__).resolve().parents[1]
-    / "ducky_app"
-    / "uefn_listener"
-    / "listener"
-    / "registry"
-    / "scene_graph_filters.py"
-)
+_FILTERS = Path(__file__).resolve().parents[1] / "uefn_listener" / "listener" / "registry" / "scene_graph_filters.py"
 _spec = importlib.util.spec_from_file_location("scene_graph_filters", _FILTERS)
 assert _spec and _spec.loader
 _mod = importlib.util.module_from_spec(_spec)
