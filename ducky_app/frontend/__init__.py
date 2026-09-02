@@ -1,3 +1,3 @@
 """UEFN Ducky control panel: merge global IDE MCP configs, deploy listener, test bridge."""
 
-__version__ = "1.1.53"
+__version__ = "1.1.54"
