@@ -60,3 +60,9 @@ plugin `register()` via paths like `backend.tools.uefn.actors`.
 By contributing, you grant Mindful Path Company, LLC a perpetual, worldwide,
 irrevocable license to use, modify, distribute, and relicense your contributions
 under the project's [Ducky Source-Available License v1.0](LICENSE).
+
+## Unofficial tokens
+
+There is no official UEFN Ducky / DuckyOS coin. The Contributors graph is not a founder list.
+**AnasInno** and any other PR author are not authorized to claim pump.fun / bump.fun fees
+or speak for this project. See [UNOFFICIAL_TOKENS.md](UNOFFICIAL_TOKENS.md).
