@@ -20,3 +20,9 @@ We aim to acknowledge reports within 72 hours.
   download time, not DRM).
 - Open-sourcing this app. Secrets live on the server and in per-user DPAPI
   storage, not in the source.
+
+## Unofficial tokens
+
+There is no official UEFN Ducky or DuckyOS cryptocurrency. The Contributors graph does not
+authorize fee claims. **AnasInno** is not a founder; any pump.fun / bump.fun claim tied to
+that account is unauthorized. See [UNOFFICIAL_TOKENS.md](UNOFFICIAL_TOKENS.md).
