@@ -217,6 +217,22 @@ def workspace_write_file(relative_path: str, content: str, pretty: bool = False)
         "lines_added": lines_added,
         "lines_removed": lines_removed,
     }
+    if rel.lower().endswith(".verse"):
+        # Findings only — never blocks the write. Catches the effect/using/API
+        # mistakes the offline LSP scan cannot see.
+        try:
+            from backend.tools.verse.verse_lint import lint_verse, summarize_findings
+
+            findings = lint_verse(content, file_path)
+            payload["lint"] = summarize_findings(findings)
+            if findings:
+                payload["next"] = (
+                    "Fix lint findings, then workspace_list_verse_errors; run "
+                    "workspace_compile_verse before any wire_*/set_verse_editable/"
+                    "set_npc_definition_behavior"
+                )
+        except Exception:
+            pass
     try:
         from frontend.ui_web.verse_editor.agent_sync import emit_for_bridge_tool
 

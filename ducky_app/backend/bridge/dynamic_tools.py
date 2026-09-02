@@ -273,6 +273,21 @@ _NEVER_EXPOSE = frozenset(
 
 _WAIT_FOR_RELOAD_SEC = 8.0
 
+# Listener commands that write Verse @editable state and fail with "STALE
+# REFLECTION" / "Verse class not found" until the class is built: their
+# passthrough gets the same compile+reload+retry preflight as the static wrappers.
+_PREFLIGHT_COMMANDS = frozenset(
+    {
+        "set_npc_definition_behavior",
+        "resize_verse_array_field",
+        "patch_verse_array_entry",
+        "set_verse_editable",
+        "set_currency_config_entries",
+        "wire_verse_device_ref",
+        "wire_verse_device_array",
+    }
+)
+
 
 def _manifest_cache_path() -> Path:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
@@ -338,6 +353,13 @@ def _make_passthrough(command: str, doc: str, param_list: list[dict]) -> Callabl
     def _tool(params: Optional[dict] = None, pretty: bool = False) -> str:
         from backend.bridge import send_command
 
+        if command in _PREFLIGHT_COMMANDS:
+            from backend.tools.verse.wire_preflight import run_with_build_retry
+
+            result = run_with_build_retry(
+                lambda: send_command(command, params or {}), tool_name=command
+            )
+            return tool_json(result, pretty=pretty)
         return tool_json(send_command(command, params or {}), pretty=pretty)
 
     _tool.__name__ = command

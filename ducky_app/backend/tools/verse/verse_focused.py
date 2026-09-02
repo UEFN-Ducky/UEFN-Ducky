@@ -7,6 +7,7 @@ from typing import Any
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
+from backend.tools.verse.wire_preflight import run_with_build_retry
 
 
 def _annotate_stale_listener(result: dict) -> dict:
@@ -61,13 +62,16 @@ def resize_verse_array(
     Call inspect_verse_device first — use exact array_field name (e.g. from editables keys).
     Then patch_verse_array_entry per row for scalars/icons.
     """
-    result = send_command(
-        "resize_verse_array_field",
-        {
-            "actor_path": actor_path,
-            "array_field": array_field,
-            "count": int(count),
-        },
+    result = run_with_build_retry(
+        lambda: send_command(
+            "resize_verse_array_field",
+            {
+                "actor_path": actor_path,
+                "array_field": array_field,
+                "count": int(count),
+            },
+        ),
+        tool_name="resize_verse_array_field",
     )
     return tool_json(result, pretty=pretty)
 
@@ -88,13 +92,16 @@ def patch_verse_array_entry(
     - `{"CurrencyName": "Gold", "DisplayOrder": 0}`
     - `{"CurrencyIcon": {"texture_path": "T_GoldIcon"}}`
     """
-    result = send_command(
-        "patch_verse_array_entry",
-        {
-            "actor_path": actor_path,
-            "array_field": array_field,
-            "index": int(index),
-            "properties": properties,
-        },
+    result = run_with_build_retry(
+        lambda: send_command(
+            "patch_verse_array_entry",
+            {
+                "actor_path": actor_path,
+                "array_field": array_field,
+                "index": int(index),
+                "properties": properties,
+            },
+        ),
+        tool_name="patch_verse_array_entry",
     )
     return tool_json(result, pretty=pretty)

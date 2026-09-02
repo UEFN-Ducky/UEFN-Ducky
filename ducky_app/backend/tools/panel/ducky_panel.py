@@ -393,7 +393,14 @@ def ducky_sync_project_to_uefn(pretty: bool = False) -> str:
 def ducky_get_errors(limit: int = 50, pretty: bool = False) -> str:
     """Recent UEFN-Ducky error log entries (bridge, agent, deploy). Host-side; no listener required."""
     limit = max(1, min(int(limit), 200))
-    return tool_json({"errors": read_errors(limit=limit)}, pretty=pretty)
+    payload: dict[str, Any] = {"errors": read_errors(limit=limit)}
+    try:
+        from backend.tools.verse.verse_stats import summarize
+
+        payload["verse_stats"] = summarize()
+    except Exception:  # noqa: BLE001 — telemetry must never break the tool
+        pass
+    return tool_json(payload, pretty=pretty)
 
 
 @mcp.tool()

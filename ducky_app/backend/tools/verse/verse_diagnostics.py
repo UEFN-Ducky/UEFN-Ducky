@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from frontend.settings import PanelSettings
@@ -17,8 +19,21 @@ from frontend.ui_web.verse_editor.panel_events import (
 )
 from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
 from backend.bridge import resolve_workspace_path
+from backend.tools.verse.compile_hints import hints_for
+from backend.tools.verse.verse_stats import record_compile, record_tool_failure
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
+
+
+OFFLINE_SCAN_NOTE = (
+    "Offline LSP scan. It does NOT detect effect (no_rollback/transacts), module-access, "
+    "or ambiguous-identifier errors. Run workspace_compile_verse before "
+    "wire_*/set_verse_editable/set_npc_definition_behavior."
+)
+WORKFLOW_NOT_CONNECTED = (
+    "UEFN Workflow Server not connected — open the project in UEFN, then retry once"
+)
+_VERSE_FILE_RE = re.compile(r"[\w\-./\\]+\.verse\b")
 
 
 def _project_root() -> str:
@@ -72,7 +87,9 @@ def workspace_list_verse_errors(pretty: bool = False, full: bool = False, rescan
     # payload is authoritative — always replace the UI registry with it.
     merged = load_for_ui(root)
     push_verse_diagnostics_sync(list(merged.get("files") or []), root, replace=True)
-    return tool_json(merged, pretty=pretty)
+    payload = dict(merged)
+    payload["note"] = OFFLINE_SCAN_NOTE
+    return tool_json(payload, pretty=pretty)
 
 
 @plugin_mcp_tool("verse")
@@ -113,6 +130,15 @@ def _spawnable_verse_classes(limit: int = 40) -> Any:
         return found.get("assets") or []
     except Exception as exc:  # noqa: BLE001 — listener down must not fail the compile tool
         return {"unavailable": str(exc)[:160]}
+
+
+def _compile_text(payload: dict[str, Any], last_log: str) -> str:
+    """Everything the compiler said, flattened, so `Script error NNNN` codes can be counted."""
+    try:
+        body = json.dumps(payload, default=str)
+    except Exception:  # noqa: BLE001
+        body = str(payload)
+    return body + "\n" + str(last_log or "")
 
 
 @plugin_mcp_tool("verse")
@@ -158,6 +184,18 @@ def workspace_compile_verse(pretty: bool = False) -> str:
         scan["with_errors"] = sum(1 for f in merged.get("files") or [] if f.get("errors"))
         scan["with_warnings"] = sum(1 for f in merged.get("files") or [] if f.get("warnings"))
     payload: dict[str, Any] = {"compile": result, "diagnostics": scan}
+    if result.get("numErrors"):
+        compile_text = _compile_text(payload, getattr(client, "last_log", ""))
+        payload["hints"] = hints_for(compile_text)
+        payload["next"] = (
+            "Load skill_read_subskill('verse','compile_errors'), fix each reported line, rebuild."
+        )
+        try:
+            codes = {h["code"]: h["count"] for h in payload["hints"]}
+            files = sorted(f for f in set(_VERSE_FILE_RE.findall(compile_text)) if "digest" not in f.lower())
+            record_compile(codes, files)
+        except Exception:  # noqa: BLE001 — telemetry must never break the tool
+            pass
     if not result.get("numErrors"):
         payload["verse_classes"] = _spawnable_verse_classes()
         payload["next"] = (
@@ -175,7 +213,16 @@ def workspace_push_verse_changes(verse_only: bool = True, pretty: bool = False) 
     """Push Verse changes to the running UEFN session (hot reload)."""
     client = get_workflow_client()
     if not client.connected:
-        client.start()
+        try:
+            client.start(timeout_s=1.0)
+        except OSError:
+            pass
+    if not client.connected:
+        try:
+            record_tool_failure("workspace_push_verse_changes", WORKFLOW_NOT_CONNECTED)
+        except Exception:  # noqa: BLE001
+            pass
+        return tool_json({"ok": False, "error": WORKFLOW_NOT_CONNECTED}, pretty=pretty)
     if not client.can_push_verse_changes:
         raise ValueError("UEFN is not ready to push Verse changes")
     message = client.push_changes(bool(verse_only))

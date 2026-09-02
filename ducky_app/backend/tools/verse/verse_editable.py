@@ -7,6 +7,7 @@ from typing import Any
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
+from backend.tools.verse.wire_preflight import run_with_build_retry
 
 
 @plugin_mcp_tool("verse")
@@ -57,7 +58,9 @@ def set_verse_editable(
         params["target_path"] = target_path
     if value is not None:
         params["value"] = value
-    result = send_command("set_verse_editable", params)
+    result = run_with_build_retry(
+        lambda: send_command("set_verse_editable", params), tool_name="set_verse_editable"
+    )
     return tool_json(result, pretty=pretty)
 
 
@@ -133,9 +136,12 @@ def wire_verse_device_ref(
     hashes and retry once. Never abort to the user. Example:
     wire_verse_device_ref("MyDevice", "SomeButtonField", "MyButton")
     """
-    result = send_command(
-        "wire_verse_device_ref",
-        {"actor_path": actor_path, "field": field, "target_path": target_path},
+    result = run_with_build_retry(
+        lambda: send_command(
+            "wire_verse_device_ref",
+            {"actor_path": actor_path, "field": field, "target_path": target_path},
+        ),
+        tool_name="wire_verse_device_ref",
     )
     return tool_json(result, pretty=pretty)
 
@@ -148,21 +154,25 @@ def wire_verse_device_array(
     target_paths: list[str] | None = None,
     pretty: bool = False,
 ) -> str:
-    """Wire one creative device or prop into an array @editable (single target per call).
+    """Wire one or more creative devices / props into an array @editable in one call.
 
-    Pass target_path OR target_paths with exactly one entry. For scalar fields like
-    NPCSpawner1 use wire_verse_device_ref instead. Then save_current_level when done.
-    Example: wire_verse_device_array("MyDevice", "SomeArrayField", "Marker_1")
+    Pass target_path (one) OR target_paths (1..N, appended in order). Returns
+    `wired` (labels) + `count`. For scalar fields like NPCSpawner1 use
+    wire_verse_device_ref instead. Then save_current_level when done.
+    Example: wire_verse_device_array("MyDevice", "SomeArrayField", target_paths=["Marker_1", "Marker_2"])
     """
     paths = [target_path] if target_path else list(target_paths or [])
-    if len(paths) != 1:
+    if not paths:
         raise ValueError(
-            "wire_verse_device_array requires exactly one target_path per call. "
-            "For multiple scalar spawners (NPCSpawner1, NPCSpawner2, …) use wire_verse_device_ref."
+            "wire_verse_device_array needs at least one target: pass target_path or target_paths=[...]. "
+            "For scalar spawners (NPCSpawner1, NPCSpawner2, …) use wire_verse_device_ref."
         )
-    result = send_command(
-        "wire_verse_device_array",
-        {"actor_path": actor_path, "field": field, "target_paths": paths},
+    result = run_with_build_retry(
+        lambda: send_command(
+            "wire_verse_device_array",
+            {"actor_path": actor_path, "field": field, "target_paths": paths},
+        ),
+        tool_name="wire_verse_device_array",
     )
     return tool_json(result, pretty=pretty)
 
@@ -202,5 +212,8 @@ def set_currency_config_entries(
         params["entries"] = entries
     else:
         params["count"] = count
-    result = send_command("set_currency_config_entries", params)
+    result = run_with_build_retry(
+        lambda: send_command("set_currency_config_entries", params),
+        tool_name="set_currency_config_entries",
+    )
     return tool_json(result, pretty=pretty)

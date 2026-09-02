@@ -1112,11 +1112,16 @@ def wire_verse_device_array(
     field: str,
     target_paths: List[str],
 ) -> dict:
-    """Wire one creative device or prop into an array @editable (single target per call)."""
-    if len(target_paths) != 1:
+    """Wire 1..N creative devices or props into an array @editable in one transaction.
+
+    The field/wrapper spec is resolved once; each target gets its own wrapper
+    appended to the existing array, then the array property is marked as a
+    wiring override once (same semantics as the single-target case).
+    """
+    if not target_paths:
         raise ValueError(
-            "wire_verse_device_array accepts exactly one target per call. "
-            "Call once per target, or use resize_verse_array_field + patch_verse_array_entry."
+            "wire_verse_device_array needs at least one target_path. "
+            "Or use resize_verse_array_field + patch_verse_array_entry for struct rows."
         )
     actor, script, prop = _require_field_for_wire(actor_path, field)
     from listener.script_property_overrides import mark_verse_wiring_overrides
@@ -1162,7 +1167,9 @@ def wire_verse_device_array(
         "actor_path": actor.get_path_name(),
         "field": field,
         "mangled_name": prop,
-        "count": len(existing),
+        "wired": [link["target"] for link in links],
+        "count": len(links),
+        "array_length": len(existing),
         "links": links,
         "ok": all(link["linked"] != "None" for link in links),
     }

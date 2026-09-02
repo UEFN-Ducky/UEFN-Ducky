@@ -634,7 +634,74 @@ async def _await_cancellable(
         raise
 
 
+def _tool_input_schema(name: str) -> Any:
+    """Registered tool's JSON input schema; falls back to its docstring, then a hint."""
+    try:
+        mcp = _ensure_mcp()
+        tm = getattr(mcp, "_tool_manager", None)
+        tool = (getattr(tm, "_tools", None) or {}).get(name)
+    except Exception:
+        tool = None
+    if tool is not None:
+        params = getattr(tool, "parameters", None)
+        if isinstance(params, dict) and params:
+            return params
+        doc = getattr(tool, "description", None) or getattr(getattr(tool, "fn", None), "__doc__", None)
+        if doc:
+            return str(doc).strip()
+    return f"schema unavailable — call ducky_get_tools(name={name!r}) for the exact parameters"
+
+
+def _record_tool_failure(name: str, message: str) -> None:
+    try:
+        from backend.tools.verse.verse_stats import record_tool_failure
+    except ImportError:
+        return
+    try:
+        record_tool_failure(name, message)
+    except Exception:
+        pass
+
+
+def _guard_key_name(name: str, args: dict[str, Any]) -> str:
+    try:
+        from backend.agent.toolsets import effective_tool_name
+
+        return effective_tool_name(name, args)
+    except Exception:
+        return name
+
+
 async def execute_tool(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    cancel_event: Any | None = None,
+) -> ToolCallResult:
+    """Dispatch a tool call; failures feed verse_stats and the hammer guard."""
+    from backend.agent import hammer_guard
+
+    result = await _execute_tool_inner(name, arguments, cancel_event=cancel_event)
+    key_name = _guard_key_name(name, arguments or {})
+    if result.ok:
+        hammer_guard.note_success(key_name)
+        return result
+    if result.error == "Cancelled":
+        return result
+    _record_tool_failure(key_name, result.error)
+    count = hammer_guard.note_failure(key_name, result.error)
+    if hammer_guard.should_stop(count):
+        return ToolCallResult(
+            ok=False,
+            tool=name,
+            error=hammer_guard.stop_payload(result.error, _tool_input_schema(key_name)),
+            hint=hammer_guard.STOP_TEXT,
+            duration_ms=result.duration_ms,
+        )
+    return result
+
+
+async def _execute_tool_inner(
     name: str,
     arguments: dict[str, Any] | None = None,
     *,

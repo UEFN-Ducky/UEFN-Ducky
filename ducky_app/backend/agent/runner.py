@@ -28,6 +28,7 @@ from backend.agent.providers import make_provider
 from backend.agent.providers.base import ProviderMessage, StreamEvent, StreamEventKind, ToolCallRequest
 from backend.agent.secrets import get_key
 from backend.agent.run_context import reset_plan_only, set_plan_only
+from backend.agent import hammer_guard
 from backend.agent.tool_router import is_destructive, select_tools
 from backend.agent.toolsets.destructive import allow_destructive_execution
 from backend.agent.toolsets import effective_tool_name
@@ -522,6 +523,7 @@ class AgentRunner:
         bridge = _CancelBridge(self._cancel, thread_cancel)
         set_tool_result_format(self.config.tool_result_format)
         plan_token = set_plan_only(bool(self.config.plan_only))
+        hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
         try:
             async for event in self._run_turn_inner(
                 user_text,
@@ -532,6 +534,7 @@ class AgentRunner:
             ):
                 yield event
         finally:
+            hammer_guard.reset_conversation(hammer_token)
             reset_plan_only(plan_token)
 
     async def _run_turn_inner(
