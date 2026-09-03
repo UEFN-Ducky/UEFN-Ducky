@@ -497,6 +497,46 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
     return None
 
 
+def sync_skill_snapshot(
+    conv: Conversation, settings: Any, project_root: str | None = None
+) -> bool:
+    """Rebuild a frozen skill index when the packs on disk changed.
+
+    Returns True when the prompt text actually changed. A conversation freezes
+    its skill index at creation so pack toggles elsewhere cannot rewrite an
+    in-flight chat; without this, a chat opened before an update never learns
+    that a new subskill exists (bodies are always read live, the index is not).
+
+    Rebuilds from the conversation's OWN selection, so per-chat enables and
+    disables survive. The prompt cache is only invalidated when the text really
+    changed — a body-only fix moves the revision but not the index, and costs
+    no cache miss.
+    """
+    from backend.skills.store import (
+        build_skill_prompt,
+        resolve_conversation_selection,
+        skills_revision,
+    )
+
+    if not str(getattr(conv, "skill_snapshot", "") or "").strip():
+        return False  # no snapshot: the send path rebuilds from selection anyway
+    rev = skills_revision()
+    if not rev or rev == str(getattr(conv, "skill_snapshot_rev", "") or ""):
+        return False
+    text = build_skill_prompt(resolve_conversation_selection(conv, settings))
+    if not text.strip():
+        return False  # never blank out a working snapshot
+    changed = text.strip() != conv.skill_snapshot.strip()
+    conv.skill_snapshot = text
+    conv.skill_snapshot_rev = rev
+    if changed:
+        from backend.agent.prompt_cache import invalidate_conv_cache
+
+        invalidate_conv_cache(conv)
+    save_conversation(conv, project_root, touch_updated=False)
+    return changed
+
+
 def save_conversation(conv: Conversation, project_root: str | None = None, *, touch_updated: bool = True) -> None:
     with _conversation_lock(conv.id):
         if touch_updated:
@@ -566,7 +606,7 @@ def create_conversation(
     now = time.time()
     s = settings or PanelSettings.load()
     root = project_root if project_root is not None else s.uefn_project_root
-    from backend.skills.store import conversation_skill_text, merge_selection
+    from backend.skills.store import conversation_skill_text, merge_selection, skills_revision
     from backend.agent.coding_agents.base import normalize_coding_agent
     from backend.agent.thinking_effort import normalize_thinking_effort
 
@@ -577,6 +617,7 @@ def create_conversation(
         skill_snapshot="",
         mutate=False,
     )
+    snapshot_rev = skills_revision()
     agent = normalize_coding_agent(coding_agent or "ducky")
     model_value = (model or "").strip()
     provider_value = (provider or "").strip()
@@ -594,6 +635,7 @@ def create_conversation(
         provider=provider_value,
         model=model_value,
         skill_snapshot=snapshot,
+        skill_snapshot_rev=snapshot_rev,
         disabled_packs=list(sel.disabled_packs),
         enabled_packs=None,
         enabled_subskills=dict(sel.enabled_subskills) or None,
@@ -854,6 +896,9 @@ def set_conversation_skill_selection(
         skill_snapshot="",
         mutate=False,
     )
+    from backend.skills.store import skills_revision
+
+    conv.skill_snapshot_rev = skills_revision()
     from backend.agent.prompt_cache import invalidate_conv_cache
 
     invalidate_conv_cache(conv)

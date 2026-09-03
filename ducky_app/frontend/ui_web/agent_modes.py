@@ -1512,6 +1512,15 @@ def run_message(
                 if "skill" in omit:
                     skill = ""
                 elif conv.skill_snapshot.strip():
+                    # Frozen index: refresh it if the packs on disk changed since
+                    # this chat was created, so an open chat still learns about
+                    # subskills added by a plugin update. No-op when nothing moved.
+                    try:
+                        from frontend.ui_web.project_chats import sync_skill_snapshot
+
+                        sync_skill_snapshot(conv, settings)
+                    except Exception:
+                        pass  # never let a refresh break a send
                     skill = conv.skill_snapshot
                 else:
                     sel = resolve_conversation_selection(conv, settings)

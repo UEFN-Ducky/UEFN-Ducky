@@ -75,6 +75,8 @@ class Conversation:
     model: str = ""
     messages: list[dict[str, Any]] = field(default_factory=list)
     skill_snapshot: str = ""
+    skill_snapshot_rev: str = ""
+    """Skill-index revision the snapshot was built from (see skills_revision)."""
     enabled_skills: list[str] | None = None
     """Legacy pack ids stored as filenames."""
     enabled_packs: list[str] | None = None
@@ -160,6 +162,7 @@ class Conversation:
             "model": self.model,
             "messages": self.messages,
             "skill_snapshot": self.skill_snapshot,
+            "skill_snapshot_rev": self.skill_snapshot_rev,
             "enabled_skills": self.enabled_skills,
             "enabled_packs": self.enabled_packs,
             "enabled_subskills": self.enabled_subskills,
@@ -208,6 +211,7 @@ class Conversation:
             model=str(d.get("model", "") or ""),
             messages=list(d.get("messages") or []),
             skill_snapshot=str(d.get("skill_snapshot", "") or ""),
+            skill_snapshot_rev=str(d.get("skill_snapshot_rev", "") or ""),
             enabled_skills=(
                 [str(x) for x in d["enabled_skills"]]
                 if "enabled_skills" in d and d["enabled_skills"] is not None
@@ -374,7 +378,7 @@ def create_conversation(
     del enabled_packs, enabled_subskills, enabled_skills
     now = time.time()
     s = settings or PanelSettings.load()
-    from backend.skills.store import conversation_skill_text, merge_selection
+    from backend.skills.store import conversation_skill_text, merge_selection, skills_revision
 
     sel = merge_selection(disabled_packs=disabled_packs)
     snapshot = skill_snapshot or conversation_skill_text(
@@ -382,6 +386,7 @@ def create_conversation(
         skill_snapshot="",
         mutate=False,
     )
+    snapshot_rev = skills_revision()
     conv = Conversation(
         id=str(uuid.uuid4()),
         folder_id=folder_id or "",
@@ -391,6 +396,7 @@ def create_conversation(
         provider=s.agent_provider,
         model=s.agent_model,
         skill_snapshot=snapshot,
+        skill_snapshot_rev=snapshot_rev,
         disabled_packs=list(sel.disabled_packs),
         enabled_packs=None,
         enabled_subskills=None,

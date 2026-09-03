@@ -394,10 +394,17 @@ def invalidate_plugin_skill_caches() -> None:
         _FINGERPRINT_AT = 0.0
         _OWNED_SKILLS_CACHE.clear()
     try:
-        from backend.skills.store import _OWNED_MAP_CACHE, _OWNED_MAP_LOCK
+        from backend.skills.store import (
+            _OWNED_MAP_CACHE,
+            _OWNED_MAP_LOCK,
+            invalidate_skills_revision,
+        )
 
         with _OWNED_MAP_LOCK:
             _OWNED_MAP_CACHE.clear()
+        # Open chats compare this revision to decide whether their frozen skill
+        # index needs rebuilding — drop it with the rest.
+        invalidate_skills_revision()
     except Exception:
         pass
 
