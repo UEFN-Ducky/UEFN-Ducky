@@ -22,15 +22,20 @@ Nothing is written into the UEFN project ``Content/`` folder.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
-from typing import Sequence
+from typing import Iterable, Sequence
 
 import backend.skills.store as _skill
 
 PROJECT_SKILL_FILENAME = "UEFN-Ducky-SKILL.md"
 SKILLS_DIRNAME = "skills"
 MANAGED_BY = "uefn-ducky"
+# Ledger of the pack folders we deployed into a skills root. Lets us prune a
+# folder we own even when its SKILL.md is gone/corrupt, so a pack that
+# disappears can never leave a stale copy an agent could still read.
+DEPLOY_LEDGER = ".ducky-skills.json"
 
 
 def seed_skill_appdata(force: bool = False) -> tuple[Path | None, bool]:
@@ -178,10 +183,64 @@ def _sync_references(src: Path | None, dest: Path) -> bool:
     return touched
 
 
+def _read_deploy_ledger(skills_root: Path) -> set[str]:
+    """Pack ids we deployed into this root on a previous run."""
+    try:
+        data = json.loads((skills_root / DEPLOY_LEDGER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    packs = data.get("packs") if isinstance(data, dict) else None
+    return {str(p) for p in packs} if isinstance(packs, list) else set()
+
+
+def _write_deploy_ledger(skills_root: Path, pack_ids: Iterable[str]) -> None:
+    try:
+        (skills_root / DEPLOY_LEDGER).write_text(
+            json.dumps({"packs": sorted(set(pack_ids))}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _prune_pack_root(dest: Path) -> list[str]:
+    """Drop everything in a pack folder we own except ``SKILL.md`` + ``references/``.
+
+    Without this, a file an older plugin version deployed at the pack root (an
+    earlier layout that kept subskills there, a renamed SKILL, a stray LICENSE)
+    survives every later update — ``_sync_references`` only mirrors
+    ``references/``, and the pack-root write only touches ``SKILL.md``. Agents
+    can still read those leftovers, so they must go.
+    """
+    keep = {_skill.PACK_FILE, _skill.REFERENCES_DIR}
+    removed: list[str] = []
+    try:
+        children = list(dest.iterdir())
+    except OSError:
+        return removed
+    for child in children:
+        if child.name in keep:
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink()
+            removed.append(child.name)
+        except OSError:
+            pass
+    return removed
+
+
 def deploy_skill_folders(skills_root: Path) -> list[str]:
     """Copy every pack into ``skills_root/<pack_id>/``; prune stale managed folders.
 
     Content-compares before writing — an unchanged tree costs reads only.
+
+    Leaves **no** stale file behind: the pack root is pruned to
+    ``SKILL.md`` + ``references/`` (folders we own only), ``references/`` is
+    mirrored exactly, and a pack that disappears is removed even if its
+    SKILL.md no longer parses, via the deploy ledger.
     """
     logs: list[str] = []
     pack_ids = _skill.list_pack_ids()
@@ -189,12 +248,21 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
         skills_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         return [f"Skill deploy skipped ({skills_root}): {e}"]
+    previously_deployed = _read_deploy_ledger(skills_root)
+    deployed: list[str] = []
     for pack_id in pack_ids:
         skill_md = _deployed_skill_md(pack_id)
         if skill_md is None:
             continue
         dest = skills_root / pack_id
         src_dir = _pack_source_dir(pack_id)
+        # Decide ownership BEFORE writing our own SKILL.md, or the check is
+        # circular: a folder a user authored must keep its own extra files.
+        owned = (
+            not dest.exists()
+            or pack_id in previously_deployed
+            or _is_managed_skill_dir(dest)
+        )
         try:
             dest.mkdir(parents=True, exist_ok=True)
             touched = _write_if_changed(
@@ -202,17 +270,27 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
             )
             refs_src = (src_dir / _skill.REFERENCES_DIR) if src_dir else None
             touched |= _sync_references(refs_src, dest / _skill.REFERENCES_DIR)
+            if owned:
+                for name in _prune_pack_root(dest):
+                    touched = True
+                    logs.append(f"Stale skill file pruned -> {dest / name}")
             if touched:
                 logs.append(f"Skill folder -> {dest}")
+            deployed.append(pack_id)
         except OSError as e:
             logs.append(f"Skill folder failed ({dest}): {e}")
     try:
         for child in skills_root.iterdir():
-            if child.is_dir() and child.name not in pack_ids and _is_managed_skill_dir(child):
-                shutil.rmtree(child)
+            if not child.is_dir() or child.name in pack_ids:
+                continue
+            # Managed frontmatter OR our ledger — the ledger covers a folder
+            # whose SKILL.md was deleted or corrupted since we wrote it.
+            if _is_managed_skill_dir(child) or child.name in previously_deployed:
+                shutil.rmtree(child, ignore_errors=True)
                 logs.append(f"Skill folder pruned -> {child}")
     except OSError:
         pass
+    _write_deploy_ledger(skills_root, deployed)
     return logs
 
 

@@ -984,7 +984,15 @@ def _copy_pack_tree(src: Path, dest: Path) -> None:
 
 
 def _merge_pack_tree(src: Path, dest: Path, *, ref_origin: str = ORIGIN_SHIPPED) -> None:
-    """Update SKILL.md + shipped refs; never delete or overwrite ``origin: user`` refs."""
+    """Update SKILL.md + shipped refs; never delete or overwrite ``origin: user`` refs.
+
+    A ref the source no longer ships is deleted **only** when its own stamp
+    matches ``ref_origin`` — i.e. this same source put it there. Without that,
+    a subskill dropped in a new build survived in AppData forever, and since
+    AppData outranks plugin-owned content in ``_pack_roots`` it would be
+    redeployed to every IDE — resurrecting content that was removed on purpose.
+    ``user`` / ``store`` / unstamped refs are never touched.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     skill_src = src / PACK_FILE
     if skill_src.is_file():
@@ -1000,12 +1008,25 @@ def _merge_pack_tree(src: Path, dest: Path, *, ref_origin: str = ORIGIN_SHIPPED)
     refs_dest.mkdir(parents=True, exist_ok=True)
     if not refs_src.is_dir():
         return
+    shipped_names: set[str] = set()
     for md in sorted(refs_src.glob("*.md")):
         out = refs_dest / md.name
+        shipped_names.add(md.name)
         if out.is_file() and _is_user_origin_file(out):
             continue
         text = _stamp_ref_origin(md.read_text(encoding="utf-8"), ref_origin)
         out.write_text(text, encoding="utf-8")
+    # Prune our own orphans: refs this source stamped but no longer ships.
+    for old in sorted(refs_dest.glob("*.md")):
+        if old.name in shipped_names:
+            continue
+        meta, _ = parse_frontmatter(_read(old) or "")
+        if _origin_from_meta(meta) != ref_origin:
+            continue  # user / store / unstamped — not ours to delete
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def _pack_version(root: Path) -> int:

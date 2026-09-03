@@ -346,3 +346,22 @@ def test_shipped_templates_have_no_error_findings():
             src = f.read()
         bad = [f for f in lint_verse(src, path) if f["severity"] == "error"]
         assert not bad, f"{os.path.basename(path)}: {bad}"
+
+
+def test_l16_concrete_subtype_editable_warns() -> None:
+    src = (
+        "using { /Verse.org/SceneGraph }\n"
+        "g := class(component):\n"
+        "    @editable Items : []concrete_subtype(entity) = array{}\n"
+    )
+    rules = [f["rule"] for f in lint_verse(src)]
+    assert "concrete_subtype_editable" in rules
+
+
+def test_l16_concrete_subtype_not_editable_is_silent() -> None:
+    src = (
+        "using { /Verse.org/SceneGraph }\n"
+        "g := class(component):\n"
+        "    Items : []concrete_subtype(entity) = array{}\n"
+    )
+    assert not [f for f in lint_verse(src) if f["rule"] == "concrete_subtype_editable"]

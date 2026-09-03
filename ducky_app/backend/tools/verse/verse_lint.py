@@ -725,6 +725,34 @@ def _rule_missing_fortnite_ui_using(ctx: _Context) -> list[dict]:
     return []
 
 
+_CONCRETE_SUBTYPE_RE = re.compile(r"concrete_subtype\s*\(\s*(\w+)\s*\)")
+
+
+def _rule_concrete_subtype_editable(ctx: _Context) -> list[dict]:
+    """L16 — v42.10 validator: every class placed in a concrete_subtype field must be <concrete>."""
+    out: list[dict] = []
+    for i, line in enumerate(ctx.code):
+        m = _CONCRETE_SUBTYPE_RE.search(line)
+        if not m:
+            continue
+        prev = ctx.code[i - 1] if i > 0 else ""
+        if "@editable" not in line and "@editable" not in prev:
+            continue
+        out.append(
+            _finding(
+                i,
+                "concrete_subtype_editable",
+                "warning",
+                f"`concrete_subtype({m.group(1)})` @editable: from v42.10 the editor validates that "
+                "every class assigned to this field is itself `<concrete>` (all fields defaulted); "
+                "a non-concrete class fails validation on republish.",
+                "Declare your own candidate classes `class<concrete>` (stock /Fortnite.com/Weapons "
+                "and /Fortnite.com/Items classes already are), or drop the field.",
+            )
+        )
+    return out
+
+
 _RULES = (
     _rule_no_rollback_in_failure_context,
     _rule_reserved_underscore,
@@ -741,6 +769,7 @@ _RULES = (
     _rule_lone_braces_after_if,
     _rule_module_name_shadow,
     _rule_missing_fortnite_ui_using,
+    _rule_concrete_subtype_editable,
 )
 
 
