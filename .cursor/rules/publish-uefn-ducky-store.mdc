@@ -1,0 +1,20 @@
+---
+description: >-
+  Publish UEFN-Ducky desktop plugins to the Store (uds_release).
+  Use when user says publish/ship/release plugin to Store.
+alwaysApply: false
+---
+
+# Publish desktop plugins to UEFN Ducky Store
+
+The **app** is this repo. Each **plugin** is
+`C:\Users\tas13\Documents\GitHub\uefn-plugins\uefn-plugin-<id>\`.
+
+```bash
+cd /c/Users/tas13/Documents/GitHub/uefn-plugins/uefn-plugin-<id>
+py -3 scripts/release.py --publish --changelog "vN: …"
+```
+
+Needs `DUCKYOS_API_KEY` (or `~/.cursor/mcp.json` Bearer). Then Settings → Store → Update.
+
+Do not bundle plugins into the EXE. Do not commit `*.ducky-plugin.zip`.

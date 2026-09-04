@@ -1,0 +1,22 @@
+---
+description: HARD — app is this repo; plugins are standalone clones
+alwaysApply: true
+---
+
+# App vs plugins
+
+**This repo (`UEFN-Ducky-Release`) is the only app source.** It remotes to
+`github.com/UEFN-Ducky/UEFN-Ducky`. Do not use a plugin monorepo.
+
+Desktop plugins and skill packs are **separate git repos**:
+
+`C:\Users\tas13\Documents\GitHub\uefn-plugins\uefn-plugin-<id>\`
+`C:\Users\tas13\Documents\GitHub\uefn-plugins\uefn-skill-npc-ai\`
+
+- Edit / commit / `git push` that clone only.
+- Publish: `py -3 scripts/release.py --publish` from the clone root.
+- Install/update: Settings → Store only.
+
+Never edit or publish from `Documents/GitHub/UEFN-Ducky` (deleted local
+`desktop-plugins` monorepo). Never ship from `%TEMP%/uefn-plugin-*-ship`.
+Never use `_org_plugin_sync/`.

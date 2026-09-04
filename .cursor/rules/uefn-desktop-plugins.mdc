@@ -1,0 +1,24 @@
+---
+description: UEFN-Ducky desktop plugin develop / Store publish — follow the skill
+globs: ducky_app/backend/uefn_plugins/**,ducky_app/frontend/uefn_plugins/**
+alwaysApply: false
+---
+
+# UEFN desktop plugins (host side)
+
+When editing `ducky_app/frontend/uefn_plugins/**` or
+`ducky_app/backend/uefn_plugins/**`, follow:
+
+`.cursor/skills/uefn-desktop-plugins/SKILL.md`
+
+Plugin **package** work happens in standalone clones under
+`Documents/GitHub/uefn-plugins/uefn-plugin-<id>/` — not in this repo.
+
+Hard rules:
+
+- Secrets only via `set_key` / `secret_keys` names — never in zips
+- New Settings/dock/editor UI must gate on `pluginContributes*`
+- Install/update ONLY via Settings → Store
+- Plugin bytes install only through `import_plugin_from_bytes`
+- After editing `store.py`/`host.py`: run
+  `cd ducky_app && py -m backend.uefn_plugins.test_uefn_plugins`
