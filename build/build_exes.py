@@ -241,6 +241,11 @@ def main() -> int:
     else:
         app_version = _bump_package_version(init_py)
 
+    # Deps first: write_ico below needs Pillow, so this must run before it.
+    pip = [sys.executable, "-m", "pip", "install", "pyinstaller", "-r", str(req)]
+    print(">", " ".join(pip))
+    subprocess.run(pip, check=True, cwd=str(root))
+
     # Branded .ico for the frozen EXE + Windows taskbar
     ducky_app = root / "ducky_app"
     for p in (root, ducky_app):
@@ -271,10 +276,6 @@ def main() -> int:
     version_file.write_text(_version_info_text(app_version, exe_stem), encoding="utf-8")
     os.environ["UEFN_DUCKY_BUILD_VERSION_FILE"] = str(version_file)
     print(f"Staged VERSIONINFO -> {version_file}")
-
-    pip = [sys.executable, "-m", "pip", "install", "pyinstaller", "-r", str(req)]
-    print(">", " ".join(pip))
-    subprocess.run(pip, check=True, cwd=str(root))
 
     # Staging under build/ (gitignored); final EXE goes to dist/ (avoids locking a running copy).
     dist_stage = here / "pyinstaller-dist"
