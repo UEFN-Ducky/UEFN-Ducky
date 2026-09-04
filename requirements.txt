@@ -13,7 +13,8 @@ anthropic>=0.40.0
 # Embedded agent chat (panel)
 openai>=1.40.0
 google-genai>=1.0
-pywinpty>=2.0.13
+# Windows terminal backend; no wheels on macOS/Linux (pip-audit CI runs on ubuntu).
+pywinpty>=2.0.13; platform_system == "Windows"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
 toon_format @ git+https://github.com/toon-format/toon-python.git

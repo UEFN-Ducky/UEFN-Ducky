@@ -32,6 +32,8 @@ def test_external_report_uses_real_session_and_usage(monkeypatch):
         lambda agent_id: {"settings_defaults": {"permission_mode": "acceptEdits"}},
     )
 
+    # Pin the catalog: context limits come from the provider model cache on this machine.
+    monkeypatch.setattr(ct, "_coding_agent_context_limit", lambda *a, **k: 200_000)
     # Pin estimates so this machine's installed skill packs don't swallow the remainder.
     monkeypatch.setattr(ct, "_tool_definition_report_sync", lambda *a, **k: (800, []))
     monkeypatch.setattr(

@@ -31,7 +31,7 @@ def test_read_beta_both_on(tmp_path: Path) -> None:
     assert beta["uefn_mcp_toolsets"] is True
     assert beta["python_and_toolsets"] is True
     assert beta["listener_init_race"] is True
-    assert "both" in beta["agent_note"].lower() or "BOTH" in beta["agent_note"]
+    assert "together" in beta["agent_note"].lower()
     assert "4200" in beta["agent_note"]
 
 

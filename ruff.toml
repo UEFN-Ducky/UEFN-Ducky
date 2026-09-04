@@ -1,6 +1,9 @@
 # Pin lint behavior in-repo so `ruff check` is identical on every machine and in CI
 # (otherwise ruff may fall back to a user-level config with a different rule set).
 # Stock ruff defaults: pycodestyle errors + pyflakes.
+# CI and the app run on 3.13; without this ruff flags ExceptionGroup as undefined.
+target-version = "py313"
+
 [lint]
 select = ["E4", "E7", "E9", "F"]
 # E402: the app deliberately imports after runtime bootstrap (sys.path setup,

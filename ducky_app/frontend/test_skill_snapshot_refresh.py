@@ -122,6 +122,8 @@ def test_body_only_change_restamps_without_busting_the_cache(tmp_path, monkeypat
 def test_per_chat_selection_survives_the_refresh(tmp_path, monkeypatch):
     monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: None)
     monkeypatch.setattr(store, "skills_revision", lambda: "rev2")
+    # Pin the pack list: normalize_disabled_packs drops ids not installed on this machine.
+    monkeypatch.setattr(store, "list_pack_ids", lambda: ["blender"])
     seen: dict = {}
 
     def _build(sel):
