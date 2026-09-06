@@ -65,7 +65,16 @@ from frontend.ui_web.project_chats import (
     set_conversation_skill_selection,
 )
 from frontend.deploy import deploy_listener, resolve_uefn_project_root
-from frontend.error_log import clear_errors as clear_error_log, read_errors, record_error, trim as trim_errors
+from frontend.error_log import (
+    clear_activity,
+    clear_errors as clear_error_log,
+    format_entries,
+    read_activity,
+    read_errors,
+    record_activity,
+    record_error,
+    trim as trim_errors,
+)
 from frontend.ide_paths import IdeKind, path_for_ide
 from frontend.merge import merge_uefn_into_config
 from frontend.mcp_block import build_uefn_server_block
@@ -238,6 +247,10 @@ def _log(msg: str) -> None:
     _log_history.append(msg)
     if len(_log_history) > _MAX_LOG:
         _log_history = _log_history[-_MAX_LOG:]
+    try:
+        record_activity("panel", msg)
+    except Exception:
+        pass
 
 
 def _tool_result_text(result: dict[str, Any] | None) -> str:
@@ -590,6 +603,10 @@ class PanelApi(
         self._pending_panel_push_lock = threading.Lock()
         self._verse_editor = VerseEditorApi()
         _load_model_cache_from_disk()
+        try:
+            trim_errors()
+        except Exception:
+            pass
         # Plugins off the splash critical path — window paints, then contribs arrive.
         self._start_plugins_load_async()
         threading.Thread(target=_warm_model_cache, daemon=True, name="warm-models").start()

@@ -1602,27 +1602,24 @@ class PanelApiSettingsMixin:
         return {"ok": True, "filename": filename}
 
     def get_log(self) -> list[str]:
-        return list(_pa._log_history)
+        return _pa.format_entries(_pa.read_activity())
 
     def clear_log(self) -> list[str]:
         _pa._log_history.clear()
+        _pa.clear_activity()
         return []
 
     def get_errors(self) -> list[str]:
-        _pa.trim_errors()
-        lines: list[str] = []
-        for e in _pa.read_errors():
-            ts = e.get("ts", 0)
-            try:
-                stamp = _pa.time.strftime("%Y-%m-%d %H:%M:%S", _pa.time.localtime(float(ts)))
-            except (ValueError, TypeError):
-                stamp = "?"
-            lines.append(f"[{stamp}] ({e.get('source', '?')}) {e.get('message', '')}")
-        return lines
+        return _pa.format_entries(_pa.read_errors())
 
     def clear_errors(self) -> list[str]:
         _pa.clear_error_log()
         return []
+
+    def copy_support_dump(self) -> str:
+        from frontend.support_dump import format_support_dump
+
+        return format_support_dump()
 
     def pull_editor_log(self) -> None:
         try:

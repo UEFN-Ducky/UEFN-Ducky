@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { copySupportDump } from "./copySupportDump";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
+import { LogPrivacyNote } from "./LogPrivacyNote";
 
 function ScrollIcon() {
   return (
@@ -15,6 +17,7 @@ function ScrollIcon() {
 
 export function LogTab() {
   const [lines, setLines] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
 
   const refresh = useCallback(() => {
     const api = getApi();
@@ -46,10 +49,12 @@ export function LogTab() {
             title="Log"
             description={
               <>
-                Session activity for the panel and app.{" "}
+                Last 24 hours of panel and plugin activity — older lines are deleted automatically.
+                Paste <strong>Copy for Discord</strong> in a bug report.{" "}
                 <span className="log-errors-stats">
                   {lines.length} {lines.length === 1 ? "entry" : "entries"}
                 </span>
+                <LogPrivacyNote />
               </>
             }
           />
@@ -57,10 +62,23 @@ export function LogTab() {
             <button
               type="button"
               className="settings-btn mcp-plugin-btn"
+              onClick={() => {
+                void copySupportDump().then((ok) => {
+                  if (!ok) return;
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+            >
+              {copied ? "Copied" : "Copy for Discord"}
+            </button>
+            <button
+              type="button"
+              className="settings-btn mcp-plugin-btn"
               disabled={lines.length === 0}
               onClick={() => void navigator.clipboard.writeText(lines.join("\n"))}
             >
-              Copy
+              Copy log
             </button>
             <button type="button" className="settings-btn mcp-plugin-btn" onClick={() => void handleClear()}>
               Clear

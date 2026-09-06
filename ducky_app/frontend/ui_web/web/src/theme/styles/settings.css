@@ -520,6 +520,13 @@
   font-weight: 500;
 }
 
+.log-errors-privacy {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .log-errors-actions {
   display: flex;
   flex-wrap: wrap;

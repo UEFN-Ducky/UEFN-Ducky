@@ -137,7 +137,7 @@ function settingsCoreSteps(): WalkthroughStep[] {
         await wait(200);
       },
     ),
-    nextStep("settings.content", "Log & Errors", "Panel logs and recent errors — last header tab under General.", async () => {
+    nextStep("settings.content", "Log & Errors", "Last 24 hours of crash and plugin errors only — no chats or personal info. Copy for Discord when reporting a bug.", async () => {
       await openTab("General");
       fireSection({ tab: "General", section: "log_errors" });
       await wait(250);

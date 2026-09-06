@@ -50,6 +50,7 @@ _PUBLIC_METHODS = frozenset({
     'continue_interrupted',
     'copy_plan',
     'copy_project_entry',
+    'copy_support_dump',
     'create_conversation',
     'create_folder',
     'create_mcp_plugin',

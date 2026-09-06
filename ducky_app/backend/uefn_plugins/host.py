@@ -2190,6 +2190,12 @@ class _PluginApi:
 
     def log(self, message: str) -> None:
         _log.info("[%s] %s", self.plugin_id, message)
+        try:
+            from frontend.error_log import record_activity
+
+            record_activity(self.plugin_id, message)
+        except Exception:
+            pass
 
     def is_enabled(self) -> bool:
         """True when this plugin is enabled in Settings → Store."""
