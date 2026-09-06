@@ -72,9 +72,6 @@ class PanelSettings:
     terminals_enabled: bool = True
     """When false, hide terminal UI and block opening new terminal tabs."""
 
-    agent_max_turns: int = 25
-    """Max agent tool loop iterations per user message."""
-
     appearance_foundation: dict[str, str] = field(default_factory=dict)
     """Foundation colors: accent, bg, surface, text, border."""
 
@@ -250,8 +247,6 @@ class PanelSettings:
     def validate(self) -> None:
         if self.port < 1 or self.port > 65535:
             raise ValueError("port must be 1-65535")
-        if self.agent_max_turns < 1 or self.agent_max_turns > 100:
-            raise ValueError("agent_max_turns must be 1-100")
         # Builtins + known gateway runtime ids (plugin may be off; keep legacy settings valid).
         if self.agent_provider and self.agent_provider not in (
             "anthropic",
@@ -335,7 +330,6 @@ class PanelSettings:
             or self.agent_provider != ""
             or self.agent_model.strip()
             or self.default_model.strip()
-            or self.agent_max_turns != 25
             or self.appearance_foundation
             or self.appearance_overrides
             or self.appearance_status_overrides

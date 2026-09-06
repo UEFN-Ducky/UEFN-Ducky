@@ -202,7 +202,6 @@ class RunConfig:
     uefn_project_name: str = ""
     project_match: bool = True
     conv_id: str = ""
-    max_turns: int = 25
     keep_last_messages: int = 20
     skill_override: str | None = None
     plan_only: bool = False
@@ -730,7 +729,8 @@ class AgentRunner:
                 "cache_write_tokens": max(0, int(usage.get("cache_write_tokens") or 0)),
             }
 
-        for turn in range(self.config.max_turns):
+        turn = 0
+        while True:
             if bridge.is_set():
                 yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                 return
@@ -1051,21 +1051,7 @@ class AgentRunner:
                     pass
 
             assistant_text = ""
-
-        err = f"Reached max turns ({self.config.max_turns})"
-        # The last step's reasoning/narration are already interleaved into
-        # blocks, so keep content/thinking empty here to avoid repeating them.
-        yield AgentEvent(
-            kind="error",
-            text=err,
-            partial_message=_partial_assistant_message(
-                content="",
-                thinking="",
-                blocks=assistant_blocks,
-                usage=total_usage,
-                error=err,
-            ),
-        )
+            turn += 1
 
     def _record_to_block(self, rec: ToolCallRecord) -> dict[str, Any]:
         display_name = effective_tool_name(rec.name, rec.arguments)

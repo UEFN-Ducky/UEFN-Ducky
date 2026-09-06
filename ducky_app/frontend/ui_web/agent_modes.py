@@ -1553,7 +1553,6 @@ def run_message(
                 project_match=bool(listener_status.get("project_match", True)),
                 conv_id=conv_id,
                 conv=conv,
-                max_turns=settings.agent_max_turns if not plan_filter else min(settings.agent_max_turns, 12),
                 keep_last_messages=keep_last,
                 skill_override=skill_override,
                 plan_only=plan_filter,

@@ -65,10 +65,6 @@ FIELD_META: dict[str, FieldMeta] = {
     "verse_diagnostics_auto_check": FieldMeta("Auto-check Verse on edit", "General", settable=True),
     "show_hidden_project_files": FieldMeta("Show hidden project files", "General", settable=True),
     "terminals_enabled": FieldMeta("Terminals enabled", "General", settable=False),
-    "agent_max_turns": FieldMeta(
-        "Max agent turns", "LLMs", settable=True,
-        description="Tool-loop iterations per message (1-100).",
-    ),
     "appearance_foundation": FieldMeta("Appearance foundation colors", "Appearance"),
     "appearance_overrides": FieldMeta("Appearance token overrides", "Appearance"),
     "appearance_status_overrides": FieldMeta("Appearance status colors", "Appearance"),
