@@ -34,6 +34,8 @@ def _tool_helpers() -> Any:
     compact = importlib.import_module("backend.agent.tool_result_compact")
     return SimpleNamespace(
         compact_json_value=tools.compact_json_value,
+        shrink_str_field=tools.shrink_str_field,
+        shrink_structured_value=tools.shrink_structured_value,
         tool_result_max=compact.tool_result_max,
     )
 

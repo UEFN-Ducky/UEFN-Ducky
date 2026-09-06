@@ -58,7 +58,7 @@ export function modelShowsThinkingEffort(
   if (backend && thinkingProviderIds.includes(backend)) return true;
   // Model-name heuristic when contributions are not loaded yet.
   const m = (model || "").toLowerCase();
-  return m.includes("claude");
+  return m.includes("claude") || m.includes("astra") || m.includes("gpt-6");
 }
 
 /** Empty is fine (global Default Model applies); reject unusable saved values. */

@@ -24,8 +24,8 @@ interface EffortSelectorProps {
   onChange?: (effort: ThinkingEffort) => void;
 }
 
-/** Per-chat Anthropic extended-thinking effort control (hidden for non-Claude chats). */
-export function EffortSelector({ convId, provider, value, onChange }: EffortSelectorProps) {
+/** Per-chat reasoning effort. Parent decides visibility (Claude, Astra, …). */
+export function EffortSelector({ convId, value, onChange }: EffortSelectorProps) {
   const [effort, setEffort] = useState<ThinkingEffort>(() => normalizeEffort(value));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -33,14 +33,6 @@ export function EffortSelector({ convId, provider, value, onChange }: EffortSele
   useEffect(() => {
     setEffort(normalizeEffort(value));
   }, [value, convId]);
-
-  const show =
-    !provider ||
-    provider.toLowerCase().includes("anthropic") ||
-    provider.toLowerCase() === "claude" ||
-    provider.toLowerCase().startsWith("claude");
-  // Also show for empty provider (default Anthropic) — Claude models are the common case.
-  if (!show) return null;
 
   const current = EFFORT_OPTIONS.find((o) => o.id === effort) ?? EFFORT_OPTIONS[0];
 

@@ -4,6 +4,7 @@ import {
   formToConfig,
   formToProfilePatch,
   isModelGateError,
+  modelShowsThinkingEffort,
   serializeDuckyForm,
   validateModelSelection,
   type DuckyProfileFormState,
@@ -93,14 +94,23 @@ describe("duckyProfileForm model selection", () => {
     expect(config.disabled_tool_ids).toEqual(["blender"]);
   });
 
-  it("formToConfig writes thinking_effort for Anthropic models", () => {
+  it("formToConfig writes thinking_effort for Anthropic and Astra models", () => {
     const form = baseForm({
       model: "anthropic:claude-sonnet-4-20250514",
       thinkingEffort: "high",
     });
     expect(formToConfig(form).thinking_effort).toBe("high");
+    expect(formToConfig(baseForm({ model: "openai:gpt-6-astra", thinkingEffort: "high" })).thinking_effort).toBe(
+      "high",
+    );
     expect(formToConfig(baseForm({ model: "openai:gpt-4o", thinkingEffort: "high" })).thinking_effort).toBe(
       "off",
     );
+  });
+
+  it("shows the effort picker for Claude and Astra", () => {
+    expect(modelShowsThinkingEffort("anthropic:claude-sonnet-4")).toBe(true);
+    expect(modelShowsThinkingEffort("openai:gpt-6-astra")).toBe(true);
+    expect(modelShowsThinkingEffort("openai:gpt-4o")).toBe(false);
   });
 });
