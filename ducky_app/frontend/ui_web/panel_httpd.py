@@ -226,7 +226,8 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     mode = str(payload.get("mode") or "agent")
                     model = str(payload.get("model") or "")
                     attachments = payload.get("attachments") or None
-                    if not conv_id or (not text.strip() and not attachments):
+                    resume = bool(payload.get("resume"))
+                    if not conv_id or (not resume and not text.strip() and not attachments):
                         self._send_json(
                             400,
                             {"status": "error", "error": "conv_id and text or attachments required"},
@@ -260,6 +261,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                                 attachments=attachments,
                                 force=bool(payload.get("force")),
                                 parent=str(payload.get("parent_conv_id") or ""),
+                                resume=resume,
                                 _local=True,
                             )
                             self._send_json(200, {"status": "running", "conv_id": conv_id, "run_id": run_id})

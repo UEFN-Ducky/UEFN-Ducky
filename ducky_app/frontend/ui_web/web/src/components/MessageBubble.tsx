@@ -23,6 +23,8 @@ interface MessageBubbleProps {
   author?: MessageAuthorDto;
   /** Stop the live run (shown on collapsed thinking while streaming). */
   onStop?: () => void;
+  /** Resume this interrupted turn without sending a new user message. */
+  onContinue?: () => void;
   /** Play-audio control — only the latest assistant reply should pass true. */
   showSpeakButton?: boolean;
 }
@@ -41,6 +43,7 @@ export const MessageBubble = memo(function MessageBubble({
   speed,
   author,
   onStop,
+  onContinue,
   showSpeakButton = false,
 }: MessageBubbleProps) {
   const [tts, setTts] = useState<TtsProgress>(() => ttsEngine.getProgress());
@@ -93,6 +96,15 @@ export const MessageBubble = memo(function MessageBubble({
           <div className="message-bubble-interrupted" role="alert">
             <span className="message-bubble-interrupted-icon" aria-hidden="true">⚠</span>
             <span>{error ? `Interrupted: ${error}` : "Interrupted before finishing"}</span>
+            {onContinue ? (
+              <button
+                type="button"
+                className="message-bubble-interrupted-continue"
+                onClick={onContinue}
+              >
+                Continue
+              </button>
+            ) : null}
           </div>
         ) : null}
         {showSpeakButton && !isStreaming && text.trim() ? (

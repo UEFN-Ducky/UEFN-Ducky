@@ -58,6 +58,7 @@ export interface RunState {
 export type RunAction =
   | { type: "send"; text: string; attachments?: MessageAttachmentDto[] }
   | { type: "resend"; text: string; attachments?: MessageAttachmentDto[] }
+  | { type: "continue" }
   | { type: "sendAccepted"; runId: string }
   | { type: "stopOptimistic" }
   | { type: "stop" }
@@ -426,6 +427,23 @@ export function chatRunReducer(state: RunState, action: RunAction): RunState {
         attachments: action.attachments?.length ? action.attachments : undefined,
       };
       return startTurn(reset(state, { idSeq: state.idSeq + 1 }), [...state.messages, userMsg]);
+    }
+
+    case "continue": {
+      const messages = [...state.messages];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const row = messages[i];
+        if (!(row.incomplete || row.role === "error")) continue;
+        const empty = !row.text?.trim() && !row.thinking?.trim();
+        if (empty || row.role === "error") {
+          messages.splice(i, 1);
+        } else {
+          const { error: _err, incomplete: _inc, ...kept } = row;
+          messages[i] = kept;
+        }
+        break;
+      }
+      return startTurn(state, messages);
     }
 
     case "resend": {

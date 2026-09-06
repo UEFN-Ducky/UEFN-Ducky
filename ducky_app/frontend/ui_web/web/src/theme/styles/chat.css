@@ -2164,7 +2164,7 @@
 
 .message-bubble-interrupted {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   margin-top: 8px;
   padding: 6px 10px;
@@ -2175,6 +2175,23 @@
   font-size: 12px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.message-bubble-interrupted-continue {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 45%, transparent);
+  background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent);
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.message-bubble-interrupted-continue:hover {
+  background: color-mix(in srgb, var(--danger, #e5484d) 28%, transparent);
 }
 
 .message-bubble-interrupted-icon {

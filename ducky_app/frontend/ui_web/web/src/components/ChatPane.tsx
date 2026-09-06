@@ -272,6 +272,7 @@ export function ChatPane({
     isAtBottom,
     reloadMessages,
     appendUserMessage,
+    continueInterrupted,
     setActiveRunId,
     onAtBottomChange,
     stopOptimistic,
@@ -990,6 +991,37 @@ export function ChatPane({
     void api.cancel_agent(chat.id);
   }, [stopRun, chat.id]);
 
+  const handleContinue = useCallback(() => {
+    const api = getApi();
+    if (!api || chat.isGroup) return;
+    continueInterrupted();
+    listRef.current?.scrollToLatest();
+    onAtBottomChange(true);
+    void (async () => {
+      try {
+        await api.wait_for_agent_idle?.(chat.id, 5.0);
+      } catch {
+        /* ignore */
+      }
+      const res = await api.continue_interrupted?.(chat.id, agentMode, selectedModel, contextFilePath);
+      if (res?.run_id) {
+        setActiveRunId(res.run_id);
+      } else {
+        stopOptimistic();
+      }
+    })();
+  }, [
+    chat.id,
+    chat.isGroup,
+    continueInterrupted,
+    onAtBottomChange,
+    agentMode,
+    selectedModel,
+    contextFilePath,
+    setActiveRunId,
+    stopOptimistic,
+  ]);
+
   const handleResend = useCallback(
     (text: string, mode: AgentMode, model: string, attachments?: MessageAttachmentDto[]) => {
       const api = getApi();
@@ -1165,6 +1197,7 @@ export function ChatPane({
                   askSession={askSession && visible ? askSession : null}
                   onResend={handleResend}
                   onStop={agentRunning ? handleStop : undefined}
+                  onContinue={!agentRunning && !chat.isGroup ? handleContinue : undefined}
                   onAtBottomChange={onAtBottomChange}
                   onJumpToLatest={handleJumpToLatest}
                   onOpenChat={onOpenChat}

@@ -47,6 +47,7 @@ _PUBLIC_METHODS = frozenset({
     'connect_verse_workflow',
     'consume_pending_deep_links',
     'consume_pending_open_files',
+    'continue_interrupted',
     'copy_plan',
     'copy_project_entry',
     'create_conversation',

@@ -968,7 +968,17 @@ export interface CodingAgentDto {
     needs_api_key?: boolean;
     needs_cli?: boolean;
   };
-  models?: { id: string; name: string; provider?: string }[];
+  models?: Array<{
+    id: string;
+    name: string;
+    provider?: string;
+    context_limit?: number;
+    price_in?: number | null;
+    price_out?: number | null;
+    supports_vision?: boolean;
+    supports_tools?: boolean;
+    supports_web_search?: boolean;
+  }>;
 }
 
 export type LinkedAgentStatus = "running" | "done" | "error" | "timeout" | "cancelled";
@@ -2042,6 +2052,12 @@ export interface PanelApi {
     model: string,
     file_path?: string,
     attachments?: MessageAttachmentDto[],
+  ): Promise<{ run_id: string }>;
+  continue_interrupted(
+    conv_id: string,
+    mode: AgentMode,
+    model: string,
+    file_path?: string,
   ): Promise<{ run_id: string }>;
   resend_last_user_message(
     conv_id: string,

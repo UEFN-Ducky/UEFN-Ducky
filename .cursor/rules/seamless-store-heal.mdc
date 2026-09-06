@@ -1,0 +1,30 @@
+---
+description: HARD — Ducky + plugins heal themselves; never homework for end users
+alwaysApply: true
+---
+
+# Seamless for other people's chats
+
+Breakage reported by anyone using UEFN-Ducky (Codex, Store plugins, MCP
+approvals, CLI shims) is healed **inside the app and its Store plugins**.
+Other people's chats must keep working with no extra click.
+
+**Never tell an end user to:**
+
+- Settings → Store → Update / Enable
+- enable MCP connections, approve tools, or edit `~/.codex/config.toml`
+- start a new chat / say continue here / paste a prompt into Cursor
+- sideload a zip or copy into `%LOCALAPPDATA%/UEFN-Ducky/uefn_plugins/`
+
+**Do this instead:**
+
+1. Fix the shared function in `UEFN-Ducky-Release` or the standalone
+   `uefn-plugin-<id>` clone.
+2. Publish the plugin (`py -3 scripts/release.py --publish`). The panel
+   auto-applies published Store updates on start.
+3. Heal on `register()` / launch — rewrite CLI config, skip broken shims,
+   auto-install the CLI. Do not wait for the next user message if a file
+   write can fix it now.
+
+Developers still publish through the Store and never hot-patch AppData.
+That is not end-user homework.

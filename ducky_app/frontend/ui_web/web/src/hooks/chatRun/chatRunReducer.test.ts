@@ -240,6 +240,42 @@ describe("chatRunReducer — errors", () => {
     expect(s.status).toBe("idle");
   });
 
+  it("continue strips the interrupt and starts a turn without a new user row", () => {
+    const crashed = run(
+      initialRunState,
+      { type: "send", text: "hi" },
+      { type: "sendAccepted", runId: "r1" },
+      ev({ type: "text_delta", text: "half" }),
+      ev({ type: "thinking", text: "hmm" }),
+      ev({ type: "error", text: "Reached max turns (25)" }),
+    );
+    const tsKeep = crashed.messages.at(-1);
+    const s = run(crashed, { type: "continue" });
+    expect(s.status).toBe("sending");
+    expect(s.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    const last = s.messages.at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(last.text).toBe("half");
+    expect(last.thinking).toBe("hmm");
+    expect(last.incomplete).toBeUndefined();
+    expect(last.error).toBeUndefined();
+    expect(last.id).toBe(tsKeep?.id);
+    expect(s.messages).toHaveLength(crashed.messages.length);
+  });
+
+  it("continue drops an empty error-only bubble", () => {
+    const crashed = run(
+      initialRunState,
+      { type: "send", text: "hi" },
+      { type: "sendAccepted", runId: "r1" },
+      ev({ type: "error", text: "Reached max turns (25)" }),
+    );
+    const s = run(crashed, { type: "continue" });
+    expect(s.status).toBe("sending");
+    expect(s.messages.at(-1)?.role).toBe("user");
+    expect(s.messages.some((m) => m.incomplete)).toBe(false);
+  });
+
   it("a crash with nothing streamed appends an interrupted assistant bubble", () => {
     const s = run(
       initialRunState,

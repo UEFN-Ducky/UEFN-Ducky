@@ -18,6 +18,44 @@ def test_pkce_pair_s256() -> None:
     assert other != verifier
 
 
+def test_auto_apply_store_updates_skips_local_and_unpaid() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    catalog = {
+        "ok": True,
+        "items": [
+            {"slug": "openai", "kind": "plugin", "state": "update", "source": "store"},
+            {"slug": "mine", "kind": "plugin", "state": "update", "source": "local"},
+            {
+                "slug": "paid-pack",
+                "kind": "plugin",
+                "state": "update",
+                "source": "store",
+                "paid": True,
+                "owned": False,
+            },
+            {"slug": "fresh", "kind": "plugin", "state": "available", "source": "store"},
+        ],
+    }
+    calls: list[str] = []
+
+    def _install(slug: str, **_kw: object) -> dict:
+        calls.append(slug)
+        return {"ok": True, "slug": slug}
+
+    with (
+        patch.object(acc, "store_catalog", return_value=catalog),
+        patch.object(acc, "store_download_and_install", side_effect=_install),
+    ):
+        out = acc.auto_apply_store_updates(force=True)
+    assert out["ok"] is True
+    assert out["updated"] == ["openai"]
+    assert calls == ["openai"]
+
+
 if __name__ == "__main__":
     test_pkce_pair_s256()
+    test_auto_apply_store_updates_skips_local_and_unpaid()
     print("ok")

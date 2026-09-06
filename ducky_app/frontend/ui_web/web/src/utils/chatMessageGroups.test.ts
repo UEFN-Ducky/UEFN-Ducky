@@ -86,6 +86,23 @@ describe("coalesceActivityRows", () => {
     expect(rows[1]).toMatchObject({ kind: "tool", id: "edit" });
   });
 
+  it("keeps an interrupted thinking bubble out of the accordion", () => {
+    const rows = coalesceActivityRows([
+      tool("1"),
+      {
+        kind: "bubble",
+        id: "th",
+        role: "assistant",
+        text: "",
+        thinking: "halfway",
+        incomplete: true,
+        error: "Reached max turns (25)",
+      },
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["activity", "bubble"]);
+    expect(rows[1]).toMatchObject({ incomplete: true, error: "Reached max turns (25)" });
+  });
+
   it("folds thinking-only bubbles into the tool run", () => {
     const rows = coalesceActivityRows([
       {

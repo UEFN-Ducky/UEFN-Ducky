@@ -2,8 +2,9 @@
 name: uefn-desktop-plugins
 description: >-
   Build and publish UEFN-Ducky desktop plugins (plugin.json, contributions,
-  register(), Store uds_release). Install/update ONLY via Settings → Store —
-  never Install-from-file, never hot-patch AppData. Use when creating or
+  register(), Store uds_release). Developers publish via Store — never
+  Install-from-file, never hot-patch AppData. The panel auto-applies
+  published updates; never tell end users to click Store. Use when creating or
   editing uefn-plugin-*, frontend/uefn_plugins/*, backend/uefn_plugins/*,
   Store plugin install/publish, or when the user asks how to develop a desktop
   plugin for their own Store.
@@ -239,9 +240,9 @@ Prefer `api.tool()` for new plugins.
 
 ## Develop / ship (Store only)
 
-**Always install and update from Settings → Store.** Never use Install from
+**Publish through the Store. Never sideload.** Never use Install from
 file, never `cp` into `%LOCALAPPDATA%/UEFN-Ducky/uefn_plugins/`, never tell
-the user to sideload a zip. Publish → Store Update is the loop.
+an end user to click Update. Publish → panel auto-applies on next start.
 
 **AI one-liners** (see `docs/publish-to-uefn-ducky-store.md`):
 
@@ -257,10 +258,11 @@ the user to sideload a zip. Publish → Store Update is the loop.
 3. Bump `version` in `plugin.json`.
 4. Commit + push that repo, then
    `py -3 scripts/release.py --publish` from the clone root.
-5. In app: **Settings → Store → Install / Update** → Enable.
+5. Panel auto-applies the published version on next start (authors can
+   also Update once in Settings → Store to test immediately).
 
 **Never** `sync_seed.py`, never pack plugins into the EXE. Publish → Store →
-Install/Update is the only loop.
+auto-apply is the only loop.
 
 ## Publish to UEFN Ducky Store (your site catalog)
 

@@ -727,6 +727,7 @@ async def _run_ask_async(
     run_id: str,
     user_attachments: list[dict[str, Any]] | None = None,
     context_omit: frozenset[str] | None = None,
+    resume: bool = False,
 ) -> str:
     stop_reason = "error"
     from frontend.ui_web.provider_usage_log import bind_usage_context, reset_usage_context
@@ -794,8 +795,12 @@ async def _run_ask_async(
                 )
             else:
                 messages.append(ProviderMessage(role="assistant", content=str(m.get("content", ""))))
-        current_images = image_attachments(parse_attachment_dicts(user_attachments))
-        messages.append(ProviderMessage(role="user", content=user_text, attachments=current_images))
+        if resume:
+            if messages and messages[-1].role == "assistant":
+                messages.append(ProviderMessage(role="user", content="Continue."))
+        else:
+            current_images = image_attachments(parse_attachment_dicts(user_attachments))
+            messages.append(ProviderMessage(role="user", content=user_text, attachments=current_images))
         if volatile_tail:
             messages.append(
                 ProviderMessage(
@@ -920,6 +925,7 @@ async def _run_agent_loop(
     run_id: str,
     plan_filter: bool = False,
     user_attachments: list[dict[str, Any]] | None = None,
+    resume: bool = False,
 ) -> str:
     cancel = session._cancel
     stop_reason = "error"
@@ -935,6 +941,7 @@ async def _run_agent_loop(
             history,
             user_attachments=user_attachments,
             thread_cancel=cancel,
+            resume=resume,
         ):
             if cancel.is_set():
                 runner.cancel()
@@ -1238,6 +1245,45 @@ def _make_broker_tap(push: PushFn, conv_id: str) -> PushFn:
     return tapped
 
 
+def clear_last_interrupt(conv) -> bool:
+    """Drop the interrupt footer. Keep partial text, thinking, ts, usage, blocks.
+
+    Empty error-only assistant rows (and standalone role=error) are removed so
+    resume does not feed a blank assistant to the model.
+    """
+    msgs = getattr(conv, "messages", None)
+    if not isinstance(msgs, list) or not msgs:
+        return False
+    last = msgs[-1]
+    if not isinstance(last, dict):
+        return False
+    if not (last.get("incomplete") or last.get("role") == "error"):
+        return False
+    empty = (
+        not str(last.get("content") or last.get("text") or "").strip()
+        and not str(last.get("thinking") or "").strip()
+        and not last.get("blocks")
+    )
+    if empty or last.get("role") == "error":
+        msgs.pop()
+    else:
+        last.pop("incomplete", None)
+        last.pop("error", None)
+    return True
+
+
+def last_user_payload(conv) -> tuple[str, Any, list[dict[str, Any]]] | None:
+    for m in reversed(getattr(conv, "messages", None) or []):
+        if isinstance(m, dict) and m.get("role") == "user":
+            text = str(m.get("text") or "")
+            content = m.get("content", text)
+            if content is None or content == "":
+                content = text
+            atts = m.get("attachments")
+            return text, content, list(atts) if isinstance(atts, list) else []
+    return None
+
+
 def run_message(
     conv_id: str,
     user_text: str,
@@ -1248,6 +1294,7 @@ def run_message(
     attachments: list[dict[str, Any]] | None = None,
     force: bool = False,
     parent: str = "",
+    resume: bool = False,
     _local: bool = False,
 ) -> str:
     if not _local and _in_bridge_process():
@@ -1259,6 +1306,7 @@ def run_message(
                 "model": model,
                 "wait": False,
                 "force": bool(force),
+                "resume": bool(resume),
                 "attachments": attachments or None,
                 # Carry the spawning chat across the process hop so the delegated
                 # run in the panel nests the child under its parent (linked_agent).
@@ -1341,55 +1389,69 @@ def run_message(
                 push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
                 return ""
 
-    try:
-        content, _stored = prepare_outgoing_user_message(
-            user_text,
-            attachments,
-            provider=provider_name or "",
-            model=turn_model,
-            external_agent=external,
+    if resume:
+        clear_last_interrupt(conv)
+        payload = last_user_payload(conv)
+        if not payload:
+            push({"type": "error", "text": "Nothing to continue", "conv_id": conv_id})
+            return ""
+        user_text, content, _stored_atts = payload
+        current_user_attachments: list[dict[str, Any]] = []
+        try:
+            save_conversation(conv)
+        except Exception:
+            pass
+        history = list(conv.messages)
+    else:
+        try:
+            content, _stored = prepare_outgoing_user_message(
+                user_text,
+                attachments,
+                provider=provider_name or "",
+                model=turn_model,
+                external_agent=external,
+            )
+        except ValueError as e:
+            push({"type": "error", "text": str(e), "conv_id": conv_id})
+            return ""
+
+        if getattr(settings, "prompt_dedupe_exact_blocks", False):
+            from backend.agent.prompt_dedupe import dedupe_exact_blocks
+
+            content = dedupe_exact_blocks(content)
+            user_text = dedupe_exact_blocks(user_text)
+
+        attachments_parsed = parse_attachment_dicts(attachments)
+        ts = time.time()
+        from frontend.ui_web.conversation_attachments import persist_message_attachments
+        from frontend.ui_web.project_chats import get_conversations_dir
+
+        stored_attachments = persist_message_attachments(
+            conv_id,
+            ts,
+            attachments_parsed,
+            get_conversations_dir(settings.uefn_project_root),
+            settings.uefn_project_root,
         )
-    except ValueError as e:
-        push({"type": "error", "text": str(e), "conv_id": conv_id})
-        return ""
+        current_user_attachments = [
+            {
+                "kind": a.kind,
+                "name": a.name,
+                "mime": a.mime,
+                **({"data_base64": a.data_base64} if a.kind == "image" else {"text": a.text}),
+            }
+            for a in attachments_parsed
+        ]
 
-    if getattr(settings, "prompt_dedupe_exact_blocks", False):
-        from backend.agent.prompt_dedupe import dedupe_exact_blocks
+        user_msg: dict[str, Any] = {"role": "user", "content": content, "text": user_text, "ts": ts}
+        if stored_attachments:
+            user_msg["attachments"] = stored_attachments
+        append_message(conv, user_msg)
+        if len(conv.messages) == 1:
+            from backend.agent.chat_title import start_auto_title
 
-        content = dedupe_exact_blocks(content)
-        user_text = dedupe_exact_blocks(user_text)
-
-    attachments_parsed = parse_attachment_dicts(attachments)
-    ts = time.time()
-    from frontend.ui_web.conversation_attachments import persist_message_attachments
-    from frontend.ui_web.project_chats import get_conversations_dir
-
-    stored_attachments = persist_message_attachments(
-        conv_id,
-        ts,
-        attachments_parsed,
-        get_conversations_dir(settings.uefn_project_root),
-        settings.uefn_project_root,
-    )
-    current_user_attachments = [
-        {
-            "kind": a.kind,
-            "name": a.name,
-            "mime": a.mime,
-            **({"data_base64": a.data_base64} if a.kind == "image" else {"text": a.text}),
-        }
-        for a in attachments_parsed
-    ]
-
-    user_msg: dict[str, Any] = {"role": "user", "content": content, "text": user_text, "ts": ts}
-    if stored_attachments:
-        user_msg["attachments"] = stored_attachments
-    append_message(conv, user_msg)
-    if len(conv.messages) == 1:
-        from backend.agent.chat_title import start_auto_title
-
-        start_auto_title(conv, user_text or content, push=push)
-    history = list(conv.messages[:-1])
+            start_auto_title(conv, user_text or content, push=push)
+        history = list(conv.messages[:-1])
 
     from frontend.ui_web.context_omit import context_omit_set
 
@@ -1440,7 +1502,11 @@ def run_message(
                 fresh = load_conversation(conv_id) or conv
                 run_coding_agent_message(
                     fresh,
-                    user_text or (content if isinstance(content, str) else str(content)),
+                    (
+                        "Continue."
+                        if resume
+                        else (user_text or (content if isinstance(content, str) else str(content)))
+                    ),
                     model=turn_model,
                     push=push,
                     run_id=run_id,
@@ -1584,6 +1650,7 @@ def run_message(
                         run_id=run_id,
                         user_attachments=current_user_attachments,
                         context_omit=omit,
+                        resume=resume,
                     )
                 )
             else:
@@ -1598,6 +1665,7 @@ def run_message(
                         run_id=run_id,
                         plan_filter=plan_filter,
                         user_attachments=current_user_attachments,
+                        resume=resume,
                     )
                 )
         except Exception as e:

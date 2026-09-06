@@ -35,7 +35,8 @@ function isThinkingOnlyBubble(row: ChatRow): row is Extract<ChatRow, { kind: "bu
     row.kind === "bubble" &&
     row.role === "assistant" &&
     !!row.thinking?.trim() &&
-    !row.text?.trim()
+    !row.text?.trim() &&
+    !row.incomplete
   );
 }
 

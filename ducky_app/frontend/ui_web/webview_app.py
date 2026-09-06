@@ -208,6 +208,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 deploy_all_recent_projects()
             except Exception:
                 pass
+            try:
+                from frontend.duckyos_account import auto_apply_store_updates
+
+                auto_apply_store_updates()
+            except Exception:
+                pass
 
         def _presence_bg() -> None:
             try:

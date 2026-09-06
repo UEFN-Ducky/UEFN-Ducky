@@ -15,7 +15,8 @@ Desktop plugins and skill packs are **separate git repos**:
 
 - Edit / commit / `git push` that clone only.
 - Publish: `py -3 scripts/release.py --publish` from the clone root.
-- Install/update: Settings → Store only.
+- Never hot-patch AppData. The panel auto-applies published Store
+  updates on start — do not tell end users to click Settings → Store.
 
 Never edit or publish from `Documents/GitHub/UEFN-Ducky` (deleted local
 `desktop-plugins` monorepo). Never ship from `%TEMP%/uefn-plugin-*-ship`.

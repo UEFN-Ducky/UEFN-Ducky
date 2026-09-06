@@ -910,6 +910,30 @@ class PanelApiChatsMixin:
         run_id = _pa.run_message(conv_id, text, mode, model, push=self._push, attachments=attachments or [])
         return {"run_id": run_id}
 
+    def continue_interrupted(
+        self,
+        conv_id: str,
+        mode: str,
+        model: str,
+        file_path: str = "",
+    ) -> dict[str, str]:
+        """Resume the last interrupted turn without appending a user message."""
+        from frontend.ui_web.group_orchestrator import is_group_conversation
+
+        if file_path:
+            _pa.ensure_conversation_file_path(conv_id, file_path)
+        turn_model = (model or "").strip()
+        if turn_model and turn_model.lower() != "default":
+            conv = _pa.load_conversation(conv_id)
+            if conv is not None and (conv.model or "").strip() != turn_model:
+                conv.model = turn_model
+                _pa.save_conversation(conv)
+        conv = _pa.load_conversation(conv_id)
+        if conv is None or (conv is not None and is_group_conversation(conv)):
+            return {"run_id": ""}
+        run_id = _pa.run_message(conv_id, "", mode, model, push=self._push, resume=True)
+        return {"run_id": run_id}
+
     def resend_last_user_message(
         self,
         conv_id: str,

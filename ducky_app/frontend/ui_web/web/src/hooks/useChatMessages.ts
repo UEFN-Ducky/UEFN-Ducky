@@ -189,6 +189,10 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     dispatch({ type: "send", text, attachments });
   }, []);
 
+  const continueInterrupted = useCallback(() => {
+    dispatch({ type: "continue" });
+  }, []);
+
   const rewindAndAppendUser = useCallback((text: string, attachments?: MessageAttachmentDto[]) => {
     dispatch({ type: "resend", text, attachments });
   }, []);
@@ -228,6 +232,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     isAtBottom: state.atBottom,
     reloadMessages: load,
     appendUserMessage,
+    continueInterrupted,
     rewindAndAppendUser,
     setActiveRunId,
     invalidateActiveRun,

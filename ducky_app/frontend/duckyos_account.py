@@ -1734,3 +1734,65 @@ def _store_download_and_install_unlocked(
         "pack_version": payload.get("pack_version"),
         "import": result,
     }
+
+
+_AUTO_APPLY_LOCK = __import__("threading").Lock()
+_auto_apply_ran = False
+
+
+def auto_apply_store_updates(*, force: bool = False) -> dict[str, Any]:
+    """Quietly install newer Store versions of already-installed plugins/skills.
+
+    End users never open Settings → Store for a published fix. Local/AI
+    sources and unpaid paid items are skipped. ponytail: one catalog pass
+    per process; ceiling is offline/catalog-down until the next panel start.
+    """
+    global _auto_apply_ran
+    with _AUTO_APPLY_LOCK:
+        if _auto_apply_ran and not force:
+            return {"ok": True, "updated": [], "skipped": "already"}
+        cat = store_catalog()
+        if not cat.get("ok"):
+            return {
+                "ok": False,
+                "updated": [],
+                "error": cat.get("error"),
+                "code": cat.get("code"),
+            }
+        updated: list[str] = []
+        errors: list[dict[str, Any]] = []
+        for item in cat.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("state") != "update":
+                continue
+            if item.get("kind") not in ("plugin", "skill"):
+                continue
+            if item.get("source") in ("local", "ai"):
+                continue
+            if item.get("paid") and not item.get("owned"):
+                continue
+            slug = str(item.get("slug") or "").strip()
+            if not slug:
+                continue
+            try:
+                result = store_download_and_install(slug, replace=True, is_update=True)
+            except DuckyOSAccountError as exc:
+                errors.append({"slug": slug, "error": exc.message, "code": exc.code})
+                continue
+            except Exception as exc:
+                errors.append({"slug": slug, "error": str(exc)})
+                continue
+            if result.get("ok"):
+                updated.append(slug)
+            else:
+                errors.append({"slug": slug, "error": result.get("error")})
+        _auto_apply_ran = True
+        if updated:
+            try:
+                from frontend.ui_web.agent_modes import push_ui_event
+
+                push_ui_event({"type": "uefn_plugins_changed"})
+            except Exception:
+                pass
+        return {"ok": True, "updated": updated, "errors": errors}

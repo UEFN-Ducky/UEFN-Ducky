@@ -517,6 +517,7 @@ class AgentRunner:
         *,
         user_attachments: list[dict[str, Any]] | None = None,
         thread_cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> AsyncIterator[AgentEvent]:
         self._cancel = asyncio.Event()
         bridge = _CancelBridge(self._cancel, thread_cancel)
@@ -530,6 +531,7 @@ class AgentRunner:
                 user_attachments=user_attachments,
                 thread_cancel=thread_cancel,
                 bridge=bridge,
+                resume=resume,
             ):
                 yield event
         finally:
@@ -544,6 +546,7 @@ class AgentRunner:
         user_attachments: list[dict[str, Any]] | None = None,
         thread_cancel: threading.Event | None = None,
         bridge: Any = None,
+        resume: bool = False,
     ) -> AsyncIterator[AgentEvent]:
         if bridge is None:
             bridge = _CancelBridge(self._cancel, thread_cancel)
@@ -644,14 +647,18 @@ class AgentRunner:
         stream_cache = markers_only_payload(prompt_cache) if prompt_cache.enable_cache else None
 
         working_history = list(history)
-        working_history.append(
-            {
-                "role": "user",
-                "content": user_text,
-                "attachments": user_attachments or [],
-                "ts": time.time(),
-            }
-        )
+        if not resume:
+            working_history.append(
+                {
+                    "role": "user",
+                    "content": user_text,
+                    "attachments": user_attachments or [],
+                    "ts": time.time(),
+                }
+            )
+        elif working_history and working_history[-1].get("role") == "assistant":
+            # ponytail: providers reject a trailing assistant; not persisted
+            working_history.append({"role": "user", "content": "Continue.", "ts": time.time()})
 
         assistant_blocks: list[dict[str, Any]] = []
         assistant_text = ""

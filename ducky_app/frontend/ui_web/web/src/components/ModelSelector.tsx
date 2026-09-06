@@ -214,23 +214,24 @@ export function ModelSelector({
   const agentModels = useCallback(
     (agentId: string): CatalogModelRow[] => {
       const agent = agents.find((a) => normId(a.id) === normId(agentId));
-      return (agent?.models || []).map(
-        (m): CatalogModelRow => ({
+      return (agent?.models || []).map((m): CatalogModelRow => {
+        const catalog = visibleModels.find((c) => c.id === m.id);
+        return {
           id: normalizeCodingAgentModelId(agentId, m.id),
           name: m.name,
           provider: m.provider || agent?.label || agentId,
           providerKey: agentId,
-          supportsVision: false,
-          supportsTools: true,
-          supportsWebSearch: false,
-          contextLimit: 0,
-          priceIn: null,
-          priceOut: null,
+          supportsVision: m.supports_vision ?? catalog?.supportsVision ?? false,
+          supportsTools: m.supports_tools ?? catalog?.supportsTools ?? true,
+          supportsWebSearch: m.supports_web_search ?? catalog?.supportsWebSearch ?? false,
+          contextLimit: m.context_limit ?? catalog?.contextLimit ?? 0,
+          priceIn: m.price_in ?? catalog?.priceIn ?? null,
+          priceOut: m.price_out ?? catalog?.priceOut ?? null,
           isLocal: false,
-        }),
-      );
+        };
+      });
     },
-    [agents],
+    [agents, visibleModels],
   );
 
   /** API models for a gateway only (no Cursor/Anthropic mix under OpenAI). */

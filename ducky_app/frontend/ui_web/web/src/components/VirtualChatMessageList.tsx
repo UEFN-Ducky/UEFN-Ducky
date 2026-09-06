@@ -65,6 +65,8 @@ interface VirtualChatMessageListProps {
   onResend: (text: string, mode: AgentMode, model: string, attachments?: MessageAttachmentDto[]) => void;
   /** Stop the live run (shown on sticky last question + collapsed live headers). */
   onStop?: () => void;
+  /** Resume the last interrupted assistant turn in place. */
+  onContinue?: () => void;
   onAtBottomChange: (atBottom: boolean) => void;
   onJumpToLatest: () => void;
   onOpenChat: (chat: ChatTab) => void;
@@ -111,6 +113,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       askSession = null,
       onResend,
       onStop,
+      onContinue,
       onAtBottomChange,
       onJumpToLatest,
       onOpenChat,
@@ -170,6 +173,16 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       for (let i = rows.length - 1; i >= 0; i--) {
         const row = rows[i];
         if (row.kind === "bubble" && row.role === "assistant" && row.text?.trim()) {
+          return row.id;
+        }
+      }
+      return null;
+    }, [rows]);
+
+    const lastIncompleteRowId = useMemo(() => {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (row.kind === "bubble" && row.incomplete && !row.isStreaming) {
           return row.id;
         }
       }
@@ -246,6 +259,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
             speed={row.author?.tts_speed}
             onOpenFile={onOpenFile}
             onStop={onStop}
+            onContinue={row.id === lastIncompleteRowId ? onContinue : undefined}
             showSpeakButton={row.id === lastSpeakRowId}
           />
         );
@@ -274,6 +288,8 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       allChats,
       linkedAgents,
       lastSpeakRowId,
+      lastIncompleteRowId,
+      onContinue,
     ]);
 
     // Release / re-engage the tail purely from the user's scroll position, so one
