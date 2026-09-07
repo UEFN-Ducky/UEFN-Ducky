@@ -4,6 +4,7 @@ import {
   buildCommittedChatRows,
   coalesceActivityRows,
   groupChatRowsIntoTurns,
+  reconcileTurns,
   userTurnRowIndices,
   type ChatRow,
 } from "./chatMessageGroups";
@@ -304,5 +305,55 @@ describe("coalesceActivityRows — group speakers", () => {
     expect(rows[0].items.map((i) => i.id)).toEqual(["1", "2"]);
     expect(rows[1].items.map((i) => i.id)).toEqual(["3"]);
     expect(rows[2].items.map((i) => i.id)).toEqual(["4"]);
+  });
+});
+
+describe("reconcileTurns", () => {
+  const history: ChatRow[] = [
+    { kind: "bubble", id: "1", role: "user", text: "hi" },
+    { kind: "bubble", id: "2", role: "assistant", text: "hello" },
+    { kind: "bubble", id: "3", role: "user", text: "more" },
+    { kind: "bubble", id: "4", role: "assistant", text: "sure" },
+  ];
+
+  it("returns the previous array when nothing changed", () => {
+    const prev = groupChatRowsIntoTurns(history);
+    const next = groupChatRowsIntoTurns(history);
+    expect(next).not.toBe(prev);
+    expect(reconcileTurns(prev, next)).toBe(prev);
+  });
+
+  it("keeps every untouched turn identity while the last turn streams", () => {
+    const prev = reconcileTurns([], groupChatRowsIntoTurns(history));
+    const streaming = appendStreamRow(history, "partial answer", true);
+    const next = reconcileTurns(prev, groupChatRowsIntoTurns(streaming));
+    expect(next).toHaveLength(2);
+    expect(next[0]).toBe(prev[0]);
+    expect(next[1]).not.toBe(prev[1]);
+    expect(next[1].responses.map((r) => r.id)).toEqual(["4", "stream"]);
+
+    // Next delta: only the stream row changes, turn 0 still keeps its identity.
+    const streaming2 = appendStreamRow(history, "partial answer grew", true);
+    const next2 = reconcileTurns(next, groupChatRowsIntoTurns(streaming2));
+    expect(next2[0]).toBe(prev[0]);
+    expect(next2[1]).not.toBe(next[1]);
+  });
+
+  it("reuses turns after a new user turn is appended", () => {
+    const prev = reconcileTurns([], groupChatRowsIntoTurns(history));
+    const extended: ChatRow[] = [...history, { kind: "bubble", id: "5", role: "user", text: "again" }];
+    const next = reconcileTurns(prev, groupChatRowsIntoTurns(extended));
+    expect(next).toHaveLength(3);
+    expect(next[0]).toBe(prev[0]);
+    expect(next[1]).toBe(prev[1]);
+    expect(next[2].query?.id).toBe("5");
+  });
+
+  it("drops reuse when a row inside a turn is replaced", () => {
+    const prev = reconcileTurns([], groupChatRowsIntoTurns(history));
+    const edited = history.map((r) => (r.id === "2" ? { ...r, text: "edited" } : r));
+    const next = reconcileTurns(prev, groupChatRowsIntoTurns(edited));
+    expect(next[0]).not.toBe(prev[0]);
+    expect(next[1]).toBe(prev[1]);
   });
 });

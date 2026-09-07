@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { memo, useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Icons } from "../icons/Icons";
 import { DuckyAvatar } from "./ducky/DuckyAvatars";
@@ -30,7 +30,7 @@ interface AgentActivityPanelProps {
   showIdleTimer?: boolean;
 }
 
-export function AgentActivityPanel({
+export const AgentActivityPanel = memo(function AgentActivityPanel({
   lines,
   duckyStyle,
   headerOnly = false,
@@ -203,4 +203,4 @@ export function AgentActivityPanel({
         : null}
     </div>
   );
-}
+});

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppNotice } from "../../components/AppNotice";
 import { DuckyAvatar } from "../../components/ducky/DuckyAvatars";
+import { DuckyParade } from "../../components/DuckyParade";
 import { DuckyProfileEditorForm } from "../../components/ducky/DuckyProfileEditorForm";
 import { NewDuckyModal } from "../../components/ducky/NewDuckyModal";
 import {
@@ -519,7 +520,9 @@ export function DuckiesTab() {
             </div>
 
             {loading && profiles.length === 0 ? (
-              <div className="duckies-tab-list-empty">Loading…</div>
+              <div className="duckies-tab-list-empty">
+                <DuckyParade size="sm" label="Loading" />
+              </div>
             ) : noMatches ? (
               <div className="duckies-tab-list-empty">No duckies match “{query.trim()}”.</div>
             ) : visibleProfiles.length > 0 ? (

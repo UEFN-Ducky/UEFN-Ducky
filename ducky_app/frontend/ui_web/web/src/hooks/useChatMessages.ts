@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { AgentEvent, MessageAttachmentDto } from "../types/panel";
 
@@ -57,6 +57,7 @@ function initFromCache(arg: { chatId: string; externalRunning: boolean }): RunSt
 
 export function useChatMessages(chatId: string, visible: boolean, isAgentRunning: boolean) {
   const [state, dispatch] = useReducer(chatRunReducer, { chatId, externalRunning: isAgentRunning }, initFromCache);
+  const [hydrated, setHydrated] = useState(() => !!getCachedChatMessages(chatId));
 
   // A ref mirror so visibility/mount effects can read the latest run state without
   // re-subscribing on every keystroke of the stream.
@@ -69,11 +70,18 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   // which decides merge-vs-replace based on whether a run is in flight.
   const load = useCallback(async () => {
     const api = getApi();
-    if (!api) return;
+    if (!api) {
+      setHydrated(true);
+      return;
+    }
     const seq = ++loadSeqRef.current;
-    const rows = await api.load_messages(chatId);
-    if (seq !== loadSeqRef.current) return; // a newer load superseded this one
-    dispatch({ type: "loaded", rows });
+    try {
+      const rows = await api.load_messages(chatId);
+      if (seq !== loadSeqRef.current) return; // a newer load superseded this one
+      dispatch({ type: "loaded", rows });
+    } finally {
+      if (seq === loadSeqRef.current) setHydrated(true);
+    }
   }, [chatId]);
 
   // Keep the reducer's mirror of the global running-set in sync with the prop.
@@ -226,6 +234,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     streamBuffer: state.stream,
     streamThinking: state.thinking,
     streamStatus: prefixSpeaker(state.statusAuthor, state.statusText),
+    hydrated,
     agentRunning: isRunActive(state),
     optimisticRunning: state.status !== "idle",
     hasNewBelow: state.hasNewBelow,

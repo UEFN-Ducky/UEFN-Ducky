@@ -285,9 +285,16 @@ function settingsCoreSteps(): WalkthroughStep[] {
         await openLlmsSection("llms");
       },
     ),
-    nextStep("settings.content", "LLMs", "Default model, installed providers, coding agents, and key status.", async () => {
-      await openLlmsSection("llms");
-    }),
+    nextStep(
+      "settings.llms.providers",
+      "Providers",
+      "Press a provider row to slide it open — paste an API key or use Codex / Claude Code, then Test & Save.",
+      async () => {
+        await openLlmsSection("llms");
+        selectLlmsProvider(null);
+        await wait(280);
+      },
+    ),
   );
 
   // Skills → ducky HOW TO USE → back
@@ -547,7 +554,7 @@ function llmProviderSetupSteps(opts: {
     clickStep(
       `settings.llms.provider.${opts.id}`,
       opts.label,
-      `Press ${opts.label} in the list to open it.`,
+      `Press the ${opts.label} row in this table. The page slides open so you can paste a key or use the coding agent.`,
       async () => {
         await openLlmsSection("llms");
         selectLlmsProvider(null);
@@ -560,10 +567,10 @@ function llmProviderSetupSteps(opts: {
       opts.keyBody,
       open,
     ),
-    nextStep(
+    clickStep(
       "settings.llms.provider.save",
       "Test & Save",
-      "After you paste a key, press Test & Save. Skip ahead if you do not have a key yet — you can come back later.",
+      "Press Test & Save after you paste a key. No key? Press Skip — you can still use the coding agent on this page.",
       open,
     ),
   ];
@@ -613,9 +620,9 @@ export const LLMS_SETUP_TOUR: WalkthroughDef = {
       },
     ),
     nextStep(
-      "settings.llms.section.llms",
+      "settings.llms.providers",
       "Providers",
-      "Each row is one gateway. Press into Anthropic, Cursor, then OpenAI — we cover the key, IDE connection, coding agent, and caching on every page.",
+      "Each row is a button. Press it and the page slides open — API key, Test & Save, and Codex / Claude Code live on that slide.",
       async () => {
         await openLlmsSection("llms");
         selectLlmsProvider(null);
@@ -626,7 +633,7 @@ export const LLMS_SETUP_TOUR: WalkthroughDef = {
       id: "anthropic",
       label: "Anthropic",
       keyBody:
-        "Paste your Anthropic API key here, then Test & Save. That unlocks Claude models in Ducky chats.",
+        "Paste your Anthropic API key here. No key? Skip and use Claude Code on this same slide — then press Test & Save if you did paste a key.",
       ideBody:
         "IDE / MCP wires UEFN tools and Ducky skills into Claude globally (every project). Apply once, then Test. Green check = up to date.",
       agentBody:
@@ -638,7 +645,7 @@ export const LLMS_SETUP_TOUR: WalkthroughDef = {
       id: "cursor",
       label: "Cursor",
       keyBody:
-        "Paste your Cursor API key here, then Test & Save. That unlocks Cursor models in Ducky chats.",
+        "Paste your Cursor API key here. No key? Skip and use the Cursor coding agent on this same slide.",
       ideBody:
         "IDE / MCP applies UEFN MCP and Ducky skills into Cursor globally. Apply, then Test. Green check means Cursor is connected.",
       agentBody:
@@ -648,7 +655,7 @@ export const LLMS_SETUP_TOUR: WalkthroughDef = {
       id: "openai",
       label: "OpenAI",
       keyBody:
-        "Paste your OpenAI API key here, then Test & Save. That unlocks GPT models in Ducky chats.",
+        "Paste your OpenAI API key here. No key? Skip and use Codex on this same slide — ChatGPT login is enough for Codex.",
       agentBody:
         "Codex is OpenAI's coding agent. Detect finds the CLI (often under npm). Default args like --full-auto are optional — keep the toggle on for chat.",
       cachingBody:

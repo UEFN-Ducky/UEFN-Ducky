@@ -10,6 +10,7 @@ import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
 import { ContextMeter } from "./ContextMeter";
 import { ChatPaneEmptyState } from "./ChatPaneEmptyState";
+import { DuckyParadeOverlay } from "./DuckyParade";
 import { VirtualChatMessageList, type VirtualChatMessageListHandle } from "./VirtualChatMessageList";
 import { useComposerAttachments } from "../hooks/useComposerAttachments";
 import type {
@@ -264,6 +265,7 @@ export function ChatPane({
 
   const {
     messages,
+    hydrated,
     streamBuffer,
     streamThinking,
     streamStatus,
@@ -490,14 +492,16 @@ export function ChatPane({
   }, [refreshContextUsage, refreshSessionFiles]);
 
   // Debounce context metering — skip streamBuffer (usage events cover streaming)
-  // and avoid firing on every composer keystroke.
+  // and avoid firing on every composer keystroke. During a run every tool event
+  // changes `messages`; usage events already meter the live turn, so wait for
+  // the run to end and meter once instead of once per tool call.
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || agentRunning) return;
     const id = window.setTimeout(() => {
       void refreshContextUsage();
     }, 500);
     return () => window.clearTimeout(id);
-  }, [visible, refreshContextUsage, messages]);
+  }, [visible, agentRunning, refreshContextUsage, messages]);
 
   useEffect(() => {
     if (!visible || !contextPanelOpen) return;
@@ -1159,11 +1163,13 @@ export function ChatPane({
             className={`selectable-text chat-pane-content${isFocus ? " chat-pane-content--focus" : ""}${isPopup ? " chat-pane-content--popup" : ""}`}
           >
             <CtrlWheelZoomRoot
-              className={`chat-pane-inner${isEmpty ? " chat-pane-inner--empty" : ""}`}
+              className={`chat-pane-inner${isEmpty || !hydrated ? " chat-pane-inner--empty" : ""}`}
               storageKey={`uefn-panel-chat-zoom:${chat.id}`}
               onZoomChange={handleChatZoomChange}
             >
-              {isEmpty && !(askSession && visible) ? (
+              {!hydrated ? (
+                <DuckyParadeOverlay label="Loading" />
+              ) : isEmpty && !(askSession && visible) ? (
                 <ChatPaneEmptyState
                   hasApiKey={externalAgent || hasApiKey}
                   selectedModel={selectedModel}

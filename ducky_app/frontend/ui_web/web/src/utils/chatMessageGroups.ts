@@ -327,3 +327,35 @@ export function groupChatRowsIntoTurns(rows: ChatRow[]): ChatTurn[] {
 
   return turns;
 }
+
+/**
+ * Reuse previous turn objects whose query + responses are element-wise identical,
+ * so a memoized turn view skips every turn the latest frame did not touch. During
+ * streaming only the last turn (the one growing a stream/activity row) changes;
+ * every earlier turn keeps its identity and never re-renders.
+ */
+export function reconcileTurns(prev: readonly ChatTurn[], next: ChatTurn[]): ChatTurn[] {
+  if (prev.length === 0) return next;
+  const byId = new Map<string, ChatTurn>();
+  for (const turn of prev) byId.set(turn.id, turn);
+  let changed = prev.length !== next.length;
+  const out = next.map((turn, i) => {
+    const old = byId.get(turn.id);
+    if (old && sameTurn(old, turn)) {
+      if (prev[i] !== old) changed = true;
+      return old;
+    }
+    changed = true;
+    return turn;
+  });
+  return changed ? out : (prev as ChatTurn[]);
+}
+
+function sameTurn(a: ChatTurn, b: ChatTurn): boolean {
+  if (a.query !== b.query) return false;
+  if (a.responses.length !== b.responses.length) return false;
+  for (let i = 0; i < a.responses.length; i++) {
+    if (a.responses[i] !== b.responses[i]) return false;
+  }
+  return true;
+}

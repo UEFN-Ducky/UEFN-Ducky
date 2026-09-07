@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from "react";
+import { memo, useEffect, useMemo, useState, type MouseEvent } from "react";
 import type { ChatPlan, PlanProgress } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
 import { PlanTodoCard } from "./PlanTodoCard";
@@ -10,6 +10,8 @@ interface ChatPlanPopupProps {
   onOpenPlan?: () => void;
   onStopTracking?: () => void | Promise<void>;
   onOpenFile?: OpenFileHandler;
+  /** Lets the sticky query wrapper raise its z-index without a :has() selector. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function count(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
@@ -19,14 +21,18 @@ function count(plan: ChatPlan, progress?: PlanProgress | null): { done: number; 
 }
 
 /** Collapsible plan pill. Active: docked above the composer. Finished: under its turn in history. */
-export function ChatPlanPopup({
+export const ChatPlanPopup = memo(function ChatPlanPopup({
   plan,
   progress,
   onOpenPlan,
   onStopTracking,
   onOpenFile,
+  onOpenChange,
 }: ChatPlanPopupProps) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
   const [stopping, setStopping] = useState(false);
   const { done, total } = useMemo(() => count(plan, progress), [plan, progress]);
   const allDone = total > 0 && done >= total;
@@ -105,4 +111,4 @@ export function ChatPlanPopup({
       ) : null}
     </div>
   );
-}
+});

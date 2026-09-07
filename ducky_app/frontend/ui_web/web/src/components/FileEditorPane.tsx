@@ -8,6 +8,7 @@ import {
 import { useWatchProjectFile } from "../hooks/useWatchProjectFile";
 import { requestOpenStore } from "../navigation/deepLinks";
 import { PluginFilePane } from "../plugin-ui/PluginFilePane";
+import { DuckyParadeOverlay } from "./DuckyParade";
 
 import {
   isVerseFile,
@@ -95,7 +96,7 @@ function ReadOnlyFilePane({ relativePath }: FileEditorPaneProps) {
   );
 
   if (loading) {
-    return <div className="ui-status-muted">Loading {relativePath}…</div>;
+    return <DuckyParadeOverlay size="sm" label="Loading" />;
   }
 
   if (error) {
@@ -210,7 +211,7 @@ function GuardedTextEditor({
   }, [relativePath]);
 
   if (gate === "loading") {
-    return <div className="ui-status-muted">Loading…</div>;
+    return <DuckyParadeOverlay size="sm" label="Loading" />;
   }
   if (gate === "model") {
     const claimed = resolvePluginEditorForFile(contrib, relativePath, "model");
@@ -250,7 +251,7 @@ function GuardedTextEditor({
     );
   }
   return (
-    <Suspense fallback={<div className="ui-status-muted">Loading editor…</div>}>
+    <Suspense fallback={<DuckyParadeOverlay size="sm" label="Loading" />}>
       <div className="file-editor-pane file-editor-pane-layout">
         {/* Source only — toolbar/chrome outside monaco may translate visually. */}
         <div data-no-translate className="file-editor-source">
@@ -325,7 +326,7 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
       );
     }
     if (!projectRoot) {
-      return <div className="ui-status-muted">Loading…</div>;
+      return <DuckyParadeOverlay size="sm" label="Loading" />;
     }
     return (
       <GuardedTextEditor relativePath={relativePath} projectRoot={projectRoot} readOnly={false} />
@@ -333,17 +334,17 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
   }
 
   if (verseEnabled === null) {
-    return <div className="ui-status-muted">Loading…</div>;
+    return <DuckyParadeOverlay size="sm" label="Loading" />;
   }
 
   const readOnly = isPanelReadOnlyFile(relativePath);
 
   if (verseEnabled && isVerseFile(relativePath)) {
     if (!projectRoot) {
-      return <div className="ui-status-muted">Loading project…</div>;
+      return <DuckyParadeOverlay size="sm" label="Loading" />;
     }
     return (
-      <Suspense fallback={<div className="ui-status-muted">Loading Verse editor…</div>}>
+      <Suspense fallback={<DuckyParadeOverlay size="sm" label="Loading" />}>
         <div className="file-editor-pane file-editor-pane-layout">
           <VerseEditorHost relativePath={relativePath} projectRoot={projectRoot} readOnly={readOnly} />
         </div>
@@ -354,7 +355,7 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
   // Text (including .gitignore / Makefile / extensionless candidates) → Monaco.
   if (verseEnabled && (isEditableTextFile(relativePath) || kind === "text")) {
     if (!projectRoot) {
-      return <div className="ui-status-muted">Loading project…</div>;
+      return <DuckyParadeOverlay size="sm" label="Loading" />;
     }
     return (
       <GuardedTextEditor relativePath={relativePath} projectRoot={projectRoot} readOnly={readOnly} />

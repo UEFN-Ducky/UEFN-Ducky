@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgentMode, MessageAttachmentDto } from "../types/panel";
 import { Icons } from "../icons/Icons";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
@@ -93,7 +93,7 @@ function AttachmentStrip({
   );
 }
 
-export function EditableUserMessage({
+export const EditableUserMessage = memo(function EditableUserMessage({
   text,
   attachments,
   editable,
@@ -333,4 +333,4 @@ export function EditableUserMessage({
       <AttachmentPreviewModal open={preview !== null} attachment={preview} onClose={() => setPreview(null)} />
     </div>
   );
-}
+});

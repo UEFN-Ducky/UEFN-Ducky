@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "chat-perf",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "ducky_app/frontend/ui_web/web", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

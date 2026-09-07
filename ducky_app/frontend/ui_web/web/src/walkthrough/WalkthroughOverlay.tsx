@@ -192,6 +192,15 @@ export function WalkthroughOverlay() {
             ) : null}
             {requireClick ? (
               <span className="walkthrough-tooltip-count">Click the highlight</span>
+            ) : null}
+            {requireClick ? (
+              <button
+                type="button"
+                className="walkthrough-btn"
+                onClick={() => void nextStep()}
+              >
+                Skip
+              </button>
             ) : (
               <button
                 type="button"
@@ -201,15 +210,6 @@ export function WalkthroughOverlay() {
                 {isLast ? "Got it" : "Next"}
               </button>
             )}
-            {requireClick && missing ? (
-              <button
-                type="button"
-                className="walkthrough-btn walkthrough-btn-primary"
-                onClick={() => void nextStep()}
-              >
-                {isLast ? "Got it" : "Next"}
-              </button>
-            ) : null}
           </div>
         </div>
       </div>

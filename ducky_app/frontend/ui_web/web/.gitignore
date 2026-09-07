@@ -1,0 +1,4 @@
+
+# chat perf harness output / exported chats (see src/perf)
+dist-perf/
+public/perf/

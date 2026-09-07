@@ -18,6 +18,7 @@ describe("SETTINGS_CORE_TOUR", () => {
       "settings.mcp.list",
       "settings.mcp.add",
       "settings.plans.row.demo-getting-started",
+      "settings.llms.providers",
       "settings.llms.section.memory",
     ]) {
       expect(targets, `missing target ${id}`).toContain(id);
@@ -53,6 +54,7 @@ describe("first-run Store → LLM setup", () => {
       "settings.llms.provider.ide.apply",
       "settings.llms.provider.agent",
       "settings.llms.provider.agent.detect",
+      "settings.llms.providers",
       "settings.llms.provider.plugin",
       "settings.llms.back",
     ]) {
@@ -68,10 +70,13 @@ describe("first-run Store → LLM setup", () => {
       "settings.llms.provider.anthropic",
       "settings.llms.provider.cursor",
       "settings.llms.provider.openai",
+      "settings.llms.provider.save",
       "settings.llms.back",
     ]) {
       const step = LLMS_SETUP_TOUR.steps.find((s) => s.target === id);
       expect(step?.advance, `${id} should require a press`).toBe("require_click");
     }
+    expect(bodies).toMatch(/Press it and the page slides open/i);
+    expect(bodies).toMatch(/Press Test & Save/i);
   });
 });

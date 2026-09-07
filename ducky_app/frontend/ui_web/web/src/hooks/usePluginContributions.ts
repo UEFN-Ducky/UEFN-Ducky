@@ -189,6 +189,7 @@ export type PluginContributions = {
     title?: string;
     auto_start?: string;
     settings_tab?: string;
+    provider_id?: string;
     steps: Array<{
       target: string;
       title: string;

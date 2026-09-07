@@ -555,7 +555,14 @@ export function AgentTab() {
 
             <section className="general-tab-section">
               <GeneralSectionHeader icon={<KeyIcon />} title="Providers" />
-              <div className="llms-provider-card">
+              <div
+                className="llms-provider-card"
+                ref={targetRef("settings.llms.providers", {
+                  kind: "settings_field",
+                  label: "Providers",
+                  route: "settings.llms",
+                })}
+              >
                 {providers.map((row) => {
                   const key = row.secret_key || row.id;
                   const rowSaved = !!keySaved[key];

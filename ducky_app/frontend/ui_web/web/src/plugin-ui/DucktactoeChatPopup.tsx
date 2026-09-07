@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChatTab } from "../types/panel";
 import { ensureDucktactoeBoardChat } from "./ducktactoeBoardChat";
 import { DucktactoeChatShell } from "./DucktactoeChatShell";
+import { DuckyParadeOverlay } from "../components/DuckyParade";
 
 export type DucktactoeChatPopupProps = {
   tabId: string;
@@ -68,7 +69,7 @@ export function DucktactoeChatPopup({
   if (!chat) {
     return (
       <div className="ducktactoe-chat-dock ducktactoe-chat-dock--loading" aria-busy="true">
-        Opening Duck-Tac-Toe chat…
+        <DuckyParadeOverlay size="sm" label="Loading" />
       </div>
     );
   }

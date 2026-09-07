@@ -154,6 +154,7 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  position: relative;
 }
 
 .chat-pane-inner--empty {
@@ -1833,6 +1834,10 @@
   padding-top: 0;
   box-sizing: border-box;
   scroll-padding-top: 16px;
+  /* Older chunks are prepended in idle time and windowed chunks settle from
+     placeholder to real height as they enter view: browser scroll anchoring
+     keeps a scrolled-up reader's row in place through both. */
+  overflow-anchor: auto;
 }
 
 /* Tool details stay instant in the long-lived plain message list. */
@@ -1868,8 +1873,10 @@
   container-type: scroll-state;
 }
 
-/* An expanded plan panel must paint above the next turn's sticky query. */
-.virtual-chat-turn-query:has(.chat-plan-popup.is-open) {
+/* An expanded plan panel must paint above the next turn's sticky query.
+   Class toggles from React — no :has() on the sticky wrapper (style invalidation
+   of every turn on each scroll). */
+.virtual-chat-turn-query.is-plan-open {
   z-index: 7;
 }
 
@@ -1884,11 +1891,36 @@
 }
 
 /* Plan bar sits tight under its query bubble. */
-.virtual-chat-turn-query:has(.chat-plan-popup) .message-bubble-user-row {
+.virtual-chat-turn-query.has-plan .message-bubble-user-row {
   margin-bottom: 6px;
 }
 
 .virtual-chat-turn-response {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Off-screen chunks are unmounted; spacers hold their last measured height
+   so the scrollbar length stays stable. content-visibility still skips paint
+   for a chunk that is only partly on screen. */
+.virtual-chat-chunk {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 3200px;
+}
+
+.virtual-chat-window-spacer {
+  width: 100%;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Content between the turns and the footer: observed for tail growth so the
+   auto-follow scrolls once per real height change instead of once per prop. */
+.virtual-chat-message-list-content {
   width: 100%;
   display: flex;
   flex-direction: column;

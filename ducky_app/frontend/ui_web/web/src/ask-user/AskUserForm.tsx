@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import {
   canSubmitQuestion,
@@ -50,7 +50,7 @@ function draftSummary(question: AskUserQuestion, draft: AskUserDraft): string {
   return draft.selected.map((id) => byId.get(id) || id).join(", ");
 }
 
-export function AskUserForm({
+export const AskUserForm = memo(function AskUserForm({
   questions,
   title,
   queueAhead = 0,
@@ -385,4 +385,4 @@ export function AskUserForm({
       </div>
     </div>
   );
-}
+});

@@ -41,6 +41,8 @@ export interface PluginWalkthroughManifest {
   auto_start?: "first_enable" | "never";
   /** Settings sidebar tab to open before the first step. */
   settings_tab?: string;
+  /** LLMs provider row id when it differs from plugin id (e.g. google → gemini). */
+  provider_id?: string;
   steps: Array<{
     target: string;
     title: string;

@@ -1,0 +1,87 @@
+.ducky-parade {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: visible;
+  max-width: 100%;
+}
+
+.ducky-parade__track {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.35em;
+  animation: ducky-parade-march 2.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ducky-parade__duck {
+  display: block;
+  object-fit: contain;
+  animation: ducky-parade-bounce 0.7s ease-in-out infinite;
+  will-change: transform;
+  transform-origin: 50% 100%;
+}
+
+.ducky-parade--md .ducky-parade__duck--leader { width: 52px; height: 52px; }
+.ducky-parade--md .ducky-parade__duck--mom    { width: 42px; height: 42px; }
+.ducky-parade--md .ducky-parade__duck--boy    { width: 34px; height: 34px; }
+.ducky-parade--md .ducky-parade__duck--girl   { width: 28px; height: 28px; }
+
+.ducky-parade--sm .ducky-parade__duck--leader { width: 36px; height: 36px; }
+.ducky-parade--sm .ducky-parade__duck--mom    { width: 30px; height: 30px; }
+.ducky-parade--sm .ducky-parade__duck--boy    { width: 24px; height: 24px; }
+.ducky-parade--sm .ducky-parade__duck--girl   { width: 20px; height: 20px; }
+
+.ducky-parade--xs .ducky-parade__duck--leader { width: 22px; height: 22px; }
+.ducky-parade--xs .ducky-parade__duck--mom    { width: 18px; height: 18px; }
+.ducky-parade--xs .ducky-parade__duck--boy    { width: 16px; height: 16px; }
+.ducky-parade--xs .ducky-parade__duck--girl   { width: 14px; height: 14px; }
+
+.ducky-parade__duck--leader { animation-delay: 0s; }
+.ducky-parade__duck--mom    { animation-delay: 0.08s; }
+.ducky-parade__duck--boy    { animation-delay: 0.16s; }
+.ducky-parade__duck--girl   { animation-delay: 0.24s; }
+
+.ducky-parade__label {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.ducky-parade-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
+  flex: 1;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.ducky-parade-overlay--cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-height: 0;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+}
+
+@keyframes ducky-parade-bounce {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  35%      { transform: translateY(-0.55em) scaleY(1.04); }
+  70%      { transform: translateY(0) scaleY(0.96); }
+}
+
+@keyframes ducky-parade-march {
+  0%   { transform: translateX(-8%); }
+  50%  { transform: translateX(8%); }
+  100% { transform: translateX(-8%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ducky-parade__track,
+  .ducky-parade__duck {
+    animation: none;
+  }
+}

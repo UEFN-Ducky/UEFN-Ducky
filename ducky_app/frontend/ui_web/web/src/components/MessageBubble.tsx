@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback, useSyncExternalStore } from "react";
 import type { MessageAuthorDto } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
 import { SpeakMessageButton } from "../voice/VoiceControls";
@@ -29,6 +29,12 @@ interface MessageBubbleProps {
   showSpeakButton?: boolean;
 }
 
+const IDLE_TTS: TtsProgress = { state: "idle", sourceText: "", spokenText: "", charIndex: 0, loading: false };
+
+function subscribeTts(onChange: () => void): () => void {
+  return ttsEngine.onProgress(onChange);
+}
+
 // User messages render via EditableUserMessage (as sticky group headers); this
 // component now only renders assistant bubbles (streamed answers + reasoning).
 export const MessageBubble = memo(function MessageBubble({
@@ -46,9 +52,15 @@ export const MessageBubble = memo(function MessageBubble({
   onContinue,
   showSpeakButton = false,
 }: MessageBubbleProps) {
-  const [tts, setTts] = useState<TtsProgress>(() => ttsEngine.getProgress());
-
-  useEffect(() => ttsEngine.onProgress(setTts), []);
+  // Every bubble used to hold its own TTS subscription and re-render on every
+  // word boundary while anything was being spoken. Select instead: bubbles that
+  // are not the one being read get the shared IDLE snapshot and never re-render.
+  const selectTts = useCallback((): TtsProgress => {
+    const p = ttsEngine.getProgress();
+    if (p.state === "idle") return IDLE_TTS;
+    return mapReadAlong(text, p.spokenText, p.sourceText, p.charIndex) ? p : IDLE_TTS;
+  }, [text]);
+  const tts = useSyncExternalStore(subscribeTts, selectTts, selectTts);
 
   if (role === "user") return null;
 

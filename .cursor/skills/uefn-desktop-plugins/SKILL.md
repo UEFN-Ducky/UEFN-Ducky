@@ -134,7 +134,7 @@ standalone AppData skill pack or owned by another plugin.
 | `llm.coding_agents` | Coding-agent block inside that provider’s detail slide (Claude Code, Codex, Cursor, Gemini CLI) |
 | `settings.sections` with `tab: "LLMs"` | Extra toggles in that provider’s detail slide (e.g. Anthropic/OpenAI prompt-cache markers) |
 | `api.register_ide_hookup(kind)` | Own IDE MCP+skills Apply (cursor / claude / antigravity); auto-applies on register; UI in that provider’s LLMs detail |
-| `walkthrough` | First-enable product tour (`plugin.<id>`). Host spotlights `target` ui-ids with Next / require_click. See Translation / Discord examples. |
+| `walkthrough` | First-enable product tour (`plugin.<id>`). Host spotlights `target` ui-ids with Next / require_click. Gateway plugins must spotlight `settings.llms.provider.<id>` (the table row), then key / Test & Save / coding agent — never only the LLMs tab. |
 
 ### `contributes.walkthrough`
 
@@ -168,7 +168,8 @@ enabled (Store). Completions persist in `PanelSettings.walkthrough_completed`.
 - `target`: semantic ui-target id (tag DOM with `useUiTarget` / `targetRef` in host UI, or reuse `settings.tab.<slug>`).
 - `advance`: `next` (coachmark Next) or `require_click` (user must click the highlighted control).
 - `settings_tab`: opens that Settings sidebar tab before step 0.
-- Reference: `plugins/uefn-plugin-translation/plugin.json`, `plugins/uefn-plugin-discord/plugin.json`.
+- Gateway (`llm.providers`) tours: first step `settings.llms.provider.<providerId>` with `require_click` so the row slides open; then `settings.llms.provider.key`, `settings.llms.provider.save` (Test & Save), and `settings.llms.provider.agent` when the plugin ships a coding agent. Set `provider_id` when it differs from the plugin id (Google → `gemini`).
+- Reference: `uefn-plugin-openai/plugin.json`, `uefn-plugin-anthropic/plugin.json`, `uefn-plugin-translation/plugin.json`.
 
 **Phase 1 UI:** `ui: "builtin:…"` marks host-owned complex forms (e.g. Discord
 Connection). Declarative `settings.sections` / `header.buttons` ship in the

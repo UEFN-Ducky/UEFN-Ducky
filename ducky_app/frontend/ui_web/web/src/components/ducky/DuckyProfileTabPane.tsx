@@ -11,6 +11,7 @@ import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPus
 import { getApi } from "../../hooks/usePanelApi";
 import { useTimedMessage } from "../../hooks/useTimedMessage";
 import { Icons } from "../../icons/Icons";
+import { DuckyParade } from "../DuckyParade";
 import {
   emitDuckyProfileChanged,
   onDuckyProfileChanged,
@@ -265,7 +266,9 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
   if ((loading && !form) || (!form && !profile && !loadError)) {
     return (
       <div className="ducky-profile-tab-pane">
-        <div className="ducky-profile-tab-pane-empty">Loading…</div>
+        <div className="ducky-profile-tab-pane-empty">
+          <DuckyParade size="sm" label="Loading" />
+        </div>
       </div>
     );
   }
@@ -290,7 +293,9 @@ export function DuckyProfileTabPane({ profileId, onCloseTab }: DuckyProfileTabPa
   if (!form || !profile) {
     return (
       <div className="ducky-profile-tab-pane">
-        <div className="ducky-profile-tab-pane-empty">Loading…</div>
+        <div className="ducky-profile-tab-pane-empty">
+          <DuckyParade size="sm" label="Loading" />
+        </div>
       </div>
     );
   }

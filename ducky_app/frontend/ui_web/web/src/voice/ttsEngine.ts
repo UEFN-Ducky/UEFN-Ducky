@@ -48,6 +48,7 @@ const listeners = new Set<Listener>();
 const progressListeners = new Set<ProgressListener>();
 let lastSpokenText = "";
 let activeSourceText = "";
+let cachedProgress: TtsProgress | null = null;
 let activeSpokenText = "";
 let highlightIndex = 0;
 let playbackState: TtsState = "idle";
@@ -436,14 +437,28 @@ export const ttsEngine = {
     return playbackState;
   },
 
+  /** Stable snapshot: the same object comes back until a field actually changes
+   *  (useSyncExternalStore in every assistant bubble relies on that). */
   getProgress(): TtsProgress {
-    return {
+    const c = cachedProgress;
+    if (
+      c &&
+      c.state === playbackState &&
+      c.sourceText === activeSourceText &&
+      c.spokenText === activeSpokenText &&
+      c.charIndex === highlightIndex &&
+      c.loading === loadingVoice
+    ) {
+      return c;
+    }
+    cachedProgress = {
       state: playbackState,
       sourceText: activeSourceText,
       spokenText: activeSpokenText,
       charIndex: highlightIndex,
       loading: loadingVoice,
     };
+    return cachedProgress;
   },
 
   getLastSpoken(): string {

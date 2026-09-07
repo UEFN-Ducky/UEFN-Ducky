@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { SplitResizeHandle } from "./SplitResizeHandle";
+import { DuckyParade } from "./DuckyParade";
 import {
   createContext,
   forwardRef,
@@ -2070,7 +2071,9 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const contentPane = (
       <>
         {contentRootLoading && filteredContentTreeEntries.length === 0 ? (
-          <div className="ui-status-sidebar-muted file-tree-empty">Loading…</div>
+          <div className="ui-status-sidebar-muted file-tree-empty">
+            <DuckyParade size="xs" label="Loading" />
+          </div>
         ) : null}
         {filteredContentTreeEntries.map((entry) => (
           <FileBranch key={entry.path} entry={entry} {...fileBranchProps} />
