@@ -5,6 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ChatTurn } from "../utils/chatMessageGroups";
 import { ConversationScrollPeek } from "./ConversationScrollPeek";
 
+function stubScrollTo(el: HTMLElement, onJump?: (top: number) => void) {
+  el.scrollTo = ((a?: ScrollToOptions | number, b?: number) => {
+    const top = typeof a === "number" ? (b ?? 0) : Number(a?.top ?? 0);
+    el.scrollTop = top;
+    onJump?.(top);
+  }) as typeof el.scrollTo;
+}
+
 function turns(n: number): ChatTurn[] {
   return Array.from({ length: n }, (_, i) => ({
     id: `turn-${i}`,
@@ -23,9 +31,7 @@ describe("ConversationScrollPeek", () => {
       clientHeight: { value: 800, configurable: true },
       scrollTop: { value: 2000, writable: true, configurable: true },
     });
-    scroller.scrollTo = (opts: ScrollToOptions | number) => {
-      scroller.scrollTop = typeof opts === "number" ? opts : Number(opts.top ?? 0);
-    };
+    stubScrollTo(scroller);
 
     render(
       <ConversationScrollPeek
@@ -55,10 +61,9 @@ describe("ConversationScrollPeek", () => {
       scrollTop: { value: 0, writable: true, configurable: true },
     });
     let jumped = 0;
-    scroller.scrollTo = (opts: ScrollToOptions | number) => {
-      jumped = typeof opts === "number" ? opts : Number(opts.top ?? 0);
-      scroller.scrollTop = jumped;
-    };
+    stubScrollTo(scroller, (top) => {
+      jumped = top;
+    });
 
     render(
       <ConversationScrollPeek
