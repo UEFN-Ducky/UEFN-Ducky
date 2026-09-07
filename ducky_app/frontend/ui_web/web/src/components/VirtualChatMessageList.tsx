@@ -37,6 +37,7 @@ import {
 import { ChatCollapseScopeProvider } from "../hooks/useChatCollapseState";
 
 import { ChatPlanPopup } from "./ChatPlanPopup";
+import { ConversationScrollPeek } from "./ConversationScrollPeek";
 
 import { AskUserForm } from "../ask-user";
 import type { AskUserSession } from "../ask-user";
@@ -859,6 +860,13 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
               </div>
             </div>
           </div>
+          <ConversationScrollPeek
+            turns={turns}
+            chunkHeights={heightsRef.current}
+            turnsPerChunk={CHUNK_TURNS}
+            scroller={scrollerElRef.current}
+            heightsTick={padTick}
+          />
           {!isAtBottom ? (
             <button
               type="button"
