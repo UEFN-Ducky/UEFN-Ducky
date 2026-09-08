@@ -8,7 +8,7 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
-from listener.serialize import rotator_pyr, serialize_actor
+from listener.serialize import ALL_ACTOR_FIELDS, rotator_pyr, serialize_actor
 
 
 def _spawn_one(asset_path: str = "", actor_class: str = "", location=None, rotation=None) -> unreal.Actor:
@@ -53,7 +53,7 @@ def duplicate_actor(actor_path: str, location_offset: Optional[List[float]] = No
             False,
         )
     lookup.invalidate()
-    return {"source": actor_path, "actor": serialize_actor(dup)}
+    return {"source": actor_path, "actor": serialize_actor(dup, ALL_ACTOR_FIELDS)}
 
 
 def set_actor_folder(actor_path: str, folder: str) -> dict:

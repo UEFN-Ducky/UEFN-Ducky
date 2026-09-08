@@ -329,7 +329,9 @@ def post_command_to_listener(
     if not body.get("success", False):
         error_msg = body.get("error", "Unknown error")
         tb = body.get("traceback", "")
+        _record_editor_change(command, params, body, ok=False, error=error_msg)
         raise RuntimeError(f"UEFN command '{command}' failed: {error_msg}\n{tb}".strip())
+    _record_editor_change(command, params, body, ok=True)
     return body.get("result", {})
 
 
@@ -453,9 +455,13 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
     if not body.get("success", False):
         error_msg = body.get("error", "Unknown error")
         tb = body.get("traceback", "")
+        # A refused or failed editor command is still part of the record: the
+        # panel should show that it was attempted and why it did not happen.
+        _record_editor_change(command, params, body, ok=False, error=error_msg)
         raise RuntimeError(f"UEFN command '{command}' failed: {error_msg}\n{tb}".strip())
 
     result = body.get("result", {})
+    _record_editor_change(command, params, body, ok=True)
 
     if command not in _READ_COMMANDS:
         _invalidate_cache()
@@ -553,6 +559,16 @@ def _configured_project_roots() -> list[str]:
             seen.add(r)
             unique.append(r)
     return unique
+
+
+def _record_editor_change(command, params, body, *, ok: bool, error: str = "") -> None:
+    """Hand an editor command to the change record. Never raises, never blocks."""
+    try:
+        from backend.workspace.editor_record import record
+
+        record(command, params or {}, body, ok=ok, error=error)
+    except Exception:  # noqa: BLE001 - the command already ran
+        pass
 
 
 def workspace_roots() -> list[str]:

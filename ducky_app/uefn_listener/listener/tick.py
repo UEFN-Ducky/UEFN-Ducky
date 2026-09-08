@@ -6,7 +6,7 @@ import traceback
 
 import unreal
 
-from listener import lookup
+from listener import ducky_capture, lookup
 from listener.config import (
     COMMAND_TIMINGS_RING,
     PROJECT_CACHE_REFRESH_SEC,
@@ -256,13 +256,25 @@ def tick_handler(delta_time: float) -> None:
             break
 
         t0 = time.time()
+        cap = None
         unreal._mcp_dispatching = True
         try:
+            # Read the state this command is about to overwrite, so the host can
+            # show what changed and offer a revert. Never raises, never blocks.
+            cap = ducky_capture.before(command, params)
             result = dispatch(command, params)
             response = {"success": True, "result": result}
+            sidecar = ducky_capture.after(command, params, result, cap, ok=True)
+            if sidecar:
+                # Additive sibling of result: every existing reader looks only at
+                # success/error/traceback/result, so old hosts ignore it.
+                response["_ducky"] = sidecar
         except Exception as e:
             log_msg(f"Command '{command}' failed: {e}", "error")
             response = {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+            sidecar = ducky_capture.after(command, params, None, cap, ok=False)
+            if sidecar:
+                response["_ducky"] = sidecar
             metrics["total_errors"] += 1
             metrics["last_error"] = str(e)
         finally:

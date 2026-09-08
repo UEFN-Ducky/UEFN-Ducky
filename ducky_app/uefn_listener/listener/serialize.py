@@ -76,6 +76,26 @@ def rotator_pyr(pitch: float, yaw: float, roll: float) -> unreal.Rotator:
     return r
 
 
+def actor_guid(actor) -> str:
+    """A stable actor id that survives relabelling, or "" when unavailable.
+
+    Labels are not unique and change under set_actor_label; path names change on
+    rename. Change tracking keys on this so a record cannot be orphaned.
+    """
+    getter = getattr(actor, "get_actor_guid", None)
+    if callable(getter):
+        try:
+            return str(getter())
+        except Exception:
+            pass
+    for prop in ("actor_instance_guid", "actor_guid"):
+        try:
+            return str(actor.get_editor_property(prop))
+        except Exception:
+            continue
+    return ""
+
+
 _ACTOR_FIELD_GETTERS = {
     "name": lambda a: a.get_name(),
     "label": lambda a: a.get_actor_label(),
@@ -84,8 +104,17 @@ _ACTOR_FIELD_GETTERS = {
     "location": lambda a: serialize(a.get_actor_location()),
     "rotation": lambda a: serialize(a.get_actor_rotation()),
     "scale": lambda a: serialize(a.get_actor_scale3d()),
+    "guid": actor_guid,
 }
 
+#: What serialize_actor returns when the caller asks for no particular fields.
+#: guid is deliberately absent: get_all_actors uses this path, and a reflection
+#: call per actor on a full level scan is not worth it. Ask for it by name.
+DEFAULT_ACTOR_FIELDS = [
+    "name", "label", "class", "path", "location", "rotation", "scale",
+]
+
+#: Every field a caller may request by name.
 ALL_ACTOR_FIELDS = list(_ACTOR_FIELD_GETTERS.keys())
 
 
@@ -94,7 +123,7 @@ def serialize_actor(actor: unreal.Actor, fields: Optional[List[str]] = None) -> 
     if not is_live(actor):
         return {"invalid": True}
     if not fields:
-        return {k: getter(actor) for k, getter in _ACTOR_FIELD_GETTERS.items()}
+        return {k: _ACTOR_FIELD_GETTERS[k](actor) for k in DEFAULT_ACTOR_FIELDS}
     out: dict = {}
     for field in fields:
         getter = _ACTOR_FIELD_GETTERS.get(field)

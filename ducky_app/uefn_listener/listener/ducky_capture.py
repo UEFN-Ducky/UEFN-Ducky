@@ -1,0 +1,477 @@
+"""Record what each editor command changed, and how to undo it.
+
+``tick.dispatch`` is the one place every editor command passes through — core
+handlers, Store-plugin handlers, and the ``listener_command`` passthrough alike —
+so capture hooks there rather than in ~120 individual handlers.
+
+For a registered command, :func:`before` reads the state the command is about to
+overwrite (one or two property reads, never a level scan) and :func:`after` turns
+that plus the result into a **sidecar**: what was touched, what it looked like
+before, and the commands that would put it back. The host attaches the sidecar to
+its change journal, so the panel can show "Hacker moved VerifyCube +250 on Z" and
+offer a Revert.
+
+Three rules this module never breaks:
+
+1. **It cannot fail a command.** Both entry points swallow every exception. A
+   capture bug must never turn a working edit into an error, and it must never
+   raise inside the editor tick.
+2. **It cannot be slow.** An unregistered command costs one dict lookup. A
+   registered one costs the reads listed in its spec. Level-wide snapshots are
+   reserved for opaque commands and only in ``full`` mode.
+3. **It never claims more than it knows.** ``revertable`` is ``auto`` only when
+   the recorded state can actually be posted back. Anything else is ``manual``
+   with a reason a human can act on, and a lossy read is labelled as such.
+
+``unreal`` and ``listener.*`` are imported inside functions so the host test
+suite can import this module and check it against the host-side classifier.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, List, Optional
+
+#: Sidecar shape version. Bump when a consumer would misread an older payload.
+CAPTURE_VERSION = 1
+
+REVERT_AUTO = "auto"
+REVERT_MANUAL = "manual"
+REVERT_NONE = "none"
+
+_enabled = True
+_mode = "full"  # "basic" (no opaque snapshots) | "full"
+
+
+def configure(enabled: Optional[bool] = None, mode: Optional[str] = None) -> dict:
+    """Host-controlled kill switch and capture depth."""
+    global _enabled, _mode
+    if enabled is not None:
+        _enabled = bool(enabled)
+    if mode in ("basic", "full"):
+        _mode = mode
+    return {"enabled": _enabled, "mode": _mode}
+
+
+def enabled() -> bool:
+    return _enabled
+
+
+# --- small helpers ---------------------------------------------------------------
+
+
+def _actor_guid(actor) -> str:
+    """A stable id that survives relabelling, or "" when unavailable."""
+    getter = getattr(actor, "get_actor_guid", None)
+    if callable(getter):
+        try:
+            return str(getter())
+        except Exception:
+            pass
+    for prop in ("actor_instance_guid", "actor_guid"):
+        try:
+            return str(actor.get_editor_property(prop))
+        except Exception:
+            continue
+    return ""
+
+
+def _actor_target(actor) -> dict:
+    """Identity block for one actor: guid preferred, path and label for humans."""
+    from listener.serialize import is_live
+
+    if not is_live(actor):
+        return {"kind": "actor", "id": "", "guid": "", "label": "", "path": "", "invalid": True}
+    try:
+        path = actor.get_path_name()
+    except Exception:
+        path = ""
+    try:
+        label = actor.get_actor_label()
+    except Exception:
+        label = ""
+    guid = _actor_guid(actor)
+    return {"kind": "actor", "id": guid or path, "guid": guid, "label": label, "path": path}
+
+
+def _xyz(vec) -> List[float]:
+    return [float(vec.x), float(vec.y), float(vec.z)]
+
+
+def _transform_state(actor) -> dict:
+    return {
+        "location": _xyz(actor.get_actor_location()),
+        "rotation": [
+            float(actor.get_actor_rotation().pitch),
+            float(actor.get_actor_rotation().yaw),
+            float(actor.get_actor_rotation().roll),
+        ],
+        "scale": _xyz(actor.get_actor_scale3d()),
+    }
+
+
+def _find(params: dict, *keys: str):
+    """Resolve the actor named by the first present key, or None."""
+    from listener import lookup
+
+    for key in keys:
+        ident = params.get(key)
+        if isinstance(ident, str) and ident.strip():
+            return lookup.find_actor(ident.strip())
+    return None
+
+
+def _restore_transform(target: dict, state: dict) -> dict:
+    return {
+        "command": "set_actor_transform",
+        "params": {
+            "actor_path": target.get("path") or target.get("id"),
+            "location": state["location"],
+            "rotation": state["rotation"],
+            "scale": state["scale"],
+        },
+    }
+
+
+# --- before / after per command ---------------------------------------------------
+# before(params) -> {"targets": [...], "state": {...}} | None
+# inverse(params, cap, result) -> [ {command, params}, ... ] | None
+
+
+def _before_actor_transform(params: dict) -> Optional[dict]:
+    actor = _find(params, "actor_path")
+    if actor is None:
+        return None
+    return {"targets": [_actor_target(actor)], "state": _transform_state(actor)}
+
+
+def _inverse_transform(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    state = cap.get("state") or {}
+    if not targets or "location" not in state:
+        return None
+    return [_restore_transform(targets[0], state)]
+
+
+def _before_actor_label(params: dict) -> Optional[dict]:
+    actor = _find(params, "actor_path")
+    if actor is None:
+        return None
+    return {"targets": [_actor_target(actor)], "state": {"label": actor.get_actor_label()}}
+
+
+def _inverse_label(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    label = (cap.get("state") or {}).get("label")
+    if not targets or label is None:
+        return None
+    return [{"command": "set_actor_label",
+             "params": {"actor_path": targets[0].get("path") or targets[0].get("id"), "label": label}}]
+
+
+def _before_actor_folder(params: dict) -> Optional[dict]:
+    actor = _find(params, "actor_path")
+    if actor is None:
+        return None
+    try:
+        folder = str(actor.get_folder_path())
+    except Exception:
+        folder = ""
+    return {"targets": [_actor_target(actor)], "state": {"folder": folder}}
+
+
+def _inverse_folder(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    folder = (cap.get("state") or {}).get("folder")
+    if not targets or folder is None:
+        return None
+    return [{"command": "set_actor_folder",
+             "params": {"actor_path": targets[0].get("path") or targets[0].get("id"), "folder": folder}}]
+
+
+def _before_actor_tags(params: dict) -> Optional[dict]:
+    actor = _find(params, "actor_path")
+    if actor is None:
+        return None
+    try:
+        tags = [str(t) for t in (actor.get_editor_property("tags") or [])]
+    except Exception:
+        return None
+    return {"targets": [_actor_target(actor)], "state": {"tags": tags}}
+
+
+def _inverse_tags(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    tags = (cap.get("state") or {}).get("tags")
+    if not targets or tags is None:
+        return None
+    return [{"command": "set_actor_tags",
+             "params": {"actor_path": targets[0].get("path") or targets[0].get("id"), "tags": tags}}]
+
+
+def _before_actor_properties(params: dict) -> Optional[dict]:
+    """Read exactly the properties about to be written — not the whole actor."""
+    from listener.serialize import serialize
+
+    actor = _find(params, "actor_path")
+    props = params.get("properties")
+    if actor is None or not isinstance(props, dict):
+        return None
+    before: Dict[str, Any] = {}
+    unreadable: List[str] = []
+    for name in props:
+        try:
+            before[str(name)] = serialize(actor.get_editor_property(str(name)))
+        except Exception:
+            unreadable.append(str(name))
+    state: Dict[str, Any] = {"properties": before}
+    if unreadable:
+        state["unreadable"] = unreadable
+    return {"targets": [_actor_target(actor)], "state": state}
+
+
+def _inverse_properties(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    state = cap.get("state") or {}
+    before = state.get("properties") or {}
+    if not targets or not before or state.get("unreadable"):
+        # A partial restore would silently leave some properties changed.
+        return None
+    return [{"command": "set_actor_properties",
+             "params": {"actor_path": targets[0].get("path") or targets[0].get("id"), "properties": before}}]
+
+
+def _before_group_locations(params: dict) -> Optional[dict]:
+    """Locations of every actor in a multi-actor move, keyed by path (labels are not unique)."""
+    from listener import lookup
+
+    paths = params.get("actor_paths")
+    if not isinstance(paths, list) or not paths:
+        return None
+    targets, locations = [], []
+    for ident in paths:
+        actor = lookup.find_actor(str(ident))
+        if actor is None:
+            return None
+        targets.append(_actor_target(actor))
+        locations.append(_xyz(actor.get_actor_location()))
+    return {"targets": targets, "state": {"locations": locations}}
+
+
+def _inverse_group_locations(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    locations = (cap.get("state") or {}).get("locations") or []
+    if not targets or len(targets) != len(locations):
+        return None
+    return [
+        {"command": "set_actor_transform",
+         "params": {"actor_path": t.get("path") or t.get("id"), "location": loc}}
+        for t, loc in zip(targets, locations)
+    ]
+
+
+def _before_single_location(params: dict) -> Optional[dict]:
+    actor = _find(params, "actor_path")
+    if actor is None:
+        return None
+    return {"targets": [_actor_target(actor)], "state": {"location": _xyz(actor.get_actor_location())}}
+
+
+def _inverse_single_location(params: dict, cap: dict, result: Any) -> Optional[list]:
+    targets = cap.get("targets") or []
+    loc = (cap.get("state") or {}).get("location")
+    if not targets or loc is None:
+        return None
+    return [{"command": "set_actor_transform",
+             "params": {"actor_path": targets[0].get("path") or targets[0].get("id"), "location": loc}}]
+
+
+def _before_attach(params: dict) -> Optional[dict]:
+    child = _find(params, "child_path")
+    if child is None:
+        return None
+    parent = None
+    try:
+        parent = child.get_attach_parent_actor()
+    except Exception:
+        pass
+    state = {"parent": _actor_target(parent)["path"] if parent is not None else ""}
+    return {"targets": [_actor_target(child)], "state": state}
+
+
+def _inverse_attach(params: dict, cap: dict, result: Any) -> Optional[list]:
+    prior = (cap.get("state") or {}).get("parent")
+    targets = cap.get("targets") or []
+    if not targets or not prior:
+        # Detaching is not expressible: attach_actor has no "no parent" form.
+        return None
+    return [{"command": "attach_actor",
+             "params": {"child_path": targets[0].get("path") or targets[0].get("id"),
+                        "parent_path": prior}}]
+
+
+def _created_actor(params: dict, cap: Optional[dict], result: Any) -> Optional[dict]:
+    """Identity of the actor a spawn/duplicate produced, read back from the result."""
+    if not isinstance(result, dict):
+        return None
+    actor = result.get("actor")
+    if not isinstance(actor, dict) or actor.get("invalid"):
+        return None
+    path = str(actor.get("path") or "")
+    guid = str(actor.get("guid") or "")
+    if not (path or guid):
+        return None
+    return {"kind": "actor", "id": guid or path, "guid": guid,
+            "label": str(actor.get("label") or ""), "path": path}
+
+
+# --- registry ---------------------------------------------------------------------
+
+
+class _Spec:
+    __slots__ = ("kind", "facet", "before", "inverse", "created", "note")
+
+    def __init__(self, kind, facet, before=None, inverse=None, created=None, note=""):
+        self.kind = kind
+        self.facet = facet
+        self.before: Optional[Callable[[dict], Optional[dict]]] = before
+        self.inverse: Optional[Callable[[dict, dict, Any], Optional[list]]] = inverse
+        self.created: Optional[Callable[[dict, Optional[dict], Any], Optional[dict]]] = created
+        self.note = note
+
+
+CAPTURE: Dict[str, _Spec] = {
+    # actors — transform and organisation
+    "set_actor_transform": _Spec("actor", "transform", _before_actor_transform, _inverse_transform),
+    "set_actor_label": _Spec("actor", "label", _before_actor_label, _inverse_label),
+    "set_actor_folder": _Spec("actor", "folder", _before_actor_folder, _inverse_folder),
+    "set_actor_tags": _Spec("actor", "tags", _before_actor_tags, _inverse_tags),
+    "set_actor_properties": _Spec("actor", "props", _before_actor_properties, _inverse_properties),
+    "snap_actor_to_ground": _Spec("actor", "transform", _before_single_location, _inverse_single_location),
+    "snap_actor_to_grid": _Spec("actor", "transform", _before_single_location, _inverse_single_location),
+    "align_actors": _Spec("actor", "transform", _before_group_locations, _inverse_group_locations),
+    "distribute_actors": _Spec("actor", "transform", _before_group_locations, _inverse_group_locations),
+    "attach_actor": _Spec(
+        "actor", "attach", _before_attach, _inverse_attach,
+        note="the actor had no parent before, and attach_actor cannot detach",
+    ),
+    # actors — creation (the inverse is a delete, handled by the host's carve-out)
+    "spawn_actor": _Spec("actor", "exists", None, None, _created_actor),
+    "duplicate_actor": _Spec("actor", "exists", None, None, _created_actor),
+}
+
+
+def _summary(command: str, cap: Optional[dict], result: Any, created: Optional[dict]) -> str:
+    """One short line for the change row. Never raises."""
+    try:
+        if created:
+            return f"created {created.get('label') or created.get('path') or 'actor'}"
+        state = (cap or {}).get("state") or {}
+        if command == "set_actor_transform" and isinstance(result, dict):
+            after = (result.get("actor") or {}).get("location")
+            before = state.get("location")
+            if isinstance(after, dict) and isinstance(before, list):
+                deltas = [
+                    (axis, round(float(after.get(axis, 0.0)) - before[i], 1))
+                    for i, axis in enumerate("xyz")
+                ]
+                moved = [f"{d:+g} on {axis.upper()}" for axis, d in deltas if abs(d) >= 0.05]
+                if moved:
+                    return "moved " + ", ".join(moved)
+                return "transform set"
+        if command == "set_actor_label":
+            return f"renamed from {state.get('label', '')!r}"
+        if command == "set_actor_folder":
+            return f"moved out of {state.get('folder') or '(no folder)'}"
+        if command == "set_actor_tags":
+            return f"tags were {state.get('tags') or []}"
+        if command == "set_actor_properties":
+            names = sorted((state.get("properties") or {}).keys())
+            return "set " + ", ".join(names[:4]) + ("…" if len(names) > 4 else "")
+        if command in ("align_actors", "distribute_actors"):
+            return f"moved {len(state.get('locations') or [])} actors"
+        if command in ("snap_actor_to_ground", "snap_actor_to_grid"):
+            return "snapped"
+    except Exception:
+        pass
+    return command.replace("_", " ")
+
+
+def before(command: str, params: Optional[dict]) -> Optional[dict]:
+    """State the command is about to overwrite, or None. Never raises."""
+    if not _enabled:
+        return None
+    try:
+        spec = CAPTURE.get(command)
+        if spec is None or spec.before is None:
+            return None
+        return spec.before(dict(params or {}))
+    except Exception:
+        return None
+
+
+def after(
+    command: str,
+    params: Optional[dict],
+    result: Any,
+    cap: Optional[dict],
+    *,
+    ok: bool = True,
+) -> Optional[dict]:
+    """Sidecar for one dispatched command, or None when there is nothing to say.
+
+    Never raises: a capture failure must not turn a successful edit into an error.
+    """
+    if not _enabled:
+        return None
+    try:
+        spec = CAPTURE.get(command)
+        if spec is None:
+            return None
+        params = dict(params or {})
+        # Each of these is guarded on its own: a bug building the inverse must
+        # cost the inverse, not the record of what changed.
+        created = None
+        if ok and spec.created is not None:
+            try:
+                created = spec.created(params, cap, result)
+            except Exception:
+                created = None
+
+        targets = list((cap or {}).get("targets") or [])
+        if not targets and created:
+            targets = [created]
+
+        inverse = None
+        if ok and spec.inverse is not None and cap:
+            try:
+                inverse = spec.inverse(params, cap, result)
+            except Exception:
+                inverse = None
+
+        if not ok:
+            revertable, reason = REVERT_NONE, "the command failed, so nothing changed"
+        elif inverse:
+            revertable, reason = REVERT_AUTO, ""
+        elif created:
+            # The host decides: it knows whether this run created the thing.
+            revertable, reason = REVERT_AUTO, ""
+        else:
+            revertable = REVERT_MANUAL
+            reason = spec.note or "no inverse could be built for this command"
+
+        return {
+            "v": CAPTURE_VERSION,
+            "command": command,
+            "kind": spec.kind,
+            "facet": spec.facet,
+            "targets": targets,
+            "before": (cap or {}).get("state"),
+            "inverse": inverse,
+            "created": [created] if created else [],
+            "revertable": revertable,
+            "reason": reason,
+            "summary": _summary(command, cap, result, created),
+            "outcome": "ok" if ok else "error",
+        }
+    except Exception:
+        return None

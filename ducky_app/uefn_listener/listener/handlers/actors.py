@@ -181,7 +181,8 @@ def cmd_spawn_actor(
             actor_sub.set_selected_level_actors([actor])
         except Exception:
             pass
-    return {"actor": serialize_actor(actor)}
+    # Include the guid: change tracking uses it to identify what this run created.
+    return {"actor": serialize_actor(actor, ALL_ACTOR_FIELDS)}
 
 
 @register("delete_actors")
