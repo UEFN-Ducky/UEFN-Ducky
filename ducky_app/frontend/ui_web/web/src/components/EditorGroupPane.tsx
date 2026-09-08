@@ -12,6 +12,7 @@ import { DucktactoeChatShell } from "../plugin-ui/DucktactoeChatShell";
 import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
 import { VerseTranslatedPane } from "./VerseTranslatedPane";
 import { DuckyProfileTabPane } from "./ducky/DuckyProfileTabPane";
+import { ChangesView } from "./changes/ChangesView";
 import { useTerminalsSettings } from "../contexts/TerminalsSettingsContext";
 import { duckyProfileIdFromTab } from "../types/panel";
 import { dropZoneFromPointer } from "../utils/editorLayoutOps";
@@ -293,6 +294,9 @@ export function EditorGroupPane({
     }
     if (activeTab.kind === "settings") {
       return <SettingsView />;
+    }
+    if (activeTab.kind === "changes") {
+      return <ChangesView allChats={allChats} onOpenFile={onOpenFile} />;
     }
     if (activeTab.kind === "plugin") {
       return (

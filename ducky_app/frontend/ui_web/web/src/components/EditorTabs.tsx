@@ -424,6 +424,8 @@ export function EditorTabs({
                   <Icons.Chart />
                 ) : tab.kind === "settings" ? (
                   <Icons.Settings />
+                ) : tab.kind === "changes" ? (
+                  <Icons.Clock />
                 ) : tab.kind === "verse-translated" ? (
                   <Icons.Globe />
                 ) : (

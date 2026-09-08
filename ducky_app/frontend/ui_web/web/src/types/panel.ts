@@ -156,7 +156,8 @@ export type EditorTabKind =
   | "discord"
   | "plugin"
   | "verse-translated"
-  | "ducky-profile";
+  | "ducky-profile"
+  | "changes";
 
 export interface EditorTab {
   id: string;
@@ -210,6 +211,11 @@ export function usageProviderIdFromTab(tabId: string): string {
 /** Singleton Settings editor tab (VS Code–style). */
 export function settingsTabId(): string {
   return "settings:main";
+}
+
+/** Singleton Changes editor tab: one project-wide ledger, never one per chat. */
+export function changesTabId(): string {
+  return "changes:main";
 }
 
 /** Discord editor tab id — one tab per bot (`discord:<botId>`). Legacy `discord:main` = default. */
@@ -595,11 +601,44 @@ export interface ChangesetConflictDto {
   found_hash?: string;
 }
 
+/** What an editor command acted on. `guid` is durable; labels are neither unique nor stable. */
+export interface EditorTargetDto {
+  kind: "actor" | "asset" | "device" | "verse" | "material" | "datatable" | "niagara" | "umg" | "entity" | "world" | "other";
+  id: string;
+  guid?: string;
+  label?: string;
+  path?: string;
+  invalid?: boolean;
+}
+
+/** One listener command to post when undoing an editor change. */
+export interface EditorStepDto {
+  command: string;
+  params?: Record<string, unknown>;
+}
+
+/** What a ducky changed in the editor rather than on disk (schema changeset_run/1). */
+export interface EditorChangeDto {
+  command: string;
+  kind?: string;
+  facet?: string;
+  targets?: EditorTargetDto[];
+  /** Commands that put the target back. Empty means it cannot be undone automatically. */
+  inverse?: EditorStepDto[];
+  /** What this command brought into existence, so a revert can remove exactly that. */
+  created?: EditorTargetDto[];
+  revertable: "auto" | "manual" | "none";
+  reason?: string;
+  summary?: string;
+  params?: Record<string, unknown>;
+}
+
 export interface ChangesetEntryDto {
   seq: number;
   ts: number;
+  /** A project-relative file path, or a `uefn://…` target slot for editor changes. */
   path: string;
-  op: "create" | "write" | "rename" | "move" | "copy" | "import" | "restore" | "delete";
+  op: "create" | "write" | "rename" | "move" | "copy" | "import" | "restore" | "delete" | "editor";
   from_path?: string | null;
   trash_token?: string | null;
   tool: string;
@@ -614,6 +653,11 @@ export interface ChangesetEntryDto {
   conflict?: ChangesetConflictDto | null;
   reverted?: boolean;
   reverted_by_run?: string | null;
+  /** Absent means "ok". Blocked and failed entries changed nothing and never revert. */
+  outcome?: "ok" | "blocked" | "failed";
+  /** Why it was refused or how it failed. */
+  reason?: string | null;
+  editor?: EditorChangeDto | null;
 }
 
 /** One agent run's project writes — schema changeset_run/1. */
@@ -635,12 +679,27 @@ export interface ChangesetRunDto {
   entries: ChangesetEntryDto[];
 }
 
+/** An editor change with no computable inverse: the user has to undo it by hand. */
+export interface ChangesetManualRow {
+  seq: number;
+  /** The uefn:// target slot, never a file path. */
+  path: string;
+  /** The target id or asset path, for the copy-out list. */
+  target: string;
+  label: string;
+  command: string;
+  summary: string;
+  reason: string;
+}
+
 export interface ChangesetRevertResult {
   ok: boolean;
   run_id: string;
   revert_run_id?: string;
   reverted: number[];
   skipped_modified: { seq: number; path: string }[];
+  /** Not errors: changes that were recorded but cannot be undone automatically. */
+  manual?: ChangesetManualRow[];
   errors: string[];
 }
 

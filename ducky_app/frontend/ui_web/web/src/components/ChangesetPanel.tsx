@@ -3,15 +3,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
-import type { ChangesetRevertResult, ChangesetRunDto, SessionFile } from "../types/panel";
+import type { ChangesetManualRow, ChangesetRevertResult, ChangesetRunDto, SessionFile } from "../types/panel";
 import {
+  blockedRows,
   changesetFilePaths,
   changesetRunSummary,
   groupChangesetEntries,
+  groupEditorEntries,
   sortRunsNewestFirst,
   statusLabel,
+  type ChangeRow,
   type ChangesetFileRow,
+  type EditorChangeRow,
 } from "../utils/changesetGrouping";
+import { requestOpenChangesTab } from "../navigation/openChangesTab";
+import { JsonDiffView } from "./changes/JsonDiffView";
 import { formatSavedAt } from "../utils/formatSavedAt";
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
 import { basename } from "../verse-editor/utils/isVerseFile";
@@ -33,12 +39,22 @@ interface ChangesetPanelProps {
 
 interface DiffView {
   path: string;
+  title: string;
+  summary: string;
   before: string;
   after: string;
   kind: "write" | "create";
+  /** Editor entries store JSON, which the text differ has nothing to say about. */
+  json: boolean;
 }
 
-const LIVE_EVENT_TYPES = new Set(["tool_done", "agent_stopped", "files_reverted", "file_guard"]);
+const LIVE_EVENT_TYPES = new Set([
+  "tool_done",
+  "agent_stopped",
+  "files_reverted",
+  "file_guard",
+  "editor_op",
+]);
 
 /**
  * Per-run ledger of what each ducky wrote (Context panel → Files). Backed by the
@@ -59,6 +75,7 @@ export function ChangesetPanel({
   const [error, setError] = useState("");
   const [busyRun, setBusyRun] = useState("");
   const [diff, setDiff] = useState<DiffView | null>(null);
+  const [manual, setManual] = useState<ChangesetManualRow[]>([]);
 
   const refresh = useCallback(async () => {
     const api = getApi();
@@ -105,6 +122,7 @@ export function ChangesetPanel({
   const reportRevert = useCallback(
     async (label: string, result: ChangesetRevertResult, retry: () => Promise<ChangesetRevertResult | null>) => {
       if (result.errors.length) setError(result.errors.join("; "));
+      setManual(result.manual ?? []);
       if (result.skipped_modified.length) {
         const names = result.skipped_modified.map((s) => basename(s.path)).join(", ");
         const force = await confirm({
@@ -116,6 +134,7 @@ export function ChangesetPanel({
         if (force) {
           const forced = await retry();
           if (forced?.errors.length) setError(forced.errors.join("; "));
+          if (forced?.manual) setManual(forced.manual);
         }
       }
       await refresh();
@@ -175,6 +194,53 @@ export function ChangesetPanel({
     [confirm, reportRevert],
   );
 
+  /** Editor changes: same contents call, JSON on the other side. */
+  const openEditorDiff = useCallback(async (run: ChangesetRunDto, row: EditorChangeRow) => {
+    const api = getApi();
+    if (!api?.get_changeset_entry_contents) return;
+    try {
+      const first = await api.get_changeset_entry_contents(run.run_id, row.firstSeq);
+      const last =
+        row.lastSeq === row.firstSeq ? first : await api.get_changeset_entry_contents(run.run_id, row.lastSeq);
+      setDiff({
+        path: row.slot,
+        title: row.label,
+        summary: row.detail,
+        before: first.before ?? "",
+        after: last.after ?? "",
+        kind: "write",
+        json: true,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const revertRow = useCallback(
+    async (run: ChangesetRunDto, seq: number, what: string) => {
+      const api = getApi();
+      if (!api?.revert_changeset_entry) return;
+      const ok = await confirm({
+        title: "Undo editor change",
+        message: `Put ${what} back the way it was before ${run.ducky_name || "this run"} changed it?`,
+        confirmLabel: "Revert",
+        danger: true,
+      });
+      if (!ok) return;
+      setBusyRun(run.run_id);
+      setError("");
+      try {
+        const result = await api.revert_changeset_entry(run.run_id, seq);
+        await reportRevert("change", result, () => api.revert_changeset_entry!(run.run_id, seq, true));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusyRun("");
+      }
+    },
+    [confirm, reportRevert],
+  );
+
   const openDiff = useCallback(async (run: ChangesetRunDto, row: ChangesetFileRow) => {
     const api = getApi();
     if (!api?.get_changeset_entry_contents) return;
@@ -183,9 +249,12 @@ export function ChangesetPanel({
       const last = row.lastSeq === row.firstSeq ? first : await api.get_changeset_entry_contents(run.run_id, row.lastSeq);
       setDiff({
         path: row.path,
+        title: basename(row.path),
+        summary: "",
         before: first.before ?? "",
         after: last.after ?? "",
         kind: row.op === "create" ? "create" : "write",
+        json: false,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -195,7 +264,14 @@ export function ChangesetPanel({
   if (runs.length === 0) {
     if (loading) return <div className="changeset-empty">Loading changes…</div>;
     if (fallbackFiles.length === 0) {
-      return <div className="context-usage-panel-files-empty">No files edited in this chat yet.</div>;
+      return (
+        <div className="context-usage-panel-files-empty">
+          No files edited in this chat yet.
+          <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
+            See all changes in this project →
+          </button>
+        </div>
+      );
     }
     return (
       <div className="context-usage-panel-files-list">
@@ -215,6 +291,9 @@ export function ChangesetPanel({
             )}
           </button>
         ))}
+        <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
+          See all changes in this project →
+        </button>
       </div>
     );
   }
@@ -222,8 +301,28 @@ export function ChangesetPanel({
   return (
     <div className="changeset-panel">
       {error ? <div className="changeset-error">{error}</div> : null}
+      {manual.length > 0 ? (
+        <section className="changes-manual">
+          <div className="changes-manual-head">
+            <strong>Remove these by hand</strong>
+            <button type="button" className="changeset-btn" onClick={() => setManual([])}>
+              Dismiss
+            </button>
+          </div>
+          <ul>
+            {manual.map((row) => (
+              <li key={`${row.seq}:${row.path}`}>
+                <span className="changes-manual-label">{row.label || row.target || row.path}</span>
+                {row.reason ? <span className="changes-manual-reason">{row.reason}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {runs.map((run) => {
         const rows = groupChangesetEntries(run);
+        const editorRows: EditorChangeRow[] = groupEditorEntries(run);
+        const refused: ChangeRow[] = blockedRows(run);
         const summary = changesetRunSummary(run);
         const busy = busyRun === run.run_id;
         const canRevert = !summary.running && !summary.reverted && !busy;
@@ -244,6 +343,11 @@ export function ChangesetPanel({
               {summary.outOfLane > 0 ? (
                 <span className="changeset-badge changeset-badge--lane" title="Written outside the member's lane (shadow mode)">
                   {summary.outOfLane} out of lane
+                </span>
+              ) : null}
+              {summary.blocked > 0 ? (
+                <span className="changeset-badge changeset-badge--blocked" title="Refused or failed — nothing changed">
+                  {summary.blocked} blocked
                 </span>
               ) : null}
               <span className="changeset-run-meta" title={run.run_id}>
@@ -318,18 +422,72 @@ export function ChangesetPanel({
                   ) : null}
                 </div>
               ))}
+              {editorRows.map((row) => (
+                <div
+                  key={row.slot}
+                  className={`changeset-file changeset-editor-row${row.reverted ? " changeset-file--reverted" : ""}`}
+                >
+                  <span className="changes-row-verb">{row.verb}</span>
+                  <span className="changes-row-name" title={row.slot}>
+                    {row.label}
+                  </span>
+                  <span className="changes-row-detail">{row.detail}</span>
+                  <span
+                    className={`changeset-badge changeset-badge--${row.revertable}`}
+                    title={row.revertable === "auto" ? "Ducky recorded how to put this back" : row.reason}
+                  >
+                    {row.revertable === "auto" ? "Auto" : row.revertable === "manual" ? "Manual" : "No undo"}
+                  </span>
+                  {row.reverted ? <span className="changeset-badge">Reverted</span> : null}
+                  {row.hasDiff && !row.reverted ? (
+                    <button type="button" className="changeset-btn" onClick={() => void openEditorDiff(run, row)}>
+                      Details
+                    </button>
+                  ) : null}
+                  {!row.reverted && row.revertable !== "none" && run.source !== "revert" ? (
+                    <button
+                      type="button"
+                      className="changeset-btn"
+                      disabled={!canRevert}
+                      onClick={() => void revertRow(run, row.lastSeq, row.label)}
+                    >
+                      Revert
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              {refused.map((row) => (
+                <div key={row.key} className="changeset-file changeset-editor-row changes-row--blocked">
+                  <span className="changes-row-verb changes-row-verb--blocked">
+                    {row.outcome === "blocked" ? "BLOCKED" : "FAILED"}
+                  </span>
+                  <span className="changes-row-name" title={row.kind === "file" ? row.path : row.slot}>
+                    {row.kind === "file" ? basename(row.path) : row.label}
+                  </span>
+                  <span className="changes-row-detail" title={row.reason}>
+                    {row.reason}
+                  </span>
+                </div>
+              ))}
             </div>
           </section>
         );
       })}
+      <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
+        See all changes in this project →
+      </button>
       {diff ? (
-        <Modal open onClose={() => setDiff(null)} title={basename(diff.path)} width={760} zIndex={100020}>
+        <Modal open onClose={() => setDiff(null)} title={diff.title} width={760} zIndex={100020}>
           <div className="changeset-diff-modal">
-            <ToolFileEditDiff
-              edit={{ path: diff.path, before: diff.before, after: diff.after, linesAdded: 0, linesRemoved: 0, kind: diff.kind }}
-              onOpenFile={onOpenFile ? (path, name) => onOpenFile(path, name) : undefined}
-              defaultExpanded
-            />
+            {diff.json ? (
+              <JsonDiffView before={diff.before} after={diff.after} summary={diff.summary} />
+            ) : (
+              <ToolFileEditDiff
+                edit={{ path: diff.path, before: diff.before, after: diff.after, linesAdded: 0, linesRemoved: 0, kind: diff.kind }}
+                onOpenFile={onOpenFile ? (path, name) => onOpenFile(path, name) : undefined}
+                defaultExpanded
+              />
+            )}
           </div>
         </Modal>
       ) : null}

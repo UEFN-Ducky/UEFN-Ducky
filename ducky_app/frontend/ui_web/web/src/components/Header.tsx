@@ -14,6 +14,7 @@ import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import type { ChatLayoutMode, ListenerStatus, ProjectInfo, ViewId } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { requestOpenChangesTab } from "../navigation/openChangesTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
 import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
@@ -188,6 +189,8 @@ export function Header({
   const workflowAction = showEditorActions && hasProject ? headerActions.verseWorkflow : null;
   const problemsAction = showEditorActions && hasProject ? headerActions.problems : null;
   const terminalAction = showEditorActions && hasProject ? headerActions.terminal : null;
+  // The ledger is always reachable once a project is open, even with no other editor action.
+  const showChanges = showEditorActions && hasProject;
   const layoutToggle = LAYOUT_TOGGLE_META[layoutMode];
   const LayoutToggleIcon = layoutToggle.Icon;
   const rightRailToggle = RIGHT_RAIL_TOGGLE_META[rightRailOpen ? "open" : "closed"];
@@ -229,6 +232,11 @@ export function Header({
     kind: "button",
     label: "Settings",
     route: "settings",
+  });
+  const changesTargetRef = useUiTarget("header.changes", {
+    kind: "button",
+    label: "Changes",
+    route: "changes",
   });
 
   return (
@@ -346,7 +354,7 @@ export function Header({
       ) : null}
 
       <div className={`app-header-trailing${isSettingsOverlay ? " app-header-trailing--settings" : ""}`}>
-        {showWorkflow || terminalAction || problemsAction ? (
+        {showWorkflow || terminalAction || problemsAction || showChanges ? (
           <span className="app-header-editor-actions">
             {showWorkflow && workflowAction ? (
               <div
@@ -384,6 +392,18 @@ export function Header({
               <span className="app-header-terminal">
                 <TerminalHeaderDropdown {...terminalAction} />
               </span>
+            ) : null}
+            {showChanges ? (
+              <button
+                ref={changesTargetRef}
+                type="button"
+                className="icon-btn app-header-changes-btn"
+                title="Changes — everything the AI changed, and how to undo it"
+                aria-label="Open changes"
+                onClick={() => requestOpenChangesTab()}
+              >
+                <Icons.Clock />
+              </button>
             ) : null}
           </span>
         ) : null}

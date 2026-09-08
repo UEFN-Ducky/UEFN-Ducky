@@ -18,6 +18,7 @@ function registryTabIds(tabIds: string[]): string[] {
       id.startsWith("plan:") ||
       id.startsWith("usage:") ||
       id.startsWith("settings:") ||
+      id.startsWith("changes:") ||
       id.startsWith("discord:") ||
       id.startsWith("plugin:") ||
       id.startsWith("verse-translated:"),

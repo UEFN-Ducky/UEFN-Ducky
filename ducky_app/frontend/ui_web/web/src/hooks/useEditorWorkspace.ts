@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ChatTab, EditorTab, EditorLayoutState, EditorWorkspaceSnapshot, FocusWindowSnapshot } from "../types/panel";
+import { changesTabId } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { collectTabIds, createDefaultLayout, repairLayout } from "../utils/editorLayoutOps";
 
@@ -54,6 +55,12 @@ async function validateSnapshot(
         id: "settings:main",
         kind: "settings",
         name: tab.name || "Settings",
+      });
+    } else if (tab.kind === "changes") {
+      openTabs.push({
+        id: changesTabId(),
+        kind: "changes",
+        name: tab.name || "Changes",
       });
     } else if (tab.kind === "ducky-profile" && tab.path) {
       openTabs.push({

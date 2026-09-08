@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import fixture from "../../../../../backend/workspace/schemas/fixtures/changeset_run.json";
 import type { ChangesetRunDto } from "../types/panel";
 import {
+  blockedRows,
   changesetFilePaths,
   changesetRunSummary,
   conflictCountsByConv,
+  editorVerb,
   groupChangesetEntries,
+  groupEditorEntries,
+  runTimeline,
   statusLabel,
 } from "./changesetGrouping";
 
@@ -28,6 +32,25 @@ function withEntries(entries: Partial<ChangesetRunDto["entries"][number]>[], ext
       ...e,
     })),
   } as ChangesetRunDto;
+}
+
+function editorEntry(over: Record<string, unknown> = {}, editor: Record<string, unknown> = {}) {
+  return {
+    path: "uefn://actor/AAA/transform",
+    op: "editor" as const,
+    tool: "set_actor_transform",
+    after_blob: "hash",
+    editor: {
+      command: "set_actor_transform",
+      kind: "actor",
+      facet: "transform",
+      targets: [{ kind: "actor", id: "AAA", guid: "AAA", label: "VerifyCube" }],
+      revertable: "auto",
+      summary: "moved +250 on Z",
+      ...editor,
+    },
+    ...over,
+  };
 }
 
 describe("groupChangesetEntries", () => {
@@ -60,12 +83,130 @@ describe("groupChangesetEntries", () => {
     const r = withEntries([{ path: "a", reverted: true }, { path: "a", reverted: false }]);
     expect(groupChangesetEntries(r)[0].reverted).toBe(false);
   });
+
+  it("never lets an editor slot or a blocked attempt into the file list", () => {
+    const r = withEntries([
+      { path: "a" },
+      editorEntry(),
+      { path: "b", outcome: "blocked", reason: "out of lane" },
+      { path: "c", outcome: "failed", reason: "disk full" },
+    ]);
+    // A uefn:// slot has no basename and nothing to open; a refusal changed nothing.
+    expect(groupChangesetEntries(r).map((x) => x.path)).toEqual(["a"]);
+    expect(changesetFilePaths([r])).toEqual(["a"]);
+  });
+});
+
+describe("groupEditorEntries", () => {
+  it("collapses repeated edits to one target into one row", () => {
+    const r = withEntries([
+      editorEntry({ seq: 1 }, { summary: "moved +100 on Z" }),
+      editorEntry({ seq: 2 }, { summary: "moved +250 on Z" }),
+    ]);
+    const [row] = groupEditorEntries(r);
+    expect(row.seqs).toEqual([1, 2]);
+    expect(row.label).toBe("VerifyCube");
+    expect(row.verb).toBe("moved");
+    // The newest summary wins; every step stays available behind the expander.
+    expect(row.detail).toBe("moved +250 on Z");
+    expect(row.steps.map((s) => s.summary)).toEqual(["moved +100 on Z", "moved +250 on Z"]);
+  });
+
+  it("a run is only auto-revertable while every step in it is", () => {
+    const r = withEntries([
+      editorEntry({}, { revertable: "auto" }),
+      editorEntry({}, { revertable: "manual", reason: "the rows were replaced" }),
+    ]);
+    const [row] = groupEditorEntries(r);
+    expect(row.revertable).toBe("manual");
+    expect(row.reason).toBe("the rows were replaced");
+  });
+
+  it("reads a creation as spawned and counts what it made", () => {
+    const r = withEntries([
+      editorEntry(
+        { path: "uefn://actor/BBB/exists", tool: "spawn_actor" },
+        {
+          command: "spawn_actor",
+          facet: "exists",
+          created: [{ kind: "actor", id: "BBB", label: "New" }],
+          summary: "spawned New",
+        },
+      ),
+    ]);
+    const [row] = groupEditorEntries(r);
+    expect(row.verb).toBe("spawned");
+    expect(row.createdCount).toBe(1);
+  });
+
+  it("falls back to the command when no facet verb fits", () => {
+    expect(editorVerb("fill_data_table_from_json", "", 0)).toBe("fill data table from json");
+    expect(editorVerb("duplicate_asset", "", 2)).toBe("created");
+  });
+});
+
+describe("blockedRows", () => {
+  it("keeps every refusal separate rather than collapsing them", () => {
+    const r = withEntries([
+      { path: "hub.verse", outcome: "blocked", reason: "out of lane" },
+      { path: "hub.verse", outcome: "blocked", reason: "out of lane" },
+    ]);
+    const rows = blockedRows(r);
+    // Two attempts, two rows: "tried twice and was refused twice" is the point.
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.outcome === "blocked" && row.reason === "out of lane")).toBe(true);
+  });
+
+  it("a blocked editor change keeps its target, not a file path", () => {
+    const r = withEntries([editorEntry({ outcome: "blocked", reason: "Refused: never delete island content" })]);
+    const [row] = blockedRows(r);
+    expect(row.kind).toBe("editor");
+    if (row.kind === "editor") expect(row.label).toBe("VerifyCube");
+    expect(row.reason).toContain("never delete");
+  });
+});
+
+describe("runTimeline", () => {
+  it("reads in the order things happened, files and editor interleaved", () => {
+    const r = withEntries([
+      { path: "shop.verse" },
+      editorEntry({ seq: 2 }),
+      { path: "hub.verse", outcome: "blocked", reason: "out of lane" },
+    ]);
+    expect(runTimeline(r).map((row) => [row.kind, row.outcome])).toEqual([
+      ["file", "ok"],
+      ["editor", "ok"],
+      ["file", "blocked"],
+    ]);
+  });
+
+  it("the fixture reads as write, create, moved, blocked", () => {
+    const rows = runTimeline(run);
+    expect(rows.map((row) => row.firstSeq)).toEqual([1, 2, 3, 4]);
+    expect(rows[2].kind).toBe("editor");
+    expect(rows[3].outcome).toBe("blocked");
+  });
 });
 
 describe("summaries", () => {
-  it("run summary counts files, conflicts and out-of-lane rows", () => {
+  it("run summary counts files, editor changes and blocked attempts apart", () => {
     const s = changesetRunSummary(run);
-    expect(s).toMatchObject({ files: 2, entries: 2, conflicts: 1, outOfLane: 0, reverted: false, running: false });
+    expect(s).toMatchObject({
+      files: 2,
+      editor: 1,
+      blocked: 1,
+      manual: 0,
+      entries: 3,
+      conflicts: 1,
+      outOfLane: 0,
+      reverted: false,
+      running: false,
+    });
+  });
+
+  it("counts editor changes that have to be undone by hand", () => {
+    const r = withEntries([editorEntry({}, { revertable: "manual", inverse: [] })]);
+    expect(changesetRunSummary(r).manual).toBe(1);
   });
 
   it("file paths dedupe across runs and skip reverted", () => {

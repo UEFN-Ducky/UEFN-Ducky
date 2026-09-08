@@ -9,6 +9,7 @@ import {
   duckyProfileTabId,
   usageTabId,
   planTabId,
+  changesTabId,
   type EditorTab,
 } from "../types/panel";
 import { parsePluginUiTabId, pluginUiTabId } from "../plugin-ui/types";
@@ -78,6 +79,7 @@ export type ParsedFocusId =
   | { kind: "file"; path: string }
   | { kind: "terminal"; sessionId: string }
   | { kind: "settings" }
+  | { kind: "changes" }
   | { kind: "usage"; providerId: string }
   | { kind: "plan"; chatId: string }
   | { kind: "plugin"; tabId: string; pluginId: string; panelId: string }
@@ -102,6 +104,9 @@ export function parseFocusId(focusId: string): ParsedFocusId | null {
   }
   if (id === settingsTabId() || id.startsWith("settings:")) {
     return { kind: "settings" };
+  }
+  if (id === changesTabId() || id.startsWith("changes:")) {
+    return { kind: "changes" };
   }
   if (id === discordTabId() || id.startsWith("discord:")) {
     // Legacy host Discord tabs → plugin chat panel.
@@ -164,6 +169,9 @@ export function focusIdToEditorTab(focusId: string, title: string): EditorTab | 
   }
   if (parsed.kind === "settings") {
     return { id: settingsTabId(), kind: "settings", name: title || "Settings" };
+  }
+  if (parsed.kind === "changes") {
+    return { id: changesTabId(), kind: "changes", name: title || "Changes" };
   }
   if (parsed.kind === "ducky-profile") {
     return {
