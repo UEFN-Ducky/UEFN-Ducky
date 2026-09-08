@@ -105,6 +105,7 @@ def verse_test_scaffold(overwrite: bool = False, pretty: bool = False) -> str:
     on OnBegin — collect with verse_test_results after a play session.
     """
     from backend.bridge import resolve_workspace_path
+    from backend.workspace.runtime import get_writer
     import os
 
     rel = "Verse/DuckyTests/ducky_test_device.verse"
@@ -119,13 +120,14 @@ def verse_test_scaffold(overwrite: bool = False, pretty: bool = False) -> str:
             },
             pretty=pretty,
         )
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
     content = scaffold_content()
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(content)
-    return tool_json({"ok": True, "path": rel, "created": True, "bytes": len(content)}, pretty=pretty)
+    result = get_writer().write_text(rel, content, tool="verse_test_scaffold")
+    payload = {"ok": True, "path": result.path, "created": True, "bytes": result.bytes_written}
+    extra = result.to_payload()
+    for key in ("changeset", "in_lane", "warning"):
+        if key in extra:
+            payload[key] = extra[key]
+    return tool_json(payload, pretty=pretty)
 
 
 @plugin_mcp_tool("tester")

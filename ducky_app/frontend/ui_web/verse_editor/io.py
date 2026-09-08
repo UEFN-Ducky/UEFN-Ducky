@@ -1,9 +1,13 @@
-"""Read/write project files with content cache for diff baselines."""
+"""Read/write project files with content cache for diff baselines.
+
+Panel saves go through the shared write pipeline (``backend.workspace``), which
+owns atomic replace, history snapshots, the change journal and policy. This
+module keeps the panel-only rules (Content-only, editable text, not locked) and
+the content cache the follow-code diff uses as its baseline.
+"""
 
 from __future__ import annotations
 
-import os
-import tempfile
 from threading import Lock
 
 from frontend.ui_web import project_files as pf
@@ -50,7 +54,7 @@ def read_file(relative_path: str) -> dict[str, str]:
 
 
 def write_file(relative_path: str, content: str) -> dict[str, object]:
-    """Atomic write under project root; updates cache."""
+    """Save from the panel editor: panel rules, then the shared write pipeline."""
     pf._require_writable_content_path(relative_path)  # noqa: SLF001
     pf._require_not_locked(relative_path)  # noqa: SLF001
     pf._require_not_digest(relative_path)  # noqa: SLF001 — never mutate UEFN digests
@@ -58,34 +62,13 @@ def write_file(relative_path: str, content: str) -> dict[str, object]:
     pf._require_under_content(target, relative_path)  # noqa: SLF001
     if not pf.is_editable_text_file(relative_path):
         raise ValueError(f"File type cannot be saved in panel: {relative_path}")
-    if not target.parent.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
     rel = str(target.relative_to(pf._project_root().resolve())).replace("\\", "/")  # noqa: SLF001
-    project_root = str(pf._project_root().resolve())  # noqa: SLF001
-    if target.is_file():
-        try:
-            old_content = target.read_text(encoding="utf-8")
-            if old_content != content:
-                file_history.snapshot_before_write(rel, old_content, project_root)
-        except OSError:
-            pass
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(target.parent),
-        prefix=f".{target.name}.",
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(content)
-        os.replace(tmp_name, target)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+
+    from backend.workspace.runtime import get_writer
+
+    result = get_writer().write_text(rel, content, tool="panel_save")
     _cache.set(rel, content)
-    return {"path": rel, "bytes_written": len(content.encode("utf-8"))}
+    return {"path": rel, "bytes_written": result.bytes_written}
 
 
 def seed_cache(relative_path: str, content: str) -> None:

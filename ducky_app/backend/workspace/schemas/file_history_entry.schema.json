@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uefn-ducky.dev/schemas/file_history_entry/2",
+  "title": "FileHistoryEntry",
+  "description": "One saved version of one project file under AppData/file_history/<project_slug>/<path>/<id>.json. schema_version 1 entries (pre-attribution) have no schema_version key and only the base fields.",
+  "type": "object",
+  "required": ["id", "path", "saved_at", "bytes", "content_hash", "content"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1, "maximum": 2 },
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "path": { "type": "string", "minLength": 1 },
+    "saved_at": { "type": "integer", "minimum": 0 },
+    "bytes": { "type": "integer", "minimum": 0 },
+    "preview": { "type": "string" },
+    "content_hash": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "content": { "type": "string" },
+    "source": { "enum": ["agent", "user", "revert"] },
+    "run_id": { "type": "string" },
+    "conv_id": { "type": "string" },
+    "profile_id": { "type": "string" },
+    "ducky_name": { "type": "string" },
+    "model": { "type": "string" },
+    "tool": { "type": "string" },
+    "group_id": { "type": "string" },
+    "coding_agent": { "type": "string" }
+  }
+}

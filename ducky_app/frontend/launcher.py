@@ -184,6 +184,13 @@ def run_bridge() -> None:
 
     import backend.tools  # noqa: F401 — core MCP tools before plugins
 
+    try:
+        from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters
+
+        install_workspace_adapters()  # file history + follow-code for writes made from here
+    except Exception:
+        pass
+
     args = sys.argv[2:] if len(sys.argv) > 2 else []
     for i, arg in enumerate(args):
         if arg == "--port" and i + 1 < len(args):

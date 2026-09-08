@@ -3,6 +3,7 @@
 Domain editor tools register via Store desktop plugins (uefn, verse, …).
 """
 
+from backend.tools.core import changesets  # noqa: F401
 from backend.tools.core import code_diagnostics  # noqa: F401
 from backend.tools.core import hints  # noqa: F401
 from backend.tools.core import system  # noqa: F401

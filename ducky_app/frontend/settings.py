@@ -66,6 +66,12 @@ class PanelSettings:
     verse_diagnostics_auto_check: bool = True
     """When true, re-check Verse files on open, edit, and after AI writes (incremental when cache on)."""
 
+    changeset_journal_enabled: bool = True
+    """When true, every project write is ledgered per run (AppData/changesets) so runs can be reverted."""
+
+    write_lanes_mode: str = "shadow"
+    """Group write lanes: off | shadow (flag out-of-lane writes) | enforce (refuse them)."""
+
     show_hidden_project_files: bool = False
     """When true, show engine folders and binary assets hidden from the sidebar by default."""
 
@@ -345,6 +351,8 @@ class PanelSettings:
             or self._hidden_bundled_counts_as_override()
             or not self.verse_diagnostics_cache_enabled
             or not self.verse_diagnostics_auto_check
+            or not self.changeset_journal_enabled
+            or self.write_lanes_mode != "shadow"
             or self.show_hidden_project_files
             or not self.terminals_enabled
             or self.default_disabled_packs

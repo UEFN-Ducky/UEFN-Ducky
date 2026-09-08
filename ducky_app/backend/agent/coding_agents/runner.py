@@ -219,9 +219,12 @@ def _emit_assistant(
     if terminal_session_id:
         conv.terminal_session_id = terminal_session_id
     save_conversation(conv)
+    from frontend.ui_web.agent_modes import close_changeset_run
+
     if ok:
         push({"type": "assistant_done", "conv_id": conv.id, "run_id": run_id})
         push({"type": "agent_stopped", "reason": "done", "conv_id": conv.id, "run_id": run_id})
+        close_changeset_run(run_id, "done")
         # Same as embedded path: private DM with a group member → hub note.
         try:
             from frontend.ui_web.group_orchestrator import announce_private_member_talk
@@ -249,6 +252,7 @@ def _emit_assistant(
                 "run_id": run_id,
             }
         )
+        close_changeset_run(run_id, stop_reason)
     return {
         "ok": ok,
         "run_id": run_id,
@@ -363,7 +367,10 @@ def run_coding_agent_message(
         skill_names=skill_names,
         native_skills=bool(reg.get("native_skills")),
     )
-    mcp_path = write_uefn_mcp_config(conv_id=conv.id, settings=settings)
+    from frontend.ui_web.workspace_bootstrap import build_run_context, record_external_edits
+
+    run_ctx = build_run_context(conv, run_id=rid, model=(model or conv.model or ''), coding_agent=agent_id)
+    mcp_path = write_uefn_mcp_config(conv_id=conv.id, settings=settings, identity=run_ctx)
     prompt_path = write_prompt_file(prompt_text, conv_id=conv.id)
     env = launch_env(
         prompt=prompt_text,
@@ -372,6 +379,7 @@ def run_coding_agent_message(
         conv_id=conv.id,
         project_root=project_root,
         extra=_thinking_env(agent_id, getattr(conv, "thinking_effort", "")),
+        identity=run_ctx,
     )
 
     try:
@@ -423,6 +431,11 @@ def run_coding_agent_message(
     # Record the CLI's REAL token usage/cost so each chat's Context panel shows
     # what the coding agent actually spent — not the embedded ducky's estimate.
     record_coding_agent_usage(conv, agent_id, model, result, push=push)
+    # The CLI edited files in its own process; attribute those versions to this run.
+    try:
+        record_external_edits(result.blocks, run_ctx)
+    except Exception:  # noqa: BLE001 - attribution must never fail the turn
+        pass
 
     reply = (result.reply_text or "").strip()
     if not reply and not result.blocks and result.output_tail:

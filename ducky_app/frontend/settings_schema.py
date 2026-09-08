@@ -63,6 +63,14 @@ FIELD_META: dict[str, FieldMeta] = {
     "verse_editor_enabled": FieldMeta("Verse editor enabled", "General", settable=True),
     "verse_diagnostics_cache_enabled": FieldMeta("Cache Verse diagnostics", "General", settable=True),
     "verse_diagnostics_auto_check": FieldMeta("Auto-check Verse on edit", "General", settable=True),
+    "changeset_journal_enabled": FieldMeta(
+        "Change journal (revert runs)", "Agent", settable=False,
+        description="Ledger every project write per run under AppData/changesets so a run can be reverted.",
+    ),
+    "write_lanes_mode": FieldMeta(
+        "Write lanes", "Agent", settable=False, enum=("off", "shadow", "enforce"),
+        description="Group members' write lanes: shadow flags out-of-lane writes, enforce refuses them, off disables.",
+    ),
     "show_hidden_project_files": FieldMeta("Show hidden project files", "General", settable=True),
     "terminals_enabled": FieldMeta("Terminals enabled", "General", settable=False),
     "appearance_foundation": FieldMeta("Appearance foundation colors", "Appearance"),

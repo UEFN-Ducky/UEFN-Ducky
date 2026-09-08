@@ -1,17 +1,45 @@
-"""Per-project, per-file save snapshots under AppData."""
+"""Per-project, per-file save snapshots under AppData.
+
+Entry schema: ``backend/workspace/schemas/file_history_entry.schema.json``.
+Version 2 adds attribution (who wrote the version: run, conversation, ducky,
+model, tool). Version 1 entries have no ``schema_version`` key and read back with
+empty attribution.
+
+Writes reach this module through the pipeline's ``FileHistoryObserver``
+(``frontend.ui_web.workspace_bootstrap``); nothing else should call
+``record_write`` for project files.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import time
+import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from frontend.settings import PanelSettings, default_app_data_dir
 from frontend.ui_web.project_chats import project_slug
 
-MAX_ENTRIES_PER_FILE = 30
+SCHEMA_VERSION = 2
+# History is a browsing aid; durable revert lives in the changeset journal.
+MAX_ENTRIES_PER_FILE = 100
+
+SOURCE_AGENT = "agent"
+SOURCE_USER = "user"
+SOURCE_REVERT = "revert"
+
+ATTRIBUTION_KEYS = (
+    "run_id",
+    "conv_id",
+    "profile_id",
+    "ducky_name",
+    "model",
+    "tool",
+    "group_id",
+    "coding_agent",
+)
 
 
 def _norm_path(relative_path: str) -> str:
@@ -87,11 +115,23 @@ def _entry_hash(entry: dict[str, Any]) -> str | None:
     return _content_hash(content) if isinstance(content, str) else None
 
 
+def _attribution(meta: Mapping[str, Any] | None) -> dict[str, str]:
+    if not meta:
+        return {}
+    out: dict[str, str] = {}
+    for key in ATTRIBUTION_KEYS:
+        value = meta.get(key)
+        if isinstance(value, str) and value:
+            out[key] = value
+    return out
+
+
 def _write_snapshot(
     relative_path: str,
     content: str,
     project_root: str | None = None,
     source: str | None = None,
+    meta: Mapping[str, Any] | None = None,
 ) -> str:
     rel = _norm_path(relative_path)
     entries_dir = _entries_dir(rel, project_root)
@@ -106,6 +146,7 @@ def _write_snapshot(
     while (entries_dir / f"{entry_id}.json").is_file():
         entry_id = str(int(entry_id) + 1)
     payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
         "id": entry_id,
         "path": rel,
         "saved_at": int(time.time()),
@@ -116,6 +157,7 @@ def _write_snapshot(
     }
     if source:
         payload["source"] = source
+    payload.update(_attribution(meta))
     target = entries_dir / f"{entry_id}.json"
     target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     _prune_entries(entries_dir)
@@ -127,9 +169,10 @@ def snapshot_before_write(
     old_content: str,
     project_root: str | None = None,
     source: str | None = None,
+    meta: Mapping[str, Any] | None = None,
 ) -> None:
-    """Store the previous on-disk content before overwriting."""
-    _write_snapshot(relative_path, old_content, project_root, source=source)
+    """Store the previous on-disk content before overwriting (an unattributed restore point)."""
+    _write_snapshot(relative_path, old_content, project_root, source=source, meta=meta)
 
 
 def snapshot_editor_content(
@@ -143,17 +186,48 @@ def snapshot_editor_content(
     return {"id": entry_id, "path": rel}
 
 
+def record_write(
+    relative_path: str,
+    before: str | None,
+    after: str,
+    project_root: str | None = None,
+    *,
+    writer: Mapping[str, Any] | None = None,
+) -> dict[str, str | None]:
+    """Record one applied write: a restore point for *before* and an attributed *after*.
+
+    ``writer`` is the pipeline's attribution dict (``RunContext.as_writer``). A
+    human save (``source == "user"``) keeps only the restore point, matching the
+    editor's long-standing behaviour: the current buffer is the newest version.
+    Returns ``{"before_id", "after_id"}`` (None when nothing was written).
+    """
+    rel = _norm_path(relative_path)
+    meta = dict(writer or {})
+    source = str(meta.get("source") or SOURCE_AGENT)
+    before_id: str | None = None
+    after_id: str | None = None
+    if before and before != after:
+        before_id = _write_snapshot(rel, before, project_root)
+    if source != SOURCE_USER:
+        after_id = _write_snapshot(rel, after, project_root, source=source, meta=meta)
+    return {"before_id": before_id, "after_id": after_id}
+
+
 def record_agent_write(
     relative_path: str,
     before: str,
     after: str,
     project_root: str | None = None,
 ) -> None:
-    """Snapshot pre-AI content (restore point) and the AI-written version (source=agent)."""
-    rel = _norm_path(relative_path)
-    if before and before != after:
-        _write_snapshot(rel, before, project_root)
-    _write_snapshot(rel, after, project_root, source="agent")
+    """Deprecated since 1.1.62; removed in 1.1.64. Writes go through ``ProjectWriter``,
+    whose ``FileHistoryObserver`` calls :func:`record_write` with real attribution."""
+    warnings.warn(
+        "file_history.record_agent_write is deprecated; write through "
+        "backend.workspace.runtime.get_writer() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    record_write(relative_path, before, after, project_root, writer={"source": SOURCE_AGENT})
 
 
 def list_entries(relative_path: str, project_root: str | None = None) -> list[dict[str, Any]]:
@@ -172,17 +246,20 @@ def list_entries(relative_path: str, project_root: str | None = None) -> list[di
         if not isinstance(content_hash, str) and isinstance(content, str):
             content_hash = _content_hash(content)
         src = data.get("source")
-        out.append(
-            {
-                "id": str(data.get("id") or path.stem),
-                "path": str(data.get("path") or rel),
-                "saved_at": int(data.get("saved_at") or 0),
-                "bytes": int(data.get("bytes") or 0),
-                "preview": str(data.get("preview") or ""),
-                "content_hash": str(content_hash or ""),
-                "source": str(src) if isinstance(src, str) and src else "",
-            }
-        )
+        row: dict[str, Any] = {
+            "schema_version": int(data.get("schema_version") or 1),
+            "id": str(data.get("id") or path.stem),
+            "path": str(data.get("path") or rel),
+            "saved_at": int(data.get("saved_at") or 0),
+            "bytes": int(data.get("bytes") or 0),
+            "preview": str(data.get("preview") or ""),
+            "content_hash": str(content_hash or ""),
+            "source": str(src) if isinstance(src, str) and src else "",
+        }
+        for key in ATTRIBUTION_KEYS:
+            value = data.get(key)
+            row[key] = value if isinstance(value, str) else ""
+        out.append(row)
     return out
 
 

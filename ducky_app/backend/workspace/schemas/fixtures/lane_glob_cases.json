@@ -1,0 +1,43 @@
+{
+  "description": "Shared lane-glob contract cases. Python (backend/workspace/test_lanes.py) and TypeScript (web/src/utils/laneGlob.test.ts) both run every case.",
+  "normalize": [
+    { "input": "Content/Verse/Shop", "output": "Content/Verse/Shop/**" },
+    { "input": "Content/Verse/Shop/", "output": "Content/Verse/Shop/**" },
+    { "input": "./Content\\Verse\\Shop\\**", "output": "Content/Verse/Shop/**" },
+    { "input": "Content/Verse/module_declarations.verse", "output": "Content/Verse/module_declarations.verse" },
+    { "input": "Content/Verse/*.verse", "output": "Content/Verse/*.verse" },
+    { "input": "  Content/Verse/Shop/**  ", "output": "Content/Verse/Shop/**" }
+  ],
+  "invalid": ["", "   ", "/Content/Verse", "C:/Proj/Content", "Content/../Saved", "../x"],
+  "match": [
+    { "pattern": "Content/Verse/Shop/**", "path": "Content/Verse/Shop/shop.verse", "expected": true },
+    { "pattern": "Content/Verse/Shop/**", "path": "Content/Verse/Shop/Sub/deep.verse", "expected": true },
+    { "pattern": "Content/Verse/Shop/**", "path": "Content/Verse/Shop", "expected": true },
+    { "pattern": "Content/Verse/Shop/**", "path": "Content/Verse/Hub/hub.verse", "expected": false },
+    { "pattern": "Content/Verse/Shop/**", "path": "Content/Verse/Shopping/x.verse", "expected": false },
+    { "pattern": "Content/Verse/Shop", "path": "content/verse/shop/SHOP.verse", "expected": true },
+    { "pattern": "Content/Verse/*.verse", "path": "Content/Verse/a.verse", "expected": true },
+    { "pattern": "Content/Verse/*.verse", "path": "Content/Verse/Sub/a.verse", "expected": false },
+    { "pattern": "Content/Verse/**/*.verse", "path": "Content/Verse/a.verse", "expected": true },
+    { "pattern": "Content/Verse/**/*.verse", "path": "Content/Verse/Sub/Deep/a.verse", "expected": true },
+    { "pattern": "Content/Verse/**/*.verse", "path": "Content/Verse/Sub/notes.txt", "expected": false },
+    { "pattern": "Content/*/Shop/**", "path": "Content/Verse/Shop/a.verse", "expected": true },
+    { "pattern": "Content/*/Shop/**", "path": "Content/A/B/Shop/a.verse", "expected": false },
+    { "pattern": "Content/Verse/module_declarations.verse", "path": "Content/Verse/module_declarations.verse", "expected": true },
+    { "pattern": "Content/Verse/module_declarations.verse", "path": "Content/Verse/module_declarations.verse.bak", "expected": false },
+    { "pattern": "Content/Verse/?.verse", "path": "Content/Verse/a.verse", "expected": true },
+    { "pattern": "Content/Verse/?.verse", "path": "Content/Verse/ab.verse", "expected": false },
+    { "pattern": ".ducky/**", "path": ".ducky/tests/x.json", "expected": true }
+  ],
+  "overlap": [
+    { "a": "Content/Verse/Shop/**", "b": "Content/Verse/Shop/**", "expected": "identical" },
+    { "a": "Content/Verse/Shop", "b": "content/verse/shop/**", "expected": "identical" },
+    { "a": "Content/Verse/**", "b": "Content/Verse/Shop/**", "expected": "contains" },
+    { "a": "Content/Verse/Shop/**", "b": "Content/Verse/Shop/shop.verse", "expected": "contains" },
+    { "a": "Content/Verse/Shop/**", "b": "Content/Verse/module_declarations.verse", "expected": null },
+    { "a": "Content/Verse/*.verse", "b": "Content/Verse/a.verse", "expected": "matches" },
+    { "a": "Content/*/Shop/**", "b": "Content/Verse/Shop/**", "expected": "maybe" },
+    { "a": "Content/Verse/Shop/**", "b": "Content/Verse/Hub/**", "expected": null },
+    { "a": "Content/Verse/a.verse", "b": "Content/Verse/b.verse", "expected": null }
+  ]
+}

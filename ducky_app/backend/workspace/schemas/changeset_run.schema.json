@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uefn-ducky.dev/schemas/changeset_run/1",
+  "title": "ChangesetRun",
+  "description": "One agent run's applied project writes. Stored under AppData/changesets/<project_slug>/runs/<run_id>.json. Content bodies live in content-addressed blobs next to it.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "conv_id", "started", "status", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "conv_id": { "type": "string" },
+    "profile_id": { "type": "string" },
+    "ducky_name": { "type": "string" },
+    "model": { "type": "string" },
+    "coding_agent": { "type": "string" },
+    "group_id": { "type": "string" },
+    "leader_conv_id": { "type": "string" },
+    "source": { "enum": ["agent", "user", "revert"] },
+    "lane": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/lane" }] },
+    "started": { "type": "number" },
+    "ended": { "type": ["number", "null"] },
+    "status": {
+      "enum": ["running", "done", "error", "cancelled", "reverted", "partially_reverted"]
+    },
+    "seen": {
+      "description": "Last content hash this run read per path; the base for stale_base conflicts.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["hash", "ts"],
+        "additionalProperties": false,
+        "properties": {
+          "hash": { "$ref": "#/$defs/hash" },
+          "ts": { "type": "number" }
+        }
+      }
+    },
+    "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+  },
+  "$defs": {
+    "hash": {
+      "description": "sha256 hex prefix (16 chars) or empty when there was no content.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{16})?$"
+    },
+    "lane": {
+      "type": "object",
+      "required": ["write_allowed"],
+      "additionalProperties": false,
+      "properties": {
+        "write_allowed": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["stale_base", "concurrent_writer"] },
+        "other_run_id": { "type": "string" },
+        "other_conv_id": { "type": "string" },
+        "other_ducky": { "type": "string" },
+        "expected_hash": { "$ref": "#/$defs/hash" },
+        "found_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": ["seq", "ts", "path", "op", "tool", "before_hash", "after_hash", "in_lane"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "ts": { "type": "number" },
+        "path": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["create", "write", "rename", "move", "copy", "import", "restore", "delete"] },
+        "from_path": { "type": ["string", "null"] },
+        "trash_token": { "type": ["string", "null"] },
+        "tool": { "type": "string" },
+        "before_hash": { "$ref": "#/$defs/hash" },
+        "after_hash": { "$ref": "#/$defs/hash" },
+        "before_entry_id": { "type": ["string", "null"] },
+        "after_entry_id": { "type": ["string", "null"] },
+        "before_blob": { "type": ["string", "null"] },
+        "after_blob": { "type": ["string", "null"] },
+        "lines_added": { "type": "integer", "minimum": 0 },
+        "lines_removed": { "type": "integer", "minimum": 0 },
+        "in_lane": {
+          "description": "true/false when a lane governed the writer; null when no lane applied.",
+          "type": ["boolean", "null"]
+        },
+        "conflict": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/conflict" }] },
+        "reverted": { "type": "boolean" },
+        "reverted_by_run": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

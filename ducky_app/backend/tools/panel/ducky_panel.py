@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from frontend.agent_profiles import get_agent_profile, list_agent_profiles_available
 from frontend.archive_folder import is_archive_folder_id
@@ -632,19 +632,81 @@ def ducky_group_create(name: str, parent_folder_id: str = "", pretty: bool = Fal
     return tool_json(res, pretty=pretty)
 
 
+def _require_lane_authority(group_id: str) -> str:
+    """Only the user or the group's leader may assign lanes. Returns the caller id ('' = user)."""
+    from backend.workspace import identity as run_identity
+
+    ctx = run_identity.resolve_context()
+    if ctx is None:
+        return ""
+    api = _panel_api()
+    info = api.group_members(group_id.strip())
+    leader = str(info.get("leader_conv_id") or "").strip()
+    if ctx.conv_id and ctx.conv_id == leader:
+        return ctx.conv_id
+    raise ValueError(
+        "Only the group leader (or the user) can set write lanes. "
+        + (f"Ask the leader (chat {leader}) in the group chat." if leader else "This group has no leader yet.")
+    )
+
+
 @mcp.tool()
-def ducky_group_invite(group_id: str, ducky: str, pretty: bool = False) -> str:
-    """Invite a ducky profile into a group as a lasting swarm member (not a parent-linked subagent)."""
+def ducky_group_invite(
+    group_id: str, ducky: str, write_allowed: Optional[list[str]] = None, pretty: bool = False
+) -> str:
+    """Invite a ducky profile into a group as a lasting swarm member (not a parent-linked subagent).
+
+    ``write_allowed`` (leader/user only) seats the member with a write lane: gitignore-style
+    globs such as ["Content/Verse/Shop/**"]; [] = read-only. Overlapping another member's
+    lane is refused. Omit for an unrestricted member.
+    """
     profile = _resolve_ducky_profile(ducky)
     if profile is None:
         raise ValueError(
             f"No ducky named {ducky!r}. Call ducky_list_duckies to see available duckies."
         )
     pid = str(profile.get("id") or "").strip() or ducky.strip()
+    if write_allowed is not None:
+        _require_lane_authority(group_id)
     api = _panel_api()
-    res = api.group_invite(group_id.strip(), pid)
+    res = api.group_invite(group_id.strip(), pid, write_allowed=write_allowed)
     if not res.get("ok"):
         raise ValueError(str(res.get("error") or "group_invite failed"))
+    return tool_json(res, pretty=pretty)
+
+
+@mcp.tool()
+def ducky_group_set_lane(
+    group_id: str,
+    member_conv_id: str,
+    write_allowed: Optional[list[str]] = None,
+    force: bool = False,
+    pretty: bool = False,
+) -> str:
+    """Set a member's write lane (leader/user only): the project paths it may create/edit/rename.
+
+    ``write_allowed``: gitignore-style globs (``Content/Verse/Shop/**``, ``Content/Verse/x.verse``;
+    a bare folder means folder/**). [] = read-only, omitted = unrestricted. A lane that overlaps a
+    teammate's lane is refused; ``force=true`` accepts warnings only. Takes effect on the
+    member's next tool call. Members cannot change their own lane — they ask you.
+    """
+    caller = _require_lane_authority(group_id)
+    api = _panel_api()
+    res = api.group_set_member_lane(
+        group_id.strip(), member_conv_id.strip(), write_allowed, force=bool(force), set_by=caller or "user"
+    )
+    if not res.get("ok"):
+        raise ValueError(str(res.get("error") or "group_set_member_lane failed"))
+    return tool_json(res, pretty=pretty)
+
+
+@mcp.tool()
+def ducky_group_get_lanes(group_id: str, pretty: bool = False) -> str:
+    """Every member's write lane for a group hub (lane_set/1): plan disjoint lanes before spawning."""
+    api = _panel_api()
+    res = api.group_get_lanes(group_id.strip())
+    if not res.get("ok"):
+        raise ValueError(str(res.get("error") or "group_get_lanes failed"))
     return tool_json(res, pretty=pretty)
 
 
@@ -753,6 +815,11 @@ def _resolve_sender(sender: str) -> str:
     s = (sender or "").strip()
     if s:
         return s
+    from backend.workspace import identity as run_identity
+
+    ctx = run_identity.current()
+    if ctx is not None and ctx.conv_id:
+        return ctx.conv_id
     from frontend.ui_web.agent_modes import get_active_conv_id
 
     active = get_active_conv_id()
@@ -1054,9 +1121,14 @@ def ducky_spawn_chat(
     timeout_sec: float = 180.0,
     coding_agent: str = "ducky",
     sender: str = "",
+    write_allowed: Optional[list[str]] = None,
     pretty: bool = False,
 ) -> str:
     """Invite a specialist into a Group swarm and send the first message.
+
+    ``write_allowed`` (leader/user only) gives the member a write lane — gitignore-style
+    globs like ["Content/Verse/Shop/**"] — so parallel members never edit the same files.
+    Partition lanes before spawning parallel work; overlaps are refused.
 
     Subagents are retired. You MUST pass ``group_id`` (hub from ``ducky_group_create``)
     or a group ``folder_id``. Prefer reuse: ``ducky_group_members`` → if the right
@@ -1114,7 +1186,7 @@ def ducky_spawn_chat(
             "(as_leader=true), then ducky_spawn_chat(group_id=…, ducky=…, message=…)."
         )
 
-    invite = ducky_group_invite(group_id=hub_id, ducky=ducky, pretty=False)
+    invite = ducky_group_invite(group_id=hub_id, ducky=ducky, write_allowed=write_allowed, pretty=False)
     import json as _json
 
     invite_data = _json.loads(invite) if isinstance(invite, str) else invite
@@ -1135,6 +1207,7 @@ def ducky_spawn_chat(
         "coding_agent": str(member.get("coding_agent") or "ducky"),
         "model": str(member.get("model") or ""),
         "provider": "",
+        "write_allowed": member.get("write_allowed"),
     }
     fresh = load_conversation(conv_id, project_root=_project_root())
     if fresh is not None:

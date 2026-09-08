@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=7.0
 ruff>=0.6
+# Schema contracts under ducky_app/backend/workspace/schemas (MIT).
+jsonschema>=4.0

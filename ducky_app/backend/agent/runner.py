@@ -29,6 +29,8 @@ from backend.agent.providers.base import ProviderMessage, StreamEvent, StreamEve
 from backend.agent.secrets import get_key
 from backend.agent.run_context import reset_plan_only, set_plan_only
 from backend.agent import hammer_guard
+from backend.workspace import identity as run_identity
+from backend.workspace.identity import RunContext
 from backend.agent.tool_router import is_destructive, select_tools
 from backend.agent.toolsets.destructive import allow_destructive_execution
 from backend.agent.toolsets import effective_tool_name
@@ -215,6 +217,26 @@ class RunConfig:
     mode_suffix: str = ""
     tool_result_format: str = "toon"
     thinking_effort: str = "off"
+    # Identity of this run for the write pipeline (attribution, lanes, journal).
+    run_id: str = ""
+    profile_id: str = ""
+    group_id: str = ""
+    leader_conv_id: str = ""
+    coding_agent: str = "ducky"
+
+    def run_context(self) -> RunContext:
+        return RunContext(
+            run_id=self.run_id,
+            conv_id=self.conv_id,
+            profile_id=self.profile_id,
+            ducky_name=self.ducky_name,
+            model=self.model,
+            provider=self.provider,
+            coding_agent=self.coding_agent or "ducky",
+            group_id=self.group_id,
+            leader_conv_id=self.leader_conv_id,
+            is_leader=bool(self.leader_conv_id and self.leader_conv_id == self.conv_id),
+        )
 
 
 @dataclass
@@ -524,6 +546,7 @@ class AgentRunner:
         set_tool_result_format(self.config.tool_result_format)
         plan_token = set_plan_only(bool(self.config.plan_only))
         hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
+        identity_token = run_identity.bind(self.config.run_context())
         try:
             async for event in self._run_turn_inner(
                 user_text,
@@ -535,6 +558,7 @@ class AgentRunner:
             ):
                 yield event
         finally:
+            run_identity.reset(identity_token)
             hammer_guard.reset_conversation(hammer_token)
             reset_plan_only(plan_token)
 

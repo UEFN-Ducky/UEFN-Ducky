@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.tools.verse import template_verify as tv
 
 
@@ -24,6 +26,34 @@ def test_parse_compile_message_maps_errors_to_staged_files(tmp_path: Path) -> No
 
 
 def test_stage_never_overwrites_and_cleanup_removes_only_ours(tmp_path: Path) -> None:
+    from backend.workspace import runtime
+    from backend.workspace.writer import ProjectWriter
+
+    runtime.reset_for_tests(ProjectWriter.for_root(str(tmp_path)))
+    try:
+        _stage_and_cleanup(tmp_path)
+    finally:
+        runtime.reset_for_tests(None)
+
+
+def test_stage_refuses_a_root_the_pipeline_does_not_own(tmp_path: Path) -> None:
+    from backend.workspace import runtime
+    from backend.workspace.writer import ProjectWriter
+
+    other = tmp_path / "Other"
+    other.mkdir()
+    runtime.reset_for_tests(ProjectWriter.for_root(str(other)))
+    try:
+        verse_root = tmp_path / "Proj" / "Content" / "Verse"
+        verse_root.mkdir(parents=True)
+        with pytest.raises(ValueError, match="not under the write pipeline root"):
+            tv._stage(verse_root, [{"id": "x", "folder": "X", "files": [{"path": "a.verse", "content": "# a"}]}])
+        assert not (verse_root / "X").exists()
+    finally:
+        runtime.reset_for_tests(None)
+
+
+def _stage_and_cleanup(tmp_path: Path) -> None:
     verse_root = tmp_path / "Content" / "Verse"
     (verse_root / "Existing").mkdir(parents=True)
     (verse_root / "Existing" / "keep.verse").write_text("# keep", encoding="utf-8")
@@ -37,7 +67,7 @@ def test_stage_never_overwrites_and_cleanup_removes_only_ours(tmp_path: Path) ->
     assert any("already exists" in s for s in skipped)
     assert len(written) == 3
     assert (verse_root / tv.SINGLES_FOLDER / "single.verse").is_file()
-    tv._cleanup(files, dirs)
+    tv._cleanup(verse_root, files, dirs)
     assert not (verse_root / "NewPack").exists()
     assert not (verse_root / tv.SINGLES_FOLDER).exists()
     assert (verse_root / "Existing" / "keep.verse").is_file()

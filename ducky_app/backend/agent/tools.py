@@ -729,6 +729,37 @@ async def _execute_tool_inner(
             duration_ms=ms,
         )
 
+    # Write lanes: early, event-emitting denial for laned group members. The pipeline
+    # re-checks inside the write itself (authoritative, covers the bridge process).
+    try:
+        from backend.workspace import events as ws_events, lanes as ws_lanes
+
+        lane_decision = ws_lanes.lane_block_reason(name, args, mode=ws_lanes.current_mode)
+    except Exception:
+        lane_decision = None
+    if lane_decision is not None:
+        ms = int((time.time() - t0) * 1000)
+        try:
+            from backend.workspace import identity as ws_identity
+
+            ctx = ws_identity.current()
+            ws_events.emit(
+                ws_events.FileGuardEvent(
+                    kind=ws_events.GUARD_LANE_DENIED,
+                    path=str((lane_decision.details.get("paths") or [""])[0]),
+                    text=lane_decision.reason,
+                    conv_id=ctx.conv_id if ctx else "",
+                    run_id=ctx.run_id if ctx else "",
+                    tool=name,
+                    lane=tuple(lane_decision.details.get("lane") or ()),
+                    leader_conv_id=str(lane_decision.details.get("leader_conv_id") or ""),
+                    details=dict(lane_decision.details),
+                ).to_dict()
+            )
+        except Exception:
+            pass
+        return ToolCallResult(ok=False, tool=name, error=lane_decision.reason, hint=lane_decision.hint, duration_ms=ms)
+
     from backend.mcp_plugins.registry import PLUGIN_TOOL_SEP, is_plugin_tool
     from backend.mcp_plugins.store import ensure_plugin_prefix_cache
 

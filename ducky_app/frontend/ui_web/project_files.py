@@ -87,6 +87,28 @@ _DEFAULT_VERSE_FILE = "using { /Verse.org/Simulation }\n\n"
 _workspace_folders_cache: dict[str, list[dict[str, str]]] = {}
 
 
+def _pipeline():
+    from backend.workspace.runtime import get_writer
+
+    return get_writer()
+
+
+def _pipeline_create(rel_path: str, text: str, *, tool: str) -> None:
+    """Create a text file through the shared write pipeline (history, journal, policy)."""
+    try:
+        _pipeline().create(rel_path, text, tool=tool)
+    except OSError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _pipeline_path_op(op: str, rel_path: str, *, source: str | None = None, tool: str, perform):
+    """Rename/move/copy/import/restore/delete under the pipeline's locks, policy and journal."""
+    try:
+        return _pipeline().path_op(op, rel_path, source=source, tool=tool, perform=perform)
+    except OSError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def _project_root() -> Path:
     raw = PanelSettings.load().uefn_project_root.strip()
     if not raw:
@@ -863,14 +885,15 @@ def move_project_entry(source_relative: str, dest_parent_relative: str) -> dict[
     if dest.exists():
         raise ValueError(f"Already exists at destination: {source.name}")
 
-    try:
-        shutil.move(str(source), str(dest))
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    _invalidate_file_paths_cache()
-
     root = _project_root().resolve()
-    return {"path": str(dest.relative_to(root)).replace("\\", "/")}
+    dest_rel = str(dest.relative_to(root)).replace("\\", "/")
+
+    def _do_move() -> None:
+        shutil.move(str(source), str(dest))
+
+    _pipeline_path_op("move", dest_rel, source=source_rel, tool="move_project_entry", perform=_do_move)
+    _invalidate_file_paths_cache()
+    return {"path": dest_rel}
 
 
 def _dedupe_dest_name(dest_parent: Path, name: str, *, is_dir: bool) -> str:
@@ -909,16 +932,18 @@ def copy_project_entry(source_relative: str, dest_parent_relative: str) -> dict[
         raise ValueError("Cannot copy a folder into itself or a descendant.")
 
     dest = dest_parent / _dedupe_dest_name(dest_parent, source.name, is_dir=is_dir)
-    try:
+    root = _project_root().resolve()
+    dest_rel = str(dest.relative_to(root)).replace("\\", "/")
+
+    def _do_copy() -> None:
         if is_dir:
             shutil.copytree(source, dest)
         else:
             shutil.copy2(source, dest)
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
+
+    _pipeline_path_op("copy", dest_rel, source=source_rel, tool="copy_project_entry", perform=_do_copy)
     _invalidate_file_paths_cache()
-    root = _project_root().resolve()
-    return {"path": str(dest.relative_to(root)).replace("\\", "/")}
+    return {"path": dest_rel}
 
 
 def import_external_entries(
@@ -963,15 +988,20 @@ def import_external_entries(
             errors.append(f"{source.name}: cannot copy a folder into itself")
             continue
         dest = dest_parent / _dedupe_dest_name(dest_parent, source.name, is_dir=is_dir)
-        try:
-            if is_dir:
-                shutil.copytree(source, dest)
+        dest_rel = str(dest.relative_to(root)).replace("\\", "/")
+
+        def _do_import(src: Path = source, dst: Path = dest, as_dir: bool = is_dir) -> None:
+            if as_dir:
+                shutil.copytree(src, dst)
             else:
-                shutil.copy2(source, dest)
-        except OSError as exc:
+                shutil.copy2(src, dst)
+
+        try:
+            _pipeline_path_op("import", dest_rel, tool="import_external_entries", perform=_do_import)
+        except ValueError as exc:
             errors.append(f"{source.name}: {exc}")
             continue
-        created.append(str(dest.relative_to(root)).replace("\\", "/"))
+        created.append(dest_rel)
     if created:
         _invalidate_file_paths_cache()
     return {"paths": created, "errors": errors}
@@ -1066,20 +1096,22 @@ def delete_project_entry(relative_path: str) -> dict[str, str]:
     if not target.exists():
         raise ValueError(f"Not found: {relative_path}")
     token = uuid.uuid4().hex
-    slot = _trash_dir() / token
-    slot.mkdir(parents=True, exist_ok=True)
-    dest = slot / target.name
-    try:
+
+    def _do_trash() -> dict[str, str]:
+        slot = _trash_dir() / token
+        slot.mkdir(parents=True, exist_ok=True)
+        dest = slot / target.name
         shutil.move(str(target), str(dest))
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    _trash_registry[token] = {
-        "orig": str(target),
-        "trash": str(dest),
-        "rel": rel,
-        "name": target.name,
-        "ts": time.time(),
-    }
+        _trash_registry[token] = {
+            "orig": str(target),
+            "trash": str(dest),
+            "rel": rel,
+            "name": target.name,
+            "ts": time.time(),
+        }
+        return {"trash_token": token}
+
+    _pipeline_path_op("delete", rel, tool="delete_project_entry", perform=_do_trash)
     _invalidate_file_paths_cache()
     return {"path": rel, "trash_token": token, "name": target.name}
 
@@ -1098,21 +1130,22 @@ def restore_trashed_entry(trash_token: str) -> dict[str, str]:
     dest = orig
     if dest.exists():
         dest = orig.parent / _dedupe_dest_name(orig.parent, orig.name, is_dir=trash_path.is_dir())
-    try:
-        shutil.move(str(trash_path), str(dest))
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    try:
-        trash_path.parent.rmdir()  # remove the now-empty token slot
-    except OSError:
-        pass
-    _trash_registry.pop(trash_token, None)
-    _invalidate_file_paths_cache()
     root = _project_root().resolve()
     try:
         rel = str(dest.relative_to(root)).replace("\\", "/")
     except ValueError:
         rel = str(meta.get("rel") or dest.name)
+
+    def _do_restore() -> None:
+        shutil.move(str(trash_path), str(dest))
+        try:
+            trash_path.parent.rmdir()  # remove the now-empty token slot
+        except OSError:
+            pass
+
+    _pipeline_path_op("restore", rel, tool="restore_trashed_entry", perform=_do_restore)
+    _trash_registry.pop(trash_token, None)
+    _invalidate_file_paths_cache()
     return {"path": rel}
 
 
@@ -1134,13 +1167,15 @@ def rename_project_entry(source_relative: str, new_name: str) -> dict[str, str]:
         return {"path": str(source.relative_to(root)).replace("\\", "/")}
     if dest.exists():
         raise ValueError(f"Already exists: {safe_name}")
-    try:
-        source.rename(dest)
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    _invalidate_file_paths_cache()
     root = _project_root().resolve()
-    return {"path": str(dest.relative_to(root)).replace("\\", "/")}
+    dest_rel = str(dest.relative_to(root)).replace("\\", "/")
+
+    def _do_rename() -> None:
+        source.rename(dest)
+
+    _pipeline_path_op("rename", dest_rel, source=source_rel, tool="rename_project_entry", perform=_do_rename)
+    _invalidate_file_paths_cache()
+    return {"path": dest_rel}
 
 
 def create_project_verse_file(parent_relative: str, name: str, content: str = "") -> dict[str, str]:
@@ -1156,14 +1191,11 @@ def create_project_verse_file(parent_relative: str, name: str, content: str = ""
     if target.exists():
         raise ValueError(f"Already exists: {rel}")
     text = content if content else _DEFAULT_VERSE_FILE
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        target.write_text(text, encoding="utf-8", newline="\n")
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    _invalidate_file_paths_cache()
     root = _project_root().resolve()
-    return {"path": str(target.relative_to(root)).replace("\\", "/")}
+    rel_path = str(target.relative_to(root)).replace("\\", "/")
+    _pipeline_create(rel_path, text, tool="create_project_verse_file")
+    _invalidate_file_paths_cache()
+    return {"path": rel_path}
 
 
 def create_project_file(parent_relative: str, name: str, content: str = "") -> dict[str, str]:
@@ -1186,11 +1218,8 @@ def create_project_file(parent_relative: str, name: str, content: str = "") -> d
     _require_under_content(target, rel)
     if target.exists():
         raise ValueError(f"Already exists: {rel}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        target.write_text(content, encoding="utf-8", newline="\n")
-    except OSError as exc:
-        raise ValueError(str(exc)) from exc
-    _invalidate_file_paths_cache()
     root = _project_root().resolve()
-    return {"path": str(target.relative_to(root)).replace("\\", "/")}
+    rel_path = str(target.relative_to(root)).replace("\\", "/")
+    _pipeline_create(rel_path, content, tool="create_project_file")
+    _invalidate_file_paths_cache()
+    return {"path": rel_path}

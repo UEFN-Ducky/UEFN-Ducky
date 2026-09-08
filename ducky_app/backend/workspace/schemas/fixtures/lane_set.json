@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "group_id": "conv-hub-01",
+  "lanes": {
+    "conv-hacker-01": {
+      "write_allowed": ["Content/Verse/Shop/**"],
+      "name": "Hacker",
+      "ducky_name": "Hacker",
+      "set_by": "conv-architect-01",
+      "set_at": 1757249900.0
+    },
+    "conv-artist-01": {
+      "write_allowed": ["Content/Verse/Hub/**", "Content/Verse/module_declarations.verse"],
+      "name": "Artist",
+      "ducky_name": "Artist",
+      "set_by": "user",
+      "set_at": 1757249910.0
+    },
+    "conv-reviewer-01": {
+      "write_allowed": [],
+      "name": "Reviewer",
+      "ducky_name": "Reviewer",
+      "set_by": "conv-architect-01",
+      "set_at": 1757249920.0
+    },
+    "conv-architect-01": {
+      "write_allowed": null
+    }
+  }
+}

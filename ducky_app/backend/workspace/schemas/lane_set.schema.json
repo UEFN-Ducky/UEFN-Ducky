@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uefn-ducky.dev/schemas/lane_set/1",
+  "title": "LaneSet",
+  "description": "Write lanes of one group, keyed by member conversation id. Globs are gitignore-style: ** spans directories, * and ? never cross '/', a bare directory means dir/**, case-insensitive on Windows. write_allowed null = unrestricted, [] = read-only.",
+  "type": "object",
+  "required": ["schema_version", "group_id", "lanes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "group_id": { "type": "string", "minLength": 1 },
+    "lanes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["write_allowed"],
+        "additionalProperties": false,
+        "properties": {
+          "write_allowed": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            ]
+          },
+          "name": { "type": "string" },
+          "ducky_name": { "type": "string" },
+          "set_by": { "type": "string" },
+          "set_at": { "type": "number" }
+        }
+      }
+    }
+  }
+}

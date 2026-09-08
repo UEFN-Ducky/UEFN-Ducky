@@ -502,6 +502,23 @@ def _make_run_scoped_push(push: PushFn, session: AgentSession, conv_id: str, run
     return scoped
 
 
+def close_changeset_run(run_id: str, reason: str) -> None:
+    """Close the run's changeset ledger (done/error/cancelled). Never raises."""
+    try:
+        from backend.bridge import workspace_roots
+        from backend.workspace.journal import FileChangeJournal
+        from backend.workspace.runtime import get_writer
+
+        journal = get_writer().journal
+        roots = workspace_roots()
+        if not isinstance(journal, FileChangeJournal) or not roots or not run_id:
+            return
+        status = {"done": "done", "cancelled": "cancelled", "stopped": "cancelled"}.get(reason, "error")
+        journal.end_run(run_id, status, project_root=roots[0])
+    except Exception:  # noqa: BLE001 - ledger bookkeeping must never break a stop
+        pass
+
+
 def _push_agent_stopped(
     push: PushFn, conv_id: str, run_id: str, reason: str, detail: str = ""
 ) -> None:
@@ -518,6 +535,7 @@ def _push_agent_stopped(
     elif reason == "error":
         event["detail"] = "Agent errored before finishing its reply"
     push(event)
+    close_changeset_run(run_id, reason)
     if reason != "done":
         return
     # Private DM with a group member → short note on the group hub for everyone.
@@ -1560,6 +1578,12 @@ def run_message(
             if isinstance(getattr(conv, "enabled_subskills", None), dict)
             else None
         )
+        # Who is writing, for the whole run (embedded loop and coding-agent path).
+        from backend.workspace import identity as run_identity
+        from frontend.ui_web.workspace_bootstrap import build_run_context
+
+        run_ctx = build_run_context(conv, run_id=run_id)
+        identity_token = run_identity.bind(run_ctx)
         try:
             # Prompt build + listener health run HERE, in the worker thread, not on
             # the caller's send path. fetch_listener_status() can block for seconds
@@ -1631,6 +1655,11 @@ def run_message(
                 mode_suffix=mode_suffix,
                 tool_result_format=settings.tool_result_format or "toon",
                 thinking_effort=str(getattr(conv, "thinking_effort", "") or "off"),
+                run_id=run_id,
+                profile_id=run_ctx.profile_id,
+                group_id=run_ctx.group_id,
+                leader_conv_id=run_ctx.leader_conv_id,
+                coding_agent=run_ctx.coding_agent,
             )
 
             if m == "ask":
@@ -1672,6 +1701,8 @@ def run_message(
             push({"type": "error", "text": str(e), "conv_id": conv_id})
             if session.run_id == run_id:
                 _push_agent_stopped(push, conv_id, run_id, "error")
+        finally:
+            run_identity.reset(identity_token)
 
     session.start(work, run_id)
     return run_id

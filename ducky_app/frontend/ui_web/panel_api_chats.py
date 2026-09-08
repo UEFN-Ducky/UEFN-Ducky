@@ -293,8 +293,13 @@ class PanelApiChatsMixin:
             "folder_id": hub_folder.id,
         }
 
-    def group_invite(self, group_id: str, profile_id: str, model: str = "") -> dict[str, Any]:
-        """Spawn an independent member chat from a ducky profile and add it to the group."""
+    def group_invite(
+        self, group_id: str, profile_id: str, model: str = "", write_allowed: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Spawn an independent member chat from a ducky profile and add it to the group.
+
+        ``write_allowed`` seats the member with a write lane (see group_set_member_lane).
+        """
         from frontend.agent_profiles import get_agent_profile
         from frontend.ducky_assets import ducky_style_label, normalize_ducky_style
         from frontend.favorite_models import ResolveErr
@@ -360,6 +365,12 @@ class PanelApiChatsMixin:
         if not (getattr(group, "leader_conv_id", None) or "").strip():
             group.leader_conv_id = member.id
         _pa.save_conversation(group)
+        if write_allowed is not None:
+            laned = self.group_set_member_lane(group_id, member.id, write_allowed)
+            if not laned.get("ok"):
+                return {"ok": False, "error": laned.get("error"), "member": row}
+            group = _pa.load_conversation(group_id) or group
+            row = next((m for m in group_members(group) if m.get("member_conv_id") == member.id), row)
         # Reload sidebar only — do not notify the member id (that auto-opens a tab).
         _pa.notify_chats_changed(group.id, group.title, group.folder_id)
         return {
@@ -488,6 +499,74 @@ class PanelApiChatsMixin:
         _pa.save_conversation(group)
         _pa.notify_chats_changed(group.id, group.title, group.folder_id)
         return {"ok": True, "group_members": next_members}
+
+    # -- write lanes ------------------------------------------------------------
+
+    def group_set_member_lane(
+        self,
+        group_id: str,
+        member_conv_id: str,
+        write_allowed: list[str] | str | None,
+        force: bool = False,
+        set_by: str = "user",
+    ) -> dict[str, Any]:
+        """Set (or clear with None) a member's write lane; refuses overlaps with teammates."""
+        import time
+
+        from backend.workspace import events, lanes as lane_engine
+        from frontend.ui_web.group_orchestrator import group_members, normalize_member
+
+        group = _pa.load_conversation(group_id)
+        if not group or not getattr(group, "is_group", False):
+            return {"ok": False, "error": "Not a group chat"}
+        mid = (member_conv_id or "").strip()
+        try:
+            rows, warnings = lane_engine.set_member_lane(
+                group_members(group), mid, write_allowed, set_by=(set_by or "user"), now=time.time(), force=bool(force)
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        next_members = [normalize_member(row, index=i) for i, row in enumerate(rows)]
+        group.group_members = next_members
+        _pa.save_conversation(group)
+        lane_engine.invalidate_lane_cache(mid)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        lane = next((m.get("write_allowed") for m in next_members if m.get("member_conv_id") == mid), None)
+        events.emit(events.LaneChangedEvent(group.id, mid, None if lane is None else tuple(lane)).to_dict())
+        return {
+            "ok": True,
+            "group_members": next_members,
+            "warnings": warnings,
+            "lanes": lane_engine.lane_set_view(group.id, next_members),
+        }
+
+    def group_get_lanes(self, group_id: str) -> dict[str, Any]:
+        from backend.workspace import lanes as lane_engine
+        from frontend.ui_web.group_orchestrator import group_members
+
+        group = _pa.load_conversation(group_id)
+        if not group or not getattr(group, "is_group", False):
+            return {"ok": False, "error": "Not a group chat"}
+        return {"ok": True, **lane_engine.lane_set_view(group.id, group_members(group))}
+
+    def group_check_lane(
+        self, group_id: str, member_conv_id: str, write_allowed: list[str] | str | None
+    ) -> dict[str, Any]:
+        """Dry run for the lane editor: normalized globs plus overlap errors/warnings."""
+        from backend.workspace import lanes as lane_engine
+        from frontend.ui_web.group_orchestrator import group_members
+
+        group = _pa.load_conversation(group_id)
+        if not group or not getattr(group, "is_group", False):
+            return {"ok": False, "errors": ["Not a group chat"], "warnings": [], "normalized": None}
+        try:
+            lane = lane_engine.normalize_lane(write_allowed)
+        except lane_engine.LaneGlobError as exc:
+            return {"ok": False, "errors": [str(exc)], "warnings": [], "normalized": None}
+        proposed = {str(m.get("member_conv_id") or ""): m.get("write_allowed") for m in group_members(group)}
+        proposed[(member_conv_id or "").strip()] = lane
+        verdict = lane_engine.check_lane_set(proposed)
+        return {"ok": not verdict["errors"], "normalized": lane, **verdict}
 
     def group_remove(self, group_id: str, member_conv_id: str) -> dict[str, Any]:
         from frontend.ui_web.group_orchestrator import group_members

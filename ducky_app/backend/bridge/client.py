@@ -504,6 +504,18 @@ threading.Thread(target=_heartbeat_loop, daemon=True).start()
 # ---------------------------------------------------------------------------
 
 
+def _normalize_project_root(selection: str) -> str:
+    """The panel accepts the .uefnproject file itself; the project root is its folder.
+
+    Keeps the bridge tools and the panel (``project_files._project_root``) on the
+    same root so every write path resolves identically.
+    """
+    full = os.path.realpath(os.path.abspath(selection))
+    if os.path.isfile(full) and full.lower().endswith(".uefnproject"):
+        return os.path.dirname(full)
+    return full
+
+
 def _configured_project_roots() -> list[str]:
     """Project roots from env or panel settings (fallback when VS Code folders unset)."""
     roots: list[str] = []
@@ -530,7 +542,7 @@ def _configured_project_roots() -> list[str]:
 
             panel_root = PanelSettings.load().uefn_project_root.strip()
             if panel_root:
-                roots.append(os.path.realpath(os.path.abspath(panel_root)))
+                roots.append(_normalize_project_root(panel_root))
         except Exception:
             pass
     # Preserve order, drop duplicates.

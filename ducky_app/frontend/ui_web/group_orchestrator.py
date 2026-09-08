@@ -65,7 +65,24 @@ def normalize_member(raw: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
         "color": str(raw.get("color") or "").strip() or member_color_for_index(index),
         # Nested group hub — one representative speaks for the whole subgroup.
         "is_group": bool(raw.get("is_group")),
+        # Write lane: None = unrestricted, [] = read-only, else gitignore-style globs.
+        "write_allowed": _normalize_lane_field(raw.get("write_allowed")),
+        "lane_set_by": str(raw.get("lane_set_by") or "").strip(),
+        "lane_set_at": float(raw.get("lane_set_at") or 0.0),
     }
+
+
+def _normalize_lane_field(raw: Any) -> list[str] | None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    if not isinstance(raw, (list, tuple, str)):
+        return None
+    from backend.workspace.lanes import LaneGlobError, normalize_lane
+
+    try:
+        return normalize_lane(list(raw) if not isinstance(raw, str) else raw)
+    except LaneGlobError:
+        return None
 
 
 def group_members(conv: Any) -> list[dict[str, Any]]:
@@ -605,6 +622,8 @@ def build_member_prompt(
     from_name: str,
     roundtable: bool = False,
     is_leader: bool = False,
+    lane: list[str] | None = None,
+    leader_name: str = "",
 ) -> str:
     roster = ", ".join(member_display_name(m) for m in members) or member_name
     my_role = ""
@@ -641,11 +660,16 @@ def build_member_prompt(
         "and that it's ready to open — e.g. 'Plan ready: Island room kit (open my Plan tab)'. "
         "Do not invent URLs; the UI links the plan from your create_plan call.",
     ]
+    lane_bits = lane_prompt_bits(member_name, members, lane=lane, leader_name=leader_name, is_leader=is_leader)
+    bits.extend(lane_bits)
     if is_leader:
         bits.append(
             "As group leader: you speak for this group to peer/parent group leaders. "
             "Break work into a plan on the group hub and create per-member plans "
             "(ducky_create_plan with chat_id=<member>) before @mentioning specialists. "
+            "Before spawning parallel members, partition the work into disjoint write lanes "
+            "(ducky_spawn_chat(write_allowed=[...]) or ducky_group_set_lane); keep shared files "
+            "such as module_declarations.verse in your own lane; review changeset_list before compiling. "
             "Summarize findings clearly so the whole group stays aware."
         )
     if roundtable:
@@ -657,6 +681,35 @@ def build_member_prompt(
         bits.append("Recent group transcript:\n" + transcript.strip())
     bits.append(f"Current message from {from_name}:\n{message.strip()}")
     return "\n\n".join(bits)
+
+
+def lane_prompt_bits(
+    member_name: str,
+    members: list[dict[str, Any]],
+    *,
+    lane: list[str] | None,
+    leader_name: str = "",
+    is_leader: bool = False,
+) -> list[str]:
+    """Prompt lines that tell a member its write lane and its teammates' lanes."""
+    bits: list[str] = []
+    ask = f"ask @{leader_name} to change it" if leader_name and not is_leader else "ask the user to change it"
+    if lane is not None:
+        shown = ", ".join(lane) if lane else "(read-only: no file writes)"
+        bits.append(
+            f"Your write lane: {shown}. Every file you create, edit, rename or delete must stay "
+            f"inside it; out-of-lane writes are refused — do not retry them, {ask}."
+        )
+    teammates = []
+    for m in members:
+        name = member_display_name(m)
+        if name == member_name or m.get("write_allowed") is None:
+            continue
+        their = m.get("write_allowed") or []
+        teammates.append(f"{name} → {', '.join(their) if their else '(read-only)'}")
+    if teammates:
+        bits.append("Teammate lanes (route file requests to the owner): " + "; ".join(teammates) + ".")
+    return bits
 
 
 def pick_member_for_question(
@@ -991,6 +1044,7 @@ def _member_push_to_group(
     relay_kinds = {
         "tool",
         "tool_done",
+        "file_guard",
         "status",
         "plan_updated",
         "thinking",
@@ -1045,6 +1099,7 @@ def _run_member_turn(
     transcript = _transcript_snippet(group) if group else ""
     leader_id = (getattr(group, "leader_conv_id", None) or "").strip() if group else ""
     speaker_id = str(speaker.get("member_conv_id") or "").strip()
+    leader_row = next((m for m in members if str(m.get("member_conv_id") or "") == leader_id), None)
     prompt = build_member_prompt(
         member_name=prompt_name,
         members=members,
@@ -1053,6 +1108,8 @@ def _run_member_turn(
         from_name=pending_from,
         roundtable=roundtable,
         is_leader=bool(leader_id and speaker_id == leader_id),
+        lane=speaker.get("write_allowed"),
+        leader_name=member_display_name(leader_row) if leader_row else "",
     )
     member_conv = load_conversation(str(speaker["member_conv_id"]))
     member_model = (getattr(member_conv, "model", None) or "").strip() if member_conv else ""

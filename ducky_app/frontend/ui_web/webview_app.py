@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import logging
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime, packaged_data_root
@@ -262,6 +263,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     t_api_init = time.perf_counter()
     api = PanelApi()
     _boot_trace("panel_api_init", t_api_init)
+    try:
+        from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters
+
+        install_workspace_adapters()
+    except Exception:
+        logging.getLogger(__name__).warning("workspace adapters failed to install", exc_info=True)
     api_holder["api"] = api
     api._tray = None  # type: ignore[attr-defined]
     window_holder: dict[str, object] = {}

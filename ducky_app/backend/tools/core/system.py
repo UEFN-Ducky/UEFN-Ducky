@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import difflib
 import os
 from typing import Any, Optional
 
-from backend.bridge import resolve_workspace_path, send_command, workspace_roots
+from backend.bridge import resolve_workspace_path, send_command
 from backend.util.json_util import tool_json
 from backend.server import mcp
+from backend.workspace.paths import (  # noqa: F401 - re-exported for existing importers
+    WRITE_OUTSIDE_CONTENT_FORBIDDEN,
+    WRITE_PYTHON_IN_PROJECT_FORBIDDEN,
+    require_writable_project_path,
+)
 
 
 @mcp.tool()
@@ -50,46 +54,6 @@ def _workspace_entry_allowed(name: str) -> bool:
         return False
     lower = name.lower()
     return not any(lower.endswith(suf) for suf in _WORKSPACE_SKIP_SUFFIXES)
-
-
-WRITE_OUTSIDE_CONTENT_FORBIDDEN = (
-    "workspace_write_file may only write under the UEFN project's Content/ or "
-    ".ducky/ folders. Never touch UEFN core files, digests, Saved/, Intermediate/, "
-    "or the project root. Never write .py/.pyc into the island (Epic rejects "
-    "the upload with ContainsPythonData). Scratch files belong in "
-    "%LOCALAPPDATA%/UEFN-Ducky/ (or OS temp). Allowed: Content/** (Verse, assets) "
-    "and .ducky/** (tests, tasks) — never Python."
-)
-
-WRITE_PYTHON_IN_PROJECT_FORBIDDEN = (
-    "Never write extra .py/.pyc into a UEFN project. Ducky auto-manages "
-    "Content/Python/init_unreal.py (listener boot) — never delete that file. "
-    "Scratch → %LOCALAPPDATA%/UEFN-Ducky/. execute_python is in-memory only."
-)
-
-_WRITE_BLOCKED_ANCESTORS = frozenset({"Saved", "Intermediate", "DerivedDataCache"})
-_WRITE_ALLOWED_ANCESTORS = frozenset({"Content", ".ducky"})
-_WRITE_BLOCKED_SUFFIXES = (".py", ".pyc")
-
-
-def require_writable_project_path(file_path: str) -> None:
-    """Refuse writes outside Content/** and .ducky/** of a UEFN project.
-
-    Digests are blocked separately by require_not_digest_path. This guard stops
-    the rest: Saved/, Intermediate/, project-root junk, UEFN core files, and
-    any .py/.pyc (Epic ContainsPythonData).
-    """
-    lowered = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").lower()
-    if lowered.endswith(_WRITE_BLOCKED_SUFFIXES):
-        raise ValueError(WRITE_PYTHON_IN_PROJECT_FORBIDDEN)
-    parts = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").split("/")
-    names = [p for p in parts if p and p != "."]
-    for i, name in enumerate(names):
-        if name in _WRITE_BLOCKED_ANCESTORS:
-            raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
-        if name in _WRITE_ALLOWED_ANCESTORS and i < len(names) - 1:
-            return
-    raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
 
 
 @mcp.tool()
@@ -152,6 +116,12 @@ def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = 
     rel = relative_path.strip().replace("\\", "/")
     payload = {"path": file_path, "content": text}
     try:
+        from backend.workspace.runtime import get_writer
+
+        get_writer().note_read(rel, text)  # base for concurrent-edit detection
+    except Exception:
+        pass
+    try:
         from frontend.ui_web.verse_editor.agent_sync import emit_for_bridge_tool
 
         emit_for_bridge_tool("workspace_read_file", {"relative_path": rel}, {"data": payload})
@@ -164,60 +134,30 @@ def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = 
 def workspace_write_file(relative_path: str, content: str, pretty: bool = False) -> str:
     """Write a text file under the VS Code workspace on host disk.
 
+    Goes through the shared write pipeline: atomic replace, history snapshot with
+    your identity, change journal, and write-lane policy when you are a laned
+    group member (an out-of-lane path is refused — do not retry it).
     Only Content/** and .ducky/**. Never writes UEFN digests (*.digest.verse),
     .py/.pyc (Epic ContainsPythonData), or anything outside those two roots
     (Saved/, Intermediate/, project root). Python scratch → %LOCALAPPDATA%/UEFN-Ducky/.
     """
-    from backend.tools.verse.verse_digests import require_not_digest_path
+    from backend.workspace.runtime import get_writer
 
-    require_not_digest_path(relative_path)
-    file_path = resolve_workspace_path(relative_path)
-    require_not_digest_path(file_path)
-    require_writable_project_path(file_path)
-    parent = os.path.dirname(file_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    before_content = ""
-    if os.path.isfile(file_path):
-        with open(file_path, encoding="utf-8", errors="replace") as f:
-            before_content = f.read()
-    with open(file_path, "w", encoding="utf-8", newline="") as f:
-        f.write(content)
-    rel = relative_path.strip().replace("\\", "/")
-    try:
-        from frontend.ui_web.verse_editor import file_history
-
-        roots = workspace_roots()
-        file_history.record_agent_write(
-            rel,
-            before_content,
-            content,
-            project_root=roots[0] if roots else None,
-        )
-    except Exception:
-        pass
-    before_lines = before_content.splitlines()
-    after_lines = content.splitlines()
-    matcher = difflib.SequenceMatcher(None, before_lines, after_lines)
-    lines_added = 0
-    lines_removed = 0
-    for tag, _i1, _i2, _j1, _j2 in matcher.get_opcodes():
-        if tag == "insert":
-            lines_added += _j2 - _j1
-        elif tag == "delete":
-            lines_removed += _i2 - _i1
-        elif tag == "replace":
-            lines_removed += _i2 - _i1
-            lines_added += _j2 - _j1
-    payload = {
+    result = get_writer().write_text(relative_path, content, tool="workspace_write_file")
+    file_path = result.abs_path
+    payload: dict[str, Any] = {
         "path": file_path,
-        "relative_path": rel,
-        "bytes_written": len(content.encode("utf-8")),
-        "before_content": before_content,
-        "lines_added": lines_added,
-        "lines_removed": lines_removed,
+        "relative_path": result.path,
+        "bytes_written": result.bytes_written,
+        "before_content": result.before_content,
+        "lines_added": result.lines_added,
+        "lines_removed": result.lines_removed,
     }
-    if rel.lower().endswith(".verse"):
+    extra = result.to_payload()
+    for key in ("changeset", "in_lane", "warning"):
+        if key in extra:
+            payload[key] = extra[key]
+    if result.path.lower().endswith(".verse"):
         # Findings only — never blocks the write. Catches the effect/using/API
         # mistakes the offline LSP scan cannot see.
         try:
@@ -233,16 +173,6 @@ def workspace_write_file(relative_path: str, content: str, pretty: bool = False)
                 )
         except Exception:
             pass
-    try:
-        from frontend.ui_web.verse_editor.agent_sync import emit_for_bridge_tool
-
-        emit_for_bridge_tool(
-            "workspace_write_file",
-            {"relative_path": rel, "content": content},
-            {"data": payload},
-        )
-    except Exception:
-        pass
     return tool_json(payload, pretty=pretty)
 
 

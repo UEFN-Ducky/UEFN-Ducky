@@ -258,6 +258,7 @@ _BLOCK_EXACT: frozenset[str] = frozenset(
         "simulate_device_event",
         "metahuman_assemble_uefn",
         "verse_template_apply",
+        "changeset_revert",
         "meshy_discover_download",
         "meshy_text_to_3d_preview",
         "meshy_rig",

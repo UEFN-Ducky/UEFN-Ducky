@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,12 @@ from backend.util.json_util import tool_json
 
 SINGLES_FOLDER = "DuckyVerifySingles"
 _ERR_RE = re.compile(r"^(?P<path>.+?\.verse)\((?P<line>\d+),\d+, \d+,\d+\) : Script (?P<kind>error|warning) (?P<code>\d+): (?P<msg>.*)$")
+
+
+def _writer():
+    from backend.workspace.runtime import get_writer
+
+    return get_writer()
 
 
 def _project_verse_root() -> Path:
@@ -54,6 +59,14 @@ def _files_for(row: dict[str, Any]) -> list[tuple[str, str]]:
 
 def _stage(verse_root: Path, rows: list[dict[str, Any]]) -> tuple[dict[str, str], list[Path], list[Path], list[str]]:
     """Write template files. Returns (abs path -> 'template_id:rel', created files, created dirs, skipped)."""
+    project_root = verse_root.parent.parent
+    writer = _writer()
+    pipeline_root = Path(writer.root()).resolve()
+    if not project_root.resolve().is_relative_to(pipeline_root):
+        raise ValueError(
+            f"Template staging root {project_root} is not under the write pipeline root "
+            f"{pipeline_root}; refusing to stage into a different project."
+        )
     written: dict[str, str] = {}
     created_files: list[Path] = []
     created_dirs: list[Path] = []
@@ -80,24 +93,31 @@ def _stage(verse_root: Path, rows: list[dict[str, Any]]) -> tuple[dict[str, str]
             while not parent.exists() and parent != verse_root:
                 chain.append(parent)
                 parent = parent.parent
-            target.parent.mkdir(parents=True, exist_ok=True)
             created_dirs.extend(reversed(chain))
-            target.write_text(body, encoding="utf-8")
+            project_rel = str(target.relative_to(project_root)).replace("\\", "/")
+            writer.create(project_rel, body, tool="verse_template_verify")
             created_files.append(target)
             written[str(target.resolve()).lower().replace("\\", "/")] = f"{tid}:{folder}/{rel}"
     return written, created_files, created_dirs, skipped
 
 
-def _cleanup(created_files: list[Path], created_dirs: list[Path]) -> None:
+def _cleanup(verse_root: Path, created_files: list[Path], created_dirs: list[Path]) -> None:
+    """Remove only what _stage created, through the pipeline so the journal sees it."""
+    project_root = verse_root.parent.parent
     for f in created_files:
+        rel = str(f.relative_to(project_root)).replace("\\", "/")
+
+        def _unlink(path: Path = f) -> None:
+            path.unlink()
+
         try:
-            f.unlink()
-        except OSError:
+            _writer().path_op("delete", rel, tool="verse_template_verify", perform=_unlink)
+        except (OSError, ValueError):
             pass
     for d in sorted(set(created_dirs), key=lambda p: len(str(p)), reverse=True):
         try:
             if d.is_dir() and not any(d.iterdir()):
-                shutil.rmtree(d, ignore_errors=True)
+                d.rmdir()
         except OSError:
             pass
 
@@ -168,7 +188,7 @@ def verse_template_verify(template_ids: str = "", cleanup: bool = True, pretty: 
         result.update({"ok": False, "error": f"compile failed to run: {exc}"})
     finally:
         if cleanup:
-            _cleanup(created_files, created_dirs)
+            _cleanup(verse_root, created_files, created_dirs)
             result["cleaned_up"] = len(created_files)
         else:
             result["left_in_project"] = sorted(written.values())

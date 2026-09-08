@@ -40,6 +40,18 @@ _TOOL_ALIASES = {
 }
 
 
+def is_write_tool(tool_name: str) -> bool:
+    """True for every tool (Ducky or coding-agent native) that writes a project file."""
+    return normalize_workspace_tool_name(tool_name) in _WRITE_TOOLS
+
+
+def project_path_from_args(args: dict[str, Any]) -> str:
+    """Project-relative path named by a write/read tool's arguments, or empty."""
+    return _coerce_project_path(
+        str(args.get("relative_path") or args.get("path") or args.get("file_path") or "")
+    )
+
+
 def _norm_path(path: str) -> str:
     return (path or "").strip().replace("\\", "/")
 

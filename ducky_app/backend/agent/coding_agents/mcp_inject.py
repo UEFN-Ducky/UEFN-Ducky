@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.agent.hard_rules import AGENT_HARD_RULES
+from backend.workspace.identity import RunContext
 from frontend.mcp_block import build_uefn_server_block
 from frontend.settings import PanelSettings, default_app_data_dir
 
@@ -66,15 +67,23 @@ def write_uefn_mcp_config(
     conv_id: str = "",
     settings: PanelSettings | None = None,
     extra_servers: dict[str, Any] | None = None,
+    identity: RunContext | None = None,
 ) -> Path:
-    """Write a temp mcpServers JSON for Claude/Codex/Cursor launches."""
+    """Write a temp mcpServers JSON for Claude/Codex/Cursor launches.
+
+    ``identity`` rides along as DUCKY_* env on the ``uefn`` server so the bridge
+    process attributes and lane-checks the agent's writes made through Ducky tools.
+    """
     s = settings or PanelSettings.load()
     servers = build_uefn_mcp_servers(s)
-    if conv_id:
+    if conv_id or identity is not None:
         uefn = servers.get("uefn")
         if isinstance(uefn, dict):
             env = dict(uefn.get("env") or {})
-            env["DUCKY_CONV_ID"] = conv_id
+            if identity is not None:
+                env.update({k: v for k, v in identity.to_env().items() if v})
+            if conv_id:
+                env["DUCKY_CONV_ID"] = conv_id
             uefn["env"] = env
     if extra_servers:
         servers.update(extra_servers)
@@ -312,6 +321,7 @@ def launch_env(
     conv_id: str,
     project_root: str,
     extra: dict[str, str] | None = None,
+    identity: RunContext | None = None,
 ) -> dict[str, str]:
     """Build env for a coding-agent subprocess.
 
@@ -328,6 +338,9 @@ def launch_env(
         "DUCKY_TASK_ID": conv_id,
         "DUCKY_PROJECT_ROOT": project_root or "",
     }
+    if identity is not None:
+        env.update({k: v for k, v in identity.to_env().items() if v})
+        env["DUCKY_CONV_ID"] = conv_id  # the chat id always wins
     if extra:
         env.update(extra)
     return env

@@ -298,6 +298,38 @@ class PanelApiProjectMixin:
 
         return file_history.snapshot_editor_content(relative_path, content)
 
+    # -- changesets (per-run ledger of project writes) ---------------------------
+
+    def list_changesets(self, conv_id: str = "", group_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.list_changesets(conv_id=conv_id, group_id=group_id, limit=limit)
+
+    def get_changeset(self, run_id: str) -> dict[str, Any]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.get_changeset(run_id)
+
+    def get_changeset_entry_contents(self, run_id: str, seq: int) -> dict[str, str]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.entry_contents(run_id, seq)
+
+    def revert_changeset_entry(self, run_id: str, seq: int, force: bool = False) -> dict[str, Any]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.revert_entry(run_id, seq, force=force)
+
+    def revert_changeset(self, run_id: str, force: bool = False) -> dict[str, Any]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.revert_run(run_id, force=force)
+
+    def export_changeset(self, run_id: str) -> dict[str, Any]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.export_run(run_id)
+
     def get_verse_lsp_status(self, client_id: str = "") -> dict[str, object]:
         return self._verse_editor.get_lsp_status(client_id or None)
 
