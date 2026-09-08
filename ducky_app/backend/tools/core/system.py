@@ -26,9 +26,18 @@ def ping(pretty: bool = False) -> str:
     return tool_json(result, pretty=pretty)
 
 
+#: Internal listener commands agents must never call by name. These exist for
+#: user-initiated recovery (undoing a run), not for agents to invoke.
+_INTERNAL_COMMAND_PREFIX = "ducky_revert_"
+
+
 @mcp.tool()
 def listener_command(command: str, params: Optional[dict[str, Any]] = None, pretty: bool = False) -> str:
     """Run a listener command by name. Call ping for valid command names."""
+    if (command or "").strip().startswith(_INTERNAL_COMMAND_PREFIX):
+        raise ValueError(
+            "Refused: never delete island content. That command is the undo path for a change the user chose to revert, not an agent tool. Fix the asset/device instead, or ask the user to revert the run from the Changes view."
+        )
     result = send_command(command, params or {})
     return tool_json(result, pretty=pretty)
 

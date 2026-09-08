@@ -22,6 +22,10 @@ from backend.server import mcp
 # Removed/forbidden commands stay hidden even if an old listener still lists them.
 _NEVER_EXPOSE = frozenset(
     {
+        # The change journal's undo of a creation. Deleting is refused for
+        # agents everywhere else; this path exists only for a user-initiated
+        # revert and must never become a callable tool.
+        "ducky_revert_creation",
         "batch_commands",
         "spawn_actor_batch",
         "setup_verse_device",

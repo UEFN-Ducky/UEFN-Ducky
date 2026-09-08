@@ -130,9 +130,11 @@ def _execute_python_blocked(code: str) -> str | None:
         "delete_asset(" in compact
         or "delete_directory(" in compact
         or "editorassetlibrary.delete_" in compact
+        or "destroy_actor(" in compact
+        or "destroy_actors(" in compact
     ):
         return (
-            "STOP: execute_python blocked — never delete island content. "
+            "STOP: execute_python blocked — never delete island content or actors. "
             "Fix broken refs (search / reimport / relink / duplicate). "
             "Delete only in the Content Browser. "
             "Editor offline is not a delete queue — do not restart UEFN to delete."

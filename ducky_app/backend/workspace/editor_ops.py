@@ -233,6 +233,9 @@ _MUTATIONS: tuple[OpSpec, ...] = (
     _op("landscape_sculpt", KIND_WORLD, ""),
     _op("area_create", KIND_WORLD, "exists", creates=True),
     _op("blockout_layout", KIND_WORLD, "", creates=True),
+    # -- internal --------------------------------------------------------------
+    _op("ducky_revert_creation", KIND_OTHER, "exists", revertable=REVERT_NONE,
+        note="the change journal's undo of a creation; never callable by an agent"),
 )
 
 _OPAQUE: tuple[OpSpec, ...] = (

@@ -135,6 +135,8 @@ _HEAVY_COMMANDS: set[str] = set(
         "set_viewport_camera",
         "execute_python",
         "reload_listener",
+        # Internal: the change journal's undo of a creation.
+        "ducky_revert_creation",
     }
 )
 

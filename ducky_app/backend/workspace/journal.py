@@ -334,6 +334,9 @@ class FileChangeJournal:
         skipped: list[dict[str, Any]] = []
         errors: list[str] = []
         touched: list[str] = []
+        # Changes with no computable inverse. Not reverted, not an error — the
+        # caller shows them as a 'remove these by hand' list.
+        manual: list[dict[str, Any]] = []
         # Newest first; one restore per path, to the state before that path's earliest entry.
         by_path: dict[str, list[dict[str, Any]]] = {}
         for entry in sorted(entries, key=lambda e: int(e["seq"]), reverse=True):
@@ -348,6 +351,9 @@ class FileChangeJournal:
             if outcome == "skipped":
                 skipped.append({"seq": int(newest["seq"]), "path": path})
                 continue
+            if outcome == "manual":
+                manual.append(self._manual_row(path, newest, earliest))
+                continue
             reverted.extend(int(e["seq"]) for e in group)
             touched.append(path)
         if reverted:
@@ -360,9 +366,12 @@ class FileChangeJournal:
                 remaining = [e for e in fresh.get("entries", []) if not e.get("reverted")]
                 fresh["status"] = STATUS_REVERTED if not remaining else STATUS_PARTIALLY_REVERTED
                 self._save_run(storage, fresh)
+            # Only real file paths belong here: consumers reload them from disk.
             events.emit(
                 events.FilesRevertedEvent(
-                    paths=tuple(touched), run_id=run["run_id"], conv_id=str(run.get("conv_id") or "")
+                    paths=tuple(p for p in touched if not p.startswith("uefn://")),
+                    run_id=run["run_id"],
+                    conv_id=str(run.get("conv_id") or ""),
                 ).to_dict()
             )
         return {
@@ -371,7 +380,22 @@ class FileChangeJournal:
             "revert_run_id": revert_run_id if reverted else "",
             "reverted": sorted(reverted),
             "skipped_modified": skipped,
+            "manual": manual,
             "errors": errors,
+        }
+
+    @staticmethod
+    def _manual_row(path: str, newest: dict[str, Any], earliest: dict[str, Any]) -> dict[str, Any]:
+        spec = earliest.get("editor") or {}
+        target = (spec.get("targets") or [{}])[0]
+        return {
+            "seq": int(newest["seq"]),
+            "path": path,
+            "command": spec.get("command") or earliest.get("tool", ""),
+            "label": target.get("label") or target.get("path") or target.get("id") or "",
+            "target": target.get("id") or target.get("path") or "",
+            "reason": spec.get("reason") or earliest.get("reason") or "",
+            "summary": spec.get("summary") or "",
         }
 
     def _revert_path(
@@ -386,6 +410,8 @@ class FileChangeJournal:
         force: bool,
         meta: dict[str, Any],
     ) -> str:
+        if earliest["op"] == OP_EDITOR:
+            return self._revert_editor(earliest, meta=meta)
         full = os.path.join(project_root, path)
         op_new = newest["op"]
         if op_new in _TEXT_OPS or op_new == "delete":
@@ -422,6 +448,52 @@ class FileChangeJournal:
             self._unlink_through_pipeline(writer, path, meta)
             return "reverted"
         raise ValueError(f"unknown op {op_old!r}")
+
+    @staticmethod
+    def _revert_editor(earliest: dict[str, Any], *, meta: dict[str, Any]) -> str:
+        """Undo one editor change by posting its inverse, or removing what it created.
+
+        The revert runs as its own attributed run, so undoing a move is itself a
+        recorded change — symmetric with file reverts. There is no rollback here:
+        UEFN has already saved, so every undo is a compensating forward edit.
+        """
+        from backend.bridge import send_command
+
+        spec = earliest.get("editor") or {}
+        steps = list(spec.get("inverse") or [])
+        created = list(spec.get("created") or [])
+        if not steps and not created:
+            return "manual"
+        for target in created:
+            # Only ever removes something this journal recorded the agent creating,
+            # and the listener re-checks that independently.
+            steps = steps + [{
+                "command": "ducky_revert_creation",
+                "params": {
+                    "kind": str(target.get("kind") or "actor"),
+                    "id": str(target.get("path") or target.get("id") or ""),
+                    "guid": str(target.get("guid") or ""),
+                },
+            }]
+        token = identity.bind(
+            identity.RunContext(
+                run_id=str(meta.get("run_id") or ""),
+                conv_id=str(meta.get("conv_id") or ""),
+                ducky_name=str(meta.get("ducky_name") or ""),
+                source=identity.SOURCE_REVERT,
+            )
+        )
+        try:
+            for step in steps:
+                command = str(step.get("command") or "")
+                if not command:
+                    continue
+                send_command(command, dict(step.get("params") or {}), timeout=30.0)
+        except ConnectionError as exc:
+            raise ConnectionError(f"open UEFN to undo editor changes ({exc})") from exc
+        finally:
+            identity.reset(token)
+        return "reverted"
 
     @staticmethod
     def _unlink_through_pipeline(writer: Any, path: str, meta: dict[str, Any]) -> None:

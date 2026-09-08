@@ -259,6 +259,7 @@ _BLOCK_EXACT: frozenset[str] = frozenset(
         "metahuman_assemble_uefn",
         "verse_template_apply",
         "changeset_revert",
+        "ducky_revert_creation",
         "meshy_discover_download",
         "meshy_text_to_3d_preview",
         "meshy_rig",

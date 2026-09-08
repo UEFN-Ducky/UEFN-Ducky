@@ -172,6 +172,33 @@ def _parse_shading_model(raw: str):
     return key, val
 
 
+
+def _replace_existing(full: str) -> None:
+    """Clear the way for a create that replaces an asset of the same name.
+
+    Replacing is long-standing behaviour here, but deleting an asset something
+    else still uses silently breaks those assets — and it is the one path that
+    reaches delete_asset without the refusal every other caller gets. Refuse
+    that case; replacing an unreferenced asset is harmless.
+    """
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return
+    referencers = []
+    try:
+        from listener.registry.assets_pipeline import get_referencers
+
+        referencers = list(get_referencers(full).get("referencers") or [])
+    except Exception:
+        referencers = []
+    if referencers:
+        shown = ", ".join(referencers[:5]) + ("…" if len(referencers) > 5 else "")
+        raise ValueError(
+            f"Refused: {full} already exists and is used by {len(referencers)} asset(s): {shown}. "
+            "Replacing it would break them. Edit it in place, or create it under a different name."
+        )
+    unreal.EditorAssetLibrary.delete_asset(full)
+
+
 def create_material(
     asset_name: str,
     folder: str = "",
@@ -183,8 +210,7 @@ def create_material(
     folder = pin_project_folder(folder, default_leaf="Materials")
     unreal.EditorAssetLibrary.make_directory(folder)
     full = f"{folder.rstrip('/')}/{asset_name}"
-    if unreal.EditorAssetLibrary.does_asset_exist(full):
-        unreal.EditorAssetLibrary.delete_asset(full)
+    _replace_existing(full)
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     mat = asset_tools.create_asset(asset_name, folder, unreal.Material, unreal.MaterialFactoryNew())
     if mat is None:
@@ -344,8 +370,7 @@ def create_material_instance(asset_name: str, parent_material_path: str, folder:
     parent = _load_material_interface(parent_material_path)
     unreal.EditorAssetLibrary.make_directory(folder)
     full = f"{folder.rstrip('/')}/{asset_name}"
-    if unreal.EditorAssetLibrary.does_asset_exist(full):
-        unreal.EditorAssetLibrary.delete_asset(full)
+    _replace_existing(full)
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
     mi = asset_tools.create_asset(
         asset_name, folder, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew()
@@ -587,8 +612,7 @@ def duplicate_material(source_path: str, asset_name: str, folder: str = "") -> d
         raise ValueError(f"Source not found: {source_path}")
     unreal.EditorAssetLibrary.make_directory(folder)
     dest = f"{folder.rstrip('/')}/{asset_name}"
-    if unreal.EditorAssetLibrary.does_asset_exist(dest):
-        unreal.EditorAssetLibrary.delete_asset(dest)
+    _replace_existing(dest)
     ok = unreal.EditorAssetLibrary.duplicate_asset(source_path, dest)
     if not ok:
         raise RuntimeError(f"duplicate_asset failed: {source_path} -> {dest}")

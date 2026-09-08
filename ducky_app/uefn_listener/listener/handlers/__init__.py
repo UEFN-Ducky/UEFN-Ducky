@@ -2,6 +2,7 @@
 from listener.handlers import actors  # noqa: F401
 from listener.handlers import assets  # noqa: F401
 from listener.handlers import device_editor  # noqa: F401
+from listener.handlers import ducky_revert  # noqa: F401 — internal revert path
 from listener.handlers import project  # noqa: F401
 from listener.handlers import system  # noqa: F401
 from listener.handlers import verse_editable  # noqa: F401
