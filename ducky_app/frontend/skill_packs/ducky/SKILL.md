@@ -106,6 +106,29 @@ coding_agent="claude_code" | "codex" | "cursor")`, or automatically when the
 profile's favorite model slot names one. The sub-agent keeps one upstream CLI
 session per chat, so follow-ups remember everything.
 
+## Write lanes & changesets (parallel duckies)
+
+Every project write goes through one pipeline: it is attributed to the chat and
+run that made it, ledgered per run, and checked against the writer's lane.
+
+- **Lanes** (group members). The leader partitions the work into disjoint write
+  lanes BEFORE spawning parallel members:
+  `ducky_spawn_chat(ducky=…, group_id=…, write_allowed=["Content/Verse/Shop/**"])`
+  or `ducky_group_set_lane(group_id, member_conv_id, write_allowed=[…])`.
+  Globs are gitignore-style (`**` spans folders; a bare folder means
+  `folder/**`); `[]` = read-only. Overlapping lanes are refused.
+  `ducky_group_get_lanes(group_id)` shows the map. Keep shared files such as
+  `module_declarations.verse` in the leader's own lane.
+- **Members cannot change their own lane.** An out-of-lane write is refused
+  (flagged only while the `write_lanes_mode` setting is `shadow`) — never retry
+  the path; ask the leader in the group chat or stay inside the lane.
+- **Changesets.** `changeset_list(group_id=…)` shows what every member wrote,
+  with conflicts (two runs touched one file) and out-of-lane writes — review it
+  before `workspace_compile_verse`. `changeset_revert(run_id)` restores a run's
+  files (one file: pass its `seq`); `changeset_export(run_id)` is the
+  `ducky.changeset/1` manifest for external orchestrators. The user sees the
+  same data in Context → Files and on each member chip (lane badge, conflict dot).
+
 ## Agent-to-agent messaging
 
 If a spawn times out it is NOT dead: the result arrives later in your chat as a

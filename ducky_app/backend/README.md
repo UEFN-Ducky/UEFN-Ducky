@@ -14,6 +14,7 @@ ducky_app/backend/
   panel/                    # Panel UI RPC client
   util/                     # json_util, env_compat, legacy import_compat
   agent/                    # Runner, providers, serialization, builtin toolsets
+  workspace/                # Governed project writes: ProjectWriter pipeline, identity, policy, journal, schemas
   tools/
     support/                # plugin_gate
     core/                   # Always-on: system, hints, code diagnostics
@@ -38,6 +39,9 @@ Tests live beside the modules they cover (`test_*.py`).
 ## Where does a new file go?
 
 1. **App infrastructure** (bridge, skills, agent loop) → matching package above.
+   Anything that writes a file inside the user's UEFN project calls
+   `backend.workspace.runtime.get_writer()`; never `open(..., "w")` on a project
+   path (`workspace/test_no_direct_writes.py` enforces it; ADR 0001 explains why).
 2. **Always-on panel / `ducky_*` tools** → `tools/panel/` or `tools/core/` and import
    from `tools/__init__.py`.
 3. **UEFN domain tools shipped in the EXE, Store-gated** →

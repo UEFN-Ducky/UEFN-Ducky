@@ -48,6 +48,7 @@ cover (`test_*.py` beside the module).
 | `ducky_app/uefn_listener/` | In-UEFN listener (runs inside UEFN via Python Editor Script Plugin) |
 | `build/` | PyInstaller spec + build scripts |
 | `scripts/` | Verse/Epic asset extraction utility |
+| `docs/adr/` | Architecture decision records; `docs/architecture/` explains cross-cutting mechanisms |
 
 Desktop Store plugins live in the separate **UEFN-Ducky** plugins repo
 (`plugins/uefn-plugin-<id>/`). Domain MCP tools in this app are activated from
@@ -56,9 +57,12 @@ plugin `register()` via paths like `backend.tools.uefn.actors`.
 ## Pull requests
 
 1. Keep changes focused; match the style of surrounding code.
-2. Run `py -m pytest` and make sure the build still produces `dist/UEFN-Ducky.exe` if you
+2. Any code that writes into the user's UEFN project goes through
+   `backend.workspace.ProjectWriter` (see `docs/architecture/write-pipeline.md`);
+   `backend/workspace/test_no_direct_writes.py` fails otherwise.
+3. Run `py -m pytest` and make sure the build still produces `dist/UEFN-Ducky.exe` if you
    touched packaging.
-3. Describe what you changed and how you verified it.
+4. Describe what you changed and how you verified it.
 
 By contributing, you grant Mindful Path Company, LLC a perpetual, worldwide,
 irrevocable license to use, modify, distribute, and relicense your contributions
