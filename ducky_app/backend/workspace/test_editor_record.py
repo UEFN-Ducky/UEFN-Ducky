@@ -175,3 +175,63 @@ def test_sidecar_from_ignores_a_listener_that_sends_none() -> None:
     assert rec.sidecar_from({"_ducky": {"v": 1}}) == {"v": 1}
     assert rec.sidecar_from({"_ducky": "junk"}) is None
     assert rec.sidecar_from(None) is None
+
+
+# --- opaque commands -------------------------------------------------------------
+
+
+OPAQUE_SIDECAR = {
+    "v": 1,
+    "command": "execute_python",
+    "kind": "world",
+    "facet": "opaque",
+    "targets": [],
+    "before": {"code": "spawn(5)", "diff": {"count": 5, "added": 5, "removed": 0, "moved": 0}},
+    "inverse": None,
+    "created": [
+        {"kind": "actor", "id": f"G{i}", "guid": f"G{i}", "label": f"Cube{i}", "path": f"/Game/x.Cube{i}"}
+        for i in range(5)
+    ],
+    "revertable": "auto",
+    "reason": "",
+    "summary": "+5 actors",
+    "outcome": "ok",
+}
+
+
+def test_two_scripts_in_one_run_are_two_rows_not_one() -> None:
+    """An opaque command is an event, not a target edited twice."""
+    token = identity.bind(RunContext(run_id="r1", conv_id="c1", ducky_name="Artist"))
+    try:
+        first = rec.build("execute_python", {"code": "a"}, None, ok=True)
+        second = rec.build("execute_python", {"code": "b"}, None, ok=True)
+    finally:
+        identity.reset(token)
+    assert first.slot != second.slot
+    assert first.slot == "uefn://opaque/execute_python/r1-1"
+    assert second.slot == "uefn://opaque/execute_python/r1-2"
+
+
+def test_an_opaque_slot_stays_inside_its_own_run() -> None:
+    for run_id in ("r1", "r2"):
+        token = identity.bind(RunContext(run_id=run_id, conv_id="c1"))
+        try:
+            change = rec.build("exec_console_command", {"command": "stat fps"}, None, ok=True)
+        finally:
+            identity.reset(token)
+        assert change.slot == f"uefn://opaque/exec_console_command/{run_id}-1"
+
+
+def test_a_script_that_spawned_actors_can_be_reverted_to_exactly_those_actors() -> None:
+    change = rec.build("execute_python", {"code": "spawn(5)"}, OPAQUE_SIDECAR, ok=True)
+    assert change.revertable == REVERT_AUTO
+    assert [t["guid"] for t in change.created] == ["G0", "G1", "G2", "G3", "G4"]
+    assert change.summary == "+5 actors"
+    # The code is part of the record: an opaque change is only auditable if readable.
+    assert change.before["code"] == "spawn(5)"
+
+
+def test_a_script_with_no_sidecar_is_recorded_but_promises_no_undo() -> None:
+    change = rec.build("execute_python", {"code": "print(1)"}, None, ok=True)
+    assert change.applied and change.revertable != REVERT_AUTO
+    assert change.reason

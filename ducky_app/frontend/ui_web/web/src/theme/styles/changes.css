@@ -437,6 +437,70 @@
   color: var(--muted);
 }
 
+.json-diff-code {
+  margin-bottom: 14px;
+}
+
+.json-diff-code pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.json-diff h4 {
+  margin: 0 0 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.json-diff-changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.json-diff-changes li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.json-diff-change {
+  flex: 0 0 62px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.json-diff-change--added {
+  color: var(--green);
+}
+
+.json-diff-change--removed {
+  color: var(--red);
+}
+
+.json-diff-change-label {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- Context panel: editor + blocked rows and the link out ---------------- */
 
 .changeset-editor-row {

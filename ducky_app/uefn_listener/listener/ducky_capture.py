@@ -135,6 +135,95 @@ def _restore_transform(target: dict, state: dict) -> dict:
 # --- before / after per command ---------------------------------------------------
 # before(params) -> {"targets": [...], "state": {...}} | None
 # inverse(params, cap, result) -> [ {command, params}, ... ] | None
+# after_state(params, cap, result) -> {...} merged into the recorded before-state
+#
+# `cap` is this module's own dict for the duration of one dispatch. Only its
+# "targets" and "state" keys reach the sidecar, so a bulky working value (a level
+# snapshot) can live beside them without being written to the change journal.
+
+
+#: Rows to keep from a bracketing snapshot. Above this the diff is not worth the tick.
+_OPAQUE_SNAPSHOT_LIMIT = 6000
+#: Changes listed in the sidecar. The count is always exact; the list is not.
+_OPAQUE_DIFF_LIMIT = 200
+
+
+def _level_snapshot() -> Optional[dict]:
+    """Every actor in the level, keyed for comparison. None when it cannot be taken."""
+    from listener.registry.device_graph import actor_state_snapshot
+
+    snap = actor_state_snapshot(limit=_OPAQUE_SNAPSHOT_LIMIT, scope="all", fields=["guid"])
+    if not isinstance(snap, dict) or snap.get("skipped"):
+        return None
+    return snap
+
+
+def _before_opaque(params: dict) -> Optional[dict]:
+    """Bracket the level so a script's spawns can be identified afterwards.
+
+    Only in ``full`` mode: this is the one capture that walks the whole level, and
+    it runs twice per opaque command.
+    """
+    if _mode != "full":
+        return None
+    snap = _level_snapshot()
+    if snap is None:
+        return None
+    # Under "snapshot", not "state": the raw rows must never reach the journal.
+    return {"targets": [], "state": {}, "snapshot": snap}
+
+
+def _after_opaque(params: dict, cap: Optional[dict], result: Any) -> Optional[dict]:
+    """What the level looked like afterwards, as a diff rather than a second copy.
+
+    Also stashes the added actors on ``cap`` so :func:`_created_opaque` can report
+    them without taking a third snapshot.
+    """
+    from listener.registry.device_graph import actor_state_diff
+
+    state: dict = {}
+    code = params.get("code") or params.get("command") or params.get("script")
+    if isinstance(code, str) and code.strip():
+        # Recorded verbatim: an opaque change is only auditable if you can read it.
+        state["code"] = code
+    before_snap = (cap or {}).get("snapshot")
+    if not isinstance(before_snap, dict):
+        return state or None
+    after_snap = _level_snapshot()
+    if after_snap is None:
+        return state or None
+    diff = actor_state_diff(before_snap, after_snap)
+    changes = list(diff.get("changes") or [])
+    added = [c for c in changes if c.get("change") == "added"]
+    if isinstance(cap, dict):
+        cap["added"] = added
+    state["diff"] = {
+        "count": len(changes),
+        "added": len(added),
+        "removed": sum(1 for c in changes if c.get("change") == "removed"),
+        "moved": sum(1 for c in changes if c.get("change") == "moved"),
+        "changes": changes[:_OPAQUE_DIFF_LIMIT],
+        "truncated": len(changes) > _OPAQUE_DIFF_LIMIT,
+    }
+    return state
+
+
+def _created_opaque(params: dict, cap: Optional[dict], result: Any) -> Optional[list]:
+    """The actors that appeared while the command ran — exactly what a revert removes."""
+    added = (cap or {}).get("added")
+    if not added:
+        return None
+    return [
+        {
+            "kind": "actor",
+            "id": str(row.get("guid") or row.get("path") or ""),
+            "guid": str(row.get("guid") or ""),
+            "label": str(row.get("label") or ""),
+            "path": str(row.get("path") or ""),
+        }
+        for row in added
+        if row.get("guid") or row.get("path")
+    ]
 
 
 def _before_actor_transform(params: dict) -> Optional[dict]:
@@ -328,14 +417,18 @@ def _created_actor(params: dict, cap: Optional[dict], result: Any) -> Optional[d
 
 
 class _Spec:
-    __slots__ = ("kind", "facet", "before", "inverse", "created", "note")
+    __slots__ = ("kind", "facet", "before", "inverse", "created", "after_state", "note")
 
-    def __init__(self, kind, facet, before=None, inverse=None, created=None, note=""):
+    def __init__(self, kind, facet, before=None, inverse=None, created=None,
+                 after_state=None, note=""):
         self.kind = kind
         self.facet = facet
         self.before: Optional[Callable[[dict], Optional[dict]]] = before
         self.inverse: Optional[Callable[[dict, dict, Any], Optional[list]]] = inverse
-        self.created: Optional[Callable[[dict, Optional[dict], Any], Optional[dict]]] = created
+        #: May return one target or a list of them — an opaque script creates many.
+        self.created: Optional[Callable[[dict, Optional[dict], Any], Any]] = created
+        #: Extra recorded state only knowable once the command has run.
+        self.after_state: Optional[Callable[[dict, Optional[dict], Any], Optional[dict]]] = after_state
         self.note = note
 
 
@@ -357,15 +450,43 @@ CAPTURE: Dict[str, _Spec] = {
     # actors — creation (the inverse is a delete, handled by the host's carve-out)
     "spawn_actor": _Spec("actor", "exists", None, None, _created_actor),
     "duplicate_actor": _Spec("actor", "exists", None, None, _created_actor),
+    # opaque — arbitrary code, bracketed by a level snapshot
+    "execute_python": _Spec(
+        "world", "opaque", _before_opaque, None, _created_opaque, _after_opaque,
+        note="arbitrary Python: only what the level snapshot noticed is known",
+    ),
+    "exec_console_command": _Spec(
+        "world", "opaque", _before_opaque, None, _created_opaque, _after_opaque,
+        note="a console command's effects are not modelled; only spawns are noticed",
+    ),
 }
 
 
-def _summary(command: str, cap: Optional[dict], result: Any, created: Optional[dict]) -> str:
+def _summary(
+    command: str,
+    cap: Optional[dict],
+    result: Any,
+    created: Optional[list] = None,
+    state: Optional[dict] = None,
+) -> str:
     """One short line for the change row. Never raises."""
     try:
+        state = dict(state if state is not None else ((cap or {}).get("state") or {}))
+        diff = state.get("diff")
+        if isinstance(diff, dict):
+            parts = [
+                f"+{diff['added']} actors" if diff.get("added") else "",
+                f"-{diff['removed']} actors" if diff.get("removed") else "",
+                f"{diff['moved']} moved" if diff.get("moved") else "",
+            ]
+            shown = ", ".join(p for p in parts if p)
+            return shown or "changed nothing the level snapshot could see"
         if created:
-            return f"created {created.get('label') or created.get('path') or 'actor'}"
-        state = (cap or {}).get("state") or {}
+            first = created[0]
+            name = first.get("label") or first.get("path") or "actor"
+            if len(created) > 1:
+                return f"created {name} and {len(created) - 1} more"
+            return f"created {name}"
         if command == "set_actor_transform" and isinstance(result, dict):
             after = (result.get("actor") or {}).get("location")
             before = state.get("location")
@@ -430,16 +551,29 @@ def after(
         params = dict(params or {})
         # Each of these is guarded on its own: a bug building the inverse must
         # cost the inverse, not the record of what changed.
-        created = None
+        state = dict((cap or {}).get("state") or {})
+        if ok and spec.after_state is not None:
+            try:
+                extra = spec.after_state(params, cap, result)
+                if isinstance(extra, dict):
+                    state.update(extra)
+            except Exception:
+                pass
+
+        created: List[dict] = []
         if ok and spec.created is not None:
             try:
-                created = spec.created(params, cap, result)
+                made = spec.created(params, cap, result)
+                if isinstance(made, dict):
+                    created = [made]
+                elif isinstance(made, list):
+                    created = [t for t in made if isinstance(t, dict)]
             except Exception:
-                created = None
+                created = []
 
         targets = list((cap or {}).get("targets") or [])
         if not targets and created:
-            targets = [created]
+            targets = list(created)
 
         inverse = None
         if ok and spec.inverse is not None and cap:
@@ -465,12 +599,12 @@ def after(
             "kind": spec.kind,
             "facet": spec.facet,
             "targets": targets,
-            "before": (cap or {}).get("state"),
+            "before": state or None,
             "inverse": inverse,
-            "created": [created] if created else [],
+            "created": created,
             "revertable": revertable,
             "reason": reason,
-            "summary": _summary(command, cap, result, created),
+            "summary": _summary(command, cap, result, created, state),
             "outcome": "ok" if ok else "error",
         }
     except Exception:

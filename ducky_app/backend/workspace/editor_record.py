@@ -16,8 +16,10 @@ must not be reported as an error because bookkeeping went wrong.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -89,6 +91,8 @@ def remove_observer(observer: EditorObserver) -> None:
 
 def reset_for_tests() -> None:
     _observers.clear()
+    with _opaque_lock:
+        _opaque_counts.clear()
 
 
 def _outcome(ok: bool, error: str) -> str:
@@ -98,6 +102,34 @@ def _outcome(ok: bool, error: str) -> str:
     if any(marker in lowered for marker in _REFUSAL_MARKERS):
         return OUTCOME_BLOCKED
     return OUTCOME_FAILED
+
+
+#: Per-run numbering for opaque calls, so two scripts in one run read as two rows.
+_opaque_counts: dict[str, int] = {}
+_opaque_lock = threading.Lock()
+_opaque_fallback = itertools.count(1)
+#: Runs remembered for numbering. Old ones are dropped; the number only has to be
+#: unique within the run it appears in.
+_OPAQUE_RUNS_KEPT = 256
+
+
+def _opaque_slot(command: str, run_id: str) -> str:
+    """A slot for one opaque call.
+
+    Every other slot is a target and a facet, so repeated edits to one actor
+    collapse into a single row and a single restore. An opaque command has no
+    target it can name — running a script twice is two events, not one target
+    edited twice — so each call gets its own slot and its own row.
+    """
+    if not run_id:
+        return slot_path("opaque", f"{command}/user-{next(_opaque_fallback)}")
+    with _opaque_lock:
+        count = _opaque_counts.get(run_id, 0) + 1
+        _opaque_counts[run_id] = count
+        if len(_opaque_counts) > _OPAQUE_RUNS_KEPT:
+            for stale in list(_opaque_counts)[: len(_opaque_counts) - _OPAQUE_RUNS_KEPT]:
+                _opaque_counts.pop(stale, None)
+    return slot_path("opaque", f"{command}/{run_id}-{count}")
 
 
 def _target_id(targets: list[Mapping[str, Any]], params: Mapping[str, Any]) -> str:
@@ -163,10 +195,16 @@ def build(
 
     kind = str(side.get("kind") or spec.kind)
     facet = str(side.get("facet") or spec.slot)
+    writer = identity.current_writer(tool=command)
+    slot = (
+        _opaque_slot(command, str(writer.get("run_id") or ""))
+        if spec.mutates == MUT_OPAQUE
+        else slot_path(kind, _target_id(targets, params), facet)
+    )
     return EditorChange(
         command=command,
         kind=kind,
-        slot=slot_path(kind, _target_id(targets, params), facet),
+        slot=slot,
         outcome=outcome,
         params=params,
         spec=spec,
@@ -178,7 +216,7 @@ def build(
         revertable=revertable,
         reason=reason,
         summary=str(side.get("summary") or command.replace("_", " ")),
-        writer=identity.current_writer(tool=command),
+        writer=writer,
     )
 
 

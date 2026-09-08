@@ -272,23 +272,85 @@ def session_status() -> dict:
     }
 
 
+#: Above this, a level-wide snapshot is refused rather than run on the game thread.
+_SNAPSHOT_ACTOR_CEILING = 6000
+#: Hard cap on returned rows, so a runaway `limit` cannot stall the editor either.
+_SNAPSHOT_MAX_ROWS = 6000
+#: Extras a caller can ask for beyond the transform. `guid` is the durable id.
+_SNAPSHOT_EXTRA_FIELDS = ("guid", "folder", "tags", "parent")
+
+
+def _snapshot_extra(actor: Any, field: str) -> Any:
+    """One optional field, or None. Never raises: a missing getter is not an error."""
+    try:
+        if field == "guid":
+            from listener.serialize import actor_guid
+
+            return actor_guid(actor) or None
+        if field == "folder":
+            return str(actor.get_folder_path()) or None
+        if field == "tags":
+            tags = [str(t) for t in (actor.get_editor_property("tags") or [])]
+            return tags or None
+        if field == "parent":
+            parent = actor.get_attach_parent_actor()
+            return parent.get_path_name() if parent else None
+    except Exception:
+        return None
+    return None
+
+
 def actor_state_snapshot(
     labels: Optional[List[str]] = None,
     label_filter: str = "",
     limit: int = 50,
+    scope: str = "devices",
+    fields: Optional[List[str]] = None,
 ) -> dict:
-    """Capture transforms (+ class) for selected actors for before/after diffs."""
+    """Capture transforms (+ class) for selected actors for before/after diffs.
+
+    ``scope="devices"`` (the default, and what every existing caller gets) walks
+    creative devices plus any actor named in ``labels``. ``scope="all"`` walks
+    every actor in the level, which is what bracketing an opaque command needs:
+    a script that spawns forty props touches nothing a device filter would see.
+
+    Rows are sorted by path **before** the cap is applied. ``lookup.actor_list()``
+    order is not stable across ticks, so an unsorted cap would return a different
+    subset each time and make a before/after pair incomparable.
+    """
     wanted = {str(x).strip().lower() for x in (labels or []) if str(x).strip()}
     filt = (label_filter or "").strip().lower()
+    every = str(scope or "devices").strip().lower() == "all"
+    extras = [f for f in (fields or []) if f in _SNAPSHOT_EXTRA_FIELDS]
+    cap = max(1, min(int(limit or 50), _SNAPSHOT_MAX_ROWS))
+
+    try:
+        all_actors = list(lookup.actor_list())
+    except Exception:
+        return {"actors": [], "count": 0, "scope": "all" if every else "devices"}
+    if every and not wanted and not filt and len(all_actors) > _SNAPSHOT_ACTOR_CEILING:
+        # Walking this many actors on the game thread is worse than not knowing.
+        return {
+            "actors": [],
+            "count": 0,
+            "scope": "all",
+            "skipped": "level_too_large",
+            "actor_count": len(all_actors),
+        }
+
     actors = []
-    for actor in lookup.actor_list():
-        if not is_creative_device(actor):
+    for actor in all_actors:
+        if not every and not is_creative_device(actor):
             # Allow non-device actors when explicitly listed
             if not wanted:
                 continue
-        label = actor.get_actor_label()
+        try:
+            label = actor.get_actor_label()
+            path = actor.get_path_name()
+        except Exception:
+            continue
         low = label.lower()
-        if wanted and low not in wanted and actor.get_path_name().lower() not in wanted:
+        if wanted and low not in wanted and path.lower() not in wanted:
             continue
         if filt and filt not in low:
             continue
@@ -298,49 +360,117 @@ def actor_state_snapshot(
             scale = actor.get_actor_scale3d()
         except Exception:
             continue
-        actors.append(
-            {
-                "label": label,
-                "path": actor.get_path_name(),
-                "class": actor.get_class().get_name(),
-                "location": serialize(loc),
-                "rotation": serialize(rot),
-                "scale": serialize(scale),
-            }
-        )
-        if len(actors) >= max(1, min(int(limit or 50), 200)):
-            break
-    return {"actors": actors, "count": len(actors)}
+        row = {
+            "label": label,
+            "path": path,
+            "class": actor.get_class().get_name(),
+            "location": serialize(loc),
+            "rotation": serialize(rot),
+            "scale": serialize(scale),
+        }
+        for field in extras:
+            value = _snapshot_extra(actor, field)
+            if value is not None:
+                row[field] = value
+        actors.append(row)
+
+    actors.sort(key=lambda a: a.get("path") or "")
+    truncated = len(actors) > cap
+    result = {
+        "actors": actors[:cap],
+        "count": min(len(actors), cap),
+        "scope": "all" if every else "devices",
+    }
+    if truncated:
+        result["truncated"] = True
+        result["total"] = len(actors)
+    return result
 
 
-def actor_state_diff(before: dict, after: dict, epsilon: float = 1.0) -> dict:
-    """Diff two actor_state_snapshot payloads. ``epsilon`` is uu for location."""
-    before_map = {
-        str(a.get("path") or a.get("label")): a for a in (before or {}).get("actors") or []
+#: Defaults per axis. One shared epsilon treated centimetres, degrees and bare
+#: multipliers alike, so a 0.9x rescale (delta 0.1) read as no change at all.
+_EPS_LOCATION = 1.0
+_EPS_ROTATION = 0.5
+_EPS_SCALE = 0.01
+
+
+def _snapshot_key(row: dict) -> str:
+    """Identity for matching a row across two snapshots: guid outlives both others."""
+    return str(row.get("guid") or row.get("path") or row.get("label") or "")
+
+
+def actor_state_diff(
+    before: dict,
+    after: dict,
+    epsilon: float = _EPS_LOCATION,
+    rotation_epsilon: float = _EPS_ROTATION,
+    scale_epsilon: float = _EPS_SCALE,
+) -> dict:
+    """Diff two actor_state_snapshot payloads.
+
+    ``epsilon`` is unreal units of location, ``rotation_epsilon`` is degrees and
+    ``scale_epsilon`` is a bare multiplier — they are different quantities and a
+    single tolerance for all three is wrong for at least two of them.
+    """
+    thresholds = {
+        "location": float(epsilon),
+        "rotation": float(rotation_epsilon),
+        "scale": float(scale_epsilon),
     }
-    after_map = {
-        str(a.get("path") or a.get("label")): a for a in (after or {}).get("actors") or []
-    }
+    before_map = {_snapshot_key(a): a for a in (before or {}).get("actors") or []}
+    after_map = {_snapshot_key(a): a for a in (after or {}).get("actors") or []}
     changes = []
     for key, a in after_map.items():
         b = before_map.get(key)
         if not b:
-            changes.append({"id": key, "label": a.get("label"), "change": "added"})
+            changes.append(
+                {
+                    "id": key,
+                    "label": a.get("label"),
+                    "path": a.get("path"),
+                    "guid": a.get("guid"),
+                    "class": a.get("class"),
+                    "change": "added",
+                }
+            )
             continue
         delta = {}
-        for axis in ("location", "rotation", "scale"):
+        for axis, threshold in thresholds.items():
             bv, av = b.get(axis) or {}, a.get(axis) or {}
             if not isinstance(bv, dict) or not isinstance(av, dict):
                 continue
             d = {k: float(av.get(k, 0)) - float(bv.get(k, 0)) for k in av}
-            if any(abs(v) > float(epsilon) for v in d.values()):
+            if any(abs(v) > threshold for v in d.values()):
                 delta[axis] = {"before": bv, "after": av, "delta": d}
         if delta:
-            changes.append({"id": key, "label": a.get("label"), "change": "moved", **delta})
+            changes.append(
+                {
+                    "id": key,
+                    "label": a.get("label"),
+                    "path": a.get("path"),
+                    "guid": a.get("guid"),
+                    "change": "moved",
+                    **delta,
+                }
+            )
     for key, b in before_map.items():
         if key not in after_map:
-            changes.append({"id": key, "label": b.get("label"), "change": "removed"})
-    return {"changes": changes, "count": len(changes), "epsilon": float(epsilon)}
+            changes.append(
+                {
+                    "id": key,
+                    "label": b.get("label"),
+                    "path": b.get("path"),
+                    "guid": b.get("guid"),
+                    "change": "removed",
+                }
+            )
+    return {
+        "changes": changes,
+        "count": len(changes),
+        "epsilon": float(epsilon),
+        "rotation_epsilon": float(rotation_epsilon),
+        "scale_epsilon": float(scale_epsilon),
+    }
 
 
 register("device_graph_snapshot")(device_graph_snapshot)

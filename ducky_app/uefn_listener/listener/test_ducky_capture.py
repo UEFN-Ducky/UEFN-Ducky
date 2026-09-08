@@ -77,14 +77,61 @@ def capture(monkeypatch):
     pkg.serialize = serialize
     pkg.lookup = lookup
 
-    for name, mod in (("listener", pkg), ("listener.serialize", serialize), ("listener.lookup", lookup)):
+    # The level the opaque bracket snapshots. Tests push a pair of states onto
+    # `levels`; each call to actor_state_snapshot pops the next one.
+    levels: list = []
+    calls: Dict[str, int] = {"snapshot": 0}
+
+    registry = types.ModuleType("listener.registry")
+    registry.__path__ = []
+    device_graph = types.ModuleType("listener.registry.device_graph")
+
+    def fake_snapshot(limit=50, scope="devices", fields=None, **_kw):
+        calls["snapshot"] += 1
+        return levels.pop(0) if levels else {"actors": [], "count": 0, "scope": scope}
+
+    def fake_diff(before, after, **_kw):
+        key = lambda row: str(row.get("guid") or row.get("path") or row.get("label") or "")
+        b = {key(a): a for a in (before or {}).get("actors") or []}
+        a = {key(x): x for x in (after or {}).get("actors") or []}
+        changes = [dict(a[k], change="added", id=k) for k in a if k not in b]
+        changes += [dict(b[k], change="removed", id=k) for k in b if k not in a]
+        return {"changes": changes, "count": len(changes)}
+
+    device_graph.actor_state_snapshot = fake_snapshot
+    device_graph.actor_state_diff = fake_diff
+    registry.device_graph = device_graph
+    pkg.registry = registry
+
+    for name, mod in (
+        ("listener", pkg),
+        ("listener.serialize", serialize),
+        ("listener.lookup", lookup),
+        ("listener.registry", registry),
+        ("listener.registry.device_graph", device_graph),
+    ):
         monkeypatch.setitem(sys.modules, name, mod)
 
     spec = importlib.util.spec_from_file_location("ducky_capture_under_test", MODULE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # a top-level `import unreal` would fail here
     module._test_actors = actors
+    module._test_levels = levels
+    module._test_calls = calls
     return module
+
+
+def level(*rows) -> dict:
+    """One actor_state_snapshot payload."""
+    return {
+        "actors": [
+            {"guid": g, "path": f"/Game/Map.Map:PersistentLevel.{g}", "label": g,
+             "class": "StaticMeshActor"}
+            for g in rows
+        ],
+        "count": len(rows),
+        "scope": "all",
+    }
 
 
 def add(capture, actor: FakeActor) -> FakeActor:
@@ -252,3 +299,108 @@ def test_a_failed_command_is_recorded_as_changing_nothing(capture) -> None:
     assert side["outcome"] == "error"
     assert side["revertable"] == "none"
     assert side["inverse"] is None
+
+
+# --- opaque commands ----------------------------------------------------------------
+
+
+def run_opaque(capture, command, params, result=None, ok=True):
+    cap = capture.before(command, params)
+    return capture.after(command, params, result if result is not None else {}, cap, ok=ok)
+
+
+def test_a_script_that_spawns_actors_records_exactly_those_actors(capture) -> None:
+    capture._test_levels[:] = [level("A", "B"), level("A", "B", "C", "D")]
+    side = run_opaque(capture, "execute_python", {"code": "spawn two cubes"})
+
+    assert side["kind"] == "world" and side["facet"] == "opaque"
+    assert [t["guid"] for t in side["created"]] == ["C", "D"]
+    # Created things are revertable: the host removes exactly what it recorded.
+    assert side["revertable"] == "auto"
+    assert side["summary"] == "+2 actors"
+    assert side["before"]["diff"]["added"] == 2
+
+
+def test_the_code_is_recorded_verbatim(capture) -> None:
+    code = "import unreal\nfor i in range(5):\n    spawn(i)"
+    capture._test_levels[:] = [level("A"), level("A")]
+    side = run_opaque(capture, "execute_python", {"code": code})
+    # An opaque change is only auditable if you can read what was run.
+    assert side["before"]["code"] == code
+
+
+def test_the_raw_snapshots_never_reach_the_sidecar(capture) -> None:
+    capture._test_levels[:] = [level("A"), level("A", "B")]
+    side = run_opaque(capture, "execute_python", {"code": "x"})
+    # The journal stores this dict. Two full level dumps per call would be absurd.
+    assert "snapshot" not in side["before"]
+    assert set(side["before"]) <= {"code", "diff"}
+    assert "actors" not in side["before"]["diff"]
+
+
+def test_a_script_that_changes_nothing_says_so_rather_than_claiming_a_change(capture) -> None:
+    capture._test_levels[:] = [level("A", "B"), level("A", "B")]
+    side = run_opaque(capture, "execute_python", {"code": "print(1)"})
+    assert side["created"] == []
+    assert side["summary"] == "changed nothing the level snapshot could see"
+    assert side["revertable"] == "manual"
+    assert "arbitrary Python" in side["reason"]
+
+
+def test_removals_are_reported_but_never_undone(capture) -> None:
+    capture._test_levels[:] = [level("A", "B", "C"), level("A")]
+    side = run_opaque(capture, "execute_python", {"code": "cleanup()"})
+    assert side["before"]["diff"]["removed"] == 2
+    # Putting a deleted actor back is not something a snapshot can do.
+    assert side["created"] == [] and side["revertable"] == "manual"
+
+
+def test_basic_mode_does_not_walk_the_level(capture) -> None:
+    capture._test_levels[:] = [level("A"), level("A", "B")]
+    try:
+        capture.configure(mode="basic")
+        before = capture.before("execute_python", {"code": "x"})
+        assert before is None
+        assert capture._test_calls["snapshot"] == 0
+    finally:
+        capture.configure(mode="full")
+
+
+def test_a_level_too_large_to_snapshot_is_not_an_error(capture, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys.modules["listener.registry.device_graph"],
+        "actor_state_snapshot",
+        lambda **_kw: {"actors": [], "count": 0, "skipped": "level_too_large"},
+    )
+    side = run_opaque(capture, "execute_python", {"code": "x"})
+    # Still recorded, still honest about what is known.
+    assert side is not None and side["command"] == "execute_python"
+    assert side["created"] == [] and side["revertable"] == "manual"
+    assert side["before"]["code"] == "x"
+
+
+def test_a_console_command_is_bracketed_the_same_way(capture) -> None:
+    capture._test_levels[:] = [level("A"), level("A", "B")]
+    side = run_opaque(capture, "exec_console_command", {"command": "summon Cube"})
+    assert side["before"]["code"] == "summon Cube"
+    assert [t["guid"] for t in side["created"]] == ["B"]
+
+
+def test_a_failed_script_records_the_attempt_and_takes_no_second_snapshot(capture) -> None:
+    capture._test_levels[:] = [level("A")]
+    cap = capture.before("execute_python", {"code": "boom"})
+    side = capture.after("execute_python", {"code": "boom"}, None, cap, ok=False)
+    assert side["outcome"] == "error" and side["revertable"] == "none"
+    assert capture._test_calls["snapshot"] == 1
+
+
+def test_a_snapshot_that_raises_costs_the_diff_not_the_record(capture, monkeypatch) -> None:
+    capture._test_levels[:] = [level("A")]
+    cap = capture.before("execute_python", {"code": "x"})
+    monkeypatch.setattr(
+        sys.modules["listener.registry.device_graph"],
+        "actor_state_snapshot",
+        lambda **_kw: (_ for _ in ()).throw(RuntimeError("editor busy")),
+    )
+    side = capture.after("execute_python", {"code": "x"}, {}, cap, ok=True)
+    assert side is not None and side["created"] == []

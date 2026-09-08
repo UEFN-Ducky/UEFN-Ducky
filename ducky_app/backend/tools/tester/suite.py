@@ -199,13 +199,26 @@ def actor_state_snapshot(
     labels: list[str] | None = None,
     label_filter: str = "",
     limit: int = 50,
+    scope: str = "devices",
+    fields: list[str] | None = None,
     pretty: bool = False,
 ) -> str:
-    """Capture transforms of devices/actors for before/after movement checks."""
+    """Capture transforms of devices/actors for before/after movement checks.
+
+    scope: "devices" (default) or "all" for every actor in the level.
+    fields: extras beyond the transform — guid, folder, tags, parent.
+    A level-wide scan is refused above ~6000 actors and says so.
+    """
     return tool_json(
         send_command(
             "actor_state_snapshot",
-            {"labels": labels or [], "label_filter": label_filter, "limit": limit},
+            {
+                "labels": labels or [],
+                "label_filter": label_filter,
+                "limit": limit,
+                "scope": scope,
+                "fields": fields or [],
+            },
         ),
         pretty=pretty,
     )
@@ -216,15 +229,27 @@ def actor_state_diff(
     before_json: str,
     after_json: str,
     epsilon: float = 1.0,
+    rotation_epsilon: float = 0.5,
+    scale_epsilon: float = 0.01,
     pretty: bool = False,
 ) -> str:
-    """Diff two actor_state_snapshot payloads (location/rotation/scale deltas)."""
+    """Diff two actor_state_snapshot payloads (location/rotation/scale deltas).
+
+    The three tolerances are different quantities: epsilon is unreal units,
+    rotation_epsilon is degrees, scale_epsilon is a bare multiplier.
+    """
     before = json.loads(before_json)
     after = json.loads(after_json)
     return tool_json(
         send_command(
             "actor_state_diff",
-            {"before": before, "after": after, "epsilon": epsilon},
+            {
+                "before": before,
+                "after": after,
+                "epsilon": epsilon,
+                "rotation_epsilon": rotation_epsilon,
+                "scale_epsilon": scale_epsilon,
+            },
         ),
         pretty=pretty,
     )
