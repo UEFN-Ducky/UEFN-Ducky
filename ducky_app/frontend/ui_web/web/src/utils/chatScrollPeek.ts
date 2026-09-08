@@ -67,20 +67,29 @@ export function indexAtFraction(frac: number, count: number): number {
   return Math.min(count - 1, Math.floor(f * count));
 }
 
-/** Tick indexes that fit on the track without stacking, always including `active`. */
-export function visibleTickIndexes(count: number, trackPx: number, active: number, minGap = 5): number[] {
-  if (count <= 0 || trackPx <= 0) return [];
-  const out: number[] = [];
-  let lastY = -minGap;
-  for (let i = 0; i < count; i++) {
-    const y = (i / Math.max(1, count - 1)) * trackPx;
-    if (i !== active && y - lastY < minGap) continue;
-    out.push(i);
-    lastY = y;
+export type PeekTickLayout = {
+  indexes: number[];
+  start: number;
+  gap: number;
+  stackH: number;
+};
+
+/** Short dashes packed at a fixed gap and centered — never stretched to fill the pane. */
+export function peekTickLayout(
+  count: number,
+  trackPx: number,
+  gapPx = 3,
+): PeekTickLayout {
+  if (count <= 0 || trackPx <= 0) return { indexes: [], start: 0, gap: 0, stackH: 0 };
+  const maxFit = Math.max(1, Math.floor(trackPx / gapPx) + 1);
+  const n = Math.min(count, maxFit);
+  const indexes: number[] = [];
+  for (let s = 0; s < n; s++) {
+    const i = n === 1 ? 0 : Math.round((s / (n - 1)) * (count - 1));
+    if (indexes.length === 0 || indexes[indexes.length - 1] !== i) indexes.push(i);
   }
-  if (active >= 0 && active < count && !out.includes(active)) {
-    out.push(active);
-    out.sort((a, b) => a - b);
-  }
-  return out;
+  const shown = indexes.length;
+  const stackH = Math.min(trackPx, Math.max(0, (shown - 1) * gapPx));
+  const gap = shown > 1 ? stackH / (shown - 1) : 0;
+  return { indexes, start: (trackPx - stackH) / 2, gap, stackH };
 }

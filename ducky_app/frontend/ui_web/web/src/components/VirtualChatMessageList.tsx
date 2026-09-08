@@ -595,6 +595,17 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       onJumpToLatest();
     }, [onJumpToLatest]);
 
+    const jumpPeek = useCallback(
+      (top: number) => {
+        const scroller = scrollerElRef.current;
+        if (!scroller) return;
+        followingRef.current = false;
+        onAtBottomChange(false);
+        scroller.scrollTo({ top, behavior: "auto" });
+      },
+      [onAtBottomChange],
+    );
+
     // Turn objects keep their identity across frames unless a row inside them
     // changed, so the memoized ChatTurnView skips every untouched turn.
     const prevTurnsRef = useRef<ChatTurn[]>([]);
@@ -866,6 +877,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
             turnsPerChunk={CHUNK_TURNS}
             scroller={scrollerElRef.current}
             heightsTick={padTick}
+            onJump={jumpPeek}
           />
           {!isAtBottom ? (
             <button

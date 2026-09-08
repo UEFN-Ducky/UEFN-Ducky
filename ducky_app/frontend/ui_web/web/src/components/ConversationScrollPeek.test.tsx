@@ -13,6 +13,35 @@ function stubScrollTo(el: HTMLElement, onJump?: (top: number) => void) {
   }) as typeof el.scrollTo;
 }
 
+function stubPeekRects() {
+  const box = (top: number, height: number, width: number): DOMRect => ({
+    x: 0,
+    y: top,
+    top,
+    left: 0,
+    bottom: top + height,
+    right: width,
+    width,
+    height,
+    toJSON() {
+      return {};
+    },
+  });
+  HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this.hasAttribute("data-chat-scroll-peek-track")) return box(0, 400, 20);
+    return box(0, 800, 400);
+  };
+  // jsdom performs no layout, so clientHeight is 0 for everything. The peek sizes
+  // its tick stack from the rail's own height, and a zero-height rail has no ticks
+  // to hover — without this the component renders but can never open.
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.hasAttribute("data-chat-scroll-peek") ? 400 : 0;
+    },
+  });
+}
+
 function turns(n: number): ChatTurn[] {
   return Array.from({ length: n }, (_, i) => ({
     id: `turn-${i}`,
@@ -21,10 +50,29 @@ function turns(n: number): ChatTurn[] {
   }));
 }
 
-describe("ConversationScrollPeek", () => {
-  afterEach(() => cleanup());
+function mountPeek(scroller: HTMLElement) {
+  return render(
+    <ConversationScrollPeek
+      turns={turns(20)}
+      chunkHeights={Array(3).fill(1000)}
+      turnsPerChunk={8}
+      scroller={scroller}
+      heightsTick={1}
+    />,
+  );
+}
 
-  it("shows the turn under the thumb while scrolling a long chat", () => {
+const origGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+const origClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+
+describe("ConversationScrollPeek", () => {
+  afterEach(() => {
+    HTMLElement.prototype.getBoundingClientRect = origGetBoundingClientRect;
+    if (origClientHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", origClientHeight);
+    cleanup();
+  });
+
+  it("does not open the card while scrolling", () => {
     const scroller = document.createElement("div");
     Object.defineProperties(scroller, {
       scrollHeight: { value: 4000, configurable: true },
@@ -32,25 +80,41 @@ describe("ConversationScrollPeek", () => {
       scrollTop: { value: 2000, writable: true, configurable: true },
     });
     stubScrollTo(scroller);
-
-    render(
-      <ConversationScrollPeek
-        turns={turns(20)}
-        chunkHeights={Array(3).fill(1000)}
-        turnsPerChunk={8}
-        scroller={scroller}
-        heightsTick={1}
-      />,
-    );
+    mountPeek(scroller);
 
     act(() => {
       scroller.dispatchEvent(new Event("scroll"));
     });
 
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeNull();
+  });
+
+  it("shows the hovered turn and hides when the pointer leaves", () => {
+    const scroller = document.createElement("div");
+    Object.defineProperties(scroller, {
+      scrollHeight: { value: 4000, configurable: true },
+      clientHeight: { value: 800, configurable: true },
+      scrollTop: { value: 0, writable: true, configurable: true },
+    });
+    stubScrollTo(scroller);
+    stubPeekRects();
+    mountPeek(scroller);
+
+    const track = document.querySelector("[data-chat-scroll-peek-track]")!;
+    fireEvent.pointerEnter(track, { clientY: 200 });
+
     const card = document.querySelector("[data-chat-scroll-peek-card]");
     expect(card).toBeTruthy();
     expect(card?.textContent).toMatch(/ask \d+/);
     expect(card?.textContent).toMatch(/answer \d+/);
+
+    fireEvent.pointerMove(track, { clientY: 360 });
+    const moved = document.querySelector("[data-chat-scroll-peek-card]");
+    expect(moved).toBeTruthy();
+    expect(moved?.getAttribute("style") ?? "").toMatch(/--peek-y/);
+
+    fireEvent.pointerLeave(track);
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeNull();
   });
 
   it("jumps the scroller when the timeline is clicked", () => {
@@ -64,6 +128,7 @@ describe("ConversationScrollPeek", () => {
     stubScrollTo(scroller, (top) => {
       jumped = top;
     });
+    stubPeekRects();
 
     render(
       <ConversationScrollPeek
@@ -74,12 +139,9 @@ describe("ConversationScrollPeek", () => {
         heightsTick={1}
       />,
     );
-    act(() => {
-      scroller.dispatchEvent(new Event("scroll"));
-    });
 
     const track = document.querySelector("[data-chat-scroll-peek-track]")!;
-    fireEvent.click(track, { clientY: 0 });
-    expect(jumped).toBeGreaterThanOrEqual(0);
+    fireEvent.click(track, { clientY: 350 });
+    expect(jumped).toBeGreaterThan(0);
   });
 });

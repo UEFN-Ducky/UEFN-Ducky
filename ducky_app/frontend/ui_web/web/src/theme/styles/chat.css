@@ -2452,7 +2452,7 @@
   flex-shrink: 0;
 }
 
-/* Codex-style conversation peek: ticks + floating snippet while scrolling. */
+/* Codex-style conversation peek: left-edge ticks; card only while hovering them. */
 .chat-scroll-peek {
   position: absolute;
   inset: 0;
@@ -2465,35 +2465,37 @@
 }
 .chat-scroll-peek-track {
   position: absolute;
-  top: 12px;
-  right: 0;
-  bottom: 12px;
-  width: 20px;
+  left: 6px;
+  width: 22px;
+  overflow: visible;
   pointer-events: auto;
   cursor: pointer;
 }
 .chat-scroll-peek-tick {
   position: absolute;
-  right: 6px;
-  width: 7px;
-  height: 1px;
-  margin-top: -0.5px;
-  background: rgba(255, 255, 255, 0.22);
+  left: 0;
+  width: 10px;
+  height: 2px;
+  margin-top: -1px;
+  background: rgba(255, 255, 255, 0.28);
   pointer-events: none;
+  transform-origin: left center;
+  transition: width 140ms ease, background-color 80ms linear;
 }
 .chat-scroll-peek.is-open .chat-scroll-peek-tick.is-active {
-  width: 0;
-  height: 0;
-  background: transparent;
+  width: 40px;
+  background: #fff;
 }
 .chat-scroll-peek-float {
   position: absolute;
-  right: 10px;
-  top: clamp(48px, var(--peek-y, 50%), calc(100% - 48px));
-  transform: translateY(-50%);
+  left: 6px;
+  top: 0;
+  transform: translate3d(0, calc(var(--peek-y, 0px) - 50%), 0);
+  transition: transform 70ms linear;
   display: flex;
   align-items: center;
   pointer-events: none;
+  will-change: transform;
 }
 .chat-scroll-peek-card {
   width: min(300px, calc(100vw - 80px));
@@ -2503,6 +2505,17 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   color: #fff;
   font-family: var(--font-ui);
+  animation: chat-scroll-peek-in 140ms ease-out;
+}
+@keyframes chat-scroll-peek-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .chat-scroll-peek-query {
   font-size: 13px;
@@ -2522,23 +2535,16 @@
   line-height: 1.4;
   color: #7a7a7a;
 }
-.chat-scroll-peek-line {
-  position: absolute;
-  right: 6px;
-  width: 36px;
-  height: 1px;
-  background: #fff;
-}
 .chat-scroll-peek-pip {
   position: absolute;
-  right: 40px;
+  left: 40px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #fff;
 }
 .chat-scroll-peek-float .chat-scroll-peek-card {
-  margin-right: 48px;
+  margin-left: 50px;
 }
 
 .virtual-chat-message-list-jump-btn {

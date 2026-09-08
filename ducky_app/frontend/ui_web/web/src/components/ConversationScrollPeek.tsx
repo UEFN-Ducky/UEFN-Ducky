@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { ChatTurn } from "../utils/chatMessageGroups";
 import {
   indexAtFraction,
   peekLinesForTurn,
+  peekTickLayout,
   turnOffsetsFromChunkHeights,
-  visibleTickIndexes,
 } from "../utils/chatScrollPeek";
 
-const HIDE_AFTER_MS = 900;
 const MIN_TURNS = 3;
+const TICK_GAP = 7;
 
 interface ConversationScrollPeekProps {
   turns: ChatTurn[];
@@ -18,11 +18,13 @@ interface ConversationScrollPeekProps {
   scroller: HTMLElement | null;
   /** Bump when measured heights change so offsets recompute. */
   heightsTick: number;
+  /** Parent should release tail-follow before scrolling so the jump sticks. */
+  onJump?: (top: number) => void;
 }
 
 /**
- * Codex-style conversation peek: right-edge ticks + a floating snippet of the
- * turn under the thumb. Own state so hover/scroll never re-renders the list.
+ * Codex-style conversation peek: packed left-edge ticks + a floating snippet.
+ * Card opens only while the pointer is on the tick strip — never on scroll.
  */
 export function ConversationScrollPeek({
   turns,
@@ -30,14 +32,16 @@ export function ConversationScrollPeek({
   turnsPerChunk,
   scroller,
   heightsTick,
+  onJump,
 }: ConversationScrollPeekProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const hideTimer = useRef(0);
-  const hovering = useRef(false);
+  const floatRef = useRef<HTMLDivElement>(null);
+  const lastIndex = useRef(-1);
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [anchorY, setAnchorY] = useState(0);
   const [overflow, setOverflow] = useState(false);
+  const [trackH, setTrackH] = useState(480);
 
   const offsets = useMemo(
     () => turnOffsetsFromChunkHeights(chunkHeights, turnsPerChunk, turns.length),
@@ -45,37 +49,70 @@ export function ConversationScrollPeek({
     [chunkHeights, turnsPerChunk, turns.length, heightsTick],
   );
 
-  const show = useCallback((i: number, y: number) => {
-    if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    hideTimer.current = 0;
-    setIndex(i);
-    setAnchorY(y);
-    setOpen(true);
+  const layout = useMemo(
+    () => peekTickLayout(turns.length, trackH, TICK_GAP),
+    [turns.length, trackH],
+  );
+
+  const place = useCallback((y: number) => {
+    const h = rootRef.current?.clientHeight ?? 0;
+    const clamped = h > 0 ? Math.min(h - 48, Math.max(48, y)) : y;
+    floatRef.current?.style.setProperty("--peek-y", `${clamped}px`);
+    return clamped;
   }, []);
 
-  const scheduleHide = useCallback(() => {
-    if (hovering.current) return;
-    if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => {
-      hideTimer.current = 0;
-      setOpen(false);
-    }, HIDE_AFTER_MS);
-  }, []);
+  const show = useCallback(
+    (i: number, y: number) => {
+      lastIndex.current = i;
+      setIndex(i);
+      setAnchorY(place(y));
+      setOpen(true);
+    },
+    [place],
+  );
 
   const indexFromClientY = useCallback(
     (clientY: number): { i: number; y: number } | null => {
       const track = rootRef.current?.querySelector<HTMLElement>("[data-chat-scroll-peek-track]");
       const root = rootRef.current;
-      if (!track || !root || turns.length === 0) return null;
+      if (!track || !root || layout.indexes.length === 0) return null;
       const trackRect = track.getBoundingClientRect();
-      const rootRect = root.getBoundingClientRect();
       const frac = (clientY - trackRect.top) / Math.max(1, trackRect.height);
-      const i = indexAtFraction(frac, turns.length);
-      if (i < 0) return null;
-      return { i, y: clientY - rootRect.top };
+      const slot = indexAtFraction(frac, layout.indexes.length);
+      const i = layout.indexes[slot];
+      if (i == null || i < 0) return null;
+      return { i, y: layout.start + slot * layout.gap };
     },
-    [turns.length],
+    [layout],
   );
+
+  const onScrub = useCallback(
+    (clientY: number) => {
+      const hit = indexFromClientY(clientY);
+      if (!hit) return;
+      const y = place(hit.y);
+      if (hit.i !== lastIndex.current) {
+        lastIndex.current = hit.i;
+        setIndex(hit.i);
+        setAnchorY(y);
+      }
+      setOpen(true);
+    },
+    [indexFromClientY, place],
+  );
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const read = () => setTrackH(root.clientHeight);
+    read();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(read);
+      ro.observe(root);
+    }
+    return () => ro?.disconnect();
+  }, [turns.length]);
 
   useEffect(() => {
     if (!scroller) return;
@@ -83,54 +120,30 @@ export function ConversationScrollPeek({
       setOverflow(scroller.scrollHeight > scroller.clientHeight + 32);
     };
     measure();
-    const onScroll = () => {
-      measure();
-      if (turns.length < MIN_TURNS) return;
-      const max = scroller.scrollHeight - scroller.clientHeight;
-      const frac = max <= 0 ? 1 : scroller.scrollTop / max;
-      // Auto-follow at the tail should not pop the peek on every streamed token.
-      if (frac > 0.97 && !hovering.current) {
-        scheduleHide();
-        return;
-      }
-      const i = indexAtFraction(frac, turns.length);
-      const root = rootRef.current;
-      const track = root?.querySelector<HTMLElement>("[data-chat-scroll-peek-track]");
-      if (i < 0 || !root || !track) return;
-      const trackRect = track.getBoundingClientRect();
-      const rootRect = root.getBoundingClientRect();
-      show(i, trackRect.top - rootRect.top + frac * trackRect.height);
-      if (!hovering.current) scheduleHide();
-    };
-    scroller.addEventListener("scroll", onScroll, { passive: true });
     let ro: ResizeObserver | undefined;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(measure);
       ro.observe(scroller);
     }
     return () => {
-      scroller.removeEventListener("scroll", onScroll);
       ro?.disconnect();
     };
-  }, [scroller, turns.length, show, scheduleHide]);
-
-  useEffect(() => () => {
-    if (hideTimer.current) window.clearTimeout(hideTimer.current);
-  }, []);
+  }, [scroller]);
 
   const jumpTo = useCallback(
     (i: number) => {
-      if (!scroller || i < 0 || i >= offsets.length) return;
-      scroller.scrollTo({ top: offsets[i], behavior: "auto" });
+      if (i < 0 || i >= offsets.length) return;
+      const top = offsets[i];
+      if (onJump) onJump(top);
+      else if (scroller) scroller.scrollTo({ top, behavior: "auto" });
     },
-    [scroller, offsets],
+    [scroller, offsets, onJump],
   );
 
   if (turns.length < MIN_TURNS) return null;
 
   const turn = turns[index];
   const lines = turn ? peekLinesForTurn(turn) : { query: "", reply: "", more: "" };
-  const ticks = visibleTickIndexes(turns.length, 400, index);
   const showCard = open && overflow && !!turn;
 
   return (
@@ -143,18 +156,12 @@ export function ConversationScrollPeek({
       <div
         className="chat-scroll-peek-track"
         data-chat-scroll-peek-track
-        onPointerEnter={(e) => {
-          hovering.current = true;
-          const hit = indexFromClientY(e.clientY);
-          if (hit) show(hit.i, hit.y);
-        }}
-        onPointerMove={(e) => {
-          const hit = indexFromClientY(e.clientY);
-          if (hit) show(hit.i, hit.y);
-        }}
+        style={{ top: layout.start, height: Math.max(layout.stackH, 1) }}
+        onPointerEnter={(e) => onScrub(e.clientY)}
+        onPointerMove={(e) => onScrub(e.clientY)}
         onPointerLeave={() => {
-          hovering.current = false;
-          scheduleHide();
+          lastIndex.current = -1;
+          setOpen(false);
         }}
         onClick={(e) => {
           const hit = indexFromClientY(e.clientY);
@@ -163,21 +170,21 @@ export function ConversationScrollPeek({
           jumpTo(hit.i);
         }}
       >
-        {ticks.map((i) => (
+        {layout.indexes.map((i, s) => (
           <span
             key={turns[i]?.id ?? i}
             className={`chat-scroll-peek-tick${i === index && open ? " is-active" : ""}`}
-            style={{ top: `${(i / Math.max(1, turns.length - 1)) * 100}%` }}
+            style={{ top: s * layout.gap }}
           />
         ))}
       </div>
       {showCard ? (
         <div
+          ref={floatRef}
           className="chat-scroll-peek-float"
           style={{ ["--peek-y" as string]: `${anchorY}px` }}
           data-chat-scroll-peek-card
         >
-          <span className="chat-scroll-peek-line" />
           <span className="chat-scroll-peek-pip" />
           <div className="chat-scroll-peek-card">
             {lines.query ? <div className="chat-scroll-peek-query">{lines.query}</div> : null}

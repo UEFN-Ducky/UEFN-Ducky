@@ -7,7 +7,7 @@ import {
   indexAtOffset,
   peekLinesForTurn,
   turnOffsetsFromChunkHeights,
-  visibleTickIndexes,
+  peekTickLayout,
 } from "./chatScrollPeek";
 
 function turn(query: string, reply: string, more = ""): ChatTurn {
@@ -47,11 +47,19 @@ describe("chatScrollPeek", () => {
     expect(indexAtFraction(1, 10)).toBe(9);
   });
 
-  it("keeps the active tick when thinning a dense track", () => {
-    const ticks = visibleTickIndexes(100, 40, 50, 5);
-    expect(ticks).toContain(0);
-    expect(ticks).toContain(50);
-    expect(ticks).toContain(99);
-    expect(ticks.length).toBeLessThan(100);
+  it("packs ticks at a tight gap instead of stretching the stack", () => {
+    const layout = peekTickLayout(8, 800, 3);
+    expect(layout.indexes).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(layout.stackH).toBe(21);
+    expect(layout.gap).toBe(3);
+    expect(layout.start).toBe((800 - 21) / 2);
+  });
+
+  it("thins ticks that would stack closer than the gap", () => {
+    const layout = peekTickLayout(100, 40, 5);
+    expect(layout.indexes[0]).toBe(0);
+    expect(layout.indexes[layout.indexes.length - 1]).toBe(99);
+    expect(layout.indexes.length).toBeLessThan(100);
+    expect(layout.stackH).toBeLessThanOrEqual(40);
   });
 });

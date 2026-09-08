@@ -320,6 +320,7 @@ def main() -> int:
 
     out = out_dir / f"{exe_stem}-{app_version}.exe"
     pending = out_dir / f"{exe_stem}-{app_version}.pending.exe"
+    wrote = out
     try:
         if out.is_file():
             out.unlink()
@@ -333,6 +334,7 @@ def main() -> int:
     except OSError as exc:
         try:
             shutil.copy2(staged, pending)
+            wrote = pending
             print(
                 f"NOTE: {out.name} is in use — wrote {pending.name} instead.\n"
                 f"  Close the running panel, then rename pending → {out.name}",
@@ -358,7 +360,7 @@ def main() -> int:
 
     locked: list[Path] = []
     for stale in dict.fromkeys(stale_exes):
-        if not _is_stale_artifact(stale, dev_build=dev_build, keep=out):
+        if not _is_stale_artifact(stale, dev_build=dev_build, keep=wrote):
             continue
         try:
             stale.unlink()
@@ -371,7 +373,7 @@ def main() -> int:
         print(
             f"\nWARNING: could not delete {names} — it is almost certainly RUNNING.\n"
             f"  Close that app (tray → Exit all, or Task Manager) so you don't keep using the\n"
-            f"  old frozen build, then delete it. The new build is {out.name}.",
+            f"  old frozen build, then delete it. The new build is {wrote.name}.",
             file=sys.stderr,
         )
 
@@ -386,9 +388,9 @@ def main() -> int:
     print(f"Done. Fresh build: v{app_version}  ({time.strftime('%Y-%m-%d %H:%M:%S')})")
     if dev_build:
         print("  Dev build: WebView inspector ON; runs Vite at http://127.0.0.1:5173 when available.")
-    print(f"  {out}")
+    print(f"  {wrote}")
     print(f"  dist/ now contains: {remaining}")
-    if remaining != [out.name]:
+    if remaining != [wrote.name]:
         print(
             "  ^ More than one .exe in dist/ — launch the one named above; the others are stale.",
             file=sys.stderr,
