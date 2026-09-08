@@ -71,6 +71,14 @@ FIELD_META: dict[str, FieldMeta] = {
         "Write lanes", "Agent", settable=False, enum=("off", "shadow", "enforce"),
         description="Group members' write lanes: shadow flags out-of-lane writes, enforce refuses them, off disables.",
     ),
+    "editor_tracking_enabled": FieldMeta(
+        "Track editor changes", "Agent", settable=False,
+        description="Record what agents change inside the UEFN editor (actors, assets, devices, Verse wiring) so it can be reviewed and reverted.",
+    ),
+    "editor_tracking_mode": FieldMeta(
+        "Editor capture depth", "Agent", settable=False, enum=("basic", "full"),
+        description="full also brackets opaque operations such as execute_python with a level snapshot so the panel can show what they changed.",
+    ),
     "show_hidden_project_files": FieldMeta("Show hidden project files", "General", settable=True),
     "terminals_enabled": FieldMeta("Terminals enabled", "General", settable=False),
     "appearance_foundation": FieldMeta("Appearance foundation colors", "Appearance"),

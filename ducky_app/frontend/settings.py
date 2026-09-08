@@ -72,6 +72,14 @@ class PanelSettings:
     write_lanes_mode: str = "shadow"
     """Group write lanes: off | shadow (flag out-of-lane writes) | enforce (refuse them)."""
 
+    editor_tracking_enabled: bool = True
+    """When true, editor changes (actors, assets, devices, Verse wiring) are recorded per run
+    alongside file writes. Off means the listener does no capture work at all."""
+
+    editor_tracking_mode: str = "full"
+    """Editor capture depth: basic (known ops only) | full (also snapshot opaque ops such as
+    execute_python so the panel can show what they changed)."""
+
     show_hidden_project_files: bool = False
     """When true, show engine folders and binary assets hidden from the sidebar by default."""
 
@@ -353,6 +361,8 @@ class PanelSettings:
             or not self.verse_diagnostics_auto_check
             or not self.changeset_journal_enabled
             or self.write_lanes_mode != "shadow"
+            or not self.editor_tracking_enabled
+            or self.editor_tracking_mode != "full"
             or self.show_hidden_project_files
             or not self.terminals_enabled
             or self.default_disabled_packs
