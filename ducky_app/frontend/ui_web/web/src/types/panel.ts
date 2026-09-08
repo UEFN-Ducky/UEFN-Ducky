@@ -94,6 +94,10 @@ export interface GroupMemberDto {
   color?: string;
   /** Nested group hub — one representative speaks for the subgroup. */
   is_group?: boolean;
+  /** Write lane: null/omitted = unrestricted, [] = read-only, else gitignore-style globs. */
+  write_allowed?: string[] | null;
+  lane_set_by?: string;
+  lane_set_at?: number;
 }
 
 export interface MessageAuthorDto {
@@ -568,8 +572,90 @@ export interface FileHistoryEntry {
   bytes: number;
   preview?: string;
   content_hash?: string;
-  /** "agent" when written by an AI tool; empty/omitted for user saves. */
+  /** "agent" | "user" | "revert"; empty/omitted for legacy user saves. */
   source?: string;
+  /** 1 = pre-attribution entry; 2 = carries the writer fields below. */
+  schema_version?: number;
+  run_id?: string;
+  conv_id?: string;
+  profile_id?: string;
+  ducky_name?: string;
+  model?: string;
+  tool?: string;
+  group_id?: string;
+  coding_agent?: string;
+}
+
+export interface ChangesetConflictDto {
+  kind: "stale_base" | "concurrent_writer";
+  other_run_id?: string;
+  other_conv_id?: string;
+  other_ducky?: string;
+  expected_hash?: string;
+  found_hash?: string;
+}
+
+export interface ChangesetEntryDto {
+  seq: number;
+  ts: number;
+  path: string;
+  op: "create" | "write" | "rename" | "move" | "copy" | "import" | "restore" | "delete";
+  from_path?: string | null;
+  trash_token?: string | null;
+  tool: string;
+  before_hash: string;
+  after_hash: string;
+  before_blob?: string | null;
+  after_blob?: string | null;
+  lines_added?: number;
+  lines_removed?: number;
+  /** true/false when a lane governed the writer; null when no lane applied. */
+  in_lane: boolean | null;
+  conflict?: ChangesetConflictDto | null;
+  reverted?: boolean;
+  reverted_by_run?: string | null;
+}
+
+/** One agent run's project writes — schema changeset_run/1. */
+export interface ChangesetRunDto {
+  schema_version: number;
+  run_id: string;
+  conv_id: string;
+  profile_id?: string;
+  ducky_name?: string;
+  model?: string;
+  coding_agent?: string;
+  group_id?: string;
+  leader_conv_id?: string;
+  source?: "agent" | "user" | "revert";
+  lane?: { write_allowed: string[] } | null;
+  started: number;
+  ended?: number | null;
+  status: "running" | "done" | "error" | "cancelled" | "reverted" | "partially_reverted";
+  entries: ChangesetEntryDto[];
+}
+
+export interface ChangesetRevertResult {
+  ok: boolean;
+  run_id: string;
+  revert_run_id?: string;
+  reverted: number[];
+  skipped_modified: { seq: number; path: string }[];
+  errors: string[];
+}
+
+export interface LaneCheckResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  normalized: string[] | null;
+}
+
+/** Every member's write lane for a group — schema lane_set/1. */
+export interface LaneSetDto {
+  schema_version: number;
+  group_id: string;
+  lanes: Record<string, { write_allowed: string[] | null; name?: string; ducky_name?: string; set_by?: string; set_at?: number }>;
 }
 
 export interface AppearanceSoundsDto {
@@ -1022,7 +1108,10 @@ export interface AgentEvent {
     | "settings_changed"
     | "mcp_plugins_changed"
     | "skills_changed"
-    | "duckies_changed";
+    | "duckies_changed"
+    | "file_guard"
+    | "lane_changed"
+    | "files_reverted";
   text?: string;
   /** ui_rpc_request: which panel method to run and its params. */
   method?: string;
@@ -1058,6 +1147,16 @@ export interface AgentEvent {
   tool?: ToolCallData;
   editor_batch?: { actions: unknown[]; conv_id?: string };
   path?: string;
+  /** file_guard: "lane_denied" | "shadow_violation" | "conflict" | "policy_denied". */
+  kind?: string;
+  lane?: string[];
+  leader_conv_id?: string;
+  /** files_reverted: project paths restored. */
+  paths?: string[];
+  /** lane_changed */
+  group_id?: string;
+  member_conv_id?: string;
+  write_allowed?: string[] | null;
   /** file_deleted / file_renamed: relative path that disappeared (or the old name). */
   old_path?: string;
   /** file_renamed: relative path after the rename. */
@@ -1594,6 +1693,14 @@ export interface PanelApi {
     member_conv_id: string,
     model?: string,
   ): Promise<{ ok?: boolean; group_members?: GroupMemberDto[]; error?: string }>;
+  group_set_member_lane?(
+    group_id: string,
+    member_conv_id: string,
+    write_allowed: string[] | null,
+    force?: boolean,
+  ): Promise<{ ok?: boolean; group_members?: GroupMemberDto[]; warnings?: string[]; lanes?: LaneSetDto; error?: string }>;
+  group_get_lanes?(group_id: string): Promise<{ ok?: boolean; error?: string } & Partial<LaneSetDto>>;
+  group_check_lane?(group_id: string, member_conv_id: string, write_allowed: string[] | null): Promise<LaneCheckResult>;
   group_remove?(group_id: string, member_conv_id: string): Promise<{ ok?: boolean; group_members?: GroupMemberDto[]; leader_conv_id?: string; error?: string }>;
   group_members?(group_id: string): Promise<{ ok?: boolean; is_group?: boolean; leader_conv_id?: string; members?: GroupMemberDto[]; error?: string }>;
   group_add_member?(
@@ -1713,6 +1820,12 @@ export interface PanelApi {
   list_file_history(relative_path: string): Promise<FileHistoryEntry[]>;
   read_file_history_entry(relative_path: string, entry_id: string): Promise<{ content: string; path: string; id: string }>;
   snapshot_file_history(relative_path: string, content: string): Promise<{ id: string; path: string }>;
+  list_changesets?(conv_id?: string, group_id?: string, limit?: number): Promise<ChangesetRunDto[]>;
+  get_changeset?(run_id: string): Promise<ChangesetRunDto>;
+  get_changeset_entry_contents?(run_id: string, seq: number): Promise<{ path: string; before: string | null; after: string | null }>;
+  revert_changeset_entry?(run_id: string, seq: number, force?: boolean): Promise<ChangesetRevertResult>;
+  revert_changeset?(run_id: string, force?: boolean): Promise<ChangesetRevertResult>;
+  export_changeset?(run_id: string): Promise<Record<string, unknown>>;
   stop_verse_diagnostics_scan(project_root?: string): Promise<{ ok: boolean }>;
   report_open_tabs(window_id: string, tab_ids: string[]): Promise<void>;
   focus_tab(tab_id: string, requesting_window: string): Promise<{ ok: boolean; window_id: string }>;

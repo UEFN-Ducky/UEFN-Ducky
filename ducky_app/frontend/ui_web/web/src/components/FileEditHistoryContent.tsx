@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { FileHistoryEntry } from "../types/panel";
 import { formatSavedAt } from "../utils/formatSavedAt";
+import { historyAuthor } from "../utils/historyAuthor";
 import {
   getHistoryHoverPreview,
   setHistoryHoverPreview,
@@ -150,7 +151,7 @@ export function FileEditHistoryContent({
           entries.map((entry) => {
             const isPreviewing = previewEntryId === entry.id;
             const isActive = activeEntryId === entry.id && !isPreviewing;
-            const isAgent = entry.source === "agent";
+            const author = historyAuthor(entry);
             return (
               <button
                 key={entry.id}
@@ -164,9 +165,12 @@ export function FileEditHistoryContent({
               >
                 <span className="file-history-item-head">
                   <span className="file-history-item-time">{formatSavedAt(entry.saved_at)}</span>
-                  {isAgent ? (
-                    <span className="file-history-item-badge file-history-item-badge--agent" title="Written by AI">
-                      AI
+                  {author.kind !== "you" ? (
+                    <span
+                      className={`file-history-item-badge file-history-item-badge--${author.kind === "ducky" ? "agent" : "revert"}`}
+                      title={author.detail}
+                    >
+                      {author.label}
                     </span>
                   ) : null}
                   {/* "Current" is owned by the pinned row above; here we only tint the

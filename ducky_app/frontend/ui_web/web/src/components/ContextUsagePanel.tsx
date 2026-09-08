@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
+import { ChangesetPanel } from "./ChangesetPanel";
 import { Modal } from "./Modal";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
@@ -11,8 +12,6 @@ import type {
   SessionFile,
   TokenUsageCall,
 } from "../types/panel";
-import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
-import { basename } from "../verse-editor/utils/isVerseFile";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { fmtCompactTokens, fmtCostUsd, fmtPercent, fmtTokens } from "../utils/contextFormat";
 
@@ -20,6 +19,8 @@ interface ContextUsagePanelProps {
   convId: string;
   usage: ContextUsage;
   sessionFiles: SessionFile[];
+  /** Group hub: the Files section lists every member's runs. */
+  isGroup?: boolean;
   omitted?: string[];
   agentMode?: AgentMode;
   model?: string;
@@ -194,6 +195,7 @@ export function ContextUsagePanel({
   convId,
   usage,
   sessionFiles,
+  isGroup = false,
   omitted = [],
   agentMode = "agent",
   model = "",
@@ -204,6 +206,7 @@ export function ContextUsagePanel({
   onClearDraft,
 }: ContextUsagePanelProps) {
   const { confirm } = useConfirmModal();
+  const [filesCount, setFilesCount] = useState(sessionFiles.length);
   const [usageExpanded, setUsageExpanded] = useState(true);
   const [apiExpanded, setApiExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
@@ -479,32 +482,18 @@ export function ContextUsagePanel({
         onToggle={() => setFilesExpanded((v) => !v)}
         title={
           <>
-            {sessionFiles.length} File{sessionFiles.length === 1 ? "" : "s"}
+            {filesCount} File{filesCount === 1 ? "" : "s"}
           </>
         }
       >
-        {sessionFiles.length > 0 ? (
-          <div className="context-usage-panel-files-list">
-            {sessionFiles.map((file) => (
-              <button
-                key={file.path}
-                type="button"
-                onClick={() => onOpenFile?.(file.path, basename(file.path))}
-                className={`context-usage-panel-file-btn${onOpenFile ? " context-usage-panel-file-btn--clickable" : ""}`}
-              >
-                <span className="context-usage-panel-file-icon">
-                  <FileTypeIcon path={file.path} size={13} />
-                </span>
-                <span className="context-usage-panel-file-name">{basename(file.path)}</span>
-                {file.lines_added != null && file.lines_added > 0 && (
-                  <span className="context-usage-panel-file-added">+{file.lines_added}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="context-usage-panel-files-empty">No files edited in this chat yet.</div>
-        )}
+        <ChangesetPanel
+          convId={convId}
+          isGroup={isGroup}
+          agentRunning={agentRunning}
+          fallbackFiles={sessionFiles}
+          onOpenFile={onOpenFile}
+          onFileCount={setFilesCount}
+        />
       </AccordionSection>
 
       {viewer ? (

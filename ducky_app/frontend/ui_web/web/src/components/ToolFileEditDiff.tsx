@@ -9,11 +9,16 @@ import { basename } from "../verse-editor/utils/isVerseFile";
 interface ToolFileEditDiffProps {
   edit: FileEditData;
   onOpenFile?: (path: string, name: string, options?: { line?: number }) => void;
+  /** Start open (changeset review modal); chat cards start collapsed. */
+  defaultExpanded?: boolean;
 }
 
-export function ToolFileEditDiff({ edit, onOpenFile }: ToolFileEditDiffProps) {
+export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: ToolFileEditDiffProps) {
   const collapseScope = useChatCollapseScope();
-  const [expanded, setExpanded] = useChatCollapseState(chatCollapseKey(collapseScope, "file-diff"), false);
+  const [expanded, setExpanded] = useChatCollapseState(
+    chatCollapseKey(collapseScope, defaultExpanded ? "file-diff-review" : "file-diff"),
+    defaultExpanded,
+  );
   const verseEditor = useVerseEditorOptional();
   const summary = useMemo(
     () =>

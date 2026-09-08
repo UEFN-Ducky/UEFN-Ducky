@@ -1396,6 +1396,7 @@ export function ChatPane({
                 outputTokens={contextUsage.output_tokens}
                 usage={contextUsage}
                 sessionFiles={sessionFiles}
+                isGroup={Boolean(chat.isGroup)}
                 convId={chat.id}
                 omitted={contextUsage.omitted}
                 agentMode={agentMode}

@@ -5812,3 +5812,255 @@
   border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
   padding-top: 10px;
 }
+
+/* ---------------------------------------------------------------------------
+ * Write lanes on group member chips + lane editor popover
+ * ------------------------------------------------------------------------- */
+.group-member-chip-lane {
+  border: 0;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.group-member-chip-lane:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+.group-member-chip-lane--set {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.group-member-chip-lane--readonly {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.group-member-chip-conflict {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red, #e0575b);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--red, #e0575b) 30%, transparent);
+  flex-shrink: 0;
+}
+.group-member-lane-popover {
+  min-width: 300px;
+  max-width: 380px;
+}
+.group-member-lane-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font: 12px/1.4 var(--font-mono, ui-monospace, monospace);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+.group-member-lane-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 6px 0;
+}
+.group-member-lane-problems {
+  font-size: 11px;
+  margin: 4px 0 6px;
+  padding-left: 16px;
+}
+.group-member-lane-problems--error {
+  color: var(--red, #e0575b);
+}
+.group-member-lane-problems--warning {
+  color: var(--amber);
+}
+.group-member-lane-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.group-member-lane-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.group-member-lane-btn:hover:not(:disabled) {
+  background: var(--btn-hover);
+}
+.group-member-lane-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.group-member-lane-btn--primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.editor-tab-hover-card-lane {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------------------
+ * Changeset panel (Context panel → Files)
+ * ------------------------------------------------------------------------- */
+.changeset-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.changeset-run {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  padding: 6px 8px;
+}
+.changeset-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.changeset-run-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.changeset-run-meta {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changeset-status {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--muted);
+}
+.changeset-status--running {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.changeset-status--error {
+  color: var(--red, #e0575b);
+  background: color-mix(in srgb, var(--red, #e0575b) 16%, transparent);
+}
+.changeset-status--reverted,
+.changeset-status--partially_reverted {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.changeset-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.changeset-btn:hover:not(:disabled) {
+  background: var(--btn-hover);
+}
+.changeset-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.changeset-files {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+.changeset-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  min-width: 0;
+}
+.changeset-file--reverted {
+  opacity: 0.55;
+}
+.changeset-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.changeset-file-name:hover {
+  text-decoration: underline;
+}
+.changeset-file-op {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.changeset-file-stats {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.changeset-file-stat--add {
+  color: var(--green);
+}
+.changeset-file-stat--remove {
+  color: var(--red, #e0575b);
+}
+.changeset-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.changeset-badge--conflict {
+  color: var(--red, #e0575b);
+  background: color-mix(in srgb, var(--red, #e0575b) 16%, transparent);
+}
+.changeset-badge--lane {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.changeset-empty,
+.changeset-error {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.changeset-error {
+  color: var(--red, #e0575b);
+}
+.changeset-diff-modal {
+  max-height: 70vh;
+  overflow: auto;
+}

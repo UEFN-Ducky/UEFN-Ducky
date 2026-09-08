@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
+import { laneTitle, shortLaneLabel, shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
 
 describe("shortWhenToUse", () => {
   it("keeps short blurbs", () => {
@@ -13,6 +13,20 @@ describe("shortWhenToUse", () => {
     expect(shortWhenToUse(long, 10)).toBe(
       "Mesh and modeling work — building or importing Static Meshes,…",
     );
+  });
+});
+
+describe("lane badge", () => {
+  it("labels the three lane states", () => {
+    expect(shortLaneLabel(null)).toBe("No lane");
+    expect(shortLaneLabel([])).toBe("Read-only");
+    expect(shortLaneLabel(["Content/Verse/Shop/**"])).toBe("Verse/Shop/");
+  });
+
+  it("tooltip lists every glob", () => {
+    expect(laneTitle(["a/**", "b.verse"])).toBe("Write lane:\na/**\nb.verse");
+    expect(laneTitle([])).toContain("Read-only");
+    expect(laneTitle(null)).toContain("No write lane");
   });
 });
 

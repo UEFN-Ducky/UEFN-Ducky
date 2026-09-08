@@ -29,6 +29,16 @@ import type { AgentEvent, ChatMessage, MessageAttachmentDto, MessageAuthorDto } 
 
 export type RunStatus = "idle" | "sending" | "running";
 
+/** Chat row for a write-pipeline guard event (lane denial, shadow flag, conflict). */
+export function fileGuardRowText(event: AgentEvent): string {
+  const kind = event.kind || "";
+  const detail = (event.text || event.path || "").trim();
+  if (kind === "conflict") return `⚠ Conflict: ${detail}`;
+  if (kind === "shadow_violation") return `⚠ Out of lane (allowed in shadow mode): ${detail}`;
+  if (kind === "lane_denied") return `⛔ Out of lane: ${detail}`;
+  return `⛔ Write refused: ${detail}`;
+}
+
 export interface RunState {
   /** idle = no run; sending = dispatched, awaiting run_id; running = accepted / streaming. */
   status: RunStatus;
@@ -298,6 +308,21 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
         role: event.success ? "success" : "error",
         text: event.text ?? "",
         tool: event.tool,
+        ...(event.author ? { author: event.author } : {}),
+      };
+      return reset(state, {
+        messages: [...state.messages, row],
+        idSeq: seq + 1,
+        hasNewBelow: markNewBelow(state),
+      });
+    }
+
+    case "file_guard": {
+      const seq = state.idSeq;
+      const row: ChatMessage = {
+        id: optId(seq),
+        role: "error",
+        text: fileGuardRowText(event),
         ...(event.author ? { author: event.author } : {}),
       };
       return reset(state, {

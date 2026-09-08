@@ -11,6 +11,7 @@ interface ContextMeterProps {
   outputTokens?: number;
   usage?: ContextUsage;
   sessionFiles?: SessionFile[];
+  isGroup?: boolean;
   convId?: string;
   omitted?: string[];
   agentMode?: AgentMode;
@@ -41,6 +42,7 @@ export function ContextMeter({
   onClosePanel,
   usage,
   sessionFiles = [],
+  isGroup = false,
   convId = "",
   omitted = [],
   agentMode = "agent",
@@ -88,6 +90,7 @@ export function ContextMeter({
           convId={convId}
           usage={reportUsage}
           sessionFiles={sessionFiles}
+          isGroup={isGroup}
           omitted={omitted}
           agentMode={agentMode}
           model={model}

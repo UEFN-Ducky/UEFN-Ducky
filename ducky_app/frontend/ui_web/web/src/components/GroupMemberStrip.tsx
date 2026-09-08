@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
-import type { AgentProfileDto, ChatTab, FolderItem, GroupMemberDto } from "../types/panel";
+import type { AgentProfileDto, ChatTab, FolderItem, GroupMemberDto, LaneCheckResult } from "../types/panel";
+import { conflictCountsByConv } from "../utils/changesetGrouping";
 import { fmtCompactTokens } from "../utils/contextFormat";
+import { parseLaneText, shortLaneLabel, validateLaneGlobs } from "../utils/laneGlob";
 import { findFolderByHubId } from "../utils/folderContextSummary";
 import { numberedEntryName } from "../utils/numberedEntryName";
 import { chatFolderSiblingNames } from "../utils/sidebarTree";
@@ -20,6 +23,14 @@ import {
 } from "./groupMemberHover";
 
 export { shortModelLabel } from "./groupMemberHover";
+export { parseLaneText, shortLaneLabel, validateLaneGlobs } from "../utils/laneGlob";
+
+/** Tooltip for the lane badge. */
+export function laneTitle(lane: string[] | null | undefined): string {
+  if (lane == null) return "No write lane — click to set one";
+  if (lane.length === 0) return "Read-only — this ducky cannot write project files";
+  return `Write lane:\n${lane.join("\n")}`;
+}
 
 type Props = {
   groupId: string;
@@ -79,12 +90,19 @@ export function GroupMemberStrip({
   const [profiles, setProfiles] = useState<AgentProfileDto[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelEditId, setModelEditId] = useState("");
+  const [laneEditId, setLaneEditId] = useState("");
+  const [laneText, setLaneText] = useState("");
+  const [laneCheck, setLaneCheck] = useState<LaneCheckResult | null>(null);
+  const [laneSaving, setLaneSaving] = useState(false);
+  /** conv id → live file conflicts (running runs) for the red dot. */
+  const [conflicts, setConflicts] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   /** Nested group hub id → its members (API fallback when folder tree is thin). */
   const [nestedMembers, setNestedMembers] = useState<Record<string, GroupMemberDto[]>>({});
   const inviteWrapRef = useRef<HTMLDivElement>(null);
   const modelEditWrapRef = useRef<HTMLDivElement>(null);
+  const laneEditWrapRef = useRef<HTMLDivElement>(null);
   const chatById = useMemo(() => new Map(allChats.map((c) => [c.id, c])), [allChats]);
 
   const refreshProfiles = useCallback(() => {
@@ -143,6 +161,55 @@ export function GroupMemberStrip({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [modelEditId]);
+
+  useEffect(() => {
+    if (!laneEditId) return;
+    const onDoc = (e: MouseEvent) => {
+      if (isOutsidePicker(e.target, laneEditWrapRef.current)) setLaneEditId("");
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [laneEditId]);
+
+  // Lane editor: instant local validation, then the server's overlap verdict (debounced).
+  useEffect(() => {
+    if (!laneEditId) return;
+    const lines = parseLaneText(laneText);
+    const local = validateLaneGlobs(lines);
+    if (local.length > 0) {
+      setLaneCheck({ ok: false, errors: local, warnings: [], normalized: null });
+      return;
+    }
+    const api = getApi();
+    if (!api?.group_check_lane) return;
+    const timer = setTimeout(() => {
+      void api.group_check_lane!(groupId, laneEditId, lines).then(setLaneCheck).catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [groupId, laneEditId, laneText]);
+
+  const refreshConflicts = useCallback(() => {
+    const api = getApi();
+    if (!api?.list_changesets) return;
+    void api
+      .list_changesets("", groupId, 50)
+      .then((runs) => setConflicts(conflictCountsByConv(Array.isArray(runs) ? runs : [])))
+      .catch(() => undefined);
+  }, [groupId]);
+
+  useEffect(() => {
+    refreshConflicts();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeAgentEvents((event) => {
+      if (event.type !== "file_guard" && event.type !== "agent_stopped" && event.type !== "files_reverted") return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(refreshConflicts, 500);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [refreshConflicts]);
 
   const profileById = useMemo(() => {
     const map = new Map<string, AgentProfileDto>();
@@ -242,6 +309,35 @@ export function GroupMemberStrip({
     [groupId, onMembersChange],
   );
 
+  const openLaneEditor = useCallback((m: GroupMemberDto) => {
+    setModelEditId("");
+    setLaneEditId(m.member_conv_id);
+    setLaneText((m.write_allowed ?? []).join("\n"));
+    setLaneCheck(null);
+    setError("");
+  }, []);
+
+  const saveLane = useCallback(
+    async (memberConvId: string, lane: string[] | null, force = false) => {
+      const api = getApi();
+      if (!api?.group_set_member_lane) return;
+      setLaneSaving(true);
+      setError("");
+      try {
+        const res = await api.group_set_member_lane(groupId, memberConvId, lane, force);
+        if (!res?.ok) {
+          setError(res?.error || "Could not set lane");
+          return;
+        }
+        onMembersChange(res.group_members || []);
+        setLaneEditId("");
+      } finally {
+        setLaneSaving(false);
+      }
+    },
+    [groupId, onMembersChange],
+  );
+
   const remove = useCallback(
     async (memberConvId: string) => {
       const api = getApi();
@@ -256,11 +352,12 @@ export function GroupMemberStrip({
         }
         onMembersChange(res.group_members || []);
         if (modelEditId === memberConvId) setModelEditId("");
+        if (laneEditId === memberConvId) setLaneEditId("");
       } finally {
         setBusy(false);
       }
     },
-    [groupId, modelEditId, onMembersChange],
+    [groupId, laneEditId, modelEditId, onMembersChange],
   );
 
   const openMember = useCallback(
@@ -340,15 +437,18 @@ export function GroupMemberStrip({
                   18,
                 );
             const editing = !nestedGroup && modelEditId === m.member_conv_id;
+            const laneEditing = !nestedGroup && laneEditId === m.member_conv_id;
+            const conflictCount = conflicts[m.member_conv_id] ?? 0;
+            const laneKind = m.write_allowed == null ? "none" : m.write_allowed.length === 0 ? "readonly" : "set";
             return (
               <div
                 key={m.member_conv_id}
                 className="group-member-chip-wrap"
-                ref={editing ? modelEditWrapRef : undefined}
+                ref={editing ? modelEditWrapRef : laneEditing ? laneEditWrapRef : undefined}
               >
                 <EditorTabHoverCardShell
                   placement="below"
-                  disabled={editing}
+                  disabled={editing || laneEditing}
                   cardHeight={
                     nestedGroup
                       ? Math.min(360, 88 + Math.max(1, nestedRoster.length) * 26 + 48)
@@ -382,6 +482,11 @@ export function GroupMemberStrip({
                           <span className="editor-tab-hover-card-model">
                             {aiTypeLabel(model, codingAgent)}
                           </span>
+                        </div>
+                      ) : null}
+                      {!nestedGroup && m.write_allowed != null ? (
+                        <div className="editor-tab-hover-card-lane">
+                          Lane: {m.write_allowed.length > 0 ? m.write_allowed.join(", ") : "read-only"}
                         </div>
                       ) : null}
                       {nestedGroup && nestedRoster.length > 0 ? (
@@ -443,7 +548,7 @@ export function GroupMemberStrip({
                       <div className="editor-tab-hover-card-status">
                         {nestedGroup
                           ? "Click → open subgroup · one rep speaks here"
-                          : "Click name → their work · model badge → change LLM"}
+                          : "Click name → their work · model badge → LLM · lane badge → write lane"}
                       </div>
                     </>
                   }
@@ -484,6 +589,23 @@ export function GroupMemberStrip({
                         {shortModelLabel(model)}
                       </button>
                     ) : null}
+                    {!nestedGroup ? (
+                      <button
+                        type="button"
+                        className={`group-member-chip-lane group-member-chip-lane--${laneKind}`}
+                        disabled={busy}
+                        title={laneTitle(m.write_allowed)}
+                        onClick={() => (laneEditing ? setLaneEditId("") : openLaneEditor(m))}
+                      >
+                        {shortLaneLabel(m.write_allowed)}
+                      </button>
+                    ) : null}
+                    {conflictCount > 0 ? (
+                      <span
+                        className="group-member-chip-conflict"
+                        title={`${conflictCount} live file conflict${conflictCount === 1 ? "" : "s"} — see Context → Files`}
+                      />
+                    ) : null}
                     <button
                       type="button"
                       className="group-member-chip-remove"
@@ -508,6 +630,58 @@ export function GroupMemberStrip({
                       placeholder="Default model"
                       menuPlacement="bottom"
                     />
+                  </div>
+                ) : null}
+                {laneEditing ? (
+                  <div className="group-member-model-popover group-member-lane-popover">
+                    <div className="group-member-model-popover-label">Write lane for {duckyName}</div>
+                    <textarea
+                      className="group-member-lane-textarea"
+                      value={laneText}
+                      onChange={(e) => setLaneText(e.target.value)}
+                      placeholder={"Content/Verse/Shop/**\nContent/Verse/module_declarations.verse"}
+                      spellCheck={false}
+                    />
+                    <div className="group-member-lane-hint">
+                      One glob per line; a bare folder means folder/**. Save with no lines = read-only. Clear = unrestricted.
+                    </div>
+                    {laneCheck?.errors.length ? (
+                      <ul className="group-member-lane-problems group-member-lane-problems--error">
+                        {laneCheck.errors.map((t) => (
+                          <li key={t}>{t}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {laneCheck?.warnings.length ? (
+                      <ul className="group-member-lane-problems group-member-lane-problems--warning">
+                        {laneCheck.warnings.map((t) => (
+                          <li key={t}>{t}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <div className="group-member-lane-actions">
+                      <button
+                        type="button"
+                        className="group-member-lane-btn group-member-lane-btn--primary"
+                        disabled={laneSaving || Boolean(laneCheck?.errors.length)}
+                        onClick={() =>
+                          void saveLane(m.member_conv_id, parseLaneText(laneText), Boolean(laneCheck?.warnings.length))
+                        }
+                      >
+                        {laneCheck?.warnings.length ? "Save anyway" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        className="group-member-lane-btn"
+                        disabled={laneSaving}
+                        onClick={() => void saveLane(m.member_conv_id, null)}
+                      >
+                        Clear lane
+                      </button>
+                      <button type="button" className="group-member-lane-btn" onClick={() => setLaneEditId("")}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>

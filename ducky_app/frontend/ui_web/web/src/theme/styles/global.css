@@ -828,6 +828,18 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
 .file-history-item-badge--agent {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
+  text-transform: none;
+  letter-spacing: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-history-item-badge--revert {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  text-transform: none;
+  letter-spacing: 0;
 }
 /* Pinned "Current" row — always visible at the top of the history list. */
 .file-history-item--current {
