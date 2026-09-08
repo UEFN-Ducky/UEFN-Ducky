@@ -16,7 +16,7 @@ import {
   subscribeAudioSettings,
   type MicPermission,
 } from "../../voice/audioSettings";
-import { listMicDevices, listOutputDevices, openMicStream } from "../../voice/micPermission";
+import { holdMic, listMicDevices, listOutputDevices, openMicStream } from "../../voice/micPermission";
 import { VoiceSettingsSection } from "../../voice/VoiceSettingsSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { SettingsToggleRow } from "./SettingsToggleRow";
@@ -167,7 +167,9 @@ export function AudioTab({ sectionTab = "input" }: AudioTabProps) {
       raf = window.requestAnimationFrame(tick);
       setTestingMic(true);
       void refreshDevices();
+      const unhold = holdMic(() => stopMicTest());
       testCleanupRef.current = () => {
+        unhold();
         window.cancelAnimationFrame(raf);
         stream.getTracks().forEach((t) => t.stop());
         void ctx.close().catch(() => undefined);

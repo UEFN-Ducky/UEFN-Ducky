@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { applyOutputDevice, effectivePlaybackVolume } from "./audioSettings";
-import { micAccessAllowed, micConstraints } from "./micPermission";
+import { holdMic, micAccessAllowed, micConstraints, releaseHeldMics } from "./micPermission";
 
 describe("audio settings helpers", () => {
   it("micAccessAllowed only when allow", () => {
@@ -27,6 +27,19 @@ describe("audio settings helpers", () => {
     const c = micConstraints("");
     const audio = c.audio as MediaTrackConstraints;
     expect(audio.deviceId).toBeUndefined();
+  });
+
+  it("releaseHeldMics runs registered stops once", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const unholdFirst = holdMic(first);
+    holdMic(second);
+    unholdFirst();
+    releaseHeldMics();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    releaseHeldMics();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it("applyOutputDevice calls setSinkId with saved id", async () => {

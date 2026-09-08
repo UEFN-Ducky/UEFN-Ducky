@@ -1,7 +1,10 @@
 /**
  * TranscriptionSession — one interface, two backends:
- *   batch: MediaRecorder → Whisper REST (dictation)
- *   streaming: OpenAI Realtime WS + server VAD (live mode / barge-in)
+ *   batch: AudioContext PCM → WAV → Whisper REST (dictation)
+ *   streaming: AudioContext PCM → OpenAI Realtime WS + server VAD (live / barge-in)
+ *
+ * Both use a default-rate AudioContext like Settings → Input's meter.
+ * Forcing sampleRate: 24000 made MediaStreamSource silent in WebView2.
  */
 
 import { runBridgeJob } from "../hooks/bridgeJobAsync";
@@ -27,6 +30,13 @@ export interface TranscriptionSession {
 }
 
 const TARGET_RATE = 24000;
+const MIN_SECONDS = 0.15;
+const MIN_PEAK = 0.008;
+
+type PcmCapture = {
+  sampleRate: number;
+  stop: () => Promise<void>;
+};
 
 /** Linear resample Float32 PCM to a target sample rate. */
 export function resampleLinear(input: Float32Array, fromRate: number, toRate: number): Float32Array {
@@ -44,6 +54,43 @@ export function resampleLinear(input: Float32Array, fromRate: number, toRate: nu
     out[i] = input[i0]! * (1 - t) + input[i1]! * t;
   }
   return out;
+}
+
+export function isTooShortRecording(samples: Float32Array, sampleRate: number): boolean {
+  const rate = sampleRate > 0 ? sampleRate : TARGET_RATE;
+  if (samples.length < rate * MIN_SECONDS) return true;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const a = Math.abs(samples[i]!);
+    if (a > peak) peak = a;
+  }
+  return peak < MIN_PEAK;
+}
+
+export function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
+  const pcm = floatTo16BitPcm(samples);
+  const dataBytes = pcm.byteLength;
+  const buf = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buf);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataBytes, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataBytes, true);
+  new Uint8Array(buf, 44).set(new Uint8Array(pcm.buffer, pcm.byteOffset, dataBytes));
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+function writeAscii(view: DataView, offset: number, text: string): void {
+  for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -78,22 +125,77 @@ function int16ToBase64(samples: Int16Array): string {
   return btoa(binary);
 }
 
-async function getMicStream(): Promise<MediaStream> {
-  return requestMicAccess();
+function concatFloat32(parts: Float32Array[]): Float32Array {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Float32Array(n);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+async function startPcmCapture(
+  stream: MediaStream,
+  onFrame: (input: Float32Array, sampleRate: number) => void,
+): Promise<PcmCapture> {
+  const audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  const sampleRate = audioCtx.sampleRate || 48000;
+  const source = audioCtx.createMediaStreamSource(stream);
+  // ponytail: ScriptProcessor is deprecated but works in WebView2 without an AudioWorklet file URL.
+  const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+  const mute = audioCtx.createGain();
+  mute.gain.value = 0;
+  processor.onaudioprocess = (e) => {
+    onFrame(e.inputBuffer.getChannelData(0), sampleRate);
+  };
+  source.connect(processor);
+  processor.connect(mute);
+  mute.connect(audioCtx.destination);
+  return {
+    sampleRate,
+    stop: async () => {
+      try {
+        processor.disconnect();
+      } catch {
+        /* ignore */
+      }
+      try {
+        source.disconnect();
+      } catch {
+        /* ignore */
+      }
+      try {
+        mute.disconnect();
+      } catch {
+        /* ignore */
+      }
+      stream.getTracks().forEach((t) => t.stop());
+      await audioCtx.close().catch(() => undefined);
+    },
+  };
 }
 
 /** Push-to-talk: record until stop(), then Whisper REST. */
 export function createBatchTranscriptionSession(): TranscriptionSession {
-  let media: MediaStream | null = null;
-  let recorder: MediaRecorder | null = null;
-  let chunks: Blob[] = [];
+  let capture: PcmCapture | null = null;
+  let chunks: Float32Array[] = [];
   let handlers: TranscriptionHandlers = {};
   let state: TranscriptionState = "idle";
-  let mime = "audio/webm";
 
   const setState = (next: TranscriptionState) => {
     state = next;
     handlers.onStateChange?.(next);
+  };
+
+  const dropCapture = () => {
+    const running = capture;
+    capture = null;
+    chunks = [];
+    if (running) void running.stop();
   };
 
   return {
@@ -101,50 +203,37 @@ export function createBatchTranscriptionSession(): TranscriptionSession {
     async start(h = {}) {
       handlers = h;
       if (state === "listening" || state === "transcribing") return;
-      media = await getMicStream();
       chunks = [];
-      const preferred = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/ogg;codecs=opus",
-        "audio/mp4",
-      ];
-      mime = preferred.find((m) => MediaRecorder.isTypeSupported(m)) || "";
-      recorder = mime ? new MediaRecorder(media, { mimeType: mime }) : new MediaRecorder(media);
-      mime = recorder.mimeType || mime || "audio/webm";
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-      };
-      recorder.start(250);
+      const media = await requestMicAccess();
+      capture = await startPcmCapture(media, (input) => {
+        chunks.push(new Float32Array(input));
+      });
       setState("listening");
     },
     async stop() {
-      if (!recorder || state !== "listening") {
+      if (!capture || state !== "listening") {
         this.abort();
         return;
       }
-      const rec = recorder;
-      const stream = media;
-      const blobMime = mime;
-      const done = new Promise<Blob>((resolve) => {
-        rec.onstop = () => resolve(new Blob(chunks, { type: blobMime }));
-      });
-      rec.stop();
-      stream?.getTracks().forEach((t) => t.stop());
-      media = null;
-      recorder = null;
+      const running = capture;
+      const parts = chunks;
+      capture = null;
+      chunks = [];
       setState("transcribing");
       try {
-        const blob = await done;
-        if (blob.size < 32) {
+        const sampleRate = running.sampleRate;
+        await running.stop();
+        const samples = concatFloat32(parts);
+        if (isTooShortRecording(samples, sampleRate)) {
           handlers.onError?.("Recording too short");
           setState("error");
           return;
         }
+        const blob = encodeWavPcm16(samples, sampleRate);
         const b64 = await blobToBase64(blob);
         const result = await runBridgeJob<{ ok?: boolean; text?: string; error?: string }>(
           "voice_transcribe_audio",
-          [b64, blobMime],
+          [b64, "audio/wav"],
           90_000,
         );
         if (!result?.ok) {
@@ -161,15 +250,7 @@ export function createBatchTranscriptionSession(): TranscriptionSession {
       }
     },
     abort() {
-      try {
-        recorder?.stop();
-      } catch {
-        /* ignore */
-      }
-      media?.getTracks().forEach((t) => t.stop());
-      media = null;
-      recorder = null;
-      chunks = [];
+      dropCapture();
       setState("idle");
     },
   };
@@ -184,10 +265,7 @@ type TokenResult = {
 
 /** Live streaming STT via OpenAI Realtime transcription WebSocket (GA). */
 export function createStreamingTranscriptionSession(): TranscriptionSession {
-  let media: MediaStream | null = null;
-  let audioCtx: AudioContext | null = null;
-  let processor: ScriptProcessorNode | null = null;
-  let source: MediaStreamAudioSourceNode | null = null;
+  let capture: PcmCapture | null = null;
   let ws: WebSocket | null = null;
   let handlers: TranscriptionHandlers = {};
   let state: TranscriptionState = "idle";
@@ -200,24 +278,9 @@ export function createStreamingTranscriptionSession(): TranscriptionSession {
   };
 
   const cleanupAudio = () => {
-    try {
-      processor?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    try {
-      source?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    processor = null;
-    source = null;
-    if (audioCtx) {
-      void audioCtx.close().catch(() => undefined);
-      audioCtx = null;
-    }
-    media?.getTracks().forEach((t) => t.stop());
-    media = null;
+    const running = capture;
+    capture = null;
+    if (running) void running.stop();
   };
 
   const closeWs = () => {
@@ -255,30 +318,36 @@ export function createStreamingTranscriptionSession(): TranscriptionSession {
         throw new Error(String(token?.error || "Could not create realtime token"));
       }
 
-      media = await getMicStream();
+      const media = await requestMicAccess();
       const wsUrl = token.ws_url || "wss://api.openai.com/v1/realtime?intent=transcription";
       // GA handshake only — the beta subprotocol routes to the retired Beta API.
-      ws = new WebSocket(wsUrl, ["realtime", `openai-insecure-api-key.${token.value}`]);
+      try {
+        ws = new WebSocket(wsUrl, ["realtime", `openai-insecure-api-key.${token.value}`]);
 
-      await new Promise<void>((resolve, reject) => {
-        if (!ws) return reject(new Error("no websocket"));
-        const timer = window.setTimeout(() => reject(new Error("Realtime WS timeout")), 15_000);
-        ws.onopen = () => {
-          window.clearTimeout(timer);
-          resolve();
-        };
-        ws.onerror = () => {
-          window.clearTimeout(timer);
-          reject(new Error("Realtime WS failed to connect"));
-        };
-        ws.onclose = (ev) => {
-          window.clearTimeout(timer);
-          if (!closed) {
-            const detail = [ev.code, ev.reason].filter(Boolean).join(" ");
-            reject(new Error(detail ? `Realtime WS closed: ${detail}` : "Realtime WS closed before open"));
-          }
-        };
-      });
+        await new Promise<void>((resolve, reject) => {
+          if (!ws) return reject(new Error("no websocket"));
+          const timer = window.setTimeout(() => reject(new Error("Realtime WS timeout")), 15_000);
+          ws.onopen = () => {
+            window.clearTimeout(timer);
+            resolve();
+          };
+          ws.onerror = () => {
+            window.clearTimeout(timer);
+            reject(new Error("Realtime WS failed to connect"));
+          };
+          ws.onclose = (ev) => {
+            window.clearTimeout(timer);
+            if (!closed) {
+              const detail = [ev.code, ev.reason].filter(Boolean).join(" ");
+              reject(new Error(detail ? `Realtime WS closed: ${detail}` : "Realtime WS closed before open"));
+            }
+          };
+        });
+      } catch (err) {
+        media.getTracks().forEach((t) => t.stop());
+        closeWs();
+        throw err;
+      }
 
       ws.onmessage = (ev) => {
         if (closed) return;
@@ -345,29 +414,23 @@ export function createStreamingTranscriptionSession(): TranscriptionSession {
 
       // Session config is bound to the ephemeral client secret — no session.update.
 
-      audioCtx = new AudioContext({ sampleRate: TARGET_RATE });
-      if (audioCtx.state === "suspended") await audioCtx.resume();
-      const actualRate = audioCtx.sampleRate || TARGET_RATE;
-      source = audioCtx.createMediaStreamSource(media);
-      // ponytail: ScriptProcessor is deprecated but works in WebView2 without an AudioWorklet file URL.
-      processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (e) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN || closed) return;
-        const input = e.inputBuffer.getChannelData(0);
-        const resampled = resampleLinear(input, actualRate, TARGET_RATE);
-        const pcm = floatTo16BitPcm(resampled);
-        ws.send(
-          JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: int16ToBase64(pcm),
-          }),
-        );
-      };
-      const mute = audioCtx.createGain();
-      mute.gain.value = 0;
-      source.connect(processor);
-      processor.connect(mute);
-      mute.connect(audioCtx.destination);
+      try {
+        capture = await startPcmCapture(media, (input, actualRate) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN || closed) return;
+          const resampled = resampleLinear(input, actualRate, TARGET_RATE);
+          const pcm = floatTo16BitPcm(resampled);
+          ws.send(
+            JSON.stringify({
+              type: "input_audio_buffer.append",
+              audio: int16ToBase64(pcm),
+            }),
+          );
+        });
+      } catch (err) {
+        closeWs();
+        media.getTracks().forEach((t) => t.stop());
+        throw err;
+      }
       setState("listening");
     },
     async stop() {

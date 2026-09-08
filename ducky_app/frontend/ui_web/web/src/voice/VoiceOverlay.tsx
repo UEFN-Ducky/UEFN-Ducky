@@ -160,7 +160,7 @@ export function VoiceOverlay({
                 <Icons.SkipToEnd />
               </button>
             ) : null}
-            {/* Speech writes into the composer — user presses Send there. */}
+            {/* Live finals auto-send; dictation still uses the composer Send. */}
             <span className="voice-overlay-transport-split" aria-hidden />
             <button
               type="button"

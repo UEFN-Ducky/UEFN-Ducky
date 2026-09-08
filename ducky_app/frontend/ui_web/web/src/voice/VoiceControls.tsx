@@ -64,7 +64,7 @@ export function VoiceControls({
   disabled,
   inputText: _inputText,
   setInputText,
-  onSend: _onSend,
+  onSend,
   streamText,
   agentRunning,
   duckyVoice,
@@ -121,6 +121,17 @@ export function VoiceControls({
     onTranscript: appendTranscript,
   });
 
+  const onLiveTranscript = useCallback(
+    (text: string) => {
+      if (!manualSend) {
+        onSend(text);
+        return;
+      }
+      appendTranscript(text);
+    },
+    [appendTranscript, manualSend, onSend],
+  );
+
   const liveMode = useLiveVoiceMode({
     enabled: live,
     chatId,
@@ -133,7 +144,7 @@ export function VoiceControls({
     onInterim: () => {
       // Interim stays in the live panel — never overwrite the typed draft.
     },
-    onTranscript: appendTranscript,
+    onTranscript: onLiveTranscript,
   });
 
   useEffect(() => {

@@ -136,8 +136,7 @@ export function VoiceSettingsSection() {
         <GeneralSectionHeader icon={<Icons.Mic />} title="Live Voice" />
         <div className="general-tab-toggle-card">
           <p className="general-tab-section-desc">
-            Dictation and live speech always write into the chat box. Nothing sends until you press
-            Send.
+            Dictation fills the chat box until you press Send. Live voice sends each pause as a turn.
           </p>
           <div className="voice-settings-row">
             <label className="voice-settings-label" htmlFor="voice-process-talk">

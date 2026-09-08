@@ -37,6 +37,27 @@ type PromptResolver = (allowed: boolean) => void;
 let promptOpen = false;
 let promptResolve: PromptResolver | null = null;
 const promptListeners = new Set<(open: boolean) => void>();
+const heldMicStops = new Set<() => void>();
+
+/** Settings mic-test (and similar) register here so chat capture can drop the exclusive stream. */
+export function holdMic(stop: () => void): () => void {
+  heldMicStops.add(stop);
+  return () => {
+    heldMicStops.delete(stop);
+  };
+}
+
+export function releaseHeldMics(): void {
+  const stops = [...heldMicStops];
+  heldMicStops.clear();
+  for (const stop of stops) {
+    try {
+      stop();
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function notifyPrompt(open: boolean) {
   promptOpen = open;
@@ -149,6 +170,7 @@ export async function requestMicAccess(): Promise<MediaStream> {
   }
 
   try {
+    releaseHeldMics();
     return await openMicStream();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
