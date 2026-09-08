@@ -1,5 +1,10 @@
 # The write pipeline
 
+Files only. Everything else a ducky changes — actors, devices, assets, Verse
+wiring, scripts — is covered by
+[editor change tracking](editor-change-tracking.md), which lands in the same
+per-run ledger.
+
 Every mutation of a file in the user's UEFN project goes through
 `backend.workspace.writer.ProjectWriter`. Nothing else may open a project file
 for writing; `backend/workspace/test_no_direct_writes.py` enforces that.

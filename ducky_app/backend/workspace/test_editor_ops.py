@@ -137,6 +137,11 @@ def test_creations_are_marked_and_share_the_exists_facet() -> None:
     creators = [s for s in EDITOR_OPS.values() if s.creates]
     assert {"spawn_actor", "duplicate_asset", "create_data_table"} <= {s.command for s in creators}
     for spec in creators:
+        if spec.mutates == MUT_OPAQUE:
+            # An opaque command may create things, but it is an event rather than a
+            # target: its slot is per-call, so it shares no facet with anything.
+            assert spec.slot == "opaque", f"{spec.command} is opaque but its slot is {spec.slot!r}"
+            continue
         assert spec.slot in ("exists", ""), f"{spec.command} creates but its slot is {spec.slot!r}"
 
 

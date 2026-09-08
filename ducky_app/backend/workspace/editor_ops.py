@@ -87,8 +87,10 @@ def _op(
     )
 
 
-def _opaque(command: str, kind: str = KIND_OTHER, *, note: str = "") -> OpSpec:
-    return OpSpec(command=command, mutates=MUT_OPAQUE, kind=kind, revertable=REVERT_MANUAL, note=note)
+def _opaque(command: str, kind: str = KIND_OTHER, *, slot: str = "", creates: bool = False,
+            revertable: str = REVERT_MANUAL, note: str = "") -> OpSpec:
+    return OpSpec(command=command, mutates=MUT_OPAQUE, kind=kind, slot=slot,
+                  revertable=revertable, creates=creates, note=note)
 
 
 _MUTATIONS: tuple[OpSpec, ...] = (
@@ -239,8 +241,12 @@ _MUTATIONS: tuple[OpSpec, ...] = (
 )
 
 _OPAQUE: tuple[OpSpec, ...] = (
-    _opaque("execute_python", note="arbitrary Python in the editor; only a snapshot diff can say what it did"),
-    _opaque("exec_console_command", note="fire-and-forget console command with no result"),
+    # Bracketed by a level snapshot, so a script that spawns actors names them and
+    # can be undone. One that changes anything else is still manual, and says so.
+    _opaque("execute_python", KIND_WORLD, slot="opaque", creates=True, revertable=REVERT_AUTO,
+            note="arbitrary Python in the editor; only a snapshot diff can say what it did"),
+    _opaque("exec_console_command", KIND_WORLD, slot="opaque", creates=True, revertable=REVERT_AUTO,
+            note="fire-and-forget console command with no result"),
     _opaque("batch_commands", note="runs several commands in one call; retired from the tool surface"),
 )
 

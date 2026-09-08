@@ -60,9 +60,14 @@ plugin `register()` via paths like `backend.tools.uefn.actors`.
 2. Any code that writes into the user's UEFN project goes through
    `backend.workspace.ProjectWriter` (see `docs/architecture/write-pipeline.md`);
    `backend/workspace/test_no_direct_writes.py` fails otherwise.
-3. Run `py -m pytest` and make sure the build still produces `dist/UEFN-Ducky.exe` if you
+3. Any new listener command needs a row in `backend/workspace/editor_ops.py`
+   saying whether it mutates (see `docs/architecture/editor-change-tracking.md`);
+   the completeness test parses the listener tree and fails otherwise. Never
+   add a delete path: undoing a creation goes through the journal's own
+   `ducky_revert_creation`, which is not an agent tool.
+4. Run `py -m pytest` and make sure the build still produces `dist/UEFN-Ducky.exe` if you
    touched packaging.
-4. Describe what you changed and how you verified it.
+5. Describe what you changed and how you verified it.
 
 By contributing, you grant Mindful Path Company, LLC a perpetual, worldwide,
 irrevocable license to use, modify, distribute, and relicense your contributions
