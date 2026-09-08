@@ -65,11 +65,20 @@ describe("favoriteModelsCatalog", () => {
 
   it("parses qualified selections and flags legacy agent-only values", () => {
     expect(qualifyFavorite("cursor", "composer-2.5")).toBe("cursor:composer-2.5");
+    expect(parseFavoriteSelection("cursor:composer-2.5", agents)?.modelId).toBe("composer-2.5");
+    // "default" means "let the agent choose" and only a coding agent has that idea.
+    expect(parseFavoriteSelection("cursor:default", agents)?.modelId).toBe("auto");
+    expect(parseFavoriteSelection("anthropic:default", agents)).toBeNull();
+    expect(isLegacyAgentOnlyFavorite("cursor", agents)).toBe(true);
+    expect(selectionNeedsRepick("cursor", agents)).toBe(true);
+    expect(selectionNeedsRepick("cursor:composer-2.5", agents)).toBe(false);
+  });
+
+  it("knows nothing is a coding agent until the live list arrives", () => {
+    // Before the host answers, "cursor:default" cannot be told from a provider
+    // whose model is literally named default — so it is not accepted as one.
+    expect(parseFavoriteSelection("cursor:default")).toBeNull();
     expect(parseFavoriteSelection("cursor:composer-2.5")?.modelId).toBe("composer-2.5");
-    expect(parseFavoriteSelection("cursor:default")?.modelId).toBe("auto");
-    expect(parseFavoriteSelection("anthropic:default")).toBeNull();
-    expect(isLegacyAgentOnlyFavorite("cursor")).toBe(true);
-    expect(selectionNeedsRepick("cursor")).toBe(true);
-    expect(selectionNeedsRepick("cursor:composer-2.5")).toBe(false);
+    expect(isLegacyAgentOnlyFavorite("cursor")).toBe(false);
   });
 });

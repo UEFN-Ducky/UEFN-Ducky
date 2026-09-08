@@ -16,9 +16,6 @@ vi.mock("../../hooks/useAgentEventBus", () => ({
 vi.mock("../../contexts/ConfirmModalContext", () => ({
   useConfirmModal: () => ({ confirm: async () => true }),
 }));
-// The text differ pulls Monaco and its web workers, which vitest cannot resolve.
-// The timeline is what is under test here; the diff modal has its own tests.
-vi.mock("../ToolFileEditDiff", () => ({ ToolFileEditDiff: () => null }));
 
 const { ChangesView } = await import("./ChangesView");
 

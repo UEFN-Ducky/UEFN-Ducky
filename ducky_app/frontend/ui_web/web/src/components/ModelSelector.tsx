@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { getApi } from "../hooks/usePanelApi";
+import { setCachedCodingAgents } from "../hooks/codingAgentsCache";
 import { onApiReady } from "../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
@@ -168,6 +169,9 @@ export function ModelSelector({
     try {
       const res = await api.list_coding_agents();
       setAgents(res.agents || []);
+      // Published for the plain form helpers, which have no component to thread
+      // this through but still have to tell a coding agent from a provider.
+      setCachedCodingAgents(res.agents || []);
     } catch {
       setAgents([]);
     }

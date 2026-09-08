@@ -27,13 +27,15 @@ export function parseFavoriteSelection(
   const backend = text.slice(0, idx).trim().toLowerCase().replace(/-/g, "_");
   let modelId = text.slice(idx + 1).trim();
   if (!backend || !modelId) return null;
-  // Bare "default" is never a real model id — treat as "auto" (Cursor legacy).
   if (modelId.toLowerCase() === "default") {
+    // "default" means "let the agent choose" and only coding agents have that
+    // idea. For an API provider it is not a model id at all, and pretending it
+    // is would store a selection that can never resolve.
+    if (!isCodingAgentFavoriteId(backend, codingAgents)) return null;
     modelId = "auto";
   }
-  // Opaque backend ids — accept any non-empty backend:model pair.
-  // Coding-agent vs API is decided by live agent list when available.
-  void codingAgents;
+  // Otherwise any non-empty backend:model pair is accepted: backend ids are
+  // opaque, and a Store gateway can add either kind at any time.
   return { backend, modelId, qualified: qualifyFavorite(backend, modelId) };
 }
 

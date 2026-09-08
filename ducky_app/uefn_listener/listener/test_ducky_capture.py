@@ -91,7 +91,9 @@ def capture(monkeypatch):
         return levels.pop(0) if levels else {"actors": [], "count": 0, "scope": scope}
 
     def fake_diff(before, after, **_kw):
-        key = lambda row: str(row.get("guid") or row.get("path") or row.get("label") or "")
+        def key(row):
+            return str(row.get("guid") or row.get("path") or row.get("label") or "")
+
         b = {key(a): a for a in (before or {}).get("actors") or []}
         a = {key(x): x for x in (after or {}).get("actors") or []}
         changes = [dict(a[k], change="added", id=k) for k in a if k not in b]

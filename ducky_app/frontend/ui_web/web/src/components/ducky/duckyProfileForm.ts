@@ -4,7 +4,13 @@ import {
   isLegacyAgentOnlyFavorite,
   parseFavoriteSelection,
 } from "../../hooks/favoriteModelsCatalog";
-import type { AgentProfileDto, AgentProfileEditorCatalogDto, DuckyConfigDto } from "../../types/panel";
+import { getCachedCodingAgents } from "../../hooks/codingAgentsCache";
+import type {
+  AgentProfileDto,
+  AgentProfileEditorCatalogDto,
+  CodingAgentDto,
+  DuckyConfigDto,
+} from "../../types/panel";
 
 export interface DuckyProfileFormState {
   name: string;
@@ -28,12 +34,15 @@ export interface DuckyProfileFormState {
 }
 
 /** Backend when the model targets a coding agent, else ducky (API models). */
-export function codingAgentFromModel(model: string): string {
+export function codingAgentFromModel(
+  model: string,
+  codingAgents: CodingAgentDto[] = getCachedCodingAgents(),
+): string {
   const text = (model || "").trim();
   if (!text) return "ducky";
-  const parsed = parseFavoriteSelection(text);
-  if (parsed && isCodingAgentFavoriteId(parsed.backend)) return parsed.backend;
-  if (isLegacyAgentOnlyFavorite(text)) {
+  const parsed = parseFavoriteSelection(text, codingAgents);
+  if (parsed && isCodingAgentFavoriteId(parsed.backend, codingAgents)) return parsed.backend;
+  if (isLegacyAgentOnlyFavorite(text, codingAgents)) {
     return text.toLowerCase().replace(/-/g, "_");
   }
   return "ducky";
@@ -62,13 +71,16 @@ export function modelShowsThinkingEffort(
 }
 
 /** Empty is fine (global Default Model applies); reject unusable saved values. */
-export function validateModelSelection(model: string): string | null {
+export function validateModelSelection(
+  model: string,
+  codingAgents: CodingAgentDto[] = getCachedCodingAgents(),
+): string | null {
   const text = (model || "").trim();
   if (!text) return null;
-  if (isLegacyAgentOnlyFavorite(text)) {
+  if (isLegacyAgentOnlyFavorite(text, codingAgents)) {
     return `“${text}” is an agent name, not an exact model. Pick a concrete model (e.g. Cursor → composer-2.5).`;
   }
-  if (!parseFavoriteSelection(text) && text.includes(":")) {
+  if (!parseFavoriteSelection(text, codingAgents) && text.includes(":")) {
     return `Saved choice “${text}” is invalid. Re-pick an exact model.`;
   }
   // Bare legacy API ids are allowed to remain stored; spawn will validate live.

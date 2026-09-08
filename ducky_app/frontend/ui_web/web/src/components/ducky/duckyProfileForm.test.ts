@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearCachedCodingAgents, setCachedCodingAgents } from "../../hooks/codingAgentsCache";
+import type { CodingAgentDto } from "../../types/panel";
 import {
   codingAgentFromModel,
   formToConfig,
@@ -27,7 +29,17 @@ function baseForm(overrides: Partial<DuckyProfileFormState> = {}): DuckyProfileF
   };
 }
 
+/** What the host reports when Cursor is installed and running. */
+const agents: CodingAgentDto[] = [
+  { id: "cursor", label: "Cursor", enabled: true, available: true, status: "ok" },
+];
+
 describe("duckyProfileForm model selection", () => {
+  // `formToConfig` and friends read the live list from the cache, since a plain
+  // form helper has no component to thread it through.
+  beforeEach(() => setCachedCodingAgents(agents));
+  afterEach(() => clearCachedCodingAgents());
+
   it("allows empty model (global Default Model applies)", () => {
     expect(validateModelSelection("")).toBeNull();
     expect(validateModelSelection("   ")).toBeNull();
@@ -37,6 +49,13 @@ describe("duckyProfileForm model selection", () => {
     expect(validateModelSelection("cursor")).toMatch(/exact model/i);
     expect(validateModelSelection("cursor:composer-2.5")).toBeNull();
     expect(validateModelSelection("cursor:default")).toBeNull();
+  });
+
+  it("says nothing about an agent name it has never heard of", () => {
+    clearCachedCodingAgents();
+    // With no live list, "cursor" is just a word: warning that it is an agent
+    // name would be a guess, and blocking the save on a guess is worse.
+    expect(validateModelSelection("cursor")).toBeNull();
   });
 
   it("flags model messages for the pick gate", () => {
@@ -49,6 +68,12 @@ describe("duckyProfileForm model selection", () => {
     expect(codingAgentFromModel("cursor:composer-2.5")).toBe("cursor");
     expect(codingAgentFromModel("anthropic:claude-sonnet-4-20250514")).toBe("ducky");
     expect(codingAgentFromModel("")).toBe("ducky");
+  });
+
+  it("takes an explicit list over the cached one", () => {
+    clearCachedCodingAgents();
+    expect(codingAgentFromModel("cursor:composer-2.5")).toBe("ducky");
+    expect(codingAgentFromModel("cursor:composer-2.5", agents)).toBe("cursor");
   });
 
   it("persists a single favorite_models entry when set", () => {
