@@ -4,49 +4,114 @@
   "title": "ChangesetExport",
   "description": "Interop view of one run: who wrote what. Stable shape for external orchestrators that need per-worker attribution and the worker's write_allowed lane.",
   "type": "object",
-  "required": ["schema_version", "format", "run", "author", "lane", "files"],
+  "required": [
+    "schema_version",
+    "format",
+    "run",
+    "author",
+    "lane",
+    "files"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": 1 },
-    "format": { "const": "ducky.changeset/1" },
+    "schema_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "ducky.changeset/1"
+    },
     "run": {
       "type": "object",
-      "required": ["run_id", "conv_id", "started", "status"],
+      "required": [
+        "run_id",
+        "conv_id",
+        "started",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "run_id": { "type": "string", "minLength": 1 },
-        "conv_id": { "type": "string" },
-        "profile_id": { "type": "string" },
-        "ducky_name": { "type": "string" },
-        "model": { "type": "string" },
-        "coding_agent": { "type": "string" },
-        "group_id": { "type": "string" },
-        "started": { "type": "number" },
-        "ended": { "type": ["number", "null"] },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conv_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "ducky_name": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "coding_agent": {
+          "type": "string"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "started": {
+          "type": "number"
+        },
+        "ended": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "status": {
-          "enum": ["running", "done", "error", "cancelled", "reverted", "partially_reverted"]
+          "enum": [
+            "running",
+            "done",
+            "error",
+            "cancelled",
+            "reverted",
+            "partially_reverted"
+          ]
         }
       }
     },
     "author": {
       "type": "object",
-      "required": ["id", "name", "model"],
+      "required": [
+        "id",
+        "name",
+        "model"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "model": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
       }
     },
     "lane": {
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "object",
-          "required": ["write_allowed"],
+          "required": [
+            "write_allowed"
+          ],
           "additionalProperties": false,
           "properties": {
-            "write_allowed": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "write_allowed": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       ]
@@ -55,26 +120,134 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["path", "op", "before_hash", "after_hash", "in_lane"],
+        "required": [
+          "path",
+          "op",
+          "before_hash",
+          "after_hash",
+          "in_lane"
+        ],
         "additionalProperties": false,
         "properties": {
-          "path": { "type": "string", "minLength": 1 },
-          "op": { "enum": ["create", "write", "rename", "move", "copy", "import", "restore", "delete"] },
-          "from_path": { "type": ["string", "null"] },
-          "before_hash": { "type": "string", "pattern": "^([0-9a-f]{16})?$" },
-          "after_hash": { "type": "string", "pattern": "^([0-9a-f]{16})?$" },
-          "lines_added": { "type": "integer", "minimum": 0 },
-          "lines_removed": { "type": "integer", "minimum": 0 },
-          "in_lane": { "type": ["boolean", "null"] },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "op": {
+            "enum": [
+              "create",
+              "write",
+              "rename",
+              "move",
+              "copy",
+              "import",
+              "restore",
+              "delete"
+            ]
+          },
+          "from_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "before_hash": {
+            "type": "string",
+            "pattern": "^([0-9a-f]{16})?$"
+          },
+          "after_hash": {
+            "type": "string",
+            "pattern": "^([0-9a-f]{16})?$"
+          },
+          "lines_added": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lines_removed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "in_lane": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "blocked",
+              "failed"
+            ]
+          },
           "conflict": {
             "oneOf": [
-              { "type": "null" },
+              {
+                "type": "null"
+              },
               {
                 "type": "object",
-                "required": ["kind"],
-                "properties": { "kind": { "enum": ["stale_base", "concurrent_writer"] } }
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "stale_base",
+                      "concurrent_writer"
+                    ]
+                  }
+                }
               }
             ]
+          }
+        }
+      }
+    },
+    "editor": {
+      "description": "Editor changes (level actors, assets, devices, Verse wiring). Separate from files: their target is a slot, not a path on disk.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "slot",
+          "command",
+          "revertable"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "slot": {
+            "type": "string",
+            "minLength": 1
+          },
+          "command": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "revertable": {
+            "enum": [
+              "auto",
+              "manual",
+              "none"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "blocked",
+              "failed"
+            ]
+          },
+          "reverted": {
+            "type": "boolean"
           }
         }
       }

@@ -102,6 +102,12 @@ class WriteRecord:
     project_root: str
     abs_path: str
     trash_token: str = ""
+    #: Editor-change payload (command, targets, inverse) for op == "editor".
+    editor: Mapping[str, Any] | None = None
+    #: ok | blocked | failed. Anything but ok changed nothing and is recorded
+    #: for the history only — never reverted, never indexed.
+    outcome: str = "ok"
+    reason: str = ""
 
     @property
     def in_lane(self) -> bool | None:

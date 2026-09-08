@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-from backend.workspace import events
+from backend.workspace import editor_record, events
 from backend.workspace.identity import SOURCE_USER, RunContext
 from backend.workspace.journal import FileChangeJournal
 from backend.workspace.lanes import LanePolicy, set_mode_source
@@ -116,6 +116,9 @@ def install() -> None:
             policies=[LanePolicy(mode=lane_mode)],
             journal=build_journal(),
         )
+        # Editor changes (actors, assets, devices, Verse wiring) land in the same
+        # per-run ledger as file writes, so one Revert covers a whole turn.
+        editor_record.add_observer(editor_record.JournalEditorObserver())
         events.register_sink(_panel_event_sink)
         _installed = True
 

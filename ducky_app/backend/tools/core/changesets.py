@@ -33,6 +33,11 @@ def _journal() -> FileChangeJournal:
 
 def _summary(run: dict[str, Any]) -> dict[str, Any]:
     entries = run.get("entries", [])
+    applied = [e for e in entries if e.get("outcome", "ok") == "ok"]
+    files = [e for e in applied if e.get("op") != "editor"]
+    editor = [e for e in applied if e.get("op") == "editor"]
+    # Counted on their own: an attempt that changed nothing is not a change.
+    blocked = [e for e in entries if e.get("outcome", "ok") != "ok"]
     return {
         "run_id": run.get("run_id", ""),
         "conv_id": run.get("conv_id", ""),
@@ -44,8 +49,13 @@ def _summary(run: dict[str, Any]) -> dict[str, Any]:
         "started": run.get("started", 0.0),
         "ended": run.get("ended"),
         "lane": run.get("lane"),
-        "files": sorted({e["path"] for e in entries}),
+        "files": sorted({e["path"] for e in files}),
         "entries": len(entries),
+        "editor_changes": len(editor),
+        "editor_manual": sum(
+            1 for e in editor if (e.get("editor") or {}).get("revertable") != "auto"
+        ),
+        "blocked": len(blocked),
         "conflicts": sum(1 for e in entries if e.get("conflict")),
         "out_of_lane": sum(1 for e in entries if e.get("in_lane") is False),
     }
@@ -68,11 +78,13 @@ def require_revert_allowed(run: dict[str, Any]) -> None:
 
 @mcp.tool()
 def changeset_list(conv_id: str = "", group_id: str = "", limit: int = 20, pretty: bool = False) -> str:
-    """List recent runs that wrote project files: who, which files, conflicts, out-of-lane writes.
+    """List recent runs that changed the project: who, which files, which editor changes, what was blocked.
 
-    Filter by conv_id (one chat) or group_id (every member of a group). Use before
-    compiling a group's work to see what each ducky touched; then changeset_export
-    for the full per-file record or changeset_revert to undo a run.
+    Covers both file writes and editor changes (actors, assets, devices, Verse
+    wiring), plus attempts that were refused or failed. Filter by conv_id (one
+    chat) or group_id (every member of a group). Use before compiling a group's
+    work to see what each ducky touched; then changeset_export for the full
+    per-file record or changeset_revert to undo a run.
     """
     runs = _journal().list_runs(
         project_root=_project_root(),

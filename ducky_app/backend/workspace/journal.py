@@ -46,6 +46,19 @@ CONFLICT_STALE_BASE = "stale_base"
 CONFLICT_CONCURRENT = "concurrent_writer"
 
 _TEXT_OPS = frozenset({"write", "create"})
+#: Editor mutations (actors, assets, devices, Verse wiring). Their "path" is a
+#: target slot such as ``uefn://actor/<guid>/transform``, not a file on disk.
+OP_EDITOR = "editor"
+#: Ops whose after-state is stored as a blob. Editor entries keep JSON there so
+#: the panel can diff what a command changed.
+_BLOB_OPS = _TEXT_OPS | {OP_EDITOR}
+
+OUTCOME_OK = "ok"
+OUTCOME_BLOCKED = "blocked"
+OUTCOME_FAILED = "failed"
+#: Entries that changed nothing: recorded so the history is honest, but never
+#: reverted, never indexed, never counted as a file.
+_NO_EFFECT_OUTCOMES = frozenset({OUTCOME_BLOCKED, OUTCOME_FAILED})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -129,7 +142,7 @@ class FileChangeJournal:
             conflict = self._detect_conflict(storage, index, run, record)
             entry = self._make_entry(storage, run, record, conflict)
             run["entries"].append(entry)
-            if record.op in _TEXT_OPS:
+            if record.op in _TEXT_OPS and record.outcome == OUTCOME_OK:
                 run["seen"][record.path] = {"hash": record.after_hash, "ts": entry["ts"]}
             self._apply_index(index, record, run_id=run_id)
             self._save_run(storage, run)
@@ -154,6 +167,7 @@ class FileChangeJournal:
             "in_lane": entry["in_lane"],
             "conflict": conflict,
             "warning": warning,
+            "outcome": entry["outcome"],
         }
 
     def end_run(self, run_id: str, status: str, *, project_root: str) -> None:
@@ -241,9 +255,24 @@ class FileChangeJournal:
                     "lines_added": int(e.get("lines_added") or 0),
                     "lines_removed": int(e.get("lines_removed") or 0),
                     "in_lane": e.get("in_lane"),
+                    "outcome": e.get("outcome", OUTCOME_OK),
                     "conflict": ({"kind": e["conflict"]["kind"]} if e.get("conflict") else None),
                 }
                 for e in run.get("entries", [])
+                if e.get("op") != OP_EDITOR
+            ],
+            "editor": [
+                {
+                    "slot": e["path"],
+                    "command": (e.get("editor") or {}).get("command", e.get("tool", "")),
+                    "kind": (e.get("editor") or {}).get("kind", ""),
+                    "targets": (e.get("editor") or {}).get("targets", []),
+                    "revertable": (e.get("editor") or {}).get("revertable", "manual"),
+                    "outcome": e.get("outcome", OUTCOME_OK),
+                    "reverted": bool(e.get("reverted")),
+                }
+                for e in run.get("entries", [])
+                if e.get("op") == OP_EDITOR
             ],
         }
 
@@ -259,7 +288,10 @@ class FileChangeJournal:
     ) -> dict[str, Any]:
         """Undo every entry of a run, newest first, one restore per path."""
         run = self.get_run(run_id, project_root=project_root)
-        entries = [e for e in run.get("entries", []) if not e.get("reverted")]
+        entries = [
+            e for e in run.get("entries", [])
+            if not e.get("reverted") and e.get("outcome", OUTCOME_OK) == OUTCOME_OK
+        ]
         return self._revert_entries(run, entries, project_root=project_root, force=force, actor=actor)
 
     def revert_entry(
@@ -550,8 +582,13 @@ class FileChangeJournal:
     def _make_entry(
         self, storage: Path, run: dict[str, Any], record: WriteRecord, conflict: dict[str, Any] | None
     ) -> dict[str, Any]:
+        applied = record.outcome == OUTCOME_OK
         before_blob = self._store_blob(storage, record.before) if record.before else None
-        after_blob = self._store_blob(storage, record.after) if record.op in _TEXT_OPS else None
+        after_blob = (
+            self._store_blob(storage, record.after)
+            if applied and record.op in _BLOB_OPS and record.after
+            else None
+        )
         return {
             "seq": len(run["entries"]) + 1,
             "ts": record.ts or self._clock(),
@@ -572,6 +609,9 @@ class FileChangeJournal:
             "conflict": conflict,
             "reverted": False,
             "reverted_by_run": None,
+            "outcome": record.outcome,
+            "reason": record.reason or None,
+            "editor": dict(record.editor) if record.editor else None,
         }
 
     @staticmethod
@@ -584,7 +624,7 @@ class FileChangeJournal:
     def _detect_conflict(
         self, storage: Path, index: dict[str, Any], run: dict[str, Any], record: WriteRecord
     ) -> dict[str, Any] | None:
-        if record.op not in _TEXT_OPS:
+        if record.op not in _TEXT_OPS or record.outcome != OUTCOME_OK:
             return None
         prev = index.get(record.path)
         if not isinstance(prev, dict):
@@ -617,6 +657,10 @@ class FileChangeJournal:
         return f"{name} is also being edited by {who} right now; coordinate before compiling."
 
     def _apply_index(self, index: dict[str, Any], record: WriteRecord, *, run_id: str) -> None:
+        # The index answers "who last wrote this file". An editor slot is not a
+        # file, and a blocked or failed attempt wrote nothing — neither belongs.
+        if record.op == OP_EDITOR or record.outcome != OUTCOME_OK:
+            return
         writer = dict(record.writer)
         stamp = {
             "hash": record.after_hash,

@@ -73,7 +73,7 @@
         "seq": { "type": "integer", "minimum": 1 },
         "ts": { "type": "number" },
         "path": { "type": "string", "minLength": 1 },
-        "op": { "enum": ["create", "write", "rename", "move", "copy", "import", "restore", "delete"] },
+        "op": { "enum": ["create", "write", "rename", "move", "copy", "import", "restore", "delete", "editor"] },
         "from_path": { "type": ["string", "null"] },
         "trash_token": { "type": ["string", "null"] },
         "tool": { "type": "string" },
@@ -91,7 +91,62 @@
         },
         "conflict": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/conflict" }] },
         "reverted": { "type": "boolean" },
-        "reverted_by_run": { "type": ["string", "null"] }
+        "reverted_by_run": { "type": ["string", "null"] },
+        "outcome": {
+          "description": "ok = applied. blocked = refused by policy. failed = errored. Only ok entries are reverted or indexed.",
+          "enum": ["ok", "blocked", "failed"]
+        },
+        "reason": { "type": ["string", "null"] },
+        "editor": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/editor" }] }
+      }
+    },
+    "editor_target": {
+      "description": "What an editor command acted on. guid is preferred: labels are not unique and paths change on rename.",
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["actor", "asset", "device", "verse", "material", "datatable", "niagara", "umg", "entity", "world", "other"] },
+        "id": { "type": "string" },
+        "guid": { "type": "string" },
+        "label": { "type": "string" },
+        "path": { "type": "string" },
+        "invalid": { "type": "boolean" }
+      }
+    },
+    "editor_step": {
+      "description": "One listener command to post when undoing an editor change.",
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" }
+      }
+    },
+    "editor": {
+      "type": "object",
+      "required": ["command", "revertable"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string" },
+        "facet": { "type": "string" },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/editor_target" } },
+        "inverse": {
+          "description": "Commands that put the target back, in order. Empty or absent means it cannot be undone automatically.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/editor_step" }
+        },
+        "created": {
+          "description": "What this command brought into existence, so a revert can remove exactly that.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/editor_target" }
+        },
+        "revertable": { "enum": ["auto", "manual", "none"] },
+        "reason": { "type": "string" },
+        "summary": { "type": "string" },
+        "params": { "type": "object" }
       }
     }
   }

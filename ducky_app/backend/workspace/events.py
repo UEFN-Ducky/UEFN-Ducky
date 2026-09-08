@@ -20,6 +20,8 @@ GUARD_SHADOW_VIOLATION = "shadow_violation"
 GUARD_CONFLICT = "conflict"
 GUARD_POLICY_DENIED = "policy_denied"
 
+EDITOR_OP = "editor_op"
+
 
 @dataclass(frozen=True)
 class FileGuardEvent:
@@ -68,6 +70,25 @@ class LaneChangedEvent:
             "member_conv_id": self.member_conv_id,
             "write_allowed": None if self.write_allowed is None else list(self.write_allowed),
         }
+
+
+@dataclass(frozen=True)
+class EditorOpEvent:
+    """One editor change (actor, asset, device, Verse wiring) an agent just made."""
+
+    command: str
+    kind: str
+    slot: str
+    summary: str
+    revertable: str
+    outcome: str = "ok"
+    target_label: str = ""
+    conv_id: str = ""
+    run_id: str = ""
+    tool: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "type": EDITOR_OP}
 
 
 _sinks: list[EventSink] = []

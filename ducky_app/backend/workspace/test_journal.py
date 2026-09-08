@@ -43,7 +43,7 @@ def test_run_document_is_created_lazily_and_validates(env) -> None:
         res2 = writer.write_text("Content/Verse/a.verse", "two\n", tool="workspace_write_file")
     finally:
         identity.reset(token)
-    assert res.changeset == {"run_id": "r1", "seq": 1, "in_lane": None, "conflict": None}
+    assert res.changeset == {"run_id": "r1", "seq": 1, "in_lane": None, "conflict": None, "outcome": "ok"}
     assert res2.changeset["seq"] == 2 and res2.warning == ""
     run = journal.get_run("r1", project_root=str(root))
     assert validate("changeset_run", run) == []

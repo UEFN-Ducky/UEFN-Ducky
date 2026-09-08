@@ -16,9 +16,11 @@ must not be reported as an error because bookkeeping went wrong.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from backend.workspace import identity
 from backend.workspace.editor_ops import (
@@ -215,4 +217,115 @@ def sidecar_from(body: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
     return side if isinstance(side, Mapping) else None
 
 
-_ObserverFactory = Callable[[], EditorObserver]
+def _jsonable(value: Any) -> Any:
+    """Best-effort JSON-safe copy; unknown objects become their repr."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return repr(value)
+
+
+def _dumps(value: Any) -> str:
+    try:
+        return json.dumps(_jsonable(value), ensure_ascii=False, sort_keys=True)
+    except Exception:  # noqa: BLE001 - a blob is never worth failing a record over
+        return json.dumps({"unserializable": repr(value)[:2000]})
+
+
+class JournalEditorObserver:
+    """Write each editor change into the run's changeset ledger.
+
+    Goes straight to the journal rather than through ``ProjectWriter``: an editor
+    slot is not a file, and the pipeline's observers (file history, follow-code
+    editor sync) must never be handed a ``uefn://`` pseudo-path.
+
+    Blocked and failed attempts are recorded too. They carry no after-blob and
+    the journal never reverts or indexes them, but they are what turns the
+    history from a list of successes into an account of what actually happened.
+    """
+
+    def on_editor_change(self, change: EditorChange) -> None:
+        from backend.workspace import events
+        from backend.workspace.journal import OP_EDITOR, FileChangeJournal
+        from backend.workspace.paths import content_hash
+        from backend.workspace.policy import ALLOW
+        from backend.workspace.runtime import get_writer
+        from backend.workspace.writer import WriteRecord
+
+        if not change.writer.get("run_id"):
+            # Not part of an agent run — the panel's own editor calls are the user.
+            return
+        writer = get_writer()
+        journal = writer.journal
+        if not isinstance(journal, FileChangeJournal):
+            return
+        try:
+            root = writer.root()
+        except Exception:
+            return
+
+        before_json = _dumps(change.before) if change.before is not None else ""
+        after_json = _dumps(
+            {"params": _jsonable(change.params), "after": _jsonable(change.after),
+             "created": _jsonable(list(change.created))}
+        ) if change.applied else ""
+
+        record = WriteRecord(
+            op=OP_EDITOR,
+            path=change.slot,
+            from_path="",
+            before=before_json,
+            after=after_json,
+            before_hash=content_hash(before_json) if before_json else "",
+            after_hash=content_hash(after_json) if after_json else "",
+            existed_before=change.before is not None,
+            tool=change.command,
+            writer=change.writer,
+            ctx=identity.resolve_context(),
+            ts=time.time(),
+            lines_added=0,
+            lines_removed=0,
+            decision=ALLOW,          # lanes do not cover editor targets (ADR 0002)
+            project_root=root,
+            abs_path="",
+            editor=self._payload(change),
+            outcome=change.outcome,
+            reason=change.reason,
+        )
+        journal.record(record)
+
+        target_label = ""
+        if change.targets:
+            first = change.targets[0]
+            target_label = str(first.get("label") or first.get("path") or first.get("id") or "")
+        events.emit(
+            events.EditorOpEvent(
+                command=change.command,
+                kind=change.kind,
+                slot=change.slot,
+                summary=change.summary,
+                revertable=change.revertable,
+                outcome=change.outcome,
+                target_label=target_label,
+                conv_id=str(change.writer.get("conv_id") or ""),
+                run_id=str(change.writer.get("run_id") or ""),
+                tool=change.command,
+            ).to_dict()
+        )
+
+    @staticmethod
+    def _payload(change: EditorChange) -> dict[str, Any]:
+        return {
+            "command": change.command,
+            "kind": change.kind,
+            "facet": change.spec.slot,
+            "targets": _jsonable(list(change.targets)),
+            "inverse": _jsonable(list(change.inverse)),
+            "created": _jsonable(list(change.created)),
+            "revertable": change.revertable,
+            "reason": change.reason,
+            "summary": change.summary,
+        }

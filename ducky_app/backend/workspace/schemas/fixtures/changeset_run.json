@@ -9,12 +9,19 @@
   "group_id": "conv-hub-01",
   "leader_conv_id": "conv-architect-01",
   "source": "agent",
-  "lane": { "write_allowed": ["Content/Verse/Shop/**"] },
+  "lane": {
+    "write_allowed": [
+      "Content/Verse/Shop/**"
+    ]
+  },
   "started": 1757250000.125,
   "ended": 1757250042.5,
   "status": "done",
   "seen": {
-    "Content/Verse/Shop/shop.verse": { "hash": "9a1f3c5e7b2d4f60", "ts": 1757250001.0 }
+    "Content/Verse/Shop/shop.verse": {
+      "hash": "9a1f3c5e7b2d4f60",
+      "ts": 1757250001.0
+    }
   },
   "entries": [
     {
@@ -65,6 +72,84 @@
       },
       "reverted": false,
       "reverted_by_run": null
+    },
+    {
+      "seq": 3,
+      "ts": 1757250035.0,
+      "path": "uefn://actor/8F2A1C33-4D5E/transform",
+      "op": "editor",
+      "from_path": null,
+      "trash_token": null,
+      "tool": "set_actor_transform",
+      "before_hash": "5d7f9b1c3e2a4068",
+      "after_hash": "6e8a0c2d4f3b5179",
+      "before_entry_id": null,
+      "after_entry_id": null,
+      "before_blob": "5d7f9b1c3e2a4068",
+      "after_blob": "6e8a0c2d4f3b5179",
+      "lines_added": 0,
+      "lines_removed": 0,
+      "in_lane": null,
+      "conflict": null,
+      "reverted": false,
+      "reverted_by_run": null,
+      "outcome": "ok",
+      "reason": null,
+      "editor": {
+        "command": "set_actor_transform",
+        "kind": "actor",
+        "facet": "transform",
+        "targets": [
+          {
+            "kind": "actor",
+            "id": "8F2A1C33-4D5E",
+            "guid": "8F2A1C33-4D5E",
+            "label": "VerifyCube",
+            "path": "/Game/Map.Map:PersistentLevel.BP_Cube_2"
+          }
+        ],
+        "inverse": [
+          {
+            "command": "set_actor_transform",
+            "params": {
+              "actor_path": "/Game/Map.Map:PersistentLevel.BP_Cube_2",
+              "location": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "created": [],
+        "revertable": "auto",
+        "reason": "",
+        "summary": "moved +250 on Z"
+      }
+    },
+    {
+      "seq": 4,
+      "ts": 1757250040.0,
+      "path": "Content/Verse/Hub/hub.verse",
+      "op": "write",
+      "from_path": null,
+      "trash_token": null,
+      "tool": "workspace_write_file",
+      "before_hash": "",
+      "after_hash": "",
+      "before_entry_id": null,
+      "after_entry_id": null,
+      "before_blob": null,
+      "after_blob": null,
+      "lines_added": 0,
+      "lines_removed": 0,
+      "in_lane": false,
+      "conflict": null,
+      "reverted": false,
+      "reverted_by_run": null,
+      "outcome": "blocked",
+      "reason": "Out of lane: \"Content/Verse/Hub/hub.verse\" is not in your write lane [Content/Verse/Shop/**].",
+      "editor": null
     }
   ]
 }
