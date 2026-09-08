@@ -47,11 +47,19 @@ class PluginClientPool:
         self._pool_lock = asyncio.Lock()
         self._tools_cache: list[Tool] | None = None
         self._tools_cache_ids: tuple[str, ...] | None = None
+        # namespaced tool name -> its server's annotations (readOnlyHint etc.).
+        # Lets the change journal tell a nested read from a nested mutation.
+        self._tool_annotations: dict[str, Any] = {}
         self._failed_until: dict[str, float] = {}
 
     def invalidate_tools_cache(self) -> None:
         self._tools_cache = None
         self._tools_cache_ids = None
+        self._tool_annotations = {}
+
+    def annotations_for(self, namespaced_name: str) -> Any | None:
+        """A nested tool's MCP annotations, or None if unknown or not yet listed."""
+        return self._tool_annotations.get(namespaced_name)
 
     async def _get_or_create(self, plugin_id: str) -> PluginConnection:
         async with self._pool_lock:
@@ -204,11 +212,19 @@ class PluginClientPool:
         tools = list(result.tools or [])
         namespaced: list[Tool] = []
         for tool in tools:
+            name = namespace_tool_name(conn.manifest, tool.name)
+            # Keep annotations and outputSchema: readOnlyHint/destructiveHint are how
+            # the change journal knows whether a nested call mutated the project.
+            annotations = getattr(tool, "annotations", None)
+            if annotations is not None:
+                self._tool_annotations[name] = annotations
             namespaced.append(
                 Tool(
-                    name=namespace_tool_name(conn.manifest, tool.name),
+                    name=name,
                     description=tool.description or tool.name,
                     inputSchema=tool.inputSchema,
+                    annotations=annotations,
+                    outputSchema=getattr(tool, "outputSchema", None),
                 )
             )
         return namespaced
