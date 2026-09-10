@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { Children, isValidElement, useMemo } from "react";
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import type { OpenFileHandler } from "../../types/richContent";
-import { basename } from "../../verse-editor/utils/isVerseFile";
-import { isWorkspaceFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
+import { RichLink } from "./RichInline";
 import { promoteMarkdownToSegments } from "./promoteMarkdownBlocks";
 import { RichBlockView } from "./RichBlockList";
 import { RichCodeBlock } from "./RichCodeBlock";
@@ -24,50 +24,21 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
       h3: ({ children }) => <RichHeading level={3}>{children}</RichHeading>,
       h4: ({ children }) => <RichHeading level={4}>{children}</RichHeading>,
       p: ({ children }) => <RichParagraph>{children}</RichParagraph>,
-      a: ({ href, children }) => {
-        const linkHref = href ?? "";
-        if (linkHref.startsWith("plan-node:")) {
-          const id = linkHref.slice("plan-node:".length).trim();
-          if (!id) return null;
-          return (
-            <span className="plan-md-anchor" data-plan-node-id={id} title="Linked plan step">
-              {children}
-            </span>
-          );
-        }
-        if (onOpenFile && isWorkspaceFilePath(linkHref)) {
-          const norm = normalizeWorkspacePath(linkHref);
-          return (
-            <button
-              type="button"
-              className="rich-md-link"
-              onClick={() => onOpenFile(norm, basename(norm))}
-              title={norm}
-            >
-              {children}
-            </button>
-          );
-        }
-        if (linkHref.startsWith("http://") || linkHref.startsWith("https://")) {
-          return (
-            <a href={linkHref} className="rich-md-link rich-md-link--external" target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          );
-        }
-        return <span className="rich-md-link rich-md-link--static">{children}</span>;
-      },
+      a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
       ul: ({ children }) => <ul className="rich-list">{children}</ul>,
-      ol: ({ children }) => <ol className="rich-list rich-list--ordered">{children}</ol>,
+      ol: ({ children, start }) => <ol start={start} className="rich-list rich-list--ordered">{children}</ol>,
       li: ({ children }) => <li className="rich-list-item">{children}</li>,
       blockquote: ({ children }) => <blockquote className="rich-blockquote">{children}</blockquote>,
-      code: ({ className, children }) => {
-        const isBlock = className?.includes("language-");
-        const lang = className?.replace("language-", "") ?? undefined;
-        const raw = String(children).replace(/\n$/, "");
-        return <RichCodeBlock text={raw} language={lang} inline={!isBlock} />;
+      code: ({ children }) => <RichCodeBlock text={String(children)} inline />,
+      pre: ({ children }) => {
+        // The pre wrapper identifies blocks even when no language is supplied.
+        const child = Children.toArray(children)[0];
+        if (!isValidElement<{ children?: ReactNode; className?: string }>(child)) return <pre>{children}</pre>;
+        return <RichCodeBlock
+          text={String(child.props.children ?? "").replace(/\n$/, "")}
+          language={child.props.className?.replace("language-", "")}
+        />;
       },
-      pre: ({ children }) => <div className="rich-pre-wrap">{children}</div>,
       table: ({ children }) => (
         <div className="rich-table-wrap">
           <table className="rich-table">{children}</table>

@@ -1,10 +1,12 @@
 import { Icons } from "../../icons/Icons";
-import type { RichCalloutTone } from "../../types/richContent";
+import type { OpenFileHandler, RichCalloutTone } from "../../types/richContent";
+import { RichInline } from "./RichInline";
 
 interface RichCalloutProps {
   tone: RichCalloutTone;
   text: string;
   title?: string;
+  onOpenFile?: OpenFileHandler;
 }
 
 function CalloutIcon({ tone }: { tone: RichCalloutTone }) {
@@ -13,16 +15,15 @@ function CalloutIcon({ tone }: { tone: RichCalloutTone }) {
   return <Icons.AlertTriangle />;
 }
 
-export function RichCallout({ tone, text, title }: RichCalloutProps) {
+export function RichCallout({ tone, text, title, onOpenFile }: RichCalloutProps) {
+  const label = title || { info: "Note", warn: "Warning", error: "Error", success: "Verified" }[tone];
   return (
     <div className={`rich-callout rich-callout--${tone}`}>
-      {title ? (
-        <div className="rich-callout-title">
-          <CalloutIcon tone={tone} />
-          {title}
-        </div>
-      ) : null}
-      <div className="rich-callout-body">{text}</div>
+      <div className="rich-callout-title">
+        <CalloutIcon tone={tone} />
+        {label}
+      </div>
+      <div className="rich-callout-body"><RichInline text={text} onOpenFile={onOpenFile} /></div>
     </div>
   );
 }

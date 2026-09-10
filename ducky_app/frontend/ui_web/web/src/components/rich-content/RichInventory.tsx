@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
 import { Icons } from "../../icons/Icons";
-import type { RichInventoryItem, RichInventoryKind } from "../../types/richContent";
+import type { OpenFileHandler, RichInventoryItem, RichInventoryKind } from "../../types/richContent";
 import { inventoryKindFromLabel } from "./inventoryKind";
 import { RichHeading } from "./RichHeading";
+import { RichInline } from "./RichInline";
 
 interface RichInventoryProps {
   items: RichInventoryItem[];
   folder?: string;
   heading?: string;
+  onOpenFile?: OpenFileHandler;
 }
 
 const KIND_ICON: Record<RichInventoryKind, () => ReactNode> = {
@@ -20,7 +22,7 @@ const KIND_ICON: Record<RichInventoryKind, () => ReactNode> = {
   default: () => <Icons.Box />,
 };
 
-export function RichInventory({ items, folder, heading }: RichInventoryProps) {
+export function RichInventory({ items, folder, heading, onOpenFile }: RichInventoryProps) {
   if (!items.length) return null;
   const title = heading?.trim() || "Inventory Added";
   return (
@@ -45,7 +47,7 @@ export function RichInventory({ items, folder, heading }: RichInventoryProps) {
                   <span className="rich-inventory-slash">/</span>
                   <code className="rich-code--inline rich-inventory-title">{item.title}</code>
                 </div>
-                {item.desc ? <p className="rich-inventory-desc">{item.desc}</p> : null}
+                {item.desc ? <p className="rich-inventory-desc"><RichInline text={item.desc} onOpenFile={onOpenFile} /></p> : null}
               </div>
             </li>
           );

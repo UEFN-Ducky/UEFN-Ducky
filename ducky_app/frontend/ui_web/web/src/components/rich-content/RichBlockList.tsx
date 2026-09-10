@@ -11,6 +11,7 @@ import { RichParagraph } from "./RichParagraph";
 import { RichReportHeader } from "./RichReportHeader";
 import { RichStats } from "./RichStats";
 import { RichTable } from "./RichTable";
+import { RichInline } from "./RichInline";
 
 interface RichBlockListProps {
   blocks: RichBlock[];
@@ -42,11 +43,11 @@ interface RichBlockViewProps {
 export function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockViewProps) {
   switch (block.type) {
     case "heading":
-      return <RichHeading level={block.level}>{block.text}</RichHeading>;
+      return <RichHeading level={block.level}><RichInline text={block.text} onOpenFile={onOpenFile} /></RichHeading>;
     case "paragraph":
-      return <RichParagraph>{block.text}</RichParagraph>;
+      return <RichParagraph><RichInline text={block.text} onOpenFile={onOpenFile} /></RichParagraph>;
     case "list":
-      return <RichList ordered={block.ordered} items={block.items} />;
+      return <RichList ordered={block.ordered} items={block.items} onOpenFile={onOpenFile} />;
     case "code":
       return <RichCodeBlock text={block.text} language={block.language} />;
     case "accordion":
@@ -59,22 +60,22 @@ export function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockView
         />
       );
     case "table":
-      return <RichTable headers={block.headers} rows={block.rows} />;
+      return <RichTable headers={block.headers} rows={block.rows} onOpenFile={onOpenFile} />;
     case "key_value":
       return <RichKeyValue pairs={block.pairs} />;
     case "file_link":
       return <RichFileLink path={block.path} label={block.label} onOpenFile={onOpenFile} />;
     case "callout":
-      return <RichCallout tone={block.tone} text={block.text} title={block.title} />;
+      return <RichCallout tone={block.tone} text={block.text} title={block.title} onOpenFile={onOpenFile} />;
     case "header":
-      return <RichReportHeader title={block.title} command={block.command} />;
+      return <RichReportHeader title={block.title} command={block.command} onOpenFile={onOpenFile} />;
     case "stats":
       return (
         <RichStats changes={block.changes} blocked={block.blocked} programs={block.programs} />
       );
     case "inventory":
       return (
-        <RichInventory items={block.items} folder={block.folder} heading={block.heading} />
+        <RichInventory items={block.items} folder={block.folder} heading={block.heading} onOpenFile={onOpenFile} />
       );
     default:
       return null;
