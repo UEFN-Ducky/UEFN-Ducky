@@ -238,6 +238,7 @@ def maintain_appdata(app_root: Path | None = None) -> dict[str, int]:
     """Run full AppData maintenance sweep."""
     if app_root is None:
         app_root = default_app_data_dir()
+    db_result = _maintain_store(app_root)
     moved = sweep_old_backups(app_root)
     pruned = prune_all_backups(app_root)
     removed_dirs = prune_empty_project_dirs(app_root)
@@ -254,10 +255,38 @@ def maintain_appdata(app_root: Path | None = None) -> dict[str, int]:
         "pruned_backups": pruned,
         "removed_project_dirs": removed_dirs,
         "removed_installer_cache": removed_installers,
+        **db_result,
     }
     if any(result.values()):
         _log.info("AppData maintenance: %s", result)
     return result
+
+
+_SNAPSHOT_EVERY_S = 24 * 3600
+
+
+def _maintain_store(app_root: Path) -> dict[str, int]:
+    """ADR 0003: integrity check (restores the newest snapshot on failure) and a
+    daily ``VACUUM INTO`` snapshot. Never raises: maintenance must not take the
+    panel down, and the store logs its own failures."""
+    import time
+
+    out = {"db_checked": 0, "db_snapshot": 0}
+    try:
+        from backend.store import db as store_db
+        from backend.store.switch import use_db
+
+        if not use_db("settings"):
+            return out
+        store_db.open_checked(app_root)
+        out["db_checked"] = 1
+        newest = store_db.newest_snapshot(app_root)
+        if newest is None or time.time() - newest.stat().st_mtime > _SNAPSHOT_EVERY_S:
+            store_db.snapshot(app_root, label="daily")
+            out["db_snapshot"] = 1
+    except Exception:
+        _log.exception("ducky.db maintenance failed")
+    return out
 
 
 def start_appdata_maintenance_async(app_root: Path | None = None) -> None:
