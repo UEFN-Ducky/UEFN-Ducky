@@ -150,6 +150,57 @@ def _message_search_text(message: dict[str, Any]) -> str:
     return str(message.get("text") or message.get("content") or "")
 
 
+def _search_chats_rows(
+    query: str,
+    matcher: re.Pattern[str],
+    *,
+    max_results: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """ADR 0003: titles from the conversations table, bodies from FTS5.
+
+    The file-store version iterated ``conv.messages`` on objects that the list
+    call had stripped, so body search silently matched titles only.
+    """
+    from frontend.ui_web.project_chats import _project_id, _repo
+
+    repo = _repo()
+    project_id = _project_id()
+    by_conv: dict[str, dict[str, Any]] = {}
+    total = 0
+    for conv in list_conversations(folder_id=None):
+        title = conv.title or ""
+        hit = matcher.search(title)
+        if hit:
+            by_conv[conv.id] = {
+                "id": conv.id,
+                "title": conv.title,
+                "folder_id": conv.folder_id or "",
+                "ducky_style": conv.ducky_style or "",
+                "matches": [{"message_id": "title", "preview": _preview(title, hit)}],
+            }
+            total += 1
+    meta = {c.id: c for c in list_conversations(folder_id=None)}
+    for row in repo.search_messages(project_id, query, limit=max_results):
+        if total >= max_results:
+            break
+        conv = meta.get(row["conv_id"])
+        if conv is None:
+            continue
+        entry = by_conv.setdefault(
+            conv.id,
+            {
+                "id": conv.id,
+                "title": conv.title,
+                "folder_id": conv.folder_id or "",
+                "ducky_style": conv.ducky_style or "",
+                "matches": [],
+            },
+        )
+        entry["matches"].append({"message_id": int(row["seq"]), "preview": str(row["preview"] or "")})
+        total += 1
+    return list(by_conv.values()), total
+
+
 def _search_chats(
     query: str,
     matcher: re.Pattern[str],
@@ -159,6 +210,11 @@ def _search_chats(
     chat_results: list[dict[str, Any]] = []
     total_matches = 0
     remaining = max_results
+
+    from backend.store.switch import use_db
+
+    if use_db("chats"):
+        return _search_chats_rows(query, matcher, max_results=max_results)
 
     for conv in list_conversations(folder_id=None):
         if remaining <= 0:

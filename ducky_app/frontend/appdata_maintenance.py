@@ -32,6 +32,16 @@ def _known_project_slugs() -> set[str]:
 
 
 def _has_conversation_data(chats_project_dir: Path) -> bool:
+    try:
+        from backend.store.switch import use_db
+
+        if use_db("chats"):
+            from backend.store.repos import chats as repo
+
+            if repo.conv_count(chats_project_dir.name) > 0:
+                return True
+    except Exception:
+        pass
     conv_dir = chats_project_dir / "conversations"
     if not conv_dir.is_dir():
         return False
