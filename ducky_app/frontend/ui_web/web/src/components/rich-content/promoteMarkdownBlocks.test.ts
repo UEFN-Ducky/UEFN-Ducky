@@ -68,38 +68,57 @@ describe("promoteMarkdownToSegments", () => {
     expect(segs).toEqual([{ kind: "markdown", text: "ok" }]);
   });
 
-  it("recovers the 3D Modeler blender prose into blocks", () => {
-    const prose =
-      "Created `SM_Chair` and `SM_Desk` in Blender (default cube removed, each object organized into its own collection under `COL_Props`), giving you real scene changes to exercise the ledger/changeset tracking with. The viewport screenshot tool errored on a schema bug on its end, but `blender_get_scene_info` confirms both meshes exist and replaced the default cube.";
-    const segs = promoteMarkdownToSegments(prose);
-    const types = segs.map((s) => (s.kind === "block" ? s.block.type : "markdown"));
-    expect(types).toEqual(["header", "heading", "stats", "inventory", "callout"]);
+  it("preserves prose, caveats and tool evidence without fabricating metrics", () => {
+    const prose = "Created `SM_Chair` and `SM_Desk` in Blender. Screenshot failed, but `blender_get_scene_info` confirmed the meshes.";
+    expect(promoteMarkdownToSegments(prose)).toEqual([{ kind: "markdown", text: prose }]);
+  });
 
-    const header = segs.find((s) => s.kind === "block" && s.block.type === "header");
-    expect(header?.kind === "block" && header.block.type === "header" && header.block.command).toBe(
-      "blender",
-    );
-    expect(
-      header?.kind === "block" && header.block.type === "header" && header.block.title,
-    ).toBe("Created SM_Chair and SM_Desk in Blender");
+  it.each(["NOTE", "TIP", "WARNING", "CAUTION", "ERROR", "SUCCESS"])("renders a %s alert with inline content", (label) => {
+    const segments = promoteMarkdownToSegments(`> [!${label}] Custom title\n> **Result** for ` + "`Props`" + "\n> Second line.");
+    expect(segments).toEqual([{ kind: "block", block: {
+      type: "callout", title: "Custom title", text: "**Result** for `Props`\nSecond line.",
+      tone: ["NOTE", "TIP"].includes(label) ? "info" : label === "ERROR" ? "error" : label === "SUCCESS" ? "success" : "warn",
+    } }]);
+  });
 
-    const inv = segs.find((s) => s.kind === "block" && s.block.type === "inventory");
-    expect(inv?.kind === "block" && inv.block.type === "inventory" && inv.block.folder).toBe(
-      "COL_Props",
-    );
-    expect(
-      inv?.kind === "block" && inv.block.type === "inventory" && inv.block.items.map((i) => i.title),
-    ).toEqual(["SM_Chair", "SM_Desk"]);
-    expect(
-      inv?.kind === "block" && inv.block.type === "inventory" && inv.block.items[0]?.kind,
-    ).toBe("blender");
+  it("keeps ordinary quotes and unknown alert types intact", () => {
+    for (const text of ["> Note that this is quoted prose", "> [!CUSTOM] Hello", "> A normal quote."]) {
+      expect(promoteMarkdownToSegments(text)).toEqual([{ kind: "markdown", text }]);
+    }
+  });
 
-    const callout = segs.find((s) => s.kind === "block" && s.block.type === "callout");
-    expect(callout?.kind === "block" && callout.block.type === "callout" && callout.block.text).toMatch(
-      /screenshot tool errored/i,
-    );
-    expect(
-      JSON.stringify(segs).includes("blender_get_scene_info"),
-    ).toBe(false);
+  it.each(["```markdown", "~~~~markdown"])("does not promote examples inside %s fences", (fence) => {
+    const text = `${fence}\n${MOCK}\n${fence.replace("markdown", "")}`;
+    expect(promoteMarkdownToSegments(text)).toEqual([{ kind: "markdown", text }]);
+  });
+
+  it("does not promote an unfinished fenced example", () => {
+    const text = "```markdown\n" + MOCK.trim();
+    expect(promoteMarkdownToSegments(text)).toEqual([{ kind: "markdown", text }]);
+  });
+
+  it("allows a report title without a command chip", () => {
+    expect(promoteMarkdownToSegments("# Build complete\n\nDetails.")[0]).toEqual({ kind: "block", block: {
+      type: "header", title: "Build complete", command: undefined,
+    } });
+  });
+
+  it("accepts blank lines between inventory rows and Windows line endings", () => {
+    const text = "## Inventory — `Test/Full`\r\n\r\n- **Verse device** / `a.verse` — **Wired**.\r\n\r\n- **Blender mesh** / `SM_Crate` — Placed.";
+    const seg = promoteMarkdownToSegments(text)[0];
+    expect(seg?.kind === "block" && seg.block.type === "inventory" && seg.block.items).toHaveLength(2);
+  });
+
+  it.each([
+    "## Run Summary\n- **Editor changes:** 23 applied\n- Check the remaining props.",
+    "## Run Summary\n- **Editor changes:** 23 applied, but two were reverted.",
+    "## Run Summary\n- **Editor changes:** -1 applied",
+    "## Run Summary\n- **Programs:** UEFN 2 · Unknown 8",
+    "## Inventory\n- **Devices** / `Trigger` — Wired.\n- A caveat here.\n- **Devices** / `Button` — Pending.",
+    "## Inventory\n- **Devices** / `Trigger` — Wired.\n  - Nested caveat.",
+    "## Inventory\n- **Devices** / `Trigger` — Wired.\n  Still needs testing.",
+    "## Inventory\n- **Devices** / `Trigger` — Wired.\nStill needs testing.",
+  ])("preserves all content in an incomplete or mixed report", (text) => {
+    expect(promoteMarkdownToSegments(text)).toEqual([{ kind: "markdown", text }]);
   });
 });
