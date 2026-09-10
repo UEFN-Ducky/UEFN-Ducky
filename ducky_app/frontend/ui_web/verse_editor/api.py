@@ -105,6 +105,7 @@ class VerseEditorApi:
             ws = discover_verse_workspace(project_root)
             status["workspace_folders"] = ws["workspace_folders"]
             status["watch_files"] = ws["watch_files"]
+            status["vproject_shadow"] = str(ws.get("vproject_shadow") or "")
         return status
 
     def get_lsp_status(self, client_id: str | None = None) -> dict[str, Any]:

@@ -394,13 +394,38 @@ def kick_detect_refresh() -> None:
         _detect_refresh_inflight = True
 
     def _run() -> None:
-        global _detect_refresh_inflight, _detect_cache, _detect_cache_at
+        global _detect_refresh_inflight
         try:
-            agents = list_coding_agents(None)
-            payload = {"agents": [a.to_dict() for a in agents]}
-            with _detect_lock:
-                _detect_cache = payload
-                _detect_cache_at = time.monotonic()
+            # Probe every adapter concurrently and publish each row as it lands.
+            # One slow plugin (Codex fetching pricing pages) must not hold the
+            # others on "Checking…" — the Settings row and picker refresh per agent.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from frontend.settings import PanelSettings
+
+            s = PanelSettings.load()
+            rows = {a["id"]: a for a in _instant_detect_payload()["agents"]}
+            order = list(rows)
+            adapters = {aid: get_adapter(aid) for aid in listed_external_coding_agents()}
+            adapters = {k: v for k, v in adapters.items() if v is not None}
+
+            def _publish() -> None:
+                global _detect_cache, _detect_cache_at
+                with _detect_lock:
+                    _detect_cache = {"agents": [rows[k] for k in order if k in rows]}
+                    _detect_cache_at = time.monotonic()
+                _notify_detect_updated()
+
+            with ThreadPoolExecutor(max_workers=max(1, len(adapters))) as pool:
+                futs = {pool.submit(ad.detect, s): aid for aid, ad in adapters.items()}
+                for fut in as_completed(futs):
+                    aid = futs[fut]
+                    try:
+                        rows[aid] = fut.result().to_dict()
+                    except Exception as exc:  # noqa: BLE001 - one bad plugin, not all rows
+                        rows[aid] = {**rows.get(aid, {}), "id": aid, "status": f"Detect failed: {exc}"}
+                    _publish()
+            if not adapters:
+                _publish()
         finally:
             with _detect_refresh_lock:
                 _detect_refresh_inflight = False

@@ -1952,7 +1952,6 @@
 
 /* VirtualChatMessageList */
 .virtual-chat-message-list-root {
-  --chat-text-size: 14px;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -2078,8 +2077,8 @@
 .virtual-chat-message-list-item {
   width: 100%;
   font-family: var(--chat-text-font);
-  font-size: var(--chat-text-size);
-  line-height: 1.8;
+  font-size: var(--chat-text-size, 14px);
+  line-height: var(--chat-line-height, 1.8);
 }
 
 /* MessageBubble */
@@ -3117,7 +3116,7 @@
   width: 100%;
   min-width: 0;
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--chat-text-size, 14px);
   line-height: 1.55;
   max-width: 100%;
   padding: 2px 4px;

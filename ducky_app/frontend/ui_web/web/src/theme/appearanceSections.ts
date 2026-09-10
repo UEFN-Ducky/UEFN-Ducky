@@ -2,6 +2,7 @@
 
 import { LAYOUT_TOKENS, STATUS_COLORS } from "./tokenEngine";
 import { VERSE_COLOR_TOKENS } from "./verseSyntaxTokens";
+import { CHAT_APPEARANCE_TOKEN_IDS } from "./chatAppearanceTokens";
 
 export type AppearanceSectionKind =
   | "effects"
@@ -107,14 +108,14 @@ export const APPEARANCE_UI_SECTIONS: AppearanceUiSection[] = [
   {
     id: "chat",
     title: "Chat",
-    subtitle: "Composer, messages, and panels.",
+    subtitle: "Response colors, blocks, typography, and live examples.",
     kind: "tokens",
     fontToken: {
       id: "chat-text-font",
       role: "ui",
       hint: "Chat message text. Defaults to the app UI font.",
     },
-    tokenIds: ["fg", "fg-dim", "muted", "border", "card", "input-bg"],
+    tokenIds: CHAT_APPEARANCE_TOKEN_IDS,
   },
   {
     id: "settings",

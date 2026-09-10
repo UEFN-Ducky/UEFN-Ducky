@@ -3,6 +3,7 @@ import { DEFAULT_CSS_VARS, defaultFoundation } from "./defaultTokens";
 import { colorToHexAndAlpha, formatColorWithAlpha, hexToHSL, hexToRgba, parseRgba, shiftColor } from "./colorUtils";
 import { applyFontLibraryToCssVars } from "./fontLibrary";
 import { VERSE_COLOR_TOKENS, VERSE_TOKEN_IDS } from "./verseSyntaxTokens";
+import { applyChatAppearance, CHAT_APPEARANCE_TOKEN_IDS } from "./chatAppearanceTokens";
 
 export interface TokenDef {
   id: string;
@@ -317,6 +318,7 @@ export const STATUS_COLORS: StatusColorDef[] = [
 ];
 
 export const ALL_TOKEN_IDS = [
+  ...CHAT_APPEARANCE_TOKEN_IDS,
   ...ALL_COLOR_TOKEN_DEFS.map((t) => t.id),
   ...LAYOUT_TOKENS.map((t) => t.id),
   ...SEMANTIC_COLOR_IDS,
@@ -500,6 +502,7 @@ export function computeCssVars(state: AppearanceState): Record<string, string> {
   }
 
   applyAliases(vars, state.overrides);
+  applyChatAppearance(vars, state.overrides);
 
   return vars;
 }

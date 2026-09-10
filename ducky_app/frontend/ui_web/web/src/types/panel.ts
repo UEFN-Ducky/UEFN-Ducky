@@ -3079,6 +3079,8 @@ export interface VerseLspStatusDto {
   last_exit_code?: number | null;
   workspace_folders?: VerseLspWorkspaceFolderDto[];
   watch_files?: string[];
+  /** Ducky-owned .vproject handed to verse-lsp when the island's built-in digests are missing; "" when the real file is used. */
+  vproject_shadow?: string;
 }
 
 export interface VerseDiagnosticsScanDto {

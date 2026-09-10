@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,15 @@ _BUILTIN_DIGEST_LABELS: dict[str, str] = {
     "unrealengine": "/UnrealEngine.com",
     "fortnite": "/Fortnite.com",
 }
+
+# Built-in digest packages every island .vproject depends on. When UEFN never wrote the
+# island's Digests/BuiltIn (interrupted first open, editor killed mid-save) the .vproject
+# still points there, and verse-lsp resolves packages from the .vproject — NOT from the
+# workspace folders — so it loads zero digests and every `using { /Fortnite.com/... }`,
+# `creative_device` and `Print` becomes an error. Ducky hands verse-lsp a shadow copy of
+# the .vproject with those packages pointed at FortniteGame's shared digests instead.
+_SHARED_DIGEST_PACKAGES = frozenset({"Verse", "UnrealEngine", "Fortnite"})
+_SHADOW_VPROJECT_DIRNAME = "vproject-shadow"
 
 
 def _verse_saved_root(project_name: str) -> Path:
@@ -60,17 +70,109 @@ def _is_builtin_digests_root(path: Path, name: str = "") -> bool:
 
 def _fortnite_game_builtin_digests() -> Path | None:
     """Shared engine digests under VerseProject/FortniteGame (when island BuiltIn is missing)."""
-    local = os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or ""
-    builtin = (
-        Path(local)
-        / "UnrealEditorFortnite"
-        / "Saved"
-        / "VerseProject"
-        / "FortniteGame"
-        / "Digests"
-        / "BuiltIn"
-    )
+    builtin = _verse_saved_root("FortniteGame") / "Digests" / "BuiltIn"
     return builtin if builtin.is_dir() else None
+
+
+def _has_digest(path: Path) -> bool:
+    """A package dir verse-lsp can actually load: exists and holds a *.digest.verse."""
+    try:
+        return path.is_dir() and any(path.glob("*.digest.verse"))
+    except OSError:
+        return False
+
+
+def _shared_digest_package_dir(package: str) -> Path | None:
+    """FortniteGame's copy of a built-in package (Digests/BuiltIn/<pkg>, else legacy <pkg>)."""
+    shared = _digest_package_dir(_verse_saved_root("FortniteGame"), package)
+    if shared is not None and _has_digest(shared):
+        return shared
+    return None
+
+
+def _shadow_vproject_root() -> Path:
+    from frontend.settings import default_app_data_dir
+
+    return default_app_data_dir() / "verse-lsp" / _SHADOW_VPROJECT_DIRNAME
+
+
+def _rewrite_missing_builtin_packages(vproject_text: str) -> tuple[str | None, list[str]]:
+    """Point built-in packages whose dirPath holds no digest at FortniteGame's shared copy.
+
+    Returns (rewritten JSON, names of packages changed); (None, []) when every built-in
+    package already resolves or nothing shared exists to substitute.
+    """
+    data = json.loads(vproject_text)
+    packages = data.get("packages") if isinstance(data, dict) else None
+    if not isinstance(packages, list):
+        return None, []
+    changed: list[str] = []
+    for pkg in packages:
+        desc = pkg.get("desc") if isinstance(pkg, dict) else None
+        if not isinstance(desc, dict):
+            continue
+        name = str(desc.get("name") or "")
+        if name not in _SHARED_DIGEST_PACKAGES:
+            continue
+        dir_path = str(desc.get("dirPath") or "")
+        if dir_path and _has_digest(Path(dir_path)):
+            continue
+        shared = _shared_digest_package_dir(name)
+        if shared is None:
+            continue
+        desc["dirPath"] = shared.resolve().as_posix()
+        changed.append(name)
+    if not changed:
+        return None, []
+    return json.dumps(data, indent=4), changed
+
+
+def _prune_shadow_vproject(project_name: str) -> None:
+    """Drop a stale shadow once UEFN has written the island's own digests."""
+    shadow_project = _shadow_vproject_root() / project_name
+    if not shadow_project.is_dir():
+        return
+    try:
+        shutil.rmtree(shadow_project)
+    except OSError:
+        pass
+
+
+def shadow_vproject_for(project_root: Path, real_vproject: Path) -> Path | None:
+    """Ducky-owned .vproject to hand verse-lsp instead of the island's, or None to use the real one.
+
+    Written under Ducky's AppData (never inside UEFN's Saved tree) only while the island file
+    references built-in digest folders that hold no digest and FortniteGame has them. It is
+    regenerated whenever the island file changes and removed once UEFN writes the island
+    digests, which flips the workspace fingerprint back to the real layout.
+    """
+    try:
+        text = real_vproject.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        rewritten, _changed = _rewrite_missing_builtin_packages(text)
+    except (TypeError, ValueError):
+        return None
+    if rewritten is None:
+        _prune_shadow_vproject(project_root.name)
+        return None
+    shadow_dir = _shadow_vproject_root() / project_root.name / "vproject"
+    shadow = shadow_dir / real_vproject.name
+    try:
+        shadow_dir.mkdir(parents=True, exist_ok=True)
+        current = shadow.read_text(encoding="utf-8") if shadow.is_file() else None
+        if current != rewritten:
+            shadow.write_text(rewritten, encoding="utf-8")
+    except OSError:
+        return None
+    return shadow
+
+
+def _is_vproject_folder(folder: dict[str, str]) -> bool:
+    name = str(folder.get("name") or "").strip().lower()
+    path = Path(str(folder.get("path") or ""))
+    return name.startswith("vproject") or path.name.lower() == "vproject"
 
 
 def _builtin_package_children(builtin: Path) -> list[dict[str, str]]:
@@ -215,6 +317,11 @@ def discover_verse_workspace(project_root: str) -> dict[str, Any]:
 
     Digests/BuiltIn (new UEFN) is expanded into Fortnite / UnrealEngine / Verse
     roots so UEFN Core can list *.digest.verse as top-level read-only files.
+
+    When the island .vproject points its built-in packages at digests UEFN never
+    wrote, the vproject root and watch file are swapped for a Ducky-owned shadow
+    copy that resolves them from FortniteGame (``vproject_shadow`` holds its path,
+    "" when the real file is in use).
     """
     root = Path(project_root).resolve()
     folders: list[dict[str, str]] = []
@@ -238,16 +345,41 @@ def discover_verse_workspace(project_root: str) -> dict[str, Any]:
 
     folders = _expand_builtin_digest_folders(folders)
 
+    real_vproject = _verse_saved_root(root.name) / "vproject" / f"{root.name}.vproject"
+    shadow_vproject: Path | None = None
+    if real_vproject.is_file():
+        shadow_vproject = shadow_vproject_for(root, real_vproject)
+    if shadow_vproject is not None:
+        # verse-lsp must see ONLY the shadow: it picks up any .vproject inside a workspace
+        # folder, and the real one (dead digest paths) wins if both are visible.
+        shadow_dir = str(shadow_vproject.parent)
+        replaced = False
+        for folder in folders:
+            if _is_vproject_folder(folder):
+                folder["path"] = shadow_dir
+                replaced = True
+        if not replaced:
+            folders.append({"name": "vproject (read-only)", "path": shadow_dir})
+
     paths = [f["path"] for f in folders]
     watch_files = _collect_watch_files(paths)
 
-    vproject = _verse_saved_root(root.name) / "vproject" / f"{root.name}.vproject"
-    if vproject.is_file():
-        vp = str(vproject.resolve())
+    if shadow_vproject is not None:
+        real_key = str(real_vproject.resolve())
+        watch_files = [w for w in watch_files if w != real_key]
+        sv = str(shadow_vproject.resolve())
+        if sv not in watch_files:
+            watch_files.insert(0, sv)
+    elif real_vproject.is_file():
+        vp = str(real_vproject.resolve())
         if vp not in watch_files:
             watch_files.insert(0, vp)
 
-    return {"workspace_folders": folders, "watch_files": watch_files}
+    return {
+        "workspace_folders": folders,
+        "watch_files": watch_files,
+        "vproject_shadow": str(shadow_vproject) if shadow_vproject is not None else "",
+    }
 
 
 def workspace_folder_fingerprint(project_root: str) -> str:

@@ -207,3 +207,165 @@ def test_refresh_editor_lsp_after_build_stops_sessions(monkeypatch):
     verse_api.refresh_editor_lsp_after_build()
     assert fake.stopped
     assert cleared["n"] == 1
+
+
+# --- shadow .vproject: island digests never written, FortniteGame has them -------------
+
+_BUILTIN_NAMES = ("Fortnite", "UnrealEngine", "Verse")
+
+
+def _write_vproject(path: Path, builtin: Path, content: Path, assets: Path) -> None:
+    import json
+
+    packages: list[dict] = [
+        {
+            "desc": {
+                "name": "Island",
+                "dirPath": content.as_posix(),
+                "settings": {"versePath": "/me@fortnite.com/Island", "allowExperimental": False},
+            },
+            "readOnly": False,
+        },
+        {
+            "desc": {"name": "Island/Assets", "dirPath": assets.as_posix(), "settings": {}},
+            "readOnly": True,
+        },
+    ]
+    for name in _BUILTIN_NAMES:
+        packages.append(
+            {"desc": {"name": name, "dirPath": (builtin / name).as_posix(), "settings": {}}, "readOnly": True}
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"packages": packages}, indent=4), encoding="utf-8")
+
+
+def _island_layout(tmp_path: Path, monkeypatch, *, island_builtin: bool, shared_builtin: bool):
+    """UEFN-generated island: code-workspace + .vproject that both point at Digests/BuiltIn."""
+    import json
+
+    project = tmp_path / "Island"
+    content = project / "Content"
+    content.mkdir(parents=True)
+    local = tmp_path / "Local"
+    verse_project = local / "UnrealEditorFortnite" / "Saved" / "VerseProject"
+    saved = verse_project / "Island"
+    builtin = saved / "Digests" / "BuiltIn"
+    assets = saved / "Digests" / "Island-Assets"
+    _touch_digest(assets, "Island-Assets")
+    if island_builtin:
+        for name in _BUILTIN_NAMES:
+            _touch_digest(builtin / name, name)
+    if shared_builtin:
+        for name in _BUILTIN_NAMES:
+            _touch_digest(verse_project / "FortniteGame" / "Digests" / "BuiltIn" / name, name)
+    vproject = saved / "vproject" / "Island.vproject"
+    _write_vproject(vproject, builtin, content, assets)
+    ws = {
+        "folders": [
+            {"name": "/me@fortnite.com/Island (Island)", "path": str(content)},
+            {"name": "/me@fortnite.com/Island (Island/Assets)", "path": str(assets)},
+            {"name": "vproject (read-only)", "path": str(saved / "vproject")},
+            {"name": "Built-in Digests", "path": str(builtin)},
+        ]
+    }
+    (project / "Island.code-workspace").write_text(json.dumps(ws), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    return project, vproject, saved
+
+
+def test_missing_island_digests_hand_verse_lsp_a_shadow_vproject(tmp_path: Path, monkeypatch):
+    import json
+
+    project, vproject, _saved = _island_layout(
+        tmp_path, monkeypatch, island_builtin=False, shared_builtin=True
+    )
+
+    result = discover_verse_workspace(str(project))
+
+    shadow = Path(result["vproject_shadow"])
+    assert shadow.is_file()
+    assert shadow.name == "Island.vproject"
+    # Ducky-owned: lives in Ducky's AppData, never inside UEFN's Saved tree.
+    assert "UEFN-Ducky" in shadow.parts
+    assert "UnrealEditorFortnite" not in shadow.parts
+    # verse-lsp resolves packages from whatever .vproject it can see: only the shadow may be
+    # visible, both as the vproject workspace root and as the watched file.
+    vproject_roots = [f for f in result["workspace_folders"] if f["name"].startswith("vproject")]
+    assert [Path(f["path"]) for f in vproject_roots] == [shadow.parent]
+    assert result["watch_files"] == [str(shadow.resolve())]
+    assert str(vproject.resolve()) not in result["watch_files"]
+    # Built-in packages now point at FortniteGame's digests; everything else is untouched.
+    data = json.loads(shadow.read_text(encoding="utf-8"))
+    by_name = {p["desc"]["name"]: p["desc"] for p in data["packages"]}
+    for name in _BUILTIN_NAMES:
+        target = Path(by_name[name]["dirPath"])
+        assert "FortniteGame" in target.parts
+        assert list(target.glob("*.digest.verse"))
+    assert by_name["Island"]["dirPath"] == (project / "Content").as_posix()
+    assert by_name["Island"]["settings"]["versePath"] == "/me@fortnite.com/Island"
+    assert by_name["Island/Assets"]["dirPath"].endswith("Island-Assets")
+    # The real file is left exactly as UEFN wrote it.
+    assert "FortniteGame" not in vproject.read_text(encoding="utf-8")
+
+
+def test_island_digests_arriving_restores_real_vproject_and_prunes_shadow(
+    tmp_path: Path, monkeypatch
+):
+    project, vproject, saved = _island_layout(
+        tmp_path, monkeypatch, island_builtin=False, shared_builtin=True
+    )
+    first = discover_verse_workspace(str(project))
+    shadow = Path(first["vproject_shadow"])
+    assert shadow.is_file()
+    fp_before = workspace_folder_fingerprint(str(project))
+
+    # UEFN's first Verse build writes the island's own digests.
+    for name in _BUILTIN_NAMES:
+        _touch_digest(saved / "Digests" / "BuiltIn" / name, name)
+
+    second = discover_verse_workspace(str(project))
+    assert second["vproject_shadow"] == ""
+    assert second["watch_files"][0] == str(vproject.resolve())
+    vproject_roots = [f for f in second["workspace_folders"] if f["name"].startswith("vproject")]
+    assert [Path(f["path"]) for f in vproject_roots] == [vproject.parent]
+    assert not shadow.exists()
+    assert not shadow.parent.parent.exists()  # whole per-island shadow dir gone
+    # Long-lived verse-lsp must be restarted on the real layout.
+    assert workspace_folder_fingerprint(str(project)) != fp_before
+
+
+def test_shadow_vproject_tracks_real_vproject_edits(tmp_path: Path, monkeypatch):
+    import json
+
+    project, vproject, _saved = _island_layout(
+        tmp_path, monkeypatch, island_builtin=False, shared_builtin=True
+    )
+    shadow = Path(discover_verse_workspace(str(project))["vproject_shadow"])
+    data = json.loads(vproject.read_text(encoding="utf-8"))
+    data["packages"][0]["desc"]["settings"]["allowExperimental"] = True
+    vproject.write_text(json.dumps(data, indent=4), encoding="utf-8")
+
+    again = Path(discover_verse_workspace(str(project))["vproject_shadow"])
+
+    assert again == shadow
+    mirrored = json.loads(shadow.read_text(encoding="utf-8"))
+    assert mirrored["packages"][0]["desc"]["settings"]["allowExperimental"] is True
+
+
+def test_no_shared_digests_means_no_shadow(tmp_path: Path, monkeypatch):
+    project, vproject, _saved = _island_layout(
+        tmp_path, monkeypatch, island_builtin=False, shared_builtin=False
+    )
+    result = discover_verse_workspace(str(project))
+    assert result["vproject_shadow"] == ""
+    assert result["watch_files"][0] == str(vproject.resolve())
+
+
+def test_island_with_own_digests_never_shadows(tmp_path: Path, monkeypatch):
+    project, vproject, _saved = _island_layout(
+        tmp_path, monkeypatch, island_builtin=True, shared_builtin=True
+    )
+    result = discover_verse_workspace(str(project))
+    assert result["vproject_shadow"] == ""
+    assert result["watch_files"][0] == str(vproject.resolve())
+    assert not (tmp_path / "Local" / "UEFN-Ducky").exists()

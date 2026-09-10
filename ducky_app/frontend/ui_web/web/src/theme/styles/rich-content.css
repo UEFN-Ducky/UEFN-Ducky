@@ -25,13 +25,13 @@
   display: block;
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.8;
+  line-height: var(--chat-line-height, 1.8);
 }
 
 .rich-summary {
   margin-bottom: 12px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--chat-muted-color, var(--muted));
 }
 
 .rich-markdown > :first-child {
@@ -45,24 +45,24 @@
 /* Headings */
 .rich-heading {
   margin: 0;
-  font-weight: 600;
-  color: var(--rich-text-accent, var(--fg));
+  font-weight: var(--chat-heading-weight, 600);
+  color: var(--rich-text-accent, var(--chat-heading-color, var(--fg)));
   line-height: 1.3;
   letter-spacing: -0.015em;
 }
 
 .rich-heading--h1 {
-  font-size: 1.25em;
+  font-size: var(--chat-h1-size, 1.25em);
   margin-top: 0.35em;
   margin-bottom: 0.35em;
 }
 
 .rich-heading--h2 {
-  font-size: 1.05em;
-  margin-top: 1.4em;
+  font-size: var(--chat-h2-size, 1.05em);
+  margin-top: var(--chat-section-gap, 1.4em);
   margin-bottom: 0.7em;
   padding-bottom: 0.5em;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--chat-border-color, var(--border));
 }
 
 .rich-heading--h3 {
@@ -87,7 +87,7 @@
 
 .rich-content strong {
   font-weight: 600;
-  color: var(--rich-text-accent, var(--fg));
+  color: var(--rich-text-accent, var(--chat-emphasis-color, var(--fg)));
 }
 
 .rich-heading strong {
@@ -96,16 +96,17 @@
 
 /* Paragraphs */
 .rich-paragraph {
-  margin: 0 0 0.85em;
-  line-height: 1.8;
-  color: var(--fg-dim);
+  margin: 0 0 var(--chat-paragraph-gap, 0.85em);
+  line-height: var(--chat-line-height, 1.8);
+  color: var(--chat-body-color, var(--fg-dim));
 }
 
 /* Lists */
 .rich-list {
+  color: var(--chat-list-color, var(--fg));
   margin: 0 0 1em;
   padding-left: 1.4em;
-  line-height: 1.8;
+  line-height: var(--chat-line-height, 1.8);
 }
 
 .rich-list--ordered {
@@ -139,24 +140,24 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.92em;
   padding: 0.12em 0.45em;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--rich-text-accent, var(--purple)) 7%, var(--card));
-  color: var(--rich-text-accent, var(--purple));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rich-text-accent, var(--purple)) 12%, transparent);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  background: color-mix(in srgb, var(--rich-text-accent, var(--chat-code-color, var(--purple))) var(--chat-code-tint, 7%), var(--chat-surface, var(--card)));
+  color: var(--rich-text-accent, var(--chat-code-color, var(--purple)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rich-text-accent, var(--chat-code-color, var(--purple))) var(--chat-code-border-tint, 12%), transparent);
   overflow-wrap: anywhere;
 }
 
 .rich-code--block {
   margin: 0 0 14px;
   padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  border: 1px solid var(--border);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  background: var(--chat-code-background, var(--card));
+  border: 1px solid var(--chat-border-color, var(--border));
   overflow-x: auto;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-mono-size, 13px);
   line-height: 1.5;
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
 }
 
 .rich-pre-wrap {
@@ -169,14 +170,14 @@
   border: none;
   padding: 0;
   font: inherit;
-  color: var(--accent);
+  color: var(--chat-link-color, var(--accent));
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .rich-md-link:hover {
-  color: color-mix(in srgb, var(--accent) 80%, var(--fg));
+  color: color-mix(in srgb, var(--chat-link-color, var(--accent)) 80%, var(--fg));
 }
 
 .rich-md-link--external {
@@ -184,7 +185,7 @@
 }
 
 .rich-md-link--static {
-  color: var(--accent);
+  color: var(--chat-link-color, var(--accent));
 }
 
 /* Blockquote */
@@ -193,14 +194,14 @@
   padding: 8px 14px;
   border-left: 3px solid var(--blue);
   background: color-mix(in srgb, var(--blue) 4%, transparent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--fg-dim);
+  border-radius: 0 var(--chat-block-radius, var(--radius-sm)) var(--chat-block-radius, var(--radius-sm)) 0;
+  color: var(--chat-body-color, var(--fg-dim));
 }
 
 /* HR */
 .rich-hr {
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--chat-border-color, var(--border));
   margin: 16px 0;
 }
 
@@ -208,8 +209,8 @@
 .rich-table-wrap {
   margin: 0 0 14px;
   overflow-x: auto;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  border: 1px solid var(--chat-border-color, var(--border));
 }
 
 .rich-table {
@@ -221,16 +222,16 @@
 .rich-table-th {
   text-align: left;
   padding: 8px 10px;
-  background: color-mix(in srgb, var(--blue) 8%, var(--card));
-  color: var(--blue);
+  background: var(--chat-table-heading-background, color-mix(in srgb, var(--blue) 8%, var(--chat-surface, var(--card))));
+  color: var(--chat-table-heading-color, var(--blue));
   font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--chat-border-color, var(--border));
   white-space: nowrap;
 }
 
 .rich-table-td {
   padding: 7px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--chat-border-color, var(--border)) 60%, transparent);
   color: var(--fg);
   vertical-align: top;
   word-break: break-word;
@@ -262,7 +263,7 @@
 
 .rich-key-value-key {
   margin: 0;
-  color: var(--muted);
+  color: var(--chat-muted-color, var(--muted));
   font-weight: 600;
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -286,16 +287,16 @@
   gap: 6px;
   margin: 0 0 10px;
   padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  border: 1px solid var(--chat-border-color, var(--border));
   background: color-mix(in srgb, var(--fg) 4%, transparent);
-  color: var(--accent);
+  color: var(--chat-link-color, var(--accent));
   font-size: 13px;
   cursor: pointer;
 }
 
 .rich-file-link:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--chat-link-color, var(--accent)) 12%, transparent);
 }
 
 .rich-file-link--static {
@@ -314,16 +315,16 @@
 
 /* Callouts */
 .rich-callout {
-  --rich-callout-accent: var(--blue);
+  --rich-callout-accent: var(--chat-callout-info-color, var(--blue));
   --rich-text-accent: var(--rich-callout-accent);
   width: 100%;
   box-sizing: border-box;
   margin: 0.4em 0 1em;
   padding: 0.85em 1em;
-  border-radius: var(--radius-sm);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
   font-size: 1em;
   line-height: 1.7;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chat-border-color, var(--border));
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border-left: 3px solid var(--rich-callout-accent);
 }
@@ -340,7 +341,7 @@
 }
 
 .rich-callout-body {
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
   white-space: pre-line;
 }
 
@@ -355,42 +356,42 @@
 }
 
 .rich-callout--info {
-  background: color-mix(in srgb, var(--blue) 10%, transparent);
-  border-color: color-mix(in srgb, var(--blue) 30%, var(--border));
+  background: var(--chat-callout-info-background, color-mix(in srgb, var(--blue) 10%, transparent));
+  border-color: var(--chat-callout-info-border, color-mix(in srgb, var(--blue) 30%, var(--chat-border-color, var(--border))));
 }
 
 .rich-callout--info .rich-callout-title {
-  color: var(--blue);
+  color: var(--rich-callout-accent);
 }
 
 .rich-callout--warn {
-  --rich-callout-accent: var(--amber);
-  background: color-mix(in srgb, var(--amber) 12%, transparent);
-  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
+  --rich-callout-accent: var(--chat-callout-warn-color, var(--amber));
+  background: var(--chat-callout-warn-background, color-mix(in srgb, var(--amber) 12%, transparent));
+  border-color: var(--chat-callout-warn-border, color-mix(in srgb, var(--amber) 35%, var(--chat-border-color, var(--border))));
 }
 
 .rich-callout--warn .rich-callout-title {
-  color: var(--amber);
+  color: var(--rich-callout-accent);
 }
 
 .rich-callout--error {
-  --rich-callout-accent: var(--red);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+  --rich-callout-accent: var(--chat-callout-error-color, var(--red));
+  background: var(--chat-callout-error-background, color-mix(in srgb, var(--red) 12%, transparent));
+  border-color: var(--chat-callout-error-border, color-mix(in srgb, var(--red) 35%, var(--chat-border-color, var(--border))));
 }
 
 .rich-callout--error .rich-callout-title {
-  color: var(--red);
+  color: var(--rich-callout-accent);
 }
 
 .rich-callout--success {
-  --rich-callout-accent: var(--green);
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  border-color: color-mix(in srgb, var(--green) 35%, var(--border));
+  --rich-callout-accent: var(--chat-callout-success-color, var(--green));
+  background: var(--chat-callout-success-background, color-mix(in srgb, var(--green) 12%, transparent));
+  border-color: var(--chat-callout-success-border, color-mix(in srgb, var(--green) 35%, var(--chat-border-color, var(--border))));
 }
 
 .rich-callout--success .rich-callout-title {
-  color: var(--green);
+  color: var(--rich-callout-accent);
 }
 
 /* Accordion */
@@ -405,8 +406,8 @@
   width: 100%;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--chat-border-color, var(--border));
+  border-radius: var(--chat-block-radius, var(--radius-sm));
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   color: var(--fg);
   font-size: 13px;
@@ -443,11 +444,11 @@
 
 .rich-accordion-body {
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chat-border-color, var(--border));
   border-top: none;
-  border-bottom-left-radius: var(--radius-sm);
-  border-bottom-right-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--fg) 4%, var(--card));
+  border-bottom-left-radius: var(--chat-block-radius, var(--radius-sm));
+  border-bottom-right-radius: var(--chat-block-radius, var(--radius-sm));
+  background: color-mix(in srgb, var(--fg) 4%, var(--chat-surface, var(--card)));
 }
 
 .rich-block-list {
@@ -468,7 +469,7 @@
   padding: 8px 10px;
   font-size: 11px;
   line-height: 1.45;
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
   background-color: color-mix(in srgb, var(--bg) 35%, transparent);
   border-radius: 6px;
   border: none;
@@ -499,14 +500,14 @@
   margin-top: 8px;
   border: none;
   background: none;
-  color: var(--muted);
+  color: var(--chat-muted-color, var(--muted));
   font-size: 11px;
   cursor: pointer;
   text-align: left;
 }
 
 .tool-execution-card-raw-json-toggle:hover {
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
 }
 
 /* Report header */
@@ -515,7 +516,7 @@
   box-sizing: border-box;
   margin: 0 0 1em;
   padding-bottom: 0.85em;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--chat-border-color, var(--border));
 }
 
 .rich-report-header-title {
@@ -527,7 +528,7 @@
   align-items: center;
   gap: 0.4em;
   padding: 0.2em 0.55em;
-  border-radius: var(--radius-sm);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   color: var(--blue);
   font-size: 0.85em;
@@ -564,7 +565,7 @@
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
 }
 
 .rich-stats-metric-row {
@@ -574,11 +575,11 @@
 }
 
 .rich-stats-num {
-  font-size: 1.85em;
+  font-size: var(--chat-stats-size, 1.85em);
   font-weight: 300;
   line-height: 1;
   letter-spacing: -0.04em;
-  color: var(--fg);
+  color: var(--chat-stats-number-color, var(--fg));
 }
 
 .rich-stats-num--blocked {
@@ -615,7 +616,7 @@
 @container (min-width: 640px) {
   .rich-stats-programs {
     padding-left: 1.5em;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--chat-border-color, var(--border));
   }
 }
 
@@ -627,7 +628,7 @@
 }
 
 .rich-stats-programs-total {
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
   font-weight: 400;
   font-size: 0.9em;
 }
@@ -657,7 +658,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
-  color: var(--rich-text-accent, var(--fg-dim));
+  color: var(--rich-text-accent, var(--chat-body-color, var(--fg-dim)));
   font-size: 0.9em;
 }
 
@@ -693,7 +694,7 @@
   gap: 0.5em;
   margin: 0 0 1em;
   padding-bottom: 0.6em;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--chat-border-color, var(--border));
 }
 
 .rich-inventory-head .rich-heading {
@@ -710,21 +711,21 @@
 .rich-inventory-list {
   display: flex;
   flex-direction: column;
-  gap: 1.15em;
+  gap: var(--chat-inventory-gap, 1.15em);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .rich-inventory-item {
-  --rich-item-accent: var(--fg-dim);
+  --rich-item-accent: var(--chat-body-color, var(--fg-dim));
   --rich-text-accent: var(--rich-item-accent);
   display: flex;
   gap: 0.85em;
   align-items: flex-start;
   min-width: 0;
   padding-bottom: 0.9em;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--chat-border-color, var(--border)) 65%, transparent);
 }
 
 .rich-inventory-item:last-child {
@@ -746,8 +747,8 @@
   width: 2.15em;
   height: 2.15em;
   margin-top: 0.1em;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--rich-item-accent) 10%, var(--card));
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  background: color-mix(in srgb, var(--rich-item-accent) 10%, var(--chat-surface, var(--card)));
   color: var(--rich-item-accent);
   border: 1px solid color-mix(in srgb, var(--rich-item-accent) 20%, transparent);
 }
@@ -762,7 +763,7 @@
 .rich-inventory-item--devices .rich-inventory-icon,
 .rich-inventory-item--devices .rich-inventory-kind { color: var(--blue); }
 .rich-inventory-item--prop .rich-inventory-icon,
-.rich-inventory-item--prop .rich-inventory-kind { color: var(--fg-dim); }
+.rich-inventory-item--prop .rich-inventory-kind { color: var(--chat-body-color, var(--fg-dim)); }
 .rich-inventory-item--blueprint .rich-inventory-icon,
 .rich-inventory-item--blueprint .rich-inventory-kind { color: var(--amber); }
 .rich-inventory-item--blender .rich-inventory-icon,
@@ -792,14 +793,14 @@
 }
 
 .rich-inventory-slash {
-  color: var(--border);
+  color: var(--chat-border-color, var(--border));
 }
 
 .rich-inventory-title {
   min-width: 0;
   max-width: 100%;
   color: var(--rich-item-accent);
-  background: color-mix(in srgb, var(--rich-item-accent) 7%, var(--card));
+  background: color-mix(in srgb, var(--rich-item-accent) 7%, var(--chat-surface, var(--card)));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rich-item-accent) 15%, transparent);
 }
 
@@ -809,7 +810,7 @@
 
 .rich-inventory-desc {
   margin: 0;
-  color: var(--fg-dim);
+  color: var(--chat-body-color, var(--fg-dim));
   line-height: 1.7;
 }
 
@@ -831,3 +832,4 @@
   --rich-text-accent: inherit;
   color: var(--rich-text-accent);
 }
+
