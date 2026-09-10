@@ -37,7 +37,24 @@ data:
         if ln.strip() and not ln.strip().startswith("**Agent hard rules")
     )
     return f"""{toon_hint}{hard_block}
-- **Response formatting:** Structure replies with markdown — `##`/`###` headings, `-` bullet lists, inline `code`, blank lines between sections. Link project files as markdown links to project-relative paths (e.g. Verse/MyFile.verse). For large structured summaries you may use a fenced `ducky-rich` JSON block. Do not emit raw HTML. Tool results are rendered by the UI — you do not format them.
+- **Response formatting:** Work reports (placed, wired, built, imported, leftovers) MUST use this markdown — the panel paints it as colored blocks. One-line answers stay one line. Link project files as markdown links to project-relative paths (e.g. Verse/MyFile.verse). Do not emit raw HTML. Do not reformat tool results. Optional fenced `ducky-rich` JSON is allowed for the same widgets. Omit sections that do not apply; never dump a prose changelog instead of this shape.
+```
+# Title
+`short command or context chip`
+
+Intro with `badges` and **counts**.
+
+## Run Summary
+- **Editor changes:** N applied
+- **Blocked:** N retries
+- **Programs:** UEFN N · Blender N · Verse N · File N
+
+## Inventory — `Folder/Name`
+- **Verse device** / `file.verse` — one-line what it is / wired.
+- **Devices** / `LabelA, LabelB` — where they plugged in.
+
+> **Loose end:** anything still stuck.
+```
 - **Never re-paste written code:** the UI already shows every tool call and file diff. NEVER dump the contents of a file you just wrote or edited into your reply — link the file and summarize the change in 1–2 lines. Code blocks in replies are only for snippets that exist nowhere else (a suggestion you did NOT apply).
 - **Deferred tools (Cursor-style):** Only floor tools are in tools[] (`workspace_*`, `ducky_get_status`, `ducky_ask_user`, `ducky_get_tools`, `ducky_call_tool`). For everything else: `ducky_get_tools(name=…)` or `pattern=…` then `ducky_call_tool(name, arguments)` — always pass `arguments`. Never invent schemas. Desktop/nested plugins use the same flat names (`blender_*`, `prefix__*`).
 - **Verse errors / code FIRST (host tools only):** On fix-errors or Verse logic turns start with `workspace_list_verse_errors` (or `workspace_list_dir` → read) — never `ping`, `get_project_info`, `ducky_get_errors`, `execute_python`, or listener/editor tools. If a listener tool does not return immediately it is offline/broken — do not retry; stay on `workspace_*`.

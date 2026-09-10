@@ -92,20 +92,29 @@ class _UsageTrackingProvider:
     async def stream_turn(self, **kwargs: Any) -> AsyncIterator[StreamEvent]:
         usage: dict[str, Any] = {}
         text_chars = 0
-        async for event in self._inner.stream_turn(**kwargs):
-            if getattr(event, "usage", None):
-                usage = dict(event.usage)
-            if getattr(event, "kind", None) == StreamEventKind.TEXT_DELTA:
-                text_chars += len(getattr(event, "text", "") or "")
-            if getattr(event, "kind", None) == StreamEventKind.DONE:
-                est = 0
-                if not usage:
-                    system = str(kwargs.get("system") or "")
-                    msgs = kwargs.get("messages") or []
-                    msg_chars = sum(len(getattr(m, "content", "") or "") for m in msgs)
-                    est = len(system) + msg_chars + text_chars
-                self._log(usage=usage or None, estimate_chars=est)
-            yield event
+        logged = False
+
+        def _estimate() -> int:
+            if usage:
+                return 0
+            system = str(kwargs.get("system") or "")
+            msgs = kwargs.get("messages") or []
+            msg_chars = sum(len(getattr(m, "content", "") or "") for m in msgs)
+            return len(system) + msg_chars + text_chars
+
+        try:
+            async for event in self._inner.stream_turn(**kwargs):
+                if getattr(event, "usage", None):
+                    usage = dict(event.usage)
+                if getattr(event, "kind", None) == StreamEventKind.TEXT_DELTA:
+                    text_chars += len(getattr(event, "text", "") or "")
+                if getattr(event, "kind", None) == StreamEventKind.DONE:
+                    self._log(usage=usage or None, estimate_chars=_estimate())
+                    logged = True
+                yield event
+        finally:
+            if not logged:
+                self._log(usage=usage or None, estimate_chars=_estimate())
 
     async def test_connection(self) -> tuple[bool, str]:
         ok, detail = await self._inner.test_connection()

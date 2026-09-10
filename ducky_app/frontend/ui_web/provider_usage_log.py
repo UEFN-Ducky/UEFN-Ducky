@@ -224,6 +224,48 @@ def _conv_lookup() -> dict[str, dict[str, str]]:
         return {}
 
 
+def _provider_family(provider_id: str) -> set[str]:
+    """Gateway + coding-agent ids that belong to the same Store plugin.
+
+    Anthropic usage page must include ``claude_code`` rows; OpenAI includes
+    ``codex``. Fail-soft to ``{provider_id}`` when plugins are not loaded.
+    """
+    key = str(provider_id or "").strip().lower()
+    if not key:
+        return set()
+    key_agent = key.replace("-", "_")
+    try:
+        from backend.uefn_plugins.host import get_contributions
+
+        contrib = get_contributions() or {}
+    except Exception:
+        return {key}
+    rows = list(contrib.get("llm_providers") or []) + list(
+        contrib.get("llm_coding_agents") or []
+    )
+    plugin_id = ""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id") or "").strip().lower()
+        if rid == key or rid.replace("-", "_") == key_agent:
+            plugin_id = str(row.get("plugin_id") or "").strip().lower()
+            break
+    if not plugin_id:
+        return {key}
+    family: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("plugin_id") or "").strip().lower() != plugin_id:
+            continue
+        rid = str(row.get("id") or "").strip().lower()
+        if rid:
+            family.add(rid)
+            family.add(rid.replace("-", "_"))
+    return family or {key}
+
+
 def usage_report(provider_id: str = "", days: int = 7) -> dict[str, Any]:
     """Aggregate ledger entries for one provider (or all when provider_id blank)."""
     from backend.agent.model_pricing import call_cost_usd
@@ -231,10 +273,11 @@ def usage_report(provider_id: str = "", days: int = 7) -> dict[str, Any]:
     days_n = max(1, min(30, int(days or _RETENTION_DAYS)))
     since = _cutoff_ts(days_n)
     prov_filter = str(provider_id or "").strip().lower()
+    family = _provider_family(prov_filter) if prov_filter else set()
     entries = [
         e
         for e in _read_entries(_log_path(), since=since)
-        if not prov_filter or str(e.get("provider") or "").strip().lower() == prov_filter
+        if not prov_filter or str(e.get("provider") or "").strip().lower() in family
     ]
     conv_meta = _conv_lookup()
 

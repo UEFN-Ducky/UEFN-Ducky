@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import threading
 import time
@@ -328,7 +329,8 @@ class AgentRunner:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
         try:
-            threading.Thread(target=producer, daemon=True).start()
+            ctx = contextvars.copy_context()
+            threading.Thread(target=ctx.run, args=(producer,), daemon=True).start()
 
             async for event in self._drain_provider_queue(
                 queue, bridge=bridge, deadline=deadline, timeout_sec=timeout_sec

@@ -3268,6 +3268,64 @@ html.window-maximized .window-resize-grip {
   }
 }
 
+.ducky-profile-stats-chats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ducky-profile-stats-chat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ducky-profile-stats-chat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.ducky-profile-stats-chat-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.ducky-profile-stats-chat-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ducky-profile-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 480px;
+  height: min(70vh, 720px);
+}
+
+.ducky-profile-ledger .changes-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-light) 70%, transparent);
+  border-radius: 12px;
+}
+
 .ducky-editor-prompt-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -398,6 +398,7 @@ input, textarea, select, button {
 .window-control-btn {
   background: transparent;
   border: none;
+  padding: 0;
   color: var(--muted);
   width: 28px;
   height: 28px;
@@ -407,6 +408,10 @@ input, textarea, select, button {
   justify-content: center;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+.window-control-btn > svg {
+  display: block;
+  flex-shrink: 0;
 }
 .window-control-btn:hover {
   background: var(--tab-hover);

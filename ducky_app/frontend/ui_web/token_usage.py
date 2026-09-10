@@ -104,30 +104,6 @@ def record_api_call(
     usage["total_cache_read"] = int(usage.get("total_cache_read") or 0) + cache_read
     usage["total_cache_write"] = int(usage.get("total_cache_write") or 0) + cache_write
     conv.token_usage = usage
-    # Global Settings ledger: gateway streams auto-log via make_provider.
-    # Coding-agent CLIs (no make_provider) still need an explicit ledger write.
-    try:
-        from backend.agent.coding_agents.base import contributed_coding_agents
-        from frontend.ui_web.provider_usage_log import log_call
-
-        prov = str(provider or "").strip().lower()
-        if prov and prov in contributed_coding_agents():
-            log_call(
-                provider=prov,
-                model=str(model or ""),
-                input_tokens=inp,
-                output_tokens=out,
-                cache_read_tokens=cache_read,
-                cache_write_tokens=cache_write,
-                cost_usd=float(cost_usd) if isinstance(cost_usd, (int, float)) else None,
-                conv_id=str(getattr(conv, "id", "") or ""),
-                agent=str(getattr(conv, "coding_agent", "") or prov),
-                ducky_label=str(
-                    getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or ""
-                ),
-            )
-    except Exception:
-        pass
     return usage
 
 

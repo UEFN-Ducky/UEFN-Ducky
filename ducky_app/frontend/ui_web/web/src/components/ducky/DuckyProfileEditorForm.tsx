@@ -18,6 +18,7 @@ import { fmtCompactTokens } from "../../utils/contextFormat";
 import { estimatePersonalityTokens, formatDuckyPersonalityBlock } from "../../utils/duckyPersonality";
 import { DuckyAvatar } from "./DuckyAvatars";
 import { DuckyMemorySection } from "./DuckyMemorySection";
+import { DuckyProfileLedger } from "./DuckyProfileLedger";
 import { DuckyProfileStats } from "./DuckyProfileStats";
 import { useDuckyCatalog } from "./DuckyCatalogContext";
 import type { DuckyProfileFormState } from "./duckyProfileForm";
@@ -37,13 +38,15 @@ const DUCKY_DROPDOWN_PICKER_SIZE = 56;
 
 type PromptExpandKey = "personality" | "whenToUse";
 
-export type DuckyProfileSectionTab = "profile" | "skills" | "mcps" | "memory";
+export type DuckyProfileSectionTab = "profile" | "skills" | "mcps" | "memory" | "usage" | "ledger";
 
 const SECTION_TABS: { id: DuckyProfileSectionTab; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "skills", label: "Skills" },
   { id: "mcps", label: "MCPs" },
   { id: "memory", label: "Memory" },
+  { id: "usage", label: "Usage" },
+  { id: "ledger", label: "Ledger" },
 ];
 
 export function DuckyProfileSectionTabs({
@@ -516,13 +519,6 @@ export function DuckyProfileEditorForm({
             </div>
           </section>
 
-          {profileId && (statsDuckyName || form.name).trim() ? (
-            <DuckyProfileStats
-              profileId={profileId}
-              duckyName={(statsDuckyName || form.name).trim()}
-            />
-          ) : null}
-
           <section className="ducky-editor-prompt-grid">
             <PromptExpandCard
               id="personality"
@@ -590,6 +586,33 @@ export function DuckyProfileEditorForm({
             ""
           }
         />
+      ) : null}
+
+      {sectionTab === "usage" ? (
+        profileId && (statsDuckyName || form.name).trim() ? (
+          <DuckyProfileStats
+            profileId={profileId}
+            duckyName={(statsDuckyName || form.name).trim()}
+            showChats
+          />
+        ) : (
+          <p className="ducky-profile-tab-hint">
+            Save this ducky to start tracking usage for every chat of this type.
+          </p>
+        )
+      ) : null}
+
+      {sectionTab === "ledger" ? (
+        profileId && (statsDuckyName || form.name).trim() ? (
+          <DuckyProfileLedger
+            profileId={profileId}
+            profileName={(statsDuckyName || form.name).trim()}
+          />
+        ) : (
+          <p className="ducky-profile-tab-hint">
+            Save this ducky to see island changes from every chat of this type — live or archived.
+          </p>
+        )
       ) : null}
 
       {sectionTab === "mcps" ? (

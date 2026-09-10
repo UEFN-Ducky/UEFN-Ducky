@@ -138,6 +138,15 @@ describe("ChangesView", () => {
     expect(screen.getByLabelText("Filter by kind")).toBeTruthy();
   });
 
+  it("scopes the ledger to every current chat of one ducky type", async () => {
+    const other = { ...run, run_id: "artist-run", profile_id: "artist", ducky_name: "Artist" };
+    listChangesets.mockResolvedValue([run, other]);
+    render(<ChangesView profileId="hacker" profileName="Hacker" />);
+    await waitFor(() => expect(screen.getByText("Hacker")).toBeTruthy());
+    expect(screen.queryByText("Artist")).toBeNull();
+    expect(screen.queryByLabelText("Filter by ducky")).toBeNull();
+  });
+
   it("opens a change dialog inside the tab, not over the app", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

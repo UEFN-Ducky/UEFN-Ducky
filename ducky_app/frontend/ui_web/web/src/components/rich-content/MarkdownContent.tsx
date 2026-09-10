@@ -5,6 +5,8 @@ import type { Components } from "react-markdown";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
 import { isWorkspaceFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
+import { promoteMarkdownToSegments } from "./promoteMarkdownBlocks";
+import { RichBlockView } from "./RichBlockList";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { RichHeading } from "./RichHeading";
 import { RichParagraph } from "./RichParagraph";
@@ -14,7 +16,7 @@ interface MarkdownContentProps {
   onOpenFile?: OpenFileHandler;
 }
 
-export function MarkdownContent({ text, onOpenFile }: MarkdownContentProps) {
+function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
   const components = useMemo((): Components => {
     return {
       h1: ({ children }) => <RichHeading level={1}>{children}</RichHeading>,
@@ -81,10 +83,28 @@ export function MarkdownContent({ text, onOpenFile }: MarkdownContentProps) {
   }, [onOpenFile]);
 
   return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+export function MarkdownContent({ text, onOpenFile }: MarkdownContentProps) {
+  const segments = useMemo(() => promoteMarkdownToSegments(text), [text]);
+  return (
     <div className="rich-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
-      </ReactMarkdown>
+      {segments.map((seg, i) =>
+        seg.kind === "markdown" ? (
+          <MarkdownChunk key={`md-${i}`} text={seg.text} onOpenFile={onOpenFile} />
+        ) : (
+          <RichBlockView
+            key={`blk-${i}`}
+            block={seg.block}
+            onOpenFile={onOpenFile}
+            collapsePath={`md:${i}:`}
+          />
+        ),
+      )}
     </div>
   );
 }

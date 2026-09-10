@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
+
+import pytest
 
 from frontend.ui_web import provider_usage_log as pul
-from frontend.ui_web.token_usage import record_api_call
-from types import SimpleNamespace
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin_host(monkeypatch):
+    # usage_report looks up plugin families; don't boot the Store host in unit tests.
+    monkeypatch.setattr(
+        "backend.uefn_plugins.host.get_contributions",
+        lambda: {"llm_providers": [], "llm_coding_agents": []},
+    )
 
 
 def test_log_call_and_report(monkeypatch, tmp_path):
@@ -123,27 +133,72 @@ def test_ducky_usage_report(monkeypatch, tmp_path):
     assert report["chats"][0]["conv_id"] == "c1"
 
 
-def test_record_api_call_hooks_ledger_for_coding_agents(monkeypatch, tmp_path):
-    """CLI coding agents skip make_provider — record_api_call must still write the ledger."""
+def test_record_coding_agent_usage_writes_ledger(monkeypatch, tmp_path):
+    """CLI coding agents skip make_provider — record_coding_agent_usage writes the ledger."""
+    from backend.agent.coding_agents.runner import record_coding_agent_usage
+
     monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        "backend.agent.coding_agents.base.contributed_coding_agents",
-        lambda: ("codex",),
+    conv = SimpleNamespace(
+        id="chat-1",
+        token_usage=None,
+        messages=[],
+        coding_agent="codex",
+        ducky_name="Builder",
+        title="Build",
     )
-    conv = SimpleNamespace(id="chat-1", token_usage=None, messages=[], coding_agent="codex")
-    record_api_call(
-        conv,
-        input_tokens=40,
-        output_tokens=5,
-        cache_read_tokens=10,
-        provider="codex",
-        model="o3",
-        cost_usd=0.002,
+    result = SimpleNamespace(
+        usage={
+            "input_tokens": 40,
+            "output_tokens": 5,
+            "cache_read_tokens": 10,
+            "model": "o3",
+            "cost_usd": 0.002,
+        }
     )
+    record_coding_agent_usage(conv, "codex", "o3", result)
     report = pul.usage_report("codex", days=7)
     assert report["call_count"] == 1
     assert report["total_input"] == 40
     assert report["total_output"] == 5
+    assert conv.token_usage is not None
+    assert conv.token_usage["total_input"] == 40
+
+
+def test_record_coding_agent_usage_empty_still_logs(monkeypatch, tmp_path):
+    from backend.agent.coding_agents.runner import record_coding_agent_usage
+
+    monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
+    conv = SimpleNamespace(
+        id="chat-2",
+        token_usage=None,
+        messages=[],
+        coding_agent="claude_code",
+        ducky_name="Coder",
+        title="Code",
+    )
+    record_coding_agent_usage(conv, "claude_code", "sonnet", None)
+    report = pul.usage_report("claude_code", days=7)
+    assert report["call_count"] == 1
+    assert report["total_input"] == 1
+    assert conv.token_usage is None
+
+
+def test_usage_report_includes_plugin_coding_agent(monkeypatch, tmp_path):
+    monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "backend.uefn_plugins.host.get_contributions",
+        lambda: {
+            "llm_providers": [{"id": "anthropic", "plugin_id": "anthropic"}],
+            "llm_coding_agents": [{"id": "claude_code", "plugin_id": "anthropic"}],
+        },
+    )
+    now = time.time()
+    pul.log_call(provider="anthropic", model="sonnet", input_tokens=10, output_tokens=2, ts=now)
+    pul.log_call(provider="claude_code", model="sonnet", input_tokens=30, output_tokens=4, ts=now)
+    pul.log_call(provider="openai", model="gpt", input_tokens=99, output_tokens=1, ts=now)
+    report = pul.usage_report("anthropic", days=7)
+    assert report["call_count"] == 2
+    assert report["total_input"] == 40
 
 
 def test_gateway_usage_helper_hits_ledger(monkeypatch, tmp_path):
@@ -202,3 +257,43 @@ def test_make_provider_wrapper_logs_stream_usage(monkeypatch, tmp_path):
     assert report["call_count"] == 1
     assert report["total_input"] == 10
     assert report["total_output"] == 2
+
+
+def test_make_provider_wrapper_logs_when_stream_raises(monkeypatch, tmp_path):
+    """Cancelled / errored streams still hit the ledger (no DONE event)."""
+    from backend.agent.providers import make_provider
+    from backend.agent.providers.base import StreamEvent, StreamEventKind
+    import asyncio
+
+    monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
+
+    class _Fake:
+        async def stream_turn(self, **_kwargs):
+            yield StreamEvent(kind=StreamEventKind.TEXT_DELTA, text="hi")
+            raise RuntimeError("boom")
+
+        async def test_connection(self):
+            return True, "ok"
+
+    monkeypatch.setattr(
+        "backend.agent.providers.gateway_providers",
+        lambda: ("openai",),
+    )
+    monkeypatch.setattr(
+        "backend.uefn_plugins.host.get_llm_provider_registration",
+        lambda _name: {"factory": lambda *_a, **_k: _Fake()},
+    )
+
+    provider = make_provider("openai", "sk-test", "gpt-4o-mini")
+
+    async def _run():
+        try:
+            async for _ in provider.stream_turn(system="hello", messages=[], tools=[]):
+                pass
+        except RuntimeError:
+            pass
+
+    asyncio.run(_run())
+    report = pul.usage_report("openai", days=7)
+    assert report["call_count"] == 1
+    assert report["total_input"] >= 1

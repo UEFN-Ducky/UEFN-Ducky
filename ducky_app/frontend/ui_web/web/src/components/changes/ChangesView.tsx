@@ -134,6 +134,9 @@ export interface ChangesViewProps {
   convId?: string;
   /** Limit the ledger to every member of this group hub. */
   groupId?: string;
+  /** Limit to every current chat of this library ducky type. */
+  profileId?: string;
+  profileName?: string;
   /** Hide the ducky dropdown (the list is already one chat). */
   hideDuckyFilter?: boolean;
   /** Render diffs inside this node instead of over the whole app. */
@@ -142,6 +145,23 @@ export interface ChangesViewProps {
 
 function runDuckyKey(run: ChangesetRunDto): string {
   return (run.profile_id || run.ducky_name || run.conv_id || "").trim();
+}
+
+function runMatchesProfile(
+  run: ChangesetRunDto,
+  profileId: string,
+  profileName: string,
+  chats?: ChatTab[],
+): boolean {
+  const pid = profileId.trim();
+  const name = profileName.trim().toLowerCase();
+  if (!pid && !name) return true;
+  if (pid && (run.profile_id || "").trim() === pid) return true;
+  const chat = runChat(run, chats);
+  if (pid && (chat?.profileId || "").trim() === pid) return true;
+  if (name && (run.ducky_name || "").trim().toLowerCase() === name) return true;
+  const chatName = (chat?.duckyName || "").trim().toLowerCase();
+  return Boolean(name && chatName && chatName === name);
 }
 
 function runChat(run: ChangesetRunDto, chats?: ChatTab[]): ChatTab | undefined {
@@ -245,6 +265,8 @@ export function ChangesView({
   onOpenChat,
   convId = "",
   groupId = "",
+  profileId = "",
+  profileName = "",
   hideDuckyFilter = false,
   modalContainer = null,
 }: ChangesViewProps) {
@@ -378,6 +400,7 @@ export function ChangesView({
     let shown = 0;
     const ordered = sortRuns(runs, sortKey, sortDir, (r) => runDuckyLabel(r, allChats).toLowerCase());
     for (const run of ordered) {
+      if (!runMatchesProfile(run, profileId, profileName, allChats)) continue;
       if (duckyFilter !== "all" && runDuckyKey(run) !== duckyFilter) continue;
       const runHit = matchesRunQuery(run, needle, allChats);
       const rows = sortChangeRows(
@@ -422,7 +445,7 @@ export function ChangesView({
       }
     }
     return { items: out, openRuns: open };
-  }, [allChats, runs, duckyFilter, kindFilter, programFilter, query, sortKey, sortDir, expanded, toggledRuns, forcedOpen]);
+  }, [allChats, runs, duckyFilter, kindFilter, programFilter, profileId, profileName, query, sortKey, sortDir, expanded, toggledRuns, forcedOpen]);
 
   const programs = useMemo(() => {
     const seen = new Set<string>();
@@ -1197,7 +1220,7 @@ export function ChangesView({
               <span>Ledger</span>
             </div>
             <div className="changes-filters">
-              {hideDuckyFilter ? null : (
+              {hideDuckyFilter || profileId || profileName ? null : (
                 <ChoiceDropdown
                   size="compact"
                   trigger={<Icons.Users />}
@@ -1383,6 +1406,8 @@ export function ChangesView({
                 ? "Nothing archived."
                 : convId || groupId
                 ? "This chat has not changed anything yet."
+                : profileId || profileName
+                ? "This ducky type has not changed anything yet."
                 : "Nothing has been changed in this project yet. Every file a ducky writes and every actor, device or asset it touches shows up here."
               : "No changes match these filters."}
           </p>

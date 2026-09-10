@@ -19,6 +19,8 @@ export const DEFAULT_CSS_VARS: Record<string, string> = {
   red: "#ff6058",
   amber: "#e8a317",
   blue: "#5eb3f6",
+  purple: "#c084fc",
+  yellow: "#facc15",
   accent: "#2563eb",
   "accent-hover": "#1d4ed8",
   "dropdown-bg": "#181818",

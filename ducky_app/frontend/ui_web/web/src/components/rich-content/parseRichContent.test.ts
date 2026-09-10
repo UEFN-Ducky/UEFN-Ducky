@@ -36,4 +36,25 @@ describe("parseRichContent", () => {
       expect(out.blocks[0]?.type).toBe("heading");
     }
   });
+
+  it("parses ducky-rich stats and inventory blocks", () => {
+    const raw = JSON.stringify({
+      __rich: true,
+      blocks: [
+        { type: "header", title: "Done", command: "ducky run" },
+        { type: "stats", changes: 3, blocked: 1, programs: { uefn: 2, verse: 1 } },
+        {
+          type: "inventory",
+          folder: "Test/A",
+          items: [{ kind: "verse", title: "x.verse", desc: "ok" }],
+        },
+        { type: "callout", tone: "warn", title: "Loose End Remaining", text: "Props" },
+      ],
+    });
+    const out = parseRichContent(raw);
+    expect(out.kind).toBe("blocks");
+    if (out.kind === "blocks") {
+      expect(out.blocks.map((b) => b.type)).toEqual(["header", "stats", "inventory", "callout"]);
+    }
+  });
 });

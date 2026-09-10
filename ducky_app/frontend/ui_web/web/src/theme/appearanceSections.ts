@@ -38,6 +38,10 @@ export const SEMANTIC_PALETTE_TOKENS: Array<{ id: string; name: string }> = [
   { id: "amber-dim", name: "Amber Dim" },
   { id: "blue", name: "Blue" },
   { id: "blue-dim", name: "Blue Dim" },
+  { id: "purple", name: "Purple" },
+  { id: "purple-dim", name: "Purple Dim" },
+  { id: "yellow", name: "Yellow" },
+  { id: "yellow-dim", name: "Yellow Dim" },
   { id: "on-green", name: "On Green" },
   { id: "on-amber", name: "On Amber" },
 ];
@@ -110,7 +114,7 @@ export const APPEARANCE_UI_SECTIONS: AppearanceUiSection[] = [
       role: "ui",
       hint: "Chat message text. Defaults to the app UI font.",
     },
-    tokenIds: ["input-bg"],
+    tokenIds: ["fg", "fg-dim", "muted", "border", "card", "input-bg"],
   },
   {
     id: "settings",

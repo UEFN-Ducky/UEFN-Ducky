@@ -442,7 +442,7 @@ export function Header({
             className="window-control-btn no-drag"
             title={isMaximized ? "Restore" : "Maximize"}
           >
-            {isMaximized ? <Icons.Restore /> : <Icons.Maximize />}
+            {isMaximized ? <Icons.WindowRestore /> : <Icons.Maximize />}
           </button>
           <button
             type="button"

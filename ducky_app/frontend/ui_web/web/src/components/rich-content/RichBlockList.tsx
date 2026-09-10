@@ -4,9 +4,12 @@ import { RichCallout } from "./RichCallout";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { RichFileLink } from "./RichFileLink";
 import { RichHeading } from "./RichHeading";
+import { RichInventory } from "./RichInventory";
 import { RichKeyValue } from "./RichKeyValue";
 import { RichList } from "./RichList";
 import { RichParagraph } from "./RichParagraph";
+import { RichReportHeader } from "./RichReportHeader";
+import { RichStats } from "./RichStats";
 import { RichTable } from "./RichTable";
 
 interface RichBlockListProps {
@@ -36,14 +39,10 @@ interface RichBlockViewProps {
   collapsePath: string;
 }
 
-function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockViewProps) {
+export function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockViewProps) {
   switch (block.type) {
     case "heading":
-      return (
-        <RichHeading level={block.level}>
-          {block.text}
-        </RichHeading>
-      );
+      return <RichHeading level={block.level}>{block.text}</RichHeading>;
     case "paragraph":
       return <RichParagraph>{block.text}</RichParagraph>;
     case "list":
@@ -64,11 +63,19 @@ function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockViewProps) 
     case "key_value":
       return <RichKeyValue pairs={block.pairs} />;
     case "file_link":
-      return (
-        <RichFileLink path={block.path} label={block.label} onOpenFile={onOpenFile} />
-      );
+      return <RichFileLink path={block.path} label={block.label} onOpenFile={onOpenFile} />;
     case "callout":
-      return <RichCallout tone={block.tone} text={block.text} />;
+      return <RichCallout tone={block.tone} text={block.text} title={block.title} />;
+    case "header":
+      return <RichReportHeader title={block.title} command={block.command} />;
+    case "stats":
+      return (
+        <RichStats changes={block.changes} blocked={block.blocked} programs={block.programs} />
+      );
+    case "inventory":
+      return (
+        <RichInventory items={block.items} folder={block.folder} heading={block.heading} />
+      );
     default:
       return null;
   }

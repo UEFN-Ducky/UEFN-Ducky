@@ -1953,7 +1953,6 @@
 /* VirtualChatMessageList */
 .virtual-chat-message-list-root {
   --chat-text-size: 14px;
-  --chat-text-font: var(--font-ui);
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -2080,6 +2079,7 @@
   width: 100%;
   font-family: var(--chat-text-font);
   font-size: var(--chat-text-size);
+  line-height: 1.8;
 }
 
 /* MessageBubble */
@@ -5288,7 +5288,6 @@
 .virtual-chat-message-list-root .agent-activity-panel-waiting-hint,
 .virtual-chat-message-list-root .rich-content,
 .virtual-chat-message-list-root .rich-summary,
-.virtual-chat-message-list-root .rich-heading,
 .virtual-chat-message-list-root .rich-paragraph,
 .virtual-chat-message-list-root .rich-list,
 .virtual-chat-message-list-root .rich-code--inline,
@@ -5916,13 +5915,8 @@
   transform: rotate(180deg);
 }
 
-/* ── Flatten all chat text to normal (400) weight ──
-   Catches what per-declaration edits can't: rich-content.css heading/strong
-   rules and the browser-default bold on <strong>/<b>/<th> in rendered markdown.
-   Scoped to chat message content + tool cards, so the Plan pane and other
-   markdown surfaces keep their weight hierarchy. Delete this block to revert. */
-.message-bubble-assistant-content,
-.message-bubble-assistant-content *,
+/* Flatten user bubbles + tool cards to normal weight. Assistant markdown
+   keeps heading/strong hierarchy so report blocks can read. */
 .message-bubble-user-content,
 .message-bubble-user-content *,
 .tool-execution-card-shell,

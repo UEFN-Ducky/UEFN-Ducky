@@ -27,7 +27,7 @@ export const TOKEN_CATEGORIES = [
   { id: "layout", name: "Layout & Effects" },
 ] as const;
 
-const SEMANTIC_COLOR_IDS = ["green", "red", "amber", "blue"] as const;
+const SEMANTIC_COLOR_IDS = ["green", "red", "amber", "blue", "purple", "yellow"] as const;
 
 export const COLOR_TOKENS: TokenDef[] = [
   { id: "accent", name: "Accent", cat: "brand", base: "accent", rule: (c) => c, color: true },

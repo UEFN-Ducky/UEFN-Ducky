@@ -74,35 +74,61 @@ def record_coding_agent_usage(
     result: Any,
     push: PushFn | None = None,
 ) -> None:
-    """Log the CLI's real usage into conv.token_usage + a UI snapshot.
+    """Log the CLI run into the Settings ledger + (when known) conv.token_usage.
 
-    Provider is the coding-agent id (claude_code/codex/cursor) so per-call rows
-    are attributed to the actual backend; the reported cost (when present) is
-    authoritative over pricing tables.
+    Always writes a ledger row so cancelled / errored / empty-usage launches
+    still appear. Provider is the coding-agent id (claude_code/codex/cursor).
+    ``cost_usd`` is authoritative when the CLI reported one.
     """
-    usage = getattr(result, "usage", None)
-    if not isinstance(usage, dict) or not usage:
-        return
+    usage = getattr(result, "usage", None) if result is not None else None
+    if not isinstance(usage, dict):
+        usage = {}
+    from frontend.ui_web.provider_usage_log import log_call
     from frontend.ui_web.token_usage import record_api_call, token_usage_report
 
     model = str(usage.get("model") or selected_model or "").strip()
     cost = usage.get("cost_usd")
+    cost_usd = float(cost) if isinstance(cost, (int, float)) else None
+    inp = int(usage.get("input_tokens") or 0)
+    out = int(usage.get("output_tokens") or 0)
+    cache_read = int(usage.get("cache_read_tokens") or 0)
+    cache_write = int(usage.get("cache_write_tokens") or 0)
+    has_usage = bool(inp or out or cache_read or cache_write)
+    try:
+        log_call(
+            provider=agent_id,
+            model=model,
+            input_tokens=inp if has_usage else 1,
+            output_tokens=out,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            cost_usd=cost_usd,
+            conv_id=str(getattr(conv, "id", "") or ""),
+            agent=str(getattr(conv, "coding_agent", "") or agent_id),
+            ducky_label=str(
+                getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or ""
+            ),
+        )
+    except Exception:
+        pass
+    if not has_usage:
+        return
     record_api_call(
         conv,
-        input_tokens=int(usage.get("input_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or 0),
-        cache_read_tokens=int(usage.get("cache_read_tokens") or 0),
-        cache_write_tokens=int(usage.get("cache_write_tokens") or 0),
+        input_tokens=inp,
+        output_tokens=out,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
         provider=agent_id,
         model=model,
-        cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
+        cost_usd=cost_usd,
     )
     stats: dict[str, Any] = {
         "coding_agent": agent_id,
         "model": model,
         "context_tokens": int(usage.get("context_tokens") or 0),
         "num_turns": int(usage.get("num_turns") or 0),
-        "cost_usd": float(cost) if isinstance(cost, (int, float)) else None,
+        "cost_usd": cost_usd,
         "updated": time.time(),
     }
     limit = int(usage.get("context_limit") or 0)
@@ -578,6 +604,7 @@ def run_coding_agent_message(
         )
     except Exception as exc:
         ckpt.flush(error=str(exc), force=True)
+        record_coding_agent_usage(conv, agent_id, model, None, push=push)
         push({"type": "error", "text": str(exc), "conv_id": conv.id, "run_id": rid})
         push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
         return {"ok": False, "error": str(exc), "run_id": rid}

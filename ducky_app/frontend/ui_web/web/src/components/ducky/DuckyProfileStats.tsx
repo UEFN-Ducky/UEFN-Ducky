@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import type { DuckyUsageReport } from "../../types/panel";
 import { fmtCompactTokens, fmtCostUsd, fmtTokens } from "../../utils/contextFormat";
+import { formatSavedAt } from "../../utils/formatSavedAt";
 
 type Props = {
   duckyName: string;
   profileId?: string;
   days?: number;
+  /** Dedicated Usage tab: list every current chat of this ducky type. */
+  showChats?: boolean;
 };
 
 function emptyReport(duckyName: string, profileId: string, days: number): DuckyUsageReport {
@@ -27,7 +30,12 @@ function emptyReport(duckyName: string, profileId: string, days: number): DuckyU
 }
 
 /** Compact last-N-days stats for one ducky profile (chats + tokens). */
-export function DuckyProfileStats({ duckyName, profileId = "", days = 7 }: Props) {
+export function DuckyProfileStats({
+  duckyName,
+  profileId = "",
+  days = 7,
+  showChats = false,
+}: Props) {
   const [report, setReport] = useState<DuckyUsageReport>(() =>
     emptyReport(duckyName, profileId, days),
   );
@@ -83,6 +91,25 @@ export function DuckyProfileStats({ duckyName, profileId = "", days = 7 }: Props
           </div>
         ))}
       </div>
+      {showChats ? (
+        <div className="ducky-profile-stats-chats">
+          <span className="ducky-profile-stats-label">Current chats of this type</span>
+          {report.chats.length === 0 ? (
+            <p className="ducky-profile-tab-hint">No chats used this ducky in the last {days} days.</p>
+          ) : (
+            <ul className="ducky-profile-stats-chat-list">
+              {report.chats.map((chat) => (
+                <li key={chat.conv_id} className="ducky-profile-stats-chat">
+                  <span className="ducky-profile-stats-chat-title">{chat.title}</span>
+                  <span className="ducky-profile-stats-chat-meta">
+                    {chat.updated ? formatSavedAt(chat.updated) : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
