@@ -111,6 +111,8 @@ def test_install_is_idempotent(monkeypatch, project: Path) -> None:
 
 
 def test_changesets_storage_climbs_from_content_to_project_root(tmp_path: Path, monkeypatch) -> None:
+    # The orphan-ledger fold is a files-backend repair; on rows the importer brings orphans in as-is.
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_LEDGER", "files")
     monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path / "appdata")
     root = tmp_path / "Island"
     (root / "Content").mkdir(parents=True)

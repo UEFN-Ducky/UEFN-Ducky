@@ -55,11 +55,9 @@ ALLOWLIST: dict[str, str] = {
     # ProjectWriter instance it is handed (a Name receiver the scanner cannot see through).
     "backend/workspace/journal.py::_replay_run": "writer.write_text on the ProjectWriter it is handed (Name receiver)",
     "backend/workspace/journal.py::_write_json": "journal run/index documents under AppData",
+    "backend/workspace/journal.py::_delete_run_doc": "run document removal under AppData (files backend)",
     "backend/workspace/journal.py::_store_blob": "journal blobs under AppData",
     "backend/workspace/human_watch.py::_save_saved": "human-watch fingerprint under AppData/changesets",
-    "backend/workspace/journal.py::prune": "journal retention under AppData",
-    "backend/workspace/journal.py::delete_runs": "journal Clear removes run documents under AppData",
-    "backend/workspace/journal.py::delete_entries": "journal row delete removes an emptied run document under AppData",
     "backend/workspace/journal.py::_sweep_orphan_blobs": "journal blob GC under AppData",
     "backend/workspace/journal.py::_revert_path": "restores via the ProjectWriter instance",
     # KNOWN DEBT — tester harness resolves its own root and writes directly. Tracked as

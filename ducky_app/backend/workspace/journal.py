@@ -289,6 +289,26 @@ def _path_aliases(path: str) -> tuple[str, ...]:
     return (p, f"Content/{p}")
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("ledger")
+
+
+def _repo():
+    """The ledger repo, with the one-time legacy import done."""
+    from backend.store.importers import phase3
+    from backend.store.repos import ledger as repo
+
+    phase3.ensure()
+    return repo
+
+
+def _pid(storage: Path) -> str:
+    """Rows are keyed by the ledger folder name (the project slug)."""
+    return storage.name
+
+
 def _disk_rel(newest: Mapping[str, Any], earliest: Mapping[str, Any], key: str) -> str:
     """Prefer the ledger's stored path so Content-rooted and project-rooted writers both resolve."""
     cands = [str(newest.get("path") or ""), str(earliest.get("path") or "")]
@@ -479,7 +499,7 @@ class FileChangeJournal:
     ) -> list[dict[str, Any]]:
         storage = self._storage_for_root(project_root)
         runs_dir = storage / "runs"
-        if not runs_dir.is_dir():
+        if not _use_db() and not runs_dir.is_dir():
             return []
         cap = max(1, int(limit))
         conv_id = (conv_id or "").strip()
@@ -948,6 +968,8 @@ class FileChangeJournal:
         return later
 
     def _iter_run_docs(self, storage: Path) -> list[dict[str, Any]]:
+        if _use_db():
+            return _repo().runs_docs(_pid(storage))
         docs: list[dict[str, Any]] = []
         for path in (storage / "runs").glob("*.json"):
             run = self._read_json(path)
@@ -1390,10 +1412,7 @@ class FileChangeJournal:
         want = bool(archived)
         updated = 0
         with self._lock(storage):
-            for path in list((storage / "runs").glob("*.json")):
-                run = self._read_json(path)
-                if not isinstance(run, dict):
-                    continue
+            for run in self._iter_run_docs(storage):
                 if not self._match_run(run, conv_id=conv_id, group_id=group_id, run_id=run_id):
                     continue
                 if run.get("status") in _OPEN_STATUSES:
@@ -1427,16 +1446,13 @@ class FileChangeJournal:
         with self._lock(storage):
             deleted_ids: set[str] = set()
             keep: list[dict[str, Any]] = []
-            for path in list((storage / "runs").glob("*.json")):
-                run = self._read_json(path)
-                if not isinstance(run, dict):
-                    continue
+            for run in self._iter_run_docs(storage):
                 match = self._match_run(run, conv_id=conv_id, group_id=group_id, run_id=run_id)
                 if match and run.get("status") not in _OPEN_STATUSES:
                     if archived_only and not run.get("archived"):
                         keep.append(run)
                         continue
-                    path.unlink(missing_ok=True)
+                    self._delete_run_doc(storage, run)
                     rid = str(run.get("run_id") or "")
                     if rid:
                         deleted_ids.add(rid)
@@ -1472,7 +1488,7 @@ class FileChangeJournal:
             if run["entries"] or run.get("status") in _OPEN_STATUSES:
                 self._save_run(storage, run)
             else:
-                self._run_path(storage, run_id).unlink(missing_ok=True)
+                self._delete_run_doc(storage, run)
                 self._drop_catalog_ids(storage, {run_id})
         return {"removed": removed, "kept": len(want) - removed}
 
@@ -1500,22 +1516,19 @@ class FileChangeJournal:
         cutoff = self._clock() - max(1, int(max_age_days)) * 86400.0
         removed_runs = 0
         with self._lock(storage):
-            runs: list[tuple[float, Path, dict[str, Any]]] = []
-            for path in (storage / "runs").glob("*.json"):
-                run = self._read_json(path)
-                if not isinstance(run, dict):
-                    continue
-                runs.append((float(run.get("started") or 0.0), path, run))
+            runs: list[tuple[float, dict[str, Any]]] = [
+                (float(run.get("started") or 0.0), run) for run in self._iter_run_docs(storage)
+            ]
             runs.sort(key=lambda t: t[0], reverse=True)
             keep: list[dict[str, Any]] = []
             dropped: set[str] = set()
-            for i, (started, path, run) in enumerate(runs):
+            for i, (started, run) in enumerate(runs):
                 open_run = run.get("status") in _OPEN_STATUSES
                 if run.get("archived"):
                     keep.append(run)
                     continue
                 if not open_run and (i >= keep_runs or started < cutoff):
-                    path.unlink(missing_ok=True)
+                    self._delete_run_doc(storage, run)
                     rid = str(run.get("run_id") or "")
                     if rid:
                         dropped.add(rid)
@@ -1529,6 +1542,9 @@ class FileChangeJournal:
 
     @staticmethod
     def _sweep_orphan_blobs(storage: Path, keep: list[dict[str, Any]]) -> int:
+        if _use_db():
+            # Refcount query over every project's entries, file versions and messages.
+            return _repo().sweep_blobs()
         referenced: set[str] = set()
         for run in keep:
             for e in run.get("entries", []):
@@ -1550,9 +1566,17 @@ class FileChangeJournal:
         if not project_root:
             raise ValueError("project_root is required")
         storage = self._storage_for_root(project_root)
-        (storage / "runs").mkdir(parents=True, exist_ok=True)
-        (storage / "blobs").mkdir(parents=True, exist_ok=True)
+        if not _use_db():
+            (storage / "runs").mkdir(parents=True, exist_ok=True)
+            (storage / "blobs").mkdir(parents=True, exist_ok=True)
         return storage
+
+    def _delete_run_doc(self, storage: Path, run: dict[str, Any]) -> None:
+        rid = str(run.get("run_id") or "")
+        if _use_db():
+            _repo().run_delete(_pid(storage), rid)
+            return
+        self._run_path(storage, rid).unlink(missing_ok=True)
 
     def _lock(self, storage: Path | None) -> threading.RLock:
         key = str(storage) if storage else ""
@@ -1568,18 +1592,28 @@ class FileChangeJournal:
         return storage / "runs" / f"{_SAFE_ID.sub('_', run_id)}.json"
 
     def _load_run(self, storage: Path, run_id: str) -> dict[str, Any] | None:
+        if _use_db():
+            return _repo().run_get(_pid(storage), run_id)
         data = self._read_json(self._run_path(storage, run_id))
         return data if isinstance(data, dict) else None
 
     def _save_run(self, storage: Path, run: dict[str, Any]) -> None:
+        if _use_db():
+            _repo().run_put(_pid(storage), run)
+            return
         self._write_json(self._run_path(storage, run["run_id"]), run)
         self._upsert_catalog(storage, run)
 
     def _load_index(self, storage: Path) -> dict[str, Any]:
+        if _use_db():
+            return _repo().index_get(_pid(storage))
         data = self._read_json(storage / "index.json")
         return data if isinstance(data, dict) else {}
 
     def _save_index(self, storage: Path, index: dict[str, Any]) -> None:
+        if _use_db():
+            _repo().index_replace(_pid(storage), index)
+            return
         self._write_json(storage / "index.json", index)
 
     @staticmethod
@@ -1592,18 +1626,22 @@ class FileChangeJournal:
         }
 
     def _load_catalog(self, storage: Path) -> dict[str, Any] | None:
+        if _use_db():
+            return _repo().catalog(_pid(storage))  # derived from the runs table
         data = self._read_json(storage / "catalog.json")
         return data if isinstance(data, dict) else None
 
     def _upsert_catalog(self, storage: Path, run: dict[str, Any]) -> None:
         rid = str(run.get("run_id") or "")
-        if not rid:
+        if not rid or _use_db():
             return
         catalog = self._load_catalog(storage) or {}
         catalog[rid] = self._catalog_entry(run)
         self._write_json(storage / "catalog.json", catalog)
 
     def _drop_catalog_ids(self, storage: Path, run_ids: set[str]) -> None:
+        if _use_db():
+            return  # derived from the runs table
         catalog = self._load_catalog(storage)
         if not catalog:
             return
@@ -1612,6 +1650,8 @@ class FileChangeJournal:
         self._write_json(storage / "catalog.json", catalog)
 
     def _rebuild_catalog(self, storage: Path) -> dict[str, Any]:
+        if _use_db():
+            return _repo().catalog(_pid(storage))
         catalog: dict[str, Any] = {}
         for path in (storage / "runs").glob("*.json"):
             run = self._read_json(path)
@@ -1639,6 +1679,8 @@ class FileChangeJournal:
     @staticmethod
     def _store_blob(storage: Path, content: str) -> str:
         digest = content_hash(content)
+        if _use_db():
+            return _repo().blob_put(content, digest=digest)
         target = storage / "blobs" / f"{digest}.txt"
         if not target.exists():
             tmp = target.with_suffix(".tmp")
@@ -1650,6 +1692,8 @@ class FileChangeJournal:
     def _read_blob(storage: Path, digest: Any) -> str | None:
         if not digest:
             return None
+        if _use_db():
+            return _repo().blob_get(str(digest))
         target = storage / "blobs" / f"{digest}.txt"
         try:
             return target.read_text(encoding="utf-8", newline="")
@@ -1845,6 +1889,9 @@ class FileChangeJournal:
         aliases = set(_path_aliases(path))
         now = self._clock()
         storage = self._storage(project_root)
+        if _use_db():
+            hit = _repo().latest_entry_for_path(_pid(storage), sorted(aliases), since=now - window_s)
+            return bool(hit) and str(hit.get("after_hash") or "") == digest
         with self._lock(storage):
             for run in self._iter_run_docs(storage):
                 for entry in run.get("entries") or []:

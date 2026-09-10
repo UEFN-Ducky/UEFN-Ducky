@@ -60,7 +60,9 @@ def test_new_file_has_no_restore_point(root: str) -> None:
     assert ids["before_id"] is None and ids["after_id"]
 
 
-def test_entry_on_disk_matches_schema_and_omits_empty_attribution(root: str) -> None:
+def test_entry_on_disk_matches_schema_and_omits_empty_attribution(root: str, monkeypatch) -> None:
+    # Legacy on-disk contract (what the importer reads); rows are covered by backend/store/test_phase3.py.
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_LEDGER", "files")
     from backend.workspace.test_schemas import validate
 
     file_history.record_write(REL, None, AFTER, project_root=root, writer={"source": "agent", "run_id": "r"})
@@ -70,7 +72,9 @@ def test_entry_on_disk_matches_schema_and_omits_empty_attribution(root: str) -> 
     assert data["run_id"] == "r" and "ducky_name" not in data
 
 
-def test_v1_entry_reads_back_with_empty_attribution(root: str) -> None:
+def test_v1_entry_reads_back_with_empty_attribution(root: str, monkeypatch) -> None:
+    # Legacy on-disk contract (what the importer reads); rows are covered by backend/store/test_phase3.py.
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_LEDGER", "files")
     entries_dir = file_history._entries_dir(REL, root)  # noqa: SLF001
     legacy = {
         "id": "1700000000000",

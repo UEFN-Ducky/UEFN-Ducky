@@ -258,12 +258,25 @@ def _storage(journal: FileChangeJournal, root: str) -> Path:
     return journal._storage(root)  # noqa: SLF001 — same AppData ledger
 
 
+def _watch_use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("ledger")
+
+
 def _load_saved(storage: Path) -> dict[str, dict[str, Any]]:
-    path = storage / _INDEX_NAME
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    if _watch_use_db():
+        from backend.store.importers import phase3
+        from backend.store.repos import ledger as repo
+
+        phase3.ensure()
+        raw: Any = repo.watch_get(storage.name)
+    else:
+        path = storage / _INDEX_NAME
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict[str, Any]] = {}
@@ -280,6 +293,11 @@ def _load_saved(storage: Path) -> dict[str, dict[str, Any]]:
 
 def _save_saved(storage: Path, seen: dict[str, dict[str, Any]]) -> None:
     payload = {rel: str(row.get("hash") or "") for rel, row in seen.items() if row.get("hash")}
+    if _watch_use_db():
+        from backend.store.repos import ledger as repo
+
+        repo.watch_replace(storage.name, payload)
+        return
     tmp = storage / (_INDEX_NAME + ".tmp")
     tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     tmp.replace(storage / _INDEX_NAME)

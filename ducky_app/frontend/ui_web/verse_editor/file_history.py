@@ -61,6 +61,25 @@ def _history_root(project_root: str | None = None) -> Path:
     return d
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("ledger")
+
+
+def _project_id(project_root: str | None) -> str:
+    root = project_root if project_root is not None else _active_project_root()
+    return project_slug(root)
+
+
+def _repo():
+    from backend.store.importers import phase3
+    from backend.store.repos import history as repo
+
+    phase3.ensure()
+    return repo
+
+
 def _entries_dir(relative_path: str, project_root: str | None = None) -> Path:
     rel = _norm_path(relative_path)
     if not rel:
@@ -134,6 +153,10 @@ def _write_snapshot(
     meta: Mapping[str, Any] | None = None,
 ) -> str:
     rel = _norm_path(relative_path)
+    if not rel:
+        raise ValueError("relative_path is required")
+    if _use_db():
+        return _write_snapshot_rows(rel, content, project_root, source=source, meta=meta)
     entries_dir = _entries_dir(rel, project_root)
     # Dedup: never create a new save point when the content is identical to the most recent
     # one. Otherwise just browsing/restoring history (which round-trips through the editor +
@@ -161,6 +184,41 @@ def _write_snapshot(
     target = entries_dir / f"{entry_id}.json"
     target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     _prune_entries(entries_dir)
+    return entry_id
+
+
+def _write_snapshot_rows(
+    rel: str,
+    content: str,
+    project_root: str | None,
+    *,
+    source: str | None,
+    meta: Mapping[str, Any] | None,
+) -> str:
+    """ADR 0003: one row per version, text stored once in ``blobs``."""
+    repo = _repo()
+    project_id = _project_id(project_root)
+    digest = _content_hash(content)
+    newest = repo.newest(project_id, rel)
+    if newest is not None and str(newest.get("content_hash") or "") == digest:
+        return str(newest.get("entry_id") or "")
+    entry_id = _entry_id()
+    while repo.exists(project_id, rel, entry_id):
+        entry_id = str(int(entry_id) + 1)
+    attribution: dict[str, Any] = dict(_attribution(meta))
+    if source:
+        attribution["source"] = source
+    repo.put(
+        project_id,
+        rel,
+        entry_id,
+        content,
+        preview=_preview_line(content),
+        saved_at=int(time.time()),
+        attribution=attribution,
+        schema_version=SCHEMA_VERSION,
+        content_hash=digest,
+    )
     return entry_id
 
 
@@ -232,6 +290,25 @@ def record_agent_write(
 
 def list_entries(relative_path: str, project_root: str | None = None) -> list[dict[str, Any]]:
     rel = _norm_path(relative_path)
+    if not rel:
+        raise ValueError("relative_path is required")
+    if _use_db():
+        out_rows: list[dict[str, Any]] = []
+        for r in _repo().list_rows(_project_id(project_root), rel):
+            row: dict[str, Any] = {
+                "schema_version": int(r.get("schema_version") or 1),
+                "id": str(r.get("entry_id") or ""),
+                "path": rel,
+                "saved_at": int(r.get("saved_at") or 0),
+                "bytes": int(r.get("bytes") or 0),
+                "preview": str(r.get("preview") or ""),
+                "content_hash": str(r.get("content_hash") or ""),
+                "source": str(r.get("source") or ""),
+            }
+            for key in ATTRIBUTION_KEYS:
+                row[key] = str(r.get(key) or "")
+            out_rows.append(row)
+        return out_rows
     entries_dir = _entries_dir(rel, project_root)
     out: list[dict[str, Any]] = []
     for path in sorted(entries_dir.glob("*.json"), key=lambda p: p.name, reverse=True):
@@ -268,6 +345,11 @@ def read_entry(relative_path: str, entry_id: str, project_root: str | None = Non
     eid = (entry_id or "").strip()
     if not eid:
         raise ValueError("entry_id is required")
+    if _use_db():
+        text = _repo().content(_project_id(project_root), rel, eid)
+        if text is None:
+            raise ValueError(f"History entry not found: {eid}")
+        return {"content": text, "path": rel, "id": eid}
     target = _entries_dir(rel, project_root) / f"{eid}.json"
     if not target.is_file():
         raise ValueError(f"History entry not found: {eid}")
