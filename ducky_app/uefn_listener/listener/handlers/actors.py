@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 import unreal
 
 from listener import lookup
+from listener.device_editor import _device_kind
+from listener.device_scale import refuse_if_creative_device_scale
 from listener.dispatch import register
 from listener.serialize import ALL_ACTOR_FIELDS, is_live, rotator_pyr, serialize, serialize_actor
 
@@ -56,23 +58,14 @@ def cmd_get_selected_actors() -> dict:
 
 
 def _load_placeable(asset_path: str):
-    """Load anything placeable by path: a normal asset, a Blueprint, or a Verse-device class.
+    """Load the Content Drawer placeable (Actor Blueprint ``_C``) when it exists.
 
-    Verse device classes live in packages like ``/Game/_Verse.<mangled-name>`` and load via
-    ``load_object`` rather than ``load_asset``. The returned object is fed to the actor factory
-    (``spawn_actor_from_object``), which places meshes, Blueprints, and Verse classes alike.
+    Naked StaticMesh spawn creates FortStaticMeshActor — that cook-fails on BR
+    BakeData foliage. Verse device classes still load via ``load_object``.
     """
-    obj = None
-    try:
-        obj = unreal.EditorAssetLibrary.load_asset(asset_path)
-    except Exception:
-        obj = None
-    if obj is None:
-        try:
-            obj = unreal.load_object(None, asset_path)
-        except Exception:
-            obj = None
-    return obj
+    from listener.island_placeable import resolve_content_drawer_placeable
+
+    return resolve_content_drawer_placeable(asset_path)
 
 
 def _resolve_actor_class(actor_class: str) -> Optional[type]:
@@ -123,7 +116,8 @@ def cmd_spawn_actor(
     """Place an actor. Optional label/folder/tags apply in the same tick/transaction.
 
     Prefer passing label+folder here instead of separate set_actor_label /
-    set_actor_folder calls (3 round-trips → 1).
+    set_actor_folder calls (3 round-trips → 1). Fortnite catalog: pass the
+    Content Drawer Actor Blueprint ``_C`` — not a BakeData StaticMesh.
     """
     loc = unreal.Vector(*location) if location else unreal.Vector(0, 0, 0)
     rot = rotator_pyr(*rotation) if rotation else rotator_pyr(0, 0, 0)
@@ -202,6 +196,7 @@ def cmd_set_actor_transform(
     scale: Optional[List[float]] = None,
 ) -> dict:
     target = lookup.require_actor(actor_path)
+    refuse_if_creative_device_scale(_device_kind(target), scale)
 
     if location is not None:
         target.set_actor_location(unreal.Vector(*location), False, False)

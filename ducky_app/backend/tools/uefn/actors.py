@@ -86,7 +86,8 @@ def spawn_actor(
     Prefer ``label`` + ``folder`` here (same tick) instead of separate
     set_actor_label / set_actor_folder calls. New actor is selected by default.
     Do not pass Verse ``*_device`` names as ``actor_class`` — search under
-    ``/Game/Creative`` for the Blueprint path.
+    ``/Game/Creative`` for the Blueprint path. Fortnite catalog props: spawn the
+    Content Drawer ``_C`` class, not a BakeData StaticMesh.
     """
     # Teach before the listener round-trip when the mistake is obvious.
     if not asset_path and actor_class:
@@ -146,7 +147,13 @@ def set_actor_transform(
     scale: Optional[list[float]] = None,
     pretty: bool = False,
 ) -> str:
-    """Set an actor transform (location, rotation, and/or scale)."""
+    """Set an actor location, rotation, and/or scale.
+
+    Scale is for props, meshes, and custom assets only. Fortnite Creative
+    devices (buttons, triggers, volumes, barriers, pads, granters, Island
+    Settings) refuse scale — resize those via Details Width/Height/zone
+    with SetDeviceProperty. Location and rotation are fine on devices.
+    """
     params: dict[str, Any] = {"actor_path": actor_path}
     if location is not None:
         params["location"] = location

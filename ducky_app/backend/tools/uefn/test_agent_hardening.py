@@ -71,6 +71,42 @@ def test_fortnite_directory_hint():
     assert "content_catalog" in AGENT_HARD_RULES
 
 
+def test_hard_rules_place_like_content_drawer():
+    assert "Place like Content Drawer" in AGENT_HARD_RULES
+    assert "FortStaticMeshActor" in AGENT_HARD_RULES
+    assert "BakeData" in AGENT_HARD_RULES
+    # Fortnite catalog is allowed; the cook bug is placement method, not the folder.
+    assert "never spawn or scatter" not in AGENT_HARD_RULES
+
+
+def test_hard_rules_never_scale_fortnite_devices():
+    assert "Never scale Fortnite Creative devices" in AGENT_HARD_RULES
+    assert "SetDeviceProperty" in AGENT_HARD_RULES
+    assert "set_actor_scale3d" in AGENT_HARD_RULES
+    assert "Width" in AGENT_HARD_RULES
+    from backend.agent.prompt import _rules_body
+
+    prompt = _rules_body(4200)
+    assert "Never scale Fortnite Creative devices" in prompt
+    assert "SetDeviceProperty" in prompt
+    actors = (
+        Path(__file__).resolve().parents[3]
+        / "uefn_listener"
+        / "listener"
+        / "handlers"
+        / "actors.py"
+    ).read_text(encoding="utf-8")
+    body = actors[actors.index("def cmd_set_actor_transform") :]
+    assert "refuse_if_creative_device_scale" in body
+    assert "_device_kind" in body
+
+
+def test_hard_rules_python_is_last_not_exhausted_fallback():
+    assert "execute_python` is LAST" in AGENT_HARD_RULES
+    assert "never a placement/layout path" in AGENT_HARD_RULES
+    assert "exhausted" in AGENT_HARD_RULES
+
+
 def test_hard_rules_captures_use_appdata_not_project():
     assert "tool_captures" in AGENT_HARD_RULES
     assert "LOCALAPPDATA" in AGENT_HARD_RULES or "AppData" in AGENT_HARD_RULES
@@ -130,6 +166,12 @@ def test_hard_rules_epic_mcp_nested():
     assert "unreal__" in AGENT_HARD_RULES
     assert "epic_mcp_setup_steps" in AGENT_HARD_RULES
     assert "XYZ" in AGENT_HARD_RULES
+
+
+def test_hard_rules_save_modal_host_dismiss():
+    assert "dismiss_uefn_modal" in AGENT_HARD_RULES
+    assert "Save popup" in AGENT_HARD_RULES
+    assert "Slate thread" in AGENT_HARD_RULES
 
 
 def test_get_verse_editables_skips_uasset_walk():
@@ -434,6 +476,9 @@ if __name__ == "__main__":
     test_compact_keeps_keyed_inspect()
     test_compact_strips_huge_unkeyed_inspect()
     test_fortnite_directory_hint()
+    test_hard_rules_place_like_content_drawer()
+    test_hard_rules_never_scale_fortnite_devices()
+    test_hard_rules_python_is_last_not_exhausted_fallback()
     test_hard_rules_captures_use_appdata_not_project()
     test_hard_rules_forbid_project_side_storage_except_ducky()
     test_hard_rules_forbid_digest_mutation()
