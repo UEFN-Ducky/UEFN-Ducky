@@ -86,6 +86,7 @@ _PUBLIC_METHODS = frozenset({
     'deploy',
     'deploy_all_projects',
     'coding_agent_login',
+    'coding_agent_logout',
     'detect_coding_agent_cli',
     'disconnect_verse_workflow',
     'discord_debug',

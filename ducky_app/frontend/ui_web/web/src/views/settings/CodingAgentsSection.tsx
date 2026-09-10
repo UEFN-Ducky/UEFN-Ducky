@@ -103,6 +103,7 @@ function CodingAgentRows({
   const [busyId, setBusyId] = useState("");
   const [detectNote, setDetectNote] = useState<Record<string, string>>({});
   const [loginId, setLoginId] = useState("");
+  const [logoutId, setLogoutId] = useState("");
 
   // Start the gateway's CLI login (terminal + browser), then poll Detect until the
   // account is signed in — no chat, no pasting codes.
@@ -137,6 +138,27 @@ function CodingAgentRows({
     }
   };
 
+  const startLogout = async (agentId: string) => {
+    const api = getApi();
+    if (!api?.coding_agent_logout) return;
+    setLogoutId(agentId);
+    setDetectNote((n) => ({ ...n, [agentId]: "Signing out…" }));
+    try {
+      const res = await api.coding_agent_logout(agentId);
+      if (!res.ok) {
+        setDetectNote((n) => ({ ...n, [agentId]: String(res.error || res.message || "Logout failed") }));
+        return;
+      }
+      setDetectNote((n) => ({ ...n, [agentId]: res.message || "Logged out." }));
+      await refresh();
+      void refreshModelsCatalog();
+    } catch (e) {
+      setDetectNote((n) => ({ ...n, [agentId]: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setLogoutId("");
+    }
+  };
+
   return (
     <div className="llms-provider-card">
       {rows.map((agent) => {
@@ -151,6 +173,7 @@ function CodingAgentRows({
         const statusText = note || agent.status;
         const detecting = busyId === agent.id;
         const loggingIn = loginId === agent.id;
+        const loggingOut = logoutId === agent.id;
         const loggedIn = agent.logged_in === true;
         const needsLogin = agent.available && agent.logged_in === false;
         return (
@@ -186,10 +209,25 @@ function CodingAgentRows({
                     label: "Log in",
                     route: "settings.llms",
                   })}
-                  disabled={loggingIn || detecting}
+                  disabled={loggingIn || loggingOut || detecting}
                   onClick={() => void startLogin(agent.id)}
                 >
                   {loggingIn ? "Waiting for sign-in…" : "Log in"}
+                </button>
+              ) : null}
+              {agent.can_logout && (loggedIn || loggingOut) ? (
+                <button
+                  type="button"
+                  className="settings-btn llms-provider-btn"
+                  ref={targetRef("settings.llms.provider.agent.logout", {
+                    kind: "button",
+                    label: "Log out",
+                    route: "settings.llms",
+                  })}
+                  disabled={loggingOut || loggingIn || detecting}
+                  onClick={() => void startLogout(agent.id)}
+                >
+                  {loggingOut ? "Signing out…" : "Log out"}
                 </button>
               ) : null}
               <label className="general-tab-switch" title="Enable in chat picker">

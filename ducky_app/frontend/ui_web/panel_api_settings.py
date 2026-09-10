@@ -779,6 +779,32 @@ class PanelApiSettingsMixin:
         invalidate_detect_cache()
         return result if isinstance(result, dict) else {"ok": bool(result)}
 
+    def coding_agent_logout(self, agent_id: str) -> dict[str, Any]:
+        """Sign the gateway's CLI out from Settings so the user can re-test login."""
+        from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
+        from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
+        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+
+        aid = normalize_coding_agent(agent_id)
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {"ok": False, "error": "Plugins still loading — try again in a moment."}
+        logout = (get_coding_agent_registration(aid) or {}).get("logout")
+        if not callable(logout):
+            return {"ok": False, "error": f"{aid} has no logout flow."}
+        settings = _pa.PanelSettings.load()
+        try:
+            result = logout(
+                cwd=(settings.uefn_project_root or "").strip(),
+                cli_path=str(coding_agent_cfg(settings, aid).get("cli_path") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - surface to the Settings row
+            return {"ok": False, "error": str(exc)}
+        invalidate_detect_cache()
+        from backend.agent.coding_agents.base import kick_detect_refresh
+
+        kick_detect_refresh()
+        return result if isinstance(result, dict) else {"ok": bool(result)}
+
     def list_tasks(self) -> dict[str, Any]:
         from backend.agent.coding_agents.epic import list_tasks
 
