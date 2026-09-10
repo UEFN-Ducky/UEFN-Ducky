@@ -1,0 +1,13 @@
+# Used by scripts/check_security.py (local). CI security.yml uses stock rules.
+title = "UEFN-Ducky"
+
+[extend]
+useDefault = true
+
+# LLM plugins pass a model id as test_key_model= — not a credential.
+[allowlist]
+description = "LLM test_key_model is a model id"
+regexTarget = "line"
+regexes = [
+  '''test_key_model\s*=''',
+]
