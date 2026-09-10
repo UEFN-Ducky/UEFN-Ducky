@@ -23,7 +23,20 @@ describe("classifyRichRef", () => {
     expect(classifyRichRef("@editable").kind).toBe("keyword");
     expect(classifyRichRef("CanvasPanel").kind).toBe("umg");
     expect(classifyRichRef("trigger_device").kind).toBe("device");
-    expect(classifyRichRef("blender_get_scene_info").kind).toBe("tool");
+    expect(classifyRichRef("blender_get_scene_info").kind).toBe("mesh");
     expect(classifyRichRef("EntryTrigger").open).toBeUndefined();
+  });
+
+  it("splits the place-and-wire tool chain into different chip kinds", () => {
+    expect(classifyRichRef("workspace_write_file").kind).toBe("file");
+    expect(classifyRichRef("workspace_list_verse_errors").kind).toBe("verse");
+    expect(classifyRichRef("workspace_compile_verse").kind).toBe("verse");
+    expect(classifyRichRef("unreal__call_tool(ValkyrieToolset.VerseToolset, BuildAll)").kind).toBe("device");
+    expect(classifyRichRef("search_assets(search=\"<class_name>\", directory=\"/<ProjectName>\")").kind).toBe("asset");
+    expect(classifyRichRef("/Game").kind).toBe("folder");
+    expect(classifyRichRef("spawn_actor(asset_path=..., label=...)").kind).toBe("actor");
+    expect(classifyRichRef("set_actor_label").kind).toBe("actor");
+    expect(classifyRichRef("wire_verse_device_ref(actor_path, field, target_path)").kind).toBe("verse");
+    expect(classifyRichRef("ListDeviceAssets(nameFilter=\"Button\")").kind).toBe("device");
   });
 });

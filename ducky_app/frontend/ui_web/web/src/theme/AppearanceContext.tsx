@@ -1009,3 +1009,7 @@ export function useAppearance(): AppearanceContextValue {
   if (!ctx) throw new Error("useAppearance must be used within AppearanceProvider");
   return ctx;
 }
+
+export function useAppearanceOptional(): AppearanceContextValue | null {
+  return useContext(AppearanceContext);
+}

@@ -28,6 +28,22 @@ const FILE_EXT = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg|bl
 const UEFN_PATH = /^\/[A-Za-z][\w]*(?:\/[\w./-]+)+$/;
 const TOOLISH = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 const ACTORISH = /^[A-Za-z][\w]*_[A-Za-z0-9]/;
+const CALL_NAME = /^([A-Za-z][\w.]*)\(/;
+
+function toolFamily(name: string): RichRefKind {
+  const n = name.toLowerCase();
+  if (/^[a-z]+_device$/.test(n)) return "device";
+  if (n.startsWith("unreal__") || n.startsWith("listdevice")) return "device";
+  if (/blender/.test(n)) return "mesh";
+  if (/umg|widget/.test(n)) return "umg";
+  if (/search_assets|open_asset/.test(n)) return "asset";
+  if (/spawn_actor|set_actor|get_actor|select_actor/.test(n)) return "actor";
+  if (n.startsWith("workspace_write") || n.startsWith("workspace_read") || n.startsWith("workspace_list_dir")) {
+    return "file";
+  }
+  if (n.startsWith("workspace_") || /verse|compile/.test(n)) return "verse";
+  return "tool";
+}
 
 function fileOpen(text: string): RichRefOpen {
   const p = text.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -56,7 +72,7 @@ function withOpen(base: Omit<RichRef, "hint">, open?: RichRefOpen): RichRef {
 /** Classify a chat code chip so hover/click know what that token is. */
 export function classifyRichRef(raw: string): RichRef {
   const text = raw.trim();
-  if (!text || text.length > 120) {
+  if (!text) {
     return { text: raw, kind: "name", label: "Name", hint: "No live location — click copies the name" };
   }
   if (text.startsWith("@") || text === "Props") {
@@ -69,6 +85,19 @@ export function classifyRichRef(raw: string): RichRef {
       { text, kind: folder ? "folder" : "asset", label: folder ? "UEFN folder" : "UEFN asset" },
       { type: "asset", path: rel },
     );
+  }
+  if (text.startsWith("/") && /^\/[^\s]{1,79}$/.test(text)) {
+    return withOpen({ text, kind: "folder", label: "UEFN path" });
+  }
+  const call = text.match(CALL_NAME);
+  if (call || /^unreal__/.test(text) || TOOLISH.test(text)) {
+    const name = call?.[1] ?? text;
+    const kind = toolFamily(name);
+    return withOpen({
+      text,
+      kind,
+      label: kind === "tool" ? "Tool" : kind === "verse" ? "Verse tool" : kind === "device" ? "Editor tool" : "Tool",
+    });
   }
   if (FILE_EXT.test(text) || /^(?:content\/|verse\/)/i.test(text)) {
     const verse = /\.verse/i.test(text);
@@ -84,7 +113,6 @@ export function classifyRichRef(raw: string): RichRef {
   }
   if (/^(?:BP_|P_|PF_)/i.test(text)) return withOpen({ text, kind: "prefab", label: "Prefab / blueprint" });
   if (/_device$/i.test(text)) return withOpen({ text, kind: "device", label: "Creative device type" });
-  if (TOOLISH.test(text)) return withOpen({ text, kind: "tool", label: "Tool" });
   if (ACTORISH.test(text)) return withOpen({ text, kind: "actor", label: "Level actor" });
   if (/^[A-Z][A-Za-z0-9]+$/.test(text)) return withOpen({ text, kind: "field", label: "Field / label" });
   return withOpen({ text, kind: "name", label: "Name" });

@@ -4,7 +4,6 @@ import { getApi } from "../../hooks/usePanelApi";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
 import { classifyRichRef } from "./classifyRichRef";
-import { richTextClass } from "./richTextColors";
 
 function openChip(text: string, onOpenFile?: OpenFileHandler): void {
   const ref = classifyRichRef(text);
@@ -56,7 +55,7 @@ export function RichCodeChip({ text, onOpenFile }: { text: string; onOpenFile?: 
     <>
       <button
         type="button"
-        className={`rich-code rich-code--inline rich-ref ${ref.open ? "rich-ref--open" : "rich-ref--copy"} ${richTextClass(text)}`}
+        className={`rich-code rich-code--inline rich-ref rich-ref--${ref.kind} ${ref.open ? "rich-ref--open" : "rich-ref--copy"}`}
         aria-describedby={pos ? tipId : undefined}
         aria-label={`${ref.label}: ${ref.text}. ${ref.hint}`}
         onMouseEnter={(e) => show(e.currentTarget)}

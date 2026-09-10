@@ -8,6 +8,7 @@ import {
   isKnownTextFilename,
   isVideoFilePath,
 } from "./fileKind";
+import { monacoLanguageForFence } from "./isVerseFile";
 
 describe("fileKind", () => {
   it("classifies common text / image / binary names", () => {
@@ -62,5 +63,15 @@ describe("fileKind", () => {
     expect(classifyFilePath("clip.mov")).toBe("video");
     expect(isVideoFilePath("ext:c:/tmp/movie.m4v")).toBe(true);
     expect(isVideoFilePath("theme.mp3")).toBe(false);
+  });
+});
+
+describe("monacoLanguageForFence", () => {
+  it("maps fence tags and unmarked Verse", () => {
+    expect(monacoLanguageForFence("verse")).toBe("verse");
+    expect(monacoLanguageForFence("python")).toBe("python");
+    expect(monacoLanguageForFence("ts")).toBe("typescript");
+    expect(monacoLanguageForFence("", "using { /Fortnite.com/Devices }\n@editable X : int = 0")).toBe("verse");
+    expect(monacoLanguageForFence("", "print('hello')")).toBe("plaintext");
   });
 });

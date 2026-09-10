@@ -19,6 +19,14 @@ import {
 import type { TokenDef } from "../../theme/tokenEngine";
 import type { VerseTokenDef } from "../../theme/verseSyntaxTokens";
 import { VerseSyntaxPreview } from "./VerseSyntaxPreview";
+import { ChatResponsePreview } from "./ChatResponsePreview";
+import {
+  CHAT_COLOR_GROUPS,
+  CHAT_COLOR_TOKENS,
+  CHAT_NUMBER_TOKENS,
+  type ChatColorToken,
+  type ChatNumberToken,
+} from "../../theme/chatAppearanceTokens";
 import { FontLibraryContent } from "./FontLibraryPanel";
 import { SectionFontPicker } from "./SectionFontPicker";
 import { AppearanceAccordionSplit } from "./AppearanceAccordionSplit";
@@ -641,9 +649,92 @@ function AppearanceUiSectionBlock({ section }: { section: AppearanceUiSection })
       onSectionReset={handleSectionReset}
       sectionResetDisabled={!canEditActiveProfile}
     >
-      {section.fontToken ? <SectionFontPicker fontToken={section.fontToken} /> : null}
-      {renderUiSectionContent(section)}
+      {section.id === "chat" ? (
+        <AppearanceAccordionSplit preview={<ChatResponsePreview />}>
+          {section.fontToken ? <SectionFontPicker fontToken={section.fontToken} /> : null}
+          <AppearanceChatTokens />
+        </AppearanceAccordionSplit>
+      ) : (
+        <>
+          {section.fontToken ? <SectionFontPicker fontToken={section.fontToken} /> : null}
+          {renderUiSectionContent(section)}
+        </>
+      )}
     </AppearanceDetailsSection>
+  );
+}
+
+function ChatColorTokenItem({ token }: { token: ChatColorToken }) {
+  return <ColorTokenItem tokenId={token.id} displayName={token.name} />;
+}
+
+function ChatNumberTokenItem({ token }: { token: ChatNumberToken }) {
+  const { cssVars, overrides, setOverride, resetOverride, canEditActiveProfile } = useAppearance();
+  const raw = cssVars[token.id] || `${token.value}${token.unit}`;
+  const num = Number.parseFloat(raw);
+  const value = Number.isFinite(num) ? num : token.value;
+  const isCustom = !!overrides[token.id];
+  const disabled = !canEditActiveProfile;
+
+  return (
+    <div className={`appearance-adv-item ${isCustom ? "is-custom" : "is-auto"}`}>
+      <div className="appearance-tab-layout-info">
+        <div className="appearance-tab-layout-name">{token.name}</div>
+        <input
+          type="range"
+          className="appearance-chat-number-range"
+          min={token.min}
+          max={token.max}
+          step={token.step}
+          value={value}
+          disabled={disabled}
+          aria-label={token.name}
+          onChange={(e) => setOverride(token.id, `${e.target.value}${token.unit}`)}
+        />
+        <div className="appearance-tab-layout-var">
+          --{token.id} · {raw}
+        </div>
+      </div>
+      <div className="appearance-tab-layout-actions">
+        <span className="appearance-adv-badge" />
+        <button
+          type="button"
+          className="appearance-reset-btn"
+          title="Revert to auto"
+          disabled={disabled}
+          onClick={() => resetOverride(token.id)}
+        >
+          {RESET_ICON}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AppearanceChatTokens() {
+  return (
+    <>
+      {CHAT_COLOR_GROUPS.map((group) => {
+        const tokens = CHAT_COLOR_TOKENS.filter((t) => t.group === group.id);
+        if (!tokens.length) return null;
+        return (
+          <div key={group.id}>
+            <h4 className="appearance-category-title">{group.name}</h4>
+            <div className="appearance-adv-grid">
+              {tokens.map((token) => (
+                <ChatColorTokenItem key={token.id} token={token} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <h4 className="appearance-category-title">Typography & spacing</h4>
+      <div className="appearance-adv-grid">
+        {CHAT_NUMBER_TOKENS.map((token) => (
+          <ChatNumberTokenItem key={token.id} token={token} />
+        ))}
+      </div>
+    </>
   );
 }
 

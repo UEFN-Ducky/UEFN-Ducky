@@ -2727,6 +2727,40 @@
   color: var(--fg);
 }
 
+.appearance-chat-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appearance-chat-number-range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.appearance-chat-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: auto;
+  padding: 12px 16px 16px;
+  max-height: min(70vh, 720px);
+}
+
+@media (min-width: 900px) {
+  .appearance-chat-preview-wrap {
+    height: calc(100dvh - 140px);
+    min-height: 520px;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .appearance-chat-preview {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
 .appearance-font-preview-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

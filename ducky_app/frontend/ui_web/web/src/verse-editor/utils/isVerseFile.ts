@@ -145,6 +145,41 @@ export function monacoLanguageForPath(relativePath: string): string {
   return "plaintext";
 }
 
+const FENCE_EXT: Record<string, string> = {
+  verse: ".verse",
+  versetest: ".versetest",
+  python: ".py",
+  py: ".py",
+  typescript: ".ts",
+  ts: ".ts",
+  javascript: ".js",
+  js: ".js",
+  json: ".json",
+  css: ".css",
+  html: ".html",
+  markdown: ".md",
+  md: ".md",
+  bash: ".sh",
+  sh: ".sh",
+  shell: ".sh",
+  rust: ".rs",
+  go: ".go",
+  yaml: ".yaml",
+  yml: ".yml",
+  xml: ".xml",
+  toml: ".toml",
+};
+
+/** Monaco language for a chat/settings fence. Unmarked Verse-looking source uses the Verse grammar. */
+export function monacoLanguageForFence(language?: string, source = ""): string {
+  const key = (language ?? "").trim().toLowerCase();
+  if (key === "verse" || key === "versetest") return "verse";
+  const ext = FENCE_EXT[key] ?? (key && key !== "plaintext" ? `.${key}` : "");
+  if (ext) return monacoLanguageForPath(`snippet${ext}`);
+  if (/\busing\s*\{/.test(source) || /@editable\b/.test(source)) return "verse";
+  return "plaintext";
+}
+
 export function isBinaryProjectFile(relativePath: string): boolean {
   const lower = relativePath.toLowerCase();
   return BINARY_PROJECT_SUFFIXES.some((ext) => lower.endsWith(ext));

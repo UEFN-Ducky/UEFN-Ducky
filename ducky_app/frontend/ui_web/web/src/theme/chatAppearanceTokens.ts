@@ -4,7 +4,7 @@ type Vars = Record<string, string>;
 export interface ChatColorToken {
   id: string;
   name: string;
-  group: "text" | "blocks" | "callouts";
+  group: "text" | "chips" | "blocks" | "callouts";
   auto: (vars: Vars) => string;
 }
 export interface ChatNumberToken {
@@ -37,7 +37,20 @@ export const CHAT_COLOR_TOKENS: ChatColorToken[] = [
   { id: "chat-link-color", name: "File & web links", group: "text", auto: from("accent") },
   { id: "chat-border-color", name: "Block borders & dividers", group: "blocks", auto: from("border") },
   { id: "chat-surface", name: "Block surface", group: "blocks", auto: from("card") },
-  { id: "chat-code-color", name: "Default code badge", group: "blocks", auto: from("purple") },
+  { id: "chat-code-color", name: "Default code badge", group: "chips", auto: from("purple") },
+  { id: "chat-ref-verse", name: "Verse files", group: "chips", auto: from("purple") },
+  { id: "chat-ref-keyword", name: "Verse keywords", group: "chips", auto: from("purple") },
+  { id: "chat-ref-file", name: "Project files", group: "chips", auto: from("blue") },
+  { id: "chat-ref-tool", name: "Tools", group: "chips", auto: from("blue-dim") },
+  { id: "chat-ref-device", name: "Devices", group: "chips", auto: from("blue") },
+  { id: "chat-ref-folder", name: "Folders & paths", group: "chips", auto: from("fg-dim") },
+  { id: "chat-ref-actor", name: "Level actors", group: "chips", auto: from("fg") },
+  { id: "chat-ref-field", name: "Fields & labels", group: "chips", auto: from("yellow") },
+  { id: "chat-ref-prefab", name: "Prefabs", group: "chips", auto: from("amber") },
+  { id: "chat-ref-asset", name: "Assets", group: "chips", auto: from("amber") },
+  { id: "chat-ref-mesh", name: "Meshes & Blender", group: "chips", auto: from("green") },
+  { id: "chat-ref-umg", name: "UMG", group: "chips", auto: from("yellow") },
+  { id: "chat-ref-name", name: "Other names", group: "chips", auto: from("muted") },
   { id: "chat-code-background", name: "Code block background", group: "blocks", auto: from("card") },
   { id: "chat-table-heading-color", name: "Table heading text", group: "blocks", auto: from("blue") },
   { id: "chat-table-heading-background", name: "Table heading background", group: "blocks", auto: (v) => mix(v.blue!, v.card!, 0.08) },
@@ -66,16 +79,17 @@ export const CHAT_NUMBER_TOKENS: ChatNumberToken[] = [
   { id: "chat-stats-size", name: "Summary number size", value: 1.85, unit: "em", min: 1, max: 3.5, step: 0.05 },
 ];
 
-export const CHAT_PALETTE = [
-  { id: "purple", name: "Verse / code", syntax: "[Verse](ducky:purple)" },
-  { id: "blue", name: "UEFN / devices", syntax: "[Devices](ducky:blue)" },
-  { id: "green", name: "Blender / verified", syntax: "[Verified](ducky:green)" },
-  { id: "amber", name: "Blueprint / pending", syntax: "[Pending](ducky:amber)" },
-  { id: "yellow", name: "UMG / key details", syntax: "[Widget](ducky:yellow)" },
-  { id: "red", name: "Errors / failures", syntax: "[Failed](ducky:red)" },
+export const CHAT_COLOR_GROUPS: Array<{ id: ChatColorToken["group"]; name: string }> = [
+  { id: "text", name: "Text" },
+  { id: "chips", name: "Code badges" },
+  { id: "blocks", name: "Blocks" },
+  { id: "callouts", name: "Callouts" },
 ];
-export const CHAT_SHARED_TOKEN_IDS = ["bg", "fg", "fg-dim", "muted", "border", "card", "input-bg", "accent", "border-focus"];
-export const CHAT_APPEARANCE_TOKEN_IDS = [...CHAT_COLOR_TOKENS.map(t => t.id), ...CHAT_NUMBER_TOKENS.map(t => t.id), ...CHAT_PALETTE.map(t => t.id), ...CHAT_SHARED_TOKEN_IDS];
+
+export const CHAT_APPEARANCE_TOKEN_IDS = [
+  ...CHAT_COLOR_TOKENS.map((t) => t.id),
+  ...CHAT_NUMBER_TOKENS.map((t) => t.id),
+];
 
 /** Apply after global palette, fonts and status colors so Auto follows the active theme. */
 export function applyChatAppearance(vars: Vars, overrides: Vars): void {

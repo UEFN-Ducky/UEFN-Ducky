@@ -1,5 +1,6 @@
 import type { OpenFileHandler } from "../../types/richContent";
-import { highlightRichCode } from "./highlightRichCode";
+import { LiveCodePreview } from "../../verse-editor/components/LiveCodePreview";
+import { monacoLanguageForFence } from "../../verse-editor/utils/isVerseFile";
 import { RichCodeChip } from "./RichCodeChip";
 
 interface RichCodeBlockProps {
@@ -14,16 +15,10 @@ export function RichCodeBlock({ text, language, inline, onOpenFile }: RichCodeBl
     return <RichCodeChip text={text} onOpenFile={onOpenFile} />;
   }
   return (
-    <pre className="rich-code rich-code--block">
-      <code className={language ? `language-${language}` : undefined}>
-        {highlightRichCode(text).map((span, i) =>
-          span.kind ? (
-            <span key={i} className={`rich-code-tok rich-code-tok--${span.kind}`}>{span.text}</span>
-          ) : (
-            span.text
-          ),
-        )}
-      </code>
-    </pre>
+    <LiveCodePreview
+      className="rich-code rich-code--block"
+      value={text}
+      language={monacoLanguageForFence(language, text)}
+    />
   );
 }
