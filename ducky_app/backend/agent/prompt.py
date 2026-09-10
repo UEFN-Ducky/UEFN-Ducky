@@ -11,9 +11,22 @@ _skill_cache: str | None = None
 _MEMORY_INDEX_PROMPT_CHARS = 2_500
 
 # Shared with coding-agent bootstrap (mcp_inject). In-panel chats paint this
-# markdown as colored blocks; prose changelogs skip the widgets.
+# markdown as colored blocks. Keep the syntax in sync with promoteMarkdownBlocks.ts.
 CHAT_REPORT_RULE = """\
-- **Response formatting:** Work reports (placed, wired, built, imported, leftovers) MUST use this markdown — the panel paints it as colored blocks. One-line answers stay one line. Link project files as markdown links to project-relative paths (e.g. Verse/MyFile.verse). Do not emit raw HTML. Do not reformat tool results. Optional fenced `ducky-rich` JSON is allowed for the same widgets. Omit sections that do not apply; never dump a prose changelog instead of this shape. Personality lines like "summarize in 1-2 lines" mean one line per inventory item — they do not skip this template.
+- **Response formatting — use Ducky's visual blocks:** The chat renderer turns semantic Markdown into native blocks; use them in your actual reply, not inside a code fence. This applies to explanations and instructions as well as work reports. Keep the user's font and size settings; never emit HTML, JSX, CSS, font instructions, or decorative JSON. One-line answers stay one line. For substantive replies, lead with the outcome, use short `##` sections, **bold key results**, `code badges` for identifiers, numbered steps with **short action labels**, and a table for comparisons. Break long walls of text into these blocks; use emphasis selectively, not on entire paragraphs. Code fences are for actual code and must name the language.
+- **Callout blocks:** Put a meaningful caveat, verification result, or tip in a quoted callout. Supported syntax (each body line starts with `>`):
+```markdown
+> [!WARNING] Remaining work
+> `Props` is still unwired; **3 of 4 fields** are verified.
+
+> [!SUCCESS] Verified
+> Build passed and the device is placed.
+
+> [!NOTE] Setup detail
+> Use the project's content mount for asset paths.
+```
+Use NOTE/TIP for information, WARNING/CAUTION for caveats, ERROR for failures, SUCCESS for verified results. Only include callouts justified by the task; do not claim verification you did not perform.
+- **Work report blocks:** For created/edited/placed/wired/imported work, use the report shape below, omitting anything that does not apply. The title's command/context chip is optional. Use exact `## Run Summary` and `## Inventory` headings for the metrics and inventory widgets. Inventory rows MUST use `- **Kind** / ` followed by a backticked name, then ` — description`. Kinds include Verse device, Devices, Prop, Blueprint, Blender mesh, UMG Widget; these produce distinct colored labels and icons. Descriptions support **emphasis**, `badges`, and [file links](Verse/MyFile.verse). Use one row per asset or related group. Only show counts from actual tool/ledger results; NEVER estimate editor changes, retries, or program counts from asset names or fill unknown counts with zero. Omit Run Summary if those counts are unavailable. Brief personality styles mean concise block content, not skipping structure. Do not reformat tool results or repeat written files; link them instead.
 ```
 # Title
 `short command or context chip`

@@ -5,173 +5,172 @@ export type PromotedSegment =
   | { kind: "markdown"; text: string }
   | { kind: "block"; block: RichBlock };
 
-const HEADER_CMD = /^\s*`([^`]+)`\s*$/;
-const INVENTORY_ITEM =
-  /^\s*[-*]\s+\*\*(.+?)\*\*\s*\/\s*`([^`]+)`\s*(?:[—–-]\s*(.*))?$/;
+const HEADER_CMD = /^`([^`]+)`\s*$/;
+const INVENTORY_ITEM = /^[-*+]\s+\*\*(.+?)\*\*\s*\/\s*`([^`]+)`\s*(?:[—–-]\s*(.*))?$/;
 const H1 = /^#\s+(.*\S)\s*$/;
 const H2 = /^##\s+(.*\S)\s*$/;
-const BULLET = /^\s*[-*]\s+/;
-const QUOTE = /^\s*>/;
+const BULLET = /^[-*+]\s+/;
+const QUOTE = /^>\s?/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 function flushMarkdown(buf: string[], segs: PromotedSegment[]): void {
-  const text = buf.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
+  const text = buf.join("\n").replace(/^\n+|\n+$/g, "");
   buf.length = 0;
   if (text.trim()) segs.push({ kind: "markdown", text });
 }
 
 function skipBlanks(lines: string[], i: number): number {
-  while (i < lines.length && lines[i]!.trim() === "") i += 1;
+  while (i < lines.length && !lines[i]!.trim()) i += 1;
   return i;
 }
 
-function firstInt(s: string): number | undefined {
-  const m = s.match(/(\d+)/);
-  return m ? Number(m[1]) : undefined;
-}
-
-function parsePrograms(s: string): Partial<Record<RichProgramKey, number>> {
-  const out: Partial<Record<RichProgramKey, number>> = {};
-  const re = /(uefn|blender|verse|file)\s*[:=]?\s*(\d+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s))) {
-    const key = m[1]!.toLowerCase() as RichProgramKey;
-    out[key] = Number(m[2]);
+/** Read only a flat list. Nested lists/paragraphs remain ordinary Markdown. */
+function readBullets(lines: string[], start: number): { bullets: string[]; end: number } {
+  const bullets: string[] = [];
+  let end = skipBlanks(lines, start);
+  while (end < lines.length && BULLET.test(lines[end]!)) {
+    bullets.push(lines[end]!);
+    end += 1;
+    const next = skipBlanks(lines, end);
+    if (BULLET.test(lines[next] ?? "")) end = next;
   }
-  return out;
+  // Do not detach a continuation, indented code or a nested list from its parent.
+  if (/^\s+\S/.test(lines[skipBlanks(lines, end)] ?? "")) return { bullets: [], end: start };
+  if ((lines[end] ?? "").trim() && !/^(?:#|>)/.test(lines[end]!)) return { bullets: [], end: start };
+  return { bullets, end };
 }
 
 function parseStatsBullets(bullets: string[]): Extract<RichBlock, { type: "stats" }> | null {
-  let changes: number | undefined;
-  let blocked: number | undefined;
-  let programs: Partial<Record<RichProgramKey, number>> | undefined;
+  const stats: Extract<RichBlock, { type: "stats" }> = { type: "stats" };
   for (const raw of bullets) {
     const text = raw.replace(BULLET, "").replace(/\*\*/g, "").trim();
-    if (/program/i.test(text)) {
-      const parsed = parsePrograms(text);
-      if (Object.keys(parsed).length) programs = { ...programs, ...parsed };
+    const metric = /^(editor changes|changes|blocked(?: ops)?):\s*(\d[\d,]*)(?:\s+(applied|retries))?$/i.exec(text);
+    if (metric) {
+      const count = Number(metric[2]!.replace(/,/g, ""));
+      const key = /^blocked/i.test(metric[1]!) ? "blocked" : "changes";
+      if (!Number.isSafeInteger(count) || stats[key] != null) return null;
+      stats[key] = count;
       continue;
     }
-    if (/block/i.test(text)) {
-      blocked = firstInt(text);
-      continue;
+    const programs = /^programs:\s*(.+)$/i.exec(text);
+    if (!programs || stats.programs) return null;
+    const parts = programs[1]!.split(/\s*[·,;|]\s*/);
+    const counts: Partial<Record<RichProgramKey, number>> = {};
+    for (const part of parts) {
+      const m = /^(uefn|blender|verse|file)\s*[:=]?\s*(\d+)$/i.exec(part);
+      if (!m) return null;
+      const key = m[1]!.toLowerCase() as RichProgramKey;
+      const count = Number(m[2]);
+      if (!Number.isSafeInteger(count) || counts[key] != null) return null;
+      counts[key] = count;
     }
-    if (/change/i.test(text) || /applied/i.test(text)) {
-      changes = firstInt(text);
-    }
+    stats.programs = counts;
   }
-  if (changes == null && blocked == null && !programs) return null;
-  return { type: "stats", changes, blocked, programs };
+  return Object.keys(stats).length > 1 ? stats : null;
 }
 
-function headingFolder(title: string): { heading: string; folder?: string } {
-  const m = title.match(/^(.*?)(?:\s+[—–-]\s*`([^`]+)`\s*)?$/);
-  const heading = (m?.[1] ?? title).trim();
-  const folder = m?.[2]?.trim();
-  return { heading, folder: folder || undefined };
-}
+const CALLOUTS: Record<string, { tone: RichCalloutTone; title: string }> = {
+  note: { tone: "info", title: "Note" },
+  info: { tone: "info", title: "Note" },
+  tip: { tone: "info", title: "Tip" },
+  important: { tone: "warn", title: "Important" },
+  warning: { tone: "warn", title: "Warning" },
+  caution: { tone: "warn", title: "Caution" },
+  gotcha: { tone: "warn", title: "Gotcha" },
+  "loose end": { tone: "warn", title: "Loose End Remaining" },
+  blocked: { tone: "warn", title: "Blocked" },
+  error: { tone: "error", title: "Error" },
+  success: { tone: "success", title: "Success" },
+  verified: { tone: "success", title: "Verified" },
+};
 
 function parseCalloutQuote(lines: string[]): Extract<RichBlock, { type: "callout" }> | null {
-  const body = lines
-    .map((ln) => ln.replace(/^\s*>\s?/, ""))
-    .join("\n")
-    .trim();
-  if (!body) return null;
-  const m =
-    body.match(/^\*\*(loose end|warning|note):?\*\*\s*:?\s*([\s\S]*)$/i) ??
-    body.match(/^(loose end|warning|note)\s*:?\s*([\s\S]*)$/i);
-  if (!m) return null;
-  const label = m[1]!.toLowerCase();
-  const rest = (m[2] ?? "").trim() || body;
-  const tone: RichCalloutTone = label === "note" ? "info" : "warn";
-  const title =
-    label === "loose end" ? "Loose End Remaining" : label === "warning" ? "Warning" : "Note";
-  return { type: "callout", tone, title, text: rest };
+  const body = lines.map((line) => line.replace(QUOTE, "")).join("\n").trim();
+  const alert = /^\[!(\w+)\][ \t]*([^\n]*)(?:\n([\s\S]*))?$/.exec(body);
+  if (alert) {
+    const config = CALLOUTS[alert[1]!.toLowerCase()];
+    if (!config) return null;
+    return { type: "callout", ...config, title: alert[2]?.trim() || config.title, text: (alert[3] ?? "").trim() };
+  }
+  const label = body.match(/^\*\*([a-z ]+):?\*\*\s*:?\s*([\s\S]*)$/i)
+    ?? body.match(/^([a-z ]+):\s*([\s\S]*)$/i);
+  const config = label && CALLOUTS[label[1]!.toLowerCase()];
+  return config ? { type: "callout", ...config, text: label![2]!.trim() } : null;
 }
 
-/** Lift report-shaped markdown into the same widgets `ducky-rich` uses. */
+/** Promote explicit semantic Markdown only. Never infer completed work or counts. */
 export function promoteMarkdownToSegments(src: string): PromotedSegment[] {
-  const lines = src.split("\n");
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
   const segs: PromotedSegment[] = [];
   const mdBuf: string[] = [];
+  let fence: string | undefined;
   let i = 0;
-
   while (i < lines.length) {
     const line = lines[i]!;
+    const marker = FENCE.exec(line)?.[1];
+    if (fence || marker) {
+      // Examples inside fenced code are never report widgets, even mid-stream.
+      if (fence) {
+        if (marker?.[0] === fence[0] && marker.length >= fence.length && !line.trim().slice(marker.length).trim()) fence = undefined;
+      } else {
+        fence = marker;
+      }
+      mdBuf.push(line);
+      i += 1;
+      continue;
+    }
 
     const h1 = H1.exec(line);
-    if (h1 && !line.startsWith("##")) {
-      let j = skipBlanks(lines, i + 1);
-      const cmd = j < lines.length ? HEADER_CMD.exec(lines[j]!) : null;
-      if (cmd) {
-        flushMarkdown(mdBuf, segs);
-        segs.push({
-          kind: "block",
-          block: { type: "header", title: h1[1]!.trim(), command: cmd[1] },
-        });
-        i = j + 1;
-        continue;
-      }
+    if (h1) {
+      const j = skipBlanks(lines, i + 1);
+      const cmd = HEADER_CMD.exec(lines[j] ?? "");
+      // A heading itself is enough; a command chip is optional.
+      flushMarkdown(mdBuf, segs);
+      segs.push({ kind: "block", block: { type: "header", title: h1[1]!.trim(), command: cmd?.[1] } });
+      i = cmd ? j + 1 : i + 1;
+      continue;
     }
 
     const h2 = H2.exec(line);
     if (h2) {
       const title = h2[1]!.trim();
-      if (/^run summary\b/i.test(title)) {
-        let j = skipBlanks(lines, i + 1);
-        const bullets: string[] = [];
-        while (j < lines.length && BULLET.test(lines[j]!)) {
-          bullets.push(lines[j]!);
-          j += 1;
-        }
+      if (/^run summary$/i.test(title)) {
+        const { bullets, end } = readBullets(lines, i + 1);
         const stats = parseStatsBullets(bullets);
         if (stats) {
           flushMarkdown(mdBuf, segs);
-          segs.push({ kind: "block", block: { type: "heading", level: 2, text: "Run Summary" } });
+          segs.push({ kind: "block", block: { type: "heading", level: 2, text: title } });
           segs.push({ kind: "block", block: stats });
-          i = j;
+          i = end;
           continue;
         }
       }
-
-      if (/^inventory\b/i.test(title)) {
-        const { heading, folder } = headingFolder(title);
-        let j = skipBlanks(lines, i + 1);
-        const items: Array<{ kind: string; title: string; desc?: string; label: string }> = [];
-        const leftover: string[] = [];
-        while (j < lines.length && BULLET.test(lines[j]!)) {
-          const m = INVENTORY_ITEM.exec(lines[j]!);
-          if (m) {
-            items.push({
-              kind: inventoryKindFromLabel(m[1]!),
-              label: m[1]!.trim(),
-              title: m[2]!.trim(),
-              desc: (m[3] ?? "").trim() || undefined,
-            });
-          } else {
-            leftover.push(lines[j]!);
-          }
-          j += 1;
-        }
-        if (items.length) {
+      if (/^(inventory\b|(?:created|updated) assets\b)/i.test(title)) {
+        const { bullets, end } = readBullets(lines, i + 1);
+        const matches = bullets.map((bullet) => INVENTORY_ITEM.exec(bullet));
+        // Mixed lists stay intact: no dropped/reordered bullets or lost caveats.
+        if (matches.length && matches.every((m) => m !== null)) {
+          const folder = /\s+[—–-]\s*`([^`]+)`\s*$/.exec(title);
           flushMarkdown(mdBuf, segs);
-          segs.push({
-            kind: "block",
-            block: { type: "inventory", heading, folder, items },
-          });
-          if (leftover.length) mdBuf.push(...leftover);
-          i = j;
+          segs.push({ kind: "block", block: {
+            type: "inventory",
+            heading: folder ? title.slice(0, folder.index).trim() : title,
+            folder: folder?.[1],
+            items: matches.map((m) => ({
+              kind: inventoryKindFromLabel(m![1]!), label: m![1]!.trim(),
+              title: m![2]!.trim(), desc: m![3]?.trim() || undefined,
+            })),
+          } });
+          i = end;
           continue;
         }
       }
     }
 
     if (QUOTE.test(line)) {
-      const quote: string[] = [];
       let j = i;
-      while (j < lines.length && QUOTE.test(lines[j]!)) {
-        quote.push(lines[j]!);
-        j += 1;
-      }
+      const quote: string[] = [];
+      while (j < lines.length && QUOTE.test(lines[j]!)) quote.push(lines[j++]!);
       const callout = parseCalloutQuote(quote);
       if (callout) {
         flushMarkdown(mdBuf, segs);
@@ -180,152 +179,9 @@ export function promoteMarkdownToSegments(src: string): PromotedSegment[] {
         continue;
       }
     }
-
     mdBuf.push(line);
     i += 1;
   }
-
   flushMarkdown(mdBuf, segs);
-  if (segs.length === 1 && segs[0]?.kind === "markdown") {
-    const recovered = recoverProseReport(segs[0].text);
-    if (recovered) return recovered;
-  }
   return segs.length ? segs : [{ kind: "markdown", text: src }];
-}
-
-const WORK_VERB =
-  /\b(created|placed|imported|modeled|wired|built|organized|spawned|added)\b/i;
-const TOOLISH_TICK = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
-const FOLDER_TICK = /^(COL_|Content\/|Verse\/|Game\/)/i;
-const ASSET_TICK = /^[A-Z]{1,4}_[A-Za-z0-9]/;
-const VERSE_TICK = /\.verse$/i;
-
-function ticksIn(src: string): string[] {
-  const out: string[] = [];
-  const re = /`([^`]+)`/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(src))) {
-    const t = m[1]!.trim();
-    if (t) out.push(t);
-  }
-  return out;
-}
-
-function isAssetTick(t: string): boolean {
-  if (TOOLISH_TICK.test(t) || FOLDER_TICK.test(t) || /\s/.test(t)) return false;
-  return ASSET_TICK.test(t) || VERSE_TICK.test(t);
-}
-
-function folderTick(ticks: string[]): string | undefined {
-  return ticks.find((t) => FOLDER_TICK.test(t));
-}
-
-function headerTitle(src: string, assets: string[]): string {
-  const first = (src.split(/(?<=[.!?])\s+/)[0] ?? src)
-    .replace(/`/g, "")
-    .replace(/\([^)]*\)/g, "")
-    .replace(/,\s+giving\b.*/i, "")
-    .replace(/\s{2,}/g, " ")
-    .trim()
-    .replace(/[.,;:]+$/, "");
-  if (first.length > 8 && first.length <= 80) return first;
-  return assets.length ? `Created ${assets.join(", ")}` : "Work complete";
-}
-
-function headerCommand(src: string): string | undefined {
-  if (/\bblender\b/i.test(src)) return "blender";
-  if (/\bverse\b/i.test(src)) return "verse";
-  if (/\buefn\b/i.test(src)) return "uefn";
-  return undefined;
-}
-
-function errorSentence(src: string): string | undefined {
-  const parts = src.split(/(?<=[.!?])\s+/);
-  const hit = parts.find((p) => /\b(error(?:ed)?|failed|schema bug)\b/i.test(p));
-  if (!hit) return undefined;
-  return hit
-    .replace(/,?\s*but\b[\s\S]*$/i, "")
-    .replace(/`([^`]+)`/g, "$1")
-    .trim()
-    .replace(/[.,;]+$/, "");
-}
-
-function itemKind(src: string, name: string): string {
-  if (/\bblender\b/i.test(src) || /^SM_/i.test(name)) {
-    return inventoryKindFromLabel( /\bblender\b/i.test(src) ? "Blender mesh" : "Mesh");
-  }
-  if (VERSE_TICK.test(name)) return inventoryKindFromLabel("Verse device");
-  if (/^(BP_|PF_)/i.test(name)) return inventoryKindFromLabel("Blueprint");
-  return inventoryKindFromLabel("Prop");
-}
-
-function itemLabel(name: string, src: string): string {
-  if (VERSE_TICK.test(name)) return "Verse device";
-  if (/^(BP_|PF_)/i.test(name)) return "Blueprint";
-  if (/\bblender\b/i.test(src) || /^SM_/i.test(name)) return "Mesh";
-  return "Prop";
-}
-
-/** Lift a work-report paragraph (backticked assets, no # headings) into widgets. */
-function recoverProseReport(src: string): PromotedSegment[] | null {
-  const text = src.trim();
-  if (!text || /^#{1,2}\s/m.test(text)) return null;
-  if (!WORK_VERB.test(text)) return null;
-  const ticks = ticksIn(text);
-  const assets = ticks.filter(isAssetTick);
-  if (!assets.length) return null;
-
-  const segs: PromotedSegment[] = [
-    {
-      kind: "block",
-      block: { type: "header", title: headerTitle(text, assets), command: headerCommand(text) },
-    },
-  ];
-
-  const programs: Partial<Record<RichProgramKey, number>> = {};
-  const cmd = headerCommand(text);
-  if (cmd === "blender") programs.blender = assets.length;
-  else if (cmd === "verse") programs.verse = assets.length;
-  else if (cmd === "uefn") programs.uefn = assets.length;
-  const err = errorSentence(text);
-  segs.push({
-    kind: "block",
-    block: {
-      type: "heading",
-      level: 2,
-      text: "Run Summary",
-    },
-  });
-  segs.push({
-    kind: "block",
-    block: {
-      type: "stats",
-      changes: assets.length,
-      blocked: err ? 1 : undefined,
-      programs: Object.keys(programs).length ? programs : undefined,
-    },
-  });
-
-  const folder = folderTick(ticks);
-  segs.push({
-    kind: "block",
-    block: {
-      type: "inventory",
-      heading: "Inventory",
-      folder,
-      items: assets.map((title) => ({
-        kind: itemKind(text, title),
-        label: itemLabel(title, text),
-        title,
-      })),
-    },
-  });
-
-  if (err) {
-    segs.push({
-      kind: "block",
-      block: { type: "callout", tone: "warn", title: "Warning", text: err },
-    });
-  }
-  return segs;
 }
