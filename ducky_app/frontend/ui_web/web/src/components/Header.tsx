@@ -13,6 +13,7 @@ import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import type { ChatLayoutMode, ListenerStatus, ProjectInfo, ViewId } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
+import { isNativeWindowChrome } from "../utils/nativeWindowChrome";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
@@ -114,26 +115,29 @@ export function Header({
     setIsMaximized(next);
   };
 
-  // Keep the maximise/restore button in sync with the *actual* window state. The OS
-  // maximises on a native caption double-click (and on Win+Up / Aero-snap) without routing
-  // through handleMaximize, so button clicks alone can't be trusted — re-read the real state
-  // whenever the window resizes (a maximise/restore always resizes the WebView viewport).
+  // Native chrome publishes this window's OS state. Observe it locally instead of
+  // spawning API workers and JS replies throughout every resize gesture.
+  // Other platforms retain the resize-based fallback.
   useEffect(() => {
-    const api = getApi();
-    const readMaximized = api?.is_window_maximized?.bind(api);
-    if (!readMaximized) return;
     let cancelled = false;
     let throttle: ReturnType<typeof setTimeout> | null = null;
 
     const sync = () => {
-      void readMaximized()
+      if (isNativeWindowChrome()) {
+        setIsMaximized(document.documentElement.classList.contains("window-maximized"));
+        return;
+      }
+      const api = getApi();
+      if (!api?.is_window_maximized) return;
+      void api.is_window_maximized()
         .then((max) => {
-          if (!cancelled) setIsMaximized(!!max);
+          if (!cancelled && !isNativeWindowChrome()) setIsMaximized(!!max);
         })
         .catch(() => {});
     };
 
     const onResize = () => {
+      if (isNativeWindowChrome()) return;
       if (throttle) return; // coalesce a resize-drag burst
       sync(); // leading edge → instant flip on double-click maximise/restore
       throttle = setTimeout(() => {
@@ -142,11 +146,18 @@ export function Header({
       }, 150);
     };
 
+    const observer = new MutationObserver(() => {
+      if (isNativeWindowChrome()) sync();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     sync(); // initial: window may already be maximised (e.g. restored session)
+    window.addEventListener("pywebviewready", sync);
     window.addEventListener("resize", onResize);
     return () => {
       cancelled = true;
       if (throttle) clearTimeout(throttle);
+      observer.disconnect();
+      window.removeEventListener("pywebviewready", sync);
       window.removeEventListener("resize", onResize);
     };
   }, []);
@@ -235,7 +246,7 @@ export function Header({
   });
   const changesTargetRef = useUiTarget("header.changes", {
     kind: "button",
-    label: "Changes",
+    label: "Ledger",
     route: "changes",
   });
 
@@ -398,8 +409,8 @@ export function Header({
                 ref={changesTargetRef}
                 type="button"
                 className="icon-btn app-header-changes-btn"
-                title="Changes — everything the AI changed, and how to undo it"
-                aria-label="Open changes"
+                title="Ledger — everything the AI changed, and how to undo it"
+                aria-label="Open ledger"
                 onClick={() => requestOpenChangesTab()}
               >
                 <Icons.Clock />

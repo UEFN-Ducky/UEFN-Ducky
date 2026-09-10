@@ -132,3 +132,12 @@ def test_zero_targets_rejected(monkeypatch):
     fn, _script, _marks = _load(monkeypatch, {})
     with pytest.raises(ValueError, match="at least one"):
         fn("MyDevice", "Markers", [])
+
+
+def test_replace_empty_clears_the_array(monkeypatch):
+    targets = {"M1": _Actor("M1")}
+    fn, script, _marks = _load(monkeypatch, targets)
+    fn("MyDevice", "Markers", ["M1"])
+    out = fn("MyDevice", "Markers", [], True)
+    assert out["count"] == 0
+    assert script.props["__verse_0xABCD_Markers"] == []

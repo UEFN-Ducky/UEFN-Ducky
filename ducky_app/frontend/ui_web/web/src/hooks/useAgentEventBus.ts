@@ -1,7 +1,6 @@
 import { useEffect, type DependencyList } from "react";
 import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { installPerfMonitor, noteFrameDelivery, notePendingDepth } from "./perfMonitor";
-import { getApi } from "./usePanelApi";
 
 /** PanelApi._push_panel events share the HTTP bus — do not treat as agent stream. */
 const PANEL_PUSH_TYPES = new Set<string>([
@@ -11,6 +10,8 @@ const PANEL_PUSH_TYPES = new Set<string>([
   "project_changed",
   "discord_changed",
   "uefn_plugins_changed",
+  "models_updated",
+  "coding_agents_updated",
   "uefn_plugin_trust_request",
   "browser_pane_state",
   "browser_pane_new_window",
@@ -22,13 +23,6 @@ const listeners = new Set<AgentEventListener>();
 const pendingEvents: AgentEvent[] = [];
 const MAX_EVENTS_PER_FRAME = 200;
 let deliveryScheduled = false;
-
-// #region agent log
-function traceEventBus(message: string, data: Record<string, unknown>) {
-  fetch('http://127.0.0.1:7248/ingest/57632f6c-d069-4c3e-b21c-ca1bafab16e6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'77e3f2'},body:JSON.stringify({sessionId:'77e3f2',runId:'chat-lag-repro',hypothesisId:'L-A,L-E',location:'hooks/useAgentEventBus.ts',message,data,timestamp:Date.now()})}).catch(()=>{});
-  void getApi()?.report_ui_perf([{ kind: "dbg_event_bus", name: message, duration_ms: 0, ...data }]);
-}
-// #endregion
 
 export function coalesceAgentEvents(events: AgentEvent[]): AgentEvent[] {
   const out: AgentEvent[] = [];
@@ -79,21 +73,6 @@ function scheduleDelivery() {
     for (const event of batch) deliver(event);
     const deliveryMs = performance.now() - t0;
     noteFrameDelivery(deliveryMs, batch.length, pendingEvents.length);
-    // #region agent log
-    if (batch.length >= 50 || deliveryMs >= 16 || pendingEvents.length >= 50) {
-      traceEventBus("frame delivery", {
-        rawLimit: MAX_EVENTS_PER_FRAME,
-        delivered: batch.length,
-        remaining: pendingEvents.length,
-        listeners: listeners.size,
-        deliveryMs: Math.round(deliveryMs * 10) / 10,
-        types: batch.reduce<Record<string, number>>((counts, event) => {
-          counts[event.type] = (counts[event.type] ?? 0) + 1;
-          return counts;
-        }, {}),
-      });
-    }
-    // #endregion
     if (pendingEvents.length > 0) scheduleDelivery();
   });
 }
@@ -121,16 +100,6 @@ function startHttpEventPoll() {
         const body = (await response.json()) as { cursor?: number; events?: AgentEvent[] };
         if (typeof body.cursor === "number") httpCursor = body.cursor;
         if (Array.isArray(body.events)) {
-          // #region agent log
-          if (body.events.length >= 20) {
-            traceEventBus("http poll burst", {
-              received: body.events.length,
-              cursor: httpCursor,
-              pendingBefore: pendingEvents.length,
-              hidden: document.hidden,
-            });
-          }
-          // #endregion
           for (const event of body.events) {
             const kind = String(event?.type || "");
             if (PANEL_PUSH_TYPES.has(kind)) {

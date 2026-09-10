@@ -5,6 +5,7 @@ import { useListenerStatus } from "../hooks/useListenerStatus";
 import { getApi } from "../hooks/usePanelApi";
 import type { VerseWorkflowStatusDto } from "../types/panel";
 import { fileDiagnosticRegistry } from "../verse-editor/lsp/fileDiagnosticRegistry";
+import { requestVerseLspSessionRebind } from "../verse-editor/lsp/verseLspSession";
 import { emitAppHook } from "../sfx/appHooks";
 
 const BUILD_STATE = {
@@ -138,6 +139,7 @@ export function VerseWorkflowBridge({ enabled }: VerseWorkflowBridgeProps) {
     try {
       const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
       await runBridgeJob("compile_verse_project", [], 180_000);
+      requestVerseLspSessionRebind();
       await refreshStatus();
     } finally {
       setBusy(false);

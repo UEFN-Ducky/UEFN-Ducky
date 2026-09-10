@@ -618,6 +618,8 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
         if dest.is_dir():
             time.sleep(0.05)
             _rmtree_retry(dest, ignore_final=True)
+    # Folder is gone now; the memoized fingerprint would keep its skills "owned" until TTL.
+    invalidate_plugin_skill_caches()
     from frontend.settings import PanelSettings, replace
 
     settings = PanelSettings.load()

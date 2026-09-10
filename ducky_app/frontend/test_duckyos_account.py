@@ -55,7 +55,41 @@ def test_auto_apply_store_updates_skips_local_and_unpaid() -> None:
     assert calls == ["openai"]
 
 
+def test_store_item_versions_strips_empty_and_keeps_changelog() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    with patch.object(
+        acc,
+        "_store_collect",
+        return_value={
+            "versions": [
+                {"version": "1.1.14", "changelog": "Bot tools.", "created_at": "2026-09-01T00:00:00Z"},
+                {"version": "", "changelog": "skip me"},
+                "nope",
+            ]
+        },
+    ):
+        out = acc.store_item_versions("discord")
+    assert out["ok"] is True
+    assert out["slug"] == "discord"
+    assert out["versions"] == [
+        {"version": "1.1.14", "changelog": "Bot tools.", "created_at": "2026-09-01T00:00:00Z"},
+    ]
+
+
+def test_store_item_versions_needs_slug() -> None:
+    from frontend.duckyos_account import store_item_versions
+
+    out = store_item_versions("  ")
+    assert out["ok"] is False
+    assert out["versions"] == []
+
+
 if __name__ == "__main__":
     test_pkce_pair_s256()
     test_auto_apply_store_updates_skips_local_and_unpaid()
+    test_store_item_versions_strips_empty_and_keeps_changelog()
+    test_store_item_versions_needs_slug()
     print("ok")

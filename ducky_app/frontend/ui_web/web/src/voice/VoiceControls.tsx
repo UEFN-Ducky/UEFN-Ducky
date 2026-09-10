@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useUiTarget } from "../ui-targets/registry";
 
 import { Icons } from "../icons/Icons";
 import { startLiveChat, stopLiveChat } from "./liveSpeakService";
@@ -72,6 +73,16 @@ export function VoiceControls({
   isGroup,
   onLiveChange,
 }: VoiceControlsProps) {
+  const micTargetRef = useUiTarget("chat.composer.mic", {
+    kind: "button",
+    label: "Microphone",
+    route: "chat",
+  });
+  const liveTargetRef = useUiTarget("chat.composer.live", {
+    kind: "button",
+    label: "Live voice",
+    route: "chat",
+  });
   const live = useIsLiveChat(chatId);
   const [voiceOn, setVoiceOn] = useState(() => getVoiceSettings().enabled);
   const [manualSend, setManualSendState] = useState(() => getVoiceSettings().liveManualSend);
@@ -292,6 +303,7 @@ export function VoiceControls({
   return (
     <div className="voice-controls">
       <button
+        ref={micTargetRef}
         type="button"
         className={`voice-btn${
           live
@@ -316,6 +328,7 @@ export function VoiceControls({
         {live && muted ? <Icons.MicOff /> : <Icons.Mic />}
       </button>
       <button
+        ref={liveTargetRef}
         type="button"
         className={`voice-btn${live ? " voice-btn--live" : ""}`}
         title={live ? "Exit live voice mode" : "Live voice mode"}

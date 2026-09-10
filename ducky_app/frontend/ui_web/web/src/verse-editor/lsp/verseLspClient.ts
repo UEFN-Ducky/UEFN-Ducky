@@ -254,6 +254,11 @@ export class VerseLspClient {
                 error: e.message,
                 code: e.code ?? null,
               });
+              // Process was initialized with whatever folders existed then. Push the
+              // current roots so Fortnite.com / Verse.org appear without a respawn.
+              this.notify("workspace/didChangeWorkspaceFolders", {
+                event: { added: folders, removed: [] },
+              });
             }
             const caps = (initResult as { capabilities?: Record<string, unknown> } | null)
               ?.capabilities;

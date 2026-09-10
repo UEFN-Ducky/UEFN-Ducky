@@ -1413,6 +1413,39 @@ def store_catalog() -> dict[str, Any]:
     return {"ok": True, "items": items_out}
 
 
+def store_item_versions(slug: str) -> dict[str, Any]:
+    """Public changelog rows for a Store item (paginated in the panel UI)."""
+    sid = str(slug or "").strip()
+    if not sid:
+        return {"ok": False, "error": "slug required", "code": "bad_request", "versions": []}
+    try:
+        payload = _store_collect(
+            "item-versions",
+            {"slug": sid},
+            allow_anonymous=True,
+            timeout=20.0,
+        )
+    except DuckyOSAccountError as exc:
+        return {"ok": False, "error": exc.message, "code": exc.code, "versions": []}
+    raw = payload.get("versions") if isinstance(payload.get("versions"), list) else []
+    versions: list[dict[str, Any]] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        ver = str(row.get("version") or "").strip()
+        if not ver:
+            continue
+        created = str(row.get("created_at") or "").strip()
+        versions.append(
+            {
+                "version": ver,
+                "changelog": str(row.get("changelog") or "").strip(),
+                "created_at": created or None,
+            }
+        )
+    return {"ok": True, "slug": sid, "versions": versions}
+
+
 def _plugin_browse_categories(plug: dict[str, Any]) -> list[str]:
     """Infer Store browse categories from contributes (themes / plugins / gateways)."""
     contrib = plug.get("contributes") if isinstance(plug.get("contributes"), dict) else {}

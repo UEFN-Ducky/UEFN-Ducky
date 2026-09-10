@@ -8,6 +8,7 @@ from frontend.ui_web.verse_editor.lsp.verse_workspace import (
     _expand_builtin_digest_folders,
     _saved_layout_folders,
     discover_verse_workspace,
+    workspace_folder_fingerprint,
 )
 
 
@@ -140,3 +141,69 @@ def test_discover_expands_code_workspace_builtin(tmp_path: Path, monkeypatch):
     assert "/UnrealEngine.com" in names
     assert "/Verse.org" in names
     assert "vproject (read-only)" in names
+
+
+def test_workspace_fingerprint_changes_when_builtin_appears(tmp_path: Path, monkeypatch):
+    import json
+
+    project = tmp_path / "CardGame"
+    content = project / "Content"
+    content.mkdir(parents=True)
+    builtin = (
+        tmp_path
+        / "Local"
+        / "UnrealEditorFortnite"
+        / "Saved"
+        / "VerseProject"
+        / "CardGame"
+        / "Digests"
+        / "BuiltIn"
+    )
+    (project / "CardGame.code-workspace").write_text(
+        json.dumps(
+            {
+                "folders": [
+                    {"name": "uefn.ducky@fortnite.com", "path": str(content)},
+                    {"name": "Built-in Digests", "path": str(builtin)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+
+    before = workspace_folder_fingerprint(str(project))
+    assert "/Fortnite.com" not in before
+
+    for name in ("Fortnite", "UnrealEngine", "Verse"):
+        _touch_digest(builtin / name, name)
+
+    after = workspace_folder_fingerprint(str(project))
+    assert before != after
+    assert "/Fortnite.com" in after
+    assert "/Verse.org" in after
+
+
+def test_refresh_editor_lsp_after_build_stops_sessions(monkeypatch):
+    from frontend.ui_web.verse_editor import api as verse_api
+
+    class Fake:
+        stopped = False
+
+        def stop_lsp(self, client_id=None):
+            self.stopped = True
+
+    fake = Fake()
+    monkeypatch.setattr(verse_api, "_VERSE_EDITOR", fake)
+    cleared = {"n": 0}
+
+    def _clear() -> None:
+        cleared["n"] = 1
+
+    monkeypatch.setattr(
+        "frontend.ui_web.project_files.invalidate_workspace_folders_cache",
+        _clear,
+    )
+    verse_api.refresh_editor_lsp_after_build()
+    assert fake.stopped
+    assert cleared["n"] == 1

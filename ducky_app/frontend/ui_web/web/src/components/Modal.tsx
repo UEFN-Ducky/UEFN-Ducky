@@ -19,6 +19,8 @@ interface ModalProps {
   bodyClassName?: string;
   /** Raise the backdrop above other overlays (e.g. a dropdown panel at 100010). */
   zIndex?: number;
+  /** Portal here instead of document.body so the dialog stays inside one tab. */
+  container?: HTMLElement | null;
 }
 
 export function Modal({
@@ -34,6 +36,7 @@ export function Modal({
   className = "",
   bodyClassName = "",
   zIndex,
+  container,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scopeClass = useScopedClass("modal-panel");
@@ -59,7 +62,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className={`modal-backdrop no-drag ${backdropClass}`}
+      className={`modal-backdrop no-drag ${backdropClass}${container ? " modal-backdrop--contained" : ""}`}
       onMouseDown={(e) => {
         if (e.button !== 0) return;
         const target = e.target as Node;
@@ -108,7 +111,7 @@ export function Modal({
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>,
-    document.body,
+    container ?? document.body,
   );
 }
 

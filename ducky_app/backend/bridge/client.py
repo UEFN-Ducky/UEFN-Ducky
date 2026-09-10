@@ -76,10 +76,18 @@ _BUSY_RETRY_SLEEP_MAX_SEC = 1.0
 _BUSY_WAIT_POLL_SEC = 0.1
 # Fail fast instead of silently queueing for the full command timeout (was 30–50s).
 _BUSY_FAIL_FAST_SEC = 10.0
+_SAVE_MODAL_WAIT_SEC = 1.5
+
+
+def _is_expected_offline(message: str) -> bool:
+    """UEFN closed / listener down is status, not an Errors-tab failure."""
+    return "Listener not reachable" in message or "listener offline" in message.lower()
 
 
 def _record_bridge_error(message: str) -> None:
     """Persist a bridge-side error to the shared appdata error log (best-effort)."""
+    if _is_expected_offline(message):
+        return
     try:
         from frontend.error_log import record_error
 
@@ -105,11 +113,65 @@ def _busy_error_message(port: int, command: str) -> str:
     current = str(health.get("current_command") or health.get("last_command") or "").strip()
     running = f" running `{current}`" if current else ""
     from backend.bridge.serial import BUSY_HINT
+    from backend.tools.core.uefn_modal import SAVE_LISTENER_COMMANDS, find_uefn_save_dialog
 
+    extra = ""
+    dialog = find_uefn_save_dialog()
+    if dialog:
+        extra = (
+            f" A UEFN '{dialog['title']}' prompt is open; Ducky presses Save on it "
+            "automatically — wait a few seconds, or call `dismiss_uefn_modal`."
+        )
+    elif command in SAVE_LISTENER_COMMANDS or current in SAVE_LISTENER_COMMANDS:
+        extra = (
+            " If a Save/Yes popup is up, call `dismiss_uefn_modal` (Ducky host) "
+            "— do not retry execute_python or unreal__*."
+        )
     return (
         f"Editor busy{running} — do not re-issue `{command}`, wait for the current "
-        f"command to finish. {BUSY_HINT}"
+        f"command to finish. {BUSY_HINT}{extra}"
     )
+
+
+def _looks_like_save_lock(port: int, command: str) -> bool:
+    from backend.tools.core.uefn_modal import SAVE_LISTENER_COMMANDS
+
+    if command in SAVE_LISTENER_COMMANDS:
+        return True
+    health = _listener_health(port) or {}
+    current = str(health.get("current_command") or "")
+    return current in SAVE_LISTENER_COMMANDS
+
+
+def _note_dismissed(command: str, info: dict) -> None:
+    """Panel activity line: the host pressed a UEFN prompt on the agent's behalf."""
+    try:
+        from frontend.error_log import record_activity
+
+        record_activity(
+            "bridge",
+            f"Pressed UEFN '{info.get('window_title') or 'Save'}' prompt "
+            f"({info.get('method')}) while `{command}` waited",
+        )
+    except Exception:
+        pass
+
+
+def _auto_dismiss_save_modal(command: str) -> bool:
+    """Host-side press of a UEFN Save prompt while the listener is stuck.
+
+    Any command can be the one that opened the prompt (a wire that saves, a
+    Verse build, ``execute_python``), so this is gated on the dialog being on
+    screen — not on the command name. ``auto_dismiss_save_modal`` never sends a
+    bare Enter and rate-limits itself.
+    """
+    from backend.tools.core.uefn_modal import auto_dismiss_save_modal
+
+    info = auto_dismiss_save_modal()
+    if not info:
+        return False
+    _note_dismissed(command, info)
+    return True
 
 
 def busy_backoff_sleep(attempt: int) -> float:
@@ -121,9 +183,16 @@ def _wait_listener_idle(port: int, *, deadline: float, command: str) -> None:
     """Poll GET / until not busy, or raise after ``_BUSY_FAIL_FAST_SEC`` of waiting."""
     wait_started = time.time()
     attempt = 0
+    dismissed = False
     while time.time() < deadline:
         if not _listener_is_busy(port):
             return
+        if (
+            not dismissed
+            and time.time() - wait_started >= _SAVE_MODAL_WAIT_SEC
+        ):
+            dismissed = True
+            _auto_dismiss_save_modal(command)
         if time.time() - wait_started >= _BUSY_FAIL_FAST_SEC:
             raise RuntimeError(_busy_error_message(port, command))
         time.sleep(busy_backoff_sleep(attempt))
@@ -143,6 +212,8 @@ def _post_json_locked(
     backoff; after ``_BUSY_FAIL_FAST_SEC`` of busy waiting, fails with a
     structured "do not re-issue" error instead of silently queueing for 30–50s.
     """
+    from backend.tools.core.uefn_modal import save_modal_watchdog
+
     url = f"http://127.0.0.1:{port}"
     payload = json.dumps({"command": command, "params": params or {}}).encode()
     deadline = time.time() + max(timeout, 1.0)
@@ -164,8 +235,11 @@ def _post_json_locked(
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=max(remaining, 0.5)) as resp:
-                return json.loads(resp.read().decode())
+            # The command itself may open a Save prompt (a wire that saves, a
+            # Verse build, execute_python): press it while the POST is outstanding.
+            with save_modal_watchdog(command, on_press=lambda e: _note_dismissed(command, e)):
+                with urllib.request.urlopen(req, timeout=max(remaining, 0.5)) as resp:
+                    return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 503:
                 last_http = e
@@ -173,6 +247,8 @@ def _post_json_locked(
                     busy_started = time.time()
                 elif time.time() - busy_started >= _BUSY_FAIL_FAST_SEC:
                     raise RuntimeError(_busy_error_message(port, command)) from e
+                if time.time() - busy_started >= _SAVE_MODAL_WAIT_SEC:
+                    _auto_dismiss_save_modal(command)
                 time.sleep(busy_backoff_sleep(attempt))
                 attempt += 1
                 continue
@@ -371,6 +447,37 @@ def _invalidate_cache() -> None:
         _response_cache.clear()
 
 
+def _wait_after_dismiss(port: int, seconds: float = 8.0) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if not _listener_is_busy(port):
+            return True
+        time.sleep(0.2)
+    return not _listener_is_busy(port)
+
+
+def _recover_save_timeout(port: int, command: str) -> Optional[dict]:
+    """Click the Save popup after a hung save POST; do not re-issue the save."""
+    from backend.tools.core.uefn_modal import SAVE_LISTENER_COMMANDS, dismiss_uefn_save_modal
+
+    if command not in SAVE_LISTENER_COMMANDS:
+        return None
+    info = dismiss_uefn_save_modal(allow_bare_enter=True)
+    if not (info.get("clicked") or info.get("sent_enter")):
+        return None
+    if not _wait_after_dismiss(port):
+        return None
+    return {
+        "success": True,
+        "result": {
+            "saved": True,
+            "dismissed_save_dialog": True,
+            "window_title": info.get("window_title"),
+            "method": info.get("method"),
+        },
+    }
+
+
 def send_command(command: str, params: Optional[dict] = None, timeout: float = REQUEST_TIMEOUT) -> dict:
     """Send a command to the UEFN listener and return the result.
 
@@ -425,8 +532,13 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
             http_ms = (time.perf_counter() - t_http0) * 1000.0
         _last_post_ok_at = time.time()
     except TimeoutError as e:
-        _record_bridge_error(str(e))
-        raise
+        recovered = _recover_save_timeout(port, command)
+        if recovered is None:
+            _record_bridge_error(str(e))
+            raise
+        body = recovered
+        http_ms = 0.0
+        _last_post_ok_at = time.time()
     except urllib.error.URLError as e:
         if _discovered_port is not None and _pinned_port is None:
             _discovered_port = None

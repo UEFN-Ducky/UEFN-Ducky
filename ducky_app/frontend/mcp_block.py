@@ -103,6 +103,13 @@ def build_uefn_server_block(settings: PanelSettings) -> dict:
     """Return dict suitable for mcpServers['uefn'] (stdio)."""
     env = _base_os_env()
     env["UEFN_DUCKY_PORT"] = str(settings.port)
+    for key in ("UEFN_VSCODE_WORKSPACE_FOLDERS", "UEFN_DUCKY_PROJECT_ROOT"):
+        val = os.environ.get(key, "")
+        if val:
+            env[key] = val
+    root = (getattr(settings, "uefn_project_root", "") or "").strip()
+    if root and not env.get("UEFN_DUCKY_PROJECT_ROOT"):
+        env["UEFN_DUCKY_PROJECT_ROOT"] = root
     return {
         "type": "stdio",
         "command": resolve_bridge_command(),

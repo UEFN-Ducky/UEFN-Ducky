@@ -24,8 +24,12 @@ export interface WalkthroughDef {
   onCompleteStart?: string;
   autoStart?: WalkthroughAutoStart;
   title?: string;
+  /** One-line blurb for Settings → Walkthrough list. */
+  description?: string;
   /** When false, finish does not write walkthrough_completed (agent ephemeral tours). */
   persist?: boolean;
+  /** Resolve steps at start (enabled plugin gateways, …). */
+  resolveSteps?: () => WalkthroughStep[];
 }
 
 export interface WalkthroughRuntimeState {

@@ -133,8 +133,9 @@ def _plugin_lines() -> list[str]:
 def _agent_lines() -> list[str]:
     try:
         from backend.agent.coding_agents.base import detect_all
+        from frontend.settings import PanelSettings
 
-        payload = detect_all()
+        payload = detect_all(PanelSettings.load())
     except Exception:
         return ["  (unavailable)"]
     agents = payload.get("agents") if isinstance(payload, dict) else None

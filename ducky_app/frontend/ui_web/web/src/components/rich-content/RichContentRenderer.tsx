@@ -1,6 +1,5 @@
 import { startTransition, useEffect, useState } from "react";
 import type { OpenFileHandler, ParsedRichContent } from "../../types/richContent";
-import { getApi } from "../../hooks/usePanelApi";
 import { parseRichContent } from "./parseRichContent";
 import { MarkdownContent } from "./MarkdownContent";
 import { RichBlockList } from "./RichBlockList";
@@ -33,15 +32,7 @@ export function RichContentRenderer({
     let cancelled = false;
     startTransition(() => {
       if (cancelled) return;
-      // #region agent log
-      const _t0 = performance.now();
-      const _p = parseRichContent(text);
-      const _dt = performance.now() - _t0;
-      if (_dt > 200) {
-        getApi()?.report_ui_perf([{ kind: "dbg_render", name: "markdown_parse", duration_ms: Math.round(_dt), text_len: text.length }]);
-      }
-      setParsed(_p);
-      // #endregion
+      setParsed(parseRichContent(text));
     });
     return () => {
       cancelled = true;

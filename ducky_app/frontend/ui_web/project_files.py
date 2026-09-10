@@ -116,8 +116,13 @@ def _project_root() -> Path:
     return resolve_uefn_project_root(Path(raw))
 
 
-def _invalidate_workspace_folders_cache() -> None:
+def invalidate_workspace_folders_cache() -> None:
+    """Drop cached Verse workspace folders so the next read sees post-build digests."""
     _workspace_folders_cache.clear()
+
+
+def _invalidate_workspace_folders_cache() -> None:
+    invalidate_workspace_folders_cache()
 
 
 def _workspace_folders() -> list[dict[str, str]]:

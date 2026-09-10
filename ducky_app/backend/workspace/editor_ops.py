@@ -124,10 +124,8 @@ _MUTATIONS: tuple[OpSpec, ...] = (
     # -- Verse @editable wiring --------------------------------------------------
     _op("set_verse_editable", KIND_VERSE, "editable", revertable=REVERT_AUTO),
     _op("wire_verse_device_ref", KIND_VERSE, "editable", revertable=REVERT_AUTO),
-    _op("wire_verse_device_array", KIND_VERSE, "editable",
-        note="appends; restoring means truncating back to the prior length"),
-    _op("wire_verse_prop_assets", KIND_VERSE, "editable",
-        note="replaces the whole array; prior contents are not recoverable"),
+    _op("wire_verse_device_array", KIND_VERSE, "editable", revertable=REVERT_AUTO),
+    _op("wire_verse_prop_assets", KIND_VERSE, "editable", revertable=REVERT_AUTO),
     _op("wire_player_spawners", KIND_VERSE, "editable"),
     _op("patch_verse_array_entry", KIND_VERSE, "editable", revertable=REVERT_AUTO),
     _op("resize_verse_array_field", KIND_VERSE, "editable",
@@ -143,7 +141,8 @@ _MUTATIONS: tuple[OpSpec, ...] = (
         note="self-inverting; pair the revert with fixup_redirectors"),
     _op("duplicate_asset", KIND_ASSET, "exists", revertable=REVERT_AUTO, creates=True),
     _op("import_asset", KIND_ASSET, "exists", revertable=REVERT_AUTO, creates=True),
-    _op("create_folder", KIND_ASSET, "exists", creates=True),
+    _op("create_folder", KIND_ASSET, "exists", creates=True, revertable=REVERT_NONE,
+        note="an empty content folder is harmless and UEFN forgets it on reload"),
     _op("delete_asset", KIND_ASSET, "exists", revertable=REVERT_NONE,
         note="refused by the listener — recorded as a blocked attempt"),
     _op("delete_directory", KIND_ASSET, "exists", revertable=REVERT_NONE,
@@ -225,16 +224,16 @@ _MUTATIONS: tuple[OpSpec, ...] = (
     _op("add_skeleton_socket", KIND_ASSET, "sockets"),
     _op("remove_skeleton_socket", KIND_ASSET, "sockets"),
     # -- world generation --------------------------------------------------------
-    _op("pcg_generate", KIND_WORLD, ""),
-    _op("terrain_generate", KIND_WORLD, ""),
+    _op("pcg_generate", KIND_WORLD, "", revertable=REVERT_AUTO, creates=True),
+    _op("terrain_generate", KIND_WORLD, "", revertable=REVERT_AUTO, creates=True),
     _op("terrain_remove_generated", KIND_WORLD, ""),
-    _op("foliage_scatter", KIND_WORLD, ""),
+    _op("foliage_scatter", KIND_WORLD, "", revertable=REVERT_AUTO, creates=True),
     _op("foliage_clear_generated", KIND_WORLD, ""),
-    _op("landscape_create", KIND_WORLD, "exists", creates=True),
+    _op("landscape_create", KIND_WORLD, "exists", revertable=REVERT_AUTO, creates=True),
     _op("landscape_rename", KIND_WORLD, "label"),
     _op("landscape_sculpt", KIND_WORLD, ""),
-    _op("area_create", KIND_WORLD, "exists", creates=True),
-    _op("blockout_layout", KIND_WORLD, "", creates=True),
+    _op("area_create", KIND_WORLD, "exists", revertable=REVERT_AUTO, creates=True),
+    _op("blockout_layout", KIND_WORLD, "exists", revertable=REVERT_AUTO, creates=True),
     # -- internal --------------------------------------------------------------
     _op("ducky_revert_creation", KIND_OTHER, "exists", revertable=REVERT_NONE,
         note="the change journal's undo of a creation; never callable by an agent"),
@@ -279,6 +278,7 @@ READ_COMMANDS: frozenset[str] = frozenset(
         "ping", "scene_graph_capabilities", "search_assets", "search_unreal_api",
         "search_verse_digest", "session_status", "status", "terrain_get_info", "umg_capabilities",
         "validate_uefn_asset", "worldgen_capabilities",
+        "get_npc_definition_info", "list_npc_definitions", "npc_author_capabilities",
         # editor view / session state — no project change
         "focus_selected", "open_asset_in_uefn", "play_in_editor", "select_actors",
         "select_entities", "set_viewport_camera", "stop_pie", "take_high_res_screenshot",
@@ -289,19 +289,28 @@ READ_COMMANDS: frozenset[str] = frozenset(
     }
 )
 
-_UNKNOWN_NOTE = "not in the classifier — treated as opaque so it is still recorded"
+_UNKNOWN_NOTE = "a plugin command Ducky cannot model — record an inverse via _ducky or api.changeset.record"
 
 _READ_PREFIXES = ("get_", "list_", "search_", "find_", "describe_", "inspect_", "read_", "query_")
 
 
 def classify(command: str) -> OpSpec:
-    """Spec for a listener command. Unknown commands are opaque, never read."""
+    """Spec for a listener command. Unknown commands are opaque unless named like a read.
+
+    Store plugins register handlers this table cannot know. A ``list_*`` /
+    ``get_*`` / ``*_capabilities`` from one of them is a read by any sane naming;
+    recording it as an un-undoable mutation is what put "list npc definitions" on
+    a user's remove-by-hand list.
+    """
     name = (command or "").strip()
     spec = EDITOR_OPS.get(name)
     if spec is not None:
         return spec
     if name in READ_COMMANDS:
         return OpSpec(command=name, mutates=MUT_READ, revertable=REVERT_NONE)
+    if name.startswith(_READ_PREFIXES) or name.endswith("_capabilities"):
+        return OpSpec(command=name, mutates=MUT_READ, revertable=REVERT_NONE,
+                      note="classified by name; not in the table")
     return OpSpec(command=name, mutates=MUT_OPAQUE, revertable=REVERT_MANUAL, note=_UNKNOWN_NOTE)
 
 
@@ -335,15 +344,30 @@ def classify_plugin_tool(name: str, annotations: Any = None) -> OpSpec:
                   note="the tool declares no annotations — treated as opaque")
 
 
-def slot_path(kind: str, ident: str, facet: str = "") -> str:
+def usable_ident(value: str) -> str:
+    """A real actor/asset id, or empty when UEFN handed back an all-zero GUID.
+
+    ``get_actor_guid`` often returns 32 zeros for Creative devices. Treating that
+    as an id collapses every labelled trigger into one Changes row.
+    """
+    text = (value or "").strip()
+    compact = text.replace("{", "").replace("}", "").replace("-", "")
+    if not compact or set(compact) <= {"0"}:
+        return ""
+    return text
+
+
+def slot_path(kind: str, ident: str, facet: str = "", program: str = "uefn") -> str:
     """Journal slot for one target and facet, e.g. ``uefn://actor/<guid>/transform``.
 
     A slot is a *target*, not a call: repeated edits to one actor's transform
     share a slot, so they collapse into one row and one restore to the state
-    before the run touched it.
+    before the run touched it. ``program`` namespaces programs so a Blender Cube
+    never collides with a UEFN Cube (``blender://object/Cube/mesh``).
     """
+    prog = (program or "uefn").strip() or "uefn"
     target = (ident or "").strip().replace("\\", "/").strip("/") or "unknown"
-    base = f"uefn://{kind or KIND_OTHER}/{target}"
+    base = f"{prog}://{kind or KIND_OTHER}/{target}"
     facet = (facet or "").strip("/")
     return f"{base}/{facet}" if facet else base
 

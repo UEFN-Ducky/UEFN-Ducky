@@ -157,6 +157,7 @@ _SWP_NOMOVE = 0x0002
 _SWP_NOSIZE = 0x0001
 _SWP_NOZORDER = 0x0004
 _WM_NCLBUTTONDOWN = 0x00A1
+_WM_NCLBUTTONDBLCLK = 0x00A3
 _WM_NCCALCSIZE = 0x0083
 _WM_NCHITTEST = 0x0084
 _WM_NCACTIVATE = 0x0086
@@ -244,7 +245,6 @@ class _MONITORINFO(ctypes.Structure):
 
 
 _window_min_track: dict[int, tuple[int, int]] = {}
-_forced_min_track: tuple[int, int] | None = None
 _pinned_webview_hwnds: set[int] = set()
 _OriginalBrowserForm = None
 
@@ -260,11 +260,11 @@ _WMSZ_BOTTOMRIGHT = 8
 
 
 def _current_min_track(hwnd: int | None) -> tuple[int, int] | None:
-    if hwnd is not None:
-        tracked = _window_min_track.get(hwnd)
-        if tracked:
-            return tracked
-    return _forced_min_track
+    tracked = _window_min_track.get(hwnd) if hwnd is not None else None
+    if tracked:
+        scale = _hwnd_scale(hwnd)
+        return tuple(round(value * scale) for value in tracked)
+    return None
 
 
 def _apply_winforms_minimum_size(window: object, min_width: int, min_height: int) -> None:
@@ -275,7 +275,8 @@ def _apply_winforms_minimum_size(window: object, min_width: int, min_height: int
             return
         from System.Drawing import Size
 
-        native.MinimumSize = Size(max(1, int(min_width)), max(1, int(min_height)))
+        scale = get_window_scale(window)
+        native.MinimumSize = Size(max(1, round(min_width * scale)), max(1, round(min_height * scale)))
         native.MaximumSize = Size(0, 0)
     except Exception:
         pass
@@ -297,10 +298,8 @@ def _clamp_sizing_rect(edge: int, rect: _RECT, min_w: int, min_h: int) -> None:
 
 
 def _apply_min_track_impl(window: object, min_width: int, min_height: int) -> bool:
-    global _forced_min_track
     w = max(1, int(min_width))
     h = max(1, int(min_height))
-    _forced_min_track = (w, h)
 
     hwnd = _hwnd_from_pywebview(window)
     if not hwnd:
@@ -341,21 +340,12 @@ def clear_window_min_track_size(window: object) -> bool:
         return False
     from frontend.ui_web.window_layout import MAIN_MIN_HEIGHT, MAIN_MIN_WIDTH
 
-    global _forced_min_track
-    _forced_min_track = None
     native = getattr(window, "native", None)
     state = {"ok": False}
 
     def apply() -> None:
-        hwnd = _hwnd_from_pywebview(window)
-        if hwnd:
-            release_native_chrome_subclass(hwnd)
-        try:
-            window.min_size = (MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)
-        except Exception:
-            pass
-        _apply_winforms_minimum_size(window, MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)
-        state["ok"] = True
+        # Leaving compact mode changes size limits, not the window's chrome lifetime.
+        state["ok"] = _apply_min_track_impl(window, MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)
 
     if native is not None:
         _run_on_form_ui(native, apply)
@@ -446,22 +436,23 @@ def _force_frame_changed(hwnd: int) -> None:
         pass
 
 
-def _set_nccalcsize_maximized_work_area(params: _NCCALCSIZE_PARAMS, hwnd: int) -> bool:
+def _set_nccalcsize_maximized_work_area(rect: _RECT, hwnd: int) -> bool:
     """Maximized client = monitor work area (WebView2 #2549)."""
     try:
-        MONITOR_DEFAULTTONULL = 0
+        MONITOR_DEFAULTTONEAREST = 2
         user32.MonitorFromRect.restype = wintypes.HMONITOR
         user32.MonitorFromRect.argtypes = [ctypes.POINTER(_RECT), ctypes.c_uint]
         user32.GetMonitorInfoW.restype = wintypes.BOOL
         user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
-        hmon = user32.MonitorFromRect(ctypes.byref(params.rgrc[0]), MONITOR_DEFAULTTONULL)
+        hmon = user32.MonitorFromRect(ctypes.byref(rect), MONITOR_DEFAULTTONEAREST)
         if not hmon:
             return False
         mi = _MONITORINFO()
         mi.cbSize = ctypes.sizeof(_MONITORINFO)
         if not user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
             return False
-        params.rgrc[0] = mi.rcWork
+        rect.left, rect.top = mi.rcWork.left, mi.rcWork.top
+        rect.right, rect.bottom = mi.rcWork.right, mi.rcWork.bottom
         return True
     except Exception:
         return False
@@ -542,6 +533,9 @@ def refresh_window_chrome(window: object, *, pin: bool = False) -> bool:
         return False
     hwnd = _hwnd_from_pywebview(window)
     if hwnd:
+        mins = getattr(window, "min_size", None)
+        if mins:
+            _window_min_track.setdefault(hwnd, tuple(map(int, mins)))
         _install_native_chrome_subclass(hwnd)  # idempotent; covers HandleCreated timing
     ok = ensure_snap_friendly_styles(window)
     if pin:
@@ -646,32 +640,33 @@ def begin_native_window_move(
     screen_x: int | None = None,
     screen_y: int | None = None,
 ) -> bool:
-    """Hand off window move to the OS so Aero Snap / edge alignment work."""
+    """Hand off caption drag to the OS, outside WebView2's message callback."""
     if sys.platform != "win32":
         return False
     hwnd = _hwnd_from_pywebview(window)
     if not hwnd:
         return False
     try:
-        if screen_x is None or screen_y is None:
-            pt = wintypes.POINT()
-            user32.GetCursorPos(ctypes.byref(pt))
-            screen_x = int(pt.x)
-            screen_y = int(pt.y)
-        lparam = (int(screen_y) << 16) | (int(screen_x) & 0xFFFF)
+        if not user32.GetAsyncKeyState(0x01) & 0x8000:
+            return False
+        # Keep the optional bridge arguments for older UI bundles, but sample
+        # physical coordinates here rather than passing CSS pixels to Win32.
+        pt = wintypes.POINT()
+        if not user32.GetCursorPos(ctypes.byref(pt)):
+            return False
+        lparam = ((int(pt.y) & 0xFFFF) << 16) | (int(pt.x) & 0xFFFF)
         user32.ReleaseCapture()
-        user32.SendMessageW(hwnd, _WM_NCLBUTTONDOWN, _HTCAPTION, lparam)
-        return True
+        return bool(_user32_sc.PostMessageW(hwnd, _WM_NCLBUTTONDOWN, _HTCAPTION, lparam))
     except Exception:
         return False
 
 
-def begin_native_window_resize(window: object, edge: str) -> bool:
+def begin_native_window_resize(window: object, edge: str, *, double_click: bool = False) -> bool:
     """Hand off window resize to the OS (edge: n/s/e/w/nw/ne/sw/se).
 
-    Prefer the OS L/R/B NC frame (see _chrome_subclass_proc). This SC_SIZE path
-    is for edges with no frame (top) if a caller needs it; must run on the UI
-    thread while LMB is still down.
+    The client-side top grips enter the same non-client resize loop as the OS
+    L/R/B frame. Post to the owning UI thread so WebView2's message callback
+    returns before Windows starts a modal move/size loop.
     """
     if sys.platform != "win32":
         return False
@@ -682,9 +677,18 @@ def begin_native_window_resize(window: object, edge: str) -> bool:
     if not hwnd:
         return False
     try:
+        if _is_maximized(hwnd) or not user32.GetAsyncKeyState(0x01) & 0x8000:
+            return False
+        pt = wintypes.POINT()
+        if not user32.GetCursorPos(ctypes.byref(pt)):
+            return False
+        # Use physical OS coordinates, including signed coordinates on monitors
+        # above/left of the primary display; DOM screen coordinates may be scaled.
+        lparam = ((int(pt.y) & 0xFFFF) << 16) | (int(pt.x) & 0xFFFF)
+        msg = _WM_NCLBUTTONDBLCLK if double_click else _WM_NCLBUTTONDOWN
+        hit_test = _HTLEFT + wmsz - 1
         user32.ReleaseCapture()
-        user32.SendMessageW(hwnd, _WM_SYSCOMMAND, _SC_SIZE | wmsz, 0)
-        return True
+        return bool(_user32_sc.PostMessageW(hwnd, msg, hit_test, lparam))
     except Exception:
         return False
 
@@ -708,6 +712,8 @@ if sys.platform == "win32":
     ]
     _user32_sc.DefWindowProcW.restype = _LRESULT
     _user32_sc.DefWindowProcW.argtypes = [wintypes.HWND, ctypes.c_uint, _WPARAM, _LPARAM]
+    _user32_sc.PostMessageW.restype = wintypes.BOOL
+    _user32_sc.PostMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, _WPARAM, _LPARAM]
 _native_subclass: dict[int, object] = {}  # hwnd -> WNDPROC callback (kept alive)
 _native_subclass_orig: dict[int, int] = {}  # hwnd -> original window proc pointer
 
@@ -719,20 +725,24 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
     does NOT cover it — the OS handles side/bottom/corner resize natively (real cursor,
     Aero Snap, lockstep). Only the top caption is stripped (client top = window top) so
     there is no title bar and no native min/max/close buttons. The top edge has no OS
-    resize frame, so a thin JS grip (WindowResize) handles top-edge resize only.
+    resize frame, so thin top/corner grips hand off to this same native resize loop.
     """
     orig = _native_subclass_orig.get(hwnd, 0)
     try:
-        if msg == _WM_NCCALCSIZE and wparam != 0:
-            params = _NCCALCSIZE_PARAMS.from_address(lparam)
+        if msg == _WM_NCCALCSIZE:
+            # Both message forms start with the proposed RECT; wParam=0 has no
+            # trailing NCCALCSIZE_PARAMS. Strip the caption in either form.
+            rect = _RECT.from_address(lparam)
             if _is_maximized(hwnd):
-                if _set_nccalcsize_maximized_work_area(params, hwnd):
+                if _set_nccalcsize_maximized_work_area(rect, hwnd):
                     return 0
             else:
-                top = params.rgrc[0].top
-                _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, lparam)
-                params = _NCCALCSIZE_PARAMS.from_address(lparam)
-                params.rgrc[0].top = top
+                top = rect.top
+                if orig:
+                    _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, lparam)
+                else:
+                    _user32_sc.DefWindowProcW(hwnd, msg, wparam, lparam)
+                rect.top = top
                 return 0
         elif msg == _WM_GETMINMAXINFO:
             if orig:
@@ -800,12 +810,41 @@ def _make_chrome_browser_form():
     OriginalBrowserForm = winforms.BrowserView.BrowserForm
     _OriginalBrowserForm = OriginalBrowserForm
     original_on_resize = OriginalBrowserForm.on_resize
+    original_on_move = OriginalBrowserForm.on_move
 
     class ChromeBrowserForm(OriginalBrowserForm):
         def __init__(self, window, cache_dir):
             OriginalBrowserForm.__init__(self, window, cache_dir)
             self._chrome_state = None
+            self._native_size_move = False
+            self._pending_resize_notification = False
+            self._pending_move_notification = False
             self.HandleCreated += self._chrome_handle_created
+            self.ResizeBegin += self._chrome_resize_begin
+            self.ResizeEnd += self._chrome_resize_end
+
+        def _chrome_resize_begin(self, _sender, _args) -> None:
+            # Dock.Fill keeps WebView2 sizing live. Only defer pywebview's Python
+            # notifications: each one otherwise starts a worker + a bounds-save
+            # timer, competing with the UI thread for the GIL on every mouse move.
+            self._native_size_move = bool(getattr(self, "frameless", False) and winforms.is_chromium)
+
+        def _chrome_resize_end(self, sender, args) -> None:
+            self._native_size_move = False
+            resized = self._pending_resize_notification
+            moved = self._pending_move_notification
+            self._pending_resize_notification = False
+            self._pending_move_notification = False
+            if resized:
+                original_on_resize(self, sender, args)
+            if moved:
+                original_on_move(self, sender, args)
+
+        def on_move(self, sender, args):
+            if getattr(self, "_native_size_move", False):
+                self._pending_move_notification = True
+                return
+            original_on_move(self, sender, args)
 
         def _chrome_handle_created(self, _sender, _args) -> None:
             if not getattr(self, "frameless", False):
@@ -814,7 +853,7 @@ def _make_chrome_browser_form():
                 hwnd = _hwnd_from_pywebview(self.pywebview_window)
                 if hwnd:
                     _install_native_chrome_subclass(hwnd)
-                ensure_snap_friendly_styles(self.pywebview_window)
+                refresh_window_chrome(self.pywebview_window)
                 reset_webview_pin(self.pywebview_window)
                 _pin_webview_once(self.pywebview_window)
             except Exception:
@@ -824,9 +863,15 @@ def _make_chrome_browser_form():
             import System.Windows.Forms as WinForms
 
             prev = getattr(self, "_chrome_state", None)
+            cur = self.WindowState
+            if getattr(self, "_native_size_move", False) and cur == prev:
+                self._pending_resize_notification = True
+                return
             original_on_resize(self, sender, args)
             if getattr(self, "frameless", False):
-                cur = self.WindowState
+                # Set before forcing frame calculation; that call can synchronously
+                # re-enter Resize. A transition must refresh the frame only once.
+                self._chrome_state = cur
                 if cur != prev and (
                     cur == WinForms.FormWindowState.Maximized
                     or prev == WinForms.FormWindowState.Maximized
@@ -840,9 +885,21 @@ def _make_chrome_browser_form():
                         _pin_webview_once(self.pywebview_window)
                     except Exception:
                         pass
-                self._chrome_state = cur
+                if cur != prev:
+                    _sync_window_chrome_state(self.pywebview_window)
 
     return ChromeBrowserForm
+
+
+def _sync_window_chrome_state(window: object) -> None:
+    """Publish to this window, never whichever main/focus window is active now."""
+    from frontend.ui_web.ui_dispatch import schedule_evaluate_js
+
+    maximized = "true" if is_window_maximized(window) else "false"
+    schedule_evaluate_js(
+        window,
+        f'document.documentElement.classList.toggle("window-maximized", {maximized});',
+    )
 
 
 def install_pywebview_chrome_patches() -> None:
@@ -864,6 +921,9 @@ def install_pywebview_chrome_patches() -> None:
             if args.IsSuccess:
                 try:
                     sender.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
+                    from frontend.ui_web.webview_ship import apply_shipped_webview2_settings
+
+                    apply_shipped_webview2_settings(sender.CoreWebView2.Settings)
                 except Exception:
                     pass
                 # Auto-allow mic for the local panel origin. App UI owns Allow/Block;
@@ -908,6 +968,7 @@ def install_pywebview_chrome_patches() -> None:
             original_nav(self, sender, args)
             try:
                 _pin_webview_once(self.pywebview_window)
+                _sync_window_chrome_state(self.pywebview_window)
             except Exception:
                 pass
 
@@ -936,7 +997,7 @@ def install_chrome_refresh_hooks() -> None:
 
 
 def install_sync_drag_bridge() -> None:
-    """Handle native drag on the UI thread during WebView2 mousedown (must be sync)."""
+    """Route chrome input directly from WebView2 to its owning window's UI thread."""
     if sys.platform != "win32":
         return
     try:
@@ -956,9 +1017,20 @@ def install_sync_drag_bridge() -> None:
                         pass
                 begin_native_window_move(window, sx, sy)
                 return
+            if func_name == "uefnNativeWindowResize":
+                if isinstance(param, (list, tuple)) and param and isinstance(param[0], str):
+                    begin_native_window_resize(
+                        window, param[0], double_click=len(param) > 1 and param[1] is True,
+                    )
+                return
             original(window, func_name, param, value_id)
 
         webview_util.js_bridge_call = patched
+        # EdgeChrome imports the function by value before this hook is installed.
+        # Updating util alone leaves the actual WebView2 callback on the old bridge.
+        edgechromium = sys.modules.get("webview.platforms.edgechromium")
+        if edgechromium is not None:
+            edgechromium.js_bridge_call = patched
         install_sync_drag_bridge._installed = True  # type: ignore[attr-defined]
     except Exception:
         pass

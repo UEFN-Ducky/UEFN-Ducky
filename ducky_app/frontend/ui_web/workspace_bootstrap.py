@@ -10,7 +10,9 @@ Adapters here are the only place the pipeline learns about frontend concerns
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, Iterable
@@ -78,11 +80,59 @@ class EditorSyncObserver:
 
 
 def _changesets_storage(project_root: str) -> Path:
-    """AppData/changesets/<project slug>, beside file_history and the chat store."""
+    """AppData/changesets/<project slug>, beside file_history and the chat store.
+
+    The writer / MCP tools hand us the first Verse workspace folder
+    (``…/<Project>/Content``); the Changes tab asks by the panel's project root
+    (``…/<Project>``). Climb to the folder holding ``*.uefnproject`` so both
+    land in one ledger instead of a ``Content_<hash>`` orphan.
+    """
     from frontend.settings import default_app_data_dir
     from frontend.ui_web.project_chats import project_slug
 
-    return default_app_data_dir() / "changesets" / project_slug(project_root)
+    p = Path(project_root).resolve()
+    for cand in (p, *p.parents[:3]):
+        if any(cand.glob("*.uefnproject")):
+            p = cand
+            break
+    base = default_app_data_dir() / "changesets"
+    storage = base / project_slug(str(p))
+    _fold_orphan_ledger(base / project_slug(str(p / "Content")), storage)
+    return storage
+
+
+_folded: set[str] = set()
+
+
+def _fold_orphan_ledger(orphan: Path, storage: Path) -> None:
+    """Merge a pre-fix ``Content_<hash>`` ledger into the project ledger, once per process."""
+    key = str(orphan)
+    if key in _folded:
+        return
+    _folded.add(key)
+    if orphan == storage or not orphan.is_dir():
+        return
+    try:
+        for sub in ("runs", "blobs"):
+            (storage / sub).mkdir(parents=True, exist_ok=True)
+            for f in (orphan / sub).glob("*"):
+                target = storage / sub / f.name
+                if not target.exists() or (sub == "runs" and f.stat().st_mtime > target.stat().st_mtime):
+                    shutil.move(str(f), str(target))
+        for name in ("catalog.json", "index.json"):
+            src = orphan / name
+            if not src.is_file():
+                continue
+            dst = storage / name
+            merged = json.loads(dst.read_text(encoding="utf-8")) if dst.is_file() else {}
+            for k, v in json.loads(src.read_text(encoding="utf-8")).items():
+                cur = merged.get(k)
+                if cur is None or float((v or {}).get("ts") or 0) > float((cur or {}).get("ts") or 0):
+                    merged[k] = v
+            dst.write_text(json.dumps(merged, indent=1), encoding="utf-8")
+        shutil.rmtree(orphan, ignore_errors=True)
+    except Exception:
+        pass  # best-effort heal; the canonical ledger still works without it
 
 
 def _journal_enabled() -> bool:
@@ -155,7 +205,9 @@ def build_run_context(
         run_id=run_id,
         conv_id=conv.id,
         profile_id=str(getattr(conv, "profile_id", "") or "").strip(),
-        ducky_name=str(getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or "").strip(),
+        # Tab title is what the user sees (Animation Engineer). ducky_name is the
+        # library profile (Verse Coder) and must not leak into the Changes ledger.
+        ducky_name=str(getattr(conv, "title", "") or getattr(conv, "ducky_name", "") or "").strip(),
         model=(model or str(getattr(conv, "model", "") or "")).strip(),
         provider=str(getattr(conv, "provider", "") or ""),
         coding_agent=(coding_agent or str(getattr(conv, "coding_agent", "") or "") or "ducky").strip(),

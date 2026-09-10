@@ -7,6 +7,7 @@ import { usePluginContributions } from "../hooks/usePluginContributions";
 import { registerBuiltinTours } from "./builtinTours";
 import { installWalkthroughPersistence, whenWalkthroughHydrated } from "./persistence";
 import {
+  expandGatewayManifest,
   parsePluginWalkthroughs,
   pluginManifestToTour,
   pluginTourId,
@@ -38,7 +39,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
     const rows = parsePluginWalkthroughs(contrib.walkthroughs);
     const nextIds = new Set<string>();
     for (const row of rows) {
-      const tour = pluginManifestToTour(row);
+      const tour = pluginManifestToTour(expandGatewayManifest(row, contrib));
       if (!tour) continue;
       registerTour(tour);
       nextIds.add(tour.id);

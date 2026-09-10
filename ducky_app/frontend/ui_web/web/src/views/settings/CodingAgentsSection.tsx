@@ -57,8 +57,8 @@ function useCodingAgentsState() {
   useEffect(() => {
     installPanelPushBus();
     return subscribePanelPush((event) => {
-      if (event.type !== "uefn_plugins_changed") return;
-      void refreshModelsCatalog();
+      if (event.type !== "uefn_plugins_changed" && event.type !== "coding_agents_updated") return;
+      if (event.type === "uefn_plugins_changed") void refreshModelsCatalog();
       void refresh();
     });
   }, [refresh]);

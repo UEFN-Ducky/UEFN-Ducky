@@ -3,6 +3,7 @@ import type { DuckyOSStoreItemDto } from "../../../types/panel";
 import { asLabelList, itemCategories } from "../storeFilters";
 import { StoreActions, type StoreItemHandlers } from "./StoreActions";
 import { StoreInstallOverlay } from "./StoreInstallOverlay";
+import { StorePatchNotes } from "./StorePatchNotes";
 import {
   authorLabelFor,
   formatInstalls,
@@ -149,6 +150,8 @@ export function StoreDetailView({ item, jobs, actionBusy, handlers, onBack }: Pr
               ) : null}
             </div>
           </div>
+
+          <StorePatchNotes slug={slug} />
         </div>
       </div>
     </div>

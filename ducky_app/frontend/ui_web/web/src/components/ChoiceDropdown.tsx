@@ -35,6 +35,9 @@ type CommonProps = {
   header?: ReactNode;
   /** Extra chrome below the option list. */
   footer?: ReactNode;
+  /** Icon-only (or custom) trigger instead of the selected label. */
+  trigger?: ReactNode;
+  hideChevron?: boolean;
 };
 
 type RadioProps = CommonProps & {
@@ -83,6 +86,8 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
     emptyLabel = "No options",
     header,
     footer,
+    trigger,
+    hideChevron,
   } = props;
   const ariaLabel = props["aria-label"];
   const checkbox = isCheckbox(props);
@@ -119,7 +124,11 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
   };
 
   return (
-    <div className={`choice-dropdown${size === "compact" ? " choice-dropdown--compact" : ""}${className ? ` ${className}` : ""}`}>
+    <div
+      className={`choice-dropdown${size === "compact" ? " choice-dropdown--compact" : ""}${
+        trigger ? " choice-dropdown--icon" : ""
+      }${className ? ` ${className}` : ""}`}
+    >
       <button
         ref={anchorRef}
         id={id}
@@ -130,17 +139,24 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-label={ariaLabel}
+        title={ariaLabel || selectedLabel}
         onClick={() => {
           if (!disabled) setOpen((v) => !v);
         }}
       >
-        <span className="choice-dropdown-trigger-copy">
-          <span className="choice-dropdown-trigger-label">{selectedLabel}</span>
-          {selectedHint ? <span className="choice-dropdown-trigger-hint">{selectedHint}</span> : null}
-        </span>
-        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
-          <Icons.ChevronDown />
-        </span>
+        {trigger ? (
+          trigger
+        ) : (
+          <span className="choice-dropdown-trigger-copy">
+            <span className="choice-dropdown-trigger-label">{selectedLabel}</span>
+            {selectedHint ? <span className="choice-dropdown-trigger-hint">{selectedHint}</span> : null}
+          </span>
+        )}
+        {hideChevron || trigger ? null : (
+          <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
+            <Icons.ChevronDown />
+          </span>
+        )}
       </button>
 
       <DropdownPanel

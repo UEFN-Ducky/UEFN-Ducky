@@ -480,6 +480,16 @@ export interface ListenerStatus {
   python_and_toolsets?: boolean;
   listener_init_race?: boolean;
   beta_access_note?: string;
+  plugin_connections?: PluginConnectionRow[];
+}
+
+export interface PluginConnectionRow {
+  id: string;
+  program: string;
+  label: string;
+  online: boolean;
+  warn?: boolean;
+  detail: string;
 }
 
 export interface ProjectInfo {
@@ -631,6 +641,8 @@ export interface EditorChangeDto {
   reason?: string;
   summary?: string;
   params?: Record<string, unknown>;
+  /** `uefn`, `blender`, … — defaults to uefn when absent. */
+  program?: string;
 }
 
 export interface ChangesetEntryDto {
@@ -672,6 +684,9 @@ export interface ChangesetRunDto {
   group_id?: string;
   leader_conv_id?: string;
   source?: "agent" | "user" | "revert";
+  /** The run this revert undid, when source is revert. */
+  reverts_run_id?: string;
+  archived?: boolean;
   lane?: { write_allowed: string[] } | null;
   started: number;
   ended?: number | null;
@@ -692,6 +707,16 @@ export interface ChangesetManualRow {
   reason: string;
 }
 
+export interface ChangesetBlockedBy {
+  other_conv_id: string;
+  other_ducky: string;
+  other_run_id: string;
+  other_seq: number;
+  path: string;
+  /** Later write is in this same run — walk newest → oldest. */
+  same_run?: boolean;
+}
+
 export interface ChangesetRevertResult {
   ok: boolean;
   run_id: string;
@@ -700,6 +725,8 @@ export interface ChangesetRevertResult {
   skipped_modified: { seq: number; path: string }[];
   /** Not errors: changes that were recorded but cannot be undone automatically. */
   manual?: ChangesetManualRow[];
+  /** Another chat wrote this slot later — revert theirs first. */
+  blocked_by?: ChangesetBlockedBy[];
   errors: string[];
 }
 
@@ -951,6 +978,20 @@ export interface DuckyOSStoreCatalog {
   error?: string;
   code?: string;
   items?: DuckyOSStoreItemDto[];
+}
+
+export interface DuckyOSStorePatchNote {
+  version?: string;
+  changelog?: string;
+  created_at?: string | null;
+}
+
+export interface DuckyOSStoreVersions {
+  ok?: boolean;
+  error?: string;
+  code?: string;
+  slug?: string;
+  versions?: DuckyOSStorePatchNote[];
 }
 
 export interface DuckyOSStoreInstallResult {
@@ -1332,6 +1373,8 @@ export interface PanelPushEvent {
     | "project_changed"
     | "discord_changed"
     | "uefn_plugins_changed"
+    | "models_updated"
+    | "coding_agents_updated"
     | "uefn_plugin_trust_request"
     | "browser_pane_state"
     | "browser_pane_new_window";
@@ -1661,6 +1704,7 @@ export interface PanelApi {
   duckyos_teams_snapshot?(stale_seconds?: number): Promise<DuckyOSTeamsSnapshot>;
   duckyos_open_teams_site?(path?: string): Promise<{ ok?: boolean; url?: string; error?: string }>;
   duckyos_store_catalog?(): Promise<DuckyOSStoreCatalog>;
+  duckyos_store_versions?(slug: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(
     slug: string,
     version?: string,
@@ -1879,12 +1923,31 @@ export interface PanelApi {
   list_file_history(relative_path: string): Promise<FileHistoryEntry[]>;
   read_file_history_entry(relative_path: string, entry_id: string): Promise<{ content: string; path: string; id: string }>;
   snapshot_file_history(relative_path: string, content: string): Promise<{ id: string; path: string }>;
-  list_changesets?(conv_id?: string, group_id?: string, limit?: number): Promise<ChangesetRunDto[]>;
+  list_changesets?(
+    conv_id?: string,
+    group_id?: string,
+    limit?: number,
+    archived?: boolean,
+  ): Promise<ChangesetRunDto[]>;
   get_changeset?(run_id: string): Promise<ChangesetRunDto>;
   get_changeset_entry_contents?(run_id: string, seq: number): Promise<{ path: string; before: string | null; after: string | null }>;
-  revert_changeset_entry?(run_id: string, seq: number, force?: boolean): Promise<ChangesetRevertResult>;
+  revert_changeset_entry?(run_id: string, seq: number, force?: boolean, step?: boolean): Promise<ChangesetRevertResult>;
   revert_changeset?(run_id: string, force?: boolean): Promise<ChangesetRevertResult>;
   export_changeset?(run_id: string): Promise<Record<string, unknown>>;
+  archive_changesets?(
+    conv_id?: string,
+    group_id?: string,
+    run_id?: string,
+    archived?: boolean,
+  ): Promise<{ updated: number }>;
+  clear_changesets?(
+    conv_id?: string,
+    group_id?: string,
+    run_id?: string,
+    archived_only?: boolean,
+  ): Promise<{ removed_runs: number; removed_blobs: number }>;
+  /** Drop blocked/failed rows from a run. Applied writes cannot be deleted (they anchor revert). */
+  delete_changeset_entries?(run_id: string, seqs: number[]): Promise<{ removed: number; kept: number }>;
   stop_verse_diagnostics_scan(project_root?: string): Promise<{ ok: boolean }>;
   report_open_tabs(window_id: string, tab_ids: string[]): Promise<void>;
   focus_tab(tab_id: string, requesting_window: string): Promise<{ ok: boolean; window_id: string }>;
@@ -1999,7 +2062,7 @@ export interface PanelApi {
     >,
   ): Promise<string>;
   test_key(provider: string, key?: string): Promise<{ ok: boolean; detail: string }>;
-  list_coding_agents(): Promise<{ agents: CodingAgentDto[] }>;
+  list_coding_agents(): Promise<{ agents: CodingAgentDto[]; checking?: boolean }>;
   set_conversation_coding_agent(
     conv_id: string,
     coding_agent: string,
@@ -2207,6 +2270,7 @@ export interface PanelApi {
       id: string;
       name: string;
       provider: string;
+      provider_key?: string;
       supports_vision?: boolean;
       supports_tools?: boolean;
       supports_web_search?: boolean;
@@ -2216,6 +2280,23 @@ export interface PanelApi {
       is_local?: boolean;
     }[]
   >;
+  get_models_catalog?(refresh?: boolean): Promise<{
+    models: Array<{
+      id: string;
+      name: string;
+      provider: string;
+      provider_key?: string;
+      supports_vision?: boolean;
+      supports_tools?: boolean;
+      supports_web_search?: boolean;
+      context_limit?: number;
+      price_in?: number | null;
+      price_out?: number | null;
+      is_local?: boolean;
+    }>;
+    default_model?: string;
+    agent_model?: string;
+  }>;
   set_model(model_id: string, provider?: string): Promise<void>;
   send_message(
     conv_id: string,
@@ -3023,7 +3104,10 @@ export interface TesterDeviceNode {
 
 export interface TesterDevicesDto {
   ok: boolean;
+  uefn_online?: boolean;
+  epic_mcp_online?: boolean;
   listener_online?: boolean;
+  live_source?: "epic" | "listener" | null;
   live?: { nodes?: TesterDeviceNode[]; edges?: unknown[]; count?: number } | null;
   workspace?: { nodes?: TesterDeviceNode[]; count?: number };
   audit?: {
@@ -3052,6 +3136,7 @@ export interface TesterSimulateDto {
   error?: string;
   note?: string;
   listener_online?: boolean;
+  uefn_online?: boolean;
 }
 
 export interface TesterListTestsDto {

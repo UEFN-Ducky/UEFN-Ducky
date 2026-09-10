@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { diffFields, formatValue, opaqueDetail } from "./JsonDiffView";
+import {
+  diffFields,
+  editorStory,
+  formatValue,
+  isEditorEnvelope,
+  isStructuredText,
+  opaqueDetail,
+  prettyCode,
+  projectEditorDiff,
+} from "./JsonDiffView";
 
 describe("diffFields", () => {
   it("marks only the properties that actually differ", () => {
@@ -76,5 +85,52 @@ describe("opaqueDetail", () => {
   it("falls back to the id when a change row has no path", () => {
     const detail = opaqueDetail({ diff: { changes: [{ change: "moved", id: "G7" }] } })!;
     expect(detail.changes[0]).toEqual({ change: "moved", label: "", path: "G7" });
+  });
+});
+
+describe("prettyCode", () => {
+  it("indents JSON so nested params are readable", () => {
+    expect(prettyCode('{"a":1}')).toBe('{\n  "a": 1\n}');
+  });
+});
+
+describe("isStructuredText", () => {
+  it("treats objects as code, not short coordinate arrays", () => {
+    expect(isStructuredText('{"folder":"/CardGame/Materials"}')).toBe(true);
+    expect(isStructuredText("[0, 0, 250]")).toBe(false);
+  });
+});
+
+describe("projectEditorDiff", () => {
+  const envelope = (params: Record<string, unknown>, created: unknown[] = []) => ({
+    params,
+    after: null,
+    created,
+  });
+
+  it("treats the journal after-blob as an envelope, not a property snapshot", () => {
+    expect(isEditorEnvelope(envelope({ actor_path: "/x", label: "New" }))).toBe(true);
+    expect(isEditorEnvelope({ location: [0, 0, 250] })).toBe(false);
+  });
+
+  it("a rename is the name, not params / created / after", () => {
+    const rows = projectEditorDiff({ label: "Button" }, envelope({ actor_path: "/x", label: "LedgerWireTest_Button" }));
+    expect(rows).toEqual([{ key: "Name", before: "Button", after: "LedgerWireTest_Button", changed: true }]);
+    expect(editorStory(rows)).toBe("Renamed Button to LedgerWireTest_Button");
+  });
+
+  it("a wire is the field and who it points at", () => {
+    const rows = projectEditorDiff(
+      { field: "TestProps", target_paths: [], asset_paths: [], value: null },
+      envelope({ actor_path: "/x", field: "TestProps", target_paths: ["WireProp_01", "WireProp_02"] }),
+    );
+    expect(rows).toEqual([
+      { key: "TestProps", before: "—", after: "WireProp_01, WireProp_02", changed: true },
+    ]);
+    expect(editorStory(rows)).toBe("Set TestProps to WireProp_01, WireProp_02");
+  });
+
+  it("does not pretend a missing after-property was cleared", () => {
+    expect(projectEditorDiff({ location: [0, 0, 0] }, envelope({ actor_path: "/x" }))).toEqual([]);
   });
 });

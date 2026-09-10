@@ -43,8 +43,6 @@ import { AskUserForm } from "../ask-user";
 import type { AskUserSession } from "../ask-user";
 import { settleAskUser } from "../ask-user";
 
-import { getApi } from "../hooks/usePanelApi";
-
 import type { AgentMode, ChatPlan, ChatTab, LinkedAgent, MessageAttachmentDto, PlanProgress } from "../types/panel";
 
 export interface VirtualChatMessageListHandle {
@@ -160,10 +158,6 @@ function sameWindow(
 ): boolean {
   return a.start === b.start && a.end === b.end;
 }
-
-/** Report list commits slower than this (one 60 Hz frame) to the perf log. */
-const SLOW_COMMIT_MS = 16;
-const SLOW_COMMIT_REPORT_INTERVAL_MS = 1000;
 
 /**
  * Everything a row needs that is NOT per-row data. Lives in context so the
@@ -677,14 +671,6 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       applyWindow();
     }, [chunks.length, scrollerReady, ensureHeights, applyWindow, scrollToBottom]);
 
-    useEffect(() => {
-      if (chunks.length === 0) return;
-      const mounted = Math.max(0, win.end - win.start + 1);
-      console.log(
-        `[chat-list] window ${win.start}-${win.end}/${chunks.length} mounted=${mounted} turns=${turns.length}`,
-      );
-    }, [convId, win.start, win.end, chunks.length, turns.length]);
-
     const { topPad, bottomPad } = useMemo(() => {
       void padTick;
       const h = heightsRef.current;
@@ -763,36 +749,6 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       },
       [askSessionId],
     );
-
-    // #region agent log
-    // Commit-time probe (works in production builds, unlike <Profiler>): render
-    // start → layout effect ≈ render + reconcile of the whole list subtree.
-    // Reported to the perf log only when a commit misses a frame, at most once
-    // per second, with the row/turn counts so regressions show their scale.
-    const renderStart = performance.now();
-    const lastReportRef = useRef(0);
-    useLayoutEffect(() => {
-      const dt = performance.now() - renderStart;
-      if (dt < SLOW_COMMIT_MS) return;
-      const now = performance.now();
-      if (now - lastReportRef.current < SLOW_COMMIT_REPORT_INTERVAL_MS) return;
-      lastReportRef.current = now;
-      try {
-        void getApi()?.report_ui_perf([
-          {
-            kind: "dbg_render",
-            name: "chat_list_commit",
-            duration_ms: Math.round(dt),
-            rows: rows.length,
-            turns: turns.length,
-            streaming: rows.length > 0 && rows[rows.length - 1].id === "stream",
-          },
-        ]);
-      } catch {
-        /* ignore */
-      }
-    });
-    // #endregion
 
     return (
       <ChatRowEnvContext.Provider value={env}>

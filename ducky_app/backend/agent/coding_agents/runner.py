@@ -172,6 +172,162 @@ def build_history_prefix(conv: Conversation, *, max_chars: int = _HISTORY_PREFIX
     )
 
 
+def checkpoint_coding_turn(
+    conv: Conversation,
+    *,
+    agent_id: str,
+    run_id: str,
+    blocks: list[dict[str, Any]] | None = None,
+    reply: str = "",
+    error: str = "",
+    project_root: str | None = None,
+) -> None:
+    """Write the in-flight assistant to disk. Survives taskkill /F (no shutdown hooks)."""
+    try:
+        from frontend.ui_web.project_chats import upsert_in_flight_assistant
+
+        text = (reply or "").strip()
+        msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": text,
+            "text": text,
+            "ts": time.time(),
+            "coding_agent": agent_id,
+            "run_id": run_id,
+            "incomplete": True,
+        }
+        if blocks:
+            msg["blocks"] = [dict(b) if isinstance(b, dict) else b for b in blocks]
+        if error:
+            msg["error"] = error
+        upsert_in_flight_assistant(conv, msg, run_id=run_id, project_root=project_root)
+    except Exception:
+        pass
+
+
+class _TurnCheckpoint:
+    """Rebuild persisted blocks from live push events; flush after every tool."""
+
+    def __init__(
+        self,
+        conv: Conversation,
+        agent_id: str,
+        run_id: str,
+        *,
+        project_root: str | None = None,
+    ) -> None:
+        self.conv = conv
+        self.agent_id = agent_id
+        self.run_id = run_id
+        self.project_root = project_root
+        self.blocks: list[dict[str, Any]] = []
+        self._last = 0.0
+
+    def wrap(self, push: PushFn) -> PushFn:
+        def wrapped(ev: dict[str, Any]) -> None:
+            self._ingest(ev if isinstance(ev, dict) else {})
+            push(ev)
+
+        return wrapped
+
+    def seed(self) -> None:
+        checkpoint_coding_turn(
+            self.conv,
+            agent_id=self.agent_id,
+            run_id=self.run_id,
+            blocks=[],
+            project_root=self.project_root,
+        )
+
+    def flush(self, *, error: str = "", force: bool = True) -> None:
+        now = time.monotonic()
+        if not force and now - self._last < 0.8:
+            return
+        self._last = now
+        checkpoint_coding_turn(
+            self.conv,
+            agent_id=self.agent_id,
+            run_id=self.run_id,
+            blocks=self.blocks,
+            error=error,
+            project_root=self.project_root,
+        )
+
+    def _ingest(self, ev: dict[str, Any]) -> None:
+        t = ev.get("type")
+        text = ev.get("text") if isinstance(ev.get("text"), str) else ""
+        if t == "thinking" and text:
+            if self.blocks and self.blocks[-1].get("type") == "thinking":
+                self.blocks[-1]["text"] = (self.blocks[-1].get("text") or "") + text
+            else:
+                self.blocks.append({"type": "thinking", "text": text})
+            self.flush(force=False)
+        elif t in ("text_delta", "text") and text:
+            if self.blocks and self.blocks[-1].get("type") == "text":
+                self.blocks[-1]["text"] = (self.blocks[-1].get("text") or "") + text
+            else:
+                self.blocks.append({"type": "text", "text": text})
+            self.flush(force=False)
+        elif t == "tool":
+            tool = ev.get("tool") if isinstance(ev.get("tool"), dict) else {}
+            self.blocks.append(
+                {
+                    "type": "tool_call",
+                    "id": str(tool.get("id") or tool.get("name") or "tool") + f":{len(self.blocks)}",
+                    "name": str(tool.get("name") or "tool"),
+                    "arguments": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
+                    "status": "pending",
+                    "result": {"ok": False, "data": "", "hint": ""},
+                }
+            )
+            self.flush(force=True)
+        elif t == "tool_done":
+            tool = ev.get("tool") if isinstance(ev.get("tool"), dict) else {}
+            name = str(tool.get("name") or "")
+            status = str(tool.get("status") or ("error" if ev.get("success") is False else "success"))
+            result_text = tool.get("result") if isinstance(tool.get("result"), str) else ""
+            found = False
+            for b in reversed(self.blocks):
+                if (
+                    b.get("type") == "tool_call"
+                    and b.get("status") == "pending"
+                    and (not name or b.get("name") == name)
+                ):
+                    b["status"] = status
+                    b["duration_ms"] = int(tool.get("durationMs") or 0)
+                    b["result"] = {
+                        "ok": status != "error",
+                        "data": result_text,
+                        "hint": str(tool.get("hint") or ""),
+                    }
+                    if isinstance(tool.get("fileEdit"), dict):
+                        b["file_edit"] = tool["fileEdit"]
+                    found = True
+                    break
+            if not found:
+                self.blocks.append(
+                    {
+                        "type": "tool_call",
+                        "id": name or f"tool:{len(self.blocks)}",
+                        "name": name or "tool",
+                        "arguments": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
+                        "status": status,
+                        "duration_ms": int(tool.get("durationMs") or 0),
+                        "result": {
+                            "ok": status != "error",
+                            "data": result_text,
+                            "hint": str(tool.get("hint") or ""),
+                        },
+                        **(
+                            {"file_edit": tool["fileEdit"]}
+                            if isinstance(tool.get("fileEdit"), dict)
+                            else {}
+                        ),
+                    }
+                )
+            self.flush(force=True)
+
+
 def _emit_assistant(
     conv: Conversation,
     *,
@@ -186,7 +342,7 @@ def _emit_assistant(
     streamed: bool = False,
     blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    from frontend.ui_web.project_chats import append_message, save_conversation
+    from frontend.ui_web.project_chats import save_conversation, upsert_in_flight_assistant
 
     text = (reply or "").strip()
     if not text and not blocks:
@@ -204,6 +360,7 @@ def _emit_assistant(
         "text": text,
         "ts": time.time(),
         "coding_agent": agent_id,
+        "run_id": run_id,
         "terminal_session_id": terminal_session_id or "",
     }
     # Interleaved thinking/text/tool_call steps in the embedded agent's format,
@@ -215,7 +372,7 @@ def _emit_assistant(
         msg["incomplete"] = True
         if error:
             msg["error"] = error
-    append_message(conv, msg)
+    upsert_in_flight_assistant(conv, msg, run_id=run_id)
     if terminal_session_id:
         conv.terminal_session_id = terminal_session_id
     save_conversation(conv)
@@ -299,6 +456,9 @@ def run_coding_agent_message(
         return {"ok": False, "error": info.status}
 
     rid = run_id or str(uuid.uuid4())
+    project_root = (settings.uefn_project_root or "").strip()
+    ckpt = _TurnCheckpoint(conv, agent_id, rid, project_root=project_root or None)
+    push = ckpt.wrap(push)
     push({"type": "status", "text": f"Starting {adapter.label}…", "conv_id": conv.id, "run_id": rid})
 
     from backend.bridge import set_port_override
@@ -311,7 +471,6 @@ def run_coding_agent_message(
         selected_project_root=settings.uefn_project_root,
     )
     listener_online = bool(listener_status.get("online"))
-    project_root = (settings.uefn_project_root or "").strip()
     cwd = project_root or "."
     cli_path = str(cfg.get("cli_path") or "")
 
@@ -370,6 +529,11 @@ def run_coding_agent_message(
     from frontend.ui_web.workspace_bootstrap import build_run_context, record_external_edits
 
     run_ctx = build_run_context(conv, run_id=rid, model=(model or conv.model or ''), coding_agent=agent_id)
+    from frontend.ui_web.live_agent_runs import set_live_writer
+
+    # Native Edit/Write hits disk outside the writer pipeline. The watcher
+    # must pin those files to this duck, not "You".
+    set_live_writer(rid, run_ctx.as_writer())
     mcp_path = write_uefn_mcp_config(conv_id=conv.id, settings=settings, identity=run_ctx)
     prompt_path = write_prompt_file(prompt_text, conv_id=conv.id)
     env = launch_env(
@@ -394,6 +558,7 @@ def run_coding_agent_message(
             push({"type": "error", "text": err, "conv_id": conv.id, "run_id": rid})
             push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
             return {"ok": False, "error": err, "run_id": rid}
+        ckpt.seed()
         result = adapter.launch(
             prompt=prompt_text,
             system_prompt=system_prompt,
@@ -412,6 +577,7 @@ def run_coding_agent_message(
             image_paths=image_paths,
         )
     except Exception as exc:
+        ckpt.flush(error=str(exc), force=True)
         push({"type": "error", "text": str(exc), "conv_id": conv.id, "run_id": rid})
         push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
         return {"ok": False, "error": str(exc), "run_id": rid}

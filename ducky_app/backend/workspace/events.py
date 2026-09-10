@@ -21,6 +21,9 @@ GUARD_CONFLICT = "conflict"
 GUARD_POLICY_DENIED = "policy_denied"
 
 EDITOR_OP = "editor_op"
+# One attributed row landed in a run ledger; the Changes tab redraws on it while
+# the agent is still working — regardless of which process/agent did the write.
+CHANGESET_ROW = "changeset_row"
 
 
 @dataclass(frozen=True)

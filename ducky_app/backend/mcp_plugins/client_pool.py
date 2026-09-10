@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -269,10 +269,22 @@ class PluginClientPool:
                 "dead MCP session — use the Ducky fallback tool for this step and "
                 "reconnect this MCP in Settings → MCPs when the task is done."
             ) from e
+        def _watchdog():
+            # Epic's MCP runs on UEFN's Slate thread: a Save prompt it opens would
+            # hold this call for the whole timeout, so the host presses it meanwhile.
+            from backend.mcp_plugins.epic import EPIC_MCP_PREFIX
+
+            if plugin_id != EPIC_MCP_PREFIX:
+                return nullcontext()
+            from backend.tools.core.uefn_modal import save_modal_watchdog
+
+            return save_modal_watchdog(f"{plugin_id}:{original_name}")
+
         try:
-            raw = await asyncio.wait_for(
-                session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
-            )
+            with _watchdog():
+                raw = await asyncio.wait_for(
+                    session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
+                )
         except asyncio.TimeoutError:
             raise RuntimeError(
                 f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
@@ -288,9 +300,10 @@ class PluginClientPool:
             try:
                 await self._close_connection(conn)
                 session = await self._ensure_session(conn)
-                raw = await asyncio.wait_for(
-                    session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
-                )
+                with _watchdog():
+                    raw = await asyncio.wait_for(
+                        session.call_tool(original_name, args), timeout=_TOOL_TIMEOUT_SEC
+                    )
                 self.invalidate_tools_cache()  # server restart may have changed tools
             except asyncio.TimeoutError:
                 raise RuntimeError(

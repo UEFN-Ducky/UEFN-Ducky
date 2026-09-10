@@ -1,4 +1,4 @@
-import type { ChangesetConflictDto, ChangesetEntryDto, ChangesetRunDto } from "../types/panel";
+import type { ChangesetConflictDto, ChangesetEntryDto, ChangesetRevertResult, ChangesetRunDto } from "../types/panel";
 
 export type ChangeOutcome = "ok" | "blocked" | "failed";
 
@@ -35,6 +35,8 @@ export interface ChangesetFileRow {
   conflict: ChangesetConflictDto | null;
   outOfLane: boolean;
   reverted: boolean;
+  /** Compensating run that undid this path, when reverted. */
+  revertedByRun: string;
   lastTs: number;
   /** Whether a text diff can be shown (write/create entries carry content). */
   hasDiff: boolean;
@@ -69,6 +71,7 @@ export function groupChangesetEntries(run: ChangesetRunDto): ChangesetFileRow[] 
         conflict: e.conflict ?? null,
         outOfLane: e.in_lane === false,
         reverted: Boolean(e.reverted),
+        revertedByRun: e.reverted_by_run || "",
         lastTs: e.ts,
         hasDiff: isText,
       });
@@ -83,6 +86,7 @@ export function groupChangesetEntries(run: ChangesetRunDto): ChangesetFileRow[] 
     if (e.conflict) row.conflict = e.conflict;
     row.outOfLane = row.outOfLane || e.in_lane === false;
     row.reverted = row.reverted && Boolean(e.reverted);
+    if (e.reverted_by_run) row.revertedByRun = e.reverted_by_run;
     row.lastTs = Math.max(row.lastTs, e.ts);
     row.hasDiff = row.hasDiff || isText;
   }
@@ -133,6 +137,8 @@ interface ChangeRowBase {
   outcome: ChangeOutcome;
   reason: string;
   reverted: boolean;
+  /** The compensating run that undid this row, when it is reverted. */
+  revertedByRun: string;
   /** Every entry behind this row, oldest first — what the expander shows. */
   steps: ChangeStep[];
 }
@@ -150,6 +156,8 @@ export interface EditorChangeRow extends ChangeRowBase {
   /** actor | asset | device | verse | material | … */
   targetKind: string;
   facet: string;
+  /** The program that owns this slot (`uefn`, `blender`, …). */
+  program: string;
   /** The target's label, or its path when it has none. */
   label: string;
   /** The listener's own words for what changed, e.g. "moved +250 on Z". */
@@ -165,8 +173,53 @@ function slotLabel(slot: string, entry: ChangesetEntryDto): string {
   const target = entry.editor?.targets?.[0];
   const named = (target?.label || "").trim() || (target?.path || "").trim() || (target?.id || "").trim();
   if (named) return named;
-  const parts = slot.replace(/^uefn:\/\//, "").split("/");
+  const rest = slot.replace(/^[a-z][a-z0-9_-]*:\/\//i, "");
+  const parts = rest.split("/");
   return parts[1] || parts[0] || slot;
+}
+
+/** Files have no scheme. Editor slots are `{program}://kind/id/facet`. */
+export function programOfSlot(slot: string): string {
+  const i = slot.indexOf("://");
+  return i > 0 ? slot.slice(0, i) : "file";
+}
+
+export function programLabel(program: string): string {
+  if (program === "file") return "Files";
+  if (program === "uefn") return "UEFN";
+  if (program === "blender") return "Blender";
+  if (!program) return "Other";
+  return program.charAt(0).toUpperCase() + program.slice(1);
+}
+
+export function programOfRow(row: ChangeRow): string {
+  const raw = row.kind === "file" ? "file" : row.program || programOfSlot(row.slot);
+  return (raw || "other").trim().toLowerCase();
+}
+
+/** True when UEFN recorded a blank / all-zero GUID instead of a real actor id. */
+export function identLooksEmpty(value: string): boolean {
+  const compact = value.replace(/[{}-]/g, "").trim();
+  return !compact || /^0+$/.test(compact);
+}
+
+/**
+ * Group key for one editor change. Repeated edits to the same actor share a
+ * slot; a zero GUID must not — those rows are keyed by the Unreal path that
+ * is already on the target.
+ */
+export function editorGroupKey(entry: ChangesetEntryDto): string {
+  const slot = entry.path || "";
+  const target = entry.editor?.targets?.[0];
+  const actorPath = String(target?.path || "").trim();
+  const prog = programOfSlot(slot);
+  if (!actorPath || prog !== "uefn") return slot;
+  const guid = String(target?.guid || target?.id || "");
+  const slotId = slot.match(/^[a-z][a-z0-9_-]*:\/\/[^/]+\/([^/]+)\//i)?.[1] || "";
+  if (!identLooksEmpty(guid) && !identLooksEmpty(slotId)) return slot;
+  const kind = entry.editor?.kind || "actor";
+  const facet = entry.editor?.facet || "";
+  return `${prog}://${kind}/${actorPath}/${facet}`;
 }
 
 /** One row per editor target+facet: three nudges to one actor read as one change. */
@@ -185,17 +238,19 @@ export function groupEditorEntries(run: ChangesetRunDto): EditorChangeRow[] {
       reverted: Boolean(e.reverted),
     };
     const created = (editor.created || []).length;
-    const row = bySlot.get(e.path);
+    const key = editorGroupKey(e);
+    const row = bySlot.get(key);
     if (!row) {
-      bySlot.set(e.path, {
+      bySlot.set(key, {
         kind: "editor",
-        key: `editor:${e.path}`,
-        slot: e.path,
+        key: `editor:${key}`,
+        slot: key,
         command: editor.command || e.tool,
         verb: editorVerb(editor.command || e.tool, editor.facet || "", created),
         targetKind: editor.kind || "other",
         facet: editor.facet || "",
-        label: slotLabel(e.path, e),
+        program: editor.program || programOfSlot(key),
+        label: slotLabel(key, e),
         detail: step.summary,
         revertable: editor.revertable || "manual",
         createdCount: created,
@@ -208,6 +263,7 @@ export function groupEditorEntries(run: ChangesetRunDto): EditorChangeRow[] {
         outcome: "ok",
         reason: (editor.reason || e.reason || "").trim(),
         reverted: Boolean(e.reverted),
+        revertedByRun: e.reverted_by_run || "",
         steps: [step],
       });
       continue;
@@ -224,6 +280,7 @@ export function groupEditorEntries(run: ChangesetRunDto): EditorChangeRow[] {
     if (!row.reason && editor.reason) row.reason = editor.reason;
     row.hasDiff = row.hasDiff || Boolean(e.after_blob) || Boolean(e.before_blob);
     row.reverted = row.reverted && Boolean(e.reverted);
+    if (e.reverted_by_run) row.revertedByRun = e.reverted_by_run;
     row.steps.push(step);
   }
   return [...bySlot.values()];
@@ -257,6 +314,7 @@ export function blockedRows(run: ChangesetRunDto): ChangeRow[] {
         outcome,
         reason: (e.reason || "").trim(),
         reverted: false,
+        revertedByRun: "",
         steps: [step],
       };
       if (isEditorEntry(e)) {
@@ -269,6 +327,7 @@ export function blockedRows(run: ChangesetRunDto): ChangeRow[] {
           verb: editorVerb(editor?.command || e.tool, editor?.facet || "", 0),
           targetKind: editor?.kind || "other",
           facet: editor?.facet || "",
+          program: editor?.program || programOfSlot(e.path),
           label: slotLabel(e.path, e),
           detail: (editor?.summary || "").trim(),
           revertable: "none",
@@ -321,6 +380,7 @@ export function runTimeline(run: ChangesetRunDto): ChangeRow[] {
       firstTs: steps[0]?.ts ?? row.lastTs,
       outcome: "ok" as const,
       reason: "",
+      revertedByRun: row.revertedByRun || "",
       steps,
     };
   });
@@ -356,10 +416,17 @@ export function changesetRunSummary(run: ChangesetRunDto): ChangesetRunSummary {
     entries: entries.length,
     conflicts: rows.filter((r) => r.conflict).length,
     outOfLane: rows.filter((r) => r.outOfLane).length,
-    reverted: run.status === "reverted",
-    partiallyReverted: run.status === "partially_reverted",
+    reverted: entries.length > 0 && entries.every((e) => e.reverted),
+    partiallyReverted: entries.some((e) => e.reverted) && entries.some((e) => !e.reverted),
     running: run.status === "running",
   };
+}
+
+/** True while this run's agent is still writing — revert is locked until Stop. */
+export function runAgentLive(run: ChangesetRunDto, runningConvIds?: ReadonlySet<string>): boolean {
+  if (run.status === "running") return true;
+  const conv = (run.conv_id || "").trim();
+  return Boolean(conv && runningConvIds?.has(conv));
 }
 
 export function sortRunsNewestFirst(runs: ChangesetRunDto[]): ChangesetRunDto[] {
@@ -408,4 +475,234 @@ export function statusLabel(status: ChangesetRunDto["status"]): string {
     default:
       return status;
   }
+}
+
+export function rowSlot(row: ChangeRow): string {
+  return row.kind === "file" ? row.path : row.slot;
+}
+
+/** A revert run we can still undo (bring the original work back). */
+export function liveRevertRun(
+  runs: ChangesetRunDto[],
+  runId: string | null | undefined,
+): ChangesetRunDto | undefined {
+  const id = (runId || "").trim();
+  if (!id) return undefined;
+  const found = runs.find((r) => r.run_id === id);
+  if (found && (found.status === "reverted" || found.archived)) return undefined;
+  return found;
+}
+
+/** Host for revert_changeset. Old empty-conv_id reverts are missing from the chat list. */
+export function revertHost(runs: ChangesetRunDto[], runId: string | null | undefined): ChangesetRunDto | null {
+  const id = (runId || "").trim();
+  if (!id) return null;
+  const live = liveRevertRun(runs, id);
+  if (live) return live;
+  if (runs.some((r) => r.run_id === id)) return null;
+  return {
+    schema_version: 1,
+    run_id: id,
+    conv_id: "",
+    started: 0,
+    status: "done",
+    source: "revert",
+    entries: [],
+  };
+}
+
+/** Badge text: entry flags beat a stale run.status (agent wrote again after revert). */
+export function runDisplayStatus(run: ChangesetRunDto, summary: ChangesetRunSummary): string {
+  if (run.archived) return "Archived";
+  if (summary.reverted) return "Reverted";
+  if (summary.partiallyReverted) return "Partly reverted";
+  if (run.status === "reverted" || run.status === "partially_reverted") {
+    return summary.running ? "Running" : "Done";
+  }
+  return statusLabel(run.status);
+}
+
+function revertFileName(path: string): string {
+  return path.replace(/\\/g, "/").split("/").pop() || path;
+}
+
+/** Empty means the restore landed. Anything else is the reason it did not. */
+export function revertFailureMessage(result: ChangesetRevertResult): string {
+  if ((result.blocked_by ?? []).length) return "";
+  const parts: string[] = [...result.errors];
+  if (result.skipped_modified.length) {
+    const names = result.skipped_modified.map((s) => revertFileName(s.path)).join(", ");
+    const verb = result.skipped_modified.length === 1 ? "no longer matches" : "no longer match";
+    parts.push(
+      result.reverted.length
+        ? `Restored some files. Not reverted: ${names} ${verb} what this run wrote.`
+        : `Not reverted: ${names} ${verb} what this run wrote.`,
+    );
+  } else if (!result.reverted.length && !(result.manual ?? []).length && !result.errors.length) {
+    parts.push("Nothing was reverted.");
+  }
+  return parts.join(" ");
+}
+
+/** Run to revert when Redo is clicked on a run header. Empty = no redo. */
+export function runRedoTargetId(run: ChangesetRunDto, runs: ChangesetRunDto[]): string {
+  if (run.source === "revert") {
+    return run.archived || run.status === "reverted" ? "" : run.run_id;
+  }
+  const ids = [
+    ...new Set(
+      (run.entries || []).map((e) => (e.reverted_by_run || "").trim()).filter(Boolean),
+    ),
+  ];
+  for (const id of ids) {
+    const found = runs.find((r) => r.run_id === id);
+    if (found && (found.status === "reverted" || found.archived)) continue;
+    if (found) return id;
+  }
+  if (
+    ids.length &&
+    (run.status === "reverted" || run.status === "partially_reverted")
+  ) {
+    return run.run_id;
+  }
+  return "";
+}
+
+export function redoTargetForPath(
+  path: string,
+  revertedByRun: string,
+  runs: ChangesetRunDto[],
+): { runId: string; seq?: number } | null {
+  const id = (revertedByRun || "").trim();
+  if (!id) return null;
+  const found = runs.find((r) => r.run_id === id);
+  if (found && (found.status === "reverted" || found.archived)) return null;
+  if (!found) return null;
+  const entry = (found.entries || []).find(
+    (e) => e.path === path && !e.reverted && (e.outcome ?? "ok") === "ok",
+  );
+  if (entry) return { runId: found.run_id, seq: entry.seq };
+  const only = (found.entries || []).filter((e) => !e.reverted && (e.outcome ?? "ok") === "ok");
+  if (only.length === 1) return { runId: found.run_id, seq: only[0].seq };
+  return { runId: found.run_id };
+}
+
+export function rowRedoTarget(
+  row: ChangeRow,
+  runs: ChangesetRunDto[],
+): { runId: string; seq?: number } | null {
+  return redoTargetForPath(rowSlot(row), row.revertedByRun, runs);
+}
+
+export function formatSmartRevertBrief(args: {
+  program: string;
+  path: string;
+  label: string;
+  command?: string;
+  reason?: string;
+  laterWriter?: { name: string; runId: string; seq: number } | null;
+}): string {
+  const lines = [
+    "Undo only this item, then compile if it is Verse.",
+    `Program: ${programLabel(args.program)}`,
+    `Target: ${args.label} (${args.path})`,
+  ];
+  if (args.command) lines.push(`Last command: ${args.command}`);
+  if (args.reason) lines.push(`Why auto-revert cannot: ${args.reason}`);
+  if (args.laterWriter) {
+    lines.push(
+      `Later writer: ${args.laterWriter.name} (run ${args.laterWriter.runId} seq ${args.laterWriter.seq}) — revert theirs first.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+export type ChangeSortKey = "time" | "name" | "kind" | "model";
+export type ChangeSortDir = "asc" | "desc";
+
+export function rowSortName(row: ChangeRow): string {
+  if (row.kind === "file") {
+    const path = row.path.replace(/\\/g, "/");
+    return (path.split("/").pop() || path).toLowerCase();
+  }
+  return (row.label || row.slot || "").toLowerCase();
+}
+
+export function rowSortKind(row: ChangeRow): string {
+  if (row.outcome !== "ok") return row.outcome;
+  return row.kind === "file" ? "file" : (row.targetKind || "editor");
+}
+
+/** Keep time order inside each program, but emit each program once (first seen). */
+export function clusterRowsByProgram(rows: ChangeRow[]): ChangeRow[] {
+  const buckets = new Map<string, ChangeRow[]>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const program = programOfRow(row);
+    let bucket = buckets.get(program);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(program, bucket);
+      order.push(program);
+    }
+    bucket.push(row);
+  }
+  return order.flatMap((program) => buckets.get(program) || []);
+}
+
+/** Sort one run's rows. Time matches the default chronological timeline. */
+export function sortChangeRows(rows: ChangeRow[], key: ChangeSortKey, dir: ChangeSortDir): ChangeRow[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    let cmp = 0;
+    if (key === "name") cmp = rowSortName(a).localeCompare(rowSortName(b));
+    else if (key === "kind") cmp = rowSortKind(a).localeCompare(rowSortKind(b));
+    else cmp = a.firstTs - b.firstTs || a.firstSeq - b.firstSeq;
+    return cmp === 0 ? (a.firstSeq - b.firstSeq) * sign : cmp * sign;
+  });
+}
+
+/** Kind used when sorting run accordions (majority of that run's rows). */
+export function runSortKind(run: ChangesetRunDto): string {
+  const counts = new Map<string, number>();
+  for (const row of runTimeline(run)) {
+    const k = rowSortKind(row);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  let best: string = run.status || "";
+  let n = 0;
+  for (const [k, c] of counts) {
+    if (c > n || (c === n && k.localeCompare(best) < 0)) {
+      best = k;
+      n = c;
+    }
+  }
+  return best;
+}
+
+export function runSortModel(run: ChangesetRunDto): string {
+  return (run.model || "").trim().toLowerCase();
+}
+
+/**
+ * Sort run accordions with the same Time / Kind / Name / Model keys as the rows inside.
+ * Time asc keeps the ledger default: newest run on top. Model is a run-level key
+ * (every row in a run shares the model), so row order stays chronological.
+ */
+export function sortRuns(
+  runs: ChangesetRunDto[],
+  key: ChangeSortKey,
+  dir: ChangeSortDir,
+  nameOf: (run: ChangesetRunDto) => string = (r) => (r.ducky_name || "").toLowerCase(),
+): ChangesetRunDto[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...runs].sort((a, b) => {
+    let cmp = 0;
+    if (key === "name") cmp = nameOf(a).localeCompare(nameOf(b));
+    else if (key === "kind") cmp = runSortKind(a).localeCompare(runSortKind(b));
+    else if (key === "model") cmp = runSortModel(a).localeCompare(runSortModel(b));
+    else cmp = (b.started || 0) - (a.started || 0);
+    if (cmp === 0) cmp = (b.started || 0) - (a.started || 0);
+    return key === "time" ? (dir === "asc" ? cmp : -cmp) : cmp * sign;
+  });
 }

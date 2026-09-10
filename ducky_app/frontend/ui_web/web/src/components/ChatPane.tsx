@@ -68,6 +68,13 @@ import { useChatColumnWidth } from "../hooks/useChatColumnWidth";
 import { isModelsCatalogReady, getCachedModels, subscribeModelsCatalog } from "../hooks/modelsCatalogCache";
 import { parseFavoriteSelection } from "../hooks/favoriteModelsCatalog";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { useMergedRef, useUiTarget } from "../ui-targets/registry";
+import {
+  getWalkthroughState,
+  isCompleted,
+  startTour,
+} from "../walkthrough/WalkthroughService";
+import { whenWalkthroughHydrated } from "../walkthrough/persistence";
 import { isAutoTranslateChat } from "../navigation/tabTranslatePrefs";
 import { usePluginUiPrefs } from "../hooks/usePluginUiPrefs";
 import { requestChatTranslateWalk } from "../navigation/openTranslatedChat";
@@ -76,6 +83,7 @@ import { isEnglishLang } from "../views/settings/translationLanguages";
 import { VoiceControls, type LiveVoiceUiHandlers } from "../voice/VoiceControls";
 import { VoiceOverlay } from "../voice/VoiceOverlay";
 import { SnipButton } from "./SnipButton";
+import { ChatChangesButton, ChatChangesSlide, useLedgerOpen } from "./ChatChangesDrawer";
 import { captureSnipFile } from "./snipCapture";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import {
@@ -143,6 +151,23 @@ export function ChatPane({
       // getFocusedChatForAsk is checked after unmount of prior pane.
     };
   }, [visible, chat.id]);
+
+  useEffect(() => {
+    if (!visible || chat.isGroup) return;
+    let cancelled = false;
+    void (async () => {
+      await whenWalkthroughHydrated();
+      if (cancelled) return;
+      await new Promise((r) => window.setTimeout(r, 400));
+      if (cancelled) return;
+      if (getWalkthroughState().active) return;
+      if (isCompleted("chat.composer")) return;
+      await startTour("chat.composer");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, chat.isGroup, chat.id]);
   const [askSession, setAskSession] = useState<AskUserSession | null>(() =>
     getAskUserSessionForConv(chat.id),
   );
@@ -190,6 +215,7 @@ export function ChatPane({
   const { confirm } = useConfirmModal();
   const [isFocused, setIsFocused] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useLedgerOpen();
   const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
   const [contextUsage, setContextUsage] = useState<ContextUsage>({
     used_tokens: 0,
@@ -219,9 +245,26 @@ export function ChatPane({
     return todos.length > 0 && todos.every((t) => t.status === "completed" || t.status === "cancelled");
   }, [chatPlan, chatPlanProgress]);
   const listRef = useRef<VirtualChatMessageListHandle>(null);
-  const paneRootRef = useRef<HTMLDivElement>(null);
+  const [paneHost, setPaneHost] = useState<HTMLDivElement | null>(null);
   const inputBoxRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerTargetRef = useUiTarget("chat.composer", {
+    kind: "chat",
+    label: "Chat composer",
+    route: "chat",
+  });
+  const inputTargetRef = useUiTarget("chat.composer.input", {
+    kind: "input",
+    label: "Message",
+    route: "chat",
+  });
+  const sendTargetRef = useUiTarget("chat.composer.send", {
+    kind: "button",
+    label: "Send",
+    route: "chat",
+  });
+  const inputBoxMergedRef = useMergedRef(inputBoxRef, composerTargetRef);
+  const textareaMergedRef = useMergedRef(textareaRef, inputTargetRef);
   const loadedChatIdRef = useRef(chat.id);
   const minTextareaHeight = useRef(60);
   const maxTextareaHeightRef = useRef(Infinity);
@@ -1136,7 +1179,7 @@ export function ChatPane({
         <ScopedCss selector={`.${paneScopeClass}`} rules={{ "--chat-pane-flex": paneFlex }} />
       ) : null}
       <div
-        ref={paneRootRef}
+        ref={setPaneHost}
         className={`chat-pane-root ${paneScopeClass}${visible ? "" : " chat-pane-root--hidden"}${isDragOver ? " chat-pane-root--drag-over" : ""}${isPopup ? " chat-pane-root--popup" : ""}`}
         {...(attachDropEnabled ? { [CHAT_ATTACH_DROP_ATTR]: "" } : {})}
         onPointerDownCapture={handleEngage}
@@ -1263,9 +1306,19 @@ export function ChatPane({
             />
           ) : null}
         <div
-          ref={inputBoxRef}
-          className={`no-drag chat-pane-input-box${isFocused ? " chat-pane-input-box--focused" : ""}${isDragOver ? " chat-pane-input-box--drag-over" : ""}${liveVoice ? " chat-pane-input-box--voice" : ""}`}
+          ref={inputBoxMergedRef}
+          className={`no-drag chat-pane-input-box${isFocused ? " chat-pane-input-box--focused" : ""}${isDragOver ? " chat-pane-input-box--drag-over" : ""}${liveVoice ? " chat-pane-input-box--voice" : ""}${changesOpen ? " chat-pane-input-box--ledger" : ""}`}
         >
+          <ChatChangesSlide
+            open={changesOpen}
+            convId={chat.id}
+            isGroup={Boolean(chat.isGroup)}
+            allChats={allChats}
+            onOpenFile={handleOpenFile}
+            onOpenChat={onOpenChat}
+            host={paneHost}
+            onClose={() => setChangesOpen(false)}
+          />
           <div className={`voice-panel-wrapper${liveVoice ? " is-open" : ""}`}>
             <div className="voice-panel-inner">
               {liveVoice && liveVoiceHandlers ? (
@@ -1324,7 +1377,7 @@ export function ChatPane({
               onTap={onInputResizeTap}
             />
             <textarea
-              ref={textareaRef}
+              ref={textareaMergedRef}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onFocus={() => setIsFocused(true)}
@@ -1387,7 +1440,11 @@ export function ChatPane({
           <div className="chat-pane-input-toolbar">
             <div className="chat-pane-input-toolbar-left">
               {!chat.isGroup ? (
-                <ModeSelector activeMode={agentMode} setMode={setAgentMode} />
+                <ModeSelector
+                  activeMode={agentMode}
+                  setMode={setAgentMode}
+                  uiTarget="chat.composer.mode"
+                />
               ) : null}
               <ContextMeter
                 usedTokens={contextUsage.used_tokens}
@@ -1412,26 +1469,30 @@ export function ChatPane({
               {!chat.isGroup ? (
                 <>
                   <div className="chat-pane-toolbar-divider" />
-                  <ModelSelector
-                    selectedModel={selectedModel}
-                    setSelectedModel={setSelectedModel}
-                    codingAgent={codingAgent}
-                    setCodingAgent={setCodingAgent}
-                    convId={chat.id}
-                    preserveSelection
-                    openSignal={modelPickerSignal}
-                    onModelMetaChange={handleModelMetaChange}
-                  />
-                  {showThinkingEffort ? (
-                    <EffortSelector
+                  <div className="chat-pane-model-effort">
+                    <ModelSelector
+                      selectedModel={selectedModel}
+                      setSelectedModel={setSelectedModel}
+                      codingAgent={codingAgent}
+                      setCodingAgent={setCodingAgent}
                       convId={chat.id}
-                      provider={chat.provider || codingAgent || "anthropic"}
-                      value={thinkingEffort}
-                      onChange={setThinkingEffort}
+                      preserveSelection
+                      openSignal={modelPickerSignal}
+                      onModelMetaChange={handleModelMetaChange}
+                      uiTarget="chat.composer.model"
                     />
-                  ) : null}
+                    {showThinkingEffort ? (
+                      <EffortSelector
+                        convId={chat.id}
+                        provider={chat.provider || codingAgent || "anthropic"}
+                        value={thinkingEffort}
+                        onChange={setThinkingEffort}
+                      />
+                    ) : null}
+                  </div>
                 </>
               ) : null}
+              <ChatChangesButton open={changesOpen} onClick={() => setChangesOpen((v) => !v)} />
             </div>
 
             <div className="chat-pane-input-toolbar-right">
@@ -1460,9 +1521,9 @@ export function ChatPane({
                 isGroup={Boolean(chat.isGroup)}
                 onLiveChange={handleLiveVoiceChange}
               />
-              {agentRunning ? (
-                <>
-                  {hasContent ? (
+              <span ref={sendTargetRef} className="chat-pane-send-target">
+                {agentRunning ? (
+                  hasContent ? (
                     <button
                       type="button"
                       onClick={() => handleSend()}
@@ -1472,22 +1533,24 @@ export function ChatPane({
                     >
                       <Icons.Send />
                     </button>
-                  ) : null}
-                  <button type="button" onClick={handleStop} className="chat-pane-stop-btn">
-                    <div className="chat-pane-stop-btn-icon" />
+                  ) : null
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSend()}
+                    disabled={!modelsUnavailable && !canSend}
+                    title={sendBtnTitle}
+                    className={sendBtnClass}
+                  >
+                    {modelsUnavailable ? <Icons.Settings /> : <Icons.Send />}
                   </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleSend()}
-                  disabled={!modelsUnavailable && !canSend}
-                  title={sendBtnTitle}
-                  className={sendBtnClass}
-                >
-                  {modelsUnavailable ? <Icons.Settings /> : <Icons.Send />}
+                )}
+              </span>
+              {agentRunning ? (
+                <button type="button" onClick={handleStop} className="chat-pane-stop-btn">
+                  <div className="chat-pane-stop-btn-icon" />
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

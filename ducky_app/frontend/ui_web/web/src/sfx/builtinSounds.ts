@@ -17,14 +17,35 @@ export const BUILTIN_SOUNDS: { id: BuiltinSoundName; label: string }[] = [
 let sharedCtx: AudioContext | null = null;
 let sinkReady: Promise<void> = Promise.resolve();
 
+function dropCtx(): void {
+  const ctx = sharedCtx;
+  sharedCtx = null;
+  if (!ctx) return;
+  try {
+    void ctx.close();
+  } catch {
+    /* device already gone */
+  }
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   const AC =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AC) return null;
-  if (!sharedCtx) sharedCtx = new AC();
-  if (sharedCtx.state === "suspended") void sharedCtx.resume();
+  if (sharedCtx && (sharedCtx.state === "closed" || String(sharedCtx.state) === "interrupted")) {
+    sharedCtx = null;
+  }
+  if (!sharedCtx) {
+    try {
+      sharedCtx = new AC();
+      sharedCtx.addEventListener("error", dropCtx);
+    } catch {
+      return null;
+    }
+  }
+  if (sharedCtx.state === "suspended") void sharedCtx.resume().catch(() => {});
   return sharedCtx;
 }
 
@@ -69,6 +90,7 @@ export function playBuiltinSound(name: BuiltinSoundName, volume = 0.5): void {
   if (!ctx) return;
   const v = Math.max(0, Math.min(1, volume));
   void ensureSink(ctx).then(() => {
+    if (ctx.state === "closed") return;
     const t = ctx.currentTime;
     switch (name) {
       case "click":

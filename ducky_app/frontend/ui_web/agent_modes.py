@@ -421,13 +421,22 @@ class AgentSession:
         )
         # #endregion
         self._cancel = threading.Event()
+        old_rid = self.run_id
         self.run_id = run_id
+        from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
+
+        if old_rid and old_rid != run_id:
+            discard_live_run_id(old_rid)
+        add_live_run_id(run_id)
 
     def start(self, target: Callable[[], None], run_id: str) -> None:
         if self.run_id != run_id:
             self.prepare_run(run_id)
         self._thread = threading.Thread(target=target, daemon=True, name=f"agent-{run_id[:8]}")
         self._thread.start()
+        from frontend.ui_web.live_agent_runs import add_live_run_id
+
+        add_live_run_id(run_id)
         # #region agent log
         _dbg_thread_state("agent thread started", runId=run_id, threadName=self._thread.name)
         # #endregion
@@ -490,6 +499,14 @@ def list_running_agents() -> list[str]:
     return [cid for cid in _sessions if is_agent_running(cid)]
 
 
+def live_changeset_run_ids() -> frozenset[str]:
+    """Run ids whose agent thread is still alive — the only ledgers that may stay ``running``."""
+    with _sessions_lock:
+        return frozenset(
+            session.run_id for cid, session in _sessions.items() if session.run_id and is_agent_running(cid)
+        )
+
+
 def _make_run_scoped_push(push: PushFn, session: AgentSession, conv_id: str, run_id: str) -> PushFn:
     def scoped(event: dict[str, Any]) -> None:
         if session.run_id != run_id:
@@ -505,16 +522,24 @@ def _make_run_scoped_push(push: PushFn, session: AgentSession, conv_id: str, run
 def close_changeset_run(run_id: str, reason: str) -> None:
     """Close the run's changeset ledger (done/error/cancelled). Never raises."""
     try:
-        from backend.bridge import workspace_roots
         from backend.workspace.journal import FileChangeJournal
         from backend.workspace.runtime import get_writer
 
-        journal = get_writer().journal
-        roots = workspace_roots()
-        if not isinstance(journal, FileChangeJournal) or not roots or not run_id:
+        writer = get_writer()
+        journal = writer.journal
+        if not isinstance(journal, FileChangeJournal) or not run_id:
             return
+        try:
+            root = writer.root()
+        except Exception:
+            from backend.bridge import workspace_roots
+
+            roots = workspace_roots()
+            if not roots:
+                return
+            root = roots[0]
         status = {"done": "done", "cancelled": "cancelled", "stopped": "cancelled"}.get(reason, "error")
-        journal.end_run(run_id, status, project_root=roots[0])
+        journal.end_run(run_id, status, project_root=root)
     except Exception:  # noqa: BLE001 - ledger bookkeeping must never break a stop
         pass
 
@@ -928,8 +953,7 @@ async def _run_ask_async(
         return stop_reason
     finally:
         reset_usage_context(usage_ctx)
-        if session.run_id == run_id:
-            _push_agent_stopped(push, conv.id, run_id, stop_reason)
+        _push_agent_stopped(push, conv.id, run_id, stop_reason)
 
 
 async def _run_agent_loop(
@@ -1084,8 +1108,9 @@ async def _run_agent_loop(
         session.clear_runner(run_id=run_id)
         if get_active_conv_id() == conv.id:
             _set_active_conv_id(None)
-        if session.run_id == run_id:
-            _push_agent_stopped(push, conv.id, run_id, stop_reason)
+        # Always close THIS run's ledger. A follow-up in the same chat already
+        # replaced session.run_id; gating on it left Revert stuck on "running".
+        _push_agent_stopped(push, conv.id, run_id, stop_reason)
         with _sessions_lock:
             waiters = _child_waiters.get(conv.id)
             if waiters is not None and not waiters:
@@ -1098,6 +1123,9 @@ async def _run_agent_loop(
                 and not session._runner
             ):
                 _sessions.pop(conv.id, None)
+        from frontend.ui_web.live_agent_runs import discard_live_run_id
+
+        discard_live_run_id(run_id)
 
 
 def run_message_and_wait(
@@ -1532,10 +1560,10 @@ def run_message(
                 )
             except Exception as e:
                 push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
-                if session.run_id == run_id:
-                    _push_agent_stopped(push, conv_id, run_id, "error")
+                _push_agent_stopped(push, conv_id, run_id, "error")
             # #region agent log
             finally:
+                close_changeset_run(run_id, "done")
                 _dbg_thread_state("external agent thread finished", runId=run_id, convId=conv_id)
             # #endregion
 
@@ -1583,6 +1611,9 @@ def run_message(
         from frontend.ui_web.workspace_bootstrap import build_run_context
 
         run_ctx = build_run_context(conv, run_id=run_id)
+        from frontend.ui_web.live_agent_runs import set_live_writer
+
+        set_live_writer(run_id, run_ctx.as_writer())
         identity_token = run_identity.bind(run_ctx)
         try:
             # Prompt build + listener health run HERE, in the worker thread, not on
@@ -1699,8 +1730,7 @@ def run_message(
                 )
         except Exception as e:
             push({"type": "error", "text": str(e), "conv_id": conv_id})
-            if session.run_id == run_id:
-                _push_agent_stopped(push, conv_id, run_id, "error")
+            _push_agent_stopped(push, conv_id, run_id, "error")
         finally:
             run_identity.reset(identity_token)
 

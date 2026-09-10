@@ -249,8 +249,11 @@ class PanelSettings:
     starter_llm_gateways_seeded: bool = False
     """First-run Store install of Anthropic / Cursor / OpenAI already attempted."""
 
-    follow_code_enabled: bool = True
-    """Play the agent's file walkthrough in the editor (content sync always happens)."""
+    follow_code_enabled: bool = False
+    """Play the agent's file walkthrough in the editor (content sync always happens). Off unless the user turns it on."""
+
+    follow_code_off_migrated: bool = False
+    """One-shot: old default was True, so every install persisted on. Flip once."""
 
     follow_code_speed: str = "normal"
     """Walkthrough delay scale: slow | normal | fast | instant."""
@@ -395,7 +398,8 @@ class PanelSettings:
             or self.allow_agent_clicks
             or bool(self.walkthrough_completed)
             or self.starter_llm_gateways_seeded
-            or not self.follow_code_enabled
+            or self.follow_code_enabled
+            or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"
             or not self.follow_code_split_beside_chat
         )
@@ -468,12 +472,18 @@ class PanelSettings:
                 if "hidden_bundled_agent_profile_ids" not in data
                 else list(getattr(raw, "hidden_bundled_agent_profile_ids", None) or [])
             )
-            return replace(
+            off = not bool(getattr(raw, "follow_code_off_migrated", False))
+            fixed = replace(
                 raw,
                 port=PANEL_LISTENER_PORT,
                 disabled_builtin_toolsets=disabled,
                 hidden_bundled_agent_profile_ids=hidden,
+                follow_code_enabled=False if off else raw.follow_code_enabled,
+                follow_code_off_migrated=True,
             )
+            if off:
+                fixed.save()
+            return fixed
         except (json.JSONDecodeError, TypeError, ValueError):
             return cls()
 

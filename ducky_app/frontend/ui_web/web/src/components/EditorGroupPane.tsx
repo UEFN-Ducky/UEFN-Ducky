@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { EditorDropZone, EditorGroup, EditorTab } from "../types/panel";
 import { EditorTabs } from "./EditorTabs";
 import { FileEditorPane } from "./FileEditorPane";
@@ -12,7 +12,6 @@ import { DucktactoeChatShell } from "../plugin-ui/DucktactoeChatShell";
 import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
 import { VerseTranslatedPane } from "./VerseTranslatedPane";
 import { DuckyProfileTabPane } from "./ducky/DuckyProfileTabPane";
-import { ChangesView } from "./changes/ChangesView";
 import { useTerminalsSettings } from "../contexts/TerminalsSettingsContext";
 import { duckyProfileIdFromTab } from "../types/panel";
 import { dropZoneFromPointer } from "../utils/editorLayoutOps";
@@ -24,6 +23,8 @@ import {
   getSidebarEditorDropPreview,
   subscribeSidebarEditorDropPreview,
 } from "../utils/sidebarDragOut";
+
+const ChangesView = lazy(() => import("./changes/ChangesView").then((m) => ({ default: m.ChangesView })));
 
 interface EditorGroupPaneProps {
   group: EditorGroup;
@@ -296,7 +297,11 @@ export function EditorGroupPane({
       return <SettingsView />;
     }
     if (activeTab.kind === "changes") {
-      return <ChangesView allChats={allChats} onOpenFile={onOpenFile} />;
+      return (
+        <Suspense fallback={<p className="changes-empty">Loading ledger…</p>}>
+          <ChangesView allChats={allChats} onOpenFile={onOpenFile} onOpenChat={onOpenChat} />
+        </Suspense>
+      );
     }
     if (activeTab.kind === "plugin") {
       return (

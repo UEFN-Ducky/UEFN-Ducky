@@ -6,11 +6,30 @@ import socket
 import threading
 from typing import Any, Callable
 
+from backend.tools.core.uefn_modal import save_modal_watchdog
 from frontend.ui_web.verse_editor.workflow.protocol import BuildState
 from frontend.ui_web.verse_editor.workflow.protocol_client import VerseWorkflowProtocolClient
 
 DEFAULT_PORT = 1962
 DEFAULT_ADDRESS = "127.0.0.1"
+
+
+def _presave_dirty_packages() -> None:
+    """Save dirty packages prompt-lessly before a build/push.
+
+    UEFN answers compileProject / pushChanges with a modal "Save Content" when
+    packages are dirty; that blocks the Slate thread and the request never
+    returns. Best-effort: listener offline or a failed save just leaves the
+    watchdog to press the prompt.
+    """
+    try:
+        from backend.bridge.client import configured_listener_port, listener_get_health, send_command
+
+        if listener_get_health(configured_listener_port(), timeout=0.5) is None:
+            return
+        send_command("save_all_dirty", {"content": True, "maps": True}, timeout=30.0)
+    except Exception:
+        pass
 
 
 class VerseWorkflowClient(VerseWorkflowProtocolClient):
@@ -35,8 +54,16 @@ class VerseWorkflowClient(VerseWorkflowProtocolClient):
             self.last_log = str(params.get("message") or "")
 
         def on_build(state: int) -> None:
+            prev = self.build_state
             self.build_state = int(state)
             self._notify_state()
+            # UEFN-native Build Verse (and Ducky's compile button) both land here when
+            # the workflow leaves Building. Restart editor verse-lsp so digest folders
+            # that just appeared are in the initialize workspace.
+            if prev == int(BuildState.Building) and int(state) != int(BuildState.Building):
+                from frontend.ui_web.verse_editor.api import refresh_editor_lsp_after_build
+
+                refresh_editor_lsp_after_build()
 
         def on_can_push(value: bool) -> None:
             self.can_push_verse_changes = bool(value)
@@ -66,13 +93,17 @@ class VerseWorkflowClient(VerseWorkflowProtocolClient):
         self._notify_state()
 
     def compile_project(self) -> dict[str, Any]:
-        result = self.send_request("compileProject", {})
+        _presave_dirty_packages()
+        with save_modal_watchdog("compileProject"):
+            result = self.send_request("compileProject", {})
         if not isinstance(result, dict):
             raise RuntimeError("Unexpected compileProject result")
         return result
 
     def push_changes(self, verse_only: bool = True) -> str:
-        result = self.send_request("pushChanges", verse_only)
+        _presave_dirty_packages()
+        with save_modal_watchdog("pushChanges"):
+            result = self.send_request("pushChanges", verse_only)
         return str(result)
 
     def get_status(self) -> dict[str, Any]:

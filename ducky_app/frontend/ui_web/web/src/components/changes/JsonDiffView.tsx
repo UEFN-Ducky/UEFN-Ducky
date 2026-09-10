@@ -1,4 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
+
+import { renderHighlightedJson } from "../tool-cards/highlightJson";
+import { renderHighlightedPython } from "../tool-cards/highlightPython";
 
 /**
  * Before/after for an editor change.
@@ -47,6 +50,56 @@ export function formatValue(value: Json): string {
   } catch {
     return String(value);
   }
+}
+
+/** Pretty-print a compact JSON string so the modal can show it like an editor. */
+export function prettyCode(text: string): string {
+  const raw = (text || "").trim();
+  if (!raw || raw === "—" || raw === "null") return text;
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+export function isStructuredText(text: string): boolean {
+  const raw = (text || "").trim();
+  if (raw.startsWith("{") && raw.endsWith("}")) {
+    try {
+      JSON.parse(raw);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // Short arrays (location/rotation) stay on one line; object lists get a code block.
+  if (raw.startsWith("[") && raw.endsWith("]") && raw.length > 60) {
+    try {
+      JSON.parse(raw);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return raw.includes("\n") && raw.length > 80;
+}
+
+function CodePane({ code, lang }: { code: string; lang: "python" | "json" }) {
+  return (
+    <pre className="tool-execution-card-args-pre tool-execution-card-args-pre--python json-diff-code-pre">
+      <code className="tool-py-code">
+        {lang === "python" ? renderHighlightedPython(code) : renderHighlightedJson(code)}
+      </code>
+    </pre>
+  );
+}
+
+function ValueView({ text }: { text: string }): ReactNode {
+  if (isStructuredText(text)) {
+    return <CodePane code={prettyCode(text)} lang="json" />;
+  }
+  return text;
 }
 
 function asRecord(value: Json): Record<string, Json> | null {
@@ -116,21 +169,150 @@ export function diffFields(before: Json, after: Json): FieldRow[] {
   });
 }
 
+/** After-blob the journal writes for an editor op: tool args, not the new world state. */
+const ENVELOPE_KEYS = new Set(["params", "created", "after"]);
+const NOISE_KEYS = new Set([
+  "actor_path",
+  "actor_paths",
+  "params",
+  "created",
+  "after",
+  "command",
+  "replace",
+  "ok",
+  "error",
+  "field",
+]);
+
+const FIELD_LABELS: Record<string, string> = {
+  label: "Name",
+  folder: "Folder",
+  tags: "Tags",
+  location: "Location",
+  rotation: "Rotation",
+  scale: "Scale",
+  parent: "Attached to",
+};
+
+function emptyish(value: Json): boolean {
+  if (value == null || value === "") return true;
+  return Array.isArray(value) && value.length === 0;
+}
+
+function listText(value: Json): string {
+  if (emptyish(value)) return "—";
+  if (Array.isArray(value)) return value.map((item) => (typeof item === "string" ? item : formatValue(item))).join(", ");
+  return formatValue(value);
+}
+
+function createdLabels(value: Json): string {
+  if (!Array.isArray(value) || value.length === 0) return "";
+  return value
+    .map((item) => {
+      const rec = asRecord(item);
+      return rec ? String(rec.label || rec.path || rec.id || "") : formatValue(item);
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** True when `after` is the journal envelope `{params, after, created}`, not a property snapshot. */
+export function isEditorEnvelope(after: Json): boolean {
+  const rec = asRecord(after);
+  return Boolean(rec && asRecord(rec.params) && [...ENVELOPE_KEYS].some((key) => key in rec));
+}
+
+function editorAfterState(after: Json): Record<string, Json> {
+  const rec = asRecord(after);
+  if (!rec) return {};
+  const params = asRecord(rec.params) ?? {};
+  const inner = asRecord(rec.after) ?? {};
+  return { ...params, ...inner };
+}
+
+function linkValue(record: Record<string, Json>): Json {
+  if (!emptyish(record.target_paths)) return record.target_paths;
+  if (!emptyish(record.target_path)) return record.target_path;
+  if (!emptyish(record.asset_paths)) return record.asset_paths;
+  return record.value;
+}
+
+/**
+ * Before is a world snapshot; after is often `{params, after, created}`.
+ * Diff those as the one or two properties a person cares about — not every key.
+ */
+export function projectEditorDiff(before: Json, after: Json): FieldRow[] {
+  const b = asRecord(before) ?? {};
+  const a = isEditorEnvelope(after) ? editorAfterState(after) : (asRecord(after) ?? {});
+  const rows: FieldRow[] = [];
+
+  const field = String(a.field ?? b.field ?? "");
+  if (field && ("field" in b || "field" in a || "target_paths" in b || "target_paths" in a)) {
+    const beforeText = listText(linkValue(b));
+    const afterText = listText(linkValue(a));
+    if (beforeText !== afterText) {
+      rows.push({ key: field, before: beforeText, after: afterText, changed: true });
+    }
+  }
+
+  const bProps = asRecord(b.properties) ?? {};
+  const aProps = asRecord(a.properties) ?? {};
+  const keys = new Set([...Object.keys(b), ...Object.keys(a), ...Object.keys(bProps), ...Object.keys(aProps)]);
+  for (const key of keys) {
+    if (NOISE_KEYS.has(key) || key === "properties" || key === "target_paths" || key === "target_path" || key === "asset_paths" || key === "value") {
+      continue;
+    }
+    const inAfter = key in a || key in aProps;
+    const beforeVal = key in bProps ? bProps[key] : b[key];
+    const afterVal = key in aProps ? aProps[key] : a[key];
+    // Envelope after often omits a property we captured before — that is not a clear.
+    if (isEditorEnvelope(after) && !inAfter) continue;
+    const beforeText = listText(beforeVal);
+    const afterText = listText(afterVal);
+    if (beforeText === afterText) continue;
+    rows.push({ key: FIELD_LABELS[key] || key, before: beforeText, after: afterText, changed: true });
+  }
+
+  const made = createdLabels(asRecord(after)?.created);
+  if (made) rows.push({ key: "Created", before: "—", after: made, changed: true });
+  return rows;
+}
+
+export function editorStory(rows: FieldRow[], fallback = ""): string {
+  if (rows.length === 1) {
+    const row = rows[0];
+    if (row.key === "Name") return `Renamed ${row.before} to ${row.after}`;
+    if (row.key === "Created") return `Created ${row.after}`;
+    if (row.after === "—") return `Cleared ${row.key}`;
+    if (row.before === "—") return `Set ${row.key} to ${row.after}`;
+    return `Changed ${row.key} from ${row.before} to ${row.after}`;
+  }
+  return fallback.trim();
+}
+
 export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
   const parsedBefore = useMemo(() => parse(before), [before]);
   const parsedAfter = useMemo(() => parse(after), [after]);
   const opaque = useMemo(() => opaqueDetail(parsedBefore), [parsedBefore]);
-  const rows = useMemo(() => diffFields(parsedBefore, parsedAfter), [parsedBefore, parsedAfter]);
+  const projected = useMemo(
+    () => (isEditorEnvelope(parsedAfter) ? projectEditorDiff(parsedBefore, parsedAfter) : null),
+    [parsedBefore, parsedAfter],
+  );
+  const rows = useMemo(
+    () => projected ?? diffFields(parsedBefore, parsedAfter),
+    [projected, parsedBefore, parsedAfter],
+  );
   const changed = rows.filter((r) => r.changed);
+  const headline = projected ? editorStory(projected, summary) : summary;
 
   if (opaque) {
     return (
       <div className="json-diff">
-        {summary ? <p className="json-diff-summary">{summary}</p> : null}
+        {headline ? <p className="json-diff-summary">{headline}</p> : null}
         {opaque.code ? (
           <section className="json-diff-code">
             <h4>What ran</h4>
-            <pre>{opaque.code}</pre>
+            <CodePane code={opaque.code} lang="python" />
           </section>
         ) : null}
         <section>
@@ -171,10 +353,32 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
     );
   }
 
+  const shown = projected ?? (changed.length > 0 ? changed : rows);
+  const stacked = shown.some((row) => isStructuredText(row.before) || isStructuredText(row.after));
+  const storyOnly = Boolean(projected && projected.length === 1 && headline);
+
   return (
     <div className="json-diff">
-      {summary ? <p className="json-diff-summary">{summary}</p> : null}
-      {rows.length > 0 ? (
+      {headline ? <p className="json-diff-summary">{headline}</p> : null}
+      {storyOnly ? null : shown.length > 0 && stacked ? (
+        <div className="json-diff-fields">
+          {shown.map((row) => (
+            <article key={row.key} className={row.changed ? "json-diff-field json-diff-field--changed" : "json-diff-field"}>
+              <h4>{row.key}</h4>
+              <div className="json-diff-sides">
+                <section>
+                  <h5>Before</h5>
+                  <ValueView text={row.before} />
+                </section>
+                <section>
+                  <h5>After</h5>
+                  <ValueView text={row.after} />
+                </section>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : shown.length > 0 ? (
         <table className="json-diff-table">
           <thead>
             <tr>
@@ -184,7 +388,7 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
             </tr>
           </thead>
           <tbody>
-            {(changed.length > 0 ? changed : rows).map((row) => (
+            {shown.map((row) => (
               <tr key={row.key} className={row.changed ? "json-diff-row--changed" : ""}>
                 <td className="json-diff-key">{row.key}</td>
                 <td className="json-diff-before">{row.before}</td>
@@ -193,19 +397,27 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
             ))}
           </tbody>
         </table>
-      ) : (
+      ) : projected ? null : (
         <div className="json-diff-raw">
           <section>
             <h4>Before</h4>
-            <pre>{before || "—"}</pre>
+            {isStructuredText(before) ? (
+              <CodePane code={prettyCode(before)} lang="json" />
+            ) : (
+              <pre>{before || "—"}</pre>
+            )}
           </section>
           <section>
             <h4>After</h4>
-            <pre>{after || "—"}</pre>
+            {isStructuredText(after) ? (
+              <CodePane code={prettyCode(after)} lang="json" />
+            ) : (
+              <pre>{after || "—"}</pre>
+            )}
           </section>
         </div>
       )}
-      {rows.length > 0 && changed.length === 0 ? (
+      {!projected && rows.length > 0 && changed.length === 0 ? (
         <p className="json-diff-note">Nothing changed between the recorded states.</p>
       ) : null}
     </div>

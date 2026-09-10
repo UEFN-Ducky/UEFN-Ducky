@@ -6,8 +6,6 @@ import type { ListenerStatus } from "../types/panel";
 
 const MENU_WIDTH = 300;
 const MENU_GAP = 6;
-const HOVER_OPEN_MS = 180;
-const HOVER_CLOSE_MS = 220;
 
 function computeMenuPosition(trigger: HTMLElement): { top: number; left: number } {
   const rect = trigger.getBoundingClientRect();
@@ -50,7 +48,7 @@ export interface ConnectionStatusDropdownProps {
   readonly?: boolean;
 }
 
-/** Header duck icon: hover/click shows Ducky listener + Epic MCP connection panel. */
+/** Header duck icon: click toggles Ducky listener + Epic MCP connection panel. */
 export function ConnectionStatusDropdown({
   status,
   projectName,
@@ -62,32 +60,11 @@ export function ConnectionStatusDropdown({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | HTMLSpanElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const openTimer = useRef<number | null>(null);
-  const closeTimer = useRef<number | null>(null);
 
   const isOnline = Boolean(status.online);
   const isWedged = Boolean(status.wedged);
   const epicOnline = Boolean(status.epic_mcp_online);
   const race = Boolean(status.listener_init_race) && !isOnline;
-
-  const clearTimers = () => {
-    if (openTimer.current != null) window.clearTimeout(openTimer.current);
-    if (closeTimer.current != null) window.clearTimeout(closeTimer.current);
-    openTimer.current = null;
-    closeTimer.current = null;
-  };
-
-  const scheduleOpen = () => {
-    if (readonly) return;
-    clearTimers();
-    openTimer.current = window.setTimeout(() => setOpen(true), HOVER_OPEN_MS);
-  };
-
-  const scheduleClose = () => {
-    if (readonly) return;
-    clearTimers();
-    closeTimer.current = window.setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
-  };
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -126,8 +103,6 @@ export function ConnectionStatusDropdown({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-
-  useEffect(() => () => clearTimers(), []);
 
   const duckyDetail = isWedged
     ? "Wedged — restart UEFN"
@@ -170,23 +145,9 @@ export function ConnectionStatusDropdown({
         ref={menuRef}
         className="connection-status-menu connection-status-menu--portaled no-drag"
         style={{ top: menuPos.top, left: menuPos.left }}
-        onMouseEnter={() => {
-          clearTimers();
-          setOpen(true);
-        }}
-        onMouseLeave={scheduleClose}
         role="dialog"
         aria-label="Connection status"
       >
-        <div className="connection-status-menu-head">Connections</div>
-        <Row label="Ducky listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
-        <Row label="UEFN MCP" detail={epicDetail} ok={epicOnline} />
-        <Row label="Ducky MCP" detail={duckyMcpDetail} ok={duckyMcpOk} warn={duckyMcpWarn} />
-        {race && !isOnline ? (
-          <p className="connection-status-menu-note">
-            Restart UEFN once to reconnect the Ducky listener (port 4200).
-          </p>
-        ) : null}
         <button
           type="button"
           className="connection-status-menu-settings"
@@ -199,6 +160,19 @@ export function ConnectionStatusDropdown({
           <span>Settings</span>
           {hasStoreUpdates ? <span className="store-update-dot store-update-dot--inline" /> : null}
         </button>
+        <div className="connection-status-menu-head">Connections</div>
+        <Row label="Ducky listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
+        <Row label="UEFN MCP" detail={epicDetail} ok={epicOnline} />
+        <Row label="Ducky MCP" detail={duckyMcpDetail} ok={duckyMcpOk} warn={duckyMcpWarn} />
+        {(status.plugin_connections ?? []).map((row) => (
+          <Row
+            key={row.id}
+            label={row.label}
+            detail={row.detail}
+            ok={row.online}
+            warn={row.warn}
+          />
+        ))}
       </div>
     ) : null;
 
@@ -220,12 +194,7 @@ export function ConnectionStatusDropdown({
         aria-label={title}
         aria-expanded={open}
         aria-haspopup="dialog"
-        onClick={() => {
-          clearTimers();
-          setOpen((v) => !v);
-        }}
-        onMouseEnter={scheduleOpen}
-        onMouseLeave={scheduleClose}
+        onClick={() => setOpen((v) => !v)}
       >
         <ConnectionStatusIcon isOnline={isOnline} isWedged={isWedged} />
         {hasStoreUpdates ? <span className="store-update-dot" aria-label="Store updates available" /> : null}

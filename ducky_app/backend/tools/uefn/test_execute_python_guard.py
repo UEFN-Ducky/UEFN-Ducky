@@ -69,3 +69,21 @@ def test_execute_python_delete_directory_is_blocked():
     msg = blocked("unreal.EditorAssetLibrary.delete_directory('/Game/Foo')")
     assert msg is not None
     assert "never delete" in msg.lower()
+
+
+def test_execute_python_spawn_actor_from_object_is_blocked():
+    blocked = _load_blocked()
+    msg = blocked(
+        "actor = unreal.EditorLevelLibrary.spawn_actor_from_object(mesh, loc, rot)\n"
+        "actor.set_actor_label('GI_Olive_1')\n"
+    )
+    assert msg is not None
+    assert "never spawn" in msg.lower()
+    assert "unreal__" in msg.lower()
+
+
+def test_execute_python_set_material_is_blocked():
+    blocked = _load_blocked()
+    msg = blocked("mesh.set_material(0, bark)\nmesh.set_material(1, leaves)\n")
+    assert msg is not None
+    assert "assign_material_to_mesh" in msg.lower()

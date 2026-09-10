@@ -70,3 +70,17 @@ def test_send_command_uses_healthy_probe_without_discovery_scan(
     out = bridge.send_command("ping", {})
     assert out.get("ok") is True
     assert discovered == []
+
+
+def test_expected_offline_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    logged: list[str] = []
+    monkeypatch.setattr(
+        "frontend.error_log.record_error",
+        lambda _src, msg: logged.append(msg),
+    )
+    bridge._record_bridge_error(
+        "Listener not reachable for 'describe_commands' (GET health failed on port 4200)"
+    )
+    bridge._record_bridge_error("Listener not reachable for 'reload_listener' (discovery failed)")
+    bridge._record_bridge_error("Command 'device_graph_snapshot' timed out after 2.0s")
+    assert logged == ["Command 'device_graph_snapshot' timed out after 2.0s"]

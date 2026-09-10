@@ -332,7 +332,9 @@ def rename_folder(folder_id: str, name: str) -> None:
 def delete_folder(folder_id: str) -> None:
     folders = [f for f in load_folders() if f.id != folder_id]
     save_folders(folders)
-    for conv in list_conversations():
+    from frontend.ui_web.project_chats import _load_all_conversations
+
+    for conv in _load_all_conversations():
         if conv.folder_id == folder_id:
             conv.folder_id = ""
             save_conversation(conv)

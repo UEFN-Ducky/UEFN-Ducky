@@ -15,6 +15,9 @@ cd /c/Users/tas13/Documents/GitHub/uefn-plugins/uefn-plugin-<id>
 py -3 scripts/release.py --publish --changelog "vN: …"
 ```
 
-Needs `DUCKYOS_API_KEY` (or `~/.cursor/mcp.json` Bearer). Then Settings → Store → Update.
+`--publish` commits + pushes the clone first (every shippable file). It refuses
+to upload if anything real is still dirty. Do not zip or `uds_release` a dirty tree.
 
-Do not bundle plugins into the EXE. Do not commit `*.ducky-plugin.zip`.
+Needs `DUCKYOS_API_KEY` (or `~/.cursor/mcp.json` Bearer).
+
+Do not bundle plugins into the EXE. Do not commit `*.ducky-plugin.zip` / `deploy/`.

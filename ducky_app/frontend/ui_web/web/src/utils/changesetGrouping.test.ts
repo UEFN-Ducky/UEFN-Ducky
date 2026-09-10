@@ -6,11 +6,27 @@ import {
   blockedRows,
   changesetFilePaths,
   changesetRunSummary,
+  clusterRowsByProgram,
   conflictCountsByConv,
   editorVerb,
+  formatSmartRevertBrief,
   groupChangesetEntries,
   groupEditorEntries,
+  liveRevertRun,
+  programLabel,
+  programOfRow,
+  programOfSlot,
+  redoTargetForPath,
+  revertFailureMessage,
+  revertHost,
+  runAgentLive,
+  runDisplayStatus,
+  runRedoTargetId,
   runTimeline,
+  rowSortKind,
+  rowSortName,
+  sortChangeRows,
+  sortRuns,
   statusLabel,
 } from "./changesetGrouping";
 
@@ -143,6 +159,36 @@ describe("groupEditorEntries", () => {
     expect(editorVerb("fill_data_table_from_json", "", 0)).toBe("fill data table from json");
     expect(editorVerb("duplicate_asset", "", 2)).toBe("created");
   });
+
+  it("does not mash different actors into one row when the GUID is all zeros", () => {
+    const zeros = "00000000000000000000000000000000";
+    const r = withEntries([
+      editorEntry(
+        { seq: 1, path: `uefn://actor/${zeros}/label` },
+        {
+          command: "set_actor_label",
+          facet: "label",
+          targets: [
+            { kind: "actor", id: zeros, guid: zeros, label: "Trigger", path: "/Level.Device_A" },
+          ],
+        },
+      ),
+      editorEntry(
+        { seq: 2, path: `uefn://actor/${zeros}/label` },
+        {
+          command: "set_actor_label",
+          facet: "label",
+          targets: [
+            { kind: "actor", id: zeros, guid: zeros, label: "Snake_EntryTrigger", path: "/Level.Device_B" },
+          ],
+        },
+      ),
+    ]);
+    const rows = groupEditorEntries(r);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.label).sort()).toEqual(["Snake_EntryTrigger", "Trigger"]);
+    expect(rows.every((row) => row.seqs.length === 1)).toBe(true);
+  });
 });
 
 describe("blockedRows", () => {
@@ -215,6 +261,15 @@ describe("summaries", () => {
     expect(changesetFilePaths([older, newer])).toEqual(["x"]);
   });
 
+  it("runAgentLive is true while the run or its chat is still writing", () => {
+    const live = withEntries([], { status: "running", conv_id: "c1" });
+    const done = withEntries([], { status: "done", conv_id: "c1" });
+    expect(runAgentLive(live)).toBe(true);
+    expect(runAgentLive(done)).toBe(false);
+    expect(runAgentLive(done, new Set(["c1"]))).toBe(true);
+    expect(runAgentLive(done, new Set(["other"]))).toBe(false);
+  });
+
   it("conflict counts only for running runs", () => {
     const running = withEntries([{ conflict: { kind: "stale_base" } }], { status: "running", conv_id: "hacker" });
     const done = withEntries([{ conflict: { kind: "stale_base" } }], { status: "done", conv_id: "artist" });
@@ -224,5 +279,174 @@ describe("summaries", () => {
   it("status labels", () => {
     expect(statusLabel("partially_reverted")).toBe("Partly reverted");
     expect(statusLabel("cancelled")).toBe("Stopped");
+  });
+
+  it("reverted is from applied entries, not a stale run.status", () => {
+    const leftover = withEntries(
+      [
+        { path: "a.verse", reverted: true },
+        { path: "b.verse", reverted: false },
+      ],
+      { status: "reverted" },
+    );
+    const summary = changesetRunSummary(leftover);
+    expect(summary.reverted).toBe(false);
+    expect(summary.partiallyReverted).toBe(true);
+    expect(runDisplayStatus(leftover, summary)).toBe("Partly reverted");
+  });
+
+  it("a stale reverted status is not shown when the entries are not reverted", () => {
+    const r = withEntries([{ path: "a.verse" }], { status: "reverted" });
+    const summary = changesetRunSummary(r);
+    expect(summary.reverted).toBe(false);
+    expect(runDisplayStatus(r, summary)).toBe("Done");
+  });
+
+  it("a skipped revert is a failure, not a success", () => {
+    expect(
+      revertFailureMessage({
+        ok: false,
+        run_id: "r1",
+        reverted: [],
+        skipped_modified: [{ seq: 1, path: "Content/Verse/a.verse" }],
+        errors: [],
+      }),
+    ).toBe("Not reverted: a.verse no longer matches what this run wrote.");
+  });
+});
+
+describe("redo targets", () => {
+  it("a reverted original points at the live revert run", () => {
+    const original = withEntries(
+      [{ path: "a.verse", reverted: true, reverted_by_run: "revert:1" }],
+      { run_id: "r1", status: "reverted" },
+    );
+    const compensating = withEntries([{ path: "a.verse" }], {
+      run_id: "revert:1",
+      source: "revert",
+      reverts_run_id: "r1",
+      status: "done",
+    });
+    expect(runRedoTargetId(original, [original, compensating])).toBe("revert:1");
+    expect(redoTargetForPath("a.verse", "revert:1", [original, compensating])).toEqual({
+      runId: "revert:1",
+      seq: 1,
+    });
+    expect(liveRevertRun([original, compensating], "revert:1")?.run_id).toBe("revert:1");
+  });
+
+  it("a spent revert run is not a redo target", () => {
+    const spent = withEntries([{ path: "a.verse", reverted: true }], {
+      run_id: "revert:1",
+      source: "revert",
+      status: "reverted",
+    });
+    expect(liveRevertRun([spent], "revert:1")).toBeUndefined();
+    expect(runRedoTargetId(spent, [spent])).toBe("");
+    expect(revertHost([spent], "revert:1")).toBeNull();
+  });
+
+  it("spent or missing compensator redos the original run", () => {
+    const original = withEntries(
+      [{ path: "a.verse", reverted: true, reverted_by_run: "revert:ghost" }],
+      { run_id: "r1", status: "reverted" },
+    );
+    expect(runRedoTargetId(original, [original])).toBe("r1");
+    expect(redoTargetForPath("a.verse", "revert:ghost", [original])).toBeNull();
+    expect(revertHost([original], "revert:ghost")?.run_id).toBe("revert:ghost");
+  });
+});
+
+describe("program slots", () => {
+  it("names the program from the slot scheme", () => {
+    expect(programOfSlot("uefn://actor/AAA/transform")).toBe("uefn");
+    expect(programOfSlot("blender://object/Cube/mesh")).toBe("blender");
+    expect(programOfSlot("Content/Verse/a.verse")).toBe("file");
+    expect(programLabel("uefn")).toBe("UEFN");
+    expect(programLabel("file")).toBe("Files");
+  });
+
+  it("keeps a Blender cube off the UEFN slot", () => {
+    const r = withEntries([
+      editorEntry(),
+      {
+        path: "blender://object/Cube/exists",
+        op: "editor",
+        tool: "blender_execute_blender_code",
+        editor: {
+          command: "blender_execute_blender_code",
+          kind: "object",
+          facet: "exists",
+          program: "blender",
+          targets: [{ kind: "other", id: "Cube", label: "Cube" }],
+          revertable: "auto",
+          summary: "added Cube",
+        },
+      },
+    ]);
+    const rows = groupEditorEntries(r);
+    expect(rows.map((x) => x.program).sort()).toEqual(["blender", "uefn"]);
+    expect(programOfRow(rows.find((x) => x.program === "blender")!)).toBe("blender");
+  });
+
+  it("clusters interleaved programs so each header appears once", () => {
+    const r = withEntries([
+      { path: "Content/Verse/a.verse", ts: 1, seq: 1 },
+      editorEntry({ ts: 2, seq: 2, path: "uefn://actor/A/transform" }),
+      { path: "Content/Verse/b.verse", ts: 3, seq: 3 },
+      editorEntry({ ts: 4, seq: 4, path: "uefn://actor/B/transform" }),
+    ]);
+    const clustered = clusterRowsByProgram(runTimeline(r));
+    expect(clustered.map(programOfRow)).toEqual(["file", "file", "uefn", "uefn"]);
+  });
+
+  it("writes a Smart Revert brief that names the program and the later writer", () => {
+    const text = formatSmartRevertBrief({
+      program: "uefn",
+      path: "uefn://verse/Game/editable",
+      label: "NPCSpawner1",
+      command: "wire_verse_device_ref",
+      reason: "the editor did not report how to undo this",
+      laterWriter: { name: "Animation Engineer", runId: "r9", seq: 3 },
+    });
+    expect(text).toContain("Undo only this item");
+    expect(text).toContain("Program: UEFN");
+    expect(text).toContain("wire_verse_device_ref");
+    expect(text).toContain("Animation Engineer");
+  });
+
+  it("sorts a run's rows by time, name, or kind, either direction", () => {
+    const rows = runTimeline(
+      withEntries([
+        editorEntry({ ts: 30, seq: 1 }, { targets: [{ kind: "actor", id: "A", guid: "A", label: "Zebra" }] }),
+        { path: "Content/Verse/Shop/apple.verse", ts: 10, seq: 2 },
+        editorEntry(
+          { ts: 20, seq: 3, path: "uefn://device/B/label" },
+          { kind: "device", targets: [{ kind: "device", id: "B", guid: "B", label: "Camera" }] },
+        ),
+      ]),
+    );
+    expect(sortChangeRows(rows, "time", "asc").map(rowSortName)).toEqual(["apple.verse", "camera", "zebra"]);
+    expect(sortChangeRows(rows, "time", "desc").map(rowSortName)).toEqual(["zebra", "camera", "apple.verse"]);
+    expect(sortChangeRows(rows, "name", "asc").map(rowSortName)).toEqual(["apple.verse", "camera", "zebra"]);
+    expect(sortChangeRows(rows, "kind", "asc").map(rowSortKind)).toEqual(["actor", "device", "file"]);
+  });
+
+  it("sorts run accordions by time, name, kind, or model", () => {
+    const zed = withEntries([{ path: "Content/Verse/z.verse" }], {
+      run_id: "z",
+      ducky_name: "Zed",
+      started: 30,
+      model: "claude-sonnet-5",
+    });
+    const amy = withEntries(
+      [editorEntry({ ts: 10, seq: 1 }, { targets: [{ kind: "actor", id: "A", guid: "A", label: "Cube" }] })],
+      { run_id: "a", ducky_name: "Amy", started: 10, model: "gpt-5" },
+    );
+    expect(sortRuns([amy, zed], "time", "asc").map((r) => r.ducky_name)).toEqual(["Zed", "Amy"]);
+    expect(sortRuns([amy, zed], "time", "desc").map((r) => r.ducky_name)).toEqual(["Amy", "Zed"]);
+    expect(sortRuns([zed, amy], "name", "asc").map((r) => r.ducky_name)).toEqual(["Amy", "Zed"]);
+    expect(sortRuns([zed, amy], "kind", "asc").map((r) => r.ducky_name)).toEqual(["Amy", "Zed"]);
+    expect(sortRuns([zed, amy], "model", "asc").map((r) => r.ducky_name)).toEqual(["Zed", "Amy"]);
   });
 });

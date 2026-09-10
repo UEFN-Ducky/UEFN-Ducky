@@ -102,6 +102,17 @@ describe("followCodeSettings persistence", () => {
     expect(mod.getFollowCodeSettings().enabled).toBe(false);
   });
 
+  it("forces follow code off once even when panel settings still say on", async () => {
+    const mod = await import("./followCodeSettings");
+    expect(mod.getFollowCodeSettings().enabled).toBe(false);
+    await mod.loadFollowCodeSettings();
+    expect(mod.getFollowCodeSettings().enabled).toBe(false);
+    expect(saveAgentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ follow_code_enabled: false }),
+    );
+    expect(localStorage.getItem("uefn-follow-code-default-off-v2")).toBe("1");
+  });
+
   it("migrates a legacy localStorage disable into panel settings once", async () => {
     localStorage.setItem("uefn-follow-code-enabled", "false");
     const mod = await import("./followCodeSettings");

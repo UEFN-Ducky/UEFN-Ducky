@@ -35,12 +35,6 @@ export function persistChatColumnWidth(width: number): void {
   window.dispatchEvent(new CustomEvent<number>(CHANGE_EVENT, { detail: next }));
 }
 
-function clampWidth(width: number, maxAvailable: number): number {
-  const effectiveMin = Math.min(MIN_CHAT_COLUMN_WIDTH, maxAvailable);
-  // Live width may exceed preference MAX when Ctrl+zoom scales it; shell is the ceiling.
-  return Math.min(maxAvailable, Math.max(effectiveMin, Math.round(width)));
-}
-
 export function useChatColumnWidthSetting() {
   const [width, setWidthState] = useState(readChatColumnWidth);
 
@@ -85,37 +79,17 @@ export function useChatColumnWidth() {
   }, []);
 
   const reapply = useCallback(() => {
-    const shell = shellRef.current;
-    const maxAvailable = shell?.clientWidth || desiredWidthRef.current;
     const scaled = desiredWidthRef.current * zoomRef.current;
-    applyColumnWidth(clampWidth(scaled, maxAvailable));
+    // CSS already clamps the gutters with max(...), so a narrow shell fits in
+    // the same layout pass. Measuring it in ResizeObserver and writing its old
+    // width on the next animation frame made the text/composer jump on expansion.
+    applyColumnWidth(Math.max(MIN_CHAT_COLUMN_WIDTH, Math.round(scaled)));
   }, [applyColumnWidth]);
 
   /** Ctrl+wheel: scale column with zoom. Zoom-out restores the settings base (e.g. 960). Does not persist. */
   const setZoomScale = useCallback((zoom: number) => {
     zoomRef.current = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     reapply();
-  }, [reapply]);
-
-  useEffect(() => {
-    const shell = shellRef.current;
-    if (!shell) return;
-
-    let raf = 0;
-    const updateFromShell = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        reapply();
-      });
-    };
-
-    updateFromShell();
-    const observer = new ResizeObserver(updateFromShell);
-    observer.observe(shell);
-    return () => {
-      cancelAnimationFrame(raf);
-      observer.disconnect();
-    };
   }, [reapply]);
 
   useEffect(() => {

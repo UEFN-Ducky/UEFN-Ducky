@@ -30,6 +30,7 @@ let lastReported = new Set<string>();
 const myClaimAt = new Map<string, number>();
 
 function log(event: string, detail?: unknown): void {
+  if (!import.meta.env.DEV) return;
   console.info(`[tab-registry:${WINDOW_ID}] ${event}`, detail ?? "");
 }
 

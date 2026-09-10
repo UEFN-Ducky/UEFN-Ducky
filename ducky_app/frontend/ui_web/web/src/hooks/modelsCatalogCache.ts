@@ -89,10 +89,12 @@ export function installModelsCatalogAutoRefresh(): void {
   autoRefreshInstalled = true;
   installPanelPushBus();
   subscribePanelPush((event) => {
+    if (event.type === "models_updated") {
+      scheduleModelsCatalogRefresh();
+      return;
+    }
     if (event.type === "uefn_plugins_changed") {
-      // Refetch so install/remove updates the picker; keep stale rows until then
-      // so chats don't block on "Loading models…".
-      invalidateModelsCatalog();
+      // Re-read the Python cache (prune already ran). Do not wait on provider APIs.
       scheduleModelsCatalogRefresh();
       return;
     }
@@ -102,65 +104,85 @@ export function installModelsCatalogAutoRefresh(): void {
   });
 }
 
+type ApiModelRow = {
+  id: string;
+  name: string;
+  provider: string;
+  provider_key?: string;
+  supports_vision?: boolean;
+  supports_tools?: boolean;
+  supports_web_search?: boolean;
+  context_limit?: number;
+  price_in?: number | null;
+  price_out?: number | null;
+  is_local?: boolean;
+};
+
+function applyDefaultFromSettings(defaultModel: string, agentModel: string) {
+  const qualified = (defaultModel || "").trim();
+  if (!qualified) {
+    cachedDefaultModel = agentModel || "";
+    return;
+  }
+  const idx = qualified.indexOf(":");
+  cachedDefaultModel = (idx > 0 ? qualified.slice(idx + 1).trim() : qualified) || agentModel || "";
+}
+
+function mapApiRow(row: ApiModelRow, fallbackKey: string): CatalogModelRow {
+  return {
+    provider: row.provider,
+    providerKey: (row.provider_key || fallbackKey || "").trim(),
+    id: row.id,
+    name: row.name,
+    supportsVision: !!row.supports_vision,
+    supportsTools: !!row.supports_tools,
+    supportsWebSearch: !!row.supports_web_search,
+    contextLimit: row.context_limit ?? 0,
+    priceIn: row.price_in ?? null,
+    priceOut: row.price_out ?? null,
+    isLocal: !!row.is_local,
+  };
+}
+
+async function fetchCatalogFromApi(force: boolean): Promise<CatalogModelRow[]> {
+  const api = getApi();
+  if (!api) return cachedModels ?? [];
+
+  // One cache-only RPC. Provider fetches run on a Python worker and push
+  // models_updated when they land — never runBridgeJob / never wait 120s.
+  if (api.get_models_catalog) {
+    const res = await api.get_models_catalog(force);
+    applyDefaultFromSettings(res.default_model || "", res.agent_model || "");
+    return (res.models || []).map((row) => mapApiRow(row, row.provider_key || ""));
+  }
+
+  const [keyStatus, settings] = await Promise.all([api.get_key_status(), api.get_settings()]);
+  applyDefaultFromSettings(settings.default_model || "", settings.agent_model || "");
+  const providersWithKeys = Object.keys(keyStatus || {}).filter(
+    (pk) => !!(keyStatus as Record<string, boolean>)[pk],
+  );
+  const batches = await Promise.all(
+    providersWithKeys.map(async (pk) => {
+      const rows = await api.get_models(pk, force);
+      return rows.map((row) => mapApiRow(row, pk));
+    }),
+  );
+  return batches.flat();
+}
+
 export async function loadModelsCatalog(options?: { force?: boolean }): Promise<CatalogModelRow[]> {
   installModelsCatalogAutoRefresh();
 
   // Sticky empty [] used to hide newly installed gateways until restart —
-  // force / invalidation always re-reads key status + providers.
+  // force / invalidation always re-reads the Python cache (still instant).
   if (!options?.force && cachedModels !== null) return cachedModels;
-  if (!options?.force && loadPromise) return loadPromise;
+  if (loadPromise) return loadPromise;
 
   const epoch = catalogEpoch;
   loadPromise = (async () => {
-    const api = getApi();
-    if (!api) return cachedModels ?? [];
-
-    const [keyStatus, settings] = await Promise.all([api.get_key_status(), api.get_settings()]);
-    if (epoch !== catalogEpoch) return cachedModels ?? [];
-
-    const fromDefault = (() => {
-      const qualified = (settings.default_model || "").trim();
-      if (!qualified) return "";
-      const idx = qualified.indexOf(":");
-      return idx > 0 ? qualified.slice(idx + 1).trim() : "";
-    })();
-    cachedDefaultModel = fromDefault || settings.agent_model || "";
-
-    // get_key_status only includes enabled Store gateways (keep-data keys stay
-    // on disk but are omitted until the gateway is installed again).
-    // Key rows may include coding-agent-only secrets; get_models returns [] for those.
-    const providersWithKeys = Object.keys(keyStatus || {}).filter(
-      (pk) => !!(keyStatus as Record<string, boolean>)[pk],
-    );
-    const batches = await Promise.all(
-      providersWithKeys.map(async (pk) => {
-        const force = !!options?.force;
-        // Force-refresh hits the network — keep it off the pywebview bridge.
-        const rows = force
-          ? await (await import("./bridgeJobAsync")).runBridgeJob<
-              Awaited<ReturnType<NonNullable<typeof api.get_models>>>
-            >("get_models", [pk, true], 120_000)
-          : await api.get_models(pk, false);
-        return rows.map(
-          (row): CatalogModelRow => ({
-            provider: row.provider,
-            providerKey: pk,
-            id: row.id,
-            name: row.name,
-            supportsVision: !!row.supports_vision,
-            supportsTools: !!row.supports_tools,
-            supportsWebSearch: !!row.supports_web_search,
-            contextLimit: row.context_limit ?? 0,
-            priceIn: row.price_in ?? null,
-            priceOut: row.price_out ?? null,
-            isLocal: !!row.is_local,
-          }),
-        );
-      }),
-    );
-
-    if (epoch !== catalogEpoch) return cachedModels ?? [];
-    cachedModels = batches.flat();
+    const rows = await fetchCatalogFromApi(!!options?.force);
+    if (epoch !== catalogEpoch) return cachedModels ?? rows;
+    cachedModels = rows;
     emit();
     return cachedModels;
   })();

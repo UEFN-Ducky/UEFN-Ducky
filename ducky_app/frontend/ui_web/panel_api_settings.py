@@ -49,7 +49,7 @@ class PanelApiSettingsMixin:
             "memory_summary_model": s.memory_summary_model or "",
             "chat_auto_title": bool(getattr(s, "chat_auto_title", True)),
             "chat_title_model": getattr(s, "chat_title_model", "") or "",
-            "follow_code_enabled": bool(getattr(s, "follow_code_enabled", True)),
+            "follow_code_enabled": bool(getattr(s, "follow_code_enabled", False)),
             "follow_code_speed": (
                 s.follow_code_speed
                 if getattr(s, "follow_code_speed", "normal")
@@ -666,10 +666,7 @@ class PanelApiSettingsMixin:
     def list_coding_agents(self) -> dict[str, Any]:
         from backend.agent.coding_agents import detect_all
 
-        # No explicit settings → uses the short-TTL cache in detect_all. The
-        # panel polls this on every chat open/close and stream tick; each probe
-        # does ~400ms of PATH scans, so uncached bursts spawn dozens of blocked
-        # pywebview bridge threads and freeze the UI (see detect_all docstring).
+        # Cache / stubs only — CLI probes run on a worker (see detect_all).
         return detect_all()
 
     def set_conversation_coding_agent(
@@ -1411,6 +1408,7 @@ class PanelApiSettingsMixin:
                             _pa._save_model_cache_to_disk()
                     except Exception:
                         pass
+                    _pa._notify_models_updated()
 
                 _pa.threading.Thread(target=_cache_models, daemon=True, name=f"models-{prov}").start()
             result = {"ok": ok, "detail": detail if not ok else "OK"}
@@ -1422,44 +1420,37 @@ class PanelApiSettingsMixin:
             return result
 
     def get_models(self, provider: str, refresh: bool = False) -> list[dict[str, Any]]:
-        from backend.agent.model_fetch import fetch_models
-        from backend.agent.providers import all_providers
-        from backend.agent.secrets import get_key
+        """Return the in-memory catalog. Never fetch on the pywebview thread.
 
-        prov = provider or _pa.PanelSettings.load().agent_provider
-        # Gateways (OpenAI / Ollama) only when their Store plugin is enabled —
-        # never serve a stale disk cache for a removed/disabled gateway.
-        if prov not in _pa.all_providers():
-            _pa._model_cache.pop(prov, None)
-            return []
-        cached = [] if refresh else _pa._model_cache.get(prov, [])
+        ``refresh=True`` kicks a background warm and still returns whatever is
+        cached right now so Agents / New Ducky / the composer never hitch.
+        """
+        prov = (provider or _pa.PanelSettings.load().agent_provider or "").strip().lower()
+        if refresh:
+            _pa.kick_model_refresh()
+        cached = _pa._model_cache.get(prov, [])
         if not cached:
-            key = get_key(prov)
-            if key:
-                try:
-                    cached = fetch_models(prov, key)
-                    _pa._model_cache[prov] = list(cached)
-                    _pa._save_model_cache_to_disk()
-                except Exception:
-                    cached = _pa._model_cache.get(prov, [])
-        from frontend.agent_models import provider_label
+            _pa.kick_model_refresh()
+        return _pa.serialize_model_rows(prov, cached)
 
-        label = provider_label(prov) or _pa.PROVIDER_LABELS.get(prov, prov.title())
-        return [
-            {
-                "provider": label,
-                "id": m.id,
-                "name": m.display_name or m.id,
-                "supports_vision": m.supports_vision,
-                "supports_tools": m.supports_tools,
-                "supports_web_search": m.supports_web_search,
-                "context_limit": m.context_limit or 0,
-                "price_in": m.price_in,
-                "price_out": m.price_out,
-                "is_local": m.is_local,
-            }
-            for m in cached
-        ]
+    def get_models_catalog(self, refresh: bool = False) -> dict[str, Any]:
+        """One-shot cache read for the picker. Network stays on a worker."""
+        if refresh:
+            _pa.kick_model_refresh()
+        settings = _pa.PanelSettings.load()
+        rows: list[dict[str, Any]] = []
+        empty = True
+        for prov, models in list(_pa._model_cache.items()):
+            if models:
+                empty = False
+            rows.extend(_pa.serialize_model_rows(prov, models))
+        if empty:
+            _pa.kick_model_refresh()
+        return {
+            "models": rows,
+            "default_model": str(getattr(settings, "default_model", "") or ""),
+            "agent_model": str(getattr(settings, "agent_model", "") or ""),
+        }
 
     def set_model(self, model_id: str, provider: str = "") -> None:
         s = _pa.PanelSettings.load()
@@ -1630,5 +1621,7 @@ class PanelApiSettingsMixin:
             )
             for line in res.get("lines", []) or []:
                 _pa.record_error("editor", str(line))
+        except ConnectionError:
+            return
         except Exception as e:
             _pa.record_error("panel", f"Pull editor log failed: {e}")

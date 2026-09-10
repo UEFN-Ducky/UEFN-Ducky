@@ -269,6 +269,18 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         install_workspace_adapters()
     except Exception:
         logging.getLogger(__name__).warning("workspace adapters failed to install", exc_info=True)
+    try:
+        from backend.workspace.human_watch import start as start_human_watch
+
+        start_human_watch()
+    except Exception:
+        logging.getLogger(__name__).warning("human watch failed to start", exc_info=True)
+    try:
+        from frontend.ui_web.changesets_api import heal_orphans_on_panel_boot
+
+        heal_orphans_on_panel_boot()
+    except Exception:
+        logging.getLogger(__name__).warning("boot orphan close failed", exc_info=True)
     api_holder["api"] = api
     api._tray = None  # type: ignore[attr-defined]
     window_holder: dict[str, object] = {}

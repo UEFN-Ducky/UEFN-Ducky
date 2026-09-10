@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -109,6 +110,27 @@ def test_install_is_idempotent(monkeypatch, project: Path) -> None:
         lanes.reset_for_tests()
 
 
+def test_changesets_storage_climbs_from_content_to_project_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path / "appdata")
+    root = tmp_path / "Island"
+    (root / "Content").mkdir(parents=True)
+    (root / "Island.uefnproject").write_text("{}", encoding="utf-8")
+    from frontend.ui_web.project_chats import project_slug
+
+    # Pre-fix orphan ledger keyed by the Content folder; must fold into the project ledger.
+    orphan = tmp_path / "appdata" / "changesets" / project_slug(str(root / "Content"))
+    (orphan / "runs").mkdir(parents=True)
+    (orphan / "runs" / "r1.json").write_text("{}", encoding="utf-8")
+    (orphan / "catalog.json").write_text('{"r1": {"conv_id": "c"}}', encoding="utf-8")
+    workspace_bootstrap._folded.clear()  # noqa: SLF001
+    # Writer/MCP hand the Verse workspace folder; the Changes tab hands the project root.
+    storage = workspace_bootstrap._changesets_storage(str(root / "Content"))  # noqa: SLF001
+    assert storage == workspace_bootstrap._changesets_storage(str(root))  # noqa: SLF001
+    assert storage.name.startswith("Island_")
+    assert (storage / "runs" / "r1.json").is_file() and not orphan.exists()
+    assert json.loads((storage / "catalog.json").read_text(encoding="utf-8")) == {"r1": {"conv_id": "c"}}
+
+
 def test_build_run_context_resolves_group_and_leader(monkeypatch) -> None:
     hub = SimpleNamespace(id="hub", is_group=True, leader_conv_id="lead")
     monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: hub if cid == "hub" else None)
@@ -124,6 +146,12 @@ def test_build_run_context_resolves_group_and_leader(monkeypatch) -> None:
     ctx2 = workspace_bootstrap.build_run_context(solo, run_id="r2", model="gpt")
     assert ctx2.group_id == "" and ctx2.is_leader is False and ctx2.ducky_name == "Chat"
     assert ctx2.coding_agent == "claude_code" and ctx2.model == "gpt"
+    titled = SimpleNamespace(
+        id="c", parent_conv_id="", profile_id="verse-coder", ducky_name="Verse Coder",
+        title="Animation Engineer", model="", provider="", coding_agent="claude_code",
+    )
+    named = workspace_bootstrap.build_run_context(titled, run_id="r3")
+    assert named.ducky_name == "Animation Engineer" and named.profile_id == "verse-coder"
 
 
 def test_record_external_edits_attributes_native_writes(project: Path, monkeypatch) -> None:

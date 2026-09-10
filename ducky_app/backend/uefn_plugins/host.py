@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import functools
 import importlib.util
+import json
 import logging
 import re
 import sys
@@ -12,7 +13,7 @@ import threading
 import time
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from backend.uefn_plugins.plugin_version import format_plugin_version, plugin_version_rank
 from backend.uefn_plugins.store import (
@@ -123,6 +124,8 @@ _PLUGIN_HOST_ONLY_TOOLS: set[str] = set()
 _SECRET_TESTERS: dict[str, dict[str, Any]] = {}
 # plugin_id → {method_name → callable} — PanelApi.plugin_call / bridge plugin.call
 _PANEL_RPC: dict[str, dict[str, Any]] = {}
+# plugin_id → {label, program, fn} — Connections menu + revert preflight
+_CONNECTION_PROBES: dict[str, dict[str, Any]] = {}
 
 # Per-run allowlist for UEFN app-plugin tools.
 # None = follow Store enable; [] = none; non-empty = those plugin ids only.
@@ -326,6 +329,113 @@ def register_tts_voices_lister(plugin_id: str, fn: Any) -> None:
         raise TypeError("TTS voices lister must be callable")
     with _LOCK:
         _TTS_VOICE_LISTERS[pid] = fn
+
+
+def register_connection_probe(
+    plugin_id: str,
+    fn: Any,
+    *,
+    label: str = "",
+    program: str = "",
+) -> None:
+    """Header Connections row. ``fn()`` must be cheap (no editor work)."""
+    from backend.uefn_plugins.store import normalize_plugin_id
+
+    pid = normalize_plugin_id(plugin_id)
+    if not callable(fn):
+        raise TypeError("connection probe must be callable")
+    with _LOCK:
+        _CONNECTION_PROBES[pid] = {
+            "label": str(label or "").strip() or pid,
+            "program": str(program or "").strip() or pid,
+            "fn": fn,
+        }
+
+
+def _normalize_connection_row(pid: str, spec: Mapping[str, Any], raw: Any) -> dict[str, Any]:
+    label = str(spec.get("label") or pid)
+    program = str(spec.get("program") or pid)
+    data: Any = raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            low = text.lower()
+            online = not (low.startswith("error") or "disconnect" in low or "offline" in low)
+            return {
+                "id": pid,
+                "program": program,
+                "label": label,
+                "online": online,
+                "warn": False,
+                "detail": text[:160] or ("Connected" if online else "Offline"),
+            }
+    if isinstance(data, Mapping):
+        online = data.get("connected")
+        if online is None:
+            online = data.get("online")
+        warn = bool(data.get("warn"))
+        detail = str(data.get("detail") or data.get("hint") or "")
+        row_label = str(data.get("label") or label)
+        return {
+            "id": pid,
+            "program": str(data.get("program") or program),
+            "label": row_label,
+            "online": bool(online),
+            "warn": warn,
+            "detail": detail[:160] or ("Connected" if online else "Offline"),
+        }
+    online = bool(data)
+    return {
+        "id": pid,
+        "program": program,
+        "label": label,
+        "online": online,
+        "warn": False,
+        "detail": "Connected" if online else "Offline",
+    }
+
+
+def plugin_connection_rows() -> list[dict[str, Any]]:
+    """Live plugin MCP rows for the Connections menu. Never raises."""
+    with _LOCK:
+        items = list(_CONNECTION_PROBES.items())
+    rows: list[dict[str, Any]] = []
+    for pid, spec in items:
+        if not is_plugin_enabled(pid):
+            continue
+        fn = spec.get("fn")
+        try:
+            raw = fn() if callable(fn) else False
+        except Exception as exc:  # noqa: BLE001 — a dead plugin must not blank the menu
+            rows.append({
+                "id": pid,
+                "program": str(spec.get("program") or pid),
+                "label": str(spec.get("label") or pid),
+                "online": False,
+                "warn": False,
+                "detail": str(exc)[:160],
+            })
+            continue
+        rows.append(_normalize_connection_row(pid, spec, raw))
+    return rows
+
+
+def plugin_connection_for_program(program: str) -> dict[str, Any] | None:
+    want = (program or "").strip()
+    if not want:
+        return None
+    for row in plugin_connection_rows():
+        if row.get("program") == want or row.get("id") == want:
+            return row
+    return None
+
+
+def attach_plugin_connections(status: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(status)
+    out["plugin_connections"] = plugin_connection_rows()
+    return out
 
 
 def register_secret_tester(plugin_id: str, secret_key: str, test_fn: Any) -> None:
@@ -611,6 +721,7 @@ def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) ->
         for key in [k for k, v in _SECRET_TESTERS.items() if v.get("plugin_id") == pid]:
             _SECRET_TESTERS.pop(key, None)
         _PANEL_RPC.pop(pid, None)
+        _CONNECTION_PROBES.pop(pid, None)
         _API_TOOL_REGISTRY.pop(pid, None)
         _API_INTENT_PATTERNS.pop(pid, None)
         for name in [n for n, owner in _PLUGIN_TOOL_OWNER.items() if owner == pid]:
@@ -717,6 +828,26 @@ def plugin_tool_names() -> frozenset[str]:
     ensure_plugins_loaded()
     with _LOCK:
         return frozenset(_PLUGIN_TOOL_NAMES)
+
+
+def plugin_for_tool(name: str) -> str:
+    """Owning plugin id for an MCP tool, or ``ducky`` for core host tools."""
+    n = (name or "").strip()
+    if not n:
+        return "ducky"
+    with _LOCK:
+        owner = _PLUGIN_TOOL_OWNER.get(n)
+    if owner:
+        return owner
+    try:
+        from backend.mcp_plugins.registry import parse_plugin_tool
+
+        parsed = parse_plugin_tool(n)
+        if parsed:
+            return parsed[0]
+    except Exception:
+        pass
+    return "ducky"
 
 
 def plugin_plan_tools() -> frozenset[str]:
@@ -1541,6 +1672,16 @@ def _register_plugin_guarded(pid: str, root: Path, manifest: dict[str, Any]) -> 
             pid,
             _REGISTER_TIMEOUT_SEC,
         )
+
+        def _late_notify() -> None:
+            done.wait()
+            _notify_uefn_plugins_changed()
+
+        threading.Thread(
+            target=_late_notify,
+            daemon=True,
+            name=f"uefn-plugin-register-late-{pid}",
+        ).start()
         return False
     _log.info(
         "UEFN plugin %s register() done in %.0fms",
@@ -2182,6 +2323,57 @@ def _import_backend(pid: str, root: Path, entry: str) -> Any:
     return mod
 
 
+class _ChangesetApi:
+    """Plug a desktop-plugin mutation into the Changes ledger.
+
+    Two ways to record, same shape: return ``_ducky`` on a tool result, or call
+    ``api.changeset.record(...)`` for a batch that is not one MCP call.
+    """
+
+    def __init__(self, api: "_PluginApi") -> None:
+        self._api = api
+
+    def record(
+        self,
+        *,
+        command: str,
+        kind: str,
+        ident: str,
+        facet: str = "",
+        before: Any = None,
+        inverse: list[dict[str, Any]] | None = None,
+        created: list[dict[str, Any]] | None = None,
+        targets: list[dict[str, Any]] | None = None,
+        summary: str = "",
+        revertable: str = "auto",
+        reason: str = "",
+        params: dict[str, Any] | None = None,
+        slot: str = "",
+    ) -> None:
+        """Record one mutation. Never raises; never fails the tool."""
+        try:
+            from backend.workspace.editor_ops import slot_path
+            from backend.workspace.editor_record import record as record_change
+
+            prog = self._api.plugin_id
+            sidecar = {
+                "program": prog,
+                "kind": kind,
+                "facet": facet,
+                "slot": slot or slot_path(kind, ident, facet, program=prog),
+                "before": before,
+                "inverse": list(inverse or []),
+                "created": list(created or []),
+                "targets": list(targets or [{"kind": kind, "id": ident, "label": ident, "path": ident}]),
+                "revertable": revertable,
+                "reason": reason,
+                "summary": summary or command.replace("_", " "),
+            }
+            record_change(command, params or {}, {"_ducky": sidecar}, ok=True)
+        except Exception:
+            pass
+
+
 class _PluginApi:
     """Narrow host surface passed to plugin register(api)."""
 
@@ -2215,6 +2407,11 @@ class _PluginApi:
             params or {},
             timeout=REQUEST_TIMEOUT if timeout is None else float(timeout),
         )
+
+    @property
+    def changeset(self) -> "_ChangesetApi":
+        """Record a mutation in the Changes ledger so Revert can unwind it."""
+        return _ChangesetApi(self)
 
     def http_json(
         self,
@@ -2331,6 +2528,16 @@ class _PluginApi:
         """Register ``synthesize(text, voice_id) -> {audio_base64, mime}`` for this plugin."""
         register_tts_synthesizer(self.plugin_id, synthesize_fn)
         self.log("TTS synthesizer registered")
+
+    def connection(self, fn: Any, *, label: str = "", program: str = "") -> None:
+        """Show this plugin in the header Connections menu.
+
+        ``fn()`` must be cheap (socket/health only). Return ``{online, detail}``
+        or ``{connected, detail}``. Same row gates revert when the ledger
+        program matches ``program`` (default: this plugin id).
+        """
+        register_connection_probe(self.plugin_id, fn, label=label, program=program)
+        self.log("connection probe registered")
 
     def register_secret_test(self, secret_key: str, test_fn: Any) -> None:
         """Register Settings → Test for a secret field (``test_fn(api_key) -> {ok, detail}``)."""

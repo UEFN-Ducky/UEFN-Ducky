@@ -1,6 +1,7 @@
 import type { AskAiPayload } from "../contexts/askAiHandlersRef";
 
 export function formatAskDraft(payload: AskAiPayload): string {
+  if (payload.draft) return payload.draft;
   const lineRef =
     payload.startLine === payload.endLine
       ? `line ${payload.startLine}`

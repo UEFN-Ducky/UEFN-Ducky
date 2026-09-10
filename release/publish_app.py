@@ -626,6 +626,10 @@ def main() -> None:
         print(f"VERSION={version}")
         return
 
+    from commit_before_store import commit_and_push_before_publish
+
+    commit_and_push_before_publish(ROOT, args.notes or f"Release desktop {version}.")
+
     exe_path = find_setup_exe(version, args.exe)
     # --no-bump / --exe: sign the Setup we are about to upload (payload already baked in).
     if args.no_bump:

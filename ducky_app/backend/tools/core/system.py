@@ -26,6 +26,21 @@ def ping(pretty: bool = False) -> str:
     return tool_json(result, pretty=pretty)
 
 
+@mcp.tool()
+def dismiss_uefn_modal(pretty: bool = False) -> str:
+    """Click UEFN's Save/Yes confirm from the Ducky host (not the editor thread).
+
+    Ducky already presses Save prompts automatically while any listener command
+    or Verse build/push is waiting. Use this only when a Save Content / unsaved
+    assets / checkout popup is still up and Epic MCP or execute_python stay
+    frozen — those run on the blocked Slate thread. This tool does not.
+    Never use this for Delete / Don't Save / Cancel dialogs.
+    """
+    from backend.tools.core.uefn_modal import dismiss_uefn_save_modal
+
+    return tool_json(dismiss_uefn_save_modal(allow_bare_enter=True), pretty=pretty)
+
+
 #: Internal listener commands agents must never call by name. These exist for
 #: user-initiated recovery (undoing a run), not for agents to invoke.
 _INTERNAL_COMMAND_PREFIX = "ducky_revert_"

@@ -37,12 +37,32 @@ from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
 # shared bridge made windows steal each other's WebSocket on every editor bind.
 _MAX_LSP_CLIENTS = 3
 _DEFAULT_LSP_CLIENT = "default"
+_VERSE_EDITOR: VerseEditorApi | None = None
+
+
+def refresh_editor_lsp_after_build() -> None:
+    """Drop cached workspace folders and kill editor verse-lsp so it re-inits with digests.
+
+    Problems uses a fresh ephemeral scan (correct). The editor's long-lived process is
+    what stays behind after a Verse build until this runs.
+    """
+    try:
+        from frontend.ui_web.project_files import invalidate_workspace_folders_cache
+
+        invalidate_workspace_folders_cache()
+    except Exception:
+        pass
+    inst = _VERSE_EDITOR
+    if inst is not None:
+        inst.stop_lsp()
 
 
 class VerseEditorApi:
     def __init__(self) -> None:
+        global _VERSE_EDITOR
         self._lsp_sessions: dict[str, LspBridge] = {}
         self._lsp_lock = threading.Lock()
+        _VERSE_EDITOR = self
 
     def _lsp_for(self, client_id: str | None) -> LspBridge:
         cid = (client_id or "").strip() or _DEFAULT_LSP_CLIENT
@@ -303,6 +323,7 @@ class VerseEditorApi:
         if not client.connected:
             raise RuntimeError("Not connected to Verse Workflow Server — open project in UEFN")
         result = client.compile_project()
+        refresh_editor_lsp_after_build()
         scan = self.scan_verse_diagnostics(push_ui=True)
         return {**result, "diagnostics_scan": scan}
 

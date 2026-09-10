@@ -85,7 +85,10 @@ export function useTesterDockPanel(enabled: boolean) {
   const snapshotJson = useCallback(() => {
     // Prefer cached panel data — never re-probe the listener on every Sim click.
     return JSON.stringify({
+      uefn_online: !!(devices?.uefn_online ?? (devices?.epic_mcp_online || devices?.listener_online)),
+      epic_mcp_online: !!devices?.epic_mcp_online,
       listener_online: !!devices?.listener_online,
+      live_source: devices?.live_source || null,
       live: devices?.live || null,
       workspace: devices?.workspace || { nodes: [], edges: [] },
     });
@@ -191,14 +194,17 @@ export function useTesterDockPanel(enabled: boolean) {
   );
 
   const auditSummary = devices?.audit?.summary;
-  const online = !!devices?.listener_online;
+  const online = !!(
+    devices?.uefn_online ?? (devices?.epic_mcp_online || devices?.listener_online)
+  );
+  const liveSource = devices?.live_source;
   const liveCount = (devices?.live?.nodes || []).length;
-  const openListenerHelp = useCallback(() => {
-    requestOpenSettings("General");
+  const openUefnHelp = useCallback(() => {
+    requestOpenSettings("LLMs");
     queueMicrotask(() =>
       window.dispatchEvent(
         new CustomEvent("ducky:settings-section", {
-          detail: { tab: "General", section: "general" },
+          detail: { tab: "LLMs", section: "mcps" },
         }),
       ),
     );
@@ -208,8 +214,13 @@ export function useTesterDockPanel(enabled: boolean) {
     <div className="tester-dock">
       <div className="tester-dock-status">
         <span className={`tester-dock-pill ${online ? "is-online" : "is-offline"}`}>
-          {online ? "Listener online" : "Listener offline"}
+          {online ? "UEFN connected" : "UEFN offline"}
         </span>
+        {liveSource ? (
+          <span className="tester-dock-pill muted">
+            {liveSource === "epic" ? "via UEFN MCP" : "via listener"}
+          </span>
+        ) : null}
         {auditSummary ? (
           <span className="tester-dock-pill muted">
             {auditSummary.errors ?? 0} err · {auditSummary.warnings ?? 0} warn
@@ -224,18 +235,18 @@ export function useTesterDockPanel(enabled: boolean) {
       {!online ? (
         <div className="tester-dock-callout" role="status">
           <p>
-            Sim needs UEFN connected. Open your project in UEFN, then connect the listener —
-            until then Sim only stubs source classes (no wiring chain).
+            Sim needs UEFN connected. Open your island — Tester uses UEFN MCP first, then the
+            listener. Until then Sim only stubs source classes (no wiring chain).
           </p>
-          <button type="button" className="tester-dock-link" onClick={openListenerHelp}>
+          <button type="button" className="tester-dock-link" onClick={openUefnHelp}>
             How to connect
           </button>
         </div>
       ) : liveCount === 0 ? (
         <div className="tester-dock-callout" role="status">
           <p>
-            Listener is online, but no devices are placed in the level. Place and wire devices in
-            UEFN, then refresh — Sim walks level wiring, not just Verse class names.
+            UEFN is connected, but no devices are placed in the level. Place and wire devices,
+            then refresh — Sim walks level wiring, not just Verse class names.
           </p>
         </div>
       ) : null}
@@ -314,7 +325,7 @@ export function useTesterDockPanel(enabled: boolean) {
                             className="tester-dock-sim-btn"
                             title={
                               !online || device.source === "workspace"
-                                ? "Simulate InteractedWithEvent (needs listener + placed device for wiring)"
+                                ? "Simulate InteractedWithEvent (needs UEFN + placed device for wiring)"
                                 : "Simulate InteractedWithEvent"
                             }
                             onClick={() => void onSimulate(device)}
@@ -346,7 +357,7 @@ export function useTesterDockPanel(enabled: boolean) {
                 <div className="tester-dock-callout is-sim-note" role="status">
                   <p>{sim.note}</p>
                   {!online ? (
-                    <button type="button" className="tester-dock-link" onClick={openListenerHelp}>
+                    <button type="button" className="tester-dock-link" onClick={openUefnHelp}>
                       How to connect
                     </button>
                   ) : null}

@@ -248,3 +248,24 @@ def discover_verse_workspace(project_root: str) -> dict[str, Any]:
             watch_files.insert(0, vp)
 
     return {"workspace_folders": folders, "watch_files": watch_files}
+
+
+def workspace_folder_fingerprint(project_root: str) -> str:
+    """Stable id of the Verse workspace roots verse-lsp was (or will be) initialized with.
+
+    BuiltIn digest packages appear only after a Verse build. A long-lived verse-lsp that
+    started before that still has Content-only folders and reports Fortnite.com as unknown.
+    """
+    if not (project_root or "").strip():
+        return ""
+    try:
+        ws = discover_verse_workspace(project_root)
+    except Exception:
+        return ""
+    folders = ws.get("workspace_folders") or []
+    parts: list[str] = []
+    for folder in folders:
+        if not isinstance(folder, dict):
+            continue
+        parts.append(f"{folder.get('name') or ''}\t{folder.get('path') or ''}")
+    return "\n".join(sorted(parts))

@@ -120,9 +120,21 @@ def test_unknown_commands_are_opaque_not_read() -> None:
     spec = classify("some_new_plugin_command")
     assert spec.mutates == MUT_OPAQUE
     assert spec.revertable == REVERT_MANUAL
-    assert "not in the classifier" in spec.note
+    assert "plugin command" in spec.note
     assert is_mutation("some_new_plugin_command")
     assert classify("").mutates == MUT_OPAQUE
+
+
+def test_unknown_plugin_reads_are_reads_by_name() -> None:
+    """Store-plugin list_/get_/*_capabilities must not land on a remove-by-hand list."""
+    for command in ("list_npc_spawners", "get_anim_preset_info", "npc_author_capabilities"):
+        assert classify(command).mutates == MUT_READ, command
+        assert not is_mutation(command)
+    assert classify("set_npc_spawner_definition").mutates == MUT_OPAQUE
+
+
+def test_create_folder_is_nothing_to_undo() -> None:
+    assert classify("create_folder").revertable == REVERT_NONE
 
 
 def test_refused_deletes_are_recorded_but_never_revertable() -> None:
@@ -147,7 +159,7 @@ def test_creations_are_marked_and_share_the_exists_facet() -> None:
 
 def test_lossy_replacements_are_never_auto() -> None:
     for command in ("fill_data_table_from_json", "fill_data_table_from_csv",
-                    "resize_verse_array_field", "wire_verse_prop_assets"):
+                    "resize_verse_array_field"):
         assert classify(command).revertable != REVERT_AUTO
         assert classify(command).note
 
@@ -198,6 +210,7 @@ def test_slot_path_tolerates_messy_identifiers() -> None:
     assert slot_path("asset", "/Game/Foo/Bar", "exists") == "uefn://asset/Game/Foo/Bar/exists"
     assert slot_path("actor", "", "transform") == "uefn://actor/unknown/transform"
     assert slot_path("actor", "x", "") == "uefn://actor/x"
+    assert slot_path("object", "Cube", "mesh", program="blender") == "blender://object/Cube/mesh"
 
 
 def test_downgrade_never_raises_revertability() -> None:
@@ -218,3 +231,10 @@ def test_module_exposes_no_mutable_shared_state() -> None:
     # EDITOR_OPS is a dict by design; make sure a caller mutating it cannot be
     # confused for a classification change elsewhere in the process.
     assert isinstance(ops.READ_COMMANDS, frozenset)
+
+
+def test_npc_definition_info_is_a_read() -> None:
+    spec = classify("get_npc_definition_info")
+    assert spec.mutates == MUT_READ
+    assert classify("list_npc_definitions").mutates == MUT_READ
+

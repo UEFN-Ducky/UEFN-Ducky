@@ -50,6 +50,15 @@ def save_now() -> bool:
     global _save_pending
     _save_pending = False
     try:
+        # Prompt-less dirty packages first so Save Content is less likely to pop.
+        # If UEFN still shows a modal, the host `dismiss_uefn_modal` tool clicks it
+        # — in-editor Python cannot; the dialog owns the Slate thread.
+        try:
+            unreal.EditorLoadingAndSavingUtils.save_dirty_packages(
+                save_map_packages=True, save_content_packages=True
+            )
+        except Exception as exc:
+            log_msg(f"Dirty-package save skipped: {exc}", "warn")
         return bool(unreal.EditorLevelLibrary.save_current_level())
     except Exception as exc:  # editor closing, no world, etc.
         log_msg(f"Level save failed: {exc}", "error")

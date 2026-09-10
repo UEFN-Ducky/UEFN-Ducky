@@ -15,6 +15,8 @@ interface DropdownPanelProps {
   width?: number;
   /** Above modal overlays (100001). Default matches global dropdown layer. */
   zIndex?: number;
+  /** Children own scrolling (model list). Without this the panel and the list both scroll. */
+  clip?: boolean;
 }
 
 type DropdownCoords = {
@@ -39,6 +41,7 @@ export function DropdownPanel({
   minWidth = 200,
   width,
   zIndex = 100010,
+  clip = false,
 }: DropdownPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scopeClass = useScopedClass("dropdown-panel");
@@ -129,7 +132,10 @@ export function DropdownPanel({
           }}
         />
       ) : null}
-      <div ref={panelRef} className={`dropdown-panel no-drag is-positioned ${scopeClass}`}>
+      <div
+        ref={panelRef}
+        className={`dropdown-panel no-drag is-positioned ${scopeClass}${clip ? " dropdown-panel--clip" : ""}`}
+      >
         {children}
       </div>
     </>,

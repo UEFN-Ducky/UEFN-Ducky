@@ -1,4 +1,4 @@
-/* Changes tab: the project-wide ledger of everything the AI changed. */
+/* Ledger tab: the project-wide record of everything the AI changed. */
 
 .changes-view {
   display: flex;
@@ -15,9 +15,10 @@
 .changes-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
+  gap: 4px;
+  flex-wrap: nowrap;
+  padding: 4px 8px;
+  min-height: 36px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-header);
 }
@@ -25,48 +26,70 @@
 .changes-toolbar-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .changes-toolbar-title svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   color: var(--fg-dim);
-}
-
-.changes-toolbar-count {
-  font-weight: 400;
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .changes-filters {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 1px;
   margin-left: auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
-.changes-filter,
+.changes-toolbar .choice-dropdown--icon .choice-dropdown-trigger {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.changes-toolbar .choice-dropdown--icon .choice-dropdown-trigger:hover:not(:disabled),
+.changes-toolbar .choice-dropdown--icon .choice-dropdown-trigger.is-open,
+.changes-toolbar .choice-dropdown--icon .choice-dropdown-trigger.is-active {
+  color: var(--fg);
+  background: var(--surface-2, var(--surface));
+  box-shadow: none;
+}
+
+.changes-toolbar .choice-dropdown--icon .choice-dropdown-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.changes-toolbar.is-searching > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
 .changes-search {
-  height: 24px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
   font-family: inherit;
-  font-size: 11px;
-  padding: 0 6px;
+  font-size: 12px;
+  padding: 0 8px;
   color: var(--fg);
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
-.changes-search {
-  min-width: 180px;
-}
-
-.changes-filter:focus,
 .changes-search:focus {
   outline: none;
   border-color: var(--border-focus);
@@ -95,7 +118,7 @@
   font-size: 11px;
 }
 
-.changes-manual-head .changeset-btn {
+.changes-manual-head .changes-run-actions {
   margin-left: auto;
 }
 
@@ -149,6 +172,19 @@
   color: var(--muted);
 }
 
+.changes-run-check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent, #3b82f6);
+  cursor: pointer;
+}
+
+.changes-view--selecting .changes-colhead {
+  padding-left: 14px;
+}
+
 .changes-run-head {
   display: flex;
   align-items: center;
@@ -162,6 +198,30 @@
   /* Fixed height: nothing in here may wrap onto a second line. */
   overflow: hidden;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.changes-run-head:hover {
+  background: var(--hover-bg, var(--panel-header));
+}
+
+.changes-run-head:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+
+.changes-run-chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.changes-run-chevron svg {
+  width: 14px;
+  height: 14px;
 }
 
 .changes-run-head .changeset-badge {
@@ -176,17 +236,163 @@
   flex: 0 0 auto;
 }
 
+.changes-run-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.changes-run-open:hover .changes-run-name,
+.changes-run-open:focus-visible .changes-run-name {
+  text-decoration: underline;
+}
+
+.changes-run-open:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .changes-run-meta {
   font-size: 11px;
   color: var(--muted);
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.changes-run-head .changeset-btn {
+.changes-run-head--selected {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 16%, var(--panel-header));
+}
+
+.changes-run-head--selected:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 22%, var(--panel-header));
+}
+
+.changes-run-head--busy,
+.changes-row--busy {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: wait;
+}
+
+.changes-run-head--busy {
+  background: color-mix(in srgb, var(--muted) 12%, var(--panel-header));
+}
+
+.changes-filters .changes-run-actions {
+  margin-left: 0;
+}
+
+.changes-run-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.changeset-btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: 8px;
+}
+
+.changeset-btn--icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.changes-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-header);
+  font-size: 12px;
+}
+
+.changes-selection-count {
+  color: var(--muted);
+}
+
+.changes-selection-bar .changes-run-actions {
+  margin-left: auto;
+}
+
+/* --- column headers ------------------------------------------------------- */
+
+.changes-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 14px 0 26px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border-light);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.changes-colhead-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-colhead-btn:hover,
+.changes-colhead-btn[aria-sort="ascending"],
+.changes-colhead-btn[aria-sort="descending"] {
+  color: var(--fg);
+}
+
+.changes-colhead-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex: 0 0 auto;
+  min-width: 72px;
+}
+
+.changes-colhead-model {
+  flex: 0 0 auto;
+  min-width: 68px;
+}
+
+.changes-colhead-kind {
+  flex: 0 0 auto;
+  min-width: 48px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.changes-colhead-name {
+  flex: 0 1 auto;
+  min-width: 88px;
+  font-weight: 500;
 }
 
 /* --- one change ----------------------------------------------------------- */
@@ -207,9 +413,21 @@
   overflow: hidden;
 }
 
+.changes-row-line--openable {
+  cursor: pointer;
+}
+
 .changes-row-line .changeset-btn,
 .changes-row-line .changeset-badge {
   flex: 0 0 auto;
+}
+
+.changes-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .changes-row:hover {
@@ -224,6 +442,31 @@
 
 .changes-row--reverted {
   opacity: 0.5;
+}
+
+.changes-row--focus {
+  border-left-color: var(--accent, #6ee7b7);
+  background: var(--tab-hover);
+}
+
+.changes-program-head {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 14px 0 26px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.changes-smart-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .changes-row-time {
@@ -312,19 +555,6 @@
   background: var(--btn-bg);
 }
 
-.changes-row-reason {
-  height: 18px;
-  box-sizing: border-box;
-  padding: 0 0 4px 76px;
-  font-size: 11px;
-  line-height: 14px;
-  color: var(--red);
-  /* One line, always: the virtualizer budgets exactly this much for it. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .changes-step {
   display: flex;
   align-items: center;
@@ -333,6 +563,16 @@
   padding-left: 76px;
   font-size: 11px;
   color: var(--fg-dim);
+}
+
+.changes-step--openable {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.changes-step--openable:hover {
+  color: var(--fg);
+  background: var(--btn-bg);
 }
 
 .changes-step-tool {
@@ -363,8 +603,11 @@
 }
 
 .json-diff-summary {
-  margin: 0 0 10px;
-  color: var(--fg-dim);
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--fg);
 }
 
 .json-diff-table {
@@ -438,20 +681,54 @@
 }
 
 .json-diff-code {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
-.json-diff-code pre {
+.json-diff-code-pre {
+  max-height: min(48vh, 420px);
   margin: 0;
-  padding: 8px;
-  max-height: 260px;
-  overflow: auto;
-  background: var(--card);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+
+.json-diff-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.json-diff-field h4 {
+  margin: 0 0 6px;
+}
+
+.json-diff-field h5 {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.json-diff-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
+.json-diff-sides > section {
+  min-width: 0;
+}
+
+.modal-backdrop--contained .json-diff-sides {
+  grid-template-columns: 1fr;
+}
+
+.json-diff-field--changed .json-diff-sides > section:first-child h5 {
+  color: var(--red);
+}
+
+.json-diff-field--changed .json-diff-sides > section:last-child h5 {
+  color: var(--green);
 }
 
 .json-diff h4 {
@@ -528,6 +805,32 @@
 
 .changeset-see-all:hover {
   text-decoration: underline;
+}
+
+.changeset-detail-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.changeset-detail-reason {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--red);
+}
+
+.changeset-detail-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.changeset-btn--danger {
+  align-self: flex-start;
+  color: var(--red);
 }
 
 /* --- header entry point --------------------------------------------------- */

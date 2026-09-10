@@ -41,6 +41,23 @@ _WRITE_BLOCKED_SUFFIXES = (".py", ".pyc")
 HASH_HEX_CHARS = 16
 
 
+def island_root(path: str) -> str:
+    """Island folder. Writer / MCP often hand ``…/<Project>/Content``; the panel hands ``…/<Project>``."""
+    full = os.path.realpath(os.path.abspath(path or ""))
+    if os.path.basename(full).lower() == "content":
+        parent = os.path.dirname(full)
+        if parent:
+            return parent
+    return full
+
+
+def same_project_roots(a: str, b: str) -> bool:
+    """True when *a* and *b* are the same island (Content vs project folder counts)."""
+    if not (a or "").strip() or not (b or "").strip():
+        return False
+    return island_root(a) == island_root(b)
+
+
 def normalize_rel(path: str) -> str:
     """Forward slashes, no leading ``./`` or ``/``, no surrounding whitespace."""
     p = (path or "").strip().replace("\\", "/")

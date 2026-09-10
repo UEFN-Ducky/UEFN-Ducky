@@ -70,6 +70,9 @@
             "reverted",
             "partially_reverted"
           ]
+        },
+        "archived": {
+          "type": "boolean"
         }
       }
     },
@@ -129,6 +132,10 @@
         ],
         "additionalProperties": false,
         "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
           "path": {
             "type": "string",
             "minLength": 1
@@ -216,6 +223,10 @@
         ],
         "additionalProperties": false,
         "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
           "slot": {
             "type": "string",
             "minLength": 1
@@ -224,6 +235,18 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "program": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "label": {
             "type": "string"
           },
           "targets": {

@@ -171,7 +171,7 @@ export function focusIdToEditorTab(focusId: string, title: string): EditorTab | 
     return { id: settingsTabId(), kind: "settings", name: title || "Settings" };
   }
   if (parsed.kind === "changes") {
-    return { id: changesTabId(), kind: "changes", name: title || "Changes" };
+    return { id: changesTabId(), kind: "changes", name: title || "Ledger" };
   }
   if (parsed.kind === "ducky-profile") {
     return {

@@ -162,24 +162,18 @@ def _available_agent_models(settings: Any) -> dict[str, set[str]]:
 
 
 def _available_api_models() -> dict[str, set[str]]:
-    from backend.agent.model_fetch import fetch_models
-    from backend.agent.providers import all_providers
-    from backend.agent.secrets import get_key, has_key
+    """In-memory catalog only — never fetch_models on the pywebview thread.
 
-    out: dict[str, set[str]] = {}
-    for provider in all_providers():
-        if not has_key(provider):
-            continue
-        try:
-            ids = {
-                (item.id if hasattr(item, "id") else str(item)).strip()
-                for item in fetch_models(provider, get_key(provider))
-            }
-            ids.discard("")
-            if ids:
-                out[provider] = ids
-        except Exception:
-            continue
+    Create-ducky / resolve used to hit every provider API here and froze the
+    panel until those calls timed out (~120s).
+    """
+    try:
+        from frontend.ui_web.panel_api import cached_api_model_ids, kick_model_refresh
+    except Exception:
+        return {}
+    out = cached_api_model_ids()
+    if not out:
+        kick_model_refresh()
     return out
 
 
@@ -272,7 +266,7 @@ def resolve_model_strict(favorite_models: Any, settings: Any) -> ResolveResult:
 
     api_models = _available_api_models()
     provider_ids = api_models.get(selection.backend)
-    if not provider_ids or selection.model_id not in provider_ids:
+    if provider_ids is not None and selection.model_id not in provider_ids:
         return ResolveErr(
             code="model_unavailable",
             message=(

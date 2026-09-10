@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from frontend.settings import PanelSettings
@@ -117,19 +118,31 @@ def workspace_open_verse_file(
     return tool_json({"path": rel, "absolute": file_path, "line": line, "column": column}, pretty=pretty)
 
 
+def verse_asset_directory(project_name: str = "") -> str:
+    """Compiled Verse devices live at /<Project>/_Verse — bare /_Verse is empty."""
+    name = (project_name or "").strip().strip("/\\")
+    return f"/{name}/_Verse" if name else "/_Verse"
+
+
+def _project_mount_name() -> str:
+    root = _project_root()
+    return Path(root).name if root else ""
+
+
 def _spawnable_verse_classes(limit: int = 40) -> Any:
-    """Best-effort compiled /_Verse asset paths via the listener (may be offline)."""
+    """Best-effort compiled Verse device asset paths via the listener (may be offline)."""
     from backend.bridge import send_command
 
+    directory = verse_asset_directory(_project_mount_name())
     try:
         found = send_command(
             "search_assets",
-            {"directory": "/_Verse", "recursive": True, "limit": limit, "fields": ["path"]},
+            {"directory": directory, "recursive": True, "limit": limit, "fields": ["path"]},
             timeout=15.0,
         )
         return found.get("assets") or []
     except Exception as exc:  # noqa: BLE001 — listener down must not fail the compile tool
-        return {"unavailable": str(exc)[:160]}
+        return {"unavailable": str(exc)[:160], "directory": directory}
 
 
 def _compile_text(payload: dict[str, Any], last_log: str) -> str:
@@ -164,6 +177,12 @@ def workspace_compile_verse(pretty: bool = False) -> str:
             "Use workspace_list_verse_errors for Problems diagnostics (works offline)."
         )
     result = client.compile_project()
+    try:
+        from frontend.ui_web.verse_editor.api import refresh_editor_lsp_after_build
+
+        refresh_editor_lsp_after_build()
+    except Exception:
+        pass
     root = _project_root()
     scan: dict[str, Any] = {}
     if root:
@@ -198,12 +217,15 @@ def workspace_compile_verse(pretty: bool = False) -> str:
             pass
     if not result.get("numErrors"):
         payload["verse_classes"] = _spawnable_verse_classes()
+        directory = verse_asset_directory(_project_mount_name())
+        payload["verse_directory"] = directory
         payload["next"] = (
             "Compile OK — Verse device classes are spawnable now. If you were placing a "
             "device, continue: pick the asset_path from verse_classes (or "
-            "search_assets(search='<class_name>', directory='/_Verse')), then "
-            "spawn_actor(asset_path=..., location=...) → set_actor_label → wire_verse_device_ref per field. "
-            "Do not stop after compiling and do not ask the user to build."
+            f"search_assets(search='<class_name>', directory='{directory}')). "
+            "Never search /_Verse or /Game for a project Verse class. Then "
+            "spawn_actor(asset_path=..., location=..., label=..., folder=...) → "
+            "wire_verse_device_ref per field. Do not stop after compiling and do not ask the user to build."
         )
     return tool_json(payload, pretty=pretty)
 

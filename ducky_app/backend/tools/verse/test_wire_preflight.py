@@ -47,6 +47,13 @@ def _flaky(fail_times: int, error: str = STALE):
     return _call, state
 
 
+@pytest.fixture(autouse=True)
+def _clear_stale_locks():
+    wp.reset_stale_locks()
+    yield
+    wp.reset_stale_locks()
+
+
 def test_fails_once_then_succeeds_after_compile_and_reload(monkeypatch):
     calls = _install_fakes(monkeypatch)
     call, state = _flaky(1)
@@ -110,13 +117,60 @@ def test_non_stale_error_propagates_unchanged(monkeypatch):
     assert calls == {"compile": 0, "reload": 0}
 
 
-def test_only_one_retry_then_second_failure_raises(monkeypatch):
+def test_only_one_retry_then_second_failure_locks(monkeypatch):
+    wp.reset_stale_locks()
     calls = _install_fakes(monkeypatch)
     call, state = _flaky(5)
-    with pytest.raises(RuntimeError, match="STALE REFLECTION"):
-        wp.run_with_build_retry(call, tool_name="wire_verse_device_ref")
+    out = wp.run_with_build_retry(
+        call, tool_name="wire_verse_device_ref", actor_path="ChainTest_Manager", field="Buttons"
+    )
+    assert out["ok"] is False
+    assert out["stale_locked"] is True
     assert state["n"] == 2
     assert calls == {"compile": 1, "reload": 1}
+
+    out2 = wp.run_with_build_retry(
+        call, tool_name="wire_verse_device_array", actor_path="ChainTest_Manager", field="Buttons"
+    )
+    assert out2["stale_locked"] is True
+    assert state["n"] == 2
+    assert calls == {"compile": 1, "reload": 1}
+
+
+def test_stale_lock_matches_path_tail(monkeypatch):
+    wp.reset_stale_locks()
+    _install_fakes(monkeypatch)
+    call, state = _flaky(5)
+    wp.run_with_build_retry(
+        call,
+        tool_name="wire_verse_device_array",
+        actor_path="/Game/Map.PersistentLevel.VerseDevice_C_UAID_1",
+        field="Props",
+    )
+    out = wp.run_with_build_retry(
+        call,
+        tool_name="wire_verse_device_array",
+        actor_path="VerseDevice_C_UAID_1",
+        field="Props",
+    )
+    assert out["stale_locked"] is True
+    assert state["n"] == 2
+
+
+def test_get_verse_editables_hash_unlocks(monkeypatch):
+    wp.reset_stale_locks()
+    _install_fakes(monkeypatch)
+    call, state = _flaky(5)
+    wp.run_with_build_retry(
+        call, tool_name="wire_verse_device_array", actor_path="Dev", field="Buttons"
+    )
+    wp.note_resolved_fields("Dev", ["Buttons"])
+    call2, state2 = _flaky(0)
+    out = wp.run_with_build_retry(
+        call2, tool_name="wire_verse_device_array", actor_path="Dev", field="Buttons"
+    )
+    assert out["ok"] is True
+    assert state2["n"] == 1
 
 
 def test_failure_recorded_in_verse_stats_when_importable(monkeypatch):
@@ -143,5 +197,8 @@ def test_host_wrapper_wire_array_accepts_many_targets(monkeypatch):
     out = json.loads(ve.wire_verse_device_array("Dev", "Markers", target_paths=["M1", "M2", "M3"]))
     assert out["count"] == 3
     assert sent[0][1]["target_paths"] == ["M1", "M2", "M3"]
+    assert sent[0][1]["replace"] is False
+    out = json.loads(ve.wire_verse_device_array("Dev", "Markers", target_paths=["M1"], replace=True))
+    assert sent[-1][1]["replace"] is True and sent[-1][1]["target_paths"] == ["M1"]
     with pytest.raises(ValueError, match="at least one"):
         ve.wire_verse_device_array("Dev", "Markers")

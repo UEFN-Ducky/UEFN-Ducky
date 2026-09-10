@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts",
-    "prebuild": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts",
+    "prebuild": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts && node scripts/check-shipped-ui.mjs",
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint src && node scripts/check-no-inline-styles.mjs",
+    "build": "tsc -b && vite build && node scripts/check-shipped-dist.mjs",
+    "lint": "eslint src && node scripts/check-no-inline-styles.mjs && node scripts/check-shipped-ui.mjs",
     "test": "vitest run",
     "preview": "vite preview"
   },

@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 25
+  version: 26
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -18,6 +18,13 @@ manages IDE hookup, chats, skills, and Verse files; the MCP server bridges AI
 agents to a listener running inside the UEFN editor (port 4200).
 
 This skill covers **using the app** — where things live, setup, and recovery.
+
+**Editor work (HARD):** official UEFN MCP first (`ducky_get_status` → nested
+`unreal__*` when `epic_mcp_online`), Ducky listener second, `execute_python` last
+and never for spawn/move/materials. Map: `skill_read_subskill("uefn", "epic_mcp")`.
+Save/Yes popup locking MCP: Ducky presses Save on it automatically while a tool
+waits; if the editor still reports busy, call `dismiss_uefn_modal` (Ducky host) —
+do not retry `execute_python` or `unreal__*`.
 
 ## Where things live
 
@@ -122,12 +129,16 @@ run that made it, ledgered per run, and checked against the writer's lane.
 - **Members cannot change their own lane.** An out-of-lane write is refused
   (flagged only while the `write_lanes_mode` setting is `shadow`) — never retry
   the path; ask the leader in the group chat or stay inside the lane.
-- **Changesets.** `changeset_list(group_id=…)` shows what every member wrote,
-  with conflicts (two runs touched one file) and out-of-lane writes — review it
-  before `workspace_compile_verse`. `changeset_revert(run_id)` restores a run's
-  files (one file: pass its `seq`); `changeset_export(run_id)` is the
-  `ducky.changeset/1` manifest for external orchestrators. The user sees the
-  same data in Context → Files and on each member chip (lane badge, conflict dot).
+- **Changesets.** `changeset_list(group_id=…)` shows what every member wrote
+  (including archived runs: `archived=true`, `revert_locked=true`). Summaries
+  include `source` (agent / user / revert) and `programs` (`file`, `uefn`,
+  `blender`, …). The ledger covers UEFN listener + Epic `unreal__*` mutations,
+  Store plugin edits, and human file edits (`source=user`, `run_id` like
+  `human:YYYY-MM-DD`, `tool=external` for Explorer / VS Code / UEFN). Review it
+  before `workspace_compile_verse`. `changeset_export` / `changeset_contents`
+  still work on archived runs. `changeset_revert` only works on live agent runs;
+  agents cannot revert human runs. `changeset_archive(run_id)` locks revert
+  without deleting the log.
 
 ## Agent-to-agent messaging
 

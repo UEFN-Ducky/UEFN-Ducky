@@ -198,6 +198,11 @@ class ProjectWriter:
         """The project root every relative path resolves against."""
         return self._root_resolver()
 
+    def abs_path(self, rel: str) -> str:
+        """Absolute path for a journalled relative path (Content/ prefix stripped when the root is Content/)."""
+        _canonical, full, _root = self._resolve(rel)
+        return full
+
     def add_policy(self, policy: WritePolicy) -> None:
         if policy not in self._policies:
             self._policies.append(policy)
@@ -342,6 +347,11 @@ class ProjectWriter:
             before = ""
             if op == "delete" and os.path.isfile(dst_full):
                 before, _ = self._read_text(dst_full)
+            record_outcome = "ok"
+            record_reason = ""
+            if op == "delete" and not existed:
+                record_outcome = "failed"
+                record_reason = "nothing on disk"
             outcome = dict(perform() or {})
             record = WriteRecord(
                 op=op,
@@ -362,6 +372,8 @@ class ProjectWriter:
                 project_root=root,
                 abs_path=dst_full,
                 trash_token=str(outcome.get("trash_token") or ""),
+                outcome=record_outcome,
+                reason=record_reason,
             )
             result = WriteResult(
                 op=op,
@@ -384,11 +396,13 @@ class ProjectWriter:
         rel = normalize_rel(rel_in)
         if not rel:
             raise ValueError("Path must not be empty.")
+        root = self._root_resolver()
+        if os.path.basename(os.path.realpath(root)).lower() == "content" and rel.lower().startswith("content/"):
+            rel = rel[8:]
         require_not_digest_path(rel)
         full = self._path_resolver(rel)
         require_not_digest_path(full)
         require_writable_project_path(full)
-        root = self._root_resolver()
         canonical = rel_from_root(full, root) or rel
         return canonical, full, root
 

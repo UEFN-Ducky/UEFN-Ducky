@@ -72,6 +72,7 @@ def capture(monkeypatch):
     serialize = types.ModuleType("listener.serialize")
     serialize.is_live = lambda a: bool(getattr(a, "_live", True))
     serialize.serialize = lambda v: v
+    serialize.actor_guid = lambda a: str(a.get_actor_guid() or "")
     lookup = types.ModuleType("listener.lookup")
     lookup.find_actor = lambda ident: actors.get(ident)
     pkg.serialize = serialize
@@ -105,12 +106,33 @@ def capture(monkeypatch):
     registry.device_graph = device_graph
     pkg.registry = registry
 
+    verse_peek: Dict[tuple, dict] = {}
+    vee = types.ModuleType("listener.verse_editable_editor")
+
+    def fake_peek(path, field):
+        return dict(verse_peek.get((path, field), verse_peek.get((str(path), str(field)), {
+            "field": field, "target_paths": [], "asset_paths": [], "value": None,
+        })))
+
+    vee.peek_verse_field_links = fake_peek
+    pkg.verse_editable_editor = vee
+
+    device_scale_spec = importlib.util.spec_from_file_location(
+        "listener.device_scale", Path(__file__).resolve().parent / "device_scale.py",
+    )
+    device_scale = importlib.util.module_from_spec(device_scale_spec)
+    assert device_scale_spec.loader is not None
+    device_scale_spec.loader.exec_module(device_scale)
+    pkg.device_scale = device_scale
+
     for name, mod in (
         ("listener", pkg),
         ("listener.serialize", serialize),
         ("listener.lookup", lookup),
         ("listener.registry", registry),
         ("listener.registry.device_graph", device_graph),
+        ("listener.verse_editable_editor", vee),
+        ("listener.device_scale", device_scale),
     ):
         monkeypatch.setitem(sys.modules, name, mod)
 
@@ -120,6 +142,7 @@ def capture(monkeypatch):
     module._test_actors = actors
     module._test_levels = levels
     module._test_calls = calls
+    module._test_verse_peek = verse_peek
     return module
 
 
@@ -207,6 +230,7 @@ def test_transform_round_trip(capture) -> None:
     [step] = side["inverse"]
     assert step["command"] == "set_actor_transform"
     assert step["params"]["location"] == [0.0, 0.0, 0.0]
+    assert "scale" not in step["params"]
 
 
 def test_label_folder_and_tags(capture) -> None:
@@ -287,6 +311,23 @@ def test_spawn_records_what_it_created(capture) -> None:
     assert side["summary"] == "created New"
 
 
+def test_asset_creations_record_the_new_asset(capture) -> None:
+    dup = capture.after("duplicate_asset", {"source_path": "/Game/A", "dest_path": "/Proj/B"},
+                        {"success": True, "source": "/Game/A", "dest": "/Proj/AI/B"}, None, ok=True)
+    assert dup["created"] == [{"kind": "asset", "id": "/Proj/AI/B", "guid": "", "label": "B", "path": "/Proj/AI/B"}]
+    assert dup["revertable"] == "auto"
+
+    mat = capture.after("create_material", {"asset_name": "M"},
+                        {"material_path": "/Proj/Materials/M.M", "asset_name": "M"}, None, ok=True)
+    assert mat["created"][0]["path"] == "/Proj/Materials/M.M" and mat["created"][0]["label"] == "M"
+
+    imp = capture.after("import_asset", {}, {"imported": ["/Proj/Imp/a", "/Proj/Imp/b"], "count": 2}, None, ok=True)
+    assert [t["path"] for t in imp["created"]] == ["/Proj/Imp/a", "/Proj/Imp/b"]
+
+    failed = capture.after("duplicate_asset", {}, {"success": False, "dest": "/Proj/X"}, None, ok=True)
+    assert failed["created"] == [] and failed["revertable"] == "manual"
+
+
 def test_spawn_that_returned_nothing_usable(capture) -> None:
     for result in ({}, {"actor": {"invalid": True}}, {"actor": {}}):
         side = capture.after("spawn_actor", {}, result, None, ok=True)
@@ -345,8 +386,9 @@ def test_a_script_that_changes_nothing_says_so_rather_than_claiming_a_change(cap
     side = run_opaque(capture, "execute_python", {"code": "print(1)"})
     assert side["created"] == []
     assert side["summary"] == "changed nothing the level snapshot could see"
-    assert side["revertable"] == "manual"
-    assert "arbitrary Python" in side["reason"]
+    # Nothing to undo is not a chore for the user — never "manual".
+    assert side["revertable"] == "none"
+    assert "changed nothing" in side["reason"]
 
 
 def test_removals_are_reported_but_never_undone(capture) -> None:
@@ -406,3 +448,92 @@ def test_a_snapshot_that_raises_costs_the_diff_not_the_record(capture, monkeypat
     )
     side = capture.after("execute_python", {"code": "x"}, {}, cap, ok=True)
     assert side is not None and side["created"] == []
+
+
+def test_wire_verse_device_ref_records_the_previous_target(capture) -> None:
+    actor = add(capture, FakeActor(label="Game", path="/Game/Map.Map:PersistentLevel.Game"))
+    capture._test_verse_peek[(actor.path, "NPCSpawner1")] = {
+        "field": "NPCSpawner1", "target_paths": ["/old"], "asset_paths": [], "value": None,
+    }
+    cap = capture.before("wire_verse_device_ref", {"actor_path": actor.path, "field": "NPCSpawner1"})
+    side = capture.after(
+        "wire_verse_device_ref",
+        {"actor_path": actor.path, "field": "NPCSpawner1", "target_path": "/new"},
+        {"ok": True},
+        cap,
+        ok=True,
+    )
+    assert side["revertable"] == "auto"
+    assert side["inverse"] == [{
+        "command": "wire_verse_device_ref",
+        "params": {"actor_path": actor.path, "field": "NPCSpawner1", "target_path": "/old"},
+    }]
+
+
+def test_wire_inverse_clears_when_previous_target_is_a_verse_property(capture) -> None:
+    actor = add(capture, FakeActor(label="Game", path="/Game/Map.Map:PersistentLevel.Game"))
+    prop = f"{actor.path}.Verse-Snake-x_0.__verse_0x38540FD1_TopDownCamera"
+    capture._test_verse_peek[(actor.path, "TopDownCamera")] = {
+        "field": "TopDownCamera", "target_paths": [prop], "asset_paths": [], "value": None,
+    }
+    cap = capture.before("wire_verse_device_ref", {"actor_path": actor.path, "field": "TopDownCamera"})
+    side = capture.after(
+        "wire_verse_device_ref",
+        {"actor_path": actor.path, "field": "TopDownCamera", "target_path": "/cam"},
+        {"ok": True},
+        cap,
+        ok=True,
+    )
+    assert side["inverse"] == [{
+        "command": "set_verse_editable",
+        "params": {"actor_path": actor.path, "field": "TopDownCamera", "value": None},
+    }]
+
+
+def test_wire_verse_device_array_inverse_replaces_the_prior_list(capture) -> None:
+    actor = add(capture, FakeActor(label="Game", path="/Game/Map.Map:PersistentLevel.Game"))
+    capture._test_verse_peek[(actor.path, "Markers")] = {
+        "field": "Markers", "target_paths": ["/a", "/b"], "asset_paths": [], "value": None,
+    }
+    cap = capture.before("wire_verse_device_array", {"actor_path": actor.path, "field": "Markers"})
+    side = capture.after(
+        "wire_verse_device_array",
+        {"actor_path": actor.path, "field": "Markers", "target_paths": ["/c"]},
+        {"ok": True},
+        cap,
+        ok=True,
+    )
+    assert side["inverse"][0]["params"]["replace"] is True
+    assert side["inverse"][0]["params"]["target_paths"] == ["/a", "/b"]
+
+
+def test_wire_verse_prop_assets_inverse_restores_the_prior_list(capture) -> None:
+    actor = add(capture, FakeActor(label="Game", path="/Game/Map.Map:PersistentLevel.Game"))
+    capture._test_verse_peek[(actor.path, "Props")] = {
+        "field": "Props", "target_paths": [], "asset_paths": ["/Game/Old"], "value": None,
+    }
+    cap = capture.before("wire_verse_prop_assets", {"actor_path": actor.path, "field": "Props"})
+    side = capture.after(
+        "wire_verse_prop_assets",
+        {"actor_path": actor.path, "field": "Props", "asset_paths": ["/Game/New"]},
+        {"ok": True},
+        cap,
+        ok=True,
+    )
+    assert side["inverse"][0]["params"]["asset_paths"] == ["/Game/Old"]
+
+
+def test_set_verse_editable_clears_when_there_was_no_prior_target(capture) -> None:
+    actor = add(capture, FakeActor(label="Game", path="/Game/Map.Map:PersistentLevel.Game"))
+    cap = capture.before("set_verse_editable", {"actor_path": actor.path, "field": "Count"})
+    side = capture.after(
+        "set_verse_editable",
+        {"actor_path": actor.path, "field": "Count", "value": 3},
+        {"ok": True},
+        cap,
+        ok=True,
+    )
+    assert side["inverse"] == [{
+        "command": "set_verse_editable",
+        "params": {"actor_path": actor.path, "field": "Count", "value": None},
+    }]

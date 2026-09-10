@@ -102,9 +102,45 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
                     return result
             except Exception:
                 _log.warning("plan tick gate could not format MCP error for %s", name)
-        return await orig_call(req)
+        result = await orig_call(req)
+        _record_bridge_tool(name, req, result)
+        return result
 
     handlers[ListToolsRequest] = list_tools_after_plugins
     handlers[CallToolRequest] = call_tool_after_plugins
     _installed = True
     _log.info("bridge plugin gate installed (timeout=%.0fs)", timeout)
+
+
+def _record_bridge_tool(name: str, req: Any, result: Any) -> None:
+    """Journal Epic / plugin `_ducky` results from the IDE bridge. Never raises."""
+    try:
+        if not name or name == "ducky_call_tool":
+            return
+        params = getattr(req, "params", None)
+        args = getattr(params, "arguments", None) if params is not None else None
+        if not isinstance(args, dict):
+            args = {}
+        text, ok = _result_text_ok(result)
+        from backend.workspace.tool_record import record_tool_result
+
+        record_tool_result(name, args, text, ok=ok)
+    except Exception:
+        pass
+
+
+def _result_text_ok(result: Any) -> tuple[str, bool]:
+    root = getattr(result, "root", result)
+    is_error = bool(getattr(root, "isError", False) or getattr(result, "isError", False))
+    content = getattr(root, "content", None)
+    if content is None:
+        content = getattr(result, "content", None)
+    if isinstance(result, str):
+        return result, not is_error
+    try:
+        from backend.agent.mcp_content import mcp_content_to_text
+
+        text = mcp_content_to_text(content) if content is not None else ""
+    except Exception:
+        text = ""
+    return text, not is_error

@@ -346,39 +346,52 @@ def _resolve_field_prop(script: Any, field: str, hashes: Dict[str, str]) -> Opti
     return None
 
 
+def _hash_not_readable(field: str, prop: str, exc: Exception) -> ValueError:
+    return ValueError(
+        f"Field {field!r} hash {prop!r} found but not readable on Script: {exc}. "
+        "Build Verse in UEFN, then reload_listener."
+    )
+
+
+def _remember_resolved_prop(script: Any, field: str, prop: str) -> str:
+    _augment_hash_cache(field, prop)
+    cls_name = script.get_class().get_name()
+    _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
+    return prop
+
+
 def _resolve_field_prop_for_wire(actor: unreal.Actor, script: Any, field: str) -> str:
     """Resolve one field for wiring — never runs the 2000-file global hash scan."""
+    _cls, verse_text, _fp = _verse_source_for_actor(actor)
+    verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
+
     prop = _resolve_field_prop(script, field, _cached_hashes())
+    if not prop:
+        live = _script_verse_properties(script, required_fields=verse_fields or None)
+        prop = live.get(field)
+    if not prop:
+        scanned = _class_scoped_hash_scan(script)
+        prop = scanned.get(field) or _probe_script_for_field(script, field, scanned)
+    if not prop:
+        prop = _lookup_field_hash_in_dirs(field, _wire_hash_search_dirs(script), max_files=120)
+
     if prop:
         try:
             script.get_editor_property(prop)
-            return prop
-        except Exception:
-            pass
+        except Exception as exc:
+            raise _hash_not_readable(field, prop, exc) from exc
+        return _remember_resolved_prop(script, field, prop)
 
-    _cls, verse_text, _fp = _verse_source_for_actor(actor)
-    verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
     if field not in verse_fields:
         raise ValueError(_field_not_found_error(actor, script, field, verse_fields))
 
-    prop = _lookup_field_hash_in_dirs(field, _wire_hash_search_dirs(script), max_files=120)
-    if prop:
-        try:
-            script.get_editor_property(prop)
-            _augment_hash_cache(field, prop)
-            cls_name = script.get_class().get_name()
-            _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
-            return prop
-        except Exception as exc:
-            raise ValueError(
-                f"Field {field!r} hash {prop!r} found in assets but not readable on Script: {exc}. "
-                "Build Verse in UEFN, then reload_listener."
-            ) from exc
-
     raise ValueError(
         f"Field {field!r} is in Verse source but has no compiled hash on this device yet. "
-        "STALE REFLECTION — run Verse build in UEFN, then reload_listener, then retry "
-        "ONCE. Further retries cannot fix this; do not hammer wire_*/set_verse_editable."
+        "STALE REFLECTION — the live Script has no readable hash after resolve. "
+        "Fix any compile errors, wait for the build, then get_verse_editables on THIS SAME "
+        "device and wire once. Do NOT place another copy of the device: a duplicate has "
+        "the same stale class and this instance gets the new hashes when the build finishes. "
+        "Do not hammer wire_*/set_verse_editable."
     )
 
 
@@ -589,33 +602,50 @@ def _iter_class_property_names(script: Any) -> List[str]:
     return names
 
 
-def _script_verse_properties(script: Any, *, tried: Optional[List[str]] = None) -> Dict[str, str]:
+def _script_verse_properties(
+    script: Any,
+    *,
+    tried: Optional[List[str]] = None,
+    required_fields: Optional[List[str]] = None,
+) -> Dict[str, str]:
     """Map @editable field name -> mangled property on this device's Script.
 
-    Never caches an empty result — a missed early call must not poison the session.
+    Merges ``dir()`` + class FProperties + Script export-text. ``dir()`` sees
+    object-ref subobjects (Trigger) but misses TArray fields (TestProps) that
+    only show up as ``TestProps(0)`` in T3D — stopping at the first non-empty
+    source cached a Trigger-only map and made later wires raise STALE.
+
+    Never caches an empty result, and never caches a map missing
+    *required_fields* (Verse-source names) — a partial early call must not
+    poison the session.
     """
     cls_name = script.get_class().get_name()
     cached = _SCRIPT_PROPS_CACHE.get(cls_name)
-    if cached:
+    if cached and (not required_fields or set(required_fields).issubset(cached)):
         if tried is not None:
             tried.append("reflection")
         return cached
 
     if tried is not None:
         tried.append("reflection")
-    found = _collect_readable_verse_props(
-        script, [n for n in dir(script) if n.startswith("__verse_0x")]
+    found: Dict[str, str] = {}
+    found.update(
+        _collect_readable_verse_props(
+            script, [n for n in dir(script) if n.startswith("__verse_0x")]
+        )
     )
-    if not found:
-        found = _collect_readable_verse_props(script, _iter_class_property_names(script))
-    if not found:
-        export_found = _script_export_text_properties(script)
-        if export_found:
-            found = export_found
-            if tried is not None:
-                tried.append("export_text")
+    class_names = _iter_class_property_names(script)
+    if class_names:
+        found.update(_collect_readable_verse_props(script, class_names))
+        if tried is not None:
+            tried.append("class_props")
+    export_found = _script_export_text_properties(script)
+    if export_found:
+        found.update(export_found)
+        if tried is not None:
+            tried.append("export_text")
 
-    if found:
+    if found and (not required_fields or set(required_fields).issubset(found)):
         _SCRIPT_PROPS_CACHE[cls_name] = found
     return found
 
@@ -1061,6 +1091,76 @@ def list_verse_reference_types() -> dict:
     }
 
 
+def peek_verse_field_links(actor_path: str, field: str) -> dict:
+    """Cheap read of who/what a Verse @editable currently points at. Never raises."""
+    out: dict = {"field": field, "target_paths": [], "asset_paths": [], "value": None}
+    try:
+        actor = lookup.find_actor(actor_path)
+        if actor is None:
+            return out
+        script = _verse_script(actor)
+        prop = _resolve_field_prop_cheap(script, field, _cached_hashes())
+        if not prop:
+            return out
+        try:
+            val = script.get_editor_property(prop)
+        except Exception:
+            return out
+        if val is None:
+            return out
+        try:
+            items = list(val) if hasattr(val, "__iter__") and not isinstance(val, (str, bytes)) else [val]
+        except Exception:
+            items = [val]
+        scalars: List[Any] = []
+        for item in items:
+            kind, path = _linked_editor_path(item)
+            if kind == "asset" and path:
+                out["asset_paths"].append(path)
+            elif path:
+                out["target_paths"].append(path)
+            elif item is None:
+                continue
+            elif isinstance(item, (bool, int, float, str)):
+                scalars.append(item)
+            else:
+                scalars.append(str(item))
+        if not out["target_paths"] and not out["asset_paths"]:
+            if len(scalars) == 1:
+                out["value"] = scalars[0]
+            elif scalars:
+                out["value"] = scalars
+    except Exception:
+        return out
+    return out
+
+
+def _linked_editor_path(item: Any) -> tuple[str, str]:
+    """``(kind, path)`` for a wrapper / Script / actor. Never raises."""
+    if item is None:
+        return "", ""
+    for link, kind in (("SavedActor", "actor"), ("AssetForEditor", "asset")):
+        try:
+            linked = item.get_editor_property(link)
+        except Exception:
+            continue
+        if linked is None:
+            continue
+        try:
+            path = str(linked.get_path_name())
+        except Exception:
+            path = str(linked)
+        if path and path not in ("None", "NoneType") and ".__verse_" not in path:
+            return kind, path
+    try:
+        path = str(item.get_path_name())
+    except Exception:
+        path = ""
+    if path and path not in ("None", "NoneType") and ".__verse_" not in path:
+        return "actor", path
+    return "", ""
+
+
 def wire_verse_device_ref(
     actor_path: str,
     field: str,
@@ -1111,14 +1211,14 @@ def wire_verse_device_array(
     actor_path: str,
     field: str,
     target_paths: List[str],
+    replace: bool = False,
 ) -> dict:
-    """Wire 1..N creative devices or props into an array @editable in one transaction.
+    """Wire creative devices or props into an array @editable in one transaction.
 
-    The field/wrapper spec is resolved once; each target gets its own wrapper
-    appended to the existing array, then the array property is marked as a
-    wiring override once (same semantics as the single-target case).
+    Default appends. ``replace=True`` starts from an empty list so a revert can
+    restore the previous members (including none).
     """
-    if not target_paths:
+    if not target_paths and not replace:
         raise ValueError(
             "wire_verse_device_array needs at least one target_path. "
             "Or use resize_verse_array_field + patch_verse_array_entry for struct rows."
@@ -1145,7 +1245,7 @@ def wire_verse_device_array(
     links = []
 
     with unreal.ScopedEditorTransaction(f"MCP Wire {field} array"):
-        existing = list(script.get_editor_property(prop) or [])
+        existing = [] if replace else list(script.get_editor_property(prop) or [])
         for target in targets:
             wrapper = unreal.new_object(cls, script)
             wrapper.set_editor_property(link_prop, target)
@@ -1180,12 +1280,9 @@ def wire_verse_prop_assets(
     field: str,
     asset_paths: List[str],
 ) -> dict:
-    """Wire one creative_prop_asset path (single asset per call)."""
-    if len(asset_paths) != 1:
-        raise ValueError(
-            "wire_verse_prop_assets accepts exactly one asset path per call. "
-            "Call once per asset."
-        )
+    """Replace a creative_prop_asset array @editable. Empty list clears it."""
+    if not isinstance(asset_paths, list):
+        raise ValueError("wire_verse_prop_assets needs asset_paths as a list (empty clears).")
     _require_field_for_wire(actor_path, field)
     from listener.script_property_overrides import mark_verse_wiring_overrides
 
@@ -1392,11 +1489,13 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     cls_name = script.get_class().get_name()
     hashes = _cached_hashes()
     resolution_tried: List[str] = []
-    script_props = _script_verse_properties(script, tried=resolution_tried)
-    if hashes and "hash_cache" not in resolution_tried:
-        resolution_tried.append("hash_cache")
     _cls, verse_text, verse_file = _verse_source_for_actor(actor)
     verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
+    script_props = _script_verse_properties(
+        script, tried=resolution_tried, required_fields=verse_fields or None
+    )
+    if hashes and "hash_cache" not in resolution_tried:
+        resolution_tried.append("hash_cache")
     if not verse_fields:
         verse_fields = sorted(script_props.keys())
     verse_types = _field_types_from_verse(verse_text) if verse_text else {}
@@ -1405,9 +1504,9 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     resolved_hashes = dict(hashes)
     resolved_hashes.update(script_props)
 
-    # Cheap first: reflection + cache + export-text. A class-scoped scan runs
-    # only when that resolves zero fields — one bounded walk, not a global
-    # os.walk of Content/.
+    # Cheap first: merged live reflection + cache. A class-scoped scan runs
+    # when any Verse-source field is still unresolved — not only when all miss
+    # (a resolved Trigger used to skip TestProps).
     prelim: Dict[str, Optional[str]] = {}
     for field in verse_fields:
         prop = _resolve_field_prop_cheap(script, field, resolved_hashes)
@@ -1415,7 +1514,7 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
         if prop:
             resolved_hashes[field] = prop
 
-    if verse_fields and not any(prelim.values()):
+    if verse_fields and any(not prelim.get(f) for f in verse_fields):
         scanned = _class_scoped_hash_scan(script)
         resolution_tried.append("class_scan")
         for field in verse_fields:
@@ -2036,7 +2135,7 @@ def setup_verse_device(
         raise ValueError(
             f"Verse asset/class not found: {asset_path}. "
             "Run workspace_compile_verse yourself (never ask the user to build in UEFN), "
-            "then search_assets(search='<class_name>', directory='/_Verse') for the real "
+            "then search_assets(search='<class_name>', directory='/<Project>/_Verse') for the real "
             "compiled path, then retry setup_verse_device with that path."
         )
 

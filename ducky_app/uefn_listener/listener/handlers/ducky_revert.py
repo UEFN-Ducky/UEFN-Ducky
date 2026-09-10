@@ -36,8 +36,17 @@ def _refuse(reason: str) -> None:
     raise ValueError(f"Refused: {reason}")
 
 
+def _usable_guid(guid: str) -> str:
+    """Empty when UEFN handed 32 zeros — Creative devices often have no real guid."""
+    compact = (guid or "").replace("{", "").replace("}", "").replace("-", "").strip()
+    if not compact or set(compact) <= {"0"}:
+        return ""
+    return guid.strip()
+
+
 def _resolve_actor(ident: str, guid: str):
     """Find the actor by recorded guid first; the path is only a fallback."""
+    guid = _usable_guid(guid)
     if guid:
         for actor in lookup.actor_list():
             if not is_live(actor):

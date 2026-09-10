@@ -139,6 +139,25 @@ def _execute_python_blocked(code: str) -> str | None:
             "Delete only in the Content Browser. "
             "Editor offline is not a delete queue — do not restart UEFN to delete."
         )
+    # Placement belongs on Epic MCP / dedicated listener tools. Raw spawn loops
+    # hold the game thread, crash UEFN, and cannot be reverted from Changes.
+    if (
+        "spawn_actor_from_object(" in compact
+        or "spawn_actor_from_class(" in compact
+        or "editorlevellibrary.spawn_actor(" in compact
+    ):
+        return (
+            "STOP: execute_python blocked — never spawn actors from Python. "
+            "FIRST ducky_get_status; when epic_mcp_online use nested Epic unreal__* "
+            "(ActorTools / DeviceToolset / ProgrammaticToolset execute_tool_script for 5+). "
+            "Listener fallback: foliage_scatter, spawn_actor(..., label=..., folder=...). "
+            "skill_read_subskill(\"uefn\", \"epic_mcp\")."
+        )
+    if "set_material(" in compact:
+        return (
+            "STOP: execute_python blocked — never assign materials from Python. "
+            "Use assign_material_to_mesh or Epic MaterialTools via unreal__call_tool."
+        )
     if "for name in dir(unreal)" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "

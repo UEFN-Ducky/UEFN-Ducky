@@ -5,7 +5,6 @@ import { getApi } from "../hooks/usePanelApi";
 import { setCachedCodingAgents } from "../hooks/codingAgentsCache";
 import { onApiReady } from "../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
-import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { groupByVendor } from "./modelVendors";
 import {
   buildPickerGateways,
@@ -22,6 +21,7 @@ import {
   type CatalogModelRow,
 } from "../hooks/modelsCatalogCache";
 import { usePluginContributions } from "../hooks/usePluginContributions";
+import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import type { CodingAgentDto } from "../types/panel";
 
 function formatContext(n: number): string {
@@ -78,6 +78,8 @@ interface ModelSelectorProps {
   placeholder?: string;
   /** Bump to open the dropdown from outside (the composer's `/model` command). */
   openSignal?: number;
+  /** Spotlight id when this trigger is the chat composer control. */
+  uiTarget?: string;
 }
 
 export function ModelSelector({
@@ -94,21 +96,21 @@ export function ModelSelector({
   menuPlacement = "top",
   placeholder = "Pick a model",
   openSignal = 0,
+  uiTarget = "",
 }: ModelSelectorProps) {
   const contrib = usePluginContributions();
   const [isOpen, setIsOpen] = useState(false);
   const [models, setModels] = useState<CatalogModelRow[]>(() => getCachedModels() ?? []);
   const [agents, setAgents] = useState<CodingAgentDto[]>([]);
+  const [agentsChecking, setAgentsChecking] = useState(true);
   const [search, setSearch] = useState("");
   // null = gateway list; provider key = that gateway’s models (+ nested CLIs).
   const [navGateway, setNavGateway] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
-  const [viewportH, setViewportH] = useState<number>();
   const anchorRef = useRef<HTMLButtonElement>(null);
-  const gatewaysPageRef = useRef<HTMLDivElement>(null);
-  const modelsPageRef = useRef<HTMLDivElement>(null);
+  const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
+  const triggerRef = useMergedRef(anchorRef, uiTargetRef);
   const firstHitRef = useRef<HTMLDivElement>(null);
-  const navScope = useScopedClass("model-selector-nav");
 
   const navGatewayRef = useRef<string | null>(null);
   const openRef = useRef(false);
@@ -169,11 +171,13 @@ export function ModelSelector({
     try {
       const res = await api.list_coding_agents();
       setAgents(res.agents || []);
+      setAgentsChecking(!!res.checking);
       // Published for the plain form helpers, which have no component to thread
       // this through but still have to tell a coding agent from a provider.
       setCachedCodingAgents(res.agents || []);
     } catch {
       setAgents([]);
+      setAgentsChecking(false);
     }
   }, []);
 
@@ -210,8 +214,9 @@ export function ModelSelector({
         void loadAgents();
         return;
       }
-      if (event.type !== "uefn_plugins_changed") return;
-      void loadAgents();
+      if (event.type === "coding_agents_updated" || event.type === "uefn_plugins_changed") {
+        void loadAgents();
+      }
     });
   }, [catalogRows, loadAgents]);
 
@@ -253,11 +258,12 @@ export function ModelSelector({
   const agentIsUnavailable = useCallback(
     (agentId: string) => {
       if (normId(agentId) === "ducky") return false;
+      if (agentsChecking) return false;
       const a = agents.find((row) => normId(row.id) === normId(agentId));
       if (!a) return true;
       return !a.enabled || !a.available;
     },
-    [agents],
+    [agents, agentsChecking],
   );
 
   // Gateway picker when we can switch coding agents and gateways exist; else flat catalog.
@@ -360,7 +366,6 @@ export function ModelSelector({
     setNav(null);
     setSearch("");
     setOpenVendor(null);
-    setViewportH(undefined);
   }, [setNav]);
 
   const requestClose = useCallback(() => {
@@ -458,18 +463,6 @@ export function ModelSelector({
   }, [isOpen, goBack]);
 
   useLayoutEffect(() => {
-    if (!isOpen || !twoLevel) return;
-    const el = navGateway ? modelsPageRef.current : gatewaysPageRef.current;
-    if (!el) return;
-    const measure = () => setViewportH(el.getBoundingClientRect().height);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [isOpen, twoLevel, navGateway, viewApiRows, openVendor, search, gatewaySearchHits]);
-
-  useLayoutEffect(() => {
     if (!isOpen || !query) return;
     firstHitRef.current?.scrollIntoView({ block: "nearest" });
   }, [isOpen, query, viewApiRows, navGateway, openVendor, gatewaySearchHits]);
@@ -525,6 +518,14 @@ export function ModelSelector({
       >
         <span className="model-selector-option-name" title={m.name}>
           {m.name}
+          {m.contextLimit > 0 ? (
+            <span
+              className="model-selector-ctx"
+              title={`Context window: ${m.contextLimit.toLocaleString()} tokens`}
+            >
+              {formatContext(m.contextLimit)}
+            </span>
+          ) : null}
         </span>
         <span className="model-selector-option-meta">
           {m.isLocal ? (
@@ -539,14 +540,6 @@ export function ModelSelector({
               {formatUsd(m.priceIn)}/{formatUsd(m.priceOut)}
             </span>
           ) : null}
-          {m.contextLimit > 0 && (
-            <span
-              className="model-selector-ctx"
-              title={`Context window: ${m.contextLimit.toLocaleString()} tokens`}
-            >
-              {formatContext(m.contextLimit)}
-            </span>
-          )}
           {m.supportsVision && (
             <span className="model-selector-cap-badge" title="Multimodal — accepts images">
               📷
@@ -635,11 +628,16 @@ export function ModelSelector({
       codingAgent === apiAgentId || (apiAgentId === "ducky" && codingAgent === "ducky")
         ? selectedRowId
         : null;
+    const catalogPending = !catalogRows && !isModelsCatalogReady();
     return (
       <>
-        {renderFlatOrVendor(viewApiRows, apiAgentId, apiSelected, {
-          hideEmpty: gw.nestedAgents.length > 0,
-        })}
+        {catalogPending && viewApiRows.length === 0 ? (
+          <div className="model-selector-empty">Loading models…</div>
+        ) : (
+          renderFlatOrVendor(viewApiRows, apiAgentId, apiSelected, {
+            hideEmpty: !catalogPending && gw.nestedAgents.length > 0,
+          })
+        )}
         {gw.nestedAgents.map((agent) => {
           const rows = agentModels(agent.id);
           const filtered = query ? rows.filter((m) => m.name.toLowerCase().includes(query)) : rows;
@@ -648,7 +646,9 @@ export function ModelSelector({
             <div key={agent.id} className="model-selector-provider-group">
               <div className="model-selector-provider-label is-static">
                 <span className="model-selector-provider-name">{agent.label}</span>
-                {unavailable ? (
+                {agentsChecking ? (
+                  <span className="model-selector-unavailable-tag">Checking…</span>
+                ) : unavailable ? (
                   <span className="model-selector-unavailable-tag">Unavailable</span>
                 ) : (
                   <span className="model-selector-provider-count">{filtered.length}</span>
@@ -661,7 +661,7 @@ export function ModelSelector({
                   disabled: unavailable,
                 }),
               )}
-              {filtered.length === 0 && !unavailable ? (
+              {filtered.length === 0 && !unavailable && !agentsChecking ? (
                 <div className="model-selector-empty">No models.</div>
               ) : null}
             </div>
@@ -751,7 +751,11 @@ export function ModelSelector({
             >
               <span className="model-selector-option-name">{gw.label}</span>
               <span className="model-selector-option-meta">
-                {count > 0 ? <span className="model-selector-provider-count">{count}</span> : null}
+                {count > 0 ? (
+                  <span className="model-selector-provider-count">{count}</span>
+                ) : !catalogRows && !isModelsCatalogReady() ? (
+                  <span className="model-selector-unavailable-tag">Loading…</span>
+                ) : null}
                 {sel && (
                   <span className="model-selector-check">
                     <Icons.Check />
@@ -779,7 +783,7 @@ export function ModelSelector({
   return (
     <div className="ui-relative model-selector">
       <button
-        ref={anchorRef}
+        ref={triggerRef}
         type="button"
         className={`no-drag model-selector-btn${isOpen ? " is-open" : ""}`}
         onClick={() => (isOpen ? requestClose() : openDropdown())}
@@ -797,12 +801,10 @@ export function ModelSelector({
         placement={menuPlacement}
         minWidth={300}
         width={320}
+        clip
       >
         {twoLevel ? (
-          <div className={`model-selector-nav ${navScope}`} data-level={navGateway ? 1 : 0}>
-            {viewportH != null ? (
-              <ScopedCss selector={`.${navScope}`} rules={{ "--ms-viewport-h": `${viewportH}px` }} />
-            ) : null}
+          <div className="model-selector-nav" data-level={navGateway ? 1 : 0}>
             <div className="model-selector-navhdr">
               {navGateway && activeGateway ? (
                 <button
@@ -823,10 +825,10 @@ export function ModelSelector({
             {searchBox()}
             <div className="model-selector-viewport">
               <div className="model-selector-track">
-                <div className="model-selector-page" ref={gatewaysPageRef}>
+                <div className="model-selector-page">
                   <div className="model-selector-scroll">{renderGatewayList()}</div>
                 </div>
-                <div className="model-selector-page" ref={modelsPageRef}>
+                <div className="model-selector-page">
                   <div className="model-selector-scroll">
                     {activeGateway ? renderGatewayDetail(activeGateway) : null}
                   </div>
@@ -837,7 +839,7 @@ export function ModelSelector({
         ) : (
           <>
             {searchBox()}
-            <div className="model-selector-scroll" ref={modelsPageRef}>
+            <div className="model-selector-scroll">
               {renderFlatOrVendor(flatRows, singleAgent, normalizedSelectedModel)}
             </div>
           </>

@@ -125,6 +125,76 @@ _MAX_LOG = 2500
 _log_history: list[str] = []
 _model_cache: dict[str, list[Any]] = {}
 _MODELS_CACHE_FILE = "models_cache.json"
+_models_refresh_lock = threading.Lock()
+_models_refresh_inflight = False
+_models_updated_hook: Any = None
+
+
+def _notify_models_updated() -> None:
+    hook = _models_updated_hook
+    if not callable(hook):
+        return
+    try:
+        hook()
+    except Exception:
+        pass
+
+
+def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any]]:
+    """JS-facing model rows from an in-memory cache. Never hits provider APIs."""
+    from frontend.agent_models import provider_label
+
+    prov = (provider or "").strip().lower()
+    label = provider_label(prov) or PROVIDER_LABELS.get(prov, prov.title())
+    rows: list[dict[str, Any]] = []
+    for m in models:
+        rows.append(
+            {
+                "provider": label,
+                "provider_key": prov,
+                "id": m.id,
+                "name": m.display_name or m.id,
+                "supports_vision": m.supports_vision,
+                "supports_tools": m.supports_tools,
+                "supports_web_search": m.supports_web_search,
+                "context_limit": m.context_limit or 0,
+                "price_in": m.price_in,
+                "price_out": m.price_out,
+                "is_local": m.is_local,
+            }
+        )
+    return rows
+
+
+def cached_api_model_ids() -> dict[str, set[str]]:
+    """Provider → model ids from the in-memory catalog. Empty until disk/warm fills it."""
+    out: dict[str, set[str]] = {}
+    for provider, models in list(_model_cache.items()):
+        ids = {(item.id if hasattr(item, "id") else str(item)).strip() for item in models}
+        ids.discard("")
+        if ids:
+            out[provider] = ids
+    return out
+
+
+def kick_model_refresh() -> None:
+    """Fetch provider catalogs on a worker. Safe to call from the pywebview thread."""
+    global _models_refresh_inflight
+    with _models_refresh_lock:
+        if _models_refresh_inflight:
+            return
+        _models_refresh_inflight = True
+
+    def _run() -> None:
+        global _models_refresh_inflight
+        try:
+            _warm_model_cache()
+        finally:
+            with _models_refresh_lock:
+                _models_refresh_inflight = False
+            _notify_models_updated()
+
+    threading.Thread(target=_run, daemon=True, name="refresh-models").start()
 
 
 def _load_model_cache_from_disk() -> None:
@@ -154,20 +224,49 @@ def _load_model_cache_from_disk() -> None:
         pass
 
 
+def _contributed_provider_ids() -> set[str]:
+    """Installed gateway ids from plugin.json — available before register() finishes."""
+    try:
+        from backend.uefn_plugins.host import get_contributions
+
+        out: set[str] = set()
+        for row in get_contributions().get("llm_providers") or []:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id") or row.get("secret_key") or "").strip().lower()
+            if pid:
+                out.add(pid)
+        return out
+    except Exception:
+        return set()
+
+
+def _catalog_keep_providers() -> set[str]:
+    """Gateways whose model lists must stay on disk.
+
+    ``all_providers()`` requires a registered factory. Boot can mark plugins
+    ready while register() is still finishing — pruning against factories
+    then wipes Anthropic/OpenAI and the picker stays empty.
+    """
+    from backend.agent.providers import all_providers
+
+    return _contributed_provider_ids() | set(all_providers())
+
+
 def _save_model_cache_to_disk() -> None:
     from dataclasses import asdict
 
-    from backend.agent.providers import all_providers
-
     try:
+        keep = _catalog_keep_providers()
+        if not keep:
+            # Plugins not painted yet — do not clobber last session's catalog.
+            return
         path = default_app_data_dir() / _MODELS_CACHE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Never persist models for gateways that are no longer installed/enabled.
-        allowed = set(all_providers())
         payload = {
             prov: [asdict(m) for m in models]
             for prov, models in _model_cache.items()
-            if prov in allowed
+            if prov in keep
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
@@ -181,9 +280,10 @@ def _prune_model_caches_to_enabled_providers() -> None:
     until that Store gateway is installed again.
     """
     from backend.agent.model_fetch import clear_model_cache
-    from backend.agent.providers import all_providers
 
-    allowed = set(all_providers())
+    allowed = _catalog_keep_providers()
+    if not allowed:
+        return
     stale = [p for p in list(_model_cache) if p not in allowed]
     if not stale:
         return
@@ -197,13 +297,11 @@ def _prune_model_caches_to_enabled_providers() -> None:
 
 
 def _all_cached_model_ids() -> list[str]:
-    from backend.agent.providers import all_providers
-
-    allowed = set(all_providers())
+    allowed = _catalog_keep_providers()
     ids: list[str] = []
     seen: set[str] = set()
     for prov, models in _model_cache.items():
-        if prov not in allowed:
+        if allowed and prov not in allowed:
             continue
         for item in models:
             mid = item.id if hasattr(item, "id") else str(item)
@@ -609,13 +707,22 @@ class PanelApi(
             pass
         # Plugins off the splash critical path — window paints, then contribs arrive.
         self._start_plugins_load_async()
-        threading.Thread(target=_warm_model_cache, daemon=True, name="warm-models").start()
+        global _models_updated_hook
+        _models_updated_hook = lambda: self._push_panel({"type": "models_updated"})
+        try:
+            from backend.agent.coding_agents.base import set_detect_updated_hook
+
+            set_detect_updated_hook(lambda: self._push_panel({"type": "coding_agents_updated"}))
+        except Exception:
+            pass
+        kick_model_refresh()
 
     def _notify_plugins_ready(self) -> None:
         try:
             _prune_model_caches_to_enabled_providers()
         except Exception:
             pass
+        kick_model_refresh()
         self._push_panel({"type": "uefn_plugins_changed"})
 
     def _start_plugins_load_async(self) -> None:
@@ -769,6 +876,12 @@ class PanelApi(
             }
         try:
             result = self._fetch_listener_status()
+            try:
+                from backend.uefn_plugins.host import attach_plugin_connections
+
+                result = attach_plugin_connections(result)
+            except Exception:
+                result.setdefault("plugin_connections", [])
             self._last_listener_status = result
             self._maybe_ship_on_listener_online(result)
             return result

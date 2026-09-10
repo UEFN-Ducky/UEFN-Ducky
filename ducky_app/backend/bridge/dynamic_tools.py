@@ -306,8 +306,11 @@ def _registered_tool_names() -> set[str]:
 
 def _fetch_live_manifest() -> Optional[list[dict]]:
     """Live command manifest, waiting briefly if a just-triggered reload is settling."""
-    from backend.bridge import send_command
+    from backend.bridge import configured_listener_port, listener_get_health, send_command
 
+    health = listener_get_health(configured_listener_port(), timeout=0.35)
+    if not health or health.get("busy") or int(health.get("queue_size") or 0) > 0:
+        return None  # UEFN closed or mid-command — cached manifest covers connect; no probe.
     deadline = time.time() + _WAIT_FOR_RELOAD_SEC
     while True:
         try:

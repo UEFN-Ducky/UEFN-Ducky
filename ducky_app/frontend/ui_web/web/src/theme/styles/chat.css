@@ -178,6 +178,10 @@
 .chat-pane-composer-host {
   position: relative;
   z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: visible;
 }
 
 /* Active plan stays above the composer — not inside the scrolling transcript. */
@@ -745,9 +749,18 @@
   flex: 1 1 0;
 }
 
-.chat-pane-input-toolbar-left .model-selector {
-  flex: 1 1 0;
+.chat-pane-input-toolbar-left .chat-pane-model-effort {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   min-width: 0;
+  flex: 0 1 auto;
+}
+
+.chat-pane-input-toolbar-left .model-selector {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 220px;
 }
 
 @container chat-composer (max-width: 360px) {
@@ -818,6 +831,10 @@
   height: 10px;
 }
 
+.chat-pane-send-target {
+  display: inline-flex;
+}
+
 .chat-pane-send-btn {
   border: none;
   border-radius: 8px;
@@ -886,6 +903,131 @@
 .snip-btn--busy {
   color: var(--blue);
   opacity: 0.8;
+}
+
+.chat-changes-btn.is-open {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--blue) 50%, transparent),
+    0 0 12px color-mix(in srgb, var(--blue) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-changes-btn.is-open {
+    animation: chat-changes-btn-glow 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes chat-changes-btn-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--blue) 40%, transparent),
+      0 0 8px color-mix(in srgb, var(--blue) 35%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--blue) 75%, transparent),
+      0 0 16px color-mix(in srgb, var(--blue) 70%, transparent);
+  }
+}
+
+.chat-changes-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+  isolation: isolate;
+  position: relative;
+  z-index: 1;
+  box-shadow: none;
+}
+
+.chat-changes-host.is-flush {
+  border-radius: 0;
+}
+
+.chat-changes-host .chat-pane-input-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: transparent;
+  border: none;
+  opacity: 0.7;
+  z-index: 3;
+}
+
+.chat-changes-host:hover .chat-pane-input-resize-handle {
+  opacity: 1;
+}
+
+.chat-changes-close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 4;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-changes-close:hover {
+  color: var(--fg);
+  background: var(--surface-2, var(--surface));
+}
+
+.chat-changes-host .changes-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: transparent;
+}
+
+.chat-changes-host .changes-toolbar {
+  padding: 2px 36px 2px 8px;
+  align-items: center;
+  border: none;
+  background: transparent;
+}
+
+.chat-changes-host .changes-colhead {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-changes-host .changes-run-head {
+  background: var(--card);
+}
+
+.chat-changes-host .changes-run-head:hover {
+  background: var(--card-hover);
+}
+
+.chat-changes-host .changes-run-head--selected {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 16%, var(--card));
+}
+
+.chat-changes-host .changes-run-head--selected:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 22%, var(--card));
+}
+
+.chat-changes-host .changes-filters {
+  margin-left: auto;
 }
 
 /* Voice controls (self-contained in web/src/voice/) */
@@ -1866,11 +2008,18 @@
 .virtual-chat-turn-query {
   width: 100%;
   position: sticky;
-  top: 16px;
+  top: 5px;
   z-index: 6;
   contain: none;
   overflow: visible;
   container-type: scroll-state;
+}
+
+/* Same fill + edge as the composer textarea box below. */
+.virtual-chat-turn-query .message-bubble-user-content {
+  background-color: var(--input-bg);
+  border: 1px solid var(--border);
+  backdrop-filter: var(--blur-md);
 }
 
 /* An expanded plan panel must paint above the next turn's sticky query.
@@ -1880,12 +2029,13 @@
   z-index: 7;
 }
 
-/* While actually pinned: lift with a shadow and an opaque elevated background,
-   so scrolling content can never ghost through a translucent card token. */
+/* While actually pinned: lift with a shadow; keep composer fill so scroll
+   content blurs through the same way as the textarea box. */
 @container scroll-state(stuck: top) {
   .virtual-chat-turn-query .message-bubble-user-content,
   .virtual-chat-turn-query .chat-plan-popup-bar {
-    background-color: var(--bg-elevated, #272727);
+    background-color: var(--input-bg);
+    border: 1px solid var(--border);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   }
 }
@@ -4941,23 +5091,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   min-width: 18px;
   height: 18px;
   padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
-}
-
-.context-meter-cache-chip {
-  font-size: 10px;
-  line-height: 1;
-  color: var(--text-muted);
-  white-space: nowrap;
-  max-width: 72px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .context-meter-ring-progress {
@@ -5974,7 +6113,8 @@
   background: color-mix(in srgb, var(--red, #e0575b) 16%, transparent);
 }
 .changeset-status--reverted,
-.changeset-status--partially_reverted {
+.changeset-status--partially_reverted,
+.changeset-status--archived {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 16%, transparent);
 }
@@ -5993,6 +6133,9 @@
 .changeset-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.changeset-btn[aria-pressed="true"] {
+  background: var(--btn-hover);
 }
 .changeset-files {
   display: flex;
@@ -6069,4 +6212,32 @@
 .changeset-diff-modal {
   max-height: 70vh;
   overflow: auto;
+}
+.changeset-diff-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.changeset-diff-steps .changeset-btn {
+  display: inline-flex;
+  align-items: center;
+}
+.changeset-diff-steps-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.changeset-diff-steps .changeset-btn[aria-pressed="true"] {
+  background: var(--btn-hover);
+}
+.changeset-diff-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, #2a2a2e);
+}
+.modal-backdrop--contained .changeset-diff-modal {
+  max-height: min(70vh, calc(100% - 72px));
 }

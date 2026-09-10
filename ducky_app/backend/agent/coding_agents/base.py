@@ -295,25 +295,113 @@ def list_coding_agents(settings: Any | None = None) -> list[CodingAgentInfo]:
     return out
 
 
-# Short-TTL cache for detect_all. Each detect() does filesystem PATH scans
-# (shutil.which per CLI) costing ~400ms; the panel calls this on every chat
-# open/close and stream tick, so without a cache a burst spawns dozens of
-# concurrent pywebview bridge threads that each block returning through the
-# single WebView2 UI thread — a thundering-herd freeze. CLI/key availability
-# changes rarely, so a few seconds of staleness is fine; settings/key writes
-# invalidate explicitly.
+# Short-TTL cache for detect_all. Plugin detect() can run `claude auth status`
+# / `--version` with 20s timeouts — that must NEVER run on the pywebview
+# thread (it queued get_models_catalog behind it and the picker sat empty).
+# Settings/key writes expire the TTL; the last payload stays so the next
+# list_coding_agents returns immediately while a worker re-probes.
 _DETECT_TTL_SEC = 5.0
 _detect_lock = threading.Lock()
 _detect_cache: dict[str, Any] | None = None
 _detect_cache_at = 0.0
+_detect_refresh_lock = threading.Lock()
+_detect_refresh_inflight = False
+_detect_updated_hook: Any = None
+
+
+def set_detect_updated_hook(hook: Any) -> None:
+    global _detect_updated_hook
+    _detect_updated_hook = hook
+
+
+def _notify_detect_updated() -> None:
+    hook = _detect_updated_hook
+    if not callable(hook):
+        return
+    try:
+        hook()
+    except Exception:
+        pass
 
 
 def invalidate_detect_cache() -> None:
-    """Force the next detect_all() to re-probe CLIs (call after settings/key writes)."""
-    global _detect_cache, _detect_cache_at
+    """Expire the detect TTL so the next list_coding_agents re-probes.
+
+    Keeps the last payload so the picker does not block or flash Unavailable.
+    """
+    global _detect_cache_at
     with _detect_lock:
-        _detect_cache = None
         _detect_cache_at = 0.0
+
+
+def _instant_detect_payload() -> dict[str, Any]:
+    """Ducky + contrib stubs — no CLI spawn. Picker shows Checking… not Unavailable."""
+    from frontend.settings import PanelSettings
+
+    s = PanelSettings.load()
+    agents: list[dict[str, Any]] = [
+        CodingAgentInfo(
+            id="ducky",
+            label="Ducky",
+            enabled=True,
+            available=True,
+            status="Embedded agent",
+            capabilities=CodingAgentCapabilities(chat_api=True, a2a=True),
+            models=[],
+        ).to_dict()
+    ]
+    enabled_by_id: dict[str, bool] = {}
+    try:
+        raw = getattr(s, "coding_agents", None) or {}
+        if isinstance(raw, dict):
+            for aid, cfg in raw.items():
+                if isinstance(cfg, dict) and "enabled" in cfg:
+                    enabled_by_id[str(aid).strip().lower().replace("-", "_")] = bool(cfg.get("enabled"))
+    except Exception:
+        pass
+    for aid in listed_external_coding_agents():
+        key = str(aid).strip().lower().replace("-", "_")
+        agents.append(
+            {
+                "id": key,
+                "label": coding_agent_label(key),
+                "enabled": enabled_by_id.get(key, True),
+                "available": False,
+                "status": "Checking…",
+                "cli_path": "",
+                "default_args": "",
+                "install_help": "",
+                "shows_thinking_effort": False,
+                "plugin_id": "",
+                "capabilities": {},
+                "models": [],
+            }
+        )
+    return {"agents": agents, "checking": True}
+
+
+def kick_detect_refresh() -> None:
+    """Re-probe CLIs on a worker. Safe to call from the pywebview thread."""
+    global _detect_refresh_inflight
+    with _detect_refresh_lock:
+        if _detect_refresh_inflight:
+            return
+        _detect_refresh_inflight = True
+
+    def _run() -> None:
+        global _detect_refresh_inflight, _detect_cache, _detect_cache_at
+        try:
+            agents = list_coding_agents(None)
+            payload = {"agents": [a.to_dict() for a in agents]}
+            with _detect_lock:
+                _detect_cache = payload
+                _detect_cache_at = time.monotonic()
+        finally:
+            with _detect_refresh_lock:
+                _detect_refresh_inflight = False
+            _notify_detect_updated()
+
+    threading.Thread(target=_run, daemon=True, name="refresh-coding-agents").start()
 
 
 def detect_all(settings: Any | None = None) -> dict[str, Any]:
@@ -322,14 +410,13 @@ def detect_all(settings: Any | None = None) -> dict[str, Any]:
     if settings is not None:
         agents = list_coding_agents(settings)
         return {"agents": [a.to_dict() for a in agents]}
-    global _detect_cache, _detect_cache_at
     now = time.monotonic()
     with _detect_lock:
-        if _detect_cache is not None and (now - _detect_cache_at) < _DETECT_TTL_SEC:
-            return _detect_cache
-    agents = list_coding_agents(None)
-    payload = {"agents": [a.to_dict() for a in agents]}
-    with _detect_lock:
-        _detect_cache = payload
-        _detect_cache_at = time.monotonic()
-    return payload
+        cached = _detect_cache
+        age_ok = cached is not None and (now - _detect_cache_at) < _DETECT_TTL_SEC
+    if age_ok and cached is not None:
+        return cached
+    kick_detect_refresh()
+    if cached is not None:
+        return cached
+    return _instant_detect_payload()

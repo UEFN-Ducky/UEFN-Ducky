@@ -105,11 +105,26 @@ export function listTargets(routeHint = ""): UiTargetInfo[] {
  * Attach a stable spotlight id to a DOM node. Returns a ref callback:
  * `<button ref={useUiTarget("settings.mcp.apply", { kind: "button" })}>`.
  */
+/** Combine an object ref with a callback ref (ui-target + dropdown anchor). */
+export function useMergedRef<T extends HTMLElement>(
+  obj: { current: T | null },
+  cb: (el: T | null) => void,
+) {
+  return useCallback(
+    (el: T | null) => {
+      (obj as { current: T | null }).current = el;
+      cb(el);
+    },
+    [obj, cb],
+  );
+}
+
 export function useUiTarget(id: string, meta: UiTargetMeta = {}) {
   const metaRef = useRef(meta);
   metaRef.current = meta;
   return useCallback(
     (el: HTMLElement | null) => {
+      if (!id) return;
       if (el) registerTarget(id, el, metaRef.current);
       else unregisterTarget(id);
     },

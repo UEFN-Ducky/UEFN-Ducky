@@ -223,6 +223,21 @@ const mockApi = {
   get_listener_status: async () => ({ ok: true }),
   duckyos_get_status: async () => ({ ok: true, logged_in: false, email: "" }),
   duckyos_store_catalog: async () => ({ ok: true, items: catalog.map((i) => ({ ...i })) }),
+  duckyos_store_versions: async (slug: string) => {
+    const count = slug === "discord" ? 12 : 2;
+    return {
+      ok: true,
+      slug,
+      versions: Array.from({ length: count }, (_, i) => ({
+        version: String(count - i),
+        changelog:
+          i === 0
+            ? "Place Fortnite assets like Content Drawer (_C). Tool order: UEFN MCP > listener > Python last."
+            : `Changelog for v${count - i}.`,
+        created_at: `2026-0${Math.max(1, 9 - (i % 8))}-0${(i % 9) + 1}T12:00:00Z`,
+      })),
+    };
+  },
   duckyos_store_checkout: async () => ({ ok: false, error: "Checkout is mocked in the harness" }),
   bridge_job_start: async (method: string, args: unknown[]) => {
     const id = `job-${++jobSeq}`;

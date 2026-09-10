@@ -89,6 +89,58 @@ def test_slot_falls_back_to_a_path_from_the_params() -> None:
     assert rec.build("create_data_table", {}, None, ok=True).slot.endswith("/unknown/exists")
 
 
+def test_zero_guid_uses_the_unreal_path_as_the_slot() -> None:
+    """Creative devices often report an all-zero GUID; that must not be the slot."""
+    zeros = "00000000-0000-0000-0000-000000000000"
+    path_a = "/Game/Map.Map:PersistentLevel.Device_Trigger_V2_C_UAID_AAA"
+    path_b = "/Game/Map.Map:PersistentLevel.Device_Trigger_V2_C_UAID_BBB"
+    sidecar_a = {
+        **SIDECAR,
+        "command": "set_actor_label",
+        "facet": "label",
+        "targets": [{"kind": "actor", "id": zeros, "guid": zeros, "label": "Trigger", "path": path_a}],
+        "summary": "renamed Trigger",
+    }
+    a = rec.build("set_actor_label", {"actor_path": path_a, "label": "Snake_A"}, sidecar_a, ok=True)
+    b = rec.build(
+        "set_actor_label",
+        {"actor_path": path_b, "label": "Snake_B"},
+        {**sidecar_a, "targets": [{**sidecar_a["targets"][0], "path": path_b}]},
+        ok=True,
+    )
+    assert a is not None and b is not None
+    assert zeros not in a.slot
+    assert "UAID_AAA" in a.slot
+    assert a.slot != b.slot
+
+
+def test_plugin_sidecar_uses_the_program_namespace() -> None:
+    side = {
+        "command": "blender_execute_blender_code",
+        "program": "blender",
+        "kind": "object",
+        "facet": "exists",
+        "targets": [{"kind": "object", "id": "Cube", "label": "Cube", "path": "Cube"}],
+        "before": {"names": []},
+        "inverse": [{"command": "blender_execute_blender_code", "params": {"code": "restore()"}}],
+        "created": [],
+        "revertable": "auto",
+        "summary": "added Cube",
+    }
+    change = rec.build("blender_execute_blender_code", {"code": "x"}, side, ok=True)
+    assert change is not None
+    assert change.program == "blender"
+    assert change.slot == "blender://object/Cube/exists"
+    assert change.revertable == REVERT_AUTO
+
+
+def test_extract_ducky_reads_a_json_sidecar() -> None:
+    text = '{"message": "ok", "_ducky": {"program": "blender", "kind": "object"}}'
+    assert rec.extract_ducky(text)["program"] == "blender"
+    assert rec.extract_ducky("not json") is None
+    assert rec.extract_ducky('{"ok": true}') is None
+
+
 # --- outcomes --------------------------------------------------------------------
 
 

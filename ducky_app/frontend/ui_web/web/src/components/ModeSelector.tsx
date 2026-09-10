@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { getApi } from "../hooks/usePanelApi";
 import type { AgentMode } from "../types/panel";
+import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import { DropdownPanel } from "./DropdownPanel";
 import {
   EFFORT_OPTIONS,
@@ -16,6 +17,12 @@ const MODES: { id: AgentMode; name: string }[] = [
   { id: "agent", name: "Agent" },
 ];
 
+const MODE_ICON: Record<AgentMode, () => JSX.Element> = {
+  ask: Icons.Chat,
+  plan: Icons.Plan,
+  agent: Icons.Sparkles,
+};
+
 interface ModeSelectorProps {
   activeMode: AgentMode;
   setMode: (m: AgentMode) => void;
@@ -23,6 +30,8 @@ interface ModeSelectorProps {
   convId?: string;
   effort?: string;
   onEffortChange?: (effort: ThinkingEffort) => void;
+  /** Spotlight id when this trigger is the chat composer control. */
+  uiTarget?: string;
 }
 
 /** Icon trigger — mode + optional reasoning in one popup. */
@@ -33,16 +42,20 @@ export function ModeSelector({
   convId,
   effort,
   onEffortChange,
+  uiTarget = "",
 }: ModeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [effortValue, setEffortValue] = useState<ThinkingEffort>(() => normalizeEffort(effort));
   const anchorRef = useRef<HTMLButtonElement>(null);
+  const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Mode", route: "chat" });
+  const triggerRef = useMergedRef(anchorRef, uiTargetRef);
 
   useEffect(() => {
     setEffortValue(normalizeEffort(effort));
   }, [effort, convId]);
 
   const currentMode = MODES.find((m) => m.id === activeMode) ?? MODES[0];
+  const ModeIcon = MODE_ICON[currentMode.id];
   const currentEffort = EFFORT_OPTIONS.find((o) => o.id === effortValue) ?? EFFORT_OPTIONS[0];
   const title = showEffort
     ? `${currentMode.name} · Reasoning ${currentEffort.label}`
@@ -62,7 +75,7 @@ export function ModeSelector({
   return (
     <div className="ui-relative mode-selector">
       <button
-        ref={anchorRef}
+        ref={triggerRef}
         type="button"
         className={`mode-selector-btn${isOpen ? " is-open" : ""}`}
         data-mode={currentMode.id}
@@ -70,7 +83,7 @@ export function ModeSelector({
         aria-label={title}
         onClick={() => setIsOpen((v) => !v)}
       >
-        <Icons.Sparkles />
+        <ModeIcon />
       </button>
 
       <DropdownPanel

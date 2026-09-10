@@ -61,18 +61,9 @@ def enabled() -> bool:
 
 def _actor_guid(actor) -> str:
     """A stable id that survives relabelling, or "" when unavailable."""
-    getter = getattr(actor, "get_actor_guid", None)
-    if callable(getter):
-        try:
-            return str(getter())
-        except Exception:
-            pass
-    for prop in ("actor_instance_guid", "actor_guid"):
-        try:
-            return str(actor.get_editor_property(prop))
-        except Exception:
-            continue
-    return ""
+    from listener.serialize import actor_guid
+
+    return actor_guid(actor)
 
 
 def _actor_target(actor) -> dict:
@@ -121,15 +112,18 @@ def _find(params: dict, *keys: str):
 
 
 def _restore_transform(target: dict, state: dict) -> dict:
-    return {
-        "command": "set_actor_transform",
-        "params": {
-            "actor_path": target.get("path") or target.get("id"),
-            "location": state["location"],
-            "rotation": state["rotation"],
-            "scale": state["scale"],
-        },
+    from listener.device_scale import _is_identity_scale
+
+    params = {
+        "actor_path": target.get("path") or target.get("id"),
+        "location": state["location"],
+        "rotation": state["rotation"],
     }
+    # Identity scale is noise from the snapshot. Sending it on a Creative
+    # device used to refuse the whole move-revert.
+    if not _is_identity_scale(state.get("scale")):
+        params["scale"] = state["scale"]
+    return {"command": "set_actor_transform", "params": params}
 
 
 # --- before / after per command ---------------------------------------------------
@@ -398,6 +392,90 @@ def _inverse_attach(params: dict, cap: dict, result: Any) -> Optional[list]:
                         "parent_path": prior}}]
 
 
+def _before_verse_editable(params: dict) -> Optional[dict]:
+    """Current SavedActor / AssetForEditor / scalar on the field about to be written."""
+    actor = _find(params, "actor_path")
+    field = str(params.get("field") or params.get("array_field") or "")
+    if actor is None or not field:
+        return None
+    from listener.verse_editable_editor import peek_verse_field_links
+
+    try:
+        path = actor.get_path_name()
+    except Exception:
+        path = str(params.get("actor_path") or "")
+    links = peek_verse_field_links(path, field)
+    return {"targets": [_actor_target(actor)], "state": links}
+
+
+def _verse_actor_path(cap: dict, params: dict) -> str:
+    targets = cap.get("targets") or []
+    if targets:
+        return str(targets[0].get("path") or targets[0].get("id") or "")
+    return str(params.get("actor_path") or "")
+
+
+def _is_placed_actor_path(path: str) -> bool:
+    """A wire target must be a placed actor, not a Verse property object.
+
+    peek sometimes returns ``Actor.Verse-….__verse_0xHASH_Field`` when SavedActor
+    is empty. Wiring that back fails with Actor not found.
+    """
+    text = (path or "").strip()
+    return bool(text) and ".__verse_" not in text
+
+
+def _placed_target_paths(cap: dict) -> list[str]:
+    return [p for p in (cap.get("state") or {}).get("target_paths") or [] if _is_placed_actor_path(str(p))]
+
+
+def _inverse_wire_ref(params: dict, cap: dict, result: Any) -> Optional[list]:
+    path = _verse_actor_path(cap, params)
+    field = str(params.get("field") or "")
+    if not path or not field:
+        return None
+    prev = _placed_target_paths(cap)
+    if prev:
+        return [{"command": "wire_verse_device_ref",
+                 "params": {"actor_path": path, "field": field, "target_path": prev[0]}}]
+    return [{"command": "set_verse_editable",
+             "params": {"actor_path": path, "field": field, "value": None}}]
+
+
+def _inverse_wire_array(params: dict, cap: dict, result: Any) -> Optional[list]:
+    path = _verse_actor_path(cap, params)
+    field = str(params.get("field") or "")
+    if not path or not field:
+        return None
+    prev = _placed_target_paths(cap)
+    return [{"command": "wire_verse_device_array",
+             "params": {"actor_path": path, "field": field, "target_paths": prev, "replace": True}}]
+
+
+def _inverse_wire_props(params: dict, cap: dict, result: Any) -> Optional[list]:
+    path = _verse_actor_path(cap, params)
+    field = str(params.get("field") or "")
+    if not path or not field:
+        return None
+    prev = list((cap.get("state") or {}).get("asset_paths") or [])
+    return [{"command": "wire_verse_prop_assets",
+             "params": {"actor_path": path, "field": field, "asset_paths": prev}}]
+
+
+def _inverse_set_editable(params: dict, cap: dict, result: Any) -> Optional[list]:
+    path = _verse_actor_path(cap, params)
+    field = str(params.get("field") or "")
+    if not path or not field:
+        return None
+    state = cap.get("state") or {}
+    prev = _placed_target_paths(cap)
+    if prev:
+        return [{"command": "set_verse_editable",
+                 "params": {"actor_path": path, "field": field, "target_path": prev[0]}}]
+    return [{"command": "set_verse_editable",
+             "params": {"actor_path": path, "field": field, "value": state.get("value")}}]
+
+
 def _created_actor(params: dict, cap: Optional[dict], result: Any) -> Optional[dict]:
     """Identity of the actor a spawn/duplicate produced, read back from the result."""
     if not isinstance(result, dict):
@@ -411,6 +489,59 @@ def _created_actor(params: dict, cap: Optional[dict], result: Any) -> Optional[d
         return None
     return {"kind": "actor", "id": guid or path, "guid": guid,
             "label": str(actor.get("label") or ""), "path": path}
+
+
+#: Where each asset-creating handler reports the new asset's path.
+_ASSET_PATH_KEYS = ("dest", "material_path", "material_instance_path", "system_path",
+                    "data_table_path", "widget_path", "asset_path")
+
+
+def _created_blockout(params: dict, cap: Optional[dict], result: Any) -> Optional[list]:
+    """Actors a blockout / area_create placed, read back from the result."""
+    if not isinstance(result, dict):
+        return None
+    created: List[dict] = []
+    seen: set[str] = set()
+
+    def _add(ident: str, path: str = "") -> None:
+        ident = (ident or path or "").strip()
+        if not ident or ident in seen:
+            return
+        seen.add(ident)
+        created.append({"kind": "actor", "id": ident, "guid": "", "label": ident, "path": path or ident})
+
+    for label in result.get("labels") or []:
+        if isinstance(label, str):
+            _add(label)
+    terrain = result.get("terrain") if isinstance(result.get("terrain"), dict) else {}
+    _add(str(terrain.get("actor_path") or ""), str(terrain.get("actor_path") or ""))
+    blockout = result.get("blockout") if isinstance(result.get("blockout"), dict) else {}
+    for label in blockout.get("labels") or []:
+        if isinstance(label, str):
+            _add(label)
+    folder = str(result.get("folder") or blockout.get("folder") or "")
+    if folder and not created:
+        _add(folder, folder)
+    return created or None
+
+
+def _created_asset(params: dict, cap: Optional[dict], result: Any) -> Optional[list]:
+    """Identity of the asset(s) a create/duplicate/import produced, from its result."""
+    if not isinstance(result, dict) or result.get("success") is False:
+        return None
+    paths: List[str] = []
+    for key in _ASSET_PATH_KEYS:
+        value = result.get(key)
+        if isinstance(value, str) and value.startswith("/"):
+            paths.append(value)
+            break
+    imported = result.get("imported")
+    if isinstance(imported, list):
+        paths.extend(p for p in imported if isinstance(p, str) and p.startswith("/"))
+    return [
+        {"kind": "asset", "id": p, "guid": "", "label": p.rsplit("/", 1)[-1].split(".")[0], "path": p}
+        for p in paths
+    ] or None
 
 
 # --- registry ---------------------------------------------------------------------
@@ -447,9 +578,24 @@ CAPTURE: Dict[str, _Spec] = {
         "actor", "attach", _before_attach, _inverse_attach,
         note="the actor had no parent before, and attach_actor cannot detach",
     ),
+    # Verse @editable wiring — inverse lives in the same ScopedEditorTransaction
+    "wire_verse_device_ref": _Spec("verse", "editable", _before_verse_editable, _inverse_wire_ref),
+    "set_verse_editable": _Spec("verse", "editable", _before_verse_editable, _inverse_set_editable),
+    "wire_verse_device_array": _Spec("verse", "editable", _before_verse_editable, _inverse_wire_array),
+    "wire_verse_prop_assets": _Spec("verse", "editable", _before_verse_editable, _inverse_wire_props),
     # actors — creation (the inverse is a delete, handled by the host's carve-out)
     "spawn_actor": _Spec("actor", "exists", None, None, _created_actor),
     "duplicate_actor": _Spec("actor", "exists", None, None, _created_actor),
+    # assets — creation (the inverse is ducky_revert_creation(kind="asset"))
+    "duplicate_asset": _Spec("asset", "exists", None, None, _created_asset),
+    "import_asset": _Spec("asset", "exists", None, None, _created_asset),
+    "create_material": _Spec("material", "exists", None, None, _created_asset),
+    "create_material_instance": _Spec("material", "exists", None, None, _created_asset),
+    "duplicate_material": _Spec("material", "exists", None, None, _created_asset),
+    "create_niagara_system": _Spec("niagara", "exists", None, None, _created_asset),
+    "create_niagara_mesh": _Spec("niagara", "exists", None, None, _created_asset),
+    "create_widget_blueprint": _Spec("umg", "exists", None, None, _created_asset),
+    "create_data_table": _Spec("datatable", "exists", None, None, _created_asset),
     # opaque — arbitrary code, bracketed by a level snapshot
     "execute_python": _Spec(
         "world", "opaque", _before_opaque, None, _created_opaque, _after_opaque,
@@ -458,6 +604,21 @@ CAPTURE: Dict[str, _Spec] = {
     "exec_console_command": _Spec(
         "world", "opaque", _before_opaque, None, _created_opaque, _after_opaque,
         note="a console command's effects are not modelled; only spawns are noticed",
+    ),
+    # worldgen / blockout — created from the result, or a level snapshot for the rest
+    "area_create": _Spec("world", "exists", None, None, _created_blockout),
+    "blockout_layout": _Spec("world", "exists", None, None, _created_blockout),
+    "landscape_create": _Spec(
+        "world", "exists", _before_opaque, None, _created_opaque, _after_opaque,
+    ),
+    "foliage_scatter": _Spec(
+        "world", "", _before_opaque, None, _created_opaque, _after_opaque,
+    ),
+    "terrain_generate": _Spec(
+        "world", "", _before_opaque, None, _created_opaque, _after_opaque,
+    ),
+    "pcg_generate": _Spec(
+        "world", "", _before_opaque, None, _created_opaque, _after_opaque,
     ),
 }
 
@@ -512,6 +673,15 @@ def _summary(
             return f"moved {len(state.get('locations') or [])} actors"
         if command in ("snap_actor_to_ground", "snap_actor_to_grid"):
             return "snapped"
+        if command in ("wire_verse_device_ref", "wire_verse_device_array", "wire_verse_prop_assets",
+                       "set_verse_editable"):
+            field = state.get("field") or ""
+            prev = state.get("target_paths") or state.get("asset_paths") or []
+            if prev:
+                return f"rewired {field} (was {len(prev)})" if field else "rewired"
+            if state.get("value") is not None:
+                return f"set {field}" if field else "set editable"
+            return f"wired {field}" if field else "wired"
     except Exception:
         pass
     return command.replace("_", " ")
@@ -582,6 +752,7 @@ def after(
             except Exception:
                 inverse = None
 
+        diff = state.get("diff")
         if not ok:
             revertable, reason = REVERT_NONE, "the command failed, so nothing changed"
         elif inverse:
@@ -589,6 +760,9 @@ def after(
         elif created:
             # The host decides: it knows whether this run created the thing.
             revertable, reason = REVERT_AUTO, ""
+        elif isinstance(diff, dict) and not diff.get("count"):
+            # Bracketing snapshots agree: nothing to undo, so nothing to hand a human.
+            revertable, reason = REVERT_NONE, "changed nothing the level snapshot could see"
         else:
             revertable = REVERT_MANUAL
             reason = spec.note or "no inverse could be built for this command"
@@ -605,6 +779,7 @@ def after(
             "revertable": revertable,
             "reason": reason,
             "summary": _summary(command, cap, result, created, state),
+            "program": "uefn",
             "outcome": "ok" if ok else "error",
         }
     except Exception:

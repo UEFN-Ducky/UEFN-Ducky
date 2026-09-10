@@ -544,6 +544,20 @@ def save_conversation(conv: Conversation, project_root: str | None = None, *, to
         path = conversation_path(conv.id, project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         t0 = time.perf_counter()
+        incoming_msgs = getattr(conv, "messages", None) or []
+        # list_conversations() strips messages. Saving that stub must not blank history.
+        # A sidebar/open stub that kept only user prompts must not wipe a checkpointed turn.
+        if path.is_file():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+                disk_msgs = existing.get("messages") if isinstance(existing, dict) else None
+                if isinstance(disk_msgs, list) and disk_msgs:
+                    if not incoming_msgs:
+                        conv.messages = disk_msgs
+                    elif _disk_has_assistant_incoming_does_not(incoming_msgs, disk_msgs):
+                        conv.messages = disk_msgs
+            except (json.JSONDecodeError, OSError):
+                pass
         data = conv.to_dict()
         write_json_atomic(path, data)
         try:
@@ -1018,6 +1032,107 @@ def append_message(conv: Conversation, message: dict[str, Any], project_root: st
             conv.updated = fresh.updated
         conv.messages.append(message)
         save_conversation(conv, project_root, touch_updated=True)
+
+
+KILLED_TURN_ERROR = "Closed while the agent was still going."
+
+
+def _disk_has_assistant_incoming_does_not(incoming: list[Any], disk: list[Any]) -> bool:
+    def has_asst(msgs: list[Any]) -> bool:
+        return any(isinstance(m, dict) and m.get("role") == "assistant" for m in msgs)
+
+    return has_asst(disk) and not has_asst(incoming)
+
+
+def upsert_in_flight_assistant(
+    conv: Conversation,
+    message: dict[str, Any],
+    *,
+    run_id: str,
+    project_root: str | None = None,
+) -> None:
+    """Replace the last assistant for ``run_id``, or append if this run has none.
+
+    Mid-turn checkpoints and the final emit share one row so a hard kill cannot
+    leave a stack of partial assistants, and a finished turn does not duplicate.
+    """
+    rid = (run_id or "").strip()
+    payload = dict(message)
+    if rid:
+        payload["run_id"] = rid
+    with _conversation_lock(conv.id):
+        fresh = load_conversation(conv.id, project_root)
+        if fresh is not None:
+            conv.messages = list(fresh.messages)
+            conv.updated = fresh.updated
+        msgs = list(conv.messages or [])
+        idx = -1
+        if rid:
+            for i in range(len(msgs) - 1, -1, -1):
+                m = msgs[i]
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "user":
+                    break
+                if m.get("role") == "assistant" and str(m.get("run_id") or "") == rid:
+                    idx = i
+                    break
+        if idx >= 0:
+            msgs[idx] = payload
+        else:
+            msgs.append(payload)
+        conv.messages = msgs
+        save_conversation(conv, project_root, touch_updated=True)
+
+
+def heal_killed_coding_turn(
+    conv_id: str,
+    run_id: str,
+    *,
+    project_root: str | None = None,
+) -> bool:
+    """If a dead run left only the user prompt, persist an interrupted assistant row."""
+    cid = (conv_id or "").strip()
+    rid = (run_id or "").strip()
+    if not cid or not rid:
+        return False
+    conv = load_conversation(cid, project_root)
+    if conv is None:
+        return False
+    last: dict[str, Any] | None = None
+    for m in reversed(conv.messages or []):
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+            last = m
+            break
+    if last is None:
+        return False
+    if last.get("role") == "assistant":
+        if str(last.get("run_id") or "") != rid or not last.get("incomplete"):
+            return False
+        if str(last.get("error") or "").strip():
+            return False
+        last = dict(last)
+        last["error"] = KILLED_TURN_ERROR
+        upsert_in_flight_assistant(conv, last, run_id=rid, project_root=project_root)
+        return True
+    if last.get("role") != "user":
+        return False
+    upsert_in_flight_assistant(
+        conv,
+        {
+            "role": "assistant",
+            "content": "",
+            "text": "",
+            "ts": time.time(),
+            "coding_agent": (getattr(conv, "coding_agent", "") or "").strip(),
+            "run_id": rid,
+            "incomplete": True,
+            "error": KILLED_TURN_ERROR,
+        },
+        run_id=rid,
+        project_root=project_root,
+    )
+    return True
 
 
 def rename_conversation(conv_id: str, title: str, project_root: str | None = None) -> None:

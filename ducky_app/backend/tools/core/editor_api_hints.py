@@ -176,7 +176,7 @@ Worldgen terrain + foliage (capability-guarded)
 - Terrain: ``terrain_generate`` builds ONE heightfield StaticMesh actor via GeometryScript
   (safe in UEFN). Creating blank Landscape actors from Python is unsafe; do not attempt it.
   Use stamps=[{type:hill|valley|flatten,x,y,radius,strength,height}] to form the land.
-- Foliage: ``foliage_list_sources`` then ``foliage_scatter`` — instances, never one actor per tree.
+- Foliage: ``foliage_list_sources`` then ``foliage_scatter(sources=…)`` — Content Drawer Actor Blueprints (``_C``), never FortStaticMeshActor wrapping a BakeData mesh.
   Still needs source meshes/FoliageTypes; clearing uses ``foliage_clear_generated``.
 - Regenerate = clear/remove generated → generate/scatter again. Tag/folder: Generated/WorldgenDemo.
 - Always ``save_current_level`` after worldgen writes. Verify with camera + screenshot.

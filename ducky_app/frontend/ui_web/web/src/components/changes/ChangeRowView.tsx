@@ -1,3 +1,4 @@
+import { Icons } from "../../icons/Icons";
 import type { ChangesetRunDto } from "../../types/panel";
 import type { ChangeRow } from "../../utils/changesetGrouping";
 import { FileTypeIcon } from "../../verse-editor/components/FileTypeIcon";
@@ -7,11 +8,26 @@ export interface ChangeRowViewProps {
   run: ChangesetRunDto;
   row: ChangeRow;
   busy: boolean;
+  /** This row's run is the one currently reverting — lock the whole row. */
+  reverting?: boolean;
   expanded: boolean;
+  /** Revert-source rows undo the undo (bring the original work back). */
+  redo?: boolean;
+  canRedo?: boolean;
   onToggleExpanded: () => void;
   onOpenFile?: (path: string, name: string) => void;
-  onDiff: () => void;
+  onDiff: (seq?: number) => void;
+  /** Blocked/failed rows: open the reason in a popup (the row itself stays one line). */
+  onDetails?: () => void;
   onRevert: () => void;
+  /** Undo one write in a collapsed row. Newest-first; later writes block. */
+  onRevertStep?: (seq: number) => void;
+  onRedo?: () => void;
+  onSmartRevert?: () => void;
+  highlighted?: boolean;
+  /** Agent for this run is still writing — revert stays locked until Stop. */
+  agentLive?: boolean;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 function timeOfDay(ts: number): string {
@@ -28,35 +44,83 @@ function timeOfDay(ts: number): string {
  *
  * A file row opens the file; an editor row deliberately does not — its path is a
  * `uefn://` target slot with no file behind it, so it gets no file icon and no
- * open handler. Blocked rows carry their reason and offer no revert: nothing
- * happened, so there is nothing to undo.
+ * open handler. Blocked rows stay one line: click opens the reason in a popup;
+ * they offer no revert because nothing happened, so there is nothing to undo.
  */
 export function ChangeRowView({
   run,
   row,
   busy,
+  reverting = false,
   expanded,
+  redo = false,
+  canRedo = false,
   onToggleExpanded,
   onOpenFile,
   onDiff,
+  onDetails,
   onRevert,
+  onRevertStep,
+  onRedo,
+  onSmartRevert,
+  highlighted = false,
+  agentLive = false,
+  onContextMenu,
 }: ChangeRowViewProps) {
   const blocked = row.outcome !== "ok";
+  const openable = blocked ? Boolean(onDetails) : false;
   const collapsed = row.steps.length > 1;
-  const canRevert = !blocked && !row.reverted && !busy && run.source !== "revert" && run.status !== "running";
+  const live = agentLive || run.status === "running";
+  const undoable =
+    !blocked &&
+    !row.reverted &&
+    !(row.kind === "editor" && row.revertable === "none");
+  const canRevert = undoable && !busy && !run.archived && !live;
+  const showRevert = !blocked && !row.reverted;
+  const canDiff = !blocked && row.hasDiff && !row.reverted;
+  const revertTitle = !undoable
+    ? row.reason || "Ducky has no recorded inverse for this one — undo it in UEFN"
+    : run.archived
+      ? "Archived — revert is locked. Unarchive first."
+      : busy
+      ? "Wait — a revert is already in progress"
+      : live
+        ? "Stop the agent first — this run is still going."
+        : redo
+          ? "Bring this change back"
+          : "Undo this change. Redo brings it back.";
 
   const classes = [
     "changes-row",
     `changes-row--${row.kind}`,
     blocked ? `changes-row--${row.outcome}` : "",
     row.reverted ? "changes-row--reverted" : "",
+    highlighted ? "changes-row--focus" : "",
+    reverting ? "changes-row--busy" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <div className={classes}>
-      <div className="changes-row-line">
+    <div
+      className={classes}
+      data-focus-seq={`${run.run_id}:${row.lastSeq}`}
+      aria-busy={reverting || undefined}
+      onContextMenu={reverting ? undefined : onContextMenu}
+    >
+      <div
+        className={`changes-row-line${canDiff || openable ? " changes-row-line--openable" : ""}`}
+        title={blocked ? row.reason : undefined}
+        onClick={
+          canDiff || openable
+            ? (e) => {
+                if ((e.target as HTMLElement).closest("button")) return;
+                if (canDiff) onDiff();
+                else onDetails?.();
+              }
+            : undefined
+        }
+      >
         <span className="changes-row-time">{timeOfDay(row.firstTs)}</span>
         {blocked ? (
           <span className="changes-row-verb changes-row-verb--blocked">
@@ -140,30 +204,93 @@ export function ChangeRowView({
         ) : null}
         {row.reverted ? <span className="changeset-badge">Reverted</span> : null}
 
-        {!blocked && row.hasDiff && !row.reverted ? (
-          <button type="button" className="changeset-btn" onClick={onDiff}>
-            {row.kind === "file" ? "Diff" : "Details"}
-          </button>
-        ) : null}
-        {canRevert && !(row.kind === "editor" && row.revertable === "none") ? (
-          <button type="button" className="changeset-btn" onClick={onRevert}>
-            Revert
-          </button>
-        ) : null}
+        <span className="changes-row-actions">
+          {canDiff ? (
+            <button
+              type="button"
+              className="changeset-btn changeset-btn--icon"
+              title={row.kind === "file" ? "Diff" : "Details"}
+              aria-label={row.kind === "file" ? "Diff" : "Details"}
+              onClick={() => onDiff()}
+            >
+              <Icons.Diff />
+            </button>
+          ) : null}
+          {showRevert && !redo ? (
+            <button
+              type="button"
+              className="changeset-btn changeset-btn--icon"
+              disabled={!canRevert}
+              title={revertTitle}
+              aria-label="Revert"
+              onClick={onRevert}
+            >
+              <Icons.Undo />
+            </button>
+          ) : null}
+          {onSmartRevert && !blocked && !row.reverted ? (
+            <button
+              type="button"
+              className="changeset-btn changeset-btn--icon"
+              title="Smart Revert — pick a chat to unwind this"
+              aria-label="Smart Revert"
+              onClick={onSmartRevert}
+            >
+              <Icons.Sparkles />
+            </button>
+          ) : null}
+          {redo && canRevert ? (
+            <button
+              type="button"
+              className="changeset-btn changeset-btn--icon"
+              title={revertTitle}
+              aria-label="Redo"
+              onClick={onRevert}
+            >
+              <Icons.Redo />
+            </button>
+          ) : null}
+          {canRedo && onRedo ? (
+            <button
+              type="button"
+              className="changeset-btn changeset-btn--icon"
+              title="Redo"
+              aria-label="Redo"
+              onClick={onRedo}
+            >
+              <Icons.Redo />
+            </button>
+          ) : null}
+        </span>
       </div>
-
-      {blocked && row.reason ? (
-        <div className="changes-row-reason" title={row.reason}>
-          {row.reason}
-        </div>
-      ) : null}
 
       {expanded
         ? row.steps.map((step) => (
-            <div key={step.seq} className="changes-step">
+            <div
+              key={step.seq}
+              className={`changes-step${canDiff ? " changes-step--openable" : ""}`}
+              role={canDiff ? "button" : undefined}
+              onClick={canDiff ? () => onDiff(step.seq) : undefined}
+            >
               <span className="changes-row-time">{timeOfDay(step.ts)}</span>
               <span className="changes-step-tool">{step.tool}</span>
               <span className="changes-step-summary">{step.summary}</span>
+              {onRevertStep && canRevert && !step.reverted ? (
+                <button
+                  type="button"
+                  className="changeset-btn changeset-btn--icon"
+                  title="Revert this write"
+                  aria-label={`Revert write ${step.seq}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRevertStep(step.seq);
+                  }}
+                >
+                  <Icons.Undo />
+                </button>
+              ) : step.reverted ? (
+                <span className="changeset-badge">Reverted</span>
+              ) : null}
             </div>
           ))
         : null}

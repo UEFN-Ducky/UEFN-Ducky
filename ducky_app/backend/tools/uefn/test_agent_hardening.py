@@ -191,14 +191,15 @@ def test_get_verse_editables_skips_uasset_walk():
     assert "forbidden_until_compiled" in body
     assert '"execute_python"' not in body.split("forbidden_until_compiled", 1)[1][:400]
     assert "_lookup_many_field_hashes_in_dirs" in src  # still used on the write path
-    assert "if found:" in src
+    assert "if found" in src
     assert "_SCRIPT_PROPS_CACHE[cls_name] = found" in src
-    # Empty reflection must not be cached (the assignment is inside `if found:`).
-    empty_cache = "_SCRIPT_PROPS_CACHE[cls_name] = found\n    return found"
-    # The old poison-cache pattern: assign then return with no `if found`.
     fn = src[src.index("def _script_verse_properties") : src.index("def _class_scoped_hash_scan")]
-    assert "if found:" in fn
-    assert empty_cache not in fn.replace("    if found:\n        _SCRIPT_PROPS_CACHE[cls_name] = found\n    return found", "")
+    assert "required_fields" in fn
+    assert "if found and (not required_fields or set(required_fields).issubset(found)):" in fn
+    # Empty / incomplete maps must not be cached.
+    assert "_SCRIPT_PROPS_CACHE[cls_name] = found" in fn
+    assign_at = fn.index("_SCRIPT_PROPS_CACHE[cls_name] = found")
+    assert "if found" in fn[:assign_at]
 
 
 def test_hard_rules_verse_build_lifecycle():
@@ -222,6 +223,7 @@ def test_hard_rules_never_hand_verse_wiring_to_user():
     assert "Never ask the user to Build Verse" in AGENT_HARD_RULES
     assert "__verse_0x" in AGENT_HARD_RULES
     assert "STOP is advisory" in AGENT_HARD_RULES
+    assert "refuses another wire" in AGENT_HARD_RULES
     assert "tell user to Build Verse" not in AGENT_HARD_RULES
     from backend.agent.prompt import _rules_body
     from backend.server import mcp

@@ -85,15 +85,31 @@ def actor_guid(actor) -> str:
     getter = getattr(actor, "get_actor_guid", None)
     if callable(getter):
         try:
-            return str(getter())
+            return _guid_text(getter())
         except Exception:
             pass
     for prop in ("actor_instance_guid", "actor_guid"):
         try:
-            return str(actor.get_editor_property(prop))
+            return _guid_text(actor.get_editor_property(prop))
         except Exception:
             continue
     return ""
+
+
+def _guid_text(guid) -> str:
+    """``str(unreal.Guid)`` is a struct repr with a transient address — use the real form.
+
+    All-zero GUIDs are treated as missing: Creative devices often report one, and
+    using it as an id collapses every labelled actor into a single Changes row.
+    """
+    to_string = getattr(guid, "to_string", None)
+    text = str(to_string()) if callable(to_string) else str(guid)
+    if text.startswith("<Struct"):
+        return ""
+    compact = text.replace("{", "").replace("}", "").replace("-", "").strip()
+    if not compact or set(compact) <= {"0"}:
+        return ""
+    return text
 
 
 _ACTOR_FIELD_GETTERS = {

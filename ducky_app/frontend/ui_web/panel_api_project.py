@@ -300,10 +300,14 @@ class PanelApiProjectMixin:
 
     # -- changesets (per-run ledger of project writes) ---------------------------
 
-    def list_changesets(self, conv_id: str = "", group_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def list_changesets(
+        self, conv_id: str = "", group_id: str = "", limit: int = 50, archived: bool = False
+    ) -> list[dict[str, Any]]:
         from frontend.ui_web import changesets_api
 
-        return changesets_api.list_changesets(conv_id=conv_id, group_id=group_id, limit=limit)
+        return changesets_api.list_changesets(
+            conv_id=conv_id, group_id=group_id, limit=limit, archived=archived
+        )
 
     def get_changeset(self, run_id: str) -> dict[str, Any]:
         from frontend.ui_web import changesets_api
@@ -315,10 +319,10 @@ class PanelApiProjectMixin:
 
         return changesets_api.entry_contents(run_id, seq)
 
-    def revert_changeset_entry(self, run_id: str, seq: int, force: bool = False) -> dict[str, Any]:
+    def revert_changeset_entry(self, run_id: str, seq: int, force: bool = False, step: bool = False) -> dict[str, Any]:
         from frontend.ui_web import changesets_api
 
-        return changesets_api.revert_entry(run_id, seq, force=force)
+        return changesets_api.revert_entry(run_id, seq, force=force, step=step)
 
     def revert_changeset(self, run_id: str, force: bool = False) -> dict[str, Any]:
         from frontend.ui_web import changesets_api
@@ -329,6 +333,29 @@ class PanelApiProjectMixin:
         from frontend.ui_web import changesets_api
 
         return changesets_api.export_run(run_id)
+
+    def archive_changesets(
+        self, conv_id: str = "", group_id: str = "", run_id: str = "", archived: bool = True
+    ) -> dict[str, int]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.archive_changesets(
+            conv_id=conv_id, group_id=group_id, run_id=run_id, archived=archived
+        )
+
+    def delete_changeset_entries(self, run_id: str, seqs: list[int]) -> dict[str, int]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.delete_changeset_entries(run_id, seqs)
+
+    def clear_changesets(
+        self, conv_id: str = "", group_id: str = "", run_id: str = "", archived_only: bool = False
+    ) -> dict[str, int]:
+        from frontend.ui_web import changesets_api
+
+        return changesets_api.clear_changesets(
+            conv_id=conv_id, group_id=group_id, run_id=run_id, archived_only=archived_only
+        )
 
     def get_verse_lsp_status(self, client_id: str = "") -> dict[str, object]:
         return self._verse_editor.get_lsp_status(client_id or None)
@@ -396,40 +423,13 @@ class PanelApiProjectMixin:
         return {"ok": False, "error": "Tester plugin is disabled — enable it in Settings → Store"}
 
     def tester_list_devices(self) -> dict[str, Any]:
-        """Device outliner for the Tester dock: live graph + workspace Verse sources."""
+        """Device outliner for the Tester dock: UEFN MCP first, listener second, Verse sources last."""
         blocked = self._require_tester_plugin()
         if blocked:
             return blocked
-        from backend.testing.device_sim import device_graph_audit, scan_verse_devices_from_files
+        from backend.testing.live_graph import list_tester_devices
 
-        root = self._tester_project_root()
-        live: dict[str, Any] | None = None
-        err: str | None = None
-        try:
-            from backend.bridge import send_command
-
-            # Short timeout: offline probe must not block Sim / refresh for 30s.
-            live = send_command(
-                "device_graph_snapshot",
-                {
-                    "limit": 100,
-                    "include_editables": True,
-                    "include_events": True,
-                },
-                timeout=2.0,
-            )
-        except Exception as exc:
-            err = str(exc)
-        workspace = scan_verse_devices_from_files(root) if root else {"nodes": [], "count": 0}
-        audit = device_graph_audit(live) if live else None
-        return {
-            "ok": True,
-            "listener_online": live is not None,
-            "live": live,
-            "workspace": workspace,
-            "audit": audit,
-            "error": err,
-        }
+        return list_tester_devices(project_root=self._tester_project_root())
 
     def tester_simulate(
         self,
@@ -446,6 +446,7 @@ class PanelApiProjectMixin:
         from backend.testing.device_sim import simulate_device_event
 
         listener_online = False
+        uefn_online = False
         snapshot: dict[str, Any] | None = None
         raw = str(snapshot_json or "").strip()
         if raw:
@@ -454,6 +455,7 @@ class PanelApiProjectMixin:
                 if isinstance(parsed, dict):
                     snapshot = parsed
                     listener_online = bool(parsed.get("listener_online"))
+                    uefn_online = bool(parsed.get("uefn_online") or parsed.get("epic_mcp_online") or listener_online)
             except _pa.json.JSONDecodeError as exc:
                 return {"ok": False, "error": f"invalid snapshot_json: {exc}", "trace": [], "effects": []}
         if snapshot is None:
@@ -462,6 +464,7 @@ class PanelApiProjectMixin:
             if not (snapshot.get("nodes") or []):
                 snapshot = listed.get("workspace") or snapshot
             listener_online = bool(listed.get("listener_online"))
+            uefn_online = bool(listed.get("uefn_online") or listed.get("epic_mcp_online") or listener_online)
         # Normalize: UI may send {live, workspace} or a flat {nodes, edges}.
         if not (snapshot.get("nodes") or []) and (
             snapshot.get("live") is not None or snapshot.get("workspace") is not None
@@ -471,6 +474,12 @@ class PanelApiProjectMixin:
                 snapshot.get("workspace") if isinstance(snapshot.get("workspace"), dict) else None
             )
             listener_online = bool(snapshot.get("listener_online") or live)
+            uefn_online = bool(
+                snapshot.get("uefn_online")
+                or snapshot.get("epic_mcp_online")
+                or listener_online
+                or live
+            )
             snapshot = live if live and (live.get("nodes") or []) else (workspace or {"nodes": [], "edges": []})
         try:
             result = simulate_device_event(
@@ -479,6 +488,7 @@ class PanelApiProjectMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "trace": [], "effects": []}
         result["listener_online"] = listener_online
+        result["uefn_online"] = uefn_online
         return result
 
     def tester_list_tests(self) -> dict[str, Any]:
@@ -587,7 +597,7 @@ class PanelApiProjectMixin:
         title = f"Test {label}" if label else "Tester"
         prompt = (
             f"Create and run tests for device `{label}`. "
-            "Start with device_graph_snapshot + device_graph_audit, then simulate_device_event, "
+            "Start with tester_list_devices (live graph + audit in one call), then simulate_device_event, "
             "then verse_test_scaffold / verse_test_run as needed."
             if label
             else (

@@ -74,7 +74,7 @@ def terrain_remove_generated(
 
 @plugin_mcp_tool("leveldesign")
 def foliage_list_sources(search: str = "", folder: str = "", limit: int = 40, pretty: bool = False) -> str:
-    """Discover StaticMesh / FoliageType assets usable as foliage sources."""
+    """Discover Content Drawer foliage props (Creative Environments) plus project meshes."""
     return tool_json(
         send_command("foliage_list_sources", {"search": search, "folder": folder, "limit": limit}),
         pretty=pretty,
@@ -98,7 +98,11 @@ def foliage_scatter(
     placement_mode: str = "auto",
     pretty: bool = False,
 ) -> str:
-    """Scatter foliage over a footprint. auto/actors = visible tagged meshes; hism = HISM containers."""
+    """Scatter foliage over a footprint.
+
+    auto/actors places Content Drawer Actor Blueprints (``_C``), the same class
+    drag-drop uses — never FortStaticMeshActor wrapping a raw BakeData mesh.
+    """
     params = {
         "center": center,
         "extent": extent,

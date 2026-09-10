@@ -40,6 +40,24 @@ def test_list_and_export(env) -> None:
     assert export["format"] == "ducky.changeset/1" and export["author"]["name"] == "Hacker"
 
 
+def test_archive_stays_readable_and_locks_revert(env) -> None:
+    root, journal = env
+    journal.end_run("r1", "done", project_root=str(root))
+    out = json.loads(tools.changeset_archive("r1"))
+    assert out["ok"] and out["updated"] == 1
+    listed = json.loads(tools.changeset_list())["runs"]
+    assert listed[0]["archived"] is True and listed[0]["revert_locked"] is True
+    live = json.loads(tools.changeset_list(archived="live"))["runs"]
+    assert live == []
+    export = json.loads(tools.changeset_export("r1"))
+    assert export["run"]["archived"] is True
+    seq = export["files"][0]["seq"]
+    body = json.loads(tools.changeset_contents("r1", seq))
+    assert body["after"] == "v1\n"
+    with pytest.raises(ValueError, match="archived"):
+        tools.changeset_revert("r1")
+
+
 def test_revert_by_owner_leader_and_user(env) -> None:
     root, _ = env
     stranger = identity.bind(RunContext(run_id="x", conv_id="artist", group_id="hub"))

@@ -55,8 +55,15 @@ Three properties of the system made this tractable:
    in the host table as mutating, and a completeness test parses the listener
    tree so no command can be added unclassified.
 
-   Unknown commands classify as **opaque**, never as harmless. Over-recording
-   costs an empty row; under-recording loses a change.
+   Unknown commands classify as **opaque**, never as harmless — with one
+   exception: a Store-plugin command named like a read (`get_*`, `list_*`,
+   `*_capabilities`, …) is a read. Recording those as un-undoable mutations put
+   "list npc definitions" on a user's undo list. Over-recording otherwise costs
+   an empty row; under-recording loses a change.
+
+   A change whose bracketing snapshots matched, or a `create_folder`, is
+   `revertable: none`: nothing to undo, so Revert marks it done rather than
+   listing it as homework.
 
 4. **A journal slot is a target and a facet, not a call.**
    `uefn://actor/<guid>/transform`, `uefn://device/<guid>/settings/<key>`, and so

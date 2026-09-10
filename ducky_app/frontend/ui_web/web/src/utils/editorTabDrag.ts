@@ -9,6 +9,7 @@ export const PLAN_NEST_DRAG_MIME = "application/x-ducky-plan-nest";
 const CROSS_WINDOW_KEY = "duckyTab";
 
 function dndLog(event: string, detail?: unknown): void {
+  if (!import.meta.env.DEV) return;
   console.info(`[tab-dnd] ${event}`, detail ?? "");
 }
 

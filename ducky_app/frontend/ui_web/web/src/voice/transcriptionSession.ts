@@ -141,8 +141,17 @@ async function startPcmCapture(
   stream: MediaStream,
   onFrame: (input: Float32Array, sampleRate: number) => void,
 ): Promise<PcmCapture> {
-  const audioCtx = new AudioContext();
-  if (audioCtx.state === "suspended") await audioCtx.resume();
+  let audioCtx: AudioContext;
+  try {
+    audioCtx = new AudioContext();
+    if (audioCtx.state === "suspended") await audioCtx.resume();
+  } catch (err) {
+    throw new Error(
+      err instanceof Error
+        ? err.message
+        : "The audio device is not available. Pick another output in Settings → Audio.",
+    );
+  }
   const sampleRate = audioCtx.sampleRate || 48000;
   const source = audioCtx.createMediaStreamSource(stream);
   // ponytail: ScriptProcessor is deprecated but works in WebView2 without an AudioWorklet file URL.

@@ -411,7 +411,8 @@ Discord wiring examples:
 | Script | Purpose |
 |--------|---------|
 | `scripts/build_zip.py` | Zip package → `deploy/<id>-<ver>.ducky-plugin.zip` |
-| `scripts/release.py` | zip / `--publish` via `uds_release` (**never** `--sync-seed`) |
+| `scripts/release.py` | `--publish` commits + pushes, then zip / `uds_release` (**never** `--sync-seed`) |
+| `scripts/commit_before_store.py` | Refuse Store upload on a dirty clone |
 
 Skip from zip: `scripts/`, `deploy/`, `.git`, `README.md`, `__pycache__`, secret suffixes.
 

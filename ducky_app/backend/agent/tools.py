@@ -82,6 +82,11 @@ def _hint_for_error(tool: str, text: str) -> str:
         return "Open Blender (addon auto-starts). Restart Blender once after first plugin install."
     if "listener" in low or "connection" in low:
         return _LISTENER_OFFLINE_HINT
+    if "stale reflection" in low or "stale_locked" in low or "no compiled hash" in low:
+        return (
+            "Host already compiled + retried once. Do NOT call wire_* again. "
+            "get_verse_editables on this same device; wire only if mangled_name is set."
+        )
     if tool.startswith("wire_verse"):
         return (
             "Check get_verse_editables mangled_name / resolution_tried, then wire. "
@@ -672,6 +677,16 @@ def _guard_key_name(name: str, args: dict[str, Any]) -> str:
         return name
 
 
+def _record_plugin_sidecar(name: str, args: dict[str, Any], text: str, *, ok: bool) -> None:
+    """Journal a plugin / Epic result. Never fails the tool."""
+    try:
+        from backend.workspace.tool_record import record_tool_result
+
+        record_tool_result(name, args, text, ok=ok)
+    except Exception:
+        pass
+
+
 async def execute_tool(
     name: str,
     arguments: dict[str, Any] | None = None,
@@ -779,7 +794,9 @@ async def _execute_tool_inner(
             )
             ms = int((time.time() - t0) * 1000)
             if _looks_like_tool_failure(name, text):
+                _record_plugin_sidecar(name, args, text, ok=False)
                 return ToolCallResult(ok=False, tool=name, error=text[:8000], duration_ms=ms)
+            _record_plugin_sidecar(name, args, text, ok=True)
             return _with_plan_tick_nudge(
                 name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
             )
@@ -820,7 +837,9 @@ async def _execute_tool_inner(
         ms = int((time.time() - t0) * 1000)
         if _looks_like_tool_failure(name, text):
             hint = _hint_for_error(name, text)
+            _record_plugin_sidecar(name, args, text, ok=False)
             return ToolCallResult(ok=False, tool=name, error=text[:8000], hint=hint, duration_ms=ms)
+        _record_plugin_sidecar(name, args, text, ok=True)
         return _with_plan_tick_nudge(
             name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
         )

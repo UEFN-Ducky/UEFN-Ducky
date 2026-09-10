@@ -155,6 +155,18 @@ def test_a_recorded_guid_that_is_gone_refuses_rather_than_guessing(mod) -> None:
     assert mod._state["destroyed"] == []
 
 
+def test_zero_guid_falls_back_to_path(mod) -> None:
+    actor = FakeActor(
+        label="Snake_Segment_1",
+        path="/ExampleProject1/Map:PersistentLevel.CP_Glass_Sphere_C_UAID_1",
+        guid="00000000000000000000000000000000",
+    )
+    mod._state["actors"] = [actor]
+    result = call(mod, kind="actor", id=actor.path, guid="00000000000000000000000000000000")
+    assert result["ok"] is True and actor.destroyed
+    assert mod._state["destroyed"] == [actor]
+
+
 def test_an_actor_is_removed_inside_a_transaction(mod) -> None:
     actor = FakeActor()
     mod._state["actors"] = [actor]

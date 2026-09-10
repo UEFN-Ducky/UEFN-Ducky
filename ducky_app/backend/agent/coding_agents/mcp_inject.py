@@ -62,6 +62,36 @@ def build_uefn_mcp_servers(settings: PanelSettings | None = None) -> dict[str, A
     return {"uefn": _windows_hidden_bridge_block(block)}
 
 
+def stamp_mcp_identity(
+    uefn: dict[str, Any], identity: RunContext | None, conv_id: str = ""
+) -> dict[str, Any]:
+    """Put run identity on the MCP server env *and* argv.
+
+    Cursor/Codex reuse one stdio process when command+args match and ignore env,
+    so every ducky's tools would land on the first run. ``--ducky-run-id`` makes
+    the argv unique per turn.
+    """
+    env = dict(uefn.get("env") or {})
+    if identity is not None:
+        env.update({k: v for k, v in identity.to_env().items() if v})
+    if conv_id:
+        env["DUCKY_CONV_ID"] = conv_id
+    run_id = ((identity.run_id if identity else "") or env.get("DUCKY_RUN_ID") or "").strip()
+    if run_id:
+        flag = ["--ducky-run-id", run_id]
+        uefn["args"] = list(uefn.get("args") or []) + flag
+        raw = env.get("DUCKY_BRIDGE_ARGV")
+        if raw:
+            try:
+                inner = json.loads(raw)
+            except json.JSONDecodeError:
+                inner = None
+            if isinstance(inner, list):
+                env["DUCKY_BRIDGE_ARGV"] = json.dumps([*inner, *flag])
+    uefn["env"] = env
+    return uefn
+
+
 def write_uefn_mcp_config(
     *,
     conv_id: str = "",
@@ -79,12 +109,7 @@ def write_uefn_mcp_config(
     if conv_id or identity is not None:
         uefn = servers.get("uefn")
         if isinstance(uefn, dict):
-            env = dict(uefn.get("env") or {})
-            if identity is not None:
-                env.update({k: v for k, v in identity.to_env().items() if v})
-            if conv_id:
-                env["DUCKY_CONV_ID"] = conv_id
-            uefn["env"] = env
+            stamp_mcp_identity(uefn, identity, conv_id)
     if extra_servers:
         servers.update(extra_servers)
     payload = {"mcpServers": servers}

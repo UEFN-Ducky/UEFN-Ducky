@@ -34,6 +34,7 @@ from backend.workspace.editor_ops import (
     OpSpec,
     classify,
     slot_path,
+    usable_ident,
 )
 
 log = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ class EditorChange:
     reason: str = ""
     summary: str = ""
     writer: Mapping[str, Any] = field(default_factory=dict)
+    program: str = "uefn"
 
     @property
     def applied(self) -> bool:
@@ -133,15 +135,20 @@ def _opaque_slot(command: str, run_id: str) -> str:
 
 
 def _target_id(targets: list[Mapping[str, Any]], params: Mapping[str, Any]) -> str:
-    """Best stable id for the slot: the listener's guid, else a path from the params."""
+    """Best stable id for the slot: a real guid, else the Unreal path.
+
+    An all-zero GUID is not an id — Creative devices often report one, and using
+    it would collapse every labelled actor into a single Changes row.
+    """
     for target in targets:
-        ident = str(target.get("guid") or target.get("id") or target.get("path") or "")
-        if ident:
-            return ident
+        for key in ("guid", "id", "path"):
+            ident = usable_ident(str(target.get(key) or ""))
+            if ident:
+                return ident
     for key in ("actor_path", "child_path", "asset_path", "material_path", "data_table_path",
-                "path", "source_path", "entity_path"):
+                "path", "source_path", "entity_path", "id"):
         value = params.get(key)
-        if isinstance(value, str) and value.strip():
+        if isinstance(value, str) and usable_ident(value):
             return value.strip()
     return ""
 
@@ -192,15 +199,20 @@ def build(
         reason = reason or "the editor did not report how to undo this"
     elif spec.mutates == MUT_OPAQUE and not side:
         reason = reason or spec.note or "this command's effects cannot be modelled"
+    elif revertable == REVERT_NONE:
+        reason = reason or spec.note
 
     kind = str(side.get("kind") or spec.kind)
     facet = str(side.get("facet") or spec.slot)
     writer = identity.current_writer(tool=command)
-    slot = (
-        _opaque_slot(command, str(writer.get("run_id") or ""))
-        if spec.mutates == MUT_OPAQUE
-        else slot_path(kind, _target_id(targets, params), facet)
-    )
+    program = str(side.get("program") or "uefn").strip() or "uefn"
+    explicit_slot = str(side.get("slot") or "").strip()
+    if explicit_slot:
+        slot = explicit_slot
+    elif spec.mutates == MUT_OPAQUE and program == "uefn":
+        slot = _opaque_slot(command, str(writer.get("run_id") or ""))
+    else:
+        slot = slot_path(kind, _target_id(targets, params), facet, program=program)
     return EditorChange(
         command=command,
         kind=kind,
@@ -217,6 +229,7 @@ def build(
         reason=reason,
         summary=str(side.get("summary") or command.replace("_", " ")),
         writer=writer,
+        program=program,
     )
 
 
@@ -253,6 +266,34 @@ def sidecar_from(body: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
     """The listener's capture payload, if this build of the listener sends one."""
     side = (body or {}).get("_ducky")
     return side if isinstance(side, Mapping) else None
+
+
+def extract_ducky(text: Any) -> Mapping[str, Any] | None:
+    """``_ducky`` block from a plugin tool's JSON result, or None."""
+    if not isinstance(text, str) or "_ducky" not in text:
+        return None
+    try:
+        obj = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    side = obj.get("_ducky")
+    return side if isinstance(side, dict) else None
+
+
+def record_sidecar_text(
+    command: str,
+    params: Mapping[str, Any] | None,
+    text: Any,
+    *,
+    ok: bool,
+) -> EditorChange | None:
+    """Record a plugin tool result that embedded ``_ducky``. Never raises."""
+    side = extract_ducky(text)
+    if not side:
+        return None
+    return record(command, params, {"_ducky": side}, ok=ok)
 
 
 def _jsonable(value: Any) -> Any:
@@ -360,10 +401,12 @@ class JournalEditorObserver:
             "command": change.command,
             "kind": change.kind,
             "facet": change.spec.slot,
+            "params": _jsonable(change.params),
             "targets": _jsonable(list(change.targets)),
             "inverse": _jsonable(list(change.inverse)),
             "created": _jsonable(list(change.created)),
             "revertable": change.revertable,
             "reason": change.reason,
             "summary": change.summary,
+            "program": change.program,
         }

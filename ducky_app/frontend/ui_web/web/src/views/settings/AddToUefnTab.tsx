@@ -1,7 +1,8 @@
 import { getApi } from "../../hooks/usePanelApi";
 import { useProjectFilesSettings } from "../../contexts/ProjectFilesSettingsContext";
 import { useUiTarget } from "../../ui-targets/registry";
-import { redoAppWalkthrough } from "../../walkthrough";
+import { requestShowChatComposer } from "../../navigation/openChatComposer";
+import { listHostTours, redoTour } from "../../walkthrough";
 import { AppSection } from "./AppSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { SettingsToggleRow } from "./SettingsToggleRow";
@@ -100,16 +101,27 @@ export function AddToUefnTab() {
         <GeneralSectionHeader
           icon={<TourIcon />}
           title="Walkthrough"
-          description="Replay the first-run tour of the app layout, Settings tabs, Store, and LLM keys."
+          description="Replay one tour at a time — Welcome, Chat, or a Settings tab."
         />
-        <div className="general-tab-btn-row" style={{ marginTop: 4 }}>
-          <button
-            type="button"
-            className="settings-btn general-tab-btn-primary"
-            onClick={() => void redoAppWalkthrough()}
-          >
-            Replay app walkthrough
-          </button>
+        <div className="walkthrough-list">
+          {listHostTours().map((tour) => (
+            <div key={tour.id} className="walkthrough-list-row">
+              <div className="walkthrough-list-copy">
+                <div className="walkthrough-list-title">{tour.title}</div>
+                {tour.description ? <div className="walkthrough-list-desc">{tour.description}</div> : null}
+              </div>
+              <button
+                type="button"
+                className="settings-btn"
+                onClick={() => {
+                  if (tour.id === "chat.composer") requestShowChatComposer();
+                  void redoTour(tour.id);
+                }}
+              >
+                Replay
+              </button>
+            </div>
+          ))}
         </div>
       </section>
 

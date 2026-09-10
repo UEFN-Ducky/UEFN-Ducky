@@ -149,6 +149,16 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error", "items": []}
 
+    def duckyos_store_versions(self, slug: str) -> dict[str, Any]:
+        from frontend.duckyos_account import DuckyOSAccountError, store_item_versions
+
+        try:
+            return store_item_versions(str(slug or ""))
+        except DuckyOSAccountError as exc:
+            return {"ok": False, "error": exc.message, "code": exc.code, "versions": []}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "code": "error", "versions": []}
+
     def duckyos_store_download(
         self, slug: str, version: str = "", is_update: bool = False
     ) -> dict[str, Any]:
@@ -450,7 +460,6 @@ class PanelApiStoreMixin:
             "compile_verse_project",
             "get_mcp_tools_catalog",
             "test_mcp_plugin",
-            "get_models",
             "voice_transcribe_audio",
             "voice_create_realtime_token",
             "voice_summarize_reply",

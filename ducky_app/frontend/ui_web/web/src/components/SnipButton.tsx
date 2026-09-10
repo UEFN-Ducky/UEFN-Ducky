@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icons } from "../icons/Icons";
 import { getApi } from "../hooks/usePanelApi";
+import { useUiTarget } from "../ui-targets/registry";
 import { captureSnipFile } from "./snipCapture";
 
 interface SnipButtonProps {
@@ -12,6 +13,11 @@ interface SnipButtonProps {
  * the composer as an image attachment. */
 export function SnipButton({ disabled, onCaptured }: SnipButtonProps) {
   const [busy, setBusy] = useState(false);
+  const uiTargetRef = useUiTarget("chat.composer.snip", {
+    kind: "button",
+    label: "Snip",
+    route: "chat",
+  });
   if (!getApi()?.snip_screen) return null;
 
   const handleClick = async () => {
@@ -27,6 +33,7 @@ export function SnipButton({ disabled, onCaptured }: SnipButtonProps) {
 
   return (
     <button
+      ref={uiTargetRef}
       type="button"
       className={`snip-btn${busy ? " snip-btn--busy" : ""}`}
       title="Snip a region of the screen into the chat"

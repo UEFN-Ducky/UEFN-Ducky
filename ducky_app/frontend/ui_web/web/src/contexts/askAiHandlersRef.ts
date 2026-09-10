@@ -5,6 +5,8 @@ export interface AskAiPayload {
   filePath: string;
   startLine: number;
   endLine: number;
+  /** If set, this is the composer text — used by Smart Revert. */
+  draft?: string;
 }
 
 export interface AskAiHandlers {

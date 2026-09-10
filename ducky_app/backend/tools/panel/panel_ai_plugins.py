@@ -81,7 +81,18 @@ def register(api) -> None:
 ```
 
 Also: `api.listener(cmd, params)`, `api.is_enabled()`, `api.log()`, `api.plugin_id`,
-`api.register_secret_test`, `api.register_llm_provider`, `api.register_ide_hookup`.
+`api.changeset.record(...)`, `api.connection(fn, label=…)`, `api.register_secret_test`,
+`api.register_llm_provider`, `api.register_ide_hookup`.
+
+## Changes ledger (`api.changeset` / `_ducky`)
+
+Mutating tools should record so Changes → Revert can unwind them. Slot:
+`{plugin_id}://{kind}/{id}/{facet}` (e.g. `blender://object/Cube/mesh`).
+
+1. **Sidecar** — return JSON with `_ducky: { program, kind, slot, before, inverse, created, revertable, summary, targets }`. The host journals it after the tool succeeds.
+2. **`api.changeset.record(command=..., kind=..., ident=..., facet=..., inverse=[...], ...)`** for a batch that is not one MCP call.
+
+Revert posts `inverse` back to that program (`execute_tool`), not UEFN `send_command`. Reads stay unrecorded.
 
 Enable/disable/uninstall the installed copy with `ducky_store_set_enabled` /
 `ducky_store_remove`. First enable of an AI plugin needs a user trust confirm

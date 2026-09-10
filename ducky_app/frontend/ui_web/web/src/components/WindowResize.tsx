@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
-import { isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
+import {
+  beginNativeWindowResize,
+  isNativeWindowChrome,
+  markNativeWindowChromeBody,
+  type ResizeEdge as Edge,
+} from "../utils/nativeWindowChrome";
 import {
   MAIN_MIN_HEIGHT,
   MAIN_MIN_WIDTH,
   SIDEBAR_ONLY_MIN_WIDTH,
 } from "../constants/windowLayout";
 
-type Edge = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
-
 const GRIPS: Edge[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+const NATIVE_GRIPS: Edge[] = ["n", "nw", "ne"];
 
 function applyResize(
   edge: Edge,
@@ -42,9 +46,8 @@ interface WindowResizeProps {
 }
 
 /**
- * Edge/corner resize grips for NON-Windows platforms. On Windows the OS owns L/R/B
- * natively (see win_frameless.py); we only render a top grip. Other platforms drive
- * JS set_window_bounds via grips portalled to <body>.
+ * Windows keeps its native L/R/B frame; top/corner overlays enter the same OS
+ * resize loop for main and focus windows. Other platforms resize through JS.
  */
 export function WindowResize({ focusMode = false, compactMode = false }: WindowResizeProps) {
   const [useNative, setUseNative] = useState(() => isNativeWindowChrome());
@@ -82,6 +85,17 @@ export function WindowResize({ focusMode = false, compactMode = false }: WindowR
   };
 
   const onPointerDown = (edge: Edge) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    // Mouse input uses mousedown below so click detail preserves native border
+    // double-click (vertical stretch). Touch/pen still enter the native loop here.
+    if (isNativeWindowChrome()) {
+      if (e.pointerType !== "mouse") {
+        e.preventDefault();
+        e.stopPropagation();
+        beginNativeWindowResize(edge);
+      }
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     const api = getApi();
@@ -138,11 +152,7 @@ export function WindowResize({ focusMode = false, compactMode = false }: WindowR
     });
   };
 
-  // Windows: OS frame handles L/R/B. Main window keeps a thin top grip (caption
-  // stripped). Focus windows skip it — that strip sat on top of the hover/drag
-  // band and stole press-and-hold as a resize instead of a move.
-  const edges = useNative ? (focusMode ? [] : (["n"] as Edge[])) : GRIPS;
-  if (edges.length === 0) return null;
+  const edges = useNative ? NATIVE_GRIPS : GRIPS;
 
   return createPortal(
     <>
@@ -155,6 +165,12 @@ export function WindowResize({ focusMode = false, compactMode = false }: WindowR
             edge.startsWith("n") ? " focus-top-edge-grip" : ""
           }`}
           onPointerDown={onPointerDown(edge)}
+          onMouseDown={(e) => {
+            if (e.button !== 0 || !isNativeWindowChrome()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            beginNativeWindowResize(edge, e.detail === 2);
+          }}
         />
       ))}
     </>,

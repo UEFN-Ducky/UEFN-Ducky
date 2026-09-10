@@ -2,6 +2,7 @@ import { useRef, type RefObject } from "react";
 import { DropdownPanel } from "./DropdownPanel";
 import { ContextUsagePanel } from "./ContextUsagePanel";
 import type { ContextUsage, SessionFile, AgentMode } from "../types/panel";
+import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import { fmtTokens } from "../utils/contextFormat";
 
 interface ContextMeterProps {
@@ -53,6 +54,12 @@ export function ContextMeter({
   onClearDraft,
 }: ContextMeterProps) {
   const anchorRef = useRef<HTMLButtonElement>(null);
+  const uiTargetRef = useUiTarget("chat.composer.usage", {
+    kind: "button",
+    label: "Context usage",
+    route: "chat",
+  });
+  const triggerRef = useMergedRef(anchorRef, uiTargetRef);
   const limit = Math.max(1, contextLimit);
   const used = Math.max(0, usedTokens);
   const ratio = Math.min(1, used / limit);
@@ -66,7 +73,7 @@ export function ContextMeter({
   const lastRead = lastCall?.cache_read_tokens ?? 0;
   const lastWrite = lastCall?.cache_write_tokens ?? 0;
   const lastIn = lastCall?.input_tokens ?? 0;
-  const cacheChip =
+  const cacheHint =
     lastRead > 0 ? `${fmtTokens(lastRead)} cached` : lastWrite > 0 ? "cache write" : lastIn > 0 ? "cache miss" : "";
 
   const reportUsage: ContextUsage = usage ?? {
@@ -103,15 +110,14 @@ export function ContextMeter({
       </DropdownPanel>
 
       <button
-        ref={anchorRef}
+        ref={triggerRef}
         type="button"
         onClick={() => onTogglePanel?.()}
-        aria-label={`Context ${fmtTokens(used)} of ${fmtTokens(limit)} tokens${cacheChip ? ` · ${cacheChip}` : ""}`}
+        aria-label={`Context ${fmtTokens(used)} of ${fmtTokens(limit)} tokens${cacheHint ? ` · ${cacheHint}` : ""}`}
         aria-expanded={panelOpen}
         className="context-meter-btn"
-        title={cacheChip || undefined}
+        title="Context"
       >
-        {cacheChip ? <span className="context-meter-cache-chip">{cacheChip}</span> : null}
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
           <circle
             cx={size / 2}

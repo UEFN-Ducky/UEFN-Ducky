@@ -10,9 +10,10 @@ from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
 from backend.testing.device_sim import (
     device_graph_audit as _audit,
-    scan_verse_devices_from_files,
     simulate_device_event as _simulate,
 )
+from backend.testing.live_graph import list_tester_devices as _list_tester_devices
+from backend.testing.live_graph import snapshot_live
 from backend.testing.verse_harness import (
     add_verse_test_case,
     compare_simulation_effects,
@@ -35,7 +36,11 @@ def _project_root() -> str:
 
 
 def _snapshot_live(**kwargs: Any) -> dict:
-    return send_command("device_graph_snapshot", kwargs)
+    """UEFN MCP first, listener second. Raises if neither can census the level."""
+    snap, _source, err = snapshot_live(kwargs)
+    if snap is not None:
+        return snap
+    raise ConnectionError(err or "UEFN offline — no live device graph")
 
 
 @plugin_mcp_tool("tester")
@@ -49,9 +54,9 @@ def device_graph_snapshot(
 ) -> str:
     """Snapshot placed devices as nodes + wiring edges for offline simulation.
 
-    Listener required. Returns nodes (label/class/kind/editables) and edges
-    (verse @editable refs + creative event bindings). Use with simulate_device_event
-    and device_graph_audit — no play session needed.
+    UEFN MCP first, Ducky listener second. Returns nodes (label/class/kind/editables)
+    and edges (verse @editable refs + creative event bindings). Use with
+    simulate_device_event and device_graph_audit — no play session needed.
     """
     result = _snapshot_live(
         label_filter=label_filter,
@@ -73,8 +78,8 @@ def simulate_device_event(
     """Offline: propagate an event through the device wiring graph.
 
     Pass a prior device_graph_snapshot as snapshot_json (JSON string), or leave
-    empty to fetch a fresh snapshot (listener required). Returns an ordered
-    trace of what fires and player-visible effects (grant_item, teleport, …).
+    empty to fetch a fresh snapshot (UEFN MCP first, listener second). Returns an
+    ordered trace of what fires and player-visible effects (grant_item, teleport, …).
     """
     if snapshot_json.strip():
         snapshot = json.loads(snapshot_json)
@@ -257,30 +262,11 @@ def actor_state_diff(
 
 @plugin_mcp_tool("tester")
 def tester_list_devices(pretty: bool = False) -> str:
-    """List devices for the Tester panel: live graph when listener online, else Verse sources."""
-    root = _project_root()
-    live: dict[str, Any] | None = None
-    try:
-        live = _snapshot_live(limit=100)
-    except Exception as exc:
-        live = None
-        offline_err = str(exc)
-    else:
-        offline_err = None
+    """List devices for the Tester panel: live graph via UEFN MCP, else listener, else Verse sources.
 
-    workspace = scan_verse_devices_from_files(root) if root else {"nodes": [], "count": 0}
-    audit = _audit(live) if live else None
-    return tool_json(
-        {
-            "ok": True,
-            "listener_online": live is not None,
-            "live": live,
-            "workspace": workspace,
-            "audit": audit,
-            "error": offline_err,
-        },
-        pretty=pretty,
-    )
+    `uefn_online` is cheap Connections health (Epic TCP + listener GET), not snapshot success.
+    """
+    return tool_json(_list_tester_devices(project_root=_project_root()), pretty=pretty)
 
 
 @plugin_mcp_tool("tester")

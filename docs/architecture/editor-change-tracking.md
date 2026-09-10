@@ -36,7 +36,7 @@ agent tool call
 |---|---|---|
 | Answers | Does this command mutate? What kind of thing, what facet, what is the most it could be revertable? | What did this look like before, and what would put it back? |
 | Needs | Nothing | `unreal`, and to run inside the tick |
-| Unknown command | `opaque` — recorded, never assumed harmless | No spec, no sidecar; the host still records it |
+| Unknown command | `opaque` — recorded, never assumed harmless (unless named `get_*` / `list_*` / `*_capabilities`: a plugin read) | No spec, no sidecar; the host still records it |
 
 `ducky_capture` keeps every `unreal` and `listener.*` import inside a function,
 so the host test suite can load it against fakes and check the two tables agree.

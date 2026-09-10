@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { getAskUserSessionForConv, subscribeAskUser } from "../ask-user";
 import { Icons } from "../icons/Icons";
 import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../hooks/useChatCollapseState";
@@ -23,7 +23,6 @@ import {
 import { formatToolDuration, humanToolLabel } from "../utils/agentActivity";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
-import { getApi } from "../hooks/usePanelApi";
 import { InlineStopButton } from "./InlineStopButton";
 
 interface ToolExecutionCardProps {
@@ -102,19 +101,6 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   externalAgent = false,
   embedded = false,
 }: ToolExecutionCardProps) {
-  // #region agent log
-  const _renderStart = performance.now();
-  useLayoutEffect(() => {
-    const _dt = performance.now() - _renderStart;
-    if (_dt > 200) {
-      try {
-        const m = toolMeta(intent, result);
-        const rs = typeof m.result === "string" ? m.result.length : JSON.stringify(m.result ?? "").length;
-        getApi()?.report_ui_perf([{ kind: "dbg_render", name: `toolcard:${m.name}`, duration_ms: Math.round(_dt), result_len: rs }]);
-      } catch { /* ignore */ }
-    }
-  });
-  // #endregion
   const meta = toolMeta(intent, result);
   const isCancelled = meta.status === "cancelled";
   const isRunning = !isCancelled && (!result || meta.status === "pending");

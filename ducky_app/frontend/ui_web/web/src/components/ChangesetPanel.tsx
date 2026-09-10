@@ -10,8 +10,12 @@ import {
   changesetRunSummary,
   groupChangesetEntries,
   groupEditorEntries,
+  redoTargetForPath,
+  revertFailureMessage,
+  revertHost,
+  runDisplayStatus,
+  runRedoTargetId,
   sortRunsNewestFirst,
-  statusLabel,
   type ChangeRow,
   type ChangesetFileRow,
   type EditorChangeRow,
@@ -54,6 +58,7 @@ const LIVE_EVENT_TYPES = new Set([
   "files_reverted",
   "file_guard",
   "editor_op",
+  "changeset_row",
 ]);
 
 /**
@@ -121,38 +126,43 @@ export function ChangesetPanel({
 
   const reportRevert = useCallback(
     async (label: string, result: ChangesetRevertResult, retry: () => Promise<ChangesetRevertResult | null>) => {
-      if (result.errors.length) setError(result.errors.join("; "));
+      let next = result;
       setManual(result.manual ?? []);
       if (result.skipped_modified.length) {
         const names = result.skipped_modified.map((s) => basename(s.path)).join(", ");
         const force = await confirm({
-          title: "Some files changed since",
+          title: "Not reverted",
           message: `${names} ${result.skipped_modified.length === 1 ? "was" : "were"} edited after this ${label}. Restore ${result.skipped_modified.length === 1 ? "it" : "them"} anyway? Later edits will be lost.`,
           confirmLabel: "Revert anyway",
           danger: true,
         });
         if (force) {
           const forced = await retry();
-          if (forced?.errors.length) setError(forced.errors.join("; "));
-          if (forced?.manual) setManual(forced.manual);
+          if (forced) {
+            next = forced;
+            if (forced.manual) setManual(forced.manual);
+          }
         }
       }
+      setError(revertFailureMessage(next));
       await refresh();
     },
     [confirm, refresh],
   );
 
   const revertRun = useCallback(
-    async (run: ChangesetRunDto) => {
+    async (run: ChangesetRunDto, isRedo = run.source === "revert") => {
       const api = getApi();
       if (!api?.revert_changeset) return;
       const summary = changesetRunSummary(run);
       const who = run.ducky_name || "this run";
       const ok = await confirm({
-        title: "Revert run",
-        message: `Restore the ${summary.files} file${summary.files === 1 ? "" : "s"} ${who} changed to their content before this run? The revert is recorded and can itself be reverted.`,
-        confirmLabel: "Revert",
-        danger: true,
+        title: isRedo ? "Bring back" : "Revert run",
+        message: isRedo
+          ? `Restore the work this revert undid? Redo puts files and editor changes back as they were after the original run.`
+          : `Restore the ${summary.files} file${summary.files === 1 ? "" : "s"} ${who} changed to their content before this run? Redo brings them back if that was a mistake.`,
+        confirmLabel: isRedo ? "Redo" : "Revert",
+        danger: !isRedo,
       });
       if (!ok) return;
       setBusyRun(run.run_id);
@@ -262,13 +272,13 @@ export function ChangesetPanel({
   }, []);
 
   if (runs.length === 0) {
-    if (loading) return <div className="changeset-empty">Loading changes…</div>;
+    if (loading) return <div className="changeset-empty">Loading ledger…</div>;
     if (fallbackFiles.length === 0) {
       return (
         <div className="context-usage-panel-files-empty">
           No files edited in this chat yet.
           <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
-            See all changes in this project →
+            Open the project ledger →
           </button>
         </div>
       );
@@ -292,7 +302,7 @@ export function ChangesetPanel({
           </button>
         ))}
         <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
-          See all changes in this project →
+          Open the project ledger →
         </button>
       </div>
     );
@@ -325,14 +335,16 @@ export function ChangesetPanel({
         const refused: ChangeRow[] = blockedRows(run);
         const summary = changesetRunSummary(run);
         const busy = busyRun === run.run_id;
-        const canRevert = !summary.running && !summary.reverted && !busy;
+        const canRevert = !summary.reverted && !busy && !run.archived;
+        const isRedo = run.source === "revert";
+        const redoId = isRedo ? "" : runRedoTargetId(run, runs);
         const meta = [shortModelLabel(run.model || ""), formatSavedAt(Math.floor(run.started))].filter(Boolean).join(" · ");
         return (
           <section key={run.run_id} className="changeset-run">
             <div className="changeset-run-head">
               <span className="changeset-run-title">{run.ducky_name || (run.source === "revert" ? "Revert" : "Ducky")}</span>
               <span className={`changeset-status changeset-status--${run.status}`}>
-                {statusLabel(run.status)}
+                {runDisplayStatus(run, summary)}
                 {summary.running && agentRunning ? "…" : ""}
               </span>
               {summary.conflicts > 0 ? (
@@ -353,15 +365,33 @@ export function ChangesetPanel({
               <span className="changeset-run-meta" title={run.run_id}>
                 {meta}
               </span>
-              {run.source !== "revert" ? (
+              {canRevert ? (
                 <button
                   type="button"
                   className="changeset-btn"
-                  disabled={!canRevert}
-                  title={summary.running ? "Wait for the run to finish" : "Restore every file this run changed"}
-                  onClick={() => void revertRun(run)}
+                  title={
+                    isRedo
+                      ? "Bring back the work this revert undid"
+                      : summary.running
+                        ? "Undo everything so far. The run is still going and may write again."
+                        : "Restore every file this run changed"
+                  }
+                  onClick={() => void revertRun(run, isRedo)}
                 >
-                  Revert all
+                  {isRedo ? "Redo" : "Revert all"}
+                </button>
+              ) : null}
+              {redoId ? (
+                <button
+                  type="button"
+                  className="changeset-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    const target = revertHost(runs, redoId);
+                    if (target) void revertRun(target, true);
+                  }}
+                >
+                  Redo
                 </button>
               ) : null}
             </div>
@@ -410,14 +440,29 @@ export function ChangesetPanel({
                       Diff
                     </button>
                   ) : null}
-                  {!row.reverted && run.source !== "revert" ? (
+                  {!row.reverted ? (
                     <button
                       type="button"
                       className="changeset-btn"
                       disabled={!canRevert}
                       onClick={() => void revertFile(run, row)}
                     >
-                      Revert
+                      {run.source === "revert" ? "Redo" : "Revert"}
+                    </button>
+                  ) : redoTargetForPath(row.path, row.revertedByRun, runs) ? (
+                    <button
+                      type="button"
+                      className="changeset-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        const target = redoTargetForPath(row.path, row.revertedByRun, runs);
+                        const host = revertHost(runs, target?.runId);
+                        if (!host) return;
+                        if (target?.seq) void revertFile(host, { ...row, lastSeq: target.seq });
+                        else void revertRun(host, true);
+                      }}
+                    >
+                      Redo
                     </button>
                   ) : null}
                 </div>
@@ -444,14 +489,29 @@ export function ChangesetPanel({
                       Details
                     </button>
                   ) : null}
-                  {!row.reverted && row.revertable !== "none" && run.source !== "revert" ? (
+                  {!row.reverted && row.revertable !== "none" ? (
                     <button
                       type="button"
                       className="changeset-btn"
                       disabled={!canRevert}
                       onClick={() => void revertRow(run, row.lastSeq, row.label)}
                     >
-                      Revert
+                      {run.source === "revert" ? "Redo" : "Revert"}
+                    </button>
+                  ) : row.reverted && redoTargetForPath(row.slot, row.revertedByRun, runs) ? (
+                    <button
+                      type="button"
+                      className="changeset-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        const target = redoTargetForPath(row.slot, row.revertedByRun, runs);
+                        const host = revertHost(runs, target?.runId);
+                        if (!host) return;
+                        if (target?.seq) void revertRow(host, target.seq, row.label);
+                        else void revertRun(host, true);
+                      }}
+                    >
+                      Redo
                     </button>
                   ) : null}
                 </div>
@@ -474,10 +534,10 @@ export function ChangesetPanel({
         );
       })}
       <button type="button" className="changeset-see-all" onClick={() => requestOpenChangesTab()}>
-        See all changes in this project →
+        Open the project ledger →
       </button>
       {diff ? (
-        <Modal open onClose={() => setDiff(null)} title={diff.title} width={760} zIndex={100020}>
+        <Modal open onClose={() => setDiff(null)} title={diff.title} width={880} zIndex={100020}>
           <div className="changeset-diff-modal">
             {diff.json ? (
               <JsonDiffView before={diff.before} after={diff.after} summary={diff.summary} />

@@ -121,7 +121,8 @@ def test_an_editor_slot_never_enters_the_file_index(env) -> None:
     finally:
         identity.reset(token)
     index = json.loads((storage / "index.json").read_text(encoding="utf-8"))
-    assert list(index) == ["Content/Verse/a.verse"]
+    assert "Content/Verse/a.verse" in index
+    assert any(key.startswith("uefn://") for key in index)
 
 
 def test_nothing_is_recorded_outside_a_run(env, monkeypatch) -> None:

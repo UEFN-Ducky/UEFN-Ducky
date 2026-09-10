@@ -7,9 +7,16 @@ interface ChatInputResizeHandleProps {
   onTap?: () => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  label?: string;
 }
 
-export function ChatInputResizeHandle({ onDrag, onTap, onDragStart, onDragEnd }: ChatInputResizeHandleProps) {
+export function ChatInputResizeHandle({
+  onDrag,
+  onTap,
+  onDragStart,
+  onDragEnd,
+  label = "Resize chat input",
+}: ChatInputResizeHandleProps) {
   const [dragging, setDragging] = useState(false);
   const startY = useRef(0);
   const lastY = useRef(0);
@@ -71,7 +78,7 @@ export function ChatInputResizeHandle({ onDrag, onTap, onDragStart, onDragEnd }:
       onPointerDown={onPointerDown}
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize chat input"
+      aria-label={label}
     />
   );
 }

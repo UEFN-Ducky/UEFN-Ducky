@@ -44,6 +44,30 @@ export const Icons = {
       <path d="M10 12h4" />
     </svg>
   ),
+  Inbox: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
+    </svg>
+  ),
+  Undo: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+    </svg>
+  ),
+  Redo: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 000 11H13" />
+    </svg>
+  ),
+  Diff: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="4" width="7" height="16" rx="1" />
+      <rect x="14" y="4" width="7" height="16" rx="1" />
+    </svg>
+  ),
   Chat: () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
@@ -157,8 +181,8 @@ export const Icons = {
     </svg>
   ),
   Sparkles: () => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 3v18M3 12h18M15.5 8.5l3-3M5.5 15.5l3-3M15.5 15.5l3 3M5.5 8.5l3 3" />
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
     </svg>
   ),
   Patreon: () => (
@@ -233,6 +257,11 @@ export const Icons = {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
       <rect x="6" y="4" width="4" height="16" rx="1" />
       <rect x="14" y="4" width="4" height="16" rx="1" />
+    </svg>
+  ),
+  Stop: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
     </svg>
   ),
   Play: () => (

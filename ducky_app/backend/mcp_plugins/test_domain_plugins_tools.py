@@ -39,3 +39,4 @@ def test_builtin_groups_ducky_only() -> None:
 
     assert BUILTIN_GROUP_IDS == (BUILTIN_DUCKY,)
     assert "ping" in BRIDGE_TOOLS
+    assert "dismiss_uefn_modal" in BRIDGE_TOOLS

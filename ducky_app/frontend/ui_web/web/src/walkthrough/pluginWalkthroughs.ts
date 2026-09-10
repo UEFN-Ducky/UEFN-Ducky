@@ -1,5 +1,13 @@
 import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { getTour, listTourIds } from "./WalkthroughService";
 import type { PluginWalkthroughManifest, WalkthroughDef } from "./types";
+
+/** Slice of plugin contributions needed to fill gateway tour gaps. */
+export type GatewayWalkthroughContrib = {
+  ide_hookups?: Array<{ plugin_id?: string }>;
+  llm_coding_agents?: Array<{ plugin_id?: string }>;
+  settings_sections?: Array<{ tab?: string; plugin_id?: string; title?: string; description?: string }>;
+};
 
 function selectLlmsProvider(id: string | null): void {
   window.dispatchEvent(new CustomEvent("ducky:llms-select-provider", { detail: { id } }));
@@ -82,6 +90,137 @@ async function enterLlmsWalkthroughStep(
     }
   }
   if (settingsTab) await wait(350);
+}
+
+function pluginKey(raw: PluginWalkthroughManifest): string {
+  return String(raw.plugin_id || raw.id || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^plugin\./, "");
+}
+
+function samePlugin(id: string | undefined, pluginId: string): boolean {
+  return String(id || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^plugin\./, "") === pluginId;
+}
+
+function findStep(
+  steps: PluginWalkthroughManifest["steps"],
+  pred: (target: string) => boolean,
+): PluginWalkthroughManifest["steps"][number] | undefined {
+  return steps.find((s) => pred(String(s?.target || "").trim()));
+}
+
+/**
+ * Gateway tours must cover every fillable slide section that plugin actually has
+ * (key, Test & Save, IDE, coding agent, plugin settings, Back).
+ */
+export function expandGatewayManifest(
+  raw: PluginWalkthroughManifest,
+  contrib: GatewayWalkthroughContrib = {},
+): PluginWalkthroughManifest {
+  if (!raw.steps?.some((s) => isLlmsProviderRowTarget(String(s?.target || "")))) return raw;
+  const pid = pluginKey(raw);
+  const hasIde = (contrib.ide_hookups || []).some((h) => samePlugin(h.plugin_id, pid));
+  const hasAgent = (contrib.llm_coding_agents || []).some((a) => samePlugin(a.plugin_id, pid));
+  const pluginSection = (contrib.settings_sections || []).find(
+    (s) => samePlugin(s.plugin_id, pid) && String(s.tab || "").toLowerCase() === "llms",
+  );
+  const row = findStep(raw.steps, isLlmsProviderRowTarget);
+  const label = String(row?.title || raw.title || pid).replace(/^Open\s+/i, "").trim() || pid;
+  const pick = (target: string) => findStep(raw.steps, (t) => t === target);
+  const step = (
+    target: string,
+    title: string,
+    body: string,
+    advance: "next" | "require_click" = "next",
+  ) => {
+    const existing = pick(target);
+    return {
+      target,
+      title: String(existing?.title || title),
+      body: String(existing?.body || body),
+      advance: existing?.advance === "require_click" || advance === "require_click" ? ("require_click" as const) : ("next" as const),
+      mode: existing?.mode === "circle" ? ("circle" as const) : ("rect" as const),
+    };
+  };
+
+  const steps: PluginWalkthroughManifest["steps"] = [];
+  if (row) {
+    steps.push({
+      ...row,
+      advance: "require_click",
+      mode: row.mode === "circle" ? "circle" : "rect",
+    });
+  }
+  steps.push(
+    step(
+      "settings.llms.provider.key",
+      `${label} key`,
+      `Paste a key (or URL) here. This is what Ducky uses for this gateway.`,
+    ),
+    step(
+      "settings.llms.provider.save",
+      "Test & Save",
+      "Press Test & Save after you fill the field. No key? Press Skip.",
+      "require_click",
+    ),
+  );
+  if (hasIde) {
+    steps.push(
+      step(
+        "settings.llms.provider.ide",
+        "IDE / MCP connection",
+        "IDE / MCP wires UEFN tools and Ducky skills into this editor. Apply once, then Test.",
+      ),
+      step(
+        "settings.llms.provider.ide.apply",
+        "Apply connection",
+        "Press Apply (or Re-apply) so UEFN MCP and Ducky skills land in this IDE. Then Test — a green check means connected.",
+      ),
+    );
+  }
+  if (hasAgent) {
+    steps.push(
+      step(
+        "settings.llms.provider.agent",
+        "Coding agent",
+        "This is the coding agent for this gateway. Detect finds the CLI. Keep the toggle on to pick it in chat.",
+      ),
+      step(
+        "settings.llms.provider.agent.detect",
+        "Detect CLI",
+        "Press Detect to find the CLI on this machine. Leave the toggle on so this agent appears in the chat picker.",
+      ),
+    );
+  }
+  if (pluginSection) {
+    steps.push(
+      step(
+        "settings.llms.provider.plugin",
+        pluginSection.title || `${label} settings`,
+        pluginSection.description || "Gateway-specific options for this provider — turn them on if you want them.",
+      ),
+    );
+  }
+  steps.push(
+    step("settings.llms.back", "Back", "Press Back to return to the provider list.", "require_click"),
+  );
+  return { ...raw, steps };
+}
+
+/** Registered plugin tours that open an LLMs provider row (enabled gateways). */
+export function listEnabledGatewayTours(): WalkthroughDef[] {
+  const out: WalkthroughDef[] = [];
+  for (const id of listTourIds()) {
+    if (!id.startsWith("plugin.")) continue;
+    const tour = getTour(id);
+    if (!tour?.steps.some((s) => isLlmsProviderRowTarget(s.target))) continue;
+    out.push(tour);
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Normalize a contributes.walkthrough row into a host WalkthroughDef. */

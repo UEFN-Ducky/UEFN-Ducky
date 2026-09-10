@@ -114,9 +114,10 @@ def cmd_wire_verse_device_ref(
 def cmd_wire_verse_device_array(
     actor_path: str,
     field: str,
-    target_paths: list[str],
+    target_paths: list[str] | None = None,
+    replace: bool = False,
 ) -> dict:
-    return wire_verse_device_array(actor_path, field, target_paths)
+    return wire_verse_device_array(actor_path, field, list(target_paths or []), replace=replace)
 
 
 @register("wire_verse_prop_assets")

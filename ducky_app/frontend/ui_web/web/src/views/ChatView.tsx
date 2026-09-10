@@ -49,6 +49,7 @@ import {
   changesTabId,
   usageTabId,
 } from "../types/panel";
+import { registerShowChatComposer } from "../navigation/openChatComposer";
 import { registerOpenSettingsEditorTab } from "../navigation/openSettingsTab";
 import { registerOpenChangesTab } from "../navigation/openChangesTab";
 import { emitAppHook } from "../sfx/appHooks";
@@ -295,7 +296,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const openChangesTab = useCallback(() => {
     const id = changesTabId();
     void openOrFocusTab(id, () =>
-      openTab({ id, kind: "changes", name: "Changes" }, { activate: true }),
+      openTab({ id, kind: "changes", name: "Ledger" }, { activate: true }),
     );
   }, [openTab]);
 
@@ -1252,6 +1253,16 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     },
     [folders, rootChats],
   );
+
+  useEffect(() => {
+    return registerShowChatComposer(() => {
+      const pick = [...allChats]
+        .filter((c) => !c.isGroup)
+        .sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0))[0];
+      if (pick) openChatTab(pick);
+      else handleCreateChat();
+    });
+  }, [allChats, openChatTab, handleCreateChat]);
 
   const handleRequestCreateDucky = useCallback(
     (ctx: { folderId: string }) => {

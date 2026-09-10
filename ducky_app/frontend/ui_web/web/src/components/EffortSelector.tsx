@@ -60,7 +60,7 @@ export function EffortSelector({ convId, value, onChange }: EffortSelectorProps)
       >
         Effort: {current.label}
       </button>
-      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} placement="top">
+      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} placement="top" clip>
         <div className="effort-selector-menu">
           {EFFORT_OPTIONS.map((opt) => (
             <button

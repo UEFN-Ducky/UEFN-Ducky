@@ -1576,6 +1576,8 @@
   max-width: 1000px;
   margin: 0 auto;
   padding-bottom: 48px;
+  container-type: inline-size;
+  container-name: ds-detail;
 }
 
 .ds-detail-cols {
@@ -1754,6 +1756,57 @@
   overflow-wrap: anywhere;
 }
 
+.ds-panel-desc--mute {
+  color: var(--ds-text-mute);
+}
+
+.ds-changelog {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ds-changelog li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+
+.ds-changelog-ver {
+  font-weight: 700;
+  color: #fff;
+}
+
+.ds-changelog-date {
+  color: var(--ds-text-mute);
+  font-size: 12px;
+  justify-self: end;
+}
+
+.ds-changelog-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ds-text-2);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.ds-pagination--panel {
+  margin-top: 16px;
+  padding: 14px 0 0;
+  justify-content: flex-start;
+}
+
+.ds-pagination--panel .ds-page {
+  width: 32px;
+  height: 32px;
+}
+
 .ds-pills {
   display: flex;
   flex-wrap: wrap;
@@ -1797,11 +1850,35 @@
 
   .ds-detail-side {
     position: relative;
+    top: auto;
     width: 100%;
   }
 
   .ds-statbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Settings pane is a slice of the window — stack on the pane, not the viewport. */
+@container ds-detail (max-width: 860px) {
+  .ds-detail-cols {
+    flex-direction: column;
+  }
+
+  .ds-detail-side {
+    position: relative;
+    top: auto;
+    width: 100%;
+  }
+
+  .ds-statbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container ds-detail (max-width: 520px) {
+  .ds-statbar {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

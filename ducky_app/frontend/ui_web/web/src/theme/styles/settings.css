@@ -1209,6 +1209,42 @@
   cursor: not-allowed;
 }
 
+.walkthrough-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.walkthrough-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.walkthrough-list-row:last-child {
+  border-bottom: none;
+}
+
+.walkthrough-list-copy {
+  min-width: 0;
+}
+
+.walkthrough-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.walkthrough-list-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .general-tab-btn-row {
   display: flex;
   flex-wrap: wrap;

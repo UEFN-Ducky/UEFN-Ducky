@@ -8,9 +8,9 @@ Composable primitives (probe → generate → scatter → clear):
           foliage_clear_generated
 
 Terrain prefers GeometryScript heightfield meshes because UEFN Landscape
-height write surfaces are incomplete/unsafe to create from scratch. Foliage
-uses one HISM container actor per source mesh (never one actor per tree).
-InstancedFoliageActor.add_instances is avoided — it has crashed this UEFN build.
+height write surfaces are incomplete/unsafe to create from scratch. Foliage auto/actors places Content Drawer Actor Blueprints (``_C``) the same
+way drag-drop does. HISM is opt-in. InstancedFoliageActor.add_instances is
+avoided — it has crashed this UEFN build.
 """
 
 from __future__ import annotations
@@ -23,6 +23,11 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
+from listener.island_placeable import (
+    FOLIAGE_SOURCE_FOLDERS,
+    is_foliage_bake_mesh,
+    resolve_content_drawer_placeable,
+)
 from listener.project_paths import content_root, pin_project_folder
 from listener.serialize import is_live, serialize
 
@@ -285,23 +290,27 @@ def _require_foliage_backend() -> str:
 
 
 def _place_mesh_actors(
-    mesh,
+    placeable,
     xforms: List[unreal.Transform],
     level_folder: str,
     label_prefix: str,
 ) -> int:
-    """Spawn tagged StaticMeshActors that reuse ``mesh`` (visible UEFN fallback)."""
+    """Spawn tagged actors the way Content Drawer does (Blueprint/Actor class).
+
+    Never ``spawn_actor_from_object(StaticMesh)`` for Fortnite catalog — that
+    creates FortStaticMeshActor with a direct mesh ref and cook-fails on BakeData.
+    """
     added = 0
     for i, xf in enumerate(xforms):
         try:
             loc = xf.translation
-            actor = unreal.EditorLevelLibrary.spawn_actor_from_object(mesh, loc)
+            try:
+                rot = xf.rotation.rotator()
+            except Exception:
+                rot = unreal.Rotator(0, 0, 0)
+            actor = _spawn_drawer_actor(placeable, loc, rot)
             if actor is None:
                 continue
-            try:
-                actor.set_actor_rotation(xf.rotation.rotator(), False)
-            except Exception:
-                pass
             try:
                 sc = xf.scale3d
                 actor.set_actor_scale3d(sc)
@@ -316,6 +325,29 @@ def _place_mesh_actors(
         except Exception:
             break
     return added
+
+
+def _placeable_name(obj) -> str:
+    try:
+        return str(obj.get_name())
+    except Exception:
+        return "Prop"
+
+
+def _placeable_path(obj) -> str:
+    try:
+        return str(obj.get_path_name())
+    except Exception:
+        return _placeable_name(obj)
+
+
+def _spawn_drawer_actor(placeable, loc, rot):
+    if isinstance(placeable, unreal.Class):
+        try:
+            return unreal.EditorLevelLibrary.spawn_actor_from_class(placeable, loc, rot)
+        except Exception:
+            return unreal.EditorLevelLibrary.spawn_actor_from_object(placeable, loc, rot)
+    return unreal.EditorLevelLibrary.spawn_actor_from_object(placeable, loc, rot)
 
 
 # ---------------------------------------------------------------------------
@@ -702,26 +734,24 @@ def foliage_list_sources(
     folder: str = "",
     limit: int = 40,
 ) -> dict:
-    """Discover StaticMesh / FoliageType assets usable as foliage sources."""
+    """Discover Content Drawer foliage props (Actor Blueprints) plus project meshes.
+
+    Default folders are ``/Game/Creative/Environments`` (what drag-drop uses).
+    BR BakeData static meshes are skipped — those are not Content Drawer items.
+    """
     limit = max(1, min(int(limit), 100))
     needle = (search or "").strip().lower()
+    try:
+        project_root = _content_root()
+    except RuntimeError:
+        project_root = ""
     folders = []
     if folder:
         folders.append(folder)
     else:
-        # Prefer the open project's content root; then stock Fortnite foliage roots.
-        try:
-            root = _content_root().rstrip("/") + "/"
-            folders.append(root)
-        except RuntimeError:
-            pass
-        folders.extend(
-            [
-                "/Game/Environments/",
-                "/Game/Athena/Items/Environmental/",
-                "/BRCosmetics/",
-            ]
-        )
+        if project_root:
+            folders.append(project_root.rstrip("/") + "/")
+        folders.extend(list(FOLIAGE_SOURCE_FOLDERS))
 
     meshes: List[dict] = []
     foliage_types: List[dict] = []
@@ -738,6 +768,8 @@ def foliage_list_sources(
                 continue
             low = full.lower()
             if needle and needle not in low:
+                continue
+            if is_foliage_bake_mesh(full):
                 continue
             foliage_types.append({"path": full, "kind": "foliage_type"})
             if len(foliage_types) >= limit:
@@ -764,8 +796,9 @@ def foliage_list_sources(
                 continue
             if not any(k in low for k in _FOLIAGE_KEYWORDS):
                 continue
-            # Prefer static mesh package paths
             if ".foliagetype" in low:
+                continue
+            if is_foliage_bake_mesh(s):
                 continue
             key = s.split(".")[0]
             if key in seen:
@@ -780,7 +813,16 @@ def foliage_list_sources(
                         cls_name = str(data.asset_class_path.asset_name)
                     else:
                         cls_name = str(getattr(data, "asset_class", ""))
-                if cls_name and cls_name not in ("StaticMesh", "FoliageType_InstancedStaticMesh"):
+                if cls_name in ("Blueprint", "BlueprintGeneratedClass"):
+                    bp = s if s.lower().endswith("_c") else f"{key}.{key.rsplit('/', 1)[-1]}_C"
+                    meshes.append({"path": bp, "kind": "blueprint"})
+                    continue
+                if cls_name and cls_name not in (
+                    "StaticMesh",
+                    "FoliageType_InstancedStaticMesh",
+                    "Blueprint",
+                    "BlueprintGeneratedClass",
+                ):
                     continue
                 if cls_name == "FoliageType_InstancedStaticMesh":
                     foliage_types.append({"path": s if "." in s else f"{key}.{key.rsplit('/',1)[-1]}", "kind": "foliage_type"})
@@ -996,7 +1038,7 @@ def foliage_scatter(
     """Scatter foliage over a footprint (deterministic).
 
     placement_mode:
-      auto/actors — tagged StaticMeshActors reusing source meshes (visible on UEFN)
+      auto/actors — Content Drawer Actor Blueprints (`_C`), same as drag-drop
       hism — one HISM container per source (often non-renderable via Python here)
     """
     _require_foliage_backend()
@@ -1013,6 +1055,7 @@ def foliage_scatter(
         max_instances = max(1, min(int(max_instances), _MAX_INSTANCES))
     folder = level_folder or _DEFAULT_FOLDER
     source_paths = [s for s in (sources or []) if s]
+    source_paths = [s for s in source_paths if not is_foliage_bake_mesh(s)]
     if not source_paths:
         listed = foliage_list_sources(limit=8)
         source_paths = [m["path"] for m in listed.get("meshes") or []][:4]
@@ -1035,11 +1078,18 @@ def foliage_scatter(
     resolved = []
     for sp in source_paths:
         try:
-            resolved.append(_load_static_mesh(sp))
+            if mode == "hism":
+                resolved.append(_load_static_mesh(sp))
+            else:
+                resolved.append(resolve_content_drawer_placeable(sp))
         except Exception:
             continue
     if not resolved:
-        raise ValueError(f"Could not resolve any foliage sources from {source_paths}")
+        raise ValueError(
+            f"Could not resolve Content Drawer props from {source_paths}. "
+            'Pass Actor Blueprint `_C` paths from /Game/Creative/Environments '
+            "(same assets you drag from the Fortnite Content Drawer)."
+        )
 
     transforms_by_key: Dict[int, List[unreal.Transform]] = {i: [] for i in range(len(resolved))}
     skipped_slope = 0
@@ -1064,7 +1114,7 @@ def foliage_scatter(
         transforms_by_key[src_i].append(t)
 
     use_hism = mode == "hism"
-    used_backend = "hism" if use_hism else "static_mesh_actors"
+    used_backend = "hism" if use_hism else "content_drawer_actors"
     added = 0
     details = []
     for i, obj in enumerate(resolved):
@@ -1076,9 +1126,9 @@ def foliage_scatter(
                 _actor, hism = _spawn_hism_container(obj, center, base_z, folder)
                 n = _add_hism_instances(hism, xforms)
             else:
-                n = _place_mesh_actors(obj, xforms, folder, f"WG_Foliage_{obj.get_name()}")
+                n = _place_mesh_actors(obj, xforms, folder, f"WG_Foliage_{_placeable_name(obj)}")
             added += n
-            details.append({"source": obj.get_path_name(), "instances": n, "backend": used_backend})
+            details.append({"source": _placeable_path(obj), "instances": n, "backend": used_backend})
         except Exception as e:
             details.append({"source": serialize(obj), "instances": 0, "error": str(e), "backend": used_backend})
 

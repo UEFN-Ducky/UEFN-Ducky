@@ -39,6 +39,7 @@ BRIDGE_TOOLS: frozenset[str] = frozenset(
         "get_editor_log",
         "shutdown",
         "uefn_editor_python_hints",
+        "dismiss_uefn_modal",
     }
 )
 

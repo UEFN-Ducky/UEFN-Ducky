@@ -1,9 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   base: "./",
+  esbuild: {
+    drop: mode === "production" ? ["debugger"] : [],
+    pure: mode === "production" ? ["console.log", "console.info", "console.debug"] : [],
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -27,4 +31,4 @@ export default defineConfig({
   worker: {
     format: "es",
   },
-});
+}));

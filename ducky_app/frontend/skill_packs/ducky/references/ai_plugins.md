@@ -53,6 +53,7 @@ Through `plugin.json` → `contributes` and/or `backend/register(api)`:
 | Sounds | `sounds` / `hooks` |
 | Verse scaffolds | `verse.templates` |
 | New MCP tools | `api.tool()` in `register(api)` |
+| Changes ledger | Every mutating tool call is logged under your plugin id automatically. Return `_ducky` (or `api.changeset.record`) only to add targets/before/after/`inverse` so the row becomes revertable. Set `program` to the plugin id (`blender`, …) so rows slot as `blender://object/Cube/exists`. UEFN is `program: "uefn"`. |
 | Bundled skills | `skills/<skill-id>/SKILL.md` inside the plugin |
 
 After install + enable, contributions and tools reload without rebuilding the EXE.

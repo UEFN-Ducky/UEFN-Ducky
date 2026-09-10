@@ -3,7 +3,7 @@ import { Icons } from "../icons/Icons";
 import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../hooks/useChatCollapseState";
 import type { FileEditData } from "../types/panel";
 import { buildFileEditDiff } from "../utils/fileEditDiff";
-import { useVerseEditorOptional } from "../verse-editor";
+import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 import { basename } from "../verse-editor/utils/isVerseFile";
 
 interface ToolFileEditDiffProps {

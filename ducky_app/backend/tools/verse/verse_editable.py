@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
 from backend.tools.support.plugin_gate import plugin_mcp_tool
-from backend.tools.verse.wire_preflight import run_with_build_retry
+from backend.tools.verse.wire_preflight import note_resolved_fields, run_with_build_retry
 
 
 @plugin_mcp_tool("verse")
@@ -37,6 +38,22 @@ def get_verse_editables(
         "get_verse_editables",
         {"actor_path": actor_path, "include_wiring_hints": include_wiring_hints},
     )
+    payload = result
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (ValueError, TypeError):
+            parsed = None
+        payload = parsed if isinstance(parsed, dict) else None
+    hashed: list[str] = []
+    editables = payload.get("editables") if isinstance(payload, dict) else None
+    if isinstance(editables, dict):
+        for name, info in editables.items():
+            mangled = info.get("mangled_name") if isinstance(info, dict) else None
+            if mangled:
+                hashed.append(str(name))
+    if hashed:
+        note_resolved_fields(actor_path, hashed)
     return tool_json(result, pretty=pretty)
 
 
@@ -59,7 +76,10 @@ def set_verse_editable(
     if value is not None:
         params["value"] = value
     result = run_with_build_retry(
-        lambda: send_command("set_verse_editable", params), tool_name="set_verse_editable"
+        lambda: send_command("set_verse_editable", params),
+        tool_name="set_verse_editable",
+        actor_path=actor_path,
+        field=field,
     )
     return tool_json(result, pretty=pretty)
 
@@ -132,8 +152,10 @@ def wire_verse_device_ref(
     Creative devices: sets SavedActor on the inner Script wrapper.
     Verse-to-Verse refs (e.g. ?player_manager): auto-routes to set_verse_editable.
 
-    Call get_verse_editables first. STOP is advisory — if a wire fails, refresh
-    hashes and retry once. Never abort to the user. Example:
+    Call get_verse_editables first. If the result is STALE REFLECTION, stop —
+    the host already compiled + retried once and will refuse another wire on
+    this field until get_verse_editables shows mangled_name. Never abort to
+    the user. Example:
     wire_verse_device_ref("MyDevice", "SomeButtonField", "MyButton")
     """
     result = run_with_build_retry(
@@ -142,6 +164,8 @@ def wire_verse_device_ref(
             {"actor_path": actor_path, "field": field, "target_path": target_path},
         ),
         tool_name="wire_verse_device_ref",
+        actor_path=actor_path,
+        field=field,
     )
     return tool_json(result, pretty=pretty)
 
@@ -152,27 +176,32 @@ def wire_verse_device_array(
     field: str,
     target_path: str = "",
     target_paths: list[str] | None = None,
+    replace: bool = False,
     pretty: bool = False,
 ) -> str:
-    """Wire one or more creative devices / props into an array @editable in one call.
+    """Wire creative devices / props into an array @editable on THIS device.
 
-    Pass target_path (one) OR target_paths (1..N, appended in order). Returns
-    `wired` (labels) + `count`. For scalar fields like NPCSpawner1 use
-    wire_verse_device_ref instead. Then save_current_level when done.
-    Example: wire_verse_device_array("MyDevice", "SomeArrayField", target_paths=["Marker_1", "Marker_2"])
+    First item (empty field): target_paths=[one] — do not spawn a second Verse device.
+    Rewrite the list: replace=True with the full new list (same actor_path).
+    Default appends. Scalar fields (NPCSpawner1) use wire_verse_device_ref.
+    STALE REFLECTION: do not call this again on the same field — inspect first.
+    Example: wire_verse_device_array("MyDevice", "Props", target_paths=["P1", "P2"], replace=True)
     """
     paths = [target_path] if target_path else list(target_paths or [])
-    if not paths:
+    if not paths and not replace:
         raise ValueError(
             "wire_verse_device_array needs at least one target: pass target_path or target_paths=[...]. "
+            "To clear the list, pass replace=True with no targets. "
             "For scalar spawners (NPCSpawner1, NPCSpawner2, …) use wire_verse_device_ref."
         )
     result = run_with_build_retry(
         lambda: send_command(
             "wire_verse_device_array",
-            {"actor_path": actor_path, "field": field, "target_paths": paths},
+            {"actor_path": actor_path, "field": field, "target_paths": paths, "replace": replace},
         ),
         tool_name="wire_verse_device_array",
+        actor_path=actor_path,
+        field=field,
     )
     return tool_json(result, pretty=pretty)
 

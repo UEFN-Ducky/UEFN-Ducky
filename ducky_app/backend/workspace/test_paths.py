@@ -20,6 +20,20 @@ def test_content_hash_is_16_hex_chars_and_stable() -> None:
     assert h != paths.content_hash("hello")
 
 
+def test_same_project_roots_treats_content_as_the_island(tmp_path) -> None:
+    island = tmp_path / "ExampleProject1"
+    content = island / "Content"
+    content.mkdir(parents=True)
+    other = tmp_path / "OtherProject" / "Content"
+    other.mkdir(parents=True)
+    assert paths.same_project_roots(str(content), str(island))
+    assert paths.same_project_roots(str(island), str(content))
+    assert paths.same_project_roots(str(island), str(island))
+    assert not paths.same_project_roots(str(content), str(other))
+    assert not paths.same_project_roots(str(island), str(tmp_path / "OtherProject"))
+    assert not paths.same_project_roots("", str(island))
+
+
 def test_rel_from_root(tmp_path) -> None:
     root = tmp_path / "Proj"
     inside = root / "Content" / "Verse" / "a.verse"

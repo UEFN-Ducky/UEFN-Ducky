@@ -317,6 +317,12 @@ def ducky_get_status(pretty: bool = False) -> str:
         version=__version__,
         selected_project_root=settings.uefn_project_root,
     )
+    try:
+        from backend.uefn_plugins.host import attach_plugin_connections
+
+        result = attach_plugin_connections(result)
+    except Exception:
+        result["plugin_connections"] = []
     return tool_json(result, pretty=pretty)
 
 

@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  expandGatewayManifest,
   inferLlmsWalkthroughProviderId,
   isLlmsProviderRowTarget,
+  listEnabledGatewayTours,
   pluginManifestToTour,
 } from "./pluginWalkthroughs";
+import { _resetWalkthroughServiceForTests, registerTour } from "./WalkthroughService";
 
 describe("isLlmsProviderRowTarget", () => {
   it("matches the table row, not the slide fields", () => {
@@ -68,5 +71,96 @@ describe("pluginManifestToTour", () => {
     expect(tour?.steps[0]?.advance).toBe("require_click");
     expect(tour?.steps[2]?.advance).toBe("require_click");
     expect(tour?.steps.every((s) => typeof s.onEnter === "function")).toBe(true);
+  });
+});
+
+describe("expandGatewayManifest", () => {
+  const row = {
+    id: "openai",
+    plugin_id: "openai",
+    title: "Set up OpenAI",
+    settings_tab: "LLMs",
+    steps: [
+      {
+        target: "settings.llms.provider.openai",
+        title: "Open OpenAI",
+        body: "Press the OpenAI row.",
+        advance: "require_click" as const,
+      },
+      { target: "settings.llms.provider.key", title: "API key or Codex", body: "Paste a key or use Codex." },
+    ],
+  };
+
+  it("fills save, agent, plugin, and back from contributions", () => {
+    const expanded = expandGatewayManifest(row, {
+      llm_coding_agents: [{ plugin_id: "openai" }],
+      settings_sections: [
+        {
+          tab: "LLMs",
+          plugin_id: "openai",
+          title: "OpenAI prompt caching",
+          description: "Cache markers reuse the system prefix.",
+        },
+      ],
+    });
+    expect(expanded.steps.map((s) => s.target)).toEqual([
+      "settings.llms.provider.openai",
+      "settings.llms.provider.key",
+      "settings.llms.provider.save",
+      "settings.llms.provider.agent",
+      "settings.llms.provider.agent.detect",
+      "settings.llms.provider.plugin",
+      "settings.llms.back",
+    ]);
+    expect(expanded.steps.find((s) => s.target === "settings.llms.provider.key")?.body).toMatch(/Codex/);
+    expect(expanded.steps.find((s) => s.target === "settings.llms.provider.plugin")?.title).toBe(
+      "OpenAI prompt caching",
+    );
+    expect(expanded.steps.find((s) => s.target === "settings.llms.back")?.advance).toBe("require_click");
+  });
+
+  it("adds IDE steps only when the plugin contributes a hookup", () => {
+    const expanded = expandGatewayManifest(
+      { ...row, id: "cursor", plugin_id: "cursor", steps: [{ ...row.steps[0], target: "settings.llms.provider.cursor" }] },
+      { ide_hookups: [{ plugin_id: "cursor" }], llm_coding_agents: [{ plugin_id: "cursor" }] },
+    );
+    expect(expanded.steps.map((s) => s.target)).toEqual([
+      "settings.llms.provider.cursor",
+      "settings.llms.provider.key",
+      "settings.llms.provider.save",
+      "settings.llms.provider.ide",
+      "settings.llms.provider.ide.apply",
+      "settings.llms.provider.agent",
+      "settings.llms.provider.agent.detect",
+      "settings.llms.back",
+    ]);
+  });
+
+  it("leaves non-gateway tours alone", () => {
+    const raw = {
+      id: "translation",
+      steps: [{ target: "settings.translation.export", title: "Export", body: "Export PO files." }],
+    };
+    expect(expandGatewayManifest(raw)).toBe(raw);
+  });
+});
+
+describe("listEnabledGatewayTours", () => {
+  afterEach(() => {
+    _resetWalkthroughServiceForTests();
+  });
+
+  it("returns registered plugin tours that click a provider row", () => {
+    registerTour({
+      id: "plugin.openai",
+      steps: [
+        { target: "settings.llms.provider.openai", title: "Open", body: "row", advance: "require_click" },
+      ],
+    });
+    registerTour({
+      id: "plugin.translation",
+      steps: [{ target: "settings.translation.export", title: "Export", body: "po", advance: "next" }],
+    });
+    expect(listEnabledGatewayTours().map((t) => t.id)).toEqual(["plugin.openai"]);
   });
 });

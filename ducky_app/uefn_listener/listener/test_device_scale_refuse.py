@@ -34,3 +34,16 @@ def test_verse_script_scale_allowed():
 
 def test_device_location_only_allowed():
     _load().refuse_if_creative_device_scale("creative_device", None)
+
+
+def test_device_identity_scale_is_not_a_rescale():
+    refuse = _load().refuse_if_creative_device_scale
+    refuse("creative_device", [1.0, 1.0, 1.0])
+    refuse("creative_device", [1.0001, 0.9999, 1.0])
+    refuse("creative_device", {"x": 1, "y": 1, "z": 1})
+
+
+def test_device_real_scale_still_refused():
+    refuse = _load().refuse_if_creative_device_scale
+    with pytest.raises(ValueError, match="never scale Fortnite Creative devices"):
+        refuse("creative_device", [2.0, 1.0, 1.0])

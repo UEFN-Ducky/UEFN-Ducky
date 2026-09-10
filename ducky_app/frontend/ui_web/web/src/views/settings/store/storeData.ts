@@ -279,3 +279,14 @@ export function formatPrice(item: DuckyOSStoreItemDto): string {
 export function needsPurchase(item: DuckyOSStoreItemDto): boolean {
   return Boolean(item.paid) && item.owned !== true;
 }
+
+/** Patch notes shown per page on the Store detail pane. */
+export const PATCH_NOTES_PAGE_SIZE = 5;
+
+export function formatPatchDate(raw: string | null | undefined): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}

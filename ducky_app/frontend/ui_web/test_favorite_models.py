@@ -224,3 +224,14 @@ def test_legacy_bare_api_id_unique_match(monkeypatch):
     assert isinstance(ok, ResolveOk)
     assert ok.provider == "openai"
     assert ok.model == "gpt-4o-mini"
+
+
+def test_resolve_api_model_when_catalog_still_warming(monkeypatch):
+    """Empty cache must not block create-ducky on a live provider fetch."""
+    settings = SimpleNamespace(default_model="")
+    monkeypatch.setattr("frontend.favorite_models._available_agent_models", lambda _s: {})
+    monkeypatch.setattr("frontend.favorite_models._available_api_models", lambda: {})
+    ok = resolve_model_strict(["anthropic:claude-sonnet-4-20250514"], settings)
+    assert isinstance(ok, ResolveOk)
+    assert ok.model == "claude-sonnet-4-20250514"
+    assert ok.provider == "anthropic"

@@ -3,6 +3,7 @@
 const PREFIX = "[verse-editor]";
 
 export function verseEditorLog(category: string, event: string, detail?: unknown): void {
+  if (!import.meta.env.DEV) return;
   const line = `${PREFIX} [${category}] ${event}`;
   if (detail !== undefined) console.log(line, detail);
   else console.log(line);
@@ -28,7 +29,7 @@ export function verseEditorLogError(category: string, event: string, err: unknow
   verseEditorError(category, event, detail);
 }
 
-if (typeof window !== "undefined") {
+if (import.meta.env.DEV && typeof window !== "undefined") {
   const w = window as unknown as { __verseEditorLogInstalled?: boolean };
   if (!w.__verseEditorLogInstalled) {
     w.__verseEditorLogInstalled = true;

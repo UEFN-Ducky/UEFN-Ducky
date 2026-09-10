@@ -17,12 +17,17 @@
     "group_id": { "type": "string" },
     "leader_conv_id": { "type": "string" },
     "source": { "enum": ["agent", "user", "revert"] },
+    "reverts_run_id": { "type": "string" },
+    "archived": { "type": "boolean" },
     "lane": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/lane" }] },
     "started": { "type": "number" },
     "ended": { "type": ["number", "null"] },
     "status": {
       "enum": ["running", "done", "error", "cancelled", "reverted", "partially_reverted"]
     },
+    "archived": { "type": "boolean" },
+    "archived_at": { "type": ["number", "null"] },
+    "reverts_run_id": { "type": "string" },
     "seen": {
       "description": "Last content hash this run read per path; the base for stale_base conflicts.",
       "type": "object",
@@ -146,6 +151,7 @@
         "revertable": { "enum": ["auto", "manual", "none"] },
         "reason": { "type": "string" },
         "summary": { "type": "string" },
+        "program": { "type": "string" },
         "params": { "type": "object" }
       }
     }

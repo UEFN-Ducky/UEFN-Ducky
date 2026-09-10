@@ -211,7 +211,7 @@ def simulate_device_event(
         if str(start.get("kind") or "") == "verse_source":
             note = (
                 "Source-only class (not placed). Sim cannot follow wiring until the device "
-                "is in the level — open UEFN, connect the listener, place + wire it, then Sim again."
+                "is in the level — open UEFN (UEFN MCP first), place + wire it, then Sim again."
             )
         else:
             note = "No wiring edges in snapshot — simulation is shallow."

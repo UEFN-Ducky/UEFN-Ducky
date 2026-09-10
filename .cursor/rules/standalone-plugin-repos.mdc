@@ -14,7 +14,8 @@ Desktop plugins and skill packs are **separate git repos**:
 `C:\Users\tas13\Documents\GitHub\uefn-plugins\uefn-skill-npc-ai\`
 
 - Edit / commit / `git push` that clone only.
-- Publish: `py -3 scripts/release.py --publish` from the clone root.
+- Publish: `py -3 scripts/release.py --publish` from the clone root
+  (commits + pushes first; refuses a dirty tree).
 - Never hot-patch AppData. The panel auto-applies published Store
   updates on start — do not tell end users to click Settings → Store.
 

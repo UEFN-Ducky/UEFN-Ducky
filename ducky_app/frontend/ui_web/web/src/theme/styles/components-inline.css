@@ -100,6 +100,17 @@
 .choice-dropdown--compact {
   max-width: 220px;
 }
+.choice-dropdown--icon {
+  width: auto;
+  max-width: none;
+}
+.choice-dropdown--icon .choice-dropdown-trigger {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+}
 .choice-dropdown-trigger {
   display: flex;
   align-items: center;
@@ -336,7 +347,7 @@ body.is-window-dragging {
   user-select: none;
 }
 
-/* ── WindowResize grips: on Windows only the top edge is rendered (OS owns L/R/B).
+/* ── WindowResize grips: Windows top/corners enter native resize (OS owns L/R/B).
       Other platforms: all edges/corners via JS set_window_bounds. ── */
 .window-resize-grip {
   position: fixed;
@@ -353,9 +364,16 @@ body.is-window-dragging {
   cursor: ns-resize;
 }
 
-/* Focus peek header owns the top strip for hover + drag; keep resize grip underneath. */
-body.focus-window .window-resize-grip--n {
-  z-index: 99999;
+/* A narrow overlay preserves the focus header's hover/drag area without adding
+   any layout padding above either custom title bar. Corners win over the edge. */
+body.native-window-chrome .window-resize-grip--n,
+body.native-window-chrome .window-resize-grip--nw,
+body.native-window-chrome .window-resize-grip--ne {
+  height: 5px;
+}
+
+html.window-maximized .window-resize-grip {
+  display: none;
 }
 
 .window-resize-grip--s {
@@ -2060,7 +2078,10 @@ body.focus-window .window-resize-grip--n {
 }
 
 .model-selector-scroll {
-  max-height: 320px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(280px, calc(var(--dropdown-max-height, 360px) - 88px));
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -2155,12 +2176,14 @@ body.focus-window .window-resize-grip--n {
 }
 
 .model-selector-option-name {
-  font-size: 12px;
-  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  flex: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
+  text-align: left;
 }
 
 .model-selector-option-meta {
@@ -2206,6 +2229,8 @@ body.focus-window .window-resize-grip--n {
 .model-selector-nav {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .model-selector-navhdr {
@@ -2249,8 +2274,8 @@ body.focus-window .window-resize-grip--n {
 
 .model-selector-viewport {
   overflow: hidden;
-  height: var(--ms-viewport-h, auto);
-  transition: height 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .model-selector-track {
@@ -2267,6 +2292,10 @@ body.focus-window .window-resize-grip--n {
   width: 50%;
   flex: 0 0 50%;
   box-sizing: border-box;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .model-selector-disclosure {

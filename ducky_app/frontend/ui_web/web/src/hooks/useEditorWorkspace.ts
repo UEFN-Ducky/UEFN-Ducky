@@ -60,7 +60,7 @@ async function validateSnapshot(
       openTabs.push({
         id: changesTabId(),
         kind: "changes",
-        name: tab.name || "Changes",
+        name: tab.name || "Ledger",
       });
     } else if (tab.kind === "ducky-profile" && tab.path) {
       openTabs.push({

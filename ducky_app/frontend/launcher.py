@@ -192,9 +192,16 @@ def run_bridge() -> None:
         pass
 
     args = sys.argv[2:] if len(sys.argv) > 2 else []
+    run_id_arg = ""
     for i, arg in enumerate(args):
         if arg == "--port" and i + 1 < len(args):
             bridge.set_port_override(int(args[i + 1]))
+        elif arg == "--ducky-run-id" and i + 1 < len(args):
+            run_id_arg = str(args[i + 1] or "").strip()
+    if run_id_arg:
+        from backend.workspace.identity import ENV_RUN_ID
+
+        os.environ[ENV_RUN_ID] = run_id_arg
 
     def _bridge_warmup() -> None:
         try:

@@ -18,9 +18,11 @@ const KEY_SPLIT = "uefn-follow-code-split";
 const CHANGE_EVENT = "uefn-follow-code-settings";
 /** One-shot: copy legacy localStorage into panel_settings.json. */
 const KEY_MIGRATED = "uefn-follow-code-migrated-v1";
+/** One-shot: old default was on, so every user looked opted-in. Force off once. */
+const KEY_DEFAULT_OFF = "uefn-follow-code-default-off-v2";
 
 const DEFAULTS: FollowCodeSettings = {
-  enabled: true,
+  enabled: false,
   speed: "normal",
   splitBesideChat: true,
 };
@@ -63,12 +65,28 @@ function readSpeed(): FollowCodeSpeed {
   return "normal";
 }
 
+function defaultOffPending(): boolean {
+  try {
+    return localStorage.getItem(KEY_DEFAULT_OFF) !== "1";
+  } catch {
+    return true;
+  }
+}
+
 function readLocal(): FollowCodeSettings {
   return {
-    enabled: readBool(KEY_ENABLED, DEFAULTS.enabled),
+    enabled: defaultOffPending() ? false : readBool(KEY_ENABLED, DEFAULTS.enabled),
     speed: readSpeed(),
     splitBesideChat: readBool(KEY_SPLIT, DEFAULTS.splitBesideChat),
   };
+}
+
+function markDefaultOffDone(): void {
+  try {
+    localStorage.setItem(KEY_DEFAULT_OFF, "1");
+  } catch {
+    /* ignore */
+  }
 }
 
 function writeLocal(settings: FollowCodeSettings): void {
@@ -120,6 +138,7 @@ export function setFollowCodeSettings(patch: Partial<FollowCodeSettings>): void 
     splitBesideChat,
   };
   writeLocal(cache);
+  markDefaultOffDone();
   notify();
   const api = getApi();
   if (api?.save_agent_settings) {
@@ -141,8 +160,9 @@ export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
   const genAtStart = writeGen;
   const s = await api.get_settings();
   if (genAtStart !== writeGen) return cache;
+  const pendingOff = defaultOffPending();
   const fromApi: FollowCodeSettings = {
-    enabled: readApiBool(s.follow_code_enabled, DEFAULTS.enabled),
+    enabled: pendingOff ? false : readApiBool(s.follow_code_enabled, DEFAULTS.enabled),
     speed:
       s.follow_code_speed === "slow" ||
       s.follow_code_speed === "normal" ||
@@ -177,6 +197,7 @@ export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
     } catch {
       /* ignore */
     }
+    markDefaultOffDone();
     if (api.save_agent_settings) {
       await api.save_agent_settings({
         follow_code_enabled: cache.enabled,
@@ -191,10 +212,18 @@ export async function loadFollowCodeSettings(): Promise<FollowCodeSettings> {
   if (genAtStart !== writeGen) return cache;
   cache = fromApi;
   writeLocal(cache);
+  markDefaultOffDone();
   try {
     localStorage.setItem(KEY_MIGRATED, "1");
   } catch {
     /* ignore */
+  }
+  if (pendingOff && api.save_agent_settings) {
+    await api.save_agent_settings({
+      follow_code_enabled: false,
+      follow_code_speed: cache.speed,
+      follow_code_split_beside_chat: cache.splitBesideChat,
+    });
   }
   notify();
   return cache;

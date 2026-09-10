@@ -17,9 +17,9 @@ description: >-
 `C:\Users\tas13\Documents\GitHub\uefn-plugins\uefn-plugin-<id>\`
 
 Never edit or publish from `UEFN-Ducky/plugins/` (archived `desktop-plugins`
-monorepo). Never ship from `%TEMP%/uefn-plugin-*-ship`. Commit and
-`git push` the standalone repo; publish with
-`py -3 scripts/release.py --publish` from that clone.
+monorepo). Never ship from `%TEMP%/uefn-plugin-*-ship`.
+`py -3 scripts/release.py --publish` from that clone commits + pushes
+every shippable file first, then uploads. Never Store-deploy a dirty tree.
 
 Desktop plugins extend the **UEFN-Ducky app** (not DuckyOS site plugins like
 `plugin-discord-bot`). Runtime root:
@@ -202,8 +202,9 @@ def register(api) -> None:
 
 | API | Purpose |
 |-----|---------|
-| `api.tool()` / `@api.tool(name=…, intent=…)` | Register on shared FastMCP; auto-gate + track names |
-| `api.register_secret_test(secret_key, fn)` | Settings → Test for a `secret` field (`fn(key) -> {ok, detail}`) |
+| `api.tool()` / `@api.tool(name=…, intent=…)` | Register on shared FastMCP; auto-gate + track names. Every mutating call is logged under your plugin id automatically. Return `_ducky` (or `api.changeset.record`) only to add targets/before/after/`inverse` so the row becomes revertable. |
+| `api.connection(fn, label=…, program=…)` | Header Connections row + revert preflight. `fn()` must be cheap; return `{online, detail}`. |
+| `api.register_secret_test(secret_key, fn)` | Settings → Test for a secret field (`fn(key) -> {ok, detail}`) |
 | `api.listener(command, params=None, timeout=…)` | Drive the live UEFN editor (`send_command`) |
 | `api.is_enabled()` | Store enable gate (for background work) |
 | `api.log(msg)` / `api.plugin_id` | Diagnostics |
@@ -255,10 +256,12 @@ an end user to click Update. Publish → panel auto-applies on next start.
 
 1. Create a new GitHub repo `UEFN-Ducky/uefn-plugin-<id>` and clone it into
    `Documents/GitHub/uefn-plugins/uefn-plugin-<id>/`.
-2. Copy Discord `scripts/build_zip.py` / `release.py` (same pattern).
+2. Copy Discord `scripts/build_zip.py` / `release.py` / `commit_before_store.py`.
 3. Bump `version` in `plugin.json`.
-4. Commit + push that repo, then
-   `py -3 scripts/release.py --publish` from the clone root.
+4. `py -3 scripts/release.py --publish` from the clone root. That script
+   **commits + pushes every shippable file first**, then zips and
+   `uds_release`s. A dirty clone aborts before upload. Never publish and
+   commit later.
 5. Panel auto-applies the published version on next start (authors can
    also Update once in Settings → Store to test immediately).
 

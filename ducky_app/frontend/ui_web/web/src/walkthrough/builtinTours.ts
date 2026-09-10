@@ -1,5 +1,7 @@
+import { requestShowChatComposer } from "../navigation/openChatComposer";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { getTargetElement, settingsTabTargetId } from "../ui-targets/registry";
+import { listEnabledGatewayTours } from "./pluginWalkthroughs";
 import {
   ensureStarterLlmGateways,
   markStarterPluginToursCompleted,
@@ -65,11 +67,8 @@ function nextStep(
   };
 }
 
-function settingsCoreSteps(): WalkthroughStep[] {
-  const steps: WalkthroughStep[] = [];
-
-  // ── General ────────────────────────────────────────────────────────────
-  steps.push(
+function settingsGeneralSteps(): WalkthroughStep[] {
+  return [
     clickStep(settingsTabTargetId("General"), "General", "Press General in the sidebar to open it.", async () => {
       requestOpenSettings();
       await wait(200);
@@ -172,10 +171,11 @@ function settingsCoreSteps(): WalkthroughStep[] {
       fireSection({ tab: "General", section: "errors" });
       await wait(250);
     }),
-  );
+  ];
+}
 
-  // ── Duckies ────────────────────────────────────────────────────────────
-  steps.push(
+function settingsDuckiesSteps(): WalkthroughStep[] {
+  return [
     clickStep(settingsTabTargetId("Duckies"), "Duckies", "Press Duckies to open profiles.", async () => {
       requestOpenSettings();
       await wait(200);
@@ -222,10 +222,11 @@ function settingsCoreSteps(): WalkthroughStep[] {
       "Press Back to return to the Duckies list.",
       () => openTab("Duckies"),
     ),
-  );
+  ];
+}
 
-  // ── Plans ──────────────────────────────────────────────────────────────
-  steps.push(
+function settingsPlansSteps(): WalkthroughStep[] {
+  return [
     clickStep(
       settingsTabTargetId("Plans"),
       "Plans",
@@ -263,10 +264,11 @@ function settingsCoreSteps(): WalkthroughStep[] {
     nextStep("settings.content", "Working plans", "Active plans for the current project.", async () => {
       await openPlansSection("working");
     }),
-  );
+  ];
+}
 
-  // ── LLMs ───────────────────────────────────────────────────────────────
-  steps.push(
+function settingsLlmsOverviewSteps(): WalkthroughStep[] {
+  return [
     clickStep(settingsTabTargetId("LLMs"), "LLMs", "Press LLMs to open providers, skills, MCPs, and memory.", async () => {
       requestOpenSettings();
       await wait(200);
@@ -295,10 +297,6 @@ function settingsCoreSteps(): WalkthroughStep[] {
         await wait(280);
       },
     ),
-  );
-
-  // Skills → ducky HOW TO USE → back
-  steps.push(
     clickStep(
       "settings.llms.section.skills",
       "Skills",
@@ -344,10 +342,6 @@ function settingsCoreSteps(): WalkthroughStep[] {
         await openLlmsSection("skills");
       },
     ),
-  );
-
-  // MCPs
-  steps.push(
     clickStep(
       "settings.llms.section.mcps",
       "MCPs",
@@ -372,10 +366,6 @@ function settingsCoreSteps(): WalkthroughStep[] {
         await openLlmsSection("mcps");
       },
     ),
-  );
-
-  // Memory — one-liner only
-  steps.push(
     clickStep(
       "settings.llms.section.memory",
       "Memory",
@@ -387,47 +377,29 @@ function settingsCoreSteps(): WalkthroughStep[] {
     nextStep("settings.content", "Memory", "Memory will be managed here.", async () => {
       await openLlmsSection("memory");
     }),
-  );
+  ];
+}
 
-  // ── Appearance / Audio (tab + content only) ─────────────────────────────
-  for (const t of [
-    {
-      label: "Appearance",
-      title: "Appearance",
-      tabBody: "Press Appearance to open themes.",
-      contentBody: "Themes, effects, skins, and sound hooks for the panel chrome.",
-    },
-    {
-      label: "Audio",
-      title: "Audio",
-      tabBody: "Press Audio to open voice settings.",
-      contentBody: "Spoken replies, microphone, output device, and volume.",
-    },
-  ] as const) {
-    steps.push(
-      clickStep(settingsTabTargetId(t.label), t.title, t.tabBody, async () => {
-        requestOpenSettings();
-        await wait(200);
-      }),
-      nextStep(`settings.content`, `${t.title} panel`, t.contentBody, () => openTab(t.label)),
-    );
-  }
-
-  steps.push(
-    clickStep(settingsTabTargetId("Store"), "Store", "Press Store to open the Ducky Store — last stop in Settings.", async () => {
+function settingsChromeTabSteps(
+  label: "Appearance" | "Audio",
+  tabBody: string,
+  contentBody: string,
+): WalkthroughStep[] {
+  return [
+    clickStep(settingsTabTargetId(label), label, tabBody, async () => {
       requestOpenSettings();
       await wait(200);
     }),
-  );
-
-  return steps;
+    nextStep("settings.content", `${label} panel`, contentBody, () => openTab(label)),
+  ];
 }
 
 export const APP_SHELL_TOUR: WalkthroughDef = {
   id: "app.shell",
-  title: "Welcome to UEFN Ducky",
+  title: "Welcome",
+  description: "Top bar, docks, chat history, and opening Settings.",
   autoStart: "first_incomplete",
-  onCompleteStart: "settings.core",
+  onCompleteStart: "settings.store",
   steps: [
     {
       target: "shell.header",
@@ -474,17 +446,94 @@ export const APP_SHELL_TOUR: WalkthroughDef = {
   ],
 };
 
-export const SETTINGS_CORE_TOUR: WalkthroughDef = {
-  id: "settings.core",
-  title: "Settings tour",
+export const CHAT_COMPOSER_TOUR: WalkthroughDef = {
+  id: "chat.composer",
+  title: "Chat",
+  description: "Composer, mode, usage, model, changes, snip, mic, live voice, and send.",
   autoStart: "never",
-  onCompleteStart: "settings.store",
-  steps: settingsCoreSteps(),
+  steps: [
+    nextStep(
+      "chat.composer",
+      "Chat box",
+      "Type here and send. The toolbar under the box is the rest of this tour.",
+      async () => {
+        requestShowChatComposer();
+        await wait(400);
+      },
+    ),
+    clickStep("chat.composer.input", "Message", "Click the text box — this is where you type to the ducky."),
+    clickStep("chat.composer.mode", "Mode", "Click Mode — Ask answers questions, Plan outlines work, Agent edits the island."),
+    clickStep("chat.composer.usage", "Usage", "Click the ring — context used, files in session, and a reset live here."),
+    clickStep("chat.composer.model", "Model", "Click the picker — choose a model or a coding agent for this chat."),
+    clickStep("chat.composer.changes", "Ledger", "Click Ledger — every file this chat wrote, with revert per turn."),
+    clickStep("chat.composer.snip", "Snip", "Click Snip — capture a screen region and drop it into the chat."),
+    clickStep("chat.composer.mic", "Mic", "Click the mic — dictate instead of typing."),
+    clickStep("chat.composer.live", "Live chat", "Click Live — talk back and forth with spoken replies."),
+    clickStep("chat.composer.send", "Enter", "Click Send (or press Enter) to run the prompt."),
+  ],
+};
+
+export const SETTINGS_GENERAL_TOUR: WalkthroughDef = {
+  id: "settings.general",
+  title: "General",
+  description: "App info, project files, Add to UEFN, and logs.",
+  autoStart: "never",
+  steps: settingsGeneralSteps(),
+};
+
+export const SETTINGS_DUCKIES_TOUR: WalkthroughDef = {
+  id: "settings.duckies",
+  title: "Duckies",
+  description: "Profiles, skills, MCPs, and when to use each ducky.",
+  autoStart: "never",
+  steps: settingsDuckiesSteps(),
+};
+
+export const SETTINGS_PLANS_TOUR: WalkthroughDef = {
+  id: "settings.plans",
+  title: "Plans",
+  description: "Plan templates and working project plans.",
+  autoStart: "never",
+  steps: settingsPlansSteps(),
+};
+
+export const SETTINGS_LLMS_TOUR: WalkthroughDef = {
+  id: "settings.llms",
+  title: "LLMs",
+  description: "Providers, skill packs, MCP servers, memory, then one enabled gateway.",
+  autoStart: "never",
+  steps: settingsLlmsOverviewSteps(),
+  resolveSteps: () => withEnabledGatewayTours(settingsLlmsOverviewSteps(), { firstOnly: true }),
+};
+
+export const SETTINGS_APPEARANCE_TOUR: WalkthroughDef = {
+  id: "settings.appearance",
+  title: "Appearance",
+  description: "Themes, effects, skins, and panel chrome.",
+  autoStart: "never",
+  steps: settingsChromeTabSteps(
+    "Appearance",
+    "Press Appearance to open themes.",
+    "Themes, effects, skins, and sound hooks for the panel chrome.",
+  ),
+};
+
+export const SETTINGS_AUDIO_TOUR: WalkthroughDef = {
+  id: "settings.audio",
+  title: "Audio",
+  description: "Spoken replies, microphone, output device, and volume.",
+  autoStart: "never",
+  steps: settingsChromeTabSteps(
+    "Audio",
+    "Press Audio to open voice settings.",
+    "Spoken replies, microphone, output device, and volume.",
+  ),
 };
 
 export const SETTINGS_STORE_TOUR: WalkthroughDef = {
   id: "settings.store",
-  title: "Store tour",
+  title: "Store",
+  description: "Browse and install plugins, then set up starter gateways.",
   autoStart: "never",
   onCompleteStart: "llms.setup",
   steps: [
@@ -532,86 +581,12 @@ export const SETTINGS_STORE_TOUR: WalkthroughDef = {
   ],
 };
 
-function enterProvider(id: string): () => Promise<void> {
-  return async () => {
-    await openLlmsSection("llms");
-    selectLlmsProvider(id);
-    // Detail slide + IDE / coding-agent / plugin sections need a beat to mount.
-    await wait(450);
-  };
-}
-
-function llmProviderSetupSteps(opts: {
-  id: "anthropic" | "cursor" | "openai";
-  label: string;
-  keyBody: string;
-  ideBody?: string;
-  agentBody: string;
-  cachingBody?: string;
-}): WalkthroughStep[] {
-  const open = enterProvider(opts.id);
-  const steps: WalkthroughStep[] = [
-    clickStep(
-      `settings.llms.provider.${opts.id}`,
-      opts.label,
-      `Press the ${opts.label} row in this table. The page slides open so you can paste a key or use the coding agent.`,
-      async () => {
-        await openLlmsSection("llms");
-        selectLlmsProvider(null);
-        await wait(280);
-      },
-    ),
-    nextStep(
-      "settings.llms.provider.key",
-      `${opts.label} API key`,
-      opts.keyBody,
-      open,
-    ),
-    clickStep(
-      "settings.llms.provider.save",
-      "Test & Save",
-      "Press Test & Save after you paste a key. No key? Press Skip — you can still use the coding agent on this page.",
-      open,
-    ),
-  ];
-  if (opts.ideBody) {
-    steps.push(
-      nextStep("settings.llms.provider.ide", "IDE / MCP connection", opts.ideBody, open),
-      nextStep(
-        "settings.llms.provider.ide.apply",
-        "Apply connection",
-        "Press Apply (or Re-apply) so UEFN MCP and Ducky skills land in this IDE. Then use Test — a green check means the connection is good. Press Next when you are ready.",
-        open,
-      ),
-    );
-  }
-  steps.push(
-    nextStep("settings.llms.provider.agent", "Coding agent", opts.agentBody, open),
-    nextStep(
-      "settings.llms.provider.agent.detect",
-      "Detect CLI",
-      "Press Detect to find the CLI on this machine. Leave the toggle on so this agent appears in the chat picker. Press Next when you are ready.",
-      open,
-    ),
-  );
-  if (opts.cachingBody) {
-    steps.push(nextStep("settings.llms.provider.plugin", "Prompt caching", opts.cachingBody, open));
-  }
-  steps.push(
-    clickStep("settings.llms.back", "Back", "Press Back to return to the provider list.", open),
-  );
-  return steps;
-}
-
-export const LLMS_SETUP_TOUR: WalkthroughDef = {
-  id: "llms.setup",
-  title: "Set up LLM providers",
-  autoStart: "never",
-  steps: [
+function llmsSetupIntroSteps(): WalkthroughStep[] {
+  return [
     clickStep(
       settingsTabTargetId("LLMs"),
       "Open LLMs",
-      "Press LLMs in the sidebar. Anthropic, Cursor, and OpenAI show up here after the Store install.",
+      "Press LLMs in the sidebar. Each enabled gateway plugin is a row you will click next.",
       async () => {
         setSuppressStarterPluginTours(false);
         markStarterPluginToursCompleted();
@@ -622,51 +597,60 @@ export const LLMS_SETUP_TOUR: WalkthroughDef = {
     nextStep(
       "settings.llms.providers",
       "Providers",
-      "Each row is a button. Press it and the page slides open — API key, Test & Save, and Codex / Claude Code live on that slide.",
+      "Each row is a button. Press it and the page slides open — API key, Test & Save, IDE, and the coding agent live on that slide.",
       async () => {
         await openLlmsSection("llms");
         selectLlmsProvider(null);
         await wait(280);
       },
     ),
-    ...llmProviderSetupSteps({
-      id: "anthropic",
-      label: "Anthropic",
-      keyBody:
-        "Paste your Anthropic API key here. No key? Skip and use Claude Code on this same slide — then press Test & Save if you did paste a key.",
-      ideBody:
-        "IDE / MCP wires UEFN tools and Ducky skills into Claude globally (every project). Apply once, then Test. Green check = up to date.",
-      agentBody:
-        "Claude Code is the coding agent. Detect finds the CLI (often under .local\\bin). Keep the toggle on to pick Claude Code in chat.",
-      cachingBody:
-        "Cache markers discount repeated Anthropic prefixes. Extended TTL keeps that cache for an hour — leave both on unless you have a reason not to.",
-    }),
-    ...llmProviderSetupSteps({
-      id: "cursor",
-      label: "Cursor",
-      keyBody:
-        "Paste your Cursor API key here. No key? Skip and use the Cursor coding agent on this same slide.",
-      ideBody:
-        "IDE / MCP applies UEFN MCP and Ducky skills into Cursor globally. Apply, then Test. Green check means Cursor is connected.",
-      agentBody:
-        "This is the Cursor coding agent. Detect finds the CLI; keep the toggle on so it shows up in the chat picker.",
-    }),
-    ...llmProviderSetupSteps({
-      id: "openai",
-      label: "OpenAI",
-      keyBody:
-        "Paste your OpenAI API key here. No key? Skip and use Codex on this same slide — ChatGPT login is enough for Codex.",
-      agentBody:
-        "Codex is OpenAI's coding agent. Detect finds the CLI (often under npm). Default args like --full-auto are optional — keep the toggle on for chat.",
-      cachingBody:
-        "Cache markers let OpenAI reuse the stable system prefix across turns. Leave Enable OpenAI cache markers on to save input tokens.",
-    }),
-  ],
+  ];
+}
+
+/** Append registered plugin gateway tours (click the row, then each fillable section). */
+function withEnabledGatewayTours(
+  base: WalkthroughStep[],
+  opts?: { firstOnly?: boolean },
+): WalkthroughStep[] {
+  const tours = listEnabledGatewayTours();
+  if (!tours.length) {
+    if (opts?.firstOnly) return base;
+    return [
+      ...base,
+      nextStep(
+        "settings.llms.providers",
+        "No gateways enabled",
+        "Enable a gateway plugin in the Store, then replay this tour to click a row and fill each section.",
+        async () => {
+          await openLlmsSection("llms");
+          selectLlmsProvider(null);
+          await wait(280);
+        },
+      ),
+    ];
+  }
+  const picked = opts?.firstOnly ? tours.slice(0, 1) : tours;
+  return [...base, ...picked.flatMap((t) => t.steps)];
+}
+
+export const LLMS_SETUP_TOUR: WalkthroughDef = {
+  id: "llms.setup",
+  title: "Set up LLM providers",
+  description: "Click each enabled gateway and fill its key, Test & Save, IDE, and coding agent.",
+  autoStart: "never",
+  steps: llmsSetupIntroSteps(),
+  resolveSteps: () => withEnabledGatewayTours(llmsSetupIntroSteps()),
 };
 
 export function registerBuiltinTours(register: (def: WalkthroughDef) => void): void {
   register(APP_SHELL_TOUR);
-  register(SETTINGS_CORE_TOUR);
+  register(CHAT_COMPOSER_TOUR);
+  register(SETTINGS_GENERAL_TOUR);
+  register(SETTINGS_DUCKIES_TOUR);
+  register(SETTINGS_PLANS_TOUR);
+  register(SETTINGS_LLMS_TOUR);
+  register(SETTINGS_APPEARANCE_TOUR);
+  register(SETTINGS_AUDIO_TOUR);
   register(SETTINGS_STORE_TOUR);
   register(LLMS_SETUP_TOUR);
 }

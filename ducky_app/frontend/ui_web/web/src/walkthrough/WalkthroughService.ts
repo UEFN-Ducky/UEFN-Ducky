@@ -1,11 +1,34 @@
 /**
  * Host walkthrough registry + runner.
  *
- * Tours are owned by id (`app.shell`, `settings.core`, `plugin.translation`, …).
+ * Tours are owned by id (`app.shell`, `chat.composer`, `plugin.translation`, …).
  * Completion is persisted externally via setCompletedMap / markCompleted callbacks.
  */
 
 import type { WalkthroughDef, WalkthroughRuntimeState, WalkthroughStep } from "./types";
+
+/** Settings list order — Welcome, Chat, then each Settings tour. */
+export const HOST_TOUR_CATALOG_IDS = [
+  "app.shell",
+  "chat.composer",
+  "settings.general",
+  "settings.duckies",
+  "settings.plans",
+  "settings.llms",
+  "settings.appearance",
+  "settings.audio",
+  "settings.store",
+  "llms.setup",
+] as const;
+
+export const SETTINGS_CORE_SPLIT_IDS = [
+  "settings.general",
+  "settings.duckies",
+  "settings.plans",
+  "settings.llms",
+  "settings.appearance",
+  "settings.audio",
+] as const;
 
 type Listener = (state: WalkthroughRuntimeState) => void;
 type FinishHook = (tourId: string, reason: "complete" | "skip") => void;
@@ -26,6 +49,7 @@ let persistCompleted: ((map: Record<string, boolean>) => void) | null = null;
 let activeTourId: string | null = null;
 let stepIndex = 0;
 let starting = false;
+let activeResolvedSteps: WalkthroughStep[] = [];
 
 function emit(): void {
   const state: WalkthroughRuntimeState = {
@@ -51,9 +75,17 @@ export function setWalkthroughPersist(fn: ((map: Record<string, boolean>) => voi
   persistCompleted = fn;
 }
 
+function migrateCompletedMap(map: Record<string, boolean>): Record<string, boolean> {
+  const next = { ...map };
+  if (next["settings.core"]) {
+    for (const id of SETTINGS_CORE_SPLIT_IDS) next[id] = true;
+  }
+  return next;
+}
+
 /** Replace in-memory completion map (used once at hydrate from disk). */
 export function setCompletedMap(map: Record<string, boolean>): void {
-  completed = { ...map };
+  completed = migrateCompletedMap(map);
 }
 
 export function getCompletedMap(): Record<string, boolean> {
@@ -87,6 +119,24 @@ export function listTourIds(): string[] {
   return [...defs.keys()].sort();
 }
 
+export interface HostTourInfo {
+  id: string;
+  title: string;
+  description: string;
+}
+
+/** Named host tours for Settings → Walkthrough (stable catalog order). */
+export function listHostTours(): HostTourInfo[] {
+  return HOST_TOUR_CATALOG_IDS.map((id) => {
+    const def = defs.get(id);
+    return {
+      id,
+      title: def?.title ?? id,
+      description: def?.description ?? "",
+    };
+  });
+}
+
 export function subscribeWalkthrough(listener: Listener): () => void {
   listeners.add(listener);
   listener({
@@ -103,6 +153,7 @@ export function getWalkthroughState(): WalkthroughRuntimeState {
 
 export function getActiveSteps(): WalkthroughStep[] {
   if (!activeTourId) return [];
+  if (activeResolvedSteps.length) return activeResolvedSteps;
   return defs.get(activeTourId)?.steps ?? [];
 }
 
@@ -129,12 +180,16 @@ export async function startTour(tourId: string, opts?: { force?: boolean }): Pro
   const def = defs.get(tourId);
   if (!def) return false;
   if (!opts?.force && isCompleted(tourId)) return false;
-  if (activeTourId === tourId && stepIndex === 0) return true;
+  if (activeTourId === tourId) return true;
+  if (activeTourId && !opts?.force) return false;
   if (starting) return false;
   starting = true;
   try {
+    const resolved = def.resolveSteps?.() ?? def.steps;
+    if (!resolved.length) return false;
     activeTourId = tourId;
     stepIndex = 0;
+    activeResolvedSteps = resolved;
     emit();
     await enterStep(0);
     emit();
@@ -165,7 +220,7 @@ export async function prevStep(): Promise<void> {
   emit();
 }
 
-const HOST_CHAIN = ["app.shell", "settings.core", "settings.store", "llms.setup"] as const;
+const HOST_CHAIN = ["app.shell", "settings.store", "llms.setup"] as const;
 
 async function finishTour(reason: "complete" | "skip"): Promise<void> {
   const id = activeTourId;
@@ -174,6 +229,7 @@ async function finishTour(reason: "complete" | "skip"): Promise<void> {
   const persist = def?.persist !== false;
   activeTourId = null;
   stepIndex = 0;
+  activeResolvedSteps = [];
   emit();
   if (id && persist) {
     const next = { ...completed, [id]: true };
@@ -208,6 +264,7 @@ export async function redoTour(tourId: string): Promise<boolean> {
   if (activeTourId) {
     activeTourId = null;
     stepIndex = 0;
+    activeResolvedSteps = [];
     emit();
   }
   return startTour(tourId, { force: true });
@@ -223,6 +280,7 @@ export async function redoAppWalkthrough(): Promise<boolean> {
   if (activeTourId) {
     activeTourId = null;
     stepIndex = 0;
+    activeResolvedSteps = [];
     emit();
   }
   return startTour("app.shell", { force: true });
@@ -249,5 +307,6 @@ export function _resetWalkthroughServiceForTests(): void {
   activeTourId = null;
   stepIndex = 0;
   starting = false;
+  activeResolvedSteps = [];
   emit();
 }

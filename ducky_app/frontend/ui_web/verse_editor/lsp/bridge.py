@@ -16,6 +16,7 @@ from typing import Any
 
 from frontend.ui_web.verse_editor.lsp.detect import detect_verse_lsp
 from frontend.ui_web.verse_editor.lsp.project_root import normalize_verse_lsp_project_root
+from frontend.ui_web.verse_editor.lsp.verse_workspace import workspace_folder_fingerprint
 
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _STDERR_RING_MAX = 80
@@ -142,6 +143,7 @@ class LspBridge:
         self._client_sock: socket.socket | None = None
         self._port: int = 0
         self._project_root: str = ""
+        self._folder_fingerprint: str = ""
         self._error: str = ""
         self._last_exit_code: int | None = None
         self._stop = threading.Event()
@@ -198,9 +200,19 @@ class LspBridge:
             self._error = "No project root set"
             return self.get_status()
 
+        # Reuse the process only when the workspace roots are unchanged. Digest folders
+        # (Fortnite.com / Verse.org / UnrealEngine.com) appear after the first Verse build;
+        # reusing the pre-build process leaves the editor squiggles claiming those scopes
+        # do not exist while Problems (ephemeral scan) is clean.
+        fp = workspace_folder_fingerprint(root)
         with self._lock:
-            same_root = self._project_root == root
-            if self._proc_running() and same_root and self._bridge_alive():
+            same_session = (
+                self._proc_running()
+                and self._project_root == root
+                and self._folder_fingerprint == fp
+                and self._bridge_alive()
+            )
+            if same_session:
                 self._error = ""
                 return self.get_status()
 
@@ -208,8 +220,13 @@ class LspBridge:
         # fresh listener to the existing process instead of restarting verse-lsp. A second
         # `initialize` from the new client just gets an error response per the LSP spec — it
         # does not crash the server — and this avoids the process/listener churn that broke the
-        # boot handshake when we restarted on every reconnect.
-        if self._proc_running() and self._project_root == root:
+        # boot handshake when we restarted on every reconnect. Skip reattach when digest
+        # folders changed — that process was initialized without Fortnite.com.
+        if (
+            self._proc_running()
+            and self._project_root == root
+            and self._folder_fingerprint == fp
+        ):
             self._stop_bridge_listener()
             proc = self._proc
             if proc is not None:
@@ -225,6 +242,7 @@ class LspBridge:
 
         lsp_path = Path(str(detect["path"]))
         self._project_root = root
+        self._folder_fingerprint = fp
         self._stop.clear()
         self._last_exit_code = None
         self._stderr_ring.clear()
@@ -320,6 +338,7 @@ class LspBridge:
         with self._lock:
             proc = self._proc
             self._proc = None
+            self._folder_fingerprint = ""
         if proc and proc.poll() is None:
             try:
                 proc.terminate()
@@ -344,6 +363,7 @@ class LspBridge:
                 return
             self._last_exit_code = code
             self._proc = None
+            self._folder_fingerprint = ""
             self._port = 0
             self._error = f"verse-lsp exited (code {code}) — reopen a .verse file to reconnect"
         self._stop_bridge_listener()
