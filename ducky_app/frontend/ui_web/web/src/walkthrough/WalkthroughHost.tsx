@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef } from "react";
 import { usePluginContributions } from "../hooks/usePluginContributions";
+import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { registerBuiltinTours } from "./builtinTours";
 import { installWalkthroughPersistence, whenWalkthroughHydrated } from "./persistence";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./pluginWalkthroughs";
 import { autoStartPending, isCompleted, markTourCompleted, registerTour, startTour, unregisterTour } from "./WalkthroughService";
 import { WalkthroughOverlay } from "./WalkthroughOverlay";
+import { openCodingAgentLoginUi } from "./openCodingAgentLogin";
 import {
   ensureStarterLlmGateways,
   peekStarterLlmOnboard,
@@ -31,6 +33,18 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
   useEffect(() => {
     registerBuiltinTours(registerTour);
     return installWalkthroughPersistence();
+  }, []);
+
+  useEffect(() => {
+    installAgentEventBus();
+    return subscribeAgentEvents((event) => {
+      if (event.type !== "open_coding_agent_login") return;
+      void openCodingAgentLoginUi({
+        providerId: event.provider_id || "anthropic",
+        title: event.title,
+        body: event.text,
+      });
+    });
   }, []);
 
   // Sync plugin walkthrough defs from contributions.

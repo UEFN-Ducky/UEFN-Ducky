@@ -25,6 +25,7 @@ import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { useAppearance } from "../theme/AppearanceContext";
 import { AccountTab } from "./settings/AccountTab";
 import { AddToUefnTab } from "./settings/AddToUefnTab";
+import { AppDataTab } from "./settings/AppDataTab";
 import { AgentTab } from "./settings/AgentTab";
 import { LanguagesTab } from "./settings/LanguagesTab";
 import { DuckiesTab } from "./settings/DuckiesTab";
@@ -74,7 +75,7 @@ export type SettingsTab = string;
 export type LlmsSectionTab = "llms" | "skills" | "mcps" | "memory";
 
 /** Header sections under Settings → General. */
-export type GeneralSectionTab = "general" | "log_errors";
+export type GeneralSectionTab = "general" | "app_data" | "log_errors";
 
 /** Color asset or emoji — line SVGs read as monochrome in the Settings rail. */
 const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], string> = {
@@ -108,6 +109,7 @@ const LLMS_SECTION_TABS: { id: LlmsSectionTab; label: string }[] = [
 
 const GENERAL_SECTION_TABS: { id: GeneralSectionTab; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "app_data", label: "App Data" },
   { id: "log_errors", label: "Log & Errors" },
 ];
 
@@ -144,6 +146,7 @@ function readInitialLlmsSection(): LlmsSectionTab {
 function readInitialGeneralSection(): GeneralSectionTab {
   const s = readLastSettingsSections();
   if (s.general === "log_errors") return "log_errors";
+  if (s.general === "app_data") return "app_data";
   // Migrated from former sidebar "Log & Errors" tab (raw key before normalize).
   try {
     const raw = (localStorage.getItem("uefn-panel-settings-active-tab") || "").trim();
@@ -190,7 +193,7 @@ function applyGeneralLeafSection(
   setGeneral: (v: GeneralSectionTab) => void,
   setLogErrors: (v: LogErrorsSectionTab) => void,
 ): boolean {
-  if (section === "general" || section === "log_errors") {
+  if (section === "general" || section === "app_data" || section === "log_errors") {
     setGeneral(section);
     return true;
   }
@@ -866,7 +869,12 @@ export function SettingsView({ version }: SettingsViewProps) {
                         ref={targetRef(`settings.general.section.${tab.id}`, {
                           kind: "tab",
                           label: tab.label,
-                          route: tab.id === "log_errors" ? "settings.log_errors" : "settings.general",
+                          route:
+                            tab.id === "log_errors"
+                              ? "settings.log_errors"
+                              : tab.id === "app_data"
+                                ? "settings.app_data"
+                                : "settings.general",
                         })}
                         type="button"
                         className={`settings-view-header-tab${generalSection === tab.id ? " is-active" : ""}`}
@@ -936,6 +944,7 @@ export function SettingsView({ version }: SettingsViewProps) {
               </div>
             ) : null}
             {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
+            {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
             {activeTab === "General" && generalSection === "log_errors" && (
               <LogErrorsTab sectionTab={logErrorsSection} />
             )}

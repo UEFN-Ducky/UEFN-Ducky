@@ -119,6 +119,33 @@ describe("expandGatewayManifest", () => {
     expect(expanded.steps.find((s) => s.target === "settings.llms.back")?.advance).toBe("require_click");
   });
 
+  it("keeps a plugin-authored login spotlight on the coding-agent row", () => {
+    const expanded = expandGatewayManifest(
+      {
+        ...row,
+        id: "anthropic",
+        plugin_id: "anthropic",
+        steps: [
+          { ...row.steps[0], target: "settings.llms.provider.anthropic" },
+          {
+            target: "settings.llms.provider.agent.login",
+            title: "Log in here",
+            body: "Never paste a login code in chat.",
+            advance: "require_click",
+          },
+        ],
+      },
+      { llm_coding_agents: [{ plugin_id: "anthropic" }] },
+    );
+    expect(expanded.steps.map((s) => s.target)).toContain("settings.llms.provider.agent.login");
+    expect(expanded.steps.find((s) => s.target === "settings.llms.provider.agent.login")?.body).toMatch(
+      /Never paste a login code in chat/,
+    );
+    expect(expanded.steps.find((s) => s.target === "settings.llms.provider.agent.login")?.advance).toBe(
+      "require_click",
+    );
+  });
+
   it("adds IDE steps only when the plugin contributes a hookup", () => {
     const expanded = expandGatewayManifest(
       { ...row, id: "cursor", plugin_id: "cursor", steps: [{ ...row.steps[0], target: "settings.llms.provider.cursor" }] },

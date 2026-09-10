@@ -37,7 +37,7 @@ type SettingsSections = {
   llms?: string;
   /** @deprecated migrated into `llms` */
   skillsMcp?: string;
-  /** General header section: general | log_errors */
+  /** General header section: general | app_data | log_errors */
   general?: string;
   /** Log | Errors leaf under General → Log & Errors */
   logErrors?: string;

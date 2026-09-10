@@ -48,6 +48,7 @@ class TerminalManager:
         title: str = "",
         *,
         push_open: bool = False,
+        hidden: bool = False,
         conv_id: str = "",
     ) -> dict[str, Any]:
         shell_norm = shell_label(shell)
@@ -56,7 +57,7 @@ class TerminalManager:
             workdir = os.getcwd()
         entry: _SessionEntry | None = None
         with self._lock:
-            session = TerminalSession(shell=shell_norm, cwd=workdir, title=title)  # type: ignore[arg-type]
+            session = TerminalSession(shell=shell_norm, cwd=workdir, title=title, hidden=hidden)  # type: ignore[arg-type]
             bridge = TerminalBridge(
                 on_input=lambda data, s=session: self._user_write(s.id, data),
                 on_resize=lambda c, r, s=session: s.resize(c, r),
@@ -100,7 +101,7 @@ class TerminalManager:
             "tab_id": f"terminal:{session.id}",
             "shell_fallback": shell_fallback,
         }
-        if push_open:
+        if push_open and not session.hidden:
             self._emit(
                 {
                     "type": "terminal_open",
@@ -136,7 +137,7 @@ class TerminalManager:
 
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [e.session.to_dict() for e in self._sessions.values()]
+            return [e.session.to_dict() for e in self._sessions.values() if not e.session.hidden]
 
     def get_session(self, session_id: str) -> TerminalSession | None:
         with self._lock:

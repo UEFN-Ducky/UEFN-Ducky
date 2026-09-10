@@ -136,6 +136,7 @@ class TerminalSession:
         shell: TerminalShell,
         cwd: str,
         title: str = "",
+        hidden: bool = False,
         on_output: Callable[[str], None] | None = None,
         on_exit: Callable[[int], None] | None = None,
     ) -> None:
@@ -143,6 +144,7 @@ class TerminalSession:
         self.shell = shell_label(shell)
         self.cwd = cwd
         self.title = (title or f"{self.shell}").strip()[:80]
+        self.hidden = bool(hidden)
         self.port = 0
         self.ws_url = ""
         self._on_output = on_output
@@ -374,4 +376,5 @@ class TerminalSession:
             "busy": self.is_busy(),
             "alive": self.is_alive(),
             "exit_code": self._exit_code,
+            "hidden": self.hidden,
         }

@@ -26,17 +26,6 @@ function PlugIcon() {
   );
 }
 
-function HardDriveIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <line x1="22" y1="12" x2="2" y2="12" />
-      <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
-      <line x1="6" y1="16" x2="6.01" y2="16" />
-      <line x1="10" y1="16" x2="10.01" y2="16" />
-    </svg>
-  );
-}
-
 function PowerIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -71,11 +60,6 @@ export function AddToUefnTab() {
   const addToUefnRef = useUiTarget("settings.general.add_to_uefn", {
     kind: "settings_field",
     label: "Add to UEFN",
-    route: "settings.general",
-  });
-  const appDataRef = useUiTarget("settings.general.app_data", {
-    kind: "settings_field",
-    label: "App Data",
     route: "settings.general",
   });
 
@@ -187,24 +171,6 @@ export function AddToUefnTab() {
       <hr className="general-tab-divider" />
 
       <div className="general-tab-footer-grid">
-        <section className="general-tab-footer-card" ref={appDataRef}>
-          <GeneralSectionHeader
-            icon={<HardDriveIcon />}
-            title="App Data"
-            description="Local settings and cache."
-          />
-          <button
-            type="button"
-            className="settings-btn"
-            onClick={() => {
-              const api = getApi();
-              if (api) void api.open_appdata();
-            }}
-          >
-            Open folder
-          </button>
-        </section>
-
         <section className="general-tab-footer-card general-tab-footer-card--danger">
           <GeneralSectionHeader
             icon={<PowerIcon />}

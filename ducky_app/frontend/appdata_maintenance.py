@@ -1,15 +1,20 @@
-"""AppData housekeeping: sweep old backups, prune orphans, background startup sweep."""
+"""AppData housekeeping: sweep old backups, prune orphans, background startup sweep.
+
+Also the Settings → App Data inventory (sizes, clear, delete).
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import threading
 from pathlib import Path
+from typing import Any
 
 from frontend.atomic_json import BACKUPS_DIR_NAME, prune_all_backups
 from frontend.settings import PanelSettings, default_app_data_dir
-from frontend.ui_web.project_chats import project_slug
+from frontend.ui_web.project_chats import project_display_name, project_slug
 from frontend.ui_web.recent_projects import load_recent_projects
 
 _log = logging.getLogger(__name__)
@@ -97,19 +102,75 @@ def sweep_old_backups(app_root: Path | None = None) -> int:
     return moved
 
 
+# (rel_parent, size-label) — folders that hold one dir per project slug.
+_PROJECT_AREAS: tuple[tuple[str, str], ...] = (
+    ("chats/projects", "Chats"),
+    ("workspace/projects", "Workspace"),
+    ("file_history", "File history"),
+    ("verse_diagnostics", "Diagnostics"),
+    ("changesets", "Changesets"),
+    ("memory/projects", "Memory"),
+)
+
+_CHILD_LIMIT = 80
+
+# name -> (label, description, kind)
+# kind: cache | user | install | runtime | settings | other
+_KNOWN: dict[str, tuple[str, str, str]] = {
+    "chats": ("Chats", "Conversation history per project.", "user"),
+    "workspace": ("Workspace", "Open editor tabs and layout per project.", "user"),
+    "file_history": ("File history", "Local undo snapshots for Verse files.", "cache"),
+    "verse_diagnostics": ("Verse diagnostics", "Cached Verse scan results per project.", "cache"),
+    "changesets": ("Changesets", "Agent write ledger so runs can be reverted.", "user"),
+    "memory": ("Memory", "Project memory notes the agent keeps.", "user"),
+    "tool_captures": ("Captures", "Screenshots and snips from tools.", "cache"),
+    "backups": ("Backups", "Rotated copies of settings JSON.", "cache"),
+    "listener": ("Listener", "UEFN Python listener shipped here. Recreated on app start.", "runtime"),
+    "skill_packs": ("Skill packs", "Installed skill packs.", "install"),
+    "uefn_plugins": ("Desktop plugins", "Installed Store plugins.", "install"),
+    "mcp_plugins": ("MCP plugins", "Installed MCP plugin packs.", "install"),
+    "ai_plugins": ("AI plugin drafts", "In-progress plugin drafts.", "install"),
+    "coding_agents": ("Coding agents", "CLI agent temp files and bridge copies.", "cache"),
+    "verse-lsp": ("Verse LSP", "Language server cache.", "cache"),
+    "plan_templates": ("Plan templates", "Reusable plan templates.", "user"),
+    "verse_templates": ("Verse templates", "Custom Verse templates.", "user"),
+    "perf": ("Perf traces", "Performance diagnostics.", "cache"),
+    "tasks": ("Tasks", "Agent task files.", "user"),
+    "sounds": ("Sounds", "Custom notification audio.", "user"),
+    "duckies": ("Custom duckies", "Custom ducky avatars.", "user"),
+    "uefn_plugin_cache": ("Plugin cache", "Per-plugin cache.", "cache"),
+    "uefn_plugin_prefs": ("Plugin prefs", "Per-plugin preferences.", "user"),
+    "webview2_browser": ("In-app browser", "Embedded browser profile (Discord login, cookies).", "cache"),
+    "panel_settings.json": ("Panel settings", "Main settings file.", "settings"),
+    "config.json": ("Config", "Listener config JSON.", "settings"),
+    "credentials.dat": ("Credentials", "Saved API keys.", "settings"),
+    "recent_projects.json": ("Recent projects", "Project switcher history.", "user"),
+    "workspace_dock.json": ("Dock layout", "Panel dock positions.", "user"),
+    "models_cache.json": ("Models cache", "Cached LLM model lists.", "cache"),
+    "agent_crashes.jsonl": ("Agent crashes", "Crash log for debugging.", "cache"),
+    "uefn_plugin_load_errors.jsonl": ("Plugin load errors", "Plugin import failures.", "cache"),
+    "mcp.json": ("MCP config", "MCP server list. Manage from Settings → LLMs → MCPs.", "settings"),
+}
+
+_PROTECTED_NAMES = frozenset(
+    {
+        "credentials.dat",
+        "panel_settings.json",
+        "config.json",
+        "mcp.json",
+        "listener",
+    }
+)
+
+
 def delete_project_appdata(slug: str, app_root: Path | None = None) -> int:
-    """Remove all AppData for a project slug (chats, workspace, history, diagnostics, previews)."""
+    """Remove all AppData for a project slug (chats, workspace, history, diagnostics, …)."""
     if not (slug or "").strip():
         return 0
     if app_root is None:
         app_root = default_app_data_dir()
     removed = 0
-    for area in (
-        "chats/projects",
-        "workspace/projects",
-        "file_history",
-        "verse_diagnostics",
-    ):
+    for area, _label in _PROJECT_AREAS:
         project_dir = app_root / Path(area) / slug
         if project_dir.is_dir() and _safe_rmtree(project_dir):
             removed += 1
@@ -189,3 +250,294 @@ def start_appdata_maintenance_async(app_root: Path | None = None) -> None:
             _log.exception("AppData maintenance failed")
 
     threading.Thread(target=_run, daemon=True, name="appdata-maintenance").start()
+
+
+def resolve_appdata_rel(rel: str, app_root: Path | None = None) -> Path | None:
+    """Resolve ``rel`` under AppData. None if it escapes the root."""
+    root = (app_root or default_app_data_dir()).resolve()
+    raw = (rel or "").replace("\\", "/").strip("/")
+    if not raw:
+        return root
+    if any(part in ("..", "") for part in raw.split("/")):
+        return None
+    path = (root / raw).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path
+
+
+def _walk_stats(path: Path) -> tuple[int, int, int]:
+    """Return (bytes, files, dirs) without following symlinks."""
+    size = 0
+    files = 0
+    dirs = 0
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs += 1
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            files += 1
+                            size += int(entry.stat(follow_symlinks=False).st_size)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return size, files, dirs
+
+
+def _rel_to_root(path: Path, root: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _describe(name: str) -> tuple[str, str, str]:
+    hit = _KNOWN.get(name)
+    if hit:
+        return hit
+    return (name, "Unlisted AppData item.", "other")
+
+
+def _flags(name: str, kind: str) -> tuple[bool, bool, bool]:
+    """clearable, deletable, protected — top-level name only (not nested children)."""
+    if name in _PROTECTED_NAMES or kind in ("runtime", "settings"):
+        return False, False, True
+    return True, True, False
+
+
+def _item_dict(path: Path, root: Path, *, nested: bool = False) -> dict[str, Any]:
+    name = path.name
+    rel = _rel_to_root(path, root)
+    label, description, kind = _describe(name if not nested else name)
+    if nested:
+        # Nested rows keep the folder name; kind follows the top-level ancestor
+        # when known, else other. Don't apply top-level protected flags to a
+        # screenshot inside tool_captures.
+        top = rel.split("/", 1)[0] if rel else name
+        _label, description, kind = _describe(top)
+        label = name
+        clearable, deletable, protected = True, True, False
+        if top in _PROTECTED_NAMES:
+            clearable, deletable, protected = False, False, True
+    else:
+        clearable, deletable, protected = _flags(name, kind)
+    is_dir = path.is_dir() and not path.is_symlink()
+    if is_dir:
+        size, files, dirs = _walk_stats(path)
+    elif path.is_file():
+        try:
+            size = int(path.stat().st_size)
+        except OSError:
+            size = 0
+        files, dirs = 1, 0
+    else:
+        size, files, dirs = 0, 0, 0
+    return {
+        "name": name,
+        "rel": rel,
+        "is_dir": is_dir,
+        "bytes": size,
+        "files": files,
+        "dirs": dirs,
+        "kind": kind,
+        "label": label,
+        "description": description,
+        "clearable": clearable,
+        "deletable": deletable,
+        "protected": protected,
+    }
+
+
+def appdata_overview(app_root: Path | None = None) -> dict[str, Any]:
+    root = (app_root or default_app_data_dir()).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, Any]] = []
+    try:
+        with os.scandir(root) as it:
+            names = sorted((e.name for e in it), key=str.lower)
+    except OSError:
+        names = []
+    for name in names:
+        path = root / name
+        items.append(_item_dict(path, root, nested=False))
+    items.sort(key=lambda row: (-int(row["bytes"]), str(row["name"]).lower()))
+    return {
+        "root": str(root),
+        "bytes": sum(int(row["bytes"]) for row in items),
+        "files": sum(int(row["files"]) for row in items),
+        "dirs": sum(int(row["dirs"]) for row in items),
+        "items": items,
+    }
+
+
+def appdata_children(rel: str, app_root: Path | None = None) -> dict[str, Any]:
+    root = (app_root or default_app_data_dir()).resolve()
+    path = resolve_appdata_rel(rel, root)
+    if path is None or not path.is_dir():
+        return {"rel": rel or "", "items": [], "truncated": False, "total": 0, "error": "not_found"}
+    rows: list[dict[str, Any]] = []
+    try:
+        with os.scandir(path) as it:
+            children = sorted((Path(e.path) for e in it), key=lambda p: p.name.lower())
+    except OSError:
+        children = []
+    for child in children:
+        rows.append(_item_dict(child, root, nested=True))
+    rows.sort(key=lambda row: (-int(row["bytes"]), str(row["name"]).lower()))
+    total = len(rows)
+    truncated = total > _CHILD_LIMIT
+    return {
+        "rel": _rel_to_root(path, root) if path != root else "",
+        "items": rows[:_CHILD_LIMIT],
+        "truncated": truncated,
+        "total": total,
+    }
+
+
+def _clear_contents(path: Path) -> int:
+    if path.is_file() or path.is_symlink():
+        try:
+            path.unlink()
+            return 1
+        except OSError:
+            return 0
+    if not path.is_dir():
+        return 0
+    removed = 0
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return 0
+    for child in children:
+        if child.is_symlink() or child.is_file():
+            try:
+                child.unlink()
+                removed += 1
+            except OSError:
+                pass
+        elif child.is_dir():
+            if _safe_rmtree(child):
+                removed += 1
+    return removed
+
+
+def appdata_clear(rel: str, app_root: Path | None = None) -> dict[str, Any]:
+    """Empty a folder (keep the folder) or delete a file. Refuses protected names."""
+    root = (app_root or default_app_data_dir()).resolve()
+    raw = (rel or "").replace("\\", "/").strip("/")
+    if not raw:
+        return {"ok": False, "error": "refused_root", "removed": 0}
+    path = resolve_appdata_rel(raw, root)
+    if path is None or not path.exists():
+        return {"ok": False, "error": "not_found", "removed": 0}
+    top = raw.split("/", 1)[0]
+    if top in _PROTECTED_NAMES:
+        return {"ok": False, "error": "protected", "removed": 0}
+    removed = _clear_contents(path)
+    return {"ok": True, "removed": removed}
+
+
+def appdata_delete(rel: str, app_root: Path | None = None) -> dict[str, Any]:
+    """Delete a file or folder under AppData. Refuses protected names and the root."""
+    root = (app_root or default_app_data_dir()).resolve()
+    raw = (rel or "").replace("\\", "/").strip("/")
+    if not raw:
+        return {"ok": False, "error": "refused_root", "removed": 0}
+    path = resolve_appdata_rel(raw, root)
+    if path is None or not path.exists():
+        return {"ok": False, "error": "not_found", "removed": 0}
+    top = raw.split("/", 1)[0]
+    if top in _PROTECTED_NAMES:
+        return {"ok": False, "error": "protected", "removed": 0}
+    if path.is_dir() and not path.is_symlink():
+        ok = _safe_rmtree(path)
+        return {"ok": ok, "removed": 1 if ok else 0, "error": None if ok else "busy"}
+    try:
+        path.unlink()
+        return {"ok": True, "removed": 1}
+    except OSError:
+        return {"ok": False, "error": "busy", "removed": 0}
+
+
+def appdata_clear_caches(app_root: Path | None = None) -> dict[str, Any]:
+    """Clear every top-level item whose kind is cache (not chats, plugins, settings)."""
+    overview = appdata_overview(app_root)
+    removed = 0
+    cleared: list[str] = []
+    for row in overview["items"]:
+        if row["kind"] != "cache" or not row["clearable"]:
+            continue
+        result = appdata_clear(str(row["rel"]), app_root)
+        if result.get("ok"):
+            removed += int(result.get("removed") or 0)
+            cleared.append(str(row["rel"]))
+    return {"ok": True, "removed": removed, "cleared": cleared}
+
+
+def appdata_projects(app_root: Path | None = None) -> dict[str, Any]:
+    root = (app_root or default_app_data_dir()).resolve()
+    slug_to_path: dict[str, str] = {}
+    for project_path in load_recent_projects():
+        if project_path.strip():
+            slug_to_path[project_slug(project_path)] = project_path
+    current = PanelSettings.load().uefn_project_root.strip()
+    if current:
+        slug_to_path.setdefault(project_slug(current), current)
+
+    slugs: set[str] = set(slug_to_path)
+    for area, _label in _PROJECT_AREAS:
+        area_root = root / Path(area)
+        if not area_root.is_dir():
+            continue
+        try:
+            for child in area_root.iterdir():
+                if child.is_dir():
+                    slugs.add(child.name)
+        except OSError:
+            continue
+
+    projects: list[dict[str, Any]] = []
+    for slug in slugs:
+        areas: list[dict[str, Any]] = []
+        total = 0
+        for area, label in _PROJECT_AREAS:
+            project_dir = root / Path(area) / slug
+            if not project_dir.is_dir():
+                continue
+            size, files, dirs = _walk_stats(project_dir)
+            areas.append(
+                {
+                    "name": label,
+                    "rel": _rel_to_root(project_dir, root),
+                    "bytes": size,
+                    "files": files,
+                    "dirs": dirs,
+                }
+            )
+            total += size
+        if not areas:
+            continue
+        project_path = slug_to_path.get(slug, "")
+        label = project_display_name(project_path) if project_path else slug
+        projects.append(
+            {
+                "slug": slug,
+                "label": label,
+                "path": project_path,
+                "bytes": total,
+                "areas": areas,
+            }
+        )
+    projects.sort(key=lambda row: (-int(row["bytes"]), str(row["label"]).lower()))
+    return {"projects": projects, "bytes": sum(int(p["bytes"]) for p in projects)}

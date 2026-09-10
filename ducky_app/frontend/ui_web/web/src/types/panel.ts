@@ -1211,6 +1211,7 @@ export interface AgentEvent {
     | "plan_updated"
     | "discord_message"
     | "ui_rpc_request"
+    | "open_coding_agent_login"
     | "settings_changed"
     | "mcp_plugins_changed"
     | "skills_changed"
@@ -1286,6 +1287,8 @@ export interface AgentEvent {
   command?: string;
   source?: string;
   channel_id?: string;
+  /** open_coding_agent_login: Settings → LLMs → this provider's detail slide. */
+  provider_id?: string;
   /** Multi-bot Discord: which bot profile emitted this event. */
   bot_id?: string;
   discord?: DiscordMessageDto;
@@ -1565,6 +1568,62 @@ export interface SessionFile {
   path: string;
   lines_added?: number;
   kind: "write" | "create" | "rename" | "move";
+}
+
+export type AppDataKind = "cache" | "user" | "install" | "runtime" | "settings" | "other";
+
+export interface AppDataItem {
+  name: string;
+  rel: string;
+  is_dir: boolean;
+  bytes: number;
+  files: number;
+  dirs: number;
+  kind: AppDataKind;
+  label: string;
+  description: string;
+  clearable: boolean;
+  deletable: boolean;
+  protected: boolean;
+}
+
+export interface AppDataOverview {
+  root: string;
+  bytes: number;
+  files: number;
+  dirs: number;
+  items: AppDataItem[];
+}
+
+export interface AppDataChildren {
+  rel: string;
+  items: AppDataItem[];
+  truncated: boolean;
+  total: number;
+  error?: string;
+}
+
+export interface AppDataProjectArea {
+  name: string;
+  rel: string;
+  bytes: number;
+  files: number;
+  dirs: number;
+}
+
+export interface AppDataProject {
+  slug: string;
+  label: string;
+  path: string;
+  bytes: number;
+  areas: AppDataProjectArea[];
+}
+
+export interface AppDataActionResult {
+  ok: boolean;
+  error?: string;
+  removed?: number;
+  cleared?: string[];
 }
 
 export interface PanelApi {
@@ -2082,7 +2141,29 @@ export interface PanelApi {
   detect_coding_agent_cli(agent_id: string): Promise<Record<string, unknown>>;
   coding_agent_login(
     agent_id: string,
-  ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string; auth_url?: string }>;
+  ): Promise<{
+    ok: boolean;
+    logged_in?: boolean;
+    needs_login?: boolean;
+    message?: string;
+    error?: string;
+    auth_url?: string;
+    login_ui?: string;
+    terminal_session_id?: string;
+  }>;
+  coding_agent_login_submit(
+    agent_id: string,
+    code: string,
+  ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string }>;
+  coding_agent_login_status(
+    agent_id: string,
+  ): Promise<{
+    ok: boolean;
+    logged_in?: boolean;
+    auth_url?: string;
+    error?: string;
+    login_ui?: string;
+  }>;
   coding_agent_logout(
     agent_id: string,
   ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string }>;
@@ -2364,6 +2445,15 @@ export interface PanelApi {
   copy_support_dump(): Promise<string>;
   pull_editor_log(): Promise<void>;
   open_appdata(): Promise<void>;
+  appdata_overview(): Promise<AppDataOverview>;
+  appdata_children(rel?: string): Promise<AppDataChildren>;
+  appdata_open(rel?: string): Promise<void>;
+  appdata_clear(rel: string): Promise<AppDataActionResult>;
+  appdata_delete(rel: string): Promise<AppDataActionResult>;
+  appdata_sweep(): Promise<Record<string, number>>;
+  appdata_projects(): Promise<{ projects: AppDataProject[]; bytes: number }>;
+  appdata_delete_project(slug: string): Promise<AppDataActionResult>;
+  appdata_clear_caches(): Promise<AppDataActionResult>;
   open_path_in_explorer(path: string): Promise<void>;
   open_project_path_in_explorer(relative_path: string): Promise<void>;
   open_skills_folder(): Promise<void>;

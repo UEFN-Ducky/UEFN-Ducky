@@ -13,6 +13,7 @@ export function richColorFromHref(href: string): RichTextColor | undefined {
 
 export function richUrlTransform(url: string, key: string): string {
   if (key === "href" && (richColorFromHref(url) || /^plan-node:[\w-]+$/.test(url))) return url;
+  if (key === "href" && /^ducky:\/\/settings\.llms\/[a-z0-9_-]+#login$/i.test(url)) return url;
   return defaultUrlTransform(url);
 }
 

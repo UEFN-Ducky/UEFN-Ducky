@@ -25,6 +25,8 @@ const LLM_DETAIL_TARGETS = new Set([
   "settings.llms.provider.ide.apply",
   "settings.llms.provider.agent",
   "settings.llms.provider.agent.detect",
+  "settings.llms.provider.agent.login",
+  "settings.llms.provider.agent.logout",
   "settings.llms.provider.plugin",
   "settings.llms.back",
 ]);
@@ -195,6 +197,25 @@ export function expandGatewayManifest(
         "Press Detect to find the CLI on this machine. Leave the toggle on so this agent appears in the chat picker.",
       ),
     );
+    if (pick("settings.llms.provider.agent.login")) {
+      steps.push(
+        step(
+          "settings.llms.provider.agent.login",
+          "Log in",
+          "Log in here — a window shows the sign-in link and a box for the code. Never paste a login code in chat.",
+          "require_click",
+        ),
+      );
+    }
+    if (pick("settings.llms.provider.agent.logout")) {
+      steps.push(
+        step(
+          "settings.llms.provider.agent.logout",
+          "Log out",
+          "Log out here to switch accounts or re-test login.",
+        ),
+      );
+    }
   }
   if (pluginSection) {
     steps.push(

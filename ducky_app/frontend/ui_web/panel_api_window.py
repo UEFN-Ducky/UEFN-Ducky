@@ -641,6 +641,59 @@ class PanelApiWindowMixin:
         d.mkdir(parents=True, exist_ok=True)
         _pa.os.startfile(str(d))  # type: ignore[attr-defined]
 
+    def appdata_overview(self) -> dict:
+        from frontend.appdata_maintenance import appdata_overview
+
+        return appdata_overview()
+
+    def appdata_children(self, rel: str = "") -> dict:
+        from frontend.appdata_maintenance import appdata_children
+
+        return appdata_children(rel or "")
+
+    def appdata_open(self, rel: str = "") -> None:
+        from frontend.appdata_maintenance import resolve_appdata_rel
+
+        path = resolve_appdata_rel(rel or "")
+        if path is None:
+            return
+        if not (rel or "").strip():
+            path.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            return
+        self.open_path_in_explorer(str(path))
+
+    def appdata_clear(self, rel: str) -> dict:
+        from frontend.appdata_maintenance import appdata_clear
+
+        return appdata_clear(rel or "")
+
+    def appdata_delete(self, rel: str) -> dict:
+        from frontend.appdata_maintenance import appdata_delete
+
+        return appdata_delete(rel or "")
+
+    def appdata_sweep(self) -> dict:
+        from frontend.appdata_maintenance import maintain_appdata
+
+        return maintain_appdata()
+
+    def appdata_projects(self) -> dict:
+        from frontend.appdata_maintenance import appdata_projects
+
+        return appdata_projects()
+
+    def appdata_delete_project(self, slug: str) -> dict:
+        from frontend.appdata_maintenance import delete_project_appdata
+
+        removed = delete_project_appdata(slug or "")
+        return {"ok": True, "removed": removed}
+
+    def appdata_clear_caches(self) -> dict:
+        from frontend.appdata_maintenance import appdata_clear_caches
+
+        return appdata_clear_caches()
+
     def _pick_save_file_webview(
         self,
         win: Any,

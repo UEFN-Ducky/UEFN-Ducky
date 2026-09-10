@@ -754,8 +754,7 @@ class PanelApiSettingsMixin:
         return {"ok": True, **info.to_dict()}
 
     def coding_agent_login(self, agent_id: str) -> dict[str, Any]:
-        """Start the gateway's own CLI login from Settings (terminal + browser),
-        so nobody has to paste codes into a chat."""
+        """Start the gateway's CLI login from Settings (in-app modal, hidden CLI)."""
         from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
         from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
@@ -778,6 +777,69 @@ class PanelApiSettingsMixin:
             return {"ok": False, "error": str(exc)}
         invalidate_detect_cache()
         return result if isinstance(result, dict) else {"ok": bool(result)}
+
+    def coding_agent_login_submit(self, agent_id: str, code: str) -> dict[str, Any]:
+        """Paste the CLI login code into the hidden auth process (Settings modal)."""
+        from backend.agent.coding_agents.base import (
+            invalidate_detect_cache,
+            kick_detect_refresh,
+            normalize_coding_agent,
+        )
+        from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
+        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+
+        aid = normalize_coding_agent(agent_id)
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {"ok": False, "error": "Plugins still loading — try again in a moment."}
+        submit = (get_coding_agent_registration(aid) or {}).get("login_submit")
+        if not callable(submit):
+            return {"ok": False, "error": f"{aid} has no in-app login submit."}
+        settings = _pa.PanelSettings.load()
+        try:
+            result = submit(
+                code=str(code or ""),
+                cwd=(settings.uefn_project_root or "").strip(),
+                cli_path=str(coding_agent_cfg(settings, aid).get("cli_path") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - surface to the Settings modal
+            return {"ok": False, "error": str(exc)}
+        if not isinstance(result, dict):
+            result = {"ok": bool(result)}
+        if result.get("logged_in"):
+            invalidate_detect_cache()
+            kick_detect_refresh()
+        return result
+
+    def coding_agent_login_status(self, agent_id: str) -> dict[str, Any]:
+        """Poll the hidden login process for the auth URL / logged-in flag."""
+        from backend.agent.coding_agents.base import (
+            invalidate_detect_cache,
+            kick_detect_refresh,
+            normalize_coding_agent,
+        )
+        from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
+        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+
+        aid = normalize_coding_agent(agent_id)
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {"ok": False, "error": "Plugins still loading — try again in a moment."}
+        status = (get_coding_agent_registration(aid) or {}).get("login_status")
+        if not callable(status):
+            return {"ok": True, "logged_in": False}
+        settings = _pa.PanelSettings.load()
+        try:
+            result = status(
+                cwd=(settings.uefn_project_root or "").strip(),
+                cli_path=str(coding_agent_cfg(settings, aid).get("cli_path") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - surface to the Settings modal
+            return {"ok": False, "error": str(exc)}
+        if not isinstance(result, dict):
+            result = {"ok": bool(result), "logged_in": False}
+        if result.get("logged_in"):
+            invalidate_detect_cache()
+            kick_detect_refresh()
+        return result
 
     def coding_agent_logout(self, agent_id: str) -> dict[str, Any]:
         """Sign the gateway's CLI out from Settings so the user can re-test login."""

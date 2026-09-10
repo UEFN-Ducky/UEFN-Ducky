@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
 import { Icons } from "../../icons/Icons";
 import { TruncatedText } from "../../components/TruncatedText";
+import { Modal, ModalActions } from "../../components/Modal";
 import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
 import { usePluginContributions } from "../../hooks/usePluginContributions";
 import type { CodingAgentDto } from "../../types/panel";
@@ -85,6 +86,184 @@ function useCodingAgentsState() {
   return { agents, drafts, loaded, refresh, saveAgent, setDraft };
 }
 
+function CodingAgentLoginModal({
+  agentId,
+  title,
+  onClose,
+  onLoggedIn,
+}: {
+  agentId: string;
+  title: string;
+  onClose: () => void;
+  onLoggedIn: () => void;
+}) {
+  const [authUrl, setAuthUrl] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [starting, setStarting] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const loggedIn = useRef(false);
+  const onLoggedInRef = useRef(onLoggedIn);
+  onLoggedInRef.current = onLoggedIn;
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = getApi();
+    if (!api?.coding_agent_login) {
+      setStarting(false);
+      setError("Login is not available in this Ducky build.");
+      return;
+    }
+
+    const applyUrl = (url?: string) => {
+      const next = String(url || "").trim();
+      if (next) setAuthUrl(next);
+    };
+
+    void (async () => {
+      try {
+        const res = await api.coding_agent_login(agentId);
+        if (cancelled) return;
+        if (res.logged_in) {
+          loggedIn.current = true;
+          onLoggedInRef.current();
+          return;
+        }
+        if (!res.ok) {
+          setError(String(res.error || res.message || "Login failed"));
+          return;
+        }
+        applyUrl(res.auth_url);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setStarting(false);
+      }
+    })();
+
+    const tick = window.setInterval(() => {
+      if (!api.coding_agent_login_status || loggedIn.current) return;
+      void (async () => {
+        try {
+          const st = await api.coding_agent_login_status(agentId);
+          if (cancelled || loggedIn.current) return;
+          if (st.logged_in) {
+            loggedIn.current = true;
+            onLoggedInRef.current();
+            return;
+          }
+          applyUrl(st.auth_url);
+        } catch {
+          /* poll is best-effort */
+        }
+      })();
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(tick);
+    };
+  }, [agentId]);
+
+  useEffect(() => {
+    if (!starting && !submitting) codeRef.current?.focus();
+  }, [starting, submitting]);
+
+  const openLink = () => {
+    const url = authUrl.trim();
+    if (!url) return;
+    const api = getApi();
+    if (api?.open_external_url) void api.open_external_url(url);
+    else window.open(url, "_blank", "noopener");
+  };
+
+  const submit = async () => {
+    const api = getApi();
+    const token = code.trim();
+    if (!api?.coding_agent_login_submit || !token || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await api.coding_agent_login_submit(agentId, token);
+      if (res.logged_in) {
+        loggedIn.current = true;
+        onLoggedInRef.current();
+        return;
+      }
+      setError(String(res.error || res.message || "Claude did not accept that code."));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      width={480}
+      zIndex={100040}
+      footer={
+        <ModalActions
+          onCancel={onClose}
+          onConfirm={() => void submit()}
+          cancelLabel="Cancel"
+          confirmLabel={submitting ? "Submitting…" : "Submit"}
+          confirmDisabled={submitting || !code.trim()}
+        />
+      }
+    >
+      <p className="general-tab-section-desc" style={{ marginTop: 0 }}>
+        Open the link, sign in, then paste the code Claude shows you.
+      </p>
+      {authUrl ? (
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={openLink}
+          style={{
+            display: "block",
+            width: "100%",
+            textAlign: "left",
+            whiteSpace: "normal",
+            wordBreak: "break-all",
+            marginBottom: 12,
+          }}
+        >
+          {authUrl}
+        </button>
+      ) : (
+        <p className="general-tab-section-desc">{starting ? "Getting the sign-in link…" : "Waiting for the sign-in link…"}</p>
+      )}
+      <input
+        ref={codeRef}
+        className="settings-input"
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="Paste the login code"
+        value={code}
+        disabled={submitting}
+        onChange={(e) => setCode(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      {error ? (
+        <p className="llms-provider-status-text is-fail" style={{ marginTop: 8, marginBottom: 0 }}>
+          {error}
+        </p>
+      ) : null}
+    </Modal>
+  );
+}
+
 function CodingAgentRows({
   rows,
   drafts,
@@ -105,38 +284,12 @@ function CodingAgentRows({
   const [loginId, setLoginId] = useState("");
   const [logoutId, setLogoutId] = useState("");
 
-  // Start the gateway's CLI login (terminal + browser), then poll Detect until the
-  // account is signed in — no chat, no pasting codes.
-  const startLogin = async (agentId: string) => {
-    const api = getApi();
-    if (!api?.coding_agent_login) return;
-    setLoginId(agentId);
-    setDetectNote((n) => ({ ...n, [agentId]: "Opening login terminal + browser…" }));
-    try {
-      const res = await api.coding_agent_login(agentId);
-      if (!res.ok && !res.logged_in) {
-        setDetectNote((n) => ({ ...n, [agentId]: String(res.error || res.message || "Login failed") }));
-        return;
-      }
-      const deadline = Date.now() + 5 * 60_000;
-      while (Date.now() < deadline) {
-        const info = await api.detect_coding_agent_cli(agentId);
-        if (info.logged_in === true) break;
-        setDetectNote((n) => ({
-          ...n,
-          [agentId]: "Finish sign-in in the browser — the Claude Login terminal shows the URL.",
-        }));
-        await new Promise((r) => window.setTimeout(r, 3000));
-      }
-      setDetectNote((n) => ({ ...n, [agentId]: "" }));
-      await refresh();
-      void refreshModelsCatalog();
-    } catch (e) {
-      setDetectNote((n) => ({ ...n, [agentId]: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setLoginId("");
-    }
-  };
+  const closeLogin = useCallback(() => setLoginId(""), []);
+  const finishLogin = useCallback(() => {
+    setLoginId("");
+    void refresh();
+    void refreshModelsCatalog();
+  }, [refresh]);
 
   const startLogout = async (agentId: string) => {
     const api = getApi();
@@ -210,9 +363,9 @@ function CodingAgentRows({
                     route: "settings.llms",
                   })}
                   disabled={loggingIn || loggingOut || detecting}
-                  onClick={() => void startLogin(agent.id)}
+                  onClick={() => setLoginId(agent.id)}
                 >
-                  {loggingIn ? "Waiting for sign-in…" : "Log in"}
+                  {loggingIn ? "Logging in…" : "Log in"}
                 </button>
               ) : null}
               {agent.can_logout && (loggedIn || loggingOut) ? (
@@ -328,6 +481,14 @@ function CodingAgentRows({
         <div className="general-tab-section-desc">
           No coding agents yet — install Cursor / Anthropic / OpenAI / Google from Settings → Plugins → Gateways.
         </div>
+      ) : null}
+      {loginId ? (
+        <CodingAgentLoginModal
+          agentId={loginId}
+          title={`Log in to ${rows.find((a) => a.id === loginId)?.label || "Claude Code"}`}
+          onClose={closeLogin}
+          onLoggedIn={finishLogin}
+        />
       ) : null}
     </div>
   );

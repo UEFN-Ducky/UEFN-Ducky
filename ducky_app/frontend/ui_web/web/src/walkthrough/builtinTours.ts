@@ -116,13 +116,23 @@ function settingsGeneralSteps(): WalkthroughStep[] {
         await wait(250);
       },
     ),
+    clickStep(
+      "settings.general.section.app_data",
+      "App Data",
+      "Press App Data to manage local settings and cache.",
+      async () => {
+        await openTab("General");
+        fireSection({ tab: "General", section: "app_data" });
+        await wait(200);
+      },
+    ),
     nextStep(
       "settings.general.app_data",
       "App Data",
-      "Open the local App Data folder — settings and cache live here.",
+      "Breakdown of every folder under App Data — open, clear, or delete from here.",
       async () => {
         await openTab("General");
-        fireSection({ tab: "General", section: "general" });
+        fireSection({ tab: "General", section: "app_data" });
         await wait(250);
       },
     ),
@@ -476,7 +486,7 @@ export const CHAT_COMPOSER_TOUR: WalkthroughDef = {
 export const SETTINGS_GENERAL_TOUR: WalkthroughDef = {
   id: "settings.general",
   title: "General",
-  description: "App info, project files, Add to UEFN, and logs.",
+  description: "App info, App Data, project files, Add to UEFN, and logs.",
   autoStart: "never",
   steps: settingsGeneralSteps(),
 };

@@ -7,6 +7,7 @@ import { isWorkspaceFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { RichEmphasis } from "./RichEmphasis";
 import { richColorFromHref, richUrlTransform } from "./richTextColors";
+import { openCodingAgentLoginUi, parseCodingAgentLoginHref } from "../../walkthrough/openCodingAgentLogin";
 
 export function RichLink({ href = "", children, onOpenFile }: {
   href?: string;
@@ -18,6 +19,19 @@ export function RichLink({ href = "", children, onOpenFile }: {
   if (href.startsWith("plan-node:")) {
     const id = href.slice("plan-node:".length).trim();
     return id ? <span className="plan-md-anchor" data-plan-node-id={id} title="Linked plan step">{children}</span> : null;
+  }
+  const login = parseCodingAgentLoginHref(href);
+  if (login) {
+    return (
+      <button
+        type="button"
+        className="rich-md-link"
+        title="Open Settings → LLMs and highlight Log in"
+        onClick={() => void openCodingAgentLoginUi({ providerId: login.providerId })}
+      >
+        {children}
+      </button>
+    );
   }
   if (onOpenFile && isWorkspaceFilePath(href)) {
     const path = normalizeWorkspacePath(href);

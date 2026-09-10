@@ -30,6 +30,7 @@ const SETTINGS_TAB: Record<string, string> = {
   "settings.memory": "LLMs",
   "settings.languages": "Languages",
   "settings.log_errors": "General",
+  "settings.app_data": "General",
   plans: "Plans",
 };
 
@@ -44,6 +45,7 @@ const SETTINGS_SECTION: Record<string, string> = {
   plans: "working",
   "settings.memory": "entries",
   "settings.log_errors": "errors",
+  "settings.app_data": "app_data",
 };
 
 type RpcResult = Record<string, unknown>;
