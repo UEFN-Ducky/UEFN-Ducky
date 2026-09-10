@@ -79,7 +79,6 @@ export function RichStats({ changes, blocked, programs }: RichStatsProps) {
                 y="0"
                 width={r.w}
                 height="4"
-                rx="2"
                 className={`rich-stats-bar-seg rich-stats-bar-seg--${r.key}`}
               />
             ))}

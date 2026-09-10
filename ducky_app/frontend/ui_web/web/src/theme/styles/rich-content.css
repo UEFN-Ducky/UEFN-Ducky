@@ -672,7 +672,7 @@
 .rich-stats-legend-dot--verse { background: var(--purple); }
 .rich-stats-legend-dot--file { background: var(--amber); }
 
-.rich-stats-legend-count {
+.rich-content .rich-stats-legend-count {
   color: var(--fg);
   font-weight: 600;
   margin-left: 0.2em;
@@ -760,7 +760,7 @@
 .rich-inventory-item--devices .rich-inventory-icon,
 .rich-inventory-item--devices .rich-inventory-kind { color: var(--blue); }
 .rich-inventory-item--prop .rich-inventory-icon,
-.rich-inventory-item--prop .rich-inventory-kind { color: var(--muted); }
+.rich-inventory-item--prop .rich-inventory-kind { color: var(--fg-dim); }
 .rich-inventory-item--blueprint .rich-inventory-icon,
 .rich-inventory-item--blueprint .rich-inventory-kind { color: var(--amber); }
 .rich-inventory-item--blender .rich-inventory-icon,
