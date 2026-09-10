@@ -11,8 +11,13 @@ def apply_shipped_webview2_settings(settings: Any) -> None:
     """Hide WebView2's Inspect/Back/Reload menu in the Store EXE.
 
     Custom React ``ContextMenu`` still works (JS ``contextmenu``). Dev
-    ``python`` runs keep the native menu. ``open_devtools`` turns it back on.
+    ``python`` / ``--dev`` / Dev EXE keep the native menu. ``open_devtools``
+    turns it back on for a packaged build.
     """
-    if not is_packaged_runtime() or settings is None:
+    if settings is None or not is_packaged_runtime():
+        return
+    from frontend.ui_web.web_dev import is_dev_panel
+
+    if is_dev_panel():
         return
     settings.AreDefaultContextMenusEnabled = False

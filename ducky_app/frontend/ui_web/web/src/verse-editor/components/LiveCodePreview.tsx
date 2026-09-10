@@ -34,7 +34,10 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
   appearanceRef.current = appearance;
   const instanceId = useId().replace(/[^a-zA-Z0-9]/g, "") || "preview";
   const [ready, setReady] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const [hint, setHint] = useState(false);
   const canMount = Boolean(appearance?.appearanceReady);
+  const lockScroll = !fill;
 
   useMonacoEditorLayout(containerRef, editorRef, ready);
 
@@ -150,13 +153,45 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
     wrapRef.current?.style.setProperty("--live-code-lines", String(lines));
   }, [lines]);
 
+  useEffect(() => {
+    if (!unlocked) return;
+    const onDown = (e: MouseEvent) => {
+      const wrap = wrapRef.current;
+      if (wrap && !wrap.contains(e.target as Node)) {
+        setUnlocked(false);
+        setHint(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [unlocked]);
+
+  useEffect(() => {
+    if (!ready) return;
+    editorRef.current?.layout();
+  }, [ready, unlocked]);
+
   return (
     <div
       ref={wrapRef}
-      className={`live-code-preview${fill ? " live-code-preview--fill" : ""}${canMount ? " live-code-preview--boot" : ""}${ready ? " live-code-preview--ready" : ""}${className ? ` ${className}` : ""}`}
+      className={`live-code-preview${fill ? " live-code-preview--fill" : ""}${canMount ? " live-code-preview--boot" : ""}${ready ? " live-code-preview--ready" : ""}${unlocked ? " live-code-preview--active" : ""}${className ? ` ${className}` : ""}`}
     >
       <pre className="live-code-preview-source">{value}</pre>
       <div ref={containerRef} className="live-code-preview-editor" />
+      {lockScroll && !unlocked ? (
+        <button
+          type="button"
+          className={`live-code-preview-lock${hint ? " live-code-preview-lock--hint" : ""}`}
+          aria-label="Click to scroll this code"
+          onWheel={() => setHint(true)}
+          onClick={() => {
+            setUnlocked(true);
+            setHint(false);
+          }}
+        >
+          {hint ? <span className="live-code-preview-lock-hint">Click to scroll</span> : null}
+        </button>
+      ) : null}
     </div>
   );
 }

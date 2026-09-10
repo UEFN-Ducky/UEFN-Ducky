@@ -473,17 +473,10 @@ input, textarea, select, button {
   z-index: 2;
 }
 .app-header-center {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 3px;
   width: auto;
-  min-width: 0;
-  max-width: min(400px, calc(100% - 520px));
-  z-index: 2;
   pointer-events: none;
 }
 .app-header-center .app-header-nav,
@@ -650,10 +643,6 @@ input, textarea, select, button {
     gap: 4px;
   }
   .app-header-center {
-    position: static;
-    transform: none;
-    width: auto;
-    max-width: none;
     flex: 0 0 auto;
     margin-left: auto;
   }

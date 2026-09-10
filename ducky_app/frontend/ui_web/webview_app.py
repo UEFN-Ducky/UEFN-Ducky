@@ -502,16 +502,14 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     icon_path = resolve_app_icon_path()
     _boot_trace("ready_for_webview_start", time.perf_counter())
-    # Production: enable WebView2 DevTools so ErrorBoundary "Open Inspector" / F12 work.
-    # Do not auto-pop the inspector window on every launch.
+    # Dev only: native Inspect menu + DevTools. Store EXE stays shipped; ErrorBoundary
+    # still calls open_devtools() when someone actually wants Inspector.
     try:
         webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     except Exception:
         pass
-    # debug=True always: AreDevToolsEnabled so ErrorBoundary can open Inspector.
-    # OPEN_DEVTOOLS_IN_DEBUG=False above keeps it from auto-opening on launch.
     _ = web_debug  # still used by resolve_web_url for Vite vs bundled URL
     webview.start(
-        debug=True,
+        debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
     )

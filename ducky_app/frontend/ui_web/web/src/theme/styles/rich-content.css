@@ -258,6 +258,40 @@ button.rich-ref:focus-visible,
   height: min(calc(var(--live-code-lines, 3) * 21px + 16px), 378px);
 }
 
+.live-code-preview--active.live-code-preview--ready .live-code-preview-editor {
+  height: min(calc(var(--live-code-lines, 3) * 21px + 16px), 70vh, 720px);
+}
+
+.live-code-preview-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.live-code-preview-lock--hint {
+  background: var(--overlay-light);
+}
+
+.live-code-preview-lock-hint {
+  padding: 0.4em 0.75em;
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  background: var(--dropdown-bg, var(--card));
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85em;
+  pointer-events: none;
+}
+
 .live-code-preview--fill,
 .live-code-preview--fill .live-code-preview-editor {
   height: 100%;

@@ -148,18 +148,6 @@
   color: color-mix(in srgb, var(--fg-inverse) 85%, transparent);
 }
 
-body.layout-sidebar-only .app-header-center {
-  width: auto;
-  max-width: min(300px, calc(100% - 360px));
-}
-
-@media (max-width: 720px) {
-  body.layout-sidebar-only .app-header-center {
-    width: auto;
-    max-width: none;
-  }
-}
-
 body.layout-sidebar-only .app-header-project-label {
   max-width: none;
   flex: 1;

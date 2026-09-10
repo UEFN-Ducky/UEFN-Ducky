@@ -15,9 +15,18 @@ def test_dev_runtime_leaves_native_menu() -> None:
 
 def test_packaged_runtime_disables_native_menu(monkeypatch) -> None:
     monkeypatch.setattr(ws, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr("frontend.ui_web.web_dev.is_dev_panel", lambda: False)
     settings = SimpleNamespace(AreDefaultContextMenusEnabled=True)
     ws.apply_shipped_webview2_settings(settings)
     assert settings.AreDefaultContextMenusEnabled is False
+
+
+def test_packaged_dev_panel_leaves_native_menu(monkeypatch) -> None:
+    monkeypatch.setattr(ws, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr("frontend.ui_web.web_dev.is_dev_panel", lambda: True)
+    settings = SimpleNamespace(AreDefaultContextMenusEnabled=True)
+    ws.apply_shipped_webview2_settings(settings)
+    assert settings.AreDefaultContextMenusEnabled is True
 
 
 if __name__ == "__main__":

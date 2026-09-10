@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import sys
 from ctypes import wintypes
+
+_log = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     user32 = ctypes.windll.user32
@@ -925,7 +928,7 @@ def install_pywebview_chrome_patches() -> None:
 
                     apply_shipped_webview2_settings(sender.CoreWebView2.Settings)
                 except Exception:
-                    pass
+                    _log.exception("WebView2 ship settings failed")
                 # Auto-allow mic for the local panel origin. App UI owns Allow/Block;
                 # this only silences WebView2's chrome prompt and persists the grant.
                 try:
