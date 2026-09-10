@@ -4,12 +4,17 @@ import remarkGfm from "remark-gfm";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
 import { isWorkspaceFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
+import { RichCodeBlock } from "./RichCodeBlock";
+import { RichEmphasis } from "./RichEmphasis";
+import { richColorFromHref, richUrlTransform } from "./richTextColors";
 
 export function RichLink({ href = "", children, onOpenFile }: {
   href?: string;
   children?: ReactNode;
   onOpenFile?: OpenFileHandler;
 }) {
+  const color = richColorFromHref(href);
+  if (color) return <span className={`rich-text-accent rich-tone--${color}`}>{children}</span>;
   if (href.startsWith("plan-node:")) {
     const id = href.slice("plan-node:".length).trim();
     return id ? <span className="plan-md-anchor" data-plan-node-id={id} title="Linked plan step">{children}</span> : null;
@@ -29,12 +34,14 @@ export function RichInline({ text, onOpenFile }: { text: string; onOpenFile?: Op
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={richUrlTransform}
       allowedElements={["p", "strong", "em", "code", "a", "del", "br"]}
       unwrapDisallowed
       skipHtml
       components={{
         p: ({ children }) => <>{children}</>,
-        code: ({ children }) => <code className="rich-code rich-code--inline">{children}</code>,
+        strong: ({ children }) => <RichEmphasis>{children}</RichEmphasis>,
+        code: ({ children }) => <RichCodeBlock text={String(children)} inline />,
         a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
       }}
     >

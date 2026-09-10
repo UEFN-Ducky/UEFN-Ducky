@@ -1146,6 +1146,10 @@ export interface CodingAgentDto {
   install_help?: string;
   /** From gateway plugin (thinking_env / shows_thinking_effort). */
   shows_thinking_effort?: boolean;
+  /** CLI account state from the gateway's detect: true/false, or null when n/a. */
+  logged_in?: boolean | null;
+  /** Gateway registered a `login` hook → Settings can run the CLI login itself. */
+  can_login?: boolean;
   capabilities?: {
     terminal_agent?: boolean;
     chat_api?: boolean;
@@ -2074,6 +2078,9 @@ export interface PanelApi {
     effort: string,
   ): Promise<{ ok: boolean; thinking_effort?: string; error?: string }>;
   detect_coding_agent_cli(agent_id: string): Promise<Record<string, unknown>>;
+  coding_agent_login(
+    agent_id: string,
+  ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string; auth_url?: string }>;
   list_tasks(): Promise<{ tasks: Record<string, unknown>[] }>;
   create_task(title: string, goal?: string, conv_ids?: string[]): Promise<Record<string, unknown>>;
   add_task_phase(task_id: string, title: string, plan?: string): Promise<Record<string, unknown>>;

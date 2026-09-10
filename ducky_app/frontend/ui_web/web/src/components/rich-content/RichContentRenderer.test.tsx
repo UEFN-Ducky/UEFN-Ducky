@@ -8,6 +8,63 @@ import { MarkdownContent } from "./MarkdownContent";
 afterEach(cleanup);
 
 describe("rich reply rendering", () => {
+  it("supports every Appearance color in ordinary replies without creating links", () => {
+    const colors = ["blue", "purple", "green", "amber", "yellow", "red"];
+    const text = colors.map((color) => `[**${color} label**](ducky:${color})`).join(" · ");
+    const { container } = render(<RichContentRenderer text={text} />);
+    for (const color of colors) {
+      expect(container.querySelector(`.rich-text-accent.rich-tone--${color} strong`)?.textContent).toBe(`${color} label`);
+    }
+    expect(container.querySelector("a, button")).toBeNull();
+    expect(container.textContent).not.toContain("ducky:");
+  });
+
+  it("colors regular Markdown headings, emphasis and code by category without a report", () => {
+    const text = [
+      "## Verse device\n\n**Verse** `logic.verse`",
+      "## Blender mesh\n\n**Blender** `crate.blend`",
+      "## Blueprint\n\n**Blueprint** `BP_Crate`",
+      "## UMG widget\n\n**UMG** `UW_Inventory`",
+      "## UEFN devices\n\n**UEFN** `trigger_device`",
+      "## Error details\n\n**Failed** to compile.",
+    ].join("\n\n");
+    const { container } = render(<RichContentRenderer text={text} />);
+    expect(container.querySelectorAll(".rich-inventory, .rich-stats")).toHaveLength(0);
+    for (const color of ["purple", "green", "amber", "yellow", "blue", "red"]) {
+      expect(container.querySelector(`h2.rich-tone--${color}`)).not.toBeNull();
+      expect(container.querySelector(`strong.rich-tone--${color}`)).not.toBeNull();
+      if (color !== "red") expect(container.querySelector(`code.rich-tone--${color}`)).not.toBeNull();
+    }
+  });
+
+  it("accepts color markers inside structured block text and preserves surrounding formatting", () => {
+    const { container } = render(<RichContentRenderer text={JSON.stringify({ __rich: true, blocks: [
+      { type: "paragraph", text: "[**Verse**](ducky:purple) with [a badge `Props`](ducky:amber)." },
+      { type: "callout", tone: "info", text: "[**Verified**](ducky:green); [**pending**](ducky:amber)." },
+    ] })} />);
+    expect(container.querySelector(".rich-tone--purple strong")?.textContent).toBe("Verse");
+    expect(container.querySelector(".rich-text-accent.rich-tone--amber code")?.textContent).toBe("Props");
+    expect(container.querySelector(".rich-callout .rich-text-accent.rich-tone--green")?.textContent).toBe("Verified");
+    expect(container.textContent).not.toContain("ducky:");
+  });
+
+  it("rejects arbitrary color values and unsafe URLs while retaining their text", () => {
+    const { container } = render(<RichContentRenderer text={
+      "[unknown](ducky:chartreuse) [injected](ducky:red;display:none) [unsafe](javascript:alert%281%29)"
+    } />);
+    expect(container.querySelector(".rich-text-accent, a, [style]")).toBeNull();
+    expect(container.textContent).toContain("unknown");
+    expect(container.textContent).toContain("injected");
+    expect(container.textContent).toContain("unsafe");
+  });
+
+  it("does not mistake no errors or long ordinary prose for a colored status", () => {
+    const { container } = render(<MarkdownContent text={
+      "**No errors found**. **" + "This sentence mentions a Verse device but remains ordinary prose. ".repeat(3) + "**"
+    } />);
+    expect(container.querySelector("strong[class*='rich-tone--']")).toBeNull();
+  });
+
   it("renders emphasis, badges and working file links throughout structured blocks", () => {
     const onOpenFile = vi.fn();
     const desc = "**Verified** `Props` in [the device](Verse/test.verse).";

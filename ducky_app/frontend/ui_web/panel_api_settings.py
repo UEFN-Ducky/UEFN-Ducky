@@ -753,6 +753,32 @@ class PanelApiSettingsMixin:
         info = adapter.detect(_pa.PanelSettings.load())
         return {"ok": True, **info.to_dict()}
 
+    def coding_agent_login(self, agent_id: str) -> dict[str, Any]:
+        """Start the gateway's own CLI login from Settings (terminal + browser),
+        so nobody has to paste codes into a chat."""
+        from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
+        from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
+        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from frontend.ui_web.agent_modes import get_panel_push
+
+        aid = normalize_coding_agent(agent_id)
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {"ok": False, "error": "Plugins still loading — try again in a moment."}
+        login = (get_coding_agent_registration(aid) or {}).get("login")
+        if not callable(login):
+            return {"ok": False, "error": f"{aid} has no login flow."}
+        settings = _pa.PanelSettings.load()
+        try:
+            result = login(
+                cwd=(settings.uefn_project_root or "").strip(),
+                cli_path=str(coding_agent_cfg(settings, aid).get("cli_path") or ""),
+                push=get_panel_push(),
+            )
+        except Exception as exc:  # noqa: BLE001 - surface to the Settings row
+            return {"ok": False, "error": str(exc)}
+        invalidate_detect_cache()
+        return result if isinstance(result, dict) else {"ok": bool(result)}
+
     def list_tasks(self) -> dict[str, Any]:
         from backend.agent.coding_agents.epic import list_tasks
 

@@ -85,7 +85,7 @@ export function RichStats({ changes, blocked, programs }: RichStatsProps) {
           </svg>
           <div className="rich-stats-legend">
             {segs.map((s) => (
-              <span key={s.key} className="rich-stats-legend-item">
+              <span key={s.key} className={`rich-stats-legend-item rich-tone--${{ uefn: "blue", blender: "green", verse: "purple", file: "amber" }[s.key]}`}>
                 <span className={`rich-stats-legend-dot rich-stats-legend-dot--${s.key}`} />
                 {s.label}
                 <strong className="rich-stats-legend-count">{s.count}</strong>

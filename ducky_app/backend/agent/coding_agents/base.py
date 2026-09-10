@@ -146,6 +146,7 @@ class CodingAgentInfo:
         install_help = ""
         plugin_id = ""
         shows_thinking = False
+        can_login = False
         try:
             from backend.uefn_plugins.host import get_coding_agent_registration
 
@@ -155,6 +156,7 @@ class CodingAgentInfo:
             shows_thinking = bool(
                 reg.get("shows_thinking_effort") or callable(reg.get("thinking_env"))
             )
+            can_login = callable(reg.get("login"))
         except Exception:
             pass
         return {
@@ -168,6 +170,9 @@ class CodingAgentInfo:
             "install_help": install_help,
             "shows_thinking_effort": shows_thinking,
             "plugin_id": plugin_id,
+            # Adapters set this after construction (True/False); None = n/a.
+            "logged_in": getattr(self, "logged_in", None),
+            "can_login": can_login,
             "capabilities": {
                 "terminal_agent": self.capabilities.terminal_agent,
                 "chat_api": self.capabilities.chat_api,

@@ -46,7 +46,7 @@
 .rich-heading {
   margin: 0;
   font-weight: 600;
-  color: var(--fg);
+  color: var(--rich-text-accent, var(--fg));
   line-height: 1.3;
   letter-spacing: -0.015em;
 }
@@ -69,14 +69,14 @@
   font-size: 1em;
   margin-top: 0.75em;
   margin-bottom: 0.3em;
-  color: var(--blue);
+  color: var(--rich-text-accent, var(--purple));
 }
 
 .rich-heading--h4 {
   font-size: 0.92em;
   margin-top: 0.65em;
   margin-bottom: 0.25em;
-  color: var(--purple);
+  color: var(--rich-text-accent, var(--amber));
 }
 
 .rich-markdown > .rich-heading:first-child,
@@ -87,7 +87,7 @@
 
 .rich-content strong {
   font-weight: 600;
-  color: var(--blue);
+  color: var(--rich-text-accent, var(--fg));
 }
 
 .rich-heading strong {
@@ -125,7 +125,7 @@
 }
 
 .rich-list-item::marker {
-  color: var(--blue);
+  color: var(--rich-text-accent, var(--purple));
   font-weight: 600;
 }
 
@@ -140,9 +140,9 @@
   font-size: 0.92em;
   padding: 0.12em 0.45em;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--blue) 7%, var(--card));
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 12%, transparent);
+  background: color-mix(in srgb, var(--rich-text-accent, var(--purple)) 7%, var(--card));
+  color: var(--rich-text-accent, var(--purple));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rich-text-accent, var(--purple)) 12%, transparent);
   overflow-wrap: anywhere;
 }
 
@@ -315,6 +315,7 @@
 /* Callouts */
 .rich-callout {
   --rich-callout-accent: var(--blue);
+  --rich-text-accent: var(--rich-callout-accent);
   width: 100%;
   box-sizing: border-box;
   margin: 0.4em 0 1em;
@@ -350,7 +351,7 @@
 }
 
 .rich-callout strong {
-  color: var(--rich-callout-accent);
+  color: var(--rich-text-accent);
 }
 
 .rich-callout--info {
@@ -656,7 +657,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
-  color: var(--fg-dim);
+  color: var(--rich-text-accent, var(--fg-dim));
   font-size: 0.9em;
 }
 
@@ -717,6 +718,7 @@
 
 .rich-inventory-item {
   --rich-item-accent: var(--fg-dim);
+  --rich-text-accent: var(--rich-item-accent);
   display: flex;
   gap: 0.85em;
   align-items: flex-start;
@@ -796,17 +798,36 @@
 .rich-inventory-title {
   min-width: 0;
   max-width: 100%;
-  color: var(--fg);
+  color: var(--rich-item-accent);
   background: color-mix(in srgb, var(--rich-item-accent) 7%, var(--card));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rich-item-accent) 15%, transparent);
 }
 
 .rich-inventory-desc strong {
-  color: var(--rich-item-accent);
+  color: var(--rich-text-accent);
 }
 
 .rich-inventory-desc {
   margin: 0;
   color: var(--fg-dim);
   line-height: 1.7;
+}
+
+/* Appearance owns the palette. These classes select live variables, never hexes.
+   Shared by ordinary Markdown, agent color markers and structured blocks. */
+.rich-tone--blue { --rich-text-accent: var(--blue); }
+.rich-tone--purple { --rich-text-accent: var(--purple); }
+.rich-tone--green { --rich-text-accent: var(--green); }
+.rich-tone--amber { --rich-text-accent: var(--amber); }
+.rich-tone--yellow { --rich-text-accent: var(--yellow); }
+.rich-tone--red { --rich-text-accent: var(--red); }
+
+.rich-text-accent {
+  color: var(--rich-text-accent);
+}
+
+/* An explicit agent-selected color takes precedence over inferred label colors. */
+.rich-text-accent :is(strong, em, .rich-code--inline) {
+  --rich-text-accent: inherit;
+  color: var(--rich-text-accent);
 }

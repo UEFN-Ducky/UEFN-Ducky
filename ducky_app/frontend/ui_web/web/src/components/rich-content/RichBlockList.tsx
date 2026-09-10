@@ -43,7 +43,7 @@ interface RichBlockViewProps {
 export function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockViewProps) {
   switch (block.type) {
     case "heading":
-      return <RichHeading level={block.level}><RichInline text={block.text} onOpenFile={onOpenFile} /></RichHeading>;
+      return <RichHeading level={block.level} text={block.text}><RichInline text={block.text} onOpenFile={onOpenFile} /></RichHeading>;
     case "paragraph":
       return <RichParagraph><RichInline text={block.text} onOpenFile={onOpenFile} /></RichParagraph>;
     case "list":

@@ -10,6 +10,8 @@ import { RichBlockView } from "./RichBlockList";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { RichHeading } from "./RichHeading";
 import { RichParagraph } from "./RichParagraph";
+import { RichEmphasis } from "./RichEmphasis";
+import { richNodeText, richTextClass, richUrlTransform } from "./richTextColors";
 
 interface MarkdownContentProps {
   text: string;
@@ -24,10 +26,11 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
       h3: ({ children }) => <RichHeading level={3}>{children}</RichHeading>,
       h4: ({ children }) => <RichHeading level={4}>{children}</RichHeading>,
       p: ({ children }) => <RichParagraph>{children}</RichParagraph>,
+      strong: ({ children }) => <RichEmphasis>{children}</RichEmphasis>,
       a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
       ul: ({ children }) => <ul className="rich-list">{children}</ul>,
       ol: ({ children, start }) => <ol start={start} className="rich-list rich-list--ordered">{children}</ol>,
-      li: ({ children }) => <li className="rich-list-item">{children}</li>,
+      li: ({ children }) => <li className={`rich-list-item ${richTextClass(richNodeText(children))}`}>{children}</li>,
       blockquote: ({ children }) => <blockquote className="rich-blockquote">{children}</blockquote>,
       code: ({ children }) => <RichCodeBlock text={String(children)} inline />,
       pre: ({ children }) => {
@@ -54,7 +57,7 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
   }, [onOpenFile]);
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={richUrlTransform} components={components}>
       {text}
     </ReactMarkdown>
   );

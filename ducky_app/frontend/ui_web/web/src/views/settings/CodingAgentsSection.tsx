@@ -102,6 +102,40 @@ function CodingAgentRows({
 }) {
   const [busyId, setBusyId] = useState("");
   const [detectNote, setDetectNote] = useState<Record<string, string>>({});
+  const [loginId, setLoginId] = useState("");
+
+  // Start the gateway's CLI login (terminal + browser), then poll Detect until the
+  // account is signed in — no chat, no pasting codes.
+  const startLogin = async (agentId: string) => {
+    const api = getApi();
+    if (!api?.coding_agent_login) return;
+    setLoginId(agentId);
+    setDetectNote((n) => ({ ...n, [agentId]: "Opening login terminal + browser…" }));
+    try {
+      const res = await api.coding_agent_login(agentId);
+      if (!res.ok && !res.logged_in) {
+        setDetectNote((n) => ({ ...n, [agentId]: String(res.error || res.message || "Login failed") }));
+        return;
+      }
+      const deadline = Date.now() + 5 * 60_000;
+      while (Date.now() < deadline) {
+        const info = await api.detect_coding_agent_cli(agentId);
+        if (info.logged_in === true) break;
+        setDetectNote((n) => ({
+          ...n,
+          [agentId]: "Finish sign-in in the browser — the Claude Login terminal shows the URL.",
+        }));
+        await new Promise((r) => window.setTimeout(r, 3000));
+      }
+      setDetectNote((n) => ({ ...n, [agentId]: "" }));
+      await refresh();
+      void refreshModelsCatalog();
+    } catch (e) {
+      setDetectNote((n) => ({ ...n, [agentId]: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setLoginId("");
+    }
+  };
 
   return (
     <div className="llms-provider-card">
@@ -116,6 +150,9 @@ function CodingAgentRows({
         const note = (detectNote[agent.id] || "").trim();
         const statusText = note || agent.status;
         const detecting = busyId === agent.id;
+        const loggingIn = loginId === agent.id;
+        const loggedIn = agent.logged_in === true;
+        const needsLogin = agent.available && agent.logged_in === false;
         return (
           <div
             key={agent.id}
@@ -123,11 +160,38 @@ function CodingAgentRows({
             style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}
           >
             <div className="llms-provider-row-main" style={{ width: "100%" }}>
-              <div className={`llms-provider-label${agent.available ? " is-saved" : ""}`}>
-                {agent.available ? <Icons.Check /> : <span className="llms-provider-dot" title="Not available" />}
+              <div className={`llms-provider-label${agent.available && !needsLogin ? " is-saved" : ""}`}>
+                {agent.available && !needsLogin ? (
+                  <Icons.Check />
+                ) : (
+                  <span className="llms-provider-dot" title={needsLogin ? "Not logged in" : "Not available"} />
+                )}
                 <span>{agent.label}</span>
+                {agent.logged_in != null ? (
+                  <span
+                    className={`llms-provider-status-text ${loggedIn ? "is-ok" : "is-fail"}`}
+                    style={{ marginLeft: 8, fontSize: 12 }}
+                  >
+                    {loggedIn ? "Logged in" : "Not logged in"}
+                  </span>
+                ) : null}
               </div>
               <div style={{ flex: 1 }} />
+              {agent.can_login && (needsLogin || loggingIn) ? (
+                <button
+                  type="button"
+                  className="settings-btn llms-provider-btn"
+                  ref={targetRef("settings.llms.provider.agent.login", {
+                    kind: "button",
+                    label: "Log in",
+                    route: "settings.llms",
+                  })}
+                  disabled={loggingIn || detecting}
+                  onClick={() => void startLogin(agent.id)}
+                >
+                  {loggingIn ? "Waiting for sign-in…" : "Log in"}
+                </button>
+              ) : null}
               <label className="general-tab-switch" title="Enable in chat picker">
                 <input
                   type="checkbox"

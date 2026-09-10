@@ -471,16 +471,34 @@ export function AgentTab() {
     });
   }, []);
 
+  // Gateways with a connected coding agent (Claude Code logged in, Codex, …)
+  // are "connected" even with no API key — the list checkmark must say so.
+  const [agentOkByPlugin, setAgentOkByPlugin] = useState<Record<string, boolean>>({});
+  const refreshAgentOk = useCallback(async () => {
+    const api = getApi();
+    if (!api) return;
+    const list = await api.list_coding_agents();
+    const next: Record<string, boolean> = {};
+    for (const a of list.agents || []) {
+      const pid = (a.plugin_id || "").trim().toLowerCase();
+      if (pid && a.available && a.logged_in !== false) next[pid] = true;
+    }
+    setAgentOkByPlugin(next);
+  }, []);
+  useEffect(() => onApiReady(() => void refreshAgentOk()), [refreshAgentOk]);
+
   useEffect(() => {
     installPanelPushBus();
     return subscribePanelPush((event) => {
       handleKeyTestPush(event);
+      if (event.type === "coding_agents_updated") void refreshAgentOk();
       if (event.type !== "uefn_plugins_changed") return;
       void refreshModelsCatalog();
+      void refreshAgentOk();
       const api = getApi();
       if (api) void api.get_key_status().then(setKeySaved);
     });
-  }, [handleKeyTestPush]);
+  }, [handleKeyTestPush, refreshAgentOk]);
 
   const testKey = async (row: PluginLlmProvider) => {
     const api = getApi();
@@ -565,7 +583,7 @@ export function AgentTab() {
               >
                 {providers.map((row) => {
                   const key = row.secret_key || row.id;
-                  const rowSaved = !!keySaved[key];
+                  const rowSaved = !!keySaved[key] || !!agentOkByPlugin[row.id.trim().toLowerCase()];
                   return (
                     <button
                       key={row.id}
@@ -582,7 +600,7 @@ export function AgentTab() {
                         {rowSaved ? (
                           <Icons.Check />
                         ) : (
-                          <span className="llms-provider-dot" title="No key saved" />
+                          <span className="llms-provider-dot" title="Not connected — no key saved, no coding agent logged in" />
                         )}
                         <span className="llms-provider-nav-name">{row.label}</span>
                       </span>
