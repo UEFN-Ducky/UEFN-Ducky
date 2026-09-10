@@ -137,6 +137,8 @@ class TerminalSession:
         cwd: str,
         title: str = "",
         hidden: bool = False,
+        spawn_argv: list[str] | None = None,
+        env_extra: dict[str, str] | None = None,
         on_output: Callable[[str], None] | None = None,
         on_exit: Callable[[int], None] | None = None,
     ) -> None:
@@ -145,6 +147,8 @@ class TerminalSession:
         self.cwd = cwd
         self.title = (title or f"{self.shell}").strip()[:80]
         self.hidden = bool(hidden)
+        self.spawn_argv = [str(a) for a in spawn_argv] if spawn_argv else None
+        self.env_extra = {str(k): str(v) for k, v in (env_extra or {}).items() if k}
         self.port = 0
         self.ws_url = ""
         self._on_output = on_output
@@ -178,13 +182,18 @@ class TerminalSession:
             self.cwd = fallback if os.path.isdir(fallback) else os.getcwd()
 
         _exe, argv = resolve_shell(self.shell)
+        if self.spawn_argv:
+            argv = self.spawn_argv
         # pywinpty expects argv list — list2cmdline breaks Git Bash on Windows.
         # Refresh Path from the registry so installs added after Ducky launched
         # (e.g. Claude Code in %USERPROFILE%\.local\bin) are visible.
+        env = env_with_fresh_path()
+        if self.env_extra:
+            env.update(self.env_extra)
         self._pty = PtyProcess.spawn(
             argv,
             cwd=self.cwd,
-            env=env_with_fresh_path(),
+            env=env,
             dimensions=(self._rows, self._cols),
         )
         self._stop.clear()

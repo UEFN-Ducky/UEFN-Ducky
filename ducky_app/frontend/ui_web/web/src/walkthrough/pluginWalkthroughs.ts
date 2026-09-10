@@ -202,7 +202,7 @@ export function expandGatewayManifest(
         step(
           "settings.llms.provider.agent.login",
           "Log in",
-          "Log in here — a window shows the sign-in link and a box for the code. Never paste a login code in chat.",
+          "Log in here — click the sign-in link, then paste the code. A Claude Login tab appears in the terminal list and closes when you cancel or finish. Never paste a login code in chat.",
           "require_click",
         ),
       );

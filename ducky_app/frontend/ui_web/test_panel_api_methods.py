@@ -96,6 +96,7 @@ _PUBLIC_METHODS = frozenset({
     'deploy',
     'deploy_all_projects',
     'coding_agent_login',
+    'coding_agent_login_cancel',
     'coding_agent_login_status',
     'coding_agent_login_submit',
     'coding_agent_logout',

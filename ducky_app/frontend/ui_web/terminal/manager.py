@@ -50,14 +50,25 @@ class TerminalManager:
         push_open: bool = False,
         hidden: bool = False,
         conv_id: str = "",
+        command: list[str] | None = None,
+        env_extra: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         shell_norm = shell_label(shell)
         workdir = (cwd or _default_cwd()).strip() or "."
         if not os.path.isdir(workdir):
             workdir = os.getcwd()
+        argv = [str(a) for a in command] if command else None
+        extra = {str(k): str(v) for k, v in (env_extra or {}).items() if k} or None
         entry: _SessionEntry | None = None
         with self._lock:
-            session = TerminalSession(shell=shell_norm, cwd=workdir, title=title, hidden=hidden)  # type: ignore[arg-type]
+            session = TerminalSession(
+                shell=shell_norm,
+                cwd=workdir,
+                title=title,
+                hidden=hidden,
+                spawn_argv=argv,
+                env_extra=extra,
+            )  # type: ignore[arg-type]
             bridge = TerminalBridge(
                 on_input=lambda data, s=session: self._user_write(s.id, data),
                 on_resize=lambda c, r, s=session: s.resize(c, r),
@@ -80,6 +91,9 @@ class TerminalManager:
             try:
                 session.spawn()
             except Exception as exc:
+                if argv:
+                    bridge.stop()
+                    return {"ok": False, "error": str(exc)}
                 if shell_norm == "bash":
                     session.shell = "powershell"
                     shell_norm = "powershell"

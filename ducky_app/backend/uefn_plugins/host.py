@@ -1729,9 +1729,9 @@ def _run_first_plugin_load() -> None:
             _record_plugin_load_error(pid, exc)
     with _LOCK:
         _UI_READY = True
-    # Do not flush load callbacks here — PanelApi still needs one notify after
-    # register() so LLM/coding-agent factories refresh. Settings paints via
-    # get_ui_contributions() + frontend poll while backends finish.
+    # HTTP bus only — not _flush_load_callbacks (PanelApi still needs one
+    # notify after register() so LLM/coding-agent factories refresh).
+    _notify_uefn_plugins_changed()
     _log.info("UEFN plugins: %d enabled (%s)", len(jobs), ", ".join(j[0] for j in jobs))
     # Parallel pre-import: exec_module dominates boot; register stays serial after.
     t_import = time.perf_counter()

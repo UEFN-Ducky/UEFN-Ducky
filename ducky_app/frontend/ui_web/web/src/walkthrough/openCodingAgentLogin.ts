@@ -44,7 +44,7 @@ export async function openCodingAgentLoginUi(opts?: {
         title: (opts?.title || "Log in here").trim() || "Log in here",
         body:
           (opts?.body || "").trim() ||
-          "Press Log in. A window shows the sign-in link and a box for the code — never paste a code in chat.",
+          "Press Log in. Click the sign-in link, then paste the code. The Claude Login tab closes when you cancel or finish.",
         advance: "require_click",
         mode: "rect",
         onEnter: async () => {

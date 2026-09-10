@@ -217,7 +217,8 @@ function CodingAgentLoginModal({
       }
     >
       <p className="general-tab-section-desc" style={{ marginTop: 0 }}>
-        Open the link, sign in, then paste the code Claude shows you.
+        Click the link to sign in, then paste the code Claude shows you. The
+        Claude Login tab in the terminal list closes when you cancel or finish.
       </p>
       {authUrl ? (
         <button
@@ -284,7 +285,13 @@ function CodingAgentRows({
   const [loginId, setLoginId] = useState("");
   const [logoutId, setLogoutId] = useState("");
 
-  const closeLogin = useCallback(() => setLoginId(""), []);
+  const closeLogin = useCallback(() => {
+    const api = getApi();
+    if (loginId && api?.coding_agent_login_cancel) {
+      void api.coding_agent_login_cancel(loginId);
+    }
+    setLoginId("");
+  }, [loginId]);
   const finishLogin = useCallback(() => {
     setLoginId("");
     void refresh();

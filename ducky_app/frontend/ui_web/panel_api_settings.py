@@ -754,7 +754,7 @@ class PanelApiSettingsMixin:
         return {"ok": True, **info.to_dict()}
 
     def coding_agent_login(self, agent_id: str) -> dict[str, Any]:
-        """Start the gateway's CLI login from Settings (in-app modal, hidden CLI)."""
+        """Start the gateway's CLI login from Settings (modal + listed terminal tab)."""
         from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
         from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
@@ -840,6 +840,23 @@ class PanelApiSettingsMixin:
             invalidate_detect_cache()
             kick_detect_refresh()
         return result
+
+    def coding_agent_login_cancel(self, agent_id: str) -> dict[str, Any]:
+        """Destroy the login terminal tab when the Settings modal is cancelled."""
+        from backend.agent.coding_agents.base import normalize_coding_agent
+        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+
+        aid = normalize_coding_agent(agent_id)
+        if not ensure_plugins_loaded(timeout=5.0):
+            return {"ok": False, "error": "Plugins still loading — try again in a moment."}
+        cancel = (get_coding_agent_registration(aid) or {}).get("login_cancel")
+        if not callable(cancel):
+            return {"ok": True, "cancelled": True}
+        try:
+            result = cancel()
+        except Exception as exc:  # noqa: BLE001 - surface to the Settings modal
+            return {"ok": False, "error": str(exc)}
+        return result if isinstance(result, dict) else {"ok": True, "cancelled": True}
 
     def coding_agent_logout(self, agent_id: str) -> dict[str, Any]:
         """Sign the gateway's CLI out from Settings so the user can re-test login."""

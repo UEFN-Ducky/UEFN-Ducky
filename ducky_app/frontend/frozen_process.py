@@ -36,11 +36,15 @@ def _run_hidden(args: list[str], *, timeout: float = 30.0) -> subprocess.Complet
         return None
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
         return subprocess.run(
             args,
             capture_output=True,
             text=True,
             creationflags=flags,
+            startupinfo=si,
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):

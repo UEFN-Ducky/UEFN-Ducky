@@ -2163,7 +2163,11 @@ export interface PanelApi {
     auth_url?: string;
     error?: string;
     login_ui?: string;
+    terminal_session_id?: string;
   }>;
+  coding_agent_login_cancel(
+    agent_id: string,
+  ): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
   coding_agent_logout(
     agent_id: string,
   ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string }>;

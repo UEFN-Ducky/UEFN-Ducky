@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { onApiReady } from "./onApiReady";
 import { getApi } from "./usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
@@ -229,283 +229,312 @@ const EMPTY: PluginContributions = {
   ready: false,
 };
 
-/** Live contribution registry from enabled UEFN plugins (Store / local). */
-export function usePluginContributions(): PluginContributions {
-  const [contrib, setContrib] = useState<PluginContributions>(EMPTY);
+let _contrib: PluginContributions = EMPTY;
+const _listeners = new Set<() => void>();
+let _started = false;
+let _pollId: number | undefined;
 
-  const refresh = useCallback(async () => {
-    const api = getApi();
-    if (!api || typeof api.get_uefn_plugin_contributions !== "function") {
-      setContrib((prev) => (prev.ready ? prev : { ...prev, ready: true }));
+function _emit() {
+  for (const listener of _listeners) listener();
+}
+
+function _setContrib(next: PluginContributions) {
+  if (next === _contrib) return;
+  _contrib = next;
+  if (next.ready) _stopPoll();
+  _emit();
+}
+
+function _stopPoll() {
+  if (_pollId === undefined) return;
+  window.clearInterval(_pollId);
+  _pollId = undefined;
+}
+
+async function refresh() {
+  const api = getApi();
+  if (!api || typeof api.get_uefn_plugin_contributions !== "function") {
+    if (!_contrib.ready) _setContrib({ ..._contrib, ready: true });
+    return;
+  }
+  try {
+    const next = await api.get_uefn_plugin_contributions();
+    // Failed fetch: leave ready=false so AppearanceContext does not wipe a
+    // saved plugin theme against an empty enabled_ids list.
+    if (!next || next.ok === false) return;
+    const settingsTabs = Array.isArray(next.settings_tabs) ? next.settings_tabs : [];
+    // Skip no-op refreshes — uefn_plugins_changed used to rebuild the Plugins
+    // sidebar on every identical payload (felt like a constant reload).
+    const nextWalkthroughs = Array.isArray((next as { walkthroughs?: unknown }).walkthroughs)
+      ? (
+          (next as { walkthroughs: PluginContributions["walkthroughs"] }).walkthroughs || []
+        ).filter(
+          (w) =>
+            !!w && typeof w.id === "string" && Array.isArray(w.steps) && w.steps.length > 0,
+        )
+      : [];
+    const nextProviderIds = (
+      Array.isArray((next as { llm_providers?: Array<{ id?: string }> }).llm_providers)
+        ? (next as { llm_providers: Array<{ id?: string }> }).llm_providers
+        : []
+    )
+      .map((p) => String(p?.id || "").trim().toLowerCase())
+      .filter(Boolean)
+      .sort();
+    const prev = _contrib;
+    const prevProviderIds = prev.llm_providers.map((p) => p.id.trim().toLowerCase()).sort();
+    if (
+      prev.ready &&
+      prev.settings_tabs.length === settingsTabs.length &&
+      prev.settings_tabs.every(
+        (t, i) =>
+          t.id === settingsTabs[i]?.id &&
+          t.plugin_id === settingsTabs[i]?.plugin_id &&
+          t.label === settingsTabs[i]?.label,
+      ) &&
+      prev.enabled_ids.length === (Array.isArray(next.enabled_ids) ? next.enabled_ids.length : 0) &&
+      prev.enabled_ids.every(
+        (id, i) => id === (Array.isArray(next.enabled_ids) ? next.enabled_ids[i] : undefined),
+      ) &&
+      prevProviderIds.length === nextProviderIds.length &&
+      prevProviderIds.every((id, i) => id === nextProviderIds[i]) &&
+      prev.walkthroughs.length === nextWalkthroughs.length &&
+      prev.walkthroughs.every(
+        (w, i) =>
+          w.id === nextWalkthroughs[i]?.id &&
+          w.plugin_id === nextWalkthroughs[i]?.plugin_id &&
+          w.steps.length === nextWalkthroughs[i]?.steps.length,
+      )
+    ) {
       return;
     }
-    try {
-      const next = await api.get_uefn_plugin_contributions();
-      // Failed fetch: leave ready=false so AppearanceContext does not wipe a
-      // saved plugin theme against an empty enabled_ids list.
-      if (!next || next.ok === false) return;
-      const settingsTabs = Array.isArray(next.settings_tabs) ? next.settings_tabs : [];
-      // Skip no-op refreshes — uefn_plugins_changed used to rebuild the Plugins
-      // sidebar on every identical payload (felt like a constant reload).
-      const nextWalkthroughs = Array.isArray((next as { walkthroughs?: unknown }).walkthroughs)
-        ? (
-            (next as { walkthroughs: PluginContributions["walkthroughs"] }).walkthroughs || []
-          ).filter(
-            (w) =>
-              !!w && typeof w.id === "string" && Array.isArray(w.steps) && w.steps.length > 0,
+    _setContrib({
+      settings_tabs: settingsTabs,
+      settings_sections: Array.isArray(next.settings_sections)
+        ? next.settings_sections
+            .filter(
+              (s): s is PluginSettingsSection =>
+                !!s &&
+                typeof s.id === "string" &&
+                typeof s.tab === "string" &&
+                Array.isArray(s.properties),
+            )
+            .map((s) => ({
+              ...s,
+              properties: s.properties.filter((p) => p && typeof p.id === "string"),
+            }))
+        : [],
+      dock_panels: Array.isArray(next.dock_panels) ? next.dock_panels : [],
+      editor_kinds: Array.isArray(next.editor_kinds) ? next.editor_kinds : [],
+      header_buttons: Array.isArray(next.header_buttons)
+        ? next.header_buttons.filter(
+            (b): b is PluginHeaderButton =>
+              !!b && typeof b.id === "string" && typeof b.action === "string",
           )
-        : [];
-      const nextProviderIds = (
-        Array.isArray((next as { llm_providers?: Array<{ id?: string }> }).llm_providers)
-          ? (next as { llm_providers: Array<{ id?: string }> }).llm_providers
-          : []
+        : [],
+      ui_panels: Array.isArray(next.ui_panels)
+        ? next.ui_panels.filter(
+            (p): p is PluginUiPanel =>
+              !!p &&
+              typeof p.id === "string" &&
+              typeof p.entry === "string" &&
+              typeof p.plugin_id === "string",
+          )
+        : [],
+      shell_boots: Array.isArray((next as { shell_boots?: unknown }).shell_boots)
+        ? ((next as { shell_boots: PluginShellBoot[] }).shell_boots || []).filter(
+            (b): b is PluginShellBoot =>
+              !!b && typeof b.plugin_id === "string" && typeof b.entry === "string",
+          )
+        : [],
+      appearance_profiles: Array.isArray(
+        (next as { appearance_profiles?: unknown }).appearance_profiles,
       )
-        .map((p) => String(p?.id || "").trim().toLowerCase())
-        .filter(Boolean)
-        .sort();
-      setContrib((prev) => {
-        const prevProviderIds = prev.llm_providers.map((p) => p.id.trim().toLowerCase()).sort();
-        if (
-          prev.ready &&
-          prev.settings_tabs.length === settingsTabs.length &&
-          prev.settings_tabs.every(
-            (t, i) =>
-              t.id === settingsTabs[i]?.id &&
-              t.plugin_id === settingsTabs[i]?.plugin_id &&
-              t.label === settingsTabs[i]?.label,
-          ) &&
-          prev.enabled_ids.length === (Array.isArray(next.enabled_ids) ? next.enabled_ids.length : 0) &&
-          prev.enabled_ids.every(
-            (id, i) => id === (Array.isArray(next.enabled_ids) ? next.enabled_ids[i] : undefined),
-          ) &&
-          prevProviderIds.length === nextProviderIds.length &&
-          prevProviderIds.every((id, i) => id === nextProviderIds[i]) &&
-          prev.walkthroughs.length === nextWalkthroughs.length &&
-          prev.walkthroughs.every(
-            (w, i) =>
-              w.id === nextWalkthroughs[i]?.id &&
-              w.plugin_id === nextWalkthroughs[i]?.plugin_id &&
-              w.steps.length === nextWalkthroughs[i]?.steps.length,
+        ? (
+            (next as { appearance_profiles: PluginAppearanceProfile[] }).appearance_profiles || []
+          ).filter(
+            (p): p is PluginAppearanceProfile =>
+              !!p &&
+              typeof p.id === "string" &&
+              typeof p.name === "string" &&
+              typeof p.plugin_id === "string",
           )
-        ) {
-          return prev;
-        }
-        return {
-        settings_tabs: settingsTabs,
-        settings_sections: Array.isArray(next.settings_sections)
-          ? next.settings_sections
-              .filter(
-                (s): s is PluginSettingsSection =>
-                  !!s &&
-                  typeof s.id === "string" &&
-                  typeof s.tab === "string" &&
-                  Array.isArray(s.properties),
-              )
-              .map((s) => ({
-                ...s,
-                properties: s.properties.filter((p) => p && typeof p.id === "string"),
-              }))
-          : [],
-        dock_panels: Array.isArray(next.dock_panels) ? next.dock_panels : [],
-        editor_kinds: Array.isArray(next.editor_kinds) ? next.editor_kinds : [],
-        header_buttons: Array.isArray(next.header_buttons)
-          ? next.header_buttons.filter(
-              (b): b is PluginHeaderButton =>
-                !!b && typeof b.id === "string" && typeof b.action === "string",
+        : [],
+      appearance_css: Array.isArray((next as { appearance_css?: unknown }).appearance_css)
+        ? ((next as { appearance_css: PluginAppearanceCss[] }).appearance_css || []).filter(
+            (c): c is PluginAppearanceCss =>
+              !!c && typeof c.plugin_id === "string" && typeof c.entry === "string",
+          )
+        : [],
+      appearance_effects: Array.isArray(
+        (next as { appearance_effects?: unknown }).appearance_effects,
+      )
+        ? (
+            (next as { appearance_effects: PluginAppearanceEffect[] }).appearance_effects || []
+          ).filter(
+            (e): e is PluginAppearanceEffect =>
+              !!e &&
+              typeof e.id === "string" &&
+              typeof e.label === "string" &&
+              typeof e.plugin_id === "string" &&
+              typeof e.entry === "string",
+          )
+        : [],
+      appearance_skins: Array.isArray((next as { appearance_skins?: unknown }).appearance_skins)
+        ? ((next as { appearance_skins: PluginAppearanceSkin[] }).appearance_skins || []).filter(
+            (s): s is PluginAppearanceSkin =>
+              !!s &&
+              typeof s.id === "string" &&
+              typeof s.label === "string" &&
+              typeof s.plugin_id === "string" &&
+              typeof s.entry === "string",
+          )
+        : [],
+      sounds: Array.isArray((next as { sounds?: unknown }).sounds)
+        ? ((next as { sounds: PluginSound[] }).sounds || []).filter(
+            (s): s is PluginSound =>
+              !!s &&
+              typeof s.id === "string" &&
+              typeof s.file === "string" &&
+              typeof s.plugin_id === "string",
+          )
+        : [],
+      hooks: Array.isArray((next as { hooks?: unknown }).hooks)
+        ? ((next as { hooks: PluginHook[] }).hooks || []).filter(
+            (h): h is PluginHook =>
+              !!h && typeof h.id === "string" && typeof h.plugin_id === "string",
+          )
+        : [],
+      verse_templates: Array.isArray((next as { verse_templates?: unknown }).verse_templates)
+        ? ((next as { verse_templates: PluginVerseTemplate[] }).verse_templates || [])
+            .filter(
+              (t): t is PluginVerseTemplate =>
+                !!t &&
+                typeof t.id === "string" &&
+                typeof t.name === "string" &&
+                typeof t.icon === "string" &&
+                typeof t.content === "string" &&
+                typeof t.plugin_id === "string",
             )
-          : [],
-        ui_panels: Array.isArray(next.ui_panels)
-          ? next.ui_panels.filter(
-              (p): p is PluginUiPanel =>
+            .map((t) => ({
+              ...t,
+              files: Array.isArray(t.files)
+                ? t.files.filter(
+                    (f): f is { path: string; content: string } =>
+                      !!f && typeof f.path === "string" && typeof f.content === "string",
+                  )
+                : undefined,
+              connects: Array.isArray(t.connects)
+                ? t.connects.filter((c): c is string => typeof c === "string" && c.length > 0)
+                : undefined,
+            }))
+            .slice()
+            .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.name.localeCompare(b.name))
+        : [],
+      tts_voices: Array.isArray((next as { tts_voices?: unknown }).tts_voices)
+        ? ((next as { tts_voices: PluginTtsVoice[] }).tts_voices || []).filter(
+            (v): v is PluginTtsVoice =>
+              !!v && typeof v.id === "string" && typeof v.plugin_id === "string",
+          )
+        : [],
+      tts_voice_plugins: Array.isArray((next as { tts_voice_plugins?: unknown }).tts_voice_plugins)
+        ? ((next as { tts_voice_plugins: string[] }).tts_voice_plugins || []).filter(
+            (p): p is string => typeof p === "string" && p.length > 0,
+          )
+        : [],
+      llm_providers: Array.isArray((next as { llm_providers?: unknown }).llm_providers)
+        ? ((next as { llm_providers: PluginLlmProvider[] }).llm_providers || [])
+            .filter(
+              (p): p is PluginLlmProvider =>
                 !!p &&
                 typeof p.id === "string" &&
-                typeof p.entry === "string" &&
-                typeof p.plugin_id === "string",
+                typeof p.label === "string" &&
+                typeof p.plugin_id === "string" &&
+                (p.kind === "secret" || p.kind === "url") &&
+                typeof p.secret_key === "string",
             )
-          : [],
-        shell_boots: Array.isArray((next as { shell_boots?: unknown }).shell_boots)
-          ? ((next as { shell_boots: PluginShellBoot[] }).shell_boots || []).filter(
-              (b): b is PluginShellBoot =>
-                !!b && typeof b.plugin_id === "string" && typeof b.entry === "string",
+            .slice()
+            .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+        : [],
+      llm_coding_agents: Array.isArray((next as { llm_coding_agents?: unknown }).llm_coding_agents)
+        ? (
+            (next as {
+              llm_coding_agents: Array<{
+                id: string;
+                label: string;
+                order?: number;
+                plugin_id: string;
+                shows_thinking_effort?: boolean;
+              }>;
+            }).llm_coding_agents || []
+          )
+            .filter(
+              (a) =>
+                !!a &&
+                typeof a.id === "string" &&
+                typeof a.label === "string" &&
+                typeof a.plugin_id === "string",
             )
-          : [],
-        appearance_profiles: Array.isArray(
-          (next as { appearance_profiles?: unknown }).appearance_profiles,
-        )
-          ? (
-              (next as { appearance_profiles: PluginAppearanceProfile[] }).appearance_profiles || []
-            ).filter(
-              (p): p is PluginAppearanceProfile =>
-                !!p &&
-                typeof p.id === "string" &&
-                typeof p.name === "string" &&
-                typeof p.plugin_id === "string",
-            )
-          : [],
-        appearance_css: Array.isArray((next as { appearance_css?: unknown }).appearance_css)
-          ? ((next as { appearance_css: PluginAppearanceCss[] }).appearance_css || []).filter(
-              (c): c is PluginAppearanceCss =>
-                !!c && typeof c.plugin_id === "string" && typeof c.entry === "string",
-            )
-          : [],
-        appearance_effects: Array.isArray(
-          (next as { appearance_effects?: unknown }).appearance_effects,
-        )
-          ? (
-              (next as { appearance_effects: PluginAppearanceEffect[] }).appearance_effects || []
-            ).filter(
-              (e): e is PluginAppearanceEffect =>
-                !!e &&
-                typeof e.id === "string" &&
-                typeof e.label === "string" &&
-                typeof e.plugin_id === "string" &&
-                typeof e.entry === "string",
-            )
-          : [],
-        appearance_skins: Array.isArray((next as { appearance_skins?: unknown }).appearance_skins)
-          ? ((next as { appearance_skins: PluginAppearanceSkin[] }).appearance_skins || []).filter(
-              (s): s is PluginAppearanceSkin =>
-                !!s &&
-                typeof s.id === "string" &&
-                typeof s.label === "string" &&
-                typeof s.plugin_id === "string" &&
-                typeof s.entry === "string",
-            )
-          : [],
-        sounds: Array.isArray((next as { sounds?: unknown }).sounds)
-          ? ((next as { sounds: PluginSound[] }).sounds || []).filter(
-              (s): s is PluginSound =>
-                !!s &&
-                typeof s.id === "string" &&
-                typeof s.file === "string" &&
-                typeof s.plugin_id === "string",
-            )
-          : [],
-        hooks: Array.isArray((next as { hooks?: unknown }).hooks)
-          ? ((next as { hooks: PluginHook[] }).hooks || []).filter(
-              (h): h is PluginHook =>
-                !!h && typeof h.id === "string" && typeof h.plugin_id === "string",
-            )
-          : [],
-        verse_templates: Array.isArray((next as { verse_templates?: unknown }).verse_templates)
-          ? ((next as { verse_templates: PluginVerseTemplate[] }).verse_templates || [])
-              .filter(
-                (t): t is PluginVerseTemplate =>
-                  !!t &&
-                  typeof t.id === "string" &&
-                  typeof t.name === "string" &&
-                  typeof t.icon === "string" &&
-                  typeof t.content === "string" &&
-                  typeof t.plugin_id === "string",
-              )
-              .map((t) => ({
-                ...t,
-                files: Array.isArray(t.files)
-                  ? t.files.filter(
-                      (f): f is { path: string; content: string } =>
-                        !!f && typeof f.path === "string" && typeof f.content === "string",
-                    )
-                  : undefined,
-                connects: Array.isArray(t.connects)
-                  ? t.connects.filter((c): c is string => typeof c === "string" && c.length > 0)
-                  : undefined,
-              }))
-              .slice()
-              .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.name.localeCompare(b.name))
-          : [],
-        tts_voices: Array.isArray((next as { tts_voices?: unknown }).tts_voices)
-          ? ((next as { tts_voices: PluginTtsVoice[] }).tts_voices || []).filter(
-              (v): v is PluginTtsVoice =>
-                !!v && typeof v.id === "string" && typeof v.plugin_id === "string",
-            )
-          : [],
-        tts_voice_plugins: Array.isArray((next as { tts_voice_plugins?: unknown }).tts_voice_plugins)
-          ? ((next as { tts_voice_plugins: string[] }).tts_voice_plugins || []).filter(
-              (p): p is string => typeof p === "string" && p.length > 0,
-            )
-          : [],
-        llm_providers: Array.isArray((next as { llm_providers?: unknown }).llm_providers)
-          ? ((next as { llm_providers: PluginLlmProvider[] }).llm_providers || [])
-              .filter(
-                (p): p is PluginLlmProvider =>
-                  !!p &&
-                  typeof p.id === "string" &&
-                  typeof p.label === "string" &&
-                  typeof p.plugin_id === "string" &&
-                  (p.kind === "secret" || p.kind === "url") &&
-                  typeof p.secret_key === "string",
-              )
-              .slice()
-              .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
-          : [],
-        llm_coding_agents: Array.isArray((next as { llm_coding_agents?: unknown }).llm_coding_agents)
-          ? (
-              (next as {
-                llm_coding_agents: Array<{
-                  id: string;
-                  label: string;
-                  order?: number;
-                  plugin_id: string;
-                  shows_thinking_effort?: boolean;
-                }>;
-              }).llm_coding_agents || []
-            )
-              .filter(
-                (a) =>
-                  !!a &&
-                  typeof a.id === "string" &&
-                  typeof a.label === "string" &&
-                  typeof a.plugin_id === "string",
-              )
-              .slice()
-              .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
-          : [],
-        ide_hookups: Array.isArray((next as { ide_hookups?: unknown }).ide_hookups)
-          ? (
-              (next as {
-                ide_hookups: Array<{ kind: string; label?: string; plugin_id: string }>;
-              }).ide_hookups || []
-            ).filter(
-              (h) =>
-                !!h &&
-                typeof h.kind === "string" &&
-                typeof h.plugin_id === "string",
-            )
-          : [],
-        walkthroughs: nextWalkthroughs,
-        enabled_ids: Array.isArray(next.enabled_ids) ? next.enabled_ids : [],
-        ready: true,
-        };
-      });
-    } catch {
-      /* leave ready false — retry on next uefn_plugins_changed / remount */
-    }
-  }, []);
-
-  useEffect(() => {
-    return onApiReady(() => {
-      void refresh();
+            .slice()
+            .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+        : [],
+      ide_hookups: Array.isArray((next as { ide_hookups?: unknown }).ide_hookups)
+        ? (
+            (next as {
+              ide_hookups: Array<{ kind: string; label?: string; plugin_id: string }>;
+            }).ide_hookups || []
+          ).filter(
+            (h) =>
+              !!h &&
+              typeof h.kind === "string" &&
+              typeof h.plugin_id === "string",
+          )
+        : [],
+      walkthroughs: nextWalkthroughs,
+      enabled_ids: Array.isArray(next.enabled_ids) ? next.enabled_ids : [],
+      ready: true,
     });
-  }, [refresh]);
+  } catch {
+    /* leave ready false — retry on next uefn_plugins_changed / poll */
+  }
+}
 
-  useEffect(() => {
-    installPanelPushBus();
-    return subscribePanelPush((event) => {
-      if (event.type === "uefn_plugins_changed") void refresh();
-    });
-  }, [refresh]);
-
+function _ensureStarted() {
+  if (_started) return;
+  _started = true;
+  onApiReady(() => {
+    void refresh();
+  });
+  installPanelPushBus();
+  subscribePanelPush((event) => {
+    if (event.type === "uefn_plugins_changed") void refresh();
+  });
   // Missed uefn_plugins_changed (push before bus / no window) left Installed empty
   // forever — poll until the first successful contributions snapshot lands.
-  useEffect(() => {
-    if (contrib.ready) return;
-    const id = window.setInterval(() => {
-      void refresh();
-    }, 400);
-    return () => window.clearInterval(id);
-  }, [contrib.ready, refresh]);
+  _pollId = window.setInterval(() => {
+    if (_contrib.ready) {
+      _stopPoll();
+      return;
+    }
+    void refresh();
+  }, 400);
+}
 
-  return contrib;
+function subscribe(listener: () => void) {
+  _listeners.add(listener);
+  _ensureStarted();
+  return () => {
+    _listeners.delete(listener);
+  };
+}
+
+function getSnapshot() {
+  return _contrib;
+}
+
+/** Live contribution registry from enabled UEFN plugins (Store / local). */
+export function usePluginContributions(): PluginContributions {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 export function pluginContributesSettingsTab(contrib: PluginContributions, tabId: string): boolean {
