@@ -259,13 +259,13 @@ export function ProviderCodingAgents({ pluginId }: { pluginId: string }) {
       enabled: draft?.enabled ?? true,
       available: false,
       status: loaded
-        ? "Backend not loaded — turn the agent on, click Detect, or restart Ducky."
+        ? "Backend not loaded yet — turn the agent on and click Detect."
         : "Checking…",
       cli_path: draft?.cli_path ?? "",
       default_args: draft?.default_args ?? "",
       capabilities: { needs_cli: true },
       install_help:
-        "If this gateway was just Updated from the Store, restart Ducky once so the new backend registers.",
+        "If this gateway was just installed, wait a moment then Detect — no app restart.",
     };
   });
 

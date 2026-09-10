@@ -1203,6 +1203,8 @@ def apply_plugin_enabled_change(plugin_id: str, *, enabled: bool) -> None:
     except Exception as exc:  # noqa: BLE001 — never kill Store toggle
         _log.exception("UEFN plugin %s contrib load failed: %s", pid, exc)
         _record_plugin_load_error(pid, exc)
+    # Paint LLMs / picker now — do not wait for register() or an app restart.
+    _notify_uefn_plugins_changed()
 
     def _enable_bg() -> None:
         try:
@@ -1273,6 +1275,8 @@ def reload_single_plugin(plugin_id: str) -> None:
     except Exception as exc:  # noqa: BLE001 — never kill Store install
         _log.exception("UEFN plugin %s contrib reload failed: %s", pid, exc)
         _record_plugin_load_error(pid, exc)
+    # Store install/update: picker + LLMs see the gateway before register() finishes.
+    _notify_uefn_plugins_changed()
 
     def _reload_bg() -> None:
         try:

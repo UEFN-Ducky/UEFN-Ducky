@@ -3106,15 +3106,20 @@
 
 .message-bubble-assistant-row {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   margin-bottom: 10px;
   padding-left: 8px;
 }
 
 .message-bubble-assistant-content {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   color: var(--fg);
   font-size: 14px;
   line-height: 1.55;
-  max-width: 92%;
+  max-width: 100%;
   padding: 2px 4px;
   font-weight: 400;
 }

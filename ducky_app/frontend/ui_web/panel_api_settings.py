@@ -274,7 +274,6 @@ class PanelApiSettingsMixin:
             get_llm_provider_registration,
             get_ui_contributions,
             plugins_ready,
-            plugins_ui_ready,
         )
 
         # Built-in providers always available (no plugin wait).
@@ -285,22 +284,23 @@ class PanelApiSettingsMixin:
             ensure_plugins_loaded_async(on_done=self._notify_plugins_ready)
             # plugin.json llm_providers land before register(); use them so
             # gateways appear while backends finish. Skip factory lookup.
-            if plugins_ui_ready():
-                for row in get_ui_contributions().get("llm_providers") or []:
-                    if not isinstance(row, dict):
-                        continue
-                    pid = str(row.get("id") or "").strip().lower()
-                    for key in (
-                        str(row.get("secret_key") or "").strip(),
-                        pid,
-                    ):
-                        if key:
-                            status[key] = has_key(key)
-                    if pid and str(row.get("kind") or "").strip().lower() == "url":
-                        status[pid] = True
-                        sk = str(row.get("secret_key") or "").strip()
-                        if sk:
-                            status[sk] = True
+            # Do not wait on plugins_ui_ready — a just-installed gateway must
+            # count as soon as its row is in the registry (no app restart).
+            for row in get_ui_contributions().get("llm_providers") or []:
+                if not isinstance(row, dict):
+                    continue
+                pid = str(row.get("id") or "").strip().lower()
+                for key in (
+                    str(row.get("secret_key") or "").strip(),
+                    pid,
+                ):
+                    if key:
+                        status[key] = has_key(key)
+                if pid and str(row.get("kind") or "").strip().lower() == "url":
+                    status[pid] = True
+                    sk = str(row.get("secret_key") or "").strip()
+                    if sk:
+                        status[sk] = True
             return status
 
         # Include every enabled gateway secret_key (and provider id) so saved keys
@@ -327,9 +327,9 @@ class PanelApiSettingsMixin:
         return status
 
     def has_any_api_key(self) -> bool:
-        from backend.agent.secrets import has_key
-
-        return any(has_key(p) for p in _pa.all_providers())
+        # Same readiness as Settings → LLMs (contributed gateways + keys),
+        # not factory-only all_providers() — that stayed empty until restart.
+        return any(self.get_key_status().values())
 
     # --- Discord group chat (Store plugin owns implementation) -----------------
     # Temporary shims: host React still calls discord_*; logic lives in
@@ -1334,13 +1334,25 @@ class PanelApiSettingsMixin:
             return result
 
         if prov_reg is None or prov not in gateway_providers():
-            label = str((contrib or {}).get("label") or prov)
-            result = {
-                "ok": False,
-                "detail": f"{label} gateway is not installed or enabled — Settings → Store → Gateways",
-            }
-            self._push_panel({"type": "key_test_done", "provider": prov, **result})
-            return result
+            # Just-installed gateway: register() is on a daemon. Wait for it —
+            # never tell the user to restart Ducky.
+            if contrib is not None:
+                from backend.uefn_plugins.host import wait_plugin_toggles
+
+                wait_plugin_toggles(timeout=8.0)
+                prov_reg = get_llm_provider_registration(prov)
+            if prov_reg is None or prov not in gateway_providers():
+                label = str((contrib or {}).get("label") or prov)
+                result = {
+                    "ok": False,
+                    "detail": (
+                        f"{label} gateway is still finishing setup — try Test again in a moment."
+                        if contrib is not None
+                        else f"{label} gateway is not installed or enabled — Settings → Store → Gateways"
+                    ),
+                }
+                self._push_panel({"type": "key_test_done", "provider": prov, **result})
+                return result
 
         kind = str((contrib or {}).get("kind") or "secret").strip().lower()
         if kind == "url":

@@ -255,7 +255,16 @@ export function usePluginContributions(): PluginContributions {
               !!w && typeof w.id === "string" && Array.isArray(w.steps) && w.steps.length > 0,
           )
         : [];
+      const nextProviderIds = (
+        Array.isArray((next as { llm_providers?: Array<{ id?: string }> }).llm_providers)
+          ? (next as { llm_providers: Array<{ id?: string }> }).llm_providers
+          : []
+      )
+        .map((p) => String(p?.id || "").trim().toLowerCase())
+        .filter(Boolean)
+        .sort();
       setContrib((prev) => {
+        const prevProviderIds = prev.llm_providers.map((p) => p.id.trim().toLowerCase()).sort();
         if (
           prev.ready &&
           prev.settings_tabs.length === settingsTabs.length &&
@@ -269,6 +278,8 @@ export function usePluginContributions(): PluginContributions {
           prev.enabled_ids.every(
             (id, i) => id === (Array.isArray(next.enabled_ids) ? next.enabled_ids[i] : undefined),
           ) &&
+          prevProviderIds.length === nextProviderIds.length &&
+          prevProviderIds.every((id, i) => id === nextProviderIds[i]) &&
           prev.walkthroughs.length === nextWalkthroughs.length &&
           prev.walkthroughs.every(
             (w, i) =>

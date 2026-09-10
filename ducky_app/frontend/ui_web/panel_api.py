@@ -227,15 +227,16 @@ def _load_model_cache_from_disk() -> None:
 def _contributed_provider_ids() -> set[str]:
     """Installed gateway ids from plugin.json — available before register() finishes."""
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.host import get_contributions, get_ui_contributions
 
         out: set[str] = set()
-        for row in get_contributions().get("llm_providers") or []:
-            if not isinstance(row, dict):
-                continue
-            pid = str(row.get("id") or row.get("secret_key") or "").strip().lower()
-            if pid:
-                out.add(pid)
+        for src in (get_ui_contributions, get_contributions):
+            for row in src().get("llm_providers") or []:
+                if not isinstance(row, dict):
+                    continue
+                pid = str(row.get("id") or row.get("secret_key") or "").strip().lower()
+                if pid:
+                    out.add(pid)
         return out
     except Exception:
         return set()
@@ -507,7 +508,16 @@ def _warm_model_cache() -> None:
     from backend.agent.secrets import get_key, has_key
 
     changed = False
-    for provider in all_providers():
+    # Contributed ids first — factory register can lag a Store install, and
+    # all_providers() would skip the new gateway until restart.
+    providers: list[str] = []
+    seen: set[str] = set()
+    for provider in (*_contributed_provider_ids(), *all_providers()):
+        if not provider or provider in seen:
+            continue
+        seen.add(provider)
+        providers.append(provider)
+    for provider in providers:
         if not has_key(provider):
             continue
         try:

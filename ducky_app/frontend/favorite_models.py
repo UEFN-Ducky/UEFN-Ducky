@@ -25,13 +25,36 @@ def coding_agent_backends() -> frozenset[str]:
         return frozenset()
 
 
+def _contributed_api_backends() -> set[str]:
+    """plugin.json gateway ids — known before register() finishes a factory."""
+    try:
+        from backend.uefn_plugins.host import get_contributions, get_ui_contributions
+    except Exception:
+        return set()
+    out: set[str] = set()
+    for src in (get_ui_contributions, get_contributions):
+        try:
+            rows = src().get("llm_providers") or []
+        except Exception:
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id") or "").strip().lower()
+            if pid:
+                out.add(pid)
+    return out
+
+
 def api_backends() -> frozenset[str]:
+    ids = _contributed_api_backends()
     try:
         from backend.agent.providers import gateway_providers
 
-        return frozenset(gateway_providers())
+        ids.update(gateway_providers())
     except Exception:
-        return frozenset()
+        pass
+    return frozenset(ids)
 
 
 def known_backends() -> frozenset[str]:

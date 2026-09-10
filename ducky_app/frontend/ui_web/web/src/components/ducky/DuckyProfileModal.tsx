@@ -30,6 +30,14 @@ import { parseFavoriteSelection } from "../../hooks/favoriteModelsCatalog";
 import { PickModelModal } from "./PickModelModal";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
 import type { DuckyEditTarget } from "./duckyProfileTypes";
+import { useHasApiKey } from "../../hooks/useHasApiKey";
+import { usePluginContributions } from "../../hooks/usePluginContributions";
+import {
+  getCachedModels,
+  isModelsCatalogReady,
+  subscribeModelsCatalog,
+} from "../../hooks/modelsCatalogCache";
+import { duckyPickerIssue } from "./duckyPickerIssue";
 
 type CreateStep = "pick" | "edit";
 
@@ -60,6 +68,29 @@ export function DuckyProfileModal({
 }: DuckyProfileModalProps) {
   const { allStyles, defaultStyle, normalizeStyle } = useDuckyCatalog();
   const { confirm, alert } = useConfirmModal();
+  const hasApiKey = useHasApiKey();
+  const contrib = usePluginContributions();
+  const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
+  const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
+  useEffect(() => {
+    const sync = () => {
+      setCatalogReady(isModelsCatalogReady());
+      setModelsCount(getCachedModels()?.length ?? 0);
+    };
+    sync();
+    return subscribeModelsCatalog(sync);
+  }, []);
+  const pickerIssue = useMemo(
+    () =>
+      duckyPickerIssue({
+        gatewayCount: contrib.llm_providers.length,
+        contribReady: contrib.ready,
+        hasApiKey,
+        catalogReady,
+        modelsCount,
+      }),
+    [catalogReady, contrib.llm_providers.length, contrib.ready, hasApiKey, modelsCount],
+  );
   const [profiles, setProfiles] = useState<AgentProfileDto[]>([]);
   const [blankProfileId, setBlankProfileId] = useState(BLANK_PROFILE_ID);
   const [catalog, setCatalog] = useState<AgentProfileEditorCatalogDto | null>(null);
@@ -551,7 +582,16 @@ export function DuckyProfileModal({
                 ) : null}
                 <DuckyProfilePicker
                   profiles={profiles}
-                  disabled={saving}
+                  issue={pickerIssue}
+                  creating={saving}
+                  onIssueAction={
+                    pickerIssue
+                      ? () => {
+                          onClose();
+                          requestOpenSettings(pickerIssue.actionTab);
+                        }
+                      : undefined
+                  }
                   onBlank={openBlankEditor}
                   onPick={(profile) => void handleProfilePick(profile)}
                   onEditProfile={openProfileEditor}

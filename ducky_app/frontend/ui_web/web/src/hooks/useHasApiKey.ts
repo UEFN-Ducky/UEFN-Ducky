@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { getApi } from "./usePanelApi";
+import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
 
 let _hasApiKey = false;
 const _listeners = new Set<() => void>();
@@ -28,6 +29,16 @@ function _ensureStarted() {
   refresh();
   window.addEventListener("pywebviewready", refresh);
   window.setInterval(refresh, 15000);
+  installPanelPushBus();
+  subscribePanelPush((event) => {
+    if (
+      event.type === "key_test_done" ||
+      event.type === "uefn_plugins_changed" ||
+      event.type === "models_updated"
+    ) {
+      refresh();
+    }
+  });
 }
 
 function subscribe(listener: () => void) {

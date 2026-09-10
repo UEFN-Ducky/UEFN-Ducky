@@ -260,7 +260,8 @@ export function ModelSelector({
       if (normId(agentId) === "ducky") return false;
       if (agentsChecking) return false;
       const a = agents.find((row) => normId(row.id) === normId(agentId));
-      if (!a) return true;
+      // Empty list is "not loaded yet" (just installed a gateway), not unavailable.
+      if (!a) return agents.length > 0;
       return !a.enabled || !a.available;
     },
     [agents, agentsChecking],
