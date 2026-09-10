@@ -170,6 +170,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   // A repeat-guard block isn't a real tool result — render it as a compact "skipped"
   // note (no presenter, no raw toggle, no token badge) instead of a full result card.
   const isGuardBlocked = !isRunning && meta.hint === "repeat-call guard";
+  // Successful writes already have the full diff card — the empty "Edit file 32ms"
+  // accordion is a duplicate. Keep the shell for errors / cancel / guard skips.
+  const hideShellForFileEdit =
+    showInlineDiff && isSuccess && !isGuardBlocked && !isCancelled;
   // Guard-blocked calls are benign skips, not failures — render them muted, not red.
   const shellTone = isRunning
     ? "running"
@@ -216,6 +220,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
       {showInlineDiff && fileEdit ? (
         <ToolFileEditDiff edit={fileEdit} onOpenFile={onOpenFile} />
       ) : null}
+      {hideShellForFileEdit ? null : (
       <div
         className={[
           "no-drag selectable-text tool-execution-card-shell",
@@ -393,6 +398,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           ) : null}
         </div>
       </div>
+      )}
     </div>
   );
 });

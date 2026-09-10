@@ -1181,20 +1181,6 @@ export function StoreTab() {
               </div>
             </div>
 
-            {!loggedIn ? (
-              <p className="ds-signin">
-                Free items work without an account.{" "}
-                <button
-                  type="button"
-                  className="ds-link"
-                  onClick={() => requestOpenSettings("Account")}
-                >
-                  Sign in
-                </button>{" "}
-                to buy paid items and sync purchases across machines.
-              </p>
-            ) : null}
-
             {filtering ? (
               filteredItems.length > 0 ? (
                 <div className="ds-grid">

@@ -51,62 +51,58 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
 
   return (
     <div className="tool-file-edit-diff">
-      <button
-        type="button"
-        className={`tool-file-edit-diff-header${expanded ? " tool-file-edit-diff-header--expanded" : ""}`}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span className="tool-file-edit-diff-header-icon">
-          <Icons.File />
-        </span>
-        <span className="tool-file-edit-diff-header-body">
-          <span
-            className="tool-file-edit-diff-filename"
-            onClick={(e) => {
-              if (!onOpenFile) return;
-              e.stopPropagation();
-              openAt(firstChangeLine);
-            }}
-            role={onOpenFile ? "link" : undefined}
-            tabIndex={onOpenFile ? 0 : undefined}
-          >
-            {displayName}
+      <div className={`tool-file-edit-diff-header${expanded ? " tool-file-edit-diff-header--expanded" : ""}`}>
+        <button
+          type="button"
+          className="tool-file-edit-diff-header-toggle"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <span className="tool-file-edit-diff-header-icon">
+            <Icons.File />
           </span>
-          {hasChanges ? (
-            <span className="tool-file-edit-diff-stats">
-              {summary.linesAdded > 0 && (
-                <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--add">+{summary.linesAdded}</span>
-              )}
-              {summary.linesRemoved > 0 && (
-                <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--remove">-{summary.linesRemoved}</span>
-              )}
+          <span className="tool-file-edit-diff-header-body">
+            <span
+              className="tool-file-edit-diff-filename"
+              onClick={(e) => {
+                if (!onOpenFile) return;
+                e.stopPropagation();
+                openAt(firstChangeLine);
+              }}
+              role={onOpenFile ? "link" : undefined}
+              tabIndex={onOpenFile ? 0 : undefined}
+            >
+              {displayName}
             </span>
-          ) : (
-            <span className="tool-file-edit-diff-stats tool-file-edit-diff-stats--unchanged">unchanged</span>
-          )}
-        </span>
-        {verseEditor ? (
-          <span
-            className="tool-file-edit-diff-replay"
-            role="button"
-            tabIndex={0}
-            title="Replay this edit in the editor"
-            aria-label="Replay this edit in the editor"
-            onClick={replay}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                replay(e);
-              }
-            }}
-          >
-            <Icons.Refresh />
+            {hasChanges ? (
+              <span className="tool-file-edit-diff-stats">
+                {summary.linesAdded > 0 && (
+                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--add">+{summary.linesAdded}</span>
+                )}
+                {summary.linesRemoved > 0 && (
+                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--remove">-{summary.linesRemoved}</span>
+                )}
+              </span>
+            ) : (
+              <span className="tool-file-edit-diff-stats tool-file-edit-diff-stats--unchanged">unchanged</span>
+            )}
           </span>
+          <span className={`tool-file-edit-diff-chevron${expanded ? " tool-file-edit-diff-chevron--expanded" : ""}`}>
+            <Icons.ChevronDown />
+          </span>
+        </button>
+        {verseEditor ? (
+          <button
+            type="button"
+            className="tool-file-edit-diff-replay"
+            title="Walk through this edit in the editor"
+            aria-label="Walk through this edit in the editor"
+            onClick={replay}
+          >
+            <Icons.Replay />
+            <span>Walk through</span>
+          </button>
         ) : null}
-        <span className={`tool-file-edit-diff-chevron${expanded ? " tool-file-edit-diff-chevron--expanded" : ""}`}>
-          <Icons.ChevronDown />
-        </span>
-      </button>
+      </div>
 
       <div className={`tool-file-edit-diff-collapse${expanded ? " is-open" : ""}`}>
         <div className="tool-file-edit-diff-collapse-inner">

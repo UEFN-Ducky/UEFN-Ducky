@@ -4321,17 +4321,28 @@
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: none;
+  gap: 6px;
+  padding: 0 8px 0 0;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
   color: inherit;
-  cursor: pointer;
-  text-align: left;
 }
 
 .tool-file-edit-diff-header--expanded {
   border-bottom: 1px solid var(--border);
+}
+
+.tool-file-edit-diff-header-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
 .tool-file-edit-diff-header-icon {
@@ -4387,16 +4398,22 @@
 }
 
 .tool-file-edit-diff-replay {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  color: var(--muted);
+  gap: 5px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 2px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 .tool-file-edit-diff-replay:hover {
-  color: var(--fg);
-  background: var(--card);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .tool-file-edit-diff-chevron {
@@ -5279,6 +5296,8 @@
 .virtual-chat-message-list-root .tool-execution-card-token-badge,
 .virtual-chat-message-list-root .tool-file-edit-diff,
 .virtual-chat-message-list-root .tool-file-edit-diff-header,
+.virtual-chat-message-list-root .tool-file-edit-diff-header-toggle,
+.virtual-chat-message-list-root .tool-file-edit-diff-replay,
 .virtual-chat-message-list-root .tool-file-edit-diff-filename,
 .virtual-chat-message-list-root .tool-file-edit-diff-stats,
 .virtual-chat-message-list-root .tool-file-edit-diff-empty,
