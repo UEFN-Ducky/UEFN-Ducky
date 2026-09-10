@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
@@ -245,6 +245,8 @@ export function AppDataTab() {
   const [childrenByRel, setChildrenByRel] = useState<
     Record<string, { items: AppDataItem[]; truncated: boolean; total: number } | "loading">
   >({});
+  const childrenByRelRef = useRef(childrenByRel);
+  childrenByRelRef.current = childrenByRel;
 
   const reload = useCallback(async () => {
     const api = getApi();
@@ -256,7 +258,18 @@ export function AppDataTab() {
       setOverview(ov);
       setProjects(Array.isArray(proj?.projects) ? proj.projects : []);
       setProjectBytes(typeof proj?.bytes === "number" ? proj.bytes : 0);
+      const openRels = Object.keys(childrenByRelRef.current).filter(
+        (rel) => childrenByRelRef.current[rel] !== "loading",
+      );
       setChildrenByRel({});
+      for (const rel of openRels) {
+        void api.appdata_children(rel).then((res) => {
+          setChildrenByRel((prev) => ({
+            ...prev,
+            [rel]: { items: res.items || [], truncated: !!res.truncated, total: res.total || 0 },
+          }));
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read App Data.");
     } finally {

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Icons } from "../../icons/Icons";
 import type { OpenFileHandler, RichInventoryItem, RichInventoryKind } from "../../types/richContent";
 import { inventoryKindFromLabel } from "./inventoryKind";
+import { RichCodeChip } from "./RichCodeChip";
 import { RichHeading } from "./RichHeading";
 import { RichInline } from "./RichInline";
 
@@ -29,7 +30,7 @@ export function RichInventory({ items, folder, heading, onOpenFile }: RichInvent
     <div className="rich-inventory">
       <div className="rich-inventory-head">
         <RichHeading level={2}>{title}</RichHeading>
-        {folder ? <code className="rich-code--inline rich-inventory-folder">{folder}</code> : null}
+        {folder ? <RichCodeChip text={folder} onOpenFile={onOpenFile} /> : null}
       </div>
       <ul className="rich-inventory-list">
         {items.map((item, i) => {
@@ -45,7 +46,7 @@ export function RichInventory({ items, folder, heading, onOpenFile }: RichInvent
                 <div className="rich-inventory-meta">
                   <span className="rich-inventory-kind">{label}</span>
                   <span className="rich-inventory-slash">/</span>
-                  <code className="rich-code--inline rich-inventory-title">{item.title}</code>
+                  <RichCodeChip text={item.title} onOpenFile={onOpenFile} />
                 </div>
                 {item.desc ? <p className="rich-inventory-desc"><RichInline text={item.desc} onOpenFile={onOpenFile} /></p> : null}
               </div>

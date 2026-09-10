@@ -5295,8 +5295,7 @@
 .virtual-chat-message-list-root .rich-paragraph,
 .virtual-chat-message-list-root .rich-list,
 .virtual-chat-message-list-root .rich-code--inline,
-.virtual-chat-message-list-root .rich-code--block,
-.virtual-chat-message-list-root .rich-code--block code,
+.virtual-chat-message-list-root button.rich-ref,
 .virtual-chat-message-list-root .rich-file-link,
 .virtual-chat-message-list-root .rich-key-value-row,
 .virtual-chat-message-list-root .rich-key-value-val,
@@ -5309,6 +5308,24 @@
   font-family: inherit;
   font-size: inherit;
 }
+
+.virtual-chat-message-list-root .rich-code--block,
+.virtual-chat-message-list-root .rich-code--block code,
+.virtual-chat-message-list-root .rich-code--block .rich-code-tok {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-mono-size, 13px);
+}
+
+.virtual-chat-message-list-root .rich-code--block,
+.virtual-chat-message-list-root .rich-code--block code {
+  color: var(--chat-body-color, var(--fg-dim));
+}
+
+.virtual-chat-message-list-root .rich-code-tok--comment { color: var(--muted); }
+.virtual-chat-message-list-root .rich-code-tok--string { color: var(--green); }
+.virtual-chat-message-list-root .rich-code-tok--number { color: var(--yellow); }
+.virtual-chat-message-list-root .rich-code-tok--kw { color: var(--purple); }
+.virtual-chat-message-list-root .rich-code-tok--fn { color: var(--blue); }
 
 /* ---- Chat Plans (Cursor-like todo checklist) ---- */
 .chat-pane-plan-wrap {

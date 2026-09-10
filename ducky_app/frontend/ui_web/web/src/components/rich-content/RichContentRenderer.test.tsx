@@ -33,7 +33,7 @@ describe("rich reply rendering", () => {
     for (const color of ["purple", "green", "amber", "yellow", "blue", "red"]) {
       expect(container.querySelector(`h2.rich-tone--${color}`)).not.toBeNull();
       expect(container.querySelector(`strong.rich-tone--${color}`)).not.toBeNull();
-      if (color !== "red") expect(container.querySelector(`code.rich-tone--${color}`)).not.toBeNull();
+      if (color !== "red") expect(container.querySelector(`button.rich-ref.rich-tone--${color}`)).not.toBeNull();
     }
   });
 
@@ -43,7 +43,7 @@ describe("rich reply rendering", () => {
       { type: "callout", tone: "info", text: "[**Verified**](ducky:green); [**pending**](ducky:amber)." },
     ] })} />);
     expect(container.querySelector(".rich-tone--purple strong")?.textContent).toBe("Verse");
-    expect(container.querySelector(".rich-text-accent.rich-tone--amber code")?.textContent).toBe("Props");
+    expect(container.querySelector(".rich-text-accent.rich-tone--amber button.rich-ref")?.textContent).toBe("Props");
     expect(container.querySelector(".rich-callout .rich-text-accent.rich-tone--green")?.textContent).toBe("Verified");
     expect(container.textContent).not.toContain("ducky:");
   });
@@ -80,7 +80,7 @@ describe("rich reply rendering", () => {
       ],
     })} />);
     expect(container.querySelectorAll("strong")).toHaveLength(6);
-    expect(container.querySelectorAll("code.rich-code--inline")).toHaveLength(6);
+    expect(container.querySelectorAll("button.rich-ref")).toHaveLength(6);
     expect(container.textContent).not.toContain("**");
     const links = getAllByRole("button", { name: "the device" });
     expect(links).toHaveLength(5);
@@ -96,7 +96,7 @@ describe("rich reply rendering", () => {
     } />);
     expect(container.querySelector("ol")?.start).toBe(3);
     expect(container.querySelectorAll("li strong")).toHaveLength(2);
-    expect(container.querySelector(".rich-callout--warn code")?.textContent).toBe("Props");
+    expect(container.querySelector(".rich-callout--warn button.rich-ref")?.textContent).toBe("Props");
     expect(container.querySelector(".rich-callout--warn strong")?.textContent).toBe("verification");
   });
 
@@ -108,12 +108,24 @@ describe("rich reply rendering", () => {
     expect(container.querySelector("pre")?.textContent).toContain("print('hello')");
   });
 
+  it("opens a Verse chip and still shows hover info for names with no location", () => {
+    const onOpenFile = vi.fn();
+    const { container, getByLabelText } = render(
+      <MarkdownContent onOpenFile={onOpenFile} text="See `ledger_full_test_device.verse` and `EntryTrigger`." />,
+    );
+    fireEvent.click(getByLabelText(/Verse file: ledger_full_test_device\.verse/i));
+    expect(onOpenFile).toHaveBeenCalledWith("Content/Verse/ledger_full_test_device.verse", "ledger_full_test_device.verse");
+    fireEvent.mouseEnter(getByLabelText(/Field \/ label: EntryTrigger/i));
+    expect(container.querySelector(".rich-ref-tip-name")?.textContent).toBe("EntryTrigger");
+    expect(container.querySelector(".rich-ref-tip-hint")?.textContent).toMatch(/copies the name/i);
+  });
+
   it("does not execute markup or unsafe links inside blocks", () => {
     const { container } = render(<RichContentRenderer text={JSON.stringify({
       __rich: true, blocks: [{ type: "paragraph", text: "<script>alert(1)</script>\n\n[unsafe](javascript:alert(1)) and `safe`" }],
     })} />);
     expect(container.querySelector("script, a[href^='javascript:']")).toBeNull();
-    expect(container.querySelector("code")?.textContent).toBe("safe");
+    expect(container.querySelector("button.rich-ref")?.textContent).toBe("safe");
   });
 
   it("renders the shared agent prompt examples as the documented widgets", () => {

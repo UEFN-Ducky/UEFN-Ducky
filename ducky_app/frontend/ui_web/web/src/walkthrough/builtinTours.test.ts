@@ -45,6 +45,7 @@ describe("split settings tours", () => {
       "settings.general.app",
       "settings.general.project_files",
       "settings.general.add_to_uefn",
+      "settings.general.section.app_data",
       "settings.general.app_data",
       "settings.duckies.row.first",
       "settings.duckies.section.skills",

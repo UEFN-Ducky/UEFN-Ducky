@@ -30,9 +30,12 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
       a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
       ul: ({ children }) => <ul className="rich-list">{children}</ul>,
       ol: ({ children, start }) => <ol start={start} className="rich-list rich-list--ordered">{children}</ol>,
-      li: ({ children }) => <li className={`rich-list-item ${richTextClass(richNodeText(children))}`}>{children}</li>,
+      li: ({ children }) => {
+        const label = richNodeText(children);
+        return <li className={`rich-list-item ${label.length <= 48 ? richTextClass(label) : ""}`}>{children}</li>;
+      },
       blockquote: ({ children }) => <blockquote className="rich-blockquote">{children}</blockquote>,
-      code: ({ children }) => <RichCodeBlock text={String(children)} inline />,
+      code: ({ children }) => <RichCodeBlock text={String(children)} inline onOpenFile={onOpenFile} />,
       pre: ({ children }) => {
         // The pre wrapper identifies blocks even when no language is supplied.
         const child = Children.toArray(children)[0];

@@ -14,6 +14,8 @@ export function isWorkspaceFilePath(href: string): boolean {
 
 export function normalizeWorkspacePath(path: string): string {
   let p = path.replace(/\\/g, "/").trim();
+  if (p.startsWith("/")) return p;
+  if (/^[^/]+\.verse$/i.test(p)) p = `Verse/${p}`;
   if (!p.toLowerCase().startsWith("content/")) {
     p = `Content/${p.replace(/^\/+/, "")}`;
   }

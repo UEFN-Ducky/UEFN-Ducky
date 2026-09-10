@@ -30,7 +30,7 @@ const from = (id: string) => (vars: Vars) => vars[id]!;
 
 export const CHAT_COLOR_TOKENS: ChatColorToken[] = [
   { id: "chat-body-color", name: "Response text", group: "text", auto: from("fg-dim") },
-  { id: "chat-list-color", name: "List text", group: "text", auto: from("fg") },
+  { id: "chat-list-color", name: "List text", group: "text", auto: from("fg-dim") },
   { id: "chat-heading-color", name: "Heading text", group: "text", auto: from("fg") },
   { id: "chat-emphasis-color", name: "Default emphasis", group: "text", auto: from("fg") },
   { id: "chat-muted-color", name: "Labels & metadata", group: "text", auto: from("muted") },

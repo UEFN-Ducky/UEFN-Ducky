@@ -439,11 +439,13 @@ def appdata_clear(rel: str, app_root: Path | None = None) -> dict[str, Any]:
     if not raw:
         return {"ok": False, "error": "refused_root", "removed": 0}
     path = resolve_appdata_rel(raw, root)
-    if path is None or not path.exists():
+    if path is None:
         return {"ok": False, "error": "not_found", "removed": 0}
     top = raw.split("/", 1)[0]
     if top in _PROTECTED_NAMES:
         return {"ok": False, "error": "protected", "removed": 0}
+    if not path.exists():
+        return {"ok": False, "error": "not_found", "removed": 0}
     removed = _clear_contents(path)
     return {"ok": True, "removed": removed}
 
@@ -455,11 +457,13 @@ def appdata_delete(rel: str, app_root: Path | None = None) -> dict[str, Any]:
     if not raw:
         return {"ok": False, "error": "refused_root", "removed": 0}
     path = resolve_appdata_rel(raw, root)
-    if path is None or not path.exists():
+    if path is None:
         return {"ok": False, "error": "not_found", "removed": 0}
     top = raw.split("/", 1)[0]
     if top in _PROTECTED_NAMES:
         return {"ok": False, "error": "protected", "removed": 0}
+    if not path.exists():
+        return {"ok": False, "error": "not_found", "removed": 0}
     if path.is_dir() and not path.is_symlink():
         ok = _safe_rmtree(path)
         return {"ok": ok, "removed": 1 if ok else 0, "error": None if ok else "busy"}

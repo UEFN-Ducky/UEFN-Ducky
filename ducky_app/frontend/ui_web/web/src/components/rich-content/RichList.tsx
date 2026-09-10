@@ -13,7 +13,7 @@ export function RichList({ ordered, items, onOpenFile }: RichListProps) {
   return (
     <Tag className={`rich-list${ordered ? " rich-list--ordered" : ""}`}>
       {items.map((item, i) => (
-        <li key={`${i}-${item.slice(0, 24)}`} className={`rich-list-item ${richTextClass(item.replace(/[*`]/g, ""))}`}>
+        <li key={`${i}-${item.slice(0, 24)}`} className={`rich-list-item ${item.replace(/[*`]/g, "").length <= 48 ? richTextClass(item.replace(/[*`]/g, "")) : ""}`}>
           <RichInline text={item} onOpenFile={onOpenFile} />
         </li>
       ))}

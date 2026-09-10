@@ -55,7 +55,7 @@ export function RichInline({ text, onOpenFile }: { text: string; onOpenFile?: Op
       components={{
         p: ({ children }) => <>{children}</>,
         strong: ({ children }) => <RichEmphasis>{children}</RichEmphasis>,
-        code: ({ children }) => <RichCodeBlock text={String(children)} inline />,
+        code: ({ children }) => <RichCodeBlock text={String(children)} inline onOpenFile={onOpenFile} />,
         a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
       }}
     >
