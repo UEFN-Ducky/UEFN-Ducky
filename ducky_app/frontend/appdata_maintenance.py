@@ -150,6 +150,12 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "agent_crashes.jsonl": ("Agent crashes", "Crash log for debugging.", "cache"),
     "uefn_plugin_load_errors.jsonl": ("Plugin load errors", "Plugin import failures.", "cache"),
     "mcp.json": ("MCP config", "MCP server list. Manage from Settings → LLMs → MCPs.", "settings"),
+    # ADR 0003: the store and its sidecars. Never clearable, never deletable.
+    "ducky.db": ("Database", "All app state (chats, settings, ledger, plans, memory).", "settings"),
+    "ducky.db-wal": ("Database log", "SQLite write-ahead log for ducky.db.", "settings"),
+    "ducky.db-shm": ("Database index", "SQLite shared-memory index for ducky.db.", "settings"),
+    "snapshots": ("Database snapshots", "Consistent copies of ducky.db (newest 3).", "settings"),
+    "legacy": ("Legacy stores", "Pre-database files kept until three clean boots.", "cache"),
 }
 
 _PROTECTED_NAMES = frozenset(
@@ -159,6 +165,10 @@ _PROTECTED_NAMES = frozenset(
         "config.json",
         "mcp.json",
         "listener",
+        "ducky.db",
+        "ducky.db-wal",
+        "ducky.db-shm",
+        "snapshots",
     }
 )
 
