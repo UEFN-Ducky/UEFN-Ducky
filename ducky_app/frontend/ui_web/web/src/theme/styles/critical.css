@@ -127,7 +127,7 @@
   --chat-ref-verse: #c084fc;
   --chat-ref-keyword: #c084fc;
   --chat-ref-file: #5eb3f6;
-  --chat-ref-tool: rgba(94, 179, 246, 0.15);
+  --chat-ref-tool: #5eb3f6;
   --chat-ref-device: #5eb3f6;
   --chat-ref-folder: #a0a0a0;
   --chat-ref-actor: #ededed;
@@ -166,5 +166,5 @@
   --chat-block-radius: 8px;
   --chat-code-tint: 7%;
   --chat-code-border-tint: 12%;
-  --chat-stats-size: 1.85em;
+  --chat-stats-size: 2.8em;
 }

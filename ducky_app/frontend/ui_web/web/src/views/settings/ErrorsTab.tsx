@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { copyText } from "../../utils/copyText";
 import { copySupportDump } from "./copySupportDump";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { LogPrivacyNote } from "./LogPrivacyNote";
@@ -17,7 +18,7 @@ function AlertIcon() {
 export function ErrorsTab() {
   const [lines, setLines] = useState<string[]>([]);
   const [pulling, setPulling] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"discord" | "errors" | null>(null);
 
   const refresh = useCallback(() => {
     const api = getApi();
@@ -85,20 +86,26 @@ export function ErrorsTab() {
               onClick={() => {
                 void copySupportDump().then((ok) => {
                   if (!ok) return;
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 2000);
+                  setCopied("discord");
+                  window.setTimeout(() => setCopied(null), 2000);
                 });
               }}
             >
-              {copied ? "Copied" : "Copy for Discord"}
+              {copied === "discord" ? "Copied" : "Copy for Discord"}
             </button>
             <button
               type="button"
               className="settings-btn mcp-plugin-btn"
               disabled={lines.length === 0}
-              onClick={() => void navigator.clipboard.writeText(lines.join("\n"))}
+              onClick={() => {
+                void copyText(lines.join("\n")).then((ok) => {
+                  if (!ok) return;
+                  setCopied("errors");
+                  window.setTimeout(() => setCopied(null), 2000);
+                });
+              }}
             >
-              Copy errors
+              {copied === "errors" ? "Copied" : "Copy errors"}
             </button>
             <button type="button" className="settings-btn mcp-plugin-btn" onClick={() => void handleClear()}>
               Clear

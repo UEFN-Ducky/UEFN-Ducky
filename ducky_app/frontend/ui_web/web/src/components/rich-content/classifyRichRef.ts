@@ -26,9 +26,10 @@ export type RichRef = {
 const UMG_TYPES = /^(CanvasPanel|Image|TextBlock|Button|Overlay|StackBox|Border|SizeBox)$/;
 const FILE_EXT = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg|blend|fbx)$/i;
 const UEFN_PATH = /^\/[A-Za-z][\w]*(?:\/[\w./-]+)+$/;
-const TOOLISH = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
-const ACTORISH = /^[A-Za-z][\w]*_[A-Za-z0-9]/;
+const ACTORISH = /^[A-Z][A-Za-z0-9]*_[A-Za-z0-9]/;
+const FIELDISH = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 const CALL_NAME = /^([A-Za-z][\w.]*)\(/;
+const KNOWN_TOOL = /^(workspace_|ducky_|blender_|unreal__|execute_|search_assets|open_asset|spawn_actor|set_actor|get_actor|select_actor|wire_|listdevice)/i;
 
 function toolFamily(name: string): RichRefKind {
   const n = name.toLowerCase();
@@ -90,7 +91,7 @@ export function classifyRichRef(raw: string): RichRef {
     return withOpen({ text, kind: "folder", label: "UEFN path" });
   }
   const call = text.match(CALL_NAME);
-  if (call || /^unreal__/.test(text) || TOOLISH.test(text)) {
+  if (call || /^unreal__/.test(text) || KNOWN_TOOL.test(text)) {
     const name = call?.[1] ?? text;
     const kind = toolFamily(name);
     return withOpen({
@@ -114,6 +115,8 @@ export function classifyRichRef(raw: string): RichRef {
   if (/^(?:BP_|P_|PF_)/i.test(text)) return withOpen({ text, kind: "prefab", label: "Prefab / blueprint" });
   if (/_device$/i.test(text)) return withOpen({ text, kind: "device", label: "Creative device type" });
   if (ACTORISH.test(text)) return withOpen({ text, kind: "actor", label: "Level actor" });
-  if (/^[A-Z][A-Za-z0-9]+$/.test(text)) return withOpen({ text, kind: "field", label: "Field / label" });
+  if (FIELDISH.test(text) || /^[A-Z][A-Za-z0-9]+$/.test(text)) {
+    return withOpen({ text, kind: "field", label: "Field / label" });
+  }
   return withOpen({ text, kind: "name", label: "Name" });
 }

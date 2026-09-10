@@ -41,7 +41,7 @@ export const CHAT_COLOR_TOKENS: ChatColorToken[] = [
   { id: "chat-ref-verse", name: "Verse files", group: "chips", auto: from("purple") },
   { id: "chat-ref-keyword", name: "Verse keywords", group: "chips", auto: from("purple") },
   { id: "chat-ref-file", name: "Project files", group: "chips", auto: from("blue") },
-  { id: "chat-ref-tool", name: "Tools", group: "chips", auto: from("blue-dim") },
+  { id: "chat-ref-tool", name: "Tools", group: "chips", auto: from("blue") },
   { id: "chat-ref-device", name: "Devices", group: "chips", auto: from("blue") },
   { id: "chat-ref-folder", name: "Folders & paths", group: "chips", auto: from("fg-dim") },
   { id: "chat-ref-actor", name: "Level actors", group: "chips", auto: from("fg") },
@@ -76,7 +76,7 @@ export const CHAT_NUMBER_TOKENS: ChatNumberToken[] = [
   { id: "chat-block-radius", name: "Block corners", value: 8, unit: "px", min: 0, max: 24, step: 1 },
   { id: "chat-code-tint", name: "Code badge tint", value: 7, unit: "%", min: 0, max: 40, step: 1 },
   { id: "chat-code-border-tint", name: "Code badge border tint", value: 12, unit: "%", min: 0, max: 60, step: 1 },
-  { id: "chat-stats-size", name: "Summary number size", value: 1.85, unit: "em", min: 1, max: 3.5, step: 0.05 },
+  { id: "chat-stats-size", name: "Summary number size", value: 2.8, unit: "em", min: 1, max: 4, step: 0.05 },
 ];
 
 export const CHAT_COLOR_GROUPS: Array<{ id: ChatColorToken["group"]; name: string }> = [

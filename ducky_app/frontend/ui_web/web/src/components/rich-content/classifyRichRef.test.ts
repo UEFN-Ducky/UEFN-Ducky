@@ -24,6 +24,7 @@ describe("classifyRichRef", () => {
     expect(classifyRichRef("CanvasPanel").kind).toBe("umg");
     expect(classifyRichRef("trigger_device").kind).toBe("device");
     expect(classifyRichRef("blender_get_scene_info").kind).toBe("mesh");
+    expect(classifyRichRef("editor_changes").kind).toBe("field");
     expect(classifyRichRef("EntryTrigger").open).toBeUndefined();
   });
 

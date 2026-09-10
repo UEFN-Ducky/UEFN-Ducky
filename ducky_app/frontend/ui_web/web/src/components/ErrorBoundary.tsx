@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { getApi } from "../hooks/usePanelApi";
+import { copyText } from "../utils/copyText";
 import { skipTour } from "../walkthrough/WalkthroughService";
 
 /** Public download page (Store block auto-pulls latest Setup). */
@@ -147,7 +148,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     ]
       .filter(Boolean)
       .join("\n\n");
-    void navigator.clipboard?.writeText?.(text).catch(() => undefined);
+    void copyText(text);
   };
 
   render() {

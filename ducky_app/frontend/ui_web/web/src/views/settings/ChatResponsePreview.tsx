@@ -1,19 +1,24 @@
 import { MarkdownContent } from "../../components/rich-content/MarkdownContent";
 
-export const CHAT_APPEARANCE_PREVIEW = `# Wired the ledger test device
-\`workspace_compile_verse\`
+export const CHAT_APPEARANCE_PREVIEW = `# Ledger Test Complete
+\`ducky run sync --ledger\`
+
+Leaving \`Props\` unwired for now per the lock — **3 of 4 fields** are wired, which is plenty for the ledger exercise. Saving everything and checking the overall ledger.
 
 ## Run Summary
-- **Editor Changes**: 4
-- **Blocked Ops**: 0
-- **Programs**: blender 1, editor 3
+- **Editor changes:** 23 applied
+- **Blocked:** 4 retries
+- **Programs:** UEFN 20 · Blender 2 · Verse 1 · File 1
 
-## Inventory
-- **Verse** / \`ledger_test_device.verse\` — \`FullTest_Manager\` with \`@editable\`s
-- **Devices** / \`FullTest_Button\` — \`button_device\` wired to \`ToggleButton\`
-- **Prefab** / \`P_LedgerTest_Prefab\` at \`/ExampleProject1/Prefabs\`
-- **Mesh** / \`SM_LedgerTestCrate\` in \`COL_Props\`
-- **UMG** / \`UW_LedgerTestHud\` — \`CanvasPanel\` + \`Image\`
+## Inventory — \`Test/LedgerFull\`
+- **Verse device** / \`ledger_full_test_device.verse\` — \`FullTest_Manager\` with 4 \`@editable\`s (\`EntryTrigger\`, \`ToggleButton\`, \`StatusHud\`, prop array). 3 of 4 wired; \`Props\` is stale.
+- **Devices** / \`FullTest_EntryTrigger, FullTest_Button, FullTest_HudMessage\` — wired into the Verse device.
+- **Random clutter** / \`Scatter_Barrel_01, Scatter_Rock_01\` — plus \`FullTest_Prop_01\` / \`FullTest_Prop_02\` cubes.
+- **Blueprint** / \`P_LedgerTest_Prefab\` — blank EntityPrefab at \`/ExampleProject1/Prefabs\`.
+- **Blender mesh** / \`SM_LedgerTestCrate\` — modeled in Blender, placed as \`BlenderCrate_01\`.
+- **UMG Widget** / \`UW_LedgerTestHud\` — widget at \`/ExampleProject1/UI\` with \`CanvasPanel\` + \`Image\`.
+
+> **Loose end:** The \`Props\` array field on \`FullTest_Manager\` needs another pass once the listener settles.
 
 ## Place and wire
 1. \`workspace_write_file\` → \`workspace_list_verse_errors\` → \`workspace_compile_verse\` → \`unreal__call_tool(ValkyrieToolset.VerseToolset, BuildAll)\`.
@@ -26,8 +31,6 @@ using { /Fortnite.com/Devices }
 ledger_test_device := class(creative_device):
     @editable EntryTrigger : trigger_device = trigger_device{}
 \`\`\`
-
-> **Loose end:** \`Props\` array is still stale — click copies the name.
 
 > [!TIP] Verified
 > \`SM_Chair\` and \`SM_Desk\` imported under \`/ExampleProject1/Meshes\`.

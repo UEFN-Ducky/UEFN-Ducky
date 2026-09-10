@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { subscribeAgentEvents } from "../../hooks/useAgentEventBus";
 import { getApi } from "../../hooks/usePanelApi";
+import { copyText } from "../../utils/copyText";
 import { useRunningAgents } from "../../hooks/useRunningAgents";
 import type {
   ChangesetBlockedBy,
@@ -1012,7 +1013,7 @@ export function ChangesView({
     const text = manual
       .map((row) => `${row.label || row.target} — ${row.command}${row.reason ? ` (${row.reason})` : ""}`)
       .join("\n");
-    void navigator.clipboard?.writeText(text);
+    void copyText(text);
   }, [manual]);
 
   const visible = items.slice(view.start, view.end);

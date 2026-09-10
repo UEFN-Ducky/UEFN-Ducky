@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { RichContentRenderer } from "./RichContentRenderer";
 import { MarkdownContent } from "./MarkdownContent";
+import { CHAT_APPEARANCE_PREVIEW } from "../../views/settings/ChatResponsePreview";
 
 afterEach(cleanup);
 
@@ -126,6 +127,16 @@ describe("rich reply rendering", () => {
     })} />);
     expect(container.querySelector("script, a[href^='javascript:']")).toBeNull();
     expect(container.querySelector("button.rich-ref")?.textContent).toBe("safe");
+  });
+
+  it("renders the Appearance chat preview as the ledger dashboard widgets", () => {
+    const { container } = render(<MarkdownContent text={CHAT_APPEARANCE_PREVIEW} />);
+    expect(container.querySelector(".rich-stats")).not.toBeNull();
+    expect(container.querySelector(".rich-stats-num")?.textContent).toBe("23");
+    expect(container.querySelector(".rich-stats-num--blocked")?.textContent).toBe("4");
+    expect(container.querySelector(".rich-stats-programs-total")?.textContent).toMatch(/24/);
+    expect(container.querySelectorAll(".rich-inventory-item")).toHaveLength(6);
+    expect(container.querySelector(".rich-inventory-head")?.textContent).toMatch(/Inventory Added/);
   });
 
   it("renders the shared agent prompt examples as the documented widgets", () => {

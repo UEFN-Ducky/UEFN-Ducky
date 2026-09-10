@@ -1755,6 +1755,11 @@ class PanelApiSettingsMixin:
 
         return format_support_dump()
 
+    def copy_text(self, text: str) -> bool:
+        from frontend.ui_web.win_clipboard import set_clipboard_text
+
+        return set_clipboard_text(text)
+
     def pull_editor_log(self) -> None:
         try:
             from backend.bridge import post_command_to_listener

@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { getApi } from "../../hooks/usePanelApi";
+import { copyText } from "../../utils/copyText";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
 import { classifyRichRef } from "./classifyRichRef";
@@ -18,7 +19,7 @@ function openChip(text: string, onOpenFile?: OpenFileHandler): void {
     void getApi()?.open_asset_in_uefn?.(ref.open.path);
     return;
   }
-  void navigator.clipboard?.writeText(ref.text);
+  void copyText(ref.text);
 }
 
 export function RichCodeChip({ text, onOpenFile }: { text: string; onOpenFile?: OpenFileHandler }) {

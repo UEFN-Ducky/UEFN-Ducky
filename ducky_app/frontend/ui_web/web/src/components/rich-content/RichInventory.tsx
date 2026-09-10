@@ -25,7 +25,8 @@ const KIND_ICON: Record<RichInventoryKind, () => ReactNode> = {
 
 export function RichInventory({ items, folder, heading, onOpenFile }: RichInventoryProps) {
   if (!items.length) return null;
-  const title = heading?.trim() || "Inventory Added";
+  const raw = heading?.trim() || "";
+  const title = !raw || /^inventory$/i.test(raw) ? "Inventory Added" : raw;
   return (
     <div className="rich-inventory">
       <div className="rich-inventory-head">

@@ -292,6 +292,31 @@ button.rich-ref:focus-visible,
   pointer-events: none;
 }
 
+.live-code-preview-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--chat-block-radius, var(--radius-sm));
+  background: var(--dropdown-bg, var(--card));
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.live-code-preview-copy:hover,
+.live-code-preview-copy:focus-visible {
+  color: var(--fg);
+  background: var(--tab-hover, var(--card-hover));
+}
+
 .live-code-preview--fill,
 .live-code-preview--fill .live-code-preview-editor {
   height: 100%;
@@ -710,9 +735,9 @@ button.rich-ref:focus-visible,
   margin: 0 0 0.3em;
   font-size: 0.72em;
   font-weight: 500;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--chat-body-color, var(--fg-dim));
+  color: var(--chat-muted-color, var(--muted));
 }
 
 .rich-stats-metric-row {
@@ -775,8 +800,8 @@ button.rich-ref:focus-visible,
 }
 
 .rich-stats-programs-total {
-  color: var(--chat-body-color, var(--fg-dim));
-  font-weight: 400;
+  color: var(--chat-heading-color, var(--fg));
+  font-weight: 500;
   font-size: 0.9em;
 }
 

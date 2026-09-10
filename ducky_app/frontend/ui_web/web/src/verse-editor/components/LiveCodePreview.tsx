@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 
+import { Icons } from "../../icons/Icons";
 import { useAppearanceOptional } from "../../theme/AppearanceContext";
+import { copyText } from "../../utils/copyText";
 import { MONACO_EMBEDDED_OVERFLOW_OPTIONS } from "../monaco/embeddedEditorOverflow";
 import { forceFullTokenization } from "../monaco/forceFullTokenization";
 import {
@@ -36,6 +38,7 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
   const [ready, setReady] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [hint, setHint] = useState(false);
+  const [copied, setCopied] = useState(false);
   const canMount = Boolean(appearance?.appearanceReady);
   const lockScroll = !fill;
 
@@ -160,6 +163,7 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
       if (wrap && !wrap.contains(e.target as Node)) {
         setUnlocked(false);
         setHint(false);
+        setCopied(false);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -178,6 +182,24 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
     >
       <pre className="live-code-preview-source">{value}</pre>
       <div ref={containerRef} className="live-code-preview-editor" />
+      {unlocked || fill ? (
+        <button
+          type="button"
+          className="live-code-preview-copy"
+          aria-label={copied ? "Copied" : "Copy code"}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyText(value).then((ok) => {
+              if (!ok) return;
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1600);
+            });
+          }}
+        >
+          {copied ? <Icons.Check /> : <Icons.Copy />}
+        </button>
+      ) : null}
       {lockScroll && !unlocked ? (
         <button
           type="button"

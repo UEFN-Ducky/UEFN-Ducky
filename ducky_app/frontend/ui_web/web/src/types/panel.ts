@@ -2449,6 +2449,7 @@ export interface PanelApi {
   get_errors(): Promise<string[]>;
   clear_errors(): Promise<string[]>;
   copy_support_dump(): Promise<string>;
+  copy_text(text: string): Promise<boolean>;
   pull_editor_log(): Promise<void>;
   open_appdata(): Promise<void>;
   appdata_overview(): Promise<AppDataOverview>;
