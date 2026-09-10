@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.agent.hard_rules import AGENT_HARD_RULES
+from backend.agent.prompt import CHAT_REPORT_RULE
 from backend.workspace.identity import RunContext
 from frontend.mcp_block import build_uefn_server_block
 from frontend.settings import PanelSettings, default_app_data_dir
@@ -286,6 +287,8 @@ def bootstrap_system_prompt(
         "Prefer workspace file tools for Verse under Content/Verse.\n"
         "Do not open interactive shells or ask the user to run CLI installers — "
         "use MCP tools and workspace file edits only.\n"
+        "\n## Chat replies\n"
+        f"{CHAT_REPORT_RULE}"
         "\n## Ask the user (HARD)\n"
         "Path forks / \"Your call\" / A–B–C / wait-vs-proceed / architecture choices → "
         "`ducky_ask_user(questions=[{id, prompt, options:[{id,label,description}]}])`. "

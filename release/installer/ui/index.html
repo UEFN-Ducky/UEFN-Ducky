@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>UEFN Ducky Setup</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="titlebar">
+      <div class="titlebar-drag" id="drag">
+        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="13" fill="#12161f"/>
+          <ellipse cx="32" cy="42" rx="26" ry="15" fill="#ffc72c"/>
+          <circle cx="45" cy="21" r="14" fill="#ffc72c"/>
+          <polygon points="54,18 63,21 54,26" fill="#ff8a00"/>
+          <circle cx="46" cy="18" r="2.7" fill="#18181c"/>
+        </svg>
+        <span class="title" id="window-title">UEFN Ducky Setup</span>
+      </div>
+      <div class="win-btns">
+        <button class="win-btn" id="btn-min" title="Minimize">&#x2013;</button>
+        <button class="win-btn close" id="btn-close" title="Close">&#x2715;</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="dots" id="dots"></div>
+
+      <section class="step" data-step="welcome">
+        <div class="hero">
+          <svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true">
+            <rect width="64" height="64" rx="13" fill="#12161f"/>
+            <ellipse cx="32" cy="42" rx="26" ry="15" fill="#ffc72c"/>
+            <ellipse cx="30" cy="43" rx="11" ry="8" fill="none" stroke="#e8a812" stroke-width="2"/>
+            <circle cx="45" cy="21" r="14" fill="#ffc72c"/>
+            <polygon points="54,18 63,21 54,26" fill="#ff8a00"/>
+            <circle cx="46" cy="18" r="2.7" fill="#18181c"/>
+            <circle cx="45" cy="17" r="0.9" fill="#fff"/>
+          </svg>
+          <div class="hero-copy">
+            <h1 id="welcome-title">UEFN Ducky</h1>
+            <p class="lead" id="welcome-lead">The control panel for Unreal Editor for Fortnite. Install once; updates arrive in-app.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="step" data-step="license">
+        <h1>License</h1>
+        <p class="lead">Please read and accept the Ducky Source-Available License to continue.</p>
+        <pre class="license" id="license-text"></pre>
+        <label class="check">
+          <input type="checkbox" id="accept" />
+          <span>I accept the agreement</span>
+        </label>
+      </section>
+
+      <section class="step" data-step="location">
+        <h1>Install location</h1>
+        <p class="lead">Choose a folder. You can change this later by uninstalling and running Setup again.</p>
+        <div class="path-row">
+          <input id="dir" spellcheck="false" />
+          <button class="btn" id="browse" type="button">Browse</button>
+        </div>
+        <p class="space" id="space"></p>
+        <div class="choices">
+          <button type="button" class="choice selected" id="scope-user" data-scope="user">
+            <strong>Only me</strong>
+            <span>Installs under your Windows profile. No administrator prompt.</span>
+          </button>
+          <button type="button" class="choice" id="scope-machine" data-scope="machine">
+            <strong>All users</strong>
+            <span>Installs for everyone on this PC. Windows will ask for permission.</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="step" data-step="options">
+        <h1>Shortcuts</h1>
+        <p class="lead">A Start menu shortcut is always created.</p>
+        <label class="check option-card">
+          <input type="checkbox" id="desktop" checked />
+          <span>Create a desktop shortcut</span>
+        </label>
+      </section>
+
+      <section class="step" data-step="progress">
+        <h1 id="progress-title">Installing</h1>
+        <p class="lead" id="progress-lead">Copying files and creating shortcuts.</p>
+        <div class="progress-wrap">
+          <div class="bar"><i id="bar"></i></div>
+          <p class="status" id="status">Starting…</p>
+          <p class="error hidden" id="error"></p>
+        </div>
+      </section>
+
+      <section class="step" data-step="done">
+        <div class="done-mark">✓</div>
+        <h1 id="done-title">UEFN Ducky is installed</h1>
+        <p class="lead">You are ready to open the panel and connect UEFN.</p>
+        <label class="check">
+          <input type="checkbox" id="launch" checked />
+          <span>Launch UEFN Ducky</span>
+        </label>
+      </section>
+    </main>
+
+    <footer>
+      <button class="btn-ghost hidden" id="back" type="button">Back</button>
+      <button class="btn hidden" id="cancel" type="button">Cancel</button>
+      <button class="btn-accent" id="next" type="button">Next</button>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

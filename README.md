@@ -166,7 +166,7 @@ py -m venv .venv
 > it can import, so a global `site-packages` full of unrelated libraries silently adds tens
 > of MB to the EXE.
 
-**Windows installer** (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+**Windows installer** (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and [.NET SDK 8](https://dot.net)):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File release/installer/make_release_installer.ps1

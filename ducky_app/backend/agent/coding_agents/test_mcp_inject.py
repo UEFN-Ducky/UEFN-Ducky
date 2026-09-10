@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from backend.agent.coding_agents.mcp_inject import stamp_mcp_identity
+from backend.agent.coding_agents.mcp_inject import bootstrap_system_prompt, stamp_mcp_identity
 from backend.workspace.identity import RunContext
 
 
@@ -26,3 +26,15 @@ def test_two_runs_get_different_argv() -> None:
     a = stamp_mcp_identity({"args": ["bridge"], "env": {}}, RunContext(run_id="1"))
     b = stamp_mcp_identity({"args": ["bridge"], "env": {}}, RunContext(run_id="2"))
     assert a["args"] != b["args"]
+
+
+def test_bootstrap_includes_chat_report_template() -> None:
+    text = bootstrap_system_prompt(
+        project_root="/tmp/p",
+        listener_online=False,
+        conv_id="chat-a",
+    )
+    assert "## Chat replies" in text
+    assert "## Inventory" in text
+    assert "> **Loose end:**" in text
+    assert "never dump a prose changelog" in text

@@ -1,6 +1,6 @@
 # Build the shipped artifacts at one version:
 #   1. dist\UEFN-Ducky-<v>.exe           (the app)
-#   2. dist\UEFN-Ducky-Setup-<v>.exe     (Inno Setup installer)
+#   2. dist\UEFN-Ducky-Setup-<v>.exe     (Ducky Setup host wrapping Inno)
 #   Optional: dist\UEFN-Ducky-Windows.zip with -Zip (portable).
 #
 # The release EXE is built as the installer payload, then removed from dist\.

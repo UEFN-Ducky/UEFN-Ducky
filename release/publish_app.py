@@ -3,7 +3,7 @@
 
 Default flow (always bumps):
   0. Sync __version__ up to the live Store version if Store is ahead
-  1. Build release EXE (build_exes.py bumps patch once) + Inno Setup
+  1. Build release EXE (build_exes.py bumps patch once) + Inno engine + Ducky Setup host
   2. Direct-to-S3: ticket → PUT Setup.exe → complete → poll job
      (falls back to multipart POST /api/files/app-release if ticket API missing)
   3. MCP uds_app_release on that same site   (latest-only version + url + sha256)
@@ -256,10 +256,24 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
         cmd.append(str(payload))
         print("=== Authenticode sign (payload) ===")
         subprocess.run(cmd, check=True, cwd=str(ROOT))
-    print("=== Inno Setup installer ===")
+    print("=== Inno Setup engine ===")
     ps1 = ROOT / "release" / "installer" / "make_release_installer.ps1"
     subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1)],
+        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly"],
+        check=True,
+        cwd=str(ROOT),
+    )
+    engine = ROOT / "dist" / "Setup-engine.exe"
+    if engine.is_file():
+        cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
+        if require_sign:
+            cmd.append("--require")
+        cmd.append(str(engine))
+        print("=== Authenticode sign (engine) ===")
+        subprocess.run(cmd, check=True, cwd=str(ROOT))
+    print("=== Ducky Setup host ===")
+    subprocess.run(
+        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly"],
         check=True,
         cwd=str(ROOT),
     )

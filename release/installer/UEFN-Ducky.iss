@@ -1,5 +1,7 @@
-; UEFN Ducky Windows installer (Inno Setup 6). Build via release/installer/make_release_installer.ps1,
-; which passes /DMyAppVersion=<x.y.z> (from frontend/__init__.py) and /DMyAppExe=<path to dist EXE>.
+; UEFN Ducky Windows install *engine* (Inno Setup 6). The published Setup.exe is
+; the Ducky-themed host (release/installer/host) which embeds this file as
+; Setup-engine.exe and runs it silently. Build via make_release_installer.ps1,
+; which passes /DMyAppVersion=<x.y.z> (from frontend/__init__.py) and /DMyAppExe.
 
 #ifndef MyAppVersion
   #error Pass /DMyAppVersion=x.y.z (use release/installer/make_release_installer.ps1)
@@ -35,9 +37,11 @@ VersionInfoProductName={#MyAppName}
 VersionInfoCopyright=(c) UEFN Ducky. All rights reserved.
 DefaultDirName={autopf}\UEFN Ducky
 DisableProgramGroupPage=yes
-; Per-user by default; the dialog lets the user pick per-machine (admin) instead.
+; Per-user by default. The Ducky Setup host (and in-app updater) pass
+; /CURRENTUSER or /ALLUSERS; `commandline` is required for those switches.
+; `dialog` remains so a direct run of Setup-engine.exe can still pick scope.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
 ; Upgrades reuse the folder chosen at first install.
 UsePreviousAppDir=yes
 ; Close a running panel/bridge before replacing files. RestartApplications stays off:
@@ -47,7 +51,10 @@ RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\dist
-OutputBaseFilename=UEFN-Ducky-Setup-{#MyAppVersion}
+; Inner engine only — the published artifact is the Ducky Setup host wrapping
+; this file. Must NOT start with UEFN-Ducky: the panel's process sweep kills
+; every UEFN-Ducky* image and would reap the engine mid-update.
+OutputBaseFilename=Setup-engine
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -115,6 +122,29 @@ var
   // the launch can go through ShellExec instead of Inno's spawn server).
   LaunchCheckBox: TNewCheckBox;
 
+function CmdLineSwitch(const Name: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+procedure WriteProgress(Percent: Integer; const Status: string);
+var
+  Dir, Path: string;
+begin
+  Dir := ExpandConstant('{localappdata}\UEFN-Ducky');
+  Path := Dir + '\setup-progress.txt';
+  ForceDirectories(Dir);
+  SaveStringToFile(Path, IntToStr(Percent) + #10 + Status, False);
+end;
+
 // Launch the panel via Explorer so it runs at the logged-in user's integrity
 // level, bypassing Inno's postinstall spawn server. Quotes guard the space in
 // DefaultDirName ("...\UEFN Ducky\...").
@@ -159,13 +189,31 @@ end;
 // Defender ML (Trojan:Win32/Wacatac.B!ml) on releases. The app prunes its
 // own %TEMP%\UEFN-Ducky\Setup-*.exe cache on startup (updater.sweep_installer_cache).
 
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  Pct: Integer;
+begin
+  if MaxProgress <= 0 then
+    Exit;
+  Pct := (CurProgress * 100) div MaxProgress;
+  WriteProgress(Pct, 'Installing...');
+end;
+
 // ssDone is SUCCESS ONLY (never after UAC No / abort). Launch when the
 // checkbox is ticked, or always for silent in-app updates — that is the only
 // relaunch path (frontend/updater.py must not start the panel on failure).
+// /NOLAUNCH is the custom host's Finish checkbox (silent updates omit it).
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+    WriteProgress(5, 'Copying files...');
+  if CurStep = ssPostInstall then
+    WriteProgress(95, 'Creating shortcuts...');
   if CurStep = ssDone then
   begin
+    WriteProgress(100, 'Done');
+    if CmdLineSwitch('/NOLAUNCH') then
+      Exit;
     if WizardSilent or ((LaunchCheckBox <> nil) and LaunchCheckBox.Checked) then
       LaunchApp();
   end;

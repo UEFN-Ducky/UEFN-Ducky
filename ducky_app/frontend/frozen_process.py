@@ -56,7 +56,8 @@ def kill_uefn_ducky_processes(*, include_self: bool = True, exclude_pid: int | N
     """
     Terminate ``UEFN-Ducky*.exe`` processes (panel + IDE ``bridge`` workers).
 
-    Uses PowerShell so versioned names like ``UEFN-Ducky-1.0.14.exe`` are matched.
+    Skips the Setup host (``UEFN-Ducky-Setup*``) so an in-place upgrade cannot
+    reap the installer. The inner engine is ``Setup-engine.exe`` and never matches.
     """
     if sys.platform != "win32":
         return False

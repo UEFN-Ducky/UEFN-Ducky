@@ -34,18 +34,30 @@ def resolve_project_dot_dir(project_root: str, *, for_write: bool = False) -> Pa
 
 
 def exe_name_matches(name: str) -> bool:
-    """True if filename is ``UEFN-Ducky*.exe``."""
+    """True if filename is ``UEFN-Ducky*.exe`` but not the Setup host."""
     lower = name.lower()
-    return lower.endswith(".exe") and lower.startswith(EXE_PREFIX.lower())
+    if not lower.endswith(".exe") or not lower.startswith(EXE_PREFIX.lower()):
+        return False
+    stem = lower[:-4]
+    # Custom Setup host is published as UEFN-Ducky-Setup-<ver>.exe — the panel
+    # sweep must not kill it (or Setup-engine.exe, which does not match anyway).
+    if stem == "uefn-ducky-setup" or stem.startswith("uefn-ducky-setup-"):
+        return False
+    return True
 
 
 def process_name_matches(process_name: str) -> bool:
     """Windows ``ProcessName`` without ``.exe`` suffix."""
     n = process_name.lower()
     pl = EXE_PREFIX.lower()
+    if n == "uefn-ducky-setup" or n.startswith("uefn-ducky-setup-"):
+        return False
     return n == pl or n.startswith(f"{pl}-") or n.startswith(f"{pl}_")
 
 
 def kill_process_ps_filter() -> str:
     """PowerShell ``Where-Object`` filter for UEFN Ducky processes."""
-    return f"($_.ProcessName -like '{EXE_PREFIX}*')"
+    return (
+        f"($_.ProcessName -like '{EXE_PREFIX}*' "
+        f"-and $_.ProcessName -notlike '{EXE_PREFIX}-Setup*')"
+    )

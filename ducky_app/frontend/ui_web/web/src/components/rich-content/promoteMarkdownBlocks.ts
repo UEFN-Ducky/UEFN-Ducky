@@ -186,5 +186,146 @@ export function promoteMarkdownToSegments(src: string): PromotedSegment[] {
   }
 
   flushMarkdown(mdBuf, segs);
+  if (segs.length === 1 && segs[0]?.kind === "markdown") {
+    const recovered = recoverProseReport(segs[0].text);
+    if (recovered) return recovered;
+  }
   return segs.length ? segs : [{ kind: "markdown", text: src }];
+}
+
+const WORK_VERB =
+  /\b(created|placed|imported|modeled|wired|built|organized|spawned|added)\b/i;
+const TOOLISH_TICK = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/;
+const FOLDER_TICK = /^(COL_|Content\/|Verse\/|Game\/)/i;
+const ASSET_TICK = /^[A-Z]{1,4}_[A-Za-z0-9]/;
+const VERSE_TICK = /\.verse$/i;
+
+function ticksIn(src: string): string[] {
+  const out: string[] = [];
+  const re = /`([^`]+)`/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) {
+    const t = m[1]!.trim();
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+function isAssetTick(t: string): boolean {
+  if (TOOLISH_TICK.test(t) || FOLDER_TICK.test(t) || /\s/.test(t)) return false;
+  return ASSET_TICK.test(t) || VERSE_TICK.test(t);
+}
+
+function folderTick(ticks: string[]): string | undefined {
+  return ticks.find((t) => FOLDER_TICK.test(t));
+}
+
+function headerTitle(src: string, assets: string[]): string {
+  const first = (src.split(/(?<=[.!?])\s+/)[0] ?? src)
+    .replace(/`/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/,\s+giving\b.*/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/[.,;:]+$/, "");
+  if (first.length > 8 && first.length <= 80) return first;
+  return assets.length ? `Created ${assets.join(", ")}` : "Work complete";
+}
+
+function headerCommand(src: string): string | undefined {
+  if (/\bblender\b/i.test(src)) return "blender";
+  if (/\bverse\b/i.test(src)) return "verse";
+  if (/\buefn\b/i.test(src)) return "uefn";
+  return undefined;
+}
+
+function errorSentence(src: string): string | undefined {
+  const parts = src.split(/(?<=[.!?])\s+/);
+  const hit = parts.find((p) => /\b(error(?:ed)?|failed|schema bug)\b/i.test(p));
+  if (!hit) return undefined;
+  return hit
+    .replace(/,?\s*but\b[\s\S]*$/i, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim()
+    .replace(/[.,;]+$/, "");
+}
+
+function itemKind(src: string, name: string): string {
+  if (/\bblender\b/i.test(src) || /^SM_/i.test(name)) {
+    return inventoryKindFromLabel( /\bblender\b/i.test(src) ? "Blender mesh" : "Mesh");
+  }
+  if (VERSE_TICK.test(name)) return inventoryKindFromLabel("Verse device");
+  if (/^(BP_|PF_)/i.test(name)) return inventoryKindFromLabel("Blueprint");
+  return inventoryKindFromLabel("Prop");
+}
+
+function itemLabel(name: string, src: string): string {
+  if (VERSE_TICK.test(name)) return "Verse device";
+  if (/^(BP_|PF_)/i.test(name)) return "Blueprint";
+  if (/\bblender\b/i.test(src) || /^SM_/i.test(name)) return "Mesh";
+  return "Prop";
+}
+
+/** Lift a work-report paragraph (backticked assets, no # headings) into widgets. */
+function recoverProseReport(src: string): PromotedSegment[] | null {
+  const text = src.trim();
+  if (!text || /^#{1,2}\s/m.test(text)) return null;
+  if (!WORK_VERB.test(text)) return null;
+  const ticks = ticksIn(text);
+  const assets = ticks.filter(isAssetTick);
+  if (!assets.length) return null;
+
+  const segs: PromotedSegment[] = [
+    {
+      kind: "block",
+      block: { type: "header", title: headerTitle(text, assets), command: headerCommand(text) },
+    },
+  ];
+
+  const programs: Partial<Record<RichProgramKey, number>> = {};
+  const cmd = headerCommand(text);
+  if (cmd === "blender") programs.blender = assets.length;
+  else if (cmd === "verse") programs.verse = assets.length;
+  else if (cmd === "uefn") programs.uefn = assets.length;
+  const err = errorSentence(text);
+  segs.push({
+    kind: "block",
+    block: {
+      type: "heading",
+      level: 2,
+      text: "Run Summary",
+    },
+  });
+  segs.push({
+    kind: "block",
+    block: {
+      type: "stats",
+      changes: assets.length,
+      blocked: err ? 1 : undefined,
+      programs: Object.keys(programs).length ? programs : undefined,
+    },
+  });
+
+  const folder = folderTick(ticks);
+  segs.push({
+    kind: "block",
+    block: {
+      type: "inventory",
+      heading: "Inventory",
+      folder,
+      items: assets.map((title) => ({
+        kind: itemKind(text, title),
+        label: itemLabel(title, text),
+        title,
+      })),
+    },
+  });
+
+  if (err) {
+    segs.push({
+      kind: "block",
+      block: { type: "callout", tone: "warn", title: "Warning", text: err },
+    });
+  }
+  return segs;
 }

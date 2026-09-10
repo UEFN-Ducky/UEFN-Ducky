@@ -115,6 +115,7 @@ def test_silent_install_args_force_close() -> None:
     assert "/CLOSEAPPLICATIONS" in args
     assert "/NOCLOSEAPPLICATIONS" not in args
     assert "/CURRENTUSER" in args
+    assert "/NOLAUNCH" not in args
     assert updater._silent_install_args("machine")[-1] == "/ALLUSERS"
 
 

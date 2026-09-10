@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DuckySetup</RootNamespace>
+    <AssemblyName>UEFN-Ducky-Setup</AssemblyName>
+    <Product>UEFN Ducky</Product>
+    <Company>UEFN Ducky</Company>
+    <Copyright>(c) UEFN Ducky. All rights reserved.</Copyright>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <AppVersion Condition="'$(AppVersion)' == ''">0.0.0</AppVersion>
+    <Version>$(AppVersion)</Version>
+    <InformationalVersion>$(AppVersion)</InformationalVersion>
+    <EngineExe Condition="'$(EngineExe)' == ''"></EngineExe>
+    <UiDir Condition="'$(UiDir)' == ''">..\ui</UiDir>
+    <LicenseFile Condition="'$(LicenseFile)' == ''">..\..\..\LICENSE</LicenseFile>
+    <SetupOutput Condition="'$(SetupOutput)' == ''"></SetupOutput>
+    <AppIcon Condition="'$(AppIcon)' == ''"></AppIcon>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(AppIcon)' != '' and Exists('$(AppIcon)')">
+    <ApplicationIcon>$(AppIcon)</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" GeneratePathProperty="true" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(EngineExe)" Condition="'$(EngineExe)' != '' and Exists('$(EngineExe)')" LogicalName="Setup-engine.exe" />
+    <EmbeddedResource Include="$(UiDir)\index.html" LogicalName="ui/index.html" />
+    <EmbeddedResource Include="$(UiDir)\styles.css" LogicalName="ui/styles.css" />
+    <EmbeddedResource Include="$(UiDir)\app.js" LogicalName="ui/app.js" />
+    <EmbeddedResource Include="$(LicenseFile)" Condition="Exists('$(LicenseFile)')" LogicalName="LICENSE" />
+    <EmbeddedResource Include="wv2\WebView2Loader.dll" LogicalName="WebView2Loader.dll" />
+    <EmbeddedResource Include="wv2\Microsoft.Web.WebView2.Core.dll" LogicalName="Microsoft.Web.WebView2.Core.dll" />
+    <EmbeddedResource Include="wv2\Microsoft.Web.WebView2.WinForms.dll" LogicalName="Microsoft.Web.WebView2.WinForms.dll" />
+  </ItemGroup>
+
+  <Target Name="RequireEngine" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(EngineExe)' == '' or !Exists('$(EngineExe)')"
+           Text="Pass /p:EngineExe=path\to\Setup-engine.exe (run make_release_installer.ps1)." />
+    <Error Condition="!Exists('wv2\Microsoft.Web.WebView2.WinForms.dll')"
+           Text="Missing host/wv2 WebView2 DLLs — make_release_installer.ps1 stages them before this build." />
+  </Target>
+
+  <Target Name="CopyPublishedSetup" AfterTargets="Build" Condition="'$(SetupOutput)' != ''">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(SetupOutput)" />
+  </Target>
+</Project>
