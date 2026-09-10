@@ -166,19 +166,23 @@ py -m venv .venv
 > it can import, so a global `site-packages` full of unrelated libraries silently adds tens
 > of MB to the EXE.
 
-**Windows installer** (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and [.NET SDK 8](https://dot.net)):
+**Windows installer** (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File release/installer/make_release_installer.ps1
 ```
-→ `dist/UEFN-Ducky-Setup-<version>.exe`
+→ `dist/UEFN-Ducky-Setup-<version>.exe` (Inno stub). The Ducky-themed host
+(`release/installer/host`, needs [.NET SDK 8](https://dot.net)) is only wrapped
+in when a code-signing cert is configured — an unsigned host that extracts an
+embedded EXE looks like a dropper to Defender.
 
 **Portable zip:** `powershell -ExecutionPolicy Bypass -File release/portable/make_release_zip.ps1`
 **Everything at once:** `powershell -ExecutionPolicy Bypass -File release/build_all.ps1 [-Zip] [-Sign]`
 
-Code signing is optional and off by default; unsigned builds trigger a SmartScreen warning
-on first run. Set `DUCKY_WINDOWS_PFX` + `DUCKY_WINDOWS_PFX_PASSWORD` and run
-`py release/sign_windows.py dist/UEFN-Ducky-Setup-<version>.exe`.
+Code signing is optional and off by default. Set `DUCKY_WINDOWS_PFX` +
+`DUCKY_WINDOWS_PFX_PASSWORD` and run
+`py release/sign_windows.py dist/UEFN-Ducky-Setup-<version>.exe`. Without a cert,
+Store Setup stays the Inno stub.
 
 **Tests:**
 

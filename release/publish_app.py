@@ -3,7 +3,9 @@
 
 Default flow (always bumps):
   0. Sync __version__ up to the live Store version if Store is ahead
-  1. Build release EXE (build_exes.py bumps patch once) + Inno engine + Ducky Setup host
+  1. Build release EXE (build_exes.py bumps patch once) + Inno Setup
+     (custom Ducky host only when Authenticode is configured — unsigned host
+     embeds+extracts an EXE and Defender treats it as a dropper)
   2. Direct-to-S3: ticket → PUT Setup.exe → complete → poll job
      (falls back to multipart POST /api/files/app-release if ticket API missing)
   3. MCP uds_app_release on that same site   (latest-only version + url + sha256)
@@ -31,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import http.client
@@ -271,13 +274,26 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
         cmd.append(str(engine))
         print("=== Authenticode sign (engine) ===")
         subprocess.run(cmd, check=True, cwd=str(ROOT))
-    print("=== Ducky Setup host ===")
-    subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly"],
-        check=True,
-        cwd=str(ROOT),
-    )
     setup = ROOT / "dist" / f"UEFN-Ducky-Setup-{version}.exe"
+    # Unsigned custom host = extract embedded EXE + Load DLLs from memory.
+    # Defender flags that as Trojan:Win32/Wacatac (dropper). Ship the Inno stub
+    # until DUCKY_WINDOWS_PFX / DUCKY_SIGNTOOL_EXTRA is set.
+    signing_on = bool(
+        (os.environ.get("DUCKY_WINDOWS_PFX") or "").strip()
+        or (os.environ.get("DUCKY_SIGNTOOL_EXTRA") or "").strip()
+    )
+    if signing_on:
+        print("=== Ducky Setup host ===")
+        subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly"],
+            check=True,
+            cwd=str(ROOT),
+        )
+    else:
+        print("=== Setup (Inno stub; skip unsigned custom host — Defender dropper heuristic) ===")
+        if not engine.is_file():
+            raise SystemExit(f"Inno engine missing: {engine}")
+        shutil.copy2(engine, setup)
     if not setup.is_file():
         raise SystemExit(f"Installer did not produce {setup.name}")
     # Sign the outer Setup.exe — this is what Chrome downloads.

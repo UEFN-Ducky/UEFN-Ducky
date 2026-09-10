@@ -66,6 +66,15 @@ if ($DoEngine) {
     Write-Host "Created $EngineExe"
 }
 
+# Unsigned custom host embeds Setup-engine.exe and extracts it at runtime —
+# Defender ML treats that as a dropper (Wacatac). Default: copy the Inno stub
+# as the published Setup. Pass -HostOnly (or set a signing cert) for the Ducky UI.
+if ($DoHost -and -not $HostOnly -and -not $env:DUCKY_WINDOWS_PFX -and -not $env:DUCKY_SIGNTOOL_EXTRA) {
+    Copy-Item $EngineExe $SetupExe -Force
+    Write-Host "Created $SetupExe (Inno stub). Custom host skipped: unsigned extract-and-run trips Defender."
+    $DoHost = $false
+}
+
 if ($DoHost) {
     if (-not (Test-Path $EngineExe)) {
         Write-Error "Missing $EngineExe — run this script without -HostOnly first (or pass -EngineOnly then sign, then -HostOnly)."
