@@ -52,6 +52,7 @@ class TerminalManager:
         conv_id: str = "",
         command: list[str] | None = None,
         env_extra: dict[str, str] | None = None,
+        activate: bool = True,
     ) -> dict[str, Any]:
         shell_norm = shell_label(shell)
         workdir = (cwd or _default_cwd()).strip() or "."
@@ -125,6 +126,7 @@ class TerminalManager:
                     "cwd": session.cwd,
                     "ws_url": session.ws_url,
                     "conv_id": conv_id,
+                    "activate": bool(activate),
                 }
             )
         return result

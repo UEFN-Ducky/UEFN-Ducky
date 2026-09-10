@@ -242,13 +242,19 @@ export function useTerminalTabs(
     return subscribeAgentEvents((event: AgentEvent) => {
       if (event.type === "terminal_open" && event.session_id && event.ws_url) {
         if (!getTerminalsEnabled()) return;
-        openTerminalTab({
+        const dto: TerminalSessionDto = {
           session_id: event.session_id,
           shell: (event.shell as TerminalShell) || DEFAULT_TERMINAL_SHELL,
           cwd: event.cwd || "",
           title: event.title || event.shell || "terminal",
           ws_url: event.ws_url,
-        });
+        };
+        // Login must stay on Settings: focusing this tab unmounts the popup.
+        if (event.activate === false || dto.title === "Claude Login") {
+          parkTab(dtoToTab(dto));
+          return;
+        }
+        openTerminalTab(dto);
         return;
       }
       if (event.type === "terminal_close" && event.session_id) {
@@ -258,7 +264,7 @@ export function useTerminalTabs(
         sessionsRef.current.delete(event.session_id);
       }
     });
-  }, [openTerminalTab, unparkSession, editor]);
+  }, [openTerminalTab, parkTab, unparkSession, editor]);
 
   const openTerminalTabBySession = useCallback(
     (sessionId: string, title: string, wsUrl: string, shell?: string, cwd?: string) => {

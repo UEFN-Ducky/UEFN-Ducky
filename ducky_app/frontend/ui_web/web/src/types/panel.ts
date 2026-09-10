@@ -1283,6 +1283,8 @@ export interface AgentEvent {
   shell?: string;
   ws_url?: string;
   cwd?: string;
+  /** terminal_open: false parks in the header list without focusing the editor tab. */
+  activate?: boolean;
   request_id?: string;
   command?: string;
   source?: string;
