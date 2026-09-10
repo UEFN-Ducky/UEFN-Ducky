@@ -17,11 +17,8 @@ export function RichContentRenderer({
   onOpenFile,
   mode = "full",
 }: RichContentRendererProps) {
-  // Parsing and tokenizing the entire growing response on every stream update
-  // makes long Cursor turns increasingly expensive. Keep the live tail as one
-  // text node; parse rich blocks/Markdown once the response is complete — and
-  // defer that parse off the critical frame via startTransition so evaluate_js
-  // is not blocked by a multi-second ReactMarkdown longtask.
+  // JSON __rich is parsed after the turn finishes. Markdown promotes live so
+  // Run Summary / Inventory appear while the reply is still writing.
   const [parsed, setParsed] = useState<ParsedRichContent | null>(null);
 
   useEffect(() => {
@@ -41,14 +38,14 @@ export function RichContentRenderer({
 
   if (!text.trim()) return null;
 
-  if (mode === "streaming") {
-    return <div className="rich-content rich-content--streaming">{text}</div>;
-  }
-
-  // While the deferred parse is pending, show plain text so the bubble paints
-  // immediately after streaming ends.
-  if (!parsed) {
-    return <div className="rich-content rich-content--streaming">{text}</div>;
+  // Live + pending-parse: render Markdown/widgets as sections complete so the
+  // bubble is never a raw ## / ** dump. JSON __rich blocks swap in when parsed.
+  if (mode === "streaming" || !parsed) {
+    return (
+      <div className="rich-content">
+        <MarkdownContent text={text} onOpenFile={onOpenFile} />
+      </div>
+    );
   }
 
   if (parsed.kind === "blocks") {

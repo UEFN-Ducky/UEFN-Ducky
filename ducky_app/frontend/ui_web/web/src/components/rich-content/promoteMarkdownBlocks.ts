@@ -44,7 +44,7 @@ function parseStatsBullets(bullets: string[]): Extract<RichBlock, { type: "stats
   const stats: Extract<RichBlock, { type: "stats" }> = { type: "stats" };
   for (const raw of bullets) {
     const text = raw.replace(BULLET, "").replace(/\*\*/g, "").trim();
-    const metric = /^(editor changes|changes|blocked(?: ops)?):\s*(\d[\d,]*)(?:\s+(applied|retries))?$/i.exec(text);
+    const metric = /^(editor changes|changes|blocked(?: ops)?):\s*(\d[\d,]*)(?:\s+(applied|retr(?:y|ies)))?$/i.exec(text);
     if (metric) {
       const count = Number(metric[2]!.replace(/,/g, ""));
       const key = /^blocked/i.test(metric[1]!) ? "blocked" : "changes";
@@ -139,7 +139,6 @@ export function promoteMarkdownToSegments(src: string): PromotedSegment[] {
         const stats = parseStatsBullets(bullets);
         if (stats) {
           flushMarkdown(mdBuf, segs);
-          segs.push({ kind: "block", block: { type: "heading", level: 2, text: title } });
           segs.push({ kind: "block", block: stats });
           i = end;
           continue;

@@ -33,6 +33,14 @@ describe("promoteMarkdownToSegments", () => {
       "ducky run sync --ledger",
     );
 
+    const sample = promoteMarkdownToSegments(`## Run Summary
+- **Editor changes:** 3 applied
+- **Blocked:** 1 retry
+- **Programs:** UEFN 2 · Blender 1 · Verse 4 · File 2`);
+    const sampleStats = sample.find((s) => s.kind === "block" && s.block.type === "stats");
+    expect(sampleStats?.kind === "block" && sampleStats.block.type === "stats" && sampleStats.block.changes).toBe(3);
+    expect(sampleStats?.kind === "block" && sampleStats.block.type === "stats" && sampleStats.block.blocked).toBe(1);
+
     const stats = segs.find((s) => s.kind === "block" && s.block.type === "stats");
     expect(stats?.kind === "block" && stats.block.type === "stats" && stats.block.changes).toBe(23);
     expect(stats?.kind === "block" && stats.block.type === "stats" && stats.block.blocked).toBe(4);

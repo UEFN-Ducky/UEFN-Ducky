@@ -38,62 +38,65 @@ export function RichStats({ changes, blocked, programs }: RichStatsProps) {
   if (!showNums && !showBar) return null;
 
   return (
-    <div className="rich-stats">
-      {showNums ? (
-        <div className="rich-stats-nums">
-          {changes != null ? (
-            <div>
-              <div className="rich-stats-metric-label">Editor Changes</div>
-              <div className="rich-stats-metric-row">
-                <div className="rich-stats-num">{changes}</div>
-                <span className="rich-stats-hint rich-stats-hint--ok">
-                  <Icons.Check /> Applied
-                </span>
+    <div className="rich-stats-block">
+      <h2 className="rich-stats-title">Run Summary</h2>
+      <div className="rich-stats">
+        {showNums ? (
+          <div className="rich-stats-nums">
+            {changes != null ? (
+              <div>
+                <div className="rich-stats-metric-label">Editor Changes</div>
+                <div className="rich-stats-metric-row">
+                  <div className="rich-stats-num">{changes}</div>
+                  <span className="rich-stats-hint rich-stats-hint--ok">
+                    <Icons.Check /> Applied
+                  </span>
+                </div>
               </div>
-            </div>
-          ) : null}
-          {blocked != null ? (
-            <div>
-              <div className="rich-stats-metric-label">Blocked Ops</div>
-              <div className="rich-stats-metric-row">
-                <div className="rich-stats-num rich-stats-num--blocked">{blocked}</div>
-                <span className="rich-stats-hint rich-stats-hint--blocked">
-                  <Icons.AlertTriangle /> Retries
-                </span>
+            ) : null}
+            {blocked != null ? (
+              <div>
+                <div className="rich-stats-metric-label">Blocked Ops</div>
+                <div className="rich-stats-metric-row">
+                  <div className="rich-stats-num rich-stats-num--blocked">{blocked}</div>
+                  <span className="rich-stats-hint rich-stats-hint--blocked">
+                    <Icons.AlertTriangle /> Retries
+                  </span>
+                </div>
               </div>
+            ) : null}
+          </div>
+        ) : null}
+        {showBar ? (
+          <div className="rich-stats-programs">
+            <div className="rich-stats-programs-head">
+              <span className="rich-stats-metric-label">Programs Tracker</span>
+              <span className="rich-stats-programs-total">{total} Total</span>
             </div>
-          ) : null}
-        </div>
-      ) : null}
-      {showBar ? (
-        <div className="rich-stats-programs">
-          <div className="rich-stats-programs-head">
-            <span className="rich-stats-metric-label">Programs Tracker</span>
-            <span className="rich-stats-programs-total">{total} Total</span>
+            <svg className="rich-stats-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden>
+              {programBarRects(segs, total).map((r) => (
+                <rect
+                  key={r.key}
+                  x={r.x}
+                  y="0"
+                  width={r.w}
+                  height="4"
+                  className={`rich-stats-bar-seg rich-stats-bar-seg--${r.key}`}
+                />
+              ))}
+            </svg>
+            <div className="rich-stats-legend">
+              {segs.map((s) => (
+                <span key={s.key} className={`rich-stats-legend-item rich-tone--${{ uefn: "blue", blender: "green", verse: "purple", file: "amber" }[s.key]}`}>
+                  <span className={`rich-stats-legend-dot rich-stats-legend-dot--${s.key}`} />
+                  {s.label}
+                  <strong className="rich-stats-legend-count">{s.count}</strong>
+                </span>
+              ))}
+            </div>
           </div>
-          <svg className="rich-stats-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden>
-            {programBarRects(segs, total).map((r) => (
-              <rect
-                key={r.key}
-                x={r.x}
-                y="0"
-                width={r.w}
-                height="4"
-                className={`rich-stats-bar-seg rich-stats-bar-seg--${r.key}`}
-              />
-            ))}
-          </svg>
-          <div className="rich-stats-legend">
-            {segs.map((s) => (
-              <span key={s.key} className={`rich-stats-legend-item rich-tone--${{ uefn: "blue", blender: "green", verse: "purple", file: "amber" }[s.key]}`}>
-                <span className={`rich-stats-legend-dot rich-stats-legend-dot--${s.key}`} />
-                {s.label}
-                <strong className="rich-stats-legend-count">{s.count}</strong>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }
