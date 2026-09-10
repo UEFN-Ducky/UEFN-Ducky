@@ -116,6 +116,9 @@ def test_self_check(monkeypatch) -> None:
 
     _snapshot = dict(_os.environ)
     try:
+        # This self-check asserts the legacy file layout (cache/<plugin>/<key>.json,
+        # prefs/all.json); the row store is covered by backend/store/test_phase1.py.
+        monkeypatch.setenv("DUCKY_STORE_BACKEND_PLUGIN_KV", "files")
         main()
     finally:
         for _k in list(_os.environ):

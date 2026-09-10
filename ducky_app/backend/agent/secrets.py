@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import sys
 from pathlib import Path
@@ -95,6 +96,23 @@ def _unprotect(ciphertext: bytes) -> bytes:
     return bytes(ctypes.string_at(out_blob.pbData, out_blob.cbData))
 
 
+def protect_text(value: str) -> bytes:
+    """DPAPI-encrypt one secret value (per-row storage, ADR 0003)."""
+    return _MAGIC + struct.pack("B", _VERSION) + _protect(value.encode("utf-8"))
+
+
+def unprotect_text(blob: bytes) -> str:
+    if len(blob) < 5 or blob[:4] != _MAGIC or blob[4] != _VERSION:
+        raise ValueError("Invalid secret blob")
+    return _unprotect(blob[5:]).decode("utf-8")
+
+
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("secrets")
+
+
 def _serialize_keys(keys: dict[str, str]) -> bytes:
     payload = json.dumps(keys, separators=(",", ":")).encode("utf-8")
     return _MAGIC + struct.pack("B", _VERSION) + _protect(payload)
@@ -121,6 +139,24 @@ def load_keys(*, use_cache: bool = True) -> dict[str, str]:
         # ponytail: Windows-only persist; tests/dev keep the process cache.
         _memory_cache = {} if _memory_cache is None else _memory_cache
         return dict(_memory_cache)
+    if _use_db():
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import secrets as repo
+
+            phase1.ensure("secrets")
+            keys = {}
+            for name, blob in repo.all_blobs().items():
+                try:
+                    value = unprotect_text(blob)
+                except (OSError, ValueError):
+                    continue
+                if value:
+                    keys[name] = value
+            _memory_cache = keys
+            return dict(keys)
+        except (OSError, RuntimeError):
+            pass
     path = credentials_path()
     if not path.is_file():
         _memory_cache = {}
@@ -139,9 +175,32 @@ def save_keys(keys: dict[str, str]) -> None:
     _memory_cache = dict(cleaned)
     if not _dpapi_available():
         return
+    if _use_db():
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import secrets as repo
+
+            phase1.ensure("secrets")
+            current = repo.all_blobs()
+            for name in set(current) - set(cleaned):
+                repo.delete(name)
+            for name, value in cleaned.items():
+                blob = current.get(name)
+                if blob is not None:
+                    try:
+                        if unprotect_text(blob) == value:
+                            continue
+                    except (OSError, ValueError):
+                        pass
+                repo.set_blob(name, protect_text(value))
+            return
+        except (OSError, RuntimeError):
+            pass
     path = credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(_serialize_keys(cleaned))
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    tmp.write_bytes(_serialize_keys(cleaned))
+    os.replace(tmp, path)
 
 
 def set_key(provider: str, value: str) -> None:

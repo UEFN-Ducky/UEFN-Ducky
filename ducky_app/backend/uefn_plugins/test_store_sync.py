@@ -86,7 +86,7 @@ def test_ensure_plugins_loaded_timeout_returns_false() -> None:
 def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
     """Disk + settings clear synchronously; hung reload/skills must not stick the bridge."""
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)
@@ -288,7 +288,7 @@ def test_reload_single_plugin_register_is_async() -> None:
 def test_rmtree_retry_recovers_from_winerror_32() -> None:
     from backend.uefn_plugins import store as st
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         target = Path(tmp) / "verse"
         target.mkdir()
         (target / "modules.md").write_text("x", encoding="utf-8")
@@ -314,7 +314,7 @@ def test_parallel_plugin_replaces_do_not_overlap_rmtree(monkeypatch) -> None:
     """Update All used to rmtree plugin B while skill-sync still had B's files open."""
     from backend.uefn_plugins import store as st
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)

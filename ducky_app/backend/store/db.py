@@ -12,6 +12,7 @@ This module is the only place in the tree allowed to import :mod:`sqlite3`
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sqlite3
@@ -96,6 +97,8 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row
+    if os.environ.get("DUCKY_DB_TRACE"):
+        _install_trace(conn, path)
     try:
         _configure(conn)
         with _guard:
@@ -108,6 +111,19 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
     cache[key] = conn
     _thread_local.conns = cache
     return conn
+
+
+def _install_trace(conn: sqlite3.Connection, path: Path) -> None:
+    """DUCKY_DB_TRACE=1: print every mutating statement with its thread (diagnostics)."""
+    import sys
+
+    def _trace(sql: str) -> None:
+        head = sql.lstrip()[:6].upper()
+        if head.startswith(("INSERT", "UPDATE", "DELETE")):
+            line = f"[ducky.db {threading.current_thread().name} {path.parent.parent.name}] {sql[:160]}"
+            sys.stderr.write(line + chr(10))
+
+    conn.set_trace_callback(_trace)
 
 
 def _configure(conn: sqlite3.Connection) -> None:

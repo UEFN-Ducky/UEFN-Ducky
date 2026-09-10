@@ -38,6 +38,37 @@ def cache_dir(plugin_id: str) -> Path:
     return appdata_dir() / "uefn_plugin_cache" / _safe_plugin_id(plugin_id)
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("plugin_kv")
+
+
+def _repo():
+    from backend.store.importers import phase1
+    from backend.store.repos import plugin_kv as repo
+
+    phase1.ensure("plugin_kv")
+    return repo
+
+
+def _protect_json(data: dict[str, Any]) -> str:
+    import base64
+
+    from backend.agent.secrets import protect_text
+
+    return base64.b64encode(protect_text(json.dumps(data, ensure_ascii=False))).decode("ascii")
+
+
+def _unprotect_json(b64: str) -> dict[str, Any]:
+    import base64
+
+    from backend.agent.secrets import unprotect_text
+
+    raw = json.loads(unprotect_text(base64.b64decode(b64)))
+    return raw if isinstance(raw, dict) else {}
+
+
 def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
     """Read plugin cache. Always prefer disk over process memory.
 
@@ -48,8 +79,23 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
     pid = _safe_plugin_id(plugin_id)
     k = _safe_key(key)
     mem_key = f"{pid}:{k}"
-    path = cache_dir(pid) / f"{k}.json"
     data: dict[str, Any] = {}
+    if _use_db():
+        try:
+            value, encrypted = _repo().get(pid, k)
+            if encrypted and isinstance(value, str):
+                try:
+                    data = _unprotect_json(value)
+                except (OSError, ValueError):
+                    data = {}
+            elif isinstance(value, dict):
+                data = value
+            with _CACHE_LOCK:
+                _CACHE[mem_key] = data
+            return dict(data)
+        except (OSError, RuntimeError):
+            pass
+    path = cache_dir(pid) / f"{k}.json"
     if path.is_file():
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
@@ -62,11 +108,27 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
     return dict(data)
 
 
-def cache_set(plugin_id: str, key: str, data: dict[str, Any]) -> None:
+def cache_set(plugin_id: str, key: str, data: dict[str, Any], *, sensitive: bool = False) -> None:
+    """Store a plugin document. ``sensitive=True`` DPAPI-encrypts it at rest (same
+    protection as API keys); the file backend has no encrypted form and refuses."""
     pid = _safe_plugin_id(plugin_id)
     k = _safe_key(key)
     payload = data if isinstance(data, dict) else {}
     mem_key = f"{pid}:{k}"
+    if _use_db():
+        try:
+            if sensitive:
+                _repo().set(pid, k, None, encrypted_b64=_protect_json(payload))
+            else:
+                _repo().set(pid, k, payload)
+            with _CACHE_LOCK:
+                _CACHE[mem_key] = dict(payload)
+            return
+        except (OSError, RuntimeError):
+            if sensitive:
+                raise
+    if sensitive:
+        raise RuntimeError("sensitive plugin data needs the database backend")
     path = cache_dir(pid)
     path.mkdir(parents=True, exist_ok=True)
     target = path / f"{k}.json"
@@ -89,6 +151,29 @@ def cache_clear(plugin_id: str, key: str = "") -> dict[str, Any]:
     root = cache_dir(pid)
     cleared: list[str] = []
     raw = (key or "").strip()
+    if _use_db():
+        try:
+            repo = _repo()
+            with _CACHE_LOCK:
+                if not raw:
+                    cleared = repo.delete_prefix(pid, "")
+                    for mk in [m for m in _CACHE if m.startswith(f"{pid}:")]:
+                        del _CACHE[mk]
+                elif raw.endswith("*"):
+                    pre = re.sub(r"[^\w.\-]+", "_", raw[:-1].strip(), flags=re.UNICODE).strip("._-")
+                    if not pre:
+                        raise ValueError("prefix required")
+                    cleared = repo.delete_prefix(pid, pre)
+                    for mk in [m for m in _CACHE if m.startswith(f"{pid}:{pre}")]:
+                        del _CACHE[mk]
+                else:
+                    k = _safe_key(raw)
+                    _CACHE.pop(f"{pid}:{k}", None)
+                    if repo.delete(pid, k):
+                        cleared.append(k)
+            return {"ok": True, "cleared": cleared}
+        except (OSError, RuntimeError):
+            pass
     with _CACHE_LOCK:
         if not raw:
             prefix = f"{pid}:"
@@ -135,6 +220,19 @@ def prefs_all_path() -> Path:
 
 def prefs_all_get() -> dict[str, Any]:
     """All plugin UI prefs (same shape as localStorage uefn-plugin-ui-prefs)."""
+    if _use_db():
+        try:
+            out: dict[str, Any] = {}
+            for pid, slot in _repo().all_prefs().items():
+                out[pid] = {
+                    str(k): v
+                    for k, v in slot.items()
+                    if isinstance(k, str)
+                    and (isinstance(v, (bool, int, float, str)) or v is None)
+                }
+            return out
+        except (OSError, RuntimeError):
+            pass
     path = prefs_all_path()
     if not path.is_file():
         return {}
@@ -175,6 +273,18 @@ def prefs_all_set(all_prefs: dict[str, Any]) -> dict[str, Any]:
                 for k, v in slot.items()
                 if isinstance(k, str) and isinstance(v, (bool, int, float, str))
             }
+        if _use_db():
+            try:
+                repo = _repo()
+                for clean in src:
+                    if isinstance(clean, str) and clean in bag:
+                        try:
+                            repo.set_prefs(_safe_plugin_id(clean), bag[_safe_plugin_id(clean)])
+                        except ValueError:
+                            continue
+                return {"ok": True, "prefs": bag}
+            except (OSError, RuntimeError):
+                pass
         root = prefs_dir()
         root.mkdir(parents=True, exist_ok=True)
         target = prefs_all_path()

@@ -13,11 +13,23 @@ from typing import Any
 from frontend.atomic_json import write_json_atomic
 from frontend.settings import default_app_data_dir
 
-_PATH = default_app_data_dir() / "workspace_dock.json"
-
-
 def _path() -> Path:
-    return _PATH
+    # Resolved per call (a module constant ignored a later LOCALAPPDATA change).
+    return default_app_data_dir() / "workspace_dock.json"
+
+
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("workspace_state")
+
+
+def _kv():
+    from backend.store.importers import phase1
+    from backend.store.repos import kv
+
+    phase1.ensure("workspace_state")
+    return kv
 
 
 def load_all() -> dict[str, Any]:
@@ -30,6 +42,12 @@ def load_all() -> dict[str, Any]:
 
 def load_window(window_id: str = "main") -> dict[str, Any] | None:
     key = (window_id or "main").strip() or "main"
+    if _use_db():
+        try:
+            raw = _kv().get_doc("workspace_state", f"dock:{key}")
+            return raw if isinstance(raw, dict) else None
+        except (OSError, RuntimeError):
+            pass
     raw = load_all().get(key)
     return raw if isinstance(raw, dict) else None
 
@@ -38,6 +56,12 @@ def save_window(window_id: str, snapshot: dict[str, Any]) -> None:
     if not isinstance(snapshot, dict):
         return
     key = (window_id or "main").strip() or "main"
+    if _use_db():
+        try:
+            _kv().set_doc("workspace_state", f"dock:{key}", snapshot)
+            return
+        except (OSError, RuntimeError):
+            pass
     data = load_all()
     data[key] = snapshot
     try:

@@ -169,6 +169,11 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Play the agent's file walkthrough in the editor.",
     ),
+    "_origin_version": FieldMeta(
+        "Settings origin version",
+        "internal",
+        description="Database snapshot version this object was loaded from; never persisted.",
+    ),
     "follow_code_off_migrated": FieldMeta(
         "Follow Code default-off migration done",
         "internal",

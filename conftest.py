@@ -119,16 +119,66 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         session.exitstatus = 3  # surfaced as an exit-code failure in CI
 
 
+def _reset_store_memos() -> None:
+    """Drop per-process caches keyed by the database path (connections, the
+    settings snapshot, the importer memo) so a test never sees a sibling's rows."""
+    try:
+        from backend.store import db
+
+        db.reset_for_tests()
+    except Exception:
+        return
+    try:
+        from backend.store.repos import settings as settings_repo
+
+        settings_repo.reset_for_tests()
+    except Exception:
+        pass
+    try:
+        from backend.store.importers import phase1
+
+        phase1.reset_for_tests()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _appdata_per_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Every test gets its own AppData root, so the database (and every file
+    store) starts empty. The session-wide root from pytest_configure still
+    covers import-time code."""
+    if _OPT_OUT:
+        yield
+        return
+    root = tmp_path / ".ducky-appdata"
+    (root / "Roaming").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(root))
+    monkeypatch.setenv("APPDATA", str(root / "Roaming"))
+    _reset_store_memos()
+    yield
+    _join_host_workers()
+    _reset_store_memos()
+
+
+def _join_host_workers(timeout: float = 5.0) -> None:
+    """The plugin host's repair coordinator is a daemon thread kicked by store
+    toggles. Left running past a test, it opened the *next* test's database and
+    wrote settings into it. Join it here; deliberately hung test fakes
+    (``uefn-plugin-repair-<id>``) are not waited for."""
+    import threading
+
+    for t in threading.enumerate():
+        if t is threading.current_thread():
+            continue
+        if t.name == "uefn-plugins-repair":
+            t.join(timeout)
+
+
 @pytest.fixture
 def isolated_appdata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A per-test AppData root (``%LOCALAPPDATA%``) for tests that want their own."""
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
     (tmp_path / "Roaming").mkdir(exist_ok=True)
-    try:
-        from backend.store import db
-
-        db.reset_for_tests()
-    except Exception:
-        pass
+    _reset_store_memos()
     return tmp_path

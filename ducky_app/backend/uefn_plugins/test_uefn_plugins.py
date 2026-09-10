@@ -295,7 +295,7 @@ def main() -> None:
     import tempfile
 
     # Isolate AppData (+ IDE skill deploy roots) for this check.
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         os.environ["LOCALAPPDATA"] = tmp
         os.environ["USERPROFILE"] = tmp
         os.environ["HOME"] = tmp
