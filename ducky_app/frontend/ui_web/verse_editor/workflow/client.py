@@ -6,9 +6,17 @@ import socket
 import threading
 from typing import Any, Callable
 
-from backend.tools.core.uefn_modal import save_modal_watchdog
 from frontend.ui_web.verse_editor.workflow.protocol import BuildState
 from frontend.ui_web.verse_editor.workflow.protocol_client import VerseWorkflowProtocolClient
+
+
+def save_modal_watchdog(*args: Any, **kwargs: Any) -> Any:
+    """Lazy: ``backend.tools`` registers every MCP tool on import (FastMCP, ~800 ms),
+    which must not happen on the panel's cold import path (test_boot_imports)."""
+    from backend.tools.core.uefn_modal import save_modal_watchdog as _real
+
+    return _real(*args, **kwargs)
+
 
 DEFAULT_PORT = 1962
 DEFAULT_ADDRESS = "127.0.0.1"

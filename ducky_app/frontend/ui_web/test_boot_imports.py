@@ -10,33 +10,40 @@ import sys
 import time
 
 
-def _purge(*keys: str) -> None:
-    drop = set(keys)
-    for key in list(sys.modules):
-        if key == "mcp" or key.startswith("mcp.") or key in drop:
-            del sys.modules[key]
+_COLD_IMPORT_PROBE = r"""
+import sys, time
+t0 = time.perf_counter()
+import frontend.ui_web.panel_api  # noqa: F401
+elapsed_ms = (time.perf_counter() - t0) * 1000.0
+mcp_loaded = any(m == "mcp" or m.startswith("mcp.") for m in sys.modules)
+print("RESULT", int(mcp_loaded), int("backend.server" in sys.modules), f"{elapsed_ms:.0f}")
+"""
 
 
 def test_panel_api_import_skips_mcp() -> None:
-    _purge(
-        "backend.server",
-        "frontend.ui_web.panel_api",
-        "frontend.ui_web.agent_modes",
-        "backend.agent.runner",
-        "backend.agent.tools",
-        "backend.agent.prompt",
+    """Cold import in a child interpreter: purging sys.modules in-process left
+    later tests holding two copies of agent_modes (monkeypatches missed)."""
+    import os
+    import subprocess
+
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = app_root + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, "-c", _COLD_IMPORT_PROBE],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=app_root,
+        timeout=120,
     )
-
-    t0 = time.perf_counter()
-    import frontend.ui_web.panel_api  # noqa: F401
-
-    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    mcp_loaded = any(m == "mcp" or m.startswith("mcp.") for m in sys.modules)
-    assert not mcp_loaded, "panel_api import pulled the mcp package (splash stays up too long)"
-    assert "backend.server" not in sys.modules, "panel_api import pulled backend.server"
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT "))
+    _, mcp_loaded, server_loaded, elapsed = line.split()
+    assert mcp_loaded == "0", "panel_api import pulled the mcp package (splash stays up too long)"
+    assert server_loaded == "0", "panel_api import pulled backend.server"
     # Warm machine budget; packaged EXE + AV can be higher — this catches the FastMCP regress.
-    assert elapsed_ms < 3000.0, f"panel_api import too slow: {elapsed_ms:.0f}ms"
-    print(f"ok panel_api import {elapsed_ms:.0f}ms without mcp")
+    assert float(elapsed) < 3000.0, f"panel_api import too slow: {elapsed}ms"
 
 
 def test_panel_api_init_does_not_await_plugins() -> None:

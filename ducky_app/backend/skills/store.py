@@ -128,7 +128,10 @@ def bundled_skill_packs_dir() -> Path | None:
         p = Path(meipass) / "frontend" / SKILL_PACKS_DIR
         if p.is_dir():
             return p
-    repo = Path(__file__).resolve().parent.parent / "frontend" / SKILL_PACKS_DIR
+    # backend/skills/store.py -> ducky_app/frontend/skill_packs (parents[2] is ducky_app;
+    # parent.parent was backend/, so dev runs never found the bundled packs and only a
+    # previously seeded AppData made the skills tests pass).
+    repo = Path(__file__).resolve().parents[2] / "frontend" / SKILL_PACKS_DIR
     if repo.is_dir():
         return repo
     return None

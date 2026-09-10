@@ -107,14 +107,15 @@ describe("ChangeRowView", () => {
       fileRow({ outcome: "blocked", reason: "Content/Verse/Hub/hub.verse is outside Hacker's lane", hasDiff: false }),
     );
     expect(screen.getByText("BLOCKED")).toBeTruthy();
-    expect(screen.getByText(/outside Hacker's lane/)).toBeTruthy();
+    // Blocked rows stay one line: the reason is the row's tooltip and the click-popup.
+    expect(screen.getByTitle(/outside Hacker's lane/)).toBeTruthy();
     expect(container.querySelectorAll("button.changeset-btn")).toHaveLength(0);
   });
 
   it("an archived run keeps Diff but locks Revert", () => {
     renderRow(fileRow(), { run: { ...run, archived: true } as ChangesetRunDto });
     expect(screen.getByRole("button", { name: "Diff" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
+    expect((screen.getByRole("button", { name: "Revert" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("grays out the row and blocks clicks while that revert is running", () => {

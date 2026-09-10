@@ -53,6 +53,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/workspace/journal.py::_move_back_through_pipeline._move": "path_op perform",
     # The journal writes its own ledger under AppData and restores through the
     # ProjectWriter instance it is handed (a Name receiver the scanner cannot see through).
+    "backend/workspace/journal.py::_replay_run": "writer.write_text on the ProjectWriter it is handed (Name receiver)",
     "backend/workspace/journal.py::_write_json": "journal run/index documents under AppData",
     "backend/workspace/journal.py::_store_blob": "journal blobs under AppData",
     "backend/workspace/human_watch.py::_save_saved": "human-watch fingerprint under AppData/changesets",

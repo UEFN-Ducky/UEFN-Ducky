@@ -481,8 +481,10 @@ class PanelSettings:
                 follow_code_enabled=False if off else raw.follow_code_enabled,
                 follow_code_off_migrated=True,
             )
-            if off:
-                fixed.save()
+            # The migrated flag rides along on the next real save(). Saving here made
+            # load() a writer: a background thread loading a stale file could then
+            # overwrite a newer save from another thread (lost update; seen with
+            # enabled_uefn_plugins). ADR 0003 replaces this with per-key updates.
             return fixed
         except (json.JSONDecodeError, TypeError, ValueError):
             return cls()

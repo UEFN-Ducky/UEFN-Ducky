@@ -83,14 +83,13 @@ def test_ensure_plugins_loaded_timeout_returns_false() -> None:
                 host._LOAD_DONE.set()
 
 
-def test_uninstall_returns_fast_and_removes_dir() -> None:
+def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
     """Disk + settings clear synchronously; hung reload/skills must not stick the bridge."""
-    import os
 
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["LOCALAPPDATA"] = tmp
-        os.environ["USERPROFILE"] = tmp
-        os.environ["HOME"] = tmp
+        monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("USERPROFILE", tmp)
+        monkeypatch.setenv("HOME", tmp)
 
         from backend.uefn_plugins.store import (
             import_plugin_from_bytes,
@@ -175,15 +174,14 @@ def _zip_hanging_register(plugin_id: str = "hangreg") -> bytes:
     return buf.getvalue()
 
 
-def test_hung_register_does_not_wedge_store_toggles() -> None:
+def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
     """ensure_plugins_loaded / disable / invalidate stay fast while register() hangs."""
-    import os
 
     # ignore_cleanup_errors: hung register() keeps the .py module mapped on Windows.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        os.environ["LOCALAPPDATA"] = tmp
-        os.environ["USERPROFILE"] = tmp
-        os.environ["HOME"] = tmp
+        monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("USERPROFILE", tmp)
+        monkeypatch.setenv("HOME", tmp)
 
         from backend.uefn_plugins.store import (
             import_plugin_from_bytes,
@@ -312,15 +310,14 @@ def test_rmtree_retry_recovers_from_winerror_32() -> None:
         assert hits["n"] >= 2
 
 
-def test_parallel_plugin_replaces_do_not_overlap_rmtree() -> None:
+def test_parallel_plugin_replaces_do_not_overlap_rmtree(monkeypatch) -> None:
     """Update All used to rmtree plugin B while skill-sync still had B's files open."""
-    import os
     from backend.uefn_plugins import store as st
 
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["LOCALAPPDATA"] = tmp
-        os.environ["USERPROFILE"] = tmp
-        os.environ["HOME"] = tmp
+        monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("USERPROFILE", tmp)
+        monkeypatch.setenv("HOME", tmp)
         with patch.object(st, "_refresh_plugin_skills_async", lambda: None):
             assert st.import_plugin_from_bytes(
                 _zip_plugin("alpha", 1), source="local", replace=True

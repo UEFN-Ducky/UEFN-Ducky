@@ -79,7 +79,8 @@ describe("ChangesView", () => {
     expect(screen.getByText("VerifyCube")).toBeTruthy();
     expect(screen.getByText("moved +250 on Z")).toBeTruthy();
     expect(screen.getByText("BLOCKED")).toBeTruthy();
-    expect(screen.getByText(/not in your write lane/i)).toBeTruthy();
+    // The refusal's reason lives in the row tooltip (blocked rows stay one line).
+    expect(screen.getByTitle(/not in your write lane/i)).toBeTruthy();
   });
 
   it("counts the blocked attempt apart from the work that landed", async () => {
