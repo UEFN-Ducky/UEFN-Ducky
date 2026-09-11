@@ -263,8 +263,33 @@ def _prepare_installer_exe(path: Path) -> None:
     _wait_exe_unlocked(path)
 
 
+# CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB.
+# Setup must outlive FORCECLOSE / our os._exit. taskkill /T on the panel used to
+# reap the installer (download finishes, Ducky closes, nothing installs).
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
 def _popen_setup(dest: Path, args: list[str]) -> subprocess.Popen[Any]:
-    return subprocess.Popen([str(dest), *args], close_fds=True)
+    cmd = [str(dest), *args]
+    if sys.platform != "win32":
+        return subprocess.Popen(cmd, close_fds=True)
+    flag_sets = (
+        _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB,
+        _CREATE_NO_WINDOW | _CREATE_BREAKAWAY_FROM_JOB,
+        _CREATE_NO_WINDOW,
+        0,
+    )
+    last_err: OSError | None = None
+    for flags in flag_sets:
+        try:
+            return subprocess.Popen(cmd, close_fds=True, creationflags=flags)
+        except OSError as exc:
+            last_err = exc
+    if last_err is not None:
+        raise last_err
+    return subprocess.Popen(cmd, close_fds=True)
 
 
 def _wait_setup_exit(proc: subprocess.Popen[Any]) -> int:
@@ -274,11 +299,14 @@ def _wait_setup_exit(proc: subprocess.Popen[Any]) -> int:
         return 1
 
 
-def _launch_setup_until_handoff(dest: Path, args: list[str]) -> tuple[int, bool]:
+def _launch_setup_until_handoff(
+    dest: Path, args: list[str], *, wait_for_elevation: bool = True
+) -> tuple[int, bool]:
     """Launch Setup; retry once if the stub dies before an elevated child appears.
 
-    First click after a fresh download is the one that races Defender. Second
-    click already worked because the EXE was cached — do that retry here.
+    Per-user installs: do not wait() for Setup to finish — FORCECLOSE would kill
+    this panel and (without breakaway) the installer with it. Machine installs
+    wait for the unelevated stub to hand off to the elevated child.
     """
     last_code = 1
     for attempt in range(2):
@@ -287,6 +315,12 @@ def _launch_setup_until_handoff(dest: Path, args: list[str]) -> tuple[int, bool]
         try:
             proc = _popen_setup(dest, args)
         except OSError:
+            continue
+        if not wait_for_elevation:
+            time.sleep(0.25)
+            if proc.poll() is None or _installer_process_running(dest):
+                return 0, True
+            last_code = int(proc.poll() if proc.poll() is not None else 1)
             continue
         last_code = _wait_setup_exit(proc)
         if _setup_still_running_after_wait(dest):
@@ -359,10 +393,11 @@ def _shutdown_after_delay() -> None:
         try:
             from frontend.frozen_process import kill_uefn_ducky_processes, release_panel_process
 
-            # Clear panel.pid before force-kill so the relaunched EXE does not wait on
-            # a dead/dying PID handoff (connect timeouts look like a 20–30s hang).
+            # Clear panel.pid before exit so the relaunched EXE does not wait on
+            # a dead/dying PID handoff. Do not include_self: Stop-Process / taskkill /T
+            # reaps Setup when it is still in this job.
             release_panel_process()
-            kill_uefn_ducky_processes(include_self=True)
+            kill_uefn_ducky_processes(include_self=False)
         except Exception:
             pass
         # Root cause of stuck "Updating…" lock: PowerShell/taskkill can fail and
@@ -490,7 +525,9 @@ def apply_update() -> dict[str, Any]:
         pass
     _set_progress(stage="installing", error=None)
     code, child_running = _launch_setup_until_handoff(
-        dest, _silent_install_args(status["install_scope"])
+        dest,
+        _silent_install_args(status["install_scope"]),
+        wait_for_elevation=status.get("install_scope") == "machine",
     )
 
     # /ALLUSERS: unelevated stub often exits 0 right after UAC Yes while the

@@ -161,7 +161,7 @@ def test_shutdown_after_delay_always_exits() -> None:
             except SystemExit as exc:
                 assert exc.code == 0
             assert "release" in calls
-            assert "kill:True" in calls
+            assert "kill:False" in calls
             assert "exit:0" in calls
         finally:
             fp.release_panel_process = orig_release
@@ -373,6 +373,35 @@ def test_launch_setup_retries_once_then_keeps_decline() -> None:
         updater._ELEVATION_HANDOFF_S = original_handoff
 
 
+def test_launch_setup_user_scope_does_not_wait_for_finish() -> None:
+    class FakeProc:
+        def poll(self) -> int | None:
+            return None
+
+        def wait(self) -> int:
+            raise AssertionError("per-user must not wait for Setup to finish")
+
+    original_popen = updater._popen_setup
+    original_running = updater._installer_process_running
+    updater._popen_setup = lambda _d, _a: FakeProc()  # type: ignore[assignment]
+    updater._installer_process_running = lambda _d: True  # type: ignore[assignment]
+    try:
+        code, running = updater._launch_setup_until_handoff(
+            Path("Setup-1.exe"), ["/VERYSILENT"], wait_for_elevation=False
+        )
+        assert code == 0
+        assert running is True
+    finally:
+        updater._popen_setup = original_popen  # type: ignore[assignment]
+        updater._installer_process_running = original_running  # type: ignore[assignment]
+
+
+def test_popen_setup_breakaway_flags_in_source() -> None:
+    src = Path(updater.__file__).read_text(encoding="utf-8")
+    assert "CREATE_BREAKAWAY_FROM_JOB" in src
+    assert "include_self=False" in src
+
+
 if __name__ == "__main__":
     test_get_update_progress_snapshot()
     test_download_updates_byte_progress()
@@ -389,6 +418,8 @@ if __name__ == "__main__":
     test_prepare_installer_exe_tolerates_missing_motw()
     test_launch_setup_retries_once_when_first_stub_dies()
     test_launch_setup_retries_once_then_keeps_decline()
+    test_launch_setup_user_scope_does_not_wait_for_finish()
+    test_popen_setup_breakaway_flags_in_source()
     print("ok")
 
 
