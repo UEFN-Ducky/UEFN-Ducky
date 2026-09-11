@@ -67,6 +67,27 @@ def _read_entries(path: Path, *, since: float) -> list[dict[str, Any]]:
     return kept
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("usage")
+
+
+def _repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import usage as repo
+
+    phase4.ensure("usage")
+    return repo
+
+
+def _entries_since(since: float) -> list[dict[str, Any]]:
+    """Ledger rows since *since*: usage_calls on the row store, the JSONL file otherwise."""
+    if _use_db():
+        return _repo().since(since)
+    return _read_entries(_log_path(), since=since)
+
+
 def _write_entries(path: Path, entries: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in entries)
@@ -116,6 +137,10 @@ def log_call(
     if isinstance(cost_usd, (int, float)):
         entry["cost_usd"] = float(cost_usd)
 
+    if _use_db():
+        # One insert, retention by query — no read-all / rewrite-all per call.
+        _repo().insert(entry, retention_s=_RETENTION_DAYS * 86400.0)
+        return
     path = _log_path()
     since = _cutoff_ts(_RETENTION_DAYS)
     entries = _read_entries(path, since=since)
@@ -276,7 +301,7 @@ def usage_report(provider_id: str = "", days: int = 7) -> dict[str, Any]:
     family = _provider_family(prov_filter) if prov_filter else set()
     entries = [
         e
-        for e in _read_entries(_log_path(), since=since)
+        for e in _entries_since(since)
         if not prov_filter or str(e.get("provider") or "").strip().lower() in family
     ]
     conv_meta = _conv_lookup()
@@ -444,7 +469,7 @@ def ducky_usage_report(
 
     entries = [
         e
-        for e in _read_entries(_log_path(), since=since)
+        for e in _entries_since(since)
         if (
             (str(e.get("conv_id") or "").strip() in conv_ids)
             or (name_key and str(e.get("ducky_label") or "").strip().casefold() == name_key)

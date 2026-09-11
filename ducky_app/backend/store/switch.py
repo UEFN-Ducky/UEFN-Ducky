@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-STORES = ("settings", "secrets", "projects", "workspace_state", "cache_docs", "plugin_kv", "chats", "ledger")
+STORES = ("settings", "secrets", "projects", "workspace_state", "cache_docs", "plugin_kv", "chats", "ledger", "plans", "memory", "usage", "events")
 
 
 def use_db(store: str) -> bool:

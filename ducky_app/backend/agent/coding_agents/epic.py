@@ -12,9 +12,39 @@ from frontend.atomic_json import write_json_atomic
 from frontend.settings import PanelSettings, default_app_data_dir
 
 
-def tasks_root(project_root: str | None = None) -> Path:
-    root = (project_root or PanelSettings.load().uefn_project_root or "").strip()
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("plans")
+
+
+def _resolve_root(project_root: str | None) -> str:
+    return (project_root or PanelSettings.load().uefn_project_root or "").strip()
+
+
+def _project_id(project_root: str | None) -> str:
+    from frontend.ui_web.project_chats import project_slug
+
+    return project_slug(_resolve_root(project_root))
+
+
+def _repo(project_root: str | None):
+    from backend.store.importers import phase4
+    from backend.store.repos import plans as repo
+
+    root = _resolve_root(project_root)
     if root:
+        phase4.ensure_project(root)
+    return repo
+
+
+def tasks_root(project_root: str | None = None) -> Path:
+    """Where task artifacts live. Rows: AppData/tasks/<slug> (the island gets no
+    side files, ADR 0001). Files backend: <project>/.ducky/tasks."""
+    root = _resolve_root(project_root)
+    if _use_db():
+        d = default_app_data_dir() / "tasks" / _project_id(project_root)
+    elif root:
         d = Path(root) / ".ducky" / "tasks"
     else:
         d = default_app_data_dir() / "tasks"
@@ -48,12 +78,17 @@ def create_task(
         "conv_ids": list(conv_ids or []),
         "artifacts": [],
     }
+    if _use_db():
+        _repo(project_root).task_put(_project_id(project_root), task)
+        return task
     path = tasks_root(project_root) / f"{task_id}.json"
     write_json_atomic(path, task)
     return task
 
 
 def list_tasks(project_root: str | None = None) -> list[dict[str, Any]]:
+    if _use_db():
+        return _repo(project_root).task_docs(_project_id(project_root))
     root = tasks_root(project_root)
     out: list[dict[str, Any]] = []
     for path in sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
@@ -67,6 +102,8 @@ def list_tasks(project_root: str | None = None) -> list[dict[str, Any]]:
 
 
 def load_task(task_id: str, project_root: str | None = None) -> dict[str, Any] | None:
+    if _use_db():
+        return _repo(project_root).task_get(_project_id(project_root), (task_id or "").strip())
     path = tasks_root(project_root) / f"{(task_id or '').strip()}.json"
     if not path.is_file():
         return None
@@ -83,6 +120,9 @@ def save_task(task: dict[str, Any], project_root: str | None = None) -> dict[str
     tid = str(task.get("id") or "").strip()
     if not tid:
         raise ValueError("task id required")
+    if _use_db():
+        _repo(project_root).task_put(_project_id(project_root), task)
+        return task
     write_json_atomic(tasks_root(project_root) / f"{tid}.json", task)
     return task
 

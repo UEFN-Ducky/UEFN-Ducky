@@ -76,9 +76,67 @@ def _path(name: str) -> Path:
     return default_app_data_dir() / name
 
 
+_KIND = {_ERRORS_NAME: "error", _ACTIVITY_NAME: "activity"}
+
+
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("events")
+
+
+def _repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import events as repo
+
+    phase4.ensure("logs")
+    return repo
+
+
+def _ingest_listener_file(name: str) -> None:
+    """The UEFN listener (Epic's Python, no database) still appends to
+    errors.jsonl; fold those lines into rows and truncate the file."""
+    repo = _repo()  # runs the one-time legacy import first (it moves the old file)
+    path = _path(name)
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    rows = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("message"):
+            rows.append({"ts": row.get("ts") or time.time(), "source": row.get("source"), "message": row.get("message")})
+    try:
+        if rows:
+            repo.insert_many(_KIND[name], rows)
+        path.write_text("", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _append(name: str, source: str, message: str, *, dedupe: bool) -> None:
     message = (message or "").strip()
     if not message:
+        return
+    if _use_db():
+        try:
+            repo = _repo()
+            kind = _KIND[name]
+            if dedupe and repo.last_message(kind) == message:
+                return
+            repo.insert(kind, ts=time.time(), source=(source or "?")[:64], message=message[:2000])
+            repo.trim(kind, older_than=time.time() - MAX_AGE_S, keep=MAX_ENTRIES)
+        except Exception:
+            pass
         return
     path = _path(name)
     try:
@@ -94,6 +152,18 @@ def _append(name: str, source: str, message: str, *, dedupe: bool) -> None:
 
 
 def _read(name: str, limit: int) -> list[dict]:
+    if _use_db():
+        try:
+            _ingest_listener_file(name)
+            repo = _repo()
+            kind = _KIND[name]
+            repo.trim(kind, older_than=time.time() - MAX_AGE_S, keep=MAX_ENTRIES)
+            return [
+                {"ts": r["ts"], "source": r["source"], "message": r["message"]}
+                for r in repo.newest(kind, limit=max(1, int(limit)))
+            ]
+        except Exception:
+            return []
     _trim_file(name)
     path = _path(name)
     if not path.is_file():
@@ -117,6 +187,11 @@ def _read(name: str, limit: int) -> list[dict]:
 
 
 def _clear(name: str) -> None:
+    if _use_db():
+        try:
+            _repo().clear(_KIND[name])
+        except Exception:
+            pass
     path = _path(name)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +213,8 @@ def _last_message(path: Path) -> str | None:
 
 
 def _trim_file(name: str) -> None:
+    if _use_db():
+        return
     path = _path(name)
     try:
         raw = path.read_text(encoding="utf-8")

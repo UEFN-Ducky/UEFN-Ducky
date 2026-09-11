@@ -62,7 +62,8 @@ def test_empty_index(isolated_appdata, tmp_path):
     assert index_markdown(root) == ""
 
 
-def test_save_and_get_entry_in_appdata_project_slug_dir(isolated_appdata, tmp_path):
+def test_save_and_get_entry_in_appdata_project_slug_dir(isolated_appdata, tmp_path, monkeypatch):
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", "files")  # legacy markdown layout contract
     from frontend.settings import default_app_data_dir
     from frontend.ui_web.project_chats import project_slug
     from backend.memory.project import list_entries, read_entry, save_entry
@@ -93,7 +94,8 @@ def test_save_and_get_entry_in_appdata_project_slug_dir(isolated_appdata, tmp_pa
     assert index[0]["description"] == "Device label convention"
 
 
-def test_nested_sub_entries_split_like_skills(isolated_appdata, tmp_path):
+def test_nested_sub_entries_split_like_skills(isolated_appdata, tmp_path, monkeypatch):
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", "files")  # legacy markdown layout contract
     """Saving entry/sub converts a flat entry into a dir with MEMORY.md + sub files."""
     from frontend.settings import default_app_data_dir
     from frontend.ui_web.project_chats import project_slug

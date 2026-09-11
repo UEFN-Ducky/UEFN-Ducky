@@ -21,6 +21,20 @@ MAX_ENTRIES = 500
 MAX_AGE_DAYS = 14
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("events")
+
+
+def _repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import events as repo
+
+    phase4.ensure("logs")
+    return repo
+
+
 def crashes_path() -> Path:
     return default_app_data_dir() / "agent_crashes.jsonl"
 
@@ -51,6 +65,14 @@ def record_crash(
         "thinking": thinking or "",
         "answer": answer or "",
     }
+    if _use_db():
+        try:
+            repo = _repo()
+            repo.insert("agent_crash", ts=entry["ts"], source=provider, message=entry["error"], payload=entry)
+            repo.trim("agent_crash", older_than=time.time() - MAX_AGE_DAYS * 86400, keep=MAX_ENTRIES)
+        except Exception:
+            pass
+        return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
@@ -62,6 +84,11 @@ def record_crash(
 
 def read_crashes(limit: int = MAX_ENTRIES) -> list[dict[str, Any]]:
     """Return crash records newest-first."""
+    if _use_db():
+        try:
+            return [r["payload"] for r in _repo().newest("agent_crash", limit=limit) if r.get("payload")]
+        except Exception:
+            return []
     path = crashes_path()
     if not path.is_file():
         return []

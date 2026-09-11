@@ -543,6 +543,15 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
     return None
 
 
+def conversation_title(conv_id: str, project_root: str | None = None) -> str:
+    """The sidebar title only; never loads message bodies on the row store."""
+    if _use_db():
+        doc = _repo().conv_get(conv_id, project_id=_project_id(project_root), with_messages=False)
+        return str((doc or {}).get("title") or "").strip()
+    conv = load_conversation(conv_id, project_root)
+    return str(getattr(conv, "title", "") or "").strip() if conv is not None else ""
+
+
 def sync_skill_snapshot(
     conv: Conversation, settings: Any, project_root: str | None = None
 ) -> bool:
