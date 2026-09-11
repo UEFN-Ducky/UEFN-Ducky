@@ -21,6 +21,14 @@ PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 # Cloudflare (and any reverse proxy) needs HTTP/1.1 + Content-Length.
 # Default BaseHTTPRequestHandler is HTTP/1.0 and 502s under keep-alive.
 _HTTP_PROTOCOL = "HTTP/1.1"
+# Document errors never show Python's "Error response" page. Iframe → parent
+# SPA; top-level → site /profile.
+_SITE_PROFILE = "https://uefnducky.org/profile"
+_GONE_HTML = (
+    b'<!doctype html><meta charset="utf-8"><script>'
+    b'parent.postMessage({type:"ud-remote-gone"},"https://uefnducky.org")'
+    b"</script>"
+)
 _COOKIE_NAME = "ducky_remote"
 _COOKIE_IDLE_S = 12 * 3600
 _LOGIN_TTL_S = 120
@@ -354,6 +362,29 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     "frame-ancestors 'self' https://uefnducky.org https://*.uefnducky.org",
                 )
                 super().end_headers()
+
+            def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+                path = urlparse(getattr(self, "path", "") or "/").path
+                if path.startswith("/__panel") or path.startswith("/__window"):
+                    super().send_error(code, message, explain)
+                    return
+                dest = (self.headers.get("Sec-Fetch-Dest") or "").lower()
+                accept = (self.headers.get("Accept") or "").lower()
+                htmlish = dest in ("document", "iframe") or "text/html" in accept
+                if not htmlish:
+                    super().send_error(code, message, explain)
+                    return
+                if dest == "iframe":
+                    self.send_response(code)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(_GONE_HTML)))
+                    self.end_headers()
+                    self.wfile.write(_GONE_HTML)
+                    return
+                self.send_response(302)
+                self.send_header("Location", _SITE_PROFILE)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def log_message(self, format: str, *args: object) -> None:
                 return

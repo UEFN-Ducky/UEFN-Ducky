@@ -90,3 +90,10 @@ def test_http11_keepalive_and_backlog():
     assert httpd._PanelServer.request_queue_size >= 128
     assert "timeout = 30" in src
     assert "1.0 / 24" in src
+
+
+def test_html_errors_never_show_python_404():
+    src = Path(httpd.__file__).read_text(encoding="utf-8")
+    assert "ud-remote-gone" in src
+    assert "https://uefnducky.org/profile" in src
+    assert "def send_error" in src
