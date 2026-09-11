@@ -10,6 +10,7 @@ import { usePluginContributions } from "../../hooks/usePluginContributions";
 import type { CodingAgentDto } from "../../types/panel";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { targetRef } from "../../ui-targets/registry";
+import { loginCanRetry, loginLinkPrompt } from "./codingAgentLoginCopy";
 
 function BotIcon() {
   return (
@@ -102,6 +103,7 @@ function CodingAgentLoginModal({
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const codeRef = useRef<HTMLInputElement>(null);
   const loggedIn = useRef(false);
   const startGen = useRef(0);
@@ -120,7 +122,10 @@ function CodingAgentLoginModal({
 
     const applyUrl = (url?: string) => {
       const next = String(url || "").trim();
-      if (next) setAuthUrl(next);
+      if (next) {
+        setAuthUrl(next);
+        setError("");
+      }
     };
 
     void (async () => {
@@ -156,7 +161,7 @@ function CodingAgentLoginModal({
             return;
           }
           applyUrl(st.auth_url);
-          if (st.session_alive === false && st.error) {
+          if (st.error && !String(st.auth_url || "").trim()) {
             setError(String(st.error));
           }
         } catch {
@@ -169,11 +174,19 @@ function CodingAgentLoginModal({
       cancelled = true;
       window.clearInterval(tick);
     };
-  }, [agentId]);
+  }, [agentId, attempt]);
 
   useEffect(() => {
     if (!starting && !submitting) codeRef.current?.focus();
   }, [starting, submitting]);
+
+  const retry = () => {
+    setError("");
+    setAuthUrl("");
+    setCode("");
+    setStarting(true);
+    setAttempt((n) => n + 1);
+  };
 
   const openLink = () => {
     const url = authUrl.trim();
@@ -206,6 +219,9 @@ function CodingAgentLoginModal({
     }
   };
 
+  const canRetry = loginCanRetry({ starting, authUrl, error });
+  const linkPrompt = loginLinkPrompt({ starting, authUrl, error });
+
   return (
     <Modal
       open
@@ -216,10 +232,10 @@ function CodingAgentLoginModal({
       footer={
         <ModalActions
           onCancel={onClose}
-          onConfirm={() => void submit()}
+          onConfirm={() => (canRetry ? retry() : void submit())}
           cancelLabel="Cancel"
-          confirmLabel={submitting ? "Submitting…" : "Submit"}
-          confirmDisabled={submitting || !code.trim() || !authUrl.trim()}
+          confirmLabel={canRetry ? "Try again" : submitting ? "Submitting…" : "Submit"}
+          confirmDisabled={canRetry ? false : submitting || !code.trim() || !authUrl.trim()}
         />
       }
     >
@@ -243,26 +259,28 @@ function CodingAgentLoginModal({
         >
           {authUrl}
         </button>
-      ) : (
-        <p className="general-tab-section-desc">{starting ? "Getting the sign-in link…" : "Waiting for the sign-in link…"}</p>
-      )}
-      <input
-        ref={codeRef}
-        className="settings-input"
-        type="text"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="Paste the login code"
-        value={code}
-        disabled={submitting}
-        onChange={(e) => setCode(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-      />
+      ) : linkPrompt ? (
+        <p className="general-tab-section-desc">{linkPrompt}</p>
+      ) : null}
+      {authUrl ? (
+        <input
+          ref={codeRef}
+          className="settings-input"
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Paste the login code"
+          value={code}
+          disabled={submitting}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void submit();
+            }
+          }}
+        />
+      ) : null}
       {error ? (
         <p className="llms-provider-status-text is-fail" style={{ marginTop: 8, marginBottom: 0 }}>
           {error}

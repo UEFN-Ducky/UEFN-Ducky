@@ -12,6 +12,15 @@ from typing import Any, Callable
 
 from frontend.ui_web.terminal.shells import TerminalShell, resolve_shell, shell_label
 
+
+def pty_argv(shell: str, spawn_argv: list[str] | None) -> list[str]:
+    """Argv for the PTY. A command spawn must not require Git Bash."""
+    if spawn_argv:
+        return [str(a) for a in spawn_argv]
+    _exe, argv = resolve_shell(shell)
+    return argv
+
+
 _OUTPUT_RING_MAX = 400
 _DONE_RE = re.compile(r"__DUCKY_DONE__(\d+)__")
 # Escape sequences that ask the terminal to REPLY (device attributes ESC[c,
@@ -181,9 +190,7 @@ class TerminalSession:
             fallback = PanelSettings.load().uefn_project_root.strip() or os.getcwd()
             self.cwd = fallback if os.path.isdir(fallback) else os.getcwd()
 
-        _exe, argv = resolve_shell(self.shell)
-        if self.spawn_argv:
-            argv = self.spawn_argv
+        argv = pty_argv(self.shell, self.spawn_argv)
         # pywinpty expects argv list — list2cmdline breaks Git Bash on Windows.
         # Refresh Path from the registry so installs added after Ducky launched
         # (e.g. Claude Code in %USERPROFILE%\.local\bin) are visible.
