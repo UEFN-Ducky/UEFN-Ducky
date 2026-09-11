@@ -1042,7 +1042,8 @@ def start_rpc_waiter() -> None:
         def _loop() -> None:
             while not _RPC_STOP.is_set():
                 try:
-                    _poll_desktop_rpc_once()
+                    if not _poll_desktop_rpc_once():
+                        _RPC_STOP.wait(1.0)
                 except Exception:
                     _RPC_STOP.wait(2.0)
 
