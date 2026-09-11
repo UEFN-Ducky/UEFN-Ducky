@@ -117,6 +117,20 @@ def _result(*, ok: bool, error: str | None, stage: str) -> dict[str, Any]:
     return {"ok": ok, "error": error, "stage": stage}
 
 
+def installer_url_allowed(url: str) -> bool:
+    """HTTPS anywhere; plain http only on this machine (local update rehearsal)."""
+    from urllib.parse import urlparse
+
+    text = (url or "").strip()
+    scheme = urlparse(text).scheme.lower()
+    if scheme == "https":
+        return True
+    if scheme == "http":
+        host = (urlparse(text).hostname or "").lower()
+        return host in ("127.0.0.1", "localhost", "::1")
+    return False
+
+
 def installer_cache_dir() -> Path:
     return Path(tempfile.gettempdir()) / "UEFN-Ducky"
 
@@ -336,7 +350,7 @@ def apply_update() -> dict[str, Any]:
     url = status["installer_url"]
     if not url:
         return _result(ok=False, error="Update feed has no installerUrl.", stage="check")
-    if not url.lower().startswith("https://"):
+    if not installer_url_allowed(url):
         return _result(ok=False, error=f"Refusing non-HTTPS installer URL: {url}", stage="check")
     sha256 = status["installer_sha256"]
     if not sha256:

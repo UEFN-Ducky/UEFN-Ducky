@@ -26,3 +26,26 @@ The frozen EXE can run the same first-boot pass by hand:
 
 Real samples the old code produced are checked in under
 `ducky_app/backend/store/fixtures/legacy/` and drive `test_upgrade_boot.py`.
+
+## Rehearsing the in-app update locally
+
+1. Install the current build normally (`dist/UEFN-Ducky-Setup-<current>.exe`).
+2. Build the next version (bump `frontend/__init__.py`, `build_exes.py --no-bump`,
+   `make_release_installer.ps1`) and serve it:
+
+   ```bash
+   py build/upgrade_proof/serve_update_feed.py dist/UEFN-Ducky-Setup-<next>.exe
+   ```
+
+3. Start the **installed** app with the feed pointed at the server:
+
+   ```bash
+   set DUCKY_UPDATE_BASE_URL=http://127.0.0.1:8765
+   "%LOCALAPPDATA%\Programs\UEFN Ducky\UEFN-Ducky.exe"
+   ```
+
+4. Settings → General → App → Check for updates → Update now. The app downloads
+   from the local server (sha256-verified), runs the Setup silently, and relaunches
+   as the next version with the same `ducky.db`.
+
+The updater accepts plain `http://` only for 127.0.0.1/localhost; production stays HTTPS.

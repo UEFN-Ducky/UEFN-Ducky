@@ -317,3 +317,86 @@ if __name__ == "__main__":
     test_setup_still_running_after_wait_sees_child()
     test_setup_still_running_after_wait_gone_is_false()
     print("ok")
+
+
+def test_installer_url_allowed_https_anywhere_http_only_loopback() -> None:
+    assert updater.installer_url_allowed("https://uefnducky.org/x/Setup.exe")
+    assert updater.installer_url_allowed("http://127.0.0.1:8765/UEFN-Ducky-Setup-1.2.1.exe")
+    assert updater.installer_url_allowed("http://localhost:1/x.exe")
+    assert not updater.installer_url_allowed("http://uefnducky.org/x/Setup.exe")
+    assert not updater.installer_url_allowed("http://10.0.0.5/x.exe")
+    assert not updater.installer_url_allowed("ftp://127.0.0.1/x.exe")
+    assert not updater.installer_url_allowed("")
+
+
+def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypatch) -> None:
+    """The exact path build/upgrade_proof/serve_update_feed.py exercises: feed
+    override → update_available → download from loopback → sha256 → Setup
+    launched. The "Setup" here is where.exe, which rejects the Inno switches and
+    exits non-zero, so the run ends as a declined install with the cache kept."""
+    import hashlib
+    import json
+    import shutil
+    import sys
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from frontend import version_check
+
+    fake_setup = tmp_path / "where.exe"
+    shutil.copy(r"C:\Windows\System32\where.exe", fake_setup)
+    digest = hashlib.sha256(fake_setup.read_bytes()).hexdigest()
+    payload = {"currentVersion": "9.9.9", "installerUrl": "/Setup-9.9.9.exe", "installerSha256": digest}
+    body = json.dumps({"handled": True, "payload": payload}).encode()
+    data = fake_setup.read_bytes()
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, content: bytes, ctype: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def do_POST(self):  # noqa: N802
+            self._send(body, "application/json")
+
+        def do_GET(self):  # noqa: N802
+            self._send(data, "application/octet-stream")
+
+        def log_message(self, *a):  # noqa: D401
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        monkeypatch.setenv(version_check.UPDATE_BASE_URL_ENV, base)
+        monkeypatch.setattr(version_check, "is_packaged_runtime", lambda: True)
+        monkeypatch.setattr("frontend.ui_web.web_dev.is_frozen_dev_exe", lambda: False)
+        monkeypatch.setattr(
+            "frontend.install_info.get_install_info",
+            lambda: {"installed": True, "install_location": str(tmp_path), "install_scope": "user"},
+        )
+        status = version_check.get_app_update_status()
+        assert status["update_available"] and status["remote_version"] == "9.9.9"
+        assert status["installer_url"] == f"{base}/Setup-9.9.9.exe"
+        assert status["installer_sha256"] == digest
+
+        cache = tmp_path / "cache"
+        monkeypatch.setattr(updater, "installer_cache_dir", lambda: cache)
+        monkeypatch.setattr(updater, "get_app_update_status", lambda: status)
+        monkeypatch.setattr(updater, "_stop_all_agents", lambda: None)
+        monkeypatch.setattr("frontend.frozen_process.kill_uefn_ducky_processes", lambda include_self=False: None)
+        assert sys.platform == "win32"
+        _reset_progress()
+        result = updater.apply_update()
+        # where.exe rejected /VERYSILENT… and exited non-zero: same as a declined UAC.
+        assert result["ok"] is False and result["stage"] == "installing"
+        assert "Installer did not finish" in str(result["error"])
+        dest = cache / "Setup-9.9.9.exe"
+        assert dest.is_file() and dest.read_bytes() == data  # verified download kept for retry
+        assert updater._cached_installer_usable(dest, digest)
+    finally:
+        srv.shutdown()
+        _reset_progress()
