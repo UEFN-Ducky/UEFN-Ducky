@@ -73,10 +73,26 @@ function normPoint(ev: { currentTarget: HTMLCanvasElement; clientX: number; clie
   };
 }
 
+function sendOverlaySize(ws: WebSocket, el: HTMLElement | null) {
+  if (ws.readyState !== WebSocket.OPEN || !el) return;
+  const r = el.getBoundingClientRect();
+  if (r.width < 80 || r.height < 80) return;
+  const dpr = window.devicePixelRatio || 1;
+  ws.send(
+    JSON.stringify({
+      type: "size",
+      w: Math.round(r.width * dpr),
+      h: Math.round(r.height * dpr),
+    }),
+  );
+}
+
 export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const lastMove = useRef(0);
+  const lastSize = useRef(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -97,6 +113,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       gotFrame = true;
       setFailed(false);
     };
+    ws.onopen = () => sendOverlaySize(ws, overlayRef.current);
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") return;
       const gen = ++frameGen;
@@ -133,6 +150,20 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   }, [hwnd]);
 
   useEffect(() => {
+    const el = overlayRef.current;
+    if (!el || !hwnd || failed) return;
+    const ro = new ResizeObserver(() => {
+      const now = performance.now();
+      if (now - lastSize.current < 200) return;
+      lastSize.current = now;
+      const sock = wsRef.current;
+      if (sock) sendOverlaySize(sock, el);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hwnd, failed]);
+
+  useEffect(() => {
     const el = canvasRef.current;
     if (!el || !hwnd || failed) return;
     const onWheel = (ev: WheelEvent) => {
@@ -164,7 +195,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   if (!hwnd) return null;
 
   return (
-    <div className="remote-window-overlay">
+    <div className="remote-window-overlay" ref={overlayRef}>
       {failed ? (
         <p className="remote-window-overlay-msg">Window unavailable (minimized or closed).</p>
       ) : (

@@ -14,8 +14,14 @@ import os
 import sys
 from typing import Any
 
-_MAX_EDGE = 1600
+_MAX_EDGE = 1280
 _KIND_ORDER = {"uefn": 0, "blender": 1, "app": 2}
+
+
+def window_fit_size(width: int, height: int) -> tuple[int, int]:
+    w = max(400, min(int(width or 0), 3840))
+    h = max(300, min(int(height or 0), 2160))
+    return w, h
 
 
 def kind_for(title: str, exe: str = "") -> str:
@@ -40,9 +46,8 @@ def jpeg_bytes(image: Any, *, max_edge: int = _MAX_EDGE) -> bytes:
         scale = max_edge / edge
         img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.BILINEAR)
     buf = io.BytesIO()
-    # ponytail: skip optimize=True (second Huffman pass) — encode speed matters
-    # more than ~2% size for the 15fps remote view stream.
-    img.save(buf, format="JPEG", quality=65)
+    # ponytail: skip optimize=True (second Huffman pass) — encode speed for 24fps.
+    img.save(buf, format="JPEG", quality=50)
     return buf.getvalue()
 
 
@@ -102,6 +107,23 @@ def bring_to_front(hwnd: int) -> bool:
     return True
 
 
+def fit_window(hwnd: int, width: int, height: int) -> bool:
+    if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
+        return False
+    box = _window_box(hwnd)
+    if not box:
+        return False
+    left, top, right, bottom = box
+    w, h = window_fit_size(width, height)
+    if abs((right - left) - w) < 8 and abs((bottom - top) - h) < 8:
+        return False
+    import ctypes
+
+    # SWP_NOZORDER | SWP_NOACTIVATE — resize without a focus fight that hitchs UEFN.
+    ctypes.windll.user32.SetWindowPos(hwnd, 0, int(left), int(top), int(w), int(h), 0x0014)
+    return True
+
+
 def inject_pointer(
     hwnd: int,
     kind: str,
@@ -153,6 +175,9 @@ def handle_stream_message(hwnd: int, payload: bytes) -> None:
     if not isinstance(event, dict):
         return
     kind = str(event.get("type") or "")
+    if kind == "size":
+        fit_window(hwnd, int(event.get("w") or 0), int(event.get("h") or 0))
+        return
     if kind in ("down", "up", "move", "wheel"):
         inject_pointer(
             hwnd,

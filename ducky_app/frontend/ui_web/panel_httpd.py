@@ -245,9 +245,8 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
             stop.set()
 
     threading.Thread(target=_reader, daemon=True, name="window-stream-in").start()
-    # 15 fps target: wait only leftover after capture+send. A fixed 200ms
-    # extra wait on top of JPEG encode made orbit look like skipped frames.
-    interval = 1.0 / 15
+    # 24 fps target: wait only leftover after capture+send.
+    interval = 1.0 / 24
     try:
         while not stop.is_set():
             t0 = time.monotonic()
@@ -347,6 +346,14 @@ def start_panel_ui_server(dist_root: Path) -> str:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = _HTTP_PROTOCOL
             timeout = 30
+
+            def end_headers(self) -> None:
+                # /ducky iframes the named host from uefnducky.org (same-site, cross-origin).
+                self.send_header(
+                    "Content-Security-Policy",
+                    "frame-ancestors 'self' https://uefnducky.org https://*.uefnducky.org",
+                )
+                super().end_headers()
 
             def log_message(self, format: str, *args: object) -> None:
                 return

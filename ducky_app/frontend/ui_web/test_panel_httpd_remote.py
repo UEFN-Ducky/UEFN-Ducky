@@ -84,8 +84,9 @@ def test_http11_for_cloudflare_origin():
 def test_http11_keepalive_and_backlog():
     """cloudflared pools origin sockets; Connection: close + backlog 5 caused 502s."""
     src = Path(httpd.__file__).read_text(encoding="utf-8")
-    assert "def end_headers(self)" not in src
     assert 'self.send_header("Connection", "close")' not in src
+    assert "frame-ancestors" in src
+    assert "X-Frame-Options" not in src
     assert httpd._PanelServer.request_queue_size >= 128
     assert "timeout = 30" in src
-    assert "1.0 / 15" in src
+    assert "1.0 / 24" in src
