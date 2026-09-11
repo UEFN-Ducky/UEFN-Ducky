@@ -1,9 +1,13 @@
-"""Reload WebView2 after a renderer/GPU death so the panel is not stuck black.
+"""Reload WebView2 after the *renderer* dies so the panel is not stuck black.
 
 WebView2 paints ``WEBVIEW2_DEFAULT_BACKGROUND_COLOR`` (#0a0a0a) when the
 renderer dies. Without ``ProcessFailed`` → Reload the window stays blank until
 the user kills the EXE. Overlay browser panes that die while Visible sit on
 top of the app and look the same.
+
+Do **not** Reload on Gpu / Utility / Sandbox exits — those fire during tab
+switches and compositor recycle. Reloading remounts React (Checking… forever,
+every click stutters).
 """
 
 from __future__ import annotations
@@ -14,6 +18,42 @@ from typing import Any, Callable
 _DEBOUNCE_S = 3.0
 _last_recover: dict[int, float] = {}
 _attached: set[int] = set()
+
+# CoreWebView2ProcessFailedKind: only these leave a dead document.
+_RECOVER_KIND_NAMES = frozenset(
+    {
+        "browserprocessexited",
+        "renderprocessexited",
+        "renderprocessunresponsive",
+    }
+)
+_RECOVER_KIND_INTS = frozenset({0, 1, 2})
+
+
+def process_fail_kind(event: Any) -> str:
+    """Normalize ProcessFailedKind to a short lower name or digit string."""
+    raw = getattr(event, "ProcessFailedKind", "") if event is not None else ""
+    try:
+        return str(int(raw))
+    except (TypeError, ValueError):
+        pass
+    name = getattr(raw, "name", None) or str(raw or "")
+    return str(name).split(".")[-1].strip().lower()
+
+
+def should_recover_process_fail(kind: str | int | None) -> bool:
+    """True only when the document process is gone (not GPU/utility recycle)."""
+    if kind is None or kind is False:
+        return False
+    try:
+        if int(kind) in _RECOVER_KIND_INTS:
+            return True
+    except (TypeError, ValueError):
+        pass
+    k = str(kind).split(".")[-1].strip().lower()
+    if k.isdigit():
+        return int(k) in _RECOVER_KIND_INTS
+    return k in _RECOVER_KIND_NAMES
 
 
 def recover_core_webview(core: Any, *, reason: str = "") -> dict[str, Any]:
@@ -59,11 +99,9 @@ def attach_process_failed(
         return None
 
     def _on_fail(_sender: Any, event: Any) -> None:
-        kind = ""
-        try:
-            kind = str(getattr(event, "ProcessFailedKind", "") or "")
-        except Exception:
-            pass
+        kind = process_fail_kind(event)
+        if not should_recover_process_fail(kind):
+            return
         reason = f"{label}:{kind}" if kind else label
         # Overlay panes: hide first so a dead control cannot cover the app.
         if on_fail is not None:

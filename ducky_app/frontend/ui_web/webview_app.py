@@ -481,12 +481,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     def _on_shown() -> None:
         threading.Thread(target=_apply_window_icon, daemon=True, name="window-icon").start()
-        try:
-            from frontend.ui_web.webview_recover import nudge_webview_visible
-
-            nudge_webview_visible(window)
-        except Exception:
-            pass
 
     window.events.shown += _on_shown
 
