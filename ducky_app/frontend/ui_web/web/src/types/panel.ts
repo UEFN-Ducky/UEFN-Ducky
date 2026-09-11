@@ -2569,6 +2569,7 @@ export interface PanelApi {
   report_ui_perf(entries: Array<Record<string, unknown>>): Promise<boolean>;
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
   list_running_agents(): Promise<string[]>;
+  list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
   pick_project_path(): Promise<string | null>;
   deploy(project_path?: string): Promise<string[]>;
   deploy_all_projects(): Promise<string[]>;

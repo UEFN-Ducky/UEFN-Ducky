@@ -25,6 +25,7 @@ import {
   sortPluginHeaderButtons,
 } from "../hooks/pluginHeaderActions";
 import { useUiTarget } from "../ui-targets/registry";
+import { RemoteWindowSelect } from "./RemoteWindowView";
 
 interface HeaderProps {
   variant?: "main" | "focus";
@@ -44,6 +45,8 @@ interface HeaderProps {
   onCloseWindow?: () => void;
   onProblemsOpenChange?: (open: boolean) => void;
   showQuickOpen?: boolean;
+  watchWindowId?: string;
+  onWatchWindowId?: (id: string) => void;
 }
 
 const LAYOUT_TOGGLE_META: Record<ChatLayoutMode, { title: string; Icon: () => JSX.Element }> = {
@@ -74,6 +77,8 @@ export function Header({
   onCloseWindow,
   onProblemsOpenChange,
   showQuickOpen = false,
+  watchWindowId = "",
+  onWatchWindowId,
 }: HeaderProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const isFocus = variant === "focus";
@@ -431,6 +436,10 @@ export function Header({
         ) : null}
 
         <div className="app-header-divider" />
+
+        {isRemote() && onWatchWindowId ? (
+          <RemoteWindowSelect value={watchWindowId} onChange={onWatchWindowId} />
+        ) : null}
 
         {isRemote() ? null : (
         <div className="window-controls">

@@ -64,6 +64,7 @@ def test_local_bridge_paths_stay_loopback(remote_auth):
     header = f"{httpd._COOKIE_NAME}={cookie}"
     assert not httpd.request_is_authorized(host, "/__panel_run", header)
     assert httpd.request_is_authorized("127.0.0.1:4199", "/__panel_run", None)
+    assert httpd.request_is_authorized(host, "/__window_view", header)
 
 
 def test_publish_panel_events_reaches_pollers():

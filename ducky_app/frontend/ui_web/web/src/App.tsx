@@ -20,6 +20,7 @@ import { VerseDiagnosticsSettingsProvider } from "./contexts/VerseDiagnosticsSet
 import { TerminalsSettingsProvider } from "./contexts/TerminalsSettingsContext";
 import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsContext";
 import { Header } from "./components/Header";
+import { RemoteWindowOverlay } from "./components/RemoteWindowView";
 import { WindowDrag } from "./components/WindowDrag";
 import { WindowResize } from "./components/WindowResize";
 import { ChatView } from "./views/ChatView";
@@ -110,6 +111,7 @@ export default function App() {
     return <FocusView focusId={focusId} />;
   }
   const [currentView, setCurrentView] = useState<ViewId>("chat");
+  const [watchWindowId, setWatchWindowId] = useState("");
   const { mode: layoutMode, setMode: setLayoutMode } = useChatLayoutMode();
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const [projectRefresh, setProjectRefresh] = useState(0);
@@ -224,9 +226,12 @@ export default function App() {
           hasProject={hasProject}
           showQuickOpen={hasProject}
           onProjectChanged={bumpSidebar}
+          watchWindowId={watchWindowId}
+          onWatchWindowId={setWatchWindowId}
         />
 
         <main className="app-main">{mainContent}</main>
+        {watchWindowId ? <RemoteWindowOverlay hwnd={watchWindowId} /> : null}
       </div>
       {versionCheck.status?.remote_version && (
         <UpdateAvailableModal

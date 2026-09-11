@@ -547,6 +547,25 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     cursor, events = _poll_panel_events(since)
                     self._send_json(200, {"cursor": cursor, "events": events})
                     return
+                if parsed.path == "/__window_view":
+                    query = parse_qs(parsed.query)
+                    try:
+                        hwnd = int((query.get("id") or ["0"])[0])
+                    except (TypeError, ValueError):
+                        hwnd = 0
+                    from frontend.window_view import capture_window_jpeg
+
+                    raw = capture_window_jpeg(hwnd)
+                    if not raw:
+                        self.send_error(404)
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 # Re-poll leg of a long UI request (require_click): the POST leg
                 # returned {pending, request_id} and the caller waits here until
                 # the user answers or its own budget runs out.

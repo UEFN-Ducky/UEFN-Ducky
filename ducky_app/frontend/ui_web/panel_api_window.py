@@ -228,6 +228,11 @@ class PanelApiWindowMixin:
 
         focus_windows.raise_focus_window(focus_id)
 
+    def list_window_views(self) -> list[dict[str, Any]]:
+        from frontend.window_view import list_window_views
+
+        return list_window_views()
+
     # ── Browser panes (native WebView2 pinned inside a window; plugin web panes) ──
 
     def browser_pane_open(self, pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
