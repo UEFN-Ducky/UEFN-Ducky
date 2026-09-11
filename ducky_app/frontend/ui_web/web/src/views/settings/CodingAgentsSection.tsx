@@ -104,11 +104,13 @@ function CodingAgentLoginModal({
   const [submitting, setSubmitting] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
   const loggedIn = useRef(false);
+  const startGen = useRef(0);
   const onLoggedInRef = useRef(onLoggedIn);
   onLoggedInRef.current = onLoggedIn;
 
   useEffect(() => {
     let cancelled = false;
+    const gen = ++startGen.current;
     const api = getApi();
     if (!api?.coding_agent_login) {
       setStarting(false);
@@ -124,7 +126,7 @@ function CodingAgentLoginModal({
     void (async () => {
       try {
         const res = await api.coding_agent_login(agentId);
-        if (cancelled) return;
+        if (cancelled || gen !== startGen.current) return;
         if (res.logged_in) {
           loggedIn.current = true;
           onLoggedInRef.current();
@@ -136,9 +138,9 @@ function CodingAgentLoginModal({
         }
         applyUrl(res.auth_url);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled && gen === startGen.current) setError(e instanceof Error ? e.message : String(e));
       } finally {
-        if (!cancelled) setStarting(false);
+        if (!cancelled && gen === startGen.current) setStarting(false);
       }
     })();
 
@@ -147,13 +149,16 @@ function CodingAgentLoginModal({
       void (async () => {
         try {
           const st = await api.coding_agent_login_status(agentId);
-          if (cancelled || loggedIn.current) return;
+          if (cancelled || loggedIn.current || gen !== startGen.current) return;
           if (st.logged_in) {
             loggedIn.current = true;
             onLoggedInRef.current();
             return;
           }
           applyUrl(st.auth_url);
+          if (st.session_alive === false && st.error) {
+            setError(String(st.error));
+          }
         } catch {
           /* poll is best-effort */
         }
@@ -191,6 +196,8 @@ function CodingAgentLoginModal({
         onLoggedInRef.current();
         return;
       }
+      const nextUrl = String(res.auth_url || "").trim();
+      if (nextUrl) setAuthUrl(nextUrl);
       setError(String(res.error || res.message || "Claude did not accept that code."));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -212,7 +219,7 @@ function CodingAgentLoginModal({
           onConfirm={() => void submit()}
           cancelLabel="Cancel"
           confirmLabel={submitting ? "Submitting…" : "Submit"}
-          confirmDisabled={submitting || !code.trim()}
+          confirmDisabled={submitting || !code.trim() || !authUrl.trim()}
         />
       }
     >

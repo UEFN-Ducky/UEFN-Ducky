@@ -49,6 +49,7 @@ export function DuckyProfilePicker({
               type="button"
               className="ducky-profile-picker-icon"
               onClick={onBlank}
+              disabled={creating}
               aria-label="Create new — custom setup"
               title="Create new — custom setup"
             >
@@ -67,6 +68,7 @@ export function DuckyProfilePicker({
                 className="ducky-profile-picker-edit-btn"
                 aria-label={`Edit ${profile.name} profile`}
                 title="Edit profile"
+                disabled={creating}
                 onClick={(e) => {
                   e.stopPropagation();
                   onEditProfile(profile);
@@ -78,6 +80,7 @@ export function DuckyProfilePicker({
                 type="button"
                 className="ducky-profile-picker-icon"
                 onClick={() => onPick(profile)}
+                disabled={creating}
                 aria-label={profile.name}
                 title={profile.name}
               >

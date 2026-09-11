@@ -39,6 +39,7 @@ import {
 } from "../../hooks/modelsCatalogCache";
 import { getCachedCodingAgents, subscribeCodingAgents } from "../../hooks/codingAgentsCache";
 import { duckyPickerIssue } from "./duckyPickerIssue";
+import { editorPrimaryLabel } from "./duckyProfileModalLabels";
 
 type CreateStep = "pick" | "edit";
 
@@ -115,6 +116,7 @@ export function DuckyProfileModal({
     thinkingEffort: "off",
   });
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [leavePrompt, setLeavePrompt] = useState(false);
@@ -160,8 +162,14 @@ export function DuckyProfileModal({
   useEffect(() => {
     if (!open || !state) {
       setCreateStep("pick");
+      setSaving(false);
+      setCreating(false);
+      setLeaveSaving(false);
       return;
     }
+    setSaving(false);
+    setCreating(false);
+    setLeaveSaving(false);
     setLoading(true);
     setCreateStep(state.mode === "create" ? "pick" : "edit");
     void (async () => {
@@ -231,7 +239,8 @@ export function DuckyProfileModal({
     [blankProfileId, defaultStyle, markClean],
   );
   const openBlankEditor = () => {
-    if (!catalog) return;
+    if (!catalog || creating) return;
+    setCreating(false);
     setSelectedProfileId(blankProfileId || BLANK_PROFILE_ID);
     setForm((prev) => {
       const next = {
@@ -244,7 +253,8 @@ export function DuckyProfileModal({
     setCreateStep("edit");
   };
   const openProfileEditor = (profile: AgentProfileDto) => {
-    if (!catalog) return;
+    if (!catalog || creating) return;
+    setCreating(false);
     applyProfileSelection(profile.id, profiles, catalog);
     setCreateStep("edit");
   };
@@ -317,20 +327,21 @@ export function DuckyProfileModal({
     [],
   );
   const handleProfilePick = async (profile: AgentProfileDto) => {
-    if (saving) return;
+    if (creating || saving) return;
     const formState = profileToForm(profile);
-    setSaving(true);
+    setCreating(true);
     try {
       await createFromForm(formState, profile.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      setCreating(false);
       if (isModelGateError(message)) {
         openModelGate(formState, "create-chat", message, profile.id);
       } else {
         await alert({ title: "Could not create ducky", message: message || "Unknown error." });
       }
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   };
   const saveProfile = async (formState: DuckyProfileFormState = form) => {
@@ -358,6 +369,7 @@ export function DuckyProfileModal({
       markClean(form);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      setSaving(false);
       if (isModelGateError(message)) {
         openModelGate(form, "save-profile", message, selectedProfileId);
       } else {
@@ -396,6 +408,7 @@ export function DuckyProfileModal({
       else await saveChatConfig(next);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      setSaving(false);
       await alert({ title: gate.title, message: message || "Unknown error." });
     } finally {
       setSaving(false);
@@ -446,6 +459,7 @@ export function DuckyProfileModal({
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      setSaving(false);
       if (isModelGateError(message)) {
         openModelGate(
           form,
@@ -525,7 +539,15 @@ export function DuckyProfileModal({
             </div>
             {isCreate ? (
               <div className="ducky-profile-modal-footer-secondary">
-                <button type="button" className="modal-btn modal-btn-muted" onClick={() => setCreateStep("pick")}>
+                <button
+                  type="button"
+                  className="modal-btn modal-btn-muted"
+                  onClick={() => {
+                    setCreating(false);
+                    setSaving(false);
+                    setCreateStep("pick");
+                  }}
+                >
                   Back
                 </button>
               </div>
@@ -549,15 +571,7 @@ export function DuckyProfileModal({
             ) : null}
             <ModalActions
               cancelLabel="Cancel"
-              confirmLabel={
-                saving
-                  ? "Saving…"
-                  : isCreate
-                    ? "Create ducky"
-                    : hasUnsavedChanges
-                      ? "Save ducky · pending"
-                      : "Save ducky"
-              }
+              confirmLabel={editorPrimaryLabel({ saving, isCreate, hasUnsavedChanges })}
               confirmDisabled={saving || loading || (!isCreate && !hasUnsavedChanges)}
               confirmClassName={saveBtnClass}
               onCancel={requestClose}
@@ -588,7 +602,7 @@ export function DuckyProfileModal({
                 <DuckyProfilePicker
                   profiles={profiles}
                   issue={pickerIssue}
-                  creating={saving}
+                  creating={creating}
                   onIssueAction={
                     pickerIssue
                       ? () => {

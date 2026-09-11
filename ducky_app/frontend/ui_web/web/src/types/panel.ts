@@ -2290,7 +2290,14 @@ export interface PanelApi {
   coding_agent_login_submit(
     agent_id: string,
     code: string,
-  ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string }>;
+  ): Promise<{
+    ok: boolean;
+    logged_in?: boolean;
+    message?: string;
+    error?: string;
+    auth_url?: string;
+    restarted?: boolean;
+  }>;
   coding_agent_login_status(
     agent_id: string,
   ): Promise<{
@@ -2300,6 +2307,7 @@ export interface PanelApi {
     error?: string;
     login_ui?: string;
     terminal_session_id?: string;
+    session_alive?: boolean;
   }>;
   coding_agent_login_cancel(
     agent_id: string,
