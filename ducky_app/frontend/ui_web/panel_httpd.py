@@ -33,6 +33,13 @@ _LOCAL_BRIDGE_PATHS = frozenset(
 # caller re-polls. Kept under the client's per-round timeout in backend.panel.rpc.
 _RPC_HANDLER_WAIT_S = 20.0
 
+class _PanelServer(ThreadingHTTPServer):
+    # Default backlog is 5; cloudflared + a React mount burst overflows it
+    # (connection refused → Cloudflare 502). 128 holds the SYN queue.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 _server: ThreadingHTTPServer | None = None
 _server_lock = threading.Lock()
 _root: Path | None = None
@@ -333,16 +340,10 @@ def start_panel_ui_server(dist_root: Path) -> str:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = _HTTP_PROTOCOL
+            timeout = 120
 
             def log_message(self, format: str, *args: object) -> None:
                 return
-
-            def end_headers(self) -> None:
-                # cloudflared default keepAliveConnections=100 + HTTP/1.1 reuse
-                # 502s this handler. Close every response (JSON, static, errors).
-                self.send_header("Connection", "close")
-                self.close_connection = True
-                super().end_headers()
 
             def handle(self) -> None:
                 peer = self.client_address[0]
@@ -350,6 +351,13 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.send_error(403)
                     return
                 super().handle()
+
+            def _close_if_chunked(self) -> None:
+                # We only read Content-Length bodies. Leftover chunked bytes
+                # would poison the next keep-alive request on this socket.
+                te = (self.headers.get("Transfer-Encoding") or "").lower()
+                if "chunked" in te and not (self.headers.get("Content-Length") or "").strip():
+                    self.close_connection = True
 
             def _request_host(self) -> str:
                 return (self.headers.get("Host") or "").strip().lower()
@@ -376,6 +384,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 self.wfile.write(data)
 
             def do_POST(self) -> None:
+                self._close_if_chunked()
                 path = urlparse(self.path).path
                 if not self._remote_authorized(path):
                     self.send_error(403)
@@ -588,6 +597,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         "Set-Cookie",
                         f"{_COOKIE_NAME}={cookie}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={_COOKIE_IDLE_S}",
                     )
+                    self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
                 if parsed.path == "/__panel_events":
@@ -632,6 +642,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     from frontend.ui_web.terminal.ws_util import websocket_upgrade_response
 
                     self.close_connection = True
+                    self.connection.settimeout(None)
                     self.connection.sendall(websocket_upgrade_response(key))
                     _serve_window_stream(self.connection, hwnd)
                     return
@@ -726,6 +737,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     except ValueError:
                         self.send_response(416)
                         self.send_header("Content-Range", f"bytes */{file_size}")
+                        self.send_header("Content-Length", "0")
                         self.end_headers()
                         return
                     mime = media_content_type(file_path)
@@ -802,7 +814,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 self.end_headers()
                 self.wfile.write(data)
 
-        _server = ThreadingHTTPServer(("127.0.0.1", PANEL_UI_HTTP_PORT), Handler)
+        _server = _PanelServer(("127.0.0.1", PANEL_UI_HTTP_PORT), Handler)
         threading.Thread(target=_server.serve_forever, daemon=True, name="panel-ui-http").start()
 
     return panel_ui_http_url()

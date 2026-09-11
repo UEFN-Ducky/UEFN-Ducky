@@ -1883,6 +1883,7 @@ export interface PanelApi {
     running?: boolean;
     mode?: string;
     error?: string;
+    named_reason?: string;
     site_update_pending?: boolean;
     sessions?: number;
   }>;
@@ -1893,6 +1894,7 @@ export interface PanelApi {
     running?: boolean;
     mode?: string;
     error?: string;
+    named_reason?: string;
     site_update_pending?: boolean;
     sessions?: number;
   }>;

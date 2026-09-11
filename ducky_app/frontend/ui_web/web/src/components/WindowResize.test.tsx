@@ -9,6 +9,7 @@ const { bounds, setBounds } = vi.hoisted(() => ({
 }));
 vi.mock("../hooks/usePanelApi", () => ({
   getApi: () => ({ get_window_bounds: bounds, set_window_bounds: setBounds }),
+  isRemote: () => false,
 }));
 
 const bridge = vi.fn();

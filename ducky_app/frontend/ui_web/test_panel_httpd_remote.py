@@ -81,8 +81,10 @@ def test_http11_for_cloudflare_origin():
     assert httpd._HTTP_PROTOCOL == "HTTP/1.1"
 
 
-def test_json_responses_close_keep_alive():
-    """Cloudflare 502s if HTTP/1.0 origin drops a keep-alive socket mid-reuse."""
+def test_http11_keepalive_and_backlog():
+    """cloudflared pools origin sockets; Connection: close + backlog 5 caused 502s."""
     src = Path(httpd.__file__).read_text(encoding="utf-8")
-    assert "self.send_header(\"Connection\", \"close\")" in src
-    assert "def end_headers(self)" in src
+    assert "def end_headers(self)" not in src
+    assert 'self.send_header("Connection", "close")' not in src
+    assert httpd._PanelServer.request_queue_size >= 128
+    assert "timeout = 120" in src

@@ -33,8 +33,10 @@ _STATUS: dict[str, Any] = {
     "mode": "",
     "hostname": "",
     "error": "",
+    "named_reason": "",
     "site_update_pending": False,
 }
+_LOG_MAX = 1_000_000
 
 
 def remote_tunnel_status() -> dict[str, Any]:
@@ -66,6 +68,24 @@ def ensure_cloudflared() -> Path:
 def _set_status(**kwargs: Any) -> None:
     with _LOCK:
         _STATUS.update(kwargs)
+
+
+def _cloudflared_log_path() -> Path:
+    return default_app_data_dir() / "diagnostics" / "cloudflared.log"
+
+
+def _append_cloudflared_log(text: str) -> None:
+    if not text:
+        return
+    path = _cloudflared_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > _LOG_MAX:
+            path.write_text("", encoding="utf-8")
+        with path.open("a", encoding="utf-8", errors="replace") as fh:
+            fh.write(text if text.endswith("\n") else text + "\n")
+    except OSError:
+        pass
 
 
 def _fetch_tunnel_token() -> dict[str, Any]:
@@ -147,10 +167,11 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
                 tail.append(text)
                 if len(tail) > 8:
                     tail.pop(0)
+                _append_cloudflared_log(text)
             match = _QUICK_HOST_RE.search(line or "")
             if match:
                 hostname = match.group(0).removeprefix("https://")
-                _set_status(hostname=hostname, running=True, error="")
+                _set_status(hostname=hostname, running=True)
             if (
                 time.monotonic() - last_named_check > 15
                 and str(remote_tunnel_status().get("mode") or "") == "quick"
@@ -158,6 +179,9 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
                 last_named_check = time.monotonic()
                 try:
                     row = _fetch_tunnel_token()
+                    reason = str(row.get("reason") or "").strip()
+                    if reason:
+                        _set_status(named_reason=reason[:240])
                     if str(row.get("mode") or "") == "named" and row.get("token"):
                         proc.terminate()
                         break
@@ -187,7 +211,7 @@ def _loop() -> None:
         try:
             s = PanelSettings.load()
             if not bool(getattr(s, "remote_access", False)):
-                _set_status(running=False, mode="", error="")
+                _set_status(running=False, mode="", error="", named_reason="")
                 _STOP.wait(2.0)
                 continue
             if not str(remote_tunnel_status().get("hostname") or "").strip():
@@ -198,7 +222,7 @@ def _loop() -> None:
             mode = str(row.get("mode") or "")
             reason = str(row.get("reason") or "").strip()
             if reason:
-                _set_status(error=reason[:240])
+                _set_status(named_reason=reason[:240])
             if mode == "pending":
                 _set_status(
                     running=False,
@@ -212,20 +236,18 @@ def _loop() -> None:
             url = f"http://127.0.0.1:{PANEL_UI_HTTP_PORT}"
             if mode == "named" and row.get("token"):
                 host = str(row.get("hostname") or "")
-                _set_status(mode="named", hostname=host, running=True, error="")
+                _set_status(mode="named", hostname=host, running=True, error="", named_reason="")
                 _run_cloudflared(
                     exe,
                     ["tunnel", "--no-autoupdate", "run", "--token", str(row["token"])],
                 )
             else:
-                _set_status(mode="quick", running=False, error="")
+                _set_status(mode="quick", running=False)
                 _run_cloudflared(
                     exe,
                     [
                         "tunnel",
                         "--no-autoupdate",
-                        "--proxy-keepalive-connections",
-                        "0",
                         "--no-chunked-encoding",
                         "--url",
                         url,

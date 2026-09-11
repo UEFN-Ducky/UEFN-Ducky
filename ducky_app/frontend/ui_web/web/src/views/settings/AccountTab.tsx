@@ -21,6 +21,7 @@ export function AccountTab() {
     running?: boolean;
     mode?: string;
     error?: string;
+    named_reason?: string;
     site_update_pending?: boolean;
     sessions?: number;
   } | null>(null);
@@ -258,6 +259,11 @@ export function AccountTab() {
             {remote?.hostname ? (
               <p className="account-tab-meta">
                 Host: <code>{remote.hostname}</code>
+              </p>
+            ) : null}
+            {remote?.mode === "quick" && remote?.named_reason ? (
+              <p className="account-tab-body account-tab-warn-text">
+                Own domain unavailable: {remote.named_reason}
               </p>
             ) : null}
             {remote?.mode === "quick" ? (

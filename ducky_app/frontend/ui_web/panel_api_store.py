@@ -177,6 +177,7 @@ class PanelApiStoreMixin:
             "running": bool(st.get("running")),
             "mode": str(st.get("mode") or ""),
             "error": str(st.get("error") or ""),
+            "named_reason": str(st.get("named_reason") or ""),
             "site_update_pending": bool(st.get("site_update_pending")),
             "sessions": remote_session_count(),
         }

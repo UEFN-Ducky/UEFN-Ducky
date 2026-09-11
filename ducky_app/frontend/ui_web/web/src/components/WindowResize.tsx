@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import {
   beginNativeWindowResize,
   isNativeWindowChrome,
@@ -153,6 +153,7 @@ export function WindowResize({ focusMode = false, compactMode = false }: WindowR
   };
 
   const edges = useNative ? NATIVE_GRIPS : GRIPS;
+  if (isRemote()) return null;
 
   return createPortal(
     <>
