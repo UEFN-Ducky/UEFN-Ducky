@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
+import { ChoiceDropdown } from "./ChoiceDropdown";
 
 export type WindowViewRow = { id: string; title: string; kind?: string };
 
@@ -12,57 +13,135 @@ export function RemoteWindowSelect({
 }) {
   const [rows, setRows] = useState<WindowViewRow[]>([]);
 
+  const load = useCallback(async () => {
+    if (!isRemote()) return;
+    const api = getApi();
+    if (!api?.list_window_views) return;
+    try {
+      const next = await api.list_window_views();
+      if (Array.isArray(next)) setRows(next);
+    } catch {
+      setRows([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isRemote()) return;
-    let cancelled = false;
-    const load = async () => {
-      const api = getApi();
-      if (!api?.list_window_views) return;
-      try {
-        const next = await api.list_window_views();
-        if (!cancelled && Array.isArray(next)) setRows(next);
-      } catch {
-        if (!cancelled) setRows([]);
-      }
-    };
     void load();
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
+    const id = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(id);
+  }, [load]);
 
   if (!isRemote()) return null;
 
   return (
-    <label className="remote-window-select no-drag">
+    <div className="remote-window-select no-drag" onPointerDown={() => void load()}>
       <span className="remote-window-select-label">View</span>
-      <select
+      <ChoiceDropdown
+        size="compact"
+        aria-label="Window to control"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        title="Look at another window on this PC"
-      >
-        <option value="">Ducky</option>
-        {rows.map((row) => (
-          <option key={row.id} value={row.id}>
-            {row.title}
-          </option>
-        ))}
-      </select>
-    </label>
+        minWidth={280}
+        placeholder="Ducky"
+        onChange={onChange}
+        options={[
+          { value: "", label: "Ducky", group: "This app" },
+          ...rows.map((row) => ({
+            value: row.id,
+            label: row.title,
+            group:
+              row.kind === "uefn" ? "UEFN" : row.kind === "blender" ? "Blender" : "Windows",
+          })),
+        ]}
+      />
+    </div>
   );
 }
 
+function wsUrl(hwnd: string): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/__window_stream?id=${encodeURIComponent(hwnd)}`;
+}
+
+function normPoint(ev: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }) {
+  const r = ev.currentTarget.getBoundingClientRect();
+  const w = r.width || 1;
+  const h = r.height || 1;
+  return {
+    x: Math.min(1, Math.max(0, (ev.clientX - r.left) / w)),
+    y: Math.min(1, Math.max(0, (ev.clientY - r.top) / h)),
+  };
+}
+
 export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
-  const [tick, setTick] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const lastMove = useRef(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!hwnd) return;
     setFailed(false);
-    const id = window.setInterval(() => setTick((n) => n + 1), 450);
-    return () => window.clearInterval(id);
+    const ws = new WebSocket(wsUrl(hwnd));
+    ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
+    let gotFrame = false;
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") return;
+      const blob = new Blob([ev.data], { type: "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          if (canvas.width !== img.width) canvas.width = img.width;
+          if (canvas.height !== img.height) canvas.height = img.height;
+          canvas.getContext("2d")?.drawImage(img, 0, 0);
+        }
+        URL.revokeObjectURL(url);
+        gotFrame = true;
+        setFailed(false);
+      };
+      img.onerror = () => URL.revokeObjectURL(url);
+      img.src = url;
+    };
+    ws.onclose = () => {
+      if (wsRef.current === ws && !gotFrame) setFailed(true);
+    };
+    return () => {
+      wsRef.current = null;
+      ws.close();
+    };
   }, [hwnd]);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || !hwnd || failed) return;
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const r = el.getBoundingClientRect();
+      const w = r.width || 1;
+      const h = r.height || 1;
+      ws.send(
+        JSON.stringify({
+          type: "wheel",
+          x: Math.min(1, Math.max(0, (ev.clientX - r.left) / w)),
+          y: Math.min(1, Math.max(0, (ev.clientY - r.top) / h)),
+          delta: ev.deltaY > 0 ? 1 : -1,
+        }),
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [hwnd, failed]);
+
+  const send = (payload: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(payload));
+  };
 
   if (!hwnd) return null;
 
@@ -71,11 +150,36 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       {failed ? (
         <p className="remote-window-overlay-msg">Window unavailable (minimized or closed).</p>
       ) : (
-        <img
-          alt=""
-          src={`/__window_view?id=${encodeURIComponent(hwnd)}&t=${tick}`}
-          onError={() => setFailed(true)}
-          onLoad={() => setFailed(false)}
+        <canvas
+          ref={canvasRef}
+          tabIndex={0}
+          className="remote-window-canvas"
+          onPointerDown={(ev) => {
+            ev.preventDefault();
+            ev.currentTarget.focus();
+            ev.currentTarget.setPointerCapture(ev.pointerId);
+            const { x, y } = normPoint(ev);
+            send({ type: "down", x, y, button: ev.button });
+          }}
+          onPointerUp={(ev) => {
+            const { x, y } = normPoint(ev);
+            send({ type: "up", x, y, button: ev.button });
+          }}
+          onPointerMove={(ev) => {
+            const now = performance.now();
+            if (ev.buttons === 0 && now - lastMove.current < 25) return;
+            lastMove.current = now;
+            const { x, y } = normPoint(ev);
+            send({ type: "move", x, y, button: ev.button });
+          }}
+          onKeyDown={(ev) => {
+            ev.preventDefault();
+            send({ type: "keydown", key: ev.key });
+          }}
+          onKeyUp={(ev) => {
+            ev.preventDefault();
+            send({ type: "keyup", key: ev.key });
+          }}
         />
       )}
     </div>

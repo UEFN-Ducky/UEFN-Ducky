@@ -17,9 +17,13 @@ function _set(value: boolean) {
 }
 
 async function _sync() {
-  const api = getApi();
-  if (!api?.has_any_api_key) return;
-  _set(await api.has_any_api_key());
+  try {
+    const api = getApi();
+    if (!api?.has_any_api_key) return;
+    _set(await api.has_any_api_key());
+  } catch {
+    /* tunnel blip — next interval retries */
+  }
 }
 
 function _ensureStarted() {

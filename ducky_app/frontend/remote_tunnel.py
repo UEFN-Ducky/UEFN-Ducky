@@ -7,6 +7,7 @@ logged in and Settings → Account → Remote access is on (default off).
 from __future__ import annotations
 
 import os
+import queue
 import re
 import subprocess
 import threading
@@ -112,6 +113,7 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
     """Run until stop or exit. Returns last hostname seen on stderr."""
     hostname = ""
     tail: list[str] = []
+    last_named_check = time.monotonic()
     proc = subprocess.Popen(
         [str(exe), *args],
         stdout=subprocess.PIPE,
@@ -123,9 +125,22 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
     )
     try:
         assert proc.stdout is not None
+        lines: queue.Queue[str | None] = queue.Queue()
+
+        def _reader() -> None:
+            try:
+                for raw in proc.stdout:
+                    lines.put(raw)
+            finally:
+                lines.put(None)
+
+        threading.Thread(target=_reader, daemon=True, name="ducky-cloudflared-out").start()
         while not _STOP.is_set():
-            line = proc.stdout.readline()
-            if not line and proc.poll() is not None:
+            try:
+                line = lines.get(timeout=1.0)
+            except queue.Empty:
+                line = ""
+            if line is None:
                 break
             text = (line or "").strip()
             if text:
@@ -136,6 +151,18 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
             if match:
                 hostname = match.group(0).removeprefix("https://")
                 _set_status(hostname=hostname, running=True, error="")
+            if (
+                time.monotonic() - last_named_check > 15
+                and str(remote_tunnel_status().get("mode") or "") == "quick"
+            ):
+                last_named_check = time.monotonic()
+                try:
+                    row = _fetch_tunnel_token()
+                    if str(row.get("mode") or "") == "named" and row.get("token"):
+                        proc.terminate()
+                        break
+                except Exception:
+                    pass
         if _STOP.is_set():
             proc.terminate()
             try:

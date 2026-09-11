@@ -18,6 +18,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 from frontend.settings import PANEL_LISTENER_PORT, default_app_data_dir
 
 PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
+# Cloudflare (and any reverse proxy) needs HTTP/1.1 + Content-Length.
+# Default BaseHTTPRequestHandler is HTTP/1.0 and 502s under keep-alive.
+_HTTP_PROTOCOL = "HTTP/1.1"
 _COOKIE_NAME = "ducky_remote"
 _COOKIE_IDLE_S = 12 * 3600
 _LOGIN_TTL_S = 120
@@ -25,8 +28,6 @@ _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 _LOCAL_BRIDGE_PATHS = frozenset(
     {"/__panel_event", "/__panel_run", "/__panel_open_files", "/__panel_rpc"}
 )
-
-PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 
 # Max seconds one /__panel_rpc leg blocks before replying {pending} so the
 # caller re-polls. Kept under the client's per-round timeout in backend.panel.rpc.
@@ -207,6 +208,48 @@ def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dic
         return rows[-1][0], [event for _, event in rows]
 
 
+def _serve_window_stream(sock: object, hwnd: int) -> None:
+    """JPEG frames out, JSON pointer/key events in. Blocks until the client drops."""
+    from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_binary, send_ws_pong
+    from frontend.window_view import bring_to_front, capture_window_jpeg, handle_stream_message
+
+    bring_to_front(hwnd)
+    stop = threading.Event()
+    send_lock = threading.Lock()
+
+    def _send(fn: object, payload: bytes) -> None:
+        with send_lock:
+            fn(sock, payload)  # type: ignore[operator]
+
+    def _reader() -> None:
+        try:
+            while not stop.is_set():
+                opcode, payload = parse_ws_frame_ex(sock)  # type: ignore[arg-type]
+                if opcode == 0x8:
+                    break
+                if opcode == 0x9:
+                    _send(send_ws_pong, payload)
+                    continue
+                if opcode == 0x1:
+                    handle_stream_message(hwnd, payload)
+        except Exception:
+            pass
+        finally:
+            stop.set()
+
+    threading.Thread(target=_reader, daemon=True, name="window-stream-in").start()
+    try:
+        while not stop.is_set():
+            raw = capture_window_jpeg(hwnd)
+            if raw:
+                _send(send_ws_binary, raw)
+            stop.wait(0.2)
+    except Exception:
+        pass
+    finally:
+        stop.set()
+
+
 def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int] | None:
     """Parse a single-range ``Range: bytes=...`` header, clamped to ``file_size``.
 
@@ -289,6 +332,8 @@ def start_panel_ui_server(dist_root: Path) -> str:
         _root = root
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = _HTTP_PROTOCOL
+
             def log_message(self, format: str, *args: object) -> None:
                 return
 
@@ -320,7 +365,9 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
+                self.send_header("Connection", "close")
                 self.end_headers()
+                self.close_connection = True
                 self.wfile.write(data)
 
             def do_POST(self) -> None:
@@ -565,6 +612,23 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
                     self.wfile.write(raw)
+                    return
+                if parsed.path == "/__window_stream":
+                    query = parse_qs(parsed.query)
+                    try:
+                        hwnd = int((query.get("id") or ["0"])[0])
+                    except (TypeError, ValueError):
+                        hwnd = 0
+                    key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+                    upgrade = (self.headers.get("Upgrade") or "").lower()
+                    if hwnd <= 0 or upgrade != "websocket" or not key:
+                        self.send_error(400)
+                        return
+                    from frontend.ui_web.terminal.ws_util import websocket_upgrade_response
+
+                    self.close_connection = True
+                    self.connection.sendall(websocket_upgrade_response(key))
+                    _serve_window_stream(self.connection, hwnd)
                     return
                 # Re-poll leg of a long UI request (require_click): the POST leg
                 # returned {pending, request_id} and the caller waits here until

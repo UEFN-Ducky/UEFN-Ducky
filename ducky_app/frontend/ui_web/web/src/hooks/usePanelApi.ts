@@ -34,6 +34,13 @@ function remoteApi(): PanelApi {
         result?: unknown;
         error?: string;
       };
+      if (json.error === "method not allowed") {
+        return undefined;
+      }
+      // Cloudflare 502/503 while the origin blips — polls retry; don't unhandled-reject.
+      if (r.status === 502 || r.status === 503) {
+        return undefined;
+      }
       if (!r.ok || json.ok === false) {
         throw new Error(json.error || `HTTP ${r.status}`);
       }

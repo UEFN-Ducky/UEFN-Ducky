@@ -233,6 +233,7 @@ let _contrib: PluginContributions = EMPTY;
 const _listeners = new Set<() => void>();
 let _started = false;
 let _pollId: number | undefined;
+let _pollMs = 400;
 
 function _emit() {
   for (const listener of _listeners) listener();
@@ -247,7 +248,7 @@ function _setContrib(next: PluginContributions) {
 
 function _stopPoll() {
   if (_pollId === undefined) return;
-  window.clearInterval(_pollId);
+  window.clearTimeout(_pollId);
   _pollId = undefined;
 }
 
@@ -261,7 +262,11 @@ async function refresh() {
     const next = await api.get_uefn_plugin_contributions();
     // Failed fetch: leave ready=false so AppearanceContext does not wipe a
     // saved plugin theme against an empty enabled_ids list.
-    if (!next || next.ok === false) return;
+    if (!next || next.ok === false) {
+      _pollMs = Math.min(_pollMs + 400, 4000);
+      return;
+    }
+    _pollMs = 400;
     const settingsTabs = Array.isArray(next.settings_tabs) ? next.settings_tabs : [];
     // Skip no-op refreshes — uefn_plugins_changed used to rebuild the Plugins
     // sidebar on every identical payload (felt like a constant reload).
@@ -495,7 +500,7 @@ async function refresh() {
       ready: true,
     });
   } catch {
-    /* leave ready false — retry on next uefn_plugins_changed / poll */
+    _pollMs = Math.min(_pollMs * 2, 8000);
   }
 }
 
@@ -511,13 +516,20 @@ function _ensureStarted() {
   });
   // Missed uefn_plugins_changed (push before bus / no window) left Installed empty
   // forever — poll until the first successful contributions snapshot lands.
-  _pollId = window.setInterval(() => {
+  const tick = () => {
     if (_contrib.ready) {
       _stopPoll();
       return;
     }
-    void refresh();
-  }, 400);
+    void refresh().finally(() => {
+      if (_contrib.ready) {
+        _stopPoll();
+        return;
+      }
+      _pollId = window.setTimeout(tick, _pollMs);
+    });
+  };
+  _pollId = window.setTimeout(tick, _pollMs);
 }
 
 function subscribe(listener: () => void) {

@@ -611,23 +611,16 @@ input, textarea, select, button {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 240px;
+  max-width: 280px;
 }
 .remote-window-select-label {
   font-size: 11px;
   opacity: 0.7;
   flex-shrink: 0;
 }
-.remote-window-select select {
+.remote-window-select .choice-dropdown {
   min-width: 0;
-  max-width: 200px;
-  height: 26px;
-  border: 1px solid var(--border);
-  background: var(--btn-bg);
-  color: var(--fg);
-  border-radius: 6px;
-  font-size: 12px;
-  padding: 0 6px;
+  flex: 1;
 }
 .remote-window-overlay {
   position: absolute;
@@ -639,10 +632,15 @@ input, textarea, select, button {
   justify-content: center;
   overflow: hidden;
 }
-.remote-window-overlay img {
+.remote-window-overlay img,
+.remote-window-overlay canvas {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+.remote-window-canvas {
+  cursor: crosshair;
+  outline: none;
 }
 .remote-window-overlay-msg {
   color: var(--fg);

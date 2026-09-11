@@ -93,7 +93,12 @@ export function installVerseLspDebugHooks(): void {
   window.addEventListener("unhandledrejection", (ev) => {
     const reason = ev.reason;
     const msg = reason instanceof Error ? reason.message : String(reason ?? "");
-    if (msg === "Canceled" || msg.endsWith(": Canceled")) {
+    if (
+      msg === "Canceled" ||
+      msg.endsWith(": Canceled") ||
+      msg === "HTTP 502" ||
+      msg === "HTTP 503"
+    ) {
       ev.preventDefault();
       return;
     }

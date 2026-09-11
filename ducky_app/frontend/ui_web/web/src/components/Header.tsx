@@ -128,6 +128,7 @@ export function Header({
     let throttle: ReturnType<typeof setTimeout> | null = null;
 
     const sync = () => {
+      if (isRemote()) return;
       if (isNativeWindowChrome()) {
         setIsMaximized(document.documentElement.classList.contains("window-maximized"));
         return;
