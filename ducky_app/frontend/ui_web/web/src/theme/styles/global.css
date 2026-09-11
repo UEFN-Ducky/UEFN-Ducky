@@ -475,7 +475,10 @@ input, textarea, select, button {
 .app-header-center {
   display: flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
   width: auto;
   pointer-events: none;
 }
@@ -489,7 +492,10 @@ input, textarea, select, button {
   flex-shrink: 0;
 }
 .app-header-center .quick-open-bar {
-  flex: 0 0 28px;
+  pointer-events: auto;
+}
+.app-header-center .quick-open-bar--field {
+  flex: 1 1 280px;
 }
 .app-header-center .sidebar-toggle-btn {
   flex-shrink: 0;
@@ -3465,11 +3471,12 @@ body.focus-window:has(.focus-top-edge-grip:hover) .focus-header-chrome,
   width: 18px;
   height: 18px;
 }
-.focus-header-chrome .app-header--focus .quick-open-bar {
-  width: 24px;
+.focus-header-chrome .app-header--focus .quick-open-bar--field {
+  max-width: 220px;
+  min-width: 140px;
   height: 24px;
-  flex: 0 0 24px;
-  padding: 0;
+  flex: 1 1 160px;
+  padding: 0 8px;
 }
 .focus-header-chrome .app-header--focus .app-header-save-btn {
   padding: 2px 8px;

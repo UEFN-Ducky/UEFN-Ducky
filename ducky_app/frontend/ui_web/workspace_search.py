@@ -17,6 +17,23 @@ from frontend.ui_web.project_files import (
 SearchScope = Literal["files", "chats", "both"]
 
 
+def _tokens(query: str) -> list[str]:
+    return [t.lower() for t in re.split(r"[\s_/.\-]+", (query or "").strip()) if t]
+
+
+def _fold(text: str) -> str:
+    return re.sub(r"[\s_/.\-]+", " ", (text or "").lower())
+
+
+def tokens_match(query: str, *parts: str) -> bool:
+    """True when every query token appears in the folded haystack (spaces = _)."""
+    toks = _tokens(query)
+    if not toks:
+        return False
+    hay = _fold(" ".join(parts))
+    return all(t in hay for t in toks)
+
+
 def _compile_matcher(query: str, *, case_sensitive: bool, whole_word: bool) -> re.Pattern[str]:
     escaped = re.escape(query.strip())
     if whole_word:
@@ -122,6 +139,8 @@ def _search_files(
         except OSError:
             continue
         matches = _search_text_lines(text, matcher, max_matches=remaining)
+        if not matches and tokens_match(query, rel_path):
+            matches = [{"line": 1, "column": 1, "preview": rel_path}]
         if not matches:
             continue
         file_results.append({"path": rel_path, "matches": matches})
@@ -169,14 +188,20 @@ def _search_chats_rows(
     total = 0
     for conv in list_conversations(folder_id=None):
         title = conv.title or ""
-        hit = matcher.search(title)
-        if hit:
+        ducky = str(getattr(conv, "ducky_name", "") or "")
+        personality = str(getattr(conv, "ducky_personality", "") or "")
+        summary = str(getattr(conv, "context_summary", "") or "")
+        hit = matcher.search(title) or matcher.search(ducky)
+        if hit or tokens_match(query, title, ducky, personality, summary):
+            snippet = title if matcher.search(title) else (ducky or summary or personality or title)
+            preview = _preview(snippet, hit) if hit else snippet[:140]
             by_conv[conv.id] = {
                 "id": conv.id,
                 "title": conv.title,
                 "folder_id": conv.folder_id or "",
                 "ducky_style": conv.ducky_style or "",
-                "matches": [{"message_id": "title", "preview": _preview(title, hit)}],
+                "ducky_name": ducky,
+                "matches": [{"message_id": "title", "preview": preview}],
             }
             total += 1
     meta = {c.id: c for c in list_conversations(folder_id=None)}
@@ -258,6 +283,90 @@ def _search_chats(
     return chat_results, total_matches
 
 
+def _search_memory(query: str, *, max_results: int) -> list[dict[str, Any]]:
+    from backend.store.switch import use_db
+    from frontend.ui_web.project_chats import _project_id
+
+    if not use_db("memory"):
+        return []
+    try:
+        from backend.store.repos import memory as memory_repo
+
+        return [
+            {
+                "name": str(row.get("name") or ""),
+                "preview": str(row.get("preview") or row.get("description") or ""),
+            }
+            for row in memory_repo.search(_project_id(), query, limit=max_results)
+        ]
+    except Exception:
+        return []
+
+
+def _search_ledger(query: str, *, max_results: int) -> list[dict[str, Any]]:
+    from backend.store.switch import use_db
+    from frontend.ui_web.project_chats import _project_id
+
+    if not use_db("ledger"):
+        return []
+    try:
+        from backend.store import db
+
+        pid = _project_id()
+        rows = db.connect().execute(
+            "SELECT path FROM path_index WHERE project_id=?", (pid,)
+        ).fetchall()
+        extra = db.connect().execute(
+            "SELECT DISTINCT e.path FROM run_entries e JOIN runs r ON r.run_id = e.run_id "
+            "WHERE r.project_id=? AND e.path <> ''",
+            (pid,),
+        ).fetchall()
+    except Exception:
+        return []
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for (path,) in list(rows) + list(extra):
+        p = str(path or "")
+        if not p or p in seen or not tokens_match(query, p):
+            continue
+        seen.add(p)
+        hits.append({"path": p, "preview": p})
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def _search_history(query: str, *, max_results: int) -> list[dict[str, Any]]:
+    from backend.store.switch import use_db
+    from frontend.ui_web.project_chats import _project_id
+
+    if not use_db("ledger"):
+        return []
+    try:
+        from backend.store import db
+
+        rows = db.connect().execute(
+            "SELECT path, preview, ducky_name FROM file_versions WHERE project_id=? "
+            "ORDER BY saved_at DESC LIMIT 400",
+            (_project_id(),),
+        ).fetchall()
+    except Exception:
+        return []
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path, preview, ducky_name in rows:
+        p = str(path or "")
+        if not p or p in seen:
+            continue
+        if not tokens_match(query, p, str(preview or ""), str(ducky_name or "")):
+            continue
+        seen.add(p)
+        hits.append({"path": p, "preview": str(preview or p), "ducky_name": str(ducky_name or "")})
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
 def search_workspace(
     query: str,
     *,
@@ -273,11 +382,17 @@ def search_workspace(
             "scope": scope,
             "file_results": [],
             "chat_results": [],
+            "memory_results": [],
+            "ledger_results": [],
+            "history_results": [],
             "stats": {
                 "file_count": 0,
                 "file_match_count": 0,
                 "chat_count": 0,
                 "chat_match_count": 0,
+                "memory_count": 0,
+                "ledger_count": 0,
+                "history_count": 0,
             },
         }
 
@@ -293,17 +408,27 @@ def search_workspace(
         file_results, file_match_count = _search_files(cleaned, matcher, max_results=per_scope_budget)
     if scope in ("chats", "both"):
         chat_results, chat_match_count = _search_chats(cleaned, matcher, max_results=per_scope_budget)
+    extra_budget = max(12, per_scope_budget // 4)
+    memory_results = _search_memory(cleaned, max_results=extra_budget) if scope in ("chats", "both") else []
+    ledger_results = _search_ledger(cleaned, max_results=extra_budget) if scope in ("files", "both") else []
+    history_results = _search_history(cleaned, max_results=extra_budget) if scope in ("files", "both") else []
 
     return {
         "query": cleaned,
         "scope": scope,
         "file_results": file_results,
         "chat_results": chat_results,
+        "memory_results": memory_results,
+        "ledger_results": ledger_results,
+        "history_results": history_results,
         "stats": {
             "file_count": len(file_results),
             "file_match_count": file_match_count,
             "chat_count": len(chat_results),
             "chat_match_count": chat_match_count,
+            "memory_count": len(memory_results),
+            "ledger_count": len(ledger_results),
+            "history_count": len(history_results),
         },
     }
 

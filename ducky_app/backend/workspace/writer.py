@@ -504,6 +504,12 @@ class ProjectWriter:
                 observer.on_write(record, result)
             except Exception:  # noqa: BLE001 - observers are UI glue
                 log.warning("workspace observer %r failed", observer, exc_info=True)
+        try:
+            from frontend.ui_web.project_files import _invalidate_file_paths_cache
+
+            _invalidate_file_paths_cache()
+        except Exception:
+            pass
 
     # -- locks -------------------------------------------------------------
 

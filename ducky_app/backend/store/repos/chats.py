@@ -314,7 +314,13 @@ def conv_max_sort_order(project_id: str, folder_id: str) -> float:
 
 def _fts_query(query: str) -> str:
     terms = [t.replace('"', '""') for t in query.split() if t.strip()]
-    return " ".join(f'"{t}"' for t in terms)
+    if not terms:
+        return ""
+    and_q = " ".join(f'"{t}"' for t in terms)
+    if len(terms) > 1:
+        joined = "_".join(terms)
+        return f'({and_q}) OR "{joined}"'
+    return and_q
 
 
 def search_messages(project_id: str, query: str, *, limit: int = 200) -> list[dict[str, Any]]:

@@ -11,7 +11,7 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .quick-open-bar:hover {
   background: var(--hover, rgba(255, 255, 255, 0.06));
@@ -22,6 +22,45 @@
   width: 14px;
   height: 14px;
   opacity: 0.85;
+}
+.quick-open-bar--field {
+  flex: 1 1 280px;
+  width: auto;
+  max-width: 440px;
+  min-width: 196px;
+  height: 30px;
+  padding: 0 10px;
+  gap: 8px;
+  justify-content: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--panel-header));
+  color: var(--muted);
+}
+.quick-open-bar--field:hover {
+  border-color: color-mix(in srgb, var(--blue) 55%, var(--border));
+  background: color-mix(in srgb, var(--bg) 55%, var(--panel-header));
+  color: var(--fg);
+}
+.quick-open-bar-placeholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  text-align: left;
+}
+.quick-open-bar-kbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  font-size: 10px;
+  font-family: inherit;
+  line-height: 1.4;
+  opacity: 0.7;
 }
 
 .quick-open-overlay {
@@ -93,14 +132,18 @@
   text-align: left;
   cursor: pointer;
 }
-.quick-open-palette-row:hover,
+.quick-open-palette-row:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
 .quick-open-palette-row.is-selected {
-  background: var(--blue);
-  color: var(--fg-inverse);
+  background: color-mix(in srgb, var(--blue) 22%, var(--panel-header));
+  color: var(--fg);
+  box-shadow: inset 3px 0 0 var(--blue);
 }
 .quick-open-palette-row.is-selected .quick-open-palette-row-sub,
 .quick-open-palette-row:hover .quick-open-palette-row-sub {
-  color: color-mix(in srgb, var(--fg-inverse) 75%, transparent);
+  color: var(--muted);
 }
 .quick-open-palette-row-icon {
   flex-shrink: 0;
@@ -145,7 +188,7 @@
 }
 .quick-open-palette-row.is-selected .quick-open-palette-recent-tag,
 .quick-open-palette-row:hover .quick-open-palette-recent-tag {
-  color: color-mix(in srgb, var(--fg-inverse) 85%, transparent);
+  color: var(--blue);
 }
 
 body.layout-sidebar-only .app-header-project-label {

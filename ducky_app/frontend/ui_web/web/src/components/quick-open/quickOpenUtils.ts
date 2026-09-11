@@ -35,9 +35,9 @@ export interface QuickOpenRecentItem {
 export type QuickOpenListItem = QuickOpenFileItem | QuickOpenChatItem | QuickOpenRecentItem;
 
 export function fuzzyScore(query: string, text: string): number {
-  const q = query.trim().toLowerCase();
+  const q = query.trim().toLowerCase().replace(/[_-]+/g, " ");
   if (!q) return 0;
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().replace(/[_-]+/g, " ");
 
   // Multi-word queries ("player manager") match when every whitespace-separated
   // token matches. Without this, the literal space can never line up against a
@@ -107,13 +107,16 @@ export function rankFiles(
 export function rankChats(query: string, chats: ChatTab[], limit = 20): QuickOpenChatItem[] {
   if (!query.trim()) return [];
   return chats
-    .map((c) => ({
-      kind: "chat" as const,
-      id: c.id,
-      name: c.name,
-      duckyStyle: c.duckyStyle,
-      score: fuzzyScore(query, c.name),
-    }))
+    .map((c) => {
+      const hay = [c.name, c.duckyName, c.duckyPersonality, c.duckyStyle].filter(Boolean).join(" ");
+      return {
+        kind: "chat" as const,
+        id: c.id,
+        name: c.name,
+        duckyStyle: c.duckyStyle,
+        score: fuzzyScore(query, hay),
+      };
+    })
     .filter((c) => c.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);

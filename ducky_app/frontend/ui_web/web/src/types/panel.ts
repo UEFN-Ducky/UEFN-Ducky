@@ -552,16 +552,38 @@ export interface WorkspaceChatSearchResult {
   matches: WorkspaceChatMatch[];
 }
 
+export interface WorkspaceMemorySearchResult {
+  name: string;
+  preview: string;
+}
+
+export interface WorkspaceLedgerSearchResult {
+  path: string;
+  preview: string;
+}
+
+export interface WorkspaceHistorySearchResult {
+  path: string;
+  preview: string;
+  ducky_name?: string;
+}
+
 export interface WorkspaceSearchResult {
   query: string;
   scope: WorkspaceSearchScope;
   file_results: WorkspaceFileSearchResult[];
   chat_results: WorkspaceChatSearchResult[];
+  memory_results?: WorkspaceMemorySearchResult[];
+  ledger_results?: WorkspaceLedgerSearchResult[];
+  history_results?: WorkspaceHistorySearchResult[];
   stats: {
     file_count: number;
     file_match_count: number;
     chat_count: number;
     chat_match_count: number;
+    memory_count?: number;
+    ledger_count?: number;
+    history_count?: number;
   };
 }
 

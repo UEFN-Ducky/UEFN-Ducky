@@ -557,7 +557,14 @@ def _include_in_workspace_tree_entry(name: str, is_dir: bool) -> bool:
 def list_project_file_paths() -> list[dict[str, str]]:
     """Flat list of project + workspace .verse files for sidebar filter / quick-open."""
     root = _project_root().resolve()
-    root_key = f"{root}|hidden={_show_hidden_project_files()}|ws={len(_workspace_folders())}"
+    try:
+        content_mtime = _content_dir().stat().st_mtime
+    except OSError:
+        content_mtime = 0.0
+    root_key = (
+        f"{root}|hidden={_show_hidden_project_files()}|ws={len(_workspace_folders())}"
+        f"|mtime={content_mtime}"
+    )
     if root_key in _file_paths_cache:
         return _file_paths_cache[root_key]
 

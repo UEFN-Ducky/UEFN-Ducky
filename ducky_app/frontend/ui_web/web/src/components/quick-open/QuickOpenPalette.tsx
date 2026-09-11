@@ -72,7 +72,7 @@ type PaletteRow =
 
   | { kind: "file"; path: string; label: string; sub: string }
 
-  | { kind: "chat"; id: string; label: string }
+  | { kind: "chat"; id: string; label: string; sub?: string }
 
   | { kind: "command"; id: string; label: string }
 
@@ -80,7 +80,13 @@ type PaletteRow =
 
   | { kind: "search-file"; path: string; label: string; sub: string; line: number; column: number }
 
-  | { kind: "search-chat"; id: string; label: string; sub: string };
+  | { kind: "search-chat"; id: string; label: string; sub: string }
+
+  | { kind: "section"; label: string }
+
+  | { kind: "memory"; name: string; label: string; sub: string }
+
+  | { kind: "ledger"; path: string; label: string; sub: string };
 
 
 
@@ -200,7 +206,10 @@ export function QuickOpenPalette() {
 
   useEffect(() => {
 
-    if (effectiveMode !== "text" || !debouncedQuery) {
+    if (
+      (effectiveMode !== "text" && effectiveMode !== "file" && effectiveMode !== "ducky") ||
+      !debouncedQuery
+    ) {
 
       setSearchResults(null);
 
@@ -410,6 +419,30 @@ export function QuickOpenPalette() {
 
 
 
+    if (!q && effectiveMode === "ducky") {
+
+      return [
+
+        { kind: "section" as const, label: "duckies" },
+
+        ...allChats.slice(0, 40).map((c) => ({
+
+          kind: "chat" as const,
+
+          id: c.id,
+
+          label: c.name,
+
+          sub: c.duckyStyle || "Ducky",
+
+        })),
+
+      ];
+
+    }
+
+
+
     if (!q) {
 
       const out: PaletteRow[] = ACTIONS.map((a) => ({ kind: "action", ...a }));
@@ -440,7 +473,7 @@ export function QuickOpenPalette() {
 
     if (effectiveMode === "ducky") {
 
-      return rankChats(q, allChats).map((c) => ({
+      const named = rankChats(q, allChats, 30).map((c) => ({
 
         kind: "chat" as const,
 
@@ -448,7 +481,47 @@ export function QuickOpenPalette() {
 
         label: c.name,
 
+        sub: c.duckyStyle || "Ducky",
+
       }));
+
+      const seen = new Set(named.map((c) => c.id));
+
+      const out: PaletteRow[] = named.length ? [{ kind: "section", label: "duckies" }, ...named] : [];
+
+      if (searchResults) {
+
+        const extra: PaletteRow[] = [];
+
+        for (const cr of searchResults.chat_results) {
+
+          if (seen.has(cr.id)) continue;
+
+          extra.push({
+
+            kind: "search-chat",
+
+            id: cr.id,
+
+            label: cr.title,
+
+            sub: (cr.matches[0]?.preview || "").trim(),
+
+          });
+
+        }
+
+        for (const mem of searchResults.memory_results || []) {
+
+          extra.push({ kind: "memory", name: mem.name, label: mem.name, sub: mem.preview });
+
+        }
+
+        if (extra.length) out.push({ kind: "section", label: "in history & memory" }, ...extra);
+
+      }
+
+      return out.slice(0, 50);
 
     }
 
@@ -466,23 +539,111 @@ export function QuickOpenPalette() {
 
     }));
 
-    const chatRows =
+    const chatRows = rankChats(q, allChats, 12).map((c) => ({
 
-      effectiveMode === "file"
+      kind: "chat" as const,
 
-        ? rankChats(q, allChats, 8).map((c) => ({
+      id: c.id,
 
-            kind: "chat" as const,
+      label: c.name,
 
-            id: c.id,
+      sub: c.duckyStyle || "Ducky",
 
-            label: c.name,
+    }));
 
-          }))
+    const out: PaletteRow[] = [];
 
-        : [];
+    if (fileRows.length) out.push({ kind: "section", label: "files" }, ...fileRows);
 
-    return [...fileRows, ...chatRows];
+    if (chatRows.length) out.push({ kind: "section", label: "duckies" }, ...chatRows);
+
+    if (searchResults) {
+
+      const seenFiles = new Set(fileRows.map((f) => f.path));
+
+      const seenChats = new Set(chatRows.map((c) => c.id));
+
+      const extras: PaletteRow[] = [];
+
+      for (const fr of searchResults.file_results) {
+
+        if (seenFiles.has(fr.path)) continue;
+
+        const m = fr.matches[0];
+
+        extras.push({
+
+          kind: "search-file",
+
+          path: fr.path,
+
+          label: basename(fr.path),
+
+          sub: m ? `${fr.path}:${m.line} — ${String(m.preview).trim()}` : fr.path,
+
+          line: Number(m?.line || 1),
+
+          column: Number(m?.column || 1),
+
+        });
+
+      }
+
+      for (const cr of searchResults.chat_results) {
+
+        if (seenChats.has(cr.id)) continue;
+
+        extras.push({
+
+          kind: "search-chat",
+
+          id: cr.id,
+
+          label: cr.title,
+
+          sub: (cr.matches[0]?.preview || "").trim(),
+
+        });
+
+      }
+
+      for (const led of searchResults.ledger_results || []) {
+
+        if (seenFiles.has(led.path)) continue;
+
+        extras.push({ kind: "ledger", path: led.path, label: basename(led.path), sub: `ledger · ${led.path}` });
+
+      }
+
+      for (const hist of searchResults.history_results || []) {
+
+        if (seenFiles.has(hist.path)) continue;
+
+        extras.push({
+
+          kind: "ledger",
+
+          path: hist.path,
+
+          label: basename(hist.path),
+
+          sub: hist.ducky_name ? `history · ${hist.ducky_name}` : `history · ${hist.path}`,
+
+        });
+
+      }
+
+      for (const mem of searchResults.memory_results || []) {
+
+        extras.push({ kind: "memory", name: mem.name, label: mem.name, sub: mem.preview });
+
+      }
+
+      if (extras.length) out.push({ kind: "section", label: "in content & ledger" }, ...extras.slice(0, 24));
+
+    }
+
+    return out.slice(0, 60);
 
   }, [
 
@@ -510,7 +671,9 @@ export function QuickOpenPalette() {
 
   useEffect(() => {
 
-    setSelectedIndex(0);
+    const first = rows.findIndex((r) => r.kind !== "section");
+
+    setSelectedIndex(first >= 0 ? first : 0);
 
   }, [rows.length, effectiveMode, debouncedQuery]);
 
@@ -522,6 +685,7 @@ export function QuickOpenPalette() {
 
       if (!handlers) return;
 
+      if (row.kind === "section") return;
       if (row.kind === "action") {
 
         setMode(row.mode);
@@ -614,6 +778,15 @@ export function QuickOpenPalette() {
 
       }
 
+      if (row.kind === "ledger") {
+        handlers.onOpenFile(row.path, basename(row.path));
+        closePalette();
+        return;
+      }
+      if (row.kind === "memory") {
+        closePalette();
+        return;
+      }
       if (row.kind === "search-chat") {
 
         const chat = flattenChats(handlers.folders, handlers.rootChats).find((c) => c.id === row.id);
@@ -648,7 +821,11 @@ export function QuickOpenPalette() {
 
       e.preventDefault();
 
-      setSelectedIndex((i) => Math.min(i + 1, Math.max(0, rows.length - 1)));
+      setSelectedIndex((i) => {
+        let n = Math.min(i + 1, Math.max(0, rows.length - 1));
+        while (n < rows.length - 1 && rows[n]?.kind === "section") n += 1;
+        return n;
+      });
 
       return;
 
@@ -658,7 +835,11 @@ export function QuickOpenPalette() {
 
       e.preventDefault();
 
-      setSelectedIndex((i) => Math.max(i - 1, 0));
+      setSelectedIndex((i) => {
+        let n = Math.max(i - 1, 0);
+        while (n > 0 && rows[n]?.kind === "section") n -= 1;
+        return n;
+      });
 
       return;
 
@@ -750,7 +931,7 @@ export function QuickOpenPalette() {
 
         <div className="quick-open-palette-list" ref={listRef}>
 
-          {listLoading ? (
+          {rows.length === 0 && listLoading ? (
 
             <div className="quick-open-palette-empty">Searching…</div>
 
@@ -800,6 +981,20 @@ export function QuickOpenPalette() {
 
                       : row.label;
 
+              if (row.kind === "section") {
+
+                return (
+
+                  <div key={`${row.kind}-${index}-${row.label}`} className="quick-open-palette-section">
+
+                    {row.label}
+
+                  </div>
+
+                );
+
+              }
+
               return (
 
                 <div key={`${row.kind}-${index}-${rowKey}`}>
@@ -834,7 +1029,7 @@ export function QuickOpenPalette() {
 
                       </>
 
-                    ) : row.kind === "file" || row.kind === "search-file" ? (
+                    ) : row.kind === "file" || row.kind === "search-file" || row.kind === "ledger" ? (
 
                       <>
 
