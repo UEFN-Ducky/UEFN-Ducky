@@ -1052,7 +1052,7 @@ def _remote_endpoint() -> dict[str, Any]:
     st = remote_tunnel_status()
     hostname = str(st.get("hostname") or "").strip()
     mode = str(st.get("mode") or "")
-    if not hostname:
+    if not hostname or not st.get("running"):
         return {
             "enabled": True,
             "hostname": "",

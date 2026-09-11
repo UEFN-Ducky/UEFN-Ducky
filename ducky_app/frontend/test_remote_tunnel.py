@@ -26,6 +26,19 @@ def test_append_cloudflared_log_truncates(tmp_path, monkeypatch):
     assert "aaaaaaaaaa" not in data
 
 
+def test_named_cache_roundtrip(monkeypatch):
+    store: dict[str, str] = {}
+    monkeypatch.setattr("backend.agent.secrets.get_key", lambda key: store.get(key))
+    monkeypatch.setattr("backend.agent.secrets.set_key", lambda key, value: store.__setitem__(key, value))
+    assert rt._load_named_cache() == {}
+    rt._save_named_cache("u-abc.uefnducky.org", "tok")
+    assert rt._load_named_cache() == {
+        "hostname": "u-abc.uefnducky.org",
+        "token": "tok",
+        "mode": "named",
+    }
+
+
 def test_named_reason_survives_quick_status():
     rt._set_status(named_reason="cloudflare 403: zone", mode="quick", running=True, error="")
     try:

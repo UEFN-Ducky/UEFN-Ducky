@@ -6,6 +6,7 @@ logged in and Settings → Account → Remote access is on (default off).
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -24,6 +25,8 @@ _CLOUDFLARED_URL = (
     "cloudflared-windows-amd64.exe"
 )
 _QUICK_HOST_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
+_NAMED_CACHE_KEY = "uefn-ducky/remote_named_tunnel"
+_REGISTERED = "Registered tunnel connection"
 
 _STOP = threading.Event()
 _LOCK = threading.Lock()
@@ -42,6 +45,36 @@ _LOG_MAX = 1_000_000
 def remote_tunnel_status() -> dict[str, Any]:
     with _LOCK:
         return dict(_STATUS)
+
+
+def _load_named_cache() -> dict[str, str]:
+    try:
+        from backend.agent.secrets import get_key
+
+        raw = get_key(_NAMED_CACHE_KEY)
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    host = str(data.get("hostname") or "").strip()
+    token = str(data.get("token") or "").strip()
+    if not host or not token:
+        return {}
+    return {"hostname": host, "token": token, "mode": "named"}
+
+
+def _save_named_cache(hostname: str, token: str) -> None:
+    host = (hostname or "").strip()
+    tok = (token or "").strip()
+    if not host or not tok:
+        return
+    try:
+        from backend.agent.secrets import set_key
+
+        set_key(_NAMED_CACHE_KEY, json.dumps({"hostname": host, "token": tok}))
+    except Exception:
+        pass
 
 
 def _bin_path() -> Path:
@@ -99,7 +132,7 @@ def _fetch_tunnel_token() -> dict[str, Any]:
             unavailable_code="rpc_unavailable",
             unavailable_msg="Remote plugin is not active on this tenant yet.",
             error_code="remote_tunnel_failed",
-            timeout=45.0,
+            timeout=20.0,
         )
     except DuckyOSAccountError as exc:
         code = str(getattr(exc, "code", "") or "")
@@ -129,7 +162,7 @@ def _remove_tunnel() -> None:
         pass
 
 
-def _run_cloudflared(exe: Path, args: list[str]) -> str:
+def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
     """Run until stop or exit. Returns last hostname seen on stderr."""
     hostname = ""
     tail: list[str] = []
@@ -172,6 +205,9 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
             if match:
                 hostname = match.group(0).removeprefix("https://")
                 _set_status(hostname=hostname, running=True)
+            if named_host and _REGISTERED in text:
+                hostname = named_host
+                _set_status(hostname=named_host, running=True, error="")
             if (
                 time.monotonic() - last_named_check > 15
                 and str(remote_tunnel_status().get("mode") or "") == "quick"
@@ -218,7 +254,13 @@ def _loop() -> None:
                 _set_status(mode="starting", running=False, error="")
             exe = ensure_cloudflared()
             _kill_orphan_cloudflareds()
-            row = _fetch_tunnel_token()
+            try:
+                row = _fetch_tunnel_token()
+            except Exception as exc:
+                row = _load_named_cache()
+                if not row.get("token"):
+                    _set_status(running=False, error=str(exc)[:240])
+                    raise
             mode = str(row.get("mode") or "")
             reason = str(row.get("reason") or "").strip()
             if reason:
@@ -232,11 +274,18 @@ def _loop() -> None:
                 )
                 _STOP.wait(15.0)
                 continue
+            if mode != "named" or not row.get("token"):
+                cached = _load_named_cache()
+                if cached.get("token"):
+                    row = cached
+                    mode = "named"
             _set_status(site_update_pending=False)
             url = f"http://127.0.0.1:{PANEL_UI_HTTP_PORT}"
             if mode == "named" and row.get("token"):
                 host = str(row.get("hostname") or "")
-                _set_status(mode="named", hostname=host, running=True, error="", named_reason="")
+                _save_named_cache(host, str(row["token"]))
+                # Host stays empty until cloudflared registers — iframe-ing early is 530/504.
+                _set_status(mode="named", hostname="", running=False, error="", named_reason="")
                 _run_cloudflared(
                     exe,
                     [
@@ -249,6 +298,7 @@ def _loop() -> None:
                         "--token",
                         str(row["token"]),
                     ],
+                    named_host=host,
                 )
             else:
                 _set_status(mode="quick", running=False)
