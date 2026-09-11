@@ -88,13 +88,14 @@ def _chats_root() -> Path:
     return default_app_data_dir() / "chats" / "projects"
 
 
-def _project_root(project_root: str | None = None) -> Path:
+def _project_root(project_root: str | None = None, *, create: bool = False) -> Path:
     root = project_root
     if root is None:
         root = PanelSettings.load().uefn_project_root
     slug = project_slug(root)
     d = _chats_root() / slug
-    d.mkdir(parents=True, exist_ok=True)
+    if create or not _use_db():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -102,14 +103,15 @@ def _folders_path(project_root: str | None = None) -> Path:
     return _project_root(project_root) / "folders.json"
 
 
-def _conversations_dir(project_root: str | None = None) -> Path:
-    d = _project_root(project_root) / "conversations"
-    d.mkdir(parents=True, exist_ok=True)
+def _conversations_dir(project_root: str | None = None, *, create: bool = False) -> Path:
+    d = _project_root(project_root, create=create) / "conversations"
+    if create or not _use_db():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def get_conversations_dir(project_root: str | None = None) -> Path:
-    return _conversations_dir(project_root)
+def get_conversations_dir(project_root: str | None = None, *, create: bool = False) -> Path:
+    return _conversations_dir(project_root, create=create)
 
 
 def _use_db() -> bool:

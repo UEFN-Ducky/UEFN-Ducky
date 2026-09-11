@@ -3,6 +3,7 @@ import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { getApi } from "../hooks/usePanelApi";
 import { setCachedCodingAgents } from "../hooks/codingAgentsCache";
+import { hasUsableModels } from "./ducky/duckyPickerIssue";
 import { onApiReady } from "../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { groupByVendor } from "./modelVendors";
@@ -294,7 +295,10 @@ export function ModelSelector({
         : normalizedSelectedModel
           ? `${agentLabel} · ${normalizedSelectedModel === "auto" ? "Auto" : normalizedSelectedModel}`
           : agentLabel
-      : committedModels.length === 0 && catalogReady && visibleModels.length === 0
+      : committedModels.length === 0 &&
+          catalogReady &&
+          !agentsChecking &&
+          !hasUsableModels({ modelsCount: visibleModels.length, agents })
         ? "No models"
         : currentModelData?.name ?? (selectedModel || placeholder);
 

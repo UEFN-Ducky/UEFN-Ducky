@@ -5,12 +5,39 @@ export type DuckyPickerIssue = {
   actionTab: "LLMs" | "Store";
 };
 
+export type UsableModelAgent = {
+  enabled?: boolean;
+  available?: boolean;
+  models?: unknown[];
+};
+
+/** Gateway catalog rows or any live coding-agent model list. */
+export function hasUsableModels(opts: {
+  modelsCount: number;
+  agents?: UsableModelAgent[];
+  /** Plugin stubs — used only while the live detect list has not landed. */
+  contribCount?: number;
+}): boolean {
+  if (opts.modelsCount > 0) return true;
+  const agents = opts.agents || [];
+  if (
+    agents.some(
+      (a) => a.enabled !== false && a.available !== false && (a.models?.length ?? 0) > 0,
+    )
+  ) {
+    return true;
+  }
+  if (agents.length === 0 && (opts.contribCount ?? 0) > 0) return true;
+  return false;
+}
+
 export function duckyPickerIssue(opts: {
   gatewayCount: number;
   contribReady?: boolean;
   hasApiKey: boolean;
   catalogReady: boolean;
   modelsCount: number;
+  agents?: UsableModelAgent[];
   /** Connected coding agents (Claude Code, Codex, …) bring their own models. */
   codingAgentCount?: number;
 }): DuckyPickerIssue | null {
@@ -29,7 +56,14 @@ export function duckyPickerIssue(opts: {
       actionTab: "LLMs",
     };
   }
-  if (opts.catalogReady && opts.modelsCount <= 0 && !(opts.codingAgentCount && opts.codingAgentCount > 0)) {
+  if (
+    opts.catalogReady &&
+    !hasUsableModels({
+      modelsCount: opts.modelsCount,
+      agents: opts.agents,
+      contribCount: opts.codingAgentCount,
+    })
+  ) {
     return {
       message: "No models loaded yet. Test the API key in Settings → LLMs, or wait a moment.",
       actionLabel: "Open LLMs",

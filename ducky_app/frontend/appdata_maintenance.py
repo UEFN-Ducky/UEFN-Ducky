@@ -56,11 +56,19 @@ def _has_conversation_data(chats_project_dir: Path) -> bool:
     return False
 
 
+def _dir_has_files(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    for _dirpath, _dirnames, filenames in os.walk(path):
+        if filenames:
+            return True
+    return False
+
+
 def _should_keep_project_slug(slug: str, known_slugs: set[str], app_root: Path) -> bool:
-    if slug in known_slugs:
-        return True
+    del known_slugs  # known/recent is not enough to keep an empty stub
     chats_dir = app_root / "chats" / "projects" / slug
-    if chats_dir.is_dir() and _has_conversation_data(chats_dir):
+    if chats_dir.is_dir() and (_has_conversation_data(chats_dir) or _dir_has_files(chats_dir)):
         return True
     return False
 
@@ -173,39 +181,43 @@ _CHILD_LIMIT = 80
 # name -> (label, description, kind)
 # kind: cache | user | install | runtime | settings | other
 _KNOWN: dict[str, tuple[str, str, str]] = {
-    "chats": ("Chats", "Conversation history per project.", "user"),
-    "workspace": ("Workspace", "Open editor tabs and layout per project.", "user"),
-    "file_history": ("File history", "Local undo snapshots for Verse files.", "cache"),
-    "verse_diagnostics": ("Verse diagnostics", "Cached Verse scan results per project.", "cache"),
-    "changesets": ("Changesets", "Agent write ledger so runs can be reverted.", "user"),
-    "memory": ("Memory", "Project memory notes the agent keeps.", "user"),
+    "chats": ("Chats leftover", "Pre-database conversation files. Safe to delete after import.", "cache"),
+    "workspace": ("Workspace leftover", "Pre-database editor layout. Now in ducky.db.", "cache"),
+    "file_history": ("File history leftover", "Pre-database undo snapshots. Now in ducky.db.", "cache"),
+    "verse_diagnostics": ("Diagnostics leftover", "Pre-database Verse scan cache. Now in ducky.db.", "cache"),
+    "changesets": ("Changesets leftover", "Pre-database write ledger. Now in ducky.db.", "cache"),
+    "memory": ("Memory leftover", "Pre-database notes. Now in ducky.db.", "cache"),
     "tool_captures": ("Captures", "Screenshots and snips from tools.", "cache"),
-    "backups": ("Backups", "Rotated copies of settings JSON.", "cache"),
+    "backups": ("Backups leftover", "Old JSON .bak copies. Snapshots replaced this.", "cache"),
     "listener": ("Listener", "UEFN Python listener shipped here. Recreated on app start.", "runtime"),
     "skill_packs": ("Skill packs", "Installed skill packs.", "install"),
-    "uefn_plugins": ("Desktop plugins", "Installed Store plugins.", "install"),
-    "mcp_plugins": ("MCP plugins", "Installed MCP plugin packs.", "install"),
+    "uefn_plugins": ("Desktop plugins", "Installed Store plugins (each plugin stays in its own folder).", "install"),
+    "mcp_plugins": ("MCP plugins leftover", "Legacy MCP packs. Unused after Store plugins.", "cache"),
     "ai_plugins": ("AI plugin drafts", "In-progress plugin drafts.", "install"),
-    "coding_agents": ("Coding agents", "CLI agent temp files and bridge copies.", "cache"),
+    "coding_agents": ("Coding agents", "Shared CLI agent temp files and bridge copies.", "cache"),
     "verse-lsp": ("Verse LSP", "Language server cache.", "cache"),
-    "plan_templates": ("Plan templates", "Reusable plan templates.", "user"),
+    "plan_templates": ("Plan templates leftover", "Pre-database templates. Now in ducky.db.", "cache"),
     "verse_templates": ("Verse templates", "Custom Verse templates.", "user"),
-    "perf": ("Perf traces", "Performance diagnostics.", "cache"),
-    "tasks": ("Tasks", "Agent task files.", "user"),
+    "perf": ("Perf leftover", "Pre-database traces. Now events in ducky.db.", "cache"),
+    "tasks": ("Tasks leftover", "Pre-database task files. Now in ducky.db.", "cache"),
     "sounds": ("Sounds", "Custom notification audio.", "user"),
     "duckies": ("Custom duckies", "Custom ducky avatars.", "user"),
-    "uefn_plugin_cache": ("Plugin cache", "Per-plugin cache.", "cache"),
-    "uefn_plugin_prefs": ("Plugin prefs", "Per-plugin preferences.", "user"),
+    "uefn_plugin_cache": ("Plugin cache leftover", "Now plugin_kv rows in ducky.db.", "cache"),
+    "uefn_plugin_prefs": ("Plugin prefs leftover", "Now plugin_kv rows in ducky.db.", "cache"),
     "webview2_browser": ("In-app browser", "Embedded browser profile (Discord login, cookies).", "cache"),
-    "panel_settings.json": ("Panel settings", "Main settings file.", "settings"),
-    "config.json": ("Config", "Listener config JSON.", "settings"),
-    "credentials.dat": ("Credentials", "Saved API keys.", "settings"),
-    "recent_projects.json": ("Recent projects", "Project switcher history.", "user"),
-    "workspace_dock.json": ("Dock layout", "Panel dock positions.", "user"),
-    "models_cache.json": ("Models cache", "Cached LLM model lists.", "cache"),
-    "agent_crashes.jsonl": ("Agent crashes", "Crash log for debugging.", "cache"),
-    "uefn_plugin_load_errors.jsonl": ("Plugin load errors", "Plugin import failures.", "cache"),
-    "mcp.json": ("MCP config", "MCP server list. Manage from Settings → LLMs → MCPs.", "settings"),
+    "panel_settings.json": ("Settings leftover", "Pre-database settings. Now rows in ducky.db.", "cache"),
+    "config.json": ("Config", "Listener config JSON (projection).", "settings"),
+    "credentials.dat": ("Credentials leftover", "Pre-database keys. Now secrets rows.", "cache"),
+    "recent_projects.json": ("Recent leftover", "Pre-database project list. Now in ducky.db.", "cache"),
+    "workspace_dock.json": ("Dock leftover", "Pre-database dock layout. Now in ducky.db.", "cache"),
+    "models_cache.json": ("Models leftover", "Pre-database catalog. Now cache_docs in ducky.db.", "cache"),
+    "agent_crashes.jsonl": ("Crashes leftover", "Pre-database crash log. Now events in ducky.db.", "cache"),
+    "uefn_plugin_load_errors.jsonl": ("Plugin errors leftover", "Now events in ducky.db.", "cache"),
+    "mcp.json": ("MCP config", "MCP server list export. Rows in ducky.db are source of truth.", "settings"),
+    "pyinstaller-work": ("Build scratch", "PyInstaller work dir. Does not belong in AppData.", "cache"),
+    "ship_stamp.json": ("Ship stamp", "Last listener/skill deploy stamp.", "runtime"),
+    "setup-progress.txt": ("Setup progress", "Installer host progress file.", "runtime"),
+    "panel.pid": ("Panel lock", "Running panel process id.", "runtime"),
     # ADR 0003: the store and its sidecars. Never clearable, never deletable.
     "ducky.db": ("Database", "All app state (chats, settings, ledger, plans, memory).", "settings"),
     "ducky.db-wal": ("Database log", "SQLite write-ahead log for ducky.db.", "settings"),
@@ -255,7 +267,7 @@ def delete_project_appdata(slug: str, app_root: Path | None = None) -> int:
 
 
 def prune_empty_project_dirs(app_root: Path | None = None) -> int:
-    """Remove stub project folders not in recent list and without conversation data."""
+    """Remove stub project folders that hold no conversation rows and no files."""
     if app_root is None:
         app_root = default_app_data_dir()
     known = _known_project_slugs()
@@ -275,6 +287,9 @@ def prune_empty_project_dirs(app_root: Path | None = None) -> int:
     for area in (
         "workspace/projects",
         "file_history",
+        "changesets",
+        "verse_diagnostics",
+        "memory/projects",
     ):
         root = app_root / Path(area)
         if not root.is_dir():
@@ -282,13 +297,93 @@ def prune_empty_project_dirs(app_root: Path | None = None) -> int:
         for project_dir in list(root.iterdir()):
             if not project_dir.is_dir():
                 continue
-            slug = project_dir.name
-            if _should_keep_project_slug(slug, known, app_root):
+            if _dir_has_files(project_dir):
                 continue
             if _safe_rmtree(project_dir):
                 removed += 1
 
     return removed
+
+
+# Empty leftover trees from the pre-database layout. Never recreate these.
+_EMPTY_LEFTOVER_ROOTS = (
+    "chats",
+    "workspace",
+    "file_history",
+    "changesets",
+    "memory",
+    "plan_templates",
+    "uefn_plugin_cache",
+    "uefn_plugin_prefs",
+    "perf",
+    "verse_diagnostics",
+    "backups",
+    "mcp_plugins",
+    "tasks",
+)
+
+
+def prune_empty_leftover_dirs(app_root: Path | None = None) -> int:
+    """Delete empty leftover folders and build scratch that does not belong in AppData."""
+    if app_root is None:
+        app_root = default_app_data_dir()
+    removed = 0
+    work = app_root / "pyinstaller-work"
+    if work.is_dir() and _safe_rmtree(work):
+        removed += 1
+    tmp = app_root / "coding_agents" / "tmp"
+    if tmp.is_dir():
+        try:
+            empty = not any(tmp.iterdir())
+        except OSError:
+            empty = False
+        if empty:
+            try:
+                tmp.rmdir()
+                removed += 1
+            except OSError:
+                pass
+    for name in _EMPTY_LEFTOVER_ROOTS:
+        top = app_root / name
+        if not top.is_dir():
+            continue
+        for dirpath, _dirnames, _filenames in os.walk(top, topdown=False):
+            path = Path(dirpath)
+            try:
+                if not any(path.iterdir()):
+                    path.rmdir()
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+def heal_plugin_runtime_homes(app_root: Path | None = None) -> int:
+    """Move plugin runtimes that leaked to AppData root into uefn_plugins/<id>/."""
+    if app_root is None:
+        app_root = default_app_data_dir()
+    src = app_root / "unity_mcp"
+    if not src.is_dir():
+        return 0
+    dest = app_root / "uefn_plugins" / "unity-mcp" / "runtime"
+    plugin_dir = dest.parent
+    if dest.exists():
+        shutil.rmtree(src, ignore_errors=True)
+        return 1
+    if not plugin_dir.is_dir():
+        shutil.rmtree(src, ignore_errors=True)
+        return 1
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        src.rename(dest)
+        return 1
+    except OSError:
+        try:
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+            shutil.rmtree(src, ignore_errors=True)
+            return 1
+        except OSError:
+            return 0
 
 
 def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -> dict[str, int]:
@@ -299,9 +394,22 @@ def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -
     if app_root is None:
         app_root = default_app_data_dir()
     db_result = _maintain_store(app_root, count_boot=count_boot)
-    moved = sweep_old_backups(app_root)
-    pruned = prune_all_backups(app_root)
+    db_mode = False
+    try:
+        from backend.store.switch import use_db
+
+        db_mode = use_db("settings")
+    except Exception:
+        pass
+    if db_mode:
+        moved = 0
+        pruned = 0
+    else:
+        moved = sweep_old_backups(app_root)
+        pruned = prune_all_backups(app_root)
     removed_dirs = prune_empty_project_dirs(app_root)
+    removed_dirs += prune_empty_leftover_dirs(app_root)
+    removed_dirs += heal_plugin_runtime_homes(app_root)
     # Successful in-app upgrades leave Setup-*.exe under %TEMP%/UEFN-Ducky until
     # the relaunched panel starts — drop anything not newer than this build.
     try:

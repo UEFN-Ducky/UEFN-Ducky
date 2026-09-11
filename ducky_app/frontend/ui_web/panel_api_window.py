@@ -558,22 +558,17 @@ class PanelApiWindowMixin:
                 import base64 as _b64
                 from datetime import datetime
 
-                from frontend.ui_web.project_chats import get_conversations_dir
                 from frontend.ui_web.tool_captures import copy_png_to_ducky_captures
 
                 raw = _b64.b64decode(str(result["data_base64"]))
                 name = f"snip-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')[:-3]}.png"
-
-                snips_dir = get_conversations_dir().parent / "snips"
-                snips_dir.mkdir(parents=True, exist_ok=True)
-                appdata_path = snips_dir / name
-                appdata_path.write_bytes(raw)
                 result["name"] = name
-                result["capture_path"] = str(appdata_path)
 
-                # AppData tool_captures (never project Saved/).
+                # AppData tool_captures only — never mkdir chats/projects stubs.
                 capture_path = copy_png_to_ducky_captures(raw, prefix="snip", filename=name)
-                result["path"] = capture_path or str(appdata_path)
+                if capture_path:
+                    result["path"] = capture_path
+                    result["capture_path"] = capture_path
             except Exception:
                 pass  # disk copy is best-effort; the composer attachment still works
         return result

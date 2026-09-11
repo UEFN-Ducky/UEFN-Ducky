@@ -76,6 +76,11 @@ describe("duckyProfileForm model selection", () => {
     expect(codingAgentFromModel("cursor:composer-2.5", agents)).toBe("cursor");
   });
 
+  it("classifies a contrib coding agent before detect cache lands", () => {
+    clearCachedCodingAgents();
+    expect(codingAgentFromModel("claude_code:sonnet-5", [], ["claude_code"])).toBe("claude_code");
+  });
+
   it("persists a single favorite_models entry when set", () => {
     const form = baseForm({ model: "cursor:vanished" });
     const patch = formToProfilePatch(form);

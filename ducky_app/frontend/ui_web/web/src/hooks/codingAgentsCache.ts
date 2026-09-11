@@ -14,6 +14,7 @@ import type { CodingAgentDto } from "../types/panel";
  * be a coding agent, and every caller treats that as "Ducky's own API".
  */
 let cached: CodingAgentDto[] = [];
+const listeners = new Set<() => void>();
 
 export function getCachedCodingAgents(): CodingAgentDto[] {
   return cached;
@@ -21,6 +22,14 @@ export function getCachedCodingAgents(): CodingAgentDto[] {
 
 export function setCachedCodingAgents(agents: CodingAgentDto[] | null | undefined): void {
   cached = Array.isArray(agents) ? agents : [];
+  for (const listener of listeners) listener();
+}
+
+export function subscribeCodingAgents(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /** Tests only: forget what was loaded. */

@@ -73,6 +73,7 @@ def _has_dot_ducky(path: object) -> bool:
 _LEGACY_PARENTS = (
     "chats/projects", "chats", "changesets", "file_history", "workspace", "memory", "plan_templates",
     "uefn_plugin_cache", "uefn_plugin_prefs", "perf", "verse_diagnostics", "backups",
+    "tasks", "mcp_plugins",
 )
 
 
