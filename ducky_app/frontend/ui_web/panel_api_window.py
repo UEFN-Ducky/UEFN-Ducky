@@ -500,6 +500,13 @@ class PanelApiWindowMixin:
                 "faultKind": str(data.get("faultKind") or "")[:32],
                 "faultAction": str(data.get("faultAction") or "")[:32],
             }
+            from backend.store.switch import use_db
+
+            if use_db("events"):
+                from backend.store.repos import events as _ev
+
+                _ev.insert("ui_crash", ts=row["ts"], source=row["surface"] or row["label"], message=row["message"], payload=row)
+                return {"ok": True, "path": "ducky.db:events/ui_crash"}
             with open(path, "a", encoding="utf-8") as f:
                 f.write(_pa.json.dumps(row, ensure_ascii=False) + "\n")
             return {"ok": True, "path": str(path)}

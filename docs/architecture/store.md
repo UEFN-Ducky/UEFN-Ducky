@@ -100,15 +100,34 @@ shadow release.
 
 ## Phases
 
-| phase | scope | exit |
+All six phases are on `feature/sqlite-store`; every store still has the
+`DUCKY_STORE_BACKEND[_<STORE>]=files` rollback switch (`backend/store/switch.py`).
+
+| phase | scope | shipped as |
 |---|---|---|
-| 0 | `backend/store/db.py`, `0001_init.sql`, freeze guard for `_sqlite3`, AppData registration and protection, test isolation fixture, fitness test, ADR | frozen EXE opens the DB on a clean machine; the suite writes nothing to the real AppData |
-| 1 | settings, secrets, recent projects, window bounds, dock, editor workspace, models cache, listener manifest, plugin kv; `config.json` becomes a projection | one settings parse per process per boot; no lost update between panel and bridge |
-| 2 | conversations, messages, folders, attachments index, usage, snapshots; FTS; big message bodies → blobs | sidebar under 10 ms; append under 2 ms; body search works; `backups/chats` stops growing |
-| 3 | runs, entries, seen, blobs, file versions, watch index; revert lookups become queries; watcher stat-gated | ledger tests pass unchanged; export byte-equal; idle watcher reads 0 bytes |
-| 4 | plans, tasks, templates, memory (+FTS), events, perf, diagnostics, skill manifest cache, plugin registry, captures | no `.ducky/` in a fresh project; memory index one query per turn |
-| 5 | delete JSON writers, `atomic_json` backups, `_has_overrides`, `_iter_run_docs`; maintenance = integrity, snapshot, retention, blob GC, legacy delete; `db check|vacuum|snapshot|export` | grep finds JSON I/O only in importers, listener and IDE-config merge |
-| 6 | optional: verse digest index, project file index, `mcp.json` → table, store catalog cache, paged `load_messages` | |
+| 0 | `backend/store/db.py`, `0001_init.sql`, freeze guard for `_sqlite3`, AppData registration and protection, test isolation fixture, fitness test, ADR | d6f3376 |
+| 1 | settings, secrets, recent projects, window bounds, dock, editor workspace, models cache, listener manifest, plugin kv; `config.json` becomes a projection | 44b06a2 |
+| 2 | conversations, messages, folders, snapshots; FTS body search | e624da2 |
+| 3 | runs, entries, seen, blobs, file versions, watch index; catalog derived; watcher index rows | c698b7c |
+| 4 | plans, tasks, templates, memory (+FTS), usage ledger, rolling logs → `events` | 230a42b |
+| 5 | perf → `events` kind `perf` + `cache_docs` report; UI crashes and plugin load errors → `events`; listener command manifest → `cache_docs`; captures index rows; Verse diagnostics rows; skill manifest cache (`cache_docs`, stat-fingerprinted); maintenance skips heavy trees and deletes `legacy/` after three clean boots; support dump reports schema + integrity; `UEFN-Ducky.exe db check|vacuum|snapshot|stats|export <table>` | this branch |
+| 6 | Verse digest index (`digest_lines` + trigram FTS behind `search_verse_digest`, discovery memo), Quick Open index invalidated by `fingerprint_project_dirs`, `mcp.json` → `mcp_servers` rows (file kept as an export), DuckyOS store catalog cached stale-on-failure, paged `load_messages(conv_id, before_id, limit)` | this branch |
+
+Deviations from the target table above: `perf_events`/`perf_reports`,
+`skill_manifest_cache` and `model_cache` did not get their own tables — they are
+`events` rows and `cache_docs` documents, which is enough for their read
+patterns. `plugins`, `verse_templates`, `group_members`, `attachments` and
+`plan_nodes`/`task_phases` stay inside the JSON `state`/doc columns of their
+owners (queried by id, never by field).
+
+### Test isolation
+
+`pytest.ini` pins rootdir to the repo, so `conftest.py` (per-test
+`LOCALAPPDATA`, store memo reset, real-AppData guard) loads whichever directory
+pytest is started from. Independently, `db.connect()` refuses to open
+`%USERPROFILE%/AppData/Local/UEFN-Ducky/ducky.db` while `PYTEST_CURRENT_TEST`
+is set unless `DUCKY_TESTS_REAL_APPDATA=1` — a test that escapes the redirect
+fails instead of importing into, pruning or migrating the live database.
 
 ## What never goes in the database
 

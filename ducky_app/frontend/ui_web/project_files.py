@@ -702,7 +702,17 @@ def fingerprint_project_dirs(relative_paths: list[str]) -> dict[str, object]:
             out[raw] = _dir_fingerprint(target) if _is_under_content(target) and target.is_dir() else ""
         except (ValueError, OSError):
             out[raw] = ""
+    # The sidebar polls this every 1.5 s. A changed fingerprint means something
+    # outside Ducky (UEFN, git, Explorer) touched the tree, so the flat path
+    # index used by Quick Open must not keep serving the old listing.
+    changed = any(_last_fingerprints.get(k) != v for k, v in out.items())
+    _last_fingerprints.update(out)
+    if changed:
+        _file_paths_cache.clear()
     return {"fingerprints": out}
+
+
+_last_fingerprints: dict[str, str] = {}
 
 
 def read_project_file(relative_path: str) -> dict[str, str]:

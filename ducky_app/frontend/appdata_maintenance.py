@@ -79,7 +79,7 @@ def sweep_old_backups(app_root: Path | None = None) -> int:
         app_root = default_app_data_dir()
     backups_root = app_root / BACKUPS_DIR_NAME
     moved = 0
-    for bak in app_root.rglob("*"):
+    for bak in _walk_for_backups(app_root):
         if not bak.is_file() or ".bak." not in bak.name:
             continue
         if backups_root in bak.parents or bak.parent == backups_root:
@@ -110,6 +110,52 @@ def sweep_old_backups(app_root: Path | None = None) -> int:
             except OSError:
                 pass
     return moved
+
+
+# Trees the app never writes .bak files into; walking them cost every boot
+# (the WebView2 profile, screenshots, node_modules of the coding-agent SDK…).
+_SWEEP_SKIP_DIRS = frozenset(
+    {
+        "webview2_browser", "tool_captures", "coding_agents", "verse-lsp", "legacy", "snapshots",
+        "piper_tts", "meshy_hats", "meshy_free", "asset_previews", "mesh_previews", "listener",
+        "uefn_plugins", "skill_packs", "ai_plugins", "mcp_plugins", "setup-engine", "exports", "imports",
+    }
+)
+
+
+def _walk_for_backups(app_root: Path):
+    for dirpath, dirnames, filenames in os.walk(app_root):
+        rel_top = Path(dirpath).relative_to(app_root).parts
+        if rel_top and rel_top[0] in _SWEEP_SKIP_DIRS:
+            dirnames[:] = []
+            continue
+        for name in filenames:
+            if ".bak." in name:
+                yield Path(dirpath) / name
+
+
+def _retire_legacy_after_clean_boots(app_root: Path, *, needed: int = 3) -> int:
+    """ADR 0003 §7: legacy/ (the pre-database files) is deleted once the store has
+    passed its integrity check on three separate boots."""
+    try:
+        from backend.store.repos import kv
+        from backend.store.switch import use_db
+
+        if not use_db("settings"):
+            return 0
+        legacy = app_root / "legacy"
+        if not legacy.is_dir():
+            return 0
+        boots = int(kv.meta_get("clean_boots") or 0) + 1
+        kv.meta_set("clean_boots", str(boots))
+        if boots < needed:
+            return 0
+        shutil.rmtree(legacy, ignore_errors=True)
+        _log.info("AppData maintenance: removed legacy/ after %d clean boots", boots)
+        return 1
+    except Exception:
+        _log.exception("legacy retirement failed")
+        return 0
 
 
 # (rel_parent, size-label) — folders that hold one dir per project slug.
@@ -280,6 +326,7 @@ def _maintain_store(app_root: Path) -> dict[str, int]:
             return out
         store_db.open_checked(app_root)
         out["db_checked"] = 1
+        out["legacy_removed"] = _retire_legacy_after_clean_boots(app_root)
         newest = store_db.newest_snapshot(app_root)
         if newest is None or time.time() - newest.stat().st_mtime > _SNAPSHOT_EVERY_S:
             store_db.snapshot(app_root, label="daily")

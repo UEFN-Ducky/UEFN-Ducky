@@ -1386,6 +1386,20 @@ def _strip_contributions_for(pid: str) -> None:
 def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
     """Persist last register failure so Settings can explain 'Backend not loaded'."""
     try:
+        from backend.store.switch import use_db
+
+        if use_db("events"):
+            import time as _t
+
+            from backend.store.repos import events as _ev
+
+            _ev.insert("plugin_load_error", ts=_t.time(), source=pid, message=f"{type(exc).__name__}: {exc}",
+                       payload={"plugin_id": pid, "error": f"{type(exc).__name__}: {exc}"})
+            _ev.trim("plugin_load_error", older_than=_t.time() - 30 * 86400, keep=_LOAD_ERROR_LOG_KEEP)
+            return
+    except Exception:
+        pass
+    try:
         from frontend.settings import default_app_data_dir
 
         path = default_app_data_dir() / "uefn_plugin_load_errors.jsonl"

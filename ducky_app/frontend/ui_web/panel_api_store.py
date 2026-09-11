@@ -7,6 +7,31 @@ from typing import Any
 import frontend.ui_web.panel_api as _pa
 
 
+def _cache_store_catalog(result: dict[str, Any]) -> dict[str, Any]:
+    """ADR 0003 phase 6: keep the last good catalog in ducky.db so the Store tab
+    opens offline and after a WebView profile wipe (localStorage used to hold a
+    copy without icons)."""
+    try:
+        from backend.store.repos import kv
+        from backend.store.switch import use_db
+
+        if not use_db("cache_docs"):
+            return result
+        if result.get("ok") and result.get("items"):
+            kv.set_doc("cache_docs", "store_catalog", {"saved_at": _pa.time.time(), "catalog": result})
+            return result
+        cached = kv.get_doc("cache_docs", "store_catalog")
+        if isinstance(cached, dict) and isinstance(cached.get("catalog"), dict):
+            stale = dict(cached["catalog"])
+            stale["stale"] = True
+            stale["stale_error"] = str(result.get("error") or "")
+            stale["saved_at"] = cached.get("saved_at")
+            return stale
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
 class PanelApiStoreMixin:
     def duckyos_get_status(self) -> dict[str, Any]:
         # Store tab also reads status — do not gate on the Account plugin.
@@ -143,11 +168,12 @@ class PanelApiStoreMixin:
         from frontend.duckyos_account import DuckyOSAccountError, store_catalog
 
         try:
-            return store_catalog()
+            result = store_catalog()
         except DuckyOSAccountError as exc:
-            return {"ok": False, "error": exc.message, "code": exc.code, "items": []}
+            result = {"ok": False, "error": exc.message, "code": exc.code, "items": []}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "code": "error", "items": []}
+            result = {"ok": False, "error": str(exc), "code": "error", "items": []}
+        return _cache_store_catalog(result)
 
     def duckyos_store_versions(self, slug: str) -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, store_item_versions

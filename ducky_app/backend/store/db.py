@@ -81,6 +81,24 @@ def _refuse_network_path(path: Path) -> None:
 # --------------------------------------------------------------------------- connect
 
 
+def _refuse_real_appdata_under_pytest(path: Path) -> None:
+    """A test that escapes the conftest redirect must fail loudly instead of
+    migrating, importing into, or pruning the developer's live database.
+    ``DUCKY_TESTS_REAL_APPDATA=1`` opts out deliberately."""
+    if "PYTEST_CURRENT_TEST" not in os.environ or os.environ.get("DUCKY_TESTS_REAL_APPDATA") == "1":
+        return
+    try:
+        real = (Path.home() / "AppData" / "Local" / "UEFN-Ducky").resolve()
+        here = path.parent.resolve() if path.parent.exists() else path.parent
+    except OSError:
+        return
+    if here == real:
+        raise RuntimeError(
+            f"refusing to open the real ducky.db ({path}) from a test; run pytest from the repo root "
+            "so conftest.py redirects LOCALAPPDATA, or set DUCKY_TESTS_REAL_APPDATA=1 on purpose"
+        )
+
+
 def connect(root: Path | None = None) -> sqlite3.Connection:
     """Return this thread's connection to ``ducky.db``, migrating on first open.
 
@@ -94,6 +112,7 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
     if conn is not None:
         return conn
     _refuse_network_path(path)
+    _refuse_real_appdata_under_pytest(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row

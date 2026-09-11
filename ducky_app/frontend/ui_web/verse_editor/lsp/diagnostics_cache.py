@@ -30,7 +30,32 @@ _MEM_DISK_FP: dict[str, tuple[int, int]] = {}
 _legacy_purged = False
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("diagnostics")
+
+
+def _rows():
+    from backend.store.importers import phase6
+    from backend.store.repos import misc
+
+    phase6.ensure("verse_diagnostics")
+    return misc
+
+
+def _project_id(project_root: str) -> str:
+    from frontend.ui_web.project_chats import project_slug
+
+    return project_slug(project_root)
+
+
 def _disk_fingerprint(project_root: str) -> tuple[int, int] | None:
+    if _use_db():
+        try:
+            return _rows().diag_stamp(_project_id(project_root))
+        except Exception:
+            return None
     path = _disk_path(project_root)
     try:
         st = path.stat()
@@ -92,6 +117,12 @@ def _empty() -> dict[str, Any]:
 
 
 def _read_disk(project_root: str) -> dict[str, Any] | None:
+    if _use_db():
+        try:
+            files = _rows().diag_get(_project_id(project_root))
+        except Exception:
+            return None
+        return {"v": CACHE_VERSION, "files": files} if files else None
     path = _disk_path(project_root)
     if not path.is_file():
         return None
@@ -108,6 +139,12 @@ def _read_disk(project_root: str) -> dict[str, Any] | None:
 
 
 def _write_disk(project_root: str, data: dict[str, Any]) -> None:
+    if _use_db():
+        try:
+            _rows().diag_replace(_project_id(project_root), data.get("files") or {})
+        except Exception:
+            pass
+        return
     path = _disk_path(project_root)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

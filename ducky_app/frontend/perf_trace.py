@@ -49,6 +49,27 @@ _writer_thread: threading.Thread | None = None
 _stop_writer = threading.Event()
 
 
+def _use_db() -> bool:
+    try:
+        from backend.store.switch import use_db
+
+        return use_db("events")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _events():
+    from backend.store.repos import events
+
+    return events
+
+
+def _kv():
+    from backend.store.repos import kv
+
+    return kv
+
+
 def _perf_dir() -> Path:
     try:
         from frontend.settings import default_app_data_dir
@@ -162,11 +183,17 @@ def trace(kind: str, name: str = "", duration_ms: float = 0.0, **meta: Any) -> N
                 del _ring[: len(_ring) - RING_SIZE]
             path = _session_jsonl if persist else None
         if path is not None:
-            try:
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
-            except OSError:
-                pass
+            if _use_db():
+                try:
+                    _events().insert("perf", ts=entry["ts"], source=_session_id, message=entry["name"], payload=entry)
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                try:
+                    with path.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+                except OSError:
+                    pass
     except Exception:
         pass
 
@@ -267,6 +294,17 @@ def write_report() -> dict[str, Any]:
         session_path = _session_report
         latest_path = _latest_report
     payload = json.dumps(report, ensure_ascii=False, indent=2, default=str)
+    if _use_db():
+        try:
+            kv = _kv()
+            kv.set_doc("cache_docs", "perf_report_latest", report)
+            if _session_id:
+                kv.set_doc("cache_docs", f"perf_report:{_session_id}", report)
+            # Per-session rows: keep the newest sessions only (was 10 jsonl files).
+            _events().trim("perf", older_than=time.time() - 7 * 86400, keep=50_000)
+        except Exception:  # noqa: BLE001
+            pass
+        return report
     for path in (session_path, latest_path):
         if path is None:
             continue
@@ -280,6 +318,12 @@ def write_report() -> dict[str, Any]:
 
 def read_latest_report() -> dict[str, Any] | None:
     """Load ``latest-report.json`` from disk (survives process death)."""
+    if _use_db():
+        try:
+            doc = _kv().get_doc("cache_docs", "perf_report_latest")
+            return doc if isinstance(doc, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
     try:
         path = _perf_dir() / "latest-report.json"
         if not path.is_file():
