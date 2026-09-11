@@ -494,9 +494,6 @@ input, textarea, select, button {
 .app-header-center .quick-open-bar {
   pointer-events: auto;
 }
-.app-header-center .quick-open-bar--field {
-  flex: 1 1 280px;
-}
 .app-header-center .sidebar-toggle-btn {
   flex-shrink: 0;
 }
@@ -3470,13 +3467,6 @@ body.focus-window:has(.focus-top-edge-grip:hover) .focus-header-chrome,
 .focus-header-chrome .app-header--focus .connection-status-icon {
   width: 18px;
   height: 18px;
-}
-.focus-header-chrome .app-header--focus .quick-open-bar--field {
-  max-width: 220px;
-  min-width: 140px;
-  height: 24px;
-  flex: 1 1 160px;
-  padding: 0 8px;
 }
 .focus-header-chrome .app-header--focus .app-header-save-btn {
   padding: 2px 8px;
