@@ -48,12 +48,16 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
   const selectLanguage = useCallback(
     (code: string) => {
       const next = code.trim() || "en";
-      setPref("language", next);
+      if (isEnglishLang(next)) {
+        setPref("language", "en");
+      } else {
+        setPrefs({ language: next, translateStart: String(Date.now()) });
+      }
       setOpen(false);
       setAdding(false);
       setDraft("");
     },
-    [setPref],
+    [setPref, setPrefs],
   );
 
   const commitLanguage = useCallback(
@@ -67,20 +71,11 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
       const nextList = languages.some((c) => c.toLowerCase() === code.toLowerCase())
         ? languages
         : [...languages, code];
-      const applyNow = isEnglishLang(language) || language.toLowerCase() === code.toLowerCase();
-      if (applyNow) {
-        setPrefs({
-          languages: serializeCustomLanguages(nextList),
-          language: code,
-        });
-        setOpen(false);
-      } else {
-        setPrefs({ languages: serializeCustomLanguages(nextList) });
-      }
+      setPrefs({ languages: serializeCustomLanguages(nextList) });
       setDraft("");
       setAdding(false);
     },
-    [language, languages, selectLanguage, setPrefs],
+    [languages, selectLanguage, setPrefs],
   );
 
   const addLanguage = useCallback(async () => {
@@ -195,7 +190,7 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
                   <span className="terminal-header-item-name">{code}</span>
                   <span className="terminal-header-item-meta">
                     <span className="terminal-header-item-status">
-                      {active ? "active" : "click to apply"}
+                      {active ? "selected" : "click to start"}
                     </span>
                   </span>
                 </button>

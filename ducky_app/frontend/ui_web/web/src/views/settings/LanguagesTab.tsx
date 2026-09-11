@@ -38,6 +38,11 @@ export function LanguagesTab() {
     label: "Add language",
     route: "settings.languages",
   });
+  const langStartRef = useUiTarget("settings.languages.start", {
+    kind: "settings_field",
+    label: "Start translation",
+    route: "settings.languages",
+  });
   const language = typeof prefs.language === "string" ? prefs.language.trim() : "en";
   const model = typeof prefs.model === "string" ? prefs.model.trim() : "";
   const languages = useMemo(() => parseCustomLanguages(prefs.languages), [prefs.languages]);
@@ -49,10 +54,23 @@ export function LanguagesTab() {
     (code: string) => {
       const next = code.trim() || "en";
       setPref("language", next);
-      setNote(isEnglishLang(next) ? "UI language: English" : `UI language: ${next}`);
+      setNote(
+        isEnglishLang(next)
+          ? "UI language: English (off)"
+          : `Selected ${next} — press Start`,
+      );
     },
     [setPref],
   );
+
+  const startTranslate = useCallback(() => {
+    if (isEnglishLang(language)) {
+      setNote("Pick a language first, then press Start.");
+      return;
+    }
+    setPref("translateStart", String(Date.now()));
+    setNote(`Starting ${language}…`);
+  }, [language, setPref]);
 
   const commitLanguage = useCallback(
     (name: string) => {
@@ -66,22 +84,11 @@ export function LanguagesTab() {
       const nextList = languages.some((c) => c.toLowerCase() === code.toLowerCase())
         ? languages
         : [...languages, code];
-      // Adding while already on a language only grows the list — auto-switching on
-      // every Add made 3+ languages thrash/restore over each other.
-      const applyNow = isEnglishLang(language) || language.toLowerCase() === code.toLowerCase();
-      if (applyNow) {
-        setPrefs({
-          languages: serializeCustomLanguages(nextList),
-          language: code,
-        });
-        setNote(`UI language: ${code}`);
-      } else {
-        setPrefs({ languages: serializeCustomLanguages(nextList) });
-        setNote(`Added ${code} — click it to apply`);
-      }
+      setPrefs({ languages: serializeCustomLanguages(nextList) });
+      setNote(`Added ${code} — select it, then press Start`);
       setDraft("");
     },
-    [language, languages, selectLanguage, setPrefs],
+    [languages, selectLanguage, setPrefs],
   );
 
   const addLanguage = useCallback(async () => {
@@ -188,7 +195,7 @@ export function LanguagesTab() {
         </h2>
         <p className="general-tab-section-desc">
           {
-            "Add the languages you want, pick an AI model to translate UI chrome, then select a language. Sidebar folders, Duckies, and panels translate too. Hover a Verse file or Ducky tab for Translate / Auto translate for that tab only. Code editors and file paths stay original. Translations are cached so each phrase is translated once."
+            "Add a language, pick an API model (Anthropic / OpenAI / Gemini / Ollama — not Claude Code, Cursor, or Codex), then press Start. Opening a gateway in the list is not enough — click a model under it. Auto-translate checkboxes are only for Verse files and chats, not this UI run."
           }
         </p>
       </div>
@@ -206,14 +213,14 @@ export function LanguagesTab() {
         <GeneralSectionHeader
           icon={<Icons.Brain />}
           title="Translation model"
-          description="Same model list as Settings → LLMs. Empty uses your Default Model. API providers work best; Cursor / Claude Code / Codex often hang on batch UI translate."
+          description="Pick a model under Anthropic, OpenAI, Gemini, or Ollama. Empty / Default Model / Claude Code / Cursor / Codex cannot batch-translate UI."
         />
         <DuckyModelPicker
           model={model}
           onChange={(next) => setPref("model", next)}
           label="Model"
           placeholder="Default model (Settings → LLMs)"
-          hint="Same catalog as Default Model. Use an installed gateway (Anthropic, OpenAI, Google, Ollama, …) for UI + file translate."
+          hint="Click a model under the gateway — highlighting Anthropic without picking a model still leaves Claude Code / Default selected."
           allowClear
           requireTools={false}
           menuPlacement="bottom"
@@ -278,7 +285,7 @@ export function LanguagesTab() {
         <GeneralSectionHeader
           icon={<Icons.Globe />}
           title="Your languages"
-          description="Only languages you add appear here. Click one to apply it to the UI."
+          description="Add grows the list only. Click a language to select it, then press Start. English (off) stops translation immediately."
         />
 
         <ul className="translation-lang-list">
@@ -305,7 +312,7 @@ export function LanguagesTab() {
                     {code}
                   </span>
                   <span className="translation-lang-item-meta">
-                    {active ? "active" : "click to apply"}
+                    {active ? "selected" : "click to select"}
                   </span>
                 </button>
                 <button
@@ -321,6 +328,22 @@ export function LanguagesTab() {
             );
           })}
         </ul>
+
+        <div ref={langStartRef} className="translation-lang-actions">
+          <button
+            type="button"
+            className="settings-btn general-tab-btn-primary"
+            onClick={startTranslate}
+            disabled={isEnglishLang(language)}
+          >
+            Start
+          </button>
+          <span className="general-tab-section-note" style={{ margin: 0 }}>
+            {isEnglishLang(language)
+              ? "Select a language first."
+              : `Start ${language} with the model above.`}
+          </span>
+        </div>
 
         <div ref={langAddRef} className="translation-lang-add">
           <input
