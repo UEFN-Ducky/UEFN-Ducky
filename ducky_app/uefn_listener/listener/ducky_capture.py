@@ -493,7 +493,7 @@ def _created_actor(params: dict, cap: Optional[dict], result: Any) -> Optional[d
 
 #: Where each asset-creating handler reports the new asset's path.
 _ASSET_PATH_KEYS = ("dest", "material_path", "material_instance_path", "system_path",
-                    "data_table_path", "widget_path", "asset_path")
+                    "data_table_path", "widget_path", "asset_path", "prefab_path")
 
 
 def _created_blockout(params: dict, cap: Optional[dict], result: Any) -> Optional[list]:
@@ -596,6 +596,9 @@ CAPTURE: Dict[str, _Spec] = {
     "create_niagara_mesh": _Spec("niagara", "exists", None, None, _created_asset),
     "create_widget_blueprint": _Spec("umg", "exists", None, None, _created_asset),
     "create_data_table": _Spec("datatable", "exists", None, None, _created_asset),
+    # a blank prefab is a plain asset; create_prefab_from_entities stays manual
+    # because deleting it would orphan the entities it turned into an instance
+    "create_empty_prefab": _Spec("entity", "exists", None, None, _created_asset),
     # opaque — arbitrary code, bracketed by a level snapshot
     "execute_python": _Spec(
         "world", "opaque", _before_opaque, None, _created_opaque, _after_opaque,

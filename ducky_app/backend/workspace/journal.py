@@ -1203,7 +1203,10 @@ class FileChangeJournal:
             )
         )
         try:
-            for step in steps:
+            queue = list(steps)
+            deferred: set[int] = set()
+            while queue:
+                step = queue.pop(0)
                 command = str(step.get("command") or "")
                 if not command:
                     continue
@@ -1218,6 +1221,20 @@ class FileChangeJournal:
                     where = "UEFN" if program == PROGRAM_UEFN else program
                     raise ConnectionError(f"open {where} to undo editor changes ({exc})") from exc
                 except Exception as exc:
+                    # One import can create a mesh and the material it uses in a
+                    # single entry, in whatever order the asset registry listed
+                    # them. The listener refuses to delete the material while the
+                    # mesh exists, so let the rest of this entry go first and try
+                    # once more at the end.
+                    if (
+                        command == "ducky_revert_creation"
+                        and "still used by" in str(exc)
+                        and queue
+                        and id(step) not in deferred
+                    ):
+                        deferred.add(id(step))
+                        queue.append(step)
+                        continue
                     if command in ("wire_verse_device_ref", "wire_verse_device_array") and _actor_missing(exc):
                         actor = str(params.get("actor_path") or "")
                         field = str(params.get("field") or "")

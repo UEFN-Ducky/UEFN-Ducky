@@ -105,12 +105,13 @@ export function AccountTab() {
     // One initial fetch + slow poll (heartbeat thread covers presence separately).
     void refreshTeams();
     void refreshRemote();
+    const starting = Boolean(remote?.enabled && !remote?.running);
     const id = window.setInterval(() => {
       void refreshTeams();
       void refreshRemote();
-    }, 90_000);
+    }, starting ? 3000 : 90_000);
     return () => window.clearInterval(id);
-  }, [status?.logged_in, refreshTeams, refreshRemote]);
+  }, [status?.logged_in, remote?.enabled, remote?.running, refreshTeams, refreshRemote]);
 
   const run = async (fn: () => Promise<DuckyOSAccountStatus>) => {
     setBusy(true);
@@ -245,7 +246,11 @@ export function AccountTab() {
             <p className="account-tab-meta">
               Tunnel:{" "}
               {remote?.running ? (
-                <strong className="account-tab-ok">{remote.mode || "on"}</strong>
+                <strong className="account-tab-ok">
+                  {remote.mode === "quick" ? "temporary" : remote.mode || "on"}
+                </strong>
+              ) : remote?.enabled ? (
+                <span className="account-tab-warn">starting</span>
               ) : (
                 <span className="account-tab-warn">off</span>
               )}
@@ -253,6 +258,13 @@ export function AccountTab() {
             {remote?.hostname ? (
               <p className="account-tab-meta">
                 Host: <code>{remote.hostname}</code>
+              </p>
+            ) : null}
+            {remote?.mode === "quick" ? (
+              <p className="account-tab-meta">
+                Temporary Cloudflare address. Your host is{" "}
+                <code>u-….app.uefnducky.org</code> after a tunnel token is saved at Admin →
+                UEFN Ducky → Remote.
               </p>
             ) : null}
             <p className="account-tab-meta">Active remote sessions: {remote?.sessions ?? 0}</p>

@@ -1040,19 +1040,31 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
 def _remote_endpoint() -> dict[str, Any]:
     from frontend.settings import PanelSettings
     from frontend.ui_web import panel_httpd
-    from frontend.remote_tunnel import remote_tunnel_status
+    from frontend.remote_tunnel import remote_tunnel_status, start_remote_tunnel
 
     s = PanelSettings.load()
     if not bool(getattr(s, "remote_access", False)):
         return {"enabled": False}
+    try:
+        start_remote_tunnel()
+    except Exception:
+        pass
     st = remote_tunnel_status()
     hostname = str(st.get("hostname") or "").strip()
+    mode = str(st.get("mode") or "")
     if not hostname:
-        return {"enabled": True, "hostname": "", "login_url": ""}
+        return {
+            "enabled": True,
+            "hostname": "",
+            "login_url": "",
+            "starting": True,
+            "mode": mode,
+            "error": str(st.get("error") or ""),
+        }
     token = panel_httpd.mint_remote_login_token()
     scheme = "http" if hostname.startswith("127.") else "https"
     login_url = f"{scheme}://{hostname}/__remote_login?t={token}"
-    return {"enabled": True, "hostname": hostname, "login_url": login_url}
+    return {"enabled": True, "hostname": hostname, "login_url": login_url, "mode": mode}
 
 
 def _remote_snapshot() -> dict[str, Any]:

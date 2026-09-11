@@ -116,6 +116,28 @@ def test_remote_endpoint_shape_when_disabled() -> None:
     assert out == {"enabled": False}
 
 
+def test_remote_endpoint_starting_when_tunnel_has_no_host() -> None:
+    from frontend.duckyos_account import _remote_endpoint
+    from frontend.settings import PanelSettings
+    from unittest.mock import patch
+
+    s = PanelSettings()
+    s.remote_access = True
+    with (
+        patch("frontend.settings.PanelSettings.load", return_value=s),
+        patch("frontend.remote_tunnel.start_remote_tunnel"),
+        patch(
+            "frontend.remote_tunnel.remote_tunnel_status",
+            return_value={"hostname": "", "mode": "starting", "error": ""},
+        ),
+    ):
+        out = _remote_endpoint()
+    assert out["enabled"] is True
+    assert out["login_url"] == ""
+    assert out["starting"] is True
+    assert out["mode"] == "starting"
+
+
 def test_remote_deny_covers_native_and_secret_paths() -> None:
     from frontend.duckyos_account import REMOTE_DENY
 
@@ -146,5 +168,6 @@ if __name__ == "__main__":
     test_dispatch_desktop_rpc_allowlist()
     test_call_panel_method_maps_kwargs_and_positional()
     test_remote_endpoint_shape_when_disabled()
+    test_remote_endpoint_starting_when_tunnel_has_no_host()
     test_remote_deny_covers_native_and_secret_paths()
     print("ok")

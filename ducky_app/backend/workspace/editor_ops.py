@@ -208,7 +208,7 @@ _MUTATIONS: tuple[OpSpec, ...] = (
     _op("remove_entity_component", KIND_ENTITY, "components"),
     _op("set_entity_component_property", KIND_ENTITY, "props"),
     _op("create_prefab_from_entities", KIND_ENTITY, "exists", creates=True),
-    _op("create_empty_prefab", KIND_ENTITY, "exists", creates=True),
+    _op("create_empty_prefab", KIND_ENTITY, "exists", revertable=REVERT_AUTO, creates=True),
     _op("instantiate_prefab", KIND_ENTITY, "exists", creates=True),
     _op("convert_actors_to_entities", KIND_ENTITY, "exists", revertable=REVERT_NONE,
         note="documented one-way conversion"),

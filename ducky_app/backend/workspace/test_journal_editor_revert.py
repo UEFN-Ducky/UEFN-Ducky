@@ -171,6 +171,36 @@ def test_undoing_a_creation_asks_the_listener_to_remove_exactly_it(env) -> None:
     assert posted[0][1]["restore_command"] == "spawn_actor"
 
 
+def test_an_asset_still_used_by_a_sibling_creation_is_removed_after_it(env, monkeypatch) -> None:
+    """import_asset records mesh + material in one entry; the material is refused
+    while the mesh exists, so the journal must delete the mesh first."""
+    root, journal, posted = env
+    mat = "/Proj/Meshes/SM_Chair/MAT_Chair_Wood.MAT_Chair_Wood"
+    mesh = "/Proj/Meshes/SM_Chair/SM_Chair.SM_Chair"
+    gone: set[str] = set()
+
+    def fake_send(command, params=None, timeout=None):
+        params = dict(params or {})
+        posted.append((command, params))
+        if command == "ducky_revert_creation" and params["id"] == mat and mesh not in gone:
+            raise ValueError(f"Refused: {mat} is still used by 1 asset(s): {mesh}")
+        gone.add(params["id"])
+        return {}
+
+    monkeypatch.setattr("backend.bridge.send_command", fake_send)
+    make(
+        env,
+        sidecar(inverse=[], created=[
+            {"kind": "asset", "id": mat, "label": "MAT_Chair_Wood", "path": mat},
+            {"kind": "asset", "id": mesh, "label": "SM_Chair", "path": mesh},
+        ], summary="created MAT_Chair_Wood and 1 more"),
+        command="import_asset",
+    )
+    result = journal.revert_run("r1", project_root=str(root))
+    assert result["errors"] == [] and result["reverted"] == [1]
+    assert [p[1]["id"] for p in posted] == [mat, mesh, mat]
+
+
 # --- manual -----------------------------------------------------------------------
 
 

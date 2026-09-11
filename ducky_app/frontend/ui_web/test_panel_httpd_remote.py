@@ -64,3 +64,11 @@ def test_local_bridge_paths_stay_loopback(remote_auth):
     header = f"{httpd._COOKIE_NAME}={cookie}"
     assert not httpd.request_is_authorized(host, "/__panel_run", header)
     assert httpd.request_is_authorized("127.0.0.1:4199", "/__panel_run", None)
+
+
+def test_publish_panel_events_reaches_pollers():
+    before = httpd._event_seq
+    httpd.publish_panel_events([{"type": "chats_changed", "conv_id": "c1"}])
+    cursor, events = httpd._poll_panel_events(before, timeout=0.0)
+    assert cursor > before
+    assert any(e.get("type") == "chats_changed" and e.get("conv_id") == "c1" for e in events)

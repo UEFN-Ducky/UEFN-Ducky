@@ -175,6 +175,9 @@ def request_is_authorized(host_header: str, path: str, cookie: str | None) -> bo
     if path in _LOCAL_BRIDGE_PATHS:
         return False
     return remote_cookie_ok(cookie, host)
+
+
+def publish_panel_events(events: list[dict[str, object]]) -> None:
     """Broadcast agent events over loopback HTTP, avoiding WebView2 evaluate_js.
 
     Each panel/focus window long-polls with its own cursor, so background-agent

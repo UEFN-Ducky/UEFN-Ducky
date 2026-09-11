@@ -111,6 +111,7 @@ def _remove_tunnel() -> None:
 def _run_cloudflared(exe: Path, args: list[str]) -> str:
     """Run until stop or exit. Returns last hostname seen on stderr."""
     hostname = ""
+    tail: list[str] = []
     proc = subprocess.Popen(
         [str(exe), *args],
         stdout=subprocess.PIPE,
@@ -126,6 +127,11 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
             line = proc.stdout.readline()
             if not line and proc.poll() is not None:
                 break
+            text = (line or "").strip()
+            if text:
+                tail.append(text)
+                if len(tail) > 8:
+                    tail.pop(0)
             match = _QUICK_HOST_RE.search(line or "")
             if match:
                 hostname = match.group(0).removeprefix("https://")
@@ -139,7 +145,11 @@ def _run_cloudflared(exe: Path, args: list[str]) -> str:
     finally:
         if proc.poll() is None:
             proc.kill()
-    return hostname
+    if hostname:
+        return hostname
+    err = (tail[-1][:240] if tail else "tunnel exited")
+    _set_status(running=False, hostname="", error=err)
+    return ""
 
 
 def _loop() -> None:
@@ -153,6 +163,8 @@ def _loop() -> None:
                 _set_status(running=False, mode="", error="")
                 _STOP.wait(2.0)
                 continue
+            if not str(remote_tunnel_status().get("hostname") or "").strip():
+                _set_status(mode="starting", running=False, error="")
             exe = ensure_cloudflared()
             row = _fetch_tunnel_token()
             mode = str(row.get("mode") or "")
@@ -175,7 +187,7 @@ def _loop() -> None:
                     ["tunnel", "--no-autoupdate", "run", "--token", str(row["token"])],
                 )
             else:
-                _set_status(mode="quick", running=True, error="")
+                _set_status(mode="quick", running=False, error="")
                 _run_cloudflared(
                     exe,
                     ["tunnel", "--no-autoupdate", "--url", url],
