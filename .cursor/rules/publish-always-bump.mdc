@@ -1,0 +1,17 @@
+---
+description: Desktop Store publish always uses the default auto-bump path
+alwaysApply: true
+---
+
+# Desktop publish — ALWAYS bump
+
+Publish the desktop app with the default command only:
+
+```
+py -3 release/publish_app.py --notes "…"
+```
+
+It bumps patch, builds Setup, commits + pushes, uploads. **Never** pass
+`--no-bump`, `--set-version`, `--version`, or `--exe` unless the user
+types that flag themselves. A local `__version__` that is already ahead
+of the Store is not a reason to skip the bump — let it bump again.
