@@ -1,6 +1,6 @@
 """MCP tools: skill packs and on-demand subskill load."""
 
-from backend.tools.support.plugin_gate import plugin_mcp_tool
+from backend.server import mcp
 from backend.skills.store import (
     build_skill_prompt,
     default_skill_selection,
@@ -9,7 +9,7 @@ from backend.skills.store import (
 )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def uefn_skill() -> str:
     """REQUIRED FIRST for wiring Verse @editable fields.
 
@@ -28,7 +28,7 @@ def uefn_skill() -> str:
         )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def skill_read_subskill(pack_id: str, subskill_id: str = "") -> str:
     """List or load a skill-pack subskill. Omit subskill_id to list all subskills in a pack.
 

@@ -904,7 +904,8 @@ def build_skill_prompt_compact(selection: SkillSelection | None = None) -> str:
     lines: list[str] = [
         "## Available skill packs (lazy-loaded)",
         'Call skill_read_subskill("<pack_id>", "core") for SKILL.md; omit id to list refs.',
-        "Load only what the current task needs.",
+        "Load only what the current task needs. Titles are not the skill — do not invent APIs or files from a title.",
+        "Never claim a file exists unless workspace_write_file returned that path this turn.",
         "",
     ]
     any_pack = False

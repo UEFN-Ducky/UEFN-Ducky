@@ -60,7 +60,10 @@ def _blocks_from_parts(parts: dict[str, str], *, omit: frozenset[str]) -> dict[s
 
         mode_suffix = parts.get("mode_suffix") or ""
         listener_port = int(parts.get("listener_port") or 4200)
-        blocks["rules"] = f"## Rules\n{_rules_body(listener_port)}{mode_suffix}"
+        local_slim = _parts_local_slim(parts)
+        blocks["rules"] = (
+            f"## Rules\n{_rules_body(listener_port, local_slim=local_slim)}{mode_suffix}"
+        )
     return blocks
 
 

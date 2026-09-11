@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
-from backend.tools.support.plugin_gate import plugin_mcp_tool
+from backend.server import mcp
 from backend.tools.verse import verse_digests
 
 
@@ -19,7 +19,7 @@ def _local_or_listener(local_fn, command: str, args: dict, pretty: bool) -> str:
     return tool_json(send_command(command, args), pretty=pretty)
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def list_verse_digests(pretty: bool = False) -> str:
     """List every Verse digest for the project with purpose blurbs and decl counts.
 
@@ -35,7 +35,7 @@ def list_verse_digests(pretty: bool = False) -> str:
     return tool_json(verse_digests.list_verse_digests(), pretty=pretty)
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def list_verse_types(
     kind: str = "",
     digest: str = "",
@@ -67,7 +67,7 @@ def list_verse_types(
     )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def list_verse_devices(digest_path: str = "", pretty: bool = False) -> str:
     """List device class names from Verse digests (_device suffix or creative_device parent).
 
@@ -82,7 +82,7 @@ def list_verse_devices(digest_path: str = "", pretty: bool = False) -> str:
     )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def search_verse_digest(
     query: str, digest_path: str = "", max_results: int = 50, pretty: bool = False
 ) -> str:
@@ -101,7 +101,7 @@ def search_verse_digest(
     )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def get_verse_api(
     name: str, digest_path: str = "", max_chars: int = 24000, pretty: bool = False
 ) -> str:
@@ -123,7 +123,7 @@ def get_verse_api(
     )
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def list_verse_modules(digest_path: str = "", pretty: bool = False) -> str:
     """List Verse module names (with nesting and line spans) across the digest files.
 

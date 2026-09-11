@@ -22,6 +22,11 @@ from backend.agent.providers.base import ProviderMessage, StreamEventKind
 from backend.agent.runner import AgentRunner, RunConfig
 from backend.agent.secrets import get_key
 from backend.agent.delegation_guard import append_delegation_warning, fake_delegation_warning
+from backend.agent.write_claim_guard import (
+    append_write_claim_warning,
+    fake_write_warning,
+    record_write_from_tool,
+)
 from backend.agent.toolsets import is_plan_safe_tool
 
 PushFn = Callable[[dict[str, Any]], None]
@@ -977,6 +982,8 @@ async def _run_agent_loop(
     t_start = time.monotonic()
     t_first: float | None = None
     delegation_tools_called: set[str] = set()
+    written_relpaths: set[str] = set()
+    write_failures: list[str] = []
     try:
         async for event in runner.run_turn(
             user_text,
@@ -1011,6 +1018,7 @@ async def _run_agent_loop(
                 )
             elif event.kind == "tool_end" and event.tool:
                 rec = event.tool
+                record_write_from_tool(rec, written_relpaths, write_failures)
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
                 _push_tool_done(push, conv.id, rec)
@@ -1099,6 +1107,10 @@ async def _run_agent_loop(
                 if warning:
                     assistant_msg = append_delegation_warning(assistant_msg, warning)
                     push({"type": "delegation_warning", "text": warning, "conv_id": conv.id})
+                write_warning = fake_write_warning(assistant_msg, written_relpaths, write_failures)
+                if write_warning:
+                    assistant_msg = append_write_claim_warning(assistant_msg, write_warning)
+                    push({"type": "delegation_warning", "text": write_warning, "conv_id": conv.id})
                 append_message(conv, assistant_msg)
                 stop_reason = "done"
                 push({"type": "assistant_done", "conv_id": conv.id})

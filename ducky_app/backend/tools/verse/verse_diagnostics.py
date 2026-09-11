@@ -23,6 +23,7 @@ from backend.bridge import resolve_workspace_path
 from backend.tools.verse.compile_hints import hints_for
 from backend.tools.verse.verse_stats import record_compile, record_tool_failure
 from backend.util.json_util import tool_json
+from backend.server import mcp
 from backend.tools.support.plugin_gate import plugin_mcp_tool
 
 
@@ -50,7 +51,7 @@ def _ui_progress(root: str):
     return on_progress
 
 
-@plugin_mcp_tool("verse")
+@mcp.tool()
 def workspace_list_verse_errors(pretty: bool = False, full: bool = False, rescan: bool = True) -> str:
     """List current Verse errors from the Problems panel (verse-lsp on host disk).
 

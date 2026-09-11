@@ -19,9 +19,10 @@ def test_tools_init_does_not_import_domain_modules() -> None:
     )
     for name in forbidden_flat:
         assert f"import {name}" not in text and f"import backend.tools.{name}" not in text, name
+    # Host-disk Verse (skill/digest/workspace lint) registers from tools/__init__
+    # so create/edit works when Epic MCP is down and the verse Store plugin is off.
     forbidden_pkgs = (
         "backend.tools.uefn",
-        "backend.tools.verse",
         "backend.tools.world",
         "backend.tools.animation",
         "backend.tools.vfx",

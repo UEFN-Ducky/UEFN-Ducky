@@ -888,6 +888,10 @@ def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
     the plugin is enabled again.
     """
     ensure_plugins_loaded()
+    try:
+        from backend.tools.support.plugin_gate import HOST_DISK_TOOLS as _host_disk
+    except Exception:
+        _host_disk = frozenset()
     active = _ACTIVE_UEFN_AGENT_IDS.get()
     with _LOCK:
         owner = dict(_PLUGIN_TOOL_OWNER)
@@ -906,7 +910,17 @@ def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
             out.append(t)
             continue
         pid = owner[name]
+        if name in _host_disk:
+            out.append(t)
+            continue
         if not is_plugin_enabled(pid):
+            try:
+                from backend.tools.support.plugin_gate import heal_enable_store_plugin
+
+                if heal_enable_store_plugin(pid) and is_plugin_enabled(pid):
+                    out.append(t)
+            except Exception:
+                pass
             continue
         if active is not None and pid not in active:
             continue

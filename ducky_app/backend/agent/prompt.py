@@ -27,7 +27,7 @@ CHAT_REPORT_RULE = """\
 > Use the project's content mount for asset paths.
 ```
 Use NOTE/TIP for information, WARNING/CAUTION for caveats, ERROR for failures, SUCCESS for verified results. Only include callouts justified by the task; do not claim verification you did not perform.
-- **Work report blocks:** For created/edited/placed/wired/imported work, use the report shape below, omitting anything that does not apply. The title's command/context chip is optional. Use exact `## Run Summary` and `## Inventory` headings for the metrics and inventory widgets. Inventory rows MUST use `- **Kind** / ` followed by a backticked name, then ` — description`. Kinds include Verse device, Devices, Prop, Blueprint, Blender mesh, UMG Widget; these produce distinct colored labels and icons. Descriptions support **emphasis**, `badges`, and [file links](Verse/MyFile.verse). Use one row per asset or related group. Only show counts from actual tool/ledger results; NEVER estimate editor changes, retries, or program counts from asset names or fill unknown counts with zero. Omit Run Summary if those counts are unavailable. Brief personality styles mean concise block content, not skipping structure. Do not reformat tool results or repeat written files; link them instead.
+- **Work report blocks:** Only after a write/place/wire tool returned ok this turn. For created/edited/placed/wired/imported work, use the report shape below, omitting anything that does not apply. The title's command/context chip is optional. Use exact `## Run Summary` and `## Inventory` headings for the metrics and inventory widgets. Inventory rows MUST use `- **Kind** / ` followed by a backticked name, then ` — description`. Kinds include Verse device, Devices, Prop, Blueprint, Blender mesh, UMG Widget; these produce distinct colored labels and icons. Descriptions support **emphasis**, `badges`, and [file links](Verse/MyFile.verse). Use one row per asset or related group. Only show counts from actual tool/ledger results; NEVER estimate editor changes, retries, or program counts from asset names or fill unknown counts with zero. Omit Run Summary if those counts are unavailable. Brief personality styles mean concise block content, not skipping structure. Do not reformat tool results or repeat written files; link them instead.
 ```
 # Title
 `short command or context chip`
@@ -53,7 +53,21 @@ def clear_skill_cache() -> None:
     _skill_cache = None
 
 
-def _rules_body(listener_port: int) -> str:
+EVIDENCE_RULE = (
+    "- **Evidence (HARD):** A project file is not written until `workspace_write_file` "
+    "(or `ducky_verse_template_apply`) returns ok for that path this turn. Never say "
+    '"the files were written", list Inventory rows, or tell the user to open a path '
+    "unless that tool succeeded. If a tool failed, is Unknown, or you did not call it "
+    "— say that in one line. Do not invent files or tool results "
+    "(including `module_declarations.verse`).\n"
+)
+
+CHAT_REPORT_RULE_LOCAL = """\
+- **Response formatting (local):** Lead with the outcome in one or two sentences. Color a label `[text](ducky:green)` only for a result a tool actually returned. No `## Inventory` / Run Summary unless a write tool succeeded this turn — then list only those exact `relative_path` values. If something broke, say so; do not invent files, UMG trees, or hashes.
+"""
+
+
+def _rules_body(listener_port: int, *, local_slim: bool = False) -> str:
     from backend.agent.hard_rules import AGENT_HARD_RULES
     from backend.agent.serialization import tool_result_format
 
@@ -73,8 +87,9 @@ data:
         for ln in AGENT_HARD_RULES.strip().splitlines()
         if ln.strip() and not ln.strip().startswith("**Agent hard rules")
     )
-    return f"""{toon_hint}{hard_block}
-{CHAT_REPORT_RULE}- **Never re-paste written code:** the UI already shows every tool call and file diff. NEVER dump the contents of a file you just wrote or edited into your reply — link the file and summarize the change in 1–2 lines. Code blocks in replies are only for snippets that exist nowhere else (a suggestion you did NOT apply).
+    report = CHAT_REPORT_RULE_LOCAL if local_slim else CHAT_REPORT_RULE
+    return f"""{EVIDENCE_RULE}{toon_hint}{hard_block}
+{report}- **Never re-paste written code:** the UI already shows every tool call and file diff. NEVER dump the contents of a file you just wrote or edited into your reply — link the file and summarize the change in 1–2 lines. Code blocks in replies are only for snippets that exist nowhere else (a suggestion you did NOT apply).
 - **Deferred tools (Cursor-style):** Only floor tools are in tools[] (`workspace_*`, `ducky_get_status`, `ducky_ask_user`, `ducky_get_tools`, `ducky_call_tool`). For everything else: `ducky_get_tools(name=…)` or `pattern=…` then `ducky_call_tool(name, arguments)` — always pass `arguments`. Never invent schemas. Desktop/nested plugins use the same flat names (`blender_*`, `prefix__*`).
 - **Verse errors / code FIRST (host tools only):** On fix-errors or Verse logic turns start with `workspace_list_verse_errors` (or `workspace_list_dir` → read) — never `ping`, `get_project_info`, `ducky_get_errors`, `execute_python`, or listener/editor tools. If a listener tool does not return immediately it is offline/broken — do not retry; stay on `workspace_*`.
 - **Project files (no listener needed):** `workspace_list_dir` → `workspace_read_file` → `workspace_write_file` (full file). Behavior changes (triggers, grants, NPC spawn, event handlers) live in `Verse/**/*.verse` — edit those files immediately; never block on listener deploy or Outliner labels. After Verse edits run `workspace_list_verse_errors` (offline OK). `workspace_compile_verse` once Problems is clean and UEFN is open — the LSP scan cannot see effect/module/ambiguity errors, so wiring before a successful build fails with STALE REFLECTION. If `wire_verse_*` returns STALE REFLECTION, do **not** call it again (host already retried once) — wait for the build, then `get_verse_editables` on the **same** device and wire once. Never place a second copy of the device to get hashes: a duplicate has the same stale class; the existing instance gets the hashes when the build lands. After non-Verse edits (TS/Rust/PHP/C++/…) run `code_list_errors` when toolchains are on PATH. One thin MCP tool per editor op — never batch or bulk commands.
@@ -352,7 +367,7 @@ def get_system_prompt_parts(
                 skill_block = f"{skill_block}\n{mode_suffix}".strip()
         except Exception:
             pass
-    static_rules = f"## Rules\n{_rules_body(listener_port)}{mode_suffix}"
+    static_rules = f"## Rules\n{_rules_body(listener_port, local_slim=local_slim)}{mode_suffix}"
     rules_block = f"{offline_rules}{static_rules}"
     personality_block = format_ducky_personality_block(ducky_name, ducky_personality)
     tool_index_block = ""
