@@ -84,5 +84,5 @@ def test_http11_for_cloudflare_origin():
 def test_json_responses_close_keep_alive():
     """Cloudflare 502s if HTTP/1.0 origin drops a keep-alive socket mid-reuse."""
     src = Path(httpd.__file__).read_text(encoding="utf-8")
-    assert 'self.send_header("Connection", "close")' in src
-    assert "self.close_connection = True" in src
+    assert "self.send_header(\"Connection\", \"close\")" in src
+    assert "def end_headers(self)" in src

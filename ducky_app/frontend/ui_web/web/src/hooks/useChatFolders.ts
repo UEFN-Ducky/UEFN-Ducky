@@ -67,8 +67,8 @@ export function useChatFolders(refreshToken: number) {
       return;
     }
     const [folderRows, allConvs] = await Promise.all([
-      api.list_folders().then((rows) => rows.filter((f) => !isArchiveFolderId(f.id))),
-      api.list_all_conversations(),
+      api.list_folders().then((rows) => (Array.isArray(rows) ? rows : []).filter((f) => !isArchiveFolderId(f.id))),
+      api.list_all_conversations().then((rows) => (Array.isArray(rows) ? rows : [])),
     ]);
 
     const chatsByFolder = new Map<string, FolderItem["chats"]>();

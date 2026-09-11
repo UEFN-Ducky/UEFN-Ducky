@@ -193,8 +193,12 @@ def _loop() -> None:
             if not str(remote_tunnel_status().get("hostname") or "").strip():
                 _set_status(mode="starting", running=False, error="")
             exe = ensure_cloudflared()
+            _kill_orphan_cloudflareds()
             row = _fetch_tunnel_token()
             mode = str(row.get("mode") or "")
+            reason = str(row.get("reason") or "").strip()
+            if reason:
+                _set_status(error=reason[:240])
             if mode == "pending":
                 _set_status(
                     running=False,
@@ -217,13 +221,42 @@ def _loop() -> None:
                 _set_status(mode="quick", running=False, error="")
                 _run_cloudflared(
                     exe,
-                    ["tunnel", "--no-autoupdate", "--url", url],
+                    [
+                        "tunnel",
+                        "--no-autoupdate",
+                        "--proxy-keepalive-connections",
+                        "0",
+                        "--no-chunked-encoding",
+                        "--url",
+                        url,
+                    ],
                 )
         except Exception as exc:
             _set_status(running=False, error=str(exc)[:240])
         if not _STOP.is_set():
             _STOP.wait(3.0)
     _set_status(running=False)
+
+
+def _kill_orphan_cloudflareds() -> None:
+    """FORCECLOSE / crashed panels leave cloudflared on :4199 — 502s and trycloudflare spam."""
+    if os.name != "nt":
+        return
+    marker = str(_bin_path()).replace("'", "''")
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{marker}*' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=15,
+        )
+    except Exception:
+        pass
 
 
 def start_remote_tunnel() -> None:

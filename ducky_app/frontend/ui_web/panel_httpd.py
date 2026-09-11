@@ -337,6 +337,13 @@ def start_panel_ui_server(dist_root: Path) -> str:
             def log_message(self, format: str, *args: object) -> None:
                 return
 
+            def end_headers(self) -> None:
+                # cloudflared default keepAliveConnections=100 + HTTP/1.1 reuse
+                # 502s this handler. Close every response (JSON, static, errors).
+                self.send_header("Connection", "close")
+                self.close_connection = True
+                super().end_headers()
+
             def handle(self) -> None:
                 peer = self.client_address[0]
                 if peer not in ("127.0.0.1", "::1"):
@@ -365,9 +372,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
-                self.send_header("Connection", "close")
                 self.end_headers()
-                self.close_connection = True
                 self.wfile.write(data)
 
             def do_POST(self) -> None:
