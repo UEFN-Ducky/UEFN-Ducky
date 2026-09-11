@@ -92,6 +92,36 @@ def test_http11_keepalive_and_backlog():
     assert "1.0 / 24" in src
 
 
+class _FakeSock:
+    def __init__(self) -> None:
+        self.sent: list[bytes] = []
+
+    def sendall(self, data: bytes) -> None:
+        self.sent.append(data)
+
+
+def test_rtc_signal_reaches_registered_sock():
+    sock = _FakeSock()
+    httpd.register_window_rtc("s1", sock)
+    try:
+        assert httpd.rtc_signal("s1", {"type": "rtc", "sdp": {"type": "answer", "sdp": "x"}})
+        assert sock.sent
+        assert b"answer" in sock.sent[0]
+    finally:
+        httpd.unregister_window_rtc("s1")
+    assert httpd.rtc_signal("s1", {"type": "rtc"}) is False
+
+
+def test_publish_window_rtc_reaches_pollers():
+    before = httpd._event_seq
+    httpd.publish_window_rtc("abc", 42, {"type": "rtc", "sdp": {"type": "offer"}})
+    _cursor, events = httpd._poll_panel_events(before, timeout=0.0)
+    assert any(
+        e.get("type") == "window_rtc" and e.get("session_id") == "abc" and e.get("hwnd") == 42
+        for e in events
+    )
+
+
 def test_html_errors_never_show_python_404():
     src = Path(httpd.__file__).read_text(encoding="utf-8")
     assert "ud-remote-gone" in src

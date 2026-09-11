@@ -60,6 +60,8 @@ _auth_lock = threading.Lock()
 _one_time: dict[str, float] = {}
 _sessions: dict[str, float] = {}
 _cookie_secret: bytes | None = None
+_window_rtc: dict[str, object] = {}
+_window_rtc_lock = threading.Lock()
 
 
 def panel_ui_http_url() -> str:
@@ -223,7 +225,93 @@ def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dic
         return rows[-1][0], [event for _, event in rows]
 
 
-def _serve_window_stream(sock: object, hwnd: int) -> None:
+def register_window_rtc(session_id: str, sock: object) -> None:
+    sid = (session_id or "").strip()
+    if not sid:
+        return
+    with _window_rtc_lock:
+        _window_rtc[sid] = sock
+
+
+def unregister_window_rtc(session_id: str) -> None:
+    with _window_rtc_lock:
+        _window_rtc.pop((session_id or "").strip(), None)
+
+
+def rtc_signal(session_id: str, payload: object) -> bool:
+    """Send a signaling JSON text frame to the remote viewer. Desktop-only."""
+    from frontend.ui_web.terminal.ws_util import send_ws_text
+
+    sid = (session_id or "").strip()
+    if not sid:
+        return False
+    with _window_rtc_lock:
+        sock = _window_rtc.get(sid)
+    if sock is None:
+        return False
+    text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    try:
+        send_ws_text(sock, text)  # type: ignore[arg-type]
+        return True
+    except Exception:
+        return False
+
+
+def publish_window_rtc(session_id: str, hwnd: int, payload: dict[str, object]) -> None:
+    publish_panel_events(
+        [
+            {
+                "type": "window_rtc",
+                "session_id": session_id,
+                "hwnd": hwnd,
+                "payload": dict(payload),
+            }
+        ]
+    )
+
+
+def _serve_window_stream(sock: object, hwnd: int, mode: str = "rtc") -> None:
+    """RTC signaling (default) or JPEG frames. Blocks until the client drops."""
+    if (mode or "").strip().lower() == "jpeg":
+        _serve_window_jpeg(sock, hwnd)
+        return
+    _serve_window_rtc(sock, hwnd)
+
+
+def _serve_window_rtc(sock: object, hwnd: int) -> None:
+    """Relay SDP/ICE over the tunnel; video itself is P2P WebRTC."""
+    from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_pong
+    from frontend.window_view import bring_to_front, handle_stream_message
+
+    bring_to_front(hwnd)
+    session_id = secrets.token_hex(8)
+    register_window_rtc(session_id, sock)
+    try:
+        while True:
+            opcode, payload = parse_ws_frame_ex(sock)  # type: ignore[arg-type]
+            if opcode == 0x8:
+                break
+            if opcode == 0x9:
+                send_ws_pong(sock, payload)  # type: ignore[arg-type]
+                continue
+            if opcode != 0x1:
+                continue
+            try:
+                event = json.loads(payload.decode("utf-8"))
+            except Exception:
+                continue
+            if isinstance(event, dict) and event.get("type") == "rtc":
+                publish_window_rtc(session_id, hwnd, event)
+                continue
+            handle_stream_message(hwnd, payload)
+    except Exception:
+        pass
+    finally:
+        unregister_window_rtc(session_id)
+        publish_window_rtc(session_id, hwnd, {"type": "rtc", "kind": "close"})
+
+
+def _serve_window_jpeg(sock: object, hwnd: int) -> None:
     """JPEG frames out, JSON pointer/key events in. Blocks until the client drops."""
     from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_binary, send_ws_pong
     from frontend.window_view import bring_to_front, capture_window_jpeg, handle_stream_message
@@ -688,7 +776,8 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.close_connection = True
                     self.connection.settimeout(None)
                     self.connection.sendall(websocket_upgrade_response(key))
-                    _serve_window_stream(self.connection, hwnd)
+                    mode = ((query.get("mode") or ["rtc"])[0] or "rtc").strip().lower()
+                    _serve_window_stream(self.connection, hwnd, mode=mode)
                     return
                 # Re-poll leg of a long UI request (require_click): the POST leg
                 # returned {pending, request_id} and the caller waits here until

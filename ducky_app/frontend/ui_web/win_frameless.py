@@ -929,6 +929,14 @@ def install_pywebview_chrome_patches() -> None:
                     apply_shipped_webview2_settings(sender.CoreWebView2.Settings)
                 except Exception:
                     _log.exception("WebView2 ship settings failed")
+                try:
+                    from frontend.ui_web.webview_recover import attach_process_failed
+
+                    self._ducky_process_failed_handler = attach_process_failed(
+                        sender.CoreWebView2, label="main"
+                    )
+                except Exception:
+                    _log.exception("WebView2 ProcessFailed hook failed")
                 # Auto-allow mic for the local panel origin. App UI owns Allow/Block;
                 # this only silences WebView2's chrome prompt and persists the grant.
                 try:

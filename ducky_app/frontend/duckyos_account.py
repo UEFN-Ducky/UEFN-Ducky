@@ -878,6 +878,9 @@ REMOTE_DENY = frozenset(
         "set_uefn_plugin_secret",
         "test_uefn_plugin_secret",
         "test_key",
+        "rtc_signal",
+        "window_input",
+        "window_box",
     }
 )
 

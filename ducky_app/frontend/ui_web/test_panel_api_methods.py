@@ -309,6 +309,7 @@ _PUBLIC_METHODS = frozenset({
     'restore_focus_windows',
     'restore_trashed_entry',
     'return_tab_to_main',
+    'rtc_signal',
     'save_agent_profile',
     'save_agent_profile_override',
     'save_agent_settings',
@@ -393,6 +394,8 @@ _PUBLIC_METHODS = frozenset({
     'voice_summarize_reply',
     'voice_transcribe_audio',
     'wait_for_agent_idle',
+    'window_box',
+    'window_input',
     'write_project_file',
     'write_task_artifact'
 })

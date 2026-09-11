@@ -978,6 +978,21 @@ def _create_control(pane: _Pane) -> None:
                     core.ServerCertificateErrorDetected += on_cert_error
                 except Exception:
                     pass
+                def _hide_dead_pane(_reason: str) -> None:
+                    # A dead overlay pane stays Visible on top of the app → black UX.
+                    pane.visible = False
+                    _apply_bounds(pane)
+
+                try:
+                    from frontend.ui_web.webview_recover import attach_process_failed
+
+                    handler = attach_process_failed(
+                        core, label=f"pane:{pane.pane_id}", on_fail=_hide_dead_pane
+                    )
+                    if handler is not None:
+                        pane._handlers.append(handler)
+                except Exception:
+                    _log.exception("browser pane ProcessFailed hook failed")
                 pane.ready = True
                 pane.failed = ""
                 target = pane.pending_url

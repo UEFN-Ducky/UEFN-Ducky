@@ -1241,7 +1241,8 @@ export interface AgentEvent {
     | "duckies_changed"
     | "file_guard"
     | "lane_changed"
-    | "files_reverted";
+    | "files_reverted"
+    | "window_rtc";
   text?: string;
   /** ui_rpc_request: which panel method to run and its params. */
   method?: string;
@@ -1317,6 +1318,22 @@ export interface AgentEvent {
   /** Multi-bot Discord: which bot profile emitted this event. */
   bot_id?: string;
   discord?: DiscordMessageDto;
+  /** window_rtc: target HWND the remote viewer asked to watch. */
+  hwnd?: number | string;
+  payload?: Record<string, unknown>;
+}
+
+export interface WindowBox {
+  left?: number;
+  top?: number;
+  right?: number;
+  bottom?: number;
+  screen_left?: number;
+  screen_top?: number;
+  screen_w?: number;
+  screen_h?: number;
+  primary_w?: number;
+  primary_h?: number;
 }
 
 export interface DiscordMessageDto {
@@ -2580,6 +2597,9 @@ export interface PanelApi {
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
   list_running_agents(): Promise<string[]>;
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
+  rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;
+  window_input?(hwnd: string | number, event: Record<string, unknown>): Promise<void>;
+  window_box?(hwnd: string | number): Promise<WindowBox>;
   pick_project_path(): Promise<string | null>;
   deploy(project_path?: string): Promise<string[]>;
   deploy_all_projects(): Promise<string[]>;

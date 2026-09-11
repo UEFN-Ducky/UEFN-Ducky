@@ -21,6 +21,8 @@ import { TerminalsSettingsProvider } from "./contexts/TerminalsSettingsContext";
 import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsContext";
 import { Header } from "./components/Header";
 import { RemoteWindowOverlay } from "./components/RemoteWindowView";
+import { RemoteWindowSender } from "./components/RemoteWindowSender";
+import { isRemote } from "./hooks/usePanelApi";
 import { WindowDrag } from "./components/WindowDrag";
 import { WindowResize } from "./components/WindowResize";
 import { ChatView } from "./views/ChatView";
@@ -231,6 +233,7 @@ export default function App() {
         />
 
         <main className="app-main">{mainContent}</main>
+        {!isRemote() ? <RemoteWindowSender /> : null}
         {watchWindowId ? <RemoteWindowOverlay hwnd={watchWindowId} /> : null}
       </div>
       {versionCheck.status?.remote_version && (

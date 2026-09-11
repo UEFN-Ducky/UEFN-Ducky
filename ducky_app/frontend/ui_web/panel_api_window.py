@@ -233,6 +233,33 @@ class PanelApiWindowMixin:
 
         return list_window_views()
 
+    def rtc_signal(self, session_id: str, payload: object) -> bool:
+        from frontend.ui_web.panel_httpd import rtc_signal
+
+        return bool(rtc_signal(str(session_id or ""), payload))
+
+    def window_input(self, hwnd: object, event: object) -> None:
+        from frontend.window_view import handle_stream_message
+
+        try:
+            hid = int(hwnd)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        if isinstance(event, str):
+            raw = event.encode("utf-8")
+        else:
+            raw = _pa.json.dumps(event if isinstance(event, dict) else {}).encode("utf-8")
+        handle_stream_message(hid, raw)
+
+    def window_box(self, hwnd: object) -> dict[str, Any]:
+        from frontend.window_view import window_box
+
+        try:
+            hid = int(hwnd)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return {}
+        return window_box(hid)
+
     # ── Browser panes (native WebView2 pinned inside a window; plugin web panes) ──
 
     def browser_pane_open(self, pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:

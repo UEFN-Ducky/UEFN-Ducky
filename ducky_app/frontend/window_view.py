@@ -1,9 +1,11 @@
 """Look at other desktop windows through the remote panel tunnel.
 
-ponytail: grab the window's on-screen rectangle (Pillow ImageGrab) and
-SendInput. Covered windows show whatever is on top; the stream brings the
-target to the front so clicks hit the same pixels. Windows Graphics Capture
-if they need occluded GPU windows.
+ponytail: WebRTC crops a getDisplayMedia screen track to this window
+(primary-monitor assumption — fit_window moves it onto the work area).
+JPEG GDI grab stays as the ICE-fail fallback. Covered windows show
+whatever is on top; the stream brings the target to the front so clicks
+hit the same pixels. Windows Graphics Capture if they need occluded GPU
+windows. STUN-only — strict NATs fall back to JPEG; TURN is the upgrade.
 """
 
 from __future__ import annotations
@@ -73,6 +75,29 @@ def capture_window_jpeg(hwnd: int) -> bytes:
     return jpeg_bytes(grabbed)
 
 
+def window_box(hwnd: int) -> dict[str, int]:
+    """On-screen rect plus virtual/primary metrics for the WebRTC crop."""
+    if sys.platform != "win32" or hwnd <= 0:
+        return {}
+    box = _window_box(hwnd)
+    if not box:
+        return {}
+    left, top, right, bottom = box
+    sl, st, sw, sh, pw, ph = _screen_metrics()
+    return {
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "screen_left": sl,
+        "screen_top": st,
+        "screen_w": sw,
+        "screen_h": sh,
+        "primary_w": pw,
+        "primary_h": ph,
+    }
+
+
 def map_norm_to_screen(box: tuple[int, int, int, int], nx: float, ny: float) -> tuple[int, int]:
     left, top, right, bottom = box
     width = max(1, right - left)
@@ -85,26 +110,9 @@ def map_norm_to_screen(box: tuple[int, int, int, int], nx: float, ny: float) -> 
 def bring_to_front(hwnd: int) -> bool:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return False
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    if not user32.IsWindow(hwnd):
-        return False
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    fg = int(user32.GetForegroundWindow() or 0)
-    our_tid = int(kernel32.GetCurrentThreadId() or 0)
-    fg_tid = int(user32.GetWindowThreadProcessId(fg, None) or 0) if fg else 0
-    if our_tid and fg_tid and our_tid != fg_tid:
-        user32.AttachThreadInput(our_tid, fg_tid, True)
-    try:
-        user32.BringWindowToTop(hwnd)
-        user32.SetForegroundWindow(hwnd)
-    finally:
-        if our_tid and fg_tid and our_tid != fg_tid:
-            user32.AttachThreadInput(our_tid, fg_tid, False)
-    return True
+    if _foreground_hwnd() == hwnd:
+        return True
+    return _raise_window(hwnd)
 
 
 def fit_window(hwnd: int, width: int, height: int) -> bool:
@@ -115,12 +123,18 @@ def fit_window(hwnd: int, width: int, height: int) -> bool:
         return False
     left, top, right, bottom = box
     w, h = window_fit_size(width, height)
-    if abs((right - left) - w) < 8 and abs((bottom - top) - h) < 8:
+    ox, oy = _primary_work_origin()
+    if (
+        abs((right - left) - w) < 8
+        and abs((bottom - top) - h) < 8
+        and abs(left - ox) < 8
+        and abs(top - oy) < 8
+    ):
         return False
     import ctypes
 
     # SWP_NOZORDER | SWP_NOACTIVATE — resize without a focus fight that hitchs UEFN.
-    ctypes.windll.user32.SetWindowPos(hwnd, 0, int(left), int(top), int(w), int(h), 0x0014)
+    ctypes.windll.user32.SetWindowPos(hwnd, 0, int(ox), int(oy), int(w), int(h), 0x0014)
     return True
 
 
@@ -238,6 +252,65 @@ def _enum_windows() -> list[dict[str, Any]]:
 
     user32.EnumWindows(WNDENUMPROC(_callback), 0)
     return out
+
+
+def _foreground_hwnd() -> int:
+    if sys.platform != "win32":
+        return 0
+    import ctypes
+
+    return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+
+
+def _raise_window(hwnd: int) -> bool:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    if not user32.IsWindow(hwnd):
+        return False
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    fg = int(user32.GetForegroundWindow() or 0)
+    our_tid = int(kernel32.GetCurrentThreadId() or 0)
+    fg_tid = int(user32.GetWindowThreadProcessId(fg, None) or 0) if fg else 0
+    if our_tid and fg_tid and our_tid != fg_tid:
+        user32.AttachThreadInput(our_tid, fg_tid, True)
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if our_tid and fg_tid and our_tid != fg_tid:
+            user32.AttachThreadInput(our_tid, fg_tid, False)
+    return True
+
+
+def _primary_work_origin() -> tuple[int, int]:
+    if sys.platform != "win32":
+        return 0, 0
+    import ctypes
+    from ctypes import wintypes
+
+    rect = wintypes.RECT()
+    if not ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+        return 0, 0
+    return int(rect.left), int(rect.top)
+
+
+def _screen_metrics() -> tuple[int, int, int, int, int, int]:
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080, 1920, 1080
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    return (
+        int(user32.GetSystemMetrics(76)),
+        int(user32.GetSystemMetrics(77)),
+        int(user32.GetSystemMetrics(78) or 1920),
+        int(user32.GetSystemMetrics(79) or 1080),
+        int(user32.GetSystemMetrics(0) or 1920),
+        int(user32.GetSystemMetrics(1) or 1080),
+    )
 
 
 def _window_box(hwnd: int) -> tuple[int, int, int, int] | None:

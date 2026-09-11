@@ -173,6 +173,9 @@ def test_remote_deny_covers_native_and_secret_paths() -> None:
     assert "get_mcp_config" in REMOTE_DENY
     assert "set_uefn_plugin_secret" in REMOTE_DENY
     assert "test_key" in REMOTE_DENY
+    assert "rtc_signal" in REMOTE_DENY
+    assert "window_input" in REMOTE_DENY
+    assert "window_box" in REMOTE_DENY
     assert "send_message" not in REMOTE_DENY
     assert "list_conversations" not in REMOTE_DENY
 

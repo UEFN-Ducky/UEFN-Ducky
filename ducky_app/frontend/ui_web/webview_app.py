@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 import logging
@@ -16,6 +17,24 @@ from frontend.frozen_process import (
 from frontend.settings import PANEL_LISTENER_PORT
 from frontend.tray_icon import TrayIconController, tray_supported
 from frontend.ui_web.shutdown import request_app_exit, start_tk_pump
+
+
+def _allow_screencast_without_gesture() -> None:
+    """ponytail: getDisplayMedia from a panel event has no transient activation."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+
+        path = r"Software\Policies\Microsoft\Edge\WebView2\ScreenCaptureWithoutGestureAllowedForOrigins"
+        key = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE)
+        try:
+            winreg.SetValueEx(key, "1", 0, winreg.REG_SZ, "http://127.0.0.1:*")
+            winreg.SetValueEx(key, "2", 0, winreg.REG_SZ, "http://localhost:*")
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        pass
 
 
 def _web_root() -> Path:
@@ -234,6 +253,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # the env var is more reliable than the DefaultBackgroundColor property (WebView2Feedback
     # BackgroundColor spec). ARGB hex — match the dark shell / boot splash (#0a0a0a).
     os.environ.setdefault("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF0A0A0A")
+    # Auto-pick a screen for getDisplayMedia (substring matches Entire screen / Screen 1).
+    os.environ.setdefault(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--auto-select-desktop-capture-source=creen",
+    )
+    _allow_screencast_without_gesture()
 
     t_webview = time.perf_counter()
     import tkinter as tk
@@ -356,6 +381,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 w.show()
             except Exception:
                 pass
+            try:
+                from frontend.ui_web.webview_recover import nudge_webview_visible
+
+                nudge_webview_visible(w)
+            except Exception:
+                pass
 
     api.bind_window(None, on_hide=on_hide, on_exit=on_exit)
 
@@ -450,6 +481,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     def _on_shown() -> None:
         threading.Thread(target=_apply_window_icon, daemon=True, name="window-icon").start()
+        try:
+            from frontend.ui_web.webview_recover import nudge_webview_visible
+
+            nudge_webview_visible(window)
+        except Exception:
+            pass
 
     window.events.shown += _on_shown
 
