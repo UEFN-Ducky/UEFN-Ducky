@@ -35,7 +35,18 @@ if ($DoEngine) {
             $Exe = $ExePending
             Write-Host "Using dist\UEFN-Ducky-$Version.pending.exe (primary exe was locked during build)."
         } else {
-            Write-Error "Build first: py build/build_exes.py (outputs dist\UEFN-Ducky-$Version.exe)"
+            $alt = Get-ChildItem $Dist -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^UEFN-Ducky-\d+\.\d+\.\d+\.exe$' } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+            if ($alt) {
+                $Exe = $alt.FullName
+                $Version = [regex]::Match($alt.Name, '\d+\.\d+\.\d+').Value
+                $SetupExe = Join-Path $Dist "UEFN-Ducky-Setup-$Version.exe"
+                Write-Host "Using $Exe (__version__ was stale)."
+            } else {
+                Write-Error "Build first: py build/build_exes.py (outputs dist\UEFN-Ducky-$Version.exe)"
+            }
         }
     }
 
