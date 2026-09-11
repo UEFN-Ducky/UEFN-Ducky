@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { copyText } from "../utils/copyText";
 import { skipTour } from "../walkthrough/WalkthroughService";
 
@@ -30,6 +30,10 @@ interface ErrorBoundaryState {
 function openExternal(url: string): void {
   try {
     const api = getApi();
+    if (isRemote()) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (url === UEFN_DUCKY_DOWNLOAD_PAGE && typeof api?.open_download_page === "function") {
       void api.open_download_page();
       return;

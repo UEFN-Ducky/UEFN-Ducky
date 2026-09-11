@@ -404,6 +404,16 @@ def main() -> None:
         assert not panel_post_origin_allowed("null", "http://127.0.0.1:4199/")
         assert not panel_post_origin_allowed("http://evil.example", "http://127.0.0.1:4199/")
         assert panel_post_origin_allowed("http://127.0.0.1:4199/", "http://127.0.0.1:4199/")
+        assert panel_post_origin_allowed(
+            "https://u-1.app.uefnducky.org",
+            "http://127.0.0.1:4199/",
+            request_host="u-1.app.uefnducky.org",
+        )
+        assert not panel_post_origin_allowed(
+            "https://evil.example",
+            "http://127.0.0.1:4199/",
+            request_host="u-1.app.uefnducky.org",
+        )
 
         from backend.uefn_plugins.host import (
             filter_uefn_plugin_tools,

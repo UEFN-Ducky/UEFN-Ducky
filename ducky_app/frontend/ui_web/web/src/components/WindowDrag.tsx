@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
 import { beginNativeWindowMove, isWindowDragTarget } from "../utils/windowDrag";
 
 /** Frameless drag: sync native move on mousedown (Aero Snap). JS fallback on other platforms. */
 export function WindowDrag() {
   useEffect(() => {
+    if (isRemote()) return;
     markNativeWindowChromeBody();
     // pywebview injects window.pywebview asynchronously; if it wasn't ready at mount,
     // re-mark once it is so the body class + native-chrome branch are correct.

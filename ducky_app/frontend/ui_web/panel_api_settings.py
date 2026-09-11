@@ -28,6 +28,7 @@ class PanelApiSettingsMixin:
             "default_coding_agent": s.default_coding_agent or "ducky",
             "coding_agents": coding_agents_dict(s),
             "duckyos_base_url": s.duckyos_base_url or "",
+            "remote_access": bool(getattr(s, "remote_access", False)),
             "voice_enabled": bool(s.voice_enabled),
             "voice_spoken_style": s.voice_spoken_style or "summary",
             "voice_summary_model": s.voice_summary_model or "",

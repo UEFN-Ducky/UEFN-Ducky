@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Icons } from "../icons/Icons";
 import { ConnectionStatusIcon } from "../components/ConnectionStatusIcon";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import type { ListenerStatus, ProjectInfo } from "../types/panel";
 
 interface WelcomeViewProps {
@@ -54,10 +54,16 @@ export function WelcomeView({ listener, project, onProjectChanged }: WelcomeView
                 ? "Agent is running. Add a UEFN project to use duckies, file editing, and map tools."
                 : "Open UEFN with the agent listener deployed, then add your project here to start."}
             </p>
+            {isRemote() ? (
+              <p className="welcome-view-desc">
+                Remote session — pick a project on the PC running UEFN Ducky, then refresh.
+              </p>
+            ) : (
             <button type="button" className="settings-btn welcome-view-add-btn" onClick={() => void addProject()}>
               <Icons.Plus />
               Add project…
             </button>
+            )}
           </>
         ) : (
           <p className="welcome-view-ready-desc">

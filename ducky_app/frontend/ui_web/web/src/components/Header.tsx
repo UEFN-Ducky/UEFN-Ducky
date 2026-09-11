@@ -12,7 +12,7 @@ import { useRightRailOpen } from "../hooks/useRightRailOpen";
 import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import type { ChatLayoutMode, ListenerStatus, ProjectInfo, ViewId } from "../types/panel";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { isNativeWindowChrome } from "../utils/nativeWindowChrome";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
@@ -432,6 +432,7 @@ export function Header({
 
         <div className="app-header-divider" />
 
+        {isRemote() ? null : (
         <div className="window-controls">
           <button type="button" onClick={handleMinimize} className="window-control-btn no-drag" title="Minimize">
             <Icons.Minimize />
@@ -453,6 +454,7 @@ export function Header({
             <Icons.Close />
           </button>
         </div>
+        )}
       </div>
     </header>
   );

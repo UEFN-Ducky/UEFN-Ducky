@@ -3,7 +3,7 @@ import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { TruncatedText } from "./TruncatedText";
 import type { ProjectInfo, RecentProject } from "../types/panel";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { useOptionalEditorWorkspaceFlush } from "../contexts/EditorWorkspaceBridge";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 
@@ -244,6 +244,7 @@ export function ProjectSelector({
           </>
         )}
 
+        {isRemote() ? null : (
         <button
           type="button"
           onPointerDown={onAddProjectPointerDown}
@@ -252,6 +253,7 @@ export function ProjectSelector({
           <Icons.Plus />
           Add project…
         </button>
+        )}
       </DropdownPanel>
     </div>
   );

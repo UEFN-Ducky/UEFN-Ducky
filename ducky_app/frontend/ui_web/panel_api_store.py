@@ -163,6 +163,44 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error"}
 
+    def remote_status(self) -> dict[str, Any]:
+        from frontend.settings import PanelSettings
+        from frontend.remote_tunnel import remote_tunnel_status
+        from frontend.ui_web.panel_httpd import remote_session_count
+
+        s = PanelSettings.load()
+        st = remote_tunnel_status()
+        return {
+            "ok": True,
+            "enabled": bool(getattr(s, "remote_access", False)),
+            "hostname": str(st.get("hostname") or ""),
+            "running": bool(st.get("running")),
+            "mode": str(st.get("mode") or ""),
+            "error": str(st.get("error") or ""),
+            "site_update_pending": bool(st.get("site_update_pending")),
+            "sessions": remote_session_count(),
+        }
+
+    def remote_set_enabled(self, enabled: bool = False) -> dict[str, Any]:
+        from frontend.settings import PanelSettings
+        from frontend.ui_web.panel_api import _save_panel_settings
+        from frontend.remote_tunnel import start_remote_tunnel, stop_remote_tunnel
+
+        s = PanelSettings.load()
+        s.remote_access = bool(enabled)
+        _save_panel_settings(s)
+        if s.remote_access:
+            start_remote_tunnel()
+        else:
+            stop_remote_tunnel(deprovision=True)
+        return self.remote_status()
+
+    def remote_sign_out_all(self) -> dict[str, Any]:
+        from frontend.ui_web.panel_httpd import sign_out_all_remote
+
+        sign_out_all_remote()
+        return self.remote_status()
+
     def duckyos_store_catalog(self) -> dict[str, Any]:
         # Store is core — never gated by the Account plugin.
         from frontend.duckyos_account import DuckyOSAccountError, store_catalog

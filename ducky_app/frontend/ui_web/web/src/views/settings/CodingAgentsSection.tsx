@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getApi } from "../../hooks/usePanelApi";
+import { getApi, isRemote } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
 import { Icons } from "../../icons/Icons";
@@ -174,7 +174,7 @@ function CodingAgentLoginModal({
     const url = authUrl.trim();
     if (!url) return;
     const api = getApi();
-    if (api?.open_external_url) void api.open_external_url(url);
+    if (!isRemote() && api?.open_external_url) void api.open_external_url(url);
     else window.open(url, "_blank", "noopener");
   };
 

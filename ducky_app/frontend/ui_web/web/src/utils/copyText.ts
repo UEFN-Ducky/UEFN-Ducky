@@ -1,4 +1,4 @@
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 
 function copyViaExecCommand(text: string): boolean {
   const ta = document.createElement("textarea");
@@ -16,7 +16,7 @@ function copyViaExecCommand(text: string): boolean {
 /** Copy text in the panel. WebView2 often ignores navigator.clipboard.writeText. */
 export async function copyText(text: string): Promise<boolean> {
   const api = getApi();
-  if (api?.copy_text) {
+  if (!isRemote() && api?.copy_text) {
     try {
       if (await api.copy_text(text)) return true;
     } catch {

@@ -214,6 +214,9 @@ class PanelSettings:
     duckyos_base_url: str = ""
     """DuckyOS tenant URL (empty = default https://uefnducky.org). Non-secret."""
 
+    remote_access: bool = False
+    """When true, serve the panel UI through an outbound Cloudflare tunnel."""
+
     allow_settings_write: bool = True
     """When false, ducky_settings_set (agent-driven settings writes) is refused."""
 
@@ -418,6 +421,7 @@ class PanelSettings:
             or self.coding_agents
             or self.default_coding_agent != "ducky"
             or self.duckyos_base_url.strip()
+            or self.remote_access
             or not self.allow_settings_write
             or self.allow_agent_clicks
             or bool(self.walkthrough_completed)

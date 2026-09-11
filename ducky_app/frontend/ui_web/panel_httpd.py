@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import mimetypes
 import re
+import secrets
 import threading
 import time
 from collections import deque
@@ -12,7 +15,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from frontend.settings import PANEL_LISTENER_PORT
+from frontend.settings import PANEL_LISTENER_PORT, default_app_data_dir
+
+PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
+_COOKIE_NAME = "ducky_remote"
+_COOKIE_IDLE_S = 12 * 3600
+_LOGIN_TTL_S = 120
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+_LOCAL_BRIDGE_PATHS = frozenset(
+    {"/__panel_event", "/__panel_run", "/__panel_open_files", "/__panel_rpc"}
+)
 
 PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 
@@ -28,13 +40,141 @@ _event_seq = 0
 _event_backlog: deque[tuple[int, dict[str, object]]] = deque(maxlen=4000)
 _CUSTOM_DUCKY_RE = re.compile(r"^duckies/custom/([a-z0-9][a-z0-9_-]{0,63})\.png$", re.IGNORECASE)
 _TOOL_CAPTURE_RE = re.compile(r"^tool-captures/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
+_auth_lock = threading.Lock()
+_one_time: dict[str, float] = {}
+_sessions: dict[str, float] = {}
+_cookie_secret: bytes | None = None
 
 
 def panel_ui_http_url() -> str:
     return f"http://127.0.0.1:{PANEL_UI_HTTP_PORT}/"
 
 
-def publish_panel_events(events: list[dict[str, object]]) -> None:
+def host_is_local(host_header: str | None) -> bool:
+    host = (host_header or "").split("/")[0].strip().lower()
+    if not host:
+        return False
+    name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if host.startswith("["):
+        name = host.split("]")[0] + "]"
+    return name in _LOCAL_HOSTS
+
+
+def _secret_path() -> Path:
+    return default_app_data_dir() / "remote_cookie_secret"
+
+
+def _cookie_key() -> bytes:
+    global _cookie_secret
+    with _auth_lock:
+        if _cookie_secret:
+            return _cookie_secret
+        path = _secret_path()
+        try:
+            raw = path.read_bytes().strip()
+            if len(raw) >= 32:
+                _cookie_secret = bytes.fromhex(raw.decode("ascii")) if raw[:1] not in b"\x00" else raw
+                if len(_cookie_secret) >= 16:
+                    return _cookie_secret
+        except Exception:
+            pass
+        _cookie_secret = secrets.token_bytes(32)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_cookie_secret.hex(), encoding="ascii")
+        return _cookie_secret
+
+
+def mint_remote_login_token() -> str:
+    token = secrets.token_urlsafe(32)
+    with _auth_lock:
+        now = time.time()
+        expired = [k for k, exp in _one_time.items() if exp < now]
+        for k in expired:
+            _one_time.pop(k, None)
+        _one_time[token] = now + _LOGIN_TTL_S
+    return token
+
+
+def consume_remote_login_token(token: str) -> bool:
+    got = (token or "").strip()
+    if not got:
+        return False
+    now = time.time()
+    with _auth_lock:
+        exp = _one_time.pop(got, None)
+        # constant-time-ish: still compare against a dummy if missing
+        dummy = now + 1.0
+        ok = hmac.compare_digest(
+            format(int(exp or 0), "x"),
+            format(int(exp or dummy), "x"),
+        )
+    return bool(exp is not None and exp >= now and ok)
+
+
+def issue_remote_cookie(host: str) -> str:
+    sid = secrets.token_hex(16)
+    exp = str(int(time.time() + _COOKIE_IDLE_S))
+    mac = hmac.new(_cookie_key(), f"{sid}.{exp}.{host}".encode(), hashlib.sha256).hexdigest()
+    value = f"{sid}.{exp}.{mac}"
+    with _auth_lock:
+        _sessions[sid] = float(exp)
+    return value
+
+
+def remote_cookie_ok(cookie_header: str | None, host: str) -> bool:
+    raw = ""
+    for part in (cookie_header or "").split(";"):
+        name, _, val = part.strip().partition("=")
+        if name == _COOKIE_NAME:
+            raw = val.strip()
+            break
+    bits = raw.split(".")
+    if len(bits) != 3:
+        return False
+    sid, exp_s, mac = bits
+    expected = hmac.new(_cookie_key(), f"{sid}.{exp_s}.{host}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(mac, expected):
+        return False
+    try:
+        exp = int(exp_s)
+    except ValueError:
+        return False
+    if exp < time.time():
+        return False
+    with _auth_lock:
+        _sessions[sid] = float(exp)
+    return True
+
+
+def remote_session_count() -> int:
+    now = time.time()
+    with _auth_lock:
+        dead = [k for k, exp in _sessions.items() if exp < now]
+        for k in dead:
+            _sessions.pop(k, None)
+        return len(_sessions)
+
+
+def sign_out_all_remote() -> None:
+    global _cookie_secret
+    with _auth_lock:
+        _one_time.clear()
+        _sessions.clear()
+        _cookie_secret = secrets.token_bytes(32)
+        path = _secret_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_cookie_secret.hex(), encoding="ascii")
+
+
+def request_is_authorized(host_header: str, path: str, cookie: str | None) -> bool:
+    host = (host_header or "").strip().lower()
+    if host_is_local(host):
+        return True
+    if path.startswith("/__remote_login"):
+        return True
+    if path in _LOCAL_BRIDGE_PATHS:
+        return False
+    return remote_cookie_ok(cookie, host)
     """Broadcast agent events over loopback HTTP, avoiding WebView2 evaluate_js.
 
     Each panel/focus window long-polls with its own cursor, so background-agent
@@ -150,11 +290,19 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 return
 
             def handle(self) -> None:
-                host = self.client_address[0]
-                if host not in ("127.0.0.1", "::1"):
+                peer = self.client_address[0]
+                if peer not in ("127.0.0.1", "::1"):
                     self.send_error(403)
                     return
                 super().handle()
+
+            def _request_host(self) -> str:
+                return (self.headers.get("Host") or "").strip().lower()
+
+            def _remote_authorized(self, path: str) -> bool:
+                return request_is_authorized(
+                    self._request_host(), path, self.headers.get("Cookie")
+                )
 
             def _read_json_body(self) -> object:
                 try:
@@ -174,13 +322,42 @@ def start_panel_ui_server(dist_root: Path) -> str:
 
             def do_POST(self) -> None:
                 path = urlparse(self.path).path
-                # Block sandboxed plugin iframes (Origin: null) and foreign origins
-                # from hitting panel control endpoints. Same-origin / no-Origin OK.
+                if not self._remote_authorized(path):
+                    self.send_error(403)
+                    return
                 from backend.uefn_plugins.webview import panel_post_origin_allowed
 
                 origin = self.headers.get("Origin")
-                if not panel_post_origin_allowed(origin, panel_ui_http_url()):
+                if not panel_post_origin_allowed(
+                    origin, panel_ui_http_url(), request_host=self._request_host()
+                ):
                     self.send_error(403)
+                    return
+                if path.startswith("/__panel_api/"):
+                    method = unquote(path[len("/__panel_api/") :]).strip().strip("/")
+                    try:
+                        payload = self._read_json_body()
+                    except Exception:
+                        self.send_error(400)
+                        return
+                    args = None
+                    if isinstance(payload, dict):
+                        args = payload.get("args", payload)
+                    from frontend.duckyos_account import REMOTE_DENY, call_panel_method
+                    from frontend.ui_web.panel_api import PanelApi
+
+                    if not method or method in REMOTE_DENY:
+                        self._send_json(403, {"ok": False, "error": "method not allowed"})
+                        return
+                    try:
+                        result = call_panel_method(PanelApi(), method, args)
+                    except AttributeError:
+                        self._send_json(404, {"ok": False, "error": "method not allowed"})
+                        return
+                    except Exception as exc:
+                        self._send_json(200, {"ok": False, "error": str(exc)})
+                        return
+                    self._send_json(200, {"ok": True, "result": result})
                     return
                 # Cross-process event bridge: the stdio MCP bridge runs in a
                 # SEPARATE process from this panel, so its notify_chats_changed /
@@ -339,6 +516,25 @@ def start_panel_ui_server(dist_root: Path) -> str:
 
             def do_GET(self) -> None:
                 parsed = urlparse(self.path)
+                if not self._remote_authorized(parsed.path):
+                    self.send_error(403)
+                    return
+                if parsed.path == "/__remote_login":
+                    query = parse_qs(parsed.query)
+                    token = (query.get("t") or [""])[0]
+                    host = self._request_host()
+                    if host_is_local(host) or not consume_remote_login_token(token):
+                        self.send_error(403)
+                        return
+                    cookie = issue_remote_cookie(host)
+                    self.send_response(302)
+                    self.send_header("Location", "/")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"{_COOKIE_NAME}={cookie}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={_COOKIE_IDLE_S}",
+                    )
+                    self.end_headers()
+                    return
                 if parsed.path == "/__panel_events":
                     query = parse_qs(parsed.query)
                     try:

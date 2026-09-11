@@ -202,6 +202,12 @@ FIELD_META: dict[str, FieldMeta] = {
         description="ducky or any Store-contributed coding-agent id.",
     ),
     "duckyos_base_url": FieldMeta("DuckyOS base URL", "Account", settable=True),
+    "remote_access": FieldMeta(
+        "Remote access",
+        "Account",
+        settable=True,
+        description="Serve this PC's UEFN Ducky in the browser at /ducky.",
+    ),
     "allow_settings_write": FieldMeta(
         "Allow agent settings writes", "General", settable=True,
         description="Master switch for ducky_settings_set.",

@@ -203,15 +203,26 @@ def try_serve_user_sound(handler: Any, rel_path: str) -> bool:
     return True
 
 
-def panel_post_origin_allowed(origin: str | None, panel_origin: str) -> bool:
+def panel_post_origin_allowed(
+    origin: str | None, panel_origin: str, request_host: str | None = None
+) -> bool:
     """True when a POST to ``/__panel_*`` is allowed.
 
     - Missing Origin (same-origin / non-browser clients) → allow.
     - Opaque origin from sandboxed iframes (``null``) → reject.
-    - Any Origin that is not the panel UI origin → reject.
+    - Panel UI origin → allow.
+    - Origin host equal to the request Host (Cloudflare tunnel) → allow.
     """
     if origin is None or origin == "":
         return True
     if origin == "null":
         return False
-    return origin.rstrip("/") == panel_origin.rstrip("/")
+    if origin.rstrip("/") == panel_origin.rstrip("/"):
+        return True
+    if request_host:
+        from urllib.parse import urlparse as _urlparse
+
+        origin_host = (_urlparse(origin).netloc or "").strip().lower()
+        req = request_host.strip().lower()
+        return bool(origin_host) and origin_host == req
+    return False

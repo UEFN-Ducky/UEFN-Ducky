@@ -824,6 +824,7 @@ export interface PanelSettingsDto {
   anthropic_extended_cache_ttl?: boolean;
   default_coding_agent?: string;
   duckyos_base_url?: string;
+  remote_access?: boolean;
   voice_enabled?: boolean;
   voice_spoken_style?: string;
   voice_summary_model?: string;
@@ -1875,6 +1876,32 @@ export interface PanelApi {
   duckyos_open_admin(): Promise<void>;
   duckyos_teams_snapshot?(stale_seconds?: number): Promise<DuckyOSTeamsSnapshot>;
   duckyos_open_teams_site?(path?: string): Promise<{ ok?: boolean; url?: string; error?: string }>;
+  remote_status?(): Promise<{
+    ok?: boolean;
+    enabled?: boolean;
+    hostname?: string;
+    running?: boolean;
+    mode?: string;
+    error?: string;
+    site_update_pending?: boolean;
+    sessions?: number;
+  }>;
+  remote_set_enabled?(enabled: boolean): Promise<{
+    ok?: boolean;
+    enabled?: boolean;
+    hostname?: string;
+    running?: boolean;
+    mode?: string;
+    error?: string;
+    site_update_pending?: boolean;
+    sessions?: number;
+  }>;
+  remote_sign_out_all?(): Promise<{
+    ok?: boolean;
+    enabled?: boolean;
+    hostname?: string;
+    sessions?: number;
+  }>;
   duckyos_store_catalog?(): Promise<DuckyOSStoreCatalog>;
   duckyos_store_versions?(slug: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(

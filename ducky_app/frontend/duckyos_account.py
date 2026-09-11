@@ -627,6 +627,12 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
         _save_blob(blob)
         start_presence_heartbeat()
         start_rpc_waiter()
+        try:
+            from frontend.remote_tunnel import start_remote_tunnel
+
+            start_remote_tunnel()
+        except Exception:
+            pass
         status = get_status()
         status["ok"] = True
         return status
@@ -833,6 +839,45 @@ RPC_ALLOWLIST = frozenset(
         "list_changesets",
         "get_changeset",
         "remote_snapshot",
+        "remote_endpoint",
+    }
+)
+
+REMOTE_DENY = frozenset(
+    {
+        "set_window_bounds",
+        "get_window_bounds",
+        "minimize_window",
+        "hide_window",
+        "toggle_maximize",
+        "is_window_maximized",
+        "begin_native_window_move",
+        "begin_native_window_resize",
+        "uses_native_window_chrome",
+        "pick_project_path",
+        "open_focus_window",
+        "open_focus_window_group",
+        "open_focus_window_at_point",
+        "adopt_tab_into_this_focus_window",
+        "raise_focus_window",
+        "browser_pane_open",
+        "browser_pane_set_bounds",
+        "browser_pane_navigate",
+        "browser_pane_command",
+        "browser_pane_state",
+        "browser_pane_close",
+        "browser_pane_list",
+        "browser_pane_hide_all",
+        "browser_clear_browsing_data",
+        "open_devtools",
+        "burst_desktop_confetti",
+        "copy_text",
+        "voice_create_realtime_token",
+        "get_mcp_config",
+        "set_mcp_config",
+        "set_uefn_plugin_secret",
+        "test_uefn_plugin_secret",
+        "test_key",
     }
 )
 
@@ -911,11 +956,58 @@ def start_presence_heartbeat() -> None:
         )
         _PRESENCE_THREAD.start()
         start_rpc_waiter()
+        try:
+            from frontend.remote_tunnel import start_remote_tunnel
+
+            start_remote_tunnel()
+        except Exception:
+            pass
 
 
 def stop_presence_heartbeat() -> None:
     _PRESENCE_STOP.set()
     stop_rpc_waiter()
+    try:
+        from frontend.remote_tunnel import stop_remote_tunnel
+
+        stop_remote_tunnel()
+    except Exception:
+        pass
+
+
+def call_panel_method(api: Any, name: str, args: Any = None) -> Any:
+    """Map a JSON args object or positional list onto a PanelApi method."""
+    import inspect
+    import json as _json
+
+    fn = getattr(api, name, None)
+    if not callable(fn):
+        raise AttributeError(name)
+    sig = inspect.signature(fn)
+    params = [
+        p
+        for p in sig.parameters.values()
+        if p.name != "self"
+        and p.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    ]
+    if isinstance(args, dict):
+        kwargs: dict[str, Any] = {}
+        for param in params:
+            if param.name in args:
+                kwargs[param.name] = args[param.name]
+            elif param.default is inspect.Parameter.empty and param.kind != inspect.Parameter.KEYWORD_ONLY:
+                raise TypeError(f"missing argument: {param.name}")
+        result = fn(**kwargs)
+    elif isinstance(args, (list, tuple)):
+        result = fn(*args)
+    else:
+        result = fn()
+    return _json.loads(_json.dumps(result, default=str))
 
 
 def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -923,35 +1015,44 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
     name = (method or "").strip()
     if name not in RPC_ALLOWLIST:
         return {"ok": False, "error": "method not allowed"}
-    import inspect
-    import json as _json
-
     from frontend.ui_web.panel_api import PanelApi
 
+    raw = args if isinstance(args, dict) else {}
     if name == "remote_snapshot":
         try:
             return {"ok": True, "result": _remote_snapshot()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
-
-    fn = getattr(PanelApi(), name, None)
-    if not callable(fn):
-        return {"ok": False, "error": "method not allowed"}
-    kwargs: dict[str, Any] = {}
-    raw = args if isinstance(args, dict) else {}
-    for pname, param in inspect.signature(fn).parameters.items():
-        if pname in raw:
-            kwargs[pname] = raw[pname]
-        elif param.default is inspect.Parameter.empty and param.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            return {"ok": False, "error": f"missing argument: {pname}"}
+    if name == "remote_endpoint":
+        try:
+            return {"ok": True, "result": _remote_endpoint()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
     try:
-        result = fn(**kwargs)
+        result = call_panel_method(PanelApi(), name, raw)
+    except TypeError as exc:
+        return {"ok": False, "error": str(exc)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "result": _json.loads(_json.dumps(result, default=str))}
+    return {"ok": True, "result": result}
+
+
+def _remote_endpoint() -> dict[str, Any]:
+    from frontend.settings import PanelSettings
+    from frontend.ui_web import panel_httpd
+    from frontend.remote_tunnel import remote_tunnel_status
+
+    s = PanelSettings.load()
+    if not bool(getattr(s, "remote_access", False)):
+        return {"enabled": False}
+    st = remote_tunnel_status()
+    hostname = str(st.get("hostname") or "").strip()
+    if not hostname:
+        return {"enabled": True, "hostname": "", "login_url": ""}
+    token = panel_httpd.mint_remote_login_token()
+    scheme = "http" if hostname.startswith("127.") else "https"
+    login_url = f"{scheme}://{hostname}/__remote_login?t={token}"
+    return {"enabled": True, "hostname": hostname, "login_url": login_url}
 
 
 def _remote_snapshot() -> dict[str, Any]:

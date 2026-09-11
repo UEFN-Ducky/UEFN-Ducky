@@ -15,6 +15,15 @@ export function AccountTab() {
   const [loaded, setLoaded] = useState(false);
   const [teams, setTeams] = useState<DuckyOSTeamsSnapshot | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
+  const [remote, setRemote] = useState<{
+    enabled?: boolean;
+    hostname?: string;
+    running?: boolean;
+    mode?: string;
+    error?: string;
+    site_update_pending?: boolean;
+    sessions?: number;
+  } | null>(null);
 
   const applyStatus = useCallback((next: DuckyOSAccountStatus) => {
     setStatus(next);
@@ -25,6 +34,19 @@ export function AccountTab() {
         detail: { logged_in: Boolean(next.logged_in) },
       }),
     );
+  }, []);
+
+  const refreshRemote = useCallback(async () => {
+    const api = getApi();
+    if (!api || typeof api.remote_status !== "function") {
+      setRemote(null);
+      return;
+    }
+    try {
+      setRemote(await api.remote_status());
+    } catch {
+      setRemote(null);
+    }
   }, []);
 
   const refreshTeams = useCallback(async () => {
@@ -77,15 +99,18 @@ export function AccountTab() {
   useEffect(() => {
     if (!status?.logged_in) {
       setTeams(null);
+      setRemote(null);
       return;
     }
     // One initial fetch + slow poll (heartbeat thread covers presence separately).
     void refreshTeams();
+    void refreshRemote();
     const id = window.setInterval(() => {
       void refreshTeams();
+      void refreshRemote();
     }, 90_000);
     return () => window.clearInterval(id);
-  }, [status?.logged_in, refreshTeams]);
+  }, [status?.logged_in, refreshTeams, refreshRemote]);
 
   const run = async (fn: () => Promise<DuckyOSAccountStatus>) => {
     setBusy(true);
@@ -199,6 +224,84 @@ export function AccountTab() {
                 disabled={busy}
               >
                 {busy ? "Signing out…" : "Log out"}
+              </button>
+            </div>
+          </div>
+
+          <div className="account-tab-card">
+            <div className="account-tab-signed-row">
+              <h3 className="account-tab-section-title">Remote</h3>
+            </div>
+            <p className="account-tab-body">
+              Open this PC&apos;s UEFN Ducky in the browser at <code>/ducky</code>. Traffic stays
+              on your machine through Cloudflare. Off by default.
+            </p>
+            {remote?.site_update_pending ? (
+              <p className="account-tab-body account-tab-warn-text">Site update pending</p>
+            ) : null}
+            {remote?.error && !remote.site_update_pending ? (
+              <p className="account-tab-body account-tab-warn-text">{remote.error}</p>
+            ) : null}
+            <p className="account-tab-meta">
+              Tunnel:{" "}
+              {remote?.running ? (
+                <strong className="account-tab-ok">{remote.mode || "on"}</strong>
+              ) : (
+                <span className="account-tab-warn">off</span>
+              )}
+            </p>
+            {remote?.hostname ? (
+              <p className="account-tab-meta">
+                Host: <code>{remote.hostname}</code>
+              </p>
+            ) : null}
+            <p className="account-tab-meta">Active remote sessions: {remote?.sessions ?? 0}</p>
+            <div className="account-tab-actions">
+              <button
+                type="button"
+                className="account-tab-btn account-tab-btn--primary"
+                disabled={busy}
+                onClick={() => {
+                  const api = getApi();
+                  const setEnabled = api?.remote_set_enabled;
+                  if (!setEnabled) return;
+                  void (async () => {
+                    setBusy(true);
+                    try {
+                      setRemote(await setEnabled(!remote?.enabled));
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {remote?.enabled ? "Turn remote access off" : "Turn remote access on"}
+              </button>
+              <button type="button" className="account-tab-btn" onClick={() => openTeamsSite("/ducky")}>
+                Open in browser
+              </button>
+              <button
+                type="button"
+                className="account-tab-btn"
+                disabled={busy || !(remote?.sessions)}
+                onClick={() => {
+                  const setOut = getApi()?.remote_sign_out_all;
+                  if (!setOut) return;
+                  void (async () => {
+                    setBusy(true);
+                    try {
+                      setRemote(await setOut());
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+              >
+                Sign out all remote
               </button>
             </div>
           </div>
