@@ -11,9 +11,8 @@ import {
   expandGatewayManifest,
   parsePluginWalkthroughs,
   pluginManifestToTour,
-  pluginTourId,
 } from "./pluginWalkthroughs";
-import { autoStartPending, isCompleted, markTourCompleted, registerTour, startTour, unregisterTour } from "./WalkthroughService";
+import { autoStartPending, isCompleted, registerTour, startTour, unregisterTour } from "./WalkthroughService";
 import { WalkthroughOverlay } from "./WalkthroughOverlay";
 import { openCodingAgentLoginUi } from "./openCodingAgentLogin";
 import { newlyEnabledForWalkthrough, rememberEnabledPlugin } from "./firstEnable";
@@ -21,7 +20,6 @@ import {
   ensureStarterLlmGateways,
   peekStarterLlmOnboard,
   setSuppressStarterPluginTours,
-  shouldSuppressPluginWalkthrough,
 } from "./starterLlmGateways";
 
 const registeredPluginTourIds = new Set<string>();
@@ -67,27 +65,11 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
     }
   }, [contrib]);
 
-  // First-enable: one new slug after the session snapshot. Store updates that
-  // drop/reload enabled_ids must not look like a brand-new Enable.
+  // Seed first-enable memory only. Installing or enabling a plugin must not
+  // route the user into a tour — replay stays on the Store card.
   useEffect(() => {
     if (!contrib.ready) return;
-    const fresh = newlyEnabledForWalkthrough(contrib.enabled_ids);
-    for (const id of fresh) {
-      if (shouldSuppressPluginWalkthrough(id)) continue;
-      const tourId = pluginTourId(id);
-      if (isCompleted(tourId)) continue;
-      const rows = parsePluginWalkthroughs(contrib.walkthroughs);
-      const row = rows.find(
-        (r) =>
-          pluginTourId(String(r.id || r.plugin_id || "")) === tourId &&
-          r.auto_start !== "never",
-      );
-      if (!row) continue;
-      markTourCompleted(tourId);
-      window.setTimeout(() => {
-        void startTour(tourId);
-      }, 500);
-    }
+    newlyEnabledForWalkthrough(contrib.enabled_ids);
   }, [contrib]);
 
   // Auto-start app.shell only after completion flags are loaded from disk.
@@ -125,14 +107,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
   return <WalkthroughOverlay />;
 }
 
-/** Call after Store enable succeeds so a tour can start even if contrib refresh is slow. */
+/** Remember the slug so a later contrib refresh cannot look like first-enable. */
 export function maybeStartPluginWalkthrough(pluginId: string): void {
-  if (shouldSuppressPluginWalkthrough(pluginId)) return;
   rememberEnabledPlugin(pluginId);
-  const tourId = pluginTourId(pluginId);
-  if (isCompleted(tourId)) return;
-  markTourCompleted(tourId);
-  window.setTimeout(() => {
-    void startTour(tourId, { force: true });
-  }, 600);
 }

@@ -496,7 +496,7 @@ export function StoreTab() {
           await new Promise((r) => setTimeout(r, 280));
           // Updates: defer catalog refresh until the whole Update All queue drains
           // (N× refresh during Update All was freezing / crashing the WebView).
-          // Fresh installs still refresh inline so enable + walkthrough can run.
+          // Fresh installs still refresh inline so the new plugin can enable.
           if (!isUpdate) {
             patchStoreJob(slug, {
               ...base,

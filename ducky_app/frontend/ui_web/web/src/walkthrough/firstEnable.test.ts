@@ -5,11 +5,11 @@ import {
   resetFirstEnableSeenForTests,
 } from "./firstEnable";
 
-afterEach(() => {
-  resetFirstEnableSeenForTests();
-});
-
 describe("newlyEnabledForWalkthrough", () => {
+  afterEach(() => {
+    resetFirstEnableSeenForTests();
+  });
+
   it("does not start tours on the first non-empty snapshot", () => {
     expect(newlyEnabledForWalkthrough(["anthropic", "cursor"])).toEqual([]);
     expect(newlyEnabledForWalkthrough(["anthropic", "cursor"])).toEqual([]);
