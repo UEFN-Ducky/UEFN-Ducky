@@ -65,11 +65,33 @@ def retire_diagnostics_cache(root: Path) -> dict[str, Any]:
     return {"moved": False}
 
 
+def retire_perf_files(root: Path) -> dict[str, Any]:
+    """perf/*.jsonl and reports are rows now (events kind ``perf`` + cache_docs);
+    the old files are a cache, so they are parked under legacy/ and deleted with it."""
+    directory = root / "perf"
+    if directory.is_dir():
+        _move_to_legacy(root, directory, "perf")
+        return {"moved": True}
+    return {"moved": False}
+
+
+def retire_json_backups(root: Path) -> dict[str, Any]:
+    """backups/ held rotated copies of the JSON stores. Nothing writes JSON stores
+    any more, so the whole tree goes with legacy/ instead of ageing out slowly."""
+    directory = root / "backups"
+    if directory.is_dir():
+        _move_to_legacy(root, directory, "backups")
+        return {"moved": True}
+    return {"moved": False}
+
+
 ALL = {
     "mcp_servers": import_mcp_servers,
     "more_logs": import_more_logs,
     "captures": import_captures,
     "verse_diagnostics": retire_diagnostics_cache,
+    "perf_files": retire_perf_files,
+    "json_backups": retire_json_backups,
 }
 
 

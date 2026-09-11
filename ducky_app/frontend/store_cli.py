@@ -9,7 +9,7 @@ import json
 import sys
 from typing import Any
 
-USAGE = "usage: db check | db vacuum | db snapshot | db stats | db export <table> [--limit N]"
+USAGE = "usage: db check | db vacuum | db snapshot | db stats | db import | db export <table> [--limit N]"
 
 
 def _tables(conn) -> list[str]:
@@ -72,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if cmd == "stats":
         print(json.dumps(stats(), indent=2))
+        return 0
+    if cmd == "import":
+        # What the panel does on its first boot after an upgrade, runnable by hand for support.
+        from backend.store.importers.boot import ensure_all_stores
+
+        print(json.dumps(ensure_all_stores(), indent=2, default=str))
         return 0
     if cmd == "export":
         if len(args) < 2:

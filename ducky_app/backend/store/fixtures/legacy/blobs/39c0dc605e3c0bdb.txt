@@ -1,0 +1,2 @@
+using { /Fortnite.com/Devices }
+hello := class(creative_device):

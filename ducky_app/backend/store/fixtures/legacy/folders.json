@@ -1,0 +1,18 @@
+{
+  "folders": [
+    {
+      "id": "archive",
+      "name": "Archive",
+      "parent_id": "",
+      "sort_order": 1000000.0,
+      "group_hub_id": ""
+    },
+    {
+      "id": "5039e099-e297-448e-ac8f-80e1a4672b3d",
+      "name": "Ideas",
+      "parent_id": "",
+      "sort_order": 1000001.0,
+      "group_hub_id": ""
+    }
+  ]
+}

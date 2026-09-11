@@ -230,9 +230,9 @@ def _write_models_cache_doc(payload: dict[str, Any]) -> None:
 
             phase1.ensure("cache_docs")
             kv.set_doc("cache_docs", "models_cache", payload)
+            return
         except (OSError, RuntimeError):
             pass
-    # Shadow file for this release (rollback source; test_models_cache_disk reads it).
     path = default_app_data_dir() / _MODELS_CACHE_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")

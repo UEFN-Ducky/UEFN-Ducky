@@ -225,7 +225,9 @@ def test_models_cache_doc_round_trip(tmp_path: Path) -> None:
     assert doc["openai"][0]["id"] == "gpt-5"
     pa._write_models_cache_doc({"openai": [{"id": "gpt-6"}]})
     assert kv.get_doc("cache_docs", "models_cache")["openai"][0]["id"] == "gpt-6"
-    assert json.loads((root / pa._MODELS_CACHE_FILE).read_text())["openai"][0]["id"] == "gpt-6"  # shadow
+    # Imported into cache_docs and parked under legacy/; nothing rewrites the old file.
+    assert not (root / pa._MODELS_CACHE_FILE).exists()
+    assert (root / "legacy" / "cache_docs" / pa._MODELS_CACHE_FILE).is_file()
 
 
 # --------------------------------------------------------------------------- plugin kv

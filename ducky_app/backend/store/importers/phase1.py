@@ -103,7 +103,7 @@ def import_settings(root: Path) -> dict[str, Any]:
     stored = repo.load_fields()
     non_default = {k: v for k, v in values.items() if defaults.get(k) != v}
     assert stored == non_default, "settings import verification failed"
-    # The file stays: PanelSettings.save() shadows every save into it this release.
+    _move_to_legacy(root, path, "settings")
     return {"source": str(path), "found": True, "fields": len(non_default)}
 
 
@@ -189,8 +189,7 @@ def import_cache_docs(root: Path) -> dict[str, Any]:
         if isinstance(doc, dict):
             kv.set_doc("cache_docs", key, doc)
             report[key] = True
-            if key != "models_cache":  # models_cache.json stays as the shadow copy this release
-                _move_to_legacy(root, root / name, "cache_docs")
+            _move_to_legacy(root, root / name, "cache_docs")
     return report
 
 

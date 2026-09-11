@@ -170,7 +170,7 @@ def _join_host_workers(timeout: float = 5.0) -> None:
     for t in threading.enumerate():
         if t is threading.current_thread():
             continue
-        if t.name == "uefn-plugins-repair":
+        if t.name in ("uefn-plugins-repair", "appdata-maintenance"):
             t.join(timeout)
 
 

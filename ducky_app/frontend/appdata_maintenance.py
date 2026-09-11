@@ -212,6 +212,7 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "ducky.db-shm": ("Database index", "SQLite shared-memory index for ducky.db.", "settings"),
     "snapshots": ("Database snapshots", "Consistent copies of ducky.db (newest 3).", "settings"),
     "legacy": ("Legacy stores", "Pre-database files kept until three clean boots.", "cache"),
+    "exports": ("Exports", "Tables exported from Settings → App Data → Database.", "user"),
 }
 
 _PROTECTED_NAMES = frozenset(
@@ -240,6 +241,16 @@ def delete_project_appdata(slug: str, app_root: Path | None = None) -> int:
         project_dir = app_root / Path(area) / slug
         if project_dir.is_dir() and _safe_rmtree(project_dir):
             removed += 1
+    # ADR 0003: the project's rows (chats, ledger, history, plans, memory, diagnostics).
+    try:
+        from backend.store.switch import use_db
+
+        if use_db("settings"):
+            from frontend.store_admin import delete_project_rows
+
+            removed += sum(delete_project_rows(slug).values())
+    except Exception:
+        _log.exception("deleting project rows for %s failed", slug)
     return removed
 
 
@@ -324,8 +335,14 @@ def _maintain_store(app_root: Path) -> dict[str, int]:
 
         if not use_db("settings"):
             return out
-        store_db.open_checked(app_root)
+        conn = store_db.open_checked(app_root)
         out["db_checked"] = 1
+        store_db.record_integrity(conn, "ok")
+        # Upgrade path: every legacy store is imported on the first boot, not
+        # lazily on first use, so legacy/ is complete before its countdown starts.
+        from backend.store.importers.boot import ensure_all_stores
+
+        out["db_imported"] = sum(1 for r in ensure_all_stores().values() if r is not None)
         out["legacy_removed"] = _retire_legacy_after_clean_boots(app_root)
         newest = store_db.newest_snapshot(app_root)
         if newest is None or time.time() - newest.stat().st_mtime > _SNAPSHOT_EVERY_S:
@@ -596,6 +613,17 @@ def appdata_projects(app_root: Path | None = None) -> dict[str, Any]:
         slug_to_path.setdefault(project_slug(current), current)
 
     slugs: set[str] = set(slug_to_path)
+    row_counts: dict[str, dict[str, int]] = {}
+    try:
+        from backend.store.switch import use_db
+
+        if use_db("settings"):
+            from frontend.store_admin import project_row_counts
+
+            row_counts = project_row_counts()
+            slugs.update(row_counts)
+    except Exception:
+        _log.exception("project row counts failed")
     for area, _label in _PROJECT_AREAS:
         area_root = root / Path(area)
         if not area_root.is_dir():
@@ -626,7 +654,8 @@ def appdata_projects(app_root: Path | None = None) -> dict[str, Any]:
                 }
             )
             total += size
-        if not areas:
+        rows = row_counts.get(slug, {})
+        if not areas and not rows:
             continue
         project_path = slug_to_path.get(slug, "")
         label = project_display_name(project_path) if project_path else slug
@@ -637,6 +666,7 @@ def appdata_projects(app_root: Path | None = None) -> dict[str, Any]:
                 "path": project_path,
                 "bytes": total,
                 "areas": areas,
+                "rows": rows,
             }
         )
     projects.sort(key=lambda row: (-int(row["bytes"]), str(row["label"]).lower()))

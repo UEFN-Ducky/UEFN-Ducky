@@ -1619,6 +1619,89 @@ export interface AppDataProject {
   path: string;
   bytes: number;
   areas: AppDataProjectArea[];
+  /** ducky.db rows scoped to this project, by table (ADR 0003). */
+  rows?: Record<string, number>;
+}
+
+/** Settings → General → App Data → Database (ADR 0003). */
+export interface StoreTable {
+  name: string;
+  label: string;
+  group: "chats" | "settings" | "changes" | "plans" | "verse" | "logs";
+  group_label: string;
+  description: string;
+  rows: number;
+  clearable: boolean;
+}
+
+export interface StoreSnapshot {
+  name: string;
+  bytes: number;
+  ts: number;
+}
+
+export interface StoreLegacy {
+  rel: string;
+  bytes: number;
+  files: number;
+  stores: { name: string; bytes: number; files: number }[];
+}
+
+export interface StoreImporter {
+  name: string;
+  report: unknown;
+  ts: number;
+}
+
+export interface StoreOverview {
+  path: string;
+  exists: boolean;
+  sqlite_version: string;
+  backends: Record<string, "rows" | "files">;
+  size_bytes: number;
+  wal_bytes: number;
+  schema_version: number;
+  head_version: number;
+  page_size?: number;
+  journal_mode?: string;
+  tables: StoreTable[];
+  snapshots: StoreSnapshot[];
+  legacy: StoreLegacy | null;
+  importers: StoreImporter[];
+  integrity: { result: string; ts: number } | null;
+  last_restore: string | null;
+  restore_pending: boolean;
+  clean_boots: number;
+  clean_boots_needed: number;
+  error: string;
+}
+
+export interface StoreTablePreview {
+  ok: boolean;
+  error?: string;
+  table?: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  offset?: number;
+  limit?: number;
+}
+
+export interface StoreActionResult {
+  ok: boolean;
+  error?: string;
+  result?: string;
+  snapshot?: string;
+  staged?: string;
+  restart_required?: boolean;
+  removed?: number;
+  removed_files?: number;
+  bytes?: number;
+  before?: number;
+  after?: number;
+  path?: string;
+  rows?: number;
+  reports?: Record<string, unknown>;
 }
 
 export interface AppDataActionResult {
@@ -2461,6 +2544,9 @@ export interface PanelApi {
   appdata_projects(): Promise<{ projects: AppDataProject[]; bytes: number }>;
   appdata_delete_project(slug: string): Promise<AppDataActionResult>;
   appdata_clear_caches(): Promise<AppDataActionResult>;
+  store_overview(): Promise<StoreOverview>;
+  store_table_preview(table: string, limit?: number, offset?: number): Promise<StoreTablePreview>;
+  store_action(action: string, arg?: string): Promise<StoreActionResult>;
   open_path_in_explorer(path: string): Promise<void>;
   open_project_path_in_explorer(relative_path: string): Promise<void>;
   open_skills_folder(): Promise<void>;

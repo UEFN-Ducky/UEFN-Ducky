@@ -132,3 +132,19 @@ Gate 4 plans/memory/telemetry → Gate 5 cutover. Each: parity on both
 backends, golden import exact and idempotent, shadow diff empty across the
 suite and three golden boots, rollback passes, budgets pass, DTO fixtures
 regenerated and vitest green.
+
+## What exists on the branch (2026-09-10)
+
+| test | covers |
+|---|---|
+| `backend/store/test_db.py` | connect/migrate, pragmas, capabilities, snapshots, integrity restore, trace |
+| `backend/store/test_fitness.py` | only the store package imports sqlite3; the listener never imports the store |
+| `backend/store/test_phase1.py` … `test_phase4.py` | each store's repo + importer against real legacy layouts |
+| `backend/store/test_phase56.py` | mcp rows + export, captures, diagnostics rows, digest trigram index, paged loads, catalog cache, perf rows, skill manifest cache, `db` CLI, legacy retirement, extra logs |
+| `backend/store/test_upgrade_boot.py` | first boot over a populated pre-database AppData (checked-in samples the old release wrote): every store imported, no stray files, `legacy/` gone after three clean boots |
+| `frontend/test_store_admin.py` | Settings → App Data → Database backend: overview, masked previews, every action, staged restore, project row deletion |
+| `web/src/views/settings/AppDataDatabase.test.tsx` | the Database tab renders health/tables/snapshots/leftovers and routes every button through `store_action` |
+| `build/upgrade_proof/` | end-to-end: the old code generates a real AppData, the new code and the frozen EXE (`db import`, `db stats`) upgrade it |
+
+Isolation: `pytest.ini` pins rootdir so the per-test AppData fixture always
+loads, and `db.connect()` refuses the real `%LOCALAPPDATA%/UEFN-Ducky` under pytest.

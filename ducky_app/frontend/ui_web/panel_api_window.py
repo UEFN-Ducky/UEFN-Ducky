@@ -701,6 +701,22 @@ class PanelApiWindowMixin:
 
         return appdata_clear_caches()
 
+    # ADR 0003 — Settings → General → App Data → Database.
+    def store_overview(self) -> dict:
+        from frontend.store_admin import overview
+
+        return overview()
+
+    def store_table_preview(self, table: str, limit: int = 50, offset: int = 0) -> dict:
+        from frontend.store_admin import table_preview
+
+        return table_preview(table or "", limit, offset)
+
+    def store_action(self, action: str, arg: str = "") -> dict:
+        from frontend.store_admin import action as run_action
+
+        return run_action(action or "", arg or "")
+
     def _pick_save_file_webview(
         self,
         win: Any,

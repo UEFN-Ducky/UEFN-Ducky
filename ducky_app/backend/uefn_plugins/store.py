@@ -603,6 +603,13 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
                 duckyos_account.logout()
             except Exception:
                 pass
+        # ADR 0003: the plugin's key/value rows (encrypted ones included) go with it.
+        try:
+            from frontend.ui_web.plugin_host_api import cache_clear
+
+            cache_clear(pid)
+        except Exception:
+            pass
     # Persist disabled before deleting files so a restart mid-teardown still shows off.
     set_uefn_plugin_enabled(pid, False)
     # Drop imported modules (bounded unload) *before* rmtree — Windows locks .py files

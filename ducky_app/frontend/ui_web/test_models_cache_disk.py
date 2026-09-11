@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import threading
 import time
 from unittest.mock import patch
@@ -50,8 +52,10 @@ def test_prune_drops_models_for_removed_gateway(tmp_path, monkeypatch):
 
     assert "openai" not in pa._model_cache
     assert "anthropic" in pa._model_cache
-    # Disk file must not keep the removed gateway either.
-    raw = (tmp_path / pa._MODELS_CACHE_FILE).read_text(encoding="utf-8")
+    # The persisted copy (ducky.db cache_docs) must not keep the removed gateway either.
+    from backend.store.repos import kv
+
+    raw = json.dumps(kv.get_doc("cache_docs", "models_cache"))
     assert "openai" not in raw
     assert "anthropic" in raw
 

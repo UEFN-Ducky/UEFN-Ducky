@@ -12,6 +12,8 @@ This module is the only place in the tree allowed to import :mod:`sqlite3`
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
 import shutil
@@ -50,6 +52,7 @@ class UnsupportedFilesystemError(StoreError):
 
 _thread_local = threading.local()
 _guard = threading.Lock()
+_log = logging.getLogger("uefn_ducky.store")
 _migrated: set[str] = set()
 
 
@@ -79,6 +82,55 @@ def _refuse_network_path(path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- connect
+
+
+RESTORE_PENDING_NAME = DB_NAME + ".restore-pending"
+
+
+def _apply_pending_restore(path: Path) -> None:
+    """Settings → Database → Restore stages a snapshot as ``ducky.db.restore-pending``;
+    the first process to open the store after that swaps it in. If another
+    process still holds the live file the swap fails and stays pending."""
+    pending = path.parent / RESTORE_PENDING_NAME
+    if not pending.is_file():
+        return
+    try:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        if path.exists():
+            path.replace(path.parent / f"{DB_NAME}.replaced-{stamp}")
+        for name in SIDECAR_NAMES:
+            side = path.parent / name
+            if side.exists():
+                side.unlink()
+        pending.replace(path)
+        _log.warning("ducky.db restored from a staged snapshot (previous file kept as %s.replaced-%s)", DB_NAME, stamp)
+    except OSError as exc:
+        _log.warning("staged ducky.db restore could not be applied yet: %s", exc)
+
+
+DatabaseError = sqlite3.DatabaseError
+
+
+def sqlite_library_version() -> str:
+    return sqlite3.sqlite_version
+
+
+def check_db_file(path: Path) -> str:
+    """``PRAGMA integrity_check`` on a database file that is not the live store (read-only)."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        return str(row[0]) if row else "no result"
+    finally:
+        conn.close()
+
+
+def record_integrity(conn: sqlite3.Connection, result: str) -> None:
+    with write_txn(conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value, updated) VALUES ('last_integrity', ?, ?)",
+            (json.dumps({"result": result, "ts": time.time()}), time.time()),
+        )
 
 
 def _refuse_real_appdata_under_pytest(path: Path) -> None:
@@ -113,6 +165,8 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
         return conn
     _refuse_network_path(path)
     _refuse_real_appdata_under_pytest(path)
+    if key not in _migrated:
+        _apply_pending_restore(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row

@@ -4,12 +4,14 @@ import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { useUiTarget } from "../../ui-targets/registry";
 import type { AppDataItem, AppDataKind, AppDataOverview, AppDataProject } from "../../types/panel";
+import { AppDataDatabase } from "./AppDataDatabase";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 
-export type AppDataInnerTab = "all" | "cache" | "projects" | "installed";
+export type AppDataInnerTab = "database" | "all" | "cache" | "projects" | "installed";
 
 const INNER_TABS: { id: AppDataInnerTab; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "database", label: "Database" },
+  { id: "all", label: "Files" },
   { id: "cache", label: "Cache" },
   { id: "projects", label: "Projects" },
   { id: "installed", label: "Installed" },
@@ -234,7 +236,7 @@ export function AppDataTab() {
     route: "settings.general",
   });
   const { confirm, alert } = useConfirmModal();
-  const [inner, setInner] = useState<AppDataInnerTab>("all");
+  const [inner, setInner] = useState<AppDataInnerTab>("database");
   const [overview, setOverview] = useState<AppDataOverview | null>(null);
   const [projects, setProjects] = useState<AppDataProject[]>([]);
   const [projectBytes, setProjectBytes] = useState(0);
@@ -408,7 +410,7 @@ export function AppDataTab() {
       if (
         !(await confirm({
           title: `Delete data for ${project.label}?`,
-          message: `Remove chats, workspace, file history, diagnostics, changesets, and memory for “${project.label}”.`,
+          message: `Remove chats, workspace, file history, diagnostics, changesets, memory and every database row for “${project.label}”.`,
           confirmLabel: "Delete project data",
           danger: true,
         }))
@@ -424,7 +426,7 @@ export function AppDataTab() {
     const items = overview?.items || [];
     if (inner === "cache") return items.filter((row) => row.kind === "cache");
     if (inner === "installed") return items.filter((row) => row.kind === "install");
-    if (inner === "projects") return [];
+    if (inner === "projects" || inner === "database") return [];
     return items;
   }, [overview, inner]);
 
@@ -494,7 +496,9 @@ export function AppDataTab() {
         ))}
       </nav>
 
-      {inner === "projects" ? (
+      {inner === "database" ? (
+        <AppDataDatabase onOpenRel={openRel} />
+      ) : inner === "projects" ? (
         <div className="appdata-list">
           {loading && projects.length === 0 ? <p className="appdata-empty">Measuring…</p> : null}
           {!loading && projects.length === 0 ? (
@@ -513,6 +517,12 @@ export function AppDataTab() {
                   <div className="appearance-tab-details-title">{project.label}</div>
                   <div className="appdata-summary-meta">
                     {formatAppDataBytes(project.bytes)}
+                    {project.rows && Object.keys(project.rows).length ? (
+                      <>
+                        <span className="appdata-dot">·</span>
+                        {Object.values(project.rows).reduce((a, b) => a + b, 0)} database rows
+                      </>
+                    ) : null}
                     {project.path ? (
                       <>
                         <span className="appdata-dot">·</span>

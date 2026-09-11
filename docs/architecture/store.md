@@ -120,6 +120,37 @@ patterns. `plugins`, `verse_templates`, `group_members`, `attachments` and
 `plan_nodes`/`task_phases` stay inside the JSON `state`/doc columns of their
 owners (queried by id, never by field).
 
+### Upgrade path (files → rows)
+
+The first boot after installing over a files-based release runs **every**
+importer (`backend/store/importers/boot.py`, called from AppData maintenance),
+not just the lazy per-store ones: settings, keys, recent projects, window and
+dock state, models cache, plugin data, chats, ledger, file history, plan
+templates, memory, usage, every log file, `mcp.json`, captures, and the
+`.ducky/` folders of recent projects. Imported files are parked under
+`legacy/<store>/`, empty parent folders are pruned, and `legacy/` is deleted
+after three clean boots (or from Settings). After boot one the App Data root
+holds only `ducky.db` (+ WAL/SHM), `legacy/`, `snapshots/`, `mcp.json` (an
+export), `config.json` (the listener projection) and the folders that are
+files by design (plugins, skill packs, captures, listener, browser profile).
+`build/upgrade_proof/` generates a real legacy folder with the old code and
+verifies all of this with the new code; `test_upgrade_boot.py` does the same
+from checked-in samples.
+
+### Settings → General → App Data → Database
+
+`frontend/store_admin.py` behind three PanelApi methods (`store_overview`,
+`store_table_preview`, `store_action`): health (size, WAL, schema, SQLite
+version, last integrity result), every table with live row counts and a masked
+row preview (DPAPI blobs, encrypted plugin rows and key-like settings never
+leave the backend), snapshot now / restore (staged as
+`ducky.db.restore-pending`, swapped in on the next boot) / delete, compact,
+optimize, sweep blobs, clear cache-class tables, export any table as JSON
+lines under `exports/`, the legacy folder with its clean-boot countdown and a
+delete-now button, and the import log. Deleting a project from the Files view
+also removes its rows. `UEFN-Ducky.exe db import` runs the first-boot import
+pass by hand.
+
 ### Test isolation
 
 `pytest.ini` pins rootdir to the repo, so `conftest.py` (per-test
