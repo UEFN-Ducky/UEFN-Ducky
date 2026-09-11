@@ -315,11 +315,20 @@ class PanelSettings:
         # just because the gateway owning the choice had not registered yet.
         from backend.uefn_plugins.host import plugins_ready
 
+        raw_agent = str(self.default_coding_agent or "ducky").strip()
         if plugins_ready():
-            self.default_coding_agent = normalize_coding_agent(self.default_coding_agent)
+            normalized = normalize_coding_agent(raw_agent)
             allowed = {"ducky", *contributed_coding_agents()}
-            if self.default_coding_agent not in allowed:
-                self.default_coding_agent = "ducky"
+            if normalized in allowed and (normalized != "ducky" or raw_agent.lower() in ("", "ducky")):
+                self.default_coding_agent = normalized
+            else:
+                # The gateway that owns this choice is not registered *right now*
+                # (plugin reload, bridge process, a disabled-then-re-enabled plugin).
+                # Keep the stored id: every consumer falls back per use, whereas a
+                # reset here used to be saved and silently switched the user to Ducky.
+                self.default_coding_agent = raw_agent or "ducky"
+        else:
+            self.default_coding_agent = raw_agent or "ducky"
         if self.coding_agents is None or not isinstance(self.coding_agents, dict):
             self.coding_agents = {}
         if not isinstance(self.walkthrough_completed, dict):

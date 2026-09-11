@@ -88,8 +88,9 @@ export function DuckyProfileModal({
         hasApiKey,
         catalogReady,
         modelsCount,
+        codingAgentCount: contrib.llm_coding_agents.length,
       }),
-    [catalogReady, contrib.llm_providers.length, contrib.ready, hasApiKey, modelsCount],
+    [catalogReady, contrib.llm_coding_agents.length, contrib.llm_providers.length, contrib.ready, hasApiKey, modelsCount],
   );
   const [profiles, setProfiles] = useState<AgentProfileDto[]>([]);
   const [blankProfileId, setBlankProfileId] = useState(BLANK_PROFILE_ID);

@@ -11,6 +11,8 @@ export function duckyPickerIssue(opts: {
   hasApiKey: boolean;
   catalogReady: boolean;
   modelsCount: number;
+  /** Connected coding agents (Claude Code, Codex, …) bring their own models. */
+  codingAgentCount?: number;
 }): DuckyPickerIssue | null {
   if (opts.contribReady === false) return null;
   if (opts.gatewayCount <= 0) {
@@ -27,7 +29,7 @@ export function duckyPickerIssue(opts: {
       actionTab: "LLMs",
     };
   }
-  if (opts.catalogReady && opts.modelsCount <= 0) {
+  if (opts.catalogReady && opts.modelsCount <= 0 && !(opts.codingAgentCount && opts.codingAgentCount > 0)) {
     return {
       message: "No models loaded yet. Test the API key in Settings → LLMs, or wait a moment.",
       actionLabel: "Open LLMs",

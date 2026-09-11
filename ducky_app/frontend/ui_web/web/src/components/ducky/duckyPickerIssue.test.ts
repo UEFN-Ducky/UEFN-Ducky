@@ -35,6 +35,27 @@ describe("duckyPickerIssue", () => {
     ).toBeNull();
   });
 
+  it("is quiet when a coding agent brings the models (no API-key models needed)", () => {
+    expect(
+      duckyPickerIssue({
+        gatewayCount: 1,
+        hasApiKey: true,
+        catalogReady: true,
+        modelsCount: 0,
+        codingAgentCount: 1,
+      }),
+    ).toBeNull();
+    expect(
+      duckyPickerIssue({
+        gatewayCount: 1,
+        hasApiKey: true,
+        catalogReady: true,
+        modelsCount: 0,
+        codingAgentCount: 0,
+      })?.message,
+    ).toMatch(/No models loaded yet/);
+  });
+
   it("waits on an in-flight catalog instead of saying no models", () => {
     expect(
       duckyPickerIssue({
