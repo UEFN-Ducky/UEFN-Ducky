@@ -38,6 +38,8 @@ type CommonProps = {
   /** Icon-only (or custom) trigger instead of the selected label. */
   trigger?: ReactNode;
   hideChevron?: boolean;
+  /** Keep the selected value in the menu; show this on the trigger instead. */
+  fixedLabel?: string;
 };
 
 type RadioProps = CommonProps & {
@@ -88,6 +90,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
     footer,
     trigger,
     hideChevron,
+    fixedLabel,
   } = props;
   const ariaLabel = props["aria-label"];
   const checkbox = isCheckbox(props);
@@ -148,7 +151,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
           trigger
         ) : (
           <span className="choice-dropdown-trigger-copy">
-            <span className="choice-dropdown-trigger-label">{selectedLabel}</span>
+            <span className="choice-dropdown-trigger-label">{fixedLabel ?? selectedLabel}</span>
             {selectedHint ? <span className="choice-dropdown-trigger-hint">{selectedHint}</span> : null}
           </span>
         )}

@@ -485,7 +485,8 @@ input, textarea, select, button {
 .app-header-center .app-header-nav,
 .app-header-center .sidebar-toggle-btn,
 .app-header-center .quick-open-bar,
-.app-header-center .plugin-header-btn {
+.app-header-center .plugin-header-btn,
+.app-header-center .plugin-header-menu {
   pointer-events: auto;
 }
 .app-header-center .app-header-nav {
@@ -518,6 +519,51 @@ input, textarea, select, button {
   height: 16px;
   font-size: 14px;
   line-height: 1;
+}
+.app-header-center .plugin-header-menu {
+  flex-shrink: 0;
+  width: auto;
+  max-width: none;
+}
+.plugin-header-menu-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.plugin-header-menu-row {
+  width: 100%;
+}
+.plugin-header-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.plugin-header-menu-item:hover,
+.plugin-header-menu-item.is-active {
+  background: var(--tab-active, rgba(255, 255, 255, 0.06));
+}
+.plugin-header-menu-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-header-menu-item .plugin-contrib-icon,
+.plugin-header-menu-item .plugin-contrib-emoji {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.app-header--compact .app-header-nav {
+  display: none;
 }
 .app-header-main {
   flex: 1;
@@ -609,18 +655,13 @@ input, textarea, select, button {
 .remote-window-select {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 280px;
-}
-.remote-window-select-label {
-  font-size: 11px;
-  opacity: 0.7;
   flex-shrink: 0;
+  width: auto;
+  min-width: 0;
 }
 .remote-window-select .choice-dropdown {
-  min-width: 0;
-  flex: 1;
+  width: auto;
+  max-width: none;
 }
 .remote-window-overlay {
   position: absolute;

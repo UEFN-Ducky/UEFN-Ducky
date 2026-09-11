@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
@@ -25,7 +25,9 @@ import {
   sortPluginHeaderButtons,
 } from "../hooks/pluginHeaderActions";
 import { useUiTarget } from "../ui-targets/registry";
+import { DropdownPanel } from "./DropdownPanel";
 import { RemoteWindowSelect } from "./RemoteWindowView";
+import type { PluginHeaderButton } from "../hooks/usePluginContributions";
 
 interface HeaderProps {
   variant?: "main" | "focus";
@@ -58,6 +60,116 @@ const RIGHT_RAIL_TOGGLE_META = {
   open: { title: "Hide right sidebar", Icon: Icons.PanelRight },
   closed: { title: "Show right sidebar", Icon: Icons.PanelRightClose },
 } as const;
+
+const COMPACT_HEADER_MQ = "(max-width: 720px)";
+
+function useCompactHeader() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(COMPACT_HEADER_MQ);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(COMPACT_HEADER_MQ).matches,
+    () => true,
+  );
+}
+
+function PluginHeaderItem({
+  btn,
+  layout,
+  onPicked,
+}: {
+  btn: PluginHeaderButton;
+  layout: "icon" | "row";
+  onPicked?: () => void;
+}) {
+  const pluginId = (btn.plugin_id || btn.id || "plugin").trim().toLowerCase();
+  const key = `${pluginId}:${btn.id}`;
+  const title = btn.title || btn.id;
+  const isTranslation = btn.plugin_id === "translation" || btn.id === "translation";
+  if (isTranslation) {
+    return (
+      <PluginSurfaceBoundary key={key} pluginId={pluginId || "translation"} surface="header-button" compact>
+        <LanguageHeaderDropdown
+          icon={resolvePluginHeaderIcon(btn.icon)}
+          title={title}
+          layout={layout}
+        />
+      </PluginSurfaceBoundary>
+    );
+  }
+  const onClick = resolvePluginHeaderAction(btn.action, btn.plugin_id);
+  if (!onClick) return null;
+  if (layout === "row") {
+    return (
+      <PluginSurfaceBoundary key={key} pluginId={pluginId} surface="header-button" compact>
+        <button
+          type="button"
+          className="plugin-header-menu-item"
+          onClick={() => {
+            onClick();
+            onPicked?.();
+          }}
+        >
+          {resolvePluginHeaderIcon(btn.icon)}
+          <span className="plugin-header-menu-item-label">{title}</span>
+        </button>
+      </PluginSurfaceBoundary>
+    );
+  }
+  return (
+    <PluginSurfaceBoundary key={key} pluginId={pluginId} surface="header-button" compact>
+      <button
+        type="button"
+        className="icon-btn no-drag plugin-header-btn"
+        title={title}
+        aria-label={title}
+        onClick={onClick}
+      >
+        {resolvePluginHeaderIcon(btn.icon)}
+      </button>
+    </PluginSurfaceBoundary>
+  );
+}
+
+function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  if (!buttons.length) return null;
+  return (
+    <div className="choice-dropdown choice-dropdown--compact plugin-header-menu no-drag">
+      <button
+        ref={anchorRef}
+        type="button"
+        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Plugins"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="choice-dropdown-trigger-copy">
+          <span className="choice-dropdown-trigger-label">Plugins</span>
+        </span>
+        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
+          <Icons.ChevronDown />
+        </span>
+      </button>
+      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
+        <div className="plugin-header-menu-list" role="menu">
+          {buttons.map((btn) => (
+            <PluginHeaderItem
+              key={`${btn.plugin_id || btn.id}:${btn.id}`}
+              btn={btn}
+              layout="row"
+              onPicked={() => setOpen(false)}
+            />
+          ))}
+        </div>
+      </DropdownPanel>
+    </div>
+  );
+}
 
 export function Header({
   variant = "main",
@@ -184,10 +296,12 @@ export function Header({
   const pluginContrib = usePluginContributions();
   const { prefs: discordUiPrefs } = useDiscordUiPrefs();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
+  const narrowHeader = useCompactHeader();
   const pluginHeaderButtons = useMemo(() => {
     if (!hasProject || isFocus || isSettingsOverlay) return [];
     return sortPluginHeaderButtons(pluginContrib.header_buttons).filter((btn) => {
-      if (!resolvePluginHeaderAction(btn.action, btn.plugin_id)) return false;
+      const isTranslation = btn.plugin_id === "translation" || btn.id === "translation";
+      if (!isTranslation && !resolvePluginHeaderAction(btn.action, btn.plugin_id)) return false;
       // Discord placement prefs gate the Discord button; other plugins always show.
       if (btn.plugin_id === "discord" || btn.id === "discord") {
         return discordUiPrefs.showInHeader;
@@ -201,6 +315,14 @@ export function Header({
     isSettingsOverlay,
     pluginContrib.header_buttons,
   ]);
+  const compactHeader = isRemote() || narrowHeader;
+  const pluginHeader = compactHeader ? (
+    <PluginHeaderMenu buttons={pluginHeaderButtons} />
+  ) : (
+    pluginHeaderButtons.map((btn) => (
+      <PluginHeaderItem key={`${btn.plugin_id || btn.id}:${btn.id}`} btn={btn} layout="icon" />
+    ))
+  );
   const showEditorActions = isFocus || !isSettingsOverlay;
   const saveAction = showEditorActions ? headerActions.save : null;
   const workflowAction = showEditorActions && hasProject ? headerActions.verseWorkflow : null;
@@ -259,7 +381,7 @@ export function Header({
   return (
     <header
       ref={headerTargetRef}
-      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""}${isSettingsOverlay ? " app-header--settings" : " drag-region app-drag-surface"}`}
+      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""}${isSettingsOverlay ? " app-header--settings" : " drag-region app-drag-surface"}${compactHeader ? " app-header--compact" : ""}`}
     >
       <div id="ducky-skin-header" className="ducky-skin-slot ducky-skin-slot--header" aria-hidden="true" />
       <div className={`app-header-left${isSettingsOverlay ? " app-header-left--settings" : ""}`}>
@@ -318,7 +440,7 @@ export function Header({
           >
             <LayoutToggleIcon />
           </button>
-          {showQuickOpen ? <QuickOpenBar /> : null}
+          {showQuickOpen && !compactHeader ? <QuickOpenBar /> : null}
           <button
             type="button"
             onClick={toggleRightRail}
@@ -327,42 +449,7 @@ export function Header({
           >
             <RightRailToggleIcon />
           </button>
-          {pluginHeaderButtons.map((btn) => {
-            const pluginId = (btn.plugin_id || btn.id || "plugin").trim().toLowerCase();
-            const key = `${pluginId}:${btn.id}`;
-            const isTranslation =
-              btn.plugin_id === "translation" || btn.id === "translation";
-            if (isTranslation) {
-              return (
-                <PluginSurfaceBoundary
-                  key={key}
-                  pluginId={pluginId || "translation"}
-                  surface="header-button"
-                  compact
-                >
-                  <LanguageHeaderDropdown
-                    icon={resolvePluginHeaderIcon(btn.icon)}
-                    title={btn.title || btn.id}
-                  />
-                </PluginSurfaceBoundary>
-              );
-            }
-            const onClick = resolvePluginHeaderAction(btn.action, btn.plugin_id);
-            if (!onClick) return null;
-            return (
-              <PluginSurfaceBoundary key={key} pluginId={pluginId} surface="header-button" compact>
-                <button
-                  type="button"
-                  className="icon-btn no-drag plugin-header-btn"
-                  title={btn.title || btn.id}
-                  aria-label={btn.title || btn.id}
-                  onClick={onClick}
-                >
-                  {resolvePluginHeaderIcon(btn.icon)}
-                </button>
-              </PluginSurfaceBoundary>
-            );
-          })}
+          {pluginHeader}
         </div>
       ) : showQuickOpen ? (
         <div className="app-header-center">

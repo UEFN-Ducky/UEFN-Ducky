@@ -106,6 +106,8 @@ export function DropdownPanel({
       // with it (or clicking its backdrop to close it) must not also collapse the
       // dropdown underneath. Close them one at a time.
       if (target instanceof Element && target.closest(".modal-backdrop")) return;
+      // Nested portaled menus (language picker, etc.) live outside this panel.
+      if (target instanceof Element && target.closest("[data-dropdown-keep]")) return;
       onClose();
     };
     document.addEventListener("pointerdown", handlePointerDown, true);

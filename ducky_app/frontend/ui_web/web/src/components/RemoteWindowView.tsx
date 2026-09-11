@@ -36,13 +36,13 @@ export function RemoteWindowSelect({
 
   return (
     <div className="remote-window-select no-drag" onPointerDown={() => void load()}>
-      <span className="remote-window-select-label">View</span>
       <ChoiceDropdown
         size="compact"
-        aria-label="Window to control"
+        aria-label="View"
         value={value}
-        minWidth={280}
-        placeholder="Ducky"
+        minWidth={240}
+        placeholder="View"
+        fixedLabel="View"
         onChange={onChange}
         options={[
           { value: "", label: "Ducky", group: "This app" },

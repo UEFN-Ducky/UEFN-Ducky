@@ -28,9 +28,15 @@ function computeMenuPosition(trigger: HTMLElement): { top: number; left: number 
 type LanguageHeaderDropdownProps = {
   icon: ReactNode;
   title: string;
+  /** Header icon vs a labeled row inside the Plugins list. */
+  layout?: "icon" | "row";
 };
 
-export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownProps) {
+export function LanguageHeaderDropdown({
+  icon,
+  title,
+  layout = "icon",
+}: LanguageHeaderDropdownProps) {
   const { prefs, setPref, setPrefs } = usePluginUiPrefs(PLUGIN_ID);
   const { confirm, alert } = useConfirmModal();
   const [open, setOpen] = useState(false);
@@ -164,6 +170,7 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
         className="terminal-header-menu terminal-header-menu--portaled no-drag"
         style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
         data-no-translate
+        data-dropdown-keep
       >
         <div className="terminal-header-list">
           <div className={`terminal-header-item${isEnglishLang(language) ? " is-active" : ""}`}>
@@ -236,12 +243,17 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
       </div>
     ) : null;
 
+  const isRow = layout === "row";
   return (
-    <div className="terminal-header-root">
+    <div className={`terminal-header-root${isRow ? " plugin-header-menu-row" : ""}`}>
       <button
         ref={triggerRef}
         type="button"
-        className={`icon-btn no-drag plugin-header-btn terminal-header-trigger${open || translated ? " is-active" : ""}`}
+        className={
+          isRow
+            ? `plugin-header-menu-item terminal-header-trigger${open || translated ? " is-active" : ""}`
+            : `icon-btn no-drag plugin-header-btn terminal-header-trigger${open || translated ? " is-active" : ""}`
+        }
         title={title}
         aria-label={title}
         aria-pressed={translated || undefined}
@@ -252,6 +264,7 @@ export function LanguageHeaderDropdown({ icon, title }: LanguageHeaderDropdownPr
         }}
       >
         {icon}
+        {isRow ? <span className="plugin-header-menu-item-label">{title}</span> : null}
       </button>
       {menu ? createPortal(menu, document.body) : null}
     </div>
