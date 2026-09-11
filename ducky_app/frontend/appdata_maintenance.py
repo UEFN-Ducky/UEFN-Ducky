@@ -291,11 +291,14 @@ def prune_empty_project_dirs(app_root: Path | None = None) -> int:
     return removed
 
 
-def maintain_appdata(app_root: Path | None = None) -> dict[str, int]:
-    """Run full AppData maintenance sweep."""
+def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -> dict[str, int]:
+    """Run full AppData maintenance sweep.
+
+    ``count_boot`` is True for the panel process only: the bridge runs the same
+    sweep, and a boot must count once toward legacy/ retirement, not twice."""
     if app_root is None:
         app_root = default_app_data_dir()
-    db_result = _maintain_store(app_root)
+    db_result = _maintain_store(app_root, count_boot=count_boot)
     moved = sweep_old_backups(app_root)
     pruned = prune_all_backups(app_root)
     removed_dirs = prune_empty_project_dirs(app_root)
@@ -322,7 +325,7 @@ def maintain_appdata(app_root: Path | None = None) -> dict[str, int]:
 _SNAPSHOT_EVERY_S = 24 * 3600
 
 
-def _maintain_store(app_root: Path) -> dict[str, int]:
+def _maintain_store(app_root: Path, *, count_boot: bool = True) -> dict[str, int]:
     """ADR 0003: integrity check (restores the newest snapshot on failure) and a
     daily ``VACUUM INTO`` snapshot. Never raises: maintenance must not take the
     panel down, and the store logs its own failures."""
@@ -343,7 +346,7 @@ def _maintain_store(app_root: Path) -> dict[str, int]:
         from backend.store.importers.boot import ensure_all_stores
 
         out["db_imported"] = sum(1 for r in ensure_all_stores().values() if r is not None)
-        out["legacy_removed"] = _retire_legacy_after_clean_boots(app_root)
+        out["legacy_removed"] = _retire_legacy_after_clean_boots(app_root) if count_boot else 0
         newest = store_db.newest_snapshot(app_root)
         if newest is None or time.time() - newest.stat().st_mtime > _SNAPSHOT_EVERY_S:
             store_db.snapshot(app_root, label="daily")
@@ -353,12 +356,12 @@ def _maintain_store(app_root: Path) -> dict[str, int]:
     return out
 
 
-def start_appdata_maintenance_async(app_root: Path | None = None) -> None:
+def start_appdata_maintenance_async(app_root: Path | None = None, *, count_boot: bool = True) -> None:
     """Run maintenance in a background thread (panel / bridge startup)."""
 
     def _run() -> None:
         try:
-            maintain_appdata(app_root)
+            maintain_appdata(app_root, count_boot=count_boot)
         except Exception:
             _log.exception("AppData maintenance failed")
 

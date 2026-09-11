@@ -4,6 +4,7 @@ rebuilds from the next scan)."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -57,32 +58,32 @@ def import_captures(root: Path) -> dict[str, Any]:
     return {"captures": n}
 
 
+def _park_or_drop(root: Path, directory: Path, store: str) -> dict[str, Any]:
+    """Move a cache tree under legacy/ when it holds files; an empty tree (the
+    app created the folder before the importer ran) is simply removed."""
+    if not directory.is_dir():
+        return {"moved": False}
+    if not any(p.is_file() for p in directory.rglob("*")):
+        shutil.rmtree(directory, ignore_errors=True)
+        return {"moved": False, "removed_empty": True}
+    _move_to_legacy(root, directory, store)
+    return {"moved": True}
+
+
 def retire_diagnostics_cache(root: Path) -> dict[str, Any]:
-    directory = root / "verse_diagnostics"
-    if directory.is_dir():
-        _move_to_legacy(root, directory, "verse_diagnostics")
-        return {"moved": True}
-    return {"moved": False}
+    return _park_or_drop(root, root / "verse_diagnostics", "verse_diagnostics")
 
 
 def retire_perf_files(root: Path) -> dict[str, Any]:
     """perf/*.jsonl and reports are rows now (events kind ``perf`` + cache_docs);
     the old files are a cache, so they are parked under legacy/ and deleted with it."""
-    directory = root / "perf"
-    if directory.is_dir():
-        _move_to_legacy(root, directory, "perf")
-        return {"moved": True}
-    return {"moved": False}
+    return _park_or_drop(root, root / "perf", "perf")
 
 
 def retire_json_backups(root: Path) -> dict[str, Any]:
     """backups/ held rotated copies of the JSON stores. Nothing writes JSON stores
     any more, so the whole tree goes with legacy/ instead of ageing out slowly."""
-    directory = root / "backups"
-    if directory.is_dir():
-        _move_to_legacy(root, directory, "backups")
-        return {"moved": True}
-    return {"moved": False}
+    return _park_or_drop(root, root / "backups", "backups")
 
 
 ALL = {

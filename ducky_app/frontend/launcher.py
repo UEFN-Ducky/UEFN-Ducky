@@ -232,7 +232,7 @@ def run_bridge() -> None:
         try:
             from frontend.appdata_maintenance import start_appdata_maintenance_async
 
-            start_appdata_maintenance_async()
+            start_appdata_maintenance_async(count_boot=False)  # the panel counts the boot
         except Exception:
             pass
         try:

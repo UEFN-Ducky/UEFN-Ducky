@@ -432,9 +432,9 @@ class PanelSettings:
                 repo.save_fields(
                     to_store.to_json_dict(), type(self)().to_json_dict(), origin_version=origin
                 )
+                return  # rows are the only copy; panel_settings.json is the files-backend fallback
             except _StoreUnavailable:
                 pass
-        # Shadow copy for this release: rollback source and the IDE-facing file.
         path = to_store.settings_path()
         # Don't litter %LOCALAPPDATA% with a settings file that holds only defaults.
         if not to_store._has_overrides():

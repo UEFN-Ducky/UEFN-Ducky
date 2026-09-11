@@ -116,7 +116,8 @@ def ensure_started() -> None:
             return
         try:
             d = _perf_dir()
-            d.mkdir(parents=True, exist_ok=True)
+            if not _use_db():
+                d.mkdir(parents=True, exist_ok=True)  # rows need no perf/ folder
             stamp = time.strftime("%Y%m%d-%H%M%S")
             _session_id = f"session-{stamp}-{os.getpid()}"
             _session_jsonl = d / f"{_session_id}.jsonl"
