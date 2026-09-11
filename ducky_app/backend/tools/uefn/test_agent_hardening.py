@@ -454,6 +454,15 @@ def test_wait_for_screenshot_file_errors_when_missing(tmp_path, monkeypatch):
     assert "not ready" in out["error"]
 
 
+def test_wait_for_screenshot_file_errors_when_listener_returned_no_path():
+    """A capture that "started" with no path is a failure, not a pending PNG."""
+    from backend.tools.uefn import editor as editor_mod
+
+    out = editor_mod._wait_for_screenshot_file({"await_path": True, "method": "Shot"})
+    assert "error" in out
+    assert "no path" in out["error"].lower()
+
+
 def test_vision_attachments_from_capture_result(tmp_path):
     from backend.agent.capture_vision import vision_attachments_from_capture_result
 

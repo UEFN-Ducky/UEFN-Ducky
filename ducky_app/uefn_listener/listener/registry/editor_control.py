@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
+import tempfile
 import time
 import uuid
 from typing import Any
@@ -17,97 +20,53 @@ def _editor_world():
     return unreal.EditorLevelLibrary.get_editor_world()
 
 
-def _screenshots_dir() -> str:
+#: Epic's in-process toolset API. ``CaptureViewport`` reads back the level
+#: viewport and hands us the PNG directly — no file hunt, no console command,
+#: and it completes on the calling frame.
+_CAPTURE_TOOLSET = "EditorToolset.EditorAppToolset"
+_CAPTURE_TOOL = "CaptureViewport"
+
+
+def _captures_dir() -> str:
+    """OS temp — never the UEFN project folder. The host copies into AppData."""
+    root = os.path.join(tempfile.gettempdir(), "ducky_captures")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _capture_viewport_png() -> bytes:
+    """PNG bytes of the active level viewport, or raise with why it failed."""
+    registry = getattr(unreal, "ToolsetRegistry", None)
+    if registry is None or not registry.is_available():
+        raise RuntimeError(
+            "Viewport capture unavailable: Epic's ToolsetRegistry is not registered "
+            "in this UEFN build (EditorToolset plugin missing or not loaded yet)"
+        )
+    result = registry.execute_tool(_CAPTURE_TOOLSET, _CAPTURE_TOOL, "{}")
+    # The capture completes on the calling frame. If it ever does not, say so —
+    # waiting here would block the tick that has to finish it.
+    if not result.is_complete:
+        raise RuntimeError("Viewport capture did not complete on this frame")
+    error = str(getattr(result, "error", "") or "")
+    if error:
+        raise RuntimeError(f"Viewport capture failed: {error}")
     try:
-        project_dir = unreal.Paths.project_saved_dir()
-    except Exception:
-        project_dir = ""
-    if not project_dir:
-        return ""
-    return os.path.join(project_dir, "Screenshots")
+        payload = json.loads(str(result.value or "{}"))
+    except (TypeError, ValueError) as e:
+        raise RuntimeError(f"Viewport capture returned unreadable JSON: {e}") from e
+    image = ((payload.get("returnValue") or {}).get("image") or {})
+    data = str(image.get("data") or "")
+    if not data:
+        raise RuntimeError("Viewport capture returned an empty image")
+    return base64.b64decode(data)
 
 
-def _expected_screenshot_path(filename: str) -> str:
-    name = os.path.basename(filename or "")
-    if not name:
-        return ""
-    root = _screenshots_dir()
-    return os.path.join(root, name) if root else name
-
-
-def _resolve_screenshot_path(filename: str, *, since: float = 0.0) -> str:
-    """Locate a fresh PNG under Saved/Screenshots only (never walk all of Saved)."""
-    name = os.path.basename(filename or "")
-    if not name:
-        return ""
-    if os.path.isabs(filename) and os.path.isfile(filename):
-        try:
-            if since <= 0.0 or os.path.getmtime(filename) >= since - 1.0:
-                return filename
-        except OSError:
-            return filename
-    root = _screenshots_dir()
-    if not root or not os.path.isdir(root):
-        return ""
-    # Non-recursive first (UE writes here directly).
-    direct = os.path.join(root, name)
-    if os.path.isfile(direct):
-        try:
-            if since <= 0.0 or os.path.getmtime(direct) >= since - 1.0:
-                return direct
-        except OSError:
-            return direct
-    # One level of subdirs only (Windows/UE sometimes nests by map name).
-    try:
-        for entry in os.listdir(root):
-            sub = os.path.join(root, entry)
-            if not os.path.isdir(sub):
-                continue
-            path = os.path.join(sub, name)
-            if not os.path.isfile(path):
-                continue
-            try:
-                if since <= 0.0 or os.path.getmtime(path) >= since - 1.0:
-                    return path
-            except OSError:
-                return path
-    except OSError:
-        pass
-    return ""
-
-
-def _newest_screenshot_since(since: float) -> str:
-    """Newest .png under Screenshots modified at/after ``since`` (shallow)."""
-    root = _screenshots_dir()
-    if not root or not os.path.isdir(root):
-        return ""
-    newest = ""
-    newest_mtime = 0.0
-    cutoff = since - 1.0
-    candidates: list[str] = []
-    try:
-        for entry in os.listdir(root):
-            path = os.path.join(root, entry)
-            if os.path.isfile(path) and entry.lower().endswith(".png"):
-                candidates.append(path)
-            elif os.path.isdir(path):
-                try:
-                    for child in os.listdir(path):
-                        if child.lower().endswith(".png"):
-                            candidates.append(os.path.join(path, child))
-                except OSError:
-                    continue
-    except OSError:
-        return ""
-    for path in candidates:
-        try:
-            mtime = os.path.getmtime(path)
-        except OSError:
-            continue
-        if mtime >= cutoff and mtime >= newest_mtime:
-            newest = path
-            newest_mtime = mtime
-    return newest
+def _capture_filename(filename: str) -> str:
+    """Unique PNG name, seeded from the caller's name when it gave one."""
+    raw = os.path.basename((filename or "").strip())
+    stem = raw[:-4] if raw.lower().endswith(".png") and raw.lower() != ".png" else ""
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem)[:48] or "uefn_ducky"
+    return f"{safe}_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
 
 
 def exec_console_command(command: str) -> dict:
@@ -130,62 +89,32 @@ def save_all_dirty(content: bool = True, maps: bool = True) -> dict:
 def take_high_res_screenshot(width: int = 1280, height: int = 720, filename: str = "") -> dict:
     """Capture the active viewport without freezing the editor.
 
-    **Never** uses ``AutomationLibrary.take_high_res_screenshot`` / HighResShot —
-    those do a synchronous offscreen render on the Slate tick and can freeze UEFN
-    for tens of seconds on dense levels (then the host hits its 30s bridge timeout).
+    **Never** uses ``AutomationLibrary`` / ``HighResShot`` — those do a
+    synchronous offscreen render on the Slate tick and can freeze UEFN for tens
+    of seconds on dense levels. **Never** uses the ``Shot`` console command
+    either: that one is a *game* viewport command and writes nothing at all in
+    the editor, which is how captures used to "start" and never produce a PNG.
 
-    Captures the current viewport buffer via ``take_screenshot`` (or console
-    ``Shot``). ``width``/``height`` are recorded as requested size only — the PNG
-    matches the viewport. Does not sleep on the game thread; the host waits for
-    the file if the write lands on the next frame.
+    Goes through Epic's ``EditorAppToolset.CaptureViewport``, which reads the
+    viewport back on the calling frame and returns the PNG inline. The file is
+    written to OS temp and the host copies it into AppData ``tool_captures``.
+    ``width``/``height`` are recorded as the requested size only — the PNG
+    matches the viewport.
     """
-    req_w, req_h = int(width), int(height)
-    # Unique name so resolve never picks a stale prior capture.
-    raw = os.path.basename((filename or "").strip())
-    if raw.lower().endswith(".png") and raw.lower() != ".png":
-        stem = raw[:-4]
-        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem)[:48] or "uefn_ducky"
-    else:
-        safe = "uefn_ducky"
-    fn = f"{safe}_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
-    started = time.time()
-    method = ""
-    try:
-        take_fn = getattr(unreal.AutomationLibrary, "take_screenshot", None)
-        if callable(take_fn):
-            take_fn(fn)
-            method = "take_screenshot"
-        else:
-            world = _editor_world()
-            unreal.SystemLibrary.execute_console_command(world, "Shot")
-            method = "Shot"
-            fn = ""
-    except Exception as e:
-        raise RuntimeError(f"Screenshot failed: {e}") from e
-
-    # Do NOT time.sleep here — sleeping on the Slate tick freezes the entire editor
-    # and can prevent the async PNG write from finishing.
-    path = ""
-    if fn:
-        path = _resolve_screenshot_path(fn, since=started)
-    if not path:
-        path = _newest_screenshot_since(started)
-    expected = path or (_expected_screenshot_path(fn) if fn else "")
+    raw = _capture_viewport_png()
+    name = _capture_filename(filename)
+    path = os.path.join(_captures_dir(), name)
+    with open(path, "wb") as handle:
+        handle.write(raw)
     out: dict[str, Any] = {
-        "width": req_w,
-        "height": req_h,
-        "filename": os.path.basename(expected or fn or "screenshot.png"),
-        "method": method,
+        "width": int(width),
+        "height": int(height),
+        "filename": name,
+        "path": path,
+        "bytes": len(raw),
+        "method": _CAPTURE_TOOL,
         "viewport_capture": True,
     }
-    if expected:
-        out["path"] = expected
-    if not path:
-        out["await_path"] = True
-        out["hint"] = (
-            "Viewport capture kicked off — PNG may appear on the next editor frame. "
-            "Host waits briefly for path; do not Bash-find."
-        )
     return out
 
 

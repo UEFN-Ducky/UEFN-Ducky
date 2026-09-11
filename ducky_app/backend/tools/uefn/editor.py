@@ -22,7 +22,17 @@ def _wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
         return result
     path = str(result.get("path") or "").strip()
     if not path:
-        return result
+        # No path at all means the capture never produced a file. Saying
+        # "kicked off, wait a frame" here is how a dead capture looked like a
+        # pending one — with nothing on its way.
+        return {
+            **result,
+            "error": (
+                "Screenshot failed: the listener returned no path, so no PNG was written. "
+                "Reload the listener and retry; if it persists, viewport capture is "
+                "unavailable in this UEFN build."
+            ),
+        }
     src = Path(path)
     if src.is_file() and src.stat().st_size > 0:
         out = {**result}
