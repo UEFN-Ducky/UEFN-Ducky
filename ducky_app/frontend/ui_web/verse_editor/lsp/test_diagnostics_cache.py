@@ -110,6 +110,8 @@ def test_disk_cache_survives_memory_clear(tmp_path: Path, monkeypatch):
         "frontend.settings.default_app_data_dir",
         lambda: cache_root,
     )
+    # Legacy file layout: these tests edit the cache *file* by hand (ADR 0003 rollback path).
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_DIAGNOSTICS", "files")
     diagnostics_cache.clear(str(root))
     cache = diagnostics_cache.load(str(root))
     abs_path = root / "Content" / "ok.verse"
@@ -140,6 +142,8 @@ def test_deleted_disk_cache_drops_memory_zombies(tmp_path: Path, monkeypatch):
         "frontend.settings.default_app_data_dir",
         lambda: cache_root,
     )
+    # Legacy file layout: these tests edit the cache *file* by hand (ADR 0003 rollback path).
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_DIAGNOSTICS", "files")
     diagnostics_cache.clear(str(root))
     cache = diagnostics_cache.load(str(root))
     abs_path = root / "Content" / "ok.verse"
@@ -173,6 +177,8 @@ def test_external_disk_rewrite_reloads_memory(tmp_path: Path, monkeypatch):
         "frontend.settings.default_app_data_dir",
         lambda: cache_root,
     )
+    # Legacy file layout: these tests edit the cache *file* by hand (ADR 0003 rollback path).
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_DIAGNOSTICS", "files")
     diagnostics_cache.clear(str(root))
     cache = diagnostics_cache.load(str(root))
     abs_path = root / "Content" / "ok.verse"

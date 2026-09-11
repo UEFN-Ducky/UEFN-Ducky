@@ -30,6 +30,17 @@ def default_app_data_dir() -> Path:
 PANEL_LISTENER_PORT = 4200
 
 
+def _settings_use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("settings")
+
+
+# Errors that mean "fall back to the file", not "hide a bug": the store package
+# raises StoreError for refusals; sqlite3 errors surface as OSError subclasses.
+_StoreUnavailable = (OSError, RuntimeError)
+
+
 @dataclass
 class PanelSettings:
     """User preferences persisted under %LOCALAPPDATA%\\UEFN-Ducky\\panel_settings.json (Windows)."""
@@ -259,6 +270,10 @@ class PanelSettings:
     """Walkthrough delay scale: slow | normal | fast | instant."""
 
     follow_code_split_beside_chat: bool = True
+    # ADR 0003: data_version the rows behind this object were read at (-1 = not from
+    # the database). save() diffs against exactly those rows, so two objects that
+    # change different fields never overwrite each other. Not persisted.
+    _origin_version: int = field(default=-1, repr=False, compare=False)
     """Agent-opened files land in a tab group beside the chat."""
 
     def validate(self) -> None:
@@ -300,11 +315,20 @@ class PanelSettings:
         # just because the gateway owning the choice had not registered yet.
         from backend.uefn_plugins.host import plugins_ready
 
+        raw_agent = str(self.default_coding_agent or "ducky").strip()
         if plugins_ready():
-            self.default_coding_agent = normalize_coding_agent(self.default_coding_agent)
+            normalized = normalize_coding_agent(raw_agent)
             allowed = {"ducky", *contributed_coding_agents()}
-            if self.default_coding_agent not in allowed:
-                self.default_coding_agent = "ducky"
+            if normalized in allowed and (normalized != "ducky" or raw_agent.lower() in ("", "ducky")):
+                self.default_coding_agent = normalized
+            else:
+                # The gateway that owns this choice is not registered *right now*
+                # (plugin reload, bridge process, a disabled-then-re-enabled plugin).
+                # Keep the stored id: every consumer falls back per use, whereas a
+                # reset here used to be saved and silently switched the user to Ducky.
+                self.default_coding_agent = raw_agent or "ducky"
+        else:
+            self.default_coding_agent = raw_agent or "ducky"
         if self.coding_agents is None or not isinstance(self.coding_agents, dict):
             self.coding_agents = {}
         if not isinstance(self.walkthrough_completed, dict):
@@ -318,7 +342,7 @@ class PanelSettings:
         return default_app_data_dir() / "panel_settings.json"
 
     def to_json_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {k: v for k, v in asdict(self).items() if not k.startswith("_")}
 
     @classmethod
     def from_json_dict(cls, data: dict[str, Any]) -> PanelSettings:
@@ -407,6 +431,19 @@ class PanelSettings:
     def save(self) -> None:
         to_store = replace(self, port=PANEL_LISTENER_PORT)
         to_store.validate()
+        if _settings_use_db():
+            try:
+                from backend.store.importers import phase1
+                from backend.store.repos import settings as repo
+
+                phase1.ensure("settings")
+                origin = self._origin_version if self._origin_version >= 0 else None
+                repo.save_fields(
+                    to_store.to_json_dict(), type(self)().to_json_dict(), origin_version=origin
+                )
+                return  # rows are the only copy; panel_settings.json is the files-backend fallback
+            except _StoreUnavailable:
+                pass
         path = to_store.settings_path()
         # Don't litter %LOCALAPPDATA% with a settings file that holds only defaults.
         if not to_store._has_overrides():
@@ -449,7 +486,36 @@ class PanelSettings:
                     pass
 
     @classmethod
-    def load(cls) -> PanelSettings:
+    def _finish_load(cls, data: dict[str, Any]) -> PanelSettings:
+        """Shared post-load fixups for the file and the database paths."""
+        raw = cls.from_json_dict(data)
+        # builtin_uefn removed — domain tools are Store plugins now.
+        disabled = [
+            g
+            for g in (getattr(raw, "disabled_builtin_toolsets", None) or [])
+            if str(g).strip() != "builtin_uefn"
+        ]
+        hidden = (
+            []
+            if "hidden_bundled_agent_profile_ids" not in data
+            else list(getattr(raw, "hidden_bundled_agent_profile_ids", None) or [])
+        )
+        off = not bool(getattr(raw, "follow_code_off_migrated", False))
+        return replace(
+            raw,
+            port=PANEL_LISTENER_PORT,
+            disabled_builtin_toolsets=disabled,
+            hidden_bundled_agent_profile_ids=hidden,
+            follow_code_enabled=False if off else raw.follow_code_enabled,
+            # The migrated flag rides along on the next real save(). Saving here made
+            # load() a writer: a background thread loading a stale file could then
+            # overwrite a newer save from another thread (lost update; seen with
+            # enabled_uefn_plugins). ADR 0003 replaces this with per-key updates.
+            follow_code_off_migrated=True,
+        )
+
+    @classmethod
+    def _load_from_file(cls) -> PanelSettings:
         path = default_app_data_dir() / "panel_settings.json"
         if not path.is_file():
             return cls()
@@ -459,33 +525,26 @@ class PanelSettings:
                 return cls()
             from backend.agent.secrets import reject_api_key_fields
 
-            data = reject_api_key_fields(data)
-            raw = cls.from_json_dict(data)
-            # builtin_uefn removed — domain tools are Store plugins now.
-            disabled = [
-                g
-                for g in (getattr(raw, "disabled_builtin_toolsets", None) or [])
-                if str(g).strip() != "builtin_uefn"
-            ]
-            hidden = (
-                []
-                if "hidden_bundled_agent_profile_ids" not in data
-                else list(getattr(raw, "hidden_bundled_agent_profile_ids", None) or [])
-            )
-            off = not bool(getattr(raw, "follow_code_off_migrated", False))
-            fixed = replace(
-                raw,
-                port=PANEL_LISTENER_PORT,
-                disabled_builtin_toolsets=disabled,
-                hidden_bundled_agent_profile_ids=hidden,
-                follow_code_enabled=False if off else raw.follow_code_enabled,
-                follow_code_off_migrated=True,
-            )
-            if off:
-                fixed.save()
-            return fixed
+            return cls._finish_load(reject_api_key_fields(data))
         except (json.JSONDecodeError, TypeError, ValueError):
             return cls()
+
+    @classmethod
+    def load(cls) -> PanelSettings:
+        """Read settings. ADR 0003: rows in ducky.db, cached per process and
+        revalidated with PRAGMA data_version; the legacy file is the rollback
+        path (``DUCKY_STORE_BACKEND=files``)."""
+        if not _settings_use_db():
+            return cls._load_from_file()
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import settings as repo
+
+            phase1.ensure("settings")
+            rows, version = repo.load_fields_versioned()
+            return replace(cls._finish_load(rows), _origin_version=version)
+        except _StoreUnavailable:
+            return cls._load_from_file()
 
 
 def panel_exe_dir() -> Path:
@@ -520,9 +579,14 @@ def apply_workspace_env(project_root: str) -> None:
                 existing = _json.loads(cfg_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 existing = {}
-        existing["project_root"] = root
-        existing.setdefault("port", PANEL_LISTENER_PORT)
-        write_json_atomic(cfg_path, existing)
+        desired = dict(existing)
+        desired["project_root"] = root
+        desired.setdefault("port", PANEL_LISTENER_PORT)
+        # config.json is the listener's projection of settings. Skip the write when
+        # nothing changed: this used to fire (with a backup copy and an fsync) on
+        # every 500 ms context-usage estimate while the user typed.
+        if desired != existing:
+            write_json_atomic(cfg_path, desired)
     except Exception:
         pass
 

@@ -29,7 +29,31 @@ def stats_path() -> Path:
         return Path.home() / ".uefn-ducky" / STATS_FILENAME
 
 
+def _use_db() -> bool:
+    try:
+        from backend.store.switch import use_db
+
+        return use_db("events")
+    except Exception:  # noqa: BLE001 — standalone scripts
+        return False
+
+
+def _repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import events as repo
+
+    phase4.ensure("logs")
+    return repo
+
+
 def _append(entry: dict) -> None:
+    if _use_db():
+        try:
+            _repo().insert("verse_stat", ts=float(entry.get("ts") or time.time()), source=str(entry.get("kind") or ""),
+                           message=str(entry.get("tool") or ""), payload=entry)
+        except Exception:  # noqa: BLE001
+            pass
+        return
     try:
         path = stats_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +87,11 @@ def record_tool_failure(tool: str, message: str) -> None:
 
 
 def _read_entries(since_ts: float) -> list[dict]:
+    if _use_db():
+        try:
+            return [r["payload"] for r in _repo().newest("verse_stat", limit=100_000, since=since_ts) if r.get("payload")]
+        except Exception:  # noqa: BLE001
+            return []
     path = stats_path()
     if not path.is_file():
         return []

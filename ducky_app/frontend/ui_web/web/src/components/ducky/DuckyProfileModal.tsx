@@ -37,6 +37,7 @@ import {
   isModelsCatalogReady,
   subscribeModelsCatalog,
 } from "../../hooks/modelsCatalogCache";
+import { getCachedCodingAgents, subscribeCodingAgents } from "../../hooks/codingAgentsCache";
 import { duckyPickerIssue } from "./duckyPickerIssue";
 
 type CreateStep = "pick" | "edit";
@@ -72,6 +73,7 @@ export function DuckyProfileModal({
   const contrib = usePluginContributions();
   const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
   const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
+  const [codingAgents, setCodingAgents] = useState(() => getCachedCodingAgents());
   useEffect(() => {
     const sync = () => {
       setCatalogReady(isModelsCatalogReady());
@@ -80,6 +82,7 @@ export function DuckyProfileModal({
     sync();
     return subscribeModelsCatalog(sync);
   }, []);
+  useEffect(() => subscribeCodingAgents(() => setCodingAgents(getCachedCodingAgents())), []);
   const pickerIssue = useMemo(
     () =>
       duckyPickerIssue({
@@ -88,8 +91,10 @@ export function DuckyProfileModal({
         hasApiKey,
         catalogReady,
         modelsCount,
+        agents: codingAgents,
+        codingAgentCount: contrib.llm_coding_agents.length,
       }),
-    [catalogReady, contrib.llm_providers.length, contrib.ready, hasApiKey, modelsCount],
+    [catalogReady, codingAgents, contrib.llm_coding_agents.length, contrib.llm_providers.length, contrib.ready, hasApiKey, modelsCount],
   );
   const [profiles, setProfiles] = useState<AgentProfileDto[]>([]);
   const [blankProfileId, setBlankProfileId] = useState(BLANK_PROFILE_ID);

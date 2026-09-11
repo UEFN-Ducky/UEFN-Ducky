@@ -104,3 +104,26 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_self_check(monkeypatch) -> None:
+    """Collected wrapper: this file was a `main()` self-check pytest never ran (store test plan, step 0).
+
+    The self-check mutates os.environ (LOCALAPPDATA and friends) without restoring it;
+    monkeypatch snapshots the environment so later tests keep the isolated AppData.
+    """
+    import os as _os
+
+    _snapshot = dict(_os.environ)
+    try:
+        # This self-check asserts the legacy file layout (cache/<plugin>/<key>.json,
+        # prefs/all.json); the row store is covered by backend/store/test_phase1.py.
+        monkeypatch.setenv("DUCKY_STORE_BACKEND_PLUGIN_KV", "files")
+        main()
+    finally:
+        for _k in list(_os.environ):
+            if _k not in _snapshot:
+                monkeypatch.delenv(_k, raising=False)
+        for _k, _v in _snapshot.items():
+            if _os.environ.get(_k) != _v:
+                monkeypatch.setenv(_k, _v)

@@ -197,6 +197,49 @@ def kick_model_refresh() -> None:
     threading.Thread(target=_run, daemon=True, name="refresh-models").start()
 
 
+def _models_cache_use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("cache_docs")
+
+
+def _read_models_cache_doc() -> Any:
+    """ducky.db ``cache_docs.models_cache`` first, the legacy file as fallback."""
+    if _models_cache_use_db():
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import kv
+
+            phase1.ensure("cache_docs")
+            doc = kv.get_doc("cache_docs", "models_cache")
+            if isinstance(doc, dict):
+                return doc
+        except (OSError, RuntimeError):
+            pass
+    path = default_app_data_dir() / _MODELS_CACHE_FILE
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_models_cache_doc(payload: dict[str, Any]) -> None:
+    if _models_cache_use_db():
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import kv
+
+            phase1.ensure("cache_docs")
+            kv.set_doc("cache_docs", "models_cache", payload)
+            return
+        except (OSError, RuntimeError):
+            pass
+    path = default_app_data_dir() / _MODELS_CACHE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _load_model_cache_from_disk() -> None:
     """Seed _model_cache from the last session so first chat open never waits on provider APIs.
 
@@ -207,7 +250,7 @@ def _load_model_cache_from_disk() -> None:
     from backend.agent.model_fetch import ModelInfo, _cache_provider_models
 
     try:
-        raw = json.loads((default_app_data_dir() / _MODELS_CACHE_FILE).read_text(encoding="utf-8"))
+        raw = _read_models_cache_doc()
         if not isinstance(raw, dict):
             return
         for prov, rows in raw.items():
@@ -262,14 +305,12 @@ def _save_model_cache_to_disk() -> None:
         if not keep:
             # Plugins not painted yet — do not clobber last session's catalog.
             return
-        path = default_app_data_dir() / _MODELS_CACHE_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             prov: [asdict(m) for m in models]
             for prov, models in _model_cache.items()
             if prov in keep
         }
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        _write_models_cache_doc(payload)
     except Exception:
         pass
 

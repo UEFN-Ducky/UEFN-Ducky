@@ -120,7 +120,7 @@ def test_an_editor_slot_never_enters_the_file_index(env) -> None:
         rec.record("set_actor_transform", {"actor_path": "/x"}, body(SIDECAR), ok=True)
     finally:
         identity.reset(token)
-    index = json.loads((storage / "index.json").read_text(encoding="utf-8"))
+    index = _journal._load_index(storage)  # noqa: SLF001 — rows or index.json
     assert "Content/Verse/a.verse" in index
     assert any(key.startswith("uefn://") for key in index)
 
@@ -166,8 +166,7 @@ def test_a_refused_command_is_recorded_but_changes_nothing(env) -> None:
     assert entry["after_blob"] is None and entry["after_hash"] == ""
     assert "Refused" in entry["reason"]
     # Nothing landed, so nothing is indexed and nothing is revertable.
-    index_file = storage / "index.json"
-    assert not index_file.exists() or json.loads(index_file.read_text(encoding="utf-8")) == {}
+    assert journal._load_index(storage) == {}  # noqa: SLF001 — rows or index.json
 
 
 def test_blocked_entries_are_skipped_by_revert(env) -> None:

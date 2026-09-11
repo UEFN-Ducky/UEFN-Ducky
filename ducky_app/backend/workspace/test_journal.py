@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -61,12 +60,12 @@ def test_user_writes_land_in_the_human_bucket(env, monkeypatch) -> None:
     for key in RunContext().to_env():
         monkeypatch.delenv(key, raising=False)
     writer.write_text("Content/Verse/a.verse", "user\n", tool="panel_save")
-    runs = list((storage / "runs").glob("*.json"))
+    runs = journal._iter_run_docs(storage)  # noqa: SLF001 — backend-neutral run listing
     assert len(runs) == 1
     run = journal.list_runs(project_root=str(root))[0]
     assert run["run_id"].startswith("human:")
     assert run["source"] == "user" and run["ducky_name"] == "You" and run["status"] == "done"
-    index = json.loads((storage / "index.json").read_text(encoding="utf-8"))
+    index = journal._load_index(storage)  # noqa: SLF001 — rows or index.json
     assert index["Content/Verse/a.verse"]["source"] == "user"
     assert index["Content/Verse/a.verse"]["run_id"].startswith("human:")
 
@@ -538,7 +537,7 @@ def test_delete_runs_forgets_ledger_not_files(env) -> None:
     assert stats["removed_runs"] == 1
     assert [r["run_id"] for r in journal.list_runs(project_root=str(root))] == ["r2"]
     assert (root / "Content" / "Verse" / "a.verse").read_text(encoding="utf-8") == "keep\n"
-    index = json.loads((storage / "index.json").read_text(encoding="utf-8"))
+    index = journal._load_index(storage)  # noqa: SLF001 — rows or index.json
     assert "Content/Verse/a.verse" not in index
     assert "Content/Verse/b.verse" in index
 

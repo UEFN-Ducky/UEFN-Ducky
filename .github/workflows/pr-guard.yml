@@ -87,6 +87,31 @@ jobs:
           print("hidden-chars: clean")
           PY
 
+  app-tests:
+    # The desktop app's own suites, blocking. Windows: the terminal backend
+    # (pywinpty) and the frozen-build paths are Windows-only. AppData is
+    # isolated by conftest.py, so nothing touches the runner's profile.
+    name: app-tests
+    runs-on: windows-latest
+    if: ${{ hashFiles('ducky_app/frontend/launcher.py') != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+      - name: Install Python deps
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Pytest (app suite)
+        run: python -m pytest ducky_app tests -q -p no:cacheprovider
+      - name: Vitest (React panel)
+        working-directory: ducky_app/frontend/ui_web/web
+        run: npm ci && npm test -- --run
+
   tests:
     name: tests
     runs-on: ubuntu-latest

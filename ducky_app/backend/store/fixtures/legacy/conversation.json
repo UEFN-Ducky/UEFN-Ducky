@@ -1,0 +1,73 @@
+{
+  "id": "24b2ea2d-88d5-486a-887b-975fd878a92a",
+  "folder_id": "",
+  "title": "Legacy chat one",
+  "created": 1789087317.551346,
+  "updated": 1789087317.6419866,
+  "sort_order": 0.0,
+  "provider": "",
+  "model": "",
+  "messages": [
+    {
+      "role": "user",
+      "content": "legacy message 0",
+      "text": "legacy message 0",
+      "ts": 1789087317.5906844
+    },
+    {
+      "role": "assistant",
+      "content": "legacy message 1",
+      "text": "legacy message 1",
+      "ts": 1789087318.6080663
+    },
+    {
+      "role": "user",
+      "content": "legacy message 2",
+      "text": "legacy message 2",
+      "ts": 1789087319.621897
+    },
+    {
+      "role": "assistant",
+      "content": "legacy message 3",
+      "text": "legacy message 3",
+      "ts": 1789087320.636698
+    }
+  ],
+  "skill_snapshot": "snapshot-text-1",
+  "skill_snapshot_rev": "da39a3ee5e6b4b0d",
+  "enabled_skills": null,
+  "enabled_packs": null,
+  "enabled_subskills": null,
+  "disabled_packs": [],
+  "ducky_style": "artist",
+  "ducky_name": "",
+  "profile_id": "",
+  "ducky_personality": "",
+  "tts_voice": "",
+  "tts_speed": 0.0,
+  "file_path": "",
+  "context_omit": null,
+  "context_summary": "",
+  "context_summary_through": 0,
+  "context_summary_tokens": 0,
+  "mcp_plugins": [
+    "unreal-mcp"
+  ],
+  "builtin_toolsets": [
+    "builtin_ducky"
+  ],
+  "uefn_plugins": null,
+  "token_usage": null,
+  "prompt_cache_snapshot": null,
+  "coding_agent": "ducky",
+  "thinking_effort": "off",
+  "upstream_session_id": "",
+  "coding_agent_stats": null,
+  "terminal_session_id": "",
+  "parent_conv_id": "",
+  "is_group": false,
+  "leader_conv_id": "",
+  "group_members": [],
+  "tool_call_count": 0,
+  "file_count": 0
+}

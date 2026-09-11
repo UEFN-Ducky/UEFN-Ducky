@@ -128,7 +128,10 @@ def bundled_skill_packs_dir() -> Path | None:
         p = Path(meipass) / "frontend" / SKILL_PACKS_DIR
         if p.is_dir():
             return p
-    repo = Path(__file__).resolve().parent.parent / "frontend" / SKILL_PACKS_DIR
+    # backend/skills/store.py -> ducky_app/frontend/skill_packs (parents[2] is ducky_app;
+    # parent.parent was backend/, so dev runs never found the bundled packs and only a
+    # previously seeded AppData made the skills tests pass).
+    repo = Path(__file__).resolve().parents[2] / "frontend" / SKILL_PACKS_DIR
     if repo.is_dir():
         return repo
     return None
@@ -550,6 +553,46 @@ def _manifest_from_skill_dir(root: Path, pack_id: str, kind: str) -> dict[str, A
     return manifest
 
 
+def _pack_stamp(root: Path) -> str:
+    """One stat pass over SKILL.md + references/*.md (what parsing would read)."""
+    parts: list[str] = []
+    refs = sorted((root / REFERENCES_DIR).glob("*.md")) if (root / REFERENCES_DIR).is_dir() else []
+    for f in [root / PACK_FILE, *refs]:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        parts.append(f"{f.name}:{st.st_mtime_ns}:{st.st_size}")
+    return "|".join(parts)
+
+
+def _manifest_cache_get(pack_id: str, root: Path, kind: str) -> dict[str, Any] | None:
+    try:
+        from backend.store.repos import kv
+        from backend.store.switch import use_db
+
+        if not use_db("cache_docs"):
+            return None
+        doc = kv.get_doc("cache_docs", f"skill_manifest:{pack_id}")
+        if isinstance(doc, dict) and doc.get("stamp") == f"{kind}|{root}|{_pack_stamp(root)}":
+            manifest = doc.get("manifest")
+            return dict(manifest) if isinstance(manifest, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _manifest_cache_put(pack_id: str, root: Path, kind: str, manifest: dict[str, Any]) -> None:
+    try:
+        from backend.store.repos import kv
+        from backend.store.switch import use_db
+
+        if use_db("cache_docs"):
+            kv.set_doc("cache_docs", f"skill_manifest:{pack_id}", {"stamp": f"{kind}|{root}|{_pack_stamp(root)}", "manifest": manifest})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def load_pack_manifest(pack_id: str) -> dict[str, Any] | None:
     if _is_bundled_pack_id(pack_id):
         kind = "bundled"
@@ -559,6 +602,9 @@ def load_pack_manifest(pack_id: str) -> dict[str, Any] | None:
         kind = "custom"
     for root in _pack_roots(pack_id):
         if (root / PACK_FILE).is_file():
+            cached = _manifest_cache_get(pack_id, root, kind)
+            if cached is not None:
+                return cached
             # Store-installed packs live in AppData as custom until we read source=.
             if kind == "custom":
                 meta, _ = parse_frontmatter(_read(root / PACK_FILE) or "")
@@ -575,6 +621,7 @@ def load_pack_manifest(pack_id: str) -> dict[str, Any] | None:
                     manifest["license"] = DEFAULT_COMMERCIAL_LICENSE
                 if "allow_redistribute" not in manifest:
                     manifest["allow_redistribute"] = False
+            _manifest_cache_put(pack_id, root, kind, manifest)
             return manifest
     return None
 

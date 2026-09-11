@@ -21,6 +21,52 @@ def _workspace_path(slug: str) -> Path:
     return _workspace_root() / slug / "editor.json"
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("workspace_state")
+
+
+def _kv():
+    from backend.store.importers import phase1
+    from backend.store.repos import kv
+
+    phase1.ensure("workspace_state")
+    return kv
+
+
+def _read_stored(slug: str) -> dict[str, Any] | None:
+    """The persisted snapshot for *slug*, or None when nothing was saved."""
+    if _use_db():
+        try:
+            doc = _kv().get_doc("workspace_state", f"editor:{slug}")
+            if isinstance(doc, dict):
+                return doc
+            return None
+        except (OSError, RuntimeError):
+            pass
+    path = _workspace_path(slug)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_stored(slug: str, snapshot: dict[str, Any]) -> None:
+    if _use_db():
+        try:
+            _kv().set_doc("workspace_state", f"editor:{slug}", snapshot)
+            return
+        except (OSError, RuntimeError):
+            pass
+    dest = _workspace_path(slug)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(dest, snapshot)
+
+
 def _default_layout(tab_ids: list[str]) -> dict[str, Any]:
     gid = "grp-default"
     active = tab_ids[-1] if tab_ids else None
@@ -249,17 +295,10 @@ def load_editor_workspace(project_slug_value: str | None = None) -> dict[str, An
             return _empty_snapshot()
         slug = project_slug(root)
 
-    path = _workspace_path(slug)
-    if not path.is_file():
+    data = _read_stored(slug)
+    if data is None:
         return _empty_snapshot()
-
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return _empty_snapshot()
-        return _normalize_snapshot(data)
-    except (json.JSONDecodeError, OSError):
-        return _empty_snapshot()
+    return _normalize_snapshot(data)
 
 
 def _merge_live_focus_windows(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -306,9 +345,7 @@ def save_editor_workspace(payload: dict[str, Any], project_root: str | None = No
 
     snapshot = _normalize_snapshot(payload if isinstance(payload, dict) else {})
     snapshot = _merge_live_focus_windows(snapshot)
-    dest = _workspace_path(slug)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(dest, snapshot)
+    _write_stored(slug, snapshot)
 
 
 def flush_focus_windows_to_disk(project_root: str | None = None) -> None:
@@ -319,13 +356,8 @@ def flush_focus_windows_to_disk(project_root: str | None = None) -> None:
     slug = project_slug(root)
     if slug == "_no_project":
         return
-    path = _workspace_path(slug)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else _empty_snapshot()
-        if not isinstance(data, dict):
-            data = _empty_snapshot()
-    except (json.JSONDecodeError, OSError):
+    data = _read_stored(slug)
+    if data is None:
         data = _empty_snapshot()
     snapshot = _merge_live_focus_windows(_normalize_snapshot(data))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(path, snapshot)
+    _write_stored(slug, snapshot)

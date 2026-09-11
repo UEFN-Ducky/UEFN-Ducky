@@ -53,12 +53,51 @@ def resolve_tool_capture_path(filename: str) -> Path:
     return target
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("captures")
+
+
+def _rows():
+    from backend.store.importers import phase6
+    from backend.store.repos import misc
+
+    phase6.ensure("captures")
+    return misc
+
+
 def _prune_old_captures(directory: Path) -> None:
+    if _use_db():
+        # Prune by row: files the index never saw (dropped there by hand) are removed
+        # too, which the old prefix-only glob never did (803 MB on one machine).
+        rows = _rows()
+        for name in rows.capture_prune(_MAX_KEEP):
+            try:
+                (directory / name).unlink()
+            except OSError:
+                pass
+        known = rows.capture_names()
+        for f in directory.glob("*.*"):
+            if f.name not in known and f.is_file():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+        return
     files = sorted(directory.glob("*.*"), key=lambda p: p.stat().st_mtime, reverse=True)
     for stale in files[_MAX_KEEP:]:
         try:
             stale.unlink()
         except OSError:
+            pass
+
+
+def _record_capture(name: str, prefix: str, nbytes: int) -> None:
+    if _use_db():
+        try:
+            _rows().capture_add(name, prefix=prefix, nbytes=nbytes)
+        except Exception:  # noqa: BLE001 — never fail a screenshot over bookkeeping
             pass
 
 
@@ -95,6 +134,7 @@ def save_tool_capture_png(raw: bytes, *, prefix: str = "capture") -> dict[str, o
     name = f"{safe_prefix}_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
     path = directory / name
     path.write_bytes(raw)
+    _record_capture(name, safe_prefix, len(raw))
     _prune_old_captures(directory)
     return {
         "path": str(path),

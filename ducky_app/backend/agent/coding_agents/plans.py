@@ -61,6 +61,32 @@ def _templates_dir(*, create: bool = True) -> Path:
     return d
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("plans")
+
+
+def _repo(project_root: str | None):
+    """The plans repo, after folding this project's legacy .ducky/plans once."""
+    from backend.store.importers import phase4
+    from backend.store.repos import plans as repo
+
+    root = _resolve_project_root(project_root)
+    if root:
+        phase4.ensure_project(root)
+    return repo
+
+
+def _project_id(project_root: str | None) -> str:
+    from frontend.ui_web.project_chats import project_slug
+
+    root = _resolve_project_root(project_root)
+    if not root:
+        raise ValueError("project_root required for project plans")
+    return project_slug(root)
+
+
 def _plan_path(chat_id: str, project_root: str | None = None) -> Path:
     safe = _safe_id(chat_id)
     if not safe:
@@ -415,6 +441,8 @@ def _roll_plan_status(plan: dict[str, Any]) -> None:
 
 
 def load_plan(chat_id: str, project_root: str | None = None) -> dict[str, Any] | None:
+    if _use_db():
+        return _load_plan_row(chat_id, project_root)
     try:
         path = _plan_path(chat_id, project_root)
     except ValueError:
@@ -442,6 +470,32 @@ def load_plan(chat_id: str, project_root: str | None = None) -> dict[str, Any] |
         return None
 
 
+def _load_plan_row(chat_id: str, project_root: str | None) -> dict[str, Any] | None:
+    safe = _safe_id(chat_id)
+    if not safe:
+        return None
+    try:
+        project_id = _project_id(project_root)
+    except ValueError:
+        return None
+    data = _repo(project_root).plan_get(project_id, safe)
+    if not isinstance(data, dict):
+        return None
+    before_ov = str(data.get("overview") or "")
+    before_nodes = data.get("nodes") if isinstance(data.get("nodes"), list) else []
+    doc = _normalize_plan_doc(data, kind="project")
+    healed = (not before_nodes and bool(doc.get("nodes"))) or (
+        "<parameter" in before_ov.lower() and "<parameter" not in str(doc.get("overview") or "").lower()
+    )
+    if healed:
+        try:
+            return save_plan(doc, project_root)
+        except ValueError:
+            return doc
+    _rollup_completed_parents(doc.get("nodes"))
+    return doc
+
+
 def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str, Any]:
     plan = _normalize_plan_doc(dict(plan), kind="project")
     chat_id = str(plan.get("chat_id") or "").strip()
@@ -452,6 +506,9 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
     plan["updated_at"] = time.time()
     _rollup_completed_parents(plan.get("nodes"))
     _roll_plan_status(plan)
+    if _use_db():
+        _repo(project_root).plan_put(_project_id(project_root), _safe_id(chat_id), "project", plan)
+        return plan
     write_json_atomic(_plan_path(chat_id, project_root), plan)
     return plan
 
@@ -971,36 +1028,39 @@ def format_plan_prompt_block(
 
 def list_plans(project_root: str | None = None) -> list[dict[str, Any]]:
     """List project plans for the active (or given) project only."""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.project_chats import conversation_title
 
     root = _resolve_project_root(project_root)
     if not root:
         return []
 
     rows: list[dict[str, Any]] = []
-    try:
-        directory = _plans_dir(root, create=False)
-    except ValueError:
-        return []
-    if not directory.is_dir():
-        return []
-
-    for path in sorted(directory.glob("*.json")):
+    sources: list[tuple[str, dict[str, Any]]] = []
+    if _use_db():
+        sources = _repo(root).plan_docs(_project_id(root), "project")
+    else:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(data, dict):
-            continue
+            directory = _plans_dir(root, create=False)
+        except ValueError:
+            return []
+        if not directory.is_dir():
+            return []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict):
+                sources.append((path.stem, data))
+
+    for stem, data in sources:
         doc = _normalize_plan_doc(data, kind="project")
-        chat_id = str(doc.get("chat_id") or path.stem or "").strip()
+        chat_id = str(doc.get("chat_id") or stem or "").strip()
         if not chat_id:
             continue
         chat_title = ""
         try:
-            conv = load_conversation(chat_id, project_root=root)
-            if conv is not None:
-                chat_title = str(getattr(conv, "title", "") or "").strip()
+            chat_title = conversation_title(chat_id, project_root=root)
         except Exception:
             pass
         overview = str(doc.get("overview") or "").strip()
@@ -1031,6 +1091,8 @@ def delete_plan(chat_id: str, project_root: str | None = None) -> bool:
     cid = (chat_id or "").strip()
     if not cid:
         raise ValueError("chat_id required")
+    if _use_db():
+        return _repo(project_root).plan_delete(_project_id(project_root), _safe_id(cid))
     path = _plan_path(cid, project_root)
     if not path.is_file():
         return False
@@ -1066,7 +1128,26 @@ def copy_plan(
 # ----- Templates (global, reusable) -----
 
 
+def _templates_repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import plans as repo
+
+    phase4.ensure("plan_templates")
+    return repo
+
+
 def load_template(template_id: str) -> dict[str, Any] | None:
+    if _use_db():
+        safe = _safe_id(template_id)
+        if not safe:
+            return None
+        data = _templates_repo().plan_get("", safe)
+        if not isinstance(data, dict):
+            return None
+        doc = _normalize_plan_doc(data, kind="template")
+        doc["id"] = str(doc.get("id") or template_id).strip()
+        doc["chat_id"] = ""
+        return doc
     path = _template_path(template_id)
     if not path.is_file():
         return None
@@ -1094,6 +1175,9 @@ def save_template(plan: dict[str, Any]) -> dict[str, Any]:
     # Templates are blueprints — keep statuses pending in storage for clarity.
     plan["nodes"] = _reset_node_statuses(plan.get("nodes") or [])
     plan["status"] = "template"
+    if _use_db():
+        _templates_repo().plan_put("", _safe_id(tid), "template", plan)
+        return plan
     write_json_atomic(_template_path(tid), plan)
     return plan
 
@@ -1178,18 +1262,23 @@ def ensure_demo_plan_template() -> dict[str, Any] | None:
 def list_templates() -> list[dict[str, Any]]:
     ensure_demo_plan_template()
     rows: list[dict[str, Any]] = []
-    directory = _templates_dir(create=False)
-    if not directory.is_dir():
-        return []
-    for path in sorted(directory.glob("*.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(data, dict):
-            continue
+    sources: list[tuple[str, dict[str, Any]]] = []
+    if _use_db():
+        sources = _templates_repo().plan_docs("", "template")
+    else:
+        directory = _templates_dir(create=False)
+        if not directory.is_dir():
+            return []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict):
+                sources.append((path.stem, data))
+    for stem, data in sources:
         doc = _normalize_plan_doc(data, kind="template")
-        tid = str(doc.get("id") or path.stem or "").strip()
+        tid = str(doc.get("id") or stem or "").strip()
         if not tid:
             continue
         overview = str(doc.get("overview") or "").strip()
@@ -1215,6 +1304,8 @@ def delete_template(template_id: str) -> bool:
     tid = (template_id or "").strip()
     if not tid:
         raise ValueError("template_id required")
+    if _use_db():
+        return _templates_repo().plan_delete("", _safe_id(tid))
     path = _template_path(tid)
     if not path.is_file():
         return False

@@ -239,6 +239,45 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("mcp")
+
+
+def _rows():
+    from backend.store.importers import phase6
+    from backend.store.repos import misc
+
+    phase6.ensure("mcp_servers")
+    return misc
+
+
+def _read_servers() -> dict[str, Any] | None:
+    """The server map: rows on the row store (mcp.json is only an export there)."""
+    if _use_db():
+        rows = _rows()
+        if rows.mcp_servers_present():
+            return rows.mcp_servers_get()
+        return None
+    data = _read_json(mcp_config_path())
+    if data and isinstance(data.get("mcpServers"), dict):
+        return {str(k): dict(v) for k, v in data["mcpServers"].items() if isinstance(v, dict)}
+    return None
+
+
+def _write_servers(servers: dict[str, Any]) -> None:
+    if _use_db():
+        _rows().mcp_servers_replace({str(k): dict(v) for k, v in servers.items() if isinstance(v, dict)})
+        # Export for hand edits / support; never read back while the row store is on.
+        try:
+            _write_json(mcp_config_path(), {"mcpServers": servers})
+        except OSError:
+            pass
+        return
+    _write_json(mcp_config_path(), {"mcpServers": servers})
+
+
 def validate_mcp_config(data: Any, *, resolve: bool = True) -> dict[str, Any]:
     """Validate Cursor-shaped config; returns normalized ``{"mcpServers": {...}}``."""
     if not isinstance(data, dict):
@@ -266,12 +305,11 @@ def validate_mcp_config(data: Any, *, resolve: bool = True) -> dict[str, Any]:
 def load_mcp_config() -> dict[str, Any]:
     """Load ``mcp.json``, migrating / seeding as needed."""
     ensure_mcp_config()
-    path = mcp_config_path()
-    data = _read_json(path)
-    if not data:
+    servers = _read_servers()
+    if not servers:
         return {"mcpServers": {}}
     try:
-        return validate_mcp_config(data, resolve=False)
+        return validate_mcp_config({"mcpServers": servers}, resolve=False)
     except ValueError:
         return {"mcpServers": {}}
 
@@ -283,7 +321,7 @@ def save_mcp_config(data: dict[str, Any]) -> Path:
     if conflicts:
         raise ValueError(_format_port_conflict_save_error(conflicts))
     path = mcp_config_path()
-    _write_json(path, normalized)
+    _write_servers(dict(normalized.get("mcpServers") or {}))
     from backend.mcp_plugins.client_pool import get_plugin_pool
 
     get_plugin_pool().invalidate_tools_cache()
@@ -304,6 +342,8 @@ def save_mcp_config(data: dict[str, Any]) -> Path:
 
 def get_mcp_config_text() -> str:
     ensure_mcp_config()
+    if _use_db():
+        return json.dumps({"mcpServers": _read_servers() or {}}, indent=2) + "\n"
     path = mcp_config_path()
     if path.is_file():
         return path.read_text(encoding="utf-8")
@@ -468,10 +508,10 @@ def _retire_moved_to_desktop_plugin_mcp(servers: dict[str, Any]) -> None:
 def ensure_mcp_config() -> Path:
     """Create/migrate ``mcp.json`` if needed. Idempotent."""
     path = mcp_config_path()
-    if path.is_file():
-        data = _read_json(path)
-        if data and isinstance(data.get("mcpServers"), dict):
-            servers = {str(k): dict(v) for k, v in data["mcpServers"].items() if isinstance(v, dict)}
+    current = _read_servers()
+    if current is not None:
+        if True:
+            servers = current
             before = json.dumps(servers, sort_keys=True)
             _seed_catalog_into_servers(servers)
             _retire_moved_to_desktop_plugin_mcp(servers)
@@ -487,7 +527,7 @@ def ensure_mcp_config() -> Path:
                     del servers[sid]
             heal_http_port_conflicts(servers)
             if json.dumps(servers, sort_keys=True) != before:
-                _write_json(path, {"mcpServers": servers})
+                _write_servers(servers)
             return path
 
     # First-time: migrate legacy folders, then seed catalog.
@@ -496,7 +536,7 @@ def ensure_mcp_config() -> Path:
     _seed_catalog_into_servers(servers)
     _retire_moved_to_desktop_plugin_mcp(servers)
     heal_http_port_conflicts(servers)
-    _write_json(path, {"mcpServers": servers})
+    _write_servers(servers)
     return path
 
 
@@ -547,8 +587,7 @@ def _manifest_from_server_block(server_id: str, block: dict[str, Any]) -> dict[s
 def load_plugin_manifest(plugin_id: str) -> dict[str, Any] | None:
     pid = normalize_server_id(plugin_id)
     ensure_mcp_config()
-    data = _read_json(mcp_config_path()) or {}
-    servers = data.get("mcpServers") if isinstance(data.get("mcpServers"), dict) else {}
+    servers = _read_servers() or {}
     block = servers.get(pid)
     if isinstance(block, dict):
         return _manifest_from_server_block(pid, block)

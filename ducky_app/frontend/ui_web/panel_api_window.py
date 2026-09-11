@@ -500,6 +500,13 @@ class PanelApiWindowMixin:
                 "faultKind": str(data.get("faultKind") or "")[:32],
                 "faultAction": str(data.get("faultAction") or "")[:32],
             }
+            from backend.store.switch import use_db
+
+            if use_db("events"):
+                from backend.store.repos import events as _ev
+
+                _ev.insert("ui_crash", ts=row["ts"], source=row["surface"] or row["label"], message=row["message"], payload=row)
+                return {"ok": True, "path": "ducky.db:events/ui_crash"}
             with open(path, "a", encoding="utf-8") as f:
                 f.write(_pa.json.dumps(row, ensure_ascii=False) + "\n")
             return {"ok": True, "path": str(path)}
@@ -551,22 +558,17 @@ class PanelApiWindowMixin:
                 import base64 as _b64
                 from datetime import datetime
 
-                from frontend.ui_web.project_chats import get_conversations_dir
                 from frontend.ui_web.tool_captures import copy_png_to_ducky_captures
 
                 raw = _b64.b64decode(str(result["data_base64"]))
                 name = f"snip-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')[:-3]}.png"
-
-                snips_dir = get_conversations_dir().parent / "snips"
-                snips_dir.mkdir(parents=True, exist_ok=True)
-                appdata_path = snips_dir / name
-                appdata_path.write_bytes(raw)
                 result["name"] = name
-                result["capture_path"] = str(appdata_path)
 
-                # AppData tool_captures (never project Saved/).
+                # AppData tool_captures only — never mkdir chats/projects stubs.
                 capture_path = copy_png_to_ducky_captures(raw, prefix="snip", filename=name)
-                result["path"] = capture_path or str(appdata_path)
+                if capture_path:
+                    result["path"] = capture_path
+                    result["capture_path"] = capture_path
             except Exception:
                 pass  # disk copy is best-effort; the composer attachment still works
         return result
@@ -693,6 +695,22 @@ class PanelApiWindowMixin:
         from frontend.appdata_maintenance import appdata_clear_caches
 
         return appdata_clear_caches()
+
+    # ADR 0003 — Settings → General → App Data → Database.
+    def store_overview(self) -> dict:
+        from frontend.store_admin import overview
+
+        return overview()
+
+    def store_table_preview(self, table: str, limit: int = 50, offset: int = 0) -> dict:
+        from frontend.store_admin import table_preview
+
+        return table_preview(table or "", limit, offset)
+
+    def store_action(self, action: str, arg: str = "") -> dict:
+        from frontend.store_admin import action as run_action
+
+        return run_action(action or "", arg or "")
 
     def _pick_save_file_webview(
         self,

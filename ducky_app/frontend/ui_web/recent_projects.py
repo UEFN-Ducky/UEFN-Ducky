@@ -29,7 +29,33 @@ def _normalize(path: str) -> str:
             return raw
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("projects")
+
+
+def _repo():
+    from backend.store.importers import phase1
+    from backend.store.repos import projects as repo
+
+    phase1.ensure("projects")
+    return repo
+
+
 def load_recent_projects() -> list[str]:
+    if _use_db():
+        try:
+            out: list[str] = []
+            seen: set[str] = set()
+            for item in _repo().recent_paths():
+                norm = _normalize(item)
+                if norm and norm not in seen:
+                    seen.add(norm)
+                    out.append(norm)
+            return out[:_MAX_RECENT]
+        except (OSError, RuntimeError):
+            pass
     path = _store_path()
     if not path.is_file():
         return []
@@ -57,9 +83,15 @@ def add_recent_project(path: str) -> None:
     norm = _normalize(path)
     if not norm:
         return
-    items = [p for p in load_recent_projects() if p != norm]
-    items.insert(0, norm)
-    write_json_atomic(_store_path(), {"projects": items[:_MAX_RECENT]})
+    if _use_db():
+        try:
+            _repo().touch(norm)
+        except (OSError, RuntimeError):
+            pass
+    else:
+        items = [p for p in load_recent_projects() if p != norm]
+        items.insert(0, norm)
+        write_json_atomic(_store_path(), {"projects": items[:_MAX_RECENT]})
     try:
         from frontend.appdata_maintenance import prune_empty_project_dirs
 
@@ -72,5 +104,11 @@ def remove_recent_project(path: str) -> None:
     norm = _normalize(path)
     if not norm:
         return
+    if _use_db():
+        try:
+            _repo().forget(norm)
+            return
+        except (OSError, RuntimeError):
+            pass
     items = [p for p in load_recent_projects() if p != norm]
     write_json_atomic(_store_path(), {"projects": items[:_MAX_RECENT]})

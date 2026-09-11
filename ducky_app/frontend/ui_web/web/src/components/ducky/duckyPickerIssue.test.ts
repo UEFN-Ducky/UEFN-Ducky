@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duckyPickerIssue } from "./duckyPickerIssue";
+import { duckyPickerIssue, hasUsableModels } from "./duckyPickerIssue";
 
 describe("duckyPickerIssue", () => {
   it("asks for a Store gateway when none are installed", () => {
@@ -35,6 +35,27 @@ describe("duckyPickerIssue", () => {
     ).toBeNull();
   });
 
+  it("is quiet when a coding agent brings the models (no API-key models needed)", () => {
+    expect(
+      duckyPickerIssue({
+        gatewayCount: 1,
+        hasApiKey: true,
+        catalogReady: true,
+        modelsCount: 0,
+        codingAgentCount: 1,
+      }),
+    ).toBeNull();
+    expect(
+      duckyPickerIssue({
+        gatewayCount: 1,
+        hasApiKey: true,
+        catalogReady: true,
+        modelsCount: 0,
+        codingAgentCount: 0,
+      })?.message,
+    ).toMatch(/No models loaded yet/);
+  });
+
   it("waits on an in-flight catalog instead of saying no models", () => {
     expect(
       duckyPickerIssue({
@@ -42,6 +63,32 @@ describe("duckyPickerIssue", () => {
         hasApiKey: true,
         catalogReady: false,
         modelsCount: 0,
+      }),
+    ).toBeNull();
+  });
+
+  it("treats live coding-agent models as usable even when the API catalog is empty", () => {
+    expect(
+      hasUsableModels({
+        modelsCount: 0,
+        agents: [
+          {
+            enabled: true,
+            available: true,
+            models: [{ id: "claude_code:sonnet-5" }],
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      duckyPickerIssue({
+        gatewayCount: 1,
+        hasApiKey: true,
+        catalogReady: true,
+        modelsCount: 0,
+        agents: [
+          { enabled: true, available: true, models: [{ id: "claude_code:sonnet-5" }] },
+        ],
       }),
     ).toBeNull();
   });

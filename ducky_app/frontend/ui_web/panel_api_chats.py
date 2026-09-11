@@ -921,17 +921,28 @@ class PanelApiChatsMixin:
             raise ValueError("layout payload must include folders and chats arrays")
         _pa.apply_sidebar_layout(folders=folders, chats=chats)
 
-    def load_messages(self, conv_id: str) -> list[dict[str, Any]]:
-        """The one message-load path: whole conversation as flat UI rows.
+    def load_messages(
+        self, conv_id: str, before_id: int | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """The one message-load path: conversation as flat UI rows.
 
-        Conversations are small local files (a handful of turns), so there is no
-        pagination — `_messages_to_ui` is the single source of truth for how a
-        stored conversation becomes the rows the chat renders.
+        `_messages_to_ui` is the single source of truth for how a stored
+        conversation becomes rows; row ids are stable positions, so a page is a
+        slice of the full row list (``limit`` newest rows, or the ``limit`` rows
+        before ``before_id``). Without arguments the whole conversation comes
+        back, as before.
         """
         conv = _pa.load_conversation(conv_id)
         if not conv:
             return []
-        return _pa._messages_to_ui(conv)
+        rows = _pa._messages_to_ui(conv)
+        if limit is None and before_id is None:
+            return rows
+        if before_id is not None:
+            rows = [r for r in rows if isinstance(r.get("id"), int) and r["id"] < int(before_id)]
+        if limit is not None and int(limit) > 0:
+            rows = rows[-int(limit):]
+        return rows
 
     def send_message(
         self,

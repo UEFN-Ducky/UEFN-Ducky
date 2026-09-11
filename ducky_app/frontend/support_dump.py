@@ -23,6 +23,7 @@ def format_support_dump(*, max_chars: int = _DISCORD_SOFT_CAP) -> str:
         f"Listener: {_listener_line()}",
         f"Default model: {_default_model() or '(none)'}",
         f"Keys: {_key_line()}",
+        f"Database: {_db_line()}",
         "Plugins:",
         *_plugin_lines(),
         "Agents:",
@@ -54,6 +55,17 @@ def _app_version() -> str:
         return str(__version__)
     except Exception:
         return "?"
+
+
+def _db_line() -> str:
+    try:
+        from backend.store import db
+
+        conn = db.connect()
+        size = db.db_path().stat().st_size if db.db_path().exists() else 0
+        return f"schema {db.user_version(conn)}/{db.head_version()}, integrity {db.integrity_check(conn)}, {size // 1024} KB"
+    except Exception as exc:  # noqa: BLE001
+        return f"unavailable ({type(exc).__name__})"
 
 
 def _default_model() -> str:

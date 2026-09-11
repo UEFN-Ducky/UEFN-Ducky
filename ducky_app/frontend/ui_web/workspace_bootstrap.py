@@ -97,7 +97,11 @@ def _changesets_storage(project_root: str) -> Path:
             break
     base = default_app_data_dir() / "changesets"
     storage = base / project_slug(str(p))
-    _fold_orphan_ledger(base / project_slug(str(p / "Content")), storage)
+    from backend.store.switch import use_db
+
+    if not use_db("ledger"):
+        # Rows: the legacy importer brought any Content_<hash> ledger in as-is.
+        _fold_orphan_ledger(base / project_slug(str(p / "Content")), storage)
     return storage
 
 

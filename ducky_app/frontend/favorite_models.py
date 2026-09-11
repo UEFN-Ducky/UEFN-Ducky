@@ -164,7 +164,14 @@ def _available_agent_models(settings: Any) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     agents = coding_agent_backends()
     try:
-        payload = detect_all(settings)
+        # The cached probe (TTL + async refresh). Passing ``settings`` here used to
+        # force a fresh synchronous probe of every CLI (claude, gemini, codex,
+        # cursor…) on each create-ducky — 3-4 s of "Creating…". Only before the
+        # first probe has ever landed (payload still "checking") do we pay for a
+        # direct probe, so a brand-new session still resolves correctly.
+        payload = detect_all()
+        if payload.get("checking"):
+            payload = detect_all(settings)
     except Exception:
         return out
     for info in payload.get("agents") or []:

@@ -95,6 +95,28 @@ _CACHE: dict[str, DigestFile] = {}
 def clear_cache() -> None:
     """Test helper — drop the mtime cache."""
     _CACHE.clear()
+    _DISCOVERY.clear()
+
+
+def _use_db() -> bool:
+    try:
+        from backend.store.switch import use_db
+
+        return use_db("digests")
+    except Exception:  # noqa: BLE001 — standalone use
+        return False
+
+
+def _rows():
+    from backend.store.repos import misc
+
+    return misc
+
+
+# discovery memo: roots key -> (monotonic time, paths). Tool calls come in bursts;
+# walking two directory trees for each one was the cost.
+_DISCOVERY: dict[str, tuple[float, list[str]]] = {}
+_DISCOVERY_TTL_S = 30.0
 
 
 def _project_name() -> str:
@@ -163,6 +185,10 @@ def discover_digest_files(
         if r:
             roots.append(r)
 
+    memo_key = "|".join(roots)
+    hit = _DISCOVERY.get(memo_key)
+    if hit is not None and time.monotonic() - hit[0] < _DISCOVERY_TTL_S:
+        return list(hit[1])
     candidates: list[str] = []
     for base in roots:
         if not base or not os.path.isdir(base):
@@ -175,7 +201,9 @@ def discover_digest_files(
                 low = fn.lower()
                 if low.endswith(".digest.verse") or (low.endswith(".verse") and "digest" in low):
                     candidates.append(os.path.join(dirpath, fn))
-    return sorted(set(candidates))
+    found = sorted(set(candidates))
+    _DISCOVERY[memo_key] = (time.monotonic(), found)
+    return found
 
 
 def _purpose_for(basename: str) -> str:
@@ -267,6 +295,13 @@ def load_digest(path: str) -> DigestFile | None:
         return None
     built = _build_index(path, mtime, lines)
     _CACHE[path] = built
+    if _use_db():
+        try:
+            rows = _rows()
+            if rows.digest_indexed_mtime(path) != mtime:
+                rows.digest_index(path, mtime, lines)
+        except Exception:  # noqa: BLE001 — the index is an accelerator, never a gate
+            pass
     return built
 
 
@@ -373,7 +408,22 @@ def search_verse_digest(
 
     # rank 0 = exact decl name, 1 = decl name contains, 2 = # doc, 3 = plain line
     ranked: list[tuple[int, dict[str, Any]]] = []
+    candidate_lines: dict[str, set[int]] | None = None
+    if _use_db() and len(q) >= 3:
+        # Trigram FTS gives the same case-insensitive substring semantics as the
+        # scan below, but only visits matching lines instead of every line of
+        # every digest (the Fortnite digest alone is tens of thousands of lines).
+        try:
+            hits = _rows().digest_search(q, [d.path for d in digests], limit=20000)
+            candidate_lines = {}
+            for path, lineno, _text in hits:
+                candidate_lines.setdefault(path, set()).add(lineno)
+        except Exception:  # noqa: BLE001
+            candidate_lines = None
     for d in digests:
+        wanted = candidate_lines.get(d.path) if candidate_lines is not None else None
+        if candidate_lines is not None and not wanted:
+            continue
         # Running enclosing module as we scan (decls are in file order).
         module_cursor = ""
         decl_i = 0
@@ -386,6 +436,8 @@ def search_verse_digest(
                 elif decl.module:
                     module_cursor = decl.module
                 decl_i += 1
+            if wanted is not None and lineno not in wanted:
+                continue
             low = line.lower()
             if q not in low:
                 continue

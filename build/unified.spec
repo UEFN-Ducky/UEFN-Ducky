@@ -124,6 +124,14 @@ if _mcp_plugins.is_dir():
             else f"frontend/mcp_plugins/{parent.replace(chr(92), '/')}"
         )
         _datas.append((str(path), dest))
+# ADR 0003: the store's SQL migrations ship as data (importlib cannot find .sql in the PYZ).
+_migrations = DUCKY_APP / "backend" / "store" / "migrations"
+if _migrations.is_dir():
+    _sql = sorted(_migrations.glob("*.sql"))
+    if not _sql:
+        raise RuntimeError("unified.spec: backend/store/migrations has no .sql files")
+    for path in _sql:
+        _datas.append((str(path), "backend/store/migrations"))
 # Desktop plugins are Store-only — never pack frontend/uefn_plugins or
 # plugins/uefn-plugin-* into the EXE. Users install via Settings → Store.
 _bundled_duckies = FRONTEND / "bundled_duckies.json"
@@ -248,6 +256,12 @@ a = Analysis(
         "PIL.ImageDraw",
         "toon_format",
         "toon_format.types",
+        # ADR 0003: ducky.db. Nothing else imports sqlite3, so the analysis
+        # would otherwise leave _sqlite3.pyd + sqlite3.dll out of the EXE.
+        "sqlite3",
+        "sqlite3.dbapi2",
+        "backend.store",
+        "backend.store.db",
     ],
     hookspath=[],
     hooksconfig={},
@@ -271,6 +285,16 @@ if _missing_host:
         + ", ".join(_missing_host)
         + ". Gateways would show as Installed but LLMs would stay empty."
     )
+
+# ADR 0003: fail the freeze if the SQLite extension module did not make it in.
+_binary_names = {str(_b[0]) for _b in a.binaries if isinstance(_b, tuple) and _b}
+if not any(_n.startswith("_sqlite3") for _n in _binary_names):
+    raise RuntimeError(
+        "unified.spec: frozen build is missing _sqlite3 (sqlite3.dll). ducky.db cannot open. "
+        "Check the sqlite3 hidden import and the Python install's DLLs folder."
+    )
+if "backend.store.db" not in _pure_names:
+    raise RuntimeError("unified.spec: frozen build is missing backend.store.db")
 
 pyz = PYZ(a.pure)
 

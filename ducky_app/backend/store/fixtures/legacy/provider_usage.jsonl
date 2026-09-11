@@ -1,0 +1,2 @@
+{"ts": 1789087317.6863873, "provider": "anthropic", "model": "claude-x", "input_tokens": 120, "output_tokens": 40, "cache_read_tokens": 0, "cache_write_tokens": 0, "conv_id": "24b2ea2d-88d5-486a-887b-975fd878a92a", "agent": "", "ducky_label": "", "cost_usd": 0.012}
+{"ts": 1789087317.687261, "provider": "openai", "model": "gpt-x", "input_tokens": 10, "output_tokens": 5, "cache_read_tokens": 0, "cache_write_tokens": 0, "conv_id": "9fee00ff-d0cf-42ac-aa4f-441972b8d491", "agent": "", "ducky_label": "", "cost_usd": 0.001}

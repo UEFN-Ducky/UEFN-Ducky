@@ -33,16 +33,37 @@ export interface DuckyProfileFormState {
   thinkingEffort: string;
 }
 
+function mergeContribAgents(
+  codingAgents: CodingAgentDto[],
+  contribIds: readonly string[],
+): CodingAgentDto[] {
+  if (!contribIds.length) return codingAgents;
+  const have = new Set(
+    codingAgents.map((a) => String(a.id || "").trim().toLowerCase().replace(/-/g, "_")),
+  );
+  const extra: CodingAgentDto[] = [];
+  for (const raw of contribIds) {
+    const id = String(raw || "").trim();
+    const key = id.toLowerCase().replace(/-/g, "_");
+    if (!id || have.has(key)) continue;
+    have.add(key);
+    extra.push({ id, label: id, enabled: true, available: true, status: "ok" });
+  }
+  return extra.length ? [...codingAgents, ...extra] : codingAgents;
+}
+
 /** Backend when the model targets a coding agent, else ducky (API models). */
 export function codingAgentFromModel(
   model: string,
   codingAgents: CodingAgentDto[] = getCachedCodingAgents(),
+  contribIds: readonly string[] = [],
 ): string {
+  const known = mergeContribAgents(codingAgents, contribIds);
   const text = (model || "").trim();
   if (!text) return "ducky";
-  const parsed = parseFavoriteSelection(text, codingAgents);
-  if (parsed && isCodingAgentFavoriteId(parsed.backend, codingAgents)) return parsed.backend;
-  if (isLegacyAgentOnlyFavorite(text, codingAgents)) {
+  const parsed = parseFavoriteSelection(text, known);
+  if (parsed && isCodingAgentFavoriteId(parsed.backend, known)) return parsed.backend;
+  if (isLegacyAgentOnlyFavorite(text, known)) {
     return text.toLowerCase().replace(/-/g, "_");
   }
   return "ducky";

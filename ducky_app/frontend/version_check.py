@@ -12,15 +12,30 @@ from urllib.parse import urljoin
 from frontend import __version__
 from frontend.bundle_root import is_packaged_runtime
 
+# Local update rehearsal: point the feed at build/upgrade_proof/serve_update_feed.py
+# (http://127.0.0.1:<port>) — see that folder's README. Loopback only; the
+# updater still refuses plain-http installer URLs from anywhere else.
+UPDATE_BASE_URL_ENV = "DUCKY_UPDATE_BASE_URL"
+
+
+def update_base_url() -> str:
+    """Where the app-version feed and relative installer URLs come from."""
+    import os
+
+    override = (os.environ.get(UPDATE_BASE_URL_ENV) or "").strip().rstrip("/")
+    if override:
+        return override
+    from frontend.duckyos_account import resolve_base_url
+
+    return resolve_base_url().rstrip("/")
+
 PATREON_URL = "https://www.patreon.com/UEFNDucky"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 
 def version_check_url() -> str:
-    from frontend.duckyos_account import resolve_base_url
-
-    return f"{resolve_base_url().rstrip('/')}/api/plugins/uefn-ducky-store/collect/app-version"
+    return f"{update_base_url()}/api/plugins/uefn-ducky-store/collect/app-version"
 
 
 def download_page_url() -> str:
@@ -95,9 +110,7 @@ def absolute_installer_url(url: str | None, *, base_url: str) -> str | None:
 
 def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(payload, error)`` for the Store app-version collect endpoint."""
-    from frontend.duckyos_account import resolve_base_url
-
-    base = resolve_base_url().rstrip("/")
+    base = update_base_url()
     url = f"{base}/api/plugins/uefn-ducky-store/collect/app-version"
     # Collect endpoints require Origin to match Host (same as duckyos_account.api_request).
     req = urllib.request.Request(
@@ -152,7 +165,6 @@ def get_app_update_status() -> dict[str, Any]:
     One payload for the panel UI and the updater: remote version compare plus
     installed-vs-portable state. Read-only.
     """
-    from frontend.duckyos_account import resolve_base_url
     from frontend.install_info import get_install_info
 
     install = get_install_info()
@@ -197,7 +209,7 @@ def get_app_update_status() -> dict[str, Any]:
         result["update_available"] = True
         result["installer_url"] = absolute_installer_url(
             _extract_str(payload, "installerUrl") or _extract_str(payload, "installer_url"),
-            base_url=resolve_base_url(),
+            base_url=update_base_url(),
         )
         result["installer_sha256"] = _extract_str(payload, "installerSha256") or _extract_str(
             payload, "sha256"

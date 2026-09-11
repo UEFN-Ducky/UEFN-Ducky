@@ -74,9 +74,9 @@ def test_children_and_clear_caches(tmp_path: Path) -> None:
     cap.mkdir(parents=True)
     (cap / "big.png").write_bytes(b"x" * 50)
     (cap / "tiny.png").write_bytes(b"y")
-    chats = root / "chats" / "projects" / "keep_me"
-    chats.mkdir(parents=True)
-    (chats / "conversation.json").write_text("{}", encoding="utf-8")
+    duckies = root / "duckies"
+    duckies.mkdir(parents=True)
+    (duckies / "x.png").write_bytes(b"z")
 
     kids = appdata_children("tool_captures", root)
     assert kids["total"] == 2
@@ -86,7 +86,7 @@ def test_children_and_clear_caches(tmp_path: Path) -> None:
     assert result["ok"] is True
     assert "tool_captures" in result["cleared"]
     assert not (cap / "big.png").exists()
-    assert (chats / "conversation.json").is_file()
+    assert (duckies / "x.png").is_file()
 
 
 def test_project_delete_covers_memory_and_changesets(tmp_path: Path, monkeypatch) -> None:

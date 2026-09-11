@@ -37,4 +37,5 @@ def test_bootstrap_includes_chat_report_template() -> None:
     assert "## Chat replies" in text
     assert "## Inventory" in text
     assert "> **Loose end:**" in text
-    assert "never dump a prose changelog" in text
+    # The report shape forbids echoing written files back into chat.
+    assert "link them instead" in text

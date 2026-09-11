@@ -1,7 +1,9 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { parseFavoriteSelection, qualifyFavorite } from "../../hooks/favoriteModelsCatalog";
 import { getCachedModels } from "../../hooks/modelsCatalogCache";
+import { getCachedCodingAgents, subscribeCodingAgents } from "../../hooks/codingAgentsCache";
+import { usePluginContributions } from "../../hooks/usePluginContributions";
 import { codingAgentFromModel } from "./duckyProfileForm";
 import { ModelSelector } from "../ModelSelector";
 
@@ -65,7 +67,14 @@ export function DuckyModelPicker({
   requireTools = true,
 }: DuckyModelPickerProps) {
   const value = (model || "").trim();
-  const codingAgent = codingAgentFromModel(value);
+  const contrib = usePluginContributions();
+  const [, setAgentsTick] = useState(0);
+  useEffect(() => subscribeCodingAgents(() => setAgentsTick((n) => n + 1)), []);
+  const codingAgent = codingAgentFromModel(
+    value,
+    getCachedCodingAgents(),
+    contrib.llm_coding_agents.map((a) => a.id),
+  );
   const selectedModel = useMemo(() => {
     const parsed = parseFavoriteSelection(value);
     if (parsed) return parsed.modelId;

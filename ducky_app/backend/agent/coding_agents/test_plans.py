@@ -29,6 +29,12 @@ class PlansStoreTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_create_update_merge_get(self) -> None:
+        # Legacy on-disk contract (<project>/.ducky/plans/*.json); rows are covered by
+        # backend/store/test_phase4.py.
+        with patch.dict(os.environ, {"DUCKY_STORE_BACKEND_PLANS": "files"}):
+            self._test_create_update_merge_get()
+
+    def _test_create_update_merge_get(self) -> None:
         plan = plans.create_plan(
             "chat-abc",
             title="Blockout city",
@@ -534,6 +540,12 @@ class PlanArgRecoveryTests(unittest.TestCase):
         self.assertGreater(prog["total"], 0)
 
     def test_load_heals_and_persists_mangled_plan(self) -> None:
+        # Legacy on-disk contract (<project>/.ducky/plans/*.json); rows are covered by
+        # backend/store/test_phase4.py.
+        with patch.dict(os.environ, {"DUCKY_STORE_BACKEND_PLANS": "files"}):
+            self._test_load_heals_and_persists_mangled_plan()
+
+    def _test_load_heals_and_persists_mangled_plan(self) -> None:
         path = Path(self.root) / ".ducky" / "plans"
         path.mkdir(parents=True)
         mangled = (

@@ -82,6 +82,26 @@ def _now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("memory")
+
+
+def _project_id(project_root: str) -> str:
+    from frontend.ui_web.project_chats import project_slug
+
+    return project_slug(resolve_project_root(project_root))
+
+
+def _repo():
+    from backend.store.importers import phase4
+    from backend.store.repos import memory as repo
+
+    phase4.ensure("memory")
+    return repo
+
+
 def _entry_file(entry: str, project_root: str) -> Path:
     return memory_dir(project_root) / f"{entry}.md"
 
@@ -165,6 +185,8 @@ def _list_subs(entry: str, project_root: str) -> list[dict[str, Any]]:
 
 def list_entries(project_root: str = "") -> list[dict[str, Any]]:
     """Index of a project's entries (frontmatter only + sub index), newest-updated first."""
+    if _use_db():
+        return _repo().index(_project_id(project_root))
     d = memory_dir(project_root)
     if not d.is_dir():
         return []
@@ -200,6 +222,23 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
     """Read ``entry`` (main body + sub index) or ``entry/sub`` (that sub's body)."""
     slug = slugify_entry_name(name)
     entry, sub = _split_slug(slug)
+    if _use_db():
+        repo = _repo()
+        project_id = _project_id(project_root)
+        row = repo.get(project_id, slug)
+        if row is None:
+            return None
+        out: dict[str, Any] = {
+            "name": slug,
+            "description": row["description"] or _default_description(row["body"]),
+            "author": row["author"] or "",
+            "updated": row["updated"] or "",
+            "content": row["body"],
+            "path": "",
+        }
+        if not sub:
+            out["subs"] = repo.subs_of(project_id, entry)
+        return out
     if sub:
         path = _entry_dir(entry, project_root) / f"{sub}.md"
         if not path.is_file():
@@ -257,7 +296,8 @@ def save_entry(
     if len(body) > _MAX_ENTRY_CHARS:
         body = body[-_MAX_ENTRY_CHARS:]
 
-    memory_dir(project_root, for_write=True)
+    if not _use_db():
+        memory_dir(project_root, for_write=True)
     existing = read_entry(slug, project_root)
     meta = {
         "name": slug,
@@ -267,6 +307,21 @@ def save_entry(
         "author": (author or "").strip() or (existing or {}).get("author") or "",
         "updated": _now_stamp(),
     }
+
+    if _use_db():
+        repo = _repo()
+        project_id = _project_id(project_root)
+        if sub and repo.get(project_id, entry) is None:
+            repo.put(
+                project_id,
+                entry,
+                description=f"Split memory topic — see its sub-entries (e.g. {slug})",
+                author=meta["author"],
+                updated=meta["updated"],
+                body=f"Index topic for `{entry}` — content lives in its sub-entries.",
+            )
+        repo.put(project_id, slug, description=meta["description"], author=meta["author"], updated=meta["updated"], body=body)
+        return {**meta, "chars": len(body), "path": ""}
 
     if sub:
         # Saving a sub splits the parent into dir form (creating a stub main if new).
@@ -328,6 +383,8 @@ def delete_entry(name: str, project_root: str = "") -> bool:
     """Delete ``entry`` (with all its subs) or just one ``entry/sub``."""
     slug = slugify_entry_name(name)
     entry, sub = _split_slug(slug)
+    if _use_db():
+        return _repo().delete(_project_id(project_root), slug, with_subs=not sub) > 0
     if sub:
         path = _entry_dir(entry, project_root) / f"{sub}.md"
         if not path.is_file():

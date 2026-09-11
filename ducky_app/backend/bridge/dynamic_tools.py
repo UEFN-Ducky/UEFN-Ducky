@@ -333,7 +333,27 @@ def _fetch_live_manifest() -> Optional[list[dict]]:
             time.sleep(0.7)  # busy (reload in flight) — retry until deadline
 
 
+def _manifest_use_db() -> bool:
+    try:
+        from backend.store.switch import use_db
+
+        return use_db("cache_docs")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _load_cached_manifest() -> Optional[list[dict]]:
+    if _manifest_use_db():
+        try:
+            from backend.store.importers import phase1
+            from backend.store.repos import kv
+
+            phase1.ensure("cache_docs")
+            doc = kv.get_doc("cache_docs", "mcp_command_manifest")
+            commands = doc.get("commands") if isinstance(doc, dict) else None
+            return commands if isinstance(commands, list) else None
+        except Exception:  # noqa: BLE001
+            return None
     try:
         data = json.loads(_manifest_cache_path().read_text(encoding="utf-8"))
         commands = data.get("commands")
@@ -343,6 +363,14 @@ def _load_cached_manifest() -> Optional[list[dict]]:
 
 
 def _save_manifest(commands: list[dict]) -> None:
+    if _manifest_use_db():
+        try:
+            from backend.store.repos import kv
+
+            kv.set_doc("cache_docs", "mcp_command_manifest", {"commands": commands, "saved_at": time.time()})
+        except Exception:  # noqa: BLE001
+            pass
+        return
     try:
         path = _manifest_cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)

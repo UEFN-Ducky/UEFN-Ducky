@@ -232,7 +232,7 @@ def run_bridge() -> None:
         try:
             from frontend.appdata_maintenance import start_appdata_maintenance_async
 
-            start_appdata_maintenance_async()
+            start_appdata_maintenance_async(count_boot=False)  # the panel counts the boot
         except Exception:
             pass
         try:
@@ -279,6 +279,12 @@ def main() -> None:
     scrub_pyinstaller_boot_env()
     if len(sys.argv) > 1 and sys.argv[1] == "bridge":
         run_bridge()
+    elif len(sys.argv) > 1 and sys.argv[1] == "db":
+        # ADR 0003: `UEFN-Ducky.exe db check|vacuum|snapshot|stats|export <table>` for support.
+        _ensure_repo_on_path()
+        from frontend.store_cli import main as store_main
+
+        raise SystemExit(store_main(sys.argv[1:]))
     else:
         # Remote Deploy needs HTTP bundle on listener_port+1000. The IDE bridge also starts this,
         # but users who only open the panel EXE must still serve the zip so UEFN can fetch it.

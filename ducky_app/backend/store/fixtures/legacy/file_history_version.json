@@ -1,0 +1,1 @@
+{"schema_version": 2, "id": "1789087318718", "path": "Content/Hello.verse", "saved_at": 1789087318, "bytes": 65, "preview": "using { /Fortnite.com/Devices }", "content_hash": "39c0dc605e3c0bdb", "content": "using { /Fortnite.com/Devices }\nhello := class(creative_device):\n"}

@@ -66,6 +66,8 @@ import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { CtrlWheelZoomRoot } from "./CtrlWheelZoomRoot";
 import { useChatColumnWidth } from "../hooks/useChatColumnWidth";
 import { isModelsCatalogReady, getCachedModels, subscribeModelsCatalog } from "../hooks/modelsCatalogCache";
+import { getCachedCodingAgents, subscribeCodingAgents } from "../hooks/codingAgentsCache";
+import { hasUsableModels } from "./ducky/duckyPickerIssue";
 import { parseFavoriteSelection } from "../hooks/favoriteModelsCatalog";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
@@ -225,6 +227,7 @@ export function ChatPane({
   });
   const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
   const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
+  const [codingAgents, setCodingAgents] = useState(() => getCachedCodingAgents());
   const [modelSupportsVision, setModelSupportsVision] = useState(false);
   const [selectedModelDisplayName, setSelectedModelDisplayName] = useState(
     initialComposer?.selectedModelDisplayName ?? chat.model ?? "",
@@ -787,8 +790,17 @@ export function ChatPane({
     return subscribeModelsCatalog(sync);
   }, []);
 
+  useEffect(() => subscribeCodingAgents(() => setCodingAgents(getCachedCodingAgents())), []);
+
   const modelsLoading = !catalogReady;
-  const noModelsAvailable = codingAgent === "ducky" && catalogReady && modelsCount === 0;
+  const noModelsAvailable =
+    codingAgent === "ducky" &&
+    catalogReady &&
+    !hasUsableModels({
+      modelsCount,
+      agents: codingAgents,
+      contribCount: pluginContrib.llm_coding_agents.length,
+    });
   const externalAgent = codingAgent !== "ducky";
 
   // True when every invited member runs an external coding agent (Claude Code,

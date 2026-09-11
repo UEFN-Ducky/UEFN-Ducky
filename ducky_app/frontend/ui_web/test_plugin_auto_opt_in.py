@@ -5,54 +5,44 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 
-def test_opt_in_uefn_plugin_all_chats(tmp_path: Path, monkeypatch) -> None:
+
+@pytest.mark.parametrize("backend", ["db", "files"])
+def test_opt_in_uefn_plugin_all_chats(tmp_path: Path, monkeypatch, backend: str) -> None:
+    """Runs on both store backends (ADR 0003): rows in ducky.db, or the legacy tree."""
+    from frontend.chat_store import Conversation
     from frontend.ui_web import project_chats as pc
 
-    monkeypatch.setattr(pc, "_chats_root", lambda: tmp_path / "chats" / "projects")
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
+    explicit = Conversation(id="c1", title="t", uefn_plugins=["discord"],
+                            prompt_cache_snapshot={"tool_names": ["x"]}).to_dict()
+    follow = Conversation(id="c2", title="t2", uefn_plugins=None).to_dict()
 
-    meta = (
-        tmp_path
-        / "chats"
-        / "projects"
-        / "proj_abc"
-        / "conversations"
-        / "c1"
-        / "conversation.json"
-    )
-    meta.parent.mkdir(parents=True)
-    meta.write_text(
-        json.dumps(
-            {
-                "id": "c1",
-                "title": "t",
-                "uefn_plugins": ["discord"],
-                "prompt_cache_snapshot": {"tool_names": ["x"]},
-            }
-        ),
-        encoding="utf-8",
-    )
-    follow = (
-        tmp_path
-        / "chats"
-        / "projects"
-        / "proj_abc"
-        / "conversations"
-        / "c2"
-        / "conversation.json"
-    )
-    follow.parent.mkdir(parents=True)
-    follow.write_text(
-        json.dumps({"id": "c2", "title": "t2", "uefn_plugins": None}),
-        encoding="utf-8",
-    )
+    if backend == "db":
+        from backend.store.repos import chats as repo
+
+        repo.conv_save("proj_abc", explicit, messages=[])
+        repo.conv_save("proj_abc", follow, messages=[])
+
+        def read(conv_id: str) -> dict:
+            return repo.conv_get(conv_id, project_id="proj_abc", with_messages=False)
+    else:
+        monkeypatch.setattr(pc, "_chats_root", lambda: tmp_path / "chats" / "projects")
+        root = tmp_path / "chats" / "projects" / "proj_abc" / "conversations"
+        for doc in (explicit, follow):
+            (root / doc["id"]).mkdir(parents=True)
+            (root / doc["id"] / "conversation.json").write_text(json.dumps(doc), encoding="utf-8")
+
+        def read(conv_id: str) -> dict:
+            return json.loads((root / conv_id / "conversation.json").read_text(encoding="utf-8"))
 
     n = pc.opt_in_uefn_plugin_all_chats("materials")
     assert n == 1
-    data = json.loads(meta.read_text(encoding="utf-8"))
+    data = read("c1")
     assert data["uefn_plugins"] == ["discord", "materials"]
     assert data["prompt_cache_snapshot"] is None
-    assert json.loads(follow.read_text(encoding="utf-8")).get("uefn_plugins") is None
+    assert read("c2").get("uefn_plugins") is None
 
 
 def test_disabled_tool_ids_leave_uefn_unscoped(monkeypatch) -> None:

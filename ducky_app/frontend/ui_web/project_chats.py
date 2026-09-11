@@ -88,13 +88,14 @@ def _chats_root() -> Path:
     return default_app_data_dir() / "chats" / "projects"
 
 
-def _project_root(project_root: str | None = None) -> Path:
+def _project_root(project_root: str | None = None, *, create: bool = False) -> Path:
     root = project_root
     if root is None:
         root = PanelSettings.load().uefn_project_root
     slug = project_slug(root)
     d = _chats_root() / slug
-    d.mkdir(parents=True, exist_ok=True)
+    if create or not _use_db():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -102,14 +103,43 @@ def _folders_path(project_root: str | None = None) -> Path:
     return _project_root(project_root) / "folders.json"
 
 
-def _conversations_dir(project_root: str | None = None) -> Path:
-    d = _project_root(project_root) / "conversations"
-    d.mkdir(parents=True, exist_ok=True)
+def _conversations_dir(project_root: str | None = None, *, create: bool = False) -> Path:
+    d = _project_root(project_root, create=create) / "conversations"
+    if create or not _use_db():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def get_conversations_dir(project_root: str | None = None) -> Path:
-    return _conversations_dir(project_root)
+def get_conversations_dir(project_root: str | None = None, *, create: bool = False) -> Path:
+    return _conversations_dir(project_root, create=create)
+
+
+def _use_db() -> bool:
+    from backend.store.switch import use_db
+
+    return use_db("chats")
+
+
+def _project_id(project_root: str | None = None) -> str:
+    root = project_root
+    if root is None:
+        root = PanelSettings.load().uefn_project_root
+    return project_slug(root)
+
+
+def _repo():
+    """The chats repo, with the one-time legacy import done."""
+    from backend.store.importers import phase2
+    from backend.store.repos import chats as repo
+
+    phase2.ensure()
+    return repo
+
+
+def _stats_for(messages: list[Any]) -> dict[str, int]:
+    from frontend.ui_web.session_files import session_stats_from_messages
+
+    return session_stats_from_messages(messages)
 
 
 def _default_folders() -> list[dict[str, Any]]:
@@ -173,6 +203,10 @@ def _load_all_conversations(
 ) -> list[Conversation]:
     from frontend.ui_web.session_files import session_stats_from_messages
 
+    if _use_db():
+        # Counts are maintained columns; a metadata list never touches message bodies.
+        docs = _repo().conv_list(_project_id(project_root), with_messages=include_messages)
+        return [Conversation.from_dict(doc) for doc in docs]
     out: list[Conversation] = []
     seen: set[str] = set()
     conv_dir = _conversations_dir(project_root)
@@ -216,7 +250,7 @@ def _maybe_migrate_conversation_sort_orders(project_root: str | None = None) -> 
     with _conversation_migrate_lock(project_root):
         if slug in _sort_migrated_slugs:
             return
-        all_convs = _load_all_conversations(project_root, include_messages=True)
+        all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
         for conv in _migrate_conversation_sort_orders(all_convs):
             save_conversation(conv, project_root, touch_updated=False)
         _sort_migrated_slugs.add(slug)
@@ -242,6 +276,13 @@ def _would_create_cycle(folders: list[ChatFolder], folder_id: str, new_parent_id
 
 
 def load_folders(project_root: str | None = None) -> list[ChatFolder]:
+    if _use_db():
+        rows = _repo().folders_get(_project_id(project_root))
+        folders = [ChatFolder.from_dict(f) for f in rows]
+        folders, archive_added = ensure_archive_folder(folders)
+        if archive_added or _migrate_folder_sort_orders(folders):
+            save_folders(folders, project_root)
+        return _sort_folders(folders)
     path = _folders_path(project_root)
     if not path.is_file():
         write_json_atomic(path, {"folders": _default_folders()})
@@ -260,6 +301,9 @@ def load_folders(project_root: str | None = None) -> list[ChatFolder]:
 
 
 def save_folders(folders: list[ChatFolder], project_root: str | None = None) -> None:
+    if _use_db():
+        _repo().folders_replace(_project_id(project_root), [f.to_dict() for f in folders])
+        return
     write_json_atomic(_folders_path(project_root), {"folders": [f.to_dict() for f in folders]})
 
 
@@ -308,7 +352,8 @@ def ensure_group_folder_hubs(project_root: str | None = None) -> int:
     linked.discard("")
     migrated = 0
     # Full load: list_conversations() strips messages, and these get saved back.
-    for conv in _load_all_conversations(project_root):
+    # (Rows: a metadata save leaves the transcript alone, so no bodies are read.)
+    for conv in _load_all_conversations(project_root, include_messages=not _use_db()):
         if not getattr(conv, "is_group", False):
             continue
         if conv.id in linked:
@@ -382,8 +427,8 @@ def delete_folder(folder_id: str, project_root: str | None = None) -> list[str]:
                 folder.parent_id = ""
         save_folders([f for f in folders if f.id != folder_id], project_root)
         # Full load: list_conversations() strips messages, so saving those back
-        # would blank the chat history.
-        for conv in _load_all_conversations(project_root):
+        # would blank the chat history. (Rows: a metadata save leaves them alone.)
+        for conv in _load_all_conversations(project_root, include_messages=not _use_db()):
             if conv.folder_id != folder_id:
                 continue
             conv.folder_id = ""
@@ -396,7 +441,7 @@ def delete_folder(folder_id: str, project_root: str | None = None) -> list[str]:
     hub_ids = set(group_hub_ids_in(sorted(doomed_ids), project_root))
     save_folders([f for f in folders if f.id not in doomed_ids], project_root)
 
-    all_convs = _load_all_conversations(project_root)
+    all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
     by_parent: dict[str, list[Conversation]] = {}
     for conv in all_convs:
         by_parent.setdefault((conv.parent_conv_id or "").strip(), []).append(conv)
@@ -468,7 +513,7 @@ def remap_conversation_file_paths(
 ) -> int:
     """Update stored ducky file paths after a project file move/rename."""
     changed = 0
-    for conv in _load_all_conversations(project_root):
+    for conv in _load_all_conversations(project_root, include_messages=not _use_db()):
         next_path = remap_conversation_file_path(conv.file_path, from_path, to_path)
         if next_path != norm_file_path(conv.file_path):
             conv.file_path = next_path
@@ -485,6 +530,9 @@ def conversation_path(conv_id: str, project_root: str | None = None) -> Path:
 
 
 def load_conversation(conv_id: str, project_root: str | None = None) -> Conversation | None:
+    if _use_db():
+        doc = _repo().conv_get(conv_id, project_id=_project_id(project_root), with_messages=True)
+        return Conversation.from_dict(doc) if doc is not None else None
     meta = conversation_path(conv_id, project_root)
     if not meta.is_file():
         return None
@@ -495,6 +543,15 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
     except (json.JSONDecodeError, OSError):
         pass
     return None
+
+
+def conversation_title(conv_id: str, project_root: str | None = None) -> str:
+    """The sidebar title only; never loads message bodies on the row store."""
+    if _use_db():
+        doc = _repo().conv_get(conv_id, project_id=_project_id(project_root), with_messages=False)
+        return str((doc or {}).get("title") or "").strip()
+    conv = load_conversation(conv_id, project_root)
+    return str(getattr(conv, "title", "") or "").strip() if conv is not None else ""
 
 
 def sync_skill_snapshot(
@@ -541,6 +598,9 @@ def save_conversation(conv: Conversation, project_root: str | None = None, *, to
     with _conversation_lock(conv.id):
         if touch_updated:
             conv.updated = time.time()
+        if _use_db():
+            _save_conversation_rows(conv, project_root)
+            return
         path = conversation_path(conv.id, project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         t0 = time.perf_counter()
@@ -573,6 +633,50 @@ def save_conversation(conv: Conversation, project_root: str | None = None, *, to
             )
         except Exception:
             pass
+
+
+def _save_conversation_rows(conv: Conversation, project_root: str | None) -> None:
+    """ADR 0003: one row per message. A metadata stub (no messages) or a stub that
+    lost the assistant row never blanks a stored transcript — same guard as the
+    file store, without reading the transcript back."""
+    t0 = time.perf_counter()
+    repo = _repo()
+    project_id = _project_id(project_root)
+    incoming = list(getattr(conv, "messages", None) or [])
+    stored_count, stored_has_assistant = repo.conv_message_summary(conv.id)
+    messages: list[dict[str, Any]] | None = incoming
+    if stored_count and not incoming:
+        messages = None
+    elif stored_count and stored_has_assistant and not any(
+        isinstance(m, dict) and m.get("role") == "assistant" for m in incoming
+    ):
+        messages = None
+    doc = conv.to_dict()
+    if messages is not None:
+        stats = _stats_for(messages)
+        conv.tool_call_count = doc["tool_call_count"] = stats["tool_call_count"]
+        conv.file_count = doc["file_count"] = stats["file_count"]
+    else:
+        current = repo.conv_get(conv.id, project_id=project_id, with_messages=False)
+        if current is not None:
+            doc["tool_call_count"] = current.get("tool_call_count", doc["tool_call_count"])
+            doc["file_count"] = current.get("file_count", doc["file_count"])
+    result = repo.conv_save(project_id, doc, messages=messages)
+    if messages is None:
+        conv.messages = repo.messages_get(conv.id)
+    try:
+        from frontend.perf_trace import trace
+
+        trace(
+            "conv_save",
+            conv.id,
+            (time.perf_counter() - t0) * 1000.0,
+            bytes=int(result.get("bytes", 0)),
+            message_count=len(conv.messages or []),
+            rows=int(result.get("inserted", 0)) + int(result.get("updated", 0)),
+        )
+    except Exception:
+        pass
 
 
 def all_available_tool_ids() -> list[str]:
@@ -641,11 +745,7 @@ def create_conversation(
         title=(title.strip()[:120] if title.strip() else "New ducky"),
         created=now,
         updated=now,
-        sort_order=max(
-            (c.sort_order for c in list_conversations(folder_id or "", root)),
-            default=-1.0,
-        )
-        + 1.0,
+        sort_order=_next_sort_order(folder_id or "", root),
         provider=provider_value,
         model=model_value,
         skill_snapshot=snapshot,
@@ -668,6 +768,12 @@ def create_conversation(
     _apply_disabled_tool_ids_to_conv(conv, disabled_tool_ids or [])
     save_conversation(conv, root)
     return conv
+
+
+def _next_sort_order(folder_id: str, project_root: str | None) -> float:
+    if _use_db():
+        return _repo().conv_max_sort_order(_project_id(project_root), folder_id) + 1.0
+    return max((c.sort_order for c in list_conversations(folder_id, project_root)), default=-1.0) + 1.0
 
 
 def _apply_tool_ids_to_conv(conv: Conversation, tool_ids: list[str]) -> None:
@@ -724,6 +830,20 @@ def opt_in_uefn_plugin_all_chats(plugin_id: str) -> int:
 
     pid = normalize_plugin_id(plugin_id)
     n = 0
+    if _use_db():
+        repo = _repo()
+        for project_id, data in repo.conv_list_all_projects(with_messages=False):
+            uefn = data.get("uefn_plugins")
+            if uefn is None or not isinstance(uefn, list):
+                continue
+            ids = [str(x) for x in uefn]
+            if pid in ids:
+                continue
+            data["uefn_plugins"] = ids + [pid]
+            data["prompt_cache_snapshot"] = None
+            repo.conv_save(project_id, data, messages=None)
+            n += 1
+        return n
     for meta in _iter_all_conversation_meta_paths():
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
@@ -746,6 +866,14 @@ def opt_in_uefn_plugin_all_chats(plugin_id: str) -> int:
 
 def invalidate_all_projects_conversation_caches() -> None:
     """Clear frozen prompt snapshots for every chat across all projects."""
+    if _use_db():
+        repo = _repo()
+        for project_id, data in repo.conv_list_all_projects(with_messages=False):
+            if data.get("prompt_cache_snapshot") is None:
+                continue
+            data["prompt_cache_snapshot"] = None
+            repo.conv_save(project_id, data, messages=None)
+        return
     for meta in _iter_all_conversation_meta_paths():
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
@@ -924,7 +1052,7 @@ def invalidate_all_conversation_caches(project_root: str | None = None) -> None:
     """Clear frozen prompt snapshots for every chat in the project."""
     from backend.agent.prompt_cache import invalidate_conv_cache
 
-    for conv in _load_all_conversations(project_root):
+    for conv in _load_all_conversations(project_root, include_messages=not _use_db()):
         invalidate_conv_cache(conv)
         save_conversation(conv, project_root, touch_updated=False)
 
@@ -949,10 +1077,13 @@ def set_conversation_ducky_style(
 def conversation_descendant_ids(conv_id: str, project_root: str | None = None) -> list[str]:
     """Return every persisted child/grandchild chat, cycle-safe and parent-first."""
     children: dict[str, list[str]] = {}
-    for conv in _load_all_conversations(project_root):
-        parent = (conv.parent_conv_id or "").strip()
-        if parent:
-            children.setdefault(parent, []).append(conv.id)
+    if _use_db():
+        children = _repo().conv_ids_by_parent(_project_id(project_root))
+    else:
+        for conv in _load_all_conversations(project_root):
+            parent = (conv.parent_conv_id or "").strip()
+            if parent:
+                children.setdefault(parent, []).append(conv.id)
     out: list[str] = []
     seen = {conv_id}
     queue = list(children.get(conv_id, []))
@@ -973,6 +1104,8 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
     # not leave orphaned sub-agent conversations behind.
     ids = [conv_id, *conversation_descendant_ids(conv_id, project_root)]
     for target_id in reversed(ids):
+        if _use_db():
+            _repo().conv_delete(target_id)
         conv_folder = conversation_dir(target_id, project_root, _conversations_dir(project_root))
         if conv_folder.is_dir():
             try:
@@ -1158,7 +1291,7 @@ def move_conversation(conv_id: str, folder_id: str, project_root: str | None = N
     # orphaned top-level chats and archived agents remain addressable.
     cascade = is_archive_folder_id(target_folder) or is_archive_folder_id(conv.folder_id)
     ids = [conv_id, *conversation_descendant_ids(conv_id, project_root)] if cascade else [conv_id]
-    by_id = {c.id: c for c in _load_all_conversations(project_root)}
+    by_id = {c.id: c for c in _load_all_conversations(project_root, include_messages=not _use_db())}
     by_id[conv.id] = conv
     for target_id in ids:
         target = by_id.get(target_id)
@@ -1207,7 +1340,7 @@ def apply_sidebar_layout(
     if not chat_updates:
         return
 
-    all_convs = _load_all_conversations(project_root)
+    all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
     by_conv_id = {c.id: c for c in all_convs}
     for conv_id, row in chat_updates.items():
         conv = by_conv_id.get(conv_id)

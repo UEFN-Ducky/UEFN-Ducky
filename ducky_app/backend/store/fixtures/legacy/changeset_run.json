@@ -1,0 +1,73 @@
+{
+ "schema_version": 1,
+ "run_id": "human:2026-09-10",
+ "conv_id": "",
+ "profile_id": "",
+ "ducky_name": "You",
+ "model": "",
+ "coding_agent": "",
+ "group_id": "",
+ "leader_conv_id": "",
+ "source": "user",
+ "lane": null,
+ "started": 1789087317.7815475,
+ "ended": 1789087317.781548,
+ "status": "done",
+ "archived": false,
+ "seen": {
+  "Content/Hello.verse": {
+   "hash": "63f6f7f806aee380",
+   "ts": 1789087318.6918843
+  }
+ },
+ "entries": [
+  {
+   "seq": 1,
+   "ts": 1789087317.769689,
+   "path": "Content/Hello.verse",
+   "op": "create",
+   "from_path": null,
+   "trash_token": null,
+   "tool": "gen",
+   "before_hash": "",
+   "after_hash": "39c0dc605e3c0bdb",
+   "before_entry_id": null,
+   "after_entry_id": null,
+   "before_blob": null,
+   "after_blob": "39c0dc605e3c0bdb",
+   "lines_added": 2,
+   "lines_removed": 0,
+   "in_lane": null,
+   "conflict": null,
+   "reverted": false,
+   "reverted_by_run": null,
+   "outcome": "ok",
+   "reason": null,
+   "editor": null
+  },
+  {
+   "seq": 2,
+   "ts": 1789087318.6918843,
+   "path": "Content/Hello.verse",
+   "op": "write",
+   "from_path": null,
+   "trash_token": null,
+   "tool": "gen",
+   "before_hash": "39c0dc605e3c0bdb",
+   "after_hash": "63f6f7f806aee380",
+   "before_entry_id": null,
+   "after_entry_id": null,
+   "before_blob": "39c0dc605e3c0bdb",
+   "after_blob": "63f6f7f806aee380",
+   "lines_added": 1,
+   "lines_removed": 0,
+   "in_lane": null,
+   "conflict": null,
+   "reverted": false,
+   "reverted_by_run": null,
+   "outcome": "ok",
+   "reason": null,
+   "editor": null
+  }
+ ]
+}
