@@ -16,6 +16,7 @@ import {
 import { autoStartPending, isCompleted, markTourCompleted, registerTour, startTour, unregisterTour } from "./WalkthroughService";
 import { WalkthroughOverlay } from "./WalkthroughOverlay";
 import { openCodingAgentLoginUi } from "./openCodingAgentLogin";
+import { newlyEnabledForWalkthrough, rememberEnabledPlugin } from "./firstEnable";
 import {
   ensureStarterLlmGateways,
   peekStarterLlmOnboard,
@@ -27,7 +28,6 @@ const registeredPluginTourIds = new Set<string>();
 
 export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
   const contrib = usePluginContributions();
-  const prevEnabled = useRef<Set<string> | null>(null);
   const shellArmed = useRef(false);
 
   useEffect(() => {
@@ -67,15 +67,12 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
     }
   }, [contrib]);
 
-  // First-enable: when a plugin appears in enabled_ids, start its tour once.
+  // First-enable: one new slug after the session snapshot. Store updates that
+  // drop/reload enabled_ids must not look like a brand-new Enable.
   useEffect(() => {
     if (!contrib.ready) return;
-    const enabled = new Set(contrib.enabled_ids.map((id) => id.trim().toLowerCase()).filter(Boolean));
-    const prev = prevEnabled.current;
-    prevEnabled.current = enabled;
-    if (!prev) return; // skip initial hydrate — only react to transitions
-    for (const id of enabled) {
-      if (prev.has(id)) continue;
+    const fresh = newlyEnabledForWalkthrough(contrib.enabled_ids);
+    for (const id of fresh) {
       if (shouldSuppressPluginWalkthrough(id)) continue;
       const tourId = pluginTourId(id);
       if (isCompleted(tourId)) continue;
@@ -88,7 +85,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
       if (!row) continue;
       markTourCompleted(tourId);
       window.setTimeout(() => {
-        void startTour(tourId, { force: true });
+        void startTour(tourId);
       }, 500);
     }
   }, [contrib]);
@@ -131,6 +128,7 @@ export function WalkthroughHost({ hasProject }: { hasProject: boolean }) {
 /** Call after Store enable succeeds so a tour can start even if contrib refresh is slow. */
 export function maybeStartPluginWalkthrough(pluginId: string): void {
   if (shouldSuppressPluginWalkthrough(pluginId)) return;
+  rememberEnabledPlugin(pluginId);
   const tourId = pluginTourId(pluginId);
   if (isCompleted(tourId)) return;
   markTourCompleted(tourId);

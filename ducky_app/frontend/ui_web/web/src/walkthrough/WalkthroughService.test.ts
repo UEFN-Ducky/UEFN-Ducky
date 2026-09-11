@@ -77,10 +77,25 @@ describe("WalkthroughService", () => {
     expect(isCompleted("app.shell")).toBe(true);
     expect(isCompleted("settings.store")).toBe(true);
     expect(isCompleted("llms.setup")).toBe(true);
+    expect(isCompleted("plugin.anthropic")).toBe(true);
     expect(isCompleted("chat.composer")).toBe(false);
     expect(isCompleted("settings.core")).toBe(false);
     await vi.advanceTimersByTimeAsync(500);
     expect(getWalkthroughState().active).toBe(false);
+  });
+
+  it("skip on a starter gateway tour dismisses the other starter gateways", async () => {
+    registerTour({
+      id: "plugin.anthropic",
+      steps: [{ target: "a", title: "A", body: "a", advance: "next" }],
+    });
+    await startTour("plugin.anthropic", { force: true });
+    await skipTour();
+    expect(isCompleted("plugin.anthropic")).toBe(true);
+    expect(isCompleted("plugin.cursor")).toBe(true);
+    expect(isCompleted("plugin.openai")).toBe(true);
+    expect(isCompleted("llms.setup")).toBe(true);
+    expect(isCompleted("app.shell")).toBe(false);
   });
 
   it("skip on chat marks only that tour", async () => {

@@ -221,6 +221,7 @@ export async function prevStep(): Promise<void> {
 }
 
 const HOST_CHAIN = ["app.shell", "settings.store", "llms.setup"] as const;
+const STARTER_PLUGIN_TOURS = ["plugin.anthropic", "plugin.cursor", "plugin.openai"] as const;
 
 async function finishTour(reason: "complete" | "skip"): Promise<void> {
   const id = activeTourId;
@@ -236,6 +237,11 @@ async function finishTour(reason: "complete" | "skip"): Promise<void> {
     // Skip = dismiss the whole first-run chain, not "advance to the next tour".
     if (reason === "skip" && (HOST_CHAIN as readonly string[]).includes(id)) {
       for (const hid of HOST_CHAIN) next[hid] = true;
+      for (const pid of STARTER_PLUGIN_TOURS) next[pid] = true;
+    }
+    if (reason === "skip" && (STARTER_PLUGIN_TOURS as readonly string[]).includes(id)) {
+      for (const pid of STARTER_PLUGIN_TOURS) next[pid] = true;
+      next["llms.setup"] = true;
     }
     writeCompleted(next);
   }
