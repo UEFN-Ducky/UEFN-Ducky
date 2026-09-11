@@ -24,7 +24,7 @@ interface DuckyModelPickerProps {
   /** Show a "×" that resets the selection to "" (fall back to the default). */
   allowClear?: boolean;
   menuPlacement?: "top" | "bottom";
-  /** Hide models that cannot run tools (default on for agent profiles). */
+  /** Hide models that cannot run tools. Off so Ollama / local catalogs stay visible. */
   requireTools?: boolean;
 }
 
@@ -64,7 +64,7 @@ export function DuckyModelPicker({
   leadingIcon,
   allowClear = true,
   menuPlacement,
-  requireTools = true,
+  requireTools = false,
 }: DuckyModelPickerProps) {
   const value = (model || "").trim();
   const contrib = usePluginContributions();

@@ -215,6 +215,7 @@ export function LanguagesTab() {
           placeholder="Default model (Settings → LLMs)"
           hint="Same catalog as Default Model. Use an installed gateway (Anthropic, OpenAI, Google, Ollama, …) for UI + file translate."
           allowClear
+          requireTools={false}
           menuPlacement="bottom"
         />
         <label
