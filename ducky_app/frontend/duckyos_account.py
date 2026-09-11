@@ -626,6 +626,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
         }
         _save_blob(blob)
         start_presence_heartbeat()
+        start_rpc_waiter()
         status = get_status()
         status["ok"] = True
         return status
@@ -642,6 +643,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
 def logout() -> dict[str, Any]:
     _BROWSER_LOGIN_CANCEL.set()
     stop_presence_heartbeat()
+    stop_rpc_waiter()
     blob = _load_blob()
     base = str(blob.get("base_url") or "").rstrip("/")
     if base and blob.get("session_value"):
@@ -808,6 +810,31 @@ _PRESENCE_STOP = __import__("threading").Event()
 _PRESENCE_THREAD: Any = None
 _PRESENCE_LOCK = __import__("threading").Lock()
 _PRESENCE_INTERVAL_S = 90.0
+_RPC_STOP = __import__("threading").Event()
+_RPC_THREAD: Any = None
+_RPC_LOCK = __import__("threading").Lock()
+RPC_ALLOWLIST = frozenset(
+    {
+        "list_folders",
+        "list_conversations",
+        "list_all_conversations",
+        "load_messages",
+        "create_conversation",
+        "rename_conversation",
+        "move_conversation",
+        "delete_conversation",
+        "send_message",
+        "cancel_agent",
+        "group_create",
+        "group_add_member",
+        "group_set_leader",
+        "group_invite",
+        "group_members",
+        "list_changesets",
+        "get_changeset",
+        "remote_snapshot",
+    }
+)
 
 
 def _presence_project_label() -> str:
@@ -883,10 +910,150 @@ def start_presence_heartbeat() -> None:
             target=_loop, daemon=True, name="duckyos-presence"
         )
         _PRESENCE_THREAD.start()
+        start_rpc_waiter()
 
 
 def stop_presence_heartbeat() -> None:
     _PRESENCE_STOP.set()
+    stop_rpc_waiter()
+
+
+def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run one allowlisted PanelApi method for the website mailbox."""
+    name = (method or "").strip()
+    if name not in RPC_ALLOWLIST:
+        return {"ok": False, "error": "method not allowed"}
+    import inspect
+    import json as _json
+
+    from frontend.ui_web.panel_api import PanelApi
+
+    if name == "remote_snapshot":
+        try:
+            return {"ok": True, "result": _remote_snapshot()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    fn = getattr(PanelApi(), name, None)
+    if not callable(fn):
+        return {"ok": False, "error": "method not allowed"}
+    kwargs: dict[str, Any] = {}
+    raw = args if isinstance(args, dict) else {}
+    for pname, param in inspect.signature(fn).parameters.items():
+        if pname in raw:
+            kwargs[pname] = raw[pname]
+        elif param.default is inspect.Parameter.empty and param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return {"ok": False, "error": f"missing argument: {pname}"}
+    try:
+        result = fn(**kwargs)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "result": _json.loads(_json.dumps(result, default=str))}
+
+
+def _remote_snapshot() -> dict[str, Any]:
+    """One disk read for the browser cache. Nothing is stored on the site."""
+    import json as _json
+
+    from frontend.ui_web.panel_api import PanelApi
+
+    api = PanelApi()
+    convs = list(api.list_all_conversations())
+    messages: dict[str, Any] = {}
+    groups: dict[str, Any] = {}
+    for row in convs:
+        if not isinstance(row, dict):
+            continue
+        cid = str(row.get("id") or "")
+        if not cid:
+            continue
+        messages[cid] = api.load_messages(cid)
+        if row.get("is_group"):
+            groups[cid] = api.group_members(cid)
+    ledger = list(api.list_changesets(limit=50))
+    changesets: dict[str, Any] = {}
+    for row in ledger:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("run_id") or "")
+        if rid:
+            changesets[rid] = api.get_changeset(rid)
+    return _json.loads(
+        _json.dumps(
+            {
+                "conversations": convs,
+                "messages": messages,
+                "groups": groups,
+                "ledger": ledger,
+                "changesets": changesets,
+            },
+            default=str,
+        )
+    )
+
+
+def _poll_desktop_rpc_once() -> bool:
+    """Long-poll one mailbox request. True if a job was handled."""
+    pending = _plugin_collect(
+        "uefn-ducky",
+        "desktop-rpc-wait",
+        {},
+        unavailable_code="rpc_unavailable",
+        unavailable_msg="Remote mailbox plugin is not active on this tenant yet.",
+        error_code="rpc_wait_failed",
+        timeout=25.0,
+    )
+    if not pending.get("pending"):
+        return False
+    rid = str(pending.get("id") or "")
+    method = str(pending.get("method") or "")
+    args = pending.get("args")
+    out = dispatch_desktop_rpc(method, args if isinstance(args, dict) else {})
+    body: dict[str, Any] = {"id": rid, "ok": bool(out.get("ok"))}
+    if "result" in out:
+        body["result"] = out["result"]
+    if out.get("error"):
+        body["error"] = out["error"]
+    _plugin_collect(
+        "uefn-ducky",
+        "desktop-rpc-result",
+        body,
+        unavailable_code="rpc_unavailable",
+        unavailable_msg="Remote mailbox plugin is not active on this tenant yet.",
+        error_code="rpc_result_failed",
+        timeout=15.0,
+    )
+    return True
+
+
+def start_rpc_waiter() -> None:
+    """Daemon thread: while logged in, long-poll the website mailbox."""
+    global _RPC_THREAD
+    with _RPC_LOCK:
+        if _RPC_THREAD is not None and _RPC_THREAD.is_alive():
+            return
+        if not (_load_blob().get("device_key") or _load_blob().get("session_value")):
+            return
+        _RPC_STOP.clear()
+
+        def _loop() -> None:
+            while not _RPC_STOP.is_set():
+                try:
+                    _poll_desktop_rpc_once()
+                except Exception:
+                    _RPC_STOP.wait(2.0)
+
+        _RPC_THREAD = __import__("threading").Thread(
+            target=_loop, daemon=True, name="duckyos-rpc-wait"
+        )
+        _RPC_THREAD.start()
+
+
+def stop_rpc_waiter() -> None:
+    _RPC_STOP.set()
 
 
 def _plugin_collect(

@@ -189,6 +189,9 @@ export function AccountTab() {
               <button type="button" className="account-tab-btn account-tab-btn--primary" onClick={handleOpenAdmin}>
                 Open Admin in browser
               </button>
+              <button type="button" className="account-tab-btn" onClick={() => openTeamsSite("/ducky")}>
+                Open remote in browser
+              </button>
               <button
                 type="button"
                 className="account-tab-btn account-tab-btn--danger"

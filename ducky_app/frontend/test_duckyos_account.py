@@ -79,6 +79,14 @@ def test_store_item_versions_strips_empty_and_keeps_changelog() -> None:
     ]
 
 
+def test_dispatch_desktop_rpc_allowlist() -> None:
+    from frontend.duckyos_account import dispatch_desktop_rpc
+
+    denied = dispatch_desktop_rpc("execute_python", {"code": "1"})
+    assert denied["ok"] is False
+    assert "not allowed" in str(denied.get("error") or "")
+
+
 def test_store_item_versions_needs_slug() -> None:
     from frontend.duckyos_account import store_item_versions
 
@@ -92,4 +100,5 @@ if __name__ == "__main__":
     test_auto_apply_store_updates_skips_local_and_unpaid()
     test_store_item_versions_strips_empty_and_keeps_changelog()
     test_store_item_versions_needs_slug()
+    test_dispatch_desktop_rpc_allowlist()
     print("ok")
