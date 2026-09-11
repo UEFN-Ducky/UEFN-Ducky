@@ -40,7 +40,9 @@ def jpeg_bytes(image: Any, *, max_edge: int = _MAX_EDGE) -> bytes:
         scale = max_edge / edge
         img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.BILINEAR)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=65, optimize=True)
+    # ponytail: skip optimize=True (second Huffman pass) — encode speed matters
+    # more than ~2% size for the 15fps remote view stream.
+    img.save(buf, format="JPEG", quality=65)
     return buf.getvalue()
 
 
@@ -114,7 +116,8 @@ def inject_pointer(
     box = _window_box(hwnd)
     if not box:
         return
-    bring_to_front(hwnd)
+    if kind != "move":
+        bring_to_front(hwnd)
     x, y = map_norm_to_screen(box, nx, ny)
     import ctypes
 

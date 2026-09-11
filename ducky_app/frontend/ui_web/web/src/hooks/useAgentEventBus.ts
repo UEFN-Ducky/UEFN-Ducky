@@ -87,10 +87,19 @@ let busInstalled = false;
 let httpPollStarted = false;
 let httpCursor = 0;
 
+const EVENT_POLL_RETRY_MIN_MS = 500;
+const EVENT_POLL_RETRY_MAX_MS = 8000;
+
+export function nextEventPollRetryMs(prev: number): number {
+  const base = prev > 0 ? prev : EVENT_POLL_RETRY_MIN_MS;
+  return Math.min(base * 2, EVENT_POLL_RETRY_MAX_MS);
+}
+
 function startHttpEventPoll() {
   if (httpPollStarted) return;
   httpPollStarted = true;
   const poll = async () => {
+    let retryMs = EVENT_POLL_RETRY_MIN_MS;
     while (httpPollStarted) {
       try {
         const response = await fetch(`/__panel_events?since=${httpCursor}`, {
@@ -99,6 +108,7 @@ function startHttpEventPoll() {
         if (!response.ok) throw new Error(`event poll ${response.status}`);
         const body = (await response.json()) as { cursor?: number; events?: AgentEvent[] };
         if (typeof body.cursor === "number") httpCursor = body.cursor;
+        retryMs = EVENT_POLL_RETRY_MIN_MS;
         if (Array.isArray(body.events)) {
           for (const event of body.events) {
             const kind = String(event?.type || "");
@@ -114,7 +124,8 @@ function startHttpEventPoll() {
           }
         }
       } catch {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, retryMs));
+        retryMs = nextEventPollRetryMs(retryMs);
       }
     }
   };

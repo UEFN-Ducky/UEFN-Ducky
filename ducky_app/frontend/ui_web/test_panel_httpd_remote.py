@@ -87,4 +87,5 @@ def test_http11_keepalive_and_backlog():
     assert "def end_headers(self)" not in src
     assert 'self.send_header("Connection", "close")' not in src
     assert httpd._PanelServer.request_queue_size >= 128
-    assert "timeout = 120" in src
+    assert "timeout = 30" in src
+    assert "1.0 / 15" in src

@@ -245,12 +245,18 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
             stop.set()
 
     threading.Thread(target=_reader, daemon=True, name="window-stream-in").start()
+    # 15 fps target: wait only leftover after capture+send. A fixed 200ms
+    # extra wait on top of JPEG encode made orbit look like skipped frames.
+    interval = 1.0 / 15
     try:
         while not stop.is_set():
+            t0 = time.monotonic()
             raw = capture_window_jpeg(hwnd)
             if raw:
                 _send(send_ws_binary, raw)
-            stop.wait(0.2)
+            leftover = interval - (time.monotonic() - t0)
+            if leftover > 0:
+                stop.wait(leftover)
     except Exception:
         pass
     finally:
@@ -340,7 +346,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = _HTTP_PROTOCOL
-            timeout = 120
+            timeout = 30
 
             def log_message(self, format: str, *args: object) -> None:
                 return

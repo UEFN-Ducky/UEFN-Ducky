@@ -9,7 +9,8 @@ from frontend import remote_tunnel as rt
 
 def test_quick_tunnel_reuses_origin_keepalive():
     src = Path(rt.__file__).read_text(encoding="utf-8")
-    assert "--proxy-keepalive-connections" not in src
+    assert "--proxy-keepalive-connections" in src
+    assert '"8"' in src or "\n                        \"8\"," in src
     assert "--no-chunked-encoding" in src
     assert "named_reason" in src
 

@@ -86,21 +86,39 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     let gotFrame = false;
+    let frameGen = 0;
+    const paint = (src: CanvasImageSource, w: number, h: number, gen: number) => {
+      if (gen !== frameGen) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      canvas.getContext("2d")?.drawImage(src, 0, 0);
+      gotFrame = true;
+      setFailed(false);
+    };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") return;
+      const gen = ++frameGen;
       const blob = new Blob([ev.data], { type: "image/jpeg" });
+      if (typeof createImageBitmap === "function") {
+        void createImageBitmap(blob).then(
+          (bmp) => {
+            try {
+              paint(bmp, bmp.width, bmp.height, gen);
+            } finally {
+              bmp.close();
+            }
+          },
+          () => {},
+        );
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          if (canvas.width !== img.width) canvas.width = img.width;
-          if (canvas.height !== img.height) canvas.height = img.height;
-          canvas.getContext("2d")?.drawImage(img, 0, 0);
-        }
+        paint(img, img.width, img.height, gen);
         URL.revokeObjectURL(url);
-        gotFrame = true;
-        setFailed(false);
       };
       img.onerror = () => URL.revokeObjectURL(url);
       img.src = url;

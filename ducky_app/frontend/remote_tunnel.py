@@ -239,7 +239,16 @@ def _loop() -> None:
                 _set_status(mode="named", hostname=host, running=True, error="", named_reason="")
                 _run_cloudflared(
                     exe,
-                    ["tunnel", "--no-autoupdate", "run", "--token", str(row["token"])],
+                    [
+                        "tunnel",
+                        "--no-autoupdate",
+                        "--proxy-keepalive-connections",
+                        "8",
+                        "--no-chunked-encoding",
+                        "run",
+                        "--token",
+                        str(row["token"]),
+                    ],
                 )
             else:
                 _set_status(mode="quick", running=False)
@@ -248,6 +257,8 @@ def _loop() -> None:
                     [
                         "tunnel",
                         "--no-autoupdate",
+                        "--proxy-keepalive-connections",
+                        "8",
                         "--no-chunked-encoding",
                         "--url",
                         url,

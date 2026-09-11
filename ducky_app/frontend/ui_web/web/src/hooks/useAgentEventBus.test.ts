@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../types/panel";
-import { coalesceAgentEvents } from "./useAgentEventBus";
+import { coalesceAgentEvents, nextEventPollRetryMs } from "./useAgentEventBus";
+
+describe("nextEventPollRetryMs", () => {
+  it("doubles from 500ms and caps at 8s", () => {
+    expect(nextEventPollRetryMs(500)).toBe(1000);
+    expect(nextEventPollRetryMs(4000)).toBe(8000);
+    expect(nextEventPollRetryMs(8000)).toBe(8000);
+  });
+});
 
 describe("coalesceAgentEvents", () => {
   it("joins adjacent high-frequency deltas without crossing tool boundaries", () => {

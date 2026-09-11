@@ -269,7 +269,7 @@ export function AccountTab() {
             {remote?.mode === "quick" ? (
               <p className="account-tab-meta">
                 Temporary Cloudflare address. Your host is{" "}
-                <code>u-….app.uefnducky.org</code> after a tunnel token is saved at Admin →
+                <code>u-….uefnducky.org</code> after a tunnel token is saved at Admin →
                 UEFN Ducky → Remote.
               </p>
             ) : null}
