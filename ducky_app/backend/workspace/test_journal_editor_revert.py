@@ -827,3 +827,22 @@ def test_redo_remap_uses_the_new_spawn_path(env, monkeypatch) -> None:
     assert any(p[0] == "spawn_actor" for p in posted)
     transforms = [p[1] for p in posted if p[0] == "set_actor_transform"]
     assert transforms and transforms[-1]["actor_path"] == "/Game/NEW"
+
+
+def test_revert_program_leaves_other_programs(env) -> None:
+    root, journal, posted = env
+    token = as_run("r1")
+    try:
+        runtime.get_writer().write_text("Content/Verse/a.verse", "v1\n")
+        rec.record("set_actor_transform", {"actor_path": "/x"}, body(sidecar()), ok=True)
+    finally:
+        identity.reset(token)
+    result = journal.revert_run("r1", project_root=str(root), program="uefn")
+    assert result["ok"] and result["reverted"]
+    run = journal.get_run("r1", project_root=str(root))
+    files = [e for e in run["entries"] if e.get("op") != "editor"]
+    editors = [e for e in run["entries"] if e.get("op") == "editor"]
+    assert files and not files[0].get("reverted")
+    assert editors and editors[0].get("reverted") is True
+    assert (root / "Content" / "Verse" / "a.verse").read_text(encoding="utf-8") == "v1\n"
+    assert posted

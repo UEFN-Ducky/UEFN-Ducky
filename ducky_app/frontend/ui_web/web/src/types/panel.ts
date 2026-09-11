@@ -2131,7 +2131,7 @@ export interface PanelApi {
   get_changeset?(run_id: string): Promise<ChangesetRunDto>;
   get_changeset_entry_contents?(run_id: string, seq: number): Promise<{ path: string; before: string | null; after: string | null }>;
   revert_changeset_entry?(run_id: string, seq: number, force?: boolean, step?: boolean): Promise<ChangesetRevertResult>;
-  revert_changeset?(run_id: string, force?: boolean): Promise<ChangesetRevertResult>;
+  revert_changeset?(run_id: string, force?: boolean, program?: string): Promise<ChangesetRevertResult>;
   export_changeset?(run_id: string): Promise<Record<string, unknown>>;
   archive_changesets?(
     conv_id?: string,

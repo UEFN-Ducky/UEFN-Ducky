@@ -612,14 +612,24 @@ class FileChangeJournal:
         project_root: str,
         force: bool = False,
         actor: Mapping[str, Any] | None = None,
+        program: str = "",
     ) -> dict[str, Any]:
-        """Undo every entry of a run, newest first, one restore per path."""
+        """Undo every entry of a run, newest first, one restore per path.
+
+        ``program`` limits the undo to that program (uefn / blender / file / …).
+        """
         run = self.get_run(run_id, project_root=project_root)
         self._require_revertable(run)
+        want = (program or "").strip().lower()
         entries = [
             e for e in run.get("entries", [])
             if not e.get("reverted") and e.get("outcome", OUTCOME_OK) == OUTCOME_OK
         ]
+        if want:
+            from backend.workspace.plugin_revert import program_of_entry
+
+            entries = [e for e in entries if program_of_entry(e).strip().lower() == want]
+            return self._revert_entries(run, entries, project_root=project_root, force=force, actor=actor)
         if not entries and str(run.get("source") or "") != identity.SOURCE_REVERT:
             applied = [
                 e for e in run.get("entries", [])

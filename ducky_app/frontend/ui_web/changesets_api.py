@@ -138,7 +138,7 @@ def revert_entry(run_id: str, seq: int, *, force: bool = False, step: bool = Fal
     )
 
 
-def revert_run(run_id: str, *, force: bool = False) -> dict[str, Any]:
+def revert_run(run_id: str, *, force: bool = False, program: str = "") -> dict[str, Any]:
     blocked = _refuse_live_run(run_id)
     if blocked:
         return blocked
@@ -146,7 +146,13 @@ def revert_run(run_id: str, *, force: bool = False) -> dict[str, Any]:
     if journal is None:
         raise ValueError("The change journal is disabled.")
     actor = identity.user_writer(tool="changeset_revert")
-    return journal.revert_run((run_id or "").strip(), project_root=_project_root(), force=bool(force), actor=actor)
+    return journal.revert_run(
+        (run_id or "").strip(),
+        project_root=_project_root(),
+        force=bool(force),
+        actor=actor,
+        program=(program or "").strip(),
+    )
 
 
 def export_run(run_id: str) -> dict[str, Any]:

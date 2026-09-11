@@ -7,6 +7,7 @@ import {
   changesetFilePaths,
   changesetRunSummary,
   clusterRowsByProgram,
+  clusterRowsByProgramAndKind,
   conflictCountsByConv,
   editorVerb,
   formatSmartRevertBrief,
@@ -398,6 +399,19 @@ describe("program slots", () => {
     ]);
     const clustered = clusterRowsByProgram(runTimeline(r));
     expect(clustered.map(programOfRow)).toEqual(["file", "file", "uefn", "uefn"]);
+  });
+
+  it("clusters kinds inside each program", () => {
+    const r = withEntries([
+      editorEntry({ ts: 1, seq: 1, path: "uefn://actor/A/transform" }),
+      editorEntry(
+        { ts: 2, seq: 2, path: "uefn://entity/E/exists" },
+        { kind: "entity", command: "create_entity", facet: "exists", summary: "created E" },
+      ),
+      editorEntry({ ts: 3, seq: 3, path: "uefn://actor/B/transform" }),
+    ]);
+    const clustered = clusterRowsByProgramAndKind(runTimeline(r));
+    expect(clustered.map((row) => rowSortKind(row))).toEqual(["actor", "actor", "entity"]);
   });
 
   it("writes a Smart Revert brief that names the program and the later writer", () => {

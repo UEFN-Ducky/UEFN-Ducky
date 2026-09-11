@@ -449,15 +449,87 @@
   background: var(--tab-hover);
 }
 
-.changes-program-head {
+.changes-program-head,
+.changes-kind-head {
   display: flex;
   align-items: center;
-  height: 22px;
-  padding: 0 14px 0 26px;
+  gap: 6px;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px 0 22px;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.changes-kind-head {
+  height: 22px;
+  padding-left: 34px;
+  font-size: 10px;
+}
+
+.changes-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-group-toggle:hover {
+  color: var(--fg);
+}
+
+.changes-group-toggle:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+
+.changes-group-chevron {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.changes-group-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.changes-group-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-group-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.changes-program-head .changes-run-actions {
+  margin-left: auto;
+}
+
+.changes-program-head .changeset-btn--icon {
+  width: 22px;
+  height: 22px;
 }
 
 .changes-smart-list {

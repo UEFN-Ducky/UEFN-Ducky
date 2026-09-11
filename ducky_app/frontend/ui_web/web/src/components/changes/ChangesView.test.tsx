@@ -11,6 +11,7 @@ const clearChangesets = vi.fn();
 const archiveChangesets = vi.fn();
 const deleteEntries = vi.fn();
 const revertEntry = vi.fn();
+const revertRunFn = vi.fn();
 
 vi.mock("../../hooks/usePanelApi", () => ({
   getApi: () => ({
@@ -20,6 +21,7 @@ vi.mock("../../hooks/usePanelApi", () => ({
     archive_changesets: archiveChangesets,
     delete_changeset_entries: deleteEntries,
     revert_changeset_entry: revertEntry,
+    revert_changeset: revertRunFn,
   }),
 }));
 vi.mock("../../hooks/useAgentEventBus", () => ({
@@ -49,6 +51,8 @@ beforeEach(() => {
   deleteEntries.mockResolvedValue({ removed: 1, kept: 0 });
   revertEntry.mockReset();
   revertEntry.mockResolvedValue({ ok: true, reverted: [1], skipped_modified: [], errors: [] });
+  revertRunFn.mockReset();
+  revertRunFn.mockResolvedValue({ ok: true, reverted: [1], skipped_modified: [], errors: [] });
   // jsdom has no ResizeObserver; the view only uses it to track the viewport.
   vi.stubGlobal(
     "ResizeObserver",
@@ -347,9 +351,38 @@ describe("ChangesView", () => {
   it("nests a run's rows by program", async () => {
     const { container } = render(<ChangesView />);
     await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
-    const heads = [...container.querySelectorAll(".changes-program-head")].map((el) => el.textContent);
+    const heads = [...container.querySelectorAll(".changes-program-head .changes-group-label")].map(
+      (el) => el.textContent,
+    );
     expect(heads).toContain("Files");
     expect(heads).toContain("UEFN");
+  });
+
+  it("collapses a program accordion and keeps the other program", async () => {
+    const { container } = render(<ChangesView />);
+    await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
+    fireEvent.click(screen.getByRole("button", { name: "UEFN, collapse" }));
+    expect(screen.queryByText("VerifyCube")).toBeNull();
+    expect(screen.getByText("shop.verse")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "UEFN, expand" }));
+    expect(screen.getByText("VerifyCube")).toBeTruthy();
+  });
+
+  it("collapses an inner kind accordion", async () => {
+    const { container } = render(<ChangesView />);
+    await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
+    expect(screen.getByRole("button", { name: "file, collapse" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "file, collapse" }));
+    expect(screen.queryByText("shop.verse")).toBeNull();
+    expect(screen.getByText("VerifyCube")).toBeTruthy();
+    expect(screen.getByText("BLOCKED")).toBeTruthy();
+  });
+
+  it("reverts only that program from the accordion button", async () => {
+    const { container } = render(<ChangesView />);
+    await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
+    fireEvent.click(screen.getByRole("button", { name: "Revert UEFN" }));
+    await waitFor(() => expect(revertRunFn).toHaveBeenCalledWith(run.run_id, false, "uefn"));
   });
 
   it("lets you revert one write from the details pager", async () => {

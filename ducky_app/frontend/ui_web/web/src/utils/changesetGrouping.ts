@@ -633,8 +633,29 @@ export function rowSortKind(row: ChangeRow): string {
   return row.kind === "file" ? "file" : (row.targetKind || "editor");
 }
 
+function clusterByKey(rows: ChangeRow[], keyOf: (row: ChangeRow) => string): ChangeRow[] {
+  const buckets = new Map<string, ChangeRow[]>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const key = keyOf(row);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+      order.push(key);
+    }
+    bucket.push(row);
+  }
+  return order.flatMap((key) => buckets.get(key) || []);
+}
+
 /** Keep time order inside each program, but emit each program once (first seen). */
 export function clusterRowsByProgram(rows: ChangeRow[]): ChangeRow[] {
+  return clusterByKey(rows, programOfRow);
+}
+
+/** Program clusters, then kind clusters inside each program. */
+export function clusterRowsByProgramAndKind(rows: ChangeRow[]): ChangeRow[] {
   const buckets = new Map<string, ChangeRow[]>();
   const order: string[] = [];
   for (const row of rows) {
@@ -647,7 +668,7 @@ export function clusterRowsByProgram(rows: ChangeRow[]): ChangeRow[] {
     }
     bucket.push(row);
   }
-  return order.flatMap((program) => buckets.get(program) || []);
+  return order.flatMap((program) => clusterByKey(buckets.get(program) || [], rowSortKind));
 }
 
 /** Sort one run's rows. Time matches the default chronological timeline. */

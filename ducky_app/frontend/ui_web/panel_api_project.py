@@ -324,10 +324,10 @@ class PanelApiProjectMixin:
 
         return changesets_api.revert_entry(run_id, seq, force=force, step=step)
 
-    def revert_changeset(self, run_id: str, force: bool = False) -> dict[str, Any]:
+    def revert_changeset(self, run_id: str, force: bool = False, program: str = "") -> dict[str, Any]:
         from frontend.ui_web import changesets_api
 
-        return changesets_api.revert_run(run_id, force=force)
+        return changesets_api.revert_run(run_id, force=force, program=program)
 
     def export_changeset(self, run_id: str) -> dict[str, Any]:
         from frontend.ui_web import changesets_api

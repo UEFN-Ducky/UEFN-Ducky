@@ -189,7 +189,7 @@ def changeset_archive(
 
 @mcp.tool()
 def changeset_revert(
-    run_id: str, seq: int = 0, force: bool = False, step: bool = False, pretty: bool = False
+    run_id: str, seq: int = 0, force: bool = False, step: bool = False, program: str = "", pretty: bool = False
 ) -> str:
     """Undo a live run's writes (or one file: pass seq). Archived runs refuse — unarchive first.
 
@@ -199,6 +199,8 @@ def changeset_revert(
 
     step=true with seq set undoes that one write only. A later unreverted write on
     the same path blocks — revert newest first.
+
+    program (uefn / blender / file / …) limits a full-run undo to that program only.
     """
     root = _project_root()
     journal = _journal()
@@ -210,7 +212,9 @@ def changeset_revert(
             run_id.strip(), int(seq), project_root=root, force=bool(force), actor=actor, step=bool(step),
         )
     else:
-        result = journal.revert_run(run_id.strip(), project_root=root, force=bool(force), actor=actor)
+        result = journal.revert_run(
+            run_id.strip(), project_root=root, force=bool(force), actor=actor, program=(program or "").strip(),
+        )
     if result.get("skipped_modified") and not force:
         result["next"] = "Some files changed since this run; re-run with force=true to restore them anyway."
     return tool_json(result, pretty=pretty)

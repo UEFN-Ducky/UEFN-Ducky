@@ -63,6 +63,20 @@ describe("promoteMarkdownToSegments", () => {
     );
   });
 
+  it("promotes labeled Blender/UEFN/Verse counts into the programs widget", () => {
+    const segs = promoteMarkdownToSegments(`## Run Summary
+- **Blender ops:** 5 (base mesh, legs, seat join, backrest join, material assign)
+- **UEFN asset creates:** 4 Blueprints (Prefabs) + 1 Material + 1 Material Instance + 1 Widget Blueprint
+- **Verse files:** 2, compiled clean (0 diagnostics via Epic VerseToolset.BuildAll)
+- **Level actors placed:** 5, across 4 outliner folders`);
+    const stats = segs.find((s) => s.kind === "block" && s.block.type === "stats");
+    expect(stats?.kind === "block" && stats.block.type === "stats" && stats.block.programs).toEqual({
+      blender: 5,
+      uefn: 9,
+      verse: 2,
+    });
+  });
+
   it("leaves unmatched bullets as markdown", () => {
     const segs = promoteMarkdownToSegments("## Inventory\n- just a normal bullet\n- another one");
     expect(segs.every((s) => s.kind === "markdown")).toBe(true);

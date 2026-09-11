@@ -40,8 +40,18 @@ function readBullets(lines: string[], start: number): { bullets: string[]; end: 
   return { bullets, end };
 }
 
+function programKeyFromLabel(label: string): RichProgramKey | null {
+  const s = label.toLowerCase();
+  if (/blender/.test(s)) return "blender";
+  if (/verse/.test(s)) return "verse";
+  if (/\bfiles?\b/.test(s)) return "file";
+  if (/uefn|level|actors?|placed/.test(s)) return "uefn";
+  return null;
+}
+
 function parseStatsBullets(bullets: string[]): Extract<RichBlock, { type: "stats" }> | null {
   const stats: Extract<RichBlock, { type: "stats" }> = { type: "stats" };
+  const counts: Partial<Record<RichProgramKey, number>> = {};
   for (const raw of bullets) {
     const text = raw.replace(BULLET, "").replace(/\*\*/g, "").trim();
     const metric = /^(editor changes|changes|blocked(?: ops)?):\s*(\d[\d,]*)(?:\s+(applied|retr(?:y|ies)))?$/i.exec(text);
@@ -53,20 +63,29 @@ function parseStatsBullets(bullets: string[]): Extract<RichBlock, { type: "stats
       continue;
     }
     const programs = /^programs:\s*(.+)$/i.exec(text);
-    if (!programs || stats.programs) return null;
-    const parts = programs[1]!.split(/\s*[·,;|]\s*/);
-    const counts: Partial<Record<RichProgramKey, number>> = {};
-    for (const part of parts) {
-      const m = /^(uefn|blender|verse|file)\s*[:=]?\s*(\d+)$/i.exec(part);
-      if (!m) return null;
-      const key = m[1]!.toLowerCase() as RichProgramKey;
-      const count = Number(m[2]);
-      if (!Number.isSafeInteger(count) || counts[key] != null) return null;
-      counts[key] = count;
+    if (programs) {
+      for (const part of programs[1]!.split(/\s*[·,;|]\s*/)) {
+        const m = /^(uefn|blender|verse|file)\s*[:=]?\s*(\d+)$/i.exec(part.trim());
+        if (!m) return null;
+        const key = m[1]!.toLowerCase() as RichProgramKey;
+        const count = Number(m[2]);
+        if (!Number.isSafeInteger(count)) return null;
+        counts[key] = (counts[key] ?? 0) + count;
+      }
+      continue;
     }
-    stats.programs = counts;
+    const labeled = /^(.+?):\s*(\d[\d,]*)\b/.exec(text);
+    const key = labeled && programKeyFromLabel(labeled[1]!);
+    if (key) {
+      const count = Number(labeled[2]!.replace(/,/g, ""));
+      if (!Number.isSafeInteger(count)) return null;
+      counts[key] = (counts[key] ?? 0) + count;
+      continue;
+    }
+    return null;
   }
-  return Object.keys(stats).length > 1 ? stats : null;
+  if (Object.keys(counts).length) stats.programs = counts;
+  return stats.changes != null || stats.blocked != null || stats.programs ? stats : null;
 }
 
 const CALLOUTS: Record<string, { tone: RichCalloutTone; title: string }> = {

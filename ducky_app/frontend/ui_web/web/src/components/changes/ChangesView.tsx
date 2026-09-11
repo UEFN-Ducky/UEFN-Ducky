@@ -14,10 +14,11 @@ import type {
 } from "../../types/panel";
 import {
   changesetRunSummary,
-  clusterRowsByProgram,
+  clusterRowsByProgramAndKind,
   formatSmartRevertBrief,
   programLabel,
   programOfRow,
+  rowSortKind,
   revertHost,
   revertFailureMessage,
   rowRedoTarget,
@@ -68,7 +69,8 @@ const LIVE_EVENT_TYPES = new Set([
 const RUN_HEADER_HEIGHT = 46;
 const CHANGE_ROW_HEIGHT = 30;
 const STEP_ROW_HEIGHT = 22;
-const PROGRAM_HEADER_HEIGHT = 22;
+const PROGRAM_HEADER_HEIGHT = 28;
+const KIND_HEADER_HEIGHT = 22;
 const OVERSCAN_PX = 320;
 
 type KindFilter = "all" | "file" | "editor" | "blocked";
@@ -119,6 +121,8 @@ interface TimelineItem {
   run: ChangesetRunDto;
   row: ChangeRow | null;
   program?: string;
+  kindHead?: string;
+  count?: number;
 }
 
 type MenuTarget =
@@ -392,6 +396,16 @@ export function ChangesView({
     });
   }, []);
 
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   /** Flat list of run headers and their rows, so one scroller virtualizes everything.
    *  Each run is an accordion: a folded run contributes only its header. */
   const { items, openRuns } = useMemo(() => {
@@ -420,22 +434,56 @@ export function ChangesView({
       shown += 1;
       if (!isOpen) continue;
       open.add(run.run_id);
-      const groupByProgram = sortKey === "time";
-      const grouped = groupByProgram ? clusterRowsByProgram(rows) : rows;
-      let lastProgram = "";
-      const multiProgram = groupByProgram && new Set(grouped.map(programOfRow)).size > 1;
+      const groupByTime = sortKey === "time";
+      const grouped = groupByTime ? clusterRowsByProgramAndKind(rows) : rows;
+      const programCounts = new Map<string, number>();
+      const kindCounts = new Map<string, number>();
+      const kindsByProgram = new Map<string, Set<string>>();
       for (const row of grouped) {
         const program = programOfRow(row);
+        const kind = rowSortKind(row);
+        programCounts.set(program, (programCounts.get(program) || 0) + 1);
+        const ck = `${program}/${kind}`;
+        kindCounts.set(ck, (kindCounts.get(ck) || 0) + 1);
+        let kinds = kindsByProgram.get(program);
+        if (!kinds) {
+          kinds = new Set();
+          kindsByProgram.set(program, kinds);
+        }
+        kinds.add(kind);
+      }
+      const multiProgram = groupByTime && programCounts.size > 1;
+      let lastProgram = "";
+      let lastKind = "";
+      for (const row of grouped) {
+        const program = programOfRow(row);
+        const kind = rowSortKind(row);
         if (multiProgram && program !== lastProgram) {
           lastProgram = program;
+          lastKind = "";
           out.push({
             key: `${run.run_id}/program:${program}`,
             height: PROGRAM_HEADER_HEIGHT,
             run,
             row: null,
             program,
+            count: programCounts.get(program) || 0,
           });
         }
+        if (collapsedGroups.has(`${run.run_id}/program:${program}`)) continue;
+        const multiKind = groupByTime && (kindsByProgram.get(program)?.size || 0) > 1;
+        if (multiKind && kind !== lastKind) {
+          lastKind = kind;
+          out.push({
+            key: `${run.run_id}/program:${program}/kind:${kind}`,
+            height: KIND_HEADER_HEIGHT,
+            run,
+            row: null,
+            kindHead: kind,
+            count: kindCounts.get(`${program}/${kind}`) || 0,
+          });
+        }
+        if (collapsedGroups.has(`${run.run_id}/program:${program}/kind:${kind}`)) continue;
         const steps = expanded.has(`${run.run_id}/${row.key}`) ? row.steps.length : 0;
         out.push({
           key: `${run.run_id}/${row.key}`,
@@ -446,7 +494,7 @@ export function ChangesView({
       }
     }
     return { items: out, openRuns: open };
-  }, [allChats, runs, duckyFilter, kindFilter, programFilter, profileId, profileName, query, sortKey, sortDir, expanded, toggledRuns, forcedOpen]);
+  }, [allChats, collapsedGroups, runs, duckyFilter, kindFilter, programFilter, profileId, profileName, query, sortKey, sortDir, expanded, toggledRuns, forcedOpen]);
 
   const programs = useMemo(() => {
     const seen = new Set<string>();
@@ -457,7 +505,7 @@ export function ChangesView({
   }, [runs]);
 
   const runOrder = useMemo(
-    () => items.filter((item) => !item.row && !item.program).map((item) => item.run.run_id),
+    () => items.filter((item) => !item.row && !item.program && !item.kindHead).map((item) => item.run.run_id),
     [items],
   );
 
@@ -587,13 +635,23 @@ export function ChangesView({
 
   useEffect(() => {
     if (!focusHint) return;
-    const item = items.find(
-      (i) => i.run.run_id === focusHint.runId && i.row?.seqs.includes(focusHint.seq),
-    );
-    if (!item) return;
-    setExpanded((prev) => new Set(prev).add(item.key));
-    setFocusKey(item.key);
-  }, [focusHint, items]);
+    const run = runs.find((r) => r.run_id === focusHint.runId);
+    if (!run) return;
+    const row = runTimeline(run).find((r) => r.seqs.includes(focusHint.seq));
+    if (!row) return;
+    const program = programOfRow(row);
+    const kind = rowSortKind(row);
+    setCollapsedGroups((prev) => {
+      const keys = [`${run.run_id}/program:${program}`, `${run.run_id}/program:${program}/kind:${kind}`];
+      if (!keys.some((k) => prev.has(k))) return prev;
+      const next = new Set(prev);
+      for (const k of keys) next.delete(k);
+      return next;
+    });
+    const key = `${run.run_id}/${row.key}`;
+    setExpanded((prev) => new Set(prev).add(key));
+    setFocusKey(key);
+  }, [focusHint, runs]);
 
   useEffect(() => {
     const consume = () => {
@@ -697,6 +755,39 @@ export function ChangesView({
       }
     },
     [allChats, confirm, refuseLiveRevert, reportRevert],
+  );
+
+  const revertProgram = useCallback(
+    async (run: ChangesetRunDto, program: string) => {
+      if (refuseLiveRevert(run)) return;
+      const api = getApi();
+      if (!api?.revert_changeset) return;
+      const label = programLabel(program);
+      const n = runTimeline(run).filter(
+        (row) => programOfRow(row) === program && row.outcome === "ok" && !row.reverted,
+      ).length;
+      const isRedo = run.source === "revert";
+      const ok = await confirm({
+        title: isRedo ? `Redo ${label}` : `Revert ${label}`,
+        message: isRedo
+          ? `Restore the ${n} ${label} change${n === 1 ? "" : "s"} this revert undid? Other programs stay as they are.`
+          : `Undo the ${n} ${label} change${n === 1 ? "" : "s"} in this run? Files, Blender, and other programs stay as they are.`,
+        confirmLabel: isRedo ? "Redo" : "Revert",
+        danger: !isRedo,
+      });
+      if (!ok) return;
+      setBusyRun(run.run_id);
+      setError("");
+      try {
+        const result = await api.revert_changeset(run.run_id, false, program);
+        await reportRevert("run", result, () => api.revert_changeset!(run.run_id, true, program));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusyRun("");
+      }
+    },
+    [confirm, refuseLiveRevert, reportRevert],
   );
 
   const archiveRuns = useCallback(
@@ -1416,9 +1507,73 @@ export function ChangesView({
           <div className={`changes-virtual ${virtualClass}`}>
             {visible.map((item) => {
               if (item.program) {
+                const run = item.run;
+                const live = isLive(run);
+                const thisReverting = busyRun === run.run_id;
+                const isRedo = run.source === "revert";
+                const open = !collapsedGroups.has(item.key);
+                const label = programLabel(item.program);
+                const canRevertProgram =
+                  !run.archived &&
+                  !live &&
+                  !thisReverting &&
+                  runTimeline(run).some(
+                    (row) => programOfRow(row) === item.program && row.outcome === "ok" && !row.reverted,
+                  );
                 return (
-                  <div key={item.key} className="changes-program-head">
-                    {programLabel(item.program)}
+                  <div key={item.key} className={`changes-program-head${open ? "" : " is-collapsed"}`}>
+                    <button
+                      type="button"
+                      className="changes-group-toggle"
+                      aria-expanded={open}
+                      aria-label={`${label}, ${open ? "collapse" : "expand"}`}
+                      onClick={() => toggleGroup(item.key)}
+                    >
+                      <span className="changes-group-chevron" aria-hidden="true">
+                        {open ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                      </span>
+                      <span className="changes-group-label">{label}</span>
+                      <span className="changes-group-count">{item.count ?? 0}</span>
+                    </button>
+                    {canRevertProgram ? (
+                      <span className="changes-run-actions">
+                        <IconBtn
+                          title={isRedo ? `Redo ${label}` : `Revert ${label}`}
+                          hint={
+                            isRedo
+                              ? `Redo only ${label} changes in this run`
+                              : `Undo only ${label} changes in this run`
+                          }
+                          disabled={Boolean(busyRun)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void revertProgram(run, item.program!);
+                          }}
+                        >
+                          {isRedo ? <Icons.Redo /> : <Icons.Undo />}
+                        </IconBtn>
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              }
+              if (item.kindHead) {
+                const open = !collapsedGroups.has(item.key);
+                return (
+                  <div key={item.key} className={`changes-kind-head${open ? "" : " is-collapsed"}`}>
+                    <button
+                      type="button"
+                      className="changes-group-toggle"
+                      aria-expanded={open}
+                      aria-label={`${item.kindHead}, ${open ? "collapse" : "expand"}`}
+                      onClick={() => toggleGroup(item.key)}
+                    >
+                      <span className="changes-group-chevron" aria-hidden="true">
+                        {open ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                      </span>
+                      <span className="changes-group-label">{item.kindHead}</span>
+                      <span className="changes-group-count">{item.count ?? 0}</span>
+                    </button>
                   </div>
                 );
               }
