@@ -2,17 +2,31 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { isRemote } from "../hooks/usePanelApi";
 import type { ViewId } from "../types/panel";
+import { framedHistType } from "./framedHist";
 import {
   applySettingsHistory,
   sameSettingsLocation,
   type SettingsNavLocation,
 } from "./settingsHistory";
+
+const PARENT_ORIGIN = "https://uefnducky.org";
+
+function framedRemote(): boolean {
+  return isRemote() && typeof window !== "undefined" && window.parent !== window;
+}
+
+function postParent(msg: Record<string, unknown>): void {
+  if (!framedRemote()) return;
+  window.parent.postMessage(msg, PARENT_ORIGIN);
+}
 
 /** A place the user can navigate back/forward to (VS Code-style history). */
 export type NavLocation =
@@ -83,6 +97,7 @@ export function NavigationHistoryProvider({ children }: { children: ReactNode })
       if (stack.length > MAX_HISTORY) stack.splice(0, stack.length - MAX_HISTORY);
       indexRef.current = stack.length - 1;
       syncFlags();
+      postParent({ type: framedHistType(stack.length), loc });
     },
     [syncFlags],
   );
@@ -106,6 +121,7 @@ export function NavigationHistoryProvider({ children }: { children: ReactNode })
       }
       stackRef.current[idx] = loc;
       syncFlags();
+      postParent({ type: "ud-replace", loc });
     },
     [record, syncFlags],
   );
@@ -131,13 +147,44 @@ export function NavigationHistoryProvider({ children }: { children: ReactNode })
     [syncFlags],
   );
 
+  const applyAtRef = useRef(applyAt);
+  applyAtRef.current = applyAt;
+
   const back = useCallback(() => {
+    if (framedRemote()) {
+      postParent({ type: "ud-history-back" });
+      return;
+    }
     if (indexRef.current > 0) applyAt(indexRef.current - 1);
   }, [applyAt]);
 
   const forward = useCallback(() => {
+    if (framedRemote()) {
+      postParent({ type: "ud-history-forward" });
+      return;
+    }
     if (indexRef.current < stackRef.current.length - 1) applyAt(indexRef.current + 1);
   }, [applyAt]);
+
+  useEffect(() => {
+    if (!framedRemote()) return;
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.origin !== PARENT_ORIGIN) return;
+      const data = ev.data as { type?: string; state?: { loc?: NavLocation } } | null;
+      if (data?.type !== "ud-pop") return;
+      const loc = data.state?.loc;
+      if (loc && typeof loc === "object" && "kind" in loc) {
+        const idx = stackRef.current.findIndex((row) => sameLocation(row, loc));
+        if (idx >= 0) {
+          applyAtRef.current(idx);
+          return;
+        }
+      }
+      if (indexRef.current > 0) applyAtRef.current(indexRef.current - 1);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   const registerViewApplier = useCallback((fn: ((view: ViewId) => void) | null) => {
     viewApplierRef.current = fn;
