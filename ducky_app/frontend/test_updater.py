@@ -303,6 +303,76 @@ def test_setup_still_running_after_wait_gone_is_false() -> None:
         updater._ELEVATION_HANDOFF_S = original_handoff
 
 
+def test_prepare_installer_exe_tolerates_missing_motw() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "Setup-1.2.12.exe"
+        dest.write_bytes(b"MZ")
+        updater._prepare_installer_exe(dest)
+
+
+def test_launch_setup_retries_once_when_first_stub_dies() -> None:
+    """First Check-for-updates after a fresh download: stub dies, retry succeeds."""
+    launches = {"n": 0}
+
+    class FakeProc:
+        def wait(self) -> int:
+            return 1 if launches["n"] == 1 else 0
+
+    def fake_popen(_dest: Path, _args: list[str]) -> FakeProc:
+        launches["n"] += 1
+        return FakeProc()
+
+    original_popen = updater._popen_setup
+    original_running = updater._installer_process_running
+    original_retry = updater._LAUNCH_RETRY_S
+    original_handoff = updater._ELEVATION_HANDOFF_S
+    updater._popen_setup = fake_popen  # type: ignore[assignment]
+    updater._installer_process_running = lambda _d: False  # type: ignore[assignment]
+    updater._LAUNCH_RETRY_S = 0.0
+    updater._ELEVATION_HANDOFF_S = 0.0
+    try:
+        code, running = updater._launch_setup_until_handoff(Path("Setup-1.exe"), ["/VERYSILENT"])
+        assert code == 0
+        assert running is False
+        assert launches["n"] == 2
+    finally:
+        updater._popen_setup = original_popen  # type: ignore[assignment]
+        updater._installer_process_running = original_running  # type: ignore[assignment]
+        updater._LAUNCH_RETRY_S = original_retry
+        updater._ELEVATION_HANDOFF_S = original_handoff
+
+
+def test_launch_setup_retries_once_then_keeps_decline() -> None:
+    launches = {"n": 0}
+
+    class FakeProc:
+        def wait(self) -> int:
+            return 1
+
+    def fake_popen(_dest: Path, _args: list[str]) -> FakeProc:
+        launches["n"] += 1
+        return FakeProc()
+
+    original_popen = updater._popen_setup
+    original_running = updater._installer_process_running
+    original_retry = updater._LAUNCH_RETRY_S
+    original_handoff = updater._ELEVATION_HANDOFF_S
+    updater._popen_setup = fake_popen  # type: ignore[assignment]
+    updater._installer_process_running = lambda _d: False  # type: ignore[assignment]
+    updater._LAUNCH_RETRY_S = 0.0
+    updater._ELEVATION_HANDOFF_S = 0.0
+    try:
+        code, running = updater._launch_setup_until_handoff(Path("Setup-1.exe"), ["/VERYSILENT"])
+        assert code == 1
+        assert running is False
+        assert launches["n"] == 2
+    finally:
+        updater._popen_setup = original_popen  # type: ignore[assignment]
+        updater._installer_process_running = original_running  # type: ignore[assignment]
+        updater._LAUNCH_RETRY_S = original_retry
+        updater._ELEVATION_HANDOFF_S = original_handoff
+
+
 if __name__ == "__main__":
     test_get_update_progress_snapshot()
     test_download_updates_byte_progress()
@@ -316,6 +386,9 @@ if __name__ == "__main__":
     test_remove_installer_file()
     test_setup_still_running_after_wait_sees_child()
     test_setup_still_running_after_wait_gone_is_false()
+    test_prepare_installer_exe_tolerates_missing_motw()
+    test_launch_setup_retries_once_when_first_stub_dies()
+    test_launch_setup_retries_once_then_keeps_decline()
     print("ok")
 
 
@@ -387,6 +460,8 @@ def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypa
         monkeypatch.setattr(updater, "installer_cache_dir", lambda: cache)
         monkeypatch.setattr(updater, "get_app_update_status", lambda: status)
         monkeypatch.setattr(updater, "_stop_all_agents", lambda: None)
+        monkeypatch.setattr(updater, "_LAUNCH_RETRY_S", 0.0)
+        monkeypatch.setattr(updater, "_ELEVATION_HANDOFF_S", 0.0)
         monkeypatch.setattr("frontend.frozen_process.kill_uefn_ducky_processes", lambda include_self=False: None)
         assert sys.platform == "win32"
         _reset_progress()

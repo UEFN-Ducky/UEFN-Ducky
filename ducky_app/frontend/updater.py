@@ -27,6 +27,10 @@ _SHUTDOWN_DELAY_S = 0.15
 # long before deciding no child appeared (UAC No / launch failed).
 _ELEVATION_HANDOFF_S = 2.0
 
+# Fresh downloads often lose the first CreateProcess to MOTW / Defender. The
+# user's second "Check for updates" click is this retry against the cached EXE.
+_LAUNCH_RETRY_S = 1.25
+
 # Inno silent upgrade: no wizard, force-close anything still holding the install
 # dir (bridges / a raced panel), never trigger a Windows restart. Relaunch is
 # ONLY CurStepChanged(ssDone) + LaunchApp — never relaunch from here on failure.
@@ -222,6 +226,76 @@ def _setup_still_running_after_wait(dest: Path) -> bool:
     return _installer_process_running(dest)
 
 
+def _unblock_downloaded_exe(path: Path) -> None:
+    """Drop the Mark-of-the-Web ADS so the first launch is not SmartScreen-blocked."""
+    try:
+        os.remove(f"{path}:Zone.Identifier")
+    except OSError:
+        pass
+
+
+def _wait_exe_unlocked(path: Path, *, timeout: float = 4.0) -> None:
+    """Wait until another process (Defender) releases the just-written Setup EXE."""
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(str(path), flags)
+            os.close(fd)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.2)
+
+
+def _prepare_installer_exe(path: Path) -> None:
+    """Flush + unblock a just-downloaded Setup so the first launch can run."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+    _unblock_downloaded_exe(path)
+    _wait_exe_unlocked(path)
+
+
+def _popen_setup(dest: Path, args: list[str]) -> subprocess.Popen[Any]:
+    return subprocess.Popen([str(dest), *args], close_fds=True)
+
+
+def _wait_setup_exit(proc: subprocess.Popen[Any]) -> int:
+    try:
+        return int(proc.wait())
+    except OSError:
+        return 1
+
+
+def _launch_setup_until_handoff(dest: Path, args: list[str]) -> tuple[int, bool]:
+    """Launch Setup; retry once if the stub dies before an elevated child appears.
+
+    First click after a fresh download is the one that races Defender. Second
+    click already worked because the EXE was cached — do that retry here.
+    """
+    last_code = 1
+    for attempt in range(2):
+        if attempt:
+            time.sleep(_LAUNCH_RETRY_S)
+        try:
+            proc = _popen_setup(dest, args)
+        except OSError:
+            continue
+        last_code = _wait_setup_exit(proc)
+        if _setup_still_running_after_wait(dest):
+            return last_code, True
+        if last_code == 0:
+            return last_code, False
+    return last_code, False
+
+
 def _download(url: str, dest: Path, *, timeout: float = 120.0) -> str | None:
     """Download ``url`` to ``dest``. Returns an error string or ``None``."""
     global _active_download_resp
@@ -248,6 +322,11 @@ def _download(url: str, dest: Path, *, timeout: float = 120.0) -> str | None:
                     out.write(chunk)
                     downloaded += len(chunk)
                     _set_progress(downloaded_bytes=downloaded, total_bytes=total)
+                out.flush()
+                try:
+                    os.fsync(out.fileno())
+                except OSError:
+                    pass
             finally:
                 with _active_download_lock:
                     _active_download_resp = None
@@ -398,6 +477,7 @@ def apply_update() -> dict[str, Any]:
     if _cancelled():
         return _result(ok=False, error=_CANCELLED, stage="verify")
 
+    _prepare_installer_exe(dest)
     _set_progress(stage="launch", error=None)
     # Drop IDE bridge workers before Setup starts so Restart Manager does not
     # wait (or prompt) on locked UEFN-Ducky*.exe handles. Do NOT exit the panel
@@ -408,24 +488,15 @@ def apply_update() -> dict[str, Any]:
         kill_uefn_ducky_processes(include_self=False)
     except Exception:
         pass
-    try:
-        proc = subprocess.Popen(
-            [str(dest), *_silent_install_args(status["install_scope"])],
-            close_fds=True,
-        )
-    except OSError as exc:
-        return _result(ok=False, error=str(exc), stage="launch")
-
     _set_progress(stage="installing", error=None)
-    try:
-        code = int(proc.wait())
-    except OSError as exc:
-        return _result(ok=False, error=str(exc), stage="installing")
+    code, child_running = _launch_setup_until_handoff(
+        dest, _silent_install_args(status["install_scope"])
+    )
 
     # /ALLUSERS: unelevated stub often exits 0 right after UAC Yes while the
     # elevated Setup-{ver}.exe child is still installing. Do not delete the
     # cache or assume success until that child is gone.
-    if _setup_still_running_after_wait(dest):
+    if child_running:
         # Install underway — unlock the EXE. Inno LaunchApp relaunches on ssDone only.
         _shutdown_after_delay()
         return _result(ok=True, error=None, stage="restarting")

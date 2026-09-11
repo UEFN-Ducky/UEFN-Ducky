@@ -302,7 +302,23 @@ def main() -> int:
     env["PYTHONPATH"] = sep.join(
         p for p in (str(ducky_app), str(root), env.get("PYTHONPATH", "")) if p
     )
-    subprocess.run(cmd, check=True, cwd=str(root), env=env)
+
+    def _run_pyinstaller() -> None:
+        (work / "unified").mkdir(parents=True, exist_ok=True)
+        subprocess.run(cmd, check=True, cwd=str(root), env=env)
+
+    try:
+        _run_pyinstaller()
+    except subprocess.CalledProcessError:
+        # Defender can delete work/<specstem> mid-Analysis → FileNotFoundError
+        # on base_library.zip. One retry after a clean work dir is enough.
+        print("PyInstaller failed; recreating work dir and retrying once")
+        try:
+            if work.is_dir():
+                shutil.rmtree(work)
+        except OSError:
+            pass
+        _run_pyinstaller()
 
     if work.is_dir():
         try:
