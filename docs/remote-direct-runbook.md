@@ -9,7 +9,7 @@ order it should go out, and how to prove each step. Protocol details are in
 | Piece | Repo / artifact | How it gets out |
 |---|---|---|
 | Desktop app | `UEFN-Ducky-Release` → `dist/UEFN-Ducky-<ver>.exe` | `py build/build_exes.py` (local test) or `py release/publish_app.py` (Store) |
-| Phone panel bundle | same repo → `gh-pages` branch → `https://panel.uefnducky.org/<ver>/` | `py release/publish_panel.py --no-build` after the EXE build (the build already produced `web/dist`) |
+| Phone panel bundle | same repo → `gh-pages` branch → `https://panel.uefnducky.org/<ver>/` | automatic: `py release/publish_app.py` publishes it right after the Store upload. Manual: `py release/publish_panel.py --no-build` after any `build_exes.py` run. |
 | Site plugin `uefn-ducky` | `DuckyOS/plugins/plugin-uefn-ducky` → `deploy/uefn-ducky-<ver>.zip` | `bash scripts/release.sh` builds; `bash scripts/release.sh --upload-only` (or the Marketplace admin) installs it on uefnducky.org |
 | Panel host DNS | Cloudflare zone `uefnducky.org` | created by the plugin on first `remote-config` call (`panel` CNAME → `uefn-ducky.github.io`, DNS-only) |
 | GitHub Pages | repo `UEFN-Ducky/UEFN-Ducky`, branch `gh-pages`, custom domain `panel.uefnducky.org` | **done Sep 12 2026** (org setting `members_can_create_public_pages` turned on, site created from `gh-pages`, CNAME set). GitHub issues the TLS certificate by itself once the DNS CNAME exists; until then the /ducky page falls back to the tunnel after 30 s. |

@@ -713,6 +713,31 @@ def main() -> None:
     if result.get("ok") is False or result.get("error"):
         raise SystemExit(result.get("error") or "uds_app_release failed")
     print(f"ok — desktop apps will see {version} via collect/app-version")
+    publish_panel_bundle(version)
+
+
+def publish_panel_bundle(version: str) -> None:
+    """Ship the phone panel that matches this desktop build to the panel host.
+
+    Direct (tunnel-free) Remote View loads the panel from panel.uefnducky.org
+    (gh-pages of this repo). The EXE build already produced web/dist for this
+    exact version, so this is a copy + push, no rebuild. A failure here is
+    reported, not fatal: phones fall back to the tunnel until it is fixed.
+    """
+    script = Path(__file__).resolve().parent / "publish_panel.py"
+    if not script.is_file():
+        print("panel: release/publish_panel.py missing — skipped", file=sys.stderr)
+        return
+    print(f"panel: publishing {version} to the panel host…")
+    proc = subprocess.run([sys.executable, str(script), "--no-build"], cwd=str(script.parent.parent))
+    if proc.returncode != 0:
+        print(
+            "panel: publish FAILED — phones keep using the tunnel until "
+            f"`py release/publish_panel.py --no-build` succeeds for {version}",
+            file=sys.stderr,
+        )
+        return
+    print(f"panel: {version} live at https://panel.uefnducky.org/{version}/ and /latest/")
 
 
 if __name__ == "__main__":

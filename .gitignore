@@ -38,3 +38,6 @@ ducky_app/frontend/ui_web/web/public/draco/
 ducky_app/frontend/ui_web/verse_editor/lsp/bin/
 ducky_app/frontend/ui_web/web/src/verse-editor/lang/
 ducky_app/frontend/ui_web/web/public/verse-workflow/
+
+# e2e artifact
+tests/e2e/remote_view/last-viewer.png
