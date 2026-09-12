@@ -72,6 +72,9 @@ class HumanWatch:
         self._seen: dict[str, dict[str, Any]] = {}
         self._pending: dict[str, dict[str, Any]] = {}
         self._seeded = False
+        # rel -> (mtime_ns, size, body, hash): lets _scan skip re-reading files
+        # that have not been touched since the previous poll.
+        self._reads: dict[str, tuple[int, int, str, str]] = {}
 
     def loop(self, poll_s: float) -> None:
         while True:
@@ -128,6 +131,16 @@ class HumanWatch:
             _save_saved(storage, self._seen)
 
     def _scan(self, island: Path) -> dict[str, dict[str, Any]]:
+        """Current contents of every watched file, re-reading only what changed.
+
+        This runs every POLL_S seconds for as long as the panel is open. It used
+        to read every watched file in full on every pass, so an idle window with
+        a normal island streamed megabytes a second off disk and spent most of
+        its CPU in the kernel. A file whose mtime and size are both unchanged
+        since the last pass has the same bytes for this watcher's purposes — an
+        editor that writes a file always moves its mtime — so the previous
+        body and hash are reused and the read is skipped entirely.
+        """
         found: dict[str, dict[str, Any]] = {}
         island_s = str(island)
         for rel_root in WATCH_REL:
@@ -153,18 +166,28 @@ class HumanWatch:
                         continue
                     if st.st_size > TEXT_READ_MAX_BYTES:
                         continue
-                    try:
-                        with open(full, encoding="utf-8", errors="replace", newline="") as handle:
-                            body = handle.read()
-                    except OSError:
-                        continue
+                    mtime_ns = int(st.st_mtime_ns)
+                    size = int(st.st_size)
+                    cached = self._reads.get(rel)
+                    if cached is not None and cached[0] == mtime_ns and cached[1] == size:
+                        body, digest = cached[2], cached[3]
+                    else:
+                        try:
+                            with open(full, encoding="utf-8", errors="replace", newline="") as handle:
+                                body = handle.read()
+                        except OSError:
+                            continue
+                        digest = content_hash(body)
+                        self._reads[rel] = (mtime_ns, size, body, digest)
                     found[rel] = {
-                        "hash": content_hash(body),
+                        "hash": digest,
                         "content": body,
-                        "mtime_ns": int(st.st_mtime_ns),
-                        "size": int(st.st_size),
+                        "mtime_ns": mtime_ns,
+                        "size": size,
                         "full": full,
                     }
+        for gone in set(self._reads) - set(found):
+            self._reads.pop(gone, None)
         return found
 
     def _commit(

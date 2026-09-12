@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -164,3 +165,60 @@ def test_mtime_touch_without_edit_is_not_a_you_row(env) -> None:
     os.utime(verse / "a.verse", None)
     _flush(watch)
     assert journal.list_runs(project_root=str(root)) == []
+
+
+def test_unchanged_files_are_not_reread_every_poll(env, monkeypatch):
+    """The 2 s poll must stat, not read, when nothing moved.
+
+    _scan used to read every watched file in full on every pass, so an idle
+    panel streamed the island off disk continuously and burned its CPU in the
+    kernel. Reads now happen only when mtime or size changed.
+    """
+    root, _journal, _writer, verse = env
+    for i in range(12):
+        (verse / f"f{i}.verse").write_text(f"body {i}\n", encoding="utf-8", newline="\n")
+
+    reads: list[str] = []
+    real_open = open
+
+    def counting_open(path, *args, **kwargs):
+        if str(path).endswith(".verse"):
+            reads.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", counting_open)
+
+    watch = HumanWatch()
+    island = Path(hw.island_root(str(root)))
+
+    watch._scan(island)
+    first = len(reads)
+    assert first >= 13, "the first pass must read every watched file"
+
+    reads.clear()
+    watch._scan(island)
+    watch._scan(island)
+    assert reads == [], f"unchanged files were re-read: {reads}"
+
+    # A real edit is still picked up, and only that file is read.
+    reads.clear()
+    target = verse / "f7.verse"
+    st = target.stat()
+    target.write_text("edited by a human\n", encoding="utf-8", newline="\n")
+    os.utime(target, ns=(st.st_mtime_ns + 1_000_000_000, st.st_mtime_ns + 1_000_000_000))
+    rows = watch._scan(island)
+    assert [Path(p).name for p in reads] == ["f7.verse"]
+    assert rows[hw._canon_watch_key("Content/Verse/f7.verse")]["content"] == "edited by a human\n"
+
+
+def test_scan_forgets_files_that_disappear(env):
+    """The read cache must not pin deleted files in memory forever."""
+    root, _journal, _writer, verse = env
+    (verse / "gone.verse").write_text("x\n", encoding="utf-8", newline="\n")
+    watch = HumanWatch()
+    island = Path(hw.island_root(str(root)))
+    watch._scan(island)
+    assert any(k.endswith("gone.verse") for k in watch._reads)
+    (verse / "gone.verse").unlink()
+    watch._scan(island)
+    assert not any(k.endswith("gone.verse") for k in watch._reads)
