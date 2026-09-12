@@ -93,7 +93,10 @@ jobs:
     # isolated by conftest.py, so nothing touches the runner's profile.
     name: app-tests
     runs-on: windows-latest
-    if: ${{ hashFiles('ducky_app/frontend/launcher.py') != '' }}
+    # hashFiles is not valid in jobs.<id>.if — GitHub marks the whole
+    # file invalid and emails "No jobs were run" on every push to main.
+    # App repo (and forks) keep this name; standalone plugin clones do not.
+    if: ${{ github.event.repository.name == 'UEFN-Ducky' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
