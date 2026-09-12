@@ -79,6 +79,8 @@ _BUTTON_REJECT = (
 # Automatic callers (bridge watchdog, 503 retry loop) may press at most once per
 # cooldown, so a dialog that survives one Enter is not hammered every second.
 _AUTO_COOLDOWN_SEC = 4.0
+# Bound on waiting for an in-flight press when the watchdog block exits.
+_STOP_JOIN_S = 5.0
 _last_auto_press_at = 0.0
 _auto_lock = threading.Lock()
 
@@ -183,11 +185,18 @@ def save_modal_watchdog(
             if stop.wait(poll_sec):
                 return
 
-    threading.Thread(target=_run, name=f"uefn-modal-watchdog:{label}", daemon=True).start()
+    thread = threading.Thread(target=_run, name=f"uefn-modal-watchdog:{label}", daemon=True)
+    thread.start()
     try:
         yield events
     finally:
         stop.set()
+        # Wait for the tick in flight to finish. Setting the flag alone leaves a
+        # thread that is already inside auto_dismiss_save_modal() free to press
+        # Enter *after* the caller stopped wanting presses — into whatever dialog
+        # the user opened next. stop.wait() returns as soon as the flag is set,
+        # so this costs nothing unless a press is genuinely mid-flight.
+        thread.join(timeout=_STOP_JOIN_S)
 
 
 # ---------------------------------------------------------------------------

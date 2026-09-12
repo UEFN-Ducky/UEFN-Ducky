@@ -3,12 +3,31 @@
  * "Install in UEFN Ducky" button.
  *
  * Supported forms:
+ *   uefn-ducky://login                     → Settings → Account + start pairing
  *   uefn-ducky://store                     → open Settings → Store
  *   uefn-ducky://store/<slug>              → open the item's detail page
  *   uefn-ducky://store/install/<slug>      → open detail + auto-install
  */
 import { onApiReady } from "../hooks/onApiReady";
 import { requestOpenSettings } from "./openSettingsTab";
+
+export const ACCOUNT_LOGIN_EVENT = "ducky:account-login";
+export const ACCOUNT_LOGIN_KEY = "uefn-account-login";
+
+export function parseLoginDeepLink(raw: string): boolean {
+  return /^uefn-ducky:\/\/login\/?(?:[?#].*)?$/i.test(String(raw || "").trim());
+}
+
+export function consumeAccountLoginRequest(): boolean {
+  try {
+    const raw = sessionStorage.getItem(ACCOUNT_LOGIN_KEY) || "";
+    if (!raw) return false;
+    sessionStorage.removeItem(ACCOUNT_LOGIN_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** sessionStorage handshake consumed by StoreTab once the catalog is loaded. */
 export const STORE_INSTALL_KEY = "uefn-store-install";
@@ -29,6 +48,16 @@ export function parseStoreDeepLink(raw: string): StoreDeepLink | null {
 }
 
 export function handleDeepLink(raw: string): boolean {
+  if (parseLoginDeepLink(raw)) {
+    try {
+      sessionStorage.setItem(ACCOUNT_LOGIN_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    requestOpenSettings("Account");
+    window.dispatchEvent(new CustomEvent(ACCOUNT_LOGIN_EVENT));
+    return true;
+  }
   const parsed = parseStoreDeepLink(raw);
   if (!parsed) return false;
   requestOpenStore({

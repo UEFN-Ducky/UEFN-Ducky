@@ -180,6 +180,44 @@ def test_remote_deny_covers_native_and_secret_paths() -> None:
     assert "list_conversations" not in REMOTE_DENY
 
 
+def test_device_login_polls_until_token() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    calls: list[str] = []
+
+    def _collect(plugin_id: str, event: str, body=None, **_kw):
+        calls.append(event)
+        if event == "desktop-device-start":
+            return {"user_code": "ABCD-EFGH", "device_code": "a" * 32}
+        if event == "desktop-device-poll":
+            if calls.count("desktop-device-poll") < 2:
+                return {"status": "pending"}
+            return {"status": "approved", "token": "dky_v1_secret", "keyId": "k1", "email": "a@b.co"}
+        raise AssertionError(event)
+
+    with (
+        patch.object(acc, "_plugin_collect", side_effect=_collect),
+        patch.object(acc, "_save_blob"),
+        patch.object(acc, "start_presence_heartbeat"),
+        patch.object(acc, "start_rpc_waiter"),
+        patch.object(acc, "_persist_base_url"),
+        patch.object(
+            acc,
+            "get_status",
+            return_value={"logged_in": True, "email": "a@b.co", "device_key_active": True},
+        ),
+        patch.object(acc, "resolve_base_url", return_value="https://uefnducky.org"),
+        patch("time.sleep"),
+    ):
+        out = acc.start_browser_login("https://uefnducky.org", timeout_secs=30)
+    assert out["ok"] is True
+    assert "desktop-device-start" in calls
+    assert calls.count("desktop-device-poll") >= 2
+    assert "desktop-exchange" not in calls
+
+
 def test_store_item_versions_needs_slug() -> None:
     from frontend.duckyos_account import store_item_versions
 
@@ -190,6 +228,7 @@ def test_store_item_versions_needs_slug() -> None:
 
 if __name__ == "__main__":
     test_pkce_pair_s256()
+    test_device_login_polls_until_token()
     test_auto_apply_store_updates_skips_local_and_unpaid()
     test_store_item_versions_strips_empty_and_keeps_changelog()
     test_store_item_versions_needs_slug()

@@ -1,10 +1,9 @@
 """DuckyOS tenant account login for the UEFN Ducky desktop app.
 
-Opens the system browser to the tenant (default ``https://uefnducky.org``).
-If you are already signed in there, the page mints a ``dky_v1_`` device API key
-(scope ``uefn-ducky.app``), parks it server-side, and redirects to a local
-``http://127.0.0.1`` callback with a one-time code. The app exchanges that
-code over HTTPS (PKCE) for the key. Credentials are stored DPAPI-encrypted in
+Starts a device-code grant against the tenant (default ``https://uefnducky.org``).
+The Account tab shows a short code; the signed-in site ``/ducky`` page approves
+it and the app polls for a ``dky_v1_`` device key (scope ``uefn-ducky.app``).
+The token never goes in a URL. Credentials are stored DPAPI-encrypted in
 ``credentials.dat``. Passwords never enter the app.
 """
 
@@ -12,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import html as html_lib
 import json
 import platform
 import re
@@ -415,202 +413,75 @@ def _finish_login(blob: dict[str, Any], email_fallback: str = "") -> dict[str, A
 
 _BROWSER_LOGIN_LOCK = __import__("threading").Lock()
 _BROWSER_LOGIN_CANCEL = __import__("threading").Event()
+_DEVICE_LOGIN: dict[str, Any] = {}
 
 
 def cancel_browser_login() -> dict[str, Any]:
     """Signal a waiting ``start_browser_login`` to abort."""
     _BROWSER_LOGIN_CANCEL.set()
+    _DEVICE_LOGIN.clear()
     return get_status()
 
 
-def _browser_callback_page(*, ok: bool, email: str = "") -> str:
-    """Styled localhost handoff page (inline CSS — no external assets)."""
-    title = "Connected" if ok else "Login failed"
-    email_line = ""
-    if ok and email.strip():
-        email_line = (
-            f'<p class="email">Signed in as <strong>{html_lib.escape(email.strip())}</strong></p>'
-        )
-    body = (
-        "You can close this tab and return to UEFN Ducky."
-        if ok
-        else "State mismatch or missing code. Close this tab and try again from the app."
-    )
-    tone = "ok" if ok else "err"
-    mark = "✓" if ok else "!"
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>{title} — UEFN Ducky</title>
-<style>
-  :root {{
-    color-scheme: dark;
-    --bg: #0a0a0a;
-    --card: #141414;
-    --border: #2a2a2a;
-    --text: #f4f4f5;
-    --muted: #a1a1aa;
-    --accent: #2563eb;
-    --ok: #22c55e;
-    --err: #ef4444;
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
-    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-    background:
-      radial-gradient(900px 420px at 15% 0%, rgba(37,99,235,.22), transparent 55%),
-      radial-gradient(700px 380px at 90% 100%, rgba(37,99,235,.12), transparent 50%),
-      var(--bg);
-    color: var(--text);
-  }}
-  .card {{
-    width: min(420px, calc(100vw - 2rem));
-    padding: 2rem 1.75rem 1.75rem;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    background: linear-gradient(180deg, #171717 0%, var(--card) 100%);
-    box-shadow: 0 24px 60px rgba(0,0,0,.45);
-    text-align: center;
-  }}
-  .brand {{
-    font-size: .75rem; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--muted); margin: 0 0 1.25rem;
-  }}
-  .mark {{
-    width: 3.25rem; height: 3.25rem; margin: 0 auto 1rem; border-radius: 999px;
-    display: grid; place-items: center; font-size: 1.35rem; font-weight: 700;
-  }}
-  .mark.ok {{ background: rgba(34,197,94,.15); color: var(--ok); border: 1px solid rgba(34,197,94,.35); }}
-  .mark.err {{ background: rgba(239,68,68,.15); color: var(--err); border: 1px solid rgba(239,68,68,.35); }}
-  h1 {{ margin: 0 0 .5rem; font-size: 1.5rem; font-weight: 650; letter-spacing: -.02em; }}
-  p {{ margin: 0; line-height: 1.5; color: var(--muted); font-size: .95rem; }}
-  p.email {{ margin-top: .85rem; color: var(--text); }}
-  .hint {{
-    margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid var(--border);
-    font-size: .8rem; color: var(--muted);
-  }}
-  .hint span {{ color: var(--accent); }}
-</style>
-</head>
-<body>
-  <main class="card">
-    <p class="brand">UEFN Ducky</p>
-    <div class="mark {tone}" aria-hidden="true">{mark}</div>
-    <h1>{title}</h1>
-    <p>{html_lib.escape(body)}</p>
-    {email_line}
-    <p class="hint">Return to <span>UEFN Ducky</span> — this tab can be closed.</p>
-  </main>
-</body>
-</html>"""
-
-
-def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> dict[str, Any]:
-    """
-    Secure desktop login: open the system browser to the tenant; if already
-    signed in there, the page mints a device key and redirects to a local
-    ``http://127.0.0.1`` callback. No password is typed in the app.
-    """
-    import threading
-    import webbrowser
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-    from urllib.parse import parse_qs, urlparse as _urlparse
-
+def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> dict[str, Any]:
+    """Show a device code in the app; poll until the site approves it."""
     base = normalize_base_url(base_url or resolve_base_url())
     _persist_base_url(base)
-
-    state = secrets_mod.token_hex(16)
-    verifier, challenge = pkce_pair()
-    result: dict[str, Any] = {"done": False}
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
-            return
-
-        def do_GET(self) -> None:  # noqa: N802
-            parsed = _urlparse(self.path)
-            if parsed.path.rstrip("/") != "/callback":
-                self.send_response(404)
-                self.end_headers()
-                return
-            qs = parse_qs(parsed.query)
-            got_state = (qs.get("state") or [""])[0]
-            code = (qs.get("code") or [""])[0]
-            email = (qs.get("email") or [""])[0]
-            ok = got_state == state and bool(code)
-            body = _browser_callback_page(ok=ok, email=email if ok else "")
-            self.send_response(200 if ok else 400)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body.encode("utf-8"))))
-            self.end_headers()
-            self.wfile.write(body.encode("utf-8"))
-            if ok:
-                result.update(
-                    {
-                        "done": True,
-                        "ok": True,
-                        "code": code,
-                        "email": email,
-                    }
-                )
-            else:
-                result.update({"done": True, "ok": False, "error": "Invalid callback"})
 
     if not _BROWSER_LOGIN_LOCK.acquire(blocking=False):
         raise DuckyOSAccountError("A browser login is already in progress", code="busy")
 
     _BROWSER_LOGIN_CANCEL.clear()
-    httpd: HTTPServer | None = None
+    _DEVICE_LOGIN.clear()
     try:
-        httpd = HTTPServer(("127.0.0.1", 0), Handler)
-        port = int(httpd.server_address[1])
-        auth_url = (
-            f"{base}/ducky?q={state}.{port}&challenge={challenge}"
+        started = _plugin_collect(
+            "uefn-ducky",
+            "desktop-device-start",
+            {},
+            unavailable_code="auth_unavailable",
+            unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+            error_code="device_start_failed",
+            allow_anonymous=True,
+            timeout=20.0,
         )
-
-        thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.25}, daemon=True)
-        thread.start()
-        webbrowser.open(auth_url)
+        user_code = str(started.get("user_code") or "").strip()
+        device_code = str(started.get("device_code") or "").strip()
+        if not user_code or not device_code:
+            raise DuckyOSAccountError("Could not start login.", code="device_start_failed")
+        _DEVICE_LOGIN.update({"user_code": user_code, "device_code": device_code})
 
         deadline = __import__("time").monotonic() + max(30.0, float(timeout_secs))
+        token = ""
+        key_id = ""
+        email = ""
         while __import__("time").monotonic() < deadline:
             if _BROWSER_LOGIN_CANCEL.is_set():
                 raise DuckyOSAccountError("Browser login cancelled", code="cancelled")
-            if result.get("done"):
-                break
-            __import__("time").sleep(0.2)
-
-        if not result.get("done") or not result.get("ok"):
-            if _BROWSER_LOGIN_CANCEL.is_set():
-                raise DuckyOSAccountError("Browser login cancelled", code="cancelled")
-            raise DuckyOSAccountError(
-                str(result.get("error") or "Timed out waiting for browser login"),
-                code="browser_timeout",
-            )
-
-        code = str(result.get("code") or "")
-        token = ""
-        key_id = ""
-        email = str(result.get("email") or "")
-        if code:
             payload = _plugin_collect(
                 "uefn-ducky",
-                "desktop-exchange",
-                {"code": code, "codeVerifier": verifier, "state": state},
+                "desktop-device-poll",
+                {"device_code": device_code},
                 unavailable_code="auth_unavailable",
                 unavailable_msg="Desktop login plugin is not active on this tenant yet.",
-                error_code="pkce_exchange_failed",
+                error_code="device_poll_failed",
                 allow_anonymous=True,
                 timeout=20.0,
             )
+            if str(payload.get("status") or "") == "pending":
+                __import__("time").sleep(3.0)
+                continue
             token = str(payload.get("token") or "")
-            key_id = str(payload.get("keyId") or payload.get("key_id") or key_id)
-            email = str(payload.get("email") or email)
+            key_id = str(payload.get("keyId") or payload.get("key_id") or "")
+            email = str(payload.get("email") or "")
+            break
+
+        if _BROWSER_LOGIN_CANCEL.is_set():
+            raise DuckyOSAccountError("Browser login cancelled", code="cancelled")
         if not token.startswith("dky_v1_"):
-            raise DuckyOSAccountError("Login handoff did not return a device key", code="pkce_exchange_failed")
+            raise DuckyOSAccountError(
+                "Timed out waiting for the code to be approved.",
+                code="browser_timeout",
+            )
         blob: dict[str, Any] = {
             "base_url": base,
             "email": email,
@@ -631,12 +502,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
         status["ok"] = True
         return status
     finally:
-        try:
-            if httpd is not None:
-                httpd.shutdown()
-                httpd.server_close()
-        except Exception:
-            pass
+        _DEVICE_LOGIN.clear()
         _BROWSER_LOGIN_LOCK.release()
 
 
@@ -669,10 +535,12 @@ def get_status() -> dict[str, Any]:
     device_active = bool(blob.get("device_key"))
     session_ok = bool(blob.get("session_value"))
     logged_in = device_active or session_ok
+    user_code = str(_DEVICE_LOGIN.get("user_code") or "")
     return {
         "logged_in": logged_in,
         "needs_code": False,
-        "browser_pending": False,
+        "browser_pending": bool(user_code),
+        "user_code": user_code,
         "base_url": base,
         "default_base_url": DEFAULT_BASE_URL,
         "email": str(blob.get("email") or "") if logged_in else "",
@@ -936,11 +804,26 @@ def send_presence_heartbeat() -> bool:
             prefer_bearer=True,
             timeout=12.0,
         )
-        return 200 <= int(status) < 300
+        ok = 200 <= int(status) < 300
     except DuckyOSAccountError:
         return False
     except Exception:
         return False
+    key_id = str(blob.get("device_key_id") or "").strip()
+    if key_id:
+        try:
+            _plugin_collect(
+                "uefn-ducky",
+                "desktop-device-heartbeat",
+                {"keyId": key_id},
+                unavailable_code="auth_unavailable",
+                unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+                error_code="device_heartbeat_failed",
+                timeout=12.0,
+            )
+        except Exception:
+            pass
+    return ok
 
 
 def start_presence_heartbeat() -> None:

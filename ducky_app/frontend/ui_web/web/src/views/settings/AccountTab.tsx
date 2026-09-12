@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
 import type { DuckyOSAccountStatus, DuckyOSTeamsSnapshot } from "../../types/panel";
+import {
+  ACCOUNT_LOGIN_EVENT,
+  consumeAccountLoginRequest,
+  requestOpenStore,
+} from "../../navigation/deepLinks";
 import { DUCKYOS_ACCOUNT_CHANGED } from "../../navigation/openSettingsTab";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
 
@@ -15,6 +20,7 @@ export function AccountTab() {
   const [loaded, setLoaded] = useState(false);
   const [teams, setTeams] = useState<DuckyOSTeamsSnapshot | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
+  const [pairingCode, setPairingCode] = useState("");
   const [remote, setRemote] = useState<{
     enabled?: boolean;
     hostname?: string;
@@ -130,11 +136,44 @@ export function AccountTab() {
     }
   };
 
-  const handleBrowserLogin = () => {
+  const handleBrowserLogin = useCallback(() => {
     const api = getApi();
     if (!api?.duckyos_login) return;
-    void run(() => api.duckyos_login(baseUrl.trim() || DEFAULT_BASE));
-  };
+    setPairingCode("");
+    const poll = window.setInterval(() => {
+      void api.duckyos_get_status?.().then((s) => {
+        if (s?.user_code) setPairingCode(s.user_code);
+      });
+    }, 500);
+    void (async () => {
+      setBusy(true);
+      setError("");
+      try {
+        const next = await api.duckyos_login(baseUrl.trim() || DEFAULT_BASE);
+        applyStatus(next);
+        if (next.plugin_disabled) {
+          requestOpenStore({ slug: "account", autoInstall: true });
+          return;
+        }
+        if (next.ok === false && next.error) setError(next.error);
+        if (next.logged_in) await refreshTeams();
+        else setTeams(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        window.clearInterval(poll);
+        setPairingCode("");
+        setBusy(false);
+      }
+    })();
+  }, [applyStatus, baseUrl, refreshTeams]);
+
+  useEffect(() => {
+    const onLogin = () => handleBrowserLogin();
+    window.addEventListener(ACCOUNT_LOGIN_EVENT, onLogin);
+    if (consumeAccountLoginRequest()) handleBrowserLogin();
+    return () => window.removeEventListener(ACCOUNT_LOGIN_EVENT, onLogin);
+  }, [handleBrowserLogin]);
 
   const handleCancel = () => {
     const api = getApi();
@@ -142,6 +181,7 @@ export function AccountTab() {
       void api.duckyos_cancel_login();
     }
     setBusy(false);
+    setPairingCode("");
     setError("");
   };
 
@@ -188,8 +228,7 @@ export function AccountTab() {
         <PluginWalkthroughReplayButton pluginId="account" label="Ducky Account" />
       </h2>
       <p className="account-tab-lead">
-        Sign in with your browser — if you are already logged into the tenant, you will be sent
-        straight back to the app. Passwords never go through UEFN Ducky.
+        Sign in on uefnducky.org/ducky with the code shown here. Passwords never go through UEFN Ducky.
       </p>
 
       {error ? <div className="account-tab-error" role="alert">{error}</div> : null}
@@ -202,14 +241,10 @@ export function AccountTab() {
               <span className="account-tab-email">{status?.email || "—"}</span>
             </div>
             <p className="account-tab-meta">
-              Tenant: <code>{status?.base_url}</code>
-            </p>
-            <p className="account-tab-meta">
-              Device key:{" "}
               {status?.device_key_active ? (
-                <strong className="account-tab-ok">active</strong>
+                <strong className="account-tab-ok">This PC is connected</strong>
               ) : (
-                <span className="account-tab-warn">missing</span>
+                <span className="account-tab-warn">This PC is not connected yet</span>
               )}
             </p>
             <div className="account-tab-actions">
@@ -426,9 +461,18 @@ export function AccountTab() {
         <div className="account-tab-card">
           {busy ? (
             <>
-              <p className="account-tab-body">
-                Waiting for browser… Finish signing in there (or cancel).
-              </p>
+              {pairingCode ? (
+                <>
+                  <p className="account-tab-code" aria-live="polite">
+                    {pairingCode}
+                  </p>
+                  <p className="account-tab-body">
+                    Open uefnducky.org/ducky and enter this code.
+                  </p>
+                </>
+              ) : (
+                <p className="account-tab-body">Getting a code…</p>
+              )}
               <div className="account-tab-actions">
                 <button type="button" className="account-tab-btn" onClick={handleCancel}>
                   Cancel

@@ -906,6 +906,9 @@ export interface DuckyOSAccountStatus {
   ok?: boolean;
   logged_in?: boolean;
   needs_code?: boolean;
+  browser_pending?: boolean;
+  user_code?: string;
+  plugin_disabled?: boolean;
   base_url?: string;
   default_base_url?: string;
   email?: string;

@@ -49,7 +49,7 @@ class PanelApiStoreMixin:
             return None
         return {
             "ok": False,
-            "error": "Account plugin is disabled — enable it in Settings → Store",
+            "error": "Account plugin is not available.",
             "code": "plugin_disabled",
             "logged_in": False,
             "plugin_disabled": True,

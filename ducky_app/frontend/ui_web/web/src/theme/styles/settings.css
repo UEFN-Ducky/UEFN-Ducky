@@ -2279,6 +2279,14 @@
   line-height: 1.5;
 }
 
+.account-tab-code {
+  margin: 0 0 8px 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
 .account-tab-ok {
   color: var(--accent);
 }

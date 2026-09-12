@@ -91,14 +91,62 @@ def test_watchdog_presses_while_caller_blocks_then_stops(monkeypatch):
 
     monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", fake)
     seen: list[dict] = []
-    with uefn_modal.save_modal_watchdog("test", poll_sec=0.02, on_press=seen.append) as events:
-        deadline = time.time() + 2.0
-        while not events and time.time() < deadline:
+
+    def until(predicate, timeout=30.0):
+        """Wait on the condition, not on a fixed sleep.
+
+        A 2 s budget with a 0.02 s poll is plenty of wall-clock but says nothing
+        about whether a daemon thread was *scheduled*; on a loaded machine this
+        test failed there while the code was fine. A generous timeout costs
+        nothing when things work and removes the flake when they are slow.
+        """
+        deadline = time.time() + timeout
+        while not predicate() and time.time() < deadline:
             time.sleep(0.01)
-        time.sleep(0.1)  # keeps polling while the caller is still blocked
+        return predicate()
+
+    with uefn_modal.save_modal_watchdog("test", poll_sec=0.02, on_press=seen.append) as events:
+        assert until(lambda: bool(events)), "watchdog never pressed"
+        # Keeps polling while the caller is still blocked.
+        assert until(lambda: len(calls) > 1), "watchdog stopped polling before the block ended"
     assert events and events[0]["label"] == "test" and events[0]["window_title"] == "Save Content"
     assert seen == events
+    # The block joins the in-flight tick, so the count is final the moment it exits.
     polled = len(calls)
     assert polled > 1
     time.sleep(0.1)
     assert len(calls) == polled  # thread stopped with the block
+
+
+def test_watchdog_block_waits_for_the_press_in_flight(monkeypatch):
+    """Leaving the block must not let a press land afterwards.
+
+    The watchdog used to only set its stop flag, so a thread already inside
+    auto_dismiss_save_modal() was free to press Enter after the caller had
+    finished — into whatever dialog the user opened next.
+    """
+    import threading
+    import time
+
+    from backend.tools.core import uefn_modal
+
+    monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
+    entered = threading.Event()
+    release = threading.Event()
+    finished: list[float] = []
+
+    def slow_press():
+        entered.set()
+        release.wait(30.0)
+        finished.append(time.time())
+        return {"sent_enter": True, "method": "enter_posted", "window_title": "Save Content"}
+
+    monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", slow_press)
+
+    with uefn_modal.save_modal_watchdog("slow", poll_sec=0.01):
+        assert entered.wait(30.0), "watchdog never started its press"
+        release.set()  # the press is now in flight as the block exits
+    left_block_at = time.time()
+
+    assert finished, "the in-flight press never completed"
+    assert finished[0] <= left_block_at, "the block exited before the press it started finished"

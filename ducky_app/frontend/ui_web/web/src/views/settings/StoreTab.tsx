@@ -30,7 +30,12 @@ import {
   takeStoreCatalogDirty,
   useStoreInstallJobs,
 } from "../../hooks/storeInstallJobs";
-import { consumeStoreCategoryRequest, consumeStoreInstallRequest } from "../../navigation/deepLinks";
+import {
+  ACCOUNT_LOGIN_EVENT,
+  ACCOUNT_LOGIN_KEY,
+  consumeStoreCategoryRequest,
+  consumeStoreInstallRequest,
+} from "../../navigation/deepLinks";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
 import {
@@ -520,6 +525,15 @@ export function StoreTab() {
                 await setEnabled(next, true);
               } else if (next?.enabled) {
                 maybeStartPluginWalkthrough(slug);
+              }
+              if (slug === "account") {
+                try {
+                  sessionStorage.setItem(ACCOUNT_LOGIN_KEY, "1");
+                } catch {
+                  /* ignore */
+                }
+                requestOpenSettings("Account");
+                window.dispatchEvent(new CustomEvent(ACCOUNT_LOGIN_EVENT));
               }
             }
           } else {
