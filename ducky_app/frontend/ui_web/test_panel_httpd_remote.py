@@ -132,6 +132,7 @@ def test_publish_window_rtc_reaches_pollers():
 def test_html_errors_never_show_python_404():
     src = Path(httpd.__file__).read_text(encoding="utf-8")
     assert "ud-remote-gone" in src
+    assert 'parent.postMessage({type:"ud-remote-gone"},"*")' in src
     assert "https://uefnducky.org/profile" in src
     assert "def send_error" in src
 

@@ -27,7 +27,7 @@ _HTTP_PROTOCOL = "HTTP/1.1"
 _SITE_PROFILE = "https://uefnducky.org/profile"
 _GONE_HTML = (
     b'<!doctype html><meta charset="utf-8"><script>'
-    b'parent.postMessage({type:"ud-remote-gone"},"https://uefnducky.org")'
+    b'parent.postMessage({type:"ud-remote-gone"},"*")'
     b"</script>"
 )
 _COOKIE_NAME = "ducky_remote"

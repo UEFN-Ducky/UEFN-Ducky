@@ -106,7 +106,7 @@ function startHttpEventPoll() {
           cache: "no-store",
         });
         if (response.status === 403 && window.parent !== window) {
-          window.parent.postMessage({ type: "ud-remote-gone" }, "https://uefnducky.org");
+          window.parent.postMessage({ type: "ud-remote-gone" }, "*");
           httpPollStarted = false;
           return;
         }
