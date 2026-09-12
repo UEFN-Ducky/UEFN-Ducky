@@ -161,3 +161,35 @@ def test_is_store_file_names_every_sidecar() -> None:
     for name in ("ducky.db", "ducky.db-wal", "ducky.db-shm", "snapshots"):
         assert db.is_store_file(name)
     assert not db.is_store_file("panel_settings.json")
+
+
+def test_cached_connect_does_no_filesystem_work(tmp_path: Path, monkeypatch) -> None:
+    """The connection cache must not stat/resolve before it can look itself up.
+
+    ``connect()`` computed its cache key with ``path.parent.exists()`` plus
+    ``path.resolve()`` on every call — three syscalls, ~0.5 ms on Windows, ahead
+    of the dict lookup. Every settings read in the app paid it, and the sidebar's
+    1.5 s tree poll paid it twice per file on screen.
+    """
+    db.connect()  # first open: resolving is expected
+
+    calls: list[str] = []
+    real_resolve = Path.resolve
+    real_exists = Path.exists
+    monkeypatch.setattr(Path, "resolve", lambda self, *a, **k: (calls.append("resolve"), real_resolve(self, *a, **k))[1])
+    monkeypatch.setattr(Path, "exists", lambda self, *a, **k: (calls.append("exists"), real_exists(self, *a, **k))[1])
+
+    for _ in range(50):
+        db.connect()
+
+    assert calls == [], f"cached connect() still touched the filesystem: {calls[:6]}"
+
+
+def test_repointed_appdata_still_opens_its_own_database(tmp_path: Path, monkeypatch) -> None:
+    """Memoising the key must not pin one process to the first database it saw."""
+    first = db.connect()
+    other = tmp_path / "elsewhere"
+    monkeypatch.setenv("LOCALAPPDATA", str(other))
+    second = db.connect()
+    assert second is not first
+    assert (other / "UEFN-Ducky" / db.DB_NAME).is_file()

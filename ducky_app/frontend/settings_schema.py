@@ -203,7 +203,7 @@ FIELD_META: dict[str, FieldMeta] = {
     ),
     "duckyos_base_url": FieldMeta("DuckyOS base URL", "Account", settable=True),
     "remote_access": FieldMeta(
-        "Remote access",
+        "UEFN Ducky in the browser",
         "Account",
         settable=True,
         description="Serve this PC's UEFN Ducky in the browser at /ducky.",

@@ -54,6 +54,7 @@ _thread_local = threading.local()
 _guard = threading.Lock()
 _log = logging.getLogger("uefn_ducky.store")
 _migrated: set[str] = set()
+_conn_keys: dict[str, str] = {}  # str(path) -> resolved connection-cache key
 
 
 # --------------------------------------------------------------------------- paths
@@ -156,18 +157,38 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
 
     Connections are cached per thread and per resolved path, so a test that
     repoints ``LOCALAPPDATA`` gets a fresh database.
+
+    The key has to be the *real* path so two spellings of one database share a
+    connection — but resolving it is three filesystem syscalls (~0.5 ms on
+    Windows), and they used to run ahead of the cache lookup on every call, so
+    every store read in the app paid for them. The resolved key is remembered
+    per spelling instead: a directory's real path does not change under a
+    running process, and a test that repoints ``LOCALAPPDATA`` produces a
+    different spelling and so resolves afresh.
     """
     path = db_path(root)
-    key = str(path.resolve()) if path.parent.exists() else str(path)
+    raw = str(path)
     cache: dict[str, sqlite3.Connection] = getattr(_thread_local, "conns", None) or {}
+    key = _conn_keys.get(raw)
+    if key is not None:
+        conn = cache.get(key)
+        if conn is not None:
+            return conn
+
+    _refuse_network_path(path)
+    _refuse_real_appdata_under_pytest(path)
+    if (key or raw) not in _migrated:
+        _apply_pending_restore(path)
+    # Resolve only after the guards have passed and the directory exists, so the
+    # key is the settled one from the very first call. Keying the first call on
+    # the pre-mkdir spelling and later calls on the resolved one opened a second
+    # connection to the same file.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = str(path.resolve())
+    _conn_keys[raw] = key
     conn = cache.get(key)
     if conn is not None:
         return conn
-    _refuse_network_path(path)
-    _refuse_real_appdata_under_pytest(path)
-    if key not in _migrated:
-        _apply_pending_restore(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row
     if os.environ.get("DUCKY_DB_TRACE"):
@@ -234,6 +255,7 @@ def reset_for_tests() -> None:
     close_thread_connections()
     with _guard:
         _migrated.clear()
+        _conn_keys.clear()
 
 
 # --------------------------------------------------------------------------- transactions

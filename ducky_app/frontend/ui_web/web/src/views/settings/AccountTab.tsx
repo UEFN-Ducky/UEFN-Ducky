@@ -217,7 +217,7 @@ export function AccountTab() {
                 Open Admin in browser
               </button>
               <button type="button" className="account-tab-btn" onClick={() => openTeamsSite("/ducky")}>
-                Open remote in browser
+                Open UEFN Ducky in browser
               </button>
               <button
                 type="button"
@@ -232,11 +232,10 @@ export function AccountTab() {
 
           <div className="account-tab-card">
             <div className="account-tab-signed-row">
-              <h3 className="account-tab-section-title">Remote</h3>
+              <h3 className="account-tab-section-title">UEFN Ducky in the browser</h3>
             </div>
             <p className="account-tab-body">
-              Open this PC&apos;s UEFN Ducky in the browser at <code>/ducky</code>. Traffic stays
-              on your machine through Cloudflare. Off by default.
+              Open this PC&apos;s UEFN Ducky in the browser at <code>/ducky</code>. Off by default.
             </p>
             {remote?.site_update_pending ? (
               <p className="account-tab-body account-tab-warn-text">Site update pending</p>
@@ -268,12 +267,11 @@ export function AccountTab() {
             ) : null}
             {remote?.mode === "quick" ? (
               <p className="account-tab-meta">
-                Temporary Cloudflare address. Your host is{" "}
-                <code>u-….uefnducky.org</code> after a tunnel token is saved at Admin →
-                UEFN Ducky → Remote.
+                Temporary address. Your host is <code>u-….uefnducky.org</code> after
+                a site token is saved.
               </p>
             ) : null}
-            <p className="account-tab-meta">Active remote sessions: {remote?.sessions ?? 0}</p>
+            <p className="account-tab-meta">Active sessions: {remote?.sessions ?? 0}</p>
             <div className="account-tab-actions">
               <button
                 type="button"
@@ -295,7 +293,7 @@ export function AccountTab() {
                   })();
                 }}
               >
-                {remote?.enabled ? "Turn remote access off" : "Turn remote access on"}
+                {remote?.enabled ? "Turn off" : "Turn on"}
               </button>
               <button type="button" className="account-tab-btn" onClick={() => openTeamsSite("/ducky")}>
                 Open in browser
@@ -319,7 +317,7 @@ export function AccountTab() {
                   })();
                 }}
               >
-                Sign out all remote
+                Sign out all sessions
               </button>
             </div>
           </div>

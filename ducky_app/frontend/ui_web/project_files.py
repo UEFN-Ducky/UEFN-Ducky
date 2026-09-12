@@ -420,8 +420,8 @@ def _is_uefn_engine_file(name: str) -> bool:
     return False
 
 
-def _is_hidden_tree_entry(name: str, is_dir: bool) -> bool:
-    if _show_hidden_project_files():
+def _is_hidden_tree_entry(name: str, is_dir: bool, show_hidden: bool) -> bool:
+    if show_hidden:
         return False
     if is_dir and name in _HIDDEN_DIR_NAMES:
         return True
@@ -450,21 +450,31 @@ def _binary_file_preview(name: str, chunk: bytes, total_size: int) -> str:
     return "\n".join(lines)
 
 
-def _should_skip(name: str, is_dir: bool) -> bool:
+def _should_skip(name: str, is_dir: bool, show_hidden: bool) -> bool:
     # Dotfiles: always show common text names (.gitignore, …); other dots follow
     # show_hidden. .git / .svn stay hidden. Non-dot skip dirs (.git is also covered).
     if name.startswith("."):
-        if not should_show_dot_entry(name, is_dir, show_hidden=_show_hidden_project_files()):
+        if not should_show_dot_entry(name, is_dir, show_hidden=show_hidden):
             return True
     if is_dir and name in _SKIP_DIR_NAMES:
         return True
     return False
 
 
-def _include_in_content_tree(name: str, is_dir: bool) -> bool:
-    if _should_skip(name, is_dir):
+def _include_in_content_tree(name: str, is_dir: bool, show_hidden: bool | None = None) -> bool:
+    """Whether *name* belongs in the sidebar's Content tree.
+
+    ``show_hidden`` is the one setting these predicates need, and it is constant
+    for the whole listing. It used to be read *per entry* — two
+    ``PanelSettings.load()`` calls per file — so the 1.5 s tree-fingerprint poll
+    re-read the settings store thousands of times a second. Callers that loop
+    read it once and pass it in.
+    """
+    if show_hidden is None:
+        show_hidden = _show_hidden_project_files()
+    if _should_skip(name, is_dir, show_hidden):
         return False
-    return not _is_hidden_tree_entry(name, is_dir)
+    return not _is_hidden_tree_entry(name, is_dir, show_hidden)
 
 
 def _is_binary_file_name(name: str) -> bool:
@@ -534,6 +544,7 @@ def _invalidate_file_paths_cache() -> None:
 def _list_directory_entries(target: Path, *, content_tree: bool) -> list[dict[str, str | bool]]:
     entries: list[dict[str, str | bool]] = []
     include = _include_in_content_tree if content_tree else _include_in_workspace_tree_entry
+    show_hidden = _show_hidden_project_files()
     try:
         names = sorted(os.listdir(target), key=lambda s: s.lower())
     except OSError as exc:
@@ -541,17 +552,17 @@ def _list_directory_entries(target: Path, *, content_tree: bool) -> list[dict[st
     for name in names:
         full = target / name
         is_dir = full.is_dir()
-        if not include(name, is_dir):
+        if not include(name, is_dir, show_hidden):
             continue
         entry_rel = _entry_path_for_target(full)
         entries.append({"name": name, "path": entry_rel, "is_dir": is_dir})
     return entries
 
 
-def _include_in_workspace_tree_entry(name: str, is_dir: bool) -> bool:
-    if _should_skip(name, is_dir):
-        return False
-    return True
+def _include_in_workspace_tree_entry(name: str, is_dir: bool, show_hidden: bool | None = None) -> bool:
+    if show_hidden is None:
+        show_hidden = _show_hidden_project_files()
+    return not _should_skip(name, is_dir, show_hidden)
 
 
 def list_project_file_paths() -> list[dict[str, str]]:
@@ -561,10 +572,8 @@ def list_project_file_paths() -> list[dict[str, str]]:
         content_mtime = _content_dir().stat().st_mtime
     except OSError:
         content_mtime = 0.0
-    root_key = (
-        f"{root}|hidden={_show_hidden_project_files()}|ws={len(_workspace_folders())}"
-        f"|mtime={content_mtime}"
-    )
+    show_hidden = _show_hidden_project_files()
+    root_key = f"{root}|hidden={show_hidden}|ws={len(_workspace_folders())}|mtime={content_mtime}"
     if root_key in _file_paths_cache:
         return _file_paths_cache[root_key]
 
@@ -572,11 +581,11 @@ def list_project_file_paths() -> list[dict[str, str]]:
     content = _content_dir()
     for dirpath, dirnames, filenames in os.walk(content):
         dirnames[:] = sorted(
-            (d for d in dirnames if _include_in_content_tree(d, True)),
+            (d for d in dirnames if _include_in_content_tree(d, True, show_hidden)),
             key=lambda s: s.lower(),
         )
         for name in sorted(filenames, key=lambda s: s.lower()):
-            if not _include_in_content_tree(name, False):
+            if not _include_in_content_tree(name, False, show_hidden):
                 continue
             full = Path(dirpath) / name
             rel = str(full.relative_to(root)).replace("\\", "/")
@@ -590,13 +599,13 @@ def list_project_file_paths() -> list[dict[str, str]]:
             continue
         for dirpath, dirnames, filenames in os.walk(folder_path):
             dirnames[:] = sorted(
-                (d for d in dirnames if _include_in_workspace_tree_entry(d, True)),
+                (d for d in dirnames if _include_in_workspace_tree_entry(d, True, show_hidden)),
                 key=lambda s: s.lower(),
             )
             for name in sorted(filenames, key=lambda s: s.lower()):
                 if not name.lower().endswith(".verse"):
                     continue
-                if not _include_in_workspace_tree_entry(name, False):
+                if not _include_in_workspace_tree_entry(name, False, show_hidden):
                     continue
                 full = Path(dirpath) / name
                 out.append({"path": _encode_abs_path(full), "name": name})
@@ -669,7 +678,7 @@ def stat_project_file(relative_path: str) -> dict[str, int | str | bool]:
     return {"path": rel, "mtime_ns": int(st.st_mtime_ns), "size": int(st.st_size), "exists": True}
 
 
-def _dir_fingerprint(target: Path) -> str:
+def _dir_fingerprint(target: Path, show_hidden: bool) -> str:
     """One-level fingerprint: child count, newest child mtime, and a hash of visible names.
 
     Catches adds/removes (count + hash), renames (hash), and touches (mtime). A child
@@ -681,7 +690,7 @@ def _dir_fingerprint(target: Path) -> str:
     with os.scandir(target) as it:
         for entry in it:
             is_dir = entry.is_dir()
-            if not _include_in_content_tree(entry.name, is_dir):
+            if not _include_in_content_tree(entry.name, is_dir, show_hidden):
                 continue
             names.append(entry.name)
             try:
@@ -699,6 +708,7 @@ def fingerprint_project_dirs(relative_paths: list[str]) -> dict[str, object]:
     missing, or non-directory) yields "" so a single bad path can't fail the whole poll.
     """
     out: dict[str, str] = {}
+    show_hidden = _show_hidden_project_files()
     for raw in relative_paths or []:
         rel = (raw or "").strip().replace("\\", "/").strip("/")
         if not rel or _is_workspace_locked_path(rel):
@@ -706,7 +716,8 @@ def fingerprint_project_dirs(relative_paths: list[str]) -> dict[str, object]:
             continue
         try:
             target = _resolve_relative(rel)
-            out[raw] = _dir_fingerprint(target) if _is_under_content(target) and target.is_dir() else ""
+            under = _is_under_content(target) and target.is_dir()
+            out[raw] = _dir_fingerprint(target, show_hidden) if under else ""
         except (ValueError, OSError):
             out[raw] = ""
     # The sidebar polls this every 1.5 s. A changed fingerprint means something

@@ -126,6 +126,10 @@ _SECRET_TESTERS: dict[str, dict[str, Any]] = {}
 _PANEL_RPC: dict[str, dict[str, Any]] = {}
 # plugin_id → {label, program, fn} — Connections menu + revert preflight
 _CONNECTION_PROBES: dict[str, dict[str, Any]] = {}
+# Last probe row per plugin. Header status polls every 8s — do not re-hit
+# unused MCP sockets on every tick.
+_CONNECTION_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_CONNECTION_CACHE_TTL_S = 30.0
 
 # Per-run allowlist for UEFN app-plugin tools.
 # None = follow Store enable; [] = none; non-empty = those plugin ids only.
@@ -350,6 +354,7 @@ def register_connection_probe(
             "program": str(program or "").strip() or pid,
             "fn": fn,
         }
+        _CONNECTION_CACHE.pop(pid, None)
 
 
 def _normalize_connection_row(pid: str, spec: Mapping[str, Any], raw: Any) -> dict[str, Any]:
@@ -375,8 +380,10 @@ def _normalize_connection_row(pid: str, spec: Mapping[str, Any], raw: Any) -> di
         online = data.get("connected")
         if online is None:
             online = data.get("online")
+        if online is None:
+            online = data.get("ok")
         warn = bool(data.get("warn"))
-        detail = str(data.get("detail") or data.get("hint") or "")
+        detail = str(data.get("detail") or data.get("hint") or data.get("state") or "")
         row_label = str(data.get("label") or label)
         return {
             "id": pid,
@@ -399,26 +406,38 @@ def _normalize_connection_row(pid: str, spec: Mapping[str, Any], raw: Any) -> di
 
 def plugin_connection_rows() -> list[dict[str, Any]]:
     """Live plugin MCP rows for the Connections menu. Never raises."""
+    now = time.monotonic()
     with _LOCK:
         items = list(_CONNECTION_PROBES.items())
     rows: list[dict[str, Any]] = []
     for pid, spec in items:
         if not is_plugin_enabled(pid):
             continue
+        with _LOCK:
+            cached = _CONNECTION_CACHE.get(pid)
+        if cached and (now - cached[0]) < _CONNECTION_CACHE_TTL_S:
+            rows.append(dict(cached[1]))
+            continue
         fn = spec.get("fn")
         try:
             raw = fn() if callable(fn) else False
         except Exception as exc:  # noqa: BLE001 — a dead plugin must not blank the menu
-            rows.append({
+            row = {
                 "id": pid,
                 "program": str(spec.get("program") or pid),
                 "label": str(spec.get("label") or pid),
                 "online": False,
                 "warn": False,
                 "detail": str(exc)[:160],
-            })
+            }
+            with _LOCK:
+                _CONNECTION_CACHE[pid] = (now, row)
+            rows.append(row)
             continue
-        rows.append(_normalize_connection_row(pid, spec, raw))
+        row = _normalize_connection_row(pid, spec, raw)
+        with _LOCK:
+            _CONNECTION_CACHE[pid] = (now, row)
+        rows.append(row)
     return rows
 
 
@@ -722,6 +741,7 @@ def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) ->
             _SECRET_TESTERS.pop(key, None)
         _PANEL_RPC.pop(pid, None)
         _CONNECTION_PROBES.pop(pid, None)
+        _CONNECTION_CACHE.pop(pid, None)
         _API_TOOL_REGISTRY.pop(pid, None)
         _API_INTENT_PATTERNS.pop(pid, None)
         for name in [n for n, owner in _PLUGIN_TOOL_OWNER.items() if owner == pid]:
