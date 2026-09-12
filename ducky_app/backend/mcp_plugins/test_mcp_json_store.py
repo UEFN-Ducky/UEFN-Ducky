@@ -6,7 +6,25 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from backend.mcp_plugins import store
+
+
+@pytest.fixture(autouse=True)
+def _fresh_row_store():
+    """Each test owns its own server map.
+
+    These tests set up an ``mcp.json`` under their own tmp_path, but the store
+    reads the ducky.db row store when it has anything in it — and one pytest
+    session shares one database. Without this reset a test inherits whichever
+    servers ran before it and never looks at the file it just wrote.
+    """
+    from backend.store.repos import misc
+
+    misc.mcp_servers_reset_for_tests()
+    yield
+    misc.mcp_servers_reset_for_tests()
 
 
 def test_migrate_legacy_folders_and_disabled(tmp_path: Path, monkeypatch) -> None:
@@ -231,6 +249,11 @@ def test_retire_blender_nested_mcp(tmp_path: Path, monkeypatch) -> None:
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
+        # Seed through the store, not by writing mcp.json alone: with the row
+        # store on (ADR 0003) mcp.json is an export that is never read back, so a
+        # file-only fixture left the starting server map empty and this test
+        # passed or failed on whether the "mcp" switch happened to be enabled.
+        store._write_servers(json.loads((appdata / "mcp.json").read_text(encoding="utf-8"))["mcpServers"])
         store.ensure_mcp_config()
         servers = store.load_mcp_config()["mcpServers"]
         assert "blender" not in servers

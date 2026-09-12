@@ -52,6 +52,21 @@ def mcp_servers_present() -> bool:
     return conn.execute("SELECT 1 FROM meta WHERE key='mcp_servers_seeded'").fetchone() is not None
 
 
+def mcp_servers_reset_for_tests() -> None:
+    """Drop the server rows and the seeded marker (tests only).
+
+    ``mcp_servers_present()`` is deliberately sticky: the marker survives an
+    empty server map so boot does not re-seed the catalog every time. One pytest
+    session shares one ducky.db, so the first test that writes servers flips that
+    marker for every test after it — and a test that sets up only an ``mcp.json``
+    then silently reads its predecessors' rows instead of its own file.
+    """
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute("DELETE FROM mcp_servers")
+        conn.execute("DELETE FROM meta WHERE key='mcp_servers_seeded'")
+
+
 # --------------------------------------------------------------------------- captures
 
 
