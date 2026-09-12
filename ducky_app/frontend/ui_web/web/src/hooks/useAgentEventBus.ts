@@ -105,6 +105,11 @@ function startHttpEventPoll() {
         const response = await fetch(`/__panel_events?since=${httpCursor}`, {
           cache: "no-store",
         });
+        if (response.status === 403 && window.parent !== window) {
+          window.parent.postMessage({ type: "ud-remote-gone" }, "https://uefnducky.org");
+          httpPollStarted = false;
+          return;
+        }
         if (!response.ok) throw new Error(`event poll ${response.status}`);
         const body = (await response.json()) as { cursor?: number; events?: AgentEvent[] };
         if (typeof body.cursor === "number") httpCursor = body.cursor;

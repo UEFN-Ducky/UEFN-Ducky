@@ -381,7 +381,7 @@ export function Header({
   return (
     <header
       ref={headerTargetRef}
-      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""}${isSettingsOverlay ? " app-header--settings" : " drag-region app-drag-surface"}${compactHeader ? " app-header--compact" : ""}`}
+      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""}${isSettingsOverlay ? " app-header--settings" : " drag-region app-drag-surface"}${compactHeader ? " app-header--compact" : ""}${isRemote() ? " app-header--remote" : ""}`}
     >
       <div id="ducky-skin-header" className="ducky-skin-slot ducky-skin-slot--header" aria-hidden="true" />
       <div className={`app-header-left${isSettingsOverlay ? " app-header-left--settings" : ""}`}>

@@ -139,6 +139,8 @@ def issue_remote_cookie(host: str) -> str:
     mac = hmac.new(_cookie_key(), f"{sid}.{exp}.{host}".encode(), hashlib.sha256).hexdigest()
     value = f"{sid}.{exp}.{mac}"
     with _auth_lock:
+        # One remote browser at a time — a new login drops every other cookie.
+        _sessions.clear()
         _sessions[sid] = float(exp)
     return value
 
@@ -164,6 +166,8 @@ def remote_cookie_ok(cookie_header: str | None, host: str) -> bool:
     if exp < time.time():
         return False
     with _auth_lock:
+        if sid not in _sessions:
+            return False
         _sessions[sid] = float(exp)
     return True
 

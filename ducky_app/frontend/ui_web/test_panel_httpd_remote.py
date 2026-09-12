@@ -59,6 +59,15 @@ def test_cookie_bound_to_host(remote_auth):
     assert not httpd.request_is_authorized(host, "/", header)
 
 
+def test_new_login_kicks_previous_cookie(remote_auth):
+    host = "u-abc.app.uefnducky.org"
+    first = httpd.issue_remote_cookie(host)
+    second = httpd.issue_remote_cookie(host)
+    assert httpd.request_is_authorized(host, "/", f"{httpd._COOKIE_NAME}={second}")
+    assert not httpd.request_is_authorized(host, "/", f"{httpd._COOKIE_NAME}={first}")
+    assert httpd.remote_session_count() == 1
+
+
 def test_local_bridge_paths_stay_loopback(remote_auth):
     host = "u-abc.app.uefnducky.org"
     cookie = httpd.issue_remote_cookie(host)

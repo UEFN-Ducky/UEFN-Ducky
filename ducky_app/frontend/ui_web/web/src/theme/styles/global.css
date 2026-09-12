@@ -644,6 +644,9 @@ input, textarea, select, button {
   min-width: 0;
   z-index: 1;
 }
+.app-header--remote {
+  padding-right: 64px;
+}
 .remote-window-select {
   display: flex;
   align-items: center;
