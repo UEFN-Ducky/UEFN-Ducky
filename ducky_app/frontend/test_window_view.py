@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import io
-
 from frontend.window_view import (
     bring_to_front,
-    jpeg_bytes,
     kind_for,
     map_norm_to_screen,
     window_box,
@@ -20,16 +17,6 @@ def test_kind_for_uefn_and_blender() -> None:
     assert kind_for("Notes", "notepad.exe") == "app"
 
 
-def test_jpeg_bytes_shrinks_wide_image() -> None:
-    from PIL import Image
-
-    img = Image.new("RGB", (3200, 200), color=(10, 20, 30))
-    raw = jpeg_bytes(img, max_edge=800)
-    out = Image.open(io.BytesIO(raw))
-    assert out.format == "JPEG"
-    assert max(out.size) == 800
-
-
 def test_map_norm_to_screen_corners() -> None:
     box = (100, 200, 300, 400)
     assert map_norm_to_screen(box, 0, 0) == (100, 200)
@@ -41,8 +28,19 @@ def test_map_norm_to_screen_corners() -> None:
 
 def test_window_fit_size_clamps() -> None:
     assert window_fit_size(80, 80) == (400, 300)
-    assert window_fit_size(9000, 5000) == (3840, 2160)
     assert window_fit_size(1600, 900) == (1600, 900)
+
+
+def test_window_fit_size_keeps_aspect_inside_work_area() -> None:
+    # 16:9 viewer on a 1920x1040 work area: width-bound.
+    w, h = window_fit_size(3840, 2160, 1920, 1040)
+    assert w <= 1920 and h <= 1040
+    assert abs(w / h - 16 / 9) < 0.02
+    # Portrait phone (3x DPR): height-bound, never taller than the screen.
+    w, h = window_fit_size(1170, 2532, 1920, 1040)
+    assert h == 1040
+    assert abs(w / h - 1170 / 2532) < 0.02
+    assert w >= 400
 
 
 def test_bring_to_front_skips_when_already_foreground(monkeypatch) -> None:

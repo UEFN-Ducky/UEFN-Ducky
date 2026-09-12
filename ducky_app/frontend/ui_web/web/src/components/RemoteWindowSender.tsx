@@ -2,95 +2,158 @@ import { useEffect } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import type { AgentEvent, WindowBox } from "../types/panel";
+import { rankVideoCodec } from "./remoteWindowMath";
+
+export { rankVideoCodec } from "./remoteWindowMath";
+
+/**
+ * Desktop side of Remote View. Runs inside the app's WebView2 (Chromium):
+ * one getDisplayMedia screen track for the whole app lifetime, one
+ * RTCPeerConnection per remote viewer session, crop to the watched window
+ * done in a Worker so the panel UI thread never stalls the frame pump.
+ *
+ * ponytail: signaling for a session is serialized and the open is memoised —
+ * an offer and its trickle candidates land in the same event batch and used
+ * to spawn N capture requests + N peer connections (N "sharing your screen"
+ * bars, candidates applied to the wrong pc, ICE failing on real NATs).
+ */
 
 const STUN: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.cloudflare.com:3478" },
     { urls: "stun:stun.l.google.com:19302" },
   ],
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require",
 };
+
+const MAX_BITRATE = 20_000_000;
+const MAX_FPS = 60;
+const BOX_POLL_MS = 250;
+// Drop the screen capture (and its "sharing your screen" bar) once nobody
+// has watched for this long; a viewer retry inside the window reuses it.
+const IDLE_RELEASE_MS = 5000;
 
 type Session = {
   pc: RTCPeerConnection;
   hwnd: string;
   abort: AbortController;
+  pendingIce: RTCIceCandidateInit[];
+  haveRemote: boolean;
+  queue: Promise<void>;
 };
 
-let cachedScreen: MediaStreamTrack | null = null;
+type CropCtx = {
+  onmessage: ((ev: { data: CropMessage }) => void) | null;
+};
+type CropMessage =
+  | { type: "box"; box: WindowBox | null }
+  | { type: "start"; readable: ReadableStream<VideoFrame>; writable: WritableStream<VideoFrame> };
+
+let screenPromise: Promise<MediaStreamTrack> | null = null;
+let idleTimer = 0;
 const sessions = new Map<string, Session>();
+const opening = new Map<string, Promise<Session | null>>();
 
-async function screenTrack(): Promise<MediaStreamTrack> {
-  if (cachedScreen && cachedScreen.readyState === "live") return cachedScreen;
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: 60 },
-    audio: false,
-  });
-  const track = stream.getVideoTracks()[0];
-  if (!track) throw new Error("no screen track");
-  try {
-    track.contentHint = "motion";
-  } catch {
-    /* ignore */
-  }
-  cachedScreen = track;
-  return track;
+function releaseScreenWhenIdle() {
+  window.clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(() => {
+    if (sessions.size || opening.size || !screenPromise) return;
+    const p = screenPromise;
+    screenPromise = null;
+    void p.then((track) => track.stop()).catch(() => {});
+  }, IDLE_RELEASE_MS);
 }
 
-function cropRect(frame: VideoFrame, box: WindowBox | null): DOMRectInit {
-  const fw = frame.displayWidth;
-  const fh = frame.displayHeight;
-  if (!box || !(box.right && box.bottom)) {
-    return { x: 0, y: 0, width: fw, height: fh };
-  }
-  const virtual = Math.abs(fw - (box.screen_w || 0)) <= 4;
-  const ox = virtual ? box.screen_left || 0 : 0;
-  const oy = virtual ? box.screen_top || 0 : 0;
-  let x = Math.max(0, Math.min(fw - 2, (box.left || 0) - ox));
-  let y = Math.max(0, Math.min(fh - 2, (box.top || 0) - oy));
-  let w = Math.max(2, Math.min(fw - x, (box.right || 0) - (box.left || 0)));
-  let h = Math.max(2, Math.min(fh - y, (box.bottom || 0) - (box.top || 0)));
-  x -= x % 2;
-  y -= y % 2;
-  w -= w % 2;
-  h -= h % 2;
-  return { x, y, width: Math.max(2, w), height: Math.max(2, h) };
-}
-
-async function croppedTrack(
-  screen: MediaStreamTrack,
-  hwnd: string,
-  abort: AbortSignal,
-): Promise<MediaStreamTrack> {
-  const Processor = (
-    window as unknown as { MediaStreamTrackProcessor?: new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> } }
-  ).MediaStreamTrackProcessor;
-  const Generator = (
-    window as unknown as { MediaStreamTrackGenerator?: new (init: { kind: "video" }) => MediaStreamTrack & { writable: WritableStream<VideoFrame> } }
-  ).MediaStreamTrackGenerator;
-  if (!Processor || !Generator) throw new Error("no crop");
-  const boxRef: { current: WindowBox | null } = { current: null };
-  const poll = window.setInterval(() => {
-    const api = getApi();
-    if (!api?.window_box) return;
-    void api.window_box(hwnd).then((next) => {
-      if (next?.right) boxRef.current = next;
+function screenTrack(): Promise<MediaStreamTrack> {
+  if (screenPromise) {
+    return screenPromise.then((track) => {
+      if (track.readyState === "live") return track;
+      screenPromise = null;
+      return screenTrack();
     });
-  }, 250);
-  abort.addEventListener("abort", () => window.clearInterval(poll));
-  const clone = screen.clone();
-  const processor = new Processor({ track: clone });
-  const generator = new Generator({ kind: "video" });
-  const writer = generator.writable.getWriter();
-  const reader = processor.readable.getReader();
-  const pump = async () => {
+  }
+  const opts = {
+    video: {
+      frameRate: { ideal: MAX_FPS, max: MAX_FPS },
+      displaySurface: "monitor",
+    },
+    audio: false,
+    selfBrowserSurface: "exclude",
+    surfaceSwitching: "exclude",
+    systemAudio: "exclude",
+    monitorTypeSurfaces: "include",
+    preferCurrentTab: false,
+  } as unknown as DisplayMediaStreamOptions;
+  screenPromise = navigator.mediaDevices.getDisplayMedia(opts).then((stream) => {
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error("no screen track");
     try {
-      while (!abort.aborted) {
+      track.contentHint = "motion";
+    } catch {
+      /* ignore */
+    }
+    track.addEventListener("ended", () => {
+      screenPromise = null;
+      for (const id of [...sessions.keys()]) teardown(id);
+    });
+    return track;
+  });
+  screenPromise.catch(() => {
+    screenPromise = null;
+  });
+  return screenPromise;
+}
+
+/**
+ * Crop pump. Self-contained on purpose: it is stringified into a Worker
+ * (no closure access) and also runs on the main thread as a fallback.
+ * Frames are re-wrapped with a visibleRect (metadata only, no copy) and
+ * dropped instead of queued when the encoder is behind — latency over
+ * completeness.
+ */
+function cropPump(ctx: CropCtx) {
+  let box: WindowBox | null = null;
+  const rectFor = (frame: VideoFrame): DOMRectInit => {
+    const fw = frame.displayWidth;
+    const fh = frame.displayHeight;
+    const b = box;
+    if (!b || !(b.right && b.bottom)) return { x: 0, y: 0, width: fw, height: fh };
+    const virtual = Math.abs(fw - (b.screen_w || 0)) <= 4;
+    const ox = virtual ? b.screen_left || 0 : 0;
+    const oy = virtual ? b.screen_top || 0 : 0;
+    let x = Math.max(0, Math.min(fw - 2, (b.left || 0) - ox));
+    let y = Math.max(0, Math.min(fh - 2, (b.top || 0) - oy));
+    let w = Math.max(2, Math.min(fw - x, (b.right || 0) - (b.left || 0)));
+    let h = Math.max(2, Math.min(fh - y, (b.bottom || 0) - (b.top || 0)));
+    x -= x % 2;
+    y -= y % 2;
+    w -= w % 2;
+    h -= h % 2;
+    return { x, y, width: Math.max(2, w), height: Math.max(2, h) };
+  };
+  const pump = async (readable: ReadableStream<VideoFrame>, writable: WritableStream<VideoFrame>) => {
+    const reader = readable.getReader();
+    const writer = writable.getWriter();
+    try {
+      for (;;) {
         const { value, done } = await reader.read();
         if (done || !value) break;
         try {
-          const next = new VideoFrame(value, { visibleRect: cropRect(value, boxRef.current) });
-          await writer.write(next);
-          next.close();
+          if (writer.desiredSize !== null && writer.desiredSize < 0) continue;
+          const r = rectFor(value);
+          const full =
+            r.x === 0 && r.y === 0 && r.width === value.displayWidth && r.height === value.displayHeight;
+          if (full) {
+            await writer.write(value);
+            continue;
+          }
+          const next = new VideoFrame(value, { visibleRect: r });
+          try {
+            await writer.write(next);
+          } finally {
+            next.close();
+          }
         } finally {
           value.close();
         }
@@ -104,28 +167,101 @@ async function croppedTrack(
         /* ignore */
       }
       try {
-        clone.stop();
+        reader.releaseLock();
       } catch {
         /* ignore */
       }
     }
   };
-  void pump();
+  ctx.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.type === "box") box = m.box;
+    else if (m.type === "start") void pump(m.readable, m.writable);
+  };
+}
+
+function startCropWorker(
+  readable: ReadableStream<VideoFrame>,
+  writable: WritableStream<VideoFrame>,
+): { post: (m: CropMessage) => void; stop: () => void } {
+  try {
+    const src = `(${cropPump.toString()})(self);`;
+    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+    const worker = new Worker(url);
+    URL.revokeObjectURL(url);
+    worker.postMessage({ type: "start", readable, writable }, [readable, writable] as unknown as Transferable[]);
+    return {
+      post: (m) => worker.postMessage(m),
+      stop: () => worker.terminate(),
+    };
+  } catch {
+    const ctx: CropCtx = { onmessage: null };
+    cropPump(ctx);
+    ctx.onmessage?.({ data: { type: "start", readable, writable } });
+    return {
+      post: (m) => ctx.onmessage?.({ data: m }),
+      stop: () => {},
+    };
+  }
+}
+
+async function croppedTrack(
+  screen: MediaStreamTrack,
+  hwnd: string,
+  abort: AbortSignal,
+): Promise<MediaStreamTrack> {
+  const Processor = (
+    window as unknown as {
+      MediaStreamTrackProcessor?: new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> };
+    }
+  ).MediaStreamTrackProcessor;
+  const Generator = (
+    window as unknown as {
+      MediaStreamTrackGenerator?: new (init: { kind: "video" }) => MediaStreamTrack & {
+        writable: WritableStream<VideoFrame>;
+      };
+    }
+  ).MediaStreamTrackGenerator;
+  if (!Processor || !Generator) throw new Error("no crop");
+  const clone = screen.clone();
+  const processor = new Processor({ track: clone });
+  const generator = new Generator({ kind: "video" });
+  const worker = startCropWorker(processor.readable, generator.writable);
+  const api = getApi();
+  const pollBox = () => {
+    if (!api?.window_box) return;
+    void api.window_box(hwnd).then(
+      (next) => {
+        if (next?.right) worker.post({ type: "box", box: next });
+      },
+      () => {},
+    );
+  };
+  pollBox();
+  const poll = window.setInterval(pollBox, BOX_POLL_MS);
+  abort.addEventListener("abort", () => {
+    window.clearInterval(poll);
+    worker.stop();
+    try {
+      clone.stop();
+    } catch {
+      /* ignore */
+    }
+    try {
+      generator.stop();
+    } catch {
+      /* ignore */
+    }
+  });
   return generator;
 }
 
 function preferVideoCodecs(pc: RTCPeerConnection) {
   const caps = RTCRtpSender.getCapabilities?.("video");
   if (!caps) return;
-  const rank = (mime: string) => {
-    const x = mime.toLowerCase();
-    if (x.includes("h264")) return 0;
-    if (x.includes("av1")) return 1;
-    if (x.includes("vp9")) return 2;
-    return 9;
-  };
-  const ordered = [...caps.codecs].sort((a, b) => rank(a.mimeType) - rank(b.mimeType));
+  const ordered = [...caps.codecs].sort((a, b) => rankVideoCodec(a) - rankVideoCodec(b));
   for (const t of pc.getTransceivers()) {
+    if (t.sender.track?.kind !== "video") continue;
     try {
       t.setCodecPreferences(ordered);
     } catch {
@@ -141,9 +277,13 @@ async function tuneSender(pc: RTCPeerConnection) {
     const params = sender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
     for (const enc of params.encodings) {
-      enc.maxBitrate = 12_000_000;
-      enc.maxFramerate = 60;
+      enc.maxBitrate = MAX_BITRATE;
+      enc.maxFramerate = MAX_FPS;
+      enc.scaleResolutionDownBy = 1;
+      (enc as { priority?: string }).priority = "high";
+      (enc as { networkPriority?: string }).networkPriority = "high";
     }
+    (params as { degradationPreference?: string }).degradationPreference = "maintain-framerate";
     await sender.setParameters(params);
   } catch {
     /* ignore */
@@ -151,6 +291,12 @@ async function tuneSender(pc: RTCPeerConnection) {
 }
 
 function teardown(sessionId: string) {
+  const inflight = opening.get(sessionId);
+  if (inflight) {
+    void inflight.then((s) => {
+      if (s && sessions.get(sessionId) === s) teardown(sessionId);
+    });
+  }
   const session = sessions.get(sessionId);
   if (!session) return;
   sessions.delete(sessionId);
@@ -160,31 +306,33 @@ function teardown(sessionId: string) {
   } catch {
     /* ignore */
   }
+  if (!sessions.size) releaseScreenWhenIdle();
 }
 
-async function ensureSession(sessionId: string, hwnd: string): Promise<Session | null> {
-  const existing = sessions.get(sessionId);
-  if (existing) return existing;
+async function openSession(sessionId: string, hwnd: string): Promise<Session | null> {
   const api = getApi();
   const signal = api?.rtc_signal;
   const inject = api?.window_input;
   if (!signal) return null;
   const abort = new AbortController();
+  window.clearTimeout(idleTimer);
   let track: MediaStreamTrack;
   try {
     const screen = await screenTrack();
     track = await croppedTrack(screen, hwnd, abort.signal);
   } catch {
+    abort.abort();
     void signal(sessionId, { type: "rtc", kind: "fail" });
     return null;
   }
   const pc = new RTCPeerConnection(STUN);
-  preferVideoCodecs(pc);
   pc.addTrack(track);
-  void tuneSender(pc);
   pc.onicecandidate = (ev) => {
     if (!ev.candidate) return;
     void signal(sessionId, { type: "rtc", candidate: ev.candidate.toJSON() });
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "failed" || pc.connectionState === "closed") teardown(sessionId);
   };
   pc.ondatachannel = (ev) => {
     ev.channel.onmessage = (msg) => {
@@ -197,16 +345,40 @@ async function ensureSession(sessionId: string, hwnd: string): Promise<Session |
       }
     };
   };
-  abort.signal.addEventListener("abort", () => {
-    try {
-      track.stop();
-    } catch {
-      /* ignore */
-    }
-  });
-  const session: Session = { pc, hwnd, abort };
+  const session: Session = {
+    pc,
+    hwnd,
+    abort,
+    pendingIce: [],
+    haveRemote: false,
+    queue: Promise.resolve(),
+  };
   sessions.set(sessionId, session);
   return session;
+}
+
+async function applySignal(sessionId: string, session: Session, payload: Record<string, unknown>) {
+  const { pc } = session;
+  const sdp = payload.sdp as RTCSessionDescriptionInit | undefined;
+  const candidate = payload.candidate as RTCIceCandidateInit | undefined;
+  if (sdp?.type === "offer") {
+    await pc.setRemoteDescription(sdp);
+    preferVideoCodecs(pc);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    session.haveRemote = true;
+    const queued = session.pendingIce.splice(0);
+    for (const c of queued) {
+      await pc.addIceCandidate(c).catch(() => {});
+    }
+    void tuneSender(pc);
+    await getApi()?.rtc_signal?.(sessionId, { type: "rtc", sdp: pc.localDescription });
+    return;
+  }
+  if (candidate) {
+    if (!session.haveRemote) session.pendingIce.push(candidate);
+    else await pc.addIceCandidate(candidate).catch(() => {});
+  }
 }
 
 async function handleRtcEvent(event: AgentEvent) {
@@ -219,32 +391,23 @@ async function handleRtcEvent(event: AgentEvent) {
     return;
   }
   if (!hwnd) return;
-  const session = await ensureSession(sessionId, hwnd);
-  if (!session) return;
-  const { pc } = session;
-  const sdp = payload.sdp as RTCSessionDescriptionInit | undefined;
-  const candidate = payload.candidate as RTCIceCandidateInit | undefined;
-  try {
-    if (sdp?.type === "offer") {
-      await pc.setRemoteDescription(sdp);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      const api = getApi();
-      await api?.rtc_signal?.(sessionId, { type: "rtc", sdp: pc.localDescription });
-      return;
+  let session = sessions.get(sessionId);
+  if (!session) {
+    let inflight = opening.get(sessionId);
+    if (!inflight) {
+      inflight = openSession(sessionId, hwnd).finally(() => opening.delete(sessionId));
+      opening.set(sessionId, inflight);
     }
-    if (candidate) {
-      try {
-        await pc.addIceCandidate(candidate);
-      } catch {
-        /* trickle before setRemoteDescription */
-      }
-    }
-  } catch {
-    teardown(sessionId);
-    const api = getApi();
-    void api?.rtc_signal?.(sessionId, { type: "rtc", kind: "fail" });
+    session = (await inflight) ?? undefined;
+    if (!session || sessions.get(sessionId) !== session) return;
   }
+  const s = session;
+  s.queue = s.queue
+    .then(() => applySignal(sessionId, s, payload))
+    .catch(() => {
+      teardown(sessionId);
+      void getApi()?.rtc_signal?.(sessionId, { type: "rtc", kind: "fail" });
+    });
 }
 
 export function RemoteWindowSender() {

@@ -8,6 +8,7 @@ import json
 import mimetypes
 import re
 import secrets
+import socket
 import threading
 import time
 from collections import deque
@@ -62,6 +63,9 @@ _sessions: dict[str, float] = {}
 _cookie_secret: bytes | None = None
 _window_rtc: dict[str, object] = {}
 _window_rtc_lock = threading.Lock()
+# Every live /__window_stream viewer socket. One viewer at a time: a new
+# browser kicks the old one (its reader thread wakes on the closed socket).
+_window_viewers: list[object] = []
 
 
 def panel_ui_http_url() -> str:
@@ -270,19 +274,49 @@ def publish_window_rtc(session_id: str, hwnd: int, payload: dict[str, object]) -
     )
 
 
-def _serve_window_stream(sock: object, hwnd: int, mode: str = "rtc") -> None:
-    """RTC signaling (default) or JPEG frames. Blocks until the client drops."""
-    if (mode or "").strip().lower() == "jpeg":
-        _serve_window_jpeg(sock, hwnd)
-        return
-    _serve_window_rtc(sock, hwnd)
+def kick_other_viewers(keep: object | None) -> int:
+    """Close every other Remote View viewer so only ``keep`` streams.
+
+    Returns how many were kicked. The kicked socket gets a ``kicked`` text
+    frame first so its browser can explain instead of retrying forever.
+    """
+    from frontend.ui_web.terminal.ws_util import send_ws_text
+
+    with _window_rtc_lock:
+        others = [v for v in _window_viewers if v is not keep]
+        _window_viewers[:] = [v for v in _window_viewers if v is keep]
+        if keep is not None and keep not in _window_viewers:
+            _window_viewers.append(keep)
+    for sock in others:
+        try:
+            send_ws_text(sock, json.dumps({"type": "rtc", "kind": "kicked"}))  # type: ignore[arg-type]
+        except Exception:
+            pass
+        try:
+            sock.shutdown(socket.SHUT_RDWR)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            sock.close()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    return len(others)
 
 
-def _serve_window_rtc(sock: object, hwnd: int) -> None:
-    """Relay SDP/ICE over the tunnel; video itself is P2P WebRTC."""
+def _forget_viewer(sock: object) -> None:
+    with _window_rtc_lock:
+        _window_viewers[:] = [v for v in _window_viewers if v is not sock]
+
+
+def _serve_window_stream(sock: object, hwnd: int) -> None:
+    """Relay SDP/ICE over the tunnel; video itself is P2P WebRTC.
+
+    Blocks until the client drops or a newer viewer kicks it.
+    """
     from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_pong
     from frontend.window_view import bring_to_front, handle_stream_message
 
+    kick_other_viewers(sock)
     bring_to_front(hwnd)
     session_id = secrets.token_hex(8)
     register_window_rtc(session_id, sock)
@@ -307,55 +341,9 @@ def _serve_window_rtc(sock: object, hwnd: int) -> None:
     except Exception:
         pass
     finally:
+        _forget_viewer(sock)
         unregister_window_rtc(session_id)
         publish_window_rtc(session_id, hwnd, {"type": "rtc", "kind": "close"})
-
-
-def _serve_window_jpeg(sock: object, hwnd: int) -> None:
-    """JPEG frames out, JSON pointer/key events in. Blocks until the client drops."""
-    from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_binary, send_ws_pong
-    from frontend.window_view import bring_to_front, capture_window_jpeg, handle_stream_message
-
-    bring_to_front(hwnd)
-    stop = threading.Event()
-    send_lock = threading.Lock()
-
-    def _send(fn: object, payload: bytes) -> None:
-        with send_lock:
-            fn(sock, payload)  # type: ignore[operator]
-
-    def _reader() -> None:
-        try:
-            while not stop.is_set():
-                opcode, payload = parse_ws_frame_ex(sock)  # type: ignore[arg-type]
-                if opcode == 0x8:
-                    break
-                if opcode == 0x9:
-                    _send(send_ws_pong, payload)
-                    continue
-                if opcode == 0x1:
-                    handle_stream_message(hwnd, payload)
-        except Exception:
-            pass
-        finally:
-            stop.set()
-
-    threading.Thread(target=_reader, daemon=True, name="window-stream-in").start()
-    # 24 fps target: wait only leftover after capture+send.
-    interval = 1.0 / 24
-    try:
-        while not stop.is_set():
-            t0 = time.monotonic()
-            raw = capture_window_jpeg(hwnd)
-            if raw:
-                _send(send_ws_binary, raw)
-            leftover = interval - (time.monotonic() - t0)
-            if leftover > 0:
-                stop.wait(leftover)
-    except Exception:
-        pass
-    finally:
-        stop.set()
 
 
 def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int] | None:
@@ -741,25 +729,6 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     cursor, events = _poll_panel_events(since)
                     self._send_json(200, {"cursor": cursor, "events": events})
                     return
-                if parsed.path == "/__window_view":
-                    query = parse_qs(parsed.query)
-                    try:
-                        hwnd = int((query.get("id") or ["0"])[0])
-                    except (TypeError, ValueError):
-                        hwnd = 0
-                    from frontend.window_view import capture_window_jpeg
-
-                    raw = capture_window_jpeg(hwnd)
-                    if not raw:
-                        self.send_error(404)
-                        return
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(raw)))
-                    self.end_headers()
-                    self.wfile.write(raw)
-                    return
                 if parsed.path == "/__window_stream":
                     query = parse_qs(parsed.query)
                     try:
@@ -776,8 +745,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.close_connection = True
                     self.connection.settimeout(None)
                     self.connection.sendall(websocket_upgrade_response(key))
-                    mode = ((query.get("mode") or ["rtc"])[0] or "rtc").strip().lower()
-                    _serve_window_stream(self.connection, hwnd, mode=mode)
+                    _serve_window_stream(self.connection, hwnd)
                     return
                 # Re-poll leg of a long UI request (require_click): the POST leg
                 # returned {pending, request_id} and the caller waits here until

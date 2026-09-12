@@ -254,9 +254,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # BackgroundColor spec). ARGB hex — match the dark shell / boot splash (#0a0a0a).
     os.environ.setdefault("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF0A0A0A")
     # Auto-pick a screen for getDisplayMedia (substring matches Entire screen / Screen 1).
+    # Raw LAN host candidates (no mDNS obfuscation) so a phone on the same Wi-Fi
+    # connects direct; the address only ever reaches the user's own viewer.
     os.environ.setdefault(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        "--auto-select-desktop-capture-source=creen",
+        "--auto-select-desktop-capture-source=creen "
+        "--disable-features=WebRtcHideLocalIpsWithMdns",
     )
     _allow_screencast_without_gesture()
 

@@ -65,7 +65,6 @@ def test_local_bridge_paths_stay_loopback(remote_auth):
     header = f"{httpd._COOKIE_NAME}={cookie}"
     assert not httpd.request_is_authorized(host, "/__panel_run", header)
     assert httpd.request_is_authorized("127.0.0.1:4199", "/__panel_run", None)
-    assert httpd.request_is_authorized(host, "/__window_view", header)
     assert httpd.request_is_authorized(host, "/__window_stream", header)
 
 
@@ -89,7 +88,6 @@ def test_http11_keepalive_and_backlog():
     assert "X-Frame-Options" not in src
     assert httpd._PanelServer.request_queue_size >= 128
     assert "timeout = 30" in src
-    assert "1.0 / 24" in src
 
 
 class _FakeSock:
@@ -127,3 +125,29 @@ def test_html_errors_never_show_python_404():
     assert "ud-remote-gone" in src
     assert "https://uefnducky.org/profile" in src
     assert "def send_error" in src
+
+
+def test_new_viewer_kicks_old_one():
+    class _Viewer(_FakeSock):
+        def __init__(self):
+            super().__init__()
+            self.closed = False
+
+        def shutdown(self, _how):
+            self.closed = True
+
+        def close(self):
+            self.closed = True
+
+    first, second = _Viewer(), _Viewer()
+    httpd._window_viewers.clear()
+    try:
+        assert httpd.kick_other_viewers(first) == 0
+        assert httpd.kick_other_viewers(second) == 1
+        assert first.closed and not second.closed
+        assert any(b"kicked" in frame for frame in first.sent)
+        assert httpd._window_viewers == [second]
+        httpd._forget_viewer(second)
+        assert httpd._window_viewers == []
+    finally:
+        httpd._window_viewers.clear()

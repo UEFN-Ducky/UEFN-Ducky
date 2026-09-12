@@ -480,20 +480,12 @@ input, textarea, select, button {
   flex: 1;
   min-width: 0;
   width: auto;
-  pointer-events: none;
-}
-.app-header-center .app-header-nav,
-.app-header-center .sidebar-toggle-btn,
-.app-header-center .quick-open-bar,
-.app-header-center .plugin-header-btn,
-.app-header-center .plugin-header-menu {
-  pointer-events: auto;
+  /* Keep the full center caption in WebView2's native hit test. Individual
+     controls opt out with no-drag; empty space supports all OS window actions. */
+  height: 100%;
 }
 .app-header-center .app-header-nav {
   flex-shrink: 0;
-}
-.app-header-center .quick-open-bar {
-  pointer-events: auto;
 }
 .app-header-center .sidebar-toggle-btn {
   flex-shrink: 0;
@@ -673,21 +665,61 @@ input, textarea, select, button {
   justify-content: center;
   overflow: hidden;
 }
-.remote-window-overlay img,
-.remote-window-overlay canvas,
 .remote-window-overlay video {
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  object-fit: contain;
 }
 .remote-window-canvas {
   cursor: crosshair;
   outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.remote-window-canvas.is-offscreen {
+  opacity: 0;
+  pointer-events: none;
+}
+.remote-window-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
 }
 .remote-window-overlay-msg {
   color: var(--fg);
   opacity: 0.7;
   font-size: 13px;
+  margin: 0;
+}
+.remote-window-retry {
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.remote-window-stats {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  opacity: 0.55;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  padding: 2px 6px;
+  pointer-events: none;
 }
 .app-header-trailing button {
   -webkit-app-region: no-drag;

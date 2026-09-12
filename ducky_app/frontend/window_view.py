@@ -1,29 +1,42 @@
 """Look at other desktop windows through the remote panel tunnel.
 
 ponytail: WebRTC crops a getDisplayMedia screen track to this window
-(primary-monitor assumption — fit_window moves it onto the work area).
-JPEG GDI grab stays as the ICE-fail fallback. Covered windows show
-whatever is on top; the stream brings the target to the front so clicks
-hit the same pixels. Windows Graphics Capture if they need occluded GPU
-windows. STUN-only — strict NATs fall back to JPEG; TURN is the upgrade.
+(primary-monitor assumption — fit_window moves it onto the work area and
+keeps the viewer's aspect so the video fills the phone with no bars).
+No JPEG path: a stream that cannot go peer-to-peer reports why. Covered
+windows show whatever is on top; the stream brings the target to the
+front so clicks hit the same pixels. Windows Graphics Capture if they need
+occluded GPU windows. STUN-only — TURN is the upgrade for strict NATs.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import sys
 from typing import Any
 
-_MAX_EDGE = 1280
 _KIND_ORDER = {"uefn": 0, "blender": 1, "app": 2}
 
 
-def window_fit_size(width: int, height: int) -> tuple[int, int]:
-    w = max(400, min(int(width or 0), 3840))
-    h = max(300, min(int(height or 0), 2160))
-    return w, h
+def window_fit_size(
+    width: int,
+    height: int,
+    max_w: int = 3840,
+    max_h: int = 2160,
+) -> tuple[int, int]:
+    """Viewer pixels → window size: at least 400×300, scaled down to fit the
+    work area while keeping the viewer's aspect (a portrait phone must not
+    push the window off-screen — the capture only sees on-screen pixels)."""
+    w = max(400, int(width or 0))
+    h = max(300, int(height or 0))
+    max_w = max(400, int(max_w or 0))
+    max_h = max(300, int(max_h or 0))
+    scale = min(1.0, max_w / w, max_h / h)
+    if scale < 1.0:
+        w = max(400, int(w * scale))
+        h = max(300, int(h * scale))
+    return min(w, max_w), min(h, max_h)
 
 
 def kind_for(title: str, exe: str = "") -> str:
@@ -36,43 +49,12 @@ def kind_for(title: str, exe: str = "") -> str:
     return "app"
 
 
-def jpeg_bytes(image: Any, *, max_edge: int = _MAX_EDGE) -> bytes:
-    from PIL import Image
-
-    img = image
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    w, h = img.size
-    edge = max(w, h)
-    if edge > max_edge and edge > 0:
-        scale = max_edge / edge
-        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.BILINEAR)
-    buf = io.BytesIO()
-    # ponytail: skip optimize=True (second Huffman pass) — encode speed for 24fps.
-    img.save(buf, format="JPEG", quality=50)
-    return buf.getvalue()
-
-
 def list_window_views() -> list[dict[str, Any]]:
     if sys.platform != "win32":
         return []
     rows = _enum_windows()
     rows.sort(key=lambda r: (_KIND_ORDER.get(str(r.get("kind") or "app"), 9), str(r.get("title") or "").lower()))
     return rows
-
-
-def capture_window_jpeg(hwnd: int) -> bytes:
-    if sys.platform != "win32" or hwnd <= 0:
-        return b""
-    box = _window_box(hwnd)
-    if not box:
-        return b""
-    from PIL import ImageGrab
-
-    grabbed = ImageGrab.grab(bbox=box, all_screens=True)
-    if grabbed is None:
-        return b""
-    return jpeg_bytes(grabbed)
 
 
 def window_box(hwnd: int) -> dict[str, int]:
@@ -122,8 +104,8 @@ def fit_window(hwnd: int, width: int, height: int) -> bool:
     if not box:
         return False
     left, top, right, bottom = box
-    w, h = window_fit_size(width, height)
-    ox, oy = _primary_work_origin()
+    ox, oy, aw, ah = _primary_work_area()
+    w, h = window_fit_size(width, height, aw, ah)
     if (
         abs((right - left) - w) < 8
         and abs((bottom - top) - h) < 8
@@ -285,16 +267,22 @@ def _raise_window(hwnd: int) -> bool:
     return True
 
 
-def _primary_work_origin() -> tuple[int, int]:
+def _primary_work_area() -> tuple[int, int, int, int]:
+    """(left, top, width, height) of the primary monitor minus the taskbar."""
     if sys.platform != "win32":
-        return 0, 0
+        return 0, 0, 1920, 1080
     import ctypes
     from ctypes import wintypes
 
     rect = wintypes.RECT()
     if not ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
-        return 0, 0
-    return int(rect.left), int(rect.top)
+        return 0, 0, 1920, 1080
+    return (
+        int(rect.left),
+        int(rect.top),
+        max(400, int(rect.right - rect.left)),
+        max(300, int(rect.bottom - rect.top)),
+    )
 
 
 def _screen_metrics() -> tuple[int, int, int, int, int, int]:

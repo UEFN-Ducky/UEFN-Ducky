@@ -430,7 +430,7 @@ export function Header({
       ) : null}
 
       {!isSettingsOverlay && !isFocus ? (
-        <div className="app-header-center">
+        <div className="app-header-center drag-region app-drag-surface">
           {navButtons}
           <button
             type="button"
@@ -452,7 +452,7 @@ export function Header({
           {pluginHeader}
         </div>
       ) : showQuickOpen ? (
-        <div className="app-header-center">
+        <div className="app-header-center drag-region app-drag-surface">
           <QuickOpenBar />
         </div>
       ) : null}
