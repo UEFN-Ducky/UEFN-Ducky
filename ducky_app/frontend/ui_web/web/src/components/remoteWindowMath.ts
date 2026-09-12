@@ -38,28 +38,32 @@ export function contentRect(
 }
 
 export const STICK_DEADZONE = 0.28;
+export const LOOK_PX = 12;
 
 /** nx/ny in -1..1 (right/down positive). Returns held WASD keys. */
-export function stickMoveKeys(nx: number, ny: number): string[] {
+export function stickMoveKeys(nx: number, ny: number, deadzone = STICK_DEADZONE): string[] {
   const mag = Math.hypot(nx, ny);
-  if (mag < STICK_DEADZONE) return [];
+  if (mag < deadzone) return [];
   const keys: string[] = [];
-  if (ny < -STICK_DEADZONE) keys.push("w");
-  if (ny > STICK_DEADZONE) keys.push("s");
-  if (nx < -STICK_DEADZONE) keys.push("a");
-  if (nx > STICK_DEADZONE) keys.push("d");
+  if (ny < -deadzone) keys.push("w");
+  if (ny > deadzone) keys.push("s");
+  if (nx < -deadzone) keys.push("a");
+  if (nx > deadzone) keys.push("d");
   return keys;
 }
 
-/** Look offset in normalized video space from a right-stick deflection. */
-export function stickLookPoint(nx: number, ny: number, scale = 0.16): { x: number; y: number } {
+/** Relative look pixels from a right-stick deflection (right/down positive). */
+export function stickLookDelta(
+  nx: number,
+  ny: number,
+  sensitivity = 1,
+  deadzone = STICK_DEADZONE,
+): { dx: number; dy: number } {
   const mag = Math.hypot(nx, ny);
-  if (mag < STICK_DEADZONE) return { x: 0.5, y: 0.5 };
-  const t = (mag - STICK_DEADZONE) / (1 - STICK_DEADZONE);
-  return {
-    x: Math.min(1, Math.max(0, 0.5 + nx * t * scale)),
-    y: Math.min(1, Math.max(0, 0.5 + ny * t * scale)),
-  };
+  if (mag < deadzone) return { dx: 0, dy: 0 };
+  const t = (mag - deadzone) / Math.max(0.01, 1 - deadzone);
+  const scale = LOOK_PX * sensitivity * t;
+  return { dx: Math.round((nx / mag) * scale), dy: Math.round((ny / mag) * scale) };
 }
 
 export function keyDiff(prev: string[], next: string[]): { down: string[]; up: string[] } {

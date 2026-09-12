@@ -3,7 +3,7 @@ import { getApi, isRemote } from "../hooks/usePanelApi";
 import { ChoiceDropdown } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
-import { contentRect, keyDiff, rankVideoCodec, stickLookPoint, stickMoveKeys } from "./remoteWindowMath";
+import { contentRect, keyDiff, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
 
 export { contentRect } from "./remoteWindowMath";
 
@@ -11,10 +11,10 @@ export type WindowViewRow = { id: string; title: string; kind?: string };
 
 type SendFn = (payload: Record<string, unknown>) => void;
 type ControlMode = "editor" | "play";
-type ControlState = { mode: ControlMode; overlay: boolean };
+type ControlState = { mode: ControlMode; overlay: boolean; look: number; deadzone: number };
 
 let boundSend: SendFn | null = null;
-let controlState: ControlState = { mode: "editor", overlay: true };
+let controlState: ControlState = { mode: "editor", overlay: true, look: 1, deadzone: 0.28 };
 const controlSubs = new Set<() => void>();
 
 function bindRemoteSend(fn: SendFn | null) {
@@ -131,6 +131,36 @@ export function RemoteViewControls({ hwnd }: { hwnd: string }) {
           >
             {controls.overlay ? "Hide sticks" : "Show sticks"}
           </button>
+          <label
+            className="remote-control-slider"
+            onPointerDown={(ev) => ev.stopPropagation()}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <span>Look {controls.look.toFixed(2)}</span>
+            <input
+              type="range"
+              min={0.25}
+              max={3}
+              step={0.05}
+              value={controls.look}
+              onChange={(ev) => setRemoteViewControls({ look: Number(ev.target.value) })}
+            />
+          </label>
+          <label
+            className="remote-control-slider"
+            onPointerDown={(ev) => ev.stopPropagation()}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <span>Deadzone {controls.deadzone.toFixed(2)}</span>
+            <input
+              type="range"
+              min={0.1}
+              max={0.45}
+              step={0.01}
+              value={controls.deadzone}
+              onChange={(ev) => setRemoteViewControls({ deadzone: Number(ev.target.value) })}
+            />
+          </label>
           {COMMANDS.map((cmd) => (
             <button
               key={cmd.key}
@@ -457,23 +487,42 @@ function holdSend(send: SendFn, key: string, down: boolean) {
   send({ type: down ? "keydown" : "keyup", key });
 }
 
-function UefnStickOverlay({ send, mode }: { send: SendFn; mode: ControlMode }) {
+function UefnStickOverlay({
+  send,
+  mode,
+  look,
+  deadzone,
+}: {
+  send: SendFn;
+  mode: ControlMode;
+  look: number;
+  deadzone: number;
+}) {
   const moveHeld = useRef<string[]>([]);
   const looking = useRef(false);
+  const lookVec = useRef({ nx: 0, ny: 0 });
+  const lookRaf = useRef(0);
+  const lookTune = useRef({ look, deadzone });
+  lookTune.current = { look, deadzone };
+
+  const cancelLook = useCallback(() => {
+    if (lookRaf.current) cancelAnimationFrame(lookRaf.current);
+    lookRaf.current = 0;
+    if (!looking.current) return;
+    looking.current = false;
+    send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+  }, [send]);
 
   const releaseAll = useCallback(() => {
     for (const key of moveHeld.current) send({ type: "keyup", key });
     moveHeld.current = [];
-    if (looking.current) {
-      looking.current = false;
-      send({ type: "up", x: 0.5, y: 0.5, button: 2 });
-    }
-  }, [send]);
+    cancelLook();
+  }, [send, cancelLook]);
 
   useEffect(() => releaseAll, [releaseAll, mode]);
 
   const onMove = (nx: number, ny: number, active: boolean) => {
-    const next = active ? stickMoveKeys(nx, ny) : [];
+    const next = active ? stickMoveKeys(nx, ny, lookTune.current.deadzone) : [];
     const diff = keyDiff(moveHeld.current, next);
     moveHeld.current = next;
     for (const key of diff.down) send({ type: "keydown", key });
@@ -481,19 +530,32 @@ function UefnStickOverlay({ send, mode }: { send: SendFn; mode: ControlMode }) {
   };
 
   const onLook = (nx: number, ny: number, active: boolean) => {
-    if (active) {
-      if (!looking.current) {
-        looking.current = true;
-        send({ type: "down", x: 0.5, y: 0.5, button: 2 });
-      }
-      const point = stickLookPoint(nx, ny);
-      send({ type: "move", ...point, button: 2 });
+    lookVec.current = { nx, ny };
+    if (!active) {
+      cancelLook();
       return;
     }
-    if (looking.current) {
-      looking.current = false;
-      send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+    if (!looking.current) {
+      looking.current = true;
+      send({ type: "move", x: 0.5, y: 0.5 });
+      send({ type: "down", x: 0.5, y: 0.5, button: 2 });
     }
+    if (lookRaf.current) return;
+    const tick = () => {
+      if (!looking.current) {
+        lookRaf.current = 0;
+        return;
+      }
+      const { dx, dy } = stickLookDelta(
+        lookVec.current.nx,
+        lookVec.current.ny,
+        lookTune.current.look,
+        lookTune.current.deadzone,
+      );
+      if (dx || dy) send({ type: "move", dx, dy });
+      lookRaf.current = requestAnimationFrame(tick);
+    };
+    lookRaf.current = requestAnimationFrame(tick);
   };
 
   return (
@@ -808,7 +870,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
         <span className="remote-window-stats">{statsLabel(stats)}</span>
       ) : null}
       {phase === "live" && controls.overlay && watchingUefn ? (
-        <UefnStickOverlay send={send} mode={controls.mode} />
+        <UefnStickOverlay send={send} mode={controls.mode} look={controls.look} deadzone={controls.deadzone} />
       ) : null}
     </div>
   );

@@ -157,10 +157,15 @@ def inject_pointer(
     *,
     button: int = 0,
     delta: int = 0,
+    dx: int | None = None,
+    dy: int | None = None,
 ) -> None:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return
-    box = _window_box(hwnd)
+    if kind == "move" and dx is not None:
+        _send_mouse(0x0001, 0, int(dx), int(dy or 0))
+        return
+    box = _client_box(hwnd) or _window_box(hwnd)
     if not box:
         return
     if kind != "move":
@@ -204,6 +209,7 @@ def handle_stream_message(hwnd: int, payload: bytes) -> None:
         fit_window(hwnd, int(event.get("w") or 0), int(event.get("h") or 0))
         return
     if kind in ("down", "up", "move", "wheel"):
+        rel = "dx" in event
         inject_pointer(
             hwnd,
             kind,
@@ -211,6 +217,8 @@ def handle_stream_message(hwnd: int, payload: bytes) -> None:
             float(event.get("y") or 0),
             button=int(event.get("button") or 0),
             delta=int(event.get("delta") or 0),
+            dx=int(event.get("dx") or 0) if rel else None,
+            dy=int(event.get("dy") or 0) if rel else None,
         )
         return
     if kind in ("key", "keydown", "keyup"):
@@ -373,6 +381,22 @@ def _window_box(hwnd: int) -> tuple[int, int, int, int] | None:
     return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
 
 
+def _client_box(hwnd: int) -> tuple[int, int, int, int] | None:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+        return None
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        return None
+    pt = wintypes.POINT(int(rect.left), int(rect.top))
+    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+        return None
+    return int(pt.x), int(pt.y), int(pt.x + rect.right), int(pt.y + rect.bottom)
+
+
 def _hwnd_pid(hwnd: int) -> int:
     import ctypes
     from ctypes import wintypes
@@ -422,11 +446,11 @@ def _input_structs():
     return ctypes, extra, Mouse, Key, Input
 
 
-def _send_mouse(flags: int, data: int) -> None:
+def _send_mouse(flags: int, data: int, dx: int = 0, dy: int = 0) -> None:
     ctypes, extra, Mouse, _Key, Input = _input_structs()
     inp = Input()
     inp.type = 0
-    inp.union.mi = Mouse(0, 0, int(data) & 0xFFFFFFFF, int(flags), 0, ctypes.pointer(extra))
+    inp.union.mi = Mouse(int(dx), int(dy), int(data) & 0xFFFFFFFF, int(flags), 0, ctypes.pointer(extra))
     ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(Input))
 
 

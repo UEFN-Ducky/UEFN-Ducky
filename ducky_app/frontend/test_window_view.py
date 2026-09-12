@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from frontend.window_view import (
     bring_to_front,
+    handle_stream_message,
     kind_for,
     map_norm_to_screen,
     window_box,
@@ -59,6 +60,22 @@ def test_bring_to_front_skips_when_already_foreground(monkeypatch) -> None:
 
 def test_window_box_empty_for_bad_hwnd() -> None:
     assert window_box(0) == {}
+
+
+def test_look_move_sends_relative_dx(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        wv,
+        "inject_pointer",
+        lambda hwnd, kind, nx, ny, **kw: calls.append((hwnd, kind, nx, ny, kw)),
+    )
+    handle_stream_message(9, b'{"type":"move","dx":4,"dy":-2}')
+    assert calls == [(9, "move", 0.0, 0.0, {"button": 0, "delta": 0, "dx": 4, "dy": -2})]
+    handle_stream_message(9, b'{"type":"down","x":0.5,"y":0.5,"button":2}')
+    assert calls[-1][4]["dx"] is None
+    assert calls[-1][4]["button"] == 2
 
 
 def test_vk_for_named_and_function_keys() -> None:

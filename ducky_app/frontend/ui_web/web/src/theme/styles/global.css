@@ -739,6 +739,17 @@ input, textarea, select, button {
   align-items: center;
   flex-shrink: 0;
 }
+.remote-control-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  color: var(--fg);
+  font-size: 12px;
+}
+.remote-control-slider input {
+  width: 100%;
+}
 .remote-sticks {
   position: absolute;
   inset: 0;
