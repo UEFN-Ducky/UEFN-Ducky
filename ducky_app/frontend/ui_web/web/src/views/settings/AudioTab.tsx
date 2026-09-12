@@ -16,6 +16,7 @@ import {
   subscribeAudioSettings,
   type MicPermission,
 } from "../../voice/audioSettings";
+import { isRemote } from "../../hooks/usePanelApi";
 import { holdMic, listMicDevices, listOutputDevices, openMicStream } from "../../voice/micPermission";
 import { VoiceSettingsSection } from "../../voice/VoiceSettingsSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
@@ -51,16 +52,17 @@ export function AudioTab({ sectionTab = "input" }: AudioTabProps) {
     try {
       const [mics, outs] = await Promise.all([listMicDevices(), listOutputDevices()]);
       setMicOptions([
-        { value: "", label: `Windows default (${mics.defaultLabel})` },
+        { value: "", label: `${isRemote() ? "This device" : "Windows default"} (${mics.defaultLabel})` },
         ...mics.devices.map((d) => ({ value: d.deviceId, label: d.label })),
       ]);
       setOutputOptions([
-        { value: "", label: `Windows default (${outs.defaultLabel})` },
+        { value: "", label: `${isRemote() ? "This device" : "Windows default"} (${outs.defaultLabel})` },
         ...outs.devices.map((d) => ({ value: d.deviceId, label: d.label })),
       ]);
     } catch {
-      setMicOptions([{ value: "", label: "Windows default" }]);
-      setOutputOptions([{ value: "", label: "Windows default" }]);
+      const fallback = isRemote() ? "This device" : "Windows default";
+      setMicOptions([{ value: "", label: fallback }]);
+      setOutputOptions([{ value: "", label: fallback }]);
     }
   }, []);
 
@@ -179,7 +181,9 @@ export function AudioTab({ sectionTab = "input" }: AudioTabProps) {
       setMicError(
         err instanceof Error
           ? err.message
-          : "Could not open microphone. Check Windows mic privacy for UEFN Ducky.",
+          : isRemote()
+            ? "Could not open this device's microphone."
+            : "Could not open microphone. Check Windows mic privacy for UEFN Ducky.",
       );
       setTestingMic(false);
     }

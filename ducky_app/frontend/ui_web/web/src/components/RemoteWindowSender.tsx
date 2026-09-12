@@ -40,6 +40,9 @@ type Session = {
   abort: AbortController;
   pendingIce: RTCIceCandidateInit[];
   haveRemote: boolean;
+  /** Local candidates gathered before the answer was signaled. */
+  outgoingIce: RTCIceCandidateInit[];
+  answerSent: boolean;
   queue: Promise<void>;
 };
 
@@ -290,6 +293,11 @@ async function tuneSender(pc: RTCPeerConnection) {
   }
 }
 
+function errorText(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
+}
+
 function teardown(sessionId: string) {
   const inflight = opening.get(sessionId);
   if (inflight) {
@@ -320,18 +328,27 @@ async function openSession(sessionId: string, hwnd: string): Promise<Session | n
   try {
     const screen = await screenTrack();
     track = await croppedTrack(screen, hwnd, abort.signal);
-  } catch {
+  } catch (err) {
     abort.abort();
-    void signal(sessionId, { type: "rtc", kind: "fail" });
+    console.error("[remote-view] capture failed", err);
+    void signal(sessionId, { type: "rtc", kind: "fail", stage: "capture", error: errorText(err) });
     return null;
   }
   const pc = new RTCPeerConnection(STUN);
   pc.addTrack(track);
   pc.onicecandidate = (ev) => {
     if (!ev.candidate) return;
-    void signal(sessionId, { type: "rtc", candidate: ev.candidate.toJSON() });
+    const c = ev.candidate.toJSON();
+    const s = sessions.get(sessionId);
+    if (s && !s.answerSent) {
+      s.outgoingIce.push(c);
+      return;
+    }
+    void signal(sessionId, { type: "rtc", candidate: c });
   };
+  pc.oniceconnectionstatechange = () => console.debug("[remote-view] ice", pc.iceConnectionState);
   pc.onconnectionstatechange = () => {
+    console.debug("[remote-view] connection", pc.connectionState);
     if (pc.connectionState === "failed" || pc.connectionState === "closed") teardown(sessionId);
   };
   pc.ondatachannel = (ev) => {
@@ -351,6 +368,8 @@ async function openSession(sessionId: string, hwnd: string): Promise<Session | n
     abort,
     pendingIce: [],
     haveRemote: false,
+    outgoingIce: [],
+    answerSent: false,
     queue: Promise.resolve(),
   };
   sessions.set(sessionId, session);
@@ -372,7 +391,19 @@ async function applySignal(sessionId: string, session: Session, payload: Record<
       await pc.addIceCandidate(c).catch(() => {});
     }
     void tuneSender(pc);
-    await getApi()?.rtc_signal?.(sessionId, { type: "rtc", sdp: pc.localDescription });
+    // ponytail: plain {type, sdp} — pywebview's serializer copies the native
+    // toJSON off RTCSessionDescription and JSON.stringify then throws
+    // "Illegal invocation"; the answer never left the desktop.
+    const local = pc.localDescription;
+    const signal = getApi()?.rtc_signal;
+    await signal?.(sessionId, {
+      type: "rtc",
+      sdp: local ? { type: local.type, sdp: local.sdp } : null,
+    });
+    session.answerSent = true;
+    for (const c of session.outgoingIce.splice(0)) {
+      await signal?.(sessionId, { type: "rtc", candidate: c });
+    }
     return;
   }
   if (candidate) {
@@ -404,9 +435,15 @@ async function handleRtcEvent(event: AgentEvent) {
   const s = session;
   s.queue = s.queue
     .then(() => applySignal(sessionId, s, payload))
-    .catch(() => {
+    .catch((err: unknown) => {
+      console.error("[remote-view] negotiation failed", err);
       teardown(sessionId);
-      void getApi()?.rtc_signal?.(sessionId, { type: "rtc", kind: "fail" });
+      void getApi()?.rtc_signal?.(sessionId, {
+        type: "rtc",
+        kind: "fail",
+        stage: "negotiate",
+        error: errorText(err),
+      });
     });
 }
 

@@ -169,7 +169,7 @@ def test_remote_deny_covers_native_and_secret_paths() -> None:
     assert "pick_project_path" in REMOTE_DENY
     assert "minimize_window" in REMOTE_DENY
     assert "set_window_bounds" in REMOTE_DENY
-    assert "voice_create_realtime_token" in REMOTE_DENY
+    assert "voice_create_realtime_token" not in REMOTE_DENY
     assert "get_mcp_config" in REMOTE_DENY
     assert "set_uefn_plugin_secret" in REMOTE_DENY
     assert "test_key" in REMOTE_DENY

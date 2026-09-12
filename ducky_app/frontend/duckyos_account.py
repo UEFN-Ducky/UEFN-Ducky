@@ -872,7 +872,6 @@ REMOTE_DENY = frozenset(
         "open_devtools",
         "burst_desktop_confetti",
         "copy_text",
-        "voice_create_realtime_token",
         "get_mcp_config",
         "set_mcp_config",
         "set_uefn_plugin_secret",

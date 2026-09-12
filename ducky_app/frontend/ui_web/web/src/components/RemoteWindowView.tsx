@@ -324,8 +324,22 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       video.srcObject = ev.streams[0] ?? new MediaStream(ev.track ? [ev.track] : []);
       void video.play().catch(() => {});
     };
+    // Trickle candidates can overtake the answer through the tunnel; hold them
+    // until setRemoteDescription resolves or addIceCandidate rejects them.
+    let haveAnswer = false;
+    const pendingIce: RTCIceCandidateInit[] = [];
+    const addIce = (c: RTCIceCandidateInit) => {
+      if (!haveAnswer) {
+        pendingIce.push(c);
+        return;
+      }
+      void pc.addIceCandidate(c).catch((err: unknown) => console.debug("[remote-view] addIceCandidate", err));
+    };
+    pc.oniceconnectionstatechange = () => console.debug("[remote-view] ice", pc.iceConnectionState);
+    pc.onicegatheringstatechange = () => console.debug("[remote-view] gathering", pc.iceGatheringState);
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
+      console.debug("[remote-view] connection", st);
       if (st === "connected") {
         live = true;
         window.clearTimeout(connectTimer);
@@ -354,6 +368,8 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
         const msg = JSON.parse(ev.data) as {
           type?: string;
           kind?: string;
+          stage?: string;
+          error?: string;
           sdp?: RTCSessionDescriptionInit;
           candidate?: RTCIceCandidateInit;
         };
@@ -362,15 +378,25 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
           return;
         }
         if (msg.kind === "fail") {
-          fail("Desktop could not start screen capture.");
+          const stage = msg.stage === "negotiate" ? "Desktop could not negotiate the stream" : "Desktop could not start screen capture";
+          fail(msg.error ? `${stage}: ${msg.error}` : `${stage}.`);
           return;
         }
         if (msg.kind === "close") {
           fail("Desktop closed the stream.");
           return;
         }
-        if (msg.sdp) void pc.setRemoteDescription(msg.sdp).catch(() => fail("Bad answer from desktop."));
-        else if (msg.candidate) void pc.addIceCandidate(msg.candidate).catch(() => {});
+        if (msg.sdp) {
+          void pc.setRemoteDescription(msg.sdp).then(
+            () => {
+              haveAnswer = true;
+              for (const c of pendingIce.splice(0)) addIce(c);
+            },
+            (err: unknown) => fail(`Bad answer from desktop: ${String((err as Error)?.message || err)}`),
+          );
+        } else if (msg.candidate) {
+          addIce(msg.candidate);
+        }
       } catch {
         /* ignore */
       }

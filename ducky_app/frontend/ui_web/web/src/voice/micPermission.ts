@@ -176,7 +176,9 @@ export async function requestMicAccess(): Promise<MediaStream> {
     const msg = err instanceof Error ? err.message : String(err);
     if (/Permission|NotAllowed|denied/i.test(msg)) {
       throw new Error(
-        "Microphone denied by the system. Check Windows mic privacy for UEFN Ducky, then try again.",
+        typeof window !== "undefined" && !window.pywebview
+          ? "Microphone denied by the browser. Allow the mic for this page, then try again."
+          : "Microphone denied by the system. Check Windows mic privacy for UEFN Ducky, then try again.",
       );
     }
     throw err instanceof Error ? err : new Error(msg);
