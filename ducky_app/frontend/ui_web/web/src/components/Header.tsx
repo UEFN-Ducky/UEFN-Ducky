@@ -7,11 +7,11 @@ import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
 import { PluginSurfaceBoundary } from "../plugin-ui/PluginSurfaceBoundary";
 import { useAppHeaderActions, useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
-import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
 import { useNavigationHistoryOptional } from "../navigation/NavigationHistoryContext";
 import { useRightRailOpen } from "../hooks/useRightRailOpen";
 import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
+import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
 import type { ChatLayoutMode, ListenerStatus, ProjectInfo, ViewId } from "../types/panel";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { isNativeWindowChrome } from "../utils/nativeWindowChrome";
@@ -134,44 +134,6 @@ function PluginHeaderItem({
   );
 }
 
-function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  if (!buttons.length) return null;
-  return (
-    <div className="choice-dropdown choice-dropdown--compact plugin-header-menu no-drag">
-      <button
-        ref={anchorRef}
-        type="button"
-        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
-        aria-haspopup="true"
-        aria-expanded={open}
-        aria-label="Plugins"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="choice-dropdown-trigger-copy">
-          <span className="choice-dropdown-trigger-label">Plugins</span>
-        </span>
-        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
-          <Icons.ChevronDown />
-        </span>
-      </button>
-      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
-        <div className="plugin-header-menu-list" role="menu">
-          {buttons.map((btn) => (
-            <PluginHeaderItem
-              key={`${btn.plugin_id || btn.id}:${btn.id}`}
-              btn={btn}
-              layout="row"
-              onPicked={() => setOpen(false)}
-            />
-          ))}
-        </div>
-      </DropdownPanel>
-    </div>
-  );
-}
-
 function HeaderToolsMenu({
   canBack,
   canForward,
@@ -260,6 +222,44 @@ function HeaderToolsMenu({
           {item("Problems", onProblems)}
           {item("Terminal", onTerminal)}
           {item("Ledger", onLedger)}
+        </div>
+      </DropdownPanel>
+    </div>
+  );
+}
+
+function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  if (!buttons.length) return null;
+  return (
+    <div className="choice-dropdown choice-dropdown--compact plugin-header-menu no-drag">
+      <button
+        ref={anchorRef}
+        type="button"
+        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Plugins"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="choice-dropdown-trigger-copy">
+          <span className="choice-dropdown-trigger-label">Plugins</span>
+        </span>
+        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
+          <Icons.ChevronDown />
+        </span>
+      </button>
+      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
+        <div className="plugin-header-menu-list" role="menu">
+          {buttons.map((btn) => (
+            <PluginHeaderItem
+              key={`${btn.plugin_id || btn.id}:${btn.id}`}
+              btn={btn}
+              layout="row"
+              onPicked={() => setOpen(false)}
+            />
+          ))}
         </div>
       </DropdownPanel>
     </div>
@@ -411,8 +411,6 @@ export function Header({
     pluginContrib.header_buttons,
   ]);
   const compactHeader = narrowHeader;
-  const { setProblemsMenuOpen } = useProblemsMenuOpen();
-  const { openPalette } = useQuickOpenBridge();
   const pluginHeader = compactHeader ? (
     <PluginHeaderMenu buttons={pluginHeaderButtons} />
   ) : (
@@ -433,6 +431,8 @@ export function Header({
   const RightRailToggleIcon = rightRailToggle.Icon;
   const rightSidebarEnabled = sidebarEnabled && hasRightPanels;
 
+  const { setProblemsMenuOpen } = useProblemsMenuOpen();
+  const { openPalette } = useQuickOpenBridge();
   const navButtons = showNav ? (
     <div className="app-header-nav no-drag">
       <button
@@ -546,7 +546,6 @@ export function Header({
               onPush={workflowAction?.onPush}
               canPush={workflowAction?.canPush}
               compileBusy={workflowAction?.busy || workflowAction?.buildState === 3}
-              onSearch={showQuickOpen ? () => openPalette("file") : undefined}
               onProblems={problemsAction ? () => setProblemsMenuOpen(true) : undefined}
               onTerminal={
                 terminalAction
@@ -558,6 +557,7 @@ export function Header({
                   : undefined
               }
               onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
+              onSearch={showQuickOpen ? () => openPalette("file") : undefined}
             />
           ) : (
             <>

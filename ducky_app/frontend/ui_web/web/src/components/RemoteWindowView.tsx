@@ -56,12 +56,12 @@ function useWindowViews(enabled: boolean): WindowViewRow[] {
   const [rows, setRows] = useState<WindowViewRow[]>([]);
   useEffect(() => {
     if (!enabled) return;
-    const api = getApi();
-    if (!api?.list_window_views) return;
+    const listViews = getApi()?.list_window_views;
+    if (!listViews) return;
     let live = true;
     const load = async () => {
       try {
-        const next = await api.list_window_views();
+        const next = await listViews();
         if (live && Array.isArray(next)) setRows(next);
       } catch {
         if (live) setRows([]);
@@ -91,11 +91,11 @@ export function RemoteViewControls({ hwnd }: { hwnd: string }) {
   };
 
   return (
-    <div className="choice-dropdown choice-dropdown--compact remote-view-controls no-drag">
+    <div className="remote-view-controls no-drag">
       <button
         ref={anchorRef}
         type="button"
-        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
+        className={`choice-dropdown-trigger choice-dropdown--compact${open ? " is-open" : ""}`}
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Controls"
@@ -177,10 +177,10 @@ export function RemoteWindowSelect({
 
   const load = useCallback(async () => {
     if (!isRemote()) return;
-    const api = getApi();
-    if (!api?.list_window_views) return;
+    const listViews = getApi()?.list_window_views;
+    if (!listViews) return;
     try {
-      const next = await api.list_window_views();
+      const next = await listViews();
       if (Array.isArray(next)) setRows(next);
     } catch {
       setRows([]);
