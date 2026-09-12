@@ -86,7 +86,7 @@ class PanelApiStoreMixin:
         _ = code
         return {
             "ok": False,
-            "error": "Use Sign in with browser — verification happens in the browser.",
+            "error": "Use Log in — verification happens in the browser.",
             "code": "use_browser",
             "logged_in": False,
         }

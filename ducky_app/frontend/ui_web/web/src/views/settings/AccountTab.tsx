@@ -424,18 +424,6 @@ export function AccountTab() {
         </>
       ) : (
         <div className="account-tab-card">
-          <label className="account-tab-label" htmlFor="duckyos-base">
-            Tenant URL
-          </label>
-          <input
-            id="duckyos-base"
-            className="account-tab-input"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            disabled={busy}
-            placeholder={DEFAULT_BASE}
-            autoComplete="url"
-          />
           {busy ? (
             <>
               <p className="account-tab-body">
@@ -454,7 +442,7 @@ export function AccountTab() {
                 className="account-tab-btn account-tab-btn--primary"
                 onClick={handleBrowserLogin}
               >
-                Sign in with browser
+                Log in
               </button>
             </div>
           )}

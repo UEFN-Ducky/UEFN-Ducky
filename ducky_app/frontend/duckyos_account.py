@@ -54,9 +54,9 @@ def normalize_base_url(raw: str | None) -> str:
         text = "https://" + text
     parsed = urlparse(text)
     if parsed.scheme.lower() != "https":
-        raise DuckyOSAccountError("Tenant URL must use https://", code="invalid_url")
+        raise DuckyOSAccountError("Account URL must use https://", code="invalid_url")
     if not parsed.netloc:
-        raise DuckyOSAccountError("Tenant URL is missing a host", code="invalid_url")
+        raise DuckyOSAccountError("Account URL is missing a host", code="invalid_url")
     return f"https://{parsed.netloc}"
 
 
@@ -539,11 +539,8 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
             qs = parse_qs(parsed.query)
             got_state = (qs.get("state") or [""])[0]
             code = (qs.get("code") or [""])[0]
-            # ponytail: token= still accepted for one release while tenants update.
-            token = (qs.get("token") or [""])[0]
-            key_id = (qs.get("key_id") or [""])[0]
             email = (qs.get("email") or [""])[0]
-            ok = got_state == state and (bool(code) or token.startswith("dky_v1_"))
+            ok = got_state == state and bool(code)
             body = _browser_callback_page(ok=ok, email=email if ok else "")
             self.send_response(200 if ok else 400)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -556,8 +553,6 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
                         "done": True,
                         "ok": True,
                         "code": code,
-                        "token": token,
-                        "key_id": key_id,
                         "email": email,
                     }
                 )
@@ -573,8 +568,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
         httpd = HTTPServer(("127.0.0.1", 0), Handler)
         port = int(httpd.server_address[1])
         auth_url = (
-            f"{base}/admin/plugins/uefn-ducky/desktop-auth"
-            f"?q={state}.{port}&challenge={challenge}"
+            f"{base}/ducky?q={state}.{port}&challenge={challenge}"
         )
 
         thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.25}, daemon=True)
@@ -598,8 +592,8 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 300.0) -> d
             )
 
         code = str(result.get("code") or "")
-        token = str(result.get("token") or "")
-        key_id = str(result.get("key_id") or "")
+        token = ""
+        key_id = ""
         email = str(result.get("email") or "")
         if code:
             payload = _plugin_collect(

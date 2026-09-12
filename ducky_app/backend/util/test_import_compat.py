@@ -35,16 +35,23 @@ def test_legacy_json_util_resolves():
     assert callable(mod.tool_json)
 
 
-def test_tools_init_does_not_import_domain_uefn():
-    """Always-on tools bootstrap must not load Store-gated domains."""
-    # Fresh check against source
+# Host-disk Verse registers without the Store plugin or Epic MCP (f8c866e), so the
+# always-on bootstrap imports these three by design. Everything else under
+# backend.tools.verse is still Store-gated.
+ALWAYS_ON_VERSE_MODULES = frozenset({"skill_tool", "verse", "verse_diagnostics"})
+
+
+def _tools_init_source() -> str:
     from pathlib import Path
 
-    init = Path(__file__).resolve().parents[1] / "tools" / "__init__.py"
-    text = init.read_text(encoding="utf-8")
+    return (Path(__file__).resolve().parents[1] / "tools" / "__init__.py").read_text(encoding="utf-8")
+
+
+def test_tools_init_does_not_import_domain_uefn():
+    """Always-on tools bootstrap must not load Store-gated domains."""
+    text = _tools_init_source()
     for banned in (
         "backend.tools.uefn",
-        "backend.tools.verse",
         "backend.tools.world",
         "backend.tools.animation",
         "backend.tools.vfx",
@@ -54,3 +61,25 @@ def test_tools_init_does_not_import_domain_uefn():
         "backend.tools.integrations",
     ):
         assert banned not in text, banned
+
+
+def test_tools_init_imports_only_the_host_disk_verse_modules():
+    """The verse exemption is three named modules, not the whole domain."""
+    import re
+
+    imported = set(re.findall(r"^from backend\.tools\.verse import (\w+)", _tools_init_source(), re.M))
+    assert imported == ALWAYS_ON_VERSE_MODULES, (
+        f"unexpected always-on verse imports: {imported ^ ALWAYS_ON_VERSE_MODULES}"
+    )
+
+
+def test_tools_bootstrap_does_not_shadow_the_verse_subpackage():
+    """An always-on `from backend.tools.verse import verse` would rebind the name
+    `verse` inside backend.tools, so backend.tools.verse stops naming the package.
+    Every `import backend.tools.verse.<mod> as x` then dies on the attribute walk.
+    """
+    import backend.tools
+
+    assert backend.tools.verse.__name__ == "backend.tools.verse"
+    mod = importlib.import_module("backend.tools.verse.verse_editable")
+    assert mod.__name__ == "backend.tools.verse.verse_editable"

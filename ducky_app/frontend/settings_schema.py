@@ -201,7 +201,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Default coding agent", "LLMs", settable=True,
         description="ducky or any Store-contributed coding-agent id.",
     ),
-    "duckyos_base_url": FieldMeta("DuckyOS base URL", "Account", settable=True),
+    "duckyos_base_url": FieldMeta(
+        "DuckyOS base URL", "internal",
+        description="Pinned to uefnducky.org; not shown in Settings.",
+    ),
     "remote_access": FieldMeta(
         "UEFN Ducky in the browser",
         "Account",

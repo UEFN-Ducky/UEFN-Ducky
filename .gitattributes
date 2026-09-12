@@ -13,3 +13,9 @@
 *.gif binary
 *.woff binary
 *.woff2 binary
+
+# Content-addressed fixtures: the file name IS the hash of the file's bytes, so
+# checking them out with CRLF makes every hash wrong. The legacy-store importer
+# then writes a blob whose text does not match its own hash, and the next
+# INSERT OR IGNORE under that hash silently keeps the corrupt row.
+ducky_app/backend/store/fixtures/legacy/blobs/*.txt -text

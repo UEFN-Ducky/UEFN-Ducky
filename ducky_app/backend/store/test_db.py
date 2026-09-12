@@ -193,3 +193,24 @@ def test_repointed_appdata_still_opens_its_own_database(tmp_path: Path, monkeypa
     second = db.connect()
     assert second is not first
     assert (other / "UEFN-Ducky" / db.DB_NAME).is_file()
+
+
+def test_content_addressed_fixtures_hash_to_their_own_filenames() -> None:
+    """A blob fixture's name is the hash of its bytes.
+
+    `* text=auto` in .gitattributes checked these out with CRLF on Windows, so
+    every hash was wrong. The legacy importer then stored a blob whose text did
+    not match its hash, and the next INSERT OR IGNORE under that hash kept the
+    corrupt row — surfacing three layers away as "history import verification
+    failed". .gitattributes pins them with -text; this fails loudly if that slips.
+    """
+    from backend.workspace.paths import content_hash
+
+    blobs = Path(__file__).resolve().parent / "fixtures" / "legacy" / "blobs"
+    files = sorted(blobs.glob("*.txt"))
+    assert files, f"no blob fixtures found under {blobs}"
+    for path in files:
+        text = path.read_bytes().decode("utf-8")
+        assert content_hash(text) == path.stem, (
+            f"{path.name} does not hash to its own name — line endings mangled on checkout?"
+        )

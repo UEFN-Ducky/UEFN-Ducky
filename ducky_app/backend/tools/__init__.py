@@ -18,9 +18,13 @@ from backend.tools.panel import panel_store  # noqa: F401
 from backend.tools.panel import panel_ui  # noqa: F401
 from backend.tools.panel import panel_verse_templates  # noqa: F401
 # Host-disk Verse: register even when the verse Store plugin is off / MCP is down.
-from backend.tools.verse import skill_tool  # noqa: F401
-from backend.tools.verse import verse  # noqa: F401
-from backend.tools.verse import verse_diagnostics  # noqa: F401
+# Aliased: an unaliased `import verse` would bind the name `verse` in this package's
+# namespace, shadowing the `backend.tools.verse` subpackage itself — after which
+# `import backend.tools.verse.verse_editable as ve` resolves the attribute chain to
+# verse.py and raises ImportError.
+from backend.tools.verse import skill_tool as _verse_skill_tool  # noqa: F401
+from backend.tools.verse import verse as _verse_tools  # noqa: F401
+from backend.tools.verse import verse_diagnostics as _verse_diagnostics  # noqa: F401
 # Domain editor tools (actors, niagara, …) still register via uefn-plugin-* only.
 # translation_tools / materials register via their plugins.
 # Discord tools live entirely in uefn-plugin-discord (api.tool).
