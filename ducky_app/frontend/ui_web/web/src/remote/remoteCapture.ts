@@ -11,8 +11,12 @@ import { rankVideoCodec } from "../components/remoteWindowMath";
 export const MAX_BITRATE = 20_000_000;
 export const MAX_FPS = 60;
 const BOX_POLL_MS = 250;
-/** Drop the capture (and its "sharing your screen" bar) once nobody watched for this long. */
-const IDLE_RELEASE_MS = 5000;
+/**
+ * Drop the capture (and its "sharing your screen" bar) once nobody watched for
+ * this long. Long enough that a viewer reconnecting after a hiccup reuses the
+ * same capture instead of prompting a fresh one.
+ */
+const IDLE_RELEASE_MS = 45_000;
 
 type CropCtx = { onmessage: ((ev: { data: CropMessage }) => void) | null };
 type CropMessage =

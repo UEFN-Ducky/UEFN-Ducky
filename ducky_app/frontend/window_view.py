@@ -89,11 +89,30 @@ def map_norm_to_screen(box: tuple[int, int, int, int], nx: float, ny: float) -> 
     return left + int(nx * (width - 1)), top + int(ny * (height - 1))
 
 
+# hwnd -> monotonic time of the last forced raise. A viewer that reconnects in
+# a loop must not steal focus from the user on every attempt.
+_LAST_RAISE: dict[int, float] = {}
+RAISE_COOLDOWN_S = 15.0
+
+
+def _raise_allowed(hwnd: int) -> bool:
+    import time
+
+    now = time.monotonic()
+    last = _LAST_RAISE.get(hwnd, 0.0)
+    if now - last < RAISE_COOLDOWN_S:
+        return False
+    _LAST_RAISE[hwnd] = now
+    return True
+
+
 def bring_to_front(hwnd: int) -> bool:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return False
     if _foreground_hwnd() == hwnd:
         return True
+    if not _raise_allowed(hwnd):
+        return False
     return _raise_window(hwnd)
 
 
@@ -117,7 +136,7 @@ def set_window_topmost(hwnd: int, on: bool) -> bool:
     insert_after = -1 if on else -2  # HWND_TOPMOST / HWND_NOTOPMOST
     flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
     user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags)
-    if on:
+    if on and _foreground_hwnd() != hwnd and _raise_allowed(hwnd):
         _raise_window(hwnd)
     return True
 

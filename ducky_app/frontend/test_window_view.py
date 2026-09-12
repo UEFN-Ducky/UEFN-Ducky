@@ -83,3 +83,20 @@ def test_vk_for_named_and_function_keys() -> None:
     assert _vk_for_key("F1") == 0x70
     assert _vk_for_key("F12") == 0x7B
     assert _vk_for_key("") == 0
+
+
+def test_bring_to_front_has_a_cooldown(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    monkeypatch.setattr(wv, "_foreground_hwnd", lambda: 0)
+    raised: list[int] = []
+    monkeypatch.setattr(wv, "_raise_window", lambda hwnd: raised.append(hwnd) or True)
+    wv._LAST_RAISE.clear()
+    assert bring_to_front(9) is True
+    assert bring_to_front(9) is False, "second raise inside the cooldown is skipped"
+    assert raised == [9]
+    wv._LAST_RAISE[9] -= wv.RAISE_COOLDOWN_S + 1
+    assert bring_to_front(9) is True
+    assert raised == [9, 9]

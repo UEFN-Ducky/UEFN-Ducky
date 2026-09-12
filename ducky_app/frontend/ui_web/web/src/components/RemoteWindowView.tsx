@@ -195,6 +195,7 @@ const STUN: RTCConfiguration = {
 
 const CONNECT_MS = 12_000;
 const RETRY_MS = [1500, 3000, 5000, 8000];
+const MAX_AUTO_RETRIES = 4;
 const SIZE_DEBOUNCE_MS = 400;
 
 export function RemoteWindowSelect({
@@ -665,7 +666,9 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       setPhase(kind);
       setReason(why);
       window.clearTimeout(connectTimer);
-      if (kind === "failed") {
+      // A few automatic retries, then stop: a viewer that retries forever makes
+      // the desktop re-capture and re-raise the window on every attempt.
+      if (kind === "failed" && attemptRef.current < MAX_AUTO_RETRIES) {
         const delay = RETRY_MS[Math.min(attemptRef.current, RETRY_MS.length - 1)];
         retryTimer = window.setTimeout(retry, delay);
       }
