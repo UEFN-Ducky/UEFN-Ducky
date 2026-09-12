@@ -204,10 +204,8 @@ def main() -> int:
     root = here.parent
     req = root / "requirements.txt"
     spec = here / "unified.spec"
-    # Prefer AppData/temp workpath — Documents/GitHub builds can lose
-    # build/unified-work mid-Analysis (OneDrive/AV) → FileNotFoundError on base_library.zip.
-    local_app = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir())
-    work = local_app / "UEFN-Ducky" / "pyinstaller-work" / "unified-work"
+    # TEMP — AppData/UEFN-Ducky/pyinstaller-work gets deleted mid-Analysis (Defender).
+    work = Path(tempfile.gettempdir()) / "uefn-ducky-pyi-work"
     legacy_work = here / "unified-work"
     for stale in (work, legacy_work):
         if stale.is_dir():
