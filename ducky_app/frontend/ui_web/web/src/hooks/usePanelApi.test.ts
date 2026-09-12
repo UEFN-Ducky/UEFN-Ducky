@@ -28,7 +28,7 @@ describe("remoteApi", () => {
       vi.fn(() => {
         calls += 1;
         return new Promise<Response>((resolve) => {
-          window.setTimeout(() => {
+          setTimeout(() => {
             resolve(new Response(JSON.stringify({ ok: true, result: true }), { status: 200 }));
           }, 20);
         });

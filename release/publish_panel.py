@@ -107,12 +107,16 @@ def main() -> int:
             ["git", "rev-parse", "--verify", f"{args.remote}/{BRANCH}"], cwd=str(ROOT), capture_output=True
         ).returncode == 0
         shutil.rmtree(work)
+        has_local = subprocess.run(
+            ["git", "rev-parse", "--verify", BRANCH], cwd=str(ROOT), capture_output=True
+        ).returncode == 0
         if has_remote:
             run(["git", "worktree", "add", "--detach", str(work), f"{args.remote}/{BRANCH}"])
+        elif has_local:
+            run(["git", "worktree", "add", "--detach", str(work), BRANCH])
         else:
             run(["git", "worktree", "add", "--detach", str(work)])
-            run(["git", "checkout", "--orphan", BRANCH], cwd=work)
-            run(["git", "rm", "-rfq", "."], cwd=work)
+            run(["git", "switch", "--orphan", BRANCH], cwd=work)
         stage(work, ver)
         run(["git", "add", "-A"], cwd=work)
         status = subprocess.run(["git", "status", "--porcelain"], cwd=str(work), capture_output=True, text=True).stdout
@@ -129,6 +133,8 @@ def main() -> int:
         return 0
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", str(work)], cwd=str(ROOT), check=False)
+        # The orphan switch leaves a local branch behind; the remote is the source of truth.
+        subprocess.run(["git", "branch", "-D", BRANCH], cwd=str(ROOT), capture_output=True)
         shutil.rmtree(work, ignore_errors=True)
 
 

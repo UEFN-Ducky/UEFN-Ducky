@@ -121,9 +121,11 @@ function directApi(): PanelApi {
 }
 
 export function getApi(): PanelApi | null {
-  const api = window.pywebview?.api;
+  const w = typeof window !== "undefined" ? window : undefined;
+  const api = w?.pywebview?.api;
   if (isPanelApiReady(api)) return api;
-  if (typeof window !== "undefined" && !window.pywebview) {
+  if (!w?.pywebview) {
+    // No pywebview: a browser (tunnel host, panel host, or a node test).
     if (getDirectTransport()) return directApi();
     return remoteApi();
   }
