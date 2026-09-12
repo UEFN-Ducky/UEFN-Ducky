@@ -11,9 +11,19 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
-Get-Process -Name "UEFN-Ducky" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process -Name "pythonw" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*$root*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
+# One instance only. A leftover host (or an orphaned WebView2 still holding the
+# debug port) makes the next run talk to a stale page that answers nothing.
+Get-Process | Where-Object { $_.ProcessName -like "UEFN-Ducky*" -or $_.ProcessName -eq "pythonw" } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 5
+foreach ($port in 9222, 4199) {
+    $owner = (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess
+    if ($owner) {
+        Write-Host "clearing orphan on $port (pid $owner)"
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+}
 $env:UEFN_DUCKY_WEB_DEV = "http://localhost:5173"
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--auto-select-desktop-capture-source=creen --disable-features=WebRtcHideLocalIpsWithMdns --remote-debugging-port=9222"
 if ($Installed) {
@@ -27,4 +37,6 @@ do {
     Start-Sleep -Seconds 2
     try { $up = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:9222/json" -TimeoutSec 2).StatusCode -eq 200 } catch { $up = $false }
 } while (-not $up -and (Get-Date) -lt $deadline)
-if ($up) { "desktop up: CDP on 9222, panel on 4199" } else { throw "desktop did not come up" }
+if (-not $up) { throw "desktop did not come up" }
+$cdpOwner = (Get-NetTCPConnection -LocalPort 9222 -State Listen -ErrorAction SilentlyContinue).OwningProcess
+"desktop up: panel on 4199, CDP on 9222 (pid $cdpOwner)"

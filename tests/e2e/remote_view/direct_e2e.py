@@ -299,6 +299,26 @@ async def main() -> int:
             print(f"blob: forbidden path -> {forbidden}")
             assert forbidden == 403, "blob allowlist not enforced"
 
+            # A real desktop asset must come back over the channel, and when the
+            # panel is served from a subdirectory the worker must be scoped to it
+            # (that scope is the only reason those URLs are interceptable).
+            allowed = await vcdp.eval(
+                "window.__duckyDirectTransport.fetchBlob('/duckies/Artist.png')"
+                ".then(r => r.status + ':' + r.headers.get('Content-Type'))"
+            )
+            print(f"blob: /duckies/Artist.png -> {allowed}")
+            if not str(allowed).startswith("200:image/png"):
+                print("FAIL desktop asset did not come back over the blob channel")
+                return 1
+            scope = await vcdp.eval(
+                "navigator.serviceWorker.getRegistration().then(r => r ? r.scope : 'none')"
+            )
+            base = await vcdp.eval("new URL('.', document.baseURI).pathname", await_promise=False)
+            print(f"worker: scope={scope} panel dir={base}")
+            if str(scope) != "none" and not str(scope).endswith(str(base)):
+                print("FAIL service worker scope does not cover the panel directory")
+                return 1
+
             await dcdp.drain(1)
             await vcdp.drain(0.5)
             remote_errors = [l for l in dcdp.log + vcdp.log if ("[error]" in l or "[exception]" in l) and "remote-" in l]
