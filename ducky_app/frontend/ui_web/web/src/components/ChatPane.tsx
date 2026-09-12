@@ -1138,7 +1138,6 @@ export function ChatPane({
     ? "No models"
     : selectedModelDisplayName || selectedModel || "model";
 
-  const attachDropEnabled = true;
 
   const armChatAttachDrop = useCallback(() => {
     getApi()?.set_import_drop_target?.(CHAT_ATTACH_TARGET)?.catch?.(() => {});
@@ -1150,13 +1149,13 @@ export function ChatPane({
 
   const handleAttachDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (!attachDropEnabled || !dragHasOsFiles(e.dataTransfer)) return;
+      if (!dragHasOsFiles(e.dataTransfer)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
       setIsDragOver(true);
       armChatAttachDrop();
     },
-    [attachDropEnabled, armChatAttachDrop],
+    [armChatAttachDrop],
   );
 
   const handleAttachDragLeave = useCallback(
@@ -1171,7 +1170,7 @@ export function ChatPane({
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
-      if (!attachDropEnabled || !dragHasOsFiles(e.dataTransfer)) return;
+      if (!dragHasOsFiles(e.dataTransfer)) return;
       e.preventDefault();
       setIsDragOver(false);
       // Leave CHAT_ATTACH_TARGET for the native document handler to consume as a no-op.
@@ -1179,7 +1178,7 @@ export function ChatPane({
         void addFiles(e.dataTransfer.files);
       }
     },
-    [attachDropEnabled, addFiles],
+    [addFiles],
   );
 
   const handleEngage = useCallback(() => {
@@ -1194,12 +1193,12 @@ export function ChatPane({
       <div
         ref={setPaneHost}
         className={`chat-pane-root ${paneScopeClass}${visible ? "" : " chat-pane-root--hidden"}${isDragOver ? " chat-pane-root--drag-over" : ""}${isPopup ? " chat-pane-root--popup" : ""}`}
-        {...(attachDropEnabled ? { [CHAT_ATTACH_DROP_ATTR]: "" } : {})}
+        {...{ [CHAT_ATTACH_DROP_ATTR]: "" }}
         onPointerDownCapture={handleEngage}
         onKeyDownCapture={handleEngage}
-        onDragOver={attachDropEnabled ? handleAttachDragOver : undefined}
-        onDragLeave={attachDropEnabled ? handleAttachDragLeave : undefined}
-        onDrop={attachDropEnabled ? handleDrop : undefined}
+        onDragOver={handleAttachDragOver}
+        onDragLeave={handleAttachDragLeave}
+        onDrop={handleDrop}
       >
       <div ref={shellRef} className="chat-column-shell">
         <div className="chat-column-gutter chat-column-gutter--left">

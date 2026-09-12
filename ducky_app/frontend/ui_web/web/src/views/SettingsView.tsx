@@ -36,7 +36,6 @@ import { AppearanceTab } from "./settings/AppearanceTab";
 import { AppearanceProfileHeader } from "./settings/AppearanceProfileBar";
 import { AudioTab, type AudioSectionTab } from "./settings/AudioTab";
 import { SkillsMcpTab } from "./settings/SkillsMcpTab";
-import { SourceControlTab } from "./settings/SourceControlTab";
 import { StoreTab } from "./settings/StoreTab";
 import { SupportTab } from "./settings/SupportTab";
 import { PluginSettingsSections } from "./settings/PluginSettingsSections";
@@ -55,7 +54,6 @@ import { useSettingsSidebarWidth } from "./settings/useSettingsSidebarWidth";
 import { settingsTabTargetId, targetRef, useUiTarget } from "../ui-targets/registry";
 
 /** Re-enable when URC / urc.exe wiring is ready. */
-const SOURCE_CONTROL_TAB_ENABLED = false;
 
 /** Host-owned Settings tabs (not gated by plugins). */
 const CORE_TABS = [
@@ -64,7 +62,6 @@ const CORE_TABS = [
   "Duckies",
   "Plans",
   "LLMs",
-  "Source Control",
   "Appearance",
   "Audio",
 ] as const;
@@ -84,7 +81,6 @@ const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], string> = {
   Duckies: CONNECTION_ICONS.online,
   Plans: "📋",
   LLMs: "🧠",
-  "Source Control": "🌿",
   Appearance: "🎨",
   Audio: "🔊",
 };
@@ -316,12 +312,7 @@ export function SettingsView({ version }: SettingsViewProps) {
   const installedPluginCountLabel =
     installedPluginCount > 9 ? "9+" : String(installedPluginCount);
 
-  const visibleCoreTabs = useMemo(() => {
-    return CORE_TABS.filter((tab) => {
-      if (!SOURCE_CONTROL_TAB_ENABLED && tab === "Source Control") return false;
-      return true;
-    });
-  }, []);
+  const visibleCoreTabs = CORE_TABS;
 
   const showHeaderSubTabs =
     activeTab === "LLMs" ||
@@ -957,7 +948,6 @@ export function SettingsView({ version }: SettingsViewProps) {
             {activeTab === "LLMs" && llmsSection === "memory" && (
               <MemoryTab sectionTab={memorySection} />
             )}
-            {SOURCE_CONTROL_TAB_ENABLED && activeTab === "Source Control" && <SourceControlTab />}
             {activeTab === "Appearance" && <AppearanceTab />}
             {activeTab === "Audio" && <AudioTab sectionTab={audioSection} />}
             {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
