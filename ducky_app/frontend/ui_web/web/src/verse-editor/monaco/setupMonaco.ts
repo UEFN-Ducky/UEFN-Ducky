@@ -3,16 +3,25 @@ import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
-import * as monaco from "monaco-editor";
-import { registerVerseTextMate } from "./registerVerseTextMate";
-import { registerVerseSnippets } from "./registerVerseSnippets";
-import { registerVerseMonacoTheme } from "./verseTheme";
-import { registerAskAiContextMenu } from "./registerAskAiContextMenu";
-import { patchEditorContextMenu } from "./patchEditorContextMenu";
-import { registerVerseFormatter } from "../format/registerVerseFormatter";
+import type * as MonacoNs from "monaco-editor";
 import { verseEditorLog, verseEditorLogError } from "../verseEditorLog";
 
-let setupPromise: Promise<typeof monaco> | null = null;
+/**
+ * Monaco is loaded on demand, never at boot.
+ *
+ * Everything here — the editor itself and the register* helpers, which reach
+ * into `monaco-editor/esm/...` — is imported inside `setupMonacoOnce`. A single
+ * static `import * as monaco` in this file used to pin the whole editor into
+ * whichever chunk imported it, and chat code fences import it (RichCodeBlock →
+ * LiveCodePreview), so Monaco sat on the first-paint path: 59% of a 5.9 MB boot
+ * bundle that most sessions never opened a file to use. The `?worker` imports
+ * above stay static; Vite emits those as their own chunks either way.
+ *
+ * Callers already `await setupMonaco()`, so nothing else had to change.
+ */
+type Monaco = typeof MonacoNs;
+
+let setupPromise: Promise<Monaco> | null = null;
 
 function configureMonacoWorkers(): void {
   const global = globalThis as typeof globalThis & {
@@ -42,22 +51,32 @@ function configureMonacoWorkers(): void {
   };
 }
 
-async function setupMonacoOnce(): Promise<typeof monaco> {
+async function setupMonacoOnce(): Promise<Monaco> {
   verseEditorLog("setup", "start");
   configureMonacoWorkers();
-  await registerVerseTextMate(monaco);
-  registerVerseSnippets(monaco);
-  registerVerseMonacoTheme(monaco);
-  registerVerseFormatter(monaco);
-  registerAskAiContextMenu();
-  patchEditorContextMenu();
+  // One round trip: the editor and its Verse language setup land together.
+  const [monaco, textMate, snippets, theme, formatter, askAi, contextMenu] = await Promise.all([
+    import("monaco-editor"),
+    import("./registerVerseTextMate"),
+    import("./registerVerseSnippets"),
+    import("./verseTheme"),
+    import("../format/registerVerseFormatter"),
+    import("./registerAskAiContextMenu"),
+    import("./patchEditorContextMenu"),
+  ]);
+  await textMate.registerVerseTextMate(monaco);
+  snippets.registerVerseSnippets(monaco);
+  theme.registerVerseMonacoTheme(monaco);
+  formatter.registerVerseFormatter(monaco);
+  askAi.registerAskAiContextMenu();
+  contextMenu.patchEditorContextMenu();
   // Generic expose so Store shell.boot plugins can call monaco.editor.getEditors().
-  (globalThis as typeof globalThis & { __duckyMonaco?: typeof monaco }).__duckyMonaco = monaco;
+  (globalThis as typeof globalThis & { __duckyMonaco?: Monaco }).__duckyMonaco = monaco;
   verseEditorLog("setup", "complete");
   return monaco;
 }
 
-export function setupMonaco(): Promise<typeof monaco> {
+export function setupMonaco(): Promise<Monaco> {
   if (!setupPromise) {
     setupPromise = setupMonacoOnce().catch((err) => {
       setupPromise = null;
