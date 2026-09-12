@@ -349,8 +349,7 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
     finally:
         _forget_viewer(sock)
         unregister_window_rtc(session_id)
-        from frontend.window_view import release_look_capture, set_window_topmost as _unpin
-        release_look_capture()
+        from frontend.window_view import set_window_topmost as _unpin
         _unpin(hwnd, False)
         publish_window_rtc(session_id, hwnd, {"type": "rtc", "kind": "close"})
 

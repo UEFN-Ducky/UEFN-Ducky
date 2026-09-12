@@ -510,7 +510,7 @@ function UefnStickOverlay({
     lookRaf.current = 0;
     if (!looking.current) return;
     looking.current = false;
-    send({ type: "up", x: 0.5, y: 0.5, button: 2, look: true });
+    send({ type: "up", x: 0.5, y: 0.5, button: 2 });
   }, [send]);
 
   const releaseAll = useCallback(() => {
@@ -519,7 +519,7 @@ function UefnStickOverlay({
     cancelLook();
   }, [send, cancelLook]);
 
-  useEffect(() => releaseAll, [releaseAll, mode]);
+  useEffect(() => () => releaseAll(), [releaseAll, mode]);
 
   const onMove = (nx: number, ny: number, active: boolean) => {
     const next = active ? stickMoveKeys(nx, ny, lookTune.current.deadzone) : [];
@@ -537,8 +537,8 @@ function UefnStickOverlay({
     }
     if (!looking.current) {
       looking.current = true;
-      send({ type: "move", x: 0.5, y: 0.5, look: true });
-      send({ type: "down", x: 0.5, y: 0.5, button: 2, look: true });
+      send({ type: "move", x: 0.5, y: 0.5 });
+      send({ type: "down", x: 0.5, y: 0.5, button: 2 });
     }
     if (lookRaf.current) return;
     const tick = () => {
@@ -552,7 +552,7 @@ function UefnStickOverlay({
         lookTune.current.look,
         lookTune.current.deadzone,
       );
-      if (dx || dy) send({ type: "move", dx, dy, look: true });
+      if (dx || dy) send({ type: "move", dx, dy });
       lookRaf.current = requestAnimationFrame(tick);
     };
     lookRaf.current = requestAnimationFrame(tick);
@@ -621,7 +621,10 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const attemptRef = useRef(0);
   const controls = useRemoteViewControls();
   const rows = useWindowViews(!!hwnd);
-  const watchingUefn = rows.find((r) => r.id === hwnd)?.kind === "uefn";
+  const kind = rows.find((r) => r.id === hwnd)?.kind;
+  const kindRef = useRef(kind);
+  if (kind) kindRef.current = kind;
+  const watchingUefn = (kind || kindRef.current) === "uefn";
 
   const send = useCallback((payload: Record<string, unknown>) => {
     const text = JSON.stringify(payload);

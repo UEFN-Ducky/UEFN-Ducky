@@ -5,7 +5,6 @@ from frontend.window_view import (
     handle_stream_message,
     kind_for,
     map_norm_to_screen,
-    viewport_inset,
     window_box,
     window_fit_size,
     _vk_for_key,
@@ -73,15 +72,10 @@ def test_look_move_sends_relative_dx(monkeypatch) -> None:
         lambda hwnd, kind, nx, ny, **kw: calls.append((hwnd, kind, nx, ny, kw)),
     )
     handle_stream_message(9, b'{"type":"move","dx":4,"dy":-2}')
-    assert calls[0][1] == "move" and calls[0][4]["dx"] == 4 and calls[0][4]["look"] is False
-    handle_stream_message(9, b'{"type":"down","x":0.5,"y":0.5,"button":2,"look":true}')
+    assert calls[0][1] == "move" and calls[0][4]["dx"] == 4
+    handle_stream_message(9, b'{"type":"down","x":0.5,"y":0.5,"button":2}')
     assert calls[-1][4]["dx"] is None
     assert calls[-1][4]["button"] == 2
-    assert calls[-1][4]["look"] is True
-
-
-def test_viewport_inset_skips_editor_chrome() -> None:
-    assert viewport_inset((0, 0, 1000, 1000)) == (180, 120, 780, 920)
 
 
 def test_vk_for_named_and_function_keys() -> None:
