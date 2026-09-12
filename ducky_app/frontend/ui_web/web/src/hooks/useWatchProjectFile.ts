@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import type { ProjectFileStat } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { onApiReady } from "./onApiReady";
@@ -25,7 +26,7 @@ export function useWatchProjectFile(
     if (!enabled || !relativePath) return;
 
     let cancelled = false;
-    let pollId: number | undefined;
+    let stopPoll: (() => void) | undefined;
 
     const poll = async () => {
       const api = getApi();
@@ -50,13 +51,13 @@ export function useWatchProjectFile(
     const stop = onApiReady(() => {
       fpRef.current = null;
       void poll();
-      pollId = window.setInterval(() => void poll(), pollMs);
+      stopPoll = setVisibleInterval(() => void poll(), pollMs);
     });
 
     return () => {
       cancelled = true;
       stop();
-      if (pollId !== undefined) window.clearInterval(pollId);
+      stopPoll?.();
       fpRef.current = null;
     };
   }, [relativePath, enabled, pollMs]);

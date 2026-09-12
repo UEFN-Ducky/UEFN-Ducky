@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import type { AgentEvent } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { agentEventRunningSignal } from "./chatRun/runningSignal";
@@ -62,7 +63,7 @@ function _ensureStarted(pollMs: number) {
   _started = true;
   subscribeAgentEvents(_applyEvent);
   void _syncFromApi();
-  window.setInterval(() => void _syncFromApi(), pollMs);
+  setVisibleInterval(() => void _syncFromApi(), pollMs);
 }
 
 function subscribe(listener: () => void) {

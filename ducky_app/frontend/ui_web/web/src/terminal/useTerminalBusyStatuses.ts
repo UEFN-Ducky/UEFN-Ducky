@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { getApi } from "../hooks/usePanelApi";
 
 export type TerminalRunner = "mcp" | "user";
@@ -47,10 +48,10 @@ export function useTerminalBusyStatuses(sessionIds: string[]): Map<string, Termi
     };
 
     void poll();
-    const timer = window.setInterval(() => void poll(), POLL_MS);
+    const stopPoll = setVisibleInterval(() => void poll(), POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPoll();
     };
   }, [idsKey]);
 

@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { onApiReady } from "./onApiReady";
 import { getApi } from "./usePanelApi";
 import { rememberStoreCatalog } from "./storeCatalogCache";
@@ -79,7 +80,7 @@ function ensurePolling(): void {
   pollStarted = true;
   onApiReady(() => {
     void fetchUpdateCount();
-    window.setInterval(() => void fetchUpdateCount(), POLL_MS);
+    setVisibleInterval(() => void fetchUpdateCount(), POLL_MS);
   });
 }
 

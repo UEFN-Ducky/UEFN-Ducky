@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { getApi } from "./usePanelApi";
 import { onApiReady } from "./onApiReady";
 
@@ -25,7 +26,7 @@ export function useWatchProjectTree(
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    let pollId: number | undefined;
+    let stopPoll: (() => void) | undefined;
 
     const poll = async () => {
       const api = getApi();
@@ -55,13 +56,13 @@ export function useWatchProjectTree(
     const stop = onApiReady(() => {
       fpRef.current = new Map();
       void poll();
-      pollId = window.setInterval(() => void poll(), pollMs);
+      stopPoll = setVisibleInterval(() => void poll(), pollMs);
     });
 
     return () => {
       cancelled = true;
       stop();
-      if (pollId !== undefined) window.clearInterval(pollId);
+      stopPoll?.();
     };
   }, [enabled, pollMs]);
 }

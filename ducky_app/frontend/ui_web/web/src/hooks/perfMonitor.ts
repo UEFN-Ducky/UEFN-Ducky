@@ -4,6 +4,7 @@
  */
 
 import { getApi } from "./usePanelApi";
+import { setVisibleInterval } from "../utils/visibleInterval";
 
 export type UiPerfEntry = {
   kind: "ui_stall" | "ui_frame";
@@ -21,7 +22,6 @@ let installed = false;
 let buffer: UiPerfEntry[] = [];
 let peakPending = 0;
 let lastRaf = 0;
-let flushTimer: ReturnType<typeof setInterval> | null = null;
 
 function enqueue(entry: UiPerfEntry) {
   buffer.push(entry);
@@ -124,12 +124,14 @@ export function installPerfMonitor() {
   };
   window.requestAnimationFrame(tick);
 
-  flushTimer = window.setInterval(() => {
+  // The rAF loop above already costs nothing while hidden — Chromium throttles
+  // it — but the flush timer would keep waking to look at an empty buffer.
+  const stopFlush = setVisibleInterval(() => {
     if (buffer.length) flush();
   }, FLUSH_INTERVAL_MS);
 
   window.addEventListener("beforeunload", () => {
     flush();
-    if (flushTimer != null) window.clearInterval(flushTimer);
+    stopFlush();
   });
 }

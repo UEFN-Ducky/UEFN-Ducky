@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { getApi } from "./usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
 
@@ -32,7 +33,7 @@ function _ensureStarted() {
   const refresh = () => void _sync();
   refresh();
   window.addEventListener("pywebviewready", refresh);
-  window.setInterval(refresh, 15000);
+  setVisibleInterval(refresh, 15000);
   installPanelPushBus();
   subscribePanelPush((event) => {
     if (

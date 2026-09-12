@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
 import { getTerminalsEnabled } from "../contexts/TerminalsSettingsContext";
@@ -231,10 +232,10 @@ export function useTerminalTabs(
       });
     };
     void syncParked();
-    const timer = window.setInterval(() => void syncParked(), 4000);
+    const stopPoll = setVisibleInterval(() => void syncParked(), 4000);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPoll();
     };
   }, [editor, rememberSession]);
 

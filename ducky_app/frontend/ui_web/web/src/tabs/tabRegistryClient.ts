@@ -1,4 +1,5 @@
 import { getApi } from "../hooks/usePanelApi";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import type { AgentEvent } from "../types/panel";
 
@@ -43,7 +44,7 @@ function claim(tabId: string): void {
 // Heartbeat: closed/crashed windows never un-report, so the backend expires window
 // entries that stop heartbeating (stale owners made focus_tab raise dead windows,
 // which blocked opening those files anywhere).
-window.setInterval(() => {
+setVisibleInterval(() => {
   void getApi()?.report_open_tabs(WINDOW_ID, [...lastReported]);
 }, 10_000);
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { setVisibleInterval } from "../../utils/visibleInterval";
 import type { AgentEvent } from "../../types/panel";
 import { installAgentEventBus, subscribeAgentEvents } from "../../hooks/useAgentEventBus";
 import { getApi } from "../../hooks/usePanelApi";
@@ -48,11 +49,11 @@ export function useVerseProjectDiagnostics(projectPath: string, onChange: () => 
   }, []);
 
   useEffect(() => {
-    const watchdog = window.setInterval(() => {
+    const stopWatchdog = setVisibleInterval(() => {
       fileDiagnosticRegistry.tickScanWatchdog();
       onChange();
     }, 2000);
-    return () => window.clearInterval(watchdog);
+    return stopWatchdog;
   }, [onChange]);
 
   useEffect(() => {
