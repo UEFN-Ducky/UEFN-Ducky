@@ -37,13 +37,12 @@ def _openai_key() -> str:
 
     if "openai" not in gateway_providers():
         raise VoiceError(
-            "OpenAI gateway is not installed — Settings → Store → Gateways → OpenAI, "
-            "then add an API key under Settings → LLMs for voice."
+            "OpenAI speech needs the OpenAI gateway. Live voice can use System default listen instead."
         )
     key = (get_key("openai") or "").strip()
     if not key:
         raise VoiceError(
-            "No OpenAI API key — open Settings → LLMs and add an OpenAI key for voice."
+            "OpenAI speech needs an OpenAI key. Switch Listen to System default, or add a key under LLMs."
         )
     return key
 

@@ -2,6 +2,14 @@ import { getApi } from "../hooks/usePanelApi";
 import { clampProcessTalk } from "./processNarration";
 
 export type SpokenStyle = "summary" | "speak_along";
+/** empty = system/browser speech (default). */
+export type SttProvider = "" | "openai" | "webspeech";
+
+export function normalizeSttProvider(raw: unknown): SttProvider {
+  const s = String(raw || "").trim().toLowerCase();
+  if (s === "openai" || s === "webspeech") return s;
+  return "";
+}
 
 export type VoiceSettings = {
   enabled: boolean;
@@ -17,6 +25,8 @@ export type VoiceSettings = {
    * (0 = mute process chatter, 1 = tools + thinking snippets). Final reply still speaks.
    */
   processTalk: number;
+  /** Listen backend. Empty uses browser speech; openai needs an OpenAI key. */
+  sttProvider: SttProvider;
 };
 
 const DEFAULTS: VoiceSettings = {
@@ -27,6 +37,7 @@ const DEFAULTS: VoiceSettings = {
   defaultSpeed: 1,
   liveManualSend: false,
   processTalk: 0.7,
+  sttProvider: "",
 };
 
 /** Preset talking-speed choices for the ChoiceDropdown pickers (value is a number string). */
@@ -91,6 +102,7 @@ export async function loadVoiceSettings(): Promise<VoiceSettings> {
     defaultSpeed: clampSpeed(s.voice_default_speed),
     liveManualSend: Boolean(s.voice_live_manual_send),
     processTalk: clampProcessTalk(s.voice_process_talk ?? 0.7),
+    sttProvider: normalizeSttProvider(s.voice_stt_provider),
   };
   notify();
   return cache;
@@ -105,6 +117,7 @@ export async function saveVoiceSettings(patch: Partial<VoiceSettings>): Promise<
     defaultSpeed: patch.defaultSpeed != null ? clampSpeed(patch.defaultSpeed) : cache.defaultSpeed,
     liveManualSend: patch.liveManualSend ?? cache.liveManualSend,
     processTalk: patch.processTalk != null ? clampProcessTalk(patch.processTalk) : cache.processTalk,
+    sttProvider: patch.sttProvider != null ? normalizeSttProvider(patch.sttProvider) : cache.sttProvider,
   };
   cache = next;
   notify();
@@ -118,6 +131,7 @@ export async function saveVoiceSettings(patch: Partial<VoiceSettings>): Promise<
       voice_default_speed: next.defaultSpeed,
       voice_live_manual_send: next.liveManualSend,
       voice_process_talk: next.processTalk,
+      voice_stt_provider: next.sttProvider,
     });
   }
   return next;

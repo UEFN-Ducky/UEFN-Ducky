@@ -23,7 +23,7 @@ import {
   type TranscriptionSession,
 } from "./transcriptionSession";
 import { ttsEngine } from "./ttsEngine";
-import { getVoiceSettings, resolveSpeed, resolveVoiceId } from "./voiceSettings";
+import { getVoiceSettings, resolveSpeed, resolveVoiceId, subscribeVoiceSettings } from "./voiceSettings";
 
 export type LiveVoiceStatus = "off" | "listening" | "thinking" | "speaking" | "error" | "muted";
 
@@ -52,6 +52,7 @@ export function useLiveVoiceMode(opts: {
   const [error, setError] = useState("");
   const [pendingText, setPendingText] = useState("");
   const [transport, setTransport] = useState(() => getLiveSpeakTransport());
+  const [sttProvider, setSttProvider] = useState(() => getVoiceSettings().sttProvider);
   const bargeTimerRef = useRef<number | null>(null);
   const onInterimRef = useRef(opts.onInterim);
   const onTranscriptRef = useRef(opts.onTranscript);
@@ -193,6 +194,8 @@ export function useLiveVoiceMode(opts: {
     }
   }, [publish, setPending]);
 
+  useEffect(() => subscribeVoiceSettings(() => setSttProvider(getVoiceSettings().sttProvider)), []);
+
   useEffect(() => {
     if (!opts.enabled) return;
     const voice = resolveVoiceId(opts.voiceId);
@@ -217,7 +220,7 @@ export function useLiveVoiceMode(opts: {
     return () => {
       stopMic();
     };
-  }, [opts.enabled, opts.muted, opts.chatId, startMic, stopMic, publish]);
+  }, [opts.enabled, opts.muted, opts.chatId, sttProvider, startMic, stopMic, publish]);
 
   useEffect(() => {
     if (!opts.enabled) return;

@@ -11,8 +11,10 @@ import { useTtsVoiceOptions } from "./pluginVoices";
 import {
   getVoiceSettings,
   loadVoiceSettings,
+  normalizeSttProvider,
   saveVoiceSettings,
   type SpokenStyle,
+  type SttProvider,
   subscribeVoiceSettings,
 } from "./voiceSettings";
 
@@ -28,6 +30,7 @@ export function VoiceSettingsSection() {
   const [voice, setVoice] = useState("");
   const [speed, setSpeed] = useState(1);
   const [processTalk, setProcessTalk] = useState(0.7);
+  const [sttProvider, setSttProvider] = useState<SttProvider>("");
   const voices = useTtsVoiceOptions();
 
   useEffect(() => {
@@ -38,6 +41,7 @@ export function VoiceSettingsSection() {
       setVoice(s.defaultVoice);
       setSpeed(s.defaultSpeed);
       setProcessTalk(s.processTalk);
+      setSttProvider(s.sttProvider);
     });
     return subscribeVoiceSettings(() => {
       const s = getVoiceSettings();
@@ -47,6 +51,7 @@ export function VoiceSettingsSection() {
       setVoice(s.defaultVoice);
       setSpeed(s.defaultSpeed);
       setProcessTalk(s.processTalk);
+      setSttProvider(s.sttProvider);
     });
   }, []);
 
@@ -137,7 +142,28 @@ export function VoiceSettingsSection() {
         <div className="general-tab-toggle-card">
           <p className="general-tab-section-desc">
             Dictation fills the chat box until you press Send. Live voice sends each pause as a turn.
+            Listen defaults to system/browser speech so you do not need an OpenAI key.
           </p>
+          <div className="voice-settings-row">
+            <label className="voice-settings-label" htmlFor="voice-stt-provider">
+              Listen
+            </label>
+            <ChoiceDropdown
+              id="voice-stt-provider"
+              aria-label="Listen backend"
+              mode="radio"
+              value={sttProvider}
+              options={[
+                { value: "", label: "System default", hint: "Browser speech — uses your default, no extra key" },
+                { value: "openai", label: "OpenAI", hint: "Whisper / Realtime — only if an OpenAI key is saved" },
+              ]}
+              onChange={(next) => {
+                const value = normalizeSttProvider(next);
+                setSttProvider(value);
+                void saveVoiceSettings({ sttProvider: value });
+              }}
+            />
+          </div>
           <div className="voice-settings-row">
             <label className="voice-settings-label" htmlFor="voice-process-talk">
               Process talk

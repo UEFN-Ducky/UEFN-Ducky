@@ -237,6 +237,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Process talk", "Audio", settable=True,
         description="How much live voice narrates tools/thinking (0 = mute, 1 = full).",
     ),
+    "voice_stt_provider": FieldMeta(
+        "Listen backend", "Audio", settable=True, enum=("", "openai", "webspeech"),
+        description="Empty = system/browser speech (default). openai = Whisper/Realtime when a key is saved.",
+    ),
     "mic_permission": FieldMeta(
         "Microphone permission", "Audio", settable=True, enum=("ask", "allow", "block"),
         description="App-level mic consent before getUserMedia.",

@@ -32,6 +32,11 @@ export type VoiceOverlayProps = {
   showPickers?: boolean;
   /** Mic off — type only; replies still speak. */
   muted?: boolean;
+  chatModel?: string;
+  setChatModel?: (value: string) => void;
+  codingAgent?: string;
+  setCodingAgent?: (value: string) => void;
+  showChatModel?: boolean;
 };
 
 function statusLabel(
@@ -71,6 +76,11 @@ export function VoiceOverlay({
   inline = false,
   showPickers = true,
   muted = false,
+  chatModel,
+  setChatModel,
+  codingAgent,
+  setCodingAgent,
+  showChatModel = false,
 }: VoiceOverlayProps) {
   const [state, setState] = useState<LiveVoiceState>(() => getLiveVoiceState(chatId));
   const [tts, setTts] = useState<TtsProgress>(() => ttsEngine.getProgress());
@@ -181,6 +191,11 @@ export function VoiceOverlay({
               setSpeed={setSpeed}
               processTalk={processTalk}
               setProcessTalk={setProcessTalk}
+              chatModel={chatModel}
+              setChatModel={setChatModel}
+              codingAgent={codingAgent}
+              setCodingAgent={setCodingAgent}
+              showChatModel={showChatModel}
             />
           </div>
         ) : null}

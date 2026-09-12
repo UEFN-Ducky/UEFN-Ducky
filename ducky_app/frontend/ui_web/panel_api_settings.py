@@ -36,6 +36,7 @@ class PanelApiSettingsMixin:
             "voice_default_speed": float(getattr(s, "voice_default_speed", 1.0) or 1.0),
             "voice_live_manual_send": bool(getattr(s, "voice_live_manual_send", False)),
             "voice_process_talk": float(getattr(s, "voice_process_talk", 0.7) or 0.0),
+            "voice_stt_provider": str(getattr(s, "voice_stt_provider", "") or "").strip(),
             "mic_permission": s.mic_permission if s.mic_permission in ("ask", "allow", "block") else "ask",
             "mic_device_id": s.mic_device_id or "",
             "output_device_id": getattr(s, "output_device_id", "") or "",
@@ -526,6 +527,9 @@ class PanelApiSettingsMixin:
                 s.voice_process_talk = max(0.0, min(1.0, float(patch.get("voice_process_talk"))))
             except (TypeError, ValueError):
                 s.voice_process_talk = 0.7
+        if "voice_stt_provider" in patch:
+            stt = str(patch.get("voice_stt_provider") or "").strip().lower()
+            s.voice_stt_provider = stt if stt in ("openai", "webspeech") else ""
         if "mic_permission" in patch:
             perm = str(patch.get("mic_permission") or "ask").strip()
             s.mic_permission = perm if perm in ("ask", "allow", "block") else "ask"

@@ -1,15 +1,16 @@
 /**
  * TranscriptionSession — one interface, two backends:
- *   batch: AudioContext PCM → WAV → Whisper REST (dictation)
- *   streaming: AudioContext PCM → OpenAI Realtime WS + server VAD (live / barge-in)
+ *   default: browser SpeechRecognition (no API key)
+ *   openai:  batch Whisper REST / Realtime WS when an OpenAI key is saved
  *
- * Both use a default-rate AudioContext like Settings → Input's meter.
+ * OpenAI PCM capture uses a default-rate AudioContext like Settings → Input.
  * Forcing sampleRate: 24000 made MediaStreamSource silent in WebView2.
  */
 
 import { runBridgeJob } from "../hooks/bridgeJobAsync";
 import { getApi } from "../hooks/usePanelApi";
 import { requestMicAccess } from "./micPermission";
+import { getVoiceSettings, normalizeSttProvider } from "./voiceSettings";
 
 export type TranscriptionHandlers = {
   onInterim?: (text: string) => void;
@@ -27,6 +28,94 @@ export interface TranscriptionSession {
   start(handlers?: TranscriptionHandlers): Promise<void>;
   stop(): Promise<void>;
   abort(): void;
+}
+
+export type SttBackend = "webspeech" | "openai";
+
+type SpeechRecCtor = new () => BrowserSpeechRec;
+
+type BrowserSpeechRec = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((ev: BrowserSpeechResultEvent) => void) | null;
+  onerror: ((ev: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  onspeechstart: (() => void) | null;
+  onspeechend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type BrowserSpeechResultEvent = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal?: boolean; 0?: { transcript?: string } }>;
+};
+
+export function getSpeechRecognitionCtor(): SpeechRecCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as Window & {
+    SpeechRecognition?: SpeechRecCtor;
+    webkitSpeechRecognition?: SpeechRecCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+
+export function pickTranscriptionBackend(opts: {
+  preference?: string;
+  speechAvailable: boolean;
+  openaiReady: boolean;
+}): SttBackend {
+  const pref = normalizeSttProvider(opts.preference);
+  if (pref === "openai") {
+    if (opts.openaiReady) return "openai";
+    if (opts.speechAvailable) return "webspeech";
+    return "openai";
+  }
+  if (pref === "webspeech") {
+    if (opts.speechAvailable) return "webspeech";
+    if (opts.openaiReady) return "openai";
+    return "webspeech";
+  }
+  if (opts.speechAvailable) return "webspeech";
+  return "openai";
+}
+
+async function openaiVoiceReady(): Promise<boolean> {
+  try {
+    const status = await getApi()?.get_key_status?.();
+    return Boolean(status && (status as { openai?: boolean }).openai);
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSttBackend(): Promise<SttBackend> {
+  return pickTranscriptionBackend({
+    preference: getVoiceSettings().sttProvider,
+    speechAvailable: Boolean(getSpeechRecognitionCtor()),
+    openaiReady: await openaiVoiceReady(),
+  });
+}
+
+function wrapSession(kind: "batch" | "streaming", pick: () => Promise<TranscriptionSession>): TranscriptionSession {
+  let inner: TranscriptionSession | null = null;
+  return {
+    kind,
+    async start(handlers) {
+      inner?.abort();
+      inner = await pick();
+      await inner.start(handlers);
+    },
+    async stop() {
+      await inner?.stop();
+    },
+    abort() {
+      inner?.abort();
+      inner = null;
+    },
+  };
 }
 
 const TARGET_RATE = 24000;
@@ -189,7 +278,7 @@ async function startPcmCapture(
 }
 
 /** Push-to-talk: record until stop(), then Whisper REST. */
-export function createBatchTranscriptionSession(): TranscriptionSession {
+function createOpenAiBatchTranscriptionSession(): TranscriptionSession {
   let capture: PcmCapture | null = null;
   let chunks: Float32Array[] = [];
   let handlers: TranscriptionHandlers = {};
@@ -273,7 +362,7 @@ type TokenResult = {
 };
 
 /** Live streaming STT via OpenAI Realtime transcription WebSocket (GA). */
-export function createStreamingTranscriptionSession(): TranscriptionSession {
+function createOpenAiStreamingTranscriptionSession(): TranscriptionSession {
   let capture: PcmCapture | null = null;
   let ws: WebSocket | null = null;
   let handlers: TranscriptionHandlers = {};
@@ -457,4 +546,134 @@ export function createStreamingTranscriptionSession(): TranscriptionSession {
       setState("idle");
     },
   };
+}
+
+function createWebSpeechTranscriptionSession(kind: "batch" | "streaming"): TranscriptionSession {
+  const Ctor = getSpeechRecognitionCtor();
+  let rec: BrowserSpeechRec | null = null;
+  let handlers: TranscriptionHandlers = {};
+  let state: TranscriptionState = "idle";
+  let closed = false;
+  let restartOnEnd = kind === "streaming";
+
+  const setState = (next: TranscriptionState) => {
+    state = next;
+    handlers.onStateChange?.(next);
+  };
+
+  const drop = () => {
+    const running = rec;
+    rec = null;
+    if (!running) return;
+    running.onresult = null;
+    running.onerror = null;
+    running.onend = null;
+    running.onspeechstart = null;
+    running.onspeechend = null;
+    try {
+      running.abort();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const bind = (speech: BrowserSpeechRec) => {
+    speech.continuous = true;
+    speech.interimResults = true;
+    speech.lang = (typeof navigator !== "undefined" && navigator.language) || "en-US";
+    speech.onspeechstart = () => handlers.onSpeechStarted?.();
+    speech.onspeechend = () => handlers.onSpeechStopped?.();
+    speech.onresult = (ev) => {
+      let interim = "";
+      let finals = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+        const row = ev.results[i];
+        const piece = String(row?.[0]?.transcript || "").trim();
+        if (!piece) continue;
+        if (row?.isFinal) finals = finals ? `${finals} ${piece}` : piece;
+        else interim = interim ? `${interim} ${piece}` : piece;
+      }
+      if (interim) handlers.onInterim?.(interim);
+      if (finals) {
+        handlers.onInterim?.("");
+        handlers.onFinal?.(finals);
+      }
+    };
+    speech.onerror = (ev) => {
+      const code = String(ev.error || "");
+      if (code === "aborted" || code === "no-speech") return;
+      handlers.onError?.(code === "not-allowed" ? "Microphone blocked" : `Speech error: ${code || "failed"}`);
+      setState("error");
+    };
+    speech.onend = () => {
+      if (closed || !restartOnEnd || state !== "listening") {
+        if (!closed && state === "listening") setState("idle");
+        return;
+      }
+      try {
+        speech.start();
+      } catch {
+        /* Chrome throws if start races abort */
+      }
+    };
+  };
+
+  return {
+    kind,
+    async start(h = {}) {
+      handlers = h;
+      closed = false;
+      restartOnEnd = kind === "streaming";
+      if (!Ctor) throw new Error("Browser speech is not available on this device.");
+      // Prime the in-app mic prompt, then release so SpeechRecognition can own the device.
+      const media = await requestMicAccess();
+      media.getTracks().forEach((t) => t.stop());
+      drop();
+      const speech = new Ctor();
+      rec = speech;
+      bind(speech);
+      speech.start();
+      setState("listening");
+    },
+    async stop() {
+      restartOnEnd = false;
+      closed = true;
+      const running = rec;
+      rec = null;
+      if (running) {
+        running.onend = () => setState("idle");
+        try {
+          running.stop();
+        } catch {
+          setState("idle");
+        }
+      } else {
+        setState("idle");
+      }
+    },
+    abort() {
+      restartOnEnd = false;
+      closed = true;
+      drop();
+      setState("idle");
+    },
+  };
+}
+
+/** Push-to-talk dictation — system speech first, OpenAI Whisper if that's what you picked. */
+export function createBatchTranscriptionSession(): TranscriptionSession {
+  return wrapSession("batch", async () =>
+    (await resolveSttBackend()) === "webspeech"
+      ? createWebSpeechTranscriptionSession("batch")
+      : createOpenAiBatchTranscriptionSession(),
+  );
+}
+
+/** Live streaming STT — system speech first, OpenAI Realtime when a key is saved. */
+export function createStreamingTranscriptionSession(): TranscriptionSession {
+  return wrapSession("streaming", async () =>
+    (await resolveSttBackend()) === "webspeech"
+      ? createWebSpeechTranscriptionSession("streaming")
+      : createOpenAiStreamingTranscriptionSession(),
+  );
 }

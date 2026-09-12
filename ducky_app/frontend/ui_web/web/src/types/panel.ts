@@ -834,6 +834,8 @@ export interface PanelSettingsDto {
   voice_live_manual_send?: boolean;
   /** 0–1: how much live voice narrates tools/thinking. */
   voice_process_talk?: number;
+  /** empty = system/browser speech; openai = Whisper/Realtime. */
+  voice_stt_provider?: string;
   mic_permission?: "ask" | "allow" | "block" | string;
   mic_device_id?: string;
   output_device_id?: string;

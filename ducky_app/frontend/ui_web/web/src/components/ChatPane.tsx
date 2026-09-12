@@ -1354,6 +1354,11 @@ export function ChatPane({
                   processTalk={liveVoiceHandlers.processTalk}
                   setProcessTalk={liveVoiceHandlers.setProcessTalk}
                   muted={liveVoiceHandlers.muted}
+                  chatModel={selectedModel}
+                  setChatModel={setSelectedModel}
+                  codingAgent={codingAgent}
+                  setCodingAgent={setCodingAgent}
+                  showChatModel={!chat.isGroup}
                 />
               ) : null}
             </div>

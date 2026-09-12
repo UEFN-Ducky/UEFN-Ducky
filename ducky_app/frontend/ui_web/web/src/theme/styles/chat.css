@@ -574,6 +574,33 @@
   min-width: 0;
 }
 
+.live-voice-model {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  max-width: 220px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, #3f3f46);
+  border-radius: 8px;
+  background: #202024;
+  overflow: hidden;
+}
+
+.live-voice-model .model-selector,
+.live-voice-model .model-selector-btn {
+  height: 100%;
+}
+
+.live-voice-model .model-selector-btn {
+  border: none;
+  border-radius: 0;
+  padding: 0 10px;
+}
+
+.live-voice-model .model-selector-btn:hover:not(:disabled),
+.live-voice-model .model-selector-btn.is-open {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
 .live-voice-combo {
   display: flex;
   align-items: stretch;

@@ -19,5 +19,6 @@ export { requestMicAccess, micAccessAllowed } from "./micPermission";
 export {
   createBatchTranscriptionSession,
   createStreamingTranscriptionSession,
+  pickTranscriptionBackend,
   resampleLinear,
 } from "./transcriptionSession";

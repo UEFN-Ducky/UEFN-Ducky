@@ -242,6 +242,9 @@ class PanelSettings:
     voice_process_talk: float = 0.7
     """How much live voice narrates tools/thinking (0 = mute process chatter, 1 = full)."""
 
+    voice_stt_provider: str = ""
+    """Live/dictation listen backend: empty = system default (browser speech), openai = Whisper/Realtime."""
+
     mic_permission: str = "ask"
     """App-level mic consent: ask | allow | block (before getUserMedia)."""
 
@@ -306,6 +309,8 @@ class PanelSettings:
             self.voice_process_talk = max(0.0, min(1.0, float(self.voice_process_talk)))
         except (TypeError, ValueError):
             self.voice_process_talk = 0.7
+        stt = str(self.voice_stt_provider or "").strip().lower()
+        self.voice_stt_provider = stt if stt in ("openai", "webspeech") else ""
         self.mic_device_id = str(self.mic_device_id or "").strip()
         self.output_device_id = str(self.output_device_id or "").strip()
         from backend.agent.coding_agents.base import (
