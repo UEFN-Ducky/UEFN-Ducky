@@ -218,6 +218,30 @@ def test_device_login_polls_until_token() -> None:
     assert "desktop-exchange" not in calls
 
 
+def test_plugin_collect_404_never_mentions_plugin() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    with patch.object(acc, "api_request", return_value=(404, {}, "")):
+        try:
+            acc._plugin_collect(
+                "uefn-ducky",
+                "desktop-device-start",
+                {},
+                unavailable_code="auth_unavailable",
+                unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+                error_code="device_start_failed",
+                allow_anonymous=True,
+            )
+        except acc.DuckyOSAccountError as exc:
+            assert "plugin" not in exc.message.lower()
+            assert "tenant" not in exc.message.lower()
+            assert exc.code == "auth_unavailable"
+        else:
+            raise AssertionError("expected DuckyOSAccountError")
+
+
 def test_store_item_versions_needs_slug() -> None:
     from frontend.duckyos_account import store_item_versions
 

@@ -5,7 +5,6 @@ import type { DuckyOSAccountStatus, DuckyOSTeamsSnapshot } from "../../types/pan
 import {
   ACCOUNT_LOGIN_EVENT,
   consumeAccountLoginRequest,
-  requestOpenStore,
 } from "../../navigation/deepLinks";
 import { DUCKYOS_ACCOUNT_CHANGED } from "../../navigation/openSettingsTab";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
@@ -151,10 +150,6 @@ export function AccountTab() {
       try {
         const next = await api.duckyos_login(baseUrl.trim() || DEFAULT_BASE);
         applyStatus(next);
-        if (next.plugin_disabled) {
-          requestOpenStore({ slug: "account", autoInstall: true });
-          return;
-        }
         if (next.ok === false && next.error) setError(next.error);
         if (next.logged_in) await refreshTeams();
         else setTeams(null);

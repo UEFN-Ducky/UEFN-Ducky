@@ -42,24 +42,8 @@ class PanelApiStoreMixin:
         except Exception:
             return get_status()
 
-    def _require_account_plugin(self) -> dict[str, Any] | None:
-        from backend.uefn_plugins.host import is_plugin_enabled
-
-        if is_plugin_enabled("account"):
-            return None
-        return {
-            "ok": False,
-            "error": "Account plugin is not available.",
-            "code": "plugin_disabled",
-            "logged_in": False,
-            "plugin_disabled": True,
-        }
-
     def duckyos_login(self, base_url: str = "", email: str = "", password: str = "") -> dict[str, Any]:
         """Start browser-based login (email/password args ignored — kept for API compat)."""
-        blocked = self._require_account_plugin()
-        if blocked:
-            return blocked
         from frontend.duckyos_account import DuckyOSAccountError, start_browser_login
 
         _ = email, password
@@ -71,18 +55,12 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
 
     def duckyos_cancel_login(self) -> dict[str, Any]:
-        blocked = self._require_account_plugin()
-        if blocked:
-            return blocked
         from frontend.duckyos_account import cancel_browser_login
 
         return cancel_browser_login()
 
     def duckyos_submit_code(self, code: str = "") -> dict[str, Any]:
         """Deprecated — email codes are completed in the browser now."""
-        blocked = self._require_account_plugin()
-        if blocked:
-            return blocked
         _ = code
         return {
             "ok": False,
@@ -92,9 +70,6 @@ class PanelApiStoreMixin:
         }
 
     def duckyos_logout(self) -> dict[str, Any]:
-        blocked = self._require_account_plugin()
-        if blocked:
-            return blocked
         from frontend.duckyos_account import DuckyOSAccountError, logout
 
         try:
@@ -105,8 +80,6 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
 
     def duckyos_open_admin(self) -> None:
-        if self._require_account_plugin():
-            return
         import webbrowser
 
         from frontend.duckyos_account import get_status
@@ -117,16 +90,6 @@ class PanelApiStoreMixin:
             webbrowser.open(f"{base}/admin")
 
     def duckyos_teams_snapshot(self, stale_seconds: int = 120) -> dict[str, Any]:
-        blocked = self._require_account_plugin()
-        if blocked:
-            return {
-                "ok": False,
-                "error": blocked["error"],
-                "code": blocked["code"],
-                "teams": [],
-                "needs_team": True,
-                "online": [],
-            }
         from frontend.duckyos_account import DuckyOSAccountError, teams_snapshot
 
         try:
@@ -151,9 +114,6 @@ class PanelApiStoreMixin:
             }
 
     def duckyos_open_teams_site(self, path: str = "/teams") -> dict[str, Any]:
-        blocked = self._require_account_plugin()
-        if blocked:
-            return {"ok": False, "error": blocked["error"], "code": blocked["code"]}
         from frontend.duckyos_account import DuckyOSAccountError, open_site_path
 
         try:

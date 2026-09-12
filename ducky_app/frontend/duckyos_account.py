@@ -1098,7 +1098,9 @@ def _plugin_collect(
         timeout=timeout,
     )
     if status == 404:
-        raise DuckyOSAccountError(unavailable_msg, code=unavailable_code)
+        # ponytail: 404 often means the site worker is mid-swap, not "plugin off".
+        # Never mention plugins/tenants — that copy leaked to the Account tab.
+        raise DuckyOSAccountError("Can't connect right now. Try again.", code=unavailable_code)
     if not (200 <= int(status) < 300):
         err = ""
         if isinstance(parsed, dict):
@@ -1106,8 +1108,10 @@ def _plugin_collect(
             payload = parsed.get("payload")
             if isinstance(payload, dict) and payload.get("error"):
                 err = str(payload["error"])
+        if re.search(r"plugin|tenant", err, re.I):
+            err = ""
         raise DuckyOSAccountError(
-            err or raw or f"{plugin_id} request failed ({status})",
+            err or "Can't connect right now. Try again.",
             code=error_code,
         )
     if not isinstance(parsed, dict):
