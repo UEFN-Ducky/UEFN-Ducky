@@ -6,8 +6,10 @@
 #ifndef MyAppVersion
   #error Pass /DMyAppVersion=x.y.z (use release/installer/make_release_installer.ps1)
 #endif
-#ifndef MyAppExe
-  #error Pass /DMyAppExe=<absolute path to dist\UEFN-Ducky.exe>
+; One-dir build: MyAppDir is the folder PyInstaller produced (UEFN-Ducky.exe,
+; UEFN-Ducky-Bridge.exe, and the payload they share). The whole folder installs.
+#ifndef MyAppDir
+  #error Pass /DMyAppDir=<absolute path to dist\UEFN-Ducky-x.y.z>
 #endif
 
 #define MyAppName "UEFN Ducky"
@@ -71,7 +73,9 @@ SetupIconFile=..\..\build\app_icon.ico
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "{#MyAppExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; Whole one-dir payload. recursesubdirs+createallsubdirs keeps _internal/ intact —
+; the EXEs cannot start without the files beside them.
+Source: "{#MyAppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\portable\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "POST_INSTALL.txt"; DestDir: "{app}"; Flags: ignoreversion

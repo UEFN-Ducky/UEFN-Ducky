@@ -291,12 +291,26 @@ def _sweep_stale_extracts() -> None:
         pass
 
 
+def is_bridge_exe() -> bool:
+    """True when running as the bridge binary rather than the app binary.
+
+    Both EXEs in the one-dir bundle share this entry point; the IDE-facing one
+    is named ``…-Bridge.exe`` purely so Windows shows it under its own
+    FileDescription. Honouring the name means launching it never opens a panel,
+    whatever argv says.
+    """
+    try:
+        return Path(sys.executable).stem.lower().endswith("-bridge")
+    except Exception:
+        return False
+
+
 def main() -> None:
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()
     _sweep_stale_extracts()
-    if len(sys.argv) > 1 and sys.argv[1] == "bridge":
+    if is_bridge_exe() or (len(sys.argv) > 1 and sys.argv[1] == "bridge"):
         run_bridge()
     elif len(sys.argv) > 1 and sys.argv[1] == "db":
         # ADR 0003: `UEFN-Ducky.exe db check|vacuum|snapshot|stats|export <table>` for support.

@@ -125,8 +125,17 @@ def _build_react_panel(root: Path) -> None:
     print(f"Verified React panel dist: {dist}")
 
 
-def _version_info_text(app_version: str, exe_stem: str) -> str:
-    """PyInstaller VSVersionInfo file (EXE(version=...) input)."""
+APP_DESCRIPTION = "UEFN Ducky - AI toolkit for Unreal Editor for Fortnite"
+BRIDGE_DESCRIPTION = "UEFN Ducky MCP Bridge (IDE tool server)"
+
+
+def _version_info_text(app_version: str, exe_stem: str, description: str = APP_DESCRIPTION) -> str:
+    """PyInstaller VSVersionInfo file (EXE(version=...) input).
+
+    ``description`` becomes FileDescription, which is the name Windows Task
+    Manager shows on the Processes tab. Every process frozen from one binary
+    reports the same string, so the app and the IDE bridge get their own.
+    """
     parts = [int(p) for p in app_version.split(".")]
     while len(parts) < 4:
         parts.append(0)
@@ -149,7 +158,7 @@ VSVersionInfo(
     StringFileInfo([
       StringTable('040904B0', [
         StringStruct('CompanyName', 'UEFN Ducky'),
-        StringStruct('FileDescription', 'UEFN Ducky - AI toolkit for Unreal Editor for Fortnite'),
+        StringStruct('FileDescription', '{description}'),
         StringStruct('FileVersion', '{ver4}'),
         StringStruct('InternalName', '{exe_stem}'),
         StringStruct('LegalCopyright', '(c) {year} UEFN Ducky. All rights reserved.'),
@@ -275,6 +284,19 @@ def main() -> int:
     os.environ["UEFN_DUCKY_BUILD_VERSION_FILE"] = str(version_file)
     print(f"Staged VERSIONINFO -> {version_file}")
 
+    # The bridge ships as its own small EXE beside the app, sharing the one-dir
+    # payload. Its only purpose is a distinct FileDescription: IDE-spawned MCP
+    # workers used to be indistinguishable from the app in Task Manager because
+    # both were the same file.
+    bridge_stem = f"{exe_stem}-Bridge"
+    bridge_version_file = Path(tempfile.gettempdir()) / "uefn_ducky_bridge_version_info.txt"
+    bridge_version_file.write_text(
+        _version_info_text(app_version, bridge_stem, BRIDGE_DESCRIPTION), encoding="utf-8"
+    )
+    os.environ["UEFN_DUCKY_BRIDGE_VERSION_FILE"] = str(bridge_version_file)
+    os.environ["UEFN_DUCKY_BRIDGE_BASENAME"] = bridge_stem
+    print(f"Staged bridge VERSIONINFO -> {bridge_version_file}")
+
     # Staging under build/ (gitignored); final EXE goes to dist/ (avoids locking a running copy).
     dist_stage = here / "pyinstaller-dist"
     dist_stage.mkdir(parents=True, exist_ok=True)
@@ -325,38 +347,32 @@ def main() -> int:
         except OSError as exc:
             print(f"Note: could not remove {work} ({exc}). Delete it manually if you want it gone.", file=sys.stderr)
 
-    staged = dist_stage / f"{exe_stem}.exe"
+    # One-dir: PyInstaller writes a folder (EXEs + their payload), not a single file.
+    staged = dist_stage / exe_stem
     out_dir = root / "dist"
     out_dir.mkdir(parents=True, exist_ok=True)
-    if not staged.is_file():
-        print(f"Missing PyInstaller output: {staged}", file=sys.stderr)
+    if not (staged / f"{exe_stem}.exe").is_file():
+        print(f"Missing PyInstaller output: {staged / (exe_stem + '.exe')}", file=sys.stderr)
+        return 1
+    bridge_stem = os.environ.get("UEFN_DUCKY_BRIDGE_BASENAME", f"{exe_stem}-Bridge")
+    if not (staged / f"{bridge_stem}.exe").is_file():
+        print(f"Missing bridge EXE: {staged / (bridge_stem + '.exe')}", file=sys.stderr)
         return 1
 
-    out = out_dir / f"{exe_stem}-{app_version}.exe"
-    pending = out_dir / f"{exe_stem}-{app_version}.pending.exe"
+    out = out_dir / f"{exe_stem}-{app_version}"
     wrote = out
     try:
-        if out.is_file():
-            out.unlink()
-        shutil.copy2(staged, out)
-        if pending.is_file():
-            try:
-                pending.unlink()
-            except OSError:
-                pass
-        print(f"Wrote {out}")
+        if out.exists():
+            shutil.rmtree(out)
+        shutil.copytree(staged, out)
+        print(f"Wrote {out}\\  ({exe_stem}.exe + {bridge_stem}.exe)")
     except OSError as exc:
-        try:
-            shutil.copy2(staged, pending)
-            wrote = pending
-            print(
-                f"NOTE: {out.name} is in use — wrote {pending.name} instead.\n"
-                f"  Close the running panel, then rename pending → {out.name}",
-                file=sys.stderr,
-            )
-        except OSError as exc2:
-            print(f"ERROR: could not write {out} ({exc}) or {pending} ({exc2}).", file=sys.stderr)
-            return 1
+        print(
+            f"ERROR: could not write {out} ({exc}).\n"
+            "  Close any running panel or bridge holding files in that folder.",
+            file=sys.stderr,
+        )
+        return 1
 
     # Guarantee "always NEW": dist/ must contain exactly the EXE we just built. Sweep older
     # versioned builds and stale .pending files so the user can never double-click an old copy.
@@ -371,6 +387,13 @@ def main() -> int:
     if not dev_build:
         extra.append(out_dir / "UEFN-Ducky.exe")
     stale_exes.extend(p for p in extra if p.is_file())
+    # One-dir build folders from earlier versions (and the one-file EXEs that
+    # preceded them) must go too, or dist/ accumulates ~200 MB per build.
+    stale_dirs = [
+        d
+        for d in out_dir.glob(f"{exe_stem}-*")
+        if d.is_dir() and d != wrote and (d / f"{exe_stem}.exe").is_file()
+    ]
 
     locked: list[Path] = []
     for stale in dict.fromkeys(stale_exes):
@@ -381,6 +404,12 @@ def main() -> int:
             print(f"Removed old artifact {stale.name}")
         except OSError:
             locked.append(stale)
+    for stale_dir in stale_dirs:
+        try:
+            shutil.rmtree(stale_dir)
+            print(f"Removed old build folder {stale_dir.name}")
+        except OSError:
+            locked.append(stale_dir)
 
     if locked:
         names = ", ".join(p.name for p in locked)
@@ -397,22 +426,30 @@ def main() -> int:
     except OSError as exc:
         print(f"Note: could not remove {dist_stage} ({exc}). Delete manually if you want it gone.", file=sys.stderr)
 
-    remaining = sorted(p.name for p in out_dir.glob("*.exe"))
+    remaining = sorted(
+        [p.name for p in out_dir.glob("*.exe")]
+        + [f"{d.name}/" for d in out_dir.iterdir() if d.is_dir()]
+    )
     print()
     print(f"Done. Fresh build: v{app_version}  ({time.strftime('%Y-%m-%d %H:%M:%S')})")
     if dev_build:
         print("  Dev build: WebView inspector ON; runs Vite at http://127.0.0.1:5173 when available.")
     print(f"  {wrote}")
     print(f"  dist/ now contains: {remaining}")
-    if remaining != [wrote.name]:
+    if remaining != [f"{wrote.name}/"]:
         print(
-            "  ^ More than one .exe in dist/ — launch the one named above; the others are stale.",
+            "  ^ More than one build in dist/ — launch the one named above; the others are stale.",
             file=sys.stderr,
         )
     print()
     print(
-        "Distribution: copy ONLY this .exe — no editor folder, zip, or DLLs beside it.\n"
-        "  (PyInstaller unpacks embedded data under %TEMP% in _MEI… folders at runtime; that is normal.)"
+        f"Run: {wrote / (exe_stem + '.exe')}\n"
+        f"IDEs get: {wrote / (bridge_stem + '.exe')}  (same code, its own name in Task Manager)"
+    )
+    print(
+        "Distribution: ship the WHOLE folder, or the Setup installer — this is a one-dir build,\n"
+        "  so the EXE needs the files beside it. In exchange nothing is unpacked to %TEMP%\n"
+        "  (no _MEI… folders to leak), startup skips the unpack, and each role is one process."
     )
     print(
         "  Bytecode is packed, not encrypted; PyInstaller 6 removed optional “encryption” "

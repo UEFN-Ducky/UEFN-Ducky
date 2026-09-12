@@ -309,13 +309,21 @@ if not _version_file or not Path(_version_file).is_file():
         "so the EXE gets a Windows VERSIONINFO resource."
     )
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name=_exe_basename,
+_bridge_version_file = os.environ.get("UEFN_DUCKY_BRIDGE_VERSION_FILE", "").strip()
+if not _bridge_version_file or not Path(_bridge_version_file).is_file():
+    raise RuntimeError(
+        "unified.spec: UEFN_DUCKY_BRIDGE_VERSION_FILE missing — run via build_exes.py "
+        "so the bridge EXE gets its own VERSIONINFO resource."
+    )
+_bridge_basename = os.environ.get("UEFN_DUCKY_BRIDGE_BASENAME", "").strip() or f"{_exe_basename}-Bridge"
+
+# One-dir, not one-file. One-file re-execs itself: a bootstrap stub unpacks ~130 MB
+# into %TEMP%\_MEI… and runs the real program as a *child*, so every Ducky showed up
+# in Task Manager as a pair, cold start paid for the unpack, and a killed process
+# stranded its _MEI folder (the temp leak). COLLECT ships those files next to the EXE
+# instead: one process per role, nothing written to TEMP, and a second small EXE for
+# the IDE bridge costs a few hundred KB rather than another full copy.
+_exe_kwargs = dict(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -327,5 +335,35 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(_app_icon),
+)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name=_exe_basename,
     version=_version_file,
+    **_exe_kwargs,
+)
+
+# Same entry point; launcher.py sees the "-Bridge" stem and runs MCP stdio mode.
+bridge_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name=_bridge_basename,
+    version=_bridge_version_file,
+    **_exe_kwargs,
+)
+
+coll = COLLECT(
+    exe,
+    bridge_exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name=_exe_basename,
 )

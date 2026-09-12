@@ -25,28 +25,23 @@ $EngineExe = Join-Path $Dist "Setup-engine.exe"
 $SetupExe = Join-Path $Dist "UEFN-Ducky-Setup-$Version.exe"
 
 if ($DoEngine) {
-    # build_exes.py bumps __version__ and writes dist\UEFN-Ducky-<version>.exe (it sweeps
-    # unversioned names). The .iss installs it as plain UEFN-Ducky.exe via DestName.
-    $Exe = Join-Path $Dist "UEFN-Ducky-$Version.exe"
-    $ExePending = Join-Path $Dist "UEFN-Ducky-$Version.pending.exe"
+    # build_exes.py bumps __version__ and writes the one-dir folder
+    # dist\UEFN-Ducky-<version>\ (UEFN-Ducky.exe + UEFN-Ducky-Bridge.exe + payload).
+    # The .iss installs the whole folder into {app}.
+    $AppDir = Join-Path $Dist "UEFN-Ducky-$Version"
 
-    if (-not (Test-Path $Exe)) {
-        if (Test-Path $ExePending) {
-            $Exe = $ExePending
-            Write-Host "Using dist\UEFN-Ducky-$Version.pending.exe (primary exe was locked during build)."
+    if (-not (Test-Path (Join-Path $AppDir "UEFN-Ducky.exe"))) {
+        $alt = Get-ChildItem $Dist -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^UEFN-Ducky-\d+\.\d+\.\d+$' -and (Test-Path (Join-Path $_.FullName "UEFN-Ducky.exe")) } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($alt) {
+            $AppDir = $alt.FullName
+            $Version = [regex]::Match($alt.Name, '\d+\.\d+\.\d+').Value
+            $SetupExe = Join-Path $Dist "UEFN-Ducky-Setup-$Version.exe"
+            Write-Host "Using $AppDir (__version__ was stale)."
         } else {
-            $alt = Get-ChildItem $Dist -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '^UEFN-Ducky-\d+\.\d+\.\d+\.exe$' } |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-            if ($alt) {
-                $Exe = $alt.FullName
-                $Version = [regex]::Match($alt.Name, '\d+\.\d+\.\d+').Value
-                $SetupExe = Join-Path $Dist "UEFN-Ducky-Setup-$Version.exe"
-                Write-Host "Using $Exe (__version__ was stale)."
-            } else {
-                Write-Error "Build first: py build/build_exes.py (outputs dist\UEFN-Ducky-$Version.exe)"
-            }
+            Write-Error "Build first: py build/build_exes.py (outputs dist\UEFN-Ducky-$Version\)"
         }
     }
 
@@ -67,7 +62,7 @@ if ($DoEngine) {
     }
     $Iscc = $IsccCandidates[0]
 
-    & $Iscc "/DMyAppVersion=$Version" "/DMyAppExe=$Exe" (Join-Path $PSScriptRoot "UEFN-Ducky.iss")
+    & $Iscc "/DMyAppVersion=$Version" "/DMyAppDir=$AppDir" (Join-Path $PSScriptRoot "UEFN-Ducky.iss")
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ISCC failed with exit code $LASTEXITCODE"
     }
