@@ -97,6 +97,31 @@ def bring_to_front(hwnd: int) -> bool:
     return _raise_window(hwnd)
 
 
+def set_window_topmost(hwnd: int, on: bool) -> bool:
+    """Pin (or unpin) the window above all others for the stream's lifetime.
+
+    getDisplayMedia captures on-screen pixels, so an always-on-top occluder
+    (a pinned Discord, a media overlay) would cover the watched window even
+    after we raise it. Holding the target TOPMOST while a viewer is connected
+    guarantees the capture sees it; teardown clears the flag.
+    """
+    if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
+        return False
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return False
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    insert_after = -1 if on else -2  # HWND_TOPMOST / HWND_NOTOPMOST
+    flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+    user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags)
+    if on:
+        _raise_window(hwnd)
+    return True
+
+
 def fit_window(hwnd: int, width: int, height: int) -> bool:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return False
@@ -117,6 +142,10 @@ def fit_window(hwnd: int, width: int, height: int) -> bool:
 
     # SWP_NOZORDER | SWP_NOACTIVATE — resize without a focus fight that hitchs UEFN.
     ctypes.windll.user32.SetWindowPos(hwnd, 0, int(ox), int(oy), int(w), int(h), 0x0014)
+    # A just-fitted window can land behind whatever occupied that spot; the
+    # capture would then stream the wrong window. Surface it once.
+    if _foreground_hwnd() != hwnd:
+        _raise_window(hwnd)
     return True
 
 
@@ -245,6 +274,15 @@ def _foreground_hwnd() -> int:
 
 
 def _raise_window(hwnd: int) -> bool:
+    """Bring the target above every other window and give it input focus.
+
+    getDisplayMedia captures the monitor's actual pixels, so a covered target
+    streams whatever sits on top. Windows blocks SetForegroundWindow from a
+    background process (foreground lock), so we (1) drop the lock timeout,
+    (2) tap ALT to satisfy the "user gesture" rule, (3) AttachThreadInput to
+    the current foreground thread, and (4) flip the window to TOPMOST then
+    back — the Z-order flip alone un-occludes it even when focus is denied.
+    """
     import ctypes
 
     user32 = ctypes.windll.user32
@@ -253,17 +291,38 @@ def _raise_window(hwnd: int) -> bool:
         return False
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+
+    # Drop the foreground-lock timeout so SetForegroundWindow is honored.
+    try:
+        prev = ctypes.c_uint(0)
+        user32.SystemParametersInfoW(0x2000, 0, ctypes.byref(prev), 0)  # SPI_GETFOREGROUNDLOCKTIMEOUT
+        user32.SystemParametersInfoW(0x2001, 0, ctypes.c_void_p(0), 0)  # SPI_SETFOREGROUNDLOCKTIMEOUT
+    except Exception:
+        prev = None
+
     fg = int(user32.GetForegroundWindow() or 0)
     our_tid = int(kernel32.GetCurrentThreadId() or 0)
     fg_tid = int(user32.GetWindowThreadProcessId(fg, None) or 0) if fg else 0
-    if our_tid and fg_tid and our_tid != fg_tid:
-        user32.AttachThreadInput(our_tid, fg_tid, True)
+    attached = bool(our_tid and fg_tid and our_tid != fg_tid and user32.AttachThreadInput(our_tid, fg_tid, True))
     try:
+        # ALT tap unlocks SetForegroundWindow for background callers.
+        _send_key(0x12, down=True)
+        _send_key(0x12, down=False)
+        # HWND_TOPMOST (-1) then HWND_NOTOPMOST (-2): raise Z-order without
+        # leaving the window permanently pinned above everything.
+        flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
         user32.BringWindowToTop(hwnd)
         user32.SetForegroundWindow(hwnd)
     finally:
-        if our_tid and fg_tid and our_tid != fg_tid:
+        if attached:
             user32.AttachThreadInput(our_tid, fg_tid, False)
+        if prev is not None:
+            try:
+                user32.SystemParametersInfoW(0x2001, 0, ctypes.c_void_p(prev.value), 0)
+            except Exception:
+                pass
     return True
 
 

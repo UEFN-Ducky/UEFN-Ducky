@@ -314,10 +314,12 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
     Blocks until the client drops or a newer viewer kicks it.
     """
     from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_pong
-    from frontend.window_view import bring_to_front, handle_stream_message
+    from frontend.window_view import handle_stream_message, set_window_topmost
 
     kick_other_viewers(sock)
-    bring_to_front(hwnd)
+    # Pin the watched window on top for the whole session so the screen
+    # capture always sees it, even past an always-on-top occluder.
+    set_window_topmost(hwnd, True)
     session_id = secrets.token_hex(8)
     register_window_rtc(session_id, sock)
     try:
@@ -343,6 +345,8 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
     finally:
         _forget_viewer(sock)
         unregister_window_rtc(session_id)
+        from frontend.window_view import set_window_topmost as _unpin
+        _unpin(hwnd, False)
         publish_window_rtc(session_id, hwnd, {"type": "rtc", "kind": "close"})
 
 
