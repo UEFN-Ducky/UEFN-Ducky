@@ -279,6 +279,15 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     webview.settings["DRAG_REGION_SELECTOR"] = ".pywebview-native-drag-disabled"
     webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = False
+    # UEFN_DUCKY_WEBVIEW_DEBUG_PORT=9333 opens Chrome DevTools Protocol on the
+    # shipped build. Off unless set: a released panel with an open debug port is
+    # a local attack surface. Without this a performance problem that only
+    # reproduces in the frozen EXE cannot be inspected at all — the source build
+    # is a different code path, so "run it from source" is not a substitute.
+    _dbg_port = os.environ.get("UEFN_DUCKY_WEBVIEW_DEBUG_PORT", "").strip()
+    if _dbg_port.isdigit() and 1024 <= int(_dbg_port) <= 65535:
+        webview.settings["REMOTE_DEBUGGING_PORT"] = int(_dbg_port)
+        logging.getLogger(__name__).warning("WebView2 remote debugging on port %s", _dbg_port)
     _boot_trace("webview_import_patches", t_webview)
 
     # Keep the early logo splash up through heavy imports — create the pump Tk later
@@ -543,7 +552,21 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     except Exception:
         pass
     _ = web_debug  # still used by resolve_web_url for Vite vs bundled URL
+    # Without storage_path pywebview hands WebView2 a fresh tempfile.mkdtemp()
+    # profile on every launch. Nothing ever deletes those: this machine had 145
+    # of them, 2.18 GB. It also meant a cold browser profile every start — empty
+    # HTTP cache and no V8 code cache, so the panel bundle was re-fetched and
+    # re-compiled each time. One stable profile beside the rest of our AppData
+    # fixes both.
+    storage_path: str | None = None
+    try:
+        from frontend.settings import default_app_data_dir
+
+        storage_path = str(default_app_data_dir() / "webview")
+    except Exception:
+        logging.getLogger(__name__).warning("webview storage path unavailable", exc_info=True)
     webview.start(
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
+        storage_path=storage_path,
     )
