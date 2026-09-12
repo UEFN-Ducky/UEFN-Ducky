@@ -1,4 +1,5 @@
 import type { AgentMode } from "../types/panel";
+import { boundedGet, boundedSet } from "../utils/boundedMap";
 
 export interface CachedChatComposerState {
   inputText: string;
@@ -8,20 +9,23 @@ export interface CachedChatComposerState {
   codingAgent?: string;
 }
 
+/** Same cap as the message cache: a session can open any number of chats. */
+const MAX_CACHED = 24;
 const cache = new Map<string, CachedChatComposerState>();
 const pendingDraftByChatId = new Map<string, string>();
 const draftListeners = new Map<string, Set<() => void>>();
 
 export function getCachedChatComposer(chatId: string): CachedChatComposerState | undefined {
-  return cache.get(chatId);
+  return boundedGet(cache, chatId);
 }
 
 export function setCachedChatComposer(chatId: string, state: CachedChatComposerState): void {
-  cache.set(chatId, state);
+  boundedSet(cache, chatId, state, MAX_CACHED);
 }
 
 export function enqueueComposerDraft(chatId: string, text: string): void {
-  pendingDraftByChatId.set(chatId, text);
+  // A draft for a chat that is never reopened would otherwise sit here forever.
+  boundedSet(pendingDraftByChatId, chatId, text, MAX_CACHED);
   for (const listener of draftListeners.get(chatId) ?? []) listener();
 }
 

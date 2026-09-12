@@ -1,6 +1,12 @@
 import { createContext, createElement, useCallback, useContext, useState, type ReactNode } from "react";
+import { boundedGet, boundedSet } from "../utils/boundedMap";
 
-/** Preserves expanded tool/message sections across chat tab remounts. */
+/**
+ * Preserves expanded tool/message sections across chat tab remounts.
+ * One entry per tool card per message, so it needs a ceiling — a long session
+ * scrolling old chats would otherwise keep every key it ever saw.
+ */
+const MAX_COLLAPSE_KEYS = 2000;
 const collapseStore = new Map<string, boolean>();
 
 export function chatCollapseKey(scope: string, ...parts: string[]): string {
@@ -8,11 +14,11 @@ export function chatCollapseKey(scope: string, ...parts: string[]): string {
 }
 
 function readCollapse(key: string): boolean | undefined {
-  return collapseStore.get(key);
+  return boundedGet(collapseStore, key);
 }
 
 function writeCollapse(key: string, open: boolean): void {
-  collapseStore.set(key, open);
+  boundedSet(collapseStore, key, open, MAX_COLLAPSE_KEYS);
 }
 
 export function useChatCollapseState(

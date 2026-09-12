@@ -5,6 +5,7 @@
  */
 
 import { PLUGIN_UI_ROUTE_PREFIX } from "../plugin-ui/constants";
+import { boundedGet, boundedSet } from "../utils/boundedMap";
 import { assetUrl } from "../remote/assetBase";
 import { applyOutputDevice, effectivePlaybackVolume, isAudioMuted } from "../voice/audioSettings";
 import { isBuiltinSoundName, playBuiltinSound, type BuiltinSoundName } from "./builtinSounds";
@@ -108,14 +109,16 @@ export function soundUrlForRef(
   return null;
 }
 
+/** Audio elements are not free; plugin sounds make the URL set open-ended. */
+const MAX_AUDIO = 48;
 const audioCache = new Map<string, HTMLAudioElement>();
 
 function playUrl(url: string, volume: number): void {
-  let el = audioCache.get(url);
+  let el = boundedGet(audioCache, url);
   if (!el) {
     el = new Audio(url);
-    audioCache.set(url, el);
   }
+  boundedSet(audioCache, url, el, MAX_AUDIO);
   el.volume = Math.max(0, Math.min(1, volume));
   el.currentTime = 0;
   void applyOutputDevice(el).then(() => el!.play()).catch(() => {

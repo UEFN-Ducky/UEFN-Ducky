@@ -1,3 +1,4 @@
+import { boundedSet } from "../utils/boundedMap";
 /**
  * Per-chat turn timer — how long the agent has been (or was) working.
  * Shared by the chat footer, hover card, and any other UI that needs the same clock.
@@ -9,6 +10,8 @@ export type ChatTurnTimer = {
   endedAt: number | null;
 };
 
+/** One entry per chat ever seen in this session; only the recent ones matter. */
+const MAX_TIMERS = 64;
 const timers = new Map<string, ChatTurnTimer>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -40,7 +43,7 @@ export function markChatTurnRunning(chatId: string, at = Date.now()): void {
   if (!chatId) return;
   const cur = timers.get(chatId);
   if (cur && cur.endedAt == null) return;
-  timers.set(chatId, { startedAt: at, endedAt: null });
+  boundedSet(timers, chatId, { startedAt: at, endedAt: null }, MAX_TIMERS);
   emit();
 }
 
@@ -49,7 +52,7 @@ export function markChatTurnIdle(chatId: string, at = Date.now()): void {
   if (!chatId) return;
   const cur = timers.get(chatId);
   if (!cur || cur.endedAt != null) return;
-  timers.set(chatId, { startedAt: cur.startedAt, endedAt: at });
+  boundedSet(timers, chatId, { startedAt: cur.startedAt, endedAt: at }, MAX_TIMERS);
   emit();
 }
 
@@ -64,14 +67,14 @@ export function syncChatTurnTimersFromRunningSet(
     if (prev.has(id)) continue;
     const cur = timers.get(id);
     if (cur && cur.endedAt == null) continue;
-    timers.set(id, { startedAt: at, endedAt: null });
+    boundedSet(timers, id, { startedAt: at, endedAt: null }, MAX_TIMERS);
     changed = true;
   }
   for (const id of prev) {
     if (next.has(id)) continue;
     const cur = timers.get(id);
     if (!cur || cur.endedAt != null) continue;
-    timers.set(id, { startedAt: cur.startedAt, endedAt: at });
+    boundedSet(timers, id, { startedAt: cur.startedAt, endedAt: at }, MAX_TIMERS);
     changed = true;
   }
   if (changed) emit();

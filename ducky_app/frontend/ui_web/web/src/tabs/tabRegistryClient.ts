@@ -1,4 +1,5 @@
 import { getApi } from "../hooks/usePanelApi";
+import { boundedSet } from "../utils/boundedMap";
 import { setVisibleInterval } from "../utils/visibleInterval";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import type { AgentEvent } from "../types/panel";
@@ -28,6 +29,8 @@ function registryTabIds(tabIds: string[]): string[] {
 
 let reportTimer: number | null = null;
 let lastReported = new Set<string>();
+/** Recent-claim timestamps; only the last handful are ever consulted. */
+const MAX_CLAIMS = 64;
 const myClaimAt = new Map<string, number>();
 
 function log(event: string, detail?: unknown): void {
@@ -37,7 +40,7 @@ function log(event: string, detail?: unknown): void {
 
 function claim(tabId: string): void {
   log("claim", tabId);
-  myClaimAt.set(tabId, Date.now());
+  boundedSet(myClaimAt, tabId, Date.now(), MAX_CLAIMS);
   void getApi()?.claim_tab(tabId, WINDOW_ID);
 }
 

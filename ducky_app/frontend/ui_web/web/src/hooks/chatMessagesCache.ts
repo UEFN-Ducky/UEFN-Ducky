@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../types/panel";
+import { boundedSet } from "../utils/boundedMap";
 
 /**
  * In-memory snapshot of a chat's live view, so switching tabs (or a hidden pane
@@ -20,13 +21,7 @@ const MAX_CACHED_CHATS = 24;
 const cache = new Map<string, CachedChatMessagesState>();
 
 function touch(chatId: string, state: CachedChatMessagesState): void {
-  cache.delete(chatId);
-  cache.set(chatId, state);
-  while (cache.size > MAX_CACHED_CHATS) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
+  boundedSet(cache, chatId, state, MAX_CACHED_CHATS);
 }
 
 export function getCachedChatMessages(chatId: string): CachedChatMessagesState | undefined {
