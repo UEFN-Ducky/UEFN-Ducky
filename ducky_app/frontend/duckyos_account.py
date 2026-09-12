@@ -840,6 +840,8 @@ RPC_ALLOWLIST = frozenset(
         "get_changeset",
         "remote_snapshot",
         "remote_endpoint",
+        "rtc_connect",
+        "rtc_report",
     }
 )
 
@@ -907,6 +909,15 @@ def _presence_uefn_online() -> bool:
         return False
 
 
+def _remote_direct_report() -> dict[str, Any]:
+    try:
+        from frontend.remote_direct import last_report
+
+        return last_report()
+    except Exception:
+        return {}
+
+
 def send_presence_heartbeat() -> bool:
     """POST presence to uefn-ducky-store collect (teams hub). Returns False if not logged in / skipped."""
     blob = _load_blob()
@@ -919,6 +930,9 @@ def send_presence_heartbeat() -> bool:
         "projectLabel": _presence_project_label(),
         "uefnOnline": _presence_uefn_online(),
         "appVersion": __version__,
+        "direct": True,
+        "directProtocol": 1,
+        "remoteDirect": _remote_direct_report(),
     }
     try:
         status, _parsed, _raw = api_request(
@@ -1030,6 +1044,21 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
             return {"ok": True, "result": _remote_endpoint()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+    if name == "rtc_connect":
+        from frontend.remote_direct import rtc_connect
+
+        try:
+            out = rtc_connect(raw)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        if out.get("error") and not out.get("answer"):
+            return {"ok": False, "error": str(out["error"]), "result": out}
+        return {"ok": True, "result": out}
+    if name == "rtc_report":
+        from frontend.remote_direct import note_report
+
+        note_report(raw)
+        return {"ok": True, "result": True}
     try:
         result = call_panel_method(PanelApi(), name, raw)
     except TypeError as exc:
@@ -1115,7 +1144,7 @@ def _poll_desktop_rpc_once() -> bool:
     pending = _plugin_collect(
         "uefn-ducky",
         "desktop-rpc-wait",
-        {},
+        {"version": __version__, "direct": True, "protocol": 1},
         unavailable_code="rpc_unavailable",
         unavailable_msg="Remote mailbox plugin is not active on this tenant yet.",
         error_code="rpc_wait_failed",
@@ -1271,6 +1300,9 @@ def teams_snapshot(*, stale_seconds: int = 120) -> dict[str, Any]:
         "projectLabel": _presence_project_label(),
         "uefnOnline": _presence_uefn_online(),
         "appVersion": __version__,
+        "direct": True,
+        "directProtocol": 1,
+        "remoteDirect": _remote_direct_report(),
     }
     try:
         hub = _collect_payload("hub", body)

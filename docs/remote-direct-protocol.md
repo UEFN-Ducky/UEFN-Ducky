@@ -115,45 +115,62 @@ closes the other.
 
 ## Signaling (via the site)
 
-All signaling messages are JSON envelopes:
+One round trip, full ICE on both sides, no trickle. The site plugin runs as a
+short subprocess per request and cannot hold a connection, so trickle ICE
+would cost a mailbox write per candidate.
+
+1. The viewer creates its peer connection and DataChannels, sets a
+   `recvonly` video transceiver, creates the offer and **waits for ICE
+   gathering to complete** (cap 2.5 s).
+2. The viewer posts `{type:"ud-direct-offer", session, offer:{type,sdp}, ice, protocol}`
+   to its parent (the site's `/ducky` page) with `postMessage`.
+3. The parent calls the existing desktop mailbox: `desktop-rpc` with
+   `method: "rtc_connect"`, `args: {session, offer, ice, protocol}`, then
+   polls `desktop-rpc-result`. `rtc_connect` needs the `uefn-ducky.remote`
+   permission and is allow-listed on both the site and the desktop.
+4. The desktop's mailbox loop hands the offer to the WebView2 page as a
+   `direct_rtc` panel event (`session`, `offer`, `ice`, `ts`). The page
+   answers `sendonly` video, waits for its own ICE gathering, and returns
+   the full answer through `direct_rtc_answer`. Stale events (`ts` older
+   than 30 s, replayed from the event backlog) are ignored.
+5. The mailbox result is `{answer:{type,sdp}, fingerprint, version, protocol}`;
+   the parent posts `{type:"ud-direct-answer", session, answer, desktop:{version, protocol}}`
+   back to the iframe. Errors come back as `{type:"ud-direct-error", session, error}`.
+6. The viewer reports `{type:"ud-direct-report", state, reason, connect_ms, candidate}`
+   as it goes; on `failed` the parent swaps the iframe to the tunnel host.
+
+Local end-to-end runs skip the parent: `?direct=local&desktop=` makes the
+viewer POST the same payload to `/__panel_api/direct_rtc_connect` on the
+desktop's own panel server.
+
+**Plain objects only.** Never pass `RTCSessionDescription` or
+`RTCIceCandidate` across a bridge; pywebview's serializer breaks on them.
+
+## Remote config
+
+Before loading the panel iframe the `/ducky` page asks the site:
 
 ```json
-{"v": 1, "session": "<32 hex>", "from": "viewer"|"desktop", "type": "offer"|"answer"|"ice"|"bye"|"need-tunnel", "payload": {...}}
+POST collect/remote-config  →  {"direct_enabled": true, "panel_base": "https://panel.uefnducky.org", "protocol": 1, "ice": [ {"urls": "stun:…"}, {"urls": ["turn:…"], "username": …, "credential": …} ]}
 ```
 
-- `offer` / `answer` payload: `{"type": "offer"|"answer", "sdp": "..."}` —
-  **plain objects only**. Never pass `RTCSessionDescription` or
-  `RTCIceCandidate` across a bridge; pywebview's serializer breaks on them.
-- `ice` payload: `{"candidate": "...", "sdpMid": "...", "sdpMLineIndex": n}`.
-- `bye`: the sender is closing the session.
-- `need-tunnel`: viewer gave up on direct + TURN; desktop starts the tunnel
-  fallback and updates presence with the host.
+- `direct_enabled: false` → the page goes straight to the tunnel path (kill switch;
+  admins flip it with `admin-remote` action `save-direct`).
+- `ice` is STUN-only until a Cloudflare Realtime TURN key is saved
+  (`admin-remote` action `save-turn`); then it carries 10-minute TURN
+  credentials minted per page load.
+- `panel_base` is where the panel bundle lives: `<panel_base>/latest/` first,
+  `<panel_base>/<desktop version>/` when the desktop is older than `latest`
+  (the page checks `<panel_base>/versions.json`).
 
-Ordering: the receiver buffers `ice` until the matching description is
-applied. Both sides keep candidates until the answer has been **sent**, not
-just created.
+## Fallback ladder
 
-Transport of the envelopes is site-specific and documented in
-`docs/remote-direct-signaling.md` (site actions, auth, polling cadence).
-
-## Session grant
-
-The viewer asks the site for a session before offering:
-
-```json
-POST collect/rtc-session  →  {"session": "<32 hex>", "ice": [ {"urls": ..., "username": ..., "credential": ...} ], "direct_enabled": true, "desktop": {"version": "1.2.42", "online": true, "tunnel_host": "u-abc.uefnducky.org"|null}}
-```
-
-- `direct_enabled: false` → viewer goes straight to the tunnel path (kill switch).
-- `ice` may be STUN-only when no TURN key is configured.
-
-## Fallback ladder (viewer)
-
-1. Direct (host / srflx). Budget 8 s from offer sent to `connected`.
-2. TURN, if `ice` contained relay servers. Same budget, restarted.
-3. `need-tunnel` → wait for presence `tunnel_host`, then load the tunnel
-   page. Budget 45 s (tunnel start + DNS).
-4. Explain and offer Retry.
+1. Direct (host / srflx / relay, all in one ICE run since TURN servers are
+   in the same config). Budget 8 s from answer set to `connected`.
+2. On `failed`, the `/ducky` page removes the iframe and runs today's tunnel
+   flow (`remote_endpoint` → `u-<id>.uefnducky.org` iframe). Nothing changes
+   for that user compared to before this work.
+3. A page that never reports anything within 30 s is treated as failed.
 
 Once connected, a `disconnected`/`failed` state re-enters the ladder at
 step 1 without reloading the page; RPC calls queue for up to 30 s.

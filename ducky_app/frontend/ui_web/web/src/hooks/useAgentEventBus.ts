@@ -1,6 +1,7 @@
 import { useEffect, type DependencyList } from "react";
 import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { installPerfMonitor, noteFrameDelivery, notePendingDepth } from "./perfMonitor";
+import { getDirectTransport } from "../remote/directTransport";
 
 /** PanelApi._push_panel events share the HTTP bus — do not treat as agent stream. */
 const PANEL_PUSH_TYPES = new Set<string>([
@@ -144,7 +145,25 @@ export function installAgentEventBus() {
   // Agent streaming + Store panel pushes use same-origin long polling instead of
   // evaluate_js. This avoids deadlocks with pywebview's own API-return calls
   // (Settings stuck on Uninstalling… / install progress frozen).
-  startHttpEventPoll();
+  // Direct Remote View (phone → PC over WebRTC): events arrive on the
+  // `events` DataChannel; there is no panel server on this origin to poll.
+  const direct = getDirectTransport();
+  if (direct) {
+    direct.onEvent((event) => {
+      const kind = String(event?.type || "");
+      if (PANEL_PUSH_TYPES.has(kind)) {
+        try {
+          window.__uefnPanelPush?.(event as unknown as PanelPushEvent);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      fanOut(event);
+    });
+  } else {
+    startHttpEventPoll();
+  }
   const queue = (window as Window & { __uefnEventQueue?: AgentEvent[] }).__uefnEventQueue;
   window.__uefnPushEvent = fanOut;
   if (queue?.length) {

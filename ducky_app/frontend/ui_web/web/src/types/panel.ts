@@ -1246,7 +1246,8 @@ export interface AgentEvent {
     | "file_guard"
     | "lane_changed"
     | "files_reverted"
-    | "window_rtc";
+    | "window_rtc"
+    | "direct_rtc";
   text?: string;
   /** ui_rpc_request: which panel method to run and its params. */
   method?: string;
@@ -1325,6 +1326,12 @@ export interface AgentEvent {
   /** window_rtc: target HWND the remote viewer asked to watch. */
   hwnd?: number | string;
   payload?: Record<string, unknown>;
+  /** direct_rtc: viewer session id, full-ICE offer, ICE servers to use. */
+  session?: string;
+  offer?: { type: string; sdp: string };
+  ice?: RTCIceServer[];
+  /** direct_rtc: unix seconds when the offer was published (stale-guard). */
+  ts?: number;
 }
 
 export interface WindowBox {
@@ -2604,6 +2611,14 @@ export interface PanelApi {
   list_running_agents(): Promise<string[]>;
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
   rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;
+  /** Direct Remote View: the page posts its full-ICE answer for a viewer session. */
+  direct_rtc_answer?(session: string, answer: { type: string; sdp: string } | null, fingerprint?: string, error?: string): Promise<boolean>;
+  /** Direct Remote View: loopback signaling for local end-to-end runs. */
+  direct_rtc_connect?(args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** Methods the desktop refuses over any remote transport. */
+  remote_deny_methods?(): Promise<string[]>;
+  /** Viewer connect telemetry (state, reason, connect_ms, candidate). */
+  direct_rtc_report?(payload: Record<string, unknown>): Promise<void>;
   window_input?(hwnd: string | number, event: Record<string, unknown>): Promise<void>;
   window_box?(hwnd: string | number): Promise<WindowBox>;
   pick_project_path(): Promise<string | null>;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openRemoteSocket } from "../remote/remoteSocket";
 
 import { Terminal } from "@xterm/xterm";
 
@@ -344,7 +345,7 @@ export function useTerminalSession(sessionId: string, wsUrl: string, visible: bo
 
 
 
-      const ws = new WebSocket(wsUrl);
+      const ws = openRemoteSocket(wsUrl, "terminal") as unknown as WebSocket;
 
       wsRef.current = ws;
 

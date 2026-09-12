@@ -22,6 +22,7 @@ import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsCon
 import { Header } from "./components/Header";
 import { RemoteWindowOverlay } from "./components/RemoteWindowView";
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
+import { installDirectPeer } from "./remote/directPeer";
 import { isRemote } from "./hooks/usePanelApi";
 import { WindowDrag } from "./components/WindowDrag";
 import { WindowResize } from "./components/WindowResize";
@@ -114,6 +115,11 @@ export default function App() {
   }
   const [currentView, setCurrentView] = useState<ViewId>("chat");
   const [watchWindowId, setWatchWindowId] = useState("");
+  // Desktop only: answer direct (tunnel-free) Remote View offers.
+  useEffect(() => {
+    if (isRemote()) return;
+    return installDirectPeer();
+  }, []);
   const { mode: layoutMode, setMode: setLayoutMode } = useChatLayoutMode();
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const [projectRefresh, setProjectRefresh] = useState(0);

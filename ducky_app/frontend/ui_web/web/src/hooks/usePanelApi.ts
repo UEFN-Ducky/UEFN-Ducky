@@ -1,4 +1,5 @@
 import type { PanelApi } from "../types/panel";
+import { getDirectTransport } from "../remote/directTransport";
 
 /** True when the panel is running in a normal browser (no pywebview). */
 export function isRemote(): boolean {
@@ -79,10 +80,53 @@ function remoteApi(): PanelApi {
   });
 }
 
+let _directApi: PanelApi | null = null;
+
+/** PanelApi over the direct WebRTC rpc channel (phone → PC, no tunnel). */
+function directApi(): PanelApi {
+  if (_directApi) return _directApi;
+  _directApi = new Proxy({} as PanelApi, {
+    get(_target, prop) {
+      if (typeof prop !== "string" || prop === "then") return undefined;
+      return (...args: unknown[]) => {
+        if (prop === "open_external_url") {
+          const url = String(args[0] || "");
+          if (url) window.open(url, "_blank", "noopener,noreferrer");
+          return Promise.resolve();
+        }
+        if (prop === "copy_text") {
+          return navigator.clipboard.writeText(String(args[0] ?? "")).then(() => true, () => false);
+        }
+        const transport = getDirectTransport();
+        if (!transport) return Promise.resolve(undefined);
+        const key = remoteInflightKey(prop, args);
+        const hit = _inflight.get(key);
+        if (hit) return hit;
+        const pending = transport
+          .invoke(prop, args)
+          .catch((err: unknown) => {
+            const msg = String((err as Error)?.message || err);
+            if (msg.startsWith("method not allowed") || msg === "desktop not connected" || msg === "timeout") return undefined;
+            throw err;
+          })
+          .finally(() => {
+            if (_inflight.get(key) === pending) _inflight.delete(key);
+          });
+        _inflight.set(key, pending);
+        return pending;
+      };
+    },
+  });
+  return _directApi;
+}
+
 export function getApi(): PanelApi | null {
   const api = window.pywebview?.api;
   if (isPanelApiReady(api)) return api;
-  if (typeof window !== "undefined" && !window.pywebview) return remoteApi();
+  if (typeof window !== "undefined" && !window.pywebview) {
+    if (getDirectTransport()) return directApi();
+    return remoteApi();
+  }
   return null;
 }
 

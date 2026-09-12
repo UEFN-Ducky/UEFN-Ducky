@@ -238,6 +238,33 @@ class PanelApiWindowMixin:
 
         return bool(rtc_signal(str(session_id or ""), payload))
 
+    # ── Direct (tunnel-free) Remote View ────────────────────────────────
+
+    def direct_rtc_answer(
+        self, session: str, answer: object = None, fingerprint: str = "", error: str = ""
+    ) -> bool:
+        from frontend.remote_direct import resolve_answer
+
+        return resolve_answer(
+            str(session or ""), answer, error=str(error or ""), fingerprint=str(fingerprint or "")
+        )
+
+    def direct_rtc_connect(self, args: object = None) -> dict[str, Any]:
+        """Loopback signaling for local end-to-end runs (same path the site mailbox uses)."""
+        from frontend.remote_direct import rtc_connect
+
+        return rtc_connect(args if isinstance(args, dict) else {})
+
+    def remote_deny_methods(self) -> list[str]:
+        from frontend.duckyos_account import REMOTE_DENY
+
+        return sorted(REMOTE_DENY)
+
+    def direct_rtc_report(self, payload: object = None) -> None:
+        from frontend.remote_direct import note_report
+
+        note_report(payload)
+
     def window_input(self, hwnd: object, event: object) -> None:
         from frontend.window_view import handle_stream_message
 
@@ -511,8 +538,6 @@ class PanelApiWindowMixin:
 
     def report_ui_crash(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Append a UI ErrorBoundary crash to AppData for support / debugging."""
-        import json
-        import time
 
         data = payload if isinstance(payload, dict) else {}
         try:
@@ -805,7 +830,6 @@ class PanelApiWindowMixin:
 
     def open_path_in_explorer(self, path: str) -> None:
         import subprocess
-        from pathlib import Path
 
         target = _pa.Path(path).expanduser()
         if not target.exists():

@@ -1,4 +1,5 @@
 import { verseLspLog, verseLspLogError, verseLspWarn } from "./verseLspDebug";
+import { openRemoteSocket } from "../../remote/remoteSocket";
 import { toLspProtocolUri, toMonacoProtocolUriFromAbs, fileUrisMatch } from "./uriUtils";
 import {
   classifyLspMessage,
@@ -192,7 +193,7 @@ export class VerseLspClient {
         }
         reject(err);
       };
-      const ws = new WebSocket(wsUrl);
+      const ws = openRemoteSocket(wsUrl, "lsp") as unknown as WebSocket;
       this.ws = ws;
       const timer = setTimeout(() => fail(new Error("LSP connection timed out")), connectTimeoutMs);
 

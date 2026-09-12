@@ -4,6 +4,7 @@ import { ChoiceDropdown } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { contentRect, keyDiff, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
+import { getDirectTransport } from "../remote/directTransport";
 
 export { contentRect } from "./remoteWindowMath";
 
@@ -627,6 +628,8 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const watchingUefn = (kind || kindRef.current) === "uefn";
 
   const send = useCallback((payload: Record<string, unknown>) => {
+    const direct = getDirectTransport();
+    if (direct && direct.sendInput(payload)) return;
     const text = JSON.stringify(payload);
     const dc = dcRef.current;
     if (dc && dc.readyState === "open") {
@@ -667,6 +670,53 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
         retryTimer = window.setTimeout(retry, delay);
       }
     };
+
+    // Direct (tunnel-free) mode: the transport already owns the peer
+    // connection; ask the desktop to attach the cropped window track.
+    const direct = getDirectTransport();
+    if (direct) {
+      const connectTimer = 0;
+      void connectTimer;
+      const video = videoRef.current;
+      const unsubVideo = direct.onVideo((stream) => {
+        if (!video || closed) return;
+        video.srcObject = stream;
+        if (stream) void video.play().catch(() => {});
+      });
+      const unsubStatus = direct.onStatus((st) => {
+        if (closed) return;
+        if (st.state === "failed") fail(st.reason || "Desktop connection lost.");
+      });
+      void direct.invoke("watch_window", [{ hwnd }]).then(
+        () => {
+          if (closed) return;
+          live = true;
+          setPhase("live");
+          setReason("");
+          for (const r of direct.peer?.getReceivers() ?? []) zeroPlayoutDelay(r);
+          const size = overlaySize(overlayRef.current);
+          if (size) direct.sendInput({ type: "size", ...size });
+        },
+        (err: unknown) => fail(`Desktop could not start screen capture: ${String((err as Error)?.message || err)}`),
+      );
+      const cursor: StatsCursor = { bytes: 0, at: 0 };
+      const statsTimer = window.setInterval(() => {
+        const pc = direct.peer;
+        if (!pc || pc.connectionState !== "connected") return;
+        void sampleStats(pc, cursor).then((st) => {
+          if (st && !closed) setStats(st);
+        });
+      }, 1000);
+      return () => {
+        closed = true;
+        window.clearTimeout(retryTimer);
+        window.clearInterval(statsTimer);
+        unsubVideo();
+        unsubStatus();
+        if (video) video.srcObject = null;
+        void direct.invoke("watch_window", [{ hwnd: "" }]).catch(() => {});
+      };
+    }
 
     const ws = new WebSocket(wsUrl(hwnd));
     wsRef.current = ws;
@@ -812,14 +862,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       timer = window.setTimeout(() => {
         const size = overlaySize(el);
         if (!size) return;
-        const payload = JSON.stringify({ type: "size", ...size });
-        const dc = dcRef.current;
-        if (dc && dc.readyState === "open") {
-          dc.send(payload);
-          return;
-        }
-        const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(payload);
+        send({ type: "size", ...size });
       }, SIZE_DEBOUNCE_MS);
     });
     ro.observe(el);
@@ -827,7 +870,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       window.clearTimeout(timer);
       ro.disconnect();
     };
-  }, [hwnd, attempt]);
+  }, [hwnd, attempt, send]);
 
   useEffect(() => {
     const el = videoRef.current;
