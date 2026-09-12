@@ -1,6 +1,7 @@
 /** Mount `#ducky-fx-root` and run the active built-in / plugin appearance effect. */
 
 import { useEffect, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import { useAppearance } from "./AppearanceContext";
 import { MATRIX_EFFECT_ID, mountMatrixFx } from "./matrixFx";
 import { parsePluginEffectId } from "./appearancePluginIds";
@@ -47,7 +48,7 @@ function runFxCleanup(key: string): void {
 
 function effectScriptUrl(pluginId: string, entry: string): string {
   const path = entry.replace(/^\/+/, "");
-  return `/${PLUGIN_UI_ROUTE_PREFIX}/${pluginId}/${path}?t=${Date.now()}`;
+  return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${pluginId}/${path}?t=${Date.now()}`);
 }
 
 export function AppearanceFxBridge() {

@@ -5,6 +5,7 @@
  */
 
 import { PLUGIN_UI_ROUTE_PREFIX } from "../plugin-ui/constants";
+import { assetUrl } from "../remote/assetBase";
 import { applyOutputDevice, effectivePlaybackVolume, isAudioMuted } from "../voice/audioSettings";
 import { isBuiltinSoundName, playBuiltinSound, type BuiltinSoundName } from "./builtinSounds";
 
@@ -96,13 +97,13 @@ export function soundUrlForRef(
     const key = `${parsed.pluginId}:${parsed.soundId}`;
     const file = pluginFileByKey?.[key];
     if (!file) return null;
-    return `/${PLUGIN_UI_ROUTE_PREFIX}/${encodeURIComponent(parsed.pluginId)}/${file
+    return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${encodeURIComponent(parsed.pluginId)}/${file
       .split("/")
       .map(encodeURIComponent)
-      .join("/")}`;
+      .join("/")}`);
   }
   if (parsed.kind === "file") {
-    return `/user-sounds/${encodeURIComponent(parsed.filename)}`;
+    return assetUrl(`user-sounds/${encodeURIComponent(parsed.filename)}`);
   }
   return null;
 }

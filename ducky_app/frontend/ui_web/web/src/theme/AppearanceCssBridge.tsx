@@ -1,6 +1,7 @@
 /** Inject appearance.css only for the active plugin theme/skin — never shared across profiles. */
 
 import { useEffect, useMemo, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import { usePluginContributions, type PluginAppearanceCss } from "../hooks/usePluginContributions";
 import { PLUGIN_UI_ROUTE_PREFIX } from "../plugin-ui/constants";
 import { useAppearance } from "./AppearanceContext";
@@ -13,7 +14,7 @@ import { handlePluginFault } from "../plugin-ui/pluginCrashGuard";
 
 function cssUrl(row: PluginAppearanceCss): string {
   const entry = row.entry.replace(/^\/+/, "");
-  return `/${PLUGIN_UI_ROUTE_PREFIX}/${row.plugin_id}/${entry}?t=${Date.now()}`;
+  return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${row.plugin_id}/${entry}?t=${Date.now()}`);
 }
 
 export function AppearanceCssBridge() {

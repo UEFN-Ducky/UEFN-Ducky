@@ -151,7 +151,7 @@ desktop's own panel server.
 Before loading the panel iframe the `/ducky` page asks the site:
 
 ```json
-POST collect/remote-config  →  {"direct_enabled": true, "panel_base": "https://panel.uefnducky.org", "protocol": 1, "ice": [ {"urls": "stun:…"}, {"urls": ["turn:…"], "username": …, "credential": …} ]}
+POST collect/remote-config  →  {"direct_enabled": true, "panel_base": "/static/plugins/uefn-ducky/panel", "protocol": 1, "ice": [ {"urls": "stun:…"}, {"urls": ["turn:…"], "username": …, "credential": …} ]}
 ```
 
 - `direct_enabled: false` → the page goes straight to the tunnel path (kill switch;
@@ -159,9 +159,20 @@ POST collect/remote-config  →  {"direct_enabled": true, "panel_base": "https:/
 - `ice` is STUN-only until a Cloudflare Realtime TURN key is saved
   (`admin-remote` action `save-turn`); then it carries 10-minute TURN
   credentials minted per page load.
-- `panel_base` is where the panel bundle lives: `<panel_base>/latest/` first,
-  `<panel_base>/<desktop version>/` when the desktop is older than `latest`
-  (the page checks `<panel_base>/versions.json`).
+- `panel_base` is where the panel bundle lives. By default that is the tenant's
+  own plugin assets — the panel ships inside `plugin-uefn-ducky` and DuckyOS
+  serves it same-origin. The page loads `<panel_base>/index.html?direct=1`.
+  An https origin on our own domains is still accepted as an escape hatch for
+  hosting the bundle elsewhere.
+
+## Asset paths
+
+The panel is served from a subdirectory, so a root-relative desktop asset URL
+would hit the site and would fall outside the Service Worker's scope. Every
+such URL goes through `assetUrl()`, which prefixes the directory the panel
+document was served from — `/` on the desktop, `/static/plugins/uefn-ducky/panel/`
+in direct mode. The worker strips that prefix again before asking the desktop,
+so the desktop always sees the plain `/plugin-ui/…` path it serves.
 
 ## Fallback ladder
 

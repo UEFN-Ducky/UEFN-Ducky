@@ -1,6 +1,7 @@
 /** Bind active appearance.skin to host chrome portal slots (React-owned only). */
 
 import { useEffect, useRef } from "react";
+import { assetUrl as desktopAssetUrl } from "../remote/assetBase";
 import { useAppearance } from "./AppearanceContext";
 import { parsePluginSkinId } from "./appearancePluginIds";
 import { usePluginContributions } from "../hooks/usePluginContributions";
@@ -50,7 +51,7 @@ function runSkinCleanup(key: string): void {
 }
 
 function assetUrl(pluginId: string, entry: string): string {
-  return `/${PLUGIN_UI_ROUTE_PREFIX}/${pluginId}/${entry.replace(/^\/+/, "")}?t=${Date.now()}`;
+  return desktopAssetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${pluginId}/${entry.replace(/^\/+/, "")}?t=${Date.now()}`);
 }
 
 export function AppearanceSkinBridge() {

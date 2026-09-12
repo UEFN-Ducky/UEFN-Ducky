@@ -9,6 +9,7 @@
  * input channel for the window overlay.
  */
 import type { AgentEvent } from "../types/panel";
+import { assetBase } from "./assetBase";
 import { rankVideoCodec } from "../components/remoteWindowMath";
 import {
   BLOB_LOW_WATER_BYTES,
@@ -58,6 +59,7 @@ const RPC_TIMEOUT_MS = 30_000;
 const CONNECT_BUDGET_MS = 8_000;
 const ICE_GATHER_MS = 2_500;
 const LOOPBACK_ORIGINS = ["http://127.0.0.1:4199", "http://localhost:4199"];
+
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number };
 
@@ -389,7 +391,7 @@ export class DirectTransport {
           reject(new Error("timeout"));
         }, RPC_TIMEOUT_MS);
         this.pending.set(id, {
-          resolve: (v) => resolve(rewriteLoopbackUrls(v, LOOPBACK_ORIGINS)),
+          resolve: (v) => resolve(rewriteLoopbackUrls(v, LOOPBACK_ORIGINS, assetBase())),
           reject,
           timer,
         });
@@ -720,10 +722,17 @@ function installServiceWorkerBlobBridge(transport: DirectTransport) {
       (err) => port.postMessage({ status: 502, error: String((err as Error)?.message || err) }),
     );
   });
-  const swUrl = `${window.location.origin}/sw.js`;
-  navigator.serviceWorker.register(swUrl, { scope: "/" }).catch(() => {
-    /* not fatal: assets just won't resolve until the SW is available */
-  });
+  // Register relative to the panel document so the worker's scope is exactly
+  // the directory the panel was served from — no Service-Worker-Allowed header
+  // and no claim on the rest of the site's origin.
+  try {
+    const swUrl = new URL("sw.js", document.baseURI).href;
+    navigator.serviceWorker.register(swUrl, { scope: assetBase() }).catch(() => {
+      /* not fatal: assets just won't resolve until the SW is available */
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export { BLOB_LOW_WATER_BYTES };

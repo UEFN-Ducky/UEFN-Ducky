@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import "./plugin-ui.css";
 import {
   PLUGIN_UI_ROUTE_PREFIX,
@@ -52,7 +53,7 @@ export function PluginFilePane({ pluginId, panelId, relativePath }: Props) {
     if (!panel?.entry) return null;
     const entry = panel.entry.replace(/^\/+/, "");
     const q = new URLSearchParams({ file: relativePath });
-    return `/${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}?${q.toString()}`;
+    return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}?${q.toString()}`);
   }, [panel, pid, relativePath]);
 
   usePluginThemePush(iframeRef, src);

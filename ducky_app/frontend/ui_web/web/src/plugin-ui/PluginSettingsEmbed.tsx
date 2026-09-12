@@ -1,6 +1,7 @@
 /** Embed a plugin ui.panels entry inside Settings (not an editor tab). */
 
 import { useEffect, useMemo, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import "./plugin-ui.css";
 import { BRIDGE_CHANNEL, PLUGIN_UI_ROUTE_PREFIX, PLUGIN_UI_SANDBOX } from "./constants";
 import { handleBridgeRequest, shouldForwardPluginPush } from "./bridge";
@@ -27,7 +28,7 @@ export function PluginSettingsEmbed({ pluginId, panelId }: Props) {
   const src = useMemo(() => {
     if (!panel?.entry) return null;
     const entry = panel.entry.replace(/^\/+/, "");
-    return `/${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}`;
+    return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}`);
   }, [panel?.entry, pid]);
 
   const tabId = `settings-plugin:${pid}:${panelId}`;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { assetUrl } from "../remote/assetBase";
 import "./plugin-ui.css";
 import { PLUGIN_UI_ROUTE_PREFIX, PLUGIN_UI_SANDBOX, BRIDGE_CHANNEL } from "./constants";
 import { handleBridgeRequest } from "./bridge";
@@ -26,7 +27,7 @@ export function DucktactoeBoardAside({ hostId, collapsed, onToggle, widthPx }: P
   const [missing, setMissing] = useState(false);
 
   const src = useMemo(
-    () => `/${PLUGIN_UI_ROUTE_PREFIX}/${DUCKTACTOE_PLUGIN_ID}/ui/index.html`,
+    () => assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${DUCKTACTOE_PLUGIN_ID}/ui/index.html`),
     [],
   );
 

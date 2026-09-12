@@ -93,14 +93,20 @@ export class PartAssembler {
 
 /**
  * Rewrite absolute loopback URLs the desktop hands out (`http://127.0.0.1:4199/x`)
- * to same-origin paths so the viewer's Service Worker can serve them over the
- * blob channel. Walks arrays and plain objects; leaves everything else alone.
+ * to panel-relative paths so the viewer's Service Worker can serve them over
+ * the blob channel. `base` is where the panel document lives — "/" on the
+ * desktop, the plugin asset directory in direct mode — and keeps every rewritten
+ * URL inside the worker's scope. Walks arrays and plain objects.
  */
-export function rewriteLoopbackUrls<T>(value: T, loopbackOrigins: readonly string[]): T {
+export function rewriteLoopbackUrls<T>(
+  value: T,
+  loopbackOrigins: readonly string[],
+  base = "/",
+): T {
   const visit = (v: unknown): unknown => {
     if (typeof v === "string") {
       for (const origin of loopbackOrigins) {
-        if (v.startsWith(origin + "/")) return v.slice(origin.length);
+        if (v.startsWith(origin + "/")) return base + v.slice(origin.length + 1);
       }
       return v;
     }

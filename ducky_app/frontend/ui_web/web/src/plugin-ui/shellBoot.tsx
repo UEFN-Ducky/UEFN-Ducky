@@ -1,6 +1,7 @@
 /** Load enabled plugins' contributes.shell.boot scripts into the main window. */
 
 import { useEffect, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import { getApi } from "../hooks/usePanelApi";
 import { patchPluginUiPrefs } from "../hooks/usePluginUiPrefs";
 import { usePluginContributions, type PluginShellBoot } from "../hooks/usePluginContributions";
@@ -181,7 +182,7 @@ function runBootCleanup(pluginId: string): void {
 
 function bootUrl(boot: PluginShellBoot): string {
   const entry = boot.entry.replace(/^\/+/, "");
-  return `/${PLUGIN_UI_ROUTE_PREFIX}/${boot.plugin_id}/${entry}?t=${Date.now()}`;
+  return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${boot.plugin_id}/${entry}?t=${Date.now()}`);
 }
 
 /** Mount shell.boot scripts for enabled plugins; unload when disabled. */

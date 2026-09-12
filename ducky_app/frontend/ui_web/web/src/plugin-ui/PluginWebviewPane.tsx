@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { assetUrl } from "../remote/assetBase";
 import "./plugin-ui.css";
 import {
   PLUGIN_UI_ROUTE_PREFIX,
@@ -60,7 +61,7 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
     if (!parsed || !panel?.entry) return null;
     const entry = panel.entry.replace(/^\/+/, "");
     // Same-origin relative URL so Vite proxy / panel_httpd both work.
-    return `/${PLUGIN_UI_ROUTE_PREFIX}/${parsed.pluginId}/${entry}`;
+    return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${parsed.pluginId}/${entry}`);
   }, [parsed, panel]);
 
   const showDucktactoeChat =

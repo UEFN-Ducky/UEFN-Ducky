@@ -1,29 +1,50 @@
 /* UEFN Ducky panel Service Worker (direct Remote View).
  *
- * The phone panel runs on the panel host, not on the PC, so relative asset
- * URLs the panel uses (/plugin-ui/…, /user-sounds/…, /tool-captures/…,
- * /duckies/…, /model-files/…) do not exist here. This worker forwards those
+ * The phone panel runs on the site, not on the PC, so the desktop-owned asset
+ * paths it references (plugin-ui/…, user-sounds/…, tool-captures/…, duckies/…,
+ * model-files/…) do not exist on this origin. This worker forwards those
  * requests to the controlling page, which fetches the bytes from the desktop
  * over the WebRTC blob channel and answers on a MessageChannel port.
- * Everything else passes through untouched.
+ *
+ * Scope is whatever directory this file was served from — "/" on the desktop,
+ * the plugin's panel directory on the site. Every URL the panel builds for a
+ * desktop asset goes through `assetUrl()` so it lands inside that scope; the
+ * worker strips the scope prefix again before asking the desktop, so the
+ * desktop always sees the plain "/plugin-ui/…" path it serves.
  */
-const PREFIXES = ["/plugin-ui/", "/user-sounds/", "/tool-captures/", "/duckies/", "/model-files/"];
-const CACHE = "ud-blob-v1";
+const PREFIXES = ["plugin-ui/", "user-sounds/", "tool-captures/", "duckies/", "model-files/"];
+const CACHE = "ud-blob-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (ev) => ev.waitUntil(self.clients.claim()));
 
-function wants(url) {
-  if (url.origin !== self.location.origin) return false;
-  return PREFIXES.some((p) => url.pathname.startsWith(p));
+/** Directory this worker governs, e.g. "/" or "/static/plugins/uefn-ducky/panel/". */
+function scopePath() {
+  try {
+    const p = new URL(self.registration.scope).pathname;
+    return p.endsWith("/") ? p : p + "/";
+  } catch {
+    return "/";
+  }
 }
 
-async function viaPage(event, url) {
-  const client = await self.clients.get(event.clientId).catch(() => null);
-  const target = client || (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))[0];
-  if (!target) return new Response("no page", { status: 503 });
+/** Desktop-side path for a request in scope, or "" when we should not handle it. */
+function desktopPath(url) {
+  if (url.origin !== self.location.origin) return "";
+  const base = scopePath();
+  if (!url.pathname.startsWith(base)) return "";
+  const rel = url.pathname.slice(base.length);
+  if (!PREFIXES.some((p) => rel.startsWith(p))) return "";
+  if (rel.includes("..")) return "";
+  return "/" + rel + (url.search || "");
+}
+
+async function viaPage(event, key) {
+  const client =
+    (await self.clients.get(event.clientId).catch(() => null)) ||
+    (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))[0];
+  if (!client) return new Response("no page", { status: 503 });
   const cache = await caches.open(CACHE);
-  const key = url.pathname + url.search;
   const cached = await cache.match(key);
   const etag = cached ? cached.headers.get("ETag") || "" : "";
   const reply = await new Promise((resolve) => {
@@ -33,10 +54,12 @@ async function viaPage(event, url) {
       clearTimeout(timer);
       resolve(ev.data || { status: 502 });
     };
-    target.postMessage({ type: "ud-blob-fetch", path: key, etag }, [mc.port2]);
+    client.postMessage({ type: "ud-blob-fetch", path: key, etag }, [mc.port2]);
   });
   if (reply.status === 304 && cached) return cached;
-  if (reply.status >= 400 || !reply.body) return cached || new Response(reply.error || "", { status: reply.status || 502 });
+  if (reply.status >= 400 || !reply.body) {
+    return cached || new Response(reply.error || "", { status: reply.status || 502 });
+  }
   const headers = { "Content-Type": reply.type || "application/octet-stream" };
   if (reply.etag) headers.ETag = reply.etag;
   const res = new Response(reply.body, { status: 200, headers });
@@ -45,12 +68,14 @@ async function viaPage(event, url) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
   let url;
   try {
     url = new URL(event.request.url);
   } catch {
     return;
   }
-  if (event.request.method !== "GET" || !wants(url)) return;
-  event.respondWith(viaPage(event, url));
+  const key = desktopPath(url);
+  if (!key) return;
+  event.respondWith(viaPage(event, key));
 });

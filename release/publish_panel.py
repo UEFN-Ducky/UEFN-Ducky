@@ -1,44 +1,43 @@
 #!/usr/bin/env python3
-"""Publish the built panel bundle to the panel host (GitHub Pages).
+"""Stage the built phone panel into the UEFN Ducky site plugin.
 
-The phone panel for direct (tunnel-free) Remote View is served from
-``https://panel.uefnducky.org`` — the ``gh-pages`` branch of this repo,
-fronted by GitHub's CDN. Layout of that branch:
+Direct (tunnel-free) Remote View serves the panel from the tenant's own
+platform: the bundle ships inside `plugin-uefn-ducky` and DuckyOS delivers it
+same-origin from that tenant's storage at
 
-    /sw.js                 Service Worker (root scope; forwards desktop assets)
-    /CNAME                 panel.uefnducky.org
-    /<version>/…           one immutable copy of web/dist per app version
-    /latest/…              copy of the newest version
-    /index.html            tiny redirect to /latest/
+    https://<tenant>/static/plugins/uefn-ducky/panel/
 
-Every desktop version keeps its own folder so an older desktop keeps
-matching the panel it was built with. ``latest`` is what the site loads
-first; the site swaps to ``/<desktop version>/`` once it learns the
-version from the desktop's answer.
+so there is no CDN, no second domain, and no per-user DNS. This script copies
+`web/dist` into the plugin's `assets/panel/`; the plugin release then packages
+and uploads it like any other plugin asset.
 
 Usage (from repo root):
-  py release/publish_panel.py               # build dist, publish current version
-  py release/publish_panel.py --no-build    # publish the dist already on disk
-  py release/publish_panel.py --dry-run     # stage into a temp worktree, don't push
+  py release/publish_panel.py                 # build dist, stage into the plugin
+  py release/publish_panel.py --no-build      # stage the dist already on disk
+  py release/publish_panel.py --plugin-dir D  # plugin checkout elsewhere
+
+After staging, release the plugin from the DuckyOS repo:
+  bash plugins/plugin-uefn-ducky/scripts/release.sh --docker --upload
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "ducky_app" / "frontend" / "ui_web" / "web"
 DIST = WEB / "dist"
 INIT = ROOT / "ducky_app" / "frontend" / "__init__.py"
-BRANCH = "gh-pages"
-CNAME = "panel.uefnducky.org"
+DEFAULT_PLUGIN_DIR = ROOT.parent / "DuckyOS" / "plugins" / "plugin-uefn-ducky"
+# Kept in sync with `plugin-uefn-ducky/src/direct.rs::DEFAULT_PANEL_BASE`.
+PANEL_SUBDIR = "panel"
 
 
 def version() -> str:
@@ -48,94 +47,72 @@ def version() -> str:
     return m.group(1)
 
 
-def run(cmd: list[str], cwd: Path | None = None) -> None:
-    print("$", " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=str(cwd or ROOT), check=True)
-
-
 def build() -> None:
     npm = "npm.cmd" if os.name == "nt" else "npm"
-    run([npm, "run", "build"], cwd=WEB)
+    print("$", npm, "run build", flush=True)
+    subprocess.run([npm, "run", "build"], cwd=str(WEB), check=True)
+
+
+def stage(plugin_dir: Path, ver: str) -> int:
     if not (DIST / "index.html").is_file():
-        raise SystemExit("web/dist/index.html missing after build")
-
-
-def redirect_html() -> str:
-    return (
-        "<!doctype html><meta charset=utf-8>"
-        "<meta http-equiv=refresh content=\"0; url=./latest/\">"
-        "<title>UEFN Ducky panel</title><a href=\"./latest/\">UEFN Ducky panel</a>\n"
-    )
-
-
-def stage(work: Path, ver: str) -> None:
-    target = work / ver
+        raise SystemExit(f"{DIST}/index.html missing — run the panel build first")
+    if not (DIST / "sw.js").is_file():
+        raise SystemExit(f"{DIST}/sw.js missing — public/sw.js should be copied by Vite")
+    assets = plugin_dir / "assets"
+    if not assets.is_dir():
+        raise SystemExit(f"plugin assets dir not found: {assets}")
+    target = assets / PANEL_SUBDIR
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(DIST, target)
-    latest = work / "latest"
-    if latest.exists():
-        shutil.rmtree(latest)
-    shutil.copytree(DIST, latest)
-    sw = DIST / "sw.js"
-    if not sw.is_file():
-        raise SystemExit("dist/sw.js missing (public/sw.js should be copied by Vite)")
-    shutil.copy2(sw, work / "sw.js")
-    (work / "CNAME").write_text(CNAME + "\n", encoding="utf-8")
-    (work / ".nojekyll").write_text("", encoding="utf-8")
-    (work / "index.html").write_text(redirect_html(), encoding="utf-8")
-    (work / "versions.json").write_text(
-        __import__("json").dumps(sorted(p.name for p in work.iterdir() if p.is_dir() and re.match(r"^\d+\.\d+\.\d+$", p.name))),
-        encoding="utf-8",
+    # The panel reports the desktop build it was made from, so a mismatch with
+    # the connected desktop is visible rather than guessed at.
+    (target / "panel-version.json").write_text(
+        json.dumps({"version": ver}, indent=2) + "\n", encoding="utf-8"
     )
+    total = 0
+    count = 0
+    unservable: list[str] = []
+    servable = {
+        ".js", ".mjs", ".css", ".map", ".json", ".html",
+        ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
+        ".wasm", ".ttf", ".woff", ".woff2",
+    }
+    for f in target.rglob("*"):
+        if not f.is_file():
+            continue
+        count += 1
+        total += f.stat().st_size
+        if f.suffix.lower() not in servable:
+            unservable.append(str(f.relative_to(target)))
+    print(f"panel: staged {count} files ({total // 1024} KB) into {target}")
+    if unservable:
+        # Core only delivers known asset types; anything else is dropped at
+        # upload and 404s at runtime, so fail loudly here instead.
+        print("panel: these files will NOT be delivered by core:", file=sys.stderr)
+        for row in unservable[:20]:
+            print(f"  {row}", file=sys.stderr)
+        return 1
+    print(f"panel: {ver} ready — release the plugin to publish it:")
+    print("  bash plugins/plugin-uefn-ducky/scripts/release.sh --docker --upload")
+    return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-build", action="store_true")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--remote", default="origin")
+    ap.add_argument("--plugin-dir", default=str(DEFAULT_PLUGIN_DIR))
     args = ap.parse_args()
-    ver = version()
+    plugin_dir = Path(args.plugin_dir).resolve()
+    if not plugin_dir.is_dir():
+        print(
+            f"panel: plugin checkout not found at {plugin_dir} — pass --plugin-dir",
+            file=sys.stderr,
+        )
+        return 1
     if not args.no_build:
         build()
-    work = Path(tempfile.mkdtemp(prefix="ducky-panel-"))
-    try:
-        # Fresh worktree on gh-pages (create the branch if the remote lacks it).
-        subprocess.run(["git", "fetch", args.remote, BRANCH], cwd=str(ROOT), check=False)
-        has_remote = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{args.remote}/{BRANCH}"], cwd=str(ROOT), capture_output=True
-        ).returncode == 0
-        shutil.rmtree(work)
-        has_local = subprocess.run(
-            ["git", "rev-parse", "--verify", BRANCH], cwd=str(ROOT), capture_output=True
-        ).returncode == 0
-        if has_remote:
-            run(["git", "worktree", "add", "--detach", str(work), f"{args.remote}/{BRANCH}"])
-        elif has_local:
-            run(["git", "worktree", "add", "--detach", str(work), BRANCH])
-        else:
-            run(["git", "worktree", "add", "--detach", str(work)])
-            run(["git", "switch", "--orphan", BRANCH], cwd=work)
-        stage(work, ver)
-        run(["git", "add", "-A"], cwd=work)
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=str(work), capture_output=True, text=True).stdout
-        if not status.strip():
-            print("panel: nothing changed")
-            return 0
-        run(["git", "-c", "user.name=ducky-release", "-c", "user.email=release@uefnducky.org", "commit", "-qm", f"panel {ver}"], cwd=work)
-        if args.dry_run:
-            print(f"panel: staged {ver} in {work} (dry run, not pushed)")
-            return 0
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(work), capture_output=True, text=True).stdout.strip()
-        run(["git", "push", args.remote, f"{head}:refs/heads/{BRANCH}"], cwd=work)
-        print(f"panel: published {ver} → https://{CNAME}/{ver}/ and /latest/")
-        return 0
-    finally:
-        subprocess.run(["git", "worktree", "remove", "--force", str(work)], cwd=str(ROOT), check=False)
-        # The orphan switch leaves a local branch behind; the remote is the source of truth.
-        subprocess.run(["git", "branch", "-D", BRANCH], cwd=str(ROOT), capture_output=True)
-        shutil.rmtree(work, ignore_errors=True)
+    return stage(plugin_dir, version())
 
 
 if __name__ == "__main__":
