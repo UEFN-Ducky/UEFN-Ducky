@@ -10,7 +10,7 @@ artifact "ducky.db Test Plan" (https://claude.ai/code/artifact/79d02098-d609-478
 | pytest `ducky_app tests` | 1213 pass, 3 fail regardless of environment, 12 pass only against a developer's real AppData, 2 skip |
 | vitest `ui_web/web` | 738 pass, 3 fail (all `components/changes`) |
 | dead | 6 `test_*.py` files collect zero tests (`main()` self-checks) |
-| CI | `pr-guard.yml` runs pytest for plugin packages only, non-blocking |
+| CI | `pr-checks.yml` runs pytest for plugin packages only, non-blocking |
 
 Real failures: `test_mcp_inject::test_bootstrap_includes_chat_report_template`
 (prompt text drift), `test_settings_schema::test_every_field_has_meta`
