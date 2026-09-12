@@ -12,12 +12,19 @@ order it should go out, and how to prove each step. Protocol details are in
 | Phone panel bundle | same repo → `gh-pages` branch → `https://panel.uefnducky.org/<ver>/` | `py release/publish_panel.py --no-build` after the EXE build (the build already produced `web/dist`) |
 | Site plugin `uefn-ducky` | `DuckyOS/plugins/plugin-uefn-ducky` → `deploy/uefn-ducky-<ver>.zip` | `bash scripts/release.sh` builds; `bash scripts/release.sh --upload-only` (or the Marketplace admin) installs it on uefnducky.org |
 | Panel host DNS | Cloudflare zone `uefnducky.org` | created by the plugin on first `remote-config` call (`panel` CNAME → `uefn-ducky.github.io`, DNS-only) |
-| GitHub Pages | repo `UEFN-Ducky/UEFN-Ducky`, branch `gh-pages`, custom domain `panel.uefnducky.org` | one-time: `gh api -X POST repos/UEFN-Ducky/UEFN-Ducky/pages -f source[branch]=gh-pages -f source[path]=/` then `gh api -X PUT repos/UEFN-Ducky/UEFN-Ducky/pages -f cname=panel.uefnducky.org` |
+| GitHub Pages | repo `UEFN-Ducky/UEFN-Ducky`, branch `gh-pages`, custom domain `panel.uefnducky.org` | **done Sep 12 2026** (org setting `members_can_create_public_pages` turned on, site created from `gh-pages`, CNAME set). GitHub issues the TLS certificate by itself once the DNS CNAME exists; until then the /ducky page falls back to the tunnel after 30 s. |
 
 Order that never breaks a user: **desktop → panel → plugin**. An old plugin
 with a new desktop just keeps using the tunnel. A new plugin with an old
 desktop gets `method not allowed` from `rtc_connect` and falls back to the
 tunnel on its own.
+
+## State as of Sep 12 2026
+
+- Desktop `dist/UEFN-Ducky-1.2.55.exe` built and e2e-verified (direct + tunnel).
+- Panel `1.2.55` published to `gh-pages` (`/1.2.55/`, `/latest/`, `/sw.js`, `versions.json`).
+- Plugin `uefn-ducky-1.1.93.zip` (Linux build) in `plugins/plugin-uefn-ducky/deploy/`, **not yet uploaded**.
+- DNS `panel` CNAME: created automatically by the plugin on the first `/ducky` visit after upload.
 
 ## Kill switch and knobs (site, no redeploy)
 
