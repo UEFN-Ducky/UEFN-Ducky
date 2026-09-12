@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -117,6 +118,26 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         if rep is not None:
             rep.write_line("REAL APPDATA GUARD: tests wrote into the real AppData. " + msg, red=True)
         session.exitstatus = 3  # surfaced as an exit-code failure in CI
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Remove this run's isolated AppData, and any a crashed run left behind.
+
+    pytest_configure mkdtemp's a root per session; without this every test run
+    ever executed stays in %TEMP% forever.
+    """
+    if _OPT_OUT:
+        return
+    root: Path | None = getattr(config, "_ducky_isolated_root", None)
+    if root is not None:
+        shutil.rmtree(root, ignore_errors=True)
+    try:
+        sys.path.insert(0, str(Path(__file__).parent / "ducky_app"))
+        from frontend.temp_cleanup import sweep_stale_temp_dirs
+
+        sweep_stale_temp_dirs("ducky-tests-appdata-", min_age_s=3600.0, budget_s=5.0)
+    except Exception:
+        pass
 
 
 def _reset_store_memos() -> None:

@@ -273,10 +273,29 @@ def run_bridge() -> None:
         raise
 
 
+def _sweep_stale_extracts() -> None:
+    """Reclaim extraction dirs from killed runs (one-file EXE only).
+
+    An IDE shuts the MCP bridge down by killing it, so its ~120 MB extraction
+    directory is never cleaned up and %TEMP% grows without bound. Runs on a
+    daemon thread and never blocks startup.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        _ensure_repo_on_path()
+        from frontend.temp_cleanup import start_background_sweep
+
+        start_background_sweep()
+    except Exception:
+        pass
+
+
 def main() -> None:
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()
+    _sweep_stale_extracts()
     if len(sys.argv) > 1 and sys.argv[1] == "bridge":
         run_bridge()
     elif len(sys.argv) > 1 and sys.argv[1] == "db":

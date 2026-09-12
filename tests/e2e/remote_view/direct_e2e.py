@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from pathlib import Path
 
 try:
     import websockets
@@ -146,6 +147,31 @@ class Cdp:
         return r.get("result", {}).get("value")
 
 
+def kill_browsers_using_profile(profile: str) -> int:
+    """Kill every browser process launched against this exact profile.
+
+    `--headless=new` re-launches the browser detached, so it is not in the
+    launcher's process tree and `taskkill /T` misses it. It then keeps the
+    profile mapped and the directory cannot be removed. Matching on our own
+    unique `--user-data-dir` is precise: it can only ever hit this run.
+    """
+    if os.name != "nt":
+        return 0
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' or Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{profile}*' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=60,
+        )
+        return len([ln for ln in out.stdout.split() if ln.strip().isdigit()])
+    except Exception:
+        return 0
+
+
 def dump(title: str, rows: list[str]) -> None:
     if rows:
         print(f"{title}:", *rows, sep="\n  ")
@@ -172,6 +198,16 @@ async def main() -> int:
     browser = find_browser()
     # Fresh profile per run: a reused profile served a stale index.html from
     # the HTTP cache and the viewer ran an old bundle against a new desktop.
+    # Sweep first — a crashed run leaves ~350 MB of browser profile behind.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "ducky_app"))
+        from frontend.temp_cleanup import remove_tree_with_retry, sweep_stale_temp_dirs
+
+        gone, freed = sweep_stale_temp_dirs("ducky-e2e-viewer-", min_age_s=900.0, budget_s=30.0)
+        if gone:
+            print(f"cleanup: reclaimed {gone} stale viewer profiles ({freed // (1024 * 1024)} MB)")
+    except Exception:
+        remove_tree_with_retry = None  # type: ignore[assignment]
     profile = tempfile.mkdtemp(prefix="ducky-e2e-viewer-")
     if not args.viewer_cdp:
         import socket
@@ -321,9 +357,9 @@ async def main() -> int:
 
             await dcdp.drain(1)
             await vcdp.drain(0.5)
-            remote_errors = [l for l in dcdp.log + vcdp.log if ("[error]" in l or "[exception]" in l) and "remote-" in l]
-            viewer_exceptions = [l for l in vcdp.log if "[exception]" in l]
-            desktop_exceptions = [l for l in dcdp.log if "[exception]" in l]
+            remote_errors = [ln for ln in dcdp.log + vcdp.log if ("[error]" in ln or "[exception]" in ln) and "remote-" in ln]
+            viewer_exceptions = [ln for ln in vcdp.log if "[exception]" in ln]
+            desktop_exceptions = [ln for ln in dcdp.log if "[exception]" in ln]
             dump("desktop page exceptions (reported, not Remote View)", desktop_exceptions[:8])
             if remote_errors or viewer_exceptions:
                 dump("FAIL errors logged", remote_errors + viewer_exceptions)
@@ -340,8 +376,21 @@ async def main() -> int:
                 proc.wait(timeout=10)
             except Exception:
                 pass
-            time.sleep(1)
-            shutil.rmtree(profile, ignore_errors=True)
+            # The detached browser is what actually holds the profile.
+            killed = kill_browsers_using_profile(profile)
+            if killed:
+                print(f"cleanup: stopped {killed} browser process(es) holding the profile")
+            # Edge keeps its profile mapped for several seconds after the kill,
+            # and each one is 200-600 MB — a single rmtree silently leaves most
+            # of it behind, which is how 5 GB accumulated in %TEMP%.
+            gone = False
+            if remove_tree_with_retry is not None:
+                gone = remove_tree_with_retry(profile, attempts=15, delay_s=1.0)
+            else:
+                shutil.rmtree(profile, ignore_errors=True)
+                gone = not os.path.exists(profile)
+            if not gone:
+                print(f"cleanup: could not remove {profile} (a later run sweeps it)", file=sys.stderr)
         print("result:", "ok" if ok else "failed")
 
 
