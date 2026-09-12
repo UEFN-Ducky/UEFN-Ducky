@@ -1,3 +1,4 @@
+import { readableLabel } from './ledgerPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type MouseEvent, type ReactNode } from "react";
 
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
@@ -1788,12 +1789,12 @@ export function ChangesView({
         <Modal
           open
           onClose={() => setSmartPicker(null)}
-          title="Smart Revert"
+          title="Ask an agent to undo this change"
           width={420}
           zIndex={modalContainer ? 40 : 100020}
           container={modalContainer}
         >
-          <p>Pick a chat to unwind this item, or spawn a new one.</p>
+          <p>Choose a chat for an agent to review this change and help undo it. This starts an agent task; it does not immediately revert the change.</p>
           <ul className="changes-smart-list">
             {(allChats ?? []).map((chat) => (
               <li key={chat.id}>
@@ -1804,7 +1805,7 @@ export function ChangesView({
             ))}
             <li>
               <button type="button" className="changeset-btn" onClick={() => pickSmartRevert("new")}>
-                New…
+                Start a new chat
               </button>
             </li>
           </ul>
@@ -1815,7 +1816,40 @@ export function ChangesView({
         <Modal
           open
           onClose={() => setDiff(null)}
-          title={diff.title}
+          footer={<>
+            {diff.row.outcome === "ok" && !diff.row.reverted && !diff.run.archived && !(diff.row.kind === "editor" && diff.row.revertable === "none") ? (
+              <div className="changeset-diff-actions"><p className="json-diff-note">{diff.cursor < 0 ? "Undo all recorded writes to this item in this run." : "Undo only the selected write. You will review a confirmation before anything changes."}</p>
+                {isLive(diff.run) ? (
+                  <button
+                    type="button"
+                    className="changeset-btn changeset-btn--danger"
+                    onClick={() => void stopAgent(diff.run)}
+                  >
+                    Stop agent to revert
+                  </button>
+                ) : diff.cursor < 0 ? (
+                  <button
+                    type="button"
+                    className="changeset-btn changeset-btn--danger"
+                    disabled={Boolean(busyRun)}
+                    onClick={() => void revertRow(diff.run, diff.row)}
+                  >
+                    Revert all writes
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="changeset-btn changeset-btn--danger"
+                    disabled={Boolean(busyRun) || Boolean(diff.snapshots[diff.cursor]?.reverted)}
+                    onClick={() => void revertStep(diff.run, diff.row, diff.snapshots[diff.cursor].seq)}
+                  >
+                    Revert this write
+                  </button>
+                )}
+              </div>
+            ) : <p className="json-diff-note">{diff.row.reverted ? "This change has already been reverted." : diff.run.archived ? "Unarchive this run to enable reverting." : "Automatic revert is not available for this entry."}</p>}
+</>}
+          title={diff.json ? readableLabel(diff.title) : diff.title}
           width={880}
           zIndex={modalContainer ? 40 : 100020}
           container={modalContainer}
@@ -1840,7 +1874,7 @@ export function ChangesView({
                   aria-pressed={diff.cursor < 0}
                   onClick={() => setDiff({ ...diff, cursor: -1 })}
                 >
-                  All
+                  All writes
                 </button>
                 {diff.snapshots.map((_, i) => (
                   <button
@@ -1890,37 +1924,6 @@ export function ChangesView({
                 />
               </Suspense>
             ) : null}
-            {diff.row.outcome === "ok" && !diff.row.reverted && !diff.run.archived ? (
-              <div className="changeset-diff-actions">
-                {isLive(diff.run) ? (
-                  <button
-                    type="button"
-                    className="changeset-btn changeset-btn--danger"
-                    onClick={() => void stopAgent(diff.run)}
-                  >
-                    Stop agent to revert
-                  </button>
-                ) : diff.cursor < 0 ? (
-                  <button
-                    type="button"
-                    className="changeset-btn changeset-btn--danger"
-                    disabled={Boolean(busyRun)}
-                    onClick={() => void revertRow(diff.run, diff.row)}
-                  >
-                    Revert all writes
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="changeset-btn changeset-btn--danger"
-                    disabled={Boolean(busyRun) || Boolean(diff.snapshots[diff.cursor]?.reverted)}
-                    onClick={() => void revertStep(diff.run, diff.row, diff.snapshots[diff.cursor].seq)}
-                  >
-                    Revert this write
-                  </button>
-                )}
-              </div>
-            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -1929,13 +1932,14 @@ export function ChangesView({
         <Modal
           open
           onClose={() => setDetail(null)}
-          title={`${detail.row.outcome === "blocked" ? "BLOCKED" : "FAILED"} — ${detail.row.kind === "file" ? detail.row.path : detail.row.label}`}
+          title={`${detail.row.outcome === "blocked" ? "Action blocked" : "Action failed"} — ${detail.row.kind === "file" ? basename(detail.row.path) : readableLabel(detail.row.label)}`}
+          footer={<div className="changeset-diff-actions"><p className="json-diff-note">Deleting this history entry does not change your project.</p><button type="button" className="changeset-btn" onClick={() => void deleteRow(detail.run, detail.row)}>Delete history entry</button></div>}
           width={560}
           zIndex={modalContainer ? 40 : 100020}
           container={modalContainer}
         >
           <div className="changeset-detail-modal">
-            <p className="changeset-detail-reason">{detail.row.reason || "No details recorded."}</p>
+            <p className="json-diff-note">This attempt was recorded as {detail.row.outcome === "blocked" ? "blocked" : "failed"}. Review the recorded reason below.</p><p className="changeset-detail-reason">{detail.row.reason || "No details recorded."}</p>
             {detail.row.steps.length > 1 ? (
               <ul className="changeset-detail-steps">
                 {detail.row.steps.map((step) => (
@@ -1946,13 +1950,6 @@ export function ChangesView({
                 ))}
               </ul>
             ) : null}
-            <button
-              type="button"
-              className="changeset-btn changeset-btn--danger"
-              onClick={() => void deleteRow(detail.run, detail.row)}
-            >
-              Delete
-            </button>
           </div>
         </Modal>
       ) : null}

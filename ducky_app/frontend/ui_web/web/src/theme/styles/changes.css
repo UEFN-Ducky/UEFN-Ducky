@@ -675,6 +675,7 @@
 }
 
 .json-diff-summary {
+  overflow-wrap: anywhere;
   margin: 0 0 12px;
   font-size: 14px;
   font-weight: 600;
@@ -687,6 +688,25 @@
   border-collapse: collapse;
   table-layout: fixed;
 }
+
+.ledger-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+}
+.ledger-facts > div {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  min-width: 0;
+}
+.ledger-facts dt { color: var(--muted); font-size: 12px; }
+.ledger-facts dd { margin: 6px 0 0; color: var(--fg); overflow-wrap: anywhere; }
+.ledger-technical { min-width: 0; color: var(--fg-dim); }
+.ledger-technical > summary { cursor: pointer; padding: 10px 0; color: var(--accent); }
+.ledger-technical pre { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.changeset-detail-reason { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .json-diff-table th {
   text-align: left;

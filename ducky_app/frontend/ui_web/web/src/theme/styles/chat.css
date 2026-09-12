@@ -6236,6 +6236,7 @@
 }
 .changeset-diff-steps {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
@@ -6254,10 +6255,22 @@
 }
 .changeset-diff-actions {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border, #2a2a2e);
+  width: 100%;
+}
+.changeset-diff-actions > p {
+  flex: 1 1 240px;
+  margin: 0;
+}
+.changeset-diff-actions > button {
+  min-height: 38px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--red);
 }
 .modal-backdrop--contained .changeset-diff-modal {
   max-height: min(70vh, calc(100% - 72px));

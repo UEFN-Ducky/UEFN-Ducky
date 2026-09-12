@@ -404,6 +404,7 @@ describe("ChangesView", () => {
     expect(screen.getByRole("button", { name: "Revert all writes" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(screen.getByText("Write 2 of 2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Revert this write" }).closest(".modal-footer")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Revert this write" }));
     await waitFor(() =>
       expect(revertEntry).toHaveBeenCalledWith(run.run_id, 5, false, true),
@@ -435,7 +436,7 @@ describe("ChangesView", () => {
     );
     await waitFor(() => expect(screen.getAllByLabelText("Smart Revert").length).toBeGreaterThan(0));
     fireEvent.click(screen.getAllByLabelText("Smart Revert")[0]);
-    expect(screen.getByText("New…")).toBeTruthy();
+    expect(screen.getByText("Start a new chat")).toBeTruthy();
     expect(screen.getByText("Verse Coder")).toBeTruthy();
   });
 });

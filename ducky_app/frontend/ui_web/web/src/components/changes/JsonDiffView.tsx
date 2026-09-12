@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 
 import { renderHighlightedJson } from "../tool-cards/highlightJson";
 import { renderHighlightedPython } from "../tool-cards/highlightPython";
+import { readableLabel, recordedResult } from "./ledgerPresentation";
 
 /**
  * Before/after for an editor change.
@@ -96,8 +97,8 @@ function CodePane({ code, lang }: { code: string; lang: "python" | "json" }) {
 }
 
 function ValueView({ text }: { text: string }): ReactNode {
-  if (isStructuredText(text)) {
-    return <CodePane code={prettyCode(text)} lang="json" />;
+  if (isStructuredText(text) || text.length > 240) {
+    return <details className="ledger-technical"><summary>View recorded value</summary><CodePane code={prettyCode(text)} lang="json" /></details>;
   }
   return text;
 }
@@ -281,13 +282,14 @@ export function projectEditorDiff(before: Json, after: Json): FieldRow[] {
 export function editorStory(rows: FieldRow[], fallback = ""): string {
   if (rows.length === 1) {
     const row = rows[0];
+    if (isStructuredText(row.before) || isStructuredText(row.after) || row.before.length + row.after.length > 240) return `Updated ${readableLabel(row.key)}`;
     if (row.key === "Name") return `Renamed ${row.before} to ${row.after}`;
     if (row.key === "Created") return `Created ${row.after}`;
     if (row.after === "—") return `Cleared ${row.key}`;
     if (row.before === "—") return `Set ${row.key} to ${row.after}`;
     return `Changed ${row.key} from ${row.before} to ${row.after}`;
   }
-  return fallback.trim();
+  return fallback.length > 240 || /[{}]/.test(fallback) ? "Review the recorded changes below." : fallback.trim();
 }
 
 export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
@@ -303,17 +305,30 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
     [projected, parsedBefore, parsedAfter],
   );
   const changed = rows.filter((r) => r.changed);
-  const headline = projected ? editorStory(projected, summary) : summary;
+  const headline = projected ? editorStory(projected, summary) : editorStory([], summary);
+  const result = recordedResult(parsedAfter);
+
+  if (result) return (
+    <div className="json-diff">
+      <h3>{result.title}</h3>
+      <dl className="ledger-facts">{result.facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <p className="json-diff-note">This is the tool’s recorded response. It does not by itself describe everything that changed in the project.</p>
+      <details className="ledger-technical"><summary>Technical details · full recorded data</summary>
+        <h4>Before</h4><CodePane code={prettyCode(before) || "No earlier value recorded"} lang="json" />
+        <h4>After</h4><CodePane code={prettyCode(after)} lang="json" />
+      </details>
+    </div>
+  );
 
   if (opaque) {
     return (
       <div className="json-diff">
         {headline ? <p className="json-diff-summary">{headline}</p> : null}
         {opaque.code ? (
-          <section className="json-diff-code">
-            <h4>What ran</h4>
+          <details className="json-diff-code ledger-technical">
+            <summary>What ran · script or command</summary>
             <CodePane code={opaque.code} lang="python" />
-          </section>
+          </details>
         ) : null}
         <section>
           <h4>What changed in the level</h4>
@@ -355,7 +370,7 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
 
   const shown = projected ?? (changed.length > 0 ? changed : rows);
   const stacked = shown.some((row) => isStructuredText(row.before) || isStructuredText(row.after));
-  const storyOnly = Boolean(projected && projected.length === 1 && headline);
+  const storyOnly = Boolean(projected && projected.length === 1 && headline && !stacked && shown[0].before.length + shown[0].after.length <= 240);
 
   return (
     <div className="json-diff">
@@ -364,7 +379,7 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
         <div className="json-diff-fields">
           {shown.map((row) => (
             <article key={row.key} className={row.changed ? "json-diff-field json-diff-field--changed" : "json-diff-field"}>
-              <h4>{row.key}</h4>
+              <h4>{readableLabel(row.key)}</h4>
               <div className="json-diff-sides">
                 <section>
                   <h5>Before</h5>
@@ -390,9 +405,9 @@ export function JsonDiffView({ before, after, summary }: JsonDiffViewProps) {
           <tbody>
             {shown.map((row) => (
               <tr key={row.key} className={row.changed ? "json-diff-row--changed" : ""}>
-                <td className="json-diff-key">{row.key}</td>
-                <td className="json-diff-before">{row.before}</td>
-                <td className="json-diff-after">{row.after}</td>
+                <td className="json-diff-key">{readableLabel(row.key)}</td>
+                <td className="json-diff-before"><ValueView text={row.before} /></td>
+                <td className="json-diff-after"><ValueView text={row.after} /></td>
               </tr>
             ))}
           </tbody>
