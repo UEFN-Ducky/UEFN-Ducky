@@ -33,7 +33,6 @@ export function StorePatchNotes({ slug }: Props) {
 
   return (
     <div className="ds-panel ds-patch-notes">
-      <h3 className="ds-panel-title">Patch notes</h3>
       <PatchNotesList notes={notes} />
     </div>
   );

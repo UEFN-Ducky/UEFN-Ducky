@@ -280,6 +280,9 @@ export function needsPurchase(item: DuckyOSStoreItemDto): boolean {
   return Boolean(item.paid) && item.owned !== true;
 }
 
+/** Older notes shown per page once the Patch notes accordion is open. */
+export const PATCH_NOTES_PAGE_SIZE = 5;
+
 export function formatPatchDate(raw: string | null | undefined): string {
   const s = String(raw || "").trim();
   if (!s) return "";

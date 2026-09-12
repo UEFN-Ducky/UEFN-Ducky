@@ -1737,6 +1737,47 @@
   color: var(--ds-text-dim);
 }
 
+.ds-patch-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ds-patch-toggle .ds-panel-title {
+  margin: 0;
+  padding-bottom: 10px;
+  flex: 1;
+  text-align: left;
+}
+
+.ds-patch-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 10px;
+  color: var(--ds-text-mute);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ds-patch-toggle-meta svg {
+  transition: transform 0.15s ease;
+}
+
+.ds-patch-toggle[aria-expanded="true"] .ds-patch-toggle-meta svg {
+  transform: rotate(90deg);
+}
+
 .ds-panel-desc {
   margin: 0;
   font-size: 13.5px;

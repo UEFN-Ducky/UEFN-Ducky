@@ -472,6 +472,15 @@ input, textarea, select, button {
   position: relative;
   z-index: 2;
 }
+
+/* Match the left/right chrome stacking. The positioned skin slot otherwise
+   covers the center caption even though it ignores ordinary pointer events. */
+.app-header-center,
+.app-header-drag-fill {
+  position: relative;
+  z-index: 1;
+}
+
 .app-header-center {
   display: flex;
   align-items: center;

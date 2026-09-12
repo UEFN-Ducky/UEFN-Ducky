@@ -282,7 +282,6 @@ export function AppSection() {
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
       ) : null}
       <div className="general-tab-app-notes">
-        <h3 className="ds-panel-title">Patch notes</h3>
         <PatchNotesList notes={status ? status.versions || [] : null} />
       </div>
     </section>
