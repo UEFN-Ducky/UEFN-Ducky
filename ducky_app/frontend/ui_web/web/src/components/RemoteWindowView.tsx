@@ -510,7 +510,7 @@ function UefnStickOverlay({
     lookRaf.current = 0;
     if (!looking.current) return;
     looking.current = false;
-    send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+    send({ type: "up", x: 0.5, y: 0.5, button: 2, look: true });
   }, [send]);
 
   const releaseAll = useCallback(() => {
@@ -537,8 +537,8 @@ function UefnStickOverlay({
     }
     if (!looking.current) {
       looking.current = true;
-      send({ type: "move", x: 0.5, y: 0.5 });
-      send({ type: "down", x: 0.5, y: 0.5, button: 2 });
+      send({ type: "move", x: 0.5, y: 0.5, look: true });
+      send({ type: "down", x: 0.5, y: 0.5, button: 2, look: true });
     }
     if (lookRaf.current) return;
     const tick = () => {
@@ -552,7 +552,7 @@ function UefnStickOverlay({
         lookTune.current.look,
         lookTune.current.deadzone,
       );
-      if (dx || dy) send({ type: "move", dx, dy });
+      if (dx || dy) send({ type: "move", dx, dy, look: true });
       lookRaf.current = requestAnimationFrame(tick);
     };
     lookRaf.current = requestAnimationFrame(tick);

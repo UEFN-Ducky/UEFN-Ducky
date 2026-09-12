@@ -89,6 +89,24 @@ def map_norm_to_screen(box: tuple[int, int, int, int], nx: float, ny: float) -> 
     return left + int(nx * (width - 1)), top + int(ny * (height - 1))
 
 
+def viewport_inset(
+    box: tuple[int, int, int, int],
+    *,
+    top: float = 0.12,
+    left: float = 0.18,
+    right: float = 0.22,
+    bottom: float = 0.08,
+) -> tuple[int, int, int, int]:
+    """Shrink a window box toward the UEFN 3D view (skip toolbars / side panels)."""
+    l, t, r, b = box
+    w = max(1, r - l)
+    h = max(1, b - t)
+    nl, nt, nr, nb = l + int(w * left), t + int(h * top), r - int(w * right), b - int(h * bottom)
+    if nr - nl < 80 or nb - nt < 80:
+        return box
+    return nl, nt, nr, nb
+
+
 def bring_to_front(hwnd: int) -> bool:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return False
@@ -159,8 +177,12 @@ def inject_pointer(
     delta: int = 0,
     dx: int | None = None,
     dy: int | None = None,
+    look: bool = False,
 ) -> None:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
+        return
+    if look:
+        _inject_look(hwnd, kind, button=button, dx=dx, dy=dy)
         return
     if kind == "move" and dx is not None:
         _send_mouse(0x0001, 0, int(dx), int(dy or 0))
@@ -219,6 +241,7 @@ def handle_stream_message(hwnd: int, payload: bytes) -> None:
             delta=int(event.get("delta") or 0),
             dx=int(event.get("dx") or 0) if rel else None,
             dy=int(event.get("dy") or 0) if rel else None,
+            look=bool(event.get("look")),
         )
         return
     if kind in ("key", "keydown", "keyup"):
@@ -395,6 +418,108 @@ def _client_box(hwnd: int) -> tuple[int, int, int, int] | None:
     if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
         return None
     return int(pt.x), int(pt.y), int(pt.x + rect.right), int(pt.y + rect.bottom)
+
+
+def _area(box: tuple[int, int, int, int]) -> int:
+    return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+
+
+def _largest_child_box(hwnd: int) -> tuple[int, int, int, int] | None:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    boxes: list[tuple[int, int, int, int]] = []
+
+    def _cb(child: int, _lp: int) -> bool:
+        if not user32.IsWindowVisible(child):
+            return True
+        box = _client_box(int(child))
+        if box:
+            boxes.append(box)
+        return True
+
+    cb = WNDENUMPROC(_cb)
+    user32.EnumChildWindows(hwnd, cb, 0)
+    return max(boxes, key=_area) if boxes else None
+
+
+def _look_box(hwnd: int) -> tuple[int, int, int, int] | None:
+    parent = _client_box(hwnd) or _window_box(hwnd)
+    if not parent:
+        return None
+    child = _largest_child_box(hwnd)
+    pa = _area(parent)
+    if child and pa and _area(child) < 0.85 * pa:
+        return viewport_inset(child, top=0.04, left=0.04, right=0.04, bottom=0.04)
+    return viewport_inset(parent)
+
+
+_look_clipped = False
+
+
+def release_look_capture() -> None:
+    global _look_clipped
+    if sys.platform != "win32":
+        _look_clipped = False
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.ClipCursor(None)
+    except Exception:
+        pass
+    _look_clipped = False
+
+
+def _clip_look(box: tuple[int, int, int, int]) -> None:
+    global _look_clipped
+    import ctypes
+    from ctypes import wintypes
+
+    rect = wintypes.RECT(int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+    ctypes.windll.user32.ClipCursor(ctypes.byref(rect))
+    _look_clipped = True
+
+
+def _post_rbutton(screen_x: int, screen_y: int, *, down: bool) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    pt = wintypes.POINT(int(screen_x), int(screen_y))
+    target = int(user32.WindowFromPoint(pt) or 0)
+    if not target:
+        return
+    user32.ScreenToClient(target, ctypes.byref(pt))
+    msg = 0x0204 if down else 0x0205
+    user32.PostMessageW(target, msg, 0x0002, (int(pt.y) << 16) | (int(pt.x) & 0xFFFF))
+
+
+def _inject_look(hwnd: int, kind: str, *, button: int, dx: int | None, dy: int | None) -> None:
+    import ctypes
+
+    box = _look_box(hwnd)
+    if not box:
+        return
+    user32 = ctypes.windll.user32
+    cx, cy = map_norm_to_screen(box, 0.5, 0.5)
+    if kind == "move" and dx is not None:
+        _send_mouse(0x0001, 0, int(dx), int(dy or 0))
+        user32.SetCursorPos(int(cx), int(cy))
+        return
+    bring_to_front(hwnd)
+    user32.SetCursorPos(int(cx), int(cy))
+    if kind == "down":
+        _clip_look(box)
+        _send_mouse(0x0008 if int(button) == 2 else 0x0002, 0)
+        _post_rbutton(cx, cy, down=True)
+        return
+    if kind == "up":
+        _send_mouse(0x0010 if int(button) == 2 else 0x0004, 0)
+        _post_rbutton(cx, cy, down=False)
+        release_look_capture()
 
 
 def _hwnd_pid(hwnd: int) -> int:
