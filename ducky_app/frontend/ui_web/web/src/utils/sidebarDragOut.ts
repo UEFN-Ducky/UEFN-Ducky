@@ -118,28 +118,45 @@ function editorGroupIdOf(el: Element | null | undefined): string {
   return typeof id === "string" ? id : "";
 }
 
+/** Editor group rectangles, measured at most once per frame.
+ *
+ * Pointer moves arrive faster than the screen updates, and measuring forces a
+ * layout flush each time. One measurement per frame is as fresh as anything
+ * the user can see, and collapses a burst of moves into a single flush.
+ */
+const RECT_CACHE_MS = 8;
+let rectCacheAt = 0;
+let rectCache: { groupId: string; rect: DOMRect }[] = [];
+
+function editorGroupRects(): { groupId: string; rect: DOMRect }[] {
+  const now = performance.now();
+  if (now - rectCacheAt < RECT_CACHE_MS) return rectCache;
+  rectCacheAt = now;
+  rectCache = [];
+  for (const el of document.querySelectorAll<HTMLElement>("[data-editor-group-id]")) {
+    const groupId = editorGroupIdOf(el);
+    if (groupId) rectCache.push({ groupId, rect: el.getBoundingClientRect() });
+  }
+  return rectCache;
+}
+
 /** Resolve which editor group + VS Code-style zone is under the pointer.
  * Uses geometry (not elementsFromPoint) so dnd-kit DragOverlay ghosts don't steal hits. */
 export function resolveEditorDropAt(clientX: number, clientY: number): SidebarEditorDrop | null {
-  const groups = document.querySelectorAll<HTMLElement>("[data-editor-group-id]");
-  let best: HTMLElement | null = null;
+  let best: { groupId: string; rect: DOMRect } | null = null;
   let bestArea = Number.POSITIVE_INFINITY;
-  for (const el of groups) {
-    const groupId = editorGroupIdOf(el);
-    if (!groupId) continue;
-    const r = el.getBoundingClientRect();
+  for (const group of editorGroupRects()) {
+    const r = group.rect;
     if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
     const area = Math.max(1, r.width * r.height);
     if (area < bestArea) {
-      best = el;
+      best = group;
       bestArea = area;
     }
   }
   if (!best) return null;
-  return {
-    groupId: editorGroupIdOf(best),
-    zone: dropZoneFromPointer(best.getBoundingClientRect(), clientX, clientY),
-  };
+  // Reuse the rect we already measured rather than asking for it a second time.
+  return { groupId: best.groupId, zone: dropZoneFromPointer(best.rect, clientX, clientY) };
 }
 
 function fallbackEditorDrop(p: SidebarDragPoint): SidebarEditorDrop | null {
