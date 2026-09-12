@@ -5,6 +5,13 @@
 name: PR guard
 
 on:
+  # Writers ruleset requires gitleaks / hidden-chars / tests on default-branch
+  # updates. A pull_request-only workflow still gets a ghost `push` run for
+  # those checks; zero jobs → GitHub emails "No jobs were run" on every
+  # publish to main. Run the cheap Ubuntu jobs on main; app-tests stays PR-only.
+  push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -93,7 +100,7 @@ jobs:
     # isolated by conftest.py, so nothing touches the runner's profile.
     name: app-tests
     runs-on: windows-latest
-    if: ${{ hashFiles('ducky_app/frontend/launcher.py') != '' }}
+    if: ${{ github.event_name != 'push' && hashFiles('ducky_app/frontend/launcher.py') != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
