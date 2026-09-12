@@ -1193,6 +1193,7 @@ export interface CodingAgentDto {
     supports_vision?: boolean;
     supports_tools?: boolean;
     supports_web_search?: boolean;
+    supports_thinking_effort?: boolean | null;
   }>;
 }
 
@@ -2536,6 +2537,7 @@ export interface PanelApi {
       price_in?: number | null;
       price_out?: number | null;
       is_local?: boolean;
+      supports_thinking_effort?: boolean | null;
     }[]
   >;
   get_models_catalog?(refresh?: boolean): Promise<{
@@ -2551,6 +2553,7 @@ export interface PanelApi {
       price_in?: number | null;
       price_out?: number | null;
       is_local?: boolean;
+      supports_thinking_effort?: boolean | null;
     }>;
     default_model?: string;
     agent_model?: string;

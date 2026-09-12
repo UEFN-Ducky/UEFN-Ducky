@@ -5,6 +5,7 @@ import {
   parseFavoriteSelection,
 } from "../../hooks/favoriteModelsCatalog";
 import { getCachedCodingAgents } from "../../hooks/codingAgentsCache";
+import { getCachedModels, type CatalogModelRow } from "../../hooks/modelsCatalogCache";
 import type {
   AgentProfileDto,
   AgentProfileEditorCatalogDto,
@@ -69,12 +70,37 @@ export function codingAgentFromModel(
   return "ducky";
 }
 
-/** True when the Effort control should show (gateway plugins that opt in). */
+function catalogSupportsThinkingEffort(
+  catalog: CatalogModelRow[] | null | undefined,
+  backend: string,
+  modelId: string,
+): boolean | null {
+  if (!catalog?.length || !backend || !modelId) return null;
+  const be = backend.trim().toLowerCase();
+  const mid = modelId.trim();
+  const qualified = `${be}:${mid}`;
+  for (const row of catalog) {
+    const pk = String(row.providerKey || "").trim().toLowerCase();
+    const id = String(row.id || "").trim();
+    if (pk && pk !== be) continue;
+    if (id !== mid && id !== qualified && !id.endsWith(`:${mid}`)) continue;
+    if (row.supportsThinkingEffort != null) return !!row.supportsThinkingEffort;
+  }
+  return null;
+}
+
+/** True when the Effort control should show (per-model flag, else plugin/heuristic). */
 export function modelShowsThinkingEffort(
   model: string,
   codingAgents: { id: string; shows_thinking_effort?: boolean }[] = [],
   thinkingProviderIds: string[] = [],
+  catalog: CatalogModelRow[] | null = getCachedModels(),
 ): boolean {
+  const parsed = parseFavoriteSelection(model);
+  const backend = (parsed?.backend || "").trim().toLowerCase();
+  const modelId = (parsed?.modelId || "").trim();
+  const flagged = catalogSupportsThinkingEffort(catalog, backend, modelId);
+  if (flagged != null) return flagged;
   const agent = codingAgentFromModel(model);
   if (agent !== "ducky") {
     const key = agent.trim().toLowerCase().replace(/-/g, "_");
@@ -83,10 +109,8 @@ export function modelShowsThinkingEffort(
     );
     if (row?.shows_thinking_effort) return true;
   }
-  const parsed = parseFavoriteSelection(model);
-  const backend = (parsed?.backend || "").trim().toLowerCase();
   if (backend && thinkingProviderIds.includes(backend)) return true;
-  // Model-name heuristic when contributions are not loaded yet.
+  // Model-name heuristic when contributions / catalog are not loaded yet.
   const m = (model || "").toLowerCase();
   return m.includes("claude") || m.includes("astra") || m.includes("gpt-6");
 }
@@ -172,7 +196,9 @@ export function formToConfig(
     coding_agent: codingAgentFromModel(model),
     tts_voice: form.ttsVoice.trim(),
     tts_speed: form.ttsSpeed || 0,
-    thinking_effort: modelShowsThinkingEffort(model) ? form.thinkingEffort || "off" : "off",
+    thinking_effort: modelShowsThinkingEffort(model, [], [], getCachedModels())
+      ? form.thinkingEffort || "off"
+      : "off",
   };
   if (chatTitle) {
     config.title = chatTitle;

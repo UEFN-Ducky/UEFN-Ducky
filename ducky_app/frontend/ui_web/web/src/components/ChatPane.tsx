@@ -190,6 +190,8 @@ export function ChatPane({
   );
   const [codingAgent, setCodingAgent] = useState(initialCodingAgent);
   const [thinkingEffort, setThinkingEffort] = useState(chat.thinkingEffort || "off");
+  const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
+  const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
   const pluginContrib = usePluginContributions();
   const showThinkingEffort = useMemo(() => {
     const thinkingProviders = (pluginContrib.llm_providers || [])
@@ -205,13 +207,14 @@ export function ChatPane({
         : chat.provider
           ? `${chat.provider}:${selectedModel || "default"}`
           : selectedModel;
-    return modelShowsThinkingEffort(qualified, agents, thinkingProviders);
+    return modelShowsThinkingEffort(qualified, agents, thinkingProviders, getCachedModels());
   }, [
     codingAgent,
     selectedModel,
     chat.provider,
     pluginContrib.llm_providers,
     pluginContrib.llm_coding_agents,
+    modelsCount,
   ]);
   const hasApiKey = useHasApiKey();
   const { confirm } = useConfirmModal();
@@ -225,8 +228,6 @@ export function ChatPane({
     input_tokens: 0,
     output_tokens: 0,
   });
-  const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
-  const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
   const [codingAgents, setCodingAgents] = useState(() => getCachedCodingAgents());
   const [modelSupportsVision, setModelSupportsVision] = useState(false);
   const [selectedModelDisplayName, setSelectedModelDisplayName] = useState(

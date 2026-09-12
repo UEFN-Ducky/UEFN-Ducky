@@ -143,4 +143,61 @@ describe("duckyProfileForm model selection", () => {
     expect(modelShowsThinkingEffort("openai:gpt-6-astra")).toBe(true);
     expect(modelShowsThinkingEffort("openai:gpt-4o")).toBe(false);
   });
+
+  it("prefers a per-model catalog flag over the name heuristic", () => {
+    const catalog = [
+      {
+        provider: "OpenAI",
+        providerKey: "openai",
+        id: "gpt-4o",
+        name: "GPT-4o",
+        supportsVision: true,
+        supportsTools: true,
+        supportsWebSearch: false,
+        contextLimit: 128000,
+        priceIn: null,
+        priceOut: null,
+        isLocal: false,
+        supportsThinkingEffort: true,
+      },
+      {
+        provider: "Anthropic",
+        providerKey: "anthropic",
+        id: "claude-sonnet-4",
+        name: "Claude Sonnet 4",
+        supportsVision: true,
+        supportsTools: true,
+        supportsWebSearch: false,
+        contextLimit: 200000,
+        priceIn: null,
+        priceOut: null,
+        isLocal: false,
+        supportsThinkingEffort: false,
+      },
+      {
+        provider: "Cursor",
+        providerKey: "cursor",
+        id: "composer-2.5",
+        name: "Composer 2.5",
+        supportsVision: true,
+        supportsTools: true,
+        supportsWebSearch: false,
+        contextLimit: 0,
+        priceIn: null,
+        priceOut: null,
+        isLocal: false,
+        supportsThinkingEffort: false,
+      },
+    ];
+    expect(modelShowsThinkingEffort("openai:gpt-4o", [], [], catalog)).toBe(true);
+    expect(modelShowsThinkingEffort("anthropic:claude-sonnet-4", [], [], catalog)).toBe(false);
+    expect(
+      modelShowsThinkingEffort(
+        "cursor:composer-2.5",
+        [{ id: "cursor", shows_thinking_effort: true }],
+        [],
+        catalog,
+      ),
+    ).toBe(false);
+  });
 });

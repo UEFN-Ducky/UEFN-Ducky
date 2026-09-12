@@ -34,6 +34,8 @@ class ModelInfo:
     price_cached_in: float | None = None
     price_cache_write: float | None = None
     is_local: bool = False
+    # None = unknown (UI falls back to provider flag / name heuristic).
+    supports_thinking_effort: bool | None = None
 
 
 def get_model_info(provider: str, model_id: str) -> ModelInfo | None:

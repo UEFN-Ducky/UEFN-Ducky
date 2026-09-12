@@ -1,11 +1,151 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { ChoiceDropdown } from "./ChoiceDropdown";
-import { contentRect, rankVideoCodec } from "./remoteWindowMath";
+import { DropdownPanel } from "./DropdownPanel";
+import { Icons } from "../icons/Icons";
+import { contentRect, keyDiff, rankVideoCodec, stickLookPoint, stickMoveKeys } from "./remoteWindowMath";
 
 export { contentRect } from "./remoteWindowMath";
 
 export type WindowViewRow = { id: string; title: string; kind?: string };
+
+type SendFn = (payload: Record<string, unknown>) => void;
+type ControlMode = "editor" | "play";
+type ControlState = { mode: ControlMode; overlay: boolean };
+
+let boundSend: SendFn | null = null;
+let controlState: ControlState = { mode: "editor", overlay: true };
+const controlSubs = new Set<() => void>();
+
+function bindRemoteSend(fn: SendFn | null) {
+  boundSend = fn;
+}
+
+export function remoteViewSend(payload: Record<string, unknown>) {
+  boundSend?.(payload);
+}
+
+function getControlState(): ControlState {
+  return controlState;
+}
+
+export function setRemoteViewControls(patch: Partial<ControlState>) {
+  controlState = { ...controlState, ...patch };
+  controlSubs.forEach((fn) => fn());
+}
+
+export function useRemoteViewControls(): ControlState {
+  return useSyncExternalStore(
+    (onChange) => {
+      controlSubs.add(onChange);
+      return () => controlSubs.delete(onChange);
+    },
+    getControlState,
+    getControlState,
+  );
+}
+
+const COMMANDS: { key: string; label: string }[] = [
+  { key: " ", label: "Space" },
+  { key: "f", label: "F" },
+  { key: "g", label: "G" },
+  { key: "Escape", label: "Esc" },
+];
+
+function useWindowViews(enabled: boolean): WindowViewRow[] {
+  const [rows, setRows] = useState<WindowViewRow[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    const api = getApi();
+    if (!api?.list_window_views) return;
+    let live = true;
+    const load = async () => {
+      try {
+        const next = await api.list_window_views();
+        if (live && Array.isArray(next)) setRows(next);
+      } catch {
+        if (live) setRows([]);
+      }
+    };
+    void load();
+    const id = window.setInterval(() => void load(), 4000);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, [enabled]);
+  return rows;
+}
+
+export function RemoteViewControls({ hwnd }: { hwnd: string }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const controls = useRemoteViewControls();
+  const rows = useWindowViews(isRemote() && !!hwnd);
+  const row = rows.find((r) => r.id === hwnd);
+  if (!isRemote() || !hwnd || row?.kind !== "uefn") return null;
+
+  const tap = (key: string) => {
+    remoteViewSend({ type: "keydown", key });
+    window.setTimeout(() => remoteViewSend({ type: "keyup", key }), 80);
+  };
+
+  return (
+    <div className="choice-dropdown choice-dropdown--compact remote-view-controls no-drag">
+      <button
+        ref={anchorRef}
+        type="button"
+        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Controls"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="choice-dropdown-trigger-copy">
+          <span className="choice-dropdown-trigger-label">Controls</span>
+        </span>
+        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
+          <Icons.ChevronDown />
+        </span>
+      </button>
+      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
+        <div className="plugin-header-menu-list" role="menu">
+          <button
+            type="button"
+            className={`plugin-header-menu-item${controls.mode === "editor" ? " is-active" : ""}`}
+            onClick={() => setRemoteViewControls({ mode: "editor" })}
+          >
+            Editor fly
+          </button>
+          <button
+            type="button"
+            className={`plugin-header-menu-item${controls.mode === "play" ? " is-active" : ""}`}
+            onClick={() => setRemoteViewControls({ mode: "play" })}
+          >
+            Play
+          </button>
+          <button
+            type="button"
+            className="plugin-header-menu-item"
+            onClick={() => setRemoteViewControls({ overlay: !controls.overlay })}
+          >
+            {controls.overlay ? "Hide sticks" : "Show sticks"}
+          </button>
+          {COMMANDS.map((cmd) => (
+            <button
+              key={cmd.key}
+              type="button"
+              className="plugin-header-menu-item"
+              onClick={() => tap(cmd.key)}
+            >
+              {cmd.label}
+            </button>
+          ))}
+        </div>
+      </DropdownPanel>
+    </div>
+  );
+}
 
 /**
  * Browser side of Remote View: WebRTC only. The tunnel WebSocket carries
@@ -256,6 +396,157 @@ function statsLabel(s: Stats): string {
   return parts.join(" · ");
 }
 
+function UefnStickPad({
+  className,
+  onChange,
+}: {
+  className: string;
+  onChange: (nx: number, ny: number, active: boolean) => void;
+}) {
+  const padRef = useRef<HTMLDivElement>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+
+  const update = (clientX: number, clientY: number, active: boolean) => {
+    const el = padRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const max = Math.max(1, r.width / 2);
+    let nx = (clientX - (r.left + r.width / 2)) / max;
+    let ny = (clientY - (r.top + r.height / 2)) / max;
+    const mag = Math.hypot(nx, ny);
+    if (mag > 1) {
+      nx /= mag;
+      ny /= mag;
+    }
+    setKnob({ x: nx, y: ny });
+    onChange(nx, ny, active);
+  };
+
+  const end = (ev: ReactPointerEvent<HTMLDivElement>) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setKnob({ x: 0, y: 0 });
+    onChange(0, 0, false);
+  };
+
+  return (
+    <div
+      ref={padRef}
+      className={className}
+      onPointerDown={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+        update(ev.clientX, ev.clientY, true);
+      }}
+      onPointerMove={(ev) => {
+        if (!ev.currentTarget.hasPointerCapture(ev.pointerId)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        update(ev.clientX, ev.clientY, true);
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+    >
+      <span className="remote-stick-knob" style={{ transform: `translate(${knob.x * 28}px, ${knob.y * 28}px)` }} />
+    </div>
+  );
+}
+
+function holdSend(send: SendFn, key: string, down: boolean) {
+  send({ type: down ? "keydown" : "keyup", key });
+}
+
+function UefnStickOverlay({ send, mode }: { send: SendFn; mode: ControlMode }) {
+  const moveHeld = useRef<string[]>([]);
+  const looking = useRef(false);
+
+  const releaseAll = useCallback(() => {
+    for (const key of moveHeld.current) send({ type: "keyup", key });
+    moveHeld.current = [];
+    if (looking.current) {
+      looking.current = false;
+      send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+    }
+  }, [send]);
+
+  useEffect(() => releaseAll, [releaseAll, mode]);
+
+  const onMove = (nx: number, ny: number, active: boolean) => {
+    const next = active ? stickMoveKeys(nx, ny) : [];
+    const diff = keyDiff(moveHeld.current, next);
+    moveHeld.current = next;
+    for (const key of diff.down) send({ type: "keydown", key });
+    for (const key of diff.up) send({ type: "keyup", key });
+  };
+
+  const onLook = (nx: number, ny: number, active: boolean) => {
+    if (active) {
+      if (!looking.current) {
+        looking.current = true;
+        send({ type: "down", x: 0.5, y: 0.5, button: 2 });
+      }
+      const point = stickLookPoint(nx, ny);
+      send({ type: "move", ...point, button: 2 });
+      return;
+    }
+    if (looking.current) {
+      looking.current = false;
+      send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+    }
+  };
+
+  return (
+    <div className="remote-sticks">
+      <UefnStickPad className="remote-stick remote-stick--left" onChange={onMove} />
+      <UefnStickPad className="remote-stick remote-stick--right" onChange={onLook} />
+      {mode === "editor" ? (
+        <div className="remote-stick-btns remote-stick-btns--left">
+          <button
+            type="button"
+            className="remote-stick-btn"
+            onPointerDown={(ev) => {
+              ev.preventDefault();
+              holdSend(send, "q", true);
+            }}
+            onPointerUp={() => holdSend(send, "q", false)}
+            onPointerCancel={() => holdSend(send, "q", false)}
+          >
+            Q
+          </button>
+          <button
+            type="button"
+            className="remote-stick-btn"
+            onPointerDown={(ev) => {
+              ev.preventDefault();
+              holdSend(send, "e", true);
+            }}
+            onPointerUp={() => holdSend(send, "e", false)}
+            onPointerCancel={() => holdSend(send, "e", false)}
+          >
+            E
+          </button>
+        </div>
+      ) : (
+        <div className="remote-stick-btns remote-stick-btns--right">
+          <button
+            type="button"
+            className="remote-stick-btn"
+            onPointerDown={(ev) => {
+              ev.preventDefault();
+              holdSend(send, " ", true);
+            }}
+            onPointerUp={() => holdSend(send, " ", false)}
+            onPointerCancel={() => holdSend(send, " ", false)}
+          >
+            Jump
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +557,20 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [attempt, setAttempt] = useState(0);
   const attemptRef = useRef(0);
+  const controls = useRemoteViewControls();
+  const rows = useWindowViews(!!hwnd);
+  const watchingUefn = rows.find((r) => r.id === hwnd)?.kind === "uefn";
+
+  const send = useCallback((payload: Record<string, unknown>) => {
+    const text = JSON.stringify(payload);
+    const dc = dcRef.current;
+    if (dc && dc.readyState === "open") {
+      dc.send(text);
+      return;
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
+  }, []);
 
   const retry = useCallback(() => {
     attemptRef.current += 1;
@@ -462,17 +767,13 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !hwnd || phase !== "live") return;
-    return attachInput(el, (payload) => {
-      const text = JSON.stringify(payload);
-      const dc = dcRef.current;
-      if (dc && dc.readyState === "open") {
-        dc.send(text);
-        return;
-      }
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
-    });
-  }, [hwnd, phase, attempt]);
+    return attachInput(el, send);
+  }, [hwnd, phase, attempt, send]);
+
+  useEffect(() => {
+    bindRemoteSend(phase === "live" ? send : null);
+    return () => bindRemoteSend(null);
+  }, [phase, send]);
 
   if (!hwnd) return null;
 
@@ -505,6 +806,9 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       ) : null}
       {phase === "live" && stats ? (
         <span className="remote-window-stats">{statsLabel(stats)}</span>
+      ) : null}
+      {phase === "live" && controls.overlay && watchingUefn ? (
+        <UefnStickOverlay send={send} mode={controls.mode} />
       ) : null}
     </div>
   );

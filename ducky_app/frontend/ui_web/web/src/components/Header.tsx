@@ -6,7 +6,8 @@ import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
 import { PluginSurfaceBoundary } from "../plugin-ui/PluginSurfaceBoundary";
-import { useAppHeaderActions } from "../contexts/AppHeaderActionsContext";
+import { useAppHeaderActions, useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
+import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
 import { useNavigationHistoryOptional } from "../navigation/NavigationHistoryContext";
 import { useRightRailOpen } from "../hooks/useRightRailOpen";
 import { useAppearance } from "../theme/AppearanceContext";
@@ -26,7 +27,7 @@ import {
 } from "../hooks/pluginHeaderActions";
 import { useUiTarget } from "../ui-targets/registry";
 import { DropdownPanel } from "./DropdownPanel";
-import { RemoteWindowSelect } from "./RemoteWindowView";
+import { RemoteViewControls, RemoteWindowSelect } from "./RemoteWindowView";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
 
 interface HeaderProps {
@@ -165,6 +166,100 @@ function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
               onPicked={() => setOpen(false)}
             />
           ))}
+        </div>
+      </DropdownPanel>
+    </div>
+  );
+}
+
+function HeaderToolsMenu({
+  canBack,
+  canForward,
+  onBack,
+  onForward,
+  showNav,
+  layoutTitle,
+  onCycleLayout,
+  sidebarEnabled,
+  rightTitle,
+  onToggleRight,
+  rightEnabled,
+  showWorkflow,
+  onCompile,
+  onPush,
+  canPush,
+  compileBusy,
+  onSearch,
+  onProblems,
+  onTerminal,
+  onLedger,
+}: {
+  canBack: boolean;
+  canForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
+  showNav: boolean;
+  layoutTitle: string;
+  onCycleLayout: () => void;
+  sidebarEnabled: boolean;
+  rightTitle: string;
+  onToggleRight: () => void;
+  rightEnabled: boolean;
+  showWorkflow: boolean;
+  onCompile?: () => void;
+  onPush?: () => void;
+  canPush?: boolean;
+  compileBusy?: boolean;
+  onSearch?: () => void;
+  onProblems?: () => void;
+  onTerminal?: () => void;
+  onLedger?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const item = (label: string, onClick?: () => void, disabled?: boolean) => (
+    <button
+      type="button"
+      className="plugin-header-menu-item"
+      disabled={disabled || !onClick}
+      onClick={() => {
+        onClick?.();
+        setOpen(false);
+      }}
+    >
+      <span className="plugin-header-menu-item-label">{label}</span>
+    </button>
+  );
+  return (
+    <div className="choice-dropdown choice-dropdown--compact header-tools-menu no-drag">
+      <button
+        ref={anchorRef}
+        type="button"
+        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Tools"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="choice-dropdown-trigger-copy">
+          <span className="choice-dropdown-trigger-label">Tools</span>
+        </span>
+        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
+          <Icons.ChevronDown />
+        </span>
+      </button>
+      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={200}>
+        <div className="plugin-header-menu-list" role="menu">
+          {showNav ? item("Back", onBack, !canBack) : null}
+          {showNav ? item("Forward", onForward, !canForward) : null}
+          {item(layoutTitle, sidebarEnabled ? onCycleLayout : undefined, !sidebarEnabled)}
+          {item(rightTitle, rightEnabled ? onToggleRight : undefined, !rightEnabled)}
+          {item("Search", onSearch)}
+          {showWorkflow ? item("Build Verse", onCompile, compileBusy) : null}
+          {showWorkflow && canPush ? item("Push Verse", onPush, compileBusy) : null}
+          {item("Problems", onProblems)}
+          {item("Terminal", onTerminal)}
+          {item("Ledger", onLedger)}
         </div>
       </DropdownPanel>
     </div>
@@ -315,7 +410,9 @@ export function Header({
     isSettingsOverlay,
     pluginContrib.header_buttons,
   ]);
-  const compactHeader = isRemote() || narrowHeader;
+  const compactHeader = narrowHeader;
+  const { setProblemsMenuOpen } = useProblemsMenuOpen();
+  const { openPalette } = useQuickOpenBridge();
   const pluginHeader = compactHeader ? (
     <PluginHeaderMenu buttons={pluginHeaderButtons} />
   ) : (
@@ -431,24 +528,61 @@ export function Header({
 
       {!isSettingsOverlay && !isFocus ? (
         <div className="app-header-center drag-region app-drag-surface">
-          {navButtons}
-          <button
-            type="button"
-            onClick={cycleLayoutMode}
-            className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--${layoutMode} ${sidebarEnabled ? "" : "is-disabled"}`}
-            title={layoutToggle.title}
-          >
-            <LayoutToggleIcon />
-          </button>
+          {compactHeader ? (
+            <HeaderToolsMenu
+              showNav={showNav}
+              canBack={!!nav?.canBack}
+              canForward={!!nav?.canForward}
+              onBack={() => nav?.back()}
+              onForward={() => nav?.forward()}
+              layoutTitle={layoutToggle.title}
+              onCycleLayout={cycleLayoutMode}
+              sidebarEnabled={sidebarEnabled}
+              rightTitle={rightRailToggle.title}
+              onToggleRight={toggleRightRail}
+              rightEnabled={rightSidebarEnabled}
+              showWorkflow={showWorkflow}
+              onCompile={workflowAction?.onCompile}
+              onPush={workflowAction?.onPush}
+              canPush={workflowAction?.canPush}
+              compileBusy={workflowAction?.busy || workflowAction?.buildState === 3}
+              onSearch={showQuickOpen ? () => openPalette("file") : undefined}
+              onProblems={problemsAction ? () => setProblemsMenuOpen(true) : undefined}
+              onTerminal={
+                terminalAction
+                  ? () => {
+                      const active = terminalAction.terminals.find((t) => t.active);
+                      if (active) terminalAction.onGotoTerminal(active.id);
+                      else terminalAction.onNewTerminal();
+                    }
+                  : undefined
+              }
+              onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
+            />
+          ) : (
+            <>
+              {navButtons}
+              <button
+                type="button"
+                onClick={cycleLayoutMode}
+                className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--${layoutMode} ${sidebarEnabled ? "" : "is-disabled"}`}
+                title={layoutToggle.title}
+              >
+                <LayoutToggleIcon />
+              </button>
+            </>
+          )}
           {showQuickOpen && !compactHeader ? <QuickOpenBar /> : null}
-          <button
-            type="button"
-            onClick={toggleRightRail}
-            className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
-            title={rightRailToggle.title}
-          >
-            <RightRailToggleIcon />
-          </button>
+          {compactHeader ? null : (
+            <button
+              type="button"
+              onClick={toggleRightRail}
+              className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
+              title={rightRailToggle.title}
+            >
+              <RightRailToggleIcon />
+            </button>
+          )}
           {pluginHeader}
         </div>
       ) : showQuickOpen ? (
@@ -526,7 +660,10 @@ export function Header({
         <div className="app-header-divider" />
 
         {isRemote() && onWatchWindowId ? (
-          <RemoteWindowSelect value={watchWindowId} onChange={onWatchWindowId} />
+          <>
+            <RemoteWindowSelect value={watchWindowId} onChange={onWatchWindowId} />
+            <RemoteViewControls hwnd={watchWindowId} />
+          </>
         ) : null}
 
         {isRemote() ? null : (

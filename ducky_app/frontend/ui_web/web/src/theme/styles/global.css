@@ -542,6 +542,10 @@ input, textarea, select, button {
 .plugin-header-menu-item.is-active {
   background: var(--tab-active, rgba(255, 255, 255, 0.06));
 }
+.plugin-header-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .plugin-header-menu-item-label {
   min-width: 0;
   overflow: hidden;
@@ -554,7 +558,8 @@ input, textarea, select, button {
   height: 16px;
   flex-shrink: 0;
 }
-.app-header--compact .app-header-nav {
+.app-header--compact .app-header-nav,
+.app-header--compact .app-header-editor-actions {
   display: none;
 }
 .app-header-main {
@@ -645,7 +650,7 @@ input, textarea, select, button {
   z-index: 1;
 }
 .app-header--remote {
-  padding-right: 64px;
+  padding-right: 40px;
 }
 .remote-window-select {
   display: flex;
@@ -723,6 +728,69 @@ input, textarea, select, button {
   border-radius: 4px;
   padding: 2px 6px;
   pointer-events: none;
+}
+.remote-view-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.remote-sticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.remote-stick {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 28px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  touch-action: none;
+}
+.remote-stick--left {
+  left: 16px;
+}
+.remote-stick--right {
+  right: 16px;
+}
+.remote-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.32);
+}
+.remote-stick-btns {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 128px;
+  display: flex;
+  gap: 8px;
+}
+.remote-stick-btns--left {
+  left: 16px;
+}
+.remote-stick-btns--right {
+  right: 16px;
+}
+.remote-stick-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  touch-action: none;
 }
 .app-header-trailing button {
   -webkit-app-region: no-drag;

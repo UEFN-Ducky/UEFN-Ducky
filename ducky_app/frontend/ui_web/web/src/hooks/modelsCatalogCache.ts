@@ -13,6 +13,7 @@ export interface CatalogModelRow {
   priceIn: number | null;
   priceOut: number | null;
   isLocal: boolean;
+  supportsThinkingEffort?: boolean | null;
 }
 
 let cachedModels: CatalogModelRow[] | null = null;
@@ -116,6 +117,7 @@ type ApiModelRow = {
   price_in?: number | null;
   price_out?: number | null;
   is_local?: boolean;
+  supports_thinking_effort?: boolean | null;
 };
 
 function applyDefaultFromSettings(defaultModel: string, agentModel: string) {
@@ -141,6 +143,8 @@ function mapApiRow(row: ApiModelRow, fallbackKey: string): CatalogModelRow {
     priceIn: row.price_in ?? null,
     priceOut: row.price_out ?? null,
     isLocal: !!row.is_local,
+    supportsThinkingEffort:
+      row.supports_thinking_effort == null ? null : !!row.supports_thinking_effort,
   };
 }
 

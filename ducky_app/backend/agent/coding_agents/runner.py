@@ -28,17 +28,23 @@ _HISTORY_PREFIX_MAX_CHARS = 6000
 
 
 def _thinking_env(agent_id: str, thinking_effort: str) -> dict[str, str]:
-    """Optional env from plugin ``register_coding_agent(thinking_env=…)``."""
+    """Host effort plus optional plugin ``register_coding_agent(thinking_env=…)``."""
+    from backend.agent.thinking_effort import normalize_thinking_effort
+
+    out: dict[str, str] = {
+        "DUCKY_THINKING_EFFORT": normalize_thinking_effort(thinking_effort),
+    }
     try:
         from backend.uefn_plugins.host import get_coding_agent_registration
 
         fn = (get_coding_agent_registration(agent_id) or {}).get("thinking_env")
         if callable(fn):
-            out = fn(thinking_effort)
-            return dict(out) if isinstance(out, dict) else {}
+            extra = fn(thinking_effort)
+            if isinstance(extra, dict):
+                out.update({str(k): str(v) for k, v in extra.items()})
     except Exception:
         pass
-    return {}
+    return out
 
 
 def _normalize_launch_model(agent_id: str, model: str) -> str:

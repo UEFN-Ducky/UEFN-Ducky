@@ -36,3 +36,37 @@ export function contentRect(
     height: h,
   };
 }
+
+export const STICK_DEADZONE = 0.28;
+
+/** nx/ny in -1..1 (right/down positive). Returns held WASD keys. */
+export function stickMoveKeys(nx: number, ny: number): string[] {
+  const mag = Math.hypot(nx, ny);
+  if (mag < STICK_DEADZONE) return [];
+  const keys: string[] = [];
+  if (ny < -STICK_DEADZONE) keys.push("w");
+  if (ny > STICK_DEADZONE) keys.push("s");
+  if (nx < -STICK_DEADZONE) keys.push("a");
+  if (nx > STICK_DEADZONE) keys.push("d");
+  return keys;
+}
+
+/** Look offset in normalized video space from a right-stick deflection. */
+export function stickLookPoint(nx: number, ny: number, scale = 0.16): { x: number; y: number } {
+  const mag = Math.hypot(nx, ny);
+  if (mag < STICK_DEADZONE) return { x: 0.5, y: 0.5 };
+  const t = (mag - STICK_DEADZONE) / (1 - STICK_DEADZONE);
+  return {
+    x: Math.min(1, Math.max(0, 0.5 + nx * t * scale)),
+    y: Math.min(1, Math.max(0, 0.5 + ny * t * scale)),
+  };
+}
+
+export function keyDiff(prev: string[], next: string[]): { down: string[]; up: string[] } {
+  const have = new Set(prev);
+  const want = new Set(next);
+  return {
+    down: next.filter((k) => !have.has(k)),
+    up: prev.filter((k) => !want.has(k)),
+  };
+}

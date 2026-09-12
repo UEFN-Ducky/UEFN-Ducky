@@ -161,6 +161,7 @@ def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any
                 "price_in": m.price_in,
                 "price_out": m.price_out,
                 "is_local": m.is_local,
+                "supports_thinking_effort": getattr(m, "supports_thinking_effort", None),
             }
         )
     return rows

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentRect, rankVideoCodec } from "./remoteWindowMath";
+import { contentRect, keyDiff, rankVideoCodec, stickLookPoint, stickMoveKeys } from "./remoteWindowMath";
 
 describe("rankVideoCodec", () => {
   it("prefers hardware-friendly H.264 profiles, then AV1, VP9, VP8", () => {
@@ -38,5 +38,25 @@ describe("contentRect", () => {
   it("returns the box itself before the video has dimensions", () => {
     const box = { left: 1, top: 2, width: 300, height: 200 };
     expect(contentRect(box, 0, 0)).toBe(box);
+  });
+});
+
+describe("stickMoveKeys", () => {
+  it("ignores the deadzone and maps WASD", () => {
+    expect(stickMoveKeys(0, 0)).toEqual([]);
+    expect(stickMoveKeys(0, -1)).toEqual(["w"]);
+    expect(stickMoveKeys(1, 0)).toEqual(["d"]);
+    expect(stickMoveKeys(-0.9, 0.9).sort()).toEqual(["a", "s"]);
+  });
+});
+
+describe("stickLookPoint / keyDiff", () => {
+  it("looks from center and diffs held keys", () => {
+    expect(stickLookPoint(0, 0)).toEqual({ x: 0.5, y: 0.5 });
+    const look = stickLookPoint(1, 0);
+    expect(look.x).toBeGreaterThan(0.5);
+    expect(look.y).toBe(0.5);
+    expect(keyDiff(["w"], ["w", "d"])).toEqual({ down: ["d"], up: [] });
+    expect(keyDiff(["w", "a"], ["d"])).toEqual({ down: ["d"], up: ["w", "a"] });
   });
 });
