@@ -116,9 +116,14 @@ describe("rich reply rendering", () => {
     );
     fireEvent.click(getByLabelText(/Verse file: ledger_full_test_device\.verse/i));
     expect(onOpenFile).toHaveBeenCalledWith("Content/Verse/ledger_full_test_device.verse", "ledger_full_test_device.verse");
-    fireEvent.mouseEnter(getByLabelText(/Field \/ label: EntryTrigger/i));
-    expect(container.querySelector(".rich-ref-tip-name")?.textContent).toBe("EntryTrigger");
-    expect(container.querySelector(".rich-ref-tip-hint")?.textContent).toMatch(/copies the name/i);
+    // The tooltip is portalled to document.body (0dec2e7) so it escapes the
+    // message list's overflow clipping — it is never inside `container`.
+    const chip = getByLabelText(/Field \/ label: EntryTrigger/i);
+    fireEvent.mouseEnter(chip);
+    expect(document.body.querySelector(".rich-ref-tip-name")?.textContent).toBe("EntryTrigger");
+    expect(document.body.querySelector(".rich-ref-tip-hint")?.textContent).toMatch(/copies the name/i);
+    fireEvent.mouseLeave(chip);
+    expect(document.body.querySelector(".rich-ref-tip")).toBeNull();
   });
 
   it("does not execute markup or unsafe links inside blocks", () => {

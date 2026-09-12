@@ -129,7 +129,7 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
       monacoRef.current = null;
     };
     // Remount when the fence language changes so Monaco gets a fresh model/grammar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- value sync is a separate effect
+
   }, [canMount, language, instanceId]);
 
   useEffect(() => {

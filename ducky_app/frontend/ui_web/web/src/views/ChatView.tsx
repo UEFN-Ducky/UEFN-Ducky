@@ -545,7 +545,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
         if (t.id !== want) remapTabId(t.id, want);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   // Cross-window tab registry: report our tabs; close local copies claimed by another

@@ -210,7 +210,7 @@ export const AskUserForm = memo(function AskUserForm({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers close over latest draft
+
   }, [captureKeys, question, draft, canSubmit, index, isLast]);
 
   if (!question) return null;

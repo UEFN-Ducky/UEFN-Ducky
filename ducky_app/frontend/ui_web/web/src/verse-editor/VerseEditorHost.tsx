@@ -444,7 +444,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
     };
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
 
   }, [path, projectRoot, appearanceReady]);
 

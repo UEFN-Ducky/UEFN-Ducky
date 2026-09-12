@@ -663,7 +663,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       heightsRef.current = [];
       ensureHeights(chunks.length);
       setWin(tailWindow(chunks.length));
-    }, [convId]); // eslint-disable-line react-hooks/exhaustive-deps -- reset only on chat switch
+    }, [convId]);  
 
     useLayoutEffect(() => {
       ensureHeights(chunks.length);

@@ -148,7 +148,7 @@ export function MiniVerseEditor({ value, onChange }: MiniVerseEditorProps) {
       monacoRef.current = null;
     };
     // Mount once per open; value sync handled separately.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [appearanceReady]);
 
   useEffect(() => {

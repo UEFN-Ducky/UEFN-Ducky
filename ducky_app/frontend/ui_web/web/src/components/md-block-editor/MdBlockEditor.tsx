@@ -272,7 +272,7 @@ export function MdBlockEditor({
         $convertFromMarkdownString(value || "", MD_TRANSFORMERS);
       },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only initial MD
+
     [],
   );
 
