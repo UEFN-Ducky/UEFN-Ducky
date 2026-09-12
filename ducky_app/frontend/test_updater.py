@@ -7,7 +7,34 @@ import tempfile
 import threading
 from pathlib import Path
 
+import pytest
+
 import frontend.updater as updater
+
+
+@pytest.fixture(autouse=True)
+def _never_exit_the_test_runner(request, monkeypatch):
+    """Keep apply_update()'s process-suicide timers out of the test process.
+
+    Both _shutdown_after_delay() and _exit_self_after_delay() arm a
+    threading.Timer that ends in os._exit(0). Armed inside a test, it fires
+    _SHUTDOWN_DELAY_S later — long after that test returned — and takes pytest
+    with it, from wherever the run had reached. Because os._exit(0) reports
+    success, the suite just stopped mid-line with exit code 0 and no summary,
+    which read as a mysterious crash rather than a test problem.
+
+    Neutralised for every test in this module: these tests assert what
+    apply_update *returns*, never that it kills the process. The calls are
+    recorded so a test can still check that a path armed one. A test that is
+    *about* the timers marks itself `real_exit_timers` and takes responsibility
+    for stubbing os._exit and threading.Timer itself.
+    """
+    if "real_exit_timers" in request.keywords:
+        return []
+    armed: list[str] = []
+    monkeypatch.setattr(updater, "_shutdown_after_delay", lambda: armed.append("shutdown"))
+    monkeypatch.setattr(updater, "_exit_self_after_delay", lambda: armed.append("exit_self"))
+    return armed
 
 
 def _reset_progress() -> None:
@@ -119,6 +146,7 @@ def test_silent_install_args_force_close() -> None:
     assert updater._silent_install_args("machine")[-1] == "/ALLUSERS"
 
 
+@pytest.mark.real_exit_timers
 def test_shutdown_after_delay_always_exits() -> None:
     """Stuck update lock: shutdown must os._exit even if process kill fails."""
     import os
@@ -433,7 +461,7 @@ def test_installer_url_allowed_https_anywhere_http_only_loopback() -> None:
     assert not updater.installer_url_allowed("")
 
 
-def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypatch) -> None:
+def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypatch, _never_exit_the_test_runner) -> None:
     """The exact path build/upgrade_proof/serve_update_feed.py exercises: feed
     override → update_available → download from loopback → sha256 → Setup
     launched. The "Setup" here is where.exe, which rejects the Inno switches and
@@ -496,10 +524,26 @@ def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypa
         monkeypatch.setattr("frontend.frozen_process.kill_uefn_ducky_processes", lambda include_self=False: None)
         assert sys.platform == "win32"
         _reset_progress()
+        armed = _never_exit_the_test_runner
         result = updater.apply_update()
-        # where.exe rejected /VERYSILENT… and exited non-zero: same as a declined UAC.
-        assert result["ok"] is False and result["stage"] == "installing"
-        assert "Installer did not finish" in str(result["error"])
+
+        # The launch outcome is a genuine race and both branches are correct.
+        # A per-user install does not wait() for Setup; it sleeps 0.25 s and asks
+        # whether the process is still alive. where.exe rejects the Inno switches
+        # and normally dies inside that window (a declined install, cache kept) —
+        # but on a loaded machine it has not been scheduled to exit yet, and the
+        # updater rightly reports the install as underway. Assert each branch
+        # precisely rather than pinning the one that happens to win when idle.
+        if result["ok"]:
+            assert result["stage"] == "restarting"
+            assert armed == ["shutdown"], "install underway must arm the panel shutdown"
+        else:
+            assert result["stage"] == "installing"
+            assert "Installer did not finish" in str(result["error"])
+            assert armed == [], "a declined install must not arm the shutdown"
+
+        # What this test is really for is deterministic: feed override →
+        # update_available → loopback download → sha256 → a usable cached Setup.
         dest = cache / "Setup-9.9.9.exe"
         assert dest.is_file() and dest.read_bytes() == data  # verified download kept for retry
         assert updater._cached_installer_usable(dest, digest)
