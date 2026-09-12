@@ -1093,6 +1093,14 @@
   flex-shrink: 0;
 }
 
+.general-tab-app-notes {
+  margin-top: 16px;
+}
+
+.general-tab-app-notes .ds-panel-title {
+  margin: 0 0 12px;
+}
+
 .general-tab-toggle-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);

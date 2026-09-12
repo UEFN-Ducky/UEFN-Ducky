@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from frontend.version_check import (
     absolute_installer_url,
+    extract_release_versions,
     is_remote_newer,
     parse_version_tuple,
     unwrap_collect_payload,
@@ -59,6 +60,24 @@ def test_absolute_installer_url() -> None:
     assert absolute_installer_url(None, base_url=base) is None
 
 
+def test_extract_release_versions() -> None:
+    rows = extract_release_versions(
+        {
+            "currentVersion": "1.2.45",
+            "releaseNotes": "latest",
+            "versions": [
+                {"version": "1.2.45", "changelog": "Effort dial", "created_at": "1"},
+                {"version": "1.2.44", "changelog": "Remote kick", "created_at": "2"},
+                {"version": "", "changelog": "skip"},
+            ],
+        }
+    )
+    assert [r["version"] for r in rows] == ["1.2.45", "1.2.44"]
+    assert rows[0]["changelog"] == "Effort dial"
+    fallback = extract_release_versions({"currentVersion": "1.2.40", "releaseNotes": "one"})
+    assert fallback == [{"version": "1.2.40", "changelog": "one", "created_at": None}]
+
+
 def test_update_channel_dev_blocks_store() -> None:
     from frontend.version_check import update_channel
 
@@ -73,5 +92,6 @@ if __name__ == "__main__":
     test_unwrap_collect_payload_nested()
     test_unwrap_flat_legacy()
     test_absolute_installer_url()
+    test_extract_release_versions()
     test_update_channel_dev_blocks_store()
     print("ok")

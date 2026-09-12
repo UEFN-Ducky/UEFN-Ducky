@@ -280,12 +280,16 @@ export function needsPurchase(item: DuckyOSStoreItemDto): boolean {
   return Boolean(item.paid) && item.owned !== true;
 }
 
-/** Patch notes shown per page on the Store detail pane. */
-export const PATCH_NOTES_PAGE_SIZE = 5;
-
 export function formatPatchDate(raw: string | null | undefined): string {
   const s = String(raw || "").trim();
   if (!s) return "";
+  if (/^\d{9,12}$/.test(s)) {
+    const n = Number(s);
+    const d = new Date(n < 1e12 ? n * 1000 : n);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+  }
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });

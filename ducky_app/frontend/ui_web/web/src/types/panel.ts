@@ -29,6 +29,7 @@ export interface AppUpdateStatus {
   installer_url: string | null;
   installer_sha256: string | null;
   release_notes: string | null;
+  versions?: DuckyOSStorePatchNote[];
   download_url: string;
   /** none | no_release | up_to_date | update_available | error */
   feed_status?: string;

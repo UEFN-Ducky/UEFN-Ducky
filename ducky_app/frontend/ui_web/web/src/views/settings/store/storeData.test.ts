@@ -13,7 +13,6 @@ import {
   pageCount,
   pageSlice,
   parsePageSizeChoice,
-  PATCH_NOTES_PAGE_SIZE,
   patchItemFromLocalPlugin,
   SCROLL_BATCH,
   sectionItems,
@@ -313,16 +312,10 @@ describe("patchItemFromLocalPlugin", () => {
   });
 });
 
-describe("patch notes paging", () => {
-  it("pages five notes at a time", () => {
-    const rows = Array.from({ length: 12 }, (_, i) => i + 1);
-    expect(pageCount(rows.length, PATCH_NOTES_PAGE_SIZE)).toBe(3);
-    expect(pageSlice(rows, 1, PATCH_NOTES_PAGE_SIZE)).toEqual([1, 2, 3, 4, 5]);
-    expect(pageSlice(rows, 3, PATCH_NOTES_PAGE_SIZE)).toEqual([11, 12]);
-  });
-
+describe("patch notes dates", () => {
   it("formats ISO dates and leaves junk alone", () => {
     expect(formatPatchDate("2026-09-09T19:57:33Z")).toMatch(/2026/);
+    expect(formatPatchDate("1757430000")).toMatch(/2025|2026/);
     expect(formatPatchDate("not-a-date")).toBe("not-a-date");
     expect(formatPatchDate("")).toBe("");
   });

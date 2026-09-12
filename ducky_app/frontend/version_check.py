@@ -80,6 +80,34 @@ def _extract_str(payload: dict[str, Any], key: str) -> str | None:
     return text or None
 
 
+def extract_release_versions(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Public patch-note rows from collect/app-version (`versions` or current notes)."""
+    raw = payload.get("versions")
+    out: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            ver = str(row.get("version") or "").strip()
+            if not ver:
+                continue
+            created = str(row.get("created_at") or "").strip()
+            out.append(
+                {
+                    "version": ver,
+                    "changelog": str(row.get("changelog") or row.get("notes") or "").strip(),
+                    "created_at": created or None,
+                }
+            )
+    if out:
+        return out
+    ver = _extract_remote_version(payload)
+    notes = _extract_str(payload, "releaseNotes") or _extract_str(payload, "notes")
+    if ver:
+        return [{"version": ver, "changelog": notes or "", "created_at": None}]
+    return []
+
+
 def unwrap_collect_payload(raw: dict[str, Any]) -> dict[str, Any]:
     """Extract the app-version object from a Store collect envelope."""
     if not isinstance(raw, dict):
@@ -181,30 +209,38 @@ def get_app_update_status() -> dict[str, Any]:
         "installer_url": None,
         "installer_sha256": None,
         "release_notes": None,
+        "versions": [],
         "download_url": download,
         # none | no_release | up_to_date | update_available | error
         "feed_status": "none",
         "error": None,
     }
 
-    # Only packaged Inno installs poll the Store for self-update.
+    payload, error = fetch_remote_payload()
+    if payload:
+        result["versions"] = extract_release_versions(payload)
+        result["release_notes"] = _extract_str(payload, "releaseNotes") or _extract_str(
+            payload, "notes"
+        )
+        remote = _extract_remote_version(payload)
+        if remote:
+            result["remote_version"] = remote
+
+    # Self-update installer fields stay installed-production only.
     if channel != "installed" or not is_packaged_runtime():
         return result
 
-    payload, error = fetch_remote_payload()
     if error or payload is None:
         result["feed_status"] = "error"
         result["error"] = error or "Empty version-check response"
         return result
 
-    remote = _extract_remote_version(payload)
+    remote = result.get("remote_version")
     if not remote:
-        # Feed is up; nothing published yet via uds_app_release.
         result["feed_status"] = "no_release"
         return result
 
-    result["remote_version"] = remote
-    if is_remote_newer(__version__, remote):
+    if is_remote_newer(__version__, str(remote)):
         result["feed_status"] = "update_available"
         result["update_available"] = True
         result["installer_url"] = absolute_installer_url(
@@ -213,9 +249,6 @@ def get_app_update_status() -> dict[str, Any]:
         )
         result["installer_sha256"] = _extract_str(payload, "installerSha256") or _extract_str(
             payload, "sha256"
-        )
-        result["release_notes"] = _extract_str(payload, "releaseNotes") or _extract_str(
-            payload, "notes"
         )
     else:
         result["feed_status"] = "up_to_date"

@@ -11,6 +11,7 @@ import {
 } from "../../update/appUpdate";
 import { useUiTarget } from "../../ui-targets/registry";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
+import { PatchNotesList } from "./store/PatchNotesList";
 
 type AppActionPhase = "idle" | "checking" | "uninstalling";
 /** Result of the last manual update check. */
@@ -91,17 +92,19 @@ export function AppSection() {
     return next;
   };
 
-  /** Local version only — Store feed is checked when the user presses the button. */
+  /** Local version immediately; Store feed for patch notes (and update status). */
   useEffect(() => {
     return onApiReady(() => {
       const api = getApi();
-      if (!api || typeof api.get_version !== "function") return;
-      void api
-        .get_version()
-        .then((v) => {
-          if (typeof v === "string" && v.trim()) setLocalVersionOnly(v.trim());
-        })
-        .catch(() => {});
+      if (api && typeof api.get_version === "function") {
+        void api
+          .get_version()
+          .then((v) => {
+            if (typeof v === "string" && v.trim()) setLocalVersionOnly(v.trim());
+          })
+          .catch(() => {});
+      }
+      void refreshStatus();
     });
   }, []);
 
@@ -278,6 +281,10 @@ export function AppSection() {
       {errorText && !updating ? (
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
       ) : null}
+      <div className="general-tab-app-notes">
+        <h3 className="ds-panel-title">Patch notes</h3>
+        <PatchNotesList notes={status ? status.versions || [] : null} />
+      </div>
     </section>
   );
 }
