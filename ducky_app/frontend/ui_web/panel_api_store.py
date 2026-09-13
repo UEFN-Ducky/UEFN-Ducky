@@ -42,6 +42,15 @@ class PanelApiStoreMixin:
         except Exception:
             return get_status()
 
+    def duckyos_agent_caps(self) -> dict[str, Any]:
+        from frontend.duckyos_account import agent_caps_status, fetch_agent_caps
+
+        try:
+            fetch_agent_caps()
+        except Exception:
+            pass
+        return agent_caps_status()
+
     def duckyos_login(self, base_url: str = "", email: str = "", password: str = "") -> dict[str, Any]:
         """Start browser-based login (email/password args ignored — kept for API compat)."""
         from frontend.duckyos_account import DuckyOSAccountError, start_browser_login
@@ -153,13 +162,16 @@ class PanelApiStoreMixin:
         if s.remote_access:
             start_remote_tunnel()
         else:
+            from frontend.ui_web.panel_httpd import kick_all_remote
+
+            kick_all_remote()
             stop_remote_tunnel(deprovision=True)
         return self.remote_status()
 
     def remote_sign_out_all(self) -> dict[str, Any]:
-        from frontend.ui_web.panel_httpd import sign_out_all_remote
+        from frontend.ui_web.panel_httpd import kick_all_remote
 
-        sign_out_all_remote()
+        kick_all_remote()
         return self.remote_status()
 
     def duckyos_store_catalog(self) -> dict[str, Any]:
@@ -1073,6 +1085,13 @@ class PanelApiStoreMixin:
             result = set_mcp_server_enabled(server_id, bool(enabled))
         s = _pa.PanelSettings.load()
         invalidate_all_conversation_caches(s.uefn_project_root or None)
+        if result.get("ok"):
+            try:
+                from frontend.duckyos_account import publish_agent_catalog
+
+                publish_agent_catalog()
+            except Exception:
+                pass
         return result
 
     def test_mcp_plugin(self, plugin_id: str) -> dict[str, Any]:

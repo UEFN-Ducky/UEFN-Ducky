@@ -161,3 +161,32 @@ def test_new_viewer_kicks_old_one():
         assert httpd._window_viewers == []
     finally:
         httpd._window_viewers.clear()
+
+
+def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
+    host = "u-abc.app.uefnducky.org"
+    cookie = httpd.issue_remote_cookie(host)
+    header = f"{httpd._COOKIE_NAME}={cookie}"
+    assert httpd.request_is_authorized(host, "/", header)
+
+    class _Viewer(_FakeSock):
+        def shutdown(self, _how):
+            pass
+
+        def close(self):
+            pass
+
+    viewer = _Viewer()
+    httpd._window_viewers.clear()
+    httpd._window_viewers.append(viewer)
+    before = httpd._event_seq
+    try:
+        httpd.kick_all_remote()
+        assert not httpd.request_is_authorized(host, "/", header)
+        assert httpd.remote_session_count() == 0
+        assert any(b"kicked" in frame for frame in viewer.sent)
+        assert httpd._window_viewers == []
+        _cursor, events = httpd._poll_panel_events(before, timeout=0.0)
+        assert any(e.get("type") == "remote_gone" for e in events)
+    finally:
+        httpd._window_viewers.clear()

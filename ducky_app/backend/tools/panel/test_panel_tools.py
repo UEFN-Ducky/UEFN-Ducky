@@ -57,6 +57,17 @@ def test_apply_settings_patch_gated_by_master_switch(isolated_appdata):
     assert "error" in blocked
 
 
+def test_apply_settings_patch_cloud_ceiling(isolated_appdata, monkeypatch):
+    from backend.tools.panel.panel_settings import apply_settings_patch
+
+    monkeypatch.setattr(
+        "frontend.duckyos_account.effective_allow_settings_write",
+        lambda local: False,
+    )
+    blocked = apply_settings_patch({"tool_result_format": "json"})
+    assert "error" in blocked
+
+
 def test_ui_rpc_broker_submit_respond_wait():
     from frontend.ui_web import ui_rpc
 

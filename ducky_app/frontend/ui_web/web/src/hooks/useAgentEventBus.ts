@@ -118,6 +118,11 @@ function startHttpEventPoll() {
         if (Array.isArray(body.events)) {
           for (const event of body.events) {
             const kind = String(event?.type || "");
+            if (kind === "remote_gone" && window.parent !== window) {
+              window.parent.postMessage({ type: "ud-remote-gone" }, "*");
+              httpPollStarted = false;
+              return;
+            }
             if (PANEL_PUSH_TYPES.has(kind)) {
               try {
                 window.__uefnPanelPush?.(event as unknown as PanelPushEvent);

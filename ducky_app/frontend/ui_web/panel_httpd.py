@@ -192,6 +192,13 @@ def sign_out_all_remote() -> None:
         path.write_text(_cookie_secret.hex(), encoding="ascii")
 
 
+def kick_all_remote() -> None:
+    """Invalidate cookies, wake iframe pollers, and drop WebRTC viewers."""
+    sign_out_all_remote()
+    kick_other_viewers(None)
+    publish_panel_events([{"type": "remote_gone"}])
+
+
 def request_is_authorized(host_header: str, path: str, cookie: str | None) -> bool:
     host = (host_header or "").strip().lower()
     if host_is_local(host):

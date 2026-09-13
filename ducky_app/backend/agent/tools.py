@@ -95,19 +95,37 @@ def _hint_for_error(tool: str, text: str) -> str:
     return ""
 
 
-async def list_mcp_tools() -> list[Tool]:
+def apply_cloud_tool_deny(tools: list[Tool]) -> list[Tool]:
+    """Drop tools the signed-in site user denied. Missing blob = no deny."""
+    try:
+        from frontend.duckyos_account import cloud_denied_names
+
+        denied = cloud_denied_names()
+    except Exception:
+        return list(tools)
+    if not denied:
+        return list(tools)
+    return [t for t in tools if getattr(t, "name", "") not in denied]
+
+
+async def list_mcp_tools(*, apply_filters: bool = True) -> list[Tool]:
     from backend.agent.builtin_toolsets import filter_builtin_tools
     from backend.uefn_plugins.host import filter_uefn_plugin_tools
 
     mcp = _ensure_mcp()
-    core = filter_uefn_plugin_tools(filter_builtin_tools(await mcp.list_tools()))
+    core = await mcp.list_tools()
+    if apply_filters:
+        core = filter_uefn_plugin_tools(filter_builtin_tools(core))
     try:
         from backend.mcp_plugins.client_pool import get_plugin_pool
 
         plugin_tools = await get_plugin_pool().list_all_plugin_tools()
     except Exception:
         plugin_tools = []
-    return list(core) + plugin_tools
+    out = list(core) + plugin_tools
+    if apply_filters:
+        return apply_cloud_tool_deny(out)
+    return out
 
 
 # Params hidden from the LLM; the server-side default already does the right thing.

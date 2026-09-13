@@ -54,8 +54,10 @@ def apply_settings_patch(patch: dict[str, Any], *, dry_run: bool = False) -> dic
     if not isinstance(patch, dict) or not patch:
         return {"error": "patch must be a non-empty object"}
     settings = PanelSettings.load()
-    if not settings.allow_settings_write:
-        return {"error": "settings writes disabled (allow_settings_write is off — re-enable in Settings)"}
+    from frontend.duckyos_account import effective_allow_settings_write
+
+    if not effective_allow_settings_write(settings.allow_settings_write):
+        return {"error": "settings writes disabled (allow_settings_write is off — re-enable on uefnducky.org)"}
     allowed = settable_keys()
     unknown = [k for k in patch if k not in allowed]
     if unknown:

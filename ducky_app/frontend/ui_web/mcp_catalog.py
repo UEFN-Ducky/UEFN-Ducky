@@ -71,8 +71,8 @@ def _schema_parameters(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
     return params
 
 
-def build_mcp_catalog() -> dict[str, Any]:
-    tools = asyncio.run(list_mcp_tools())
+def build_mcp_catalog(*, apply_filters: bool = True) -> dict[str, Any]:
+    tools = asyncio.run(list_mcp_tools(apply_filters=apply_filters))
     by_cat = _tool_category_map()
     categories: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
@@ -80,9 +80,9 @@ def build_mcp_catalog() -> dict[str, Any]:
     plugin_destructive = plugin_destructive_tool_names()
     uefn_owner: dict[str, str] = {}
     try:
-        from backend.uefn_plugins.host import uefn_agent_tool_rows
+        from backend.uefn_plugins.host import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
 
-        for row in uefn_agent_tool_rows():
+        for row in list(uefn_agent_tool_rows()) + list(uefn_plugin_tool_group_rows()):
             pid = str(row.get("id") or "").strip()
             label = str(row.get("label") or pid).strip() or pid
             for name in row.get("tool_names") or []:
@@ -159,3 +159,68 @@ def build_mcp_catalog() -> dict[str, Any]:
         "categories": ordered_categories,
         "tools": rows,
     }
+
+
+def _merge_installed_plugin_tools(full: dict[str, Any]) -> None:
+    """Include Store-installed plugin tools even when the local toggle is off."""
+    try:
+        from backend.uefn_plugins.host import uefn_plugin_tool_group_rows
+        from backend.agent.toolsets.destructive import DESTRUCTIVE_TOOLS
+
+        rows = uefn_plugin_tool_group_rows()
+        destructive = set(DESTRUCTIVE_TOOLS)
+    except Exception:
+        return
+    have = {str(t.get("name")) for t in (full.get("tools") or []) if isinstance(t, dict)}
+    by_id = {str(c.get("id")): c for c in (full.get("categories") or []) if isinstance(c, dict)}
+    for row in rows:
+        label = str(row.get("label") or row.get("id") or "").strip()
+        if not label:
+            continue
+        slug = label.lower().replace(" ", "_")
+        cat_id = f"uefn_plugin_{slug}"
+        bucket = by_id.get(cat_id)
+        if bucket is None:
+            bucket = {"id": cat_id, "label": f"Desktop plugin: {label}", "tools": []}
+            full.setdefault("categories", []).append(bucket)
+            by_id[cat_id] = bucket
+        for name in row.get("tool_names") or []:
+            if not isinstance(name, str) or not name.strip() or name in have:
+                continue
+            have.add(name)
+            item = {
+                "name": name,
+                "description": name,
+                "destructive": name in destructive,
+            }
+            bucket.setdefault("tools", []).append(item)
+            full.setdefault("tools", []).append(item)
+
+
+def build_caps_catalog() -> dict[str, Any]:
+    """Slim grouped catalog for the website permission modal (no schemas)."""
+    full = build_mcp_catalog(apply_filters=False)
+    _merge_installed_plugin_tools(full)
+    categories = []
+    for cat in full.get("categories") or []:
+        if not isinstance(cat, dict):
+            continue
+        tools = []
+        for tool in cat.get("tools") or []:
+            if not isinstance(tool, dict) or not tool.get("name"):
+                continue
+            tools.append(
+                {
+                    "name": str(tool["name"]),
+                    "description": str(tool.get("description") or ""),
+                    "destructive": bool(tool.get("destructive")),
+                }
+            )
+        categories.append(
+            {
+                "id": str(cat.get("id") or ""),
+                "label": str(cat.get("label") or cat.get("id") or ""),
+                "tools": tools,
+            }
+        )
+    return {"categories": categories}

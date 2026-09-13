@@ -916,6 +916,11 @@ export interface DuckyOSAccountStatus {
   user_id?: string;
   roles?: string[];
   permissions?: string[];
+  agent_denied?: string[];
+  agent_settings?: {
+    allow_settings_write?: boolean;
+    allow_agent_clicks?: boolean;
+  };
   device_key_active?: boolean;
   device_key_error?: string;
   session_expired?: boolean;
@@ -1899,6 +1904,12 @@ export interface PanelApi {
     faultAction?: string;
   }): Promise<{ ok: boolean; path?: string; error?: string }>;
   duckyos_get_status(): Promise<DuckyOSAccountStatus>;
+  duckyos_agent_caps?(): Promise<{
+    ok?: boolean;
+    denied?: string[];
+    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean };
+    denied_count?: number;
+  }>;
   duckyos_login(base_url?: string): Promise<DuckyOSAccountStatus>;
   duckyos_cancel_login(): Promise<DuckyOSAccountStatus>;
   /** @deprecated Verification happens in the browser. */

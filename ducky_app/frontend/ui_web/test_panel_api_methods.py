@@ -119,6 +119,7 @@ _PUBLIC_METHODS = frozenset({
     'dock_focus_window_beside_main',
     'draft_skill_pack',
     'draft_subskill',
+    'duckyos_agent_caps',
     'duckyos_cancel_login',
     'duckyos_get_status',
     'duckyos_login',

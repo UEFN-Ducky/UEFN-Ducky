@@ -491,6 +491,8 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
         }
         _save_blob(blob)
         start_presence_heartbeat()
+        fetch_agent_caps(blob)
+        publish_agent_catalog()
         start_rpc_waiter()
         try:
             from frontend.remote_tunnel import start_remote_tunnel
@@ -551,7 +553,117 @@ def get_status() -> dict[str, Any]:
         "device_key_active": device_active if logged_in else False,
         "device_key_error": str(blob.get("device_key_error") or "") if logged_in else "",
         "auth_mode": "browser",
+        "agent_denied": list(blob.get("agent_denied") or []) if logged_in else [],
+        "agent_settings": dict(blob.get("agent_settings") or {}) if logged_in else {},
     }
+
+
+def cloud_denied_names() -> set[str]:
+    blob = _load_blob()
+    return {
+        str(name)
+        for name in (blob.get("agent_denied") or [])
+        if isinstance(name, str) and name.strip()
+    }
+
+
+def cloud_settings_ceiling() -> dict[str, bool] | None:
+    blob = _load_blob()
+    raw = blob.get("agent_settings")
+    if not isinstance(raw, dict) or not raw:
+        return None
+    return {
+        "allow_settings_write": bool(raw.get("allow_settings_write", True)),
+        "allow_agent_clicks": bool(raw.get("allow_agent_clicks", False)),
+    }
+
+
+def effective_allow_settings_write(local: bool) -> bool:
+    ceil = cloud_settings_ceiling()
+    if ceil is None:
+        return local
+    return local and ceil["allow_settings_write"]
+
+
+def effective_allow_agent_clicks(local: bool) -> bool:
+    ceil = cloud_settings_ceiling()
+    if ceil is None:
+        return local
+    return local and ceil["allow_agent_clicks"]
+
+
+def agent_caps_status() -> dict[str, Any]:
+    blob = _load_blob()
+    denied = [str(n) for n in (blob.get("agent_denied") or []) if isinstance(n, str)]
+    settings = blob.get("agent_settings") if isinstance(blob.get("agent_settings"), dict) else {}
+    return {
+        "ok": True,
+        "denied": denied,
+        "settings": settings,
+        "denied_count": len(denied),
+    }
+
+
+def _store_agent_caps(blob: dict[str, Any], row: dict[str, Any] | None) -> None:
+    if not isinstance(row, dict):
+        return
+    denied = row.get("denied")
+    if isinstance(denied, list):
+        blob["agent_denied"] = [str(n) for n in denied if isinstance(n, str) and n.strip()]
+    settings = row.get("settings")
+    if isinstance(settings, dict):
+        blob["agent_settings"] = {
+            "allow_settings_write": bool(settings.get("allow_settings_write", True)),
+            "allow_agent_clicks": bool(settings.get("allow_agent_clicks", False)),
+        }
+    _save_blob(blob)
+
+
+def fetch_agent_caps(blob: dict[str, Any] | None = None) -> dict[str, Any]:
+    blob = blob if blob is not None else _load_blob()
+    if not (blob.get("device_key") or blob.get("session_value")):
+        return blob
+    try:
+        row = _plugin_collect(
+            "uefn-ducky",
+            "agent-caps-get",
+            {},
+            unavailable_code="auth_unavailable",
+            unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+            error_code="agent_caps_failed",
+            timeout=12.0,
+        )
+    except Exception:
+        return blob
+    _store_agent_caps(blob, row)
+    return blob
+
+
+def publish_agent_catalog() -> None:
+    """Push the installed-tool catalog once (login / plugin toggle). Not a poll."""
+    blob = _load_blob()
+    if not blob.get("device_key"):
+        return
+    try:
+        from frontend.ui_web.mcp_catalog import build_caps_catalog
+
+        catalog = build_caps_catalog()
+    except Exception:
+        return
+    if not isinstance(catalog, dict) or not catalog.get("categories"):
+        return
+    try:
+        _plugin_collect(
+            "uefn-ducky",
+            "agent-caps-catalog",
+            {"catalog": catalog, "appVersion": __version__},
+            unavailable_code="auth_unavailable",
+            unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+            error_code="agent_caps_failed",
+            timeout=20.0,
+        )
+    except Exception:
+        return
 
 
 def refresh_status() -> dict[str, Any]:

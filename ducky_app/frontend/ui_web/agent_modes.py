@@ -1607,6 +1607,12 @@ def run_message(
         from backend.skills.store import set_active_disabled_packs, set_active_enabled_subskills
         from backend.uefn_plugins.host import set_active_uefn_agent_plugin_ids
 
+        try:
+            from frontend.duckyos_account import fetch_agent_caps
+
+            fetch_agent_caps()
+        except Exception:
+            pass
         set_active_plugin_ids(conv.mcp_plugins)
         set_active_builtin_groups(conv.builtin_toolsets)
         # None = follow Store enable (all enabled app-plugin tools). Explicit
