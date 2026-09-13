@@ -1108,7 +1108,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const handleDetachChatAt = useCallback(
     async (chat: { id: string; name: string }, at: { screenX: number; screenY: number }) => {
       const tabId = chatTabId(chat.id);
-      await openFocusAtPoint(tabId, chat.name, at.screenX, at.screenY);
+      if (!(await openFocusAtPoint(tabId, chat.name, at.screenX, at.screenY))) return;
       if (openTabsRef.current.some((t) => t.id === tabId)) closeTabInLayout(tabId);
     },
     [openFocusAtPoint, closeTabInLayout, openTabsRef],
@@ -1117,7 +1117,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const handleDetachFileAt = useCallback(
     async (path: string, name: string, at: { screenX: number; screenY: number }) => {
       const tabId = fileTabId(path.replace(/\\/g, "/"));
-      await openFocusAtPoint(tabId, name, at.screenX, at.screenY);
+      if (!(await openFocusAtPoint(tabId, name, at.screenX, at.screenY))) return;
       if (openTabsRef.current.some((t) => t.id === tabId)) closeTabInLayout(tabId);
     },
     [openFocusAtPoint, closeTabInLayout, openTabsRef],
@@ -1326,6 +1326,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
 
   return (
     <VerseEditorProvider
+      openTabs={openTabs}
       onOpenFile={openFileTab}
       onAgentOpenFile={openAgentFileTab}
       onFileSync={handleFileSync}

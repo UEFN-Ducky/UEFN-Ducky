@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { onApiReady } from "../hooks/onApiReady";
 import { useWatchProjectFile } from "../hooks/useWatchProjectFile";
 import { basename } from "../verse-editor/utils/isVerseFile";
@@ -16,12 +17,15 @@ export function ImageFilePane({ relativePath }: ImageFilePaneProps) {
   const [mime, setMime] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const beginRequest = useLatestRequest(relativePath);
   const [imgFailed, setImgFailed] = useState(false);
 
   const load = useCallback(
     (options?: { showLoading?: boolean }) => {
       const showLoading = options?.showLoading ?? true;
+      const isCurrent = beginRequest();
       return onApiReady((api) => {
+        if (!isCurrent()) return;
         if (showLoading) setLoading(true);
         setError(null);
         setImgFailed(false);
@@ -35,6 +39,7 @@ export function ImageFilePane({ relativePath }: ImageFilePaneProps) {
           }));
         void Promise.resolve(fetchUrl)
           .then((result) => {
+            if (!isCurrent()) return;
             const url = result.media_url || "";
             if (!url) {
               setMediaUrl(null);
@@ -47,15 +52,16 @@ export function ImageFilePane({ relativePath }: ImageFilePaneProps) {
             setMime(result.mime || "");
           })
           .catch((e: unknown) => {
+            if (!isCurrent()) return;
             setMediaUrl(null);
             setError(e instanceof Error ? e.message : "Failed to load image");
           })
           .finally(() => {
-            if (showLoading) setLoading(false);
+            if (isCurrent()) setLoading(false);
           });
       });
     },
-    [relativePath],
+    [relativePath, beginRequest],
   );
 
   useEffect(() => {

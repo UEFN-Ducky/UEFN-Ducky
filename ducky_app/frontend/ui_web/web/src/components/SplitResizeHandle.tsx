@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { pointerResize } from "../utils/pointerResize";
 
 interface SplitResizeHandleProps {
   onDrag: (delta: number) => void;
@@ -23,7 +24,8 @@ export function SplitResizeHandle({
   splitAxis,
 }: SplitResizeHandleProps) {
   const [dragging, setDragging] = useState(false);
-  const lastPos = useRef(0);
+  const cleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanupRef.current?.(), []);
   const onDragRef = useRef(onDrag);
   const onDragEndRef = useRef(onDragEnd);
   onDragRef.current = onDrag;
@@ -32,28 +34,18 @@ export function SplitResizeHandle({
   const isVertical = orientation === "vertical";
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-
-    const onPointerMove = (ev: PointerEvent) => {
-      const pos = isVertical ? ev.clientY : ev.clientX;
-      const delta = pos - lastPos.current;
-      lastPos.current = pos;
-      if (delta !== 0) onDragRef.current(delta);
-    };
-
-    const endDrag = () => {
-      setDragging(false);
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", endDrag);
-      onDragEndRef.current?.();
-    };
-
-    lastPos.current = isVertical ? e.clientY : e.clientX;
+    cleanupRef.current?.();
     setDragging(true);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
+    cleanupRef.current = pointerResize(e, (dx, dy) => {
+      const delta = isVertical ? dy : dx;
+      if (delta) onDragRef.current(delta);
+    }, () => {
+      setDragging(false);
+      onDragEndRef.current?.();
+      cleanupRef.current = null;
+    });
   };
 
   return (

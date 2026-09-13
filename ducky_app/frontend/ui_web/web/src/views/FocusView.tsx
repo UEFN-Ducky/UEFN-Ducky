@@ -315,7 +315,7 @@ function FocusViewContent({ focusId }: FocusViewProps) {
   const hasVisibleTabs = collectTabIds(layout).length > 0;
 
   return (
-    <VerseEditorProvider onOpenFile={handleOpenFile} onRequestSplit={handleRequestSplit} projectPath={projectPath}>
+    <VerseEditorProvider openTabs={openTabs} onOpenFile={handleOpenFile} onRequestSplit={handleRequestSplit} projectPath={projectPath}>
       <FocusViewMain
         openTabs={openTabs}
         layout={layout}

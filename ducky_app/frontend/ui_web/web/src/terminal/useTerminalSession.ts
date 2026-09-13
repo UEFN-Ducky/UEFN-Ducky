@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { frameBatch } from "../utils/frameBatch";
 import { openRemoteSocket } from "../remote/remoteSocket";
 
 import { Terminal } from "@xterm/xterm";
@@ -191,6 +192,8 @@ export function useTerminalSession(sessionId: string, wsUrl: string, visible: bo
 
 
 
+  const lastResizeRef = useRef<{ ws: WebSocket; cols: number; rows: number } | null>(null);
+
   const sendResize = useCallback(() => {
 
     const term = termRef.current;
@@ -204,6 +207,10 @@ export function useTerminalSession(sessionId: string, wsUrl: string, visible: bo
     const rows = term.rows;
 
     if (cols < 1 || rows < 1) return;
+
+    const last = lastResizeRef.current;
+    if (last?.ws === ws && last.cols === cols && last.rows === rows) return;
+    lastResizeRef.current = { ws, cols, rows };
 
     ws.send(JSON.stringify({ type: "resize", cols, rows } satisfies WsMessage));
 
@@ -469,11 +476,9 @@ export function useTerminalSession(sessionId: string, wsUrl: string, visible: bo
 
 
 
-    const ro = new ResizeObserver(() => {
+    const resizeBatch = frameBatch(fitAndResize);
 
-      fitAndResize();
-
-    });
+    const ro = new ResizeObserver(resizeBatch.schedule);
 
     ro.observe(container);
 
@@ -492,6 +497,8 @@ export function useTerminalSession(sessionId: string, wsUrl: string, visible: bo
       onData.dispose();
 
       ro.disconnect();
+
+      resizeBatch.cancel();
 
       const ws = wsRef.current;
 

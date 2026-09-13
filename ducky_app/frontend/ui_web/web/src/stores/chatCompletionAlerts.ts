@@ -1,4 +1,7 @@
-const alertChatIds = new Set<string>();
+// Copy-on-write: useSyncExternalStore compares snapshots with Object.is, so mutating
+// one Set in place never re-rendered subscribers (a dismissed alert's badge lingered
+// until something unrelated re-rendered the tab strip).
+let alertChatIds: ReadonlySet<string> = new Set<string>();
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -19,13 +22,15 @@ export function getCompletionAlertChatIds(): ReadonlySet<string> {
 export function setCompletionAlert(chatId: string) {
   const id = chatId.trim();
   if (!id || alertChatIds.has(id)) return;
-  alertChatIds.add(id);
+  alertChatIds = new Set([...alertChatIds, id]);
   emit();
 }
 
 export function dismissCompletionAlert(chatId: string) {
   const id = chatId.trim();
   if (!id || !alertChatIds.has(id)) return;
-  alertChatIds.delete(id);
+  const next = new Set(alertChatIds);
+  next.delete(id);
+  alertChatIds = next;
   emit();
 }

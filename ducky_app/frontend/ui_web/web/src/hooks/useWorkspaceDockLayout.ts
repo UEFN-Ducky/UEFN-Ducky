@@ -129,11 +129,15 @@ export function useWorkspaceDockLayout(windowId: string) {
 
   const resizeRailWidth = useCallback(
     (side: DockSide, width: number) => {
-      commit((prev) =>
-        side === "left" ? { ...prev, leftWidth: width } : { ...prev, rightWidth: width },
-      );
+      const prev = snapshotRef.current;
+      const key = side === "left" ? "leftWidth" : "rightWidth";
+      if (prev[key] === width) return;
+      const next = { ...prev, [key]: width };
+      // Live drag stays in memory; pointer release persists once, after its final delta.
+      snapshotRef.current = next;
+      setSnapshot(next);
     },
-    [commit],
+    [],
   );
 
   const persistRailWidth = useCallback(() => {

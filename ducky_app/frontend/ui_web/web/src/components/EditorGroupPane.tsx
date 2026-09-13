@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { EditorDropZone, EditorGroup, EditorTab } from "../types/panel";
 import { EditorTabs } from "./EditorTabs";
 import { FileEditorPane } from "./FileEditorPane";
@@ -62,7 +62,7 @@ interface EditorGroupPaneProps {
   onToggleGroupLock?: (groupId: string) => void;
 }
 
-export function EditorGroupPane({
+export const EditorGroupPane = memo(function EditorGroupPane({
   group,
   openTabs,
   isFocused,
@@ -395,4 +395,4 @@ export function EditorGroupPane({
       </div>
     </div>
   );
-}
+});

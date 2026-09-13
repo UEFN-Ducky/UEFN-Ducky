@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DuckyAvatar, DUCKY_AVATAR_SIZES } from "./ducky/DuckyAvatars";
 
+import { frameBatch } from "../utils/frameBatch";
+
 import { Icons } from "../icons/Icons";
 
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
+import { normPath } from "../verse-editor/utils/isVerseFile";
 import type { ChatTab, EditorTab } from "../types/panel";
 
 import { ChatTabHoverCard, resolveEditorChatTab } from "./editor/ChatTabHoverCard";
@@ -265,10 +268,10 @@ export function EditorTabs({
     window.requestAnimationFrame(() => onTabActivated?.(tab));
   };
 
+  // dirtyPaths keys are normPath (lowercased): a raw `Content/...` path never matched,
+  // so the ● and the Save / Save all menu items never reflected an edited file.
   const isDirty = (tab: EditorTab) =>
-    tab.kind === "file" &&
-    !!tab.path &&
-    !!dirtyPaths?.has(tab.path.replace(/\\/g, "/"));
+    tab.kind === "file" && !!tab.path && !!dirtyPaths?.has(normPath(tab.path));
 
   const hasDirtyTabs = tabs.some(isDirty);
 
@@ -319,22 +322,21 @@ export function EditorTabs({
     if (!el || tabOverflowMode !== "scrollbar") return;
 
     const update = () => {
-      setTabScroll({
-        scrollLeft: el.scrollLeft,
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-      });
+      const next = { scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
+      setTabScroll((prev) => prev.scrollLeft === next.scrollLeft && prev.scrollWidth === next.scrollWidth && prev.clientWidth === next.clientWidth ? prev : next);
     };
 
     update();
-    el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
+    const batch = frameBatch(update);
+    el.addEventListener("scroll", batch.schedule, { passive: true });
+    const ro = new ResizeObserver(batch.schedule);
     ro.observe(el);
     return () => {
-      el.removeEventListener("scroll", update);
+      el.removeEventListener("scroll", batch.schedule);
+      batch.cancel();
       ro.disconnect();
     };
-  }, [tabOverflowMode, tabs]);
+  }, [tabOverflowMode, tabs, tabScale]);
 
   const tabStripOverflows = tabScroll.scrollWidth > tabScroll.clientWidth + 1;
   const tabThumbWidth = tabStripOverflows

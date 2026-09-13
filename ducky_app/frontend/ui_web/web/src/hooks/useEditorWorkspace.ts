@@ -22,6 +22,9 @@ async function fileExists(path: string): Promise<boolean> {
   const api = getApi();
   if (!api) return false;
   try {
+    // A stat is enough — reading every restored file's content just to test for
+    // existence made a workspace with many tabs slow to come back.
+    if (typeof api.stat_project_file === "function") return (await api.stat_project_file(path)).exists;
     await api.read_project_file(path);
     return true;
   } catch {
@@ -142,12 +145,17 @@ export function useEditorWorkspace({
   const isRestoringRef = useRef(false);
   const stateRef = useRef({ openTabs, layout });
   const allChatsRef = useRef(allChats);
+  const projectSlugRef = useRef(projectSlug);
   stateRef.current = { openTabs, layout };
   allChatsRef.current = allChats;
+  projectSlugRef.current = projectSlug;
 
   const saveNow = useCallback(async () => {
     const api = getApi();
-    if (!api || isRestoringRef.current) return;
+    // Never persist before this project's snapshot has been applied (or deliberately
+    // skipped): the empty pre-restore state — or the previous project's tabs right
+    // after a switch — would overwrite the saved workspace.
+    if (!api || isRestoringRef.current || _restoredWorkspaceSlug !== projectSlugRef.current) return;
     const { openTabs: tabs, layout: lay } = stateRef.current;
     try {
       await api.save_editor_workspace(buildSnapshot(tabs, lay));
@@ -182,6 +190,7 @@ export function useEditorWorkspace({
     _restoredWorkspaceSlug = projectSlug;
 
     let cancelled = false;
+    let settled = false;
 
     const restore = async () => {
       isRestoringRef.current = true;
@@ -212,6 +221,7 @@ export function useEditorWorkspace({
         // Stomping main openTabs re-claims those ids and destroys the focus window.
         const applyFromDisk =
           switchingProject || stateRef.current.openTabs.length === 0;
+        settled = true;
         if (!applyFromDisk) return;
 
         initLayoutState(validated.openTabs, validated.layout);
@@ -256,6 +266,9 @@ export function useEditorWorkspace({
     return () => {
       cancelled = true;
       isRestoringRef.current = false;
+      // Cancelled before the snapshot was applied (remount, foldersLoaded flap): let
+      // the next run retry instead of treating this project as restored.
+      if (!settled) _restoredWorkspaceSlug = previousSlug;
     };
   }, [projectSlug, foldersLoaded, initLayoutState]);
 

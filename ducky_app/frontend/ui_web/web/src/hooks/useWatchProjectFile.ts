@@ -26,11 +26,13 @@ export function useWatchProjectFile(
     if (!enabled || !relativePath) return;
 
     let cancelled = false;
+    let inFlight = false;
     let stopPoll: (() => void) | undefined;
 
     const poll = async () => {
       const api = getApi();
-      if (!api?.stat_project_file || cancelled) return;
+      if (!api?.stat_project_file || cancelled || inFlight) return;
+      inFlight = true;
       try {
         const stat = await api.stat_project_file(relativePath);
         if (cancelled) return;
@@ -45,6 +47,8 @@ export function useWatchProjectFile(
         }
       } catch {
         // deleted or transient read error — next poll retries
+      } finally {
+        inFlight = false;
       }
     };
 

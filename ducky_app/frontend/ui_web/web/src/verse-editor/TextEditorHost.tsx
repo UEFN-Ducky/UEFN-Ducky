@@ -40,8 +40,9 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
-  const savedContentRef = useRef("");
+
   const {
+    fileSessions,
     setDirty,
     dirtyPaths,
     registerSaveHandler,
@@ -78,6 +79,7 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
 
     let cancelled = false;
     setReady(false);
+    setSaving(false);
     setError(null);
 
     void (async () => {
@@ -90,7 +92,7 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
       try {
         const { content, path: canonicalPath } = await readVerseFile(relativePath);
         if (cancelled) return;
-        savedContentRef.current = content;
+        
 
         const monacoApi = await setupMonaco();
         if (cancelled) return;
@@ -110,16 +112,23 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
 
         const absPath = toEditorAbsolutePath(projectRoot, canonicalPath);
         const uri = monacoApi.Uri.file(absPath);
-        const existingModel = monacoApi.editor.getModel(uri);
-        if (existingModel) {
-          try {
-            existingModel.dispose();
-          } catch {
-            /* already torn down */
-          }
+        const session = fileSessions.acquire(path, content, () => {
+          // Goto-definition/peek targets are created outside the session cache and Monaco
+          // refuses a second model at the same URI — replace such a stray model.
+          monacoApi.editor.getModel(uri)?.dispose();
+          return monacoApi.editor.createModel(content, language, uri);
+        });
+        const model = session.model;
+        if (model.getValue() !== content && session.savedContent !== content) {
+          // Disk changed while this tab was hidden and the buffer holds unsaved edits.
+          // The mtime watcher only starts at mount, so apply its policy here: disk
+          // wins, the edited buffer is recorded to history and stays one undo away.
+          await recordExternalFileChange(path, model.getValue(), content);
+          if (cancelled) return;
+          fileSessions.applyDiskContent(path, content);
         }
+        setDirty(path, fileSessions.isDirty(path));
 
-        const model = monacoApi.editor.createModel(content, language, uri);
         if (editorRef.current) {
           try {
             editorRef.current.dispose();
@@ -149,6 +158,7 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
         });
 
         editorRef.current = ed;
+        if (session.viewState) ed.restoreViewState(session.viewState);
 
         // Register in the shared editor registry so replay/follow-code can find this
         // buffer (VerseEditorHost does the same). Without it, replaying a non-verse
@@ -161,7 +171,7 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
 
         ed.onDidChangeModelContent(() => {
           if (locked) return;
-          setDirty(path, ed.getValue() !== savedContentRef.current);
+          setDirty(path, ed.getValue() !== fileSessions.savedContent(path));
         });
 
         ed.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => {
@@ -196,28 +206,22 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
       editorRef.current = null;
       if (ed) {
         clearQuickOpenEditor(ed, path);
-        const model = ed.getModel();
+        const session = fileSessions.get(path);
+        if (session && session.model === ed.getModel()) session.viewState = ed.saveViewState();
         try {
           ed.dispose();
         } catch {
           /* unmount race */
         }
-        if (model && !model.isDisposed()) {
-          try {
-            model.dispose();
-          } catch {
-            /* already disposed */
-          }
-        }
       }
     };
   }, [
+    fileSessions,
     relativePath,
     projectRoot,
     appearanceReady,
     language,
     locked,
-    minimapEnabled,
     path,
     setDirty,
     registerEditor,
@@ -239,27 +243,27 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
     });
   }, [cssVars, foundation, appearanceReady, zoom]);
 
+  useEffect(() => { editorRef.current?.updateOptions({ minimap: { enabled: minimapEnabled } }); }, [minimapEnabled, ready]);
+
   const handleSave = useCallback(async (): Promise<boolean> => {
     if (locked) return true;
     const ed = editorRef.current;
-    if (!ed || saving) return !dirty;
-    if (ed.getValue() === savedContentRef.current) {
+    if (!ed) return !dirty;
+    if (ed.getValue() === fileSessions.savedContent(path)) {
       setDirty(path, false);
       return true;
     }
     setSaving(true);
     try {
-      const content = ed.getValue();
-      await writeVerseFile(path, content);
-      savedContentRef.current = content;
-      setDirty(path, false);
-      return true;
+      const saved = await fileSessions.save(path, writeVerseFile);
+      setDirty(path, fileSessions.isDirty(path));
+      return saved;
     } catch {
       return false;
     } finally {
-      setSaving(false);
+      if (editorRef.current === ed) setSaving(false);
     }
-  }, [path, saving, setDirty, dirty, locked]);
+  }, [path, fileSessions, setDirty, dirty, locked]);
 
   handleSaveRef.current = handleSave;
 
@@ -269,34 +273,41 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
       if (!ed) return;
       const model = ed.getModel();
       if (!model || model.isDisposed()) return;
-      savedContentRef.current = content;
+      fileSessions.markSaved(path, content);
       if (ed.getValue() !== content) model.setValue(content);
       setDirty(path, false);
     },
-    [path, setDirty],
+    [path, fileSessions, setDirty],
   );
 
   const handleExternalFileChange = useCallback(async () => {
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model || model.isDisposed()) return;
+    const version = model.getVersionId();
+    const isCurrent = () => editorRef.current === ed && !model.isDisposed() && model.getVersionId() === version;
     try {
       const { content } = await readVerseFile(path);
-      const ed = editorRef.current;
-      if (!ed) return;
+      if (!isCurrent()) return;
       const current = ed.getValue();
       if (content === current) {
-        savedContentRef.current = content;
+        fileSessions.markSaved(path, content);
         setDirty(path, false);
         return;
       }
+      // Ignore the disk echo of our own save while the user keeps typing.
+      if (content === fileSessions.savedContent(path)) return;
       const previousContent =
-        current !== savedContentRef.current ? current : savedContentRef.current;
+        current !== fileSessions.savedContent(path) ? current : fileSessions.savedContent(path);
       await recordExternalFileChange(path, previousContent, content);
+      if (!isCurrent()) return;
       applyDiskContent(content);
     } catch (e) {
-      if (e instanceof Error && e.message.includes("Not a file")) {
+      if (isCurrent() && e instanceof Error && e.message.includes("Not a file")) {
         notifyMissingProjectFile(path);
       }
     }
-  }, [path, applyDiskContent, setDirty]);
+  }, [path, fileSessions, applyDiskContent, setDirty]);
 
   useWatchProjectFile(path, () => void handleExternalFileChange(), {
     enabled: ready && !error,

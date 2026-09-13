@@ -29,6 +29,12 @@ function registryTabIds(tabIds: string[]): string[] {
 
 let reportTimer: number | null = null;
 let lastReported = new Set<string>();
+/** Tabs open in THIS window right now (synchronous, unlike the debounced report). */
+let localOpenTabIds = new Set<string>();
+/** Opens apply in call order: bridge replies for rapid clicks can land out of order. */
+let openChain: Promise<void> = Promise.resolve();
+/** A registry lookup that stalls must not wedge every later open behind it. */
+const FOCUS_LOOKUP_TIMEOUT_MS = 2000;
 /** Recent-claim timestamps; only the last handful are ever consulted. */
 const MAX_CLAIMS = 64;
 const myClaimAt = new Map<string, number>();
@@ -64,6 +70,7 @@ export function releaseAllTabs(): void {
   if (reportTimer !== null) window.clearTimeout(reportTimer);
   reportTimer = null;
   lastReported = new Set();
+  localOpenTabIds = new Set();
   log("releasing all tabs (window closing)");
   void getApi()?.report_open_tabs(WINDOW_ID, []);
 }
@@ -72,6 +79,7 @@ export function releaseAllTabs(): void {
  * once: during the debounce window a click on the closed tab would still route
  * to this window instead of falling through to "open in main". */
 export function reportOpenTabsNow(tabIds: string[]): void {
+  localOpenTabIds = new Set(tabIds);
   const ids = registryTabIds(tabIds);
   if (reportTimer !== null) window.clearTimeout(reportTimer);
   reportTimer = null;
@@ -83,6 +91,7 @@ export function reportOpenTabsNow(tabIds: string[]): void {
  * appear are CLAIMED (covers drag-drop between windows, which adds tabs without an
  * explicit open call): other windows close their copy — one tab across the system. */
 export function reportOpenTabs(tabIds: string[]): void {
+  localOpenTabIds = new Set(tabIds);
   const ids = registryTabIds(tabIds);
   if (reportTimer !== null) window.clearTimeout(reportTimer);
   reportTimer = window.setTimeout(() => {
@@ -97,15 +106,32 @@ export function reportOpenTabs(tabIds: string[]): void {
 
 /** VS Code single-tab rule: if another window owns the tab, raise it there;
  * otherwise open locally and claim ownership (other windows close their copies). */
-export async function openOrFocusTab(tabId: string, openLocally: () => void): Promise<void> {
+export function openOrFocusTab(tabId: string, openLocally: () => void): Promise<void> {
+  // Already open here: activating it needs no registry round-trip (the backend
+  // excludes the requesting window anyway) and must not wait behind one.
+  if (localOpenTabIds.has(tabId)) {
+    log("open locally (already here)", tabId);
+    openLocally();
+    return Promise.resolve();
+  }
+  const run = openChain.then(() => focusElsewhereOrOpen(tabId, openLocally));
+  openChain = run.catch(() => undefined);
+  return run;
+}
+
+async function focusElsewhereOrOpen(tabId: string, openLocally: () => void): Promise<void> {
   const api = getApi();
   if (api) {
     try {
-      const res = await api.focus_tab(tabId, WINDOW_ID);
+      const res = await Promise.race([
+        api.focus_tab(tabId, WINDOW_ID),
+        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), FOCUS_LOOKUP_TIMEOUT_MS)),
+      ]);
       if (res?.ok) {
         log("focused in other window", { tabId, owner: res.window_id });
         return;
       }
+      if (res === null) log("focus_tab timed out — opening locally", tabId);
     } catch (e) {
       log("focus_tab failed — opening locally", { tabId, error: String(e) });
     }

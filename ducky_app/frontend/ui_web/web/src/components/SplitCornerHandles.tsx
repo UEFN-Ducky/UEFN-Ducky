@@ -1,4 +1,7 @@
-import { Fragment, useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+
+import { frameBatch } from "../utils/frameBatch";
+import { pointerResize } from "../utils/pointerResize";
 
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 
@@ -54,6 +57,8 @@ interface SplitCornerHandlesProps {
  * adjacent divider at once, VS Code style, with a 4-way cursor.
  */
 export function SplitCornerHandles({ containerRef, layout, onResizeMany }: SplitCornerHandlesProps) {
+  const cleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanupRef.current?.(), []);
   const scopeClass = useScopedClass("split-corner-handle");
   const [corners, setCorners] = useState<Corner[]>([]);
   const onResizeManyRef = useRef(onResizeMany);
@@ -77,7 +82,7 @@ export function SplitCornerHandles({ containerRef, layout, onResizeMany }: Split
   const recompute = useCallback(() => {
     const container = containerRef.current;
     if (!container) {
-      setCorners([]);
+      setCorners((prev) => prev.length ? [] : prev);
       return;
     }
     const rootRect = container.getBoundingClientRect();
@@ -93,7 +98,7 @@ export function SplitCornerHandles({ containerRef, layout, onResizeMany }: Split
     const verticals = handles.filter((h) => h.axis === "row");
     const horizontals = handles.filter((h) => h.axis === "column");
     if (verticals.length === 0 || horizontals.length === 0) {
-      setCorners([]);
+      setCorners((prev) => prev.length ? [] : prev);
       return;
     }
     const found = new Map<string, Corner>();
@@ -110,19 +115,33 @@ export function SplitCornerHandles({ containerRef, layout, onResizeMany }: Split
         found.set(key, { key, x: cx - rootRect.left, y: cy - rootRect.top, targets });
       }
     }
-    setCorners([...found.values()]);
+    const next = [...found.values()];
+    setCorners((prev) => {
+      const unchanged = prev.length === next.length && prev.every((corner, i) => {
+        const other = next[i]!;
+        return corner.key === other.key && corner.x === other.x && corner.y === other.y
+          && corner.targets.length === other.targets.length
+          && corner.targets.every((target, j) => {
+            const otherTarget = other.targets[j]!;
+            return target.splitId === otherTarget.splitId
+              && target.childIndex === otherTarget.childIndex && target.axis === otherTarget.axis;
+          });
+      });
+      return unchanged ? prev : next;
+    });
   }, [containerRef]);
 
   useLayoutEffect(() => {
     recompute();
-  }, [recompute, layout]);
+  }, [recompute, layout.root]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => recompute());
+    const batch = frameBatch(recompute);
+    const observer = new ResizeObserver(batch.schedule);
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); batch.cancel(); };
   }, [containerRef, recompute]);
 
   const setCornerHover = useCallback(
@@ -137,36 +156,24 @@ export function SplitCornerHandles({ containerRef, layout, onResizeMany }: Split
     e.preventDefault();
     e.stopPropagation();
 
+    cleanupRef.current?.();
     const targets = corner.targets;
     const highlighted = getHandleEls(targets);
     for (const el of highlighted) el.classList.add("is-corner-hover");
+    const previousCursor = document.body.style.cursor;
     document.body.style.cursor = "all-scroll";
 
-    let lastX = e.clientX;
-    let lastY = e.clientY;
-
-    const onPointerMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - lastX;
-      const dy = ev.clientY - lastY;
-      lastX = ev.clientX;
-      lastY = ev.clientY;
+    const reset = () => {
+      document.body.style.cursor = previousCursor;
+      for (const el of highlighted) el.classList.remove("is-corner-hover");
+    };
+    const stop = pointerResize(e, (dx, dy) => {
       const ops = targets
         .map((t) => ({ ...t, deltaPx: t.axis === "row" ? dx : dy }))
         .filter((op) => op.deltaPx !== 0);
       if (ops.length) onResizeManyRef.current(ops);
-    };
-
-    const endDrag = () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", endDrag);
-      document.body.style.cursor = "";
-      for (const el of highlighted) el.classList.remove("is-corner-hover");
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
+    }, () => { reset(); cleanupRef.current = null; });
+    cleanupRef.current = () => { stop(); reset(); };
   };
 
   return (

@@ -18,7 +18,9 @@ import {
 
 } from "react";
 
-import type { FileEditData } from "../types/panel";
+import { FileEditorSessions } from "./fileEditorSessions";
+import { writeVerseFile } from "./api/verseEditorApi";
+import type { FileEditData, EditorTab } from "../types/panel";
 import { checkFileAfterAgentWrite } from "./diagnostics/checkFileAfterAgentWrite";
 import { EditorActionQueue } from "./queue/EditorActionQueue";
 import { ReplayController } from "./replay/ReplayController";
@@ -48,6 +50,7 @@ export interface HistoryPreviewState {
 
 
 interface VerseEditorContextValue {
+  fileSessions: FileEditorSessions;
 
   queue: EditorActionQueue;
 
@@ -156,6 +159,8 @@ interface VerseEditorProviderProps {
 
   children: ReactNode;
 
+  openTabs?: EditorTab[];
+
   onOpenFile: (path: string, name: string, options?: { activate?: boolean }) => void;
 
   /** Queue (agent follow-code) opens only — user opens via openFileAt keep onOpenFile. */
@@ -175,6 +180,8 @@ export function VerseEditorProvider({
 
   children,
 
+  openTabs,
+
   onOpenFile,
 
   onAgentOpenFile,
@@ -187,7 +194,24 @@ export function VerseEditorProvider({
 
 }: VerseEditorProviderProps) {
 
+  const fileSessions = useMemo(() => new FileEditorSessions(), [projectPath]);
+  const fileSessionsRef = useRef(fileSessions);
+  fileSessionsRef.current = fileSessions;
+  useEffect(() => () => fileSessions.dispose(), [fileSessions]);
+
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(() => new Set());
+
+  // Models live exactly as long as their file tab: closing a tab (in any group) frees
+  // its model and clears its dirty mark.
+  useEffect(() => {
+    if (!openTabs) return;
+    const paths = new Set(openTabs.filter((tab) => tab.kind === "file" && tab.path).map((tab) => normPath(tab.path!)));
+    fileSessions.retain(paths);
+    setDirtyPaths((prev) => {
+      const next = new Set([...prev].filter((path) => paths.has(path)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [openTabs, fileSessions]);
 
   const [playbackLocked, setPlaybackLocked] = useState(false);
 
@@ -320,7 +344,10 @@ export function VerseEditorProvider({
 
         onMarkSaved: (path, content) => {
           const bridge = editorBridgesRef.current.get(normPath(path));
-          bridge?.markSaved?.(content);
+          if (bridge) bridge.markSaved?.(content);
+          // Open but hidden tab: no editor to receive the agent's text, so the retained
+          // model must take it or re-activating would show (and later save) stale text.
+          else fileSessionsRef.current.applyDiskContent(path, content);
           setDirty(path, false);
         },
 
@@ -400,9 +427,16 @@ export function VerseEditorProvider({
 
     if (handler) return handler();
 
+    if (fileSessions.get(key)) {
+      try {
+        const saved = await fileSessions.save(key, writeVerseFile);
+        setDirty(key, fileSessions.isDirty(key));
+        return saved;
+      } catch { return false; }
+    }
     return !dirtyRef.current.has(key);
 
-  }, []);
+  }, [fileSessions, setDirty]);
 
 
 
@@ -468,8 +502,8 @@ export function VerseEditorProvider({
   );
 
   const getEditorContent = useCallback(
-    (path: string) => queue.getEditor(path)?.getModel()?.getValue(),
-    [queue],
+    (path: string) => queue.getEditor(path)?.getModel()?.getValue() ?? fileSessions.get(path)?.model.getValue(),
+    [queue, fileSessions],
   );
 
   const openFileAt = useCallback(
@@ -590,6 +624,8 @@ export function VerseEditorProvider({
 
     () => ({
 
+      fileSessions,
+
       queue,
 
       replayController,
@@ -649,6 +685,8 @@ export function VerseEditorProvider({
     }),
 
     [
+
+      fileSessions,
 
       queue,
 

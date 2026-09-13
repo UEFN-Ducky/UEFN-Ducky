@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   readLastSettingsSections,
   readLastSettingsTab,
@@ -244,7 +244,7 @@ interface SettingsViewProps {
   version?: string;
 }
 
-export function SettingsView({ version }: SettingsViewProps) {
+export const SettingsView = memo(function SettingsView({ version }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     () => readLastSettingsTab() || "General",
   );
@@ -596,25 +596,60 @@ export function SettingsView({ version }: SettingsViewProps) {
     route: "settings",
   });
 
-  const renderPluginTabBody = (tab: PluginSettingsTab) => {
-    const ui = (tab.ui || "").trim();
-    const Builtin = BUILTIN_SETTINGS_UI[ui];
-    if (Builtin) return <Builtin />;
-    const panel = parsePanelUi(ui);
-    if (panel && tab.plugin_id) {
+  // Keep expensive forms stable while resizing the rail or updating navigation badges.
+  const content = useMemo(() => {
+    const renderPluginTabBody = (tab: PluginSettingsTab) => {
+      const ui = (tab.ui || "").trim();
+      const Builtin = BUILTIN_SETTINGS_UI[ui];
+      if (Builtin) return <Builtin />;
+      const panel = parsePanelUi(ui);
+      if (panel && tab.plugin_id) {
+        return (
+          <div className="general-tab-shell plugin-settings-tab-shell">
+            <PluginSettingsSections tabId={tab.id} />
+            <PluginSettingsEmbed pluginId={tab.plugin_id} panelId={panel.panelId} />
+          </div>
+        );
+      }
       return (
-        <div className="general-tab-shell plugin-settings-tab-shell">
+        <div className="general-tab-shell">
           <PluginSettingsSections tabId={tab.id} />
-          <PluginSettingsEmbed pluginId={tab.plugin_id} panelId={panel.panelId} />
         </div>
       );
-    }
+    };
+
     return (
-      <div className="general-tab-shell">
-        <PluginSettingsSections tabId={tab.id} />
-      </div>
+      <>
+        {activeTab === "Support" && <SupportTab />}
+        {storeMounted ? (
+          <div
+            className="store-tab-host"
+            hidden={activeTab !== "Store"}
+            aria-hidden={activeTab !== "Store"}
+          >
+            <StoreTab />
+          </div>
+        ) : null}
+        {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
+        {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
+        {activeTab === "General" && generalSection === "log_errors" && (
+          <LogErrorsTab sectionTab={logErrorsSection} />
+        )}
+        {activeTab === "Duckies" && <DuckiesTab />}
+        {activeTab === "Plans" && <PlansTab sectionTab={plansSection} />}
+        {activeTab === "LLMs" && llmsSection === "llms" && <AgentTab />}
+        {activeTab === "LLMs" && (llmsSection === "skills" || llmsSection === "mcps") && (
+          <SkillsMcpTab sectionTab={llmsSection} />
+        )}
+        {activeTab === "LLMs" && llmsSection === "memory" && (
+          <MemoryTab sectionTab={memorySection} />
+        )}
+        {activeTab === "Appearance" && <AppearanceTab />}
+        {activeTab === "Audio" && <AudioTab sectionTab={audioSection} />}
+        {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
+      </>
     );
-  };
+  }, [activeTab, storeMounted, generalSection, logErrorsSection, plansSection, llmsSection, memorySection, audioSection, activePluginTab]);
 
   return (
     <div className="settings-view no-drag">
@@ -924,36 +959,10 @@ export function SettingsView({ version }: SettingsViewProps) {
           ) : null}
 
           <section ref={contentTargetRef} className="settings-view-content selectable-text no-drag">
-            {activeTab === "Support" && <SupportTab />}
-            {storeMounted ? (
-              <div
-                className="store-tab-host"
-                hidden={activeTab !== "Store"}
-                aria-hidden={activeTab !== "Store"}
-              >
-                <StoreTab />
-              </div>
-            ) : null}
-            {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
-            {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
-            {activeTab === "General" && generalSection === "log_errors" && (
-              <LogErrorsTab sectionTab={logErrorsSection} />
-            )}
-            {activeTab === "Duckies" && <DuckiesTab />}
-            {activeTab === "Plans" && <PlansTab sectionTab={plansSection} />}
-            {activeTab === "LLMs" && llmsSection === "llms" && <AgentTab />}
-            {activeTab === "LLMs" && (llmsSection === "skills" || llmsSection === "mcps") && (
-              <SkillsMcpTab sectionTab={llmsSection} />
-            )}
-            {activeTab === "LLMs" && llmsSection === "memory" && (
-              <MemoryTab sectionTab={memorySection} />
-            )}
-            {activeTab === "Appearance" && <AppearanceTab />}
-            {activeTab === "Audio" && <AudioTab sectionTab={audioSection} />}
-            {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
+            {content}
           </section>
         </CtrlWheelZoomRoot>
       </div>
     </div>
   );
-}
+});

@@ -79,6 +79,8 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       const rows = await api.load_messages(chatId);
       if (seq !== loadSeqRef.current) return; // a newer load superseded this one
       dispatch({ type: "loaded", rows });
+    } catch {
+      // Keep the cached conversation on transient bridge failures; a later reload retries.
     } finally {
       if (seq === loadSeqRef.current) setHydrated(true);
     }
@@ -101,6 +103,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   // is ready). A run in flight keeps its optimistic tail; loaded() merges.
   useEffect(() => {
     void load();
+    return () => { loadSeqRef.current += 1; };
   }, [load]);
 
   // Safety-net refresh when the pane (re)appears while idle and pinned to the

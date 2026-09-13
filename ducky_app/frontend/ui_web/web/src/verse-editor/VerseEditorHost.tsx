@@ -61,9 +61,10 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
 
-  const savedContentRef = useRef("");
+
 
   const {
+    fileSessions,
 
     registerEditor,
 
@@ -104,7 +105,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
   const [error, setError] = useState<string | null>(null);
 
-  const [saving, setSaving] = useState(false);
+
 
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -159,6 +160,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
     setReady(false);
 
+
     setError(null);
 
 
@@ -197,7 +199,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
         if (cancelled) return;
 
-        savedContentRef.current = content;
+        
 
 
 
@@ -228,17 +230,22 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
         const uri = monacoApi.Uri.file(absPath);
         verseLspLog("editor", "model uri", { absPath, uri: uri.toString() });
 
-        const existingModel = monacoApi.editor.getModel(uri);
-
-        if (existingModel) {
-          try {
-            existingModel.dispose();
-          } catch {
-            /* model already torn down */
-          }
+        const session = fileSessions.acquire(path, content, () => {
+          // Goto-definition/peek targets are created outside the session cache and Monaco
+          // refuses a second model at the same URI — replace such a stray model.
+          monacoApi.editor.getModel(uri)?.dispose();
+          return monacoApi.editor.createModel(content, "verse", uri);
+        });
+        const model = session.model;
+        if (model.getValue() !== content && session.savedContent !== content) {
+          // Disk changed while this tab was hidden and the buffer holds unsaved edits.
+          // The mtime watcher only starts at mount, so apply its policy here: disk
+          // wins, the edited buffer is recorded to history and stays one undo away.
+          await recordExternalFileChange(path, model.getValue(), content);
+          if (cancelled) return;
+          fileSessions.applyDiskContent(path, content);
         }
-
-        const model = monacoApi.editor.createModel(content, "verse", uri);
+        setDirty(path, fileSessions.isDirty(path));
 
         if (editorRef.current) {
           try {
@@ -332,6 +339,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
         });
 
         editorRef.current = ed;
+        if (session.viewState) ed.restoreViewState(session.viewState);
 
         setEditorInstance(ed);
 
@@ -367,7 +375,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
           clearHistoryPreview(path);
 
-          setDirty(path, ed.getValue() !== savedContentRef.current);
+          setDirty(path, ed.getValue() !== fileSessions.savedContent(path));
 
         });
 
@@ -427,18 +435,12 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       setMonacoInstance(null);
 
       if (ed) {
-        const model = ed.getModel();
+        const session = fileSessions.get(path);
+        if (session && session.model === ed.getModel()) session.viewState = ed.saveViewState();
         try {
           ed.dispose();
         } catch {
           /* layout race during maximize / unmount */
-        }
-        if (model && !model.isDisposed()) {
-          try {
-            model.dispose();
-          } catch {
-            /* model already torn down */
-          }
         }
       }
 
@@ -446,7 +448,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
 
 
-  }, [path, projectRoot, appearanceReady]);
+  }, [path, projectRoot, appearanceReady, fileSessions]);
 
 
 
@@ -591,9 +593,9 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
     const ed = editorRef.current;
 
-    if (!ed || saving) return !dirty;
+    if (!ed) return !dirty;
 
-    if (ed.getValue() === savedContentRef.current) {
+    if (ed.getValue() === fileSessions.savedContent(path)) {
 
       setDirty(path, false);
 
@@ -601,19 +603,15 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
     }
 
-    setSaving(true);
+
 
     try {
 
-      const content = ed.getValue();
+      const saved = await fileSessions.save(path, writeVerseFile);
 
-      await writeVerseFile(path, content);
+      if (editorRef.current === ed) setSaveError(null);
 
-      savedContentRef.current = content;
-
-      setSaveError(null);
-
-      setDirty(path, false);
+      setDirty(path, fileSessions.isDirty(path));
 
       if (projectRoot && isVerseDiagnosticsAutoCheckEnabled()) {
         refreshOpenFileDiagnosticsNow(projectRoot, path);
@@ -621,7 +619,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
       bumpHistoryRefresh();
 
-      return true;
+      return saved;
 
     } catch (e) {
 
@@ -629,17 +627,13 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
       // A failed save must never be silent: surface it in a banner so the user knows
       // their buffer never reached disk and can retry / copy their work out.
-      setSaveError(e instanceof Error ? e.message : "Save failed");
+      if (editorRef.current === ed) setSaveError(e instanceof Error ? e.message : "Save failed");
 
       return false;
 
-    } finally {
-
-      setSaving(false);
-
     }
 
-  }, [path, saving, setDirty, dirty, projectRoot, locked]);
+  }, [path, fileSessions, setDirty, dirty, projectRoot, locked, bumpHistoryRefresh]);
 
 
 
@@ -651,25 +645,29 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       if (!ed) return;
       const model = ed.getModel();
       if (!model || model.isDisposed()) return;
-      savedContentRef.current = content;
+      fileSessions.markSaved(path, content);
       if (ed.getValue() !== content) {
         model.setValue(content);
       }
       setDirty(path, false);
       clearHistoryPreview(path);
     },
-    [path, setDirty, clearHistoryPreview],
+    [path, fileSessions, setDirty, clearHistoryPreview],
   );
 
   const handleExternalFileChange = useCallback(async () => {
     if (playbackLocked) return;
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model || model.isDisposed()) return;
+    const version = model.getVersionId();
+    const isCurrent = () => editorRef.current === ed && !model.isDisposed() && model.getVersionId() === version;
     try {
       const { content } = await readVerseFile(path);
-      const ed = editorRef.current;
-      if (!ed) return;
+      if (!isCurrent()) return;
       const current = ed.getValue();
       if (content === current) {
-        savedContentRef.current = content;
+        fileSessions.markSaved(path, content);
         setDirty(path, false);
         return;
       }
@@ -680,10 +678,11 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       // position) and wipe the undo stack, forcing a recovery from the history panel.
       // Leave the buffer alone; the next real external change (disk ≠ our last save) still
       // reloads below.
-      if (content === savedContentRef.current) return;
+      if (content === fileSessions.savedContent(path)) return;
       const previousContent =
-        current !== savedContentRef.current ? current : savedContentRef.current;
+        current !== fileSessions.savedContent(path) ? current : fileSessions.savedContent(path);
       await recordExternalFileChange(path, previousContent, content);
+      if (!isCurrent()) return;
       applyDiskContent(content);
       bumpHistoryRefresh();
     } catch (e) {
@@ -691,11 +690,11 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       // Deleted on disk while open (Explorer, another tool / project switch):
       // auto-close the tab — leaving it open keeps the LSP doc alive and
       // resurrects stale Problems in the top bar.
-      if (e instanceof Error && e.message.includes("Not a file")) {
+      if (isCurrent() && e instanceof Error && e.message.includes("Not a file")) {
         notifyMissingProjectFile(path);
       }
     }
-  }, [path, playbackLocked, applyDiskContent, setDirty]);
+  }, [path, fileSessions, playbackLocked, applyDiskContent, setDirty, bumpHistoryRefresh]);
 
   useWatchProjectFile(path, () => void handleExternalFileChange(), {
     enabled: ready && !error && !playbackLocked,
@@ -716,7 +715,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       model,
       lspReady,
       markSaved: (content: string) => {
-        savedContentRef.current = content;
+        fileSessions.markSaved(path, content);
         setDirty(path, false);
       },
     });

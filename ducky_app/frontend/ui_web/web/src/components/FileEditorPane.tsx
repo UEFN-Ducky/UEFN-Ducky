@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { onApiReady } from "../hooks/onApiReady";
 import {
   resolvePluginEditorForFile,
@@ -47,16 +48,20 @@ function ReadOnlyFilePane({ relativePath }: FileEditorPaneProps) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const beginRequest = useLatestRequest(relativePath);
 
   const loadContent = useCallback(
     (options?: { showLoading?: boolean }) => {
       const showLoading = options?.showLoading ?? true;
+      const isCurrent = beginRequest();
       return onApiReady((api) => {
+        if (!isCurrent()) return;
         if (showLoading) setLoading(true);
         setError(null);
         void api
           .read_project_file(relativePath)
           .then((result) => {
+            if (!isCurrent()) return;
             if (result.kind === "image" || result.media_url) {
               setError("This file is an image — reopen the tab to preview it.");
               setContent(null);
@@ -69,15 +74,16 @@ function ReadOnlyFilePane({ relativePath }: FileEditorPaneProps) {
             setContent(result.content);
           })
           .catch((e: unknown) => {
+            if (!isCurrent()) return;
             setContent(null);
             setError(e instanceof Error ? e.message : "Failed to read file");
           })
           .finally(() => {
-            if (showLoading) setLoading(false);
+            if (isCurrent()) setLoading(false);
           });
       });
     },
-    [relativePath],
+    [relativePath, beginRequest],
   );
 
   useEffect(() => {
@@ -135,7 +141,7 @@ function BinaryFilePane({
   const storeSlug = suggestStorePlugin || null;
 
   if (showRaw) {
-    return <ReadOnlyFilePane relativePath={relativePath} />;
+    return <ReadOnlyFilePane key={relativePath} relativePath={relativePath} />;
   }
 
   return (
@@ -226,23 +232,25 @@ function GuardedTextEditor({
     }
     return (
       <BinaryFilePane
+        key={relativePath}
         relativePath={relativePath}
         suggestStorePlugin={UASSET_PREVIEW_STORE_SLUG}
       />
     );
   }
   if (gate === "image") {
-    return <ImageFilePane relativePath={relativePath} />;
+    return <ImageFilePane key={relativePath} relativePath={relativePath} />;
   }
   if (gate === "audio") {
-    return <AudioFilePane relativePath={relativePath} />;
+    return <AudioFilePane key={relativePath} relativePath={relativePath} />;
   }
   if (gate === "video") {
-    return <VideoFilePane relativePath={relativePath} />;
+    return <VideoFilePane key={relativePath} relativePath={relativePath} />;
   }
   if (gate === "binary") {
     return (
       <BinaryFilePane
+        key={relativePath}
         relativePath={relativePath}
         suggestStorePlugin={
           wantsAssetPreviewPlugin(relativePath) ? UASSET_PREVIEW_STORE_SLUG : null
@@ -284,13 +292,13 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
 
   // Images / audio / video first — never open as hex/Monaco.
   if (kind === "image" || isImageFilePath(relativePath)) {
-    return <ImageFilePane relativePath={relativePath} />;
+    return <ImageFilePane key={relativePath} relativePath={relativePath} />;
   }
   if (kind === "audio" || isAudioFilePath(relativePath)) {
-    return <AudioFilePane relativePath={relativePath} />;
+    return <AudioFilePane key={relativePath} relativePath={relativePath} />;
   }
   if (kind === "video" || isVideoFilePath(relativePath)) {
-    return <VideoFilePane relativePath={relativePath} />;
+    return <VideoFilePane key={relativePath} relativePath={relativePath} />;
   }
 
   // 3D models / Unreal assets — plugin-owned when contributed; else binary.
@@ -307,6 +315,7 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
     }
     return (
       <BinaryFilePane
+        key={relativePath}
         relativePath={relativePath}
         suggestStorePlugin={UASSET_PREVIEW_STORE_SLUG}
       />
@@ -318,6 +327,7 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
     if (kind === "binary" || isBinaryProjectFile(relativePath)) {
       return (
         <BinaryFilePane
+          key={relativePath}
           relativePath={relativePath}
           suggestStorePlugin={
             wantsAssetPreviewPlugin(relativePath, kind) ? UASSET_PREVIEW_STORE_SLUG : null
@@ -329,7 +339,7 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
       return <DuckyParadeOverlay size="sm" label="Loading" />;
     }
     return (
-      <GuardedTextEditor relativePath={relativePath} projectRoot={projectRoot} readOnly={false} />
+      <GuardedTextEditor key={relativePath} relativePath={relativePath} projectRoot={projectRoot} readOnly={false} />
     );
   }
 
@@ -358,13 +368,14 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
       return <DuckyParadeOverlay size="sm" label="Loading" />;
     }
     return (
-      <GuardedTextEditor relativePath={relativePath} projectRoot={projectRoot} readOnly={readOnly} />
+      <GuardedTextEditor key={relativePath} relativePath={relativePath} projectRoot={projectRoot} readOnly={readOnly} />
     );
   }
 
   if (kind === "binary") {
     return (
       <BinaryFilePane
+        key={relativePath}
         relativePath={relativePath}
         suggestStorePlugin={
           wantsAssetPreviewPlugin(relativePath, kind) ? UASSET_PREVIEW_STORE_SLUG : null
@@ -373,5 +384,5 @@ export function FileEditorPane({ relativePath }: FileEditorPaneProps) {
     );
   }
 
-  return <ReadOnlyFilePane relativePath={relativePath} />;
+  return <ReadOnlyFilePane key={relativePath} relativePath={relativePath} />;
 }

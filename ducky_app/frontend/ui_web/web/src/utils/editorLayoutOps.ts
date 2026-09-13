@@ -206,6 +206,7 @@ export function removeTabFromLayout(layout: EditorLayoutState, tabId: string): E
 export function activateTab(layout: EditorLayoutState, groupId: string, tabId: string): EditorLayoutState {
   const group = layout.groups[groupId];
   if (!group?.tabIds.includes(tabId)) return layout;
+  if (group.activeTabId === tabId && layout.focusedGroupId === groupId) return layout;
   return {
     ...updateGroup(layout, groupId, { activeTabId: tabId }),
     focusedGroupId: groupId,
@@ -213,7 +214,7 @@ export function activateTab(layout: EditorLayoutState, groupId: string, tabId: s
 }
 
 export function focusGroup(layout: EditorLayoutState, groupId: string): EditorLayoutState {
-  if (!layout.groups[groupId]) return layout;
+  if (!layout.groups[groupId] || layout.focusedGroupId === groupId) return layout;
   return { ...layout, focusedGroupId: groupId };
 }
 
@@ -517,7 +518,8 @@ export function repairLayout(layout: EditorLayoutState): EditorLayoutState {
   const collapsed = collapseEmptyGroups(layout);
   const tabIds = collectTabIds(collapsed);
   if (tabIds.length === 0) return createEmptyLayout();
-  if (tabIds.length === 1) return createDefaultLayout(tabIds);
+  // Preserve the surviving group identity: changing it remounts the editor on close/reopen.
+  if (tabIds.length === 1 && collapsed.root.type === "group") return collapsed;
   const groupsInTree = collectGroupIdsInTree(collapsed.root);
   const nonEmptyInTree = [...groupsInTree].filter((id) => (collapsed.groups[id]?.tabIds.length ?? 0) > 0);
   if (nonEmptyInTree.length <= 1 && groupsInTree.size > 1) {

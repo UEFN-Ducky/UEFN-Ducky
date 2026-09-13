@@ -30,7 +30,8 @@ export function useSettingsSidebarWidth() {
   widthRef.current = width;
 
   const onResize = useCallback((deltaX: number) => {
-    setWidth((prev) => clampWidth(prev + deltaX));
+    widthRef.current = clampWidth(widthRef.current + deltaX);
+    setWidth(widthRef.current);
   }, []);
 
   const persistWidth = useCallback(() => {

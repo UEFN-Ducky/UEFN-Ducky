@@ -1,13 +1,14 @@
 import { useEffect, useState, type RefObject } from "react";
+import { frameBatch } from "../../utils/frameBatch";
 import type { editor } from "monaco-editor";
 
 const RESIZE_SETTLE_MS = 150;
 
-function safeLayout(ed: editor.IStandaloneCodeEditor | null): void {
+function safeLayout(ed: editor.IStandaloneCodeEditor | null, width: number, height: number): void {
   if (!ed) return;
   try {
     if (ed.getModel()?.isDisposed()) return;
-    ed.layout();
+    ed.layout({ width, height });
   } catch {
     /* editor disposed during window resize / tab switch */
   }
@@ -26,32 +27,34 @@ export function useMonacoEditorLayout(
     const container = containerRef.current;
     if (!container) return;
 
-    let rafId = 0;
+    let lastWidth = 0;
+    let lastHeight = 0;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const scheduleLayout = () => {
+    const batch = frameBatch(() => {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      // Hidden panes must not collapse their editor to zero; showing them triggers RO.
+      if (width <= 0 || height <= 0) {
+        lastWidth = lastHeight = 0;
+        return;
+      }
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width;
+      lastHeight = height;
       setIsResizing(true);
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        safeLayout(editorRef.current);
-      });
+      safeLayout(editorRef.current, width, height);
       if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => {
-        setIsResizing(false);
-        safeLayout(editorRef.current);
-      }, RESIZE_SETTLE_MS);
-    };
+      settleTimer = setTimeout(() => setIsResizing(false), RESIZE_SETTLE_MS);
+    });
 
-    const ro = new ResizeObserver(scheduleLayout);
+    const ro = new ResizeObserver(batch.schedule);
     ro.observe(container);
-    window.addEventListener("resize", scheduleLayout);
-    scheduleLayout();
+    batch.schedule();
 
     return () => {
       ro.disconnect();
-      window.removeEventListener("resize", scheduleLayout);
-      if (rafId) cancelAnimationFrame(rafId);
+      batch.cancel();
       if (settleTimer) clearTimeout(settleTimer);
     };
   }, [enabled, containerRef, editorRef]);
