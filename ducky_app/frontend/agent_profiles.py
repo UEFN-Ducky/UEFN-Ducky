@@ -120,6 +120,18 @@ def _patch_profile(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
     return _normalize_profile(merged, bundled=merged.get("kind") == "bundled")
 
 
+def _stored_hidden_list(settings: PanelSettings) -> list[str]:
+    """Hide-list as stored. [] means show every built-in. None means hide all.
+
+    Never use ``hidden or bundled_ids()`` — an empty list is meaningful
+    (show all) and is falsy in Python, so that form hides every sibling.
+    """
+    raw = settings.hidden_bundled_agent_profile_ids
+    if raw is None or not isinstance(raw, list):
+        return list(bundled_profile_ids())
+    return [str(x).strip() for x in raw if str(x).strip()]
+
+
 def _hidden_bundled_ids(settings: PanelSettings) -> frozenset[str]:
     raw = settings.hidden_bundled_agent_profile_ids
     if raw is None:
@@ -130,6 +142,41 @@ def _hidden_bundled_ids(settings: PanelSettings) -> frozenset[str]:
         # Legacy installs (pre opt-out default) keep built-ins visible.
         return frozenset()
     return frozenset(str(x).strip() for x in raw if str(x).strip())
+
+
+def _is_empty_or_poison(
+    hidden: frozenset[str], override_ids: frozenset[str], bundled: frozenset[str]
+) -> bool:
+    """True when ``hidden = list([] or bundled_ids())`` ran, then one save/delete.
+
+    Save-one: hidden == all bundled except the override keys.
+    Delete-one: hidden == all bundled.
+    """
+    if not bundled or not hidden:
+        return False
+    if hidden == bundled:
+        return True
+    return bool(override_ids) and hidden == (bundled - override_ids)
+
+
+def _heal_hidden_if_poisoned(settings: PanelSettings, *, persist: bool = True) -> PanelSettings:
+    raw = settings.hidden_bundled_agent_profile_ids
+    if not isinstance(raw, list) or not raw:
+        return settings
+    bundled = bundled_profile_ids()
+    hidden = frozenset(str(x).strip() for x in raw if str(x).strip())
+    overrides = settings.agent_profile_overrides if isinstance(settings.agent_profile_overrides, dict) else {}
+    override_ids = frozenset(str(k).strip() for k in overrides if str(k).strip())
+    if not _is_empty_or_poison(hidden, override_ids, bundled):
+        return settings
+    settings.hidden_bundled_agent_profile_ids = []
+    if persist:
+        try:
+            settings.validate()
+            settings.save()
+        except Exception:
+            pass
+    return settings
 
 
 def _merge_agent_profiles(
@@ -161,13 +208,13 @@ def list_bundled_agent_profile_templates() -> list[dict[str, Any]]:
 
 def list_agent_profiles(settings: PanelSettings | None = None) -> list[dict[str, Any]]:
     """Profiles shown in the settings library (built-ins hidden by default)."""
-    s = settings or PanelSettings.load()
+    s = _heal_hidden_if_poisoned(settings or PanelSettings.load())
     return _merge_agent_profiles(s, apply_hidden=True)
 
 
 def list_agent_profiles_available(settings: PanelSettings | None = None) -> list[dict[str, Any]]:
     """All bundled + custom profiles for spawn, delegation, and template pickers."""
-    s = settings or PanelSettings.load()
+    s = _heal_hidden_if_poisoned(settings or PanelSettings.load())
     return _merge_agent_profiles(s, apply_hidden=False)
 
 
@@ -251,7 +298,7 @@ def save_agent_profile_override(bundled_id: str, patch: dict[str, Any]) -> dict[
         if isinstance(merged_patch.get(_key), list):
             merged_patch[_key] = _dedup_preserve_order([str(x) for x in merged_patch[_key]])
     overrides[bid] = merged_patch
-    hidden = list(s.hidden_bundled_agent_profile_ids or bundled_profile_ids())
+    hidden = _stored_hidden_list(s)
     if bid in hidden:
         hidden = [x for x in hidden if x != bid]
     s.hidden_bundled_agent_profile_ids = hidden
@@ -268,7 +315,7 @@ def delete_agent_profile(profile_id: str) -> None:
     bundled_ids = bundled_profile_ids()
     s = PanelSettings.load()
     if pid in bundled_ids:
-        hidden = list(s.hidden_bundled_agent_profile_ids or bundled_profile_ids())
+        hidden = _stored_hidden_list(s)
         if pid not in hidden:
             hidden.append(pid)
         s.hidden_bundled_agent_profile_ids = hidden
