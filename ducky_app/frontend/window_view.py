@@ -301,23 +301,33 @@ def _foreground_hwnd() -> int:
 
 
 def _raise_window(hwnd: int) -> bool:
-    """Bring the target above every other window and give it input focus.
+    """Bring the target above every other window and, when safe, give it focus.
 
     getDisplayMedia captures the monitor's actual pixels, so a covered target
-    streams whatever sits on top. Windows blocks SetForegroundWindow from a
-    background process (foreground lock), so we (1) drop the lock timeout,
-    (2) tap ALT to satisfy the "user gesture" rule, (3) AttachThreadInput to
-    the current foreground thread, and (4) flip the window to TOPMOST then
-    back — the Z-order flip alone un-occludes it even when focus is denied.
+    streams whatever sits on top. The TOPMOST→NOTOPMOST flip (NOACTIVATE)
+    un-occludes it without touching focus. Focus is only stolen when the
+    foreground window is NOT ours: yanking activation away from the Ducky panel
+    sends input-synchronous WM_ACTIVATE/WM_KILLFOCUS into our UI thread while
+    it may be mid-COM-call into WebView2 — that is the AppHangXProcB1
+    (host ↔ msedgewebview2.exe) deadlock that froze the panel. Never
+    AttachThreadInput to the foreground thread for the same reason: a shared
+    input queue turns one stuck thread into two.
     """
     import ctypes
 
     user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
     if not user32.IsWindow(hwnd):
         return False
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+
+    flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+    user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)
+    user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
+
+    fg = int(user32.GetForegroundWindow() or 0)
+    if fg and _is_our_hwnd(fg):
+        return True
 
     # Drop the foreground-lock timeout so SetForegroundWindow is honored.
     try:
@@ -326,25 +336,13 @@ def _raise_window(hwnd: int) -> bool:
         user32.SystemParametersInfoW(0x2001, 0, ctypes.c_void_p(0), 0)  # SPI_SETFOREGROUNDLOCKTIMEOUT
     except Exception:
         prev = None
-
-    fg = int(user32.GetForegroundWindow() or 0)
-    our_tid = int(kernel32.GetCurrentThreadId() or 0)
-    fg_tid = int(user32.GetWindowThreadProcessId(fg, None) or 0) if fg else 0
-    attached = bool(our_tid and fg_tid and our_tid != fg_tid and user32.AttachThreadInput(our_tid, fg_tid, True))
     try:
         # ALT tap unlocks SetForegroundWindow for background callers.
         _send_key(0x12, down=True)
         _send_key(0x12, down=False)
-        # HWND_TOPMOST (-1) then HWND_NOTOPMOST (-2): raise Z-order without
-        # leaving the window permanently pinned above everything.
-        flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
-        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)
-        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)
         user32.BringWindowToTop(hwnd)
         user32.SetForegroundWindow(hwnd)
     finally:
-        if attached:
-            user32.AttachThreadInput(our_tid, fg_tid, False)
         if prev is not None:
             try:
                 user32.SystemParametersInfoW(0x2001, 0, ctypes.c_void_p(prev.value), 0)

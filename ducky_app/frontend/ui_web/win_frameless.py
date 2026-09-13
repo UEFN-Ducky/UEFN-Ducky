@@ -1023,6 +1023,28 @@ def install_sync_drag_bridge() -> None:
             return
         original = webview_util.js_bridge_call
 
+        class _QueuedReturn:
+            """pywebview returns every JS→Python result with a blocking
+            ``window.evaluate_js`` (Invoke + semaphore, no timeout) on a fresh
+            thread per call. When the WinForms UI thread stops pumping (WebView2
+            cross-process hang) those threads never exit — the panel hit ~5000
+            of them. Route returns through the per-window ui_dispatch worker
+            instead: one thread waits, the rest finish, and the ui_js_stall
+            watchdog records every thread stack for the post-mortem."""
+
+            __slots__ = ("_w",)
+
+            def __init__(self, w: object) -> None:
+                self._w = w
+
+            def __getattr__(self, name: str):
+                return getattr(self._w, name)
+
+            def evaluate_js(self, script: str, *_args, **_kwargs) -> None:
+                from frontend.ui_web.ui_dispatch import schedule_evaluate_js
+
+                schedule_evaluate_js(self._w, script)
+
         def patched(window: object, func_name: str, param: object, value_id: str) -> None:
             if func_name == "uefnNativeWindowMove":
                 sx = sy = None
@@ -1039,7 +1061,7 @@ def install_sync_drag_bridge() -> None:
                         window, param[0], double_click=len(param) > 1 and param[1] is True,
                     )
                 return
-            original(window, func_name, param, value_id)
+            original(_QueuedReturn(window), func_name, param, value_id)
 
         webview_util.js_bridge_call = patched
         # EdgeChrome imports the function by value before this hook is installed.

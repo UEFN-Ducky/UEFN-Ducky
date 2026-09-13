@@ -94,9 +94,49 @@ def test_bridge_patches_edgechromiums_import_and_preserves_origin_window(monkeyp
     edge.js_bridge_call(focus, "uefnNativeWindowMove", [-300, 20], "move")
     move.assert_called_once_with(focus, -300, 20)
     edge.js_bridge_call(focus, "get_version", [], "ordinary")
-    original.assert_called_once_with(focus, "get_version", [], "ordinary")
+    original.assert_called_once()
+    wrapped, name, args, vid = original.call_args.args
+    assert (name, args, vid) == ("get_version", [], "ordinary")
+    assert wrapped._w is focus, "pywebview still sees the real window's attributes"
     chrome.install_sync_drag_bridge()
     assert edge.js_bridge_call is webview.util.js_bridge_call
+
+
+def test_bridge_return_value_never_blocks_the_api_call_thread(monkeypatch):
+    """Regression for the 5000-thread pile-up: pywebview's per-call thread used
+    to sit in window.evaluate_js (Invoke + semaphore, no timeout) once the UI
+    thread stopped pumping. Returns go through ui_dispatch now."""
+    import threading
+
+    from frontend.ui_web import ui_dispatch
+
+    queued: list[tuple[object, str]] = []
+    monkeypatch.setattr(ui_dispatch, "schedule_evaluate_js", lambda w, js: queued.append((w, js)))
+    monkeypatch.setattr(chrome.sys, "platform", "win32")
+    monkeypatch.setattr(chrome.install_sync_drag_bridge, "_installed", False, raising=False)
+    import webview.util
+
+    monkeypatch.setattr(webview.util, "js_bridge_call", webview.util.js_bridge_call)
+
+    class _Window:
+        _functions: dict = {}
+        _js_api = SimpleNamespace(get_version=lambda: "1.2.3")
+
+        def evaluate_js(self, *_a, **_k):  # the blocking pywebview path — must not be hit
+            threading.Event().wait()
+
+    win = _Window()
+    chrome.install_sync_drag_bridge()
+    before = threading.active_count()
+    webview.util.js_bridge_call(win, "get_version", [], "v1")
+    for _ in range(300):
+        if queued and threading.active_count() <= before:
+            break
+        threading.Event().wait(0.01)
+    assert queued and queued[0][0] is win
+    assert '_returnValuesCallbacks["get_version"]["v1"]' in queued[0][1]
+    assert "1.2.3" in queued[0][1]
+    assert threading.active_count() <= before, "pywebview's per-call thread must exit, not wait on the UI thread"
 
 
 def test_minimums_are_per_window_and_scaled_to_current_monitor(native, monkeypatch):

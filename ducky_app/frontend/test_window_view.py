@@ -58,6 +58,42 @@ def test_bring_to_front_skips_when_already_foreground(monkeypatch) -> None:
     assert raised == [8]
 
 
+def test_raise_window_never_steals_focus_from_our_own_window(monkeypatch) -> None:
+    """Regression: SetForegroundWindow/AttachThreadInput against the Ducky panel
+    deadlocked the UI thread with WebView2 (WER AppHangXProcB1). Only the
+    NOACTIVATE z-order flip may run when we are the foreground window."""
+    import ctypes
+    import types
+
+    import frontend.window_view as wv
+
+    calls: list[str] = []
+
+    class _User32:
+        def __getattr__(self, name):
+            def _fn(*_a, **_k):
+                calls.append(name)
+                return 1 if name in ("IsWindow", "GetForegroundWindow") else 0
+
+            return _fn
+
+    fake = types.SimpleNamespace(user32=_User32(), kernel32=types.SimpleNamespace())
+    monkeypatch.setattr(ctypes, "windll", fake, raising=False)
+    monkeypatch.setattr(wv, "_send_key", lambda *a, **k: calls.append("SendInput"))
+
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: True)
+    assert wv._raise_window(5) is True
+    assert calls.count("SetWindowPos") == 2
+    assert "AttachThreadInput" not in calls
+    assert "SetForegroundWindow" not in calls and "SendInput" not in calls
+
+    calls.clear()
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    assert wv._raise_window(5) is True
+    assert "SetForegroundWindow" in calls
+    assert "AttachThreadInput" not in calls
+
+
 def test_window_box_empty_for_bad_hwnd() -> None:
     assert window_box(0) == {}
 
