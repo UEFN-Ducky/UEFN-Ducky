@@ -4,6 +4,10 @@ import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
 import { Icons } from "../icons/Icons";
 import type { ListenerStatus } from "../types/panel";
 
+function isFramedWebView(): boolean {
+  return typeof window !== "undefined" && !window.pywebview && window.parent !== window;
+}
+
 const MENU_WIDTH = 300;
 const MENU_GAP = 6;
 
@@ -160,6 +164,19 @@ export function ConnectionStatusDropdown({
           <span>Settings</span>
           {hasStoreUpdates ? <span className="store-update-dot store-update-dot--inline" /> : null}
         </button>
+        {isFramedWebView() ? (
+          <button
+            type="button"
+            className="connection-status-menu-settings"
+            onClick={() => {
+              setOpen(false);
+              window.parent.postMessage({ type: "ud-remote-close" }, "*");
+            }}
+          >
+            <Icons.Close />
+            <span>Close web view</span>
+          </button>
+        ) : null}
         <div className="connection-status-menu-head">Connections</div>
         <Row label="Ducky listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
         <Row label="UEFN MCP" detail={epicDetail} ok={epicOnline} />

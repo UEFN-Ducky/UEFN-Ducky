@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import type { ListenerStatus } from "../types/panel";
-
-afterEach(cleanup);
 
 const status: ListenerStatus = {
   online: false,
@@ -18,6 +16,11 @@ const status: ListenerStatus = {
 };
 
 describe("ConnectionStatusDropdown", () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as unknown as { parent?: Window }).parent;
+  });
+
   it("lists plugin MCP rows and puts Settings above Connections", () => {
     render(
       <ConnectionStatusDropdown
@@ -37,5 +40,24 @@ describe("ConnectionStatusDropdown", () => {
     const settings = dialog.querySelector(".connection-status-menu-settings");
     const head = dialog.querySelector(".connection-status-menu-head");
     expect(settings && head && settings.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Close web view")).toBeNull();
+  });
+
+  it("posts ud-remote-close from Close web view only when framed", () => {
+    const postMessage = vi.fn();
+    Object.defineProperty(window, "parent", {
+      configurable: true,
+      value: { postMessage },
+    });
+    render(
+      <ConnectionStatusDropdown
+        status={status}
+        projectName="ExampleProject1"
+        onOpenSettings={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /offline/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Close web view" }));
+    expect(postMessage).toHaveBeenCalledWith({ type: "ud-remote-close" }, "*");
   });
 });
