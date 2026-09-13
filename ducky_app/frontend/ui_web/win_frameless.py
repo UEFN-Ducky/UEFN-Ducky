@@ -923,6 +923,11 @@ def install_pywebview_chrome_patches() -> None:
         def on_webview_ready(self, sender, args):
             if args.IsSuccess:
                 try:
+                    # Powers -webkit-app-region: drag on our frameless window.
+                    # Measured 2026-09-12 and ruled out as the cause of the idle
+                    # read-op storm: toggling it off changed the host's idle read
+                    # rate by under 2% (39,327/s -> 38,605/s). Do not re-suspect it
+                    # without new evidence.
                     sender.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = True
                     from frontend.ui_web.webview_ship import apply_shipped_webview2_settings
 
