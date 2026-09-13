@@ -265,7 +265,7 @@ def rtc_signal(session_id: str, payload: object) -> bool:
         return False
 
 
-def publish_window_rtc(session_id: str, hwnd: int, payload: dict[str, object]) -> None:
+def publish_window_rtc(session_id: str, hwnd: object, payload: dict[str, object]) -> None:
     publish_panel_events(
         [
             {
@@ -312,7 +312,7 @@ def _forget_viewer(sock: object) -> None:
         _window_viewers[:] = [v for v in _window_viewers if v is not sock]
 
 
-def _serve_window_stream(sock: object, hwnd: int) -> None:
+def _serve_window_stream(sock: object, hwnd: object) -> None:
     """Relay SDP/ICE over the tunnel; video itself is P2P WebRTC.
 
     Blocks until the client drops or a newer viewer kicks it.
@@ -320,10 +320,12 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
     from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex, send_ws_pong
     from frontend.window_view import handle_stream_message, set_window_topmost
 
+    hid = int(hwnd) if str(hwnd).isdigit() else 0
     kick_other_viewers(sock)
     # Pin the watched window on top for the whole session so the screen
     # capture always sees it, even past an always-on-top occluder.
-    set_window_topmost(hwnd, True)
+    if hid:
+        set_window_topmost(hid, True)
     session_id = secrets.token_hex(8)
     register_window_rtc(session_id, sock)
     try:
@@ -350,7 +352,8 @@ def _serve_window_stream(sock: object, hwnd: int) -> None:
         _forget_viewer(sock)
         unregister_window_rtc(session_id)
         from frontend.window_view import set_window_topmost as _unpin
-        _unpin(hwnd, False)
+        if hid:
+            _unpin(hid, False)
         publish_window_rtc(session_id, hwnd, {"type": "rtc", "kind": "close"})
 
 
@@ -739,13 +742,12 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     return
                 if parsed.path == "/__window_stream":
                     query = parse_qs(parsed.query)
-                    try:
-                        hwnd = int((query.get("id") or ["0"])[0])
-                    except (TypeError, ValueError):
-                        hwnd = 0
+                    view_id = str((query.get("id") or [""])[0] or "").strip()
                     key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
                     upgrade = (self.headers.get("Upgrade") or "").lower()
-                    if hwnd <= 0 or upgrade != "websocket" or not key:
+                    hid = int(view_id) if view_id.isdigit() else 0
+                    ok_id = hid > 0 or view_id == "desktop" or view_id.startswith("monitor:")
+                    if not ok_id or upgrade != "websocket" or not key:
                         self.send_error(400)
                         return
                     from frontend.ui_web.terminal.ws_util import websocket_upgrade_response
@@ -753,7 +755,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.close_connection = True
                     self.connection.settimeout(None)
                     self.connection.sendall(websocket_upgrade_response(key))
-                    _serve_window_stream(self.connection, hwnd)
+                    _serve_window_stream(self.connection, view_id)
                     return
                 # Re-poll leg of a long UI request (require_click): the POST leg
                 # returned {pending, request_id} and the caller waits here until

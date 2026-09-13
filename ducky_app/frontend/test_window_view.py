@@ -7,6 +7,9 @@ from frontend.window_view import (
     map_norm_to_screen,
     window_box,
     window_fit_size,
+    _keep_window,
+    _screen_view_rows,
+    _view_rect,
     _vk_for_key,
 )
 
@@ -136,3 +139,71 @@ def test_bring_to_front_has_a_cooldown(monkeypatch) -> None:
     wv._LAST_RAISE[9] -= wv.RAISE_COOLDOWN_S + 1
     assert bring_to_front(9) is True
     assert raised == [9, 9]
+
+
+def test_keep_window_drops_shell_junk() -> None:
+    keep = dict(owned=False, toolwindow=False, cloaked=False, iconic=False, width=800, height=600)
+    assert not _keep_window(title="", **keep)
+    assert not _keep_window(title="Notes", owned=True, toolwindow=False, cloaked=False, iconic=False, width=800, height=600)
+    assert not _keep_window(title="Notes", owned=False, toolwindow=True, cloaked=False, iconic=False, width=800, height=600)
+    assert not _keep_window(title="Notes", owned=False, toolwindow=False, cloaked=True, iconic=False, width=800, height=600)
+    assert not _keep_window(title="Notes", owned=False, toolwindow=False, cloaked=False, iconic=False, width=1, height=1)
+    assert not _keep_window(title="Program Manager", **keep)
+    assert not _keep_window(title="DWM Notification Window", **keep)
+    assert _keep_window(title="Documents", **keep)
+    assert _keep_window(title="Notes", owned=False, toolwindow=False, cloaked=False, iconic=True, width=0, height=0)
+
+
+def test_screen_view_rows_single_and_multi() -> None:
+    assert _screen_view_rows([(0, 0, 1920, 1080)]) == [
+        {"id": "desktop", "title": "Entire desktop", "kind": "desktop"}
+    ]
+    rows = _screen_view_rows([(0, 0, 3840, 1080), (3840, 0, 1920, 1080)])
+    assert [r["id"] for r in rows] == ["desktop", "monitor:0", "monitor:1"]
+    assert rows[2]["title"] == "Display 2 (1920\u00d71080)"
+
+
+def test_view_rect_desktop_and_monitor() -> None:
+    desktop = (0, 0, 5760, 1080)
+    mons = [(0, 0, 3840, 1080), (3840, 0, 1920, 1080)]
+    assert _view_rect("desktop", desktop=desktop, monitors=mons) == (0, 0, 5760, 1080)
+    assert _view_rect("monitor:1", desktop=desktop, monitors=mons) == (3840, 0, 5760, 1080)
+    assert _view_rect("monitor:9", desktop=desktop, monitors=mons) is None
+
+
+def test_window_box_desktop_and_monitor(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_screen_metrics", lambda: (0, 0, 5760, 1080, 3840, 1080))
+    monkeypatch.setattr(wv, "_monitors", lambda: [(0, 0, 3840, 1080), (3840, 0, 1920, 1080)])
+    desk = window_box("desktop")
+    assert desk["left"] == 0 and desk["right"] == 5760 and desk["screen_w"] == 5760
+    mon = window_box("monitor:1")
+    assert mon["left"] == 3840 and mon["right"] == 5760 and mon["bottom"] == 1080
+    assert window_box("monitor:9") == {}
+
+
+def test_desktop_size_does_not_fit(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(wv, "fit_window", lambda *a: calls.append(a))
+    handle_stream_message("desktop", b'{"type":"size","w":800,"h":600}')
+    handle_stream_message("monitor:0", b'{"type":"size","w":800,"h":600}')
+    assert calls == []
+
+
+def test_desktop_pointer_skips_raise(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_screen_metrics", lambda: (0, 0, 5760, 1080, 3840, 1080))
+    monkeypatch.setattr(wv, "_monitors", lambda: [(0, 0, 3840, 1080), (3840, 0, 1920, 1080)])
+    boxes: list[object] = []
+    monkeypatch.setattr(wv, "_pointer_on_box", lambda box, *_a, **_k: boxes.append(box))
+    raised: list[int] = []
+    monkeypatch.setattr(wv, "bring_to_front", lambda h: raised.append(h))
+    handle_stream_message("desktop", b'{"type":"down","x":0.5,"y":0.5}')
+    assert boxes == [(0, 0, 5760, 1080)]
+    assert raised == []

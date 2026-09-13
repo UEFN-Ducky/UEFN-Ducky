@@ -16,7 +16,9 @@ import os
 import sys
 from typing import Any
 
-_KIND_ORDER = {"uefn": 0, "blender": 1, "app": 2}
+_KIND_ORDER = {"desktop": 0, "monitor": 1, "uefn": 2, "blender": 3, "app": 4}
+_JUNK_TITLES = frozenset({"Program Manager", "DWM Notification Window", "Windows Input Experience"})
+_MIN_VIEW = 100
 
 
 def window_fit_size(
@@ -49,28 +51,81 @@ def kind_for(title: str, exe: str = "") -> str:
     return "app"
 
 
+def _keep_window(
+    *,
+    title: str,
+    owned: bool,
+    toolwindow: bool,
+    cloaked: bool,
+    iconic: bool,
+    width: int,
+    height: int,
+) -> bool:
+    """Alt-Tab-ish: titled, unowned, not a tool/cloaked/tiny shell HWND."""
+    if not title or title in _JUNK_TITLES:
+        return False
+    if owned or toolwindow or cloaked:
+        return False
+    if not iconic and (width < _MIN_VIEW or height < _MIN_VIEW):
+        return False
+    return True
+
+
+def _screen_view_rows(monitors: list[tuple[int, int, int, int]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = [{"id": "desktop", "title": "Entire desktop", "kind": "desktop"}]
+    if len(monitors) < 2:
+        return rows
+    for i, (_l, _t, w, h) in enumerate(monitors):
+        rows.append({"id": f"monitor:{i}", "title": f"Display {i + 1} ({w}\u00d7{h})", "kind": "monitor"})
+    return rows
+
+
+def _view_rect(
+    view_id: str,
+    *,
+    desktop: tuple[int, int, int, int],
+    monitors: list[tuple[int, int, int, int]],
+) -> tuple[int, int, int, int] | None:
+    if view_id == "desktop":
+        sl, st, sw, sh = desktop
+        return sl, st, sl + sw, st + sh
+    if view_id.startswith("monitor:"):
+        try:
+            i = int(view_id.split(":", 1)[1])
+        except ValueError:
+            return None
+        if 0 <= i < len(monitors):
+            left, top, w, h = monitors[i]
+            return left, top, left + w, top + h
+    return None
+
+
+def _is_screen_view(view: object) -> bool:
+    s = str(view or "").strip()
+    return s == "desktop" or s.startswith("monitor:")
+
+
+def _as_hwnd(view: object) -> int:
+    s = str(view or "").strip()
+    if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+        return int(s)
+    return 0
+
+
 def list_window_views() -> list[dict[str, Any]]:
     if sys.platform != "win32":
         return []
-    rows = _enum_windows()
+    rows = _screen_view_rows(_monitors()) + _enum_windows()
     rows.sort(key=lambda r: (_KIND_ORDER.get(str(r.get("kind") or "app"), 9), str(r.get("title") or "").lower()))
     return rows
 
 
-def window_box(hwnd: int) -> dict[str, int]:
+def window_box(hwnd: object) -> dict[str, int]:
     """On-screen rect plus virtual/primary metrics for the WebRTC crop."""
-    if sys.platform != "win32" or hwnd <= 0:
+    if sys.platform != "win32":
         return {}
-    box = _window_box(hwnd)
-    if not box:
-        return {}
-    left, top, right, bottom = box
     sl, st, sw, sh, pw, ph = _screen_metrics()
-    return {
-        "left": left,
-        "top": top,
-        "right": right,
-        "bottom": bottom,
+    extras = {
         "screen_left": sl,
         "screen_top": st,
         "screen_w": sw,
@@ -78,6 +133,21 @@ def window_box(hwnd: int) -> dict[str, int]:
         "primary_w": pw,
         "primary_h": ph,
     }
+    vid = str(hwnd or "").strip()
+    if _is_screen_view(vid):
+        rect = _view_rect(vid, desktop=(sl, st, sw, sh), monitors=_monitors())
+        if not rect:
+            return {}
+        left, top, right, bottom = rect
+        return {"left": left, "top": top, "right": right, "bottom": bottom, **extras}
+    hid = _as_hwnd(vid)
+    if hid <= 0:
+        return {}
+    box = _window_box(hid)
+    if not box:
+        return {}
+    left, top, right, bottom = box
+    return {"left": left, "top": top, "right": right, "bottom": bottom, **extras}
 
 
 def map_norm_to_screen(box: tuple[int, int, int, int], nx: float, ny: float) -> tuple[int, int]:
@@ -168,6 +238,38 @@ def fit_window(hwnd: int, width: int, height: int) -> bool:
     return True
 
 
+def _pointer_on_box(
+    box: tuple[int, int, int, int] | None,
+    kind: str,
+    nx: float,
+    ny: float,
+    *,
+    button: int = 0,
+    delta: int = 0,
+    dx: int | None = None,
+    dy: int | None = None,
+) -> None:
+    if kind == "move" and dx is not None:
+        _send_mouse(0x0001, 0, int(dx), int(dy or 0))
+        return
+    if not box:
+        return
+    x, y = map_norm_to_screen(box, nx, ny)
+    import ctypes
+
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
+    flags_down = {0: 0x0002, 1: 0x0020, 2: 0x0008}
+    flags_up = {0: 0x0004, 1: 0x0040, 2: 0x0010}
+    if kind == "move":
+        return
+    if kind == "wheel":
+        _send_mouse(0x0800, int(delta) * 120)
+        return
+    flag = flags_down.get(int(button), 0x0002) if kind == "down" else flags_up.get(int(button), 0x0004)
+    if kind in ("down", "up"):
+        _send_mouse(flag, 0)
+
+
 def inject_pointer(
     hwnd: int,
     kind: str,
@@ -182,28 +284,14 @@ def inject_pointer(
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return
     if kind == "move" and dx is not None:
-        _send_mouse(0x0001, 0, int(dx), int(dy or 0))
+        _pointer_on_box(None, kind, nx, ny, dx=dx, dy=dy)
         return
     box = _client_box(hwnd) or _window_box(hwnd)
     if not box:
         return
     if kind != "move":
         bring_to_front(hwnd)
-    x, y = map_norm_to_screen(box, nx, ny)
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    user32.SetCursorPos(int(x), int(y))
-    flags_down = {0: 0x0002, 1: 0x0020, 2: 0x0008}
-    flags_up = {0: 0x0004, 1: 0x0040, 2: 0x0010}
-    if kind == "move":
-        return
-    if kind == "wheel":
-        _send_mouse(0x0800, int(delta) * 120)
-        return
-    flag = flags_down.get(int(button), 0x0002) if kind == "down" else flags_up.get(int(button), 0x0004)
-    if kind in ("down", "up"):
-        _send_mouse(flag, 0)
+    _pointer_on_box(box, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
 
 
 def inject_key(hwnd: int, key: str, *, down: bool = True) -> None:
@@ -216,7 +304,7 @@ def inject_key(hwnd: int, key: str, *, down: bool = True) -> None:
     _send_key(vk, down=down)
 
 
-def handle_stream_message(hwnd: int, payload: bytes) -> None:
+def handle_stream_message(view: object, payload: bytes) -> None:
     try:
         event = json.loads(payload.decode("utf-8"))
     except Exception:
@@ -224,24 +312,42 @@ def handle_stream_message(hwnd: int, payload: bytes) -> None:
     if not isinstance(event, dict):
         return
     kind = str(event.get("type") or "")
+    hid = _as_hwnd(view)
+    screen = _is_screen_view(view)
     if kind == "size":
-        fit_window(hwnd, int(event.get("w") or 0), int(event.get("h") or 0))
+        if hid:
+            fit_window(hid, int(event.get("w") or 0), int(event.get("h") or 0))
         return
     if kind in ("down", "up", "move", "wheel"):
         rel = "dx" in event
-        inject_pointer(
-            hwnd,
-            kind,
-            float(event.get("x") or 0),
-            float(event.get("y") or 0),
-            button=int(event.get("button") or 0),
-            delta=int(event.get("delta") or 0),
-            dx=int(event.get("dx") or 0) if rel else None,
-            dy=int(event.get("dy") or 0) if rel else None,
-        )
+        dx = int(event.get("dx") or 0) if rel else None
+        dy = int(event.get("dy") or 0) if rel else None
+        nx = float(event.get("x") or 0)
+        ny = float(event.get("y") or 0)
+        button = int(event.get("button") or 0)
+        delta = int(event.get("delta") or 0)
+        if screen:
+            if sys.platform != "win32":
+                return
+            box = _view_rect(
+                str(view).strip(),
+                desktop=_screen_metrics()[:4],
+                monitors=_monitors(),
+            )
+            _pointer_on_box(box, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
+        else:
+            inject_pointer(hid, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
         return
     if kind in ("key", "keydown", "keyup"):
-        inject_key(hwnd, str(event.get("key") or ""), down=kind != "keyup")
+        key = str(event.get("key") or "")
+        if screen:
+            if sys.platform != "win32":
+                return
+            vk = _vk_for_key(key)
+            if vk:
+                _send_key(vk, down=kind != "keyup")
+        else:
+            inject_key(hid, key, down=kind != "keyup")
 
 
 def _enum_windows() -> list[dict[str, Any]]:
@@ -276,8 +382,21 @@ def _enum_windows() -> list[dict[str, Any]]:
         if int(pid.value) == me:
             return True
         exe = _exe_name(int(pid.value))
-        title = _text(hwnd) or exe
-        if not title:
+        title = _text(hwnd)
+        owner = bool(user32.GetWindow(hwnd, 4))  # GW_OWNER
+        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        ex = int(get_long(hwnd, -20) or 0)  # GWL_EXSTYLE
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        if not _keep_window(
+            title=title,
+            owned=owner,
+            toolwindow=bool(ex & 0x00000080),  # WS_EX_TOOLWINDOW
+            cloaked=_hwnd_cloaked(hwnd),
+            iconic=iconic,
+            width=int(rect.right - rect.left),
+            height=int(rect.bottom - rect.top),
+        ):
             return True
         out.append(
             {
@@ -367,6 +486,59 @@ def _primary_work_area() -> tuple[int, int, int, int]:
         max(400, int(rect.right - rect.left)),
         max(300, int(rect.bottom - rect.top)),
     )
+
+
+def _hwnd_cloaked(hwnd: int) -> bool:
+    import ctypes
+
+    v = ctypes.c_int(0)
+    try:
+        ctypes.windll.dwmapi.DwmGetWindowAttribute(hwnd, 14, ctypes.byref(v), ctypes.sizeof(v))
+    except Exception:
+        return False
+    return bool(v.value)
+
+
+def _monitors() -> list[tuple[int, int, int, int]]:
+    """(left, top, width, height), primary first, then left-to-right."""
+    if sys.platform != "win32":
+        return [(0, 0, 1920, 1080)]
+    import ctypes
+    from ctypes import wintypes
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    user32 = ctypes.windll.user32
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM
+    )
+    found: list[tuple[int, int, int, int, int]] = []
+
+    def _cb(hmon, _hdc, _prect, _lp):
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            r = info.rcMonitor
+            found.append(
+                (
+                    int(r.left),
+                    int(r.top),
+                    int(r.right - r.left),
+                    int(r.bottom - r.top),
+                    0 if info.dwFlags & 1 else 1,
+                )
+            )
+        return True
+
+    user32.EnumDisplayMonitors(0, 0, MONITORENUMPROC(_cb), 0)
+    found.sort(key=lambda m: (m[4], m[0], m[1]))
+    return [(l, t, w, h) for l, t, w, h, _p in found] or [(0, 0, 1920, 1080)]
 
 
 def _screen_metrics() -> tuple[int, int, int, int, int, int]:

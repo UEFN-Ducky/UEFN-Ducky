@@ -268,24 +268,16 @@ class PanelApiWindowMixin:
     def window_input(self, hwnd: object, event: object) -> None:
         from frontend.window_view import handle_stream_message
 
-        try:
-            hid = int(hwnd)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return
         if isinstance(event, str):
             raw = event.encode("utf-8")
         else:
             raw = _pa.json.dumps(event if isinstance(event, dict) else {}).encode("utf-8")
-        handle_stream_message(hid, raw)
+        handle_stream_message(hwnd, raw)
 
     def window_box(self, hwnd: object) -> dict[str, Any]:
         from frontend.window_view import window_box
 
-        try:
-            hid = int(hwnd)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return {}
-        return window_box(hid)
+        return window_box(hwnd)
 
     # ── Browser panes (native WebView2 pinned inside a window; plugin web panes) ──
 

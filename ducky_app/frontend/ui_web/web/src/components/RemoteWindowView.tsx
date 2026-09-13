@@ -264,7 +264,13 @@ export function RemoteWindowSelect({
             value: row.id,
             label: row.title,
             group:
-              row.kind === "uefn" ? "UEFN" : row.kind === "blender" ? "Blender" : "Windows",
+              row.kind === "desktop" || row.kind === "monitor"
+                ? "Desktop"
+                : row.kind === "uefn"
+                  ? "UEFN"
+                  : row.kind === "blender"
+                    ? "Blender"
+                    : "Windows",
           })),
         ]}
       />
