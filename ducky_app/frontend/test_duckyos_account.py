@@ -242,6 +242,33 @@ def test_plugin_collect_404_never_mentions_plugin() -> None:
             raise AssertionError("expected DuckyOSAccountError")
 
 
+def test_publish_device_presence_offline_when_remote_off() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+    from frontend.settings import PanelSettings
+
+    seen: list[dict] = []
+
+    def _collect(_plugin_id: str, event: str, body=None, **_kw):
+        seen.append({"event": event, "body": dict(body or {})})
+        return {"ok": True}
+
+    s = PanelSettings()
+    s.remote_access = False
+    with (
+        patch.object(acc, "_load_blob", return_value={"device_key_id": "k1"}),
+        patch.object(acc, "_plugin_collect", side_effect=_collect),
+        patch("frontend.settings.PanelSettings.load", return_value=s),
+    ):
+        acc.publish_device_presence()
+        acc.publish_device_presence(live=True)
+        acc.publish_device_presence(live=False)
+    assert seen[0] == {"event": "desktop-device-heartbeat", "body": {"keyId": "k1", "live": False}}
+    assert seen[1] == {"event": "desktop-device-heartbeat", "body": {"keyId": "k1"}}
+    assert seen[2]["body"]["live"] is False
+
+
 def test_store_item_versions_needs_slug() -> None:
     from frontend.duckyos_account import store_item_versions
 
@@ -262,4 +289,5 @@ if __name__ == "__main__":
     test_remote_endpoint_starting_when_tunnel_has_no_host()
     test_remote_endpoint_waits_until_tunnel_registers()
     test_remote_deny_covers_native_and_secret_paths()
+    test_publish_device_presence_offline_when_remote_off()
     print("ok")

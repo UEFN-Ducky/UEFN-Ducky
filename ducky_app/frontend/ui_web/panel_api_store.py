@@ -161,10 +161,15 @@ class PanelApiStoreMixin:
         _save_panel_settings(s)
         if s.remote_access:
             start_remote_tunnel()
+            from frontend.duckyos_account import publish_device_presence
+
+            publish_device_presence(live=True)
         else:
             from frontend.ui_web.panel_httpd import kick_all_remote
+            from frontend.duckyos_account import publish_device_presence
 
             kick_all_remote()
+            publish_device_presence(live=False)
             stop_remote_tunnel(deprovision=True)
         return self.remote_status()
 

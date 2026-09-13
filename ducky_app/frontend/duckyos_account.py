@@ -921,21 +921,42 @@ def send_presence_heartbeat() -> bool:
         return False
     except Exception:
         return False
-    key_id = str(blob.get("device_key_id") or "").strip()
-    if key_id:
-        try:
-            _plugin_collect(
-                "uefn-ducky",
-                "desktop-device-heartbeat",
-                {"keyId": key_id},
-                unavailable_code="auth_unavailable",
-                unavailable_msg="Desktop login plugin is not active on this tenant yet.",
-                error_code="device_heartbeat_failed",
-                timeout=12.0,
-            )
-        except Exception:
-            pass
+    publish_device_presence()
     return ok
+
+
+def _remote_access_on() -> bool:
+    try:
+        from frontend.settings import PanelSettings
+
+        return bool(getattr(PanelSettings.load(), "remote_access", False))
+    except Exception:
+        return False
+
+
+def publish_device_presence(*, live: bool | None = None) -> None:
+    """Site PC badge: Live only while remote access is on. live=False clears last_seen."""
+    blob = _load_blob()
+    key_id = str(blob.get("device_key_id") or "").strip()
+    if not key_id:
+        return
+    if live is None:
+        live = _remote_access_on()
+    body: dict[str, Any] = {"keyId": key_id}
+    if not live:
+        body["live"] = False
+    try:
+        _plugin_collect(
+            "uefn-ducky",
+            "desktop-device-heartbeat",
+            body,
+            unavailable_code="auth_unavailable",
+            unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+            error_code="device_heartbeat_failed",
+            timeout=12.0,
+        )
+    except Exception:
+        pass
 
 
 def start_presence_heartbeat() -> None:
