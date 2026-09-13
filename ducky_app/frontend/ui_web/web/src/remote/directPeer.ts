@@ -44,6 +44,7 @@ type Session = {
   pc: RTCPeerConnection;
   videoSender: RTCRtpSender | null;
   watch: { hwnd: string; abort: AbortController } | null;
+  watchJob: Promise<unknown>;
   unsubEvents: (() => void) | null;
   eventSeq: number;
   streams: Map<string, WebSocket>;
@@ -104,6 +105,7 @@ async function handleOffer(event: AgentEvent) {
     pc,
     videoSender: null,
     watch: null,
+    watchJob: Promise.resolve(),
     unsubEvents: null,
     eventSeq: 0,
     streams: new Map(),
@@ -224,7 +226,9 @@ async function onRpc(s: Session, ch: RTCDataChannel, raw: string) {
   }
   if (method === "watch_window") {
     const hwnd = String((args[0] as { hwnd?: string })?.hwnd || "");
-    reply({ id: req.id, ...(await startWatch(s, hwnd)) });
+    const job = s.watchJob.catch(() => {}).then(() => startWatch(s, hwnd));
+    s.watchJob = job;
+    reply({ id: req.id, ...(await job) });
     return;
   }
   if (method === "__ping") {
@@ -255,8 +259,10 @@ async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; erro
   if (!hwnd) return { ok: true, result: { watching: "" } };
   if (!s.videoSender) return { ok: false, error: "no video transceiver in offer" };
   const abort = new AbortController();
+  let held = false;
   try {
     const screen = await acquireScreenTrack();
+    held = true;
     const track = await croppedTrack(screen, hwnd, abort.signal);
     abort.signal.addEventListener("abort", () => {
       try {
@@ -264,7 +270,10 @@ async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; erro
       } catch {
         /* ignore */
       }
-      releaseScreenTrack();
+      if (held) {
+        held = false;
+        releaseScreenTrack();
+      }
     });
     await s.videoSender.replaceTrack(track);
     s.watch = { hwnd, abort };
@@ -273,6 +282,10 @@ async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; erro
     return { ok: true, result: { watching: hwnd } };
   } catch (err) {
     abort.abort();
+    if (held) {
+      held = false;
+      releaseScreenTrack();
+    }
     return { ok: false, error: `capture failed: ${String((err as Error)?.message || err)}` };
   }
 }

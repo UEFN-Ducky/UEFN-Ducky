@@ -198,6 +198,26 @@ const RETRY_MS = [1500, 3000, 5000, 8000];
 const MAX_AUTO_RETRIES = 4;
 const SIZE_DEBOUNCE_MS = 400;
 
+/** Capture only while this tab is actually on screen — same idea as UE pausing when you tab away. */
+function useViewerActive(): boolean {
+  const [on, setOn] = useState(() => typeof document === "undefined" || document.visibilityState === "visible");
+  useEffect(() => {
+    const sync = () => setOn(document.visibilityState === "visible");
+    const off = () => setOn(false);
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("pagehide", off);
+    window.addEventListener("pageshow", sync);
+    document.addEventListener("freeze", off);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("pagehide", off);
+      window.removeEventListener("pageshow", sync);
+      document.removeEventListener("freeze", off);
+    };
+  }, []);
+  return on;
+}
+
 export function RemoteWindowSelect({
   value,
   onChange,
@@ -627,6 +647,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const kindRef = useRef(kind);
   if (kind) kindRef.current = kind;
   const watchingUefn = (kind || kindRef.current) === "uefn";
+  const viewing = useViewerActive();
 
   const send = useCallback((payload: Record<string, unknown>) => {
     const direct = getDirectTransport();
@@ -652,7 +673,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   }, [hwnd]);
 
   useEffect(() => {
-    if (!hwnd) return;
+    if (!hwnd || !viewing) return;
     let closed = false;
     let live = false;
     let retryTimer = 0;
@@ -854,7 +875,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
         }
       }
     };
-  }, [hwnd, attempt, retry]);
+  }, [hwnd, attempt, retry, viewing]);
 
   useEffect(() => {
     const el = overlayRef.current;
