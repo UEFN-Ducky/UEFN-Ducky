@@ -1377,17 +1377,50 @@ def teams_snapshot(*, stale_seconds: int = 120) -> dict[str, Any]:
                         else False
                     ),
                 }
+        roles = _team_roles(team)
+        my_role = str(entry.get("myRole") or "member")
+        pending = []
+        for inv in entry.get("pendingInvites") or []:
+            if not isinstance(inv, dict):
+                continue
+            pending.append(
+                {
+                    "email": str(inv.get("email") or ""),
+                    "role": str(inv.get("role") or "member"),
+                    "token": str(inv.get("token") or ""),
+                }
+            )
         teams.append(
             {
                 "id": str(team.get("id") or ""),
                 "name": str(team.get("name") or ""),
                 "slug": str(team.get("slug") or ""),
                 "description": str(team.get("description") or ""),
-                "my_role": str(entry.get("myRole") or "member"),
+                "my_role": my_role,
                 "members": members_out,
+                "roles": roles,
+                "pending_invites": pending,
+                "perms": {
+                    "invite": _role_has(roles, my_role, "invite"),
+                    "revoke_invite": _role_has(roles, my_role, "revoke_invite"),
+                    "change_role": _role_has(roles, my_role, "change_role"),
+                    "remove_member": _role_has(roles, my_role, "remove_member"),
+                    "edit_team": _role_has(roles, my_role, "edit_team"),
+                    "manage_roles": _role_has(roles, my_role, "manage_roles"),
+                    "manage_plugins": _role_has(roles, my_role, "manage_plugins"),
+                },
             }
         )
 
+    quota_raw = hub.get("quota") if isinstance(hub.get("quota"), dict) else {}
+    try:
+        max_owned = int(quota_raw.get("maxOwned") or 1)
+    except (TypeError, ValueError):
+        max_owned = 1
+    try:
+        owned_count = int(quota_raw.get("ownedCount") or 0)
+    except (TypeError, ValueError):
+        owned_count = 0
     return {
         "ok": True,
         "teams": teams,
@@ -1396,6 +1429,11 @@ def teams_snapshot(*, stale_seconds: int = 120) -> dict[str, Any]:
         "teams_url": _teams_site_url("/teams"),
         "invite_url": _teams_site_url("/invite"),
         "stale_seconds": int(stale_seconds),
+        "quota": {
+            "can_create": bool(quota_raw.get("canCreate")),
+            "max_owned": max_owned,
+            "owned_count": owned_count,
+        },
     }
 
 
@@ -1404,6 +1442,218 @@ def _teams_site_url(path: str) -> str:
     base = str(blob.get("base_url") or resolve_base_url()).rstrip("/")
     path = path if path.startswith("/") else f"/{path}"
     return f"{base}{path}"
+
+
+_NAME_NOT_ALLOWED = "That name isn't allowed."
+_BLOCKED_NAMES = frozenset(
+    (
+        "ass",
+        "asshole",
+        "bastard",
+        "bitch",
+        "cock",
+        "crap",
+        "cunt",
+        "dick",
+        "dildo",
+        "dyke",
+        "fag",
+        "faggot",
+        "fuck",
+        "fuckin",
+        "fucking",
+        "goddamn",
+        "nigga",
+        "nigger",
+        "penis",
+        "piss",
+        "pussy",
+        "rape",
+        "shit",
+        "slut",
+        "tit",
+        "tits",
+        "twat",
+        "vagina",
+        "wank",
+        "whore",
+    )
+)
+_DEFAULT_TEAM_ROLES = (
+    {"id": "owner", "name": "Owner", "builtin": True, "perms": ["*"]},
+    {
+        "id": "admin",
+        "name": "Admin",
+        "builtin": True,
+        "perms": [
+            "invite",
+            "revoke_invite",
+            "change_role",
+            "remove_member",
+            "edit_team",
+            "manage_plugins",
+        ],
+    },
+    {"id": "member", "name": "Member", "builtin": True, "perms": []},
+)
+
+
+def _fold_leet(ch: str) -> str:
+    c = ch.lower()
+    if c == "0":
+        return "o"
+    if c in ("1", "!"):
+        return "i"
+    if c == "3":
+        return "e"
+    if c == "4":
+        return "a"
+    if c in ("5", "$"):
+        return "s"
+    if c == "7":
+        return "t"
+    if c == "@":
+        return "a"
+    return c
+
+
+def name_allowed(raw: str) -> bool:
+    """Same token rule as duckyos-input::filter_profanity — reject if it would change."""
+    out: list[str] = []
+    folded: list[str] = []
+    orig: list[str] = []
+
+    def flush() -> None:
+        if not orig:
+            return
+        token = "".join(folded)
+        out.extend(["*"] * len(orig) if token in _BLOCKED_NAMES else orig)
+        folded.clear()
+        orig.clear()
+
+    for c in raw:
+        if (c.isascii() and c.isalnum()) or c in "@$!":
+            orig.append(c)
+            folded.append(_fold_leet(c))
+            continue
+        flush()
+        out.append(c)
+    flush()
+    return "".join(out) == raw
+
+
+def _require_clean_name(name: str) -> str:
+    s = (name or "").strip()
+    if not s:
+        raise DuckyOSAccountError("name required", code="bad_name")
+    if not name_allowed(s):
+        raise DuckyOSAccountError(_NAME_NOT_ALLOWED, code="bad_name")
+    return s
+
+
+def _team_roles(team: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = team.get("roles")
+    if not isinstance(raw, list) or not raw:
+        return [dict(r) for r in _DEFAULT_TEAM_ROLES]
+    out: list[dict[str, Any]] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        perms = [str(p) for p in (row.get("perms") or []) if str(p)]
+        out.append(
+            {
+                "id": str(row.get("id") or ""),
+                "name": str(row.get("name") or row.get("id") or ""),
+                "builtin": bool(row.get("builtin")),
+                "perms": perms,
+            }
+        )
+    return out or [dict(r) for r in _DEFAULT_TEAM_ROLES]
+
+
+def _role_has(roles: list[dict[str, Any]], role_id: str, perm: str) -> bool:
+    if role_id == "owner":
+        return True
+    if perm == "manage_roles":
+        return False
+    for row in roles:
+        if str(row.get("id") or "") == role_id:
+            perms = row.get("perms") or []
+            return "*" in perms or perm in perms
+    return role_id == "admin" and perm != "manage_roles"
+
+
+def team_create(*, name: str) -> dict[str, Any]:
+    return _collect_payload("create-team", {"name": _require_clean_name(name)})
+
+
+def team_update(*, team_slug: str, name: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"teamSlug": str(team_slug or "").strip()}
+    if name is not None:
+        body["name"] = _require_clean_name(name)
+    return _collect_payload("update-team", body)
+
+
+def team_invite(*, team_slug: str, email: str, role: str = "member") -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "teamSlug": str(team_slug or "").strip(),
+        "email": str(email or "").strip(),
+        "role": str(role or "member").strip() or "member",
+        "joinPath": "/invite",
+    }
+    blob = _load_blob()
+    base = str(blob.get("base_url") or resolve_base_url()).rstrip("/")
+    if base.startswith("https://"):
+        body["origin"] = base
+    return _collect_payload("invite", body)
+
+
+def team_set_role(*, team_slug: str, user_id: str, role: str) -> dict[str, Any]:
+    return _collect_payload(
+        "set-role",
+        {
+            "teamSlug": str(team_slug or "").strip(),
+            "userId": str(user_id or "").strip(),
+            "role": str(role or "member").strip(),
+        },
+    )
+
+
+def team_set_roles(*, team_slug: str, roles: list[Any]) -> dict[str, Any]:
+    clean: list[dict[str, Any]] = []
+    for row in roles or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if name:
+            _require_clean_name(name)
+        perms = [str(p) for p in (row.get("perms") or []) if str(p)]
+        clean.append(
+            {
+                "id": str(row.get("id") or ""),
+                "name": name,
+                "builtin": bool(row.get("builtin")),
+                "perms": perms,
+            }
+        )
+    return _collect_payload(
+        "set-team-roles",
+        {"teamSlug": str(team_slug or "").strip(), "roles": clean},
+    )
+
+
+def team_remove_member(*, team_slug: str, user_id: str) -> dict[str, Any]:
+    return _collect_payload(
+        "remove-member",
+        {
+            "teamSlug": str(team_slug or "").strip(),
+            "userId": str(user_id or "").strip(),
+        },
+    )
+
+
+def team_revoke_invite(*, token: str) -> dict[str, Any]:
+    return _collect_payload("revoke-invite", {"token": str(token or "").strip()})
 
 
 def open_site_path(path: str = "/teams") -> dict[str, Any]:

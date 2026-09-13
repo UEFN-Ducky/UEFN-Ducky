@@ -2245,8 +2245,9 @@
 .account-tab-signed-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .account-tab-badge {
@@ -2313,17 +2314,23 @@
 }
 
 .account-tab-section-title {
+  display: block;
   margin: 0;
+  margin-right: auto;
+  min-width: 7rem;
   font-size: 14px;
   font-weight: 650;
+  word-spacing: 0.16em;
 }
 
 .account-tab-subsection-title {
-  margin: 0 0 8px 0;
+  display: block;
+  margin: 12px 0 8px 0;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  word-spacing: 0.18em;
   color: var(--muted);
 }
 
@@ -2412,6 +2419,85 @@
 
 .account-tab-warn-text {
   color: var(--muted);
+}
+
+.account-tab-form {
+  display: grid;
+  gap: 10px;
+}
+
+.account-tab-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  word-spacing: 0.14em;
+}
+
+.account-tab-field span {
+  display: block;
+  word-spacing: 0.14em;
+}
+
+.account-tab-input--inline {
+  width: auto;
+  min-width: 8rem;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.account-tab-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 2px;
+}
+
+.account-tab-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+  word-spacing: 0.16em;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -3px;
+}
+
+.account-tab-tab.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.account-tab-role-edit {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.account-tab-perms-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.account-tab-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  word-spacing: 0.12em;
+}
+
+.account-tab-quiet-link {
+  margin: 4px 0 0;
 }
 
 .appearance-layout-toggle {

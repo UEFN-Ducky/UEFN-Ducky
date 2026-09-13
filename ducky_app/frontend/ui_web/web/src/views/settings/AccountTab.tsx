@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
-import type { DuckyOSAccountStatus, DuckyOSTeamsSnapshot } from "../../types/panel";
+import type {
+  DuckyOSAccountStatus,
+  DuckyOSTeamDto,
+  DuckyOSTeamRoleDto,
+  DuckyOSTeamsSnapshot,
+} from "../../types/panel";
 import {
   ACCOUNT_LOGIN_EVENT,
   consumeAccountLoginRequest,
@@ -10,6 +15,88 @@ import { DUCKYOS_ACCOUNT_CHANGED } from "../../navigation/openSettingsTab";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
 
 const DEFAULT_BASE = "https://uefnducky.org";
+const NAME_NOT_ALLOWED = "That name isn't allowed.";
+const TEAM_PERM_LABELS: Array<{ id: string; label: string }> = [
+  { id: "invite", label: "Invite" },
+  { id: "revoke_invite", label: "Revoke invite" },
+  { id: "change_role", label: "Change role" },
+  { id: "remove_member", label: "Remove member" },
+  { id: "edit_team", label: "Edit team" },
+  { id: "manage_plugins", label: "Manage plugins" },
+];
+const BLOCKED_NAMES = new Set([
+  "ass",
+  "asshole",
+  "bastard",
+  "bitch",
+  "cock",
+  "crap",
+  "cunt",
+  "dick",
+  "dildo",
+  "dyke",
+  "fag",
+  "faggot",
+  "fuck",
+  "fuckin",
+  "fucking",
+  "goddamn",
+  "nigga",
+  "nigger",
+  "penis",
+  "piss",
+  "pussy",
+  "rape",
+  "shit",
+  "slut",
+  "tit",
+  "tits",
+  "twat",
+  "vagina",
+  "wank",
+  "whore",
+]);
+
+function foldLeet(ch: string): string {
+  const c = ch.toLowerCase();
+  if (c === "0") return "o";
+  if (c === "1" || c === "!") return "i";
+  if (c === "3") return "e";
+  if (c === "4") return "a";
+  if (c === "5" || c === "$") return "s";
+  if (c === "7") return "t";
+  if (c === "@") return "a";
+  return c;
+}
+
+function nameAllowed(raw: string): boolean {
+  let out = "";
+  let folded = "";
+  let orig = "";
+  const flush = () => {
+    if (!orig) return;
+    out += BLOCKED_NAMES.has(folded) ? "*".repeat([...orig].length) : orig;
+    folded = "";
+    orig = "";
+  };
+  for (const c of raw) {
+    if (/[0-9A-Za-z@$!]/.test(c)) {
+      orig += c;
+      folded += foldLeet(c);
+      continue;
+    }
+    flush();
+    out += c;
+  }
+  flush();
+  return out === raw;
+}
+
+function requireCleanName(raw: string): string {
+  const name = raw.trim();
+  if (!nameAllowed(name)) throw new Error(NAME_NOT_ALLOWED);
+  return name;
+}
 
 export function AccountTab() {
   const [status, setStatus] = useState<DuckyOSAccountStatus | null>(null);
@@ -31,6 +118,14 @@ export function AccountTab() {
     site_update_pending?: boolean;
     sessions?: number;
   } | null>(null);
+  const [teamTab, setTeamTab] = useState<"team" | "plugins" | "settings">("team");
+  const [selectedSlug, setSelectedSlug] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("member");
+  const [settingsName, setSettingsName] = useState("");
+  const [roleDrafts, setRoleDrafts] = useState<DuckyOSTeamRoleDto[]>([]);
+  const [teamMsg, setTeamMsg] = useState("");
 
   const applyStatus = useCallback((next: DuckyOSAccountStatus) => {
     setStatus(next);
@@ -92,6 +187,22 @@ export function AccountTab() {
       setTeamsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const list = teams?.teams || [];
+    if (!list.length) {
+      setSelectedSlug("");
+      setSettingsName("");
+      setRoleDrafts([]);
+      return;
+    }
+    const current = list.find((t) => t.slug === selectedSlug) || list[0];
+    if (current?.slug && current.slug !== selectedSlug) setSelectedSlug(current.slug);
+    setSettingsName(current?.name || "");
+    setRoleDrafts(current?.roles?.length ? current.roles.map((r) => ({ ...r, perms: [...(r.perms || [])] })) : []);
+    const firstAssignable = (current?.roles || []).find((r) => r.id && r.id !== "owner");
+    setInviteRole(firstAssignable?.id || "member");
+  }, [teams, selectedSlug]);
 
   useEffect(() => {
     return onApiReady((api) => {
@@ -207,6 +318,25 @@ export function AccountTab() {
     const api = getApi();
     if (api && typeof api.duckyos_open_admin === "function") {
       void api.duckyos_open_admin();
+    }
+  };
+
+  const runTeam = async (fn: () => Promise<{ ok?: boolean; error?: string } | void>) => {
+    setTeamMsg("");
+    setBusy(true);
+    try {
+      const out = await fn();
+      if (out && out.ok === false) {
+        setTeamMsg(out.error || "Request failed");
+        return false;
+      }
+      await refreshTeams();
+      return true;
+    } catch (err) {
+      setTeamMsg(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -403,87 +533,74 @@ export function AccountTab() {
             {teams?.error && teams.ok === false ? (
               <p className="account-tab-body account-tab-warn-text">{teams.error}</p>
             ) : null}
+            {teamMsg ? <p className="account-tab-body account-tab-warn-text">{teamMsg}</p> : null}
 
             {needsTeam ? (
               <>
-                <p className="account-tab-body">
-                  You are not on a team yet. Create one on the website — invites, roles, and profiles
-                  live there.
-                </p>
-                <div className="account-tab-actions">
-                  <button
-                    type="button"
-                    className="account-tab-btn account-tab-btn--primary"
-                    onClick={() => openTeamsSite("/teams")}
+                {teams?.quota?.can_create === false ? (
+                  <p className="account-tab-body">
+                    You’ve reached the owned-team limit ({teams.quota.owned_count ?? 0}/
+                    {teams.quota.max_owned ?? 1}).
+                  </p>
+                ) : (
+                  <form
+                    className="account-tab-form"
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      const api = getApi();
+                      if (!api?.duckyos_team_create) return;
+                      try {
+                        const name = requireCleanName(createName);
+                        void runTeam(() => api.duckyos_team_create!(name));
+                      } catch (err) {
+                        setTeamMsg(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
                   >
-                    Create a team on website
+                    <label className="account-tab-field">
+                      <span>Team name</span>
+                      <input
+                        className="account-tab-input"
+                        value={createName}
+                        maxLength={80}
+                        onChange={(e) => setCreateName(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <div className="account-tab-actions">
+                      <button type="submit" className="account-tab-btn account-tab-btn--primary" disabled={busy}>
+                        {busy ? "Creating…" : "Create team"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+                <p className="account-tab-quiet-link">
+                  <button type="button" className="account-tab-btn account-tab-btn--ghost" onClick={() => openTeamsSite("/teams")}>
+                    Open on website
                   </button>
-                </div>
+                </p>
               </>
             ) : (
-              <>
-                {teamList.map((team) => (
-                  <div key={team.id || team.slug} className="account-tab-team">
-                    <div className="account-tab-team-head">
-                      <strong>{team.name || team.slug || "Team"}</strong>
-                      <span className="account-tab-muted-inline">/{team.slug}</span>
-                      <span className="account-tab-role">{team.my_role || "member"}</span>
-                    </div>
-                    <ul className="account-tab-member-list">
-                      {(team.members || []).map((m) => (
-                        <li key={m.user_id || m.email}>
-                          <span className={`account-tab-dot${m.online ? " on" : ""}`} title={m.online ? "Online" : "Offline"} />
-                          <span className="account-tab-member-name">{m.display_name || m.email || "member"}</span>
-                          <span className="account-tab-muted-inline">{m.role}</span>
-                          {m.online && m.presence?.project_label ? (
-                            <span className="account-tab-muted-inline">{m.presence.project_label}</span>
-                          ) : null}
-                          {m.online && m.presence?.uefn_online ? (
-                            <span className="account-tab-muted-inline">UEFN</span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-
-                <div className="account-tab-online">
-                  <h4 className="account-tab-subsection-title">Online now</h4>
-                  {online.length === 0 ? (
-                    <p className="account-tab-muted">No teammates online right now.</p>
-                  ) : (
-                    <ul className="account-tab-member-list">
-                      {online.map((row) => (
-                        <li key={row.user_id || row.display_name}>
-                          <span className="account-tab-dot on" />
-                          <span className="account-tab-member-name">
-                            {row.display_name}
-                            {row.is_self ? " (you)" : ""}
-                          </span>
-                          <span className="account-tab-muted-inline">
-                            {[row.source, row.project_label, row.uefn_online ? "UEFN" : ""]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div className="account-tab-actions">
-                  <button
-                    type="button"
-                    className="account-tab-btn account-tab-btn--primary"
-                    onClick={() => openTeamsSite("/teams")}
-                  >
-                    Manage team on website
-                  </button>
-                  <button type="button" className="account-tab-btn" onClick={() => openTeamsSite("/invite")}>
-                    Invite page
-                  </button>
-                </div>
-              </>
+              <AccountTeamPanel
+                teamList={teamList}
+                selectedSlug={selectedSlug}
+                setSelectedSlug={setSelectedSlug}
+                teamTab={teamTab}
+                setTeamTab={setTeamTab}
+                online={online}
+                inviteEmail={inviteEmail}
+                setInviteEmail={setInviteEmail}
+                inviteRole={inviteRole}
+                setInviteRole={setInviteRole}
+                settingsName={settingsName}
+                setSettingsName={setSettingsName}
+                roleDrafts={roleDrafts}
+                setRoleDrafts={setRoleDrafts}
+                busy={busy}
+                runTeam={runTeam}
+                openTeamsSite={openTeamsSite}
+                setTeamMsg={setTeamMsg}
+              />
             )}
           </div>
         </>
@@ -523,5 +640,358 @@ export function AccountTab() {
         </div>
       )}
     </div>
+  );
+}
+
+function AccountTeamPanel(props: {
+  teamList: DuckyOSTeamDto[];
+  selectedSlug: string;
+  setSelectedSlug: (slug: string) => void;
+  teamTab: "team" | "plugins" | "settings";
+  setTeamTab: (tab: "team" | "plugins" | "settings") => void;
+  online: NonNullable<DuckyOSTeamsSnapshot["online"]>;
+  inviteEmail: string;
+  setInviteEmail: (v: string) => void;
+  inviteRole: string;
+  setInviteRole: (v: string) => void;
+  settingsName: string;
+  setSettingsName: (v: string) => void;
+  roleDrafts: DuckyOSTeamRoleDto[];
+  setRoleDrafts: (v: DuckyOSTeamRoleDto[]) => void;
+  busy: boolean;
+  runTeam: (fn: () => Promise<{ ok?: boolean; error?: string } | void>) => Promise<boolean>;
+  openTeamsSite: (path?: string) => void;
+  setTeamMsg: (v: string) => void;
+}) {
+  const team = props.teamList.find((t) => t.slug === props.selectedSlug) || props.teamList[0];
+  if (!team) return null;
+  const perms = team.perms || {};
+  const roles = (team.roles || []).filter((r) => r.id && r.id !== "owner");
+  const slug = team.slug || "";
+
+  return (
+    <>
+      {props.teamList.length > 1 ? (
+        <label className="account-tab-field">
+          <span>Team</span>
+          <select
+            className="account-tab-input"
+            value={slug}
+            onChange={(e) => props.setSelectedSlug(e.target.value)}
+          >
+            {props.teamList.map((t) => (
+              <option key={t.slug || t.id} value={t.slug}>
+                {t.name || t.slug}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <div className="account-tab-team-head">
+          <strong>{team.name || team.slug || "Team"}</strong>
+          <span className="account-tab-muted-inline">/{team.slug}</span>
+          <span className="account-tab-role">{team.my_role || "member"}</span>
+        </div>
+      )}
+
+      <div className="account-tab-tabs" role="tablist">
+        {(["team", "plugins", "settings"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`account-tab-tab${props.teamTab === tab ? " is-active" : ""}`}
+            onClick={() => props.setTeamTab(tab)}
+          >
+            {tab === "team" ? "Team" : tab === "plugins" ? "Plugins" : "Settings"}
+          </button>
+        ))}
+      </div>
+
+      {props.teamTab === "team" ? (
+        <>
+          {perms.invite ? (
+            <form
+              className="account-tab-form"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                const api = getApi();
+                if (!api?.duckyos_team_invite) return;
+                void props.runTeam(() =>
+                  api.duckyos_team_invite!(slug, props.inviteEmail, props.inviteRole),
+                ).then((ok) => {
+                  if (ok) props.setInviteEmail("");
+                });
+              }}
+            >
+              <label className="account-tab-field">
+                <span>Invite teammate</span>
+                <input
+                  className="account-tab-input"
+                  type="email"
+                  value={props.inviteEmail}
+                  onChange={(e) => props.setInviteEmail(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="account-tab-field">
+                <span>Role</span>
+                <select
+                  className="account-tab-input"
+                  value={props.inviteRole}
+                  onChange={(e) => props.setInviteRole(e.target.value)}
+                >
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name || r.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="account-tab-actions">
+                <button type="submit" className="account-tab-btn account-tab-btn--primary" disabled={props.busy}>
+                  Send invite
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          <h4 className="account-tab-subsection-title">Online now</h4>
+          {props.online.length === 0 ? (
+            <p className="account-tab-muted">No teammates online right now.</p>
+          ) : (
+            <ul className="account-tab-member-list">
+              {props.online.map((row) => (
+                <li key={row.user_id || row.display_name}>
+                  <span className="account-tab-dot on" />
+                  <span className="account-tab-member-name">
+                    {row.display_name}
+                    {row.is_self ? " (you)" : ""}
+                  </span>
+                  <span className="account-tab-muted-inline">
+                    {[row.source, row.project_label, row.uefn_online ? "UEFN" : ""]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h4 className="account-tab-subsection-title">Members</h4>
+          <ul className="account-tab-member-list">
+            {(team.members || []).map((m) => (
+              <li key={m.user_id || m.email}>
+                <span className={`account-tab-dot${m.online ? " on" : ""}`} />
+                <span className="account-tab-member-name">{m.display_name || m.email || "member"}</span>
+                {perms.change_role && m.role !== "owner" ? (
+                  <select
+                    className="account-tab-input account-tab-input--inline"
+                    value={m.role}
+                    disabled={props.busy}
+                    onChange={(e) => {
+                      const api = getApi();
+                      if (!api?.duckyos_team_set_role || !m.user_id) return;
+                      void props.runTeam(() =>
+                        api.duckyos_team_set_role!(slug, m.user_id || "", e.target.value),
+                      );
+                    }}
+                  >
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name || r.id}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="account-tab-muted-inline">{m.role}</span>
+                )}
+                {perms.remove_member && m.role !== "owner" ? (
+                  <button
+                    type="button"
+                    className="account-tab-btn account-tab-btn--ghost"
+                    disabled={props.busy}
+                    onClick={() => {
+                      const api = getApi();
+                      if (!api?.duckyos_team_remove_member || !m.user_id) return;
+                      void props.runTeam(() =>
+                        api.duckyos_team_remove_member!(slug, m.user_id || ""),
+                      );
+                    }}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          {(team.pending_invites || []).length ? (
+            <>
+              <h4 className="account-tab-subsection-title">Pending invites</h4>
+              <ul className="account-tab-member-list">
+                {(team.pending_invites || []).map((inv) => (
+                  <li key={inv.token || inv.email}>
+                    <span className="account-tab-member-name">{inv.email}</span>
+                    <span className="account-tab-muted-inline">{inv.role}</span>
+                    {perms.revoke_invite && inv.token ? (
+                      <button
+                        type="button"
+                        className="account-tab-btn account-tab-btn--ghost"
+                        disabled={props.busy}
+                        onClick={() => {
+                          const api = getApi();
+                          if (!api?.duckyos_team_revoke_invite) return;
+                          void props.runTeam(() => api.duckyos_team_revoke_invite!(inv.token || ""));
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {props.teamTab === "plugins" ? (
+        <p className="account-tab-body">Community plugin submission is coming soon.</p>
+      ) : null}
+
+      {props.teamTab === "settings" ? (
+        <>
+          {perms.edit_team ? (
+            <form
+              className="account-tab-form"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                const api = getApi();
+                if (!api?.duckyos_team_update) return;
+                try {
+                  const name = requireCleanName(props.settingsName);
+                  void props.runTeam(() => api.duckyos_team_update!(slug, name));
+                } catch (err) {
+                  props.setTeamMsg(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            >
+              <label className="account-tab-field">
+                <span>Name</span>
+                <input
+                  className="account-tab-input"
+                  value={props.settingsName}
+                  maxLength={80}
+                  onChange={(e) => props.setSettingsName(e.target.value)}
+                  required
+                />
+              </label>
+              <div className="account-tab-actions">
+                <button type="submit" className="account-tab-btn account-tab-btn--primary" disabled={props.busy}>
+                  Save
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="account-tab-muted">You can view this team. Ask an owner to change settings.</p>
+          )}
+
+          {perms.manage_roles ? (
+            <form
+              className="account-tab-form"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                const api = getApi();
+                if (!api?.duckyos_team_set_roles) return;
+                try {
+                  for (const r of props.roleDrafts) requireCleanName(r.name || r.id || "");
+                  void props.runTeam(() => api.duckyos_team_set_roles!(slug, props.roleDrafts));
+                } catch (err) {
+                  props.setTeamMsg(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            >
+              <h4 className="account-tab-subsection-title">Roles</h4>
+              {props.roleDrafts.map((role, idx) => (
+                <div key={role.id || idx} className="account-tab-role-edit">
+                  {role.id === "owner" ? (
+                    <p className="account-tab-body">Owner — all permissions. Cannot be changed.</p>
+                  ) : (
+                    <>
+                      <label className="account-tab-field">
+                        <span>Name</span>
+                        <input
+                          className="account-tab-input"
+                          value={role.name || ""}
+                          maxLength={40}
+                          onChange={(e) => {
+                            const next = props.roleDrafts.slice();
+                            next[idx] = { ...role, name: e.target.value };
+                            props.setRoleDrafts(next);
+                          }}
+                        />
+                      </label>
+                      <div className="account-tab-perms-grid">
+                        {TEAM_PERM_LABELS.map((p) => (
+                          <label key={p.id} className="account-tab-perm">
+                            <input
+                              type="checkbox"
+                              checked={(role.perms || []).includes(p.id)}
+                              onChange={(e) => {
+                                const cur = new Set(role.perms || []);
+                                if (e.target.checked) cur.add(p.id);
+                                else cur.delete(p.id);
+                                const next = props.roleDrafts.slice();
+                                next[idx] = { ...role, perms: Array.from(cur) };
+                                props.setRoleDrafts(next);
+                              }}
+                            />
+                            <span>{p.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {!role.builtin ? (
+                        <button
+                          type="button"
+                          className="account-tab-btn account-tab-btn--ghost"
+                          onClick={() =>
+                            props.setRoleDrafts(props.roleDrafts.filter((_, i) => i !== idx))
+                          }
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))}
+              <div className="account-tab-actions">
+                <button
+                  type="button"
+                  className="account-tab-btn"
+                  onClick={() =>
+                    props.setRoleDrafts([
+                      ...props.roleDrafts,
+                      { id: "", name: "", builtin: false, perms: [] },
+                    ])
+                  }
+                >
+                  Add role
+                </button>
+                <button type="submit" className="account-tab-btn account-tab-btn--primary" disabled={props.busy}>
+                  Save roles
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </>
+      ) : null}
+
+      <p className="account-tab-quiet-link">
+        <button type="button" className="account-tab-btn account-tab-btn--ghost" onClick={() => props.openTeamsSite("/teams")}>
+          Open on website
+        </button>
+      </p>
+    </>
   );
 }

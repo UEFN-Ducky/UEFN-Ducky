@@ -132,6 +132,75 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error"}
 
+    def _duckyos_team_call(self, fn, **kwargs: Any) -> dict[str, Any]:
+        from frontend.duckyos_account import DuckyOSAccountError
+
+        try:
+            out = fn(**kwargs)
+            if isinstance(out, dict):
+                out.setdefault("ok", True)
+                return out
+            return {"ok": True}
+        except DuckyOSAccountError as exc:
+            return {"ok": False, "error": exc.message, "code": exc.code}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "code": "error"}
+
+    def duckyos_team_create(self, name: str = "") -> dict[str, Any]:
+        from frontend.duckyos_account import team_create
+
+        return self._duckyos_team_call(team_create, name=str(name or ""))
+
+    def duckyos_team_update(self, team_slug: str = "", name: str | None = None) -> dict[str, Any]:
+        from frontend.duckyos_account import team_update
+
+        return self._duckyos_team_call(
+            team_update, team_slug=str(team_slug or ""), name=name
+        )
+
+    def duckyos_team_invite(
+        self, team_slug: str = "", email: str = "", role: str = "member"
+    ) -> dict[str, Any]:
+        from frontend.duckyos_account import team_invite
+
+        return self._duckyos_team_call(
+            team_invite,
+            team_slug=str(team_slug or ""),
+            email=str(email or ""),
+            role=str(role or "member"),
+        )
+
+    def duckyos_team_set_role(
+        self, team_slug: str = "", user_id: str = "", role: str = "member"
+    ) -> dict[str, Any]:
+        from frontend.duckyos_account import team_set_role
+
+        return self._duckyos_team_call(
+            team_set_role,
+            team_slug=str(team_slug or ""),
+            user_id=str(user_id or ""),
+            role=str(role or "member"),
+        )
+
+    def duckyos_team_set_roles(self, team_slug: str = "", roles: list | None = None) -> dict[str, Any]:
+        from frontend.duckyos_account import team_set_roles
+
+        return self._duckyos_team_call(
+            team_set_roles, team_slug=str(team_slug or ""), roles=roles or []
+        )
+
+    def duckyos_team_remove_member(self, team_slug: str = "", user_id: str = "") -> dict[str, Any]:
+        from frontend.duckyos_account import team_remove_member
+
+        return self._duckyos_team_call(
+            team_remove_member, team_slug=str(team_slug or ""), user_id=str(user_id or "")
+        )
+
+    def duckyos_team_revoke_invite(self, token: str = "") -> dict[str, Any]:
+        from frontend.duckyos_account import team_revoke_invite
+
+        return self._duckyos_team_call(team_revoke_invite, token=str(token or ""))
+
     def remote_status(self) -> dict[str, Any]:
         from frontend.settings import PanelSettings
         from frontend.remote_tunnel import remote_tunnel_status

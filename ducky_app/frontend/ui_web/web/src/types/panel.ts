@@ -944,6 +944,23 @@ export interface DuckyOSTeamMemberDto {
   };
 }
 
+export interface DuckyOSTeamRoleDto {
+  id?: string;
+  name?: string;
+  builtin?: boolean;
+  perms?: string[];
+}
+
+export interface DuckyOSTeamPermsDto {
+  invite?: boolean;
+  revoke_invite?: boolean;
+  change_role?: boolean;
+  remove_member?: boolean;
+  edit_team?: boolean;
+  manage_roles?: boolean;
+  manage_plugins?: boolean;
+}
+
 export interface DuckyOSTeamDto {
   id?: string;
   name?: string;
@@ -951,6 +968,15 @@ export interface DuckyOSTeamDto {
   description?: string;
   my_role?: string;
   members?: DuckyOSTeamMemberDto[];
+  roles?: DuckyOSTeamRoleDto[];
+  pending_invites?: Array<{ email?: string; role?: string; token?: string }>;
+  perms?: DuckyOSTeamPermsDto;
+}
+
+export interface DuckyOSTeamQuotaDto {
+  can_create?: boolean;
+  max_owned?: number;
+  owned_count?: number;
 }
 
 export interface DuckyOSTeamsSnapshot {
@@ -970,6 +996,7 @@ export interface DuckyOSTeamsSnapshot {
   teams_url?: string;
   invite_url?: string;
   stale_seconds?: number;
+  quota?: DuckyOSTeamQuotaDto;
 }
 
 export type DuckyOSStoreItemState = "available" | "installed" | "update" | "unsupported";
@@ -1918,6 +1945,27 @@ export interface PanelApi {
   duckyos_open_admin(): Promise<void>;
   duckyos_teams_snapshot?(stale_seconds?: number): Promise<DuckyOSTeamsSnapshot>;
   duckyos_open_teams_site?(path?: string): Promise<{ ok?: boolean; url?: string; error?: string }>;
+  duckyos_team_create?(name: string): Promise<{ ok?: boolean; slug?: string; error?: string }>;
+  duckyos_team_update?(team_slug: string, name?: string): Promise<{ ok?: boolean; error?: string }>;
+  duckyos_team_invite?(
+    team_slug: string,
+    email: string,
+    role?: string,
+  ): Promise<{ ok?: boolean; emailed?: boolean; token?: string; error?: string }>;
+  duckyos_team_set_role?(
+    team_slug: string,
+    user_id: string,
+    role: string,
+  ): Promise<{ ok?: boolean; error?: string }>;
+  duckyos_team_set_roles?(
+    team_slug: string,
+    roles: DuckyOSTeamRoleDto[],
+  ): Promise<{ ok?: boolean; error?: string }>;
+  duckyos_team_remove_member?(
+    team_slug: string,
+    user_id: string,
+  ): Promise<{ ok?: boolean; error?: string }>;
+  duckyos_team_revoke_invite?(token: string): Promise<{ ok?: boolean; error?: string }>;
   remote_status?(): Promise<{
     ok?: boolean;
     enabled?: boolean;
