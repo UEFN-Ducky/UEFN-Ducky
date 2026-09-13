@@ -920,7 +920,7 @@ function AccountTeamPanel(props: {
                           </label>
                         ))}
                       </div>
-                      {!role.builtin ? (
+                      {role.id !== "owner" ? (
                         <button
                           type="button"
                           className="account-tab-btn account-tab-btn--ghost"

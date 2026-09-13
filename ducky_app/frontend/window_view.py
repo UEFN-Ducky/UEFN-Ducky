@@ -120,6 +120,65 @@ def list_window_views() -> list[dict[str, Any]]:
     return rows
 
 
+_UEFN_EDITOR_EXE = "UnrealEditorFortnite.exe"
+
+
+def uefnproject_path(root: str | os.PathLike[str] | None = None):
+    """Resolve the current island's ``*.uefnproject`` (Windows startfile target)."""
+    from pathlib import Path
+
+    if root is None:
+        from frontend.settings import PanelSettings
+
+        raw = (PanelSettings.load().uefn_project_root or "").strip()
+        if not raw:
+            raise RuntimeError("No project selected")
+        root = raw
+    p = Path(root)
+    if p.is_file() and p.suffix.lower() == ".uefnproject":
+        return p
+    if p.is_dir():
+        matches = sorted(p.glob("*.uefnproject"))
+        if matches:
+            return matches[0]
+    raise RuntimeError(f"No .uefnproject in {p}")
+
+
+def kill_uefn_cmd() -> list[str]:
+    return ["taskkill", "/IM", _UEFN_EDITOR_EXE, "/F"]
+
+
+def _kill_uefn_editor() -> bool:
+    if sys.platform != "win32":
+        return False
+    import subprocess
+
+    r = subprocess.run(
+        kill_uefn_cmd(),
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return r.returncode == 0
+
+
+def _start_uefn(path: object) -> None:
+    os.startfile(str(path))  # type: ignore[attr-defined]
+
+
+def launch_uefn_project() -> dict[str, Any]:
+    path = uefnproject_path()
+    _start_uefn(path)
+    return {"ok": True, "path": str(path)}
+
+
+def restart_uefn_project() -> dict[str, Any]:
+    killed = _kill_uefn_editor()
+    out = launch_uefn_project()
+    out["killed"] = killed
+    return out
+
+
 def window_box(hwnd: object) -> dict[str, int]:
     """On-screen rect plus virtual/primary metrics for the WebRTC crop."""
     if sys.platform != "win32":

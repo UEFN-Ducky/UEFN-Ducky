@@ -16,6 +16,8 @@ export type ChoiceOption = {
   disabled?: boolean;
   /** Optional group header (radio/checkbox lists). */
   group?: string;
+  /** Trailing row button (Launch / Restart). Does not change the selected value. */
+  action?: { label: string; onClick: () => void };
 };
 
 type CommonProps = {
@@ -37,10 +39,22 @@ type CommonProps = {
   footer?: ReactNode;
   /** Icon-only (or custom) trigger instead of the selected label. */
   trigger?: ReactNode;
+  /** Header-style icon trigger; pairs with an open-state light (no chevron). */
+  icon?: ReactNode;
   hideChevron?: boolean;
   /** Keep the selected value in the menu; show this on the trigger instead. */
   fixedLabel?: string;
 };
+
+/** Icon + open-state light for header menus (Tools / Plugins / View / Controls). */
+export function ChoiceTriggerFace({ icon }: { icon: ReactNode }) {
+  return (
+    <>
+      <span className="choice-dropdown-trigger-icon">{icon}</span>
+      <span className="choice-dropdown-light" aria-hidden />
+    </>
+  );
+}
 
 type RadioProps = CommonProps & {
   mode?: "radio";
@@ -89,6 +103,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
     header,
     footer,
     trigger,
+    icon,
     hideChevron,
     fixedLabel,
   } = props;
@@ -129,8 +144,8 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
   return (
     <div
       className={`choice-dropdown${size === "compact" ? " choice-dropdown--compact" : ""}${
-        trigger ? " choice-dropdown--icon" : ""
-      }${className ? ` ${className}` : ""}`}
+        trigger || icon ? " choice-dropdown--icon" : ""
+      }${icon ? " choice-dropdown--light" : ""}${className ? ` ${className}` : ""}`}
     >
       <button
         ref={anchorRef}
@@ -147,7 +162,9 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
           if (!disabled) setOpen((v) => !v);
         }}
       >
-        {trigger ? (
+        {icon ? (
+          <ChoiceTriggerFace icon={icon} />
+        ) : trigger ? (
           trigger
         ) : (
           <span className="choice-dropdown-trigger-copy">
@@ -155,7 +172,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
             {selectedHint ? <span className="choice-dropdown-trigger-hint">{selectedHint}</span> : null}
           </span>
         )}
-        {hideChevron || trigger ? null : (
+        {hideChevron || trigger || icon ? null : (
           <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
             <Icons.ChevronDown />
           </span>
@@ -184,9 +201,37 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
               <div key={group ?? "__ungrouped__"} className="choice-dropdown-group">
                 {group ? <div className="choice-dropdown-group-label">{group}</div> : null}
                 {items.map((opt) => {
+                  const actionOnly = Boolean(opt.action && opt.disabled);
                   const selected = checkbox
                     ? props.values.includes(opt.value)
                     : props.value === opt.value;
+                  const actionBtn = opt.action ? (
+                    <button
+                      type="button"
+                      className="choice-dropdown-option-action"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        opt.action?.onClick();
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      {opt.action.label}
+                    </button>
+                  ) : null;
+                  if (actionOnly) {
+                    return (
+                      <div key={opt.value} className="choice-dropdown-option is-action-only">
+                        <span className="choice-dropdown-option-copy">
+                          <span className="choice-dropdown-option-label">{opt.label}</span>
+                          {opt.hint ? (
+                            <span className="choice-dropdown-option-hint">{opt.hint}</span>
+                          ) : null}
+                        </span>
+                        {actionBtn}
+                      </div>
+                    );
+                  }
                   return (
                     <label
                       key={opt.value}
@@ -223,6 +268,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
                           <span className="choice-dropdown-option-hint">{opt.hint}</span>
                         ) : null}
                       </span>
+                      {actionBtn}
                     </label>
                   );
                 })}

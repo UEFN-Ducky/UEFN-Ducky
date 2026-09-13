@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi, isRemote } from "../hooks/usePanelApi";
-import { ChoiceDropdown } from "./ChoiceDropdown";
+import { ChoiceDropdown, ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { contentRect, keyDiff, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
@@ -92,22 +93,18 @@ export function RemoteViewControls({ hwnd }: { hwnd: string }) {
   };
 
   return (
-    <div className="remote-view-controls no-drag">
+    <div className="remote-view-controls no-drag choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light">
       <button
         ref={anchorRef}
         type="button"
-        className={`choice-dropdown-trigger choice-dropdown--compact${open ? " is-open" : ""}`}
+        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Controls"
+        title="Controls"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="choice-dropdown-trigger-copy">
-          <span className="choice-dropdown-trigger-label">Controls</span>
-        </span>
-        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
-          <Icons.ChevronDown />
-        </span>
+        <ChoiceTriggerFace icon={<Icons.Play />} />
       </button>
       <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
         <div className="plugin-header-menu-list" role="menu">
@@ -218,14 +215,38 @@ function useViewerActive(): boolean {
   return on;
 }
 
+const LAUNCH_UEFN_VALUE = "__launch_uefn__";
+
 export function RemoteWindowSelect({
   value,
   onChange,
+  projectName = "",
 }: {
   value: string;
   onChange: (id: string) => void;
+  projectName?: string;
 }) {
+  const { confirm, alert } = useConfirmModal();
   const [rows, setRows] = useState<WindowViewRow[]>([]);
+  const [busy, setBusy] = useState(false);
+  const pendingUeFn = useRef(false);
+  const seenUeFn = useRef<Set<string>>(new Set());
+
+  const applyRows = useCallback(
+    (next: WindowViewRow[]) => {
+      const uefn = next.filter((row) => row.kind === "uefn");
+      if (pendingUeFn.current) {
+        const fresh = uefn.find((row) => !seenUeFn.current.has(row.id));
+        if (fresh) {
+          pendingUeFn.current = false;
+          onChange(fresh.id);
+        }
+      }
+      seenUeFn.current = new Set(uefn.map((row) => row.id));
+      setRows(next);
+    },
+    [onChange],
+  );
 
   const load = useCallback(async () => {
     if (!isRemote()) return;
@@ -233,11 +254,11 @@ export function RemoteWindowSelect({
     if (!listViews) return;
     try {
       const next = await listViews();
-      if (Array.isArray(next)) setRows(next);
+      if (Array.isArray(next)) applyRows(next);
     } catch {
-      setRows([]);
+      applyRows([]);
     }
-  }, []);
+  }, [applyRows]);
 
   useEffect(() => {
     if (!isRemote()) return;
@@ -246,7 +267,44 @@ export function RemoteWindowSelect({
     return () => window.clearInterval(id);
   }, [load]);
 
+  const runUeFn = useCallback(
+    async (kind: "launch" | "restart") => {
+      const api = getApi();
+      const fn = kind === "restart" ? api?.restart_uefn_project : api?.launch_uefn_project;
+      if (!fn) {
+        await alert("UEFN launch is unavailable on this panel.");
+        return;
+      }
+      if (kind === "restart") {
+        const ok = await confirm({
+          title: "Restart UEFN?",
+          message: "This closes Unreal Editor for Fortnite and reopens the current project. Unsaved editor work will be lost.",
+          confirmLabel: "Restart",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+      setBusy(true);
+      pendingUeFn.current = true;
+      seenUeFn.current = new Set(rows.filter((row) => row.kind === "uefn").map((row) => row.id));
+      try {
+        await fn();
+      } catch (e) {
+        pendingUeFn.current = false;
+        await alert(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+        void load();
+      }
+    },
+    [alert, confirm, load, rows],
+  );
+
   if (!isRemote()) return null;
+
+  const uefnRows = rows.filter((row) => row.kind === "uefn");
+  const launchLabel = projectName.trim() ? `Launch ${projectName.trim()}` : "Launch UEFN";
+  const otherRows = rows.filter((row) => row.kind !== "uefn");
 
   return (
     <div className="remote-window-select no-drag" onPointerDown={() => void load()}>
@@ -254,24 +312,47 @@ export function RemoteWindowSelect({
         size="compact"
         aria-label="View"
         value={value}
-        minWidth={240}
+        minWidth={280}
         placeholder="View"
-        fixedLabel="View"
-        onChange={onChange}
+        icon={<Icons.Monitor />}
+        onChange={(id) => {
+          if (id === LAUNCH_UEFN_VALUE) return;
+          onChange(id);
+        }}
         options={[
           { value: "", label: "Ducky", group: "This app" },
-          ...rows.map((row) => ({
+          ...otherRows.map((row) => ({
             value: row.id,
             label: row.title,
             group:
               row.kind === "desktop" || row.kind === "monitor"
                 ? "Desktop"
-                : row.kind === "uefn"
-                  ? "UEFN"
-                  : row.kind === "blender"
-                    ? "Blender"
-                    : "Windows",
+                : row.kind === "blender"
+                  ? "Blender"
+                  : "Windows",
           })),
+          ...(uefnRows.length
+            ? uefnRows.map((row) => ({
+                value: row.id,
+                label: row.title,
+                group: "UEFN",
+                action: {
+                  label: busy ? "…" : "Restart",
+                  onClick: () => void runUeFn("restart"),
+                },
+              }))
+            : [
+                {
+                  value: LAUNCH_UEFN_VALUE,
+                  label: launchLabel,
+                  group: "UEFN",
+                  disabled: true,
+                  action: {
+                    label: busy ? "…" : "Launch",
+                    onClick: () => void runUeFn("launch"),
+                  },
+                },
+              ]),
         ]}
       />
     </div>

@@ -233,6 +233,16 @@ class PanelApiWindowMixin:
 
         return list_window_views()
 
+    def launch_uefn_project(self) -> dict[str, Any]:
+        from frontend.window_view import launch_uefn_project
+
+        return launch_uefn_project()
+
+    def restart_uefn_project(self) -> dict[str, Any]:
+        from frontend.window_view import restart_uefn_project
+
+        return restart_uefn_project()
+
     def rtc_signal(self, session_id: str, payload: object) -> bool:
         from frontend.ui_web.panel_httpd import rtc_signal
 

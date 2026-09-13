@@ -4,7 +4,11 @@ from frontend.window_view import (
     bring_to_front,
     handle_stream_message,
     kind_for,
+    kill_uefn_cmd,
+    launch_uefn_project,
     map_norm_to_screen,
+    restart_uefn_project,
+    uefnproject_path,
     window_box,
     window_fit_size,
     _keep_window,
@@ -207,3 +211,68 @@ def test_desktop_pointer_skips_raise(monkeypatch) -> None:
     handle_stream_message("desktop", b'{"type":"down","x":0.5,"y":0.5}')
     assert boxes == [(0, 0, 5760, 1080)]
     assert raised == []
+
+
+def test_uefnproject_path_finds_file(tmp_path) -> None:
+    island = tmp_path / "Island.uefnproject"
+    island.write_text("{}", encoding="utf-8")
+    assert uefnproject_path(tmp_path) == island
+    assert uefnproject_path(island) == island
+
+
+def test_uefnproject_path_missing_root(tmp_path) -> None:
+    try:
+        uefnproject_path(tmp_path)
+    except RuntimeError as e:
+        assert ".uefnproject" in str(e)
+    else:
+        raise AssertionError("expected missing .uefnproject")
+
+
+def test_uefnproject_path_no_settings(monkeypatch) -> None:
+    class _S:
+        uefn_project_root = ""
+
+        @classmethod
+        def load(cls):
+            return cls()
+
+    monkeypatch.setattr("frontend.settings.PanelSettings", _S)
+    try:
+        uefnproject_path()
+    except RuntimeError as e:
+        assert "No project selected" in str(e)
+    else:
+        raise AssertionError("expected no project")
+
+
+def test_kill_uefn_cmd_is_editor_only() -> None:
+    cmd = kill_uefn_cmd()
+    assert cmd == ["taskkill", "/IM", "UnrealEditorFortnite.exe", "/F"]
+    assert "UEFN-Ducky" not in " ".join(cmd)
+
+
+def test_launch_uefn_project_startfiles(tmp_path, monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    island = tmp_path / "Demo.uefnproject"
+    island.write_text("{}", encoding="utf-8")
+    started: list[str] = []
+    monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
+    monkeypatch.setattr(wv, "_start_uefn", lambda path: started.append(str(path)))
+    assert launch_uefn_project() == {"ok": True, "path": str(island)}
+    assert started == [str(island)]
+
+
+def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    island = tmp_path / "Demo.uefnproject"
+    island.write_text("{}", encoding="utf-8")
+    order: list[str] = []
+    monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: order.append("kill") or True)
+    monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
+    monkeypatch.setattr(wv, "_start_uefn", lambda path: order.append(f"start:{path}"))
+    out = restart_uefn_project()
+    assert out["ok"] is True and out["killed"] is True
+    assert order == ["kill", f"start:{island}"]

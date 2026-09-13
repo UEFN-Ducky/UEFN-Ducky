@@ -521,7 +521,8 @@ input, textarea, select, button {
   font-size: 14px;
   line-height: 1;
 }
-.app-header-center .plugin-header-menu {
+.app-header-center .plugin-header-menu,
+.app-header-center .header-tools-menu {
   flex-shrink: 0;
   width: auto;
   max-width: none;

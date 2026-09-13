@@ -26,6 +26,7 @@ import {
   sortPluginHeaderButtons,
 } from "../hooks/pluginHeaderActions";
 import { useUiTarget } from "../ui-targets/registry";
+import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { RemoteViewControls, RemoteWindowSelect } from "./RemoteWindowView";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
@@ -193,7 +194,7 @@ function HeaderToolsMenu({
     </button>
   );
   return (
-    <div className="choice-dropdown choice-dropdown--compact header-tools-menu no-drag">
+    <div className="choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light header-tools-menu no-drag">
       <button
         ref={anchorRef}
         type="button"
@@ -201,14 +202,10 @@ function HeaderToolsMenu({
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Tools"
+        title="Tools"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="choice-dropdown-trigger-copy">
-          <span className="choice-dropdown-trigger-label">Tools</span>
-        </span>
-        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
-          <Icons.ChevronDown />
-        </span>
+        <ChoiceTriggerFace icon={<Icons.Sliders />} />
       </button>
       <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={200}>
         <div className="plugin-header-menu-list" role="menu">
@@ -233,7 +230,7 @@ function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   if (!buttons.length) return null;
   return (
-    <div className="choice-dropdown choice-dropdown--compact plugin-header-menu no-drag">
+    <div className="choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light plugin-header-menu no-drag">
       <button
         ref={anchorRef}
         type="button"
@@ -241,14 +238,10 @@ function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Plugins"
+        title="Plugins"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="choice-dropdown-trigger-copy">
-          <span className="choice-dropdown-trigger-label">Plugins</span>
-        </span>
-        <span className={`choice-dropdown-chevron${open ? " is-open" : ""}`} aria-hidden>
-          <Icons.ChevronDown />
-        </span>
+        <ChoiceTriggerFace icon={<Icons.Puzzle />} />
       </button>
       <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={220}>
         <div className="plugin-header-menu-list" role="menu">
@@ -661,7 +654,11 @@ export function Header({
 
         {isRemote() && onWatchWindowId ? (
           <>
-            <RemoteWindowSelect value={watchWindowId} onChange={onWatchWindowId} />
+            <RemoteWindowSelect
+              value={watchWindowId}
+              onChange={onWatchWindowId}
+              projectName={project.name}
+            />
             <RemoteViewControls hwnd={watchWindowId} />
           </>
         ) : null}

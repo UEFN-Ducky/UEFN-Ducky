@@ -128,6 +128,11 @@ export const Icons = {
       <path d="M12 22.08V12" />
     </svg>
   ),
+  Puzzle: () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M8 4a2 2 0 114 0v1h3a2 2 0 012 2v3h1a2 2 0 110 4h-1v3a2 2 0 01-2 2h-3v1a2 2 0 11-4 0v-1H5a2 2 0 01-2-2v-3H2a2 2 0 110-4h1V7a2 2 0 012-2h3z" />
+    </svg>
+  ),
   Zap: () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />

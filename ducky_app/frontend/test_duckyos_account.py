@@ -178,6 +178,8 @@ def test_remote_deny_covers_native_and_secret_paths() -> None:
     assert "window_box" in REMOTE_DENY
     assert "send_message" not in REMOTE_DENY
     assert "list_conversations" not in REMOTE_DENY
+    assert "launch_uefn_project" not in REMOTE_DENY
+    assert "restart_uefn_project" not in REMOTE_DENY
 
 
 def test_device_login_polls_until_token() -> None:

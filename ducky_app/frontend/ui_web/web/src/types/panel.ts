@@ -2695,6 +2695,10 @@ export interface PanelApi {
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
   list_running_agents(): Promise<string[]>;
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
+  /** Open the current island in UEFN (Windows file association on ``*.uefnproject``). */
+  launch_uefn_project?(): Promise<{ ok: boolean; path?: string }>;
+  /** Kill UnrealEditorFortnite.exe, then launch the current island again. */
+  restart_uefn_project?(): Promise<{ ok: boolean; path?: string; killed?: boolean }>;
   rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;
   /** Direct Remote View: the page posts its full-ICE answer for a viewer session. */
   direct_rtc_answer?(session: string, answer: { type: string; sdp: string } | null, fingerprint?: string, error?: string): Promise<boolean>;
