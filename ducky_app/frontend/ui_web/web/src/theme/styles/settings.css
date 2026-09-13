@@ -2131,6 +2131,12 @@
   transform: scale(0.98);
 }
 
+.account-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .account-tab-title {
   display: flex;
   align-items: center;
@@ -2179,6 +2185,59 @@
 .account-tab-card--signed-in {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.account-tab-card--caps {
+  max-width: 720px;
+}
+
+.account-tab-caps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.account-tab-caps-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px 8px;
+}
+
+.account-tab-caps-group summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 0 6px;
+}
+
+.account-tab-caps-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-tab-caps-master,
+.account-tab-caps-tool {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.account-tab-caps-master small,
+.account-tab-caps-tool small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.account-tab-caps-tool {
+  padding: 6px 0 6px 18px;
+}
+
+.account-tab-caps-tool--destructive strong {
+  color: var(--red);
 }
 
 .account-tab-label {

@@ -198,7 +198,7 @@ def _merge_installed_plugin_tools(full: dict[str, Any]) -> None:
 
 
 def build_caps_catalog() -> dict[str, Any]:
-    """Slim grouped catalog for the website permission modal (no schemas)."""
+    """Slim grouped catalog for the desktop AI permissions editor (no schemas)."""
     full = build_mcp_catalog(apply_filters=False)
     _merge_installed_plugin_tools(full)
     categories = []

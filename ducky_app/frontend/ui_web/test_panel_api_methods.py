@@ -120,6 +120,7 @@ _PUBLIC_METHODS = frozenset({
     'draft_skill_pack',
     'draft_subskill',
     'duckyos_agent_caps',
+    'duckyos_agent_caps_set',
     'duckyos_cancel_login',
     'duckyos_get_status',
     'duckyos_login',

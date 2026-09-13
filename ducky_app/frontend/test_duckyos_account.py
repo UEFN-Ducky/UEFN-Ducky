@@ -291,12 +291,59 @@ def test_store_item_versions_needs_slug() -> None:
     assert out["versions"] == []
 
 
+def test_set_agent_caps_stays_on_desktop() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    blob: dict = {}
+    settings = SimpleNamespace(allow_settings_write=True, allow_agent_clicks=False)
+    settings.save = lambda: None
+    pushed: list = []
+
+    def _save(data):
+        blob.clear()
+        blob.update(data)
+
+    def _collect(plugin_id, event, body=None, **_kwargs):
+        pushed.append((plugin_id, event, body or {}))
+        return {"ok": True}
+
+    catalog = {"categories": [{"id": "p", "label": "P", "tools": [{"name": "keep_me"}]}]}
+    with (
+        patch.object(acc, "_load_blob", lambda: dict(blob)),
+        patch.object(acc, "_save_blob", _save),
+        patch.object(acc, "_plugin_collect", _collect),
+        patch("frontend.settings.PanelSettings.load", return_value=settings),
+        patch("frontend.ui_web.mcp_catalog.build_caps_catalog", return_value=catalog),
+    ):
+        out = acc.set_agent_caps(["deny_me"], {"allow_settings_write": False, "allow_agent_clicks": True})
+        assert out["denied"] == ["deny_me"]
+        assert out["settings"]["allow_settings_write"] is False
+        assert "catalog" not in out
+        assert settings.allow_settings_write is False
+        assert settings.allow_agent_clicks is True
+        assert blob["agent_caps_local"] is True
+        assert pushed == []
+        blob["device_key"] = "k"
+        acc.set_agent_caps(["deny_me"], {"allow_settings_write": False})
+        assert pushed[-1][1] == "agent-caps-set"
+        assert acc.fetch_agent_caps() is not None
+        assert pushed[-1][1] == "agent-caps-set"
+
+    assert acc.sanitize_denied_names(["ok_tool", "ok_tool", "", "bad name", 1]) == ["ok_tool"]
+    assert acc.effective_allow_settings_write(True) is True
+    assert acc.effective_allow_agent_clicks(False) is False
+
+
 if __name__ == "__main__":
     test_pkce_pair_s256()
     test_device_login_polls_until_token()
     test_auto_apply_store_updates_skips_local_and_unpaid()
     test_store_item_versions_strips_empty_and_keeps_changelog()
     test_store_item_versions_needs_slug()
+    test_set_agent_caps_stays_on_desktop()
     test_name_allowed_matches_filter()
     test_dispatch_desktop_rpc_allowlist()
     test_call_panel_method_maps_kwargs_and_positional()

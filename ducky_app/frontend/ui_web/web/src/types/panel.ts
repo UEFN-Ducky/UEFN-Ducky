@@ -1931,11 +1931,34 @@ export interface PanelApi {
     faultAction?: string;
   }): Promise<{ ok: boolean; path?: string; error?: string }>;
   duckyos_get_status(): Promise<DuckyOSAccountStatus>;
-  duckyos_agent_caps?(): Promise<{
+  duckyos_agent_caps?(include_catalog?: boolean): Promise<{
     ok?: boolean;
     denied?: string[];
     settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean };
     denied_count?: number;
+    catalog?: {
+      categories?: Array<{
+        id?: string;
+        label?: string;
+        tools?: Array<{ name?: string; description?: string; destructive?: boolean }>;
+      }>;
+    };
+  }>;
+  duckyos_agent_caps_set?(
+    denied?: string[],
+    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean },
+  ): Promise<{
+    ok?: boolean;
+    denied?: string[];
+    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean };
+    denied_count?: number;
+    catalog?: {
+      categories?: Array<{
+        id?: string;
+        label?: string;
+        tools?: Array<{ name?: string; description?: string; destructive?: boolean }>;
+      }>;
+    };
   }>;
   duckyos_login(base_url?: string): Promise<DuckyOSAccountStatus>;
   duckyos_cancel_login(): Promise<DuckyOSAccountStatus>;

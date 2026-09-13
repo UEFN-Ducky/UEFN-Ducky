@@ -42,14 +42,15 @@ class PanelApiStoreMixin:
         except Exception:
             return get_status()
 
-    def duckyos_agent_caps(self) -> dict[str, Any]:
-        from frontend.duckyos_account import agent_caps_status, fetch_agent_caps
+    def duckyos_agent_caps(self, include_catalog: bool = True) -> dict[str, Any]:
+        from frontend.duckyos_account import agent_caps_status
 
-        try:
-            fetch_agent_caps()
-        except Exception:
-            pass
-        return agent_caps_status()
+        return agent_caps_status(include_catalog=bool(include_catalog))
+
+    def duckyos_agent_caps_set(self, denied: Any = None, settings: Any = None) -> dict[str, Any]:
+        from frontend.duckyos_account import set_agent_caps
+
+        return set_agent_caps(denied, settings)
 
     def duckyos_login(self, base_url: str = "", email: str = "", password: str = "") -> dict[str, Any]:
         """Start browser-based login (email/password args ignored — kept for API compat)."""

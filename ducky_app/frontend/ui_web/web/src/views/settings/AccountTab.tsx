@@ -13,6 +13,7 @@ import {
 } from "../../navigation/deepLinks";
 import { DUCKYOS_ACCOUNT_CHANGED } from "../../navigation/openSettingsTab";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
+import { AgentCapsCard } from "./AgentCapsCard";
 
 const DEFAULT_BASE = "https://uefnducky.org";
 const NAME_NOT_ALLOWED = "That name isn't allowed.";
@@ -107,7 +108,6 @@ export function AccountTab() {
   const [teams, setTeams] = useState<DuckyOSTeamsSnapshot | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
   const [pairingCode, setPairingCode] = useState("");
-  const [capsDenied, setCapsDenied] = useState(0);
   const [remote, setRemote] = useState<{
     enabled?: boolean;
     hostname?: string;
@@ -148,20 +148,6 @@ export function AccountTab() {
       setRemote(await api.remote_status());
     } catch {
       setRemote(null);
-    }
-  }, []);
-
-  const refreshCaps = useCallback(async () => {
-    const api = getApi();
-    if (!api || typeof api.duckyos_agent_caps !== "function") {
-      setCapsDenied(0);
-      return;
-    }
-    try {
-      const row = await api.duckyos_agent_caps();
-      setCapsDenied(Number(row?.denied_count || 0));
-    } catch {
-      setCapsDenied(0);
     }
   }, []);
 
@@ -232,20 +218,18 @@ export function AccountTab() {
     if (!status?.logged_in) {
       setTeams(null);
       setRemote(null);
-      setCapsDenied(0);
       return;
     }
     // One initial fetch + slow poll (heartbeat thread covers presence separately).
     void refreshTeams();
     void refreshRemote();
-    void refreshCaps();
     const starting = Boolean(remote?.enabled && !remote?.running);
     const id = window.setInterval(() => {
       void refreshTeams();
       void refreshRemote();
     }, starting ? 3000 : 90_000);
     return () => window.clearInterval(id);
-  }, [status?.logged_in, remote?.enabled, remote?.running, refreshTeams, refreshRemote, refreshCaps]);
+  }, [status?.logged_in, remote?.enabled, remote?.running, refreshTeams, refreshRemote]);
 
   const run = async (fn: () => Promise<DuckyOSAccountStatus>) => {
     setBusy(true);
@@ -499,23 +483,7 @@ export function AccountTab() {
             </div>
           </div>
 
-          <div className="account-tab-card">
-            <h3 className="account-tab-section-title">AI permissions</h3>
-            <p className="account-tab-body">
-              {capsDenied > 0
-                ? `${capsDenied} tool${capsDenied === 1 ? "" : "s"} blocked — change on website.`
-                : "What the AI can do is saved on your uefnducky.org account."}
-            </p>
-            <div className="account-tab-actions">
-              <button
-                type="button"
-                className="account-tab-btn account-tab-btn--primary"
-                onClick={() => openTeamsSite("/profile#uefn-ducky")}
-              >
-                Change on website
-              </button>
-            </div>
-          </div>
+          <AgentCapsCard onError={setError} />
 
           <div className="account-tab-card account-tab-teams">
             <div className="account-tab-signed-row">
@@ -639,6 +607,8 @@ export function AccountTab() {
           )}
         </div>
       )}
+
+      {loggedIn ? null : <AgentCapsCard onError={setError} />}
     </div>
   );
 }

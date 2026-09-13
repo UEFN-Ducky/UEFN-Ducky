@@ -558,6 +558,32 @@ def get_status() -> dict[str, Any]:
     }
 
 
+_DENY_MAX = 2000
+_DENY_NAME_MAX = 128
+
+
+def _name_ok(name: str) -> bool:
+    return bool(name) and len(name) <= _DENY_NAME_MAX and all(
+        ch.isalnum() or ch in "_-.:" for ch in name
+    )
+
+
+def sanitize_denied_names(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        name = str(item).strip() if isinstance(item, str) else ""
+        if not _name_ok(name) or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+        if len(out) >= _DENY_MAX:
+            break
+    return out
+
+
 def cloud_denied_names() -> set[str]:
     blob = _load_blob()
     return {
@@ -579,29 +605,109 @@ def cloud_settings_ceiling() -> dict[str, bool] | None:
 
 
 def effective_allow_settings_write(local: bool) -> bool:
-    ceil = cloud_settings_ceiling()
-    if ceil is None:
-        return local
-    return local and ceil["allow_settings_write"]
+    return bool(local)
 
 
 def effective_allow_agent_clicks(local: bool) -> bool:
-    ceil = cloud_settings_ceiling()
-    if ceil is None:
-        return local
-    return local and ceil["allow_agent_clicks"]
+    return bool(local)
 
 
-def agent_caps_status() -> dict[str, Any]:
+def _panel_cap_settings() -> dict[str, bool]:
+    try:
+        from frontend.settings import PanelSettings
+
+        s = PanelSettings.load()
+        return {
+            "allow_settings_write": bool(s.allow_settings_write),
+            "allow_agent_clicks": bool(s.allow_agent_clicks),
+        }
+    except Exception:
+        raw = _load_blob().get("agent_settings")
+        if not isinstance(raw, dict):
+            raw = {}
+        return {
+            "allow_settings_write": bool(raw.get("allow_settings_write", True)),
+            "allow_agent_clicks": bool(raw.get("allow_agent_clicks", False)),
+        }
+
+
+def _apply_caps_to_panel(settings: dict[str, Any]) -> None:
+    from frontend.settings import PanelSettings
+
+    s = PanelSettings.load()
+    if "allow_settings_write" in settings:
+        s.allow_settings_write = bool(settings["allow_settings_write"])
+    if "allow_agent_clicks" in settings:
+        s.allow_agent_clicks = bool(settings["allow_agent_clicks"])
+    s.save()
+
+
+def agent_caps_status(*, include_catalog: bool = False) -> dict[str, Any]:
     blob = _load_blob()
     denied = [str(n) for n in (blob.get("agent_denied") or []) if isinstance(n, str)]
-    settings = blob.get("agent_settings") if isinstance(blob.get("agent_settings"), dict) else {}
-    return {
+    settings = _panel_cap_settings()
+    out: dict[str, Any] = {
         "ok": True,
         "denied": denied,
         "settings": settings,
         "denied_count": len(denied),
     }
+    if include_catalog:
+        try:
+            from frontend.ui_web.mcp_catalog import build_caps_catalog
+
+            catalog = build_caps_catalog()
+        except Exception:
+            catalog = {"categories": []}
+        out["catalog"] = catalog if isinstance(catalog, dict) else {"categories": []}
+    return out
+
+
+def set_agent_caps(denied: Any = None, settings: Any = None) -> dict[str, Any]:
+    """Desktop is the limiter. Cloud is a replica when this PC is signed in."""
+    blob = _load_blob()
+    if denied is not None:
+        blob["agent_denied"] = sanitize_denied_names(denied)
+    cur = blob.get("agent_settings") if isinstance(blob.get("agent_settings"), dict) else {}
+    next_settings = {
+        "allow_settings_write": bool(cur.get("allow_settings_write", True)),
+        "allow_agent_clicks": bool(cur.get("allow_agent_clicks", False)),
+    }
+    next_settings.update(_panel_cap_settings())
+    if isinstance(settings, dict):
+        if "allow_settings_write" in settings:
+            next_settings["allow_settings_write"] = bool(settings["allow_settings_write"])
+        if "allow_agent_clicks" in settings:
+            next_settings["allow_agent_clicks"] = bool(settings["allow_agent_clicks"])
+    blob["agent_settings"] = next_settings
+    blob["agent_caps_local"] = True
+    _save_blob(blob)
+    try:
+        _apply_caps_to_panel(next_settings)
+    except Exception:
+        pass
+    _push_agent_caps(blob)
+    return agent_caps_status(include_catalog=False)
+
+
+def _push_agent_caps(blob: dict[str, Any]) -> None:
+    if not blob.get("device_key"):
+        return
+    try:
+        _plugin_collect(
+            "uefn-ducky",
+            "agent-caps-set",
+            {
+                "denied": list(blob.get("agent_denied") or []),
+                "settings": dict(blob.get("agent_settings") or {}),
+            },
+            unavailable_code="auth_unavailable",
+            unavailable_msg="Desktop login plugin is not active on this tenant yet.",
+            error_code="agent_caps_failed",
+            timeout=12.0,
+        )
+    except Exception:
+        return
 
 
 def _store_agent_caps(blob: dict[str, Any], row: dict[str, Any] | None) -> None:
@@ -621,6 +727,8 @@ def _store_agent_caps(blob: dict[str, Any], row: dict[str, Any] | None) -> None:
 
 def fetch_agent_caps(blob: dict[str, Any] | None = None) -> dict[str, Any]:
     blob = blob if blob is not None else _load_blob()
+    if blob.get("agent_caps_local"):
+        return blob
     if not (blob.get("device_key") or blob.get("session_value")):
         return blob
     try:
@@ -636,6 +744,12 @@ def fetch_agent_caps(blob: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception:
         return blob
     _store_agent_caps(blob, row)
+    try:
+        raw = blob.get("agent_settings")
+        if isinstance(raw, dict):
+            _apply_caps_to_panel(raw)
+    except Exception:
+        pass
     return blob
 
 
