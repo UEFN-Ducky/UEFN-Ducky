@@ -28,15 +28,18 @@ it.each([
 it("keeps dock drag updates in memory and saves the exact final width once", () => {
   const { result } = renderHook(() => useWorkspaceDockLayout("main"));
   const write = vi.spyOn(Storage.prototype, "setItem");
+  const initial = result.current.leftWidth;
   act(() => {
     for (let width = 250; width < 350; width++) result.current.resizeRailWidth("left", width);
   });
-  expect(result.current.leftWidth).toBe(349);
+  // Live drag must not commit React — that re-renders the chat every pixel.
+  expect(result.current.leftWidth).toBe(initial);
   expect(write).not.toHaveBeenCalled();
   act(() => {
     result.current.resizeRailWidth("left", 360);
     result.current.persistRailWidth();
   });
+  expect(result.current.leftWidth).toBe(360);
   expect(JSON.parse(localStorage.getItem(dockStorageKey("main"))!).leftWidth).toBe(360);
   expect(write).toHaveBeenCalledTimes(1);
 });

@@ -8,18 +8,37 @@ import frontend.ui_web.panel_api as _pa
 
 
 class PanelApiChatsMixin:
-    def list_folders(self) -> list[dict[str, str | float]]:
+    @staticmethod
+    def _folder_sidebar_row(
+        f: Any,
+        *,
+        project_slug: str = "",
+        project_name: str = "",
+    ) -> dict[str, str | float]:
+        row: dict[str, str | float] = {
+            "id": f.id,
+            "name": f.name,
+            "parent_id": f.parent_id,
+            "sort_order": f.sort_order,
+            "group_hub_id": getattr(f, "group_hub_id", "") or "",
+        }
+        if project_slug:
+            row["project_slug"] = project_slug
+            row["project_name"] = project_name or project_slug
+        return row
+
+    def list_folders(self, all_projects: bool = False) -> list[dict[str, str | float]]:
         _pa.ensure_group_folder_hubs()
-        return [
-            {
-                "id": f.id,
-                "name": f.name,
-                "parent_id": f.parent_id,
-                "sort_order": f.sort_order,
-                "group_hub_id": getattr(f, "group_hub_id", "") or "",
-            }
-            for f in _pa.load_folders()
-        ]
+        if not all_projects:
+            return [self._folder_sidebar_row(f) for f in _pa.load_folders()]
+        rows: list[dict[str, str | float]] = []
+        for slug, folders in _pa.iter_folders_by_project():
+            name = _pa.project_slug_display_name(slug)
+            rows.extend(
+                self._folder_sidebar_row(f, project_slug=slug, project_name=name)
+                for f in folders
+            )
+        return rows
 
     def list_conversations(self, folder_id: str) -> list[dict[str, str | float | int]]:
         return [
@@ -27,11 +46,23 @@ class PanelApiChatsMixin:
             for c in _pa.list_conversations(folder_id)
         ]
 
-    def list_all_conversations(self) -> list[dict[str, str | float | int | bool]]:
+    def list_all_conversations(self, all_projects: bool = False) -> list[dict[str, str | float | int | bool]]:
         """All project chats in one call (metadata only) for sidebar grouping."""
-        convs = _pa.list_all_conversation_metadata()
-        group_ids = {c.id for c in convs if getattr(c, "is_group", False)}
-        return [self._conversation_sidebar_row(c, group_ids=group_ids) for c in convs]
+        if not all_projects:
+            convs = _pa.list_all_conversation_metadata()
+            group_ids = {c.id for c in convs if getattr(c, "is_group", False)}
+            return [self._conversation_sidebar_row(c, group_ids=group_ids) for c in convs]
+        tagged = list(_pa.iter_conversations_by_project())
+        group_ids = {c.id for _, c in tagged if getattr(c, "is_group", False)}
+        return [
+            self._conversation_sidebar_row(
+                c,
+                group_ids=group_ids,
+                project_slug=slug,
+                project_name=_pa.project_slug_display_name(slug),
+            )
+            for slug, c in tagged
+        ]
 
     def list_conversations_for_file(self, file_path: str) -> list[dict[str, str | float | int]]:
         return [
@@ -71,10 +102,12 @@ class PanelApiChatsMixin:
         c: Any,
         *,
         group_ids: set[str] | None = None,
+        project_slug: str = "",
+        project_name: str = "",
     ) -> dict[str, str | float | int | bool]:
         del group_ids  # retained for call-site compat; subagents retired
         parent_id = (getattr(c, "parent_conv_id", None) or "").strip()
-        return {
+        row: dict[str, str | float | int | bool] = {
             "id": c.id,
             "title": c.title,
             "sort_order": c.sort_order,
@@ -102,6 +135,10 @@ class PanelApiChatsMixin:
             "file_count": int(getattr(c, "file_count", 0) or 0),
             "context_tokens": _pa.PanelApi._sidebar_context_tokens(c),
         }
+        if project_slug:
+            row["project_slug"] = project_slug
+            row["project_name"] = project_name or project_slug
+        return row
 
     def create_folder(self, name: str, parent_id: str = "") -> dict[str, str]:
         f = _pa.create_folder(name, parent_id)

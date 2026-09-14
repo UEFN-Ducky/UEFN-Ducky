@@ -51,6 +51,7 @@ import { numberedEntryName } from "../utils/numberedEntryName";
 import {
   contextMenuSeparator,
   fileTreeCreateItems,
+  duckyTreeAllProjectsItem,
   duckyTreeCompactItem,
   duckyTreeCreateItems,
   showHiddenProjectFilesItem,
@@ -60,10 +61,15 @@ import {
   expandFoldersById,
   findChatAncestorFolderIds,
   findFolderById,
+  folderIdForCreate,
   insertChatFolder,
   maxExpandedFolderDepth,
   toggleChatFolderLevels,
 } from "../utils/sidebarTree";
+import {
+  readDuckiesAllProjects,
+  rememberDuckiesAllProjects,
+} from "../utils/duckiesTreePrefs";
 
 function shouldBlockSidebarHotkey(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -336,13 +342,14 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
   foldersRef.current = folders;
   const groupCreateQueueRef = useRef<{ chain: Promise<void> }>({ chain: Promise.resolve() });
 
+  const createFolderId = folderIdForCreate(selectedChatFolderId ?? "", projectSlug, folders);
   const { createDucky } = useCreateDucky({
     folders,
     rootChats,
     load,
     onCreated: onChatSelect,
     filePath: activeFilePath,
-    selectedFolderId: selectedChatFolderId,
+    selectedFolderId: createFolderId,
   });
   const { confirm } = useConfirmModal();
   const undoHistory = useUndoHistoryOptional();
@@ -352,6 +359,15 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     setDuckiesCompact(value);
     rememberDuckiesCompact(value);
   }, []);
+  const [duckiesAllProjects, setDuckiesAllProjects] = useState(readDuckiesAllProjects);
+  const toggleDuckiesAllProjects = useCallback(
+    (value: boolean) => {
+      setDuckiesAllProjects(value);
+      rememberDuckiesAllProjects(value);
+      void load();
+    },
+    [load],
+  );
 
   useEffect(() => {
     if (filesRefreshProp !== undefined) setFilesRefresh(filesRefreshProp);
@@ -535,7 +551,7 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
 
   const createChatFlow = useCallback(async () => {
     if (onRequestCreateDucky) {
-      onRequestCreateDucky({ folderId: selectedChatFolderId ?? "" });
+      onRequestCreateDucky({ folderId: createFolderId });
       return;
     }
     const created = await createDucky();
@@ -543,7 +559,7 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       markNew("chat", created.id);
       setEditing({ kind: "chat", id: created.id, value: created.name });
     }
-  }, [createDucky, markNew, onRequestCreateDucky, selectedChatFolderId]);
+  }, [createDucky, createFolderId, markNew, onRequestCreateDucky]);
 
   const createGroup = useCallback(
     async (parentId: string) => {
@@ -594,14 +610,18 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
 
   const createGroupFlow = useCallback(
     (folderId?: string) => {
-      const parentId = folderId ?? selectedChatFolderId ?? "";
+      const parentId = folderIdForCreate(
+        folderId ?? selectedChatFolderId ?? "",
+        projectSlug,
+        foldersRef.current,
+      );
       // Serialized: each create names itself from the tree the previous one left,
       // instead of every click in a fast burst racing to the same "Group1".
       const queue = groupCreateQueueRef.current;
       queue.chain = queue.chain.then(() => createGroup(parentId)).catch(() => undefined);
       return queue.chain;
     },
-    [createGroup, selectedChatFolderId],
+    [createGroup, projectSlug, selectedChatFolderId],
   );
 
   const revealFileInSidebar = useCallback(
@@ -665,8 +685,16 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       ),
       contextMenuSeparator("duckies-sep-compact"),
       duckyTreeCompactItem(duckiesCompact, toggleDuckiesCompact),
+      duckyTreeAllProjectsItem(duckiesAllProjects, toggleDuckiesAllProjects),
     ],
-    [createChatFlow, createGroupFlow, duckiesCompact, toggleDuckiesCompact],
+    [
+      createChatFlow,
+      createGroupFlow,
+      duckiesAllProjects,
+      duckiesCompact,
+      toggleDuckiesAllProjects,
+      toggleDuckiesCompact,
+    ],
   );
 
   const { menu: filesHeaderMenu, open: openFilesHeaderMenu, close: closeFilesHeaderMenu } =
@@ -1059,6 +1087,7 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
             dockSide={dockSide}
             onSelectionCountChange={setDuckySelectionCount}
             compact={duckiesCompact}
+            currentProjectSlug={projectSlug}
           />
         )}
       </div>

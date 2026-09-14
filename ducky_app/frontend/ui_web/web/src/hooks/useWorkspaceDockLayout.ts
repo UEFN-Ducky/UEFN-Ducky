@@ -23,7 +23,9 @@ export function useWorkspaceDockLayout(windowId: string) {
   const storageKey = dockStorageKey(windowId);
   const [snapshot, setSnapshot] = useState<WorkspaceDockSnapshot>(() => readDockSnapshot(windowId));
   const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
+  const liveResizeRef = useRef(false);
+  // Live drag writes snapshotRef without setState; don't clobber it on unrelated renders.
+  if (!liveResizeRef.current) snapshotRef.current = snapshot;
   const hydratingRef = useRef(false);
 
   // Prefer AppData over localStorage once the bridge is up.
@@ -132,16 +134,21 @@ export function useWorkspaceDockLayout(windowId: string) {
       const prev = snapshotRef.current;
       const key = side === "left" ? "leftWidth" : "rightWidth";
       if (prev[key] === width) return;
-      const next = { ...prev, [key]: width };
-      // Live drag stays in memory; pointer release persists once, after its final delta.
-      snapshotRef.current = next;
-      setSnapshot(next);
+      // Live drag: memory + CSS vars only. setSnapshot on pointerup would
+      // re-render the big chat every pixel.
+      liveResizeRef.current = true;
+      snapshotRef.current = { ...prev, [key]: width };
     },
     [],
   );
 
   const persistRailWidth = useCallback(() => {
-    persistDockSnapshot(snapshotRef.current, windowId);
+    liveResizeRef.current = false;
+    const next = snapshotRef.current;
+    persistDockSnapshot(next, windowId);
+    setSnapshot((prev) =>
+      prev.leftWidth === next.leftWidth && prev.rightWidth === next.rightWidth ? prev : next,
+    );
   }, [windowId]);
 
   const toggleCollapsed = useCallback(

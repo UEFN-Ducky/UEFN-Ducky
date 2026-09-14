@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
@@ -9,6 +9,7 @@ import { PluginSurfaceBoundary } from "../plugin-ui/PluginSurfaceBoundary";
 import { useAppHeaderActions, useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
 import { useNavigationHistoryOptional } from "../navigation/NavigationHistoryContext";
 import { useRightRailOpen } from "../hooks/useRightRailOpen";
+import { useNarrowLayout } from "../hooks/useNarrowLayout";
 import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
@@ -63,19 +64,6 @@ const RIGHT_RAIL_TOGGLE_META = {
   closed: { title: "Show right sidebar", Icon: Icons.PanelRightClose },
 } as const;
 
-const COMPACT_HEADER_MQ = "(max-width: 720px)";
-
-function useCompactHeader() {
-  return useSyncExternalStore(
-    (onChange) => {
-      const mq = window.matchMedia(COMPACT_HEADER_MQ);
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(COMPACT_HEADER_MQ).matches,
-    () => true,
-  );
-}
 
 function PluginHeaderItem({
   btn,
@@ -384,7 +372,7 @@ export function Header({
   const pluginContrib = usePluginContributions();
   const { prefs: discordUiPrefs } = useDiscordUiPrefs();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
-  const narrowHeader = useCompactHeader();
+  const narrowHeader = useNarrowLayout();
   const pluginHeaderButtons = useMemo(() => {
     if (!hasProject || isFocus || isSettingsOverlay) return [];
     return sortPluginHeaderButtons(pluginContrib.header_buttons).filter((btn) => {

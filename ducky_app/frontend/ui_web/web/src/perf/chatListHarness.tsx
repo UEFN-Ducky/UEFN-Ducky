@@ -20,6 +20,8 @@ import {
 } from "../utils/chatMessageGroups";
 import type { ChatMessage } from "../types/panel";
 import { syntheticMessages } from "./syntheticChat";
+import { WorkspaceDockProvider, useWorkspaceDock } from "../workspace/WorkspaceDockContext";
+import { DockRail } from "../workspace/DockRail";
 
 type PerfEntry = Record<string, unknown>;
 
@@ -49,6 +51,56 @@ const noop = () => {};
 // Stable like ChatPane's memoized state: a fresh [] per render would change the
 // list's row-environment context every frame and re-render every row.
 const EMPTY: never[] = [];
+
+let dockRenders = 0;
+function DockHarness({ children }: { children: React.ReactNode }) {
+  const dock = useWorkspaceDock();
+  dockRenders++;
+  return <>
+    <div>
+      <button onClick={() => dock.setLeftRailOpen(!dock.leftRailOpen)}>Toggle left</button>
+      <button onClick={() => dock.setRightRailOpen(!dock.rightRailOpen)}>Toggle right</button>
+      <button onClick={() => void resizeRun()}>Measure sidebar resize</button>
+    </div>
+    <div className="workspace-dock-layout">
+      <DockRail side="left" open={dock.leftRailOpen}><div>Left sidebar</div></DockRail>
+      <div className="workspace-dock-center">{children}</div>
+      <DockRail side="right" open={dock.rightRailOpen}><div>Right sidebar</div></DockRail>
+    </div>
+  </>;
+}
+
+/** Real rail handlers + chat layout. Force layout to include reflow in each sample;
+ * frame cadence is reported separately because hidden browser tabs throttle rAF. */
+async function resizeRun() {
+  const samples: number[] = [];
+  const before = dockRenders;
+  const lt = longTaskRecorder();
+  for (const side of ["left", "right"]) {
+    const handle = document.querySelector<HTMLElement>(`[aria-label="Resize ${side} panel"]`);
+    if (!handle) continue;
+    const x = handle.getBoundingClientRect().x;
+    handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, clientX: x }));
+    for (let i = 1; i <= 80; i++) {
+      await nextFrame();
+      const t = performance.now();
+      flushSync(() => window.dispatchEvent(new PointerEvent("pointermove", {
+        pointerId: 1, clientX: x + (side === "left" ? 1 : -1) * (i <= 40 ? i : 80 - i) * 6,
+      })));
+      await nextFrame();
+      void document.querySelector<HTMLElement>(".virtual-chat-message-list-scroller")?.scrollHeight;
+      samples.push(performance.now() - t);
+    }
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, clientX: x }));
+  }
+  const tasks = lt.stop();
+  const sorted = samples.sort((a, b) => a - b);
+  document.getElementById("perf-bar")!.textContent = JSON.stringify({
+    resizeSamples: samples.length, dockRenders: dockRenders - before,
+    medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.floor(sorted.length * .95)],
+    maxMs: Math.max(...samples), longTasks: tasks, hiddenFrames,
+  });
+}
 
 function lastUserId(rows: ChatRow[]): string | null {
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -241,12 +293,17 @@ async function main() {
   const bar = document.getElementById("perf-bar");
   const t0 = performance.now();
   const root = ReactDOM.createRoot(document.getElementById("perf-list")!);
-  flushSync(() => root.render(<Harness committed={committedRows} />));
+  const chat = <Harness committed={committedRows} />;
+  flushSync(() => root.render(params.has("dock")
+    ? <WorkspaceDockProvider windowId="perf-dock"><DockHarness>{chat}</DockHarness></WorkspaceDockProvider>
+    : chat));
   await nextFrame();
   const firstFrameMs = performance.now() - t0;
   const chunksAtFirstFrame = document.querySelectorAll(".virtual-chat-chunk").length;
   if (bar) bar.textContent = `${messages.length} messages → ${committedRows.length} rows; first frame ${firstFrameMs.toFixed(1)} ms. Run window.__chatPerf.run()`;
-  (window as unknown as { __chatPerf: unknown }).__chatPerf = { run, streamRun, scrollRun, entries: perfEntries, firstFrameMs, chunksAtFirstFrame };
+  (window as unknown as { __chatPerf: unknown }).__chatPerf = {
+    run, streamRun, scrollRun, resizeRun, entries: perfEntries, firstFrameMs, chunksAtFirstFrame,
+  };
 }
 
 void main();

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import type { FolderItem } from "../types/panel";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { FolderDto, FolderItem } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { ARCHIVE_FOLDER_ID, isArchiveFolderId } from "../utils/archiveFolder";
-import { buildFolderTree } from "../utils/sidebarTree";
+import { readDuckiesAllProjects } from "../utils/duckiesTreePrefs";
+import { buildFolderTree, wrapProjectsAsFolders } from "../utils/sidebarTree";
 
 type ConvRow = Awaited<ReturnType<NonNullable<ReturnType<typeof getApi>>["list_all_conversations"]>>[number];
 
@@ -18,6 +19,7 @@ function mapConversations(convs: ConvRow[]): FolderItem["chats"] {
     const parentId = c.parent_conv_id?.trim() || undefined;
     const leaderConvId = String((c as { leader_conv_id?: string }).leader_conv_id || "").trim() || undefined;
     const isLeader = Boolean(parentId && leaderByHub.get(parentId) === c.id);
+    const projectSlug = String((c as { project_slug?: string }).project_slug || "").trim() || undefined;
     return {
       id: c.id,
       name: c.title,
@@ -44,17 +46,81 @@ function mapConversations(convs: ConvRow[]): FolderItem["chats"] {
       toolCallCount: Number(c.tool_call_count) || 0,
       fileCount: Number(c.file_count) || 0,
       contextTokens: Number(c.context_tokens) || 0,
+      projectSlug,
     };
   });
 }
 
-export function useChatFolders(refreshToken: number) {
+function collectExpanded(items: FolderItem[], into: Map<string, boolean>) {
+  for (const item of items) {
+    into.set(item.id, item.expanded);
+    collectExpanded(item.children, into);
+  }
+}
+
+function assembleOneProject(
+  folderRows: FolderDto[],
+  allConvs: ConvRow[],
+  expandedById: Map<string, boolean>,
+): {
+  folders: FolderItem[];
+  rootChats: FolderItem["chats"];
+  hubChats: FolderItem["chats"];
+  archiveChats: FolderItem["chats"];
+} {
+  const chatsByFolder = new Map<string, FolderItem["chats"]>();
+  const archive: ConvRow[] = [];
+  const byFolder = new Map<string, ConvRow[]>();
+  const validFolderIds = new Set(folderRows.map((f) => f.id));
+
+  for (const c of allConvs) {
+    const storedFid = (c.folder_id || "").trim();
+    if (isArchiveFolderId(storedFid) || storedFid === ARCHIVE_FOLDER_ID) {
+      archive.push(c);
+      continue;
+    }
+    const fid = storedFid && validFolderIds.has(storedFid) ? storedFid : "";
+    const bucket = byFolder.get(fid) ?? [];
+    bucket.push(c);
+    byFolder.set(fid, bucket);
+  }
+
+  for (const [fid, rows] of byFolder) {
+    chatsByFolder.set(fid, mapConversations(rows));
+  }
+  for (const f of folderRows) {
+    if (!chatsByFolder.has(f.id)) chatsByFolder.set(f.id, []);
+  }
+  if (!chatsByFolder.has("")) chatsByFolder.set("", []);
+
+  const hubIds = new Set(
+    folderRows.map((f) => String(f.group_hub_id || "").trim()).filter(Boolean),
+  );
+  const hubs: FolderItem["chats"] = [];
+  for (const rows of chatsByFolder.values()) {
+    for (const c of rows) {
+      if (c.isGroup && hubIds.has(c.id)) hubs.push(c);
+    }
+  }
+
+  const rootRaw = chatsByFolder.get("") ?? [];
+  return {
+    folders: buildFolderTree(folderRows, chatsByFolder, expandedById),
+    rootChats: rootRaw.filter((c) => !(c.isGroup && hubIds.has(c.id))),
+    hubChats: hubs,
+    archiveChats: mapConversations(archive),
+  };
+}
+
+export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [rootChats, setRootChats] = useState<FolderItem["chats"]>([]);
   /** Group hub chats hidden from the sidebar tree but still needed for ChatPane lookup. */
   const [hubChats, setHubChats] = useState<FolderItem["chats"]>([]);
   const [archiveChats, setArchiveChats] = useState<FolderItem["chats"]>([]);
   const [foldersLoaded, setFoldersLoaded] = useState(false);
+  const foldersRef = useRef(folders);
+  foldersRef.current = folders;
 
   const load = useCallback(async () => {
     const api = getApi();
@@ -66,69 +132,70 @@ export function useChatFolders(refreshToken: number) {
       setFoldersLoaded(true);
       return;
     }
+    const allProjects = readDuckiesAllProjects();
     const [folderRows, allConvs] = await Promise.all([
-      api.list_folders().then((rows) => (Array.isArray(rows) ? rows : []).filter((f) => !isArchiveFolderId(f.id))),
-      api.list_all_conversations().then((rows) => (Array.isArray(rows) ? rows : [])),
+      api.list_folders(allProjects).then((rows) => (Array.isArray(rows) ? rows : []).filter((f) => !isArchiveFolderId(f.id))),
+      api.list_all_conversations(allProjects).then((rows) => (Array.isArray(rows) ? rows : [])),
     ]);
 
-    const chatsByFolder = new Map<string, FolderItem["chats"]>();
-    const archive: ConvRow[] = [];
-    const byFolder = new Map<string, ConvRow[]>();
-    const validFolderIds = new Set(folderRows.map((f) => f.id));
+    const expandedById = new Map<string, boolean>();
+    collectExpanded(foldersRef.current, expandedById);
 
-    for (const c of allConvs) {
-      const storedFid = (c.folder_id || "").trim();
-      if (isArchiveFolderId(storedFid) || storedFid === ARCHIVE_FOLDER_ID) {
-        archive.push(c);
-        continue;
+    if (!allProjects) {
+      const one = assembleOneProject(folderRows, allConvs, expandedById);
+      setArchiveChats(one.archiveChats);
+      setHubChats(one.hubChats);
+      setRootChats(one.rootChats);
+      setFolders(one.folders);
+      setFoldersLoaded(true);
+      return;
+    }
+
+    type Group = { name: string; folderRows: FolderDto[]; convs: ConvRow[] };
+    const bySlug = new Map<string, Group>();
+    const ensure = (slug: string, name: string): Group => {
+      const existing = bySlug.get(slug);
+      if (existing) {
+        if (name && existing.name === slug) existing.name = name;
+        return existing;
       }
-      // Recover legacy spawned chats saved under the nonexistent literal
-      // "default" folder (and any other orphaned folder id) into the root.
-      const fid = storedFid && validFolderIds.has(storedFid) ? storedFid : "";
-      const bucket = byFolder.get(fid) ?? [];
-      bucket.push(c);
-      byFolder.set(fid, bucket);
+      const created: Group = { name: name || slug, folderRows: [], convs: [] };
+      bySlug.set(slug, created);
+      return created;
+    };
+
+    for (const row of folderRows) {
+      const slug = String(row.project_slug || "").trim();
+      if (!slug) continue;
+      ensure(slug, String(row.project_name || "").trim()).folderRows.push(row);
+    }
+    for (const conv of allConvs) {
+      const slug = String((conv as { project_slug?: string }).project_slug || "").trim();
+      if (!slug) continue;
+      ensure(slug, String((conv as { project_name?: string }).project_name || "").trim()).convs.push(conv);
     }
 
-    for (const [fid, rows] of byFolder) {
-      chatsByFolder.set(fid, mapConversations(rows));
+    const projects: Array<{
+      slug: string;
+      name: string;
+      folders: FolderItem[];
+      rootChats: FolderItem["chats"];
+      hubChats: FolderItem["chats"];
+      archiveChats: FolderItem["chats"];
+    }> = [];
+    for (const [slug, group] of bySlug) {
+      if (group.convs.length === 0) continue;
+      const one = assembleOneProject(group.folderRows, group.convs, expandedById);
+      if (one.rootChats.length === 0 && one.folders.length === 0) continue;
+      projects.push({ slug, name: group.name, ...one });
     }
-    for (const f of folderRows) {
-      if (!chatsByFolder.has(f.id)) chatsByFolder.set(f.id, []);
-    }
-    if (!chatsByFolder.has("")) chatsByFolder.set("", []);
 
-    setArchiveChats(mapConversations(archive));
-
-    // Hide linked group hubs from the tree (folder click opens them), but keep
-    // them in hubChats so EditorGroupPane can resolve isGroup / members.
-    const hubIds = new Set(
-      folderRows.map((f) => String(f.group_hub_id || "").trim()).filter(Boolean),
-    );
-    const hubs: FolderItem["chats"] = [];
-    for (const rows of chatsByFolder.values()) {
-      for (const c of rows) {
-        if (c.isGroup && hubIds.has(c.id)) hubs.push(c);
-      }
-    }
-    setHubChats(hubs);
-
-    const rootRaw = chatsByFolder.get("") ?? [];
-    setRootChats(rootRaw.filter((c) => !(c.isGroup && hubIds.has(c.id))));
-
-    setFolders((prev) => {
-      const expandedById = new Map<string, boolean>();
-      const collectExpanded = (items: FolderItem[]) => {
-        for (const item of items) {
-          expandedById.set(item.id, item.expanded);
-          collectExpanded(item.children);
-        }
-      };
-      collectExpanded(prev);
-      return buildFolderTree(folderRows, chatsByFolder, expandedById);
-    });
+    setHubChats(projects.flatMap((p) => p.hubChats));
+    setArchiveChats(projects.find((p) => p.slug === currentProjectSlug)?.archiveChats ?? []);
+    setRootChats([]);
+    setFolders(wrapProjectsAsFolders(projects, currentProjectSlug, expandedById));
     setFoldersLoaded(true);
-  }, []);
+  }, [currentProjectSlug]);
 
   useEffect(() => {
     setFoldersLoaded(false);

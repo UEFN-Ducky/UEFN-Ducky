@@ -35,6 +35,7 @@ import {
 } from "../utils/chatMessageGroups";
 
 import { ChatCollapseScopeProvider } from "../hooks/useChatCollapseState";
+import { DOCK_LAYOUT_IDLE_EVENT, dockLayoutBusy } from "../workspace/dockLayoutEvents";
 
 import { ChatPlanPopup } from "./ChatPlanPopup";
 import { ConversationScrollPeek } from "./ConversationScrollPeek";
@@ -576,6 +577,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       const content = contentElRef.current;
       if (!scroller || !content || typeof ResizeObserver === "undefined") return;
       const observer = new ResizeObserver(() => {
+        if (dockLayoutBusy()) return;
         if (followingRef.current) scrollToBottom("auto");
         applyWindowRef.current();
       });
@@ -649,6 +651,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
 
     const onChunkHeight = useCallback(
       (index: number, height: number) => {
+        if (dockLayoutBusy()) return;
         const h = heightsRef.current;
         if (index >= h.length || h[index] === height || height <= 0) return;
         const delta = height - h[index];
@@ -664,6 +667,27 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       },
       [applyWindow],
     );
+
+    useEffect(() => {
+      const flush = () => {
+        const root = contentElRef.current;
+        if (root) {
+          root.querySelectorAll<HTMLElement>("[data-chat-chunk]").forEach((node) => {
+            const index = Number(node.dataset.chatChunk);
+            if (!Number.isFinite(index)) return;
+            const height = node.offsetHeight;
+            const h = heightsRef.current;
+            if (index >= h.length || height <= 0) return;
+            h[index] = height;
+          });
+        }
+        setPadTick((t) => t + 1);
+        if (followingRef.current) scrollToBottom("auto");
+        applyWindowRef.current();
+      };
+      window.addEventListener(DOCK_LAYOUT_IDLE_EVENT, flush);
+      return () => window.removeEventListener(DOCK_LAYOUT_IDLE_EVENT, flush);
+    }, [scrollToBottom]);
 
     useLayoutEffect(() => {
       heightsRef.current = [];

@@ -46,9 +46,13 @@ import {
   expandFoldersById,
   findFolderById,
   flattenLayout,
+  folderIdForCreate,
+  isForeignSidebarId,
+  isProjectFolderId,
   nestDropId,
   parseDragId,
   resolveDragOverId,
+  unwrapProjectFoldersForLayout,
   type DropPosition,
 } from "../utils/sidebarTree";
 import {
@@ -89,6 +93,7 @@ import {
 
 const ChatTreeHoverPlacementContext = createContext<EditorTabHoverCardPlacement>("right");
 const DuckiesCompactContext = createContext(false);
+const DuckiesCurrentProjectContext = createContext("");
 
 /** A row's view of the tree-wide multi-selection, so it can offer "Delete ALL". */
 type RowSelectionCtx = {
@@ -198,12 +203,20 @@ const ChatRow = memo(function ChatRow({
 }) {
   const hoverPlacement = useContext(ChatTreeHoverPlacementContext);
   const compact = useContext(DuckiesCompactContext);
+  const currentProjectSlug = useContext(DuckiesCurrentProjectContext);
   const id = dragId("chat", chat.id);
   const rowSelection = useContext(RowSelectionContext);
   const deleteCount = useRowDeleteCount(id);
   const deleteLabel =
     deleteCount > 1 ? "Delete ALL" : archived ? "Delete permanently" : "Archive";
-  const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id, ...SORTABLE_STATIC });
+  const dragDisabled = Boolean(
+    chat.projectSlug && currentProjectSlug && chat.projectSlug !== currentProjectSlug,
+  );
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
+    id,
+    disabled: dragDisabled,
+    ...SORTABLE_STATIC,
+  });
   const rowRef = useRef<HTMLDivElement | null>(null);
   const rowScopeClass = useScopedClass("dnd-row");
   const { menu, open, close } = useContextMenuState<void>();
@@ -362,8 +375,8 @@ const ChatRow = memo(function ChatRow({
         mergeRowRef={mergeRowRef}
         dataAttr="data-sidebar-id"
         dataId={id}
-        attributes={attributes}
-        listeners={listeners}
+        attributes={dragDisabled ? undefined : attributes}
+        listeners={dragDisabled ? undefined : listeners}
         onClick={(e) => {
           if (isEditing) return;
           if (onModSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
@@ -522,9 +535,18 @@ function FolderHeader({
   dropHint: DropHint | null;
 }) {
   const id = dragId("folder", folder.id);
+  const currentProjectSlug = useContext(DuckiesCurrentProjectContext);
+  const isProjectWrap = isProjectFolderId(folder.id);
+  const dragDisabled =
+    isProjectWrap ||
+    Boolean(folder.projectSlug && currentProjectSlug && folder.projectSlug !== currentProjectSlug);
   const rowSelection = useContext(RowSelectionContext);
   const deleteLabel = useRowDeleteCount(id) > 1 ? "Delete ALL" : "Delete";
-  const { attributes, listeners, setNodeRef, isDragging } = useSortable({ id, ...SORTABLE_STATIC });
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
+    id,
+    disabled: dragDisabled,
+    ...SORTABLE_STATIC,
+  });
   const rowRef = useRef<HTMLDivElement | null>(null);
   const rowScopeClass = useScopedClass("dnd-row");
   const { menu, open, close } = useContextMenuState<void>();
@@ -584,19 +606,27 @@ function FolderHeader({
         renameInput={
           <input {...renameInputProps(editing, setEditing, editInputRef, onCommitRename, onCancelRename)} />
         }
-        actions={<SidebarHoverActions onRename={onRename} onDelete={onDelete} deleteTitle={deleteLabel} />}
+        actions={
+          isProjectWrap ? undefined : (
+            <SidebarHoverActions onRename={onRename} onDelete={onDelete} deleteTitle={deleteLabel} />
+          )
+        }
         contextMenu={
           menu ? (
             <ContextMenu
               x={menu.x}
               y={menu.y}
               onClose={close}
-              items={[
-                ...duckyTreeCreateItems(onCreateDucky, onCreateGroup),
-                contextMenuSeparator("folder-sep"),
-                { id: "rename", label: "Rename", onClick: onRename },
-                { id: "delete", label: deleteLabel, danger: true, onClick: onDelete },
-              ]}
+              items={
+                isProjectWrap
+                  ? duckyTreeCreateItems(onCreateDucky, onCreateGroup)
+                  : [
+                      ...duckyTreeCreateItems(onCreateDucky, onCreateGroup),
+                      contextMenuSeparator("folder-sep"),
+                      { id: "rename", label: "Rename", onClick: onRename },
+                      { id: "delete", label: deleteLabel, danger: true, onClick: onDelete },
+                    ]
+              }
             />
           ) : null
         }
@@ -611,8 +641,8 @@ function FolderHeader({
         mergeRowRef={mergeRowRef}
         dataAttr="data-sidebar-id"
         dataId={id}
-        attributes={attributes}
-        listeners={listeners}
+        attributes={dragDisabled ? undefined : attributes}
+        listeners={dragDisabled ? undefined : listeners}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("button")) return;
           if (e.button !== 0) return;
@@ -906,6 +936,8 @@ interface SidebarFolderTreeProps {
   onSelectionCountChange?: (count: number) => void;
   /** Dense rows: hide chat meta line and shrink duck/group height. */
   compact?: boolean;
+  /** Active island slug — foreign duckies stay listed but are not reordered here. */
+  currentProjectSlug?: string;
 }
 
 export function SidebarFolderTree({
@@ -944,6 +976,7 @@ export function SidebarFolderTree({
   dockSide = "left",
   onSelectionCountChange,
   compact = false,
+  currentProjectSlug = "",
 }: SidebarFolderTreeProps) {
   const hoverPlacement: EditorTabHoverCardPlacement = dockSide === "right" ? "left" : "right";
   const [selection, setSelection] = useState<ExplorerSelection>(emptySelection);
@@ -1019,20 +1052,22 @@ export function SidebarFolderTree({
 
   const createDuckyIn = useCallback(
     (folderId: string) => {
-      onSelectChatFolder(folderId);
+      const target = folderIdForCreate(folderId, currentProjectSlug, folders);
+      onSelectChatFolder(target);
       void onCreateDucky();
     },
-    [onCreateDucky, onSelectChatFolder],
+    [currentProjectSlug, folders, onCreateDucky, onSelectChatFolder],
   );
 
   const createGroupIn = useCallback(
     (folderId: string) => {
-      onSelectChatFolder(folderId);
+      const target = folderIdForCreate(folderId, currentProjectSlug, folders);
+      onSelectChatFolder(target);
       // Pass the parent explicitly: the selection state set above isn't visible
       // to onCreateGroup's closure until the next render.
-      void onCreateGroup(folderId);
+      void onCreateGroup(target);
     },
-    [onCreateGroup, onSelectChatFolder],
+    [currentProjectSlug, folders, onCreateGroup, onSelectChatFolder],
   );
 
   const rootTreeMenuItems = useMemo(
@@ -1229,7 +1264,11 @@ export function SidebarFolderTree({
   ) => {
     const api = getApi();
     if (!api?.apply_sidebar_layout) return;
-    const patch = appendArchiveChatsToLayout(flattenLayout(nextFolders, nextRootChats), nextArchiveChats);
+    const unwrapped = unwrapProjectFoldersForLayout(nextFolders, nextRootChats, currentProjectSlug);
+    const patch = appendArchiveChatsToLayout(
+      flattenLayout(unwrapped.folders, unwrapped.rootChats),
+      nextArchiveChats,
+    );
     try {
       await api.apply_sidebar_layout(patch);
     } catch {
@@ -1288,6 +1327,14 @@ export function SidebarFolderTree({
     const sel = selectionRef.current.selected;
     // If the dragged row is part of a multi-selection, move the whole set.
     const sources = sel.has(activeId) && sel.size > 1 ? [...sel] : [activeId];
+    if (
+      currentProjectSlug &&
+      (isForeignSidebarId(activeId, folders, rootChats, currentProjectSlug) ||
+        isForeignSidebarId(overId, folders, rootChats, currentProjectSlug) ||
+        sources.some((src) => isForeignSidebarId(src, folders, rootChats, currentProjectSlug)))
+    ) {
+      return;
+    }
     let nextFolders = folders;
     let nextRoot = rootChats;
     let nextArchive = archiveChats;
@@ -1416,6 +1463,7 @@ export function SidebarFolderTree({
         }}
       >
         <DuckiesCompactContext.Provider value={compact}>
+        <DuckiesCurrentProjectContext.Provider value={currentProjectSlug}>
         <SortableContext items={rootSortableIds} strategy={verticalListSortingStrategy}>
           {rootChatsToRender.map((chat) =>
             filtering ? (
@@ -1515,6 +1563,7 @@ export function SidebarFolderTree({
             No duckies yet — right-click to create one.
           </div>
         ) : null}
+        </DuckiesCurrentProjectContext.Provider>
         </DuckiesCompactContext.Provider>
       </div>
       <DragOverlay>

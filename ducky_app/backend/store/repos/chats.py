@@ -76,6 +76,17 @@ def folders_get(project_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def folders_list_all_projects() -> list[tuple[str, list[dict[str, Any]]]]:
+    rows = db.connect().execute(
+        "SELECT project_id, id, name, parent_id, sort_order, group_hub_id FROM folders "
+        "ORDER BY project_id, parent_id, sort_order, id"
+    ).fetchall()
+    by: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by.setdefault(str(r["project_id"]), []).append(dict(r))
+    return list(by.items())
+
+
 def folders_exist(project_id: str) -> bool:
     return db.connect().execute("SELECT 1 FROM folders WHERE project_id=? LIMIT 1", (project_id,)).fetchone() is not None
 

@@ -95,7 +95,7 @@ function FocusViewContent({ focusId }: FocusViewProps) {
   useConnectionIcon(listener);
   const hasProject = !!projectPath.trim();
   const runningChatIds = useRunningAgents();
-  const { folders, rootChats, load } = useChatFolders(0);
+  const { folders, rootChats, load } = useChatFolders(0, project.slug);
   const handleCloseWindow = useFocusCloseWindow();
 
   useEffect(() => {

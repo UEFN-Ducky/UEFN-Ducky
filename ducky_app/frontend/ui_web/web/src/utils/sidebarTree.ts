@@ -1,6 +1,16 @@
 import type { FolderDto, FolderItem, SidebarLayoutPatch } from "../types/panel";
 import { ARCHIVE_FOLDER_ID, isArchiveFolderId } from "./archiveFolder";
 
+export const PROJECT_FOLDER_PREFIX = "project:";
+
+export function isProjectFolderId(id: string): boolean {
+  return id.startsWith(PROJECT_FOLDER_PREFIX);
+}
+
+export function projectFolderId(slug: string): string {
+  return `${PROJECT_FOLDER_PREFIX}${slug}`;
+}
+
 export function findFolderById(folders: FolderItem[], id: string): FolderItem | null {
   for (const folder of folders) {
     if (folder.id === id) return folder;
@@ -29,6 +39,118 @@ export function findChatAncestorFolderIds(
 
   if (rootChats.some((chat) => chat.id === chatId)) return [];
   return walk(folders, []) ?? [];
+}
+
+export function folderIdForCreate(
+  folderId: string,
+  currentSlug: string,
+  folders: FolderItem[],
+): string {
+  if (!folderId || isProjectFolderId(folderId)) return "";
+  const folder = findFolderById(folders, folderId);
+  if (folder?.projectSlug && currentSlug && folder.projectSlug !== currentSlug) return "";
+  return folderId;
+}
+
+function stampFolderProject(folders: FolderItem[], slug: string): FolderItem[] {
+  return folders.map((folder) => ({
+    ...folder,
+    projectSlug: slug,
+    chats: folder.chats.map((chat) => ({ ...chat, projectSlug: chat.projectSlug || slug })),
+    children: stampFolderProject(folder.children, slug),
+  }));
+}
+
+export function wrapProjectsAsFolders(
+  projects: Array<{
+    slug: string;
+    name: string;
+    folders: FolderItem[];
+    rootChats: FolderItem["chats"];
+  }>,
+  currentSlug: string,
+  expandedById: Map<string, boolean>,
+): FolderItem[] {
+  const ordered = [...projects].sort((a, b) => {
+    if (a.slug === currentSlug) return -1;
+    if (b.slug === currentSlug) return 1;
+    return a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug);
+  });
+  return ordered.map((project, index) => {
+    const id = projectFolderId(project.slug);
+    const expanded = expandedById.has(id) ? expandedById.get(id)! : project.slug === currentSlug;
+    return {
+      id,
+      name: project.name,
+      parentId: "",
+      sortOrder: index,
+      expanded,
+      chats: project.rootChats.map((chat) => ({
+        ...chat,
+        projectSlug: chat.projectSlug || project.slug,
+      })),
+      children: stampFolderProject(project.folders, project.slug),
+      projectSlug: project.slug,
+    };
+  });
+}
+
+export function unwrapProjectFoldersForLayout(
+  roots: FolderItem[],
+  rootChats: FolderItem["chats"],
+  currentSlug: string,
+): { folders: FolderItem[]; rootChats: FolderItem["chats"] } {
+  if (!roots.some((folder) => isProjectFolderId(folder.id))) {
+    return { folders: roots, rootChats };
+  }
+  const wrapper = roots.find((folder) => folder.id === projectFolderId(currentSlug));
+  if (!wrapper) return { folders: [], rootChats: [] };
+  return { folders: wrapper.children, rootChats: wrapper.chats };
+}
+
+function findChatInTree(
+  folders: FolderItem[],
+  rootChats: FolderItem["chats"],
+  chatId: string,
+): FolderItem["chats"][number] | undefined {
+  const root = rootChats.find((chat) => chat.id === chatId);
+  if (root) return root;
+  const walk = (items: FolderItem[]): FolderItem["chats"][number] | undefined => {
+    for (const folder of items) {
+      const hit = folder.chats.find((chat) => chat.id === chatId);
+      if (hit) return hit;
+      const nested = walk(folder.children);
+      if (nested) return nested;
+    }
+    return undefined;
+  };
+  return walk(folders);
+}
+
+/** True when this drag id belongs to another project's accordion. */
+export function isForeignSidebarId(
+  rawId: string,
+  folders: FolderItem[],
+  rootChats: FolderItem["chats"],
+  currentSlug: string,
+): boolean {
+  if (!currentSlug) return false;
+  const nest = parseNestDropId(rawId);
+  if (nest !== null) {
+    if (!nest) return false;
+    if (isProjectFolderId(nest)) return nest !== projectFolderId(currentSlug);
+    const folder = findFolderById(folders, nest);
+    return Boolean(folder?.projectSlug && folder.projectSlug !== currentSlug);
+  }
+  const parsed = parseDragId(rawId);
+  if (!parsed) return false;
+  if (parsed.kind === "folder") {
+    if (isProjectFolderId(parsed.id)) return parsed.id !== projectFolderId(currentSlug);
+    const folder = findFolderById(folders, parsed.id);
+    return Boolean(folder?.projectSlug && folder.projectSlug !== currentSlug);
+  }
+  const chat = findChatInTree(folders, rootChats, parsed.id);
+  return Boolean(chat?.projectSlug && chat.projectSlug !== currentSlug);
 }
 
 export function expandFoldersById(folders: FolderItem[], folderIds: ReadonlySet<string>): FolderItem[] {
@@ -203,6 +325,7 @@ export function flattenLayout(roots: FolderItem[], rootChats: FolderItem["chats"
 
   const walkSiblings = (siblings: FolderItem[], parentId: string) => {
     siblings.forEach((folder, index) => {
+      if (isProjectFolderId(folder.id)) return;
       folder.parentId = parentId;
       folder.sortOrder = index;
       folders.push({ id: folder.id, parent_id: parentId, sort_order: index });
@@ -234,6 +357,10 @@ export function flattenFoldersForSelect(roots: FolderItem[], depth = 0): { id: s
   const out: { id: string; label: string }[] = [];
   for (const folder of roots) {
     if (isArchiveFolderId(folder.id)) continue;
+    if (isProjectFolderId(folder.id)) {
+      out.push(...flattenFoldersForSelect(folder.children, depth));
+      continue;
+    }
     const prefix = depth > 0 ? `${"— ".repeat(depth)}` : "";
     out.push({ id: folder.id, label: `${prefix}${folder.name}` });
     out.push(...flattenFoldersForSelect(folder.children, depth + 1));

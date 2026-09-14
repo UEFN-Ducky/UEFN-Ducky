@@ -79,3 +79,17 @@ export function duckyTreeCompactItem(
     onClick: () => onToggle(!compact),
   };
 }
+
+export function duckyTreeAllProjectsItem(
+  allProjects: boolean,
+  onToggle: (value: boolean) => void,
+): ContextMenuItem {
+  return {
+    id: "ducky-all-projects",
+    label: "All projects",
+    switch: true,
+    checked: allProjects,
+    keepOpen: true,
+    onClick: () => onToggle(!allProjects),
+  };
+}

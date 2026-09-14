@@ -200,6 +200,78 @@
   min-height: 0;
 }
 
+.workspace-dock-layout.is-narrow {
+  position: relative;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
+}
+
+.workspace-dock-layout.is-narrow.is-swiping,
+.workspace-dock-layout.is-narrow:has(.dock-rail-shell.is-swiping) {
+  touch-action: none;
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 30;
+  width: var(--dock-shell-width, 241px);
+  overflow: hidden;
+  pointer-events: none;
+  transition: none;
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.is-open,
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.is-swiping {
+  pointer-events: auto;
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--left {
+  left: 0;
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--right {
+  right: 0;
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay .dock-rail {
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--left:not(.is-open):not(.is-swiping) .dock-rail {
+  transform: translateX(-100%);
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--right:not(.is-open):not(.is-swiping) .dock-rail {
+  transform: translateX(100%);
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.is-open:not(.is-swiping) .dock-rail {
+  transform: translateX(0);
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.is-open .dock-rail,
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.is-swiping .dock-rail {
+  box-shadow: 8px 0 24px var(--overlay);
+}
+
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--right.is-open .dock-rail,
+.workspace-dock-layout.is-narrow .dock-rail-shell.is-overlay.dock-rail-shell--right.is-swiping .dock-rail {
+  box-shadow: -8px 0 24px var(--overlay);
+}
+
+.dock-rail-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: var(--overlay);
+  cursor: pointer;
+}
+
 .chat-view-editor-area {
   flex: 1 1 0%;
   display: flex;

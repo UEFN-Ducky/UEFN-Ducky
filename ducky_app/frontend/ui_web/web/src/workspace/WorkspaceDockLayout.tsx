@@ -9,6 +9,9 @@ import { useVerseHistoryDockPanel } from "./panels/VerseHistoryDockPanel";
 import { useTesterDockPanel } from "./panels/TesterDockPanel";
 import { requestOpenDiscordTab, setDiscordTabOpen, useDiscordTabOpen } from "../navigation/openDiscordTab";
 import { useFocusWindow } from "../hooks/useFocusWindow";
+import { useNarrowLayout } from "../hooks/useNarrowLayout";
+import { useRailEdgeSwipe } from "../hooks/useRailEdgeSwipe";
+import { useChatLayoutMode } from "../hooks/useChatLayoutMode";
 import {
   dockPanelPluginUi,
   pluginContributesDockPanel,
@@ -178,6 +181,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     ref,
   ) {
     const dock = useWorkspaceDock();
+    const overlay = useNarrowLayout();
+    const { setMode: setLayoutMode } = useChatLayoutMode();
     const leftSidebarRef = useRef<ChatSidebarHandle>(null);
     const rightSidebarRef = useRef<ChatSidebarHandle>(null);
     const [dragOverlay, setDragOverlayState] = useState<DockDropTarget>(null);
@@ -367,15 +372,37 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     const dragTargetSide = dockDropTargetSide(dragOverlay);
     const leftPeek = isDockPanelDragging && !leftMixed && dragTargetSide === "left";
     const rightPeek = isDockPanelDragging && !rightMixed && dragTargetSide === "right";
+    const swipe = useRailEdgeSwipe({
+      enabled: overlay,
+      leftOpen,
+      rightOpen,
+      leftEnabled: !!leftMixed,
+      rightEnabled: !!rightMixed,
+      leftWidth: dock.leftWidth,
+      rightWidth: dock.rightWidth,
+      setLeftOpen: (open) => setLayoutMode(open ? "full" : "sidebarHidden"),
+      setRightOpen: dock.setRightRailOpen,
+    });
+    const leftSwipeTx = swipe.drag?.side === "left" ? swipe.drag.tx : null;
+    const rightSwipeTx = swipe.drag?.side === "right" ? swipe.drag.tx : null;
 
     return (
-      <div className={`workspace-dock-layout workspace-dock-layout--${variant}`}>
+      <div
+        className={`workspace-dock-layout workspace-dock-layout--${variant}${overlay ? " is-narrow" : ""}`}
+        onPointerDownCapture={overlay ? swipe.onPointerDownCapture : undefined}
+        onPointerMoveCapture={overlay ? swipe.onPointerMoveCapture : undefined}
+        onPointerUpCapture={overlay ? swipe.onPointerUpCapture : undefined}
+        onPointerCancelCapture={overlay ? swipe.onPointerUpCapture : undefined}
+      >
         <div id="ducky-skin-left" className="ducky-skin-slot ducky-skin-slot--left" aria-hidden="true" />
         {leftMixed || leftPeek ? (
           <DockRail
             side="left"
             open={leftOpen || leftPeek}
             peek={leftPeek}
+            overlay={overlay}
+            swipeTx={leftSwipeTx}
+            resizeDisabled={overlay}
             panelIds={leftMixed?.panelIds}
             panels={leftMixed?.panels}
             dragOverlay={dragOverlay}
@@ -388,11 +415,26 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
 
         <div className="workspace-dock-center">{children}</div>
 
+        {overlay && (leftOpen || rightOpen) && swipe.drag == null ? (
+          <button
+            type="button"
+            className="dock-rail-backdrop"
+            aria-label="Hide sidebar"
+            onClick={() => {
+              if (leftOpen) setLayoutMode("sidebarHidden");
+              if (rightOpen) dock.setRightRailOpen(false);
+            }}
+          />
+        ) : null}
+
         {rightMixed || rightPeek ? (
           <DockRail
             side="right"
             open={rightOpen || rightPeek}
             peek={rightPeek}
+            overlay={overlay}
+            swipeTx={rightSwipeTx}
+            resizeDisabled={overlay}
             panelIds={rightMixed?.panelIds}
             panels={rightMixed?.panels}
             dragOverlay={dragOverlay}

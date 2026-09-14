@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { SplitResizeHandle } from "../components/SplitResizeHandle";
 
@@ -18,6 +18,7 @@ import {
   OUTLINE_PANEL_WIDTH_MIN,
 } from "../hooks/useOutlinePanelWidth";
 import { SIDEBAR_WIDTH_MIN } from "../hooks/useSidebarWidth";
+import { notifyDockLayoutIdle } from "./dockLayoutEvents";
 import { targetRef } from "../ui-targets/registry";
 
 
@@ -54,6 +55,10 @@ export function DockRail({
 
   peek,
 
+  overlay,
+
+  swipeTx,
+
   resizeDisabled,
 
   panelIds,
@@ -76,6 +81,10 @@ export function DockRail({
 
   peek?: boolean;
 
+  overlay?: boolean;
+
+  swipeTx?: number | null;
+
   resizeDisabled?: boolean;
 
   panelIds?: DockPanelId[];
@@ -97,7 +106,9 @@ export function DockRail({
   const scopeClass = useScopedClass(`dock-rail-${side}`);
 
   const stackRef = useRef<HTMLDivElement | null>(null);
-
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const widthRef = useRef(0);
+  const railOpenRef = useRef<boolean | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
 
@@ -114,11 +125,12 @@ export function DockRail({
 
   const railWidth = isPeek ? PEEK_WIDTH : width;
 
-  const shellWidth = (open || isPeek) && (hasPanels || isPeek) ? railWidth + HANDLE_WIDTH : 0;
-
   const railOpen = open || isPeek;
-
-
+  if (!isResizing) widthRef.current = railWidth;
+  const visualWidth = isResizing ? widthRef.current : railWidth;
+  const shellWidth = (overlay || railOpen) && (hasPanels || isPeek) ? visualWidth + HANDLE_WIDTH : 0;
+  const resizeRailWidth = dock.resizeRailWidth;
+  const persistRailWidth = dock.persistRailWidth;
 
   const panelStyle = useMemo(
 
@@ -126,49 +138,82 @@ export function DockRail({
 
       ({
 
-        "--dock-rail-width": `${railWidth}px`,
+        "--dock-rail-width": `${visualWidth}px`,
 
       }) as CSSProperties,
 
-    [railWidth],
+    [visualWidth],
 
   );
-
-
 
   const onResize = useCallback(
-
     (delta: number) => {
-
       setIsResizing(true);
-
+      const el = shellRef.current;
+      el?.classList.add("is-resizing");
       const next =
-
         side === "left"
-
-          ? Math.min(560, Math.max(SIDEBAR_WIDTH_MIN, width + delta))
-
-          : Math.min(480, Math.max(OUTLINE_PANEL_WIDTH_MIN, width - delta));
-
-      dock.resizeRailWidth(side, next);
-
+          ? Math.min(560, Math.max(SIDEBAR_WIDTH_MIN, widthRef.current + delta))
+          : Math.min(480, Math.max(OUTLINE_PANEL_WIDTH_MIN, widthRef.current - delta));
+      widthRef.current = next;
+      if (el) {
+        el.style.setProperty("--dock-rail-width", `${next}px`);
+        el.style.setProperty("--dock-shell-width", `${next + HANDLE_WIDTH}px`);
+      }
+      resizeRailWidth(side, next);
     },
-
-    [dock, side, width],
-
+    [resizeRailWidth, side],
   );
 
-
-
   const handleResizeEnd = useCallback(() => {
-
+    persistRailWidth();
+    notifyDockLayoutIdle();
+    shellRef.current?.classList.remove("is-resizing");
     setIsResizing(false);
+  }, [persistRailWidth]);
 
-    dock.persistRailWidth();
+  useLayoutEffect(() => {
+    if (railOpenRef.current === null) {
+      railOpenRef.current = railOpen;
+      return;
+    }
+    if (railOpenRef.current === railOpen) return;
+    railOpenRef.current = railOpen;
+    const el = shellRef.current;
+    if (!el) return;
+    el.classList.add("is-animating");
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.classList.remove("is-animating");
+      window.clearTimeout(timeout);
+      el.removeEventListener("transitionend", onEnd);
+      notifyDockLayoutIdle();
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target !== el || event.propertyName !== "width") return;
+      finish();
+    };
+    el.addEventListener("transitionend", onEnd);
+    const timeout = window.setTimeout(finish, 400);
+    return () => {
+      window.clearTimeout(timeout);
+      el.removeEventListener("transitionend", onEnd);
+    };
+  }, [railOpen]);
 
-  }, [dock]);
-
-
+  const assignShellRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      shellRef.current = el;
+      targetRef(side === "left" ? "shell.left" : "shell.right", {
+        kind: "button",
+        label: side === "left" ? "Left side" : "Right side",
+        route: "chat",
+      })(el);
+    },
+    [side],
+  );
 
   if (!hasPanels && !isPeek) return null;
 
@@ -202,15 +247,15 @@ export function DockRail({
 
     <div
 
-      ref={targetRef(side === "left" ? "shell.left" : "shell.right", {
-        kind: "button",
-        label: side === "left" ? "Left side" : "Right side",
-        route: "chat",
-      })}
+      ref={assignShellRef}
 
-      className={`dock-rail-shell dock-rail-shell--${side} ${scopeClass} ${railOpen ? "is-open" : ""}${isPeek ? " is-peek" : ""}${isResizing ? " is-resizing" : ""}`}
+      className={`dock-rail-shell dock-rail-shell--${side} ${scopeClass} ${railOpen ? "is-open" : ""}${overlay ? " is-overlay" : ""}${swipeTx != null ? " is-swiping" : ""}${isPeek ? " is-peek" : ""}${isResizing ? " is-resizing" : ""}`}
 
-      style={panelStyle}
+      style={
+        swipeTx != null
+          ? ({ ...panelStyle, "--dock-swipe-tx": `${swipeTx}px` } as CSSProperties)
+          : panelStyle
+      }
 
     >
 
@@ -222,7 +267,7 @@ export function DockRail({
 
           "--dock-shell-width": `${shellWidth}px`,
 
-          "--dock-rail-width": `${railWidth}px`,
+          "--dock-rail-width": `${visualWidth}px`,
 
         }}
 
@@ -248,7 +293,7 @@ export function DockRail({
 
         className={`dock-rail dock-rail--${side}${railOpen ? " is-open" : ""}${isPeek ? " is-peek" : ""}`}
 
-        aria-hidden={!railOpen}
+        aria-hidden={!railOpen && swipeTx == null}
 
         data-dock-side={side}
 

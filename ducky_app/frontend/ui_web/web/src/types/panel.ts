@@ -145,6 +145,8 @@ export interface ChatTab {
   fileCount?: number;
   /** Latest context-window size (tokens) for sidebar group hover totals. */
   contextTokens?: number;
+  /** Home project slug when the Duckies tree is showing all projects. */
+  projectSlug?: string;
 }
 
 export type EditorTabKind =
@@ -391,6 +393,8 @@ export interface FolderItem {
   children: FolderItem[];
   /** When set, clicking the folder opens this group hub chat. */
   groupHubId?: string;
+  /** Home project slug for synthetic all-projects wraps and their children. */
+  projectSlug?: string;
 }
 
 export interface FolderDto {
@@ -399,6 +403,8 @@ export interface FolderDto {
   parent_id: string;
   sort_order: number;
   group_hub_id?: string;
+  project_slug?: string;
+  project_name?: string;
 }
 
 export interface SidebarChatLayout {
@@ -2079,9 +2085,9 @@ export interface PanelApi {
     capture_path?: string;
   }>;
   hide_window(): Promise<void>;
-  list_folders(): Promise<FolderDto[]>;
+  list_folders(all_projects?: boolean): Promise<FolderDto[]>;
   list_conversations(folder_id: string): Promise<{ id: string; title: string; sort_order: number; updated?: number; ducky_style?: string; ducky_name?: string; ducky_personality?: string; tts_voice?: string; tts_speed?: number; file_path?: string; model?: string; provider?: string; coding_agent?: string; thinking_effort?: string; terminal_session_id?: string; folder_id?: string; parent_conv_id?: string; is_group?: boolean; is_subagent?: boolean; group_members?: GroupMemberDto[]; tool_call_count?: number; file_count?: number; context_tokens?: number }[]>;
-  list_all_conversations(): Promise<{ id: string; title: string; sort_order: number; updated?: number; ducky_style?: string; ducky_name?: string; profile_id?: string; ducky_personality?: string; tts_voice?: string; tts_speed?: number; file_path?: string; model?: string; provider?: string; coding_agent?: string; thinking_effort?: string; terminal_session_id?: string; folder_id?: string; parent_conv_id?: string; is_group?: boolean; is_subagent?: boolean; group_members?: GroupMemberDto[]; tool_call_count?: number; file_count?: number; context_tokens?: number }[]>;
+  list_all_conversations(all_projects?: boolean): Promise<{ id: string; title: string; sort_order: number; updated?: number; ducky_style?: string; ducky_name?: string; profile_id?: string; ducky_personality?: string; tts_voice?: string; tts_speed?: number; file_path?: string; model?: string; provider?: string; coding_agent?: string; thinking_effort?: string; terminal_session_id?: string; folder_id?: string; parent_conv_id?: string; is_group?: boolean; is_subagent?: boolean; group_members?: GroupMemberDto[]; tool_call_count?: number; file_count?: number; context_tokens?: number; project_slug?: string; project_name?: string }[]>;
   list_conversations_for_file(file_path: string): Promise<{ id: string; title: string; sort_order: number; updated?: number; ducky_style?: string; ducky_name?: string; ducky_personality?: string; tts_voice?: string; tts_speed?: number; file_path?: string; model?: string; provider?: string; coding_agent?: string; thinking_effort?: string; terminal_session_id?: string; folder_id?: string; parent_conv_id?: string; is_group?: boolean; is_subagent?: boolean; group_members?: GroupMemberDto[]; tool_call_count?: number; file_count?: number; context_tokens?: number }[]>;
   apply_sidebar_layout(patch: SidebarLayoutPatch): Promise<void>;
   create_folder(name: string, parent_id?: string): Promise<{ id: string; name: string }>;

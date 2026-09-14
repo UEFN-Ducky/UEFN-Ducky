@@ -275,6 +275,91 @@ def _would_create_cycle(folders: list[ChatFolder], folder_id: str, new_parent_id
     return False
 
 
+def _slug_display_names() -> dict[str, str]:
+    from frontend.ui_web.recent_projects import load_recent_projects
+
+    names: dict[str, str] = {}
+    for path in load_recent_projects():
+        names[project_slug(path)] = project_display_name(path)
+    current = (PanelSettings.load().uefn_project_root or "").strip()
+    if current:
+        names.setdefault(project_slug(current), project_display_name(current))
+    return names
+
+
+def _iter_disk_project_slugs() -> list[str]:
+    root = _chats_root()
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir() if p.is_dir())
+
+
+def _load_folders_for_slug(slug: str) -> list[ChatFolder]:
+    if _use_db():
+        return [ChatFolder.from_dict(f) for f in _repo().folders_get(slug)]
+    path = _chats_root() / slug / "folders.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = data.get("folders") if isinstance(data, dict) else data
+        if not isinstance(raw, list):
+            return []
+        return _sort_folders([ChatFolder.from_dict(f) for f in raw if isinstance(f, dict)])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _load_conversations_for_slug(slug: str) -> list[Conversation]:
+    if _use_db():
+        return [Conversation.from_dict(d) for d in _repo().conv_list(slug, with_messages=False)]
+    out: list[Conversation] = []
+    conv_dir = _chats_root() / slug / "conversations"
+    if not conv_dir.is_dir():
+        return out
+    for path in conv_dir.iterdir():
+        if not path.is_dir():
+            continue
+        meta = path / "conversation.json"
+        if not meta.is_file():
+            continue
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                continue
+            data = {**data, "messages": []}
+            out.append(Conversation.from_dict(data))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return out
+
+
+def iter_folders_by_project() -> list[tuple[str, list[ChatFolder]]]:
+    if _use_db():
+        return [
+            (pid, [ChatFolder.from_dict(f) for f in rows])
+            for pid, rows in _repo().folders_list_all_projects()
+        ]
+    return [(slug, _load_folders_for_slug(slug)) for slug in _iter_disk_project_slugs()]
+
+
+def iter_conversations_by_project() -> list[tuple[str, Conversation]]:
+    if _use_db():
+        return [
+            (pid, Conversation.from_dict(data))
+            for pid, data in _repo().conv_list_all_projects(with_messages=False)
+        ]
+    out: list[tuple[str, Conversation]] = []
+    for slug in _iter_disk_project_slugs():
+        for conv in _load_conversations_for_slug(slug):
+            out.append((slug, conv))
+    return out
+
+
+def project_slug_display_name(slug: str) -> str:
+    return _slug_display_names().get(slug) or slug
+
+
 def load_folders(project_root: str | None = None) -> list[ChatFolder]:
     if _use_db():
         rows = _repo().folders_get(_project_id(project_root))
@@ -529,12 +614,23 @@ def conversation_path(conv_id: str, project_root: str | None = None) -> Path:
     return conversation_meta_path(conv_id, _conversations_dir(project_root))
 
 
+def _find_conversation_meta(conv_id: str, project_root: str | None = None) -> Path | None:
+    primary = conversation_path(conv_id, project_root)
+    if primary.is_file():
+        return primary
+    for meta in _iter_all_conversation_meta_paths():
+        if meta.parent.name == conv_id:
+            return meta
+    return None
+
+
 def load_conversation(conv_id: str, project_root: str | None = None) -> Conversation | None:
     if _use_db():
-        doc = _repo().conv_get(conv_id, project_id=_project_id(project_root), with_messages=True)
+        # Ids are globally unique — don't filter by the active island slug.
+        doc = _repo().conv_get(conv_id, with_messages=True)
         return Conversation.from_dict(doc) if doc is not None else None
-    meta = conversation_path(conv_id, project_root)
-    if not meta.is_file():
+    meta = _find_conversation_meta(conv_id, project_root)
+    if meta is None:
         return None
     try:
         data = json.loads(meta.read_text(encoding="utf-8"))
@@ -548,7 +644,7 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
 def conversation_title(conv_id: str, project_root: str | None = None) -> str:
     """The sidebar title only; never loads message bodies on the row store."""
     if _use_db():
-        doc = _repo().conv_get(conv_id, project_id=_project_id(project_root), with_messages=False)
+        doc = _repo().conv_get(conv_id, with_messages=False)
         return str((doc or {}).get("title") or "").strip()
     conv = load_conversation(conv_id, project_root)
     return str(getattr(conv, "title", "") or "").strip() if conv is not None else ""
@@ -602,6 +698,9 @@ def save_conversation(conv: Conversation, project_root: str | None = None, *, to
             _save_conversation_rows(conv, project_root)
             return
         path = conversation_path(conv.id, project_root)
+        home = _find_conversation_meta(conv.id, project_root)
+        if home is not None:
+            path = home
         path.parent.mkdir(parents=True, exist_ok=True)
         t0 = time.perf_counter()
         incoming_msgs = getattr(conv, "messages", None) or []
@@ -641,7 +740,7 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> Non
     file store, without reading the transcript back."""
     t0 = time.perf_counter()
     repo = _repo()
-    project_id = _project_id(project_root)
+    project_id = repo.conv_project_id(conv.id) or _project_id(project_root)
     incoming = list(getattr(conv, "messages", None) or [])
     stored_count, stored_has_assistant = repo.conv_message_summary(conv.id)
     messages: list[dict[str, Any]] | None = incoming
@@ -657,7 +756,7 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> Non
         conv.tool_call_count = doc["tool_call_count"] = stats["tool_call_count"]
         conv.file_count = doc["file_count"] = stats["file_count"]
     else:
-        current = repo.conv_get(conv.id, project_id=project_id, with_messages=False)
+        current = repo.conv_get(conv.id, with_messages=False)
         if current is not None:
             doc["tool_call_count"] = current.get("tool_call_count", doc["tool_call_count"])
             doc["file_count"] = current.get("file_count", doc["file_count"])
@@ -1078,9 +1177,12 @@ def conversation_descendant_ids(conv_id: str, project_root: str | None = None) -
     """Return every persisted child/grandchild chat, cycle-safe and parent-first."""
     children: dict[str, list[str]] = {}
     if _use_db():
-        children = _repo().conv_ids_by_parent(_project_id(project_root))
+        home = _repo().conv_project_id(conv_id) or _project_id(project_root)
+        children = _repo().conv_ids_by_parent(home)
     else:
-        for conv in _load_all_conversations(project_root):
+        home_meta = _find_conversation_meta(conv_id, project_root)
+        slug = home_meta.parent.parent.parent.name if home_meta is not None else _project_id(project_root)
+        for conv in _load_conversations_for_slug(slug):
             parent = (conv.parent_conv_id or "").strip()
             if parent:
                 children.setdefault(parent, []).append(conv.id)
@@ -1107,6 +1209,10 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
         if _use_db():
             _repo().conv_delete(target_id)
         conv_folder = conversation_dir(target_id, project_root, _conversations_dir(project_root))
+        if not conv_folder.is_dir():
+            meta = _find_conversation_meta(target_id, project_root)
+            if meta is not None:
+                conv_folder = meta.parent
         if conv_folder.is_dir():
             try:
                 shutil.rmtree(conv_folder)
