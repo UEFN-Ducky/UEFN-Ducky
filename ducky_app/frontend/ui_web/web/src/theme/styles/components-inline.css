@@ -2003,10 +2003,16 @@ html.window-maximized .window-resize-grip {
   opacity: 0.9;
 }
 
-.project-selector-mismatch-hint {
+.project-selector-mismatch-hint,
+.project-selector-add-hint {
   margin-top: 2px;
   font-size: 10px;
   color: var(--muted);
+}
+
+.project-selector-add-hint {
+  padding: 0 10px 8px;
+  line-height: 1.4;
 }
 
 /* ── ModelSelector ── */

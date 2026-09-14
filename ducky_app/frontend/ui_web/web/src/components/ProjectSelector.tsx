@@ -227,6 +227,7 @@ export function ProjectSelector({
         )}
 
         {isRemote() ? null : (
+        <>
         <button
           type="button"
           onPointerDown={onAddProjectPointerDown}
@@ -235,6 +236,10 @@ export function ProjectSelector({
           <Icons.Plus />
           Add project…
         </button>
+        <div className="project-selector-mismatch-hint project-selector-add-hint">
+          Select the parent project folder that holds your UEFN game — not the Content folder.
+        </div>
+        </>
         )}
     </>
   );

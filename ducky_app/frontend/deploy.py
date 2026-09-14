@@ -318,6 +318,11 @@ def resolve_uefn_project_root(user_selection: Path) -> Path:
             return p
         if (p / "Content").is_dir():
             return p
+        # Picked Content/ instead of the project root.
+        if p.name.lower() == "content":
+            parent = p.parent
+            if (parent / ".uefnproject").is_file() or (parent / "Content").is_dir():
+                return parent
     raise ValueError(
         "Select your UEFN project folder (should contain .uefnproject or a Content folder), "
         "or pick the .uefnproject file."

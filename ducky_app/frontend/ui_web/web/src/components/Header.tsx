@@ -459,11 +459,6 @@ export function Header({
     label: "Ledger",
     route: "changes",
   });
-  const automationsTargetRef = useUiTarget("header.automations", {
-    kind: "button",
-    label: "Automations",
-    route: "automations",
-  });
 
   return (
     <header
@@ -596,18 +591,6 @@ export function Header({
       ) : null}
 
       <div className={`app-header-trailing${isSettingsOverlay ? " app-header-trailing--settings" : ""}`}>
-        {!isSettingsOverlay ? (
-          <button
-            ref={automationsTargetRef}
-            type="button"
-            className="icon-btn app-header-automations-btn"
-            title="Automations — scheduled and event workflows"
-            aria-label="Open automations"
-            onClick={() => requestOpenAutomationsTab()}
-          >
-            <Icons.Clock />
-          </button>
-        ) : null}
         {showWorkflow || terminalAction || problemsAction || showChanges ? (
           <span className="app-header-editor-actions">
             {showWorkflow && workflowAction ? (

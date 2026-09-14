@@ -59,10 +59,15 @@ export function WelcomeView({ listener, project, onProjectChanged }: WelcomeView
                 Remote session — pick a project on the PC running UEFN Ducky, then refresh.
               </p>
             ) : (
-            <button type="button" className="settings-btn welcome-view-add-btn" onClick={() => void addProject()}>
-              <Icons.Plus />
-              Add project…
-            </button>
+              <>
+                <button type="button" className="settings-btn welcome-view-add-btn" onClick={() => void addProject()}>
+                  <Icons.Plus />
+                  Add project…
+                </button>
+                <p className="welcome-view-add-hint">
+                  Select the parent project folder that holds your UEFN game — not the Content folder.
+                </p>
+              </>
             )}
           </>
         ) : (

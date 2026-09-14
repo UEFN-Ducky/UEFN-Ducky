@@ -70,6 +70,8 @@ import {
   readDuckiesAllProjects,
   rememberDuckiesAllProjects,
 } from "../utils/duckiesTreePrefs";
+import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
+import { useUiTarget } from "../ui-targets/registry";
 
 function shouldBlockSidebarHotkey(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -353,6 +355,11 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
   });
   const { confirm } = useConfirmModal();
   const undoHistory = useUndoHistoryOptional();
+  const automationsTargetRef = useUiTarget("header.automations", {
+    kind: "button",
+    label: "Automations",
+    route: "automations",
+  });
   const { treeRefreshToken, showHiddenFiles, setShowHiddenFiles } = useProjectFilesSettings();
   const [duckiesCompact, setDuckiesCompact] = useState(readDuckiesCompact);
   const toggleDuckiesCompact = useCallback((value: boolean) => {
@@ -967,6 +974,13 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
         }}
       >
         <Icons.Search />
+      </SectionIconButton>
+      <SectionIconButton
+        buttonRef={(el) => automationsTargetRef(el)}
+        title="Automations"
+        onClick={() => requestOpenAutomationsTab()}
+      >
+        <Icons.Clock />
       </SectionIconButton>
       <DuckyArchiveDropdown
         archiveChats={archiveChats}

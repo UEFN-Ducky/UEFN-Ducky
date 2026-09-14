@@ -650,19 +650,11 @@ class PanelApiWindowMixin:
 
         try:
             folder_type = webview.FileDialog.FOLDER
-            open_type = webview.FileDialog.OPEN
         except AttributeError:  # older pywebview
             folder_type = getattr(webview, "FOLDER_DIALOG", 20)
-            open_type = getattr(webview, "OPEN_DIALOG", 10)
 
         try:
             picked = win.create_file_dialog(folder_type)
-            if picked:
-                return str(_pa.resolve_uefn_project_root(_pa.Path(picked[0])))
-            picked = win.create_file_dialog(
-                open_type,
-                file_types=("UEFN project (*.uefnproject)", "All files (*.*)"),
-            )
             if picked:
                 return str(_pa.resolve_uefn_project_root(_pa.Path(picked[0])))
         except Exception:
@@ -675,13 +667,6 @@ class PanelApiWindowMixin:
         d = filedialog.askdirectory(title="UEFN project folder", parent=root)
         if d:
             return str(_pa.resolve_uefn_project_root(_pa.Path(d)))
-        f = filedialog.askopenfilename(
-            title="Or pick a .uefnproject file",
-            parent=root,
-            filetypes=[("UEFN", "*.uefnproject"), ("All", "*.*")],
-        )
-        if f:
-            return str(_pa.resolve_uefn_project_root(_pa.Path(f)))
         return None
 
     def _pick_project_path_standalone(self) -> str | None:

@@ -12,7 +12,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
 
 const NODE_W = 200;
-const NODE_H = 72;
+const NODE_H = 76;
 const GROUP_ORDER = ["Starting", "Triggers", "Duckies", "Tools", "Logic"];
 
 function emptyGraph(): AutomationGraphDto {
@@ -23,18 +23,39 @@ function nid(): string {
   return `n${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function groupCatalog(catalog: AutomationNodeDto[], query: string) {
+  const q = query.trim().toLowerCase();
+  const map = new Map<string, AutomationNodeDto[]>();
+  for (const n of catalog) {
+    if (q && !`${n.label} ${n.type} ${n.group} ${n.description || ""}`.toLowerCase().includes(q)) continue;
+    const g = n.group || "Nodes";
+    const list = map.get(g) || [];
+    list.push(n);
+    map.set(g, list);
+  }
+  const keys = [...map.keys()].sort((a, b) => {
+    const ia = GROUP_ORDER.indexOf(a);
+    const ib = GROUP_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
+  return keys.map((k) => [k, map.get(k) || []] as const);
+}
+
 export function AutomationsView() {
   const [rows, setRows] = useState<AutomationSummaryDto[]>([]);
   const [catalog, setCatalog] = useState<AutomationNodeDto[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<AutomationDto | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [expandedId, setExpandedId] = useState("");
   const [pan, setPan] = useState({ x: 40, y: 40 });
   const [zoom, setZoom] = useState(1);
   const [wireFrom, setWireFrom] = useState<string | null>(null);
   const [log, setLog] = useState<AutomationRunDto | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState("");
+  const [spawn, setSpawn] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [spawnFilter, setSpawnFilter] = useState("");
   const boardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
@@ -59,6 +80,15 @@ export function AutomationsView() {
     void refreshList();
   }, [refreshList]);
 
+  useEffect(() => {
+    if (!spawn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSpawn(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [spawn]);
+
   const loadOne = useCallback(async (id: string) => {
     const api = getApi();
     const res = await api?.get_automation?.(id);
@@ -66,6 +96,7 @@ export function AutomationsView() {
       setDraft(res.automation);
       setSelectedId(id);
       setSelectedNodeId("");
+      setExpandedId("");
       setLog((res.automation.runs || []).slice(-1)[0] || null);
     }
   }, []);
@@ -90,12 +121,12 @@ export function AutomationsView() {
       graph: emptyGraph(),
     } as AutomationDto);
     setSelectedNodeId("");
+    setExpandedId("");
     setLog(null);
     if (created.id) setSelectedId(created.id);
   }, [persist]);
 
   const graph = draft?.graph || emptyGraph();
-  const selectedNode = graph.nodes.find((n) => n.id === selectedNodeId) || null;
 
   const patchGraph = (fn: (g: AutomationGraphDto) => AutomationGraphDto) => {
     if (!draft) return;
@@ -103,21 +134,21 @@ export function AutomationsView() {
     setDraft(next);
   };
 
-  const addNode = (entry: AutomationNodeDto) => {
-    const board = boardRef.current?.getBoundingClientRect();
-    const x = ((board?.width || 400) / 2 - pan.x) / zoom - NODE_W / 2;
-    const y = ((board?.height || 300) / 2 - pan.y) / zoom - NODE_H / 2;
+  const addNodeAt = (entry: AutomationNodeDto, worldX: number, worldY: number) => {
     const node: AutomationGraphNodeDto = {
       id: nid(),
       type: entry.type,
-      x,
-      y,
+      x: worldX,
+      y: worldY,
       config: {},
       label: entry.label,
       description: entry.description || "",
     };
     patchGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     setSelectedNodeId(node.id);
+    setExpandedId(node.id);
+    setSpawn(null);
+    setSpawnFilter("");
   };
 
   const saveDraft = () => {
@@ -130,29 +161,25 @@ export function AutomationsView() {
     setBusy(true);
     try {
       const res = await getApi()?.run_automation?.(draft.id);
-      if (res) setLog(res);
+      if (res) {
+        setLog(res);
+        setLogOpen(true);
+      }
     } finally {
       setBusy(false);
     }
   };
 
-  const groups = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const map = new Map<string, AutomationNodeDto[]>();
-    for (const n of catalog) {
-      if (q && !`${n.label} ${n.type} ${n.group}`.toLowerCase().includes(q)) continue;
-      const g = n.group || "Nodes";
-      const list = map.get(g) || [];
-      list.push(n);
-      map.set(g, list);
-    }
-    const keys = [...map.keys()].sort((a, b) => {
-      const ia = GROUP_ORDER.indexOf(a);
-      const ib = GROUP_ORDER.indexOf(b);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
-    });
-    return keys.map((k) => [k, map.get(k) || []] as const);
-  }, [catalog, filter]);
+  const spawnGroups = useMemo(() => groupCatalog(catalog, spawnFilter), [catalog, spawnFilter]);
+
+  const worldFromClient = (clientX: number, clientY: number) => {
+    const board = boardRef.current?.getBoundingClientRect();
+    if (!board) return { x: 0, y: 0 };
+    return {
+      x: (clientX - board.left - pan.x) / zoom,
+      y: (clientY - board.top - pan.y) / zoom,
+    };
+  };
 
   const onBoardWheel = (e: React.WheelEvent) => {
     e.preventDefault();
@@ -161,12 +188,13 @@ export function AutomationsView() {
   };
 
   const onBoardPointerDown = (e: React.PointerEvent) => {
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
       panRef.current = { x: pan.x, y: pan.y, px: e.clientX, py: e.clientY };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } else if (e.target === e.currentTarget) {
+    } else if (e.button === 0 && e.target === e.currentTarget) {
       setSelectedNodeId("");
       setWireFrom(null);
+      setSpawn(null);
     }
   };
 
@@ -193,6 +221,19 @@ export function AutomationsView() {
   const endPointer = () => {
     dragRef.current = null;
     panRef.current = null;
+  };
+
+  const onBoardContextMenu = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest(".aw-node") || t.closest(".aw-port") || t.closest(".aw-wire")) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    if (!draft) return;
+    const world = worldFromClient(e.clientX, e.clientY);
+    setSpawn({ x: e.clientX, y: e.clientY, worldX: world.x, worldY: world.y });
+    setSpawnFilter("");
   };
 
   const startNodeDrag = (e: React.PointerEvent, node: AutomationGraphNodeDto) => {
@@ -224,6 +265,8 @@ export function AutomationsView() {
     }
   };
 
+  const logCount = log?.steps?.length || 0;
+
   return (
     <div className="aw-root">
       <aside className="aw-list">
@@ -247,25 +290,6 @@ export function AutomationsView() {
             </li>
           ))}
         </ul>
-      </aside>
-      <aside className="aw-palette">
-        <input
-          className="aw-palette-filter"
-          placeholder="Filter nodes"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        {groups.map(([name, tiles]) => (
-          <details key={name} className="aw-acc" open={name === "Starting" || name === "Duckies"}>
-            <summary>{name}</summary>
-            {tiles.map((t) => (
-              <button key={t.type} type="button" className="aw-tile" onClick={() => addNode(t)} disabled={!draft}>
-                <span>{t.label}</span>
-                <small>{t.description}</small>
-              </button>
-            ))}
-          </details>
-        ))}
       </aside>
       <div className="aw-main">
         <div className="aw-toolbar">
@@ -323,7 +347,7 @@ export function AutomationsView() {
               </button>
             </>
           ) : (
-            <span className="aw-empty-hint">Create a workflow or pick one — empty graphs are valid.</span>
+            <span className="aw-empty-hint">Create a workflow or pick one — right-click the canvas to add nodes.</span>
           )}
         </div>
         <div
@@ -333,7 +357,7 @@ export function AutomationsView() {
           onPointerDown={onBoardPointerDown}
           onPointerMove={onBoardPointerMove}
           onPointerUp={endPointer}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={onBoardContextMenu}
         >
           <div className="aw-world" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
             <svg className="aw-wires" width={8000} height={8000}>
@@ -364,75 +388,144 @@ export function AutomationsView() {
             </svg>
             {graph.nodes.map((node) => {
               const meta = byType.get(node.type);
+              const expanded = expandedId === node.id;
               return (
                 <div
                   key={node.id}
-                  className={`aw-node aw-node--${meta?.role || "action"}${selectedNodeId === node.id ? " is-selected" : ""}${wireFrom === node.id ? " is-wiring" : ""}`}
+                  className={`aw-node aw-node--${meta?.role || "action"}${selectedNodeId === node.id ? " is-selected" : ""}${wireFrom === node.id ? " is-wiring" : ""}${expanded ? " is-expanded" : ""}`}
                   style={{ left: node.x, top: node.y }}
-                  onPointerDown={(e) => startNodeDrag(e, node)}
                 >
                   <button type="button" className="aw-port aw-port--in" onClick={(e) => clickPort(e, node.id, "in")} />
-                  <div className="aw-node-body">
-                    <strong>{node.label || meta?.label || node.type}</strong>
-                    <small>{node.description || meta?.description || node.type}</small>
+                  <div className="aw-node-card">
+                    <div className="aw-node-body" onPointerDown={(e) => startNodeDrag(e, node)}>
+                      <strong>{node.label || meta?.label || node.type}</strong>
+                      <small>{node.description || meta?.description || node.type}</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="aw-node-expand-toggle"
+                      aria-expanded={expanded}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedNodeId(node.id);
+                        setExpandedId(expanded ? "" : node.id);
+                      }}
+                    >
+                      {expanded ? "Close" : "Expand"}
+                    </button>
+                    {expanded ? (
+                      <div className="aw-node-props aw-node-props--open" onPointerDown={(e) => e.stopPropagation()}>
+                        <NodeInspector
+                          node={node}
+                          meta={meta}
+                          edges={graph.edges.filter((e) => e.source === node.id)}
+                          onChange={(next) =>
+                            patchGraph((g) => ({
+                              ...g,
+                              nodes: g.nodes.map((n) => (n.id === next.id ? next : n)),
+                            }))
+                          }
+                          onEdgeKind={(target, kind) =>
+                            patchGraph((g) => ({
+                              ...g,
+                              edges: g.edges.map((e) =>
+                                e.source === node.id && e.target === target ? { ...e, kind } : e,
+                              ),
+                            }))
+                          }
+                          onDelete={() => {
+                            patchGraph((g) => ({
+                              nodes: g.nodes.filter((n) => n.id !== node.id),
+                              edges: g.edges.filter((e) => e.source !== node.id && e.target !== node.id),
+                            }));
+                            setSelectedNodeId("");
+                            setExpandedId("");
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                   <button type="button" className="aw-port aw-port--out" onClick={(e) => clickPort(e, node.id, "out")} />
                 </div>
               );
             })}
           </div>
-        </div>
-        <div className="aw-log">
-          <strong>Run log</strong>
-          {log?.steps?.length ? (
-            <ol>
-              {log.steps.map((s, i) => (
-                <li key={i} className={s.ok === false ? "is-err" : ""}>
-                  {s.label || s.type} {s.ok === false ? `— ${s.error}` : "ok"}
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p>Test a graph to see steps here. Timers only fire while the panel is running.</p>
-          )}
+          <button
+            type="button"
+            className={`aw-log-fab${logOpen ? " is-open" : ""}`}
+            title={logOpen ? "Hide run log" : "Run log"}
+            aria-expanded={logOpen}
+            onClick={() => setLogOpen((v) => !v)}
+          >
+            <Icons.Sliders />
+            {logCount ? <span className="aw-log-fab-badge">{logCount}</span> : null}
+          </button>
+          {logOpen ? (
+            <div className="aw-log-dock">
+              <div className="aw-log-dock-head">
+                <strong>Run log</strong>
+                <button type="button" className="icon-btn" title="Hide" onClick={() => setLogOpen(false)}>
+                  ×
+                </button>
+              </div>
+              {log?.steps?.length ? (
+                <ol>
+                  {log.steps.map((s, i) => (
+                    <li key={i} className={s.ok === false ? "is-err" : ""}>
+                      {s.label || s.type} {s.ok === false ? `— ${s.error}` : "ok"}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p>Test a graph to see steps here. Timers only fire while the panel is running.</p>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
-      <aside className="aw-inspector">
-        <div className="aw-inspector-head">
-          <Icons.Sliders />
-          <span>Inspector</span>
+      {spawn ? (
+        <div className="aw-spawn-scrim" onMouseDown={() => setSpawn(null)}>
+          <div
+            className="aw-spawn-menu"
+            role="dialog"
+            aria-label="Add node"
+            style={{ left: spawn.x, top: spawn.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <input
+              className="aw-spawn-search"
+              autoFocus
+              placeholder="Filter nodes"
+              value={spawnFilter}
+              onChange={(e) => setSpawnFilter(e.target.value)}
+            />
+            <p className="aw-spawn-hint">Right-click the canvas to add a node.</p>
+            <div className="aw-spawn-scroll">
+              {spawnGroups.length ? (
+                spawnGroups.map(([name, tiles]) => (
+                  <details key={name} className="aw-acc" open>
+                    <summary>{name}</summary>
+                    {tiles.map((t) => (
+                      <button
+                        key={t.type}
+                        type="button"
+                        className="aw-tile"
+                        onClick={() => addNodeAt(t, spawn.worldX, spawn.worldY)}
+                      >
+                        <span>{t.label}</span>
+                        <small>{t.description}</small>
+                      </button>
+                    ))}
+                  </details>
+                ))
+              ) : (
+                <p className="aw-empty-hint">No matching nodes.</p>
+              )}
+            </div>
+          </div>
         </div>
-        {selectedNode && draft ? (
-          <NodeInspector
-            node={selectedNode}
-            meta={byType.get(selectedNode.type)}
-            edges={graph.edges.filter((e) => e.source === selectedNode.id)}
-            onChange={(next) =>
-              patchGraph((g) => ({
-                ...g,
-                nodes: g.nodes.map((n) => (n.id === next.id ? next : n)),
-              }))
-            }
-            onEdgeKind={(target, kind) =>
-              patchGraph((g) => ({
-                ...g,
-                edges: g.edges.map((e) =>
-                  e.source === selectedNode.id && e.target === target ? { ...e, kind } : e,
-                ),
-              }))
-            }
-            onDelete={() => {
-              patchGraph((g) => ({
-                nodes: g.nodes.filter((n) => n.id !== selectedNode.id),
-                edges: g.edges.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id),
-              }));
-              setSelectedNodeId("");
-            }}
-          />
-        ) : (
-          <p className="aw-empty-hint">Select a node. Click an output port, then an input port, to wire.</p>
-        )}
-      </aside>
+      ) : null}
     </div>
   );
 }

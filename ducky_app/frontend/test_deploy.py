@@ -240,3 +240,19 @@ def test_remove_project_init_leaves_foreign_file(tmp_path: Path) -> None:
     init.write_text("# my own python\nprint('hi')\n", encoding="utf-8")
     deploy.remove_project_init(project)
     assert init.is_file()
+
+
+def test_resolve_uefn_project_root_walks_up_from_content(tmp_path: Path) -> None:
+    island = tmp_path / "Island"
+    content = island / "Content"
+    content.mkdir(parents=True)
+    (island / ".uefnproject").write_text("{}", encoding="utf-8")
+    assert deploy.resolve_uefn_project_root(content) == island.resolve()
+    assert deploy.resolve_uefn_project_root(island) == island.resolve()
+
+
+def test_resolve_uefn_project_root_rejects_unrelated_folder(tmp_path: Path) -> None:
+    other = tmp_path / "NotAnIsland"
+    other.mkdir()
+    with pytest.raises(ValueError, match="UEFN project folder"):
+        deploy.resolve_uefn_project_root(other)
