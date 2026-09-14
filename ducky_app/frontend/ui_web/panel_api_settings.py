@@ -1760,6 +1760,16 @@ class PanelApiSettingsMixin:
 
         return format_support_dump()
 
+    def submit_feedback(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from frontend.feedback_submit import submit_feedback as send
+
+        data = payload if isinstance(payload, dict) else {}
+        return send(
+            message=str(data.get("message") or ""),
+            email=str(data.get("email") or ""),
+            include_errors=bool(data.get("include_errors")),
+        )
+
     def copy_text(self, text: str) -> bool:
         from frontend.ui_web.win_clipboard import set_clipboard_text
 

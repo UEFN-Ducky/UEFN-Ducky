@@ -2027,6 +2027,12 @@
   }
 }
 
+.support-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .support-tab-title {
   font-size: 20px;
   margin: 0 0 8px 0;
@@ -2035,7 +2041,7 @@
 
 .support-tab-lead {
   color: var(--fg);
-  margin: 0 0 28px 0;
+  margin: 0;
   font-size: 14px;
   font-weight: 500;
 }
@@ -2129,6 +2135,104 @@
 
 .support-tab-cta:active {
   transform: scale(0.98);
+}
+
+.support-tab-card--feedback {
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.support-tab-feedback-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.support-tab-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.support-tab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.support-tab-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.support-tab-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.support-tab-input--area {
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.support-tab-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.support-tab-check input {
+  margin-top: 2px;
+}
+
+.support-tab-check.is-disabled {
+  color: var(--muted);
+}
+
+.support-tab-feedback-status {
+  margin: 0;
+  font-size: 13px;
+}
+
+.support-tab-feedback-status.is-ok {
+  color: var(--green, #3dcc7a);
+}
+
+.support-tab-feedback-status.is-err {
+  color: var(--red);
+}
+
+.support-tab-send {
+  align-self: flex-start;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: var(--fg-inverse);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.support-tab-send:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .account-tab {

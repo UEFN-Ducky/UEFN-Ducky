@@ -265,11 +265,13 @@ input, textarea, select, button {
 
 .connection-status-menu {
   width: 300px;
+  max-height: min(80vh, 560px);
   background: var(--dropdown-bg, var(--panel, #1e1e1e));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 8px);
   box-shadow: 0 8px 24px var(--overlay, rgba(0, 0, 0, 0.35));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px 0 4px;
 }
 

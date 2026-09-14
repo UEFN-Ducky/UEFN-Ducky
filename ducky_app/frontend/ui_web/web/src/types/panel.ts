@@ -2695,8 +2695,8 @@ export interface PanelApi {
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
   list_running_agents(): Promise<string[]>;
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
-  /** Open the current island in UEFN (Windows file association on ``*.uefnproject``). */
-  launch_uefn_project?(): Promise<{ ok: boolean; path?: string }>;
+  /** Launch UnrealEditorFortnite.exe (optional island argv). Not startfile. */
+  launch_uefn_project?(): Promise<{ ok: boolean; path?: string; exe?: string }>;
   /** Kill UnrealEditorFortnite.exe, then launch the current island again. */
   restart_uefn_project?(): Promise<{ ok: boolean; path?: string; killed?: boolean }>;
   rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;
@@ -2722,6 +2722,11 @@ export interface PanelApi {
   get_errors(): Promise<string[]>;
   clear_errors(): Promise<string[]>;
   copy_support_dump(): Promise<string>;
+  submit_feedback(payload: {
+    message: string;
+    email?: string;
+    include_errors?: boolean;
+  }): Promise<{ ok: boolean; error?: string }>;
   copy_text(text: string): Promise<boolean>;
   pull_editor_log(): Promise<void>;
   open_appdata(): Promise<void>;

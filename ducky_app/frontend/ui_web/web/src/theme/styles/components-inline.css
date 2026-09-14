@@ -1766,6 +1766,16 @@ html.window-maximized .window-resize-grip {
 }
 
 /* ── ProjectSelector ── */
+.project-selector-embedded {
+  padding: 4px 0 8px;
+}
+.project-selector-embedded .project-selector-section-label {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.project-selector-embedded .project-selector-item-row {
+  padding: 0 4px;
+}
 .project-selector-root {
   position: relative;
   width: fit-content;

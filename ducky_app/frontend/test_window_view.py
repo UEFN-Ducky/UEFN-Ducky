@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from frontend.window_view import (
     bring_to_front,
+    fortnite_roots_from_launcher_dat,
     handle_stream_message,
     kind_for,
     kill_uefn_cmd,
+    launch_uefn_cmd,
     launch_uefn_project,
     map_norm_to_screen,
     restart_uefn_project,
@@ -252,16 +254,34 @@ def test_kill_uefn_cmd_is_editor_only() -> None:
     assert "UEFN-Ducky" not in " ".join(cmd)
 
 
-def test_launch_uefn_project_startfiles(tmp_path, monkeypatch) -> None:
+def test_launch_uefn_cmd_goes_through_editor() -> None:
+    exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
+    island = r"C:\islands\Demo.uefnproject"
+    assert launch_uefn_cmd(exe, island) == [exe, island]
+    assert launch_uefn_cmd(exe) == [exe]
+
+
+def test_fortnite_roots_from_launcher_dat() -> None:
+    raw = """{"InstallationList":[
+      {"InstallLocation":"C:\\\\Epic\\\\Fortnite","AppName":"Fortnite","ArtifactId":"Fortnite"},
+      {"InstallLocation":"C:\\\\Epic\\\\UE","AppName":"UE_5"}
+    ]}"""
+    assert fortnite_roots_from_launcher_dat(raw) == [r"C:\Epic\Fortnite"]
+    assert fortnite_roots_from_launcher_dat("not-json") == []
+
+
+def test_launch_uefn_project_uses_editor(tmp_path, monkeypatch) -> None:
     import frontend.window_view as wv
 
     island = tmp_path / "Demo.uefnproject"
     island.write_text("{}", encoding="utf-8")
-    started: list[str] = []
+    exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
+    started: list[tuple] = []
+    monkeypatch.setattr(wv, "uefn_editor_exe", lambda: exe)
     monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
-    monkeypatch.setattr(wv, "_start_uefn", lambda path: started.append(str(path)))
-    assert launch_uefn_project() == {"ok": True, "path": str(island)}
-    assert started == [str(island)]
+    monkeypatch.setattr(wv, "_start_uefn", lambda editor, project=None: started.append((editor, str(project) if project else "")))
+    assert launch_uefn_project() == {"ok": True, "exe": exe, "path": str(island)}
+    assert started == [(exe, str(island))]
 
 
 def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:
@@ -269,10 +289,12 @@ def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None
 
     island = tmp_path / "Demo.uefnproject"
     island.write_text("{}", encoding="utf-8")
+    exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
     order: list[str] = []
     monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: order.append("kill") or True)
+    monkeypatch.setattr(wv, "uefn_editor_exe", lambda: exe)
     monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
-    monkeypatch.setattr(wv, "_start_uefn", lambda path: order.append(f"start:{path}"))
+    monkeypatch.setattr(wv, "_start_uefn", lambda editor, project=None: order.append(f"start:{editor}:{project}"))
     out = restart_uefn_project()
     assert out["ok"] is True and out["killed"] is True
-    assert order == ["kill", f"start:{island}"]
+    assert order == ["kill", f"start:{exe}:{island}"]

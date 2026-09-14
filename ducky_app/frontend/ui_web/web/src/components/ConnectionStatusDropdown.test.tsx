@@ -41,6 +41,24 @@ describe("ConnectionStatusDropdown", () => {
     const head = dialog.querySelector(".connection-status-menu-head");
     expect(settings && head && settings.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Close web view")).toBeNull();
+    expect(screen.queryByText("RECENT PROJECTS")).toBeNull();
+  });
+
+  it("renders extra (recent projects) above Connections on remote", () => {
+    render(
+      <ConnectionStatusDropdown
+        status={status}
+        projectName="ExampleProject1"
+        onOpenSettings={() => {}}
+        extra={<div className="project-selector-section-label">RECENT PROJECTS</div>}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /offline/i }));
+    const dialog = screen.getByRole("dialog", { name: "Connection status" });
+    const extra = dialog.querySelector(".project-selector-section-label");
+    const head = dialog.querySelector(".connection-status-menu-head");
+    expect(extra?.textContent).toBe("RECENT PROJECTS");
+    expect(extra && head && extra.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("posts ud-remote-close from Close web view only when framed", () => {

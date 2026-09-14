@@ -484,6 +484,18 @@ export function Header({
                 projectName={project.path?.trim() ? project.name : undefined}
                 hasStoreUpdates={hasStoreUpdates}
                 onOpenSettings={() => void handleSettingsToggle()}
+                extra={
+                  !isFocus && isRemote() ? (
+                    <ProjectSelector
+                      embedded
+                      project={project}
+                      onProjectChanged={onProjectChanged}
+                      uefnProjectName={uefnProjectName}
+                      projectMatch={projectMatch}
+                      listenerOnline={isOnline}
+                    />
+                  ) : null
+                }
               />
             </span>
             {isFocus ? (
@@ -492,7 +504,7 @@ export function Header({
                   {project.name}
                 </span>
               ) : null
-            ) : (
+            ) : isRemote() ? null : (
               <ProjectSelector
                 project={project}
                 onProjectChanged={onProjectChanged}

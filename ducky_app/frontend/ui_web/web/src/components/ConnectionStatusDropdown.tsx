@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
 import { Icons } from "../icons/Icons";
@@ -50,6 +50,8 @@ export interface ConnectionStatusDropdownProps {
   hasStoreUpdates?: boolean;
   onOpenSettings: () => void;
   readonly?: boolean;
+  /** Remote/mobile: recent projects list (replaces the header project dropdown). */
+  extra?: ReactNode;
 }
 
 /** Header duck icon: click toggles Ducky listener + Epic MCP connection panel. */
@@ -59,6 +61,7 @@ export function ConnectionStatusDropdown({
   hasStoreUpdates = false,
   onOpenSettings,
   readonly = false,
+  extra,
 }: ConnectionStatusDropdownProps) {
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -177,6 +180,7 @@ export function ConnectionStatusDropdown({
             <span>Close web view</span>
           </button>
         ) : null}
+        {extra}
         <div className="connection-status-menu-head">Connections</div>
         <Row label="Ducky listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
         <Row label="UEFN MCP" detail={epicDetail} ok={epicOnline} />

@@ -16,6 +16,8 @@ interface ProjectSelectorProps {
   projectMatch?: boolean;
   /** Whether the UEFN listener is online (mismatch is only meaningful when it is). */
   listenerOnline?: boolean;
+  /** Menu body only — used inside the mobile/remote connection dropdown. */
+  embedded?: boolean;
 }
 
 function sameProjectName(a: string | undefined, b: string | undefined): boolean {
@@ -28,6 +30,7 @@ export function ProjectSelector({
   uefnProjectName,
   projectMatch,
   listenerOnline,
+  embedded = false,
 }: ProjectSelectorProps) {
   const flushFromBridge = useOptionalEditorWorkspaceFlush();
   const { confirm } = useConfirmModal();
@@ -108,9 +111,9 @@ export function ProjectSelector({
   }, [close, selectProject]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen && !embedded) return;
     refreshRecent();
-  }, [isOpen, project.path, refreshRecent]);
+  }, [embedded, isOpen, project.path, refreshRecent]);
 
   const label = project.path?.trim() ? project.name : "Select project";
 
@@ -138,29 +141,8 @@ export function ProjectSelector({
     void addProject();
   };
 
-  return (
-    <div className="no-drag project-selector-root">
-      <button
-        ref={anchorRef}
-        type="button"
-        onPointerDown={onAnchorPointerDown}
-        title={
-          mismatch
-            ? `UEFN has ${uefnName} open — the panel is editing ${project.name}. Click to switch.`
-            : project.path || "Choose UEFN project"
-        }
-        className={`project-selector-btn${isOpen ? " is-open" : ""}${project.path ? " has-path" : " no-path"}${mismatch ? " has-mismatch" : ""}`}
-      >
-        <TruncatedText
-          className="project-selector-title"
-          title={project.path || label}
-        >
-          {label}
-        </TruncatedText>
-        {mismatch && <span className="project-selector-mismatch-dot" aria-hidden="true" />}
-      </button>
-
-      <DropdownPanel anchorRef={anchorRef} open={isOpen} onClose={close} minWidth={280}>
+  const menu = (
+    <>
         {mismatch && (
           <div className="project-selector-mismatch-banner">
             <span className="project-selector-mismatch-banner-icon" aria-hidden="true">
@@ -254,6 +236,37 @@ export function ProjectSelector({
           Add project…
         </button>
         )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className="no-drag project-selector-embedded">{menu}</div>;
+  }
+
+  return (
+    <div className="no-drag project-selector-root">
+      <button
+        ref={anchorRef}
+        type="button"
+        onPointerDown={onAnchorPointerDown}
+        title={
+          mismatch
+            ? `UEFN has ${uefnName} open — the panel is editing ${project.name}. Click to switch.`
+            : project.path || "Choose UEFN project"
+        }
+        className={`project-selector-btn${isOpen ? " is-open" : ""}${project.path ? " has-path" : " no-path"}${mismatch ? " has-mismatch" : ""}`}
+      >
+        <TruncatedText
+          className="project-selector-title"
+          title={project.path || label}
+        >
+          {label}
+        </TruncatedText>
+        {mismatch && <span className="project-selector-mismatch-dot" aria-hidden="true" />}
+      </button>
+
+      <DropdownPanel anchorRef={anchorRef} open={isOpen} onClose={close} minWidth={280}>
+        {menu}
       </DropdownPanel>
     </div>
   );

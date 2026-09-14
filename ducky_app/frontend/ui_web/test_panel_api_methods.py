@@ -20,6 +20,7 @@ _PUBLIC_METHODS = frozenset({
     'store_action',
     'store_overview',
     'store_table_preview',
+    'submit_feedback',
     'apply_all_ides',
     'apply_ducky_config',
     'apply_ide',

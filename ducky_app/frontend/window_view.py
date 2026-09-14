@@ -124,7 +124,7 @@ _UEFN_EDITOR_EXE = "UnrealEditorFortnite.exe"
 
 
 def uefnproject_path(root: str | os.PathLike[str] | None = None):
-    """Resolve the current island's ``*.uefnproject`` (Windows startfile target)."""
+    """Resolve the current island's ``*.uefnproject`` (editor argv, not startfile)."""
     from pathlib import Path
 
     if root is None:
@@ -148,6 +148,57 @@ def kill_uefn_cmd() -> list[str]:
     return ["taskkill", "/IM", _UEFN_EDITOR_EXE, "/F"]
 
 
+def launch_uefn_cmd(exe: object, project: object | None = None) -> list[str]:
+    """Open UEFN through the editor binary — ``.uefnproject`` has no working association."""
+    cmd = [str(exe)]
+    if project:
+        cmd.append(str(project))
+    return cmd
+
+
+def fortnite_roots_from_launcher_dat(raw: str) -> list[str]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    out: list[str] = []
+    for item in data.get("InstallationList") or []:
+        if not isinstance(item, dict):
+            continue
+        loc = str(item.get("InstallLocation") or "").strip()
+        blob = f"{item.get('AppName', '')} {item.get('ArtifactId', '')} {loc}".lower()
+        if loc and "fortnite" in blob:
+            out.append(loc)
+    return out
+
+
+def uefn_editor_exe() -> str:
+    from pathlib import Path
+
+    rel = Path("Engine") / "Binaries" / "Win64" / _UEFN_EDITOR_EXE
+    pf = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+    for root in (pf / "Epic Games" / "Fortnite",):
+        cand = root / rel
+        if cand.is_file():
+            return str(cand)
+    programdata = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+    for dat in (
+        programdata / "Epic" / "UnrealEngineLauncher" / "LauncherInstalled.dat",
+        programdata / "Epic" / "EpicGamesLauncher" / "Data" / "LauncherInstalled.dat",
+    ):
+        try:
+            raw = dat.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for loc in fortnite_roots_from_launcher_dat(raw):
+            cand = Path(loc) / rel
+            if cand.is_file():
+                return str(cand)
+    raise RuntimeError(
+        "Unreal Editor for Fortnite not found. Install UEFN from the Epic Games Launcher."
+    )
+
+
 def _kill_uefn_editor() -> bool:
     if sys.platform != "win32":
         return False
@@ -162,14 +213,29 @@ def _kill_uefn_editor() -> bool:
     return r.returncode == 0
 
 
-def _start_uefn(path: object) -> None:
-    os.startfile(str(path))  # type: ignore[attr-defined]
+def _start_uefn(exe: object, project: object | None = None) -> None:
+    import subprocess
+    from pathlib import Path
+
+    flags = int(getattr(subprocess, "DETACHED_PROCESS", 0)) | int(
+        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    )
+    subprocess.Popen(
+        launch_uefn_cmd(exe, project),
+        cwd=str(Path(str(exe)).parent),
+        close_fds=True,
+        creationflags=flags,
+    )
 
 
 def launch_uefn_project() -> dict[str, Any]:
-    path = uefnproject_path()
-    _start_uefn(path)
-    return {"ok": True, "path": str(path)}
+    exe = uefn_editor_exe()
+    try:
+        path = uefnproject_path()
+    except RuntimeError:
+        path = None
+    _start_uefn(exe, path)
+    return {"ok": True, "exe": exe, "path": str(path) if path else ""}
 
 
 def restart_uefn_project() -> dict[str, Any]:
