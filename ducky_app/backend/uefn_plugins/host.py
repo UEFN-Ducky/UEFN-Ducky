@@ -83,6 +83,8 @@ _CONTRIBUTIONS: dict[str, Any] = {
     "appearance_skins": [],  # {id, label, plugin_id, entry, css?}
     "sounds": [],  # {id, label, file, plugin_id}
     "hooks": [],  # {id, label, plugin_id}
+    "automations_nodes": [],  # contributes.automations.nodes (+ plugin_id)
+    "automations_triggers": [],  # contributes.automations.triggers (+ plugin_id)
     # New-file Verse scaffolds for the template picker (content inlined at load).
     "verse_templates": [],  # {id, name, icon, description?, content, order?, file?, plugin_id}
     "tts_voices": [],  # {id, label, plugin_id}
@@ -229,6 +231,8 @@ def get_ui_contributions() -> dict[str, Any]:
             "appearance_skins": _dedupe_contrib_rows(_CONTRIBUTIONS["appearance_skins"]),
             "sounds": _dedupe_contrib_rows(_CONTRIBUTIONS["sounds"]),
             "hooks": _dedupe_contrib_rows(_CONTRIBUTIONS["hooks"]),
+            "automations_nodes": _dedupe_contrib_rows(_CONTRIBUTIONS["automations_nodes"]),
+            "automations_triggers": _dedupe_contrib_rows(_CONTRIBUTIONS["automations_triggers"]),
             "verse_templates": sorted(
                 _dedupe_contrib_rows(_CONTRIBUTIONS["verse_templates"]),
                 key=lambda t: (int(t.get("order") or 100), str(t.get("name") or "")),
@@ -1375,6 +1379,14 @@ def reload_plugins() -> None:
             _CONTRIBUTIONS["appearance_skins"] = []
             _CONTRIBUTIONS["sounds"] = []
             _CONTRIBUTIONS["hooks"] = []
+            _CONTRIBUTIONS["automations_nodes"] = []
+            _CONTRIBUTIONS["automations_triggers"] = []
+            try:
+                from backend.automations.plugin import clear_all as _clear_auto_handlers
+
+                _clear_auto_handlers()
+            except Exception:
+                pass
             _CONTRIBUTIONS["verse_templates"] = []
             _CONTRIBUTIONS["tts_voices"] = []
             _CONTRIBUTIONS["llm_providers"] = []
@@ -1401,8 +1413,26 @@ def reload_plugins() -> None:
         pass
 
 
+def _automation_contrib_row(row: Any, pid: str) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    nid = str(row.get("id") or row.get("type") or "").strip()
+    if not nid:
+        return None
+    entry = dict(row)
+    entry["id"] = nid
+    entry["plugin_id"] = pid
+    return entry
+
+
 def _strip_contributions_for(pid: str) -> None:
     """Remove contribution rows for one plugin (so a failed register can retry cleanly)."""
+    try:
+        from backend.automations.plugin import clear_for_plugin
+
+        clear_for_plugin(pid)
+    except Exception:
+        pass
     for key, val in _CONTRIBUTIONS.items():
         if key == "agent_tools":
             if isinstance(val, dict):
@@ -2199,6 +2229,16 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             {"id": hid, "label": label or hid, "plugin_id": pid}
         )
 
+    auto = contributes.get("automations") if isinstance(contributes.get("automations"), dict) else {}
+    for row in auto.get("triggers") or []:
+        parsed = _automation_contrib_row(row, pid)
+        if parsed:
+            _CONTRIBUTIONS["automations_triggers"].append(parsed)
+    for row in auto.get("nodes") or []:
+        parsed = _automation_contrib_row(row, pid)
+        if parsed:
+            _CONTRIBUTIONS["automations_nodes"].append(parsed)
+
     for voice in contributes.get("tts.voices") or contributes.get("tts_voices") or []:
         if not isinstance(voice, dict):
             continue
@@ -2595,6 +2635,28 @@ class _PluginApi:
         """Register Settings → Test for a secret field (``test_fn(api_key) -> {ok, detail}``)."""
         register_secret_tester(self.plugin_id, secret_key, test_fn)
         self.log(f"Secret tester registered: {secret_key}")
+
+    def register_automation_node(self, node_type: str, handler: Any = None) -> Any:
+        """Register a handler for a contributed automations node type.
+
+        ``api.register_automation_node("email.send", fn)`` or decorator form.
+        """
+        from backend.automations.plugin import register_node
+
+        def decorator(fn: Any) -> Any:
+            register_node(self.plugin_id, node_type, fn)
+            self.log(f"Automation node registered: {node_type}")
+            return fn
+
+        if handler is not None:
+            return decorator(handler)
+        return decorator
+
+    def emit_automation(self, trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fire enabled workflows whose starter matches ``trigger_id``."""
+        from backend.automations.runner import emit_automation as _emit
+
+        return _emit(trigger_id, payload or {})
 
     def register_panel_rpc(self, name: str, fn: Any) -> None:
         """Register a PanelApi / bridge method: ``plugin_call(plugin_id, name, params)``.

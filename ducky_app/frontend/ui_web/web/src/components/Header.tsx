@@ -18,6 +18,7 @@ import { getApi, isRemote } from "../hooks/usePanelApi";
 import { isNativeWindowChrome } from "../utils/nativeWindowChrome";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
+import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
 import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
@@ -144,6 +145,7 @@ function HeaderToolsMenu({
   onProblems,
   onTerminal,
   onLedger,
+  onAutomations,
 }: {
   canBack: boolean;
   canForward: boolean;
@@ -165,6 +167,7 @@ function HeaderToolsMenu({
   onProblems?: () => void;
   onTerminal?: () => void;
   onLedger?: () => void;
+  onAutomations?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -206,6 +209,7 @@ function HeaderToolsMenu({
           {showWorkflow && canPush ? item("Push Verse", onPush, compileBusy) : null}
           {item("Problems", onProblems)}
           {item("Terminal", onTerminal)}
+          {item("Automations", onAutomations)}
           {item("Ledger", onLedger)}
         </div>
       </DropdownPanel>
@@ -455,6 +459,11 @@ export function Header({
     label: "Ledger",
     route: "changes",
   });
+  const automationsTargetRef = useUiTarget("header.automations", {
+    kind: "button",
+    label: "Automations",
+    route: "automations",
+  });
 
   return (
     <header
@@ -552,6 +561,7 @@ export function Header({
                   : undefined
               }
               onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
+              onAutomations={() => requestOpenAutomationsTab()}
               onSearch={showQuickOpen ? () => openPalette("file") : undefined}
             />
             </>
@@ -586,6 +596,18 @@ export function Header({
       ) : null}
 
       <div className={`app-header-trailing${isSettingsOverlay ? " app-header-trailing--settings" : ""}`}>
+        {!isSettingsOverlay ? (
+          <button
+            ref={automationsTargetRef}
+            type="button"
+            className="icon-btn app-header-automations-btn"
+            title="Automations — scheduled and event workflows"
+            aria-label="Open automations"
+            onClick={() => requestOpenAutomationsTab()}
+          >
+            <Icons.Clock />
+          </button>
+        ) : null}
         {showWorkflow || terminalAction || problemsAction || showChanges ? (
           <span className="app-header-editor-actions">
             {showWorkflow && workflowAction ? (
@@ -634,7 +656,7 @@ export function Header({
                 aria-label="Open ledger"
                 onClick={() => requestOpenChangesTab()}
               >
-                <Icons.Clock />
+                <Icons.Diff />
               </button>
             ) : null}
           </span>

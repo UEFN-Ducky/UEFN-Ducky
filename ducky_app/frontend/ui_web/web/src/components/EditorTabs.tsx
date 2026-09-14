@@ -427,6 +427,8 @@ export function EditorTabs({
                 ) : tab.kind === "settings" ? (
                   <Icons.Settings />
                 ) : tab.kind === "changes" ? (
+                  <Icons.Diff />
+                ) : tab.kind === "automations" ? (
                   <Icons.Clock />
                 ) : tab.kind === "verse-translated" ? (
                   <Icons.Globe />

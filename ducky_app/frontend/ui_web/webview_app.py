@@ -234,6 +234,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 auto_apply_store_updates()
             except Exception:
                 pass
+            try:
+                from backend.automations.scheduler import start_scheduler
+
+                start_scheduler()
+            except Exception:
+                pass
 
         def _presence_bg() -> None:
             try:

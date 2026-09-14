@@ -361,6 +361,8 @@ class PanelApiStoreMixin:
             "ui_panels": [],
             "sounds": [],
             "hooks": [],
+            "automations_nodes": [],
+            "automations_triggers": [],
             "agent_tools": {},
             "enabled_ids": [],
         }

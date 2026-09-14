@@ -62,6 +62,15 @@ describe("parseFocusId / focusIdToEditorTab", () => {
     });
   });
 
+  it("parses the Automations singleton tab", () => {
+    expect(parseFocusId("automations:main")).toEqual({ kind: "automations" });
+    expect(focusIdToEditorTab("automations:main", "Automations")).toEqual({
+      id: "automations:main",
+      kind: "automations",
+      name: "Automations",
+    });
+  });
+
   it("parses ducky-profile pop-out tabs", () => {
     expect(parseFocusId("ducky-profile:audio")).toEqual({
       kind: "ducky-profile",

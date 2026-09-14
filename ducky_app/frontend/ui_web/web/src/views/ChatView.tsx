@@ -46,12 +46,14 @@ import {
   planTabId,
   pluginUiTabId,
   settingsTabId,
+  automationsTabId,
   changesTabId,
   usageTabId,
 } from "../types/panel";
 import { registerShowChatComposer } from "../navigation/openChatComposer";
 import { registerOpenSettingsEditorTab } from "../navigation/openSettingsTab";
 import { registerOpenChangesTab } from "../navigation/openChangesTab";
+import { registerOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { emitAppHook } from "../sfx/appHooks";
 import { registerOpenDiscordTab, setDiscordTabOpen } from "../navigation/openDiscordTab";
 import { registerOpenPlanTab, type OpenPlanRequest } from "../navigation/openPlanTab";
@@ -303,6 +305,17 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   useEffect(() => {
     return registerOpenChangesTab(openChangesTab);
   }, [openChangesTab]);
+
+  const openAutomationsTab = useCallback(() => {
+    const id = automationsTabId();
+    void openOrFocusTab(id, () =>
+      openTab({ id, kind: "automations", name: "Automations" }, { activate: true }),
+    );
+  }, [openTab]);
+
+  useEffect(() => {
+    return registerOpenAutomationsTab(openAutomationsTab);
+  }, [openAutomationsTab]);
 
   const openDuckyProfileTab = useCallback(
     (req: { profileId: string; name: string; duckyStyle?: string }) => {

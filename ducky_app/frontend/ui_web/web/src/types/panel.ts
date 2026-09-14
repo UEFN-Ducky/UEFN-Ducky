@@ -160,7 +160,8 @@ export type EditorTabKind =
   | "plugin"
   | "verse-translated"
   | "ducky-profile"
-  | "changes";
+  | "changes"
+  | "automations";
 
 export interface EditorTab {
   id: string;
@@ -219,6 +220,88 @@ export function settingsTabId(): string {
 /** Singleton Changes editor tab: one project-wide ledger, never one per chat. */
 export function changesTabId(): string {
   return "changes:main";
+}
+
+/** Singleton Automations editor tab. */
+export function automationsTabId(): string {
+  return "automations:main";
+}
+
+export interface AutomationGraphNodeDto {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  config: Record<string, unknown>;
+  label?: string;
+  description?: string;
+}
+
+export interface AutomationGraphEdgeDto {
+  source: string;
+  target: string;
+  kind: string;
+}
+
+export interface AutomationGraphDto {
+  nodes: AutomationGraphNodeDto[];
+  edges: AutomationGraphEdgeDto[];
+}
+
+export interface AutomationRunStepDto {
+  ok?: boolean;
+  id?: string;
+  type?: string;
+  label?: string;
+  error?: string;
+  result?: unknown;
+  branch?: boolean;
+}
+
+export interface AutomationRunDto {
+  ok?: boolean;
+  error?: string;
+  id?: string;
+  steps?: AutomationRunStepDto[];
+  conv_id?: string;
+  started?: number;
+  ended?: number;
+  trigger_id?: string;
+}
+
+export interface AutomationDto {
+  id: string;
+  name: string;
+  enabled: boolean;
+  graph: AutomationGraphDto;
+  runs?: AutomationRunDto[];
+  updated?: number;
+  last_run?: number;
+}
+
+export interface AutomationSummaryDto {
+  id: string;
+  name: string;
+  enabled: boolean;
+  updated?: number;
+  last_run?: number;
+  node_count?: number;
+}
+
+export interface AutomationFieldDto {
+  id: string;
+  label?: string;
+  type?: string;
+}
+
+export interface AutomationNodeDto {
+  type: string;
+  label: string;
+  group: string;
+  role?: string;
+  description?: string;
+  plugin_id?: string;
+  config_fields?: AutomationFieldDto[];
 }
 
 /** Discord editor tab id — one tab per bot (`discord:<botId>`). Legacy `discord:main` = default. */
@@ -1143,6 +1226,20 @@ export interface UefnPluginContributionsDto {
   }>;
   sounds?: Array<{ id: string; label?: string; file: string; plugin_id: string }>;
   hooks?: Array<{ id: string; label?: string; plugin_id: string }>;
+  automations_nodes?: Array<{
+    id: string;
+    label?: string;
+    group?: string;
+    description?: string;
+    plugin_id: string;
+  }>;
+  automations_triggers?: Array<{
+    id: string;
+    label?: string;
+    group?: string;
+    description?: string;
+    plugin_id: string;
+  }>;
   /** New-file Verse scaffolds from `contributes.verse.templates`. */
   verse_templates?: Array<{
     id: string;
@@ -2049,6 +2146,25 @@ export interface PanelApi {
   duckyos_store_checkout?(slug: string): Promise<{ ok?: boolean; error?: string; code?: string; url?: string; slug?: string }>;
   duckyos_store_grant?(sessionId: string, slug?: string): Promise<{ ok?: boolean; error?: string; code?: string; slug?: string; alreadyOwned?: boolean }>;
   list_uefn_plugins?(): Promise<{ ok?: boolean; error?: string; plugins?: UefnPluginDto[] }>;
+  list_automation_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
+  list_automations?(): Promise<{ ok?: boolean; automations?: AutomationSummaryDto[] }>;
+  get_automation?(workflow_id: string): Promise<{ ok?: boolean; error?: string; automation?: AutomationDto }>;
+  save_automation?(doc: Partial<AutomationDto> & { graph?: AutomationGraphDto }): Promise<{
+    ok?: boolean;
+    error?: string;
+    automation?: AutomationDto;
+  }>;
+  delete_automation?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
+  run_automation?(
+    workflow_id: string,
+    trigger_id?: string,
+    payload?: Record<string, unknown>,
+    starter_id?: string,
+  ): Promise<AutomationRunDto>;
+  emit_automation?(
+    trigger_id: string,
+    payload?: Record<string, unknown>,
+  ): Promise<{ ok?: boolean; error?: string; trigger_id?: string; runs?: AutomationRunDto[] }>;
   get_uefn_plugin_contributions?(): Promise<UefnPluginContributionsDto>;
   set_uefn_plugin_enabled?(
     plugin_id: string,

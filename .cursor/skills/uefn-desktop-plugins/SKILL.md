@@ -128,6 +128,7 @@ standalone AppData skill pack or owned by another plugin.
 | `appearance.skin` | Full chrome swap into host portals (frame/header/left/right) |
 | `sounds` | Audio files listed in Appearance → Sounds (`plugin:<id>:<soundId>`) |
 | `hooks` | Extra hookable events for Appearance → Sounds; emit via `ducky:hook` |
+| `automations.nodes` / `automations.triggers` | Palette tiles in the Automations editor. `register()`: `api.register_automation_node(type, handler)` and `api.emit_automation(trigger_id, payload)`. Disabled plugin → tiles and handlers gone. Leave `hooks` alone (sounds). |
 | `verse.templates` | New-file Verse scaffolds (`file`/`content` or multi-file `folder`+`files[]`) |
 | `agent.tools` | Optional category / intent for MCP tools registered via `api.tool()` (tool names auto-tracked) |
 | `llm.providers` | Rows under Settings → LLMs → Providers; click opens a detail slide (key, coding agent, plugin options) |

@@ -172,6 +172,36 @@ window.dispatchEvent(new CustomEvent("ducky:hook", {
 
 Built-in shell hooks (always available): `tab.changed`, `settings.opened`, `agent.selected`, `agent.done`, `agent.error`, `verse.errors`. Listen the same way if a plugin needs them.
 
+### contributes.automations
+
+Host Automations editor (header Clock). **Not** `contributes.hooks` (Appearance → Sounds).
+
+```json
+"automations": {
+  "triggers": [
+    { "id": "email.received", "label": "Email received", "group": "Triggers",
+      "config_fields": [{ "id": "mailbox", "label": "Mailbox", "type": "string" }] }
+  ],
+  "nodes": [
+    { "id": "email.send", "label": "Send email", "group": "Email",
+      "config_fields": [{ "id": "to", "label": "To", "type": "string" }] }
+  ]
+}
+```
+
+```python
+def register(api):
+    @api.register_automation_node("email.send")
+    def send(ctx):
+        # ctx = {config, payload, node}
+        return {"ok": True}
+
+    # poll or webhook, then:
+    api.emit_automation("email.received", {"subject": "…"})
+```
+
+Timers and `emit_automation` only run while the panel process is running. Gmail/email is a later plugin — the hook is the product.
+
 ### contributes.verse.templates
 
 Rows in the sidebar **New file** Verse template picker while the plugin is enabled. Content is inlined at load. UI id is `plugin:<pluginId>:<id>`. Multi-file packs create a project folder with N `.verse` files.

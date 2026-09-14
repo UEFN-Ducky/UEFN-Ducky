@@ -37,6 +37,7 @@ _ROUTES = (
     "settings.log_errors",
     "chat",
     "changes",
+    "automations",
     "skills_studio",
     "terminals",
     "plans",
@@ -159,8 +160,8 @@ def ducky_ui_navigate(route: str, item_id: str = "", pretty: bool = False) -> st
     route: one of settings, settings.general, settings.llms, settings.mcp_plugins,
     settings.skills, settings.appearance, settings.duckies, settings.plans,
     settings.memory, settings.languages, settings.log_errors, chat, changes,
-    skills_studio, terminals, plans, project_picker. `changes` opens the project-wide
-    ledger of every file and editor change, who made it, and what was blocked.
+    automations, skills_studio, terminals, plans, project_picker. `changes` opens the
+    project-wide ledger. `automations` opens the workflow editor.
     `item_id` targets a row (e.g. a chat/conv id).
     Returns {ok, route}. Needs an open panel; UEFN may be offline.
     Example: ducky_ui_navigate("settings.mcp_plugins").

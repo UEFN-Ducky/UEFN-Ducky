@@ -719,6 +719,7 @@ from frontend.ui_web.panel_api_store import PanelApiStoreMixin  # noqa: E402
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin  # noqa: E402
 from frontend.ui_web.panel_api_project import PanelApiProjectMixin  # noqa: E402
 from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin  # noqa: E402
+from frontend.ui_web.panel_api_automations import PanelApiAutomationsMixin  # noqa: E402
 
 
 class PanelApi(
@@ -727,6 +728,7 @@ class PanelApi(
     PanelApiChatsMixin,
     PanelApiProjectMixin,
     PanelApiSettingsMixin,
+    PanelApiAutomationsMixin,
 ):
     def __init__(self) -> None:
         self._window: Any = None

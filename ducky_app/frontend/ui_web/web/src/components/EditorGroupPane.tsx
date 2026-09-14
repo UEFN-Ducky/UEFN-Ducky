@@ -25,6 +25,9 @@ import {
 } from "../utils/sidebarDragOut";
 
 const ChangesView = lazy(() => import("./changes/ChangesView").then((m) => ({ default: m.ChangesView })));
+const AutomationsView = lazy(() =>
+  import("../automations/AutomationsView").then((m) => ({ default: m.AutomationsView })),
+);
 
 interface EditorGroupPaneProps {
   group: EditorGroup;
@@ -300,6 +303,13 @@ export const EditorGroupPane = memo(function EditorGroupPane({
       return (
         <Suspense fallback={<p className="changes-empty">Loading ledger…</p>}>
           <ChangesView allChats={allChats} onOpenFile={onOpenFile} onOpenChat={onOpenChat} />
+        </Suspense>
+      );
+    }
+    if (activeTab.kind === "automations") {
+      return (
+        <Suspense fallback={<p className="aw-empty-hint">Loading automations…</p>}>
+          <AutomationsView />
         </Suspense>
       );
     }
