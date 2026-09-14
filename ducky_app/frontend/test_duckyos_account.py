@@ -204,6 +204,8 @@ def test_device_login_polls_until_token() -> None:
         patch.object(acc, "_save_blob"),
         patch.object(acc, "start_presence_heartbeat"),
         patch.object(acc, "start_rpc_waiter"),
+        patch.object(acc, "fetch_agent_caps"),
+        patch.object(acc, "publish_agent_catalog"),
         patch.object(acc, "_persist_base_url"),
         patch.object(
             acc,
@@ -212,6 +214,7 @@ def test_device_login_polls_until_token() -> None:
         ),
         patch.object(acc, "resolve_base_url", return_value="https://uefnducky.org"),
         patch("time.sleep"),
+        patch("frontend.remote_tunnel.start_remote_tunnel"),
     ):
         out = acc.start_browser_login("https://uefnducky.org", timeout_secs=30)
     assert out["ok"] is True

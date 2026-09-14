@@ -480,7 +480,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
                 timeout=20.0,
             )
             if str(payload.get("status") or "") == "pending":
-                __import__("time").sleep(3.0)
+                __import__("time").sleep(1.0)
                 continue
             token = str(payload.get("token") or "")
             key_id = str(payload.get("keyId") or payload.get("key_id") or "")
@@ -503,15 +503,25 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
         }
         _save_blob(blob)
         start_presence_heartbeat()
-        fetch_agent_caps(blob)
-        publish_agent_catalog()
         start_rpc_waiter()
-        try:
-            from frontend.remote_tunnel import start_remote_tunnel
 
-            start_remote_tunnel()
-        except Exception:
-            pass
+        def _after_login() -> None:
+            try:
+                fetch_agent_caps(_load_blob())
+                publish_agent_catalog()
+            except Exception:
+                pass
+            try:
+                from frontend.remote_tunnel import start_remote_tunnel
+
+                start_remote_tunnel()
+            except Exception:
+                pass
+
+        # ponytail: caps + cloudflared can take 10s+; Account is already signed in.
+        __import__("threading").Thread(
+            target=_after_login, daemon=True, name="ducky-login-followup"
+        ).start()
         status = get_status()
         status["ok"] = True
         return status
