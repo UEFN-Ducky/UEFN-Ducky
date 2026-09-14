@@ -49,7 +49,6 @@ import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
 import { PluginSettingsEmbed } from "../plugin-ui/PluginSettingsEmbed";
 import { PANEL_ACTION_PREFIX } from "../plugin-ui/constants";
 import { resolvePluginHeaderIcon } from "../hooks/pluginHeaderActions";
-import { CONNECTION_ICONS } from "../connectionIcons";
 import { useSettingsSidebarWidth } from "./settings/useSettingsSidebarWidth";
 import { settingsTabTargetId, targetRef, useUiTarget } from "../ui-targets/registry";
 
@@ -74,15 +73,15 @@ export type LlmsSectionTab = "llms" | "skills" | "mcps" | "memory";
 /** Header sections under Settings → General. */
 export type GeneralSectionTab = "general" | "app_data" | "log_errors";
 
-/** Color asset or emoji — line SVGs read as monochrome in the Settings rail. */
-const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], string> = {
-  Store: "🛒",
-  General: "⚙️",
-  Duckies: CONNECTION_ICONS.online,
-  Plans: "📋",
-  LLMs: "🧠",
-  Appearance: "🎨",
-  Audio: "🔊",
+/** Monochrome line icons for the Settings rail. */
+const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], () => JSX.Element> = {
+  Store: Icons.Puzzle,
+  General: Icons.Gear,
+  Duckies: Icons.Duck,
+  Plans: Icons.Plan,
+  LLMs: Icons.Brain,
+  Appearance: Icons.Sparkles,
+  Audio: Icons.Speaker,
 };
 
 /** Sidebar label — Store tab is the Plugins page (catalog + installed). */
@@ -673,7 +672,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
                 <span>Support</span>
               </button>
               {visibleCoreTabs.map((tab) => {
-                const tabEmoji = CORE_TAB_ICONS[tab];
+                const TabIcon = CORE_TAB_ICONS[tab];
                 const label = coreTabLabel(tab);
                 const showUpdateDot = tab === "Store" && hasStoreUpdates;
                 const showJobBadge = tab === "Store" && Boolean(storeJobBadge);
@@ -692,7 +691,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
                         : undefined
                     }
                   >
-                    {resolvePluginHeaderIcon(tabEmoji)}
+                    {TabIcon ? <TabIcon /> : null}
                     <span>{label}</span>
                     {showJobBadge || showUpdateDot ? (
                       <span className="store-tab-badges" aria-hidden={false}>
@@ -732,7 +731,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
                         : undefined
                     }
                   >
-                    {resolvePluginHeaderIcon("🧩")}
+                    <Icons.Puzzle />
                     <span>Installed</span>
                     <span
                       className="settings-view-sidebar-plugins-count"

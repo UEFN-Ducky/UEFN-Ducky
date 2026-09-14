@@ -38,6 +38,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useSidebarPanelLayout } from "../hooks/useSidebarPanelLayout";
 import { useSidebarPanelMode } from "../hooks/useSidebarPanelMode";
 import { useSidebarWidth } from "../hooks/useSidebarWidth";
+import { OPEN_SIDEBAR_PANEL_EVENT } from "../navigation/openSidebarPanel";
 import { getApi } from "../hooks/usePanelApi";
 import { SidebarStackedPanels } from "./sidebar/SidebarStackedPanels";
 import { SidebarPanelTabs } from "./sidebar/SidebarPanelTabs";
@@ -379,6 +380,25 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       el?.scrollIntoView({ block: "nearest" });
     });
   }, [syncSidebarPanel, panelMode, embedded, dockSide, dockSetFocusedPanel, legacySetFocusedPanel]);
+
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const panel = (event as CustomEvent<{ panel?: SidebarPanelTab }>).detail?.panel;
+      if (panel !== "chats" && panel !== "files") return;
+      if (panelMode === "tabs") {
+        setPanelTab(panel);
+        return;
+      }
+      if (embedded && dockSetFocusedPanel) dockSetFocusedPanel(dockSide, panel);
+      else legacySetFocusedPanel(panel);
+      requestAnimationFrame(() => {
+        const el = stackRef.current?.querySelector(`[data-panel-id="${panel}"]`);
+        el?.scrollIntoView({ block: "nearest" });
+      });
+    };
+    window.addEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+  }, [panelMode, embedded, dockSide, dockSetFocusedPanel, legacySetFocusedPanel]);
 
   useEffect(() => {
     if (activeChats.length === 0) return;

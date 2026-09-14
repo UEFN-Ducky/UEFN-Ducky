@@ -294,8 +294,15 @@ function FocusViewContent({ focusId }: FocusViewProps) {
 
   const quickOpenHandlers = useMemo<QuickOpenHandlers | null>(() => {
     if (!hasProject) return null;
-    return { openTabs, folders, rootChats, onOpenFile: handleOpenFile, onOpenChat: handleOpenChat };
-  }, [hasProject, openTabs, folders, rootChats, handleOpenFile, handleOpenChat]);
+    return {
+      openTabs,
+      folders,
+      rootChats,
+      projectName: projectPath.replace(/\\/g, "/").split("/").filter(Boolean).pop(),
+      onOpenFile: handleOpenFile,
+      onOpenChat: handleOpenChat,
+    };
+  }, [hasProject, openTabs, folders, rootChats, handleOpenFile, handleOpenChat, projectPath]);
 
   useRegisterQuickOpenHandlers(quickOpenHandlers);
 

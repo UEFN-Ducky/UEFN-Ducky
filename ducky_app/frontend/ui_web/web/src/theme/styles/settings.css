@@ -187,7 +187,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 8px 12px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -203,6 +204,8 @@
 .settings-view-sidebar-tab img.plugin-contrib-icon,
 .settings-view-sidebar-tab .plugin-contrib-emoji {
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
 }
 
 .settings-view-sidebar-tab img.plugin-contrib-icon {
@@ -210,6 +213,12 @@
   height: 16px;
   border-radius: 3px;
   object-fit: cover;
+  filter: grayscale(1);
+}
+
+.settings-view-sidebar-tab.is-active img.plugin-contrib-icon,
+.settings-view-sidebar-tab:hover img.plugin-contrib-icon {
+  filter: grayscale(0.25);
 }
 
 .settings-view-sidebar-tab .plugin-contrib-emoji {

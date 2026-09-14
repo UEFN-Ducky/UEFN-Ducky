@@ -1203,7 +1203,14 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     useMemo<QuickOpenHandlers | null>(
       () =>
         projectSlug
-          ? { openTabs, folders, rootChats, onOpenFile: handleSidebarFileSelect, onOpenChat: handleSidebarChatSelect }
+          ? {
+              openTabs,
+              folders,
+              rootChats,
+              projectName: projectSlug,
+              onOpenFile: handleSidebarFileSelect,
+              onOpenChat: handleSidebarChatSelect,
+            }
           : null,
       [projectSlug, openTabs, folders, rootChats, handleSidebarFileSelect, handleSidebarChatSelect],
     ),

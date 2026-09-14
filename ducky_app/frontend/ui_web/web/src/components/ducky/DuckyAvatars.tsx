@@ -4,7 +4,7 @@ import { useDuckyCatalogOptional } from "./DuckyCatalogContext";
 
 export const DUCKY_AVATAR_SIZES = {
   sidebar: 36,
-  tab: 18,
+  tab: 16,
   compact: 18,
   history: 18,
   emptyPane: 200,

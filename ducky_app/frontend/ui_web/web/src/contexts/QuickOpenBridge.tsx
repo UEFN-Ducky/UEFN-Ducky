@@ -42,6 +42,8 @@ export interface QuickOpenHandlers {
 
   rootChats: FolderItem["chats"];
 
+  projectName?: string;
+
   onOpenFile: (path: string, name: string) => void;
 
   onOpenChat: (chat: ChatTab) => void;

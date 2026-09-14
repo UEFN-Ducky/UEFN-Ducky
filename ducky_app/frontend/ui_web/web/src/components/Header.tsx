@@ -534,6 +534,8 @@ export function Header({
       {!isSettingsOverlay && !isFocus ? (
         <div className="app-header-center drag-region app-drag-surface">
           {compactHeader ? (
+            <>
+            {showQuickOpen ? <QuickOpenBar variant="icon" /> : null}
             <HeaderToolsMenu
               showNav={showNav}
               canBack={!!nav?.canBack}
@@ -564,6 +566,7 @@ export function Header({
               onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
               onSearch={showQuickOpen ? () => openPalette("file") : undefined}
             />
+            </>
           ) : (
             <>
               {navButtons}
@@ -577,7 +580,7 @@ export function Header({
               </button>
             </>
           )}
-          {showQuickOpen && !compactHeader ? <QuickOpenBar /> : null}
+          {showQuickOpen && !compactHeader ? <QuickOpenBar variant="field" /> : null}
           {compactHeader ? null : (
             <button
               type="button"
@@ -592,7 +595,7 @@ export function Header({
         </div>
       ) : showQuickOpen ? (
         <div className="app-header-center drag-region app-drag-surface">
-          <QuickOpenBar />
+          <QuickOpenBar variant="field" />
         </div>
       ) : null}
 
