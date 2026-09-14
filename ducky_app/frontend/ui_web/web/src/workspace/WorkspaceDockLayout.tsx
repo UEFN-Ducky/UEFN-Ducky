@@ -440,6 +440,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
             onDockDragChange={setIsDockPanelDragging}
             onClose={() => setLeftOpen(false)}
           >
+            {leftMixed?.children}
           </DockRail>
         ) : null}
 
@@ -472,6 +473,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
             onDockDragChange={setIsDockPanelDragging}
             onClose={() => setRightOpen(false)}
           >
+            {rightMixed?.children}
           </DockRail>
         ) : null}
         <div id="ducky-skin-right" className="ducky-skin-slot ducky-skin-slot--right" aria-hidden="true" />
