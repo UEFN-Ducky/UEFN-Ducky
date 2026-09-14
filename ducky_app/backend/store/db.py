@@ -319,8 +319,10 @@ def migrate(conn: sqlite3.Connection) -> int:
     if current == head:
         return current
     if current > 0:
+        # On the connection we already hold: snapshot() would re-enter connect()
+        # and deadlock on _guard (1.2.90 hung every upgraded panel at boot).
         try:
-            snapshot(Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent, label="pre-migrate")
+            _vacuum_into(conn, Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent, label="pre-migrate")
         except Exception:
             pass
     for number, path in migration_files():
@@ -370,6 +372,10 @@ def integrity_check(conn: sqlite3.Connection) -> str:
 def snapshot(root: Path | None = None, *, label: str = "") -> Path:
     """``VACUUM INTO`` a consistent copy under ``snapshots/``; keeps the newest N."""
     root = root or app_root()
+    return _vacuum_into(connect(root), root, label=label)
+
+
+def _vacuum_into(conn: sqlite3.Connection, root: Path, *, label: str = "") -> Path:
     target_dir = snapshot_dir(root)
     target_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -379,7 +385,6 @@ def snapshot(root: Path | None = None, *, label: str = "") -> Path:
     while target.exists():
         n += 1
         target = target_dir / f"ducky-{stamp}{suffix}-{n}.db"
-    conn = connect(root)
     conn.execute("VACUUM INTO ?", (str(target),))
     _prune_snapshots(target_dir)
     return target

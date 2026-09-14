@@ -107,6 +107,23 @@ def test_migration_files_are_contiguous_and_apply_from_zero(tmp_path: Path) -> N
     raw.close()
 
 
+def test_upgrade_from_previous_schema_does_not_deadlock(tmp_path: Path) -> None:
+    """1.2.90: migrate() → snapshot() → connect() re-entered _guard and hung every
+    upgraded panel at boot. A schema-(head-1) database must open on a worker
+    thread within seconds and leave a pre-migrate snapshot behind."""
+    conn = db.connect()
+    conn.execute("DROP TABLE automations")  # 0007 is the migration 1.2.90 added
+    conn.execute(f"PRAGMA user_version={db.head_version() - 1}")
+    db.reset_for_tests()
+
+    done: list[int] = []
+    t = threading.Thread(target=lambda: done.append(db.user_version(db.connect())), daemon=True)
+    t.start()
+    t.join(timeout=20)
+    assert done == [db.head_version()], "connect() deadlocked while migrating"
+    assert any("pre-migrate" in p.name for p in db.snapshot_dir().glob("ducky-*.db"))
+
+
 def test_split_statements_keeps_triggers_whole() -> None:
     sql = (
         "-- comment\n"
