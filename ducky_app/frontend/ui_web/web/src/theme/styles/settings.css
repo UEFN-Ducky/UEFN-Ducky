@@ -208,17 +208,15 @@
   height: 16px;
 }
 
+.settings-view-sidebar-tab svg {
+  color: var(--chrome-tone, var(--muted));
+}
+
 .settings-view-sidebar-tab img.plugin-contrib-icon {
   width: 16px;
   height: 16px;
   border-radius: 3px;
   object-fit: cover;
-  filter: grayscale(1);
-}
-
-.settings-view-sidebar-tab.is-active img.plugin-contrib-icon,
-.settings-view-sidebar-tab:hover img.plugin-contrib-icon {
-  filter: grayscale(0.25);
 }
 
 .settings-view-sidebar-tab .plugin-contrib-emoji {

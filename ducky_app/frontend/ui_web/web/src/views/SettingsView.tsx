@@ -51,6 +51,7 @@ import { PANEL_ACTION_PREFIX } from "../plugin-ui/constants";
 import { resolvePluginHeaderIcon } from "../hooks/pluginHeaderActions";
 import { useSettingsSidebarWidth } from "./settings/useSettingsSidebarWidth";
 import { settingsTabTargetId, targetRef, useUiTarget } from "../ui-targets/registry";
+import { settingsTabTone } from "../components/quick-open/quickOpenRecents";
 
 /** Re-enable when URC / urc.exe wiring is ready. */
 
@@ -682,6 +683,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
                     ref={targetRef(settingsTabTargetId(tab), { kind: "tab", label, route: "settings" })}
                     type="button"
                     className={`settings-view-sidebar-tab${activeTab === tab ? " is-active" : ""}${showUpdateDot ? " has-store-update" : ""}${showJobBadge ? " has-store-jobs" : ""}`}
+                    data-chrome-tone={settingsTabTone(tab)}
                     onClick={() => void requestTab(tab)}
                     title={
                       sidebarIconsOnly
@@ -721,6 +723,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
                   <button
                     type="button"
                     className={`settings-view-sidebar-tab settings-view-sidebar-plugins-toggle${activeIsPluginTab || storeIsPluginsPage ? " is-active-group" : ""}${storeIsPluginsPage && !storePluginFocus ? " is-active" : ""}`}
+                    data-chrome-tone="purple"
                     onClick={onPluginsHeaderClick}
                     aria-expanded={pluginsNavOpen || !pluginContrib.ready}
                     title={

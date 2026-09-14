@@ -113,7 +113,7 @@ function listProps(rows: ChatRow[]) {
   };
 }
 
-/** jsdom reports clientHeight 0, so the list mounts every chunk (see chatListWindowRange). */
+/** jsdom reports clientHeight 0; applyWindow stays on the tail instead of every chunk. */
 
 function snapshotCounts(): Map<string, number> {
   return new Map(probes.counts);
@@ -148,15 +148,17 @@ describe("VirtualChatMessageList streaming isolation", () => {
     const heights = Array(25).fill(1000);
     expect(chatListWindowRange(10500, 800, heights, 2)).toEqual({ start: 8, end: 13 });
     expect(chatListWindowRange(24000, 800, heights, 2)).toEqual({ start: 22, end: 24 });
+    // Helper still covers the whole list when height is unknown; applyWindow
+    // must not use this path on first paint (see tail-only jsdom test below).
     expect(chatListWindowRange(0, 0, heights, 2)).toEqual({ start: 0, end: 24 });
   });
 
-  it("mounts every chunk in jsdom (unknown viewport)", () => {
+  it("mounts only the tail in jsdom (unknown viewport)", () => {
     const history = buildHistory(100);
     render(<VirtualChatMessageList {...listProps(history)} />);
     const scroller = document.querySelector<HTMLElement>(".virtual-chat-message-list-scroller")!;
-    expect(scroller.dataset.chatWindow).toBe("0-12");
-    expect(document.querySelectorAll(".virtual-chat-chunk").length).toBe(13);
+    expect(scroller.dataset.chatWindow).toBe("8-12");
+    expect(document.querySelectorAll(".virtual-chat-chunk").length).toBe(5);
   });
 
   it("re-renders only the live turn while an answer streams into a 300-turn chat", () => {
@@ -164,10 +166,10 @@ describe("VirtualChatMessageList streaming isolation", () => {
     const stableProps = listProps(history);
     const view = render(<VirtualChatMessageList {...stableProps} />);
     const afterMount = snapshotCounts();
-    // Every history row rendered exactly once on mount: user + activity + assistant per turn.
-    expect(afterMount.get("user:q0")).toBe(1);
+    // First paint with no viewport keeps the tail (5 chunks), not all 300 turns.
+    expect(afterMount.get("user:q0")).toBeUndefined();
     expect(afterMount.get("bubble:a299")).toBe(1);
-    expect(afterMount.size).toBe(300 * 3);
+    expect(afterMount.size).toBe(36 * 3);
 
     const frames = 60;
     let text = "";

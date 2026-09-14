@@ -23,37 +23,6 @@
   height: 14px;
   opacity: 0.85;
 }
-.quick-open-bar--field {
-  flex: 1 1 220px;
-  width: auto;
-  max-width: 420px;
-  min-width: 160px;
-  height: 28px;
-  padding: 0 10px;
-  gap: 8px;
-  justify-content: flex-start;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 55%, var(--panel-header));
-  color: var(--muted);
-}
-.quick-open-bar--field:hover {
-  border-color: color-mix(in srgb, var(--fg) 18%, var(--border));
-  color: var(--fg-dim, var(--fg));
-}
-.quick-open-bar-placeholder {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-}
-.quick-open-bar-hint {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  opacity: 0.65;
-}
 .quick-open-overlay {
   position: fixed;
   inset: 0;
@@ -257,6 +226,9 @@
 .quick-open-service-tile:hover,
 .quick-open-service-tile.is-selected {
   background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.quick-open-service-tile:hover .quick-open-service-tile-label,
+.quick-open-service-tile.is-selected .quick-open-service-tile-label {
   color: var(--fg);
 }
 .quick-open-service-tile-icon {
@@ -265,7 +237,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: inherit;
+  color: var(--chrome-tone, var(--blue));
 }
 .quick-open-service-tile-icon svg {
   width: 22px;
@@ -308,9 +280,6 @@
   }
   .quick-open-services-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .quick-open-bar--field {
-    max-width: none;
   }
 }
 

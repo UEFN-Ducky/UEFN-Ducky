@@ -124,8 +124,8 @@ export function chatListWindowRange(
 ): { start: number; end: number } {
   const n = heights.length;
   if (n === 0) return { start: 0, end: -1 };
-  // jsdom / first layout: no viewport yet — keep everything so tests and
-  // the first paint before measure do not flash an empty pane.
+  // Unknown viewport: the *range helper* covers the whole list. applyWindow
+  // must not use this on first paint — clientHeight 0 would mount every chunk.
   if (clientHeight <= 0) return { start: 0, end: n - 1 };
 
   const offsets = new Array<number>(n + 1);
@@ -630,11 +630,17 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         return;
       }
       const el = scrollerElRef.current;
-      let next = el
-        ? chatListWindowRange(el.scrollTop, el.clientHeight, heights, OVERSCAN_CHUNKS)
-        : tailWindow(n);
+      // jsdom and WebView2's first flex layout report clientHeight 0. Treating
+      // that as "show everything" mounts every markdown/tool chunk and freezes
+      // open-chat. Stay on the tail until a real viewport exists.
+      if (!el || el.clientHeight <= 0) {
+        const next = tailWindow(n);
+        setWin((prev) => (sameWindow(prev, next) ? prev : next));
+        return;
+      }
+      let next = chatListWindowRange(el.scrollTop, el.clientHeight, heights, OVERSCAN_CHUNKS);
       if (followingRef.current) {
-        const distance = el ? el.scrollHeight - el.scrollTop - el.clientHeight : Infinity;
+        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
         next = distance > AT_BOTTOM_THRESHOLD_PX ? tailWindow(n) : { start: next.start, end: n - 1 };
       }
       setWin((prev) => (sameWindow(prev, next) ? prev : next));

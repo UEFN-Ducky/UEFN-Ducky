@@ -19,6 +19,8 @@ export function SupportTab() {
         <p className="support-tab-lead">Thank you for using UEFN Ducky — it genuinely means a lot.</p>
       </div>
 
+      <FeedbackCard />
+
       <div className="support-tab-card">
         <p className="support-tab-body">
           UEFN Ducky is <strong>primarily maintained by one developer</strong> — about 99% of the
@@ -49,8 +51,6 @@ export function SupportTab() {
           <span>Support on Patreon</span>
         </button>
       </div>
-
-      <FeedbackCard />
     </div>
   );
 }

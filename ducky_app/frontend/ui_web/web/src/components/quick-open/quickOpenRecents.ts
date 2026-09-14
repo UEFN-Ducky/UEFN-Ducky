@@ -31,6 +31,29 @@ export type IdleService = {
   chatId?: string;
 };
 
+/** Theme token names only — never hex. */
+export type ChromeTone = "green" | "amber" | "blue" | "purple" | "yellow" | "accent";
+
+const DESTINATION_TONES: Record<string, ChromeTone> = {
+  "settings:Store": "purple",
+  "settings:Duckies": "amber",
+  "settings:Plans": "blue",
+  "settings:LLMs": "green",
+  "settings:Appearance": "yellow",
+  "settings:Audio": "blue",
+  "settings:General": "accent",
+  files: "amber",
+};
+
+export function destinationTone(id: string): ChromeTone {
+  if (id.startsWith("chat:")) return "amber";
+  return DESTINATION_TONES[id] ?? "blue";
+}
+
+export function settingsTabTone(tab: string): ChromeTone {
+  return destinationTone(tab === "files" ? "files" : `settings:${tab}`);
+}
+
 const memory = new Map<string, string>();
 const MEMORY_STORE: RecentsStore = {
   getItem: (key) => memory.get(key) ?? null,

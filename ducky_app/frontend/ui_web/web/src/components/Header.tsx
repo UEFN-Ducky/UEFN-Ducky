@@ -535,7 +535,7 @@ export function Header({
         <div className="app-header-center drag-region app-drag-surface">
           {compactHeader ? (
             <>
-            {showQuickOpen ? <QuickOpenBar variant="icon" /> : null}
+            {showQuickOpen ? <QuickOpenBar /> : null}
             <HeaderToolsMenu
               showNav={showNav}
               canBack={!!nav?.canBack}
@@ -570,6 +570,7 @@ export function Header({
           ) : (
             <>
               {navButtons}
+              {showQuickOpen ? <QuickOpenBar /> : null}
               <button
                 type="button"
                 onClick={cycleLayoutMode}
@@ -578,24 +579,21 @@ export function Header({
               >
                 <LayoutToggleIcon />
               </button>
+              <button
+                type="button"
+                onClick={toggleRightRail}
+                className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
+                title={rightRailToggle.title}
+              >
+                <RightRailToggleIcon />
+              </button>
             </>
-          )}
-          {showQuickOpen && !compactHeader ? <QuickOpenBar variant="field" /> : null}
-          {compactHeader ? null : (
-            <button
-              type="button"
-              onClick={toggleRightRail}
-              className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
-              title={rightRailToggle.title}
-            >
-              <RightRailToggleIcon />
-            </button>
           )}
           {pluginHeader}
         </div>
       ) : showQuickOpen ? (
         <div className="app-header-center drag-region app-drag-surface">
-          <QuickOpenBar variant="field" />
+          <QuickOpenBar />
         </div>
       ) : null}
 

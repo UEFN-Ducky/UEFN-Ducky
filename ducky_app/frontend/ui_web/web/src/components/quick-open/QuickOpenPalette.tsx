@@ -31,6 +31,7 @@ import {
 } from "./quickOpenUtils";
 import {
   clearQueries,
+  destinationTone,
   mergeIdleResources,
   mergeIdleServices,
   pushQuery,
@@ -689,6 +690,7 @@ export function QuickOpenPalette() {
                       type="button"
                       data-row-index={index}
                       className={`quick-open-service-tile${isSelected ? " is-selected" : ""}`}
+                      data-chrome-tone={destinationTone(service.id)}
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => activateService(service)}
                     >

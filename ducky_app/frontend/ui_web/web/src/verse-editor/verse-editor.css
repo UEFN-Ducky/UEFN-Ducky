@@ -797,22 +797,17 @@
   font-size: 11px;
 }
 
-/* ── Verse template manager (mock-exact layout via CSS vars) ── */
+/* ── Verse template manager (layout only — colors from Ducky theme vars) ── */
 .modal-panel.vtm-modal {
   --vtm-modal-width: 48rem;
   --vtm-modal-height: 700px;
-  --vtm-radius-xl: 1rem;
-  --vtm-bg: #111827;
-  --vtm-border-soft: rgba(55, 65, 81, 0.6);
-  --vtm-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
-  --vtm-fg: #f1f5f9;
   width: min(var(--vtm-modal-width), calc(100vw - 32px));
   height: min(var(--vtm-modal-height), 90vh);
   max-height: min(var(--vtm-modal-height), 90vh);
-  border-radius: var(--vtm-radius-xl);
-  border: 1px solid var(--vtm-border-soft);
-  background: var(--vtm-bg);
-  box-shadow: var(--vtm-shadow);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   animation: vtmModalEnter 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -831,52 +826,45 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  color: var(--vtm-fg);
+  color: var(--fg);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .vtm {
-  --vtm-modal-width: 48rem;
-  --vtm-modal-height: 700px;
-  --vtm-radius: 0.5rem;
-  --vtm-radius-lg: 0.75rem;
-  --vtm-radius-xl: 1rem;
-  --vtm-bg: #111827;
-  --vtm-bg-50: rgba(17, 24, 39, 0.5);
-  --vtm-bg-90: rgba(17, 24, 39, 0.9);
-  --vtm-bg-deep: rgba(3, 7, 18, 0.5);
-  --vtm-bg-solid: #030712;
-  --vtm-surface: rgba(31, 41, 55, 0.4);
-  --vtm-surface-hover: #1f2937;
-  --vtm-surface-2: #1f2937;
-  --vtm-border: #1f2937;
-  --vtm-border-soft: rgba(55, 65, 81, 0.6);
-  --vtm-border-input: #374151;
-  --vtm-fg: #f1f5f9;
-  --vtm-fg-muted: #d1d5db;
-  --vtm-muted: #6b7280;
-  --vtm-muted-2: #9ca3af;
-  --vtm-placeholder: #6b7280;
-  --vtm-brand: #0ea5e9;
-  --vtm-brand-400: #38bdf8;
-  --vtm-brand-300: #7dd3fc;
-  --vtm-brand-600: #0284c7;
-  --vtm-brand-dim: rgba(14, 165, 233, 0.1);
-  --vtm-brand-ring: rgba(14, 165, 233, 0.5);
-  --vtm-brand-glow: rgba(14, 165, 233, 0.2);
-  --vtm-indigo: rgba(129, 140, 248, 0.9);
-  --vtm-green: #16a34a;
-  --vtm-green-hover: #22c55e;
-  --vtm-green-glow: rgba(34, 197, 94, 0.2);
-  --vtm-red: #f87171;
-  --vtm-editor-bg: #1e1e1e;
-  --vtm-editor-sidebar: #252526;
-  --vtm-editor-border: #3c3c3c;
-  --vtm-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
-  --vtm-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --vtm-font: var(--font-ui, "Inter", "Segoe UI", system-ui, sans-serif);
-  --vtm-font-mono: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  --vtm-radius: var(--radius-sm);
+  --vtm-radius-lg: var(--radius);
+  --vtm-radius-xl: var(--radius);
+  --vtm-bg: var(--card);
+  --vtm-bg-50: color-mix(in srgb, var(--bg) 50%, transparent);
+  --vtm-bg-90: color-mix(in srgb, var(--panel-header) 90%, transparent);
+  --vtm-bg-deep: var(--input-bg);
+  --vtm-bg-solid: var(--bg);
+  --vtm-surface: color-mix(in srgb, var(--card) 70%, transparent);
+  --vtm-surface-hover: var(--card-hover);
+  --vtm-surface-2: var(--bg-elevated);
+  --vtm-border: var(--border);
+  --vtm-border-input: var(--border-light);
+  --vtm-fg: var(--fg);
+  --vtm-fg-muted: var(--fg-dim);
+  --vtm-muted: var(--muted);
+  --vtm-muted-2: var(--fg-dim);
+  --vtm-placeholder: var(--muted);
+  --vtm-brand: var(--accent);
+  --vtm-brand-400: var(--blue);
+  --vtm-brand-300: var(--blue);
+  --vtm-brand-dim: color-mix(in srgb, var(--accent) 10%, transparent);
+  --vtm-brand-ring: color-mix(in srgb, var(--accent) 50%, transparent);
+  --vtm-indigo: var(--purple);
+  --vtm-green: var(--green);
+  --vtm-green-glow: var(--green-dim);
+  --vtm-red: var(--red);
+  --vtm-editor-bg: var(--verse-editor-bg);
+  --vtm-editor-sidebar: var(--sidebar);
+  --vtm-editor-border: var(--verse-editor-widget-border);
+  --vtm-shadow-sm: var(--shadow-sm);
+  --vtm-font: var(--font-ui);
+  --vtm-font-mono: var(--font-mono);
 
   position: relative;
   display: flex;
@@ -924,7 +912,8 @@
   padding: 16px 24px;
   border-bottom: 1px solid var(--vtm-border);
   background: var(--vtm-bg-90);
-  backdrop-filter: blur(12px);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
 }
 
 .vtm-header-left {
@@ -940,10 +929,7 @@
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.25;
-  background: linear-gradient(to right, #f3f4f6, #9ca3af);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--fg);
 }
 
 .vtm-icon-btn {
@@ -966,7 +952,7 @@
 }
 
 .vtm-icon-btn:hover {
-  color: #fff;
+  color: var(--fg);
   background: var(--vtm-surface-2);
 }
 
@@ -1010,13 +996,13 @@
   color: var(--vtm-fg-muted);
   font-size: 0.875rem;
   line-height: 1.25rem;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: inset var(--shadow-sm);
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .vtm-input--solid {
   background: var(--vtm-bg-solid);
-  color: #e5e7eb;
+  color: var(--fg);
 }
 
 .vtm-input::placeholder {
@@ -1024,7 +1010,7 @@
 }
 
 .vtm-input--solid::placeholder {
-  color: #4b5563;
+  color: var(--muted);
 }
 
 .vtm-input:focus {
@@ -1035,7 +1021,7 @@
 }
 
 .vtm-input.is-invalid {
-  box-shadow: 0 0 0 2px #ef4444;
+  box-shadow: 0 0 0 2px var(--red);
 }
 
 .vtm-search-input {
@@ -1063,13 +1049,13 @@
 
 .vtm-body::-webkit-scrollbar-thumb,
 .vtm-ide-file-list::-webkit-scrollbar-thumb {
-  background-color: #3f3f46;
+  background-color: var(--border-light);
   border-radius: 10px;
 }
 
 .vtm-body:hover::-webkit-scrollbar-thumb,
 .vtm-ide-file-list:hover::-webkit-scrollbar-thumb {
-  background-color: #52525b;
+  background-color: var(--muted);
 }
 
 .vtm-picker-body {
@@ -1113,7 +1099,7 @@
 
 .vtm-card:hover {
   background: var(--vtm-surface-hover);
-  border-color: #4b5563;
+  border-color: var(--border-light);
 }
 
 .vtm-card.is-selected {
@@ -1140,11 +1126,11 @@
 }
 
 .vtm-card:hover .vtm-card-icon {
-  background: #374151;
+  background: var(--btn-bg);
 }
 
 .vtm-card-icon.is-selected {
-  background: rgba(14, 165, 233, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--vtm-brand-300);
 }
 
@@ -1160,7 +1146,7 @@
 .vtm-card-name {
   font-size: 14px;
   font-weight: 600;
-  color: #e5e7eb;
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1168,7 +1154,7 @@
 }
 
 .vtm-card:hover .vtm-card-name {
-  color: #fff;
+  color: var(--fg);
 }
 
 .vtm-card.is-selected .vtm-card-name {
@@ -1204,7 +1190,7 @@
   justify-content: center;
   padding: 2px;
   border-radius: 999px;
-  background: rgba(14, 165, 233, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--vtm-brand-400);
   box-shadow: var(--vtm-shadow-sm);
 }
@@ -1236,17 +1222,17 @@
   border-radius: 0.375rem;
   color: var(--vtm-muted);
   cursor: pointer;
-  background: rgba(17, 24, 39, 0.85);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
 }
 
 .vtm-card-action:hover {
   color: var(--vtm-brand-400);
-  background: rgba(14, 165, 233, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .vtm-card-action--danger:hover {
   color: var(--vtm-red);
-  background: rgba(248, 113, 113, 0.15);
+  background: var(--red-dim);
 }
 
 .vtm-card-action svg {
@@ -1298,9 +1284,9 @@
 }
 
 .vtm-create-custom-btn:hover {
-  color: #fff;
-  border-color: #6b7280;
-  background: rgba(31, 41, 55, 0.8);
+  color: var(--fg);
+  border-color: var(--muted);
+  background: var(--card-hover);
 }
 
 .vtm-create-custom-btn:focus-visible {
@@ -1323,7 +1309,7 @@
 }
 
 .vtm-create-custom-btn:hover .vtm-create-custom-icon {
-  background: #374151;
+  background: var(--btn-bg);
 }
 
 .vtm-create-custom-body {
@@ -1335,11 +1321,11 @@
 .vtm-create-custom-name {
   font-size: 15px;
   font-weight: 600;
-  color: #e5e7eb;
+  color: var(--fg);
 }
 
 .vtm-create-custom-btn:hover .vtm-create-custom-name {
-  color: #fff;
+  color: var(--fg);
 }
 
 .vtm-create-custom-desc {
@@ -1361,7 +1347,8 @@
   padding: 16px 24px;
   border-top: 1px solid var(--vtm-border);
   background: var(--vtm-bg-90);
-  backdrop-filter: blur(12px);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
 }
 
 .vtm-btn {
@@ -1404,33 +1391,33 @@
 
 .vtm-btn--ghost:hover:not(:disabled) {
   background: var(--vtm-surface-2);
-  color: #fff;
+  color: var(--fg);
 }
 
 .vtm-btn--primary {
   padding-left: 1.25rem;
   padding-right: 1.25rem;
   border: 1px solid transparent;
-  background: var(--vtm-brand-600);
-  color: #fff;
-  box-shadow: 0 4px 6px -1px var(--vtm-brand-glow);
+  background: var(--accent);
+  color: var(--fg-inverse);
+  box-shadow: var(--shadow-glow);
 }
 
 .vtm-btn--primary:hover:not(:disabled) {
-  background: var(--vtm-brand);
+  background: var(--accent-hover);
 }
 
 .vtm-btn--save {
   padding-left: 1.25rem;
   padding-right: 1.25rem;
   border: 1px solid transparent;
-  background: var(--vtm-green);
-  color: #fff;
+  background: var(--green);
+  color: var(--fg-inverse);
   box-shadow: 0 4px 6px -1px var(--vtm-green-glow);
 }
 
 .vtm-btn--save:hover:not(:disabled) {
-  background: var(--vtm-green-hover);
+  background: var(--green);
 }
 
 .vtm-creator-body {
@@ -1502,7 +1489,7 @@
   border: 1px solid var(--vtm-border);
   border-radius: var(--vtm-radius-lg);
   background: var(--vtm-bg-solid);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: inset var(--shadow-sm);
 }
 
 .vtm-mode-btn {
@@ -1523,8 +1510,8 @@
 }
 
 .vtm-mode-btn.is-selected {
-  background: #374151;
-  color: #fff;
+  background: var(--btn-bg);
+  color: var(--fg);
   box-shadow: var(--vtm-shadow-sm);
 }
 
@@ -1541,7 +1528,7 @@
   border: 1px solid var(--vtm-border);
   border-radius: var(--vtm-radius-lg);
   background: var(--vtm-bg-solid);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: inset var(--shadow-sm);
 }
 
 .vtm-quick-icon {
@@ -1565,15 +1552,15 @@
 }
 
 .vtm-quick-icon.is-selected {
-  background: #374151;
-  color: #fff;
+  background: var(--btn-bg);
+  color: var(--fg);
   transform: scale(1.1);
-  box-shadow: 0 0 0 1px #6b7280;
+  box-shadow: 0 0 0 1px var(--muted);
 }
 
 .vtm-or {
   font-size: 0.875rem;
-  color: #4b5563;
+  color: var(--muted);
 }
 
 .vtm-emoji-paste {
@@ -1586,8 +1573,8 @@
   font-family: var(--vtm-font-mono);
   font-size: 11px;
   color: var(--vtm-brand-400);
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--vtm-brand-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 0.25rem;
   padding: 2px 8px;
 }
@@ -1601,7 +1588,7 @@
   border-radius: var(--vtm-radius-lg);
   background: var(--vtm-editor-bg);
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: inset var(--shadow-sm);
 }
 
 .vtm-ide-sidebar {
@@ -1625,7 +1612,7 @@
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--vtm-editor-border);
-  background: rgba(17, 24, 39, 0.5);
+  background: color-mix(in srgb, var(--panel-header) 50%, transparent);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1646,8 +1633,8 @@
 }
 
 .vtm-ide-add:hover {
-  color: #fff;
-  background: #374151;
+  color: var(--fg);
+  background: var(--btn-bg);
 }
 
 .vtm-ide-file-list {
@@ -1671,18 +1658,18 @@
 }
 
 .vtm-ide-file:hover {
-  background: rgba(31, 41, 55, 0.7);
+  background: var(--tab-hover);
 }
 
 .vtm-ide-file.is-active {
-  background: rgba(14, 165, 233, 0.2);
-  border-color: rgba(14, 165, 233, 0.3);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--vtm-brand-300);
 }
 
 .vtm-ide-file-icon {
   flex-shrink: 0;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .vtm-ide-file.is-active .vtm-ide-file-icon {
@@ -1703,7 +1690,7 @@
 }
 
 .vtm-ide-file.is-active .vtm-ide-path {
-  color: #bae6fd;
+  color: var(--blue);
 }
 
 .vtm-ide-remove {
@@ -1714,8 +1701,8 @@
   padding: 2px;
   border: none;
   border-radius: 0.25rem;
-  background: #111827;
-  color: #6b7280;
+  background: var(--bg);
+  color: var(--muted);
   cursor: pointer;
 }
 
