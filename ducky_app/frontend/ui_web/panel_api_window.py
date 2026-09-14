@@ -581,11 +581,17 @@ class PanelApiWindowMixin:
 
     def open_external_url(self, url: str) -> None:
         """Open an https link in the user's default browser (settings help links)."""
+        u = str(url or "").strip()
+        if not u.startswith("https://"):
+            return
+        from frontend.ui_web.panel_httpd import remote_session_count
+
+        if remote_session_count() > 0:
+            self._push({"type": "open_url", "url": u})
+            return
         import webbrowser
 
-        u = str(url or "").strip()
-        if u.startswith("https://"):
-            webbrowser.open(u)
+        webbrowser.open(u)
 
     def burst_desktop_confetti(self, client_x: float, client_y: float) -> None:
         """Fullscreen confetti burst at a point in the main window's client area."""

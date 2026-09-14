@@ -1019,10 +1019,7 @@ export interface DuckyOSAccountStatus {
   roles?: string[];
   permissions?: string[];
   agent_denied?: string[];
-  agent_settings?: {
-    allow_settings_write?: boolean;
-    allow_agent_clicks?: boolean;
-  };
+  agent_settings?: AgentCapsSettings;
   device_key_active?: boolean;
   device_key_error?: string;
   session_expired?: boolean;
@@ -1031,6 +1028,13 @@ export interface DuckyOSAccountStatus {
   email_hint?: string;
   ttl_seconds?: number;
 }
+
+export type AgentCapsSettings = {
+  allow_settings_write?: boolean;
+  allow_agent_clicks?: boolean;
+  allow_see_uefn?: boolean;
+  allow_see_other_programs?: boolean;
+};
 
 export type RemoteAccessStatus = {
   ok?: boolean;
@@ -1408,7 +1412,8 @@ export interface AgentEvent {
     | "lane_changed"
     | "files_reverted"
     | "window_rtc"
-    | "direct_rtc";
+    | "direct_rtc"
+    | "open_url";
   text?: string;
   /** ui_rpc_request: which panel method to run and its params. */
   method?: string;
@@ -1493,6 +1498,8 @@ export interface AgentEvent {
   ice?: RTCIceServer[];
   /** direct_rtc: unix seconds when the offer was published (stale-guard). */
   ts?: number;
+  /** open_url: https link to open on the remote viewer. */
+  url?: string;
 }
 
 export interface WindowBox {
@@ -2060,7 +2067,7 @@ export interface PanelApi {
   duckyos_agent_caps?(include_catalog?: boolean): Promise<{
     ok?: boolean;
     denied?: string[];
-    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean };
+    settings?: AgentCapsSettings;
     denied_count?: number;
     catalog?: {
       categories?: Array<{
@@ -2072,11 +2079,11 @@ export interface PanelApi {
   }>;
   duckyos_agent_caps_set?(
     denied?: string[],
-    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean },
+    settings?: AgentCapsSettings,
   ): Promise<{
     ok?: boolean;
     denied?: string[];
-    settings?: { allow_settings_write?: boolean; allow_agent_clicks?: boolean };
+    settings?: AgentCapsSettings;
     denied_count?: number;
     catalog?: {
       categories?: Array<{

@@ -98,14 +98,23 @@ def _hint_for_error(tool: str, text: str) -> str:
 def apply_cloud_tool_deny(tools: list[Tool]) -> list[Tool]:
     """Drop tools the signed-in site user denied. Missing blob = no deny."""
     try:
-        from frontend.duckyos_account import cloud_denied_names
+        from frontend.duckyos_account import cloud_denied_names, tool_blocked_by_caps
 
         denied = cloud_denied_names()
     except Exception:
         return list(tools)
-    if not denied:
-        return list(tools)
-    return [t for t in tools if getattr(t, "name", "") not in denied]
+    out = []
+    for t in tools:
+        name = getattr(t, "name", "")
+        if name in denied:
+            continue
+        try:
+            if tool_blocked_by_caps(name):
+                continue
+        except Exception:
+            pass
+        out.append(t)
+    return out
 
 
 async def list_mcp_tools(*, apply_filters: bool = True) -> list[Tool]:
@@ -745,6 +754,16 @@ async def _execute_tool_inner(
     if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
         ms = int((time.time() - t0) * 1000)
         return ToolCallResult(ok=False, tool=name, error="Cancelled", duration_ms=ms)
+
+    try:
+        from frontend.duckyos_account import tool_blocked_by_caps
+
+        cap_block = tool_blocked_by_caps(name)
+    except Exception:
+        cap_block = None
+    if cap_block:
+        ms = int((time.time() - t0) * 1000)
+        return ToolCallResult(ok=False, tool=name, error=cap_block, duration_ms=ms)
 
     try:
         from backend.agent.coding_agents.plans import plan_mutator_block_reason

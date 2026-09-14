@@ -2,6 +2,8 @@ import { useEffect, type DependencyList } from "react";
 import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { installPerfMonitor, noteFrameDelivery, notePendingDepth } from "./perfMonitor";
 import { getDirectTransport } from "../remote/directTransport";
+import { isRemote } from "./usePanelApi";
+import { openHttpsOnThisDevice } from "../remote/openHttps";
 
 /** PanelApi._push_panel events share the HTTP bus — do not treat as agent stream. */
 const PANEL_PUSH_TYPES = new Set<string>([
@@ -79,6 +81,10 @@ function scheduleDelivery() {
 }
 
 function fanOut(event: AgentEvent) {
+  if (String(event.type) === "open_url" && isRemote()) {
+    openHttpsOnThisDevice(String(event.url || ""));
+    return;
+  }
   pendingEvents.push(event);
   notePendingDepth(pendingEvents.length);
   scheduleDelivery();

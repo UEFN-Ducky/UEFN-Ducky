@@ -8,6 +8,8 @@ import { RichCodeBlock } from "./RichCodeBlock";
 import { RichEmphasis } from "./RichEmphasis";
 import { richColorFromHref, richUrlTransform } from "./richTextColors";
 import { openCodingAgentLoginUi, parseCodingAgentLoginHref } from "../../walkthrough/openCodingAgentLogin";
+import { isRemote } from "../../hooks/usePanelApi";
+import { openHttpsOnThisDevice } from "../../remote/openHttps";
 
 export function RichLink({ href = "", children, onOpenFile }: {
   href?: string;
@@ -38,7 +40,18 @@ export function RichLink({ href = "", children, onOpenFile }: {
     return <button type="button" className="rich-md-link" title={path} onClick={() => onOpenFile(path, basename(path))}>{children}</button>;
   }
   if (/^https?:\/\//i.test(href)) {
-    return <a href={href} className="rich-md-link rich-md-link--external" target="_blank" rel="noreferrer">{children}</a>;
+    const remoteHttps = isRemote() && /^https:\/\//i.test(href);
+    return (
+      <a
+        href={href}
+        className="rich-md-link rich-md-link--external"
+        target="_blank"
+        rel="noreferrer"
+        onClick={remoteHttps ? (ev) => { ev.preventDefault(); openHttpsOnThisDevice(href); } : undefined}
+      >
+        {children}
+      </a>
+    );
   }
   return <span className="rich-md-link rich-md-link--static">{children}</span>;
 }

@@ -593,15 +593,28 @@ def cloud_denied_names() -> set[str]:
     }
 
 
+_CAP_DEFAULTS: dict[str, bool] = {
+    "allow_settings_write": True,
+    "allow_agent_clicks": False,
+    "allow_see_uefn": True,
+    "allow_see_other_programs": True,
+}
+_UEFN_SEE_TOOLS = frozenset({"take_high_res_screenshot", "get_viewport_camera"})
+_OTHER_APP_PREFIXES = ("blender_", "unity_", "roblox_")
+_OTHER_APP_TOOLS = frozenset({"snip_screen"})
+
+
+def _cap_bools(raw: dict[str, Any] | None) -> dict[str, bool]:
+    src = raw if isinstance(raw, dict) else {}
+    return {key: bool(src.get(key, default)) for key, default in _CAP_DEFAULTS.items()}
+
+
 def cloud_settings_ceiling() -> dict[str, bool] | None:
     blob = _load_blob()
     raw = blob.get("agent_settings")
     if not isinstance(raw, dict) or not raw:
         return None
-    return {
-        "allow_settings_write": bool(raw.get("allow_settings_write", True)),
-        "allow_agent_clicks": bool(raw.get("allow_agent_clicks", False)),
-    }
+    return _cap_bools(raw)
 
 
 def effective_allow_settings_write(local: bool) -> bool:
@@ -612,33 +625,36 @@ def effective_allow_agent_clicks(local: bool) -> bool:
     return bool(local)
 
 
+def tool_blocked_by_caps(name: str) -> str | None:
+    """Why this tool is hidden, or None if allowed."""
+    settings = _panel_cap_settings()
+    if not settings.get("allow_see_uefn", True) and name in _UEFN_SEE_TOOLS:
+        return "See UEFN is off — re-enable in Settings → Account"
+    if not settings.get("allow_see_other_programs", True) and (
+        name in _OTHER_APP_TOOLS or name.startswith(_OTHER_APP_PREFIXES)
+    ):
+        return "See other programs is off — re-enable in Settings → Account"
+    return None
+
+
 def _panel_cap_settings() -> dict[str, bool]:
     try:
         from frontend.settings import PanelSettings
 
         s = PanelSettings.load()
-        return {
-            "allow_settings_write": bool(s.allow_settings_write),
-            "allow_agent_clicks": bool(s.allow_agent_clicks),
-        }
+        return {key: bool(getattr(s, key, default)) for key, default in _CAP_DEFAULTS.items()}
     except Exception:
         raw = _load_blob().get("agent_settings")
-        if not isinstance(raw, dict):
-            raw = {}
-        return {
-            "allow_settings_write": bool(raw.get("allow_settings_write", True)),
-            "allow_agent_clicks": bool(raw.get("allow_agent_clicks", False)),
-        }
+        return _cap_bools(raw if isinstance(raw, dict) else {})
 
 
 def _apply_caps_to_panel(settings: dict[str, Any]) -> None:
     from frontend.settings import PanelSettings
 
     s = PanelSettings.load()
-    if "allow_settings_write" in settings:
-        s.allow_settings_write = bool(settings["allow_settings_write"])
-    if "allow_agent_clicks" in settings:
-        s.allow_agent_clicks = bool(settings["allow_agent_clicks"])
+    for key in _CAP_DEFAULTS:
+        if key in settings:
+            setattr(s, key, bool(settings[key]))
     s.save()
 
 
@@ -669,16 +685,12 @@ def set_agent_caps(denied: Any = None, settings: Any = None) -> dict[str, Any]:
     if denied is not None:
         blob["agent_denied"] = sanitize_denied_names(denied)
     cur = blob.get("agent_settings") if isinstance(blob.get("agent_settings"), dict) else {}
-    next_settings = {
-        "allow_settings_write": bool(cur.get("allow_settings_write", True)),
-        "allow_agent_clicks": bool(cur.get("allow_agent_clicks", False)),
-    }
+    next_settings = _cap_bools(cur)
     next_settings.update(_panel_cap_settings())
     if isinstance(settings, dict):
-        if "allow_settings_write" in settings:
-            next_settings["allow_settings_write"] = bool(settings["allow_settings_write"])
-        if "allow_agent_clicks" in settings:
-            next_settings["allow_agent_clicks"] = bool(settings["allow_agent_clicks"])
+        for key in _CAP_DEFAULTS:
+            if key in settings:
+                next_settings[key] = bool(settings[key])
     blob["agent_settings"] = next_settings
     blob["agent_caps_local"] = True
     _save_blob(blob)
@@ -718,10 +730,7 @@ def _store_agent_caps(blob: dict[str, Any], row: dict[str, Any] | None) -> None:
         blob["agent_denied"] = [str(n) for n in denied if isinstance(n, str) and n.strip()]
     settings = row.get("settings")
     if isinstance(settings, dict):
-        blob["agent_settings"] = {
-            "allow_settings_write": bool(settings.get("allow_settings_write", True)),
-            "allow_agent_clicks": bool(settings.get("allow_agent_clicks", False)),
-        }
+        blob["agent_settings"] = _cap_bools(settings)
     _save_blob(blob)
 
 

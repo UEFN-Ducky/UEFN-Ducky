@@ -2298,8 +2298,12 @@
   box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-.account-tab-card--caps {
-  max-width: 720px;
+.account-tab-card--caps .account-tab-subsection-title {
+  margin-top: 16px;
+}
+
+.account-tab-card--caps .account-tab-subsection-title:first-of-type {
+  margin-top: 12px;
 }
 
 .account-tab-caps-list {

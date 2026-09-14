@@ -300,7 +300,12 @@ def test_set_agent_caps_stays_on_desktop() -> None:
     from frontend import duckyos_account as acc
 
     blob: dict = {}
-    settings = SimpleNamespace(allow_settings_write=True, allow_agent_clicks=False)
+    settings = SimpleNamespace(
+        allow_settings_write=True,
+        allow_agent_clicks=False,
+        allow_see_uefn=True,
+        allow_see_other_programs=True,
+    )
     settings.save = lambda: None
     pushed: list = []
 
@@ -320,12 +325,24 @@ def test_set_agent_caps_stays_on_desktop() -> None:
         patch("frontend.settings.PanelSettings.load", return_value=settings),
         patch("frontend.ui_web.mcp_catalog.build_caps_catalog", return_value=catalog),
     ):
-        out = acc.set_agent_caps(["deny_me"], {"allow_settings_write": False, "allow_agent_clicks": True})
+        out = acc.set_agent_caps(
+            ["deny_me"],
+            {
+                "allow_settings_write": False,
+                "allow_agent_clicks": True,
+                "allow_see_uefn": False,
+                "allow_see_other_programs": False,
+            },
+        )
         assert out["denied"] == ["deny_me"]
         assert out["settings"]["allow_settings_write"] is False
+        assert out["settings"]["allow_see_uefn"] is False
+        assert out["settings"]["allow_see_other_programs"] is False
         assert "catalog" not in out
         assert settings.allow_settings_write is False
         assert settings.allow_agent_clicks is True
+        assert settings.allow_see_uefn is False
+        assert settings.allow_see_other_programs is False
         assert blob["agent_caps_local"] is True
         assert pushed == []
         blob["device_key"] = "k"
@@ -339,6 +356,30 @@ def test_set_agent_caps_stays_on_desktop() -> None:
     assert acc.effective_allow_agent_clicks(False) is False
 
 
+def test_tool_blocked_by_caps_see_toggles() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    settings = SimpleNamespace(
+        allow_settings_write=True,
+        allow_agent_clicks=False,
+        allow_see_uefn=False,
+        allow_see_other_programs=False,
+    )
+    with patch("frontend.settings.PanelSettings.load", return_value=settings):
+        assert acc.tool_blocked_by_caps("take_high_res_screenshot")
+        assert acc.tool_blocked_by_caps("blender_get_viewport_screenshot")
+        assert acc.tool_blocked_by_caps("unity_call")
+        assert acc.tool_blocked_by_caps("workspace_read_file") is None
+    settings.allow_see_uefn = True
+    settings.allow_see_other_programs = True
+    with patch("frontend.settings.PanelSettings.load", return_value=settings):
+        assert acc.tool_blocked_by_caps("take_high_res_screenshot") is None
+        assert acc.tool_blocked_by_caps("blender_status") is None
+
+
 if __name__ == "__main__":
     test_pkce_pair_s256()
     test_device_login_polls_until_token()
@@ -346,6 +387,7 @@ if __name__ == "__main__":
     test_store_item_versions_strips_empty_and_keeps_changelog()
     test_store_item_versions_needs_slug()
     test_set_agent_caps_stays_on_desktop()
+    test_tool_blocked_by_caps_see_toggles()
     test_name_allowed_matches_filter()
     test_dispatch_desktop_rpc_allowlist()
     test_call_panel_method_maps_kwargs_and_positional()

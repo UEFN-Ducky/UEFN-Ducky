@@ -49,4 +49,14 @@ describe("remoteApi", () => {
     );
     await expect(getApi()!.has_any_api_key()).resolves.toBeUndefined();
   });
+
+  it("opens https on this device instead of posting to the PC", async () => {
+    const open = vi.fn();
+    const fetch = vi.fn();
+    vi.stubGlobal("open", open);
+    vi.stubGlobal("fetch", fetch);
+    await getApi()!.open_external_url("https://example.com/docs");
+    expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank", "noopener,noreferrer");
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

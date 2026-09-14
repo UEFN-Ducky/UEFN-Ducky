@@ -1,5 +1,6 @@
 import type { PanelApi } from "../types/panel";
 import { getDirectTransport } from "../remote/directTransport";
+import { openHttpsOnThisDevice } from "../remote/openHttps";
 
 /** True when the panel is running in a normal browser (no pywebview). */
 export function isRemote(): boolean {
@@ -25,8 +26,7 @@ const _inflight = new Map<string, Promise<unknown>>();
 function remoteApi(): PanelApi {
   const invoke = (name: string, args: unknown[]) => {
     if (name === "open_external_url") {
-      const url = String(args[0] || "");
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      openHttpsOnThisDevice(String(args[0] || ""));
       return Promise.resolve();
     }
     if (name === "copy_text") {
@@ -90,8 +90,7 @@ function directApi(): PanelApi {
       if (typeof prop !== "string" || prop === "then") return undefined;
       return (...args: unknown[]) => {
         if (prop === "open_external_url") {
-          const url = String(args[0] || "");
-          if (url) window.open(url, "_blank", "noopener,noreferrer");
+          openHttpsOnThisDevice(String(args[0] || ""));
           return Promise.resolve();
         }
         if (prop === "copy_text") {

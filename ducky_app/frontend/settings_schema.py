@@ -212,12 +212,20 @@ FIELD_META: dict[str, FieldMeta] = {
         description="Serve this PC's UEFN Ducky in the browser at /ducky.",
     ),
     "allow_settings_write": FieldMeta(
-        "Allow agent settings writes", "General", settable=True,
-        description="Master switch for ducky_settings_set.",
+        "Change Ducky Settings", "Account", settable=True,
+        description="Let the AI save Appearance, models, voice, and layout in this app.",
     ),
     "allow_agent_clicks": FieldMeta(
-        "Allow agent clicks", "General", settable=True,
-        description="Let ducky_ui_click click controls (default off = spotlight + user click).",
+        "Click Ducky controls", "Account", settable=True,
+        description="On: the AI presses the highlighted control. Off: it highlights and waits for you.",
+    ),
+    "allow_see_uefn": FieldMeta(
+        "See UEFN", "Account", settable=True,
+        description="Let the AI look at the UEFN viewport and screenshots when this PC is connected.",
+    ),
+    "allow_see_other_programs": FieldMeta(
+        "See other programs", "Account", settable=True,
+        description="Let the AI look at Blender, Unity, Roblox, and screen snips outside UEFN and Ducky.",
     ),
     "voice_enabled": FieldMeta(
         "Spoken replies", "Audio", settable=True,

@@ -218,10 +218,16 @@ class PanelSettings:
     """When true, serve the panel UI through an outbound Cloudflare tunnel."""
 
     allow_settings_write: bool = True
-    """When false, ducky_settings_set (agent-driven settings writes) is refused."""
+    """When false, ducky_settings_set (agent-driven Ducky Settings writes) is refused."""
 
     allow_agent_clicks: bool = False
-    """When true, ducky_ui_click may click panel controls programmatically. Off = spotlight + user click only."""
+    """When true, the AI may press highlighted panel controls. Off = highlight and wait for you."""
+
+    allow_see_uefn: bool = True
+    """When false, hide UEFN viewport / screenshot tools from the AI."""
+
+    allow_see_other_programs: bool = True
+    """When false, hide Blender / Unity / Roblox / screen-snip tools from the AI."""
 
     voice_enabled: bool = False
     """When true, speak assistant replies (summary or speak-along)."""
@@ -429,6 +435,8 @@ class PanelSettings:
             or self.remote_access
             or not self.allow_settings_write
             or self.allow_agent_clicks
+            or not self.allow_see_uefn
+            or not self.allow_see_other_programs
             or bool(self.walkthrough_completed)
             or self.starter_llm_gateways_seeded
             or self.follow_code_enabled
