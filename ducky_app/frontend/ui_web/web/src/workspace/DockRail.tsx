@@ -114,6 +114,8 @@ export function DockRail({
   const stackRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const widthRef = useRef(0);
+  const dragStartWidthRef = useRef(0);
+  const liveResizeRef = useRef(false);
   const railOpenRef = useRef<boolean | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -155,36 +157,48 @@ export function DockRail({
   const minWidth = side === "left" ? SIDEBAR_WIDTH_MIN : OUTLINE_PANEL_WIDTH_MIN;
   const maxWidth = side === "left" ? SIDEBAR_WIDTH_MAX : OUTLINE_PANEL_WIDTH_MAX;
 
+  const clearLiveResizeStyle = useCallback(() => {
+    const el = shellRef.current;
+    el?.style.removeProperty("--dock-rail-width");
+    el?.style.removeProperty("--dock-shell-width");
+    el?.classList.remove("is-resizing");
+  }, []);
+
   const onResize = useCallback(
     (delta: number) => {
-      setIsResizing(true);
+      if (!liveResizeRef.current) {
+        liveResizeRef.current = true;
+        dragStartWidthRef.current = widthRef.current;
+        setIsResizing(true);
+        shellRef.current?.classList.add("is-resizing");
+      }
       const el = shellRef.current;
-      el?.classList.add("is-resizing");
       const next = railResizeFrame(side, widthRef.current, delta, maxWidth);
       widthRef.current = next;
       if (el) {
         el.style.setProperty("--dock-rail-width", `${next}px`);
         el.style.setProperty("--dock-shell-width", `${next + HANDLE_WIDTH}px`);
       }
-      if (next >= minWidth) resizeRailWidth(side, next);
     },
-    [maxWidth, minWidth, resizeRailWidth, side],
+    [maxWidth, side],
   );
 
   const handleResizeEnd = useCallback(() => {
-    const released = railResizeEnd(widthRef.current, minWidth, maxWidth);
-    if (released.close) {
-      persistRailWidth();
-      onClose?.();
-    } else {
-      widthRef.current = released.width;
-      resizeRailWidth(side, released.width);
-      persistRailWidth();
-    }
+    liveResizeRef.current = false;
+    const released = railResizeEnd(widthRef.current, minWidth, maxWidth, dragStartWidthRef.current);
+    widthRef.current = released.width;
+    resizeRailWidth(side, released.width);
+    persistRailWidth();
+    clearLiveResizeStyle();
+    if (released.close) onClose?.();
     notifyDockLayoutIdle();
-    shellRef.current?.classList.remove("is-resizing");
     setIsResizing(false);
-  }, [maxWidth, minWidth, onClose, persistRailWidth, resizeRailWidth, side]);
+  }, [clearLiveResizeStyle, maxWidth, minWidth, onClose, persistRailWidth, resizeRailWidth, side]);
+
+  useLayoutEffect(() => {
+    if (isResizing) return;
+    clearLiveResizeStyle();
+  }, [clearLiveResizeStyle, isResizing]);
 
   useLayoutEffect(() => {
     if (railOpenRef.current === null) {
