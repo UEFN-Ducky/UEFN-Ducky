@@ -202,21 +202,14 @@ export function usePluginUiPrefs(pluginId: string): {
 export function useDiscordUiPrefs(): {
   prefs: {
     showInHeader: boolean;
-    showInLeftSidebar: boolean;
-    showInRightSidebar: boolean;
   };
   setPrefs: (patch: Partial<{
     showInHeader: boolean;
-    showInLeftSidebar: boolean;
-    showInRightSidebar: boolean;
   }>) => void;
 } {
   const { getBool, setPref } = usePluginUiPrefs("discord");
-  // Match plugin.json placement defaults (OFF until the user opts in).
   const prefs = {
     showInHeader: getBool("showInHeader", false),
-    showInLeftSidebar: getBool("showInLeftSidebar", false),
-    showInRightSidebar: getBool("showInRightSidebar", false),
   };
   const setPrefs = useCallback(
     (patch: Partial<typeof prefs>) => {

@@ -18,6 +18,8 @@ export type DockPanelMode = "tabs" | "stacked";
 // `discordhub` was merged into `groupchat` (one Discord panel) — kept in the type
 // union for saved-layout compatibility but no longer a rendered panel.
 export const ALL_DOCK_PANELS: DockPanelId[] = ["chats", "files", "outline", "history", "tester", "groupchat"];
+/** Always listed in Appearance → Sidebar. Plugin-gated ids join this when they contribute. */
+export const BUILTIN_DOCK_PANELS: DockPanelId[] = ["chats", "files", "outline", "history"];
 export const MIN_DOCK_PANEL_HEIGHT = 80;
 
 export const DOCK_STORAGE_KEY = "uefn-workspace-dock-layout";
@@ -49,6 +51,12 @@ export type WorkspaceDockSnapshot = {
   right: DockRailStackState;
   leftRailOpen: boolean;
   rightRailOpen: boolean;
+  /** Feature kill switch — hides the rail and its header toggle. Distinct from leftRailOpen (collapse). */
+  leftRailEnabled: boolean;
+  /** Feature kill switch — hides the rail and its header toggle. Distinct from rightRailOpen (collapse). */
+  rightRailEnabled: boolean;
+  /** Panels kept in the snapshot but omitted from both rails. */
+  hiddenPanels: DockPanelId[];
   leftWidth: number;
   rightWidth: number;
   /** Layout mode for whatever panels sit on the left rail. */
@@ -103,6 +111,10 @@ export function defaultDockSnapshot(): WorkspaceDockSnapshot {
     right: defaultRailStack(["outline", "history", "tester"], "outline", 0.55),
     leftRailOpen: true,
     rightRailOpen: true,
+    leftRailEnabled: true,
+    rightRailEnabled: true,
+    // Discord dock is opt-in (legacy plugin prefs defaulted both sides off).
+    hiddenPanels: ["groupchat"],
     leftWidth: SIDEBAR_WIDTH_DEFAULT,
     rightWidth: OUTLINE_PANEL_WIDTH_DEFAULT,
     leftPanelMode: "stacked",
@@ -126,6 +138,9 @@ export function defaultFocusDockSnapshot(): WorkspaceDockSnapshot {
     right: defaultRailStack(["outline", "history", "tester"], "outline", 0.55),
     leftRailOpen: false,
     rightRailOpen: false,
+    leftRailEnabled: true,
+    rightRailEnabled: true,
+    hiddenPanels: ["groupchat"],
     leftWidth: OUTLINE_PANEL_WIDTH_DEFAULT,
     rightWidth: OUTLINE_PANEL_WIDTH_DEFAULT,
     leftPanelMode: "stacked",
@@ -267,6 +282,13 @@ export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDock
 
   if (typeof data.leftRailOpen === "boolean") base.leftRailOpen = data.leftRailOpen;
   if (typeof data.rightRailOpen === "boolean") base.rightRailOpen = data.rightRailOpen;
+  if (typeof data.leftRailEnabled === "boolean") base.leftRailEnabled = data.leftRailEnabled;
+  if (typeof data.rightRailEnabled === "boolean") base.rightRailEnabled = data.rightRailEnabled;
+  if (Array.isArray(data.hiddenPanels)) {
+    base.hiddenPanels = uniqueDockPanelIds(data.hiddenPanels);
+  } else {
+    applyDiscordSidebarMigration(base);
+  }
   if (typeof data.leftWidth === "number") base.leftWidth = clampLeftWidth(data.leftWidth);
   if (typeof data.rightWidth === "number") base.rightWidth = clampRightWidth(data.rightWidth);
 
@@ -385,13 +407,118 @@ export function persistDockSnapshot(snapshot: WorkspaceDockSnapshot, windowId = 
 }
 
 export function panelsOnSide(snapshot: WorkspaceDockSnapshot, side: DockSide): DockPanelId[] {
-  const ids = ALL_DOCK_PANELS.filter((id) => snapshot.panelSide[id] === side);
+  const hidden = new Set(snapshot.hiddenPanels);
+  const ids = ALL_DOCK_PANELS.filter((id) => snapshot.panelSide[id] === side && !hidden.has(id));
   const stack = side === "left" ? snapshot.left : snapshot.right;
   const ordered = stack.order.filter((id) => ids.includes(id));
   for (const id of ids) {
     if (!ordered.includes(id)) ordered.push(id);
   }
   return ordered;
+}
+
+/** Built-ins plus enabled-plugin dock slots the host already renders. */
+export function sidebarPanelCatalog(contributedIds: Iterable<string>): DockPanelId[] {
+  const contrib = new Set(contributedIds);
+  const extra = ALL_DOCK_PANELS.filter((id) => !BUILTIN_DOCK_PANELS.includes(id) && contrib.has(id));
+  return [...BUILTIN_DOCK_PANELS, ...extra];
+}
+
+function uniqueDockPanelIds(raw: unknown[]): DockPanelId[] {
+  const out: DockPanelId[] = [];
+  for (const item of raw) {
+    const id = migrateDockPanelId(String(item));
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function readDiscordSidebarPrefs(): { left: boolean; right: boolean } {
+  try {
+    const raw = localStorage.getItem("uefn-plugin-ui-prefs");
+    const all = raw ? (JSON.parse(raw) as Record<string, Record<string, unknown>>) : {};
+    const discord = all.discord && typeof all.discord === "object" ? all.discord : {};
+    return {
+      left: discord.showInLeftSidebar === true,
+      right: discord.showInRightSidebar === true,
+    };
+  } catch {
+    return { left: false, right: false };
+  }
+}
+
+/** One-shot: snapshots that predate hiddenPanels inherit Discord plugin placement prefs. */
+function applyDiscordSidebarMigration(base: WorkspaceDockSnapshot): void {
+  const { left, right } = readDiscordSidebarPrefs();
+  if (!left && !right) {
+    if (!base.hiddenPanels.includes("groupchat")) base.hiddenPanels.push("groupchat");
+    return;
+  }
+  base.hiddenPanels = base.hiddenPanels.filter((id) => id !== "groupchat");
+  const side: DockSide = right && !left ? "right" : "left";
+  Object.assign(base, movePanelInSnapshot(base, "groupchat", side));
+}
+
+export function movePanelInSnapshot(
+  snapshot: WorkspaceDockSnapshot,
+  panelId: DockPanelId,
+  targetSide: DockSide,
+  insertIndex?: number,
+): WorkspaceDockSnapshot {
+  const fromSide = snapshot.panelSide[panelId];
+  if (fromSide === targetSide && insertIndex === undefined) return snapshot;
+
+  const next: WorkspaceDockSnapshot = {
+    ...snapshot,
+    panelSide: { ...snapshot.panelSide, [panelId]: targetSide },
+  };
+
+  const removeFromStack = (side: DockSide) => {
+    const stack = side === "left" ? next.left : next.right;
+    return { ...stack, order: stack.order.filter((id) => id !== panelId) };
+  };
+
+  let left = fromSide === "left" ? removeFromStack("left") : next.left;
+  let right = fromSide === "right" ? removeFromStack("right") : next.right;
+
+  const insertInto = (side: DockSide) => {
+    const stack = side === "left" ? left : right;
+    const order = stack.order.filter((id) => id !== panelId);
+    const idx = insertIndex !== undefined ? Math.min(insertIndex, order.length) : order.length;
+    order.splice(idx, 0, panelId);
+    const focused =
+      stack.focusedPanel === panelId || !order.includes(stack.focusedPanel) ? panelId : stack.focusedPanel;
+    return { ...stack, order, focusedPanel: focused };
+  };
+
+  if (targetSide === "left") left = insertInto("left");
+  else right = insertInto("right");
+
+  return { ...next, left, right };
+}
+
+export function withRailEnabled(
+  snapshot: WorkspaceDockSnapshot,
+  side: DockSide,
+  enabled: boolean,
+): WorkspaceDockSnapshot {
+  const key = side === "left" ? "leftRailEnabled" : "rightRailEnabled";
+  if (snapshot[key] === enabled) return snapshot;
+  return { ...snapshot, [key]: enabled };
+}
+
+export function withPanelOnSide(
+  snapshot: WorkspaceDockSnapshot,
+  panelId: DockPanelId,
+  targetSide: DockSide | null,
+): WorkspaceDockSnapshot {
+  if (targetSide === null) {
+    if (snapshot.hiddenPanels.includes(panelId)) return snapshot;
+    return { ...snapshot, hiddenPanels: [...snapshot.hiddenPanels, panelId] };
+  }
+  const hiddenPanels = snapshot.hiddenPanels.filter((id) => id !== panelId);
+  const next = hiddenPanels.length === snapshot.hiddenPanels.length ? snapshot : { ...snapshot, hiddenPanels };
+  return movePanelInSnapshot(next, panelId, targetSide);
 }
 
 /**

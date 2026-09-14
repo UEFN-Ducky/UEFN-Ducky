@@ -3234,11 +3234,18 @@
   color: var(--fg-dim);
 }
 
-.appearance-layout-preview-stack-divider {
-  height: 4px;
-  background: var(--accent);
-  opacity: 0.45;
-  flex-shrink: 0;
+.appearance-layout-preview-sidebar.is-disabled {
+  opacity: 0.4;
+}
+
+.appearance-sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.appearance-sidebar-panel-list {
+  margin-top: 0;
 }
 
 .appearance-tab-details-title {

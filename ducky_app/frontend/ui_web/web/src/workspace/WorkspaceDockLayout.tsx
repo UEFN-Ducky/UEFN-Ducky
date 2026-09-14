@@ -18,7 +18,6 @@ import {
   usePluginContributions,
   type PluginContributions,
 } from "../hooks/usePluginContributions";
-import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
 import { isVerseFile } from "../verse-editor/utils/isVerseFile";
 import { Icons } from "../icons/Icons";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
@@ -41,9 +40,6 @@ function filterPanelsForVariant(
   variant: "default" | "focus",
   discordTabOpen: boolean,
   discordPluginOn: boolean,
-  showDiscordLeft: boolean,
-  showDiscordRight: boolean,
-  side: "left" | "right",
   testerPluginOn: boolean,
 ) {
   if (variant === "focus") {
@@ -55,9 +51,7 @@ function filterPanelsForVariant(
   // vanishes from its rail. The dock snapshot is untouched, so closing the tab
   // restores the panel to its exact side/order/size.
   let next = ids;
-  const discordAllowedOnSide =
-    discordPluginOn && (side === "left" ? showDiscordLeft : showDiscordRight);
-  if (discordTabOpen || !discordAllowedOnSide) {
+  if (discordTabOpen || !discordPluginOn) {
     next = next.filter((id) => id !== "groupchat" && id !== "discordhub");
   }
   if (!testerPluginOn) {
@@ -228,7 +222,6 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
 
     const discordTabOpen = useDiscordTabOpen();
     const pluginContrib = usePluginContributions();
-    const { prefs: discordUiPrefs } = useDiscordUiPrefs();
     const discordPluginOn = pluginContributesDockPanel(pluginContrib, "groupchat");
     const testerPluginOn = pluginContributesDockPanel(pluginContrib, "tester");
     const leftPanelIds = filterPanelsForVariant(
@@ -236,9 +229,6 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       variant,
       discordTabOpen,
       discordPluginOn,
-      discordUiPrefs.showInLeftSidebar,
-      discordUiPrefs.showInRightSidebar,
-      "left",
       testerPluginOn,
     );
     const rightPanelIds = filterPanelsForVariant(
@@ -246,9 +236,6 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       variant,
       discordTabOpen,
       discordPluginOn,
-      discordUiPrefs.showInLeftSidebar,
-      discordUiPrefs.showInRightSidebar,
-      "right",
       testerPluginOn,
     );
 
@@ -257,11 +244,15 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     const verseOnLeft = hasVerseAuxPanels(leftPanelIds);
     const verseOnRight = hasVerseAuxPanels(rightPanelIds);
 
+    const leftRailAllowed = dock.leftRailEnabled;
+    const rightRailAllowed = dock.rightRailEnabled;
     const leftOpen =
+      leftRailAllowed &&
       layoutMode !== "sidebarHidden" &&
       dock.leftRailOpen &&
       (leftSidebarOnLeft || verseOnLeft);
-    const rightOpen = dock.rightRailOpen && (leftSidebarOnRight || verseOnRight);
+    const rightOpen =
+      rightRailAllowed && dock.rightRailOpen && (leftSidebarOnRight || verseOnRight);
 
     const versePath =
       activeFilePath && isVerseFile(activeFilePath) ? activeFilePath.replace(/\\/g, "/") : undefined;
@@ -370,14 +361,16 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     }, [leftSidebarOnRight, rightPanelIds, rightVerseIds, rightVersePanels, sidebarProps, verseOnRight]);
 
     const dragTargetSide = dockDropTargetSide(dragOverlay);
-    const leftPeek = isDockPanelDragging && !leftMixed && dragTargetSide === "left";
-    const rightPeek = isDockPanelDragging && !rightMixed && dragTargetSide === "right";
+    const leftPeek =
+      leftRailAllowed && isDockPanelDragging && !leftMixed && dragTargetSide === "left";
+    const rightPeek =
+      rightRailAllowed && isDockPanelDragging && !rightMixed && dragTargetSide === "right";
     const swipe = useRailEdgeSwipe({
       enabled: overlay,
       leftOpen,
       rightOpen,
-      leftEnabled: !!leftMixed,
-      rightEnabled: !!rightMixed,
+      leftEnabled: leftRailAllowed && !!leftMixed,
+      rightEnabled: rightRailAllowed && !!rightMixed,
       leftWidth: dock.leftWidth,
       rightWidth: dock.rightWidth,
       setLeftOpen: (open) => setLayoutMode(open ? "full" : "sidebarHidden"),
@@ -395,7 +388,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
         onPointerCancelCapture={overlay ? swipe.onPointerUpCapture : undefined}
       >
         <div id="ducky-skin-left" className="ducky-skin-slot ducky-skin-slot--left" aria-hidden="true" />
-        {leftMixed || leftPeek ? (
+        {leftRailAllowed && (leftMixed || leftPeek) ? (
           <DockRail
             side="left"
             open={leftOpen || leftPeek}
@@ -427,7 +420,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
           />
         ) : null}
 
-        {rightMixed || rightPeek ? (
+        {rightRailAllowed && (rightMixed || rightPeek) ? (
           <DockRail
             side="right"
             open={rightOpen || rightPeek}

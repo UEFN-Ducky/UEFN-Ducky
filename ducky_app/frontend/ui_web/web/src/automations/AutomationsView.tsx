@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AutomationTemplatePicker } from "./AutomationTemplatePicker";
 import type {
   AutomationDto,
   AutomationGraphDto,
@@ -7,6 +8,7 @@ import type {
   AutomationNodeDto,
   AutomationRunDto,
   AutomationSummaryDto,
+  AutomationTemplateDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
@@ -63,6 +65,7 @@ export function AutomationsView() {
   const [busy, setBusy] = useState(false);
   const [spawn, setSpawn] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [spawnFilter, setSpawnFilter] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const boardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
@@ -127,17 +130,24 @@ export function AutomationsView() {
   }, [refreshList]);
 
   const createNew = useCallback(async () => {
-    const created = await persist({
-      id: "",
-      name: "Untitled",
-      enabled: true,
-      graph: emptyGraph(),
-    } as AutomationDto);
-    setSelectedNodeId("");
-    setExpandedId("");
-    setLog(null);
-    if (created.id) setSelectedId(created.id);
-  }, [persist]);
+    setPickerOpen(true);
+  }, []);
+
+  const createFromTemplate = useCallback(
+    async (template: AutomationTemplateDto | null) => {
+      const created = await persist({
+        id: "",
+        name: template?.name || "Untitled",
+        enabled: true,
+        graph: template?.graph || emptyGraph(),
+      } as AutomationDto);
+      setSelectedNodeId("");
+      setExpandedId("");
+      setLog(null);
+      if (created.id) setSelectedId(created.id);
+    },
+    [persist],
+  );
 
   const graph = draft?.graph || emptyGraph();
 
@@ -392,7 +402,7 @@ export function AutomationsView() {
               </button>
             </>
           ) : (
-            <span className="aw-empty-hint">Create a workflow or pick one — right-click the canvas to add nodes.</span>
+            <span className="aw-empty-hint">Create a workflow or pick a template — right-click the canvas to add nodes.</span>
           )}
         </div>
         <div
@@ -595,6 +605,12 @@ export function AutomationsView() {
           </div>
         </div>
       ) : null}
+      <AutomationTemplatePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(t) => void createFromTemplate(t)}
+        currentGraph={draft?.graph || null}
+      />
     </div>
   );
 }

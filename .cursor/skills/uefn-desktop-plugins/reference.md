@@ -185,6 +185,11 @@ Host Automations editor (header Clock). **Not** `contributes.hooks` (Appearance 
   "nodes": [
     { "id": "email.send", "label": "Send email", "group": "Email",
       "config_fields": [{ "id": "to", "label": "To", "type": "string" }] }
+  ],
+  "templates": [
+    { "id": "email-inbox", "label": "Email to a ducky", "icon": "✉️",
+      "description": "New mail spawns a ducky with the subject.",
+      "graph": { "nodes": [], "edges": [] } }
   ]
 }
 ```

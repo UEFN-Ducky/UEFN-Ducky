@@ -12,6 +12,9 @@ import {
   persistDockSnapshot,
   readDockSnapshot,
   syncLocalDockSnapshot,
+  movePanelInSnapshot,
+  withPanelOnSide,
+  withRailEnabled,
   DOCK_CHANGE_EVENT,
 } from "../workspace/workspaceDockStorage";
 import { resizeStackedPanelSplit } from "../utils/stackedPanelFlex";
@@ -256,38 +259,21 @@ export function useWorkspaceDockLayout(windowId: string) {
 
   const movePanel = useCallback(
     (panelId: DockPanelId, targetSide: DockSide, insertIndex?: number) => {
-      commit((prev) => {
-        const fromSide = prev.panelSide[panelId];
-        if (fromSide === targetSide && insertIndex === undefined) return prev;
+      commit((prev) => movePanelInSnapshot(prev, panelId, targetSide, insertIndex));
+    },
+    [commit],
+  );
 
-        const next = { ...prev, panelSide: { ...prev.panelSide, [panelId]: targetSide } };
+  const setRailEnabled = useCallback(
+    (side: DockSide, enabled: boolean) => {
+      commit((prev) => withRailEnabled(prev, side, enabled));
+    },
+    [commit],
+  );
 
-        const removeFromStack = (side: DockSide) => {
-          const stack = side === "left" ? next.left : next.right;
-          const order = stack.order.filter((id) => id !== panelId);
-          return { ...stack, order };
-        };
-
-        let left = fromSide === "left" ? removeFromStack("left") : next.left;
-        let right = fromSide === "right" ? removeFromStack("right") : next.right;
-
-        const insertInto = (side: DockSide) => {
-          const stack = side === "left" ? left : right;
-          const order = stack.order.filter((id) => id !== panelId);
-          const idx = insertIndex !== undefined ? Math.min(insertIndex, order.length) : order.length;
-          order.splice(idx, 0, panelId);
-          const focused =
-            stack.focusedPanel === panelId || !order.includes(stack.focusedPanel)
-              ? panelId
-              : stack.focusedPanel;
-          return { ...stack, order, focusedPanel: focused };
-        };
-
-        if (targetSide === "left") left = insertInto("left");
-        else right = insertInto("right");
-
-        return { ...next, left, right };
-      });
+  const setPanelOnSide = useCallback(
+    (panelId: DockPanelId, targetSide: DockSide | null) => {
+      commit((prev) => withPanelOnSide(prev, panelId, targetSide));
     },
     [commit],
   );
@@ -332,11 +318,15 @@ export function useWorkspaceDockLayout(windowId: string) {
     persistSplit,
     setFocusedPanel,
     movePanel,
+    setRailEnabled,
+    setPanelOnSide,
     setPanelModeForSide,
     panelModeForSide,
     stackForSide,
     leftRailOpen: snapshot.leftRailOpen,
     rightRailOpen: snapshot.rightRailOpen,
+    leftRailEnabled: snapshot.leftRailEnabled,
+    rightRailEnabled: snapshot.rightRailEnabled,
     leftWidth: snapshot.leftWidth,
     rightWidth: snapshot.rightWidth,
     leftPanelMode: snapshot.leftPanelMode,

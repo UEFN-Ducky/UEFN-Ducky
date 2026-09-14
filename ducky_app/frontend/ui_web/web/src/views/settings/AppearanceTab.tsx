@@ -32,15 +32,11 @@ import { SectionFontPicker } from "./SectionFontPicker";
 import { AppearanceAccordionSplit } from "./AppearanceAccordionSplit";
 import { AppearanceFontPreview } from "./AppearanceFontPreview";
 import { AppearanceLayoutPreview } from "./AppearanceLayoutPreview";
+import { AppearanceSidebarSectionBlock } from "./AppearanceSidebarSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import { ScopedCss, useScopedClass } from "../../utils/scopedCss";
-import { useDockSidePanelMode } from "../../hooks/useDockSidePanelMode";
-import type { DockPanelMode, DockSide } from "../../workspace/workspaceDockStorage";
-import {
-  useEditorTabOverflowMode,
-  type EditorTabOverflowMode,
-} from "../../hooks/useEditorTabOverflowMode";
+import { useEditorTabOverflowMode, type EditorTabOverflowMode } from "../../hooks/useEditorTabOverflowMode";
 import {
   MAX_CHAT_COLUMN_WIDTH,
   MIN_CHAT_COLUMN_WIDTH,
@@ -849,60 +845,23 @@ function ChatColumnWidthControl() {
   );
 }
 
-function PanelSideLayoutControl({ side }: { side: DockSide }) {
-  const { mode, setMode } = useDockSidePanelMode(side);
-
-  const onSelect = (next: DockPanelMode) => {
-    if (next !== mode) setMode(next);
-  };
-
-  const label = side === "left" ? "Left panel" : "Right panel";
-
-  return (
-    <div className="appearance-layout-control">
-      <h4 className="appearance-category-title">{label}</h4>
-      <p className="appearance-layout-control-desc">
-        How every panel docked on the {side} rail lays out. Tabs show one panel at a time behind a tab
-        bar; stacked shows all of them at once, split by resizable dividers. This follows the side, not
-        the panel — drag all four panels to the {side} and they all pick up this mode.
-      </p>
-      <div
-        className="content-search-mode-toggle appearance-layout-toggle"
-        role="group"
-        aria-label={`${label} layout`}
-      >
-        <button
-          type="button"
-          className={`content-search-mode-btn${mode === "tabs" ? " is-active" : ""}`}
-          aria-pressed={mode === "tabs"}
-          onClick={() => onSelect("tabs")}
-        >
-          Tabs
-        </button>
-        <button
-          type="button"
-          className={`content-search-mode-btn${mode === "stacked" ? " is-active" : ""}`}
-          aria-pressed={mode === "stacked"}
-          onClick={() => onSelect("stacked")}
-        >
-          Stacked panels
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function AppearanceLayoutSectionBlock() {
   return (
-    <AppearanceDetailsSection title="Layout" subtitle="Editor tabs and dock panel layout.">
+    <AppearanceDetailsSection title="Layout" subtitle="Chat column and editor tabs.">
       <AppearanceAccordionSplit preview={<AppearanceLayoutPreview />}>
         <div className="appearance-layout-controls">
           <ChatColumnWidthControl />
           <EditorTabOverflowControl />
-          <PanelSideLayoutControl side="left" />
-          <PanelSideLayoutControl side="right" />
         </div>
       </AppearanceAccordionSplit>
+    </AppearanceDetailsSection>
+  );
+}
+
+function AppearanceSidebarAccordion() {
+  return (
+    <AppearanceDetailsSection title="Sidebar" subtitle="Left and right dock rails, and which panels show on each.">
+      <AppearanceSidebarSectionBlock />
     </AppearanceDetailsSection>
   );
 }
@@ -964,6 +923,8 @@ export function AppearanceTab() {
       <AppearanceFontsSectionBlock />
 
       <AppearanceLayoutSectionBlock />
+
+      <AppearanceSidebarAccordion />
     </div>
   );
 }

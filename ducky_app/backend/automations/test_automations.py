@@ -179,3 +179,22 @@ def test_emit_skips_when_trigger_config_channel_differs(monkeypatch):
     assert hit["runs"]
     assert hit["runs"][0]["ok"] is True
     assert any(s.get("type") == "flow.wait" for s in hit["runs"][0]["steps"])
+
+
+def test_custom_automation_template_roundtrip():
+    from backend.automations.templates import delete_custom, list_custom, save_custom
+
+    row = save_custom(
+        "Ping",
+        description="demo",
+        graph={
+            "nodes": [{"id": "m", "type": "start.manual", "x": 0, "y": 0, "config": {}}],
+            "edges": [],
+        },
+    )
+    assert row["id"].startswith("custom:")
+    listed = list_custom()
+    got = next(t for t in listed if t["id"] == row["id"])
+    assert got["graph"]["nodes"][0]["type"] == "start.manual"
+    assert delete_custom(row["id"]) is True
+    assert not any(t["id"] == row["id"] for t in list_custom())

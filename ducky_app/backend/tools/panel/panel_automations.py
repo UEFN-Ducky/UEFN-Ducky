@@ -17,6 +17,14 @@ def list_automation_nodes(pretty: bool = False) -> str:
 
 
 @mcp.tool()
+def list_automation_templates(pretty: bool = False) -> str:
+    """Plugin + user Automations templates (ready-made graphs)."""
+    from backend.automations.templates import list_templates
+
+    return tool_json({"ok": True, "templates": list_templates()}, pretty=pretty)
+
+
+@mcp.tool()
 def list_automations(pretty: bool = False) -> str:
     """List saved Automations workflows (id, name, enabled, updated)."""
     from backend.automations.store import list_automations as _list

@@ -198,6 +198,7 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "verse-lsp": ("Verse LSP", "Language server cache.", "cache"),
     "plan_templates": ("Plan templates leftover", "Pre-database templates. Now in ducky.db.", "cache"),
     "verse_templates": ("Verse templates", "Custom Verse templates.", "user"),
+    "automation_templates": ("Automation templates", "Custom Automations graphs.", "user"),
     "perf": ("Perf leftover", "Pre-database traces. Now events in ducky.db.", "cache"),
     "tasks": ("Tasks leftover", "Pre-database task files. Now in ducky.db.", "cache"),
     "sounds": ("Sounds", "Custom notification audio.", "user"),

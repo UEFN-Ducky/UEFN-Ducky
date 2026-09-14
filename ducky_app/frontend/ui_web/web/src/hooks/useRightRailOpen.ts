@@ -13,6 +13,8 @@ function readRightRailState() {
   return {
     open: snapshot.rightRailOpen,
     hasPanels: panelsOnSide(snapshot, "right").length > 0,
+    leftRailEnabled: snapshot.leftRailEnabled !== false,
+    rightRailEnabled: snapshot.rightRailEnabled !== false,
   };
 }
 
@@ -45,6 +47,8 @@ export function useRightRailOpen() {
   return {
     rightRailOpen: state.open,
     hasRightPanels: state.hasPanels,
+    leftRailEnabled: state.leftRailEnabled,
+    rightRailEnabled: state.rightRailEnabled,
     toggleRightRail,
   };
 }

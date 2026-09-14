@@ -85,6 +85,7 @@ _CONTRIBUTIONS: dict[str, Any] = {
     "hooks": [],  # {id, label, plugin_id}
     "automations_nodes": [],  # contributes.automations.nodes (+ plugin_id)
     "automations_triggers": [],  # contributes.automations.triggers (+ plugin_id)
+    "automations_templates": [],  # contributes.automations.templates (+ plugin_id, graph)
     # New-file Verse scaffolds for the template picker (content inlined at load).
     "verse_templates": [],  # {id, name, icon, description?, content, order?, file?, plugin_id}
     "tts_voices": [],  # {id, label, plugin_id}
@@ -233,6 +234,7 @@ def get_ui_contributions() -> dict[str, Any]:
             "hooks": _dedupe_contrib_rows(_CONTRIBUTIONS["hooks"]),
             "automations_nodes": _dedupe_contrib_rows(_CONTRIBUTIONS["automations_nodes"]),
             "automations_triggers": _dedupe_contrib_rows(_CONTRIBUTIONS["automations_triggers"]),
+            "automations_templates": _dedupe_contrib_rows(_CONTRIBUTIONS["automations_templates"]),
             "verse_templates": sorted(
                 _dedupe_contrib_rows(_CONTRIBUTIONS["verse_templates"]),
                 key=lambda t: (int(t.get("order") or 100), str(t.get("name") or "")),
@@ -1381,6 +1383,7 @@ def reload_plugins() -> None:
             _CONTRIBUTIONS["hooks"] = []
             _CONTRIBUTIONS["automations_nodes"] = []
             _CONTRIBUTIONS["automations_triggers"] = []
+            _CONTRIBUTIONS["automations_templates"] = []
             try:
                 from backend.automations.plugin import clear_all as _clear_auto_handlers
 
@@ -1423,6 +1426,26 @@ def _automation_contrib_row(row: Any, pid: str) -> dict[str, Any] | None:
     entry["id"] = nid
     entry["plugin_id"] = pid
     return entry
+
+
+def _automation_template_row(row: Any, pid: str) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    tid = str(row.get("id") or "").strip()
+    if not tid:
+        return None
+    from backend.automations.store import normalize_graph
+
+    name = str(row.get("label") or row.get("name") or tid).strip() or tid
+    return {
+        "id": tid,
+        "label": name,
+        "name": name,
+        "description": str(row.get("description") or ""),
+        "icon": str(row.get("icon") or "⚡"),
+        "graph": normalize_graph(row.get("graph")),
+        "plugin_id": pid,
+    }
 
 
 def _strip_contributions_for(pid: str) -> None:
@@ -2238,6 +2261,10 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         parsed = _automation_contrib_row(row, pid)
         if parsed:
             _CONTRIBUTIONS["automations_nodes"].append(parsed)
+    for row in auto.get("templates") or []:
+        parsed = _automation_template_row(row, pid)
+        if parsed:
+            _CONTRIBUTIONS["automations_templates"].append(parsed)
 
     for voice in contributes.get("tts.voices") or contributes.get("tts_voices") or []:
         if not isinstance(voice, dict):

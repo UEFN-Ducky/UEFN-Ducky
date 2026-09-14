@@ -58,3 +58,46 @@ class PanelApiAutomationsMixin:
         from backend.automations.runner import emit_automation
 
         return emit_automation(trigger_id, payload or {})
+
+    def list_automation_templates(self) -> dict[str, Any]:
+        from backend.automations.templates import list_templates
+
+        return {"ok": True, "templates": list_templates()}
+
+    def save_custom_automation_template(
+        self,
+        name: str,
+        description: str = "",
+        icon: str = "⚡",
+        graph_json: str = "",
+        template_id: str = "",
+    ) -> dict[str, Any]:
+        from backend.automations.templates import save_custom
+
+        graph: Any = {}
+        raw = (graph_json or "").strip()
+        if raw:
+            import json
+
+            try:
+                graph = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                return {"ok": False, "error": f"bad graph_json: {exc}"}
+        try:
+            row = save_custom(
+                name,
+                description=description,
+                icon=icon,
+                graph=graph,
+                template_id=template_id,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "template": row}
+
+    def delete_custom_automation_template(self, template_id: str) -> dict[str, Any]:
+        from backend.automations.templates import delete_custom
+
+        if not delete_custom(template_id):
+            return {"ok": False, "error": "template not found"}
+        return {"ok": True}

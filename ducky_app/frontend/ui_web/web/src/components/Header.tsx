@@ -133,9 +133,11 @@ function HeaderToolsMenu({
   layoutTitle,
   onCycleLayout,
   sidebarEnabled,
+  showLeftToggle,
   rightTitle,
   onToggleRight,
   rightEnabled,
+  showRightToggle,
   showWorkflow,
   onCompile,
   onPush,
@@ -155,9 +157,11 @@ function HeaderToolsMenu({
   layoutTitle: string;
   onCycleLayout: () => void;
   sidebarEnabled: boolean;
+  showLeftToggle: boolean;
   rightTitle: string;
   onToggleRight: () => void;
   rightEnabled: boolean;
+  showRightToggle: boolean;
   showWorkflow: boolean;
   onCompile?: () => void;
   onPush?: () => void;
@@ -202,8 +206,12 @@ function HeaderToolsMenu({
         <div className="plugin-header-menu-list" role="menu">
           {showNav ? item("Back", onBack, !canBack) : null}
           {showNav ? item("Forward", onForward, !canForward) : null}
-          {item(layoutTitle, sidebarEnabled ? onCycleLayout : undefined, !sidebarEnabled)}
-          {item(rightTitle, rightEnabled ? onToggleRight : undefined, !rightEnabled)}
+          {showLeftToggle
+            ? item(layoutTitle, sidebarEnabled ? onCycleLayout : undefined, !sidebarEnabled)
+            : null}
+          {showRightToggle
+            ? item(rightTitle, rightEnabled ? onToggleRight : undefined, !rightEnabled)
+            : null}
           {item("Search", onSearch)}
           {showWorkflow ? item("Build Verse", onCompile, compileBusy) : null}
           {showWorkflow && canPush ? item("Push Verse", onPush, compileBusy) : null}
@@ -372,7 +380,8 @@ export function Header({
   const showNav = !isFocus && !!nav;
   const sidebarEnabled = (isFocus || !isSettingsOverlay) && hasProject;
   const headerActions = useAppHeaderActions();
-  const { rightRailOpen, hasRightPanels, toggleRightRail } = useRightRailOpen();
+  const { rightRailOpen, hasRightPanels, toggleRightRail, leftRailEnabled, rightRailEnabled } =
+    useRightRailOpen();
   const pluginContrib = usePluginContributions();
   const { prefs: discordUiPrefs } = useDiscordUiPrefs();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
@@ -415,6 +424,8 @@ export function Header({
   const rightRailToggle = RIGHT_RAIL_TOGGLE_META[rightRailOpen ? "open" : "closed"];
   const RightRailToggleIcon = rightRailToggle.Icon;
   const rightSidebarEnabled = sidebarEnabled && hasRightPanels;
+  const showLeftSidebarToggle = leftRailEnabled;
+  const showRightSidebarToggle = rightRailEnabled;
 
   const { setProblemsMenuOpen } = useProblemsMenuOpen();
   const { openPalette } = useQuickOpenBridge();
@@ -537,9 +548,11 @@ export function Header({
               layoutTitle={layoutToggle.title}
               onCycleLayout={cycleLayoutMode}
               sidebarEnabled={sidebarEnabled}
+              showLeftToggle={showLeftSidebarToggle}
               rightTitle={rightRailToggle.title}
               onToggleRight={toggleRightRail}
               rightEnabled={rightSidebarEnabled}
+              showRightToggle={showRightSidebarToggle}
               showWorkflow={showWorkflow}
               onCompile={workflowAction?.onCompile}
               onPush={workflowAction?.onPush}
@@ -564,22 +577,26 @@ export function Header({
             <>
               {navButtons}
               {showQuickOpen ? <QuickOpenBar /> : null}
-              <button
-                type="button"
-                onClick={cycleLayoutMode}
-                className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--${layoutMode} ${sidebarEnabled ? "" : "is-disabled"}`}
-                title={layoutToggle.title}
-              >
-                <LayoutToggleIcon />
-              </button>
-              <button
-                type="button"
-                onClick={toggleRightRail}
-                className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
-                title={rightRailToggle.title}
-              >
-                <RightRailToggleIcon />
-              </button>
+              {showLeftSidebarToggle ? (
+                <button
+                  type="button"
+                  onClick={cycleLayoutMode}
+                  className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--${layoutMode} ${sidebarEnabled ? "" : "is-disabled"}`}
+                  title={layoutToggle.title}
+                >
+                  <LayoutToggleIcon />
+                </button>
+              ) : null}
+              {showRightSidebarToggle ? (
+                <button
+                  type="button"
+                  onClick={toggleRightRail}
+                  className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
+                  title={rightRailToggle.title}
+                >
+                  <RightRailToggleIcon />
+                </button>
+              ) : null}
             </>
           )}
           {pluginHeader}

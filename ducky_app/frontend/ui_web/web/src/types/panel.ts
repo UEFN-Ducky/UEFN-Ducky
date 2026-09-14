@@ -294,6 +294,17 @@ export interface AutomationFieldDto {
   type?: string;
 }
 
+export interface AutomationTemplateDto {
+  id: string;
+  name: string;
+  label?: string;
+  description?: string;
+  icon?: string;
+  kind?: string;
+  plugin_id?: string;
+  graph: AutomationGraphDto;
+}
+
 export interface AutomationNodeDto {
   type: string;
   label: string;
@@ -2147,6 +2158,15 @@ export interface PanelApi {
   duckyos_store_grant?(sessionId: string, slug?: string): Promise<{ ok?: boolean; error?: string; code?: string; slug?: string; alreadyOwned?: boolean }>;
   list_uefn_plugins?(): Promise<{ ok?: boolean; error?: string; plugins?: UefnPluginDto[] }>;
   list_automation_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
+  list_automation_templates?(): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
+  save_custom_automation_template?(
+    name: string,
+    description?: string,
+    icon?: string,
+    graph_json?: string,
+    template_id?: string,
+  ): Promise<{ ok?: boolean; error?: string; template?: AutomationTemplateDto }>;
+  delete_custom_automation_template?(template_id: string): Promise<{ ok?: boolean; error?: string }>;
   list_automations?(): Promise<{ ok?: boolean; automations?: AutomationSummaryDto[] }>;
   get_automation?(workflow_id: string): Promise<{ ok?: boolean; error?: string; automation?: AutomationDto }>;
   save_automation?(doc: Partial<AutomationDto> & { graph?: AutomationGraphDto }): Promise<{
