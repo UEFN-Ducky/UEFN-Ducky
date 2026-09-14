@@ -32,6 +32,7 @@ import { SectionFontPicker } from "./SectionFontPicker";
 import { AppearanceAccordionSplit } from "./AppearanceAccordionSplit";
 import { AppearanceFontPreview } from "./AppearanceFontPreview";
 import { AppearanceLayoutPreview } from "./AppearanceLayoutPreview";
+import { AppearanceHeaderSectionBlock } from "./AppearanceHeaderSection";
 import { AppearanceSidebarSectionBlock } from "./AppearanceSidebarSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { SettingsToggleRow } from "./SettingsToggleRow";
@@ -858,6 +859,14 @@ function AppearanceLayoutSectionBlock() {
   );
 }
 
+function AppearanceHeaderAccordion() {
+  return (
+    <AppearanceDetailsSection title="Header" subtitle="Show or hide back/forward, sidebar toggles, search, and plugin buttons.">
+      <AppearanceHeaderSectionBlock />
+    </AppearanceDetailsSection>
+  );
+}
+
 function AppearanceSidebarAccordion() {
   return (
     <AppearanceDetailsSection title="Sidebar" subtitle="Left and right dock rails, and which panels show on each.">
@@ -923,6 +932,8 @@ export function AppearanceTab() {
       <AppearanceFontsSectionBlock />
 
       <AppearanceLayoutSectionBlock />
+
+      <AppearanceHeaderAccordion />
 
       <AppearanceSidebarAccordion />
     </div>

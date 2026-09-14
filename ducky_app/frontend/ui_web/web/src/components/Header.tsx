@@ -22,8 +22,9 @@ import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
-import { useDiscordUiPrefs } from "../hooks/usePluginUiPrefs";
+import { useHeaderVisibility } from "../hooks/useHeaderVisibility";
 import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
+import { pluginHeaderButtonId } from "../workspace/headerVisibilityStorage";
 import {
   resolvePluginHeaderAction,
   resolvePluginHeaderIcon,
@@ -150,6 +151,7 @@ function HeaderToolsMenu({
   onTerminal,
   onLedger,
   onAutomations,
+  showSearch,
 }: {
   canBack: boolean;
   canForward: boolean;
@@ -174,6 +176,7 @@ function HeaderToolsMenu({
   onTerminal?: () => void;
   onLedger?: () => void;
   onAutomations?: () => void;
+  showSearch?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -214,7 +217,7 @@ function HeaderToolsMenu({
           {showRightToggle
             ? item(rightTitle, rightEnabled ? onToggleRight : undefined, !rightEnabled)
             : null}
-          {item("Search", onSearch)}
+          {showSearch ? item("Search", onSearch) : null}
           {showWorkflow ? item("Build Verse", onCompile, compileBusy) : null}
           {showWorkflow && canPush ? item("Push Verse", onPush, compileBusy) : null}
           {item("Problems", onProblems)}
@@ -386,7 +389,7 @@ export function Header({
     useRightRailOpen();
   const overlaySession = useOverlayRailSession();
   const pluginContrib = usePluginContributions();
-  const { prefs: discordUiPrefs } = useDiscordUiPrefs();
+  const { isVisible: headerBtnVisible } = useHeaderVisibility();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
   const narrowHeader = useNarrowLayout();
   const pluginHeaderButtons = useMemo(() => {
@@ -394,14 +397,10 @@ export function Header({
     return sortPluginHeaderButtons(pluginContrib.header_buttons).filter((btn) => {
       const isTranslation = btn.plugin_id === "translation" || btn.id === "translation";
       if (!isTranslation && !resolvePluginHeaderAction(btn.action, btn.plugin_id)) return false;
-      // Discord placement prefs gate the Discord button; other plugins always show.
-      if (btn.plugin_id === "discord" || btn.id === "discord") {
-        return discordUiPrefs.showInHeader;
-      }
-      return true;
+      return headerBtnVisible(pluginHeaderButtonId(btn.plugin_id || btn.id, btn.id));
     });
   }, [
-    discordUiPrefs.showInHeader,
+    headerBtnVisible,
     hasProject,
     isFocus,
     isSettingsOverlay,
@@ -433,8 +432,10 @@ export function Header({
   const rightRailToggle = RIGHT_RAIL_TOGGLE_META[rightRailShown ? "open" : "closed"];
   const RightRailToggleIcon = rightRailToggle.Icon;
   const rightSidebarEnabled = sidebarEnabled && hasRightPanels;
-  const showLeftSidebarToggle = leftRailEnabled;
-  const showRightSidebarToggle = rightRailEnabled;
+  const showNavButtons = showNav && headerBtnVisible("nav");
+  const showSearch = !!showQuickOpen && headerBtnVisible("search");
+  const showLeftSidebarToggle = leftRailEnabled && headerBtnVisible("leftSidebar");
+  const showRightSidebarToggle = rightRailEnabled && headerBtnVisible("rightSidebar");
   const onCycleLayout = () => {
     if (compactHeader) {
       toggleOverlayRail("left");
@@ -452,7 +453,7 @@ export function Header({
 
   const { setProblemsMenuOpen } = useProblemsMenuOpen();
   const { openPalette } = useQuickOpenBridge();
-  const navButtons = showNav ? (
+  const navButtons = showNavButtons ? (
     <div className="app-header-nav no-drag">
       <button
         type="button"
@@ -561,9 +562,9 @@ export function Header({
         <div className="app-header-center drag-region app-drag-surface">
           {compactHeader ? (
             <>
-            {showQuickOpen ? <QuickOpenBar /> : null}
+            {showSearch ? <QuickOpenBar /> : null}
             <HeaderToolsMenu
-              showNav={showNav}
+              showNav={showNavButtons}
               canBack={!!nav?.canBack}
               canForward={!!nav?.canForward}
               onBack={() => nav?.back()}
@@ -593,13 +594,14 @@ export function Header({
               }
               onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
               onAutomations={() => requestOpenAutomationsTab()}
-              onSearch={showQuickOpen ? () => openPalette("file") : undefined}
+              showSearch={showSearch}
+              onSearch={showSearch ? () => openPalette("file") : undefined}
             />
             </>
           ) : (
             <>
               {navButtons}
-              {showQuickOpen ? <QuickOpenBar /> : null}
+              {showSearch ? <QuickOpenBar /> : null}
               {showLeftSidebarToggle ? (
                 <button
                   type="button"
@@ -624,7 +626,7 @@ export function Header({
           )}
           {pluginHeader}
         </div>
-      ) : showQuickOpen ? (
+      ) : showSearch ? (
         <div className="app-header-center drag-region app-drag-surface">
           <QuickOpenBar />
         </div>

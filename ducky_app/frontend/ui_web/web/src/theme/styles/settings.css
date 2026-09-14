@@ -3248,6 +3248,35 @@
   margin-top: 0;
 }
 
+.appearance-header-preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  min-height: 44px;
+}
+
+.appearance-header-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-header);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appearance-header-preview-chip.is-off {
+  opacity: 0.35;
+}
+
 .appearance-tab-details-title {
   font-weight: 700;
   font-size: 15px;
