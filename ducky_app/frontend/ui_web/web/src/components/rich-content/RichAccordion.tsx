@@ -33,11 +33,13 @@ export function RichAccordion({ title, blocks, onOpenFile, defaultOpen = false, 
         </span>
       </button>
       <div className={`tool-card-collapse${open ? " is-open" : ""}`}>
+        {open ? (
         <div className="tool-card-collapse-inner">
           <div className="rich-accordion-body">
             <RichBlockList blocks={blocks} onOpenFile={onOpenFile} collapsePath={`${collapsePath}accordion:${title}/`} />
           </div>
         </div>
+        ) : null}
       </div>
     </div>
   );

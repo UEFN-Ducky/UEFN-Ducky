@@ -2545,6 +2545,19 @@
   color: var(--muted);
 }
 
+.account-tab-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.account-tab-session-list li {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .account-tab-member-list {
   list-style: none;
   margin: 0;

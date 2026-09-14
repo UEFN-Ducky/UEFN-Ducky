@@ -173,12 +173,24 @@ def remote_cookie_ok(cookie_header: str | None, host: str) -> bool:
 
 
 def remote_session_count() -> int:
+    return len(_live_remote_sessions())
+
+
+def remote_session_summaries() -> list[dict[str, int]]:
+    now = time.time()
+    return [
+        {"n": i, "expires_in_s": max(0, int(exp - now))}
+        for i, exp in enumerate(_live_remote_sessions(), start=1)
+    ]
+
+
+def _live_remote_sessions() -> list[float]:
     now = time.time()
     with _auth_lock:
         dead = [k for k, exp in _sessions.items() if exp < now]
         for k in dead:
             _sessions.pop(k, None)
-        return len(_sessions)
+        return list(_sessions.values())
 
 
 def sign_out_all_remote() -> None:

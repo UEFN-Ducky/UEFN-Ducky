@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
-import type { DuckyOSAccountStatus } from "../../types/panel";
+import type { DuckyOSAccountStatus, RemoteAccessStatus } from "../../types/panel";
 import {
   ACCOUNT_LOGIN_EVENT,
   consumeAccountLoginRequest,
@@ -12,6 +12,13 @@ import { AgentCapsCard } from "./AgentCapsCard";
 
 const DEFAULT_BASE = "https://uefnducky.org";
 
+function formatSessionLeft(seconds: number): string {
+  if (seconds < 90) return "less than 2 min left";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes} min left`;
+  return `${Math.round(minutes / 60)} hr left`;
+}
+
 export function AccountTab() {
   const [status, setStatus] = useState<DuckyOSAccountStatus | null>(null);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE);
@@ -19,16 +26,7 @@ export function AccountTab() {
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [pairingCode, setPairingCode] = useState("");
-  const [remote, setRemote] = useState<{
-    enabled?: boolean;
-    hostname?: string;
-    running?: boolean;
-    mode?: string;
-    error?: string;
-    named_reason?: string;
-    site_update_pending?: boolean;
-    sessions?: number;
-  } | null>(null);
+  const [remote, setRemote] = useState<RemoteAccessStatus | null>(null);
 
   const applyStatus = useCallback((next: DuckyOSAccountStatus) => {
     setStatus(next);
@@ -154,14 +152,7 @@ export function AccountTab() {
     void run(() => api.duckyos_logout());
   };
 
-  const handleOpenAdmin = () => {
-    const api = getApi();
-    if (api && typeof api.duckyos_open_admin === "function") {
-      void api.duckyos_open_admin();
-    }
-  };
-
-  const openSite = (path = "/ducky") => {
+  const openSite = (path = "/profile") => {
     const api = getApi();
     if (api && typeof api.duckyos_open_teams_site === "function") {
       void api.duckyos_open_teams_site(path);
@@ -180,6 +171,13 @@ export function AccountTab() {
   }
 
   const loggedIn = Boolean(status?.logged_in);
+  const sessionList =
+    remote?.session_list && remote.session_list.length > 0
+      ? remote.session_list
+      : Array.from({ length: remote?.sessions ?? 0 }, (_, i) => ({
+          n: i + 1,
+          expires_in_s: 0,
+        }));
 
   return (
     <div className="account-tab">
@@ -208,11 +206,8 @@ export function AccountTab() {
               )}
             </p>
             <div className="account-tab-actions">
-              <button type="button" className="account-tab-btn account-tab-btn--primary" onClick={handleOpenAdmin}>
-                Open Admin in browser
-              </button>
-              <button type="button" className="account-tab-btn" onClick={() => openSite("/ducky")}>
-                Open UEFN Ducky in browser
+              <button type="button" className="account-tab-btn account-tab-btn--primary" onClick={() => openSite("/profile")}>
+                Open Profile in Browser
               </button>
               <button
                 type="button"
@@ -227,46 +222,30 @@ export function AccountTab() {
 
           <div className="account-tab-card">
             <div className="account-tab-signed-row">
-              <h3 className="account-tab-section-title">UEFN Ducky in the browser</h3>
+              <h3 className="account-tab-section-title">UEFN Ducky in Browser</h3>
             </div>
             <p className="account-tab-body">
-              Open this PC&apos;s UEFN Ducky in the browser at <code>/ducky</code>. Off by default.
+              Use this PC&apos;s panel from a browser. Off by default.
             </p>
+            {remote?.enabled && !remote?.running ? (
+              <p className="account-tab-meta">Starting…</p>
+            ) : null}
             {remote?.site_update_pending ? (
-              <p className="account-tab-body account-tab-warn-text">Site update pending</p>
+              <p className="account-tab-body account-tab-warn-text">Update pending</p>
             ) : null}
             {remote?.error && !remote.site_update_pending ? (
               <p className="account-tab-body account-tab-warn-text">{remote.error}</p>
             ) : null}
-            <p className="account-tab-meta">
-              Tunnel:{" "}
-              {remote?.running ? (
-                <strong className="account-tab-ok">
-                  {remote.mode === "quick" ? "temporary" : remote.mode || "on"}
-                </strong>
-              ) : remote?.enabled ? (
-                <span className="account-tab-warn">starting</span>
-              ) : (
-                <span className="account-tab-warn">off</span>
-              )}
-            </p>
-            {remote?.hostname ? (
-              <p className="account-tab-meta">
-                Host: <code>{remote.hostname}</code>
-              </p>
+            {sessionList.length > 0 ? (
+              <ul className="account-tab-session-list">
+                {sessionList.map((row) => (
+                  <li key={row.n}>
+                    Browser session {row.n}
+                    {row.expires_in_s > 0 ? ` · ${formatSessionLeft(row.expires_in_s)}` : ""}
+                  </li>
+                ))}
+              </ul>
             ) : null}
-            {remote?.mode === "quick" && remote?.named_reason ? (
-              <p className="account-tab-body account-tab-warn-text">
-                Own domain unavailable: {remote.named_reason}
-              </p>
-            ) : null}
-            {remote?.mode === "quick" ? (
-              <p className="account-tab-meta">
-                Temporary address. Your host is <code>u-….uefnducky.org</code> after
-                a site token is saved.
-              </p>
-            ) : null}
-            <p className="account-tab-meta">Active sessions: {remote?.sessions ?? 0}</p>
             <div className="account-tab-actions">
               <button
                 type="button"
@@ -290,30 +269,29 @@ export function AccountTab() {
               >
                 {remote?.enabled ? "Turn off" : "Turn on"}
               </button>
-              <button type="button" className="account-tab-btn" onClick={() => openSite("/ducky")}>
-                Open in browser
-              </button>
-              <button
-                type="button"
-                className="account-tab-btn"
-                disabled={busy || !(remote?.sessions)}
-                onClick={() => {
-                  const setOut = getApi()?.remote_sign_out_all;
-                  if (!setOut) return;
-                  void (async () => {
-                    setBusy(true);
-                    try {
-                      setRemote(await setOut());
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : String(err));
-                    } finally {
-                      setBusy(false);
-                    }
-                  })();
-                }}
-              >
-                Sign out all sessions
-              </button>
+              {sessionList.length > 0 ? (
+                <button
+                  type="button"
+                  className="account-tab-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    const setOut = getApi()?.remote_sign_out_all;
+                    if (!setOut) return;
+                    void (async () => {
+                      setBusy(true);
+                      try {
+                        setRemote(await setOut());
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  Sign out all sessions
+                </button>
+              ) : null}
             </div>
           </div>
 

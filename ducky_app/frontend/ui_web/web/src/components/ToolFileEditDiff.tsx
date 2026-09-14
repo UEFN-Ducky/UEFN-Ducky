@@ -21,7 +21,7 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
   );
   const verseEditor = useVerseEditorOptional();
   const summary = useMemo(
-    () =>
+    () => expanded ?
       buildFileEditDiff(
         edit.path,
         edit.before,
@@ -29,15 +29,21 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
         edit.linesAdded,
         edit.linesRemoved,
         edit.kind === "create" ? "create" : "write",
-      ),
-    [edit],
+      ) : null,
+    [edit, expanded],
   );
 
-  const displayName = summary.fileName || basename(edit.path);
-  const hasChanges = summary.linesAdded > 0 || summary.linesRemoved > 0 || summary.isCreate;
+  const displayName = basename(edit.path);
+  const hasChanges = edit.linesAdded > 0 || edit.linesRemoved > 0 || edit.kind === "create";
 
-  const firstChangeLine =
-    summary.hunks.flatMap((h) => h.lines).find((line) => line.kind !== "context")?.line ?? 1;
+  const openFirstChange = () => {
+    const diff = summary ?? buildFileEditDiff(
+      edit.path, edit.before, edit.after, edit.linesAdded, edit.linesRemoved,
+      edit.kind === "create" ? "create" : "write",
+    );
+    const line = diff.hunks.flatMap((h) => h.lines).find((line) => line.kind !== "context")?.line ?? 1;
+    openAt(line);
+  };
 
   const openAt = (line: number) => {
     if (!onOpenFile) return;
@@ -66,7 +72,7 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
               onClick={(e) => {
                 if (!onOpenFile) return;
                 e.stopPropagation();
-                openAt(firstChangeLine);
+                openFirstChange();
               }}
               role={onOpenFile ? "link" : undefined}
               tabIndex={onOpenFile ? 0 : undefined}
@@ -75,11 +81,11 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
             </span>
             {hasChanges ? (
               <span className="tool-file-edit-diff-stats">
-                {summary.linesAdded > 0 && (
-                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--add">+{summary.linesAdded}</span>
+                {edit.linesAdded > 0 && (
+                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--add">+{edit.linesAdded}</span>
                 )}
-                {summary.linesRemoved > 0 && (
-                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--remove">-{summary.linesRemoved}</span>
+                {edit.linesRemoved > 0 && (
+                  <span className="tool-file-edit-diff-stat tool-file-edit-diff-stat--remove">-{edit.linesRemoved}</span>
                 )}
               </span>
             ) : (
@@ -105,6 +111,7 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
       </div>
 
       <div className={`tool-file-edit-diff-collapse${expanded ? " is-open" : ""}`}>
+        {summary ? (
         <div className="tool-file-edit-diff-collapse-inner">
           {summary.hunks.length === 0 ? (
             <div className="tool-file-edit-diff-empty">No line changes</div>
@@ -152,6 +159,7 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
             ))
           )}
         </div>
+        ) : null}
       </div>
     </div>
   );

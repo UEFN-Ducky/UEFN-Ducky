@@ -157,8 +157,16 @@ describe("VirtualChatMessageList streaming isolation", () => {
     const history = buildHistory(100);
     render(<VirtualChatMessageList {...listProps(history)} />);
     const scroller = document.querySelector<HTMLElement>(".virtual-chat-message-list-scroller")!;
-    expect(scroller.dataset.chatWindow).toBe("8-12");
-    expect(document.querySelectorAll(".virtual-chat-chunk").length).toBe(5);
+    expect(scroller.dataset.chatWindow).toBe("97-99");
+    expect(document.querySelectorAll(".virtual-chat-chunk").length).toBe(3);
+  });
+
+  it("also windows a report-heavy chat with only 17 turns", () => {
+    const history = buildHistory(17);
+    render(<VirtualChatMessageList {...listProps(history)} />);
+    expect(document.querySelectorAll(".virtual-chat-turn")).toHaveLength(3);
+    expect(probes.counts.has("user:q0")).toBe(false);
+    expect(probes.counts.get("bubble:a16")).toBe(1);
   });
 
   it("re-renders only the live turn while an answer streams into a 300-turn chat", () => {
@@ -166,10 +174,10 @@ describe("VirtualChatMessageList streaming isolation", () => {
     const stableProps = listProps(history);
     const view = render(<VirtualChatMessageList {...stableProps} />);
     const afterMount = snapshotCounts();
-    // First paint with no viewport keeps the tail (5 chunks), not all 300 turns.
+    // First paint with no viewport keeps three tail turns, not all 300 turns.
     expect(afterMount.get("user:q0")).toBeUndefined();
     expect(afterMount.get("bubble:a299")).toBe(1);
-    expect(afterMount.size).toBe(36 * 3);
+    expect(afterMount.size).toBe(3 * 3);
 
     const frames = 60;
     let text = "";

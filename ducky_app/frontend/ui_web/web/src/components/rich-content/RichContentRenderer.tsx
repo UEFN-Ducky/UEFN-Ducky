@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { memo, useMemo } from "react";
 import type { OpenFileHandler, ParsedRichContent } from "../../types/richContent";
 import { parseRichContent } from "./parseRichContent";
 import { MarkdownContent } from "./MarkdownContent";
@@ -12,33 +12,23 @@ interface RichContentRendererProps {
   mode?: RichContentMode;
 }
 
-export function RichContentRenderer({
+export const RichContentRenderer = memo(function RichContentRenderer({
   text,
   onOpenFile,
   mode = "full",
 }: RichContentRendererProps) {
   // JSON __rich is parsed after the turn finishes. Markdown promotes live so
   // Run Summary / Inventory appear while the reply is still writing.
-  const [parsed, setParsed] = useState<ParsedRichContent | null>(null);
-
-  useEffect(() => {
-    if (mode !== "full") {
-      setParsed(null);
-      return;
-    }
-    let cancelled = false;
-    startTransition(() => {
-      if (cancelled) return;
-      setParsed(parseRichContent(text));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [mode, text]);
+  // Classify before rendering: an effect rendered every historical answer as
+  // Markdown first, then parsed/rendered it again (or replaced it with widgets).
+  const parsed = useMemo<ParsedRichContent | null>(
+    () => mode === "full" ? parseRichContent(text) : null,
+    [mode, text],
+  );
 
   if (!text.trim()) return null;
 
-  // Live + pending-parse: render Markdown/widgets as sections complete so the
+  // Live: render Markdown/widgets as sections complete so the
   // bubble is never a raw ## / ** dump. JSON __rich blocks swap in when parsed.
   if (mode === "streaming" || !parsed) {
     return (
@@ -62,4 +52,4 @@ export function RichContentRenderer({
       <MarkdownContent text={parsed.text ?? text} onOpenFile={onOpenFile} />
     </div>
   );
-}
+});

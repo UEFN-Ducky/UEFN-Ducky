@@ -205,20 +205,20 @@ class PanelApiStoreMixin:
     def remote_status(self) -> dict[str, Any]:
         from frontend.settings import PanelSettings
         from frontend.remote_tunnel import remote_tunnel_status
-        from frontend.ui_web.panel_httpd import remote_session_count
+        from frontend.ui_web.panel_httpd import remote_session_count, remote_session_summaries
 
         s = PanelSettings.load()
         st = remote_tunnel_status()
+        err = str(st.get("error") or "")
+        # Don't ship hostname / tunnel mode / named_reason to the panel UI.
         return {
             "ok": True,
             "enabled": bool(getattr(s, "remote_access", False)),
-            "hostname": str(st.get("hostname") or ""),
             "running": bool(st.get("running")),
-            "mode": str(st.get("mode") or ""),
-            "error": str(st.get("error") or ""),
-            "named_reason": str(st.get("named_reason") or ""),
+            "error": "Couldn't start browser access." if err else "",
             "site_update_pending": bool(st.get("site_update_pending")),
             "sessions": remote_session_count(),
+            "session_list": remote_session_summaries(),
         }
 
     def remote_set_enabled(self, enabled: bool = False) -> dict[str, Any]:

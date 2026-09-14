@@ -1032,6 +1032,16 @@ export interface DuckyOSAccountStatus {
   ttl_seconds?: number;
 }
 
+export type RemoteAccessStatus = {
+  ok?: boolean;
+  enabled?: boolean;
+  running?: boolean;
+  error?: string;
+  site_update_pending?: boolean;
+  sessions?: number;
+  session_list?: { n: number; expires_in_s: number }[];
+};
+
 export interface DuckyOSTeamMemberDto {
   user_id?: string;
   email?: string;
@@ -2105,34 +2115,9 @@ export interface PanelApi {
     user_id: string,
   ): Promise<{ ok?: boolean; error?: string }>;
   duckyos_team_revoke_invite?(token: string): Promise<{ ok?: boolean; error?: string }>;
-  remote_status?(): Promise<{
-    ok?: boolean;
-    enabled?: boolean;
-    hostname?: string;
-    running?: boolean;
-    mode?: string;
-    error?: string;
-    named_reason?: string;
-    site_update_pending?: boolean;
-    sessions?: number;
-  }>;
-  remote_set_enabled?(enabled: boolean): Promise<{
-    ok?: boolean;
-    enabled?: boolean;
-    hostname?: string;
-    running?: boolean;
-    mode?: string;
-    error?: string;
-    named_reason?: string;
-    site_update_pending?: boolean;
-    sessions?: number;
-  }>;
-  remote_sign_out_all?(): Promise<{
-    ok?: boolean;
-    enabled?: boolean;
-    hostname?: string;
-    sessions?: number;
-  }>;
+  remote_status?(): Promise<RemoteAccessStatus>;
+  remote_set_enabled?(enabled: boolean): Promise<RemoteAccessStatus>;
+  remote_sign_out_all?(): Promise<RemoteAccessStatus>;
   duckyos_store_catalog?(): Promise<DuckyOSStoreCatalog>;
   duckyos_store_versions?(slug: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(

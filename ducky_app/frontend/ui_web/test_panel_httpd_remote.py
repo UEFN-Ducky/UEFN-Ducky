@@ -55,6 +55,11 @@ def test_cookie_bound_to_host(remote_auth):
     assert httpd.request_is_authorized(host, "/", header)
     assert not httpd.request_is_authorized(other, "/", header)
     assert httpd.remote_session_count() >= 1
+    rows = httpd.remote_session_summaries()
+    assert len(rows) >= 1
+    assert set(rows[0]) == {"n", "expires_in_s"}
+    assert rows[0]["n"] == 1
+    assert rows[0]["expires_in_s"] > 0
     httpd.sign_out_all_remote()
     assert not httpd.request_is_authorized(host, "/", header)
 

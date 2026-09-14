@@ -2076,15 +2076,20 @@
   flex-direction: column;
 }
 
-/* Off-screen chunks are unmounted; spacers hold their last measured height
-   so the scrollbar length stays stable. content-visibility still skips paint
-   for a chunk that is only partly on screen. */
+/* Off-screen turns are unmounted; spacers hold their measured height. Do not
+   apply content-visibility here: its intrinsic stand-in is not a real chunk
+   measurement and can feed changing estimates back into the scroll window. */
 .virtual-chat-chunk {
   width: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* Skip layout/paint of off-screen replies within a large mounted turn, while
+   leaving its sticky user query outside paint containment. */
+.virtual-chat-turn-response > .virtual-chat-message-list-row {
   content-visibility: auto;
-  contain-intrinsic-size: auto 3200px;
+  contain-intrinsic-size: auto 200px;
 }
 
 .virtual-chat-window-spacer {

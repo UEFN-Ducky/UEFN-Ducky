@@ -9,6 +9,30 @@ import { CHAT_APPEARANCE_PREVIEW } from "../../views/settings/ChatResponsePrevie
 afterEach(cleanup);
 
 describe("rich reply rendering", () => {
+  it("mounts nested accordion content only while expanded", () => {
+    const text = JSON.stringify({ __rich: true, blocks: [{
+      type: "accordion", title: "Deferred report", blocks: [
+        { type: "paragraph", text: "**Details rendered on demand**" },
+      ],
+    }] });
+    const view = render(<RichContentRenderer text={text} />);
+    const toggle = view.getByRole("button", { name: "Deferred report" });
+    expect(view.container.querySelector(".rich-accordion-body")).toBeNull();
+    fireEvent.click(toggle);
+    expect(view.container.querySelector(".rich-accordion-body strong")?.textContent).toBe("Details rendered on demand");
+    fireEvent.click(toggle);
+    expect(view.container.querySelector(".rich-accordion-body")).toBeNull();
+  });
+
+  it("replaces a completed structured reply when its text changes", () => {
+    const view = render(<RichContentRenderer text={JSON.stringify({ __rich: true, blocks: [
+      { type: "paragraph", text: "Old report" },
+    ] })} />);
+    view.rerender(<RichContentRenderer text="New **answer**" />);
+    expect(view.container.textContent).not.toContain("Old report");
+    expect(view.container.querySelector("strong")?.textContent).toBe("answer");
+  });
+
   it("supports every Appearance color in ordinary replies without creating links", () => {
     const colors = ["blue", "purple", "green", "amber", "yellow", "red"];
     const text = colors.map((color) => `[**${color} label**](ducky:${color})`).join(" · ");

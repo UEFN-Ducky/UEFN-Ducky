@@ -106,11 +106,13 @@ const AT_BOTTOM_THRESHOLD_PX = 24;
  * with a height spacer so the scrollbar stays full-size. Boundaries are
  * index-based, so older chunks never change membership when new turns arrive.
  */
-const CHUNK_TURNS = 8;
-const OVERSCAN_CHUNKS = 2;
+// A turn can contain a whole report. Eight turns per chunk plus two chunks of
+// overscan kept up to 40 reports mounted, even in a modest 17-turn conversation.
+const CHUNK_TURNS = 1;
+const OVERSCAN_CHUNKS = 1;
 /** First-paint stand-in until a chunk is measured. Over-estimate so the thumb
  *  only grows as real heights land — never shrinks from back-fill. */
-const ESTIMATE_CHUNK_PX = 3200;
+const ESTIMATE_CHUNK_PX = 800;
 
 export function resetChatListMountCache(): void {
   /* height cache is per-list instance; kept so existing tests can call it */
