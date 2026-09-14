@@ -89,6 +89,26 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
 
+    def duckyos_list_pcs(self) -> dict[str, Any]:
+        from frontend.duckyos_account import DuckyOSAccountError, list_account_pcs
+
+        try:
+            return list_account_pcs()
+        except DuckyOSAccountError as exc:
+            return {"ok": False, "error": exc.message, "code": exc.code, "devices": []}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "code": "error", "devices": []}
+
+    def duckyos_revoke_pc(self, key_id: str = "") -> dict[str, Any]:
+        from frontend.duckyos_account import DuckyOSAccountError, revoke_account_pc
+
+        try:
+            return revoke_account_pc(str(key_id or ""))
+        except DuckyOSAccountError as exc:
+            return {"ok": False, "error": exc.message, "code": exc.code, "logged_in": False}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
+
     def duckyos_open_admin(self) -> None:
         import webbrowser
 

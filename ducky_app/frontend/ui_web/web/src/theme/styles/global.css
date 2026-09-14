@@ -722,6 +722,14 @@ input, textarea, select, button {
   padding: 24px;
   text-align: center;
 }
+.remote-window-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--amber, #e0af68);
+  animation: spin-slow 0.8s linear infinite;
+}
 .remote-window-overlay-msg {
   color: var(--fg);
   opacity: 0.7;

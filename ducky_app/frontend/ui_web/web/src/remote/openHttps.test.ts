@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { httpsUrl, openHttpsOnThisDevice, UD_OPEN_URL } from "./openHttps";
 
@@ -36,7 +37,7 @@ describe("openHttpsOnThisDevice", () => {
     const open = vi.fn();
     const postMessage = vi.fn();
     vi.stubGlobal("open", open);
-    vi.stubGlobal("parent", { postMessage });
+    vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage } as unknown as Window);
     expect(openHttpsOnThisDevice("https://example.com/x")).toBe(true);
     expect(postMessage).toHaveBeenCalledWith(
       { type: UD_OPEN_URL, url: "https://example.com/x" },

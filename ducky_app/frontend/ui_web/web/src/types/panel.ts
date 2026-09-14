@@ -2098,6 +2098,12 @@ export interface PanelApi {
   /** @deprecated Verification happens in the browser. */
   duckyos_submit_code(code?: string): Promise<DuckyOSAccountStatus>;
   duckyos_logout(): Promise<DuckyOSAccountStatus>;
+  duckyos_list_pcs?(): Promise<{
+    ok?: boolean;
+    error?: string;
+    devices?: Array<{ keyId?: string; name?: string; live?: boolean; last_seen?: number; mine?: boolean }>;
+  }>;
+  duckyos_revoke_pc?(key_id: string): Promise<DuckyOSAccountStatus & { ok?: boolean; error?: string }>;
   duckyos_open_admin(): Promise<void>;
   duckyos_teams_snapshot?(stale_seconds?: number): Promise<DuckyOSTeamsSnapshot>;
   duckyos_open_teams_site?(path?: string): Promise<{ ok?: boolean; url?: string; error?: string }>;

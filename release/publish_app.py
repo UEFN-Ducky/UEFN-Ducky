@@ -178,7 +178,7 @@ def write_version(version: str) -> None:
 
 def fetch_store_version(base: str) -> str | None:
     """Public collect/app-version — no API key required."""
-    url = base.rstrip("/") + "/api/plugins/uefn-ducky-store/collect/app-version"
+    url = base.rstrip("/") + "/api/v1/plugins/uefn-ducky-store/collect/app-version"
     req = urllib.request.Request(
         url,
         data=b"{}",

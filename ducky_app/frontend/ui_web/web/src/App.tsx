@@ -20,7 +20,7 @@ import { VerseDiagnosticsSettingsProvider } from "./contexts/VerseDiagnosticsSet
 import { TerminalsSettingsProvider } from "./contexts/TerminalsSettingsContext";
 import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsContext";
 import { Header } from "./components/Header";
-import { RemoteWindowOverlay } from "./components/RemoteWindowView";
+import { RemoteWindowLaunching, RemoteWindowOverlay, useUeFnLaunching } from "./components/RemoteWindowView";
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
 import { installDirectPeer } from "./remote/directPeer";
 import { isRemote } from "./hooks/usePanelApi";
@@ -117,6 +117,7 @@ export default function App() {
   }
   const [currentView, setCurrentView] = useState<ViewId>("chat");
   const [watchWindowId, setWatchWindowId] = useState("");
+  const uefnLaunching = useUeFnLaunching();
   // Desktop only: answer direct (tunnel-free) Remote View offers.
   useEffect(() => {
     if (isRemote()) return;
@@ -242,7 +243,11 @@ export default function App() {
 
         <main className="app-main">{mainContent}</main>
         {!isRemote() ? <RemoteWindowSender /> : null}
-        {watchWindowId ? <RemoteWindowOverlay hwnd={watchWindowId} /> : null}
+        {watchWindowId ? (
+          <RemoteWindowOverlay hwnd={watchWindowId} />
+        ) : uefnLaunching ? (
+          <RemoteWindowLaunching label={uefnLaunching} />
+        ) : null}
       </div>
       {versionCheck.status?.remote_version && (
         <UpdateAvailableModal

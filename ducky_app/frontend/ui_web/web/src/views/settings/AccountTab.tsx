@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
+import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import type { DuckyOSAccountStatus, RemoteAccessStatus } from "../../types/panel";
 import {
   ACCOUNT_LOGIN_EVENT,
@@ -20,6 +21,7 @@ function formatSessionLeft(seconds: number): string {
 }
 
 export function AccountTab() {
+  const { confirm } = useConfirmModal();
   const [status, setStatus] = useState<DuckyOSAccountStatus | null>(null);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE);
   const [busy, setBusy] = useState(false);
@@ -27,6 +29,7 @@ export function AccountTab() {
   const [loaded, setLoaded] = useState(false);
   const [pairingCode, setPairingCode] = useState("");
   const [remote, setRemote] = useState<RemoteAccessStatus | null>(null);
+  const [pcs, setPcs] = useState<Array<{ keyId?: string; name?: string; live?: boolean; mine?: boolean }>>([]);
 
   const applyStatus = useCallback((next: DuckyOSAccountStatus) => {
     setStatus(next);
@@ -49,6 +52,20 @@ export function AccountTab() {
       setRemote(await api.remote_status());
     } catch {
       setRemote(null);
+    }
+  }, []);
+
+  const refreshPcs = useCallback(async () => {
+    const api = getApi();
+    if (!api || typeof api.duckyos_list_pcs !== "function") {
+      setPcs([]);
+      return;
+    }
+    try {
+      const row = await api.duckyos_list_pcs();
+      setPcs(Array.isArray(row.devices) ? row.devices : []);
+    } catch {
+      setPcs([]);
     }
   }, []);
 
@@ -79,15 +96,18 @@ export function AccountTab() {
   useEffect(() => {
     if (!status?.logged_in) {
       setRemote(null);
+      setPcs([]);
       return;
     }
     void refreshRemote();
+    void refreshPcs();
     const starting = Boolean(remote?.enabled && !remote?.running);
     const id = window.setInterval(() => {
       void refreshRemote();
+      void refreshPcs();
     }, starting ? 3000 : 90_000);
     return () => window.clearInterval(id);
-  }, [status?.logged_in, remote?.enabled, remote?.running, refreshRemote]);
+  }, [status?.logged_in, remote?.enabled, remote?.running, refreshRemote, refreshPcs]);
 
   const run = async (fn: () => Promise<DuckyOSAccountStatus>) => {
     setBusy(true);
@@ -205,6 +225,53 @@ export function AccountTab() {
                 <span className="account-tab-warn">This PC is not connected yet</span>
               )}
             </p>
+            {pcs.length > 0 ? (
+              <ul className="account-tab-pc-list">
+                {pcs.map((pc) => (
+                  <li key={pc.keyId || pc.name}>
+                    <span>
+                      {pc.name || "UEFN Ducky"}
+                      {pc.mine ? " · this PC" : ""}
+                      {pc.live ? " · live" : " · offline"}
+                    </span>
+                    <button
+                      type="button"
+                      className="account-tab-btn account-tab-btn--danger"
+                      disabled={busy || !pc.keyId}
+                      onClick={() => {
+                        const keyId = String(pc.keyId || "");
+                        if (!keyId) return;
+                        void (async () => {
+                          const ok = await confirm({
+                            title: "Remove this PC?",
+                            message: "It will drop off uefnducky.org/ducky until you connect it again.",
+                            confirmLabel: "Remove",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          const api = getApi();
+                          if (!api?.duckyos_revoke_pc) return;
+                          setBusy(true);
+                          setError("");
+                          try {
+                            const next = await api.duckyos_revoke_pc(keyId);
+                            if (next.ok === false && next.error) setError(next.error);
+                            if (next.logged_in !== undefined) applyStatus(next);
+                            await refreshPcs();
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="account-tab-actions">
               <button type="button" className="account-tab-btn account-tab-btn--primary" onClick={() => openSite("/profile")}>
                 Open Profile in Browser

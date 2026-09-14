@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
+from pathlib import Path
 from typing import Any
 
 _KIND_ORDER = {"desktop": 0, "monitor": 1, "uefn": 2, "blender": 3, "app": 4}
@@ -121,12 +123,18 @@ def list_window_views() -> list[dict[str, Any]]:
 
 
 _UEFN_EDITOR_EXE = "UnrealEditorFortnite.exe"
+_UEFN_SHIPPING_EXE = "UnrealEditorFortnite-Win64-Shipping.exe"
+_UEFN_REL_EXES = (
+    Path("FortniteGame") / "Binaries" / "Win64" / _UEFN_SHIPPING_EXE,
+    Path("Engine") / "Binaries" / "Win64" / _UEFN_EDITOR_EXE,
+)
+_UEFN_NOT_FOUND = (
+    "Unreal Editor for Fortnite not found. Install UEFN from the Epic Games Launcher."
+)
 
 
 def uefnproject_path(root: str | os.PathLike[str] | None = None):
     """Resolve the current island's ``*.uefnproject`` (editor argv, not startfile)."""
-    from pathlib import Path
-
     if root is None:
         from frontend.settings import PanelSettings
 
@@ -145,12 +153,18 @@ def uefnproject_path(root: str | os.PathLike[str] | None = None):
 
 
 def kill_uefn_cmd() -> list[str]:
-    return ["taskkill", "/IM", _UEFN_EDITOR_EXE, "/F"]
+    return ["taskkill", "/IM", _UEFN_SHIPPING_EXE, "/IM", _UEFN_EDITOR_EXE, "/F"]
 
 
-def launch_uefn_cmd(exe: object, project: object | None = None) -> list[str]:
+def launch_uefn_cmd(
+    exe: object,
+    project: object | None = None,
+    extra: object = None,
+) -> list[str]:
     """Open UEFN through the editor binary — ``.uefnproject`` has no working association."""
     cmd = [str(exe)]
+    if extra:
+        cmd.extend(str(a) for a in extra if str(a).strip())
     if project:
         cmd.append(str(project))
     return cmd
@@ -172,31 +186,76 @@ def fortnite_roots_from_launcher_dat(raw: str) -> list[str]:
     return out
 
 
-def uefn_editor_exe() -> str:
-    from pathlib import Path
+def fortnite_studio_launch_from_item(raw: str) -> tuple[str, list[str]] | None:
+    """Parse one Epic ``.item``; Fortnite Studio only (never the game client)."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    app = str(data.get("AppName") or "")
+    display = str(data.get("DisplayName") or "").lower()
+    if app != "Fortnite_Studio" and "unreal editor for fortnite" not in display:
+        return None
+    loc = str(data.get("InstallLocation") or "").strip()
+    rel = str(data.get("LaunchExecutable") or "").replace("/", os.sep).strip()
+    if not loc or not rel:
+        return None
+    extra = [a for a in shlex.split(str(data.get("LaunchCommand") or ""), posix=False) if a]
+    return str(Path(loc) / rel), extra
 
-    rel = Path("Engine") / "Binaries" / "Win64" / _UEFN_EDITOR_EXE
-    pf = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
-    for root in (pf / "Epic Games" / "Fortnite",):
+
+def _editor_on_root(root: Path) -> str | None:
+    for rel in _UEFN_REL_EXES:
         cand = root / rel
         if cand.is_file():
             return str(cand)
-    programdata = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+    return None
+
+
+def _programdata() -> Path:
+    return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+
+
+def uefn_editor_launch() -> tuple[str, list[str]]:
+    """Studio shipping exe + Epic LaunchCommand args, then legacy editor exe."""
+    manifests = _programdata() / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    if manifests.is_dir():
+        for item in sorted(manifests.glob("*.item")):
+            try:
+                raw = item.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            parsed = fortnite_studio_launch_from_item(raw)
+            if parsed and Path(parsed[0]).is_file():
+                return parsed
+    roots: list[str] = [
+        str(Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Epic Games" / "Fortnite")
+    ]
     for dat in (
-        programdata / "Epic" / "UnrealEngineLauncher" / "LauncherInstalled.dat",
-        programdata / "Epic" / "EpicGamesLauncher" / "Data" / "LauncherInstalled.dat",
+        _programdata() / "Epic" / "UnrealEngineLauncher" / "LauncherInstalled.dat",
+        _programdata() / "Epic" / "EpicGamesLauncher" / "Data" / "LauncherInstalled.dat",
     ):
         try:
             raw = dat.read_text(encoding="utf-8")
         except OSError:
             continue
-        for loc in fortnite_roots_from_launcher_dat(raw):
-            cand = Path(loc) / rel
-            if cand.is_file():
-                return str(cand)
-    raise RuntimeError(
-        "Unreal Editor for Fortnite not found. Install UEFN from the Epic Games Launcher."
-    )
+        roots.extend(fortnite_roots_from_launcher_dat(raw))
+    seen: set[str] = set()
+    for loc in roots:
+        key = loc.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        found = _editor_on_root(Path(loc))
+        if found:
+            return found, []
+    raise RuntimeError(_UEFN_NOT_FOUND)
+
+
+def uefn_editor_exe() -> str:
+    return uefn_editor_launch()[0]
 
 
 def _kill_uefn_editor() -> bool:
@@ -213,15 +272,14 @@ def _kill_uefn_editor() -> bool:
     return r.returncode == 0
 
 
-def _start_uefn(exe: object, project: object | None = None) -> None:
+def _start_uefn(exe: object, project: object | None = None, extra: object = None) -> None:
     import subprocess
-    from pathlib import Path
 
     flags = int(getattr(subprocess, "DETACHED_PROCESS", 0)) | int(
         getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     )
     subprocess.Popen(
-        launch_uefn_cmd(exe, project),
+        launch_uefn_cmd(exe, project, extra),
         cwd=str(Path(str(exe)).parent),
         close_fds=True,
         creationflags=flags,
@@ -229,12 +287,12 @@ def _start_uefn(exe: object, project: object | None = None) -> None:
 
 
 def launch_uefn_project() -> dict[str, Any]:
-    exe = uefn_editor_exe()
+    exe, extra = uefn_editor_launch()
     try:
         path = uefnproject_path()
     except RuntimeError:
         path = None
-    _start_uefn(exe, path)
+    _start_uefn(exe, path, extra)
     return {"ok": True, "exe": exe, "path": str(path) if path else ""}
 
 

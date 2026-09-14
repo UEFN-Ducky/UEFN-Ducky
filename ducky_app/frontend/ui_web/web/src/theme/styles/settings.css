@@ -2557,6 +2557,23 @@
   gap: 6px;
 }
 
+.account-tab-pc-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.account-tab-pc-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .account-tab-session-list li {
   font-size: 13px;
   color: var(--muted);

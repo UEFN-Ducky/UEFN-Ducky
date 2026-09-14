@@ -128,6 +128,8 @@ _PUBLIC_METHODS = frozenset({
     'duckyos_get_status',
     'duckyos_login',
     'duckyos_logout',
+    'duckyos_list_pcs',
+    'duckyos_revoke_pc',
     'duckyos_open_admin',
     'duckyos_open_teams_site',
     'duckyos_store_catalog',

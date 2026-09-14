@@ -244,6 +244,35 @@ def test_plugin_collect_404_never_mentions_plugin() -> None:
             raise AssertionError("expected DuckyOSAccountError")
 
 
+def test_plugin_collect_posts_v1_only() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    seen: list[str] = []
+
+    def _req(method, path, body=None, **_kw):
+        seen.append(path)
+        return (200, {"payload": {"ok": True}}, "")
+
+    with (
+        patch.object(acc, "api_request", side_effect=_req),
+        patch.object(acc, "_load_blob", return_value={"base_url": "https://uefnducky.org"}),
+    ):
+        acc._plugin_collect(
+            "uefn-ducky",
+            "desktop-device-start",
+            {},
+            unavailable_code="auth_unavailable",
+            unavailable_msg="",
+            error_code="device_start_failed",
+            allow_anonymous=True,
+        )
+    assert seen == ["/api/v1/plugins/uefn-ducky/collect/desktop-device-start"]
+    assert all("/api/v1/plugins/" in p for p in seen)
+    assert not any(p.startswith("/api/plugins/") for p in seen)
+
+
 def test_publish_device_presence_offline_when_remote_off() -> None:
     from unittest.mock import patch
 
@@ -380,6 +409,71 @@ def test_tool_blocked_by_caps_see_toggles() -> None:
         assert acc.tool_blocked_by_caps("blender_status") is None
 
 
+def test_list_account_pcs_marks_mine() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    def _collect(_plugin, event, body=None, **_kw):
+        assert event == "desktop-devices"
+        return {
+            "devices": [
+                {"keyId": "k1", "name": "UEFN Ducky on Win32", "live": False, "last_seen": 1},
+                {"keyId": "k2", "name": "Other", "live": True, "last_seen": 2},
+            ]
+        }
+
+    with (
+        patch.object(acc, "_load_blob", return_value={"device_key_id": "k1"}),
+        patch.object(acc, "_plugin_collect", side_effect=_collect),
+    ):
+        out = acc.list_account_pcs()
+    assert out["ok"] is True
+    assert out["devices"][0]["mine"] is True
+    assert out["devices"][1]["mine"] is False
+
+
+def test_revoke_account_pc_clears_this_device() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    blob = {"device_key": "tok", "device_key_id": "k1", "base_url": "https://uefnducky.org"}
+    saved: list[dict] = []
+
+    with (
+        patch.object(acc, "_load_blob", return_value=blob),
+        patch.object(acc, "_save_blob", side_effect=saved.append),
+        patch.object(acc, "_plugin_collect", return_value={"ok": True}),
+        patch.object(acc, "stop_presence_heartbeat"),
+        patch.object(acc, "stop_rpc_waiter"),
+        patch.object(acc, "get_status", return_value={"logged_in": True, "device_key_active": False}),
+        patch("frontend.remote_tunnel.stop_remote_tunnel"),
+        patch.object(acc, "publish_device_presence"),
+    ):
+        out = acc.revoke_account_pc("k1")
+    assert out["ok"] is True
+    assert "device_key" not in saved[-1]
+    assert "device_key_id" not in saved[-1]
+
+
+def test_revoke_device_key_also_collects() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    seen: list[str] = []
+
+    def _collect(_plugin, event, body=None, **_kw):
+        seen.append(event)
+        return {"ok": True}
+
+    blob = {"device_key_id": "k1", "device_key": "tok", "base_url": "https://uefnducky.org"}
+    with patch.object(acc, "_plugin_collect", side_effect=_collect):
+        acc._revoke_device_key(blob)
+    assert seen == ["desktop-device-revoke"]
+
+
 if __name__ == "__main__":
     test_pkce_pair_s256()
     test_device_login_polls_until_token()
@@ -396,4 +490,8 @@ if __name__ == "__main__":
     test_remote_endpoint_waits_until_tunnel_registers()
     test_remote_deny_covers_native_and_secret_paths()
     test_publish_device_presence_offline_when_remote_off()
+    test_plugin_collect_posts_v1_only()
+    test_list_account_pcs_marks_mine()
+    test_revoke_account_pc_clears_this_device()
+    test_revoke_device_key_also_collects()
     print("ok")

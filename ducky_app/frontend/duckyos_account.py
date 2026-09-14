@@ -320,16 +320,28 @@ def mint_device_key(blob: dict[str, Any] | None = None) -> dict[str, Any]:
 
 def _revoke_device_key(blob: dict[str, Any]) -> None:
     key_id = str(blob.get("device_key_id") or "").strip()
-    base = str(blob.get("base_url") or "").rstrip("/")
-    if not key_id or not base or not blob.get("session_value"):
+    if not key_id:
         return
+    base = str(blob.get("base_url") or "").rstrip("/")
+    if base and blob.get("session_value"):
+        try:
+            _request(
+                "DELETE",
+                f"{base}/api/auth/api-keys/{key_id}",
+                cookie_header=_session_cookie_header(blob),
+                csrf_token=str(blob.get("csrf_value") or ""),
+                timeout=12.0,
+            )
+        except DuckyOSAccountError:
+            pass
     try:
-        _request(
-            "DELETE",
-            f"{base}/api/auth/api-keys/{key_id}",
-            cookie_header=_session_cookie_header(blob),
-            csrf_token=str(blob.get("csrf_value") or ""),
-            timeout=12.0,
+        _plugin_collect(
+            "uefn-ducky",
+            "desktop-device-revoke",
+            {"keyId": key_id},
+            unavailable_code="rpc_unavailable",
+            unavailable_msg="Remote mailbox plugin is not active on this tenant yet.",
+            error_code="revoke_failed",
         )
     except DuckyOSAccountError:
         pass
@@ -514,8 +526,8 @@ def logout() -> dict[str, Any]:
     stop_rpc_waiter()
     blob = _load_blob()
     base = str(blob.get("base_url") or "").rstrip("/")
+    _revoke_device_key(blob)
     if base and blob.get("session_value"):
-        _revoke_device_key(blob)
         try:
             _request(
                 "POST",
@@ -528,6 +540,85 @@ def logout() -> dict[str, Any]:
             pass
     _clear_blob()
     return get_status()
+
+
+def list_account_pcs() -> dict[str, Any]:
+    """PCs linked to this Ducky account (website + this panel)."""
+    blob = _load_blob()
+    mine = str(blob.get("device_key_id") or "").strip()
+    row = _plugin_collect(
+        "uefn-ducky",
+        "desktop-devices",
+        {},
+        unavailable_code="rpc_unavailable",
+        unavailable_msg="Can't load PCs right now.",
+        error_code="devices_failed",
+    )
+    devices = []
+    raw = row.get("devices") if isinstance(row, dict) else None
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            key_id = str(item.get("keyId") or item.get("key_id") or "").strip()
+            devices.append(
+                {
+                    "keyId": key_id,
+                    "name": str(item.get("name") or "UEFN Ducky"),
+                    "live": bool(item.get("live")),
+                    "last_seen": int(item.get("last_seen") or 0),
+                    "mine": bool(mine and key_id == mine),
+                }
+            )
+    return {"ok": True, "devices": devices}
+
+
+def revoke_account_pc(key_id: str = "") -> dict[str, Any]:
+    """Drop one linked PC. If it is this panel, clear the local device key too."""
+    key_id = str(key_id or "").strip()
+    if not key_id:
+        raise DuckyOSAccountError("No PC selected", code="no_key")
+    blob = _load_blob()
+    mine = str(blob.get("device_key_id") or "").strip()
+    base = str(blob.get("base_url") or "").rstrip("/")
+    if base and blob.get("session_value"):
+        try:
+            _request(
+                "DELETE",
+                f"{base}/api/auth/api-keys/{key_id}",
+                cookie_header=_session_cookie_header(blob),
+                csrf_token=str(blob.get("csrf_value") or ""),
+                timeout=12.0,
+            )
+        except DuckyOSAccountError:
+            pass
+    _plugin_collect(
+        "uefn-ducky",
+        "desktop-device-revoke",
+        {"keyId": key_id},
+        unavailable_code="rpc_unavailable",
+        unavailable_msg="Can't remove that PC right now.",
+        error_code="revoke_failed",
+    )
+    if mine and key_id == mine:
+        blob = _load_blob()
+        blob.pop("device_key", None)
+        blob.pop("device_key_id", None)
+        blob["device_key_error"] = ""
+        _save_blob(blob)
+        stop_presence_heartbeat()
+        stop_rpc_waiter()
+        try:
+            from frontend.remote_tunnel import stop_remote_tunnel
+
+            stop_remote_tunnel(deprovision=True)
+        except Exception:
+            pass
+        try:
+            publish_device_presence(live=False)
+        except Exception:
+            pass
+    return {"ok": True, **get_status()}
 
 
 def get_status() -> dict[str, Any]:
@@ -1034,7 +1125,7 @@ def send_presence_heartbeat() -> bool:
     try:
         status, _parsed, _raw = api_request(
             "POST",
-            "/api/plugins/uefn-ducky-store/collect/presence",
+            "/api/v1/plugins/uefn-ducky-store/collect/presence",
             body,
             prefer_bearer=True,
             timeout=12.0,
@@ -1347,7 +1438,7 @@ def _plugin_collect(
 ) -> dict[str, Any]:
     status, parsed, raw = api_request(
         "POST",
-        f"/api/plugins/{plugin_id}/collect/{event}",
+        f"/api/v1/plugins/{plugin_id}/collect/{event}",
         body or {},
         prefer_bearer=True,
         allow_anonymous=allow_anonymous,

@@ -216,6 +216,42 @@ function useViewerActive(): boolean {
 }
 
 const LAUNCH_UEFN_VALUE = "__launch_uefn__";
+const LAUNCH_WAIT_MS = 120_000;
+
+let uefnLaunchLabel = "";
+const launchSubs = new Set<() => void>();
+
+function emitLaunch() {
+  launchSubs.forEach((fn) => fn());
+}
+
+function setUeFnLaunching(label: string) {
+  if (uefnLaunchLabel === label) return;
+  uefnLaunchLabel = label;
+  emitLaunch();
+}
+
+export function useUeFnLaunching(): string {
+  return useSyncExternalStore(
+    (onChange) => {
+      launchSubs.add(onChange);
+      return () => launchSubs.delete(onChange);
+    },
+    () => uefnLaunchLabel,
+    () => uefnLaunchLabel,
+  );
+}
+
+export function RemoteWindowLaunching({ label }: { label: string }) {
+  return (
+    <div className="remote-window-overlay" role="status" aria-live="polite">
+      <div className="remote-window-status">
+        <span className="remote-window-spinner" aria-hidden />
+        <p className="remote-window-overlay-msg">Launching {label}…</p>
+      </div>
+    </div>
+  );
+}
 
 export function RemoteWindowSelect({
   value,
@@ -231,6 +267,17 @@ export function RemoteWindowSelect({
   const [busy, setBusy] = useState(false);
   const pendingUeFn = useRef(false);
   const seenUeFn = useRef<Set<string>>(new Set());
+  const waitTimer = useRef(0);
+
+  const stopWaiting = useCallback(() => {
+    pendingUeFn.current = false;
+    setBusy(false);
+    setUeFnLaunching("");
+    if (waitTimer.current) {
+      window.clearTimeout(waitTimer.current);
+      waitTimer.current = 0;
+    }
+  }, []);
 
   const applyRows = useCallback(
     (next: WindowViewRow[]) => {
@@ -238,14 +285,14 @@ export function RemoteWindowSelect({
       if (pendingUeFn.current) {
         const fresh = uefn.find((row) => !seenUeFn.current.has(row.id));
         if (fresh) {
-          pendingUeFn.current = false;
+          stopWaiting();
           onChange(fresh.id);
         }
       }
       seenUeFn.current = new Set(uefn.map((row) => row.id));
       setRows(next);
     },
-    [onChange],
+    [onChange, stopWaiting],
   );
 
   const load = useCallback(async () => {
@@ -263,9 +310,10 @@ export function RemoteWindowSelect({
   useEffect(() => {
     if (!isRemote()) return;
     void load();
-    const id = window.setInterval(() => void load(), 2000);
+    const ms = busy ? 800 : 2000;
+    const id = window.setInterval(() => void load(), ms);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [busy, load]);
 
   const runUeFn = useCallback(
     async (kind: "launch" | "restart") => {
@@ -283,22 +331,33 @@ export function RemoteWindowSelect({
           danger: true,
         });
         if (!ok) return;
+        onChange("");
       }
+      const label = projectName.trim() || "UEFN";
       setBusy(true);
+      setUeFnLaunching(label);
       pendingUeFn.current = true;
       seenUeFn.current = new Set(rows.filter((row) => row.kind === "uefn").map((row) => row.id));
+      if (waitTimer.current) window.clearTimeout(waitTimer.current);
+      waitTimer.current = window.setTimeout(() => {
+        if (!pendingUeFn.current) return;
+        stopWaiting();
+        void alert("UEFN didn't open a window. Check the desktop — it may still be starting.");
+      }, LAUNCH_WAIT_MS);
       try {
         await fn();
       } catch (e) {
-        pendingUeFn.current = false;
+        stopWaiting();
         await alert(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-        void load();
       }
+      void load();
     },
-    [alert, confirm, load, rows],
+    [alert, confirm, load, onChange, projectName, rows, stopWaiting],
   );
+
+  useEffect(() => () => {
+    if (waitTimer.current) window.clearTimeout(waitTimer.current);
+  }, []);
 
   if (!isRemote()) return null;
 

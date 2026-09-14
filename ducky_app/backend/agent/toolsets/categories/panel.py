@@ -54,6 +54,7 @@ EXTENDED_TOOLS = frozenset(
         "ducky_get_local_project",
         "ducky_list_projects",
         "ducky_set_project",
+        "ducky_launch_uefn",
         "ducky_sync_project_to_uefn",
         "ducky_get_errors",
         "ducky_agent_transcript",

@@ -23,7 +23,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-FEED_PATH = "/api/plugins/uefn-ducky-store/collect/app-version"
+FEED_PATH = "/api/v1/plugins/uefn-ducky-store/collect/app-version"
 
 
 def _version_from_name(name: str) -> str:

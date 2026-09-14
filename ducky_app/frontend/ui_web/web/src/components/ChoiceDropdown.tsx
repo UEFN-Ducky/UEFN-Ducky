@@ -213,6 +213,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
                         e.preventDefault();
                         e.stopPropagation();
                         opt.action?.onClick();
+                        setOpen(false);
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
                     >

@@ -355,6 +355,18 @@ def ducky_set_project(path: str = "", name: str = "", pretty: bool = False) -> s
 
 
 @mcp.tool()
+def ducky_launch_uefn(pretty: bool = False) -> str:
+    """Start Unreal Editor for Fortnite with the panel's current island.
+
+    Host-side Windows launch (Fortnite Studio shipping exe + ``.uefnproject`` argv).
+    Use when UEFN is closed. Does not restart a running editor.
+    """
+    from frontend.window_view import launch_uefn_project
+
+    return tool_json(launch_uefn_project(), pretty=pretty)
+
+
+@mcp.tool()
 def ducky_sync_project_to_uefn(pretty: bool = False) -> str:
     """Point the panel's active project at whatever project UEFN currently has open.
 

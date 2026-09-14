@@ -3,6 +3,7 @@ from __future__ import annotations
 from frontend.window_view import (
     bring_to_front,
     fortnite_roots_from_launcher_dat,
+    fortnite_studio_launch_from_item,
     handle_stream_message,
     kind_for,
     kill_uefn_cmd,
@@ -10,6 +11,8 @@ from frontend.window_view import (
     launch_uefn_project,
     map_norm_to_screen,
     restart_uefn_project,
+    uefn_editor_exe,
+    uefn_editor_launch,
     uefnproject_path,
     window_box,
     window_fit_size,
@@ -250,7 +253,14 @@ def test_uefnproject_path_no_settings(monkeypatch) -> None:
 
 def test_kill_uefn_cmd_is_editor_only() -> None:
     cmd = kill_uefn_cmd()
-    assert cmd == ["taskkill", "/IM", "UnrealEditorFortnite.exe", "/F"]
+    assert cmd == [
+        "taskkill",
+        "/IM",
+        "UnrealEditorFortnite-Win64-Shipping.exe",
+        "/IM",
+        "UnrealEditorFortnite.exe",
+        "/F",
+    ]
     assert "UEFN-Ducky" not in " ".join(cmd)
 
 
@@ -259,6 +269,9 @@ def test_launch_uefn_cmd_goes_through_editor() -> None:
     island = r"C:\islands\Demo.uefnproject"
     assert launch_uefn_cmd(exe, island) == [exe, island]
     assert launch_uefn_cmd(exe) == [exe]
+    extra = ["-obfuscationid=abc"]
+    shipping = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
+    assert launch_uefn_cmd(shipping, island, extra) == [shipping, extra[0], island]
 
 
 def test_fortnite_roots_from_launcher_dat() -> None:
@@ -270,18 +283,130 @@ def test_fortnite_roots_from_launcher_dat() -> None:
     assert fortnite_roots_from_launcher_dat("not-json") == []
 
 
+def test_fortnite_studio_launch_from_item() -> None:
+    raw = """{
+      "AppName": "Fortnite_Studio",
+      "DisplayName": "Unreal Editor for Fortnite",
+      "InstallLocation": "C:\\\\Epic\\\\Fortnite",
+      "LaunchExecutable": "FortniteGame/Binaries/Win64/UnrealEditorFortnite-Win64-Shipping.exe",
+      "LaunchCommand": " -obfuscationid=abc"
+    }"""
+    exe, extra = fortnite_studio_launch_from_item(raw) or ("", [])
+    assert exe.replace("/", "\\").endswith(
+        "Fortnite\\FortniteGame\\Binaries\\Win64\\UnrealEditorFortnite-Win64-Shipping.exe"
+    )
+    assert extra == ["-obfuscationid=abc"]
+    assert fortnite_studio_launch_from_item(
+        '{"AppName":"Fortnite","InstallLocation":"C:\\\\F",'
+        '"LaunchExecutable":"FortniteGame/Binaries/Win64/FortniteClient-Win64-Shipping.exe"}'
+    ) is None
+    assert fortnite_studio_launch_from_item("not-json") is None
+
+
+def _touch_editor(root, *parts: str):
+    path = root.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    return path
+
+
+def test_uefn_editor_launch_prefers_studio_item(tmp_path, monkeypatch) -> None:
+    import json
+
+    pd = tmp_path / "ProgramData"
+    manifests = pd / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    manifests.mkdir(parents=True)
+    root = tmp_path / "Fortnite"
+    exe = _touch_editor(
+        root,
+        "FortniteGame",
+        "Binaries",
+        "Win64",
+        "UnrealEditorFortnite-Win64-Shipping.exe",
+    )
+    (manifests / "studio.item").write_text(
+        json.dumps(
+            {
+                "AppName": "Fortnite_Studio",
+                "DisplayName": "Unreal Editor for Fortnite",
+                "InstallLocation": str(root),
+                "LaunchExecutable": "FortniteGame/Binaries/Win64/UnrealEditorFortnite-Win64-Shipping.exe",
+                "LaunchCommand": " -obfuscationid=abc",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROGRAMDATA", str(pd))
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path / "pf"))
+    found, extra = uefn_editor_launch()
+    assert found == str(exe)
+    assert extra == ["-obfuscationid=abc"]
+    assert uefn_editor_exe() == str(exe)
+
+
+def test_uefn_editor_launch_shipping_on_root(tmp_path, monkeypatch) -> None:
+    pf = tmp_path / "pf"
+    exe = _touch_editor(
+        pf / "Epic Games" / "Fortnite",
+        "FortniteGame",
+        "Binaries",
+        "Win64",
+        "UnrealEditorFortnite-Win64-Shipping.exe",
+    )
+    monkeypatch.setenv("PROGRAMFILES", str(pf))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "empty-pd"))
+    assert uefn_editor_exe() == str(exe)
+
+
+def test_uefn_editor_launch_legacy_engine_exe(tmp_path, monkeypatch) -> None:
+    pf = tmp_path / "pf"
+    exe = _touch_editor(
+        pf / "Epic Games" / "Fortnite",
+        "Engine",
+        "Binaries",
+        "Win64",
+        "UnrealEditorFortnite.exe",
+    )
+    monkeypatch.setenv("PROGRAMFILES", str(pf))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "empty-pd"))
+    assert uefn_editor_exe() == str(exe)
+
+
+def test_uefn_editor_launch_shipping_beats_legacy(tmp_path, monkeypatch) -> None:
+    pf = tmp_path / "pf"
+    root = pf / "Epic Games" / "Fortnite"
+    shipping = _touch_editor(
+        root,
+        "FortniteGame",
+        "Binaries",
+        "Win64",
+        "UnrealEditorFortnite-Win64-Shipping.exe",
+    )
+    _touch_editor(root, "Engine", "Binaries", "Win64", "UnrealEditorFortnite.exe")
+    monkeypatch.setenv("PROGRAMFILES", str(pf))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "empty-pd"))
+    assert uefn_editor_exe() == str(shipping)
+
+
 def test_launch_uefn_project_uses_editor(tmp_path, monkeypatch) -> None:
     import frontend.window_view as wv
 
     island = tmp_path / "Demo.uefnproject"
     island.write_text("{}", encoding="utf-8")
-    exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
+    exe = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
+    extra = ["-obfuscationid=abc"]
     started: list[tuple] = []
-    monkeypatch.setattr(wv, "uefn_editor_exe", lambda: exe)
+    monkeypatch.setattr(wv, "uefn_editor_launch", lambda: (exe, extra))
     monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
-    monkeypatch.setattr(wv, "_start_uefn", lambda editor, project=None: started.append((editor, str(project) if project else "")))
+    monkeypatch.setattr(
+        wv,
+        "_start_uefn",
+        lambda editor, project=None, extra=None: started.append(
+            (editor, str(project) if project else "", extra)
+        ),
+    )
     assert launch_uefn_project() == {"ok": True, "exe": exe, "path": str(island)}
-    assert started == [(exe, str(island))]
+    assert started == [(exe, str(island), extra)]
 
 
 def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:
@@ -289,12 +414,16 @@ def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None
 
     island = tmp_path / "Demo.uefnproject"
     island.write_text("{}", encoding="utf-8")
-    exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
+    exe = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
     order: list[str] = []
     monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: order.append("kill") or True)
-    monkeypatch.setattr(wv, "uefn_editor_exe", lambda: exe)
+    monkeypatch.setattr(wv, "uefn_editor_launch", lambda: (exe, []))
     monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
-    monkeypatch.setattr(wv, "_start_uefn", lambda editor, project=None: order.append(f"start:{editor}:{project}"))
+    monkeypatch.setattr(
+        wv,
+        "_start_uefn",
+        lambda editor, project=None, extra=None: order.append(f"start:{editor}:{project}"),
+    )
     out = restart_uefn_project()
     assert out["ok"] is True and out["killed"] is True
     assert order == ["kill", f"start:{exe}:{island}"]

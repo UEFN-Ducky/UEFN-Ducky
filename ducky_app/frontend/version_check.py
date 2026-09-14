@@ -35,7 +35,7 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 
 def version_check_url() -> str:
-    return f"{update_base_url()}/api/plugins/uefn-ducky-store/collect/app-version"
+    return f"{update_base_url()}/api/v1/plugins/uefn-ducky-store/collect/app-version"
 
 
 def download_page_url() -> str:
@@ -139,7 +139,7 @@ def absolute_installer_url(url: str | None, *, base_url: str) -> str | None:
 def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(payload, error)`` for the Store app-version collect endpoint."""
     base = update_base_url()
-    url = f"{base}/api/plugins/uefn-ducky-store/collect/app-version"
+    url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
     # Collect endpoints require Origin to match Host (same as duckyos_account.api_request).
     req = urllib.request.Request(
         url,
