@@ -11,6 +11,7 @@ import {
 function readRightRailState() {
   const snapshot = readDockSnapshot(WINDOW_ID);
   return {
+    leftOpen: snapshot.leftRailOpen,
     open: snapshot.rightRailOpen,
     hasPanels: panelsOnSide(snapshot, "right").length > 0,
     leftRailEnabled: snapshot.leftRailEnabled !== false,
@@ -45,6 +46,7 @@ export function useRightRailOpen() {
   }, []);
 
   return {
+    leftRailOpen: state.leftOpen,
     rightRailOpen: state.open,
     hasRightPanels: state.hasPanels,
     leftRailEnabled: state.leftRailEnabled,

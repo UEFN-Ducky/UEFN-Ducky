@@ -125,6 +125,24 @@ def _invalidate_workspace_folders_cache() -> None:
     invalidate_workspace_folders_cache()
 
 
+def _ensure_content_workspace_folder(folders: list[dict[str, str]], root: Path) -> list[dict[str, str]]:
+    """Keep the island Content dir in the workspace list so the sidebar has a writable root."""
+    content = root / CONTENT_DIR
+    if not content.is_dir():
+        return folders
+    try:
+        resolved = content.resolve()
+    except OSError:
+        return folders
+    for folder in folders:
+        try:
+            if Path(folder["path"]).resolve() == resolved:
+                return folders
+        except OSError:
+            continue
+    return [{"name": root.name, "path": str(resolved)}, *folders]
+
+
 def _workspace_folders() -> list[dict[str, str]]:
     root = _project_root().resolve()
     key = str(root)
@@ -143,7 +161,43 @@ def _workspace_folders() -> list[dict[str, str]]:
         if not path:
             continue
         out.append({"name": name or Path(path).name, "path": path})
-    _workspace_folders_cache[key] = out
+    out = _ensure_content_workspace_folder(out, root)
+    # ponytail: empty discover (half-written .code-workspace) must not stick;
+    # next read retries instead of locking the sidebar on "no folders".
+    if out:
+        _workspace_folders_cache[key] = out
+    return out
+
+
+def _other_project_content_folders() -> list[dict[str, str]]:
+    """Recent islands' Content dirs, excluding the active project (All projects tree)."""
+    try:
+        current = _project_root().resolve()
+    except ValueError:
+        return []
+    from frontend.ui_web.project_switch import list_panel_projects
+
+    out: list[dict[str, str]] = []
+    for item in list_panel_projects():
+        raw = str(item.get("path") or "").strip()
+        if not raw:
+            continue
+        try:
+            path = Path(raw).resolve()
+        except OSError:
+            continue
+        if path == current:
+            continue
+        content = path / CONTENT_DIR
+        if not content.is_dir():
+            continue
+        try:
+            resolved = str(content.resolve())
+        except OSError:
+            continue
+        name = str(item.get("name") or "").strip() or path.name
+        out.append({"name": name, "path": resolved})
+    out.sort(key=lambda row: row["name"].lower())
     return out
 
 
@@ -266,6 +320,25 @@ def _is_under_any_workspace_folder(target: Path) -> bool:
     for folder_path in _workspace_folder_paths():
         if _is_path_under(resolved, folder_path):
             return True
+    for folder in _other_project_content_folders():
+        try:
+            if _is_path_under(resolved, Path(folder["path"])):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _is_under_listed_content(target: Path) -> bool:
+    """True for the active island Content tree or another recent project's Content."""
+    if _is_under_content(target):
+        return True
+    for folder in _other_project_content_folders():
+        try:
+            if _is_path_under(target, Path(folder["path"])):
+                return True
+        except OSError:
+            continue
     return False
 
 
@@ -620,14 +693,28 @@ def list_project_files(relative_path: str = "") -> dict[str, object]:
 
     if not rel or rel.lower() == WORKSPACE_ROOTS_PATH.lower():
         entries: list[dict[str, str | bool]] = []
+        root_name = _project_root().name
         for i, folder in enumerate(_workspace_folders()):
             folder_path = Path(folder["path"])
+            read_only = not _is_content_folder_path(folder_path)
             entries.append(
                 {
-                    "name": folder["name"],
+                    "name": root_name if not read_only else folder["name"],
                     "path": f"{WS_PATH_PREFIX}{i}",
                     "is_dir": folder_path.is_dir(),
-                    "read_only": not _is_content_folder_path(folder_path),
+                    "read_only": read_only,
+                    "kind": "core" if read_only else "content",
+                }
+            )
+        for extra in _other_project_content_folders():
+            folder_path = Path(extra["path"])
+            entries.append(
+                {
+                    "name": extra["name"],
+                    "path": _encode_abs_path(folder_path),
+                    "is_dir": folder_path.is_dir(),
+                    "read_only": True,
+                    "kind": "project",
                 }
             )
         return {"path": WORKSPACE_ROOTS_PATH, "entries": entries}
@@ -647,7 +734,7 @@ def list_project_files(relative_path: str = "") -> dict[str, object]:
             raise ValueError(f"Path escapes workspace folders: {relative_path!r}")
         if not target.is_dir():
             raise ValueError(f"Not a directory: {relative_path}")
-        entries = _list_directory_entries(target, content_tree=False)
+        entries = _list_directory_entries(target, content_tree=_is_under_listed_content(target))
         return {"path": rel, "entries": entries}
 
     target = _resolve_relative(rel)

@@ -61,6 +61,7 @@ export function useWorkspaceDockLayout(windowId: string) {
 
   useEffect(() => {
     const flush = () => {
+      if (hydratingRef.current) return;
       persistDockSnapshot(snapshotRef.current, windowId);
       flushDockSnapshotToDisk(windowId);
     };
@@ -102,17 +103,23 @@ export function useWorkspaceDockLayout(windowId: string) {
     };
   }, [storageKey, windowId]);
 
+  const persistIfReady = useCallback(
+    (next: WorkspaceDockSnapshot) => {
+      if (hydratingRef.current) return;
+      persistDockSnapshot(next, windowId);
+    },
+    [windowId],
+  );
+
   const commit = useCallback(
     (updater: (prev: WorkspaceDockSnapshot) => WorkspaceDockSnapshot) => {
       setSnapshot((prev) => {
         const next = updater(prev);
-        if (next !== prev) {
-          persistDockSnapshot(next, windowId);
-        }
+        if (next !== prev) persistIfReady(next);
         return next;
       });
     },
-    [windowId],
+    [persistIfReady],
   );
 
   const leftPanels = panelsOnSide(snapshot, "left");
@@ -148,11 +155,11 @@ export function useWorkspaceDockLayout(windowId: string) {
   const persistRailWidth = useCallback(() => {
     liveResizeRef.current = false;
     const next = snapshotRef.current;
-    persistDockSnapshot(next, windowId);
+    persistIfReady(next);
     setSnapshot((prev) =>
       prev.leftWidth === next.leftWidth && prev.rightWidth === next.rightWidth ? prev : next,
     );
-  }, [windowId]);
+  }, [persistIfReady]);
 
   const toggleCollapsed = useCallback(
     (side: DockSide, id: DockPanelId) => {
@@ -243,8 +250,8 @@ export function useWorkspaceDockLayout(windowId: string) {
   );
 
   const persistSplit = useCallback(() => {
-    persistDockSnapshot(snapshotRef.current, windowId);
-  }, [windowId]);
+    persistIfReady(snapshotRef.current);
+  }, [persistIfReady]);
 
   const setFocusedPanel = useCallback(
     (side: DockSide, id: DockPanelId) => {

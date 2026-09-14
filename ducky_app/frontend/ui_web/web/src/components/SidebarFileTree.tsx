@@ -32,9 +32,10 @@ import {
 } from "react";
 import { Icons } from "../icons/Icons";
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
-import { isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName } from "../verse-editor/utils/isVerseFile";
+import { isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName, ABS_PATH_PREFIX } from "../verse-editor/utils/isVerseFile";
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 import { getApi } from "../hooks/usePanelApi";
+import { onApiReady } from "../hooks/onApiReady";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { useUndoHistoryOptional } from "../navigation/UndoHistoryContext";
 import { useScopedClass } from "../utils/scopedCss";
@@ -78,6 +79,7 @@ import {
   entryNameMatches,
   shouldShowFileEntry,
 } from "../utils/fileTreeFilter";
+import { contentTreeVisibleEntries, isProjectContentRoot } from "../utils/contentTreeProjects";
 import { useProjectFileIndex } from "../hooks/useProjectFileIndex";
 import { useSidebarDragPointerTracking } from "../hooks/useSidebarDragPointerTracking";
 import type { DropPosition } from "../utils/sidebarTree";
@@ -167,6 +169,7 @@ type SelectMods = { ctrl: boolean; shift: boolean };
 interface SidebarFileTreeProps {
   projectSlug: string;
   refreshToken?: number;
+  allProjects?: boolean;
   isActive?: boolean;
   activeFilePath?: string;
   parentPath: string;
@@ -759,6 +762,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     {
       projectSlug,
       refreshToken = 0,
+      allProjects = false,
       isActive = false,
       activeFilePath,
       parentPath,
@@ -798,7 +802,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const fileTreeSplitContainerRef = useRef<HTMLDivElement | null>(null);
     const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
     const [error, setError] = useState<string | null>(null);
-    const [loadingRoot, setLoadingRoot] = useState(false);
+    const [loadingRoot, setLoadingRoot] = useState(true);
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [dropHint, setDropHint] = useState<DropHint | null>(null);
     // Highlight state for an in-progress Explorer file drop onto the Content root.
@@ -847,10 +851,11 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       [filterQuery, filtering, indexedFiles, cache],
     );
 
-    const { contentRootEntry, workspaceRootEntries } = useMemo(() => {
+    const { contentRootEntry, workspaceRootEntries, projectRootEntries } = useMemo(() => {
       const content = rootEntries.find((entry) => entry.read_only === false) ?? null;
-      const workspace = rootEntries.filter((entry) => entry !== content);
-      return { contentRootEntry: content, workspaceRootEntries: workspace };
+      const projectRoots = rootEntries.filter(isProjectContentRoot);
+      const workspace = rootEntries.filter((entry) => entry !== content && !isProjectContentRoot(entry));
+      return { contentRootEntry: content, workspaceRootEntries: workspace, projectRootEntries: projectRoots };
     }, [rootEntries]);
 
     const contentTopLevelEntries = useMemo(() => {
@@ -858,12 +863,23 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       return cache.get(contentRootEntry.path) ?? [];
     }, [contentRootEntry, cache]);
 
+    const contentDisplayEntries = useMemo(
+      () =>
+        contentTreeVisibleEntries({
+          allProjects,
+          contentRoot: contentRootEntry,
+          contentChildren: contentTopLevelEntries,
+          projectRoots: projectRootEntries,
+        }),
+      [allProjects, contentRootEntry, contentTopLevelEntries, projectRootEntries],
+    );
+
     const filteredContentTreeEntries = useMemo(() => {
-      if (!filtering) return contentTopLevelEntries;
-      return contentTopLevelEntries.filter((entry) =>
+      if (!filtering) return contentDisplayEntries;
+      return contentDisplayEntries.filter((entry) =>
         shouldShowFileEntry(entry, filterQuery, visiblePaths, cache),
       );
-    }, [contentTopLevelEntries, filtering, filterQuery, visiblePaths, cache]);
+    }, [contentDisplayEntries, filtering, filterQuery, visiblePaths, cache]);
 
     const contentRootLoading = Boolean(
       contentRootEntry && loadingPaths.has(contentRootEntry.path),
@@ -949,29 +965,31 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       const api = getApi();
       if (!api) return [];
       const listing = await api.list_project_files(relativePath || WORKSPACE_ROOTS_PATH);
-      return listing.entries;
+      return Array.isArray(listing?.entries) ? listing.entries : [];
     }, []);
 
     const reloadTree = useCallback(async () => {
       const api = getApi();
-      if (!api) {
-        setRootEntries([]);
-        setCache(new Map());
-        setError(null);
-        return;
-      }
+      if (!api) return;
       setError(null);
       try {
+        let digestAbs: string[] = [];
         if (api.list_workspace_roots) {
           const roots = await api.list_workspace_roots();
           const rootList = Array.isArray(roots) ? roots : [];
           setWorkspaceRoots(rootList);
-          setWorkspaceFolderAbsPaths(rootList.filter((root) => root.read_only).map((root) => root.path));
+          digestAbs = rootList.filter((root) => root.read_only).map((root) => root.path);
         }
         const entries = await loadDir(WORKSPACE_ROOTS_PATH);
+        const projectAbs = entries
+          .filter(isProjectContentRoot)
+          .map((entry) => entry.path.slice(ABS_PATH_PREFIX.length));
+        setWorkspaceFolderAbsPaths([...digestAbs, ...projectAbs]);
         setRootEntries(entries);
         const nextCache = new Map([[WORKSPACE_ROOTS_PATH, entries]]);
-        const wsPaths = entries.filter((entry) => entry.read_only).map((entry) => entry.path);
+        const wsPaths = entries
+          .filter((entry) => entry.read_only && !isProjectContentRoot(entry))
+          .map((entry) => entry.path);
         const contentWs = entries.find((entry) => !entry.read_only);
         const prefetchPaths = contentWs ? [contentWs.path, ...wsPaths] : wsPaths;
         await Promise.all(
@@ -1024,12 +1042,30 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     }, [reloadTree, onParentPathChange]);
 
     useEffect(() => {
-      void initTree();
+      let cancelled = false;
+      const stop = onApiReady(() => {
+        if (!cancelled) void initTree();
+      });
+      return () => {
+        cancelled = true;
+        stop();
+      };
     }, [initTree, projectSlug, refreshToken]);
 
     useEffect(() => {
       if (isActive) void reloadTree();
     }, [isActive, reloadTree]);
+
+    const contentRootPath = contentRootEntry?.path;
+    useEffect(() => {
+      if (!allProjects || !contentRootPath) return;
+      setExpandedPaths((prev) => {
+        if (prev.has(contentRootPath)) return prev;
+        const next = new Set(prev);
+        next.add(contentRootPath);
+        return next;
+      });
+    }, [allProjects, contentRootPath]);
 
     // Auto-refresh the tree when watched folders change on disk (UEFN compile, Explorer,
     // git, …). Watches the Content root + every expanded writable folder; "" fingerprints
@@ -1672,7 +1708,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const hasExpandedFolders = useCallback(() => expandedPathsRef.current.size > 0, []);
 
     const contentRootEntriesRef = useRef<ProjectFileEntry[]>([]);
-    contentRootEntriesRef.current = contentTopLevelEntries;
+    contentRootEntriesRef.current = contentDisplayEntries;
 
     const toggleTreeLevel = useCallback(() => {
       const prev = expandedPathsRef.current;

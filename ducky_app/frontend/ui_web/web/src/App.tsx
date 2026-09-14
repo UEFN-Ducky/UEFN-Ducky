@@ -51,6 +51,8 @@ import { useUndoShortcuts } from "./navigation/useUndoShortcuts";
 import { registerOpenSettingsView, requestOpenSettings } from "./navigation/openSettingsTab";
 import { installDeepLinkListeners } from "./navigation/deepLinks";
 import { nextChatLayoutMode, type ViewId } from "./types/panel";
+import { WINDOW_ID } from "./tabs/tabRegistryClient";
+import { persistDockSnapshot, readDockSnapshot } from "./workspace/workspaceDockStorage";
 import { PluginShellBootBridge } from "./plugin-ui/shellBoot";
 import { PluginCrashBanner } from "./plugin-ui/PluginCrashBanner";
 import { installPluginFaultGuards } from "./plugin-ui/pluginCrashGuard";
@@ -137,17 +139,17 @@ export default function App() {
   const hasProject = !!project.path?.trim();
 
   const cycleLayoutMode = useCallback(() => {
-    setLayoutMode(nextChatLayoutMode(layoutMode));
+    const next = nextChatLayoutMode(layoutMode);
+    setLayoutMode(next);
+    const snapshot = readDockSnapshot(WINDOW_ID);
+    persistDockSnapshot({ ...snapshot, leftRailOpen: next !== "sidebarHidden" }, WINDOW_ID);
   }, [layoutMode, setLayoutMode]);
 
   useEffect(() => {
-    if (!hasProject) {
-      setLayoutMode("full");
-      return;
-    }
+    if (!hasProject) return;
     // Leaving welcome overlay: Settings becomes an editor tab under ChatView.
     setCurrentView((view) => (view === "settings" ? "chat" : view));
-  }, [hasProject, setLayoutMode]);
+  }, [hasProject]);
 
   useEffect(() => {
     return registerOpenSettingsView(() => {

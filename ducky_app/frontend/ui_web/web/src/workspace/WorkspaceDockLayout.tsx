@@ -10,6 +10,7 @@ import { useTesterDockPanel } from "./panels/TesterDockPanel";
 import { requestOpenDiscordTab, setDiscordTabOpen, useDiscordTabOpen } from "../navigation/openDiscordTab";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useNarrowLayout } from "../hooks/useNarrowLayout";
+import { useOverlayRailSession } from "../hooks/useOverlayRailSession";
 import { useRailEdgeSwipe } from "../hooks/useRailEdgeSwipe";
 import { useChatLayoutMode } from "../hooks/useChatLayoutMode";
 import {
@@ -23,6 +24,11 @@ import { Icons } from "../icons/Icons";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { dockDropTargetSide } from "../utils/dockPanelDrag";
 import type { DockPanelId } from "./workspaceDockStorage";
+import {
+  effectiveRailOpen,
+  resetOverlayRailSession,
+  setOverlayRailOpen,
+} from "./overlayRailSession";
 import { PluginWebviewPane } from "../plugin-ui/PluginWebviewPane";
 import { pluginUiTabId } from "../plugin-ui/types";
 
@@ -176,6 +182,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
   ) {
     const dock = useWorkspaceDock();
     const overlay = useNarrowLayout();
+    const overlaySession = useOverlayRailSession();
     const { setMode: setLayoutMode } = useChatLayoutMode();
     const leftSidebarRef = useRef<ChatSidebarHandle>(null);
     const rightSidebarRef = useRef<ChatSidebarHandle>(null);
@@ -198,9 +205,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     }, []);
 
     useEffect(() => {
-      if (variant === "focus") return;
-      dock.setLeftRailOpen(layoutMode !== "sidebarHidden");
-    }, [dock.setLeftRailOpen, layoutMode, variant]);
+      if (overlay) resetOverlayRailSession();
+    }, [overlay]);
 
     useImperativeHandle(
       ref,
@@ -246,13 +252,23 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
 
     const leftRailAllowed = dock.leftRailEnabled;
     const rightRailAllowed = dock.rightRailEnabled;
+    const persistedLeftOpen = dock.leftRailOpen && layoutMode !== "sidebarHidden";
     const leftOpen =
       leftRailAllowed &&
-      layoutMode !== "sidebarHidden" &&
-      dock.leftRailOpen &&
+      effectiveRailOpen({
+        overlay,
+        persisted: persistedLeftOpen,
+        session: overlaySession.left,
+      }) &&
       (leftSidebarOnLeft || verseOnLeft);
     const rightOpen =
-      rightRailAllowed && dock.rightRailOpen && (leftSidebarOnRight || verseOnRight);
+      rightRailAllowed &&
+      effectiveRailOpen({
+        overlay,
+        persisted: dock.rightRailOpen,
+        session: overlaySession.right,
+      }) &&
+      (leftSidebarOnRight || verseOnRight);
 
     const versePath =
       activeFilePath && isVerseFile(activeFilePath) ? activeFilePath.replace(/\\/g, "/") : undefined;
@@ -365,6 +381,27 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       leftRailAllowed && isDockPanelDragging && !leftMixed && dragTargetSide === "left";
     const rightPeek =
       rightRailAllowed && isDockPanelDragging && !rightMixed && dragTargetSide === "right";
+    const setLeftOpen = useCallback(
+      (open: boolean) => {
+        if (overlay) {
+          setOverlayRailOpen("left", open);
+          return;
+        }
+        setLayoutMode(open ? "full" : "sidebarHidden");
+        dock.setLeftRailOpen(open);
+      },
+      [dock, overlay, setLayoutMode],
+    );
+    const setRightOpen = useCallback(
+      (open: boolean) => {
+        if (overlay) {
+          setOverlayRailOpen("right", open);
+          return;
+        }
+        dock.setRightRailOpen(open);
+      },
+      [dock, overlay],
+    );
     const swipe = useRailEdgeSwipe({
       enabled: overlay,
       leftOpen,
@@ -373,8 +410,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       rightEnabled: rightRailAllowed && !!rightMixed,
       leftWidth: dock.leftWidth,
       rightWidth: dock.rightWidth,
-      setLeftOpen: (open) => setLayoutMode(open ? "full" : "sidebarHidden"),
-      setRightOpen: dock.setRightRailOpen,
+      setLeftOpen,
+      setRightOpen,
     });
     const leftSwipeTx = swipe.drag?.side === "left" ? swipe.drag.tx : null;
     const rightSwipeTx = swipe.drag?.side === "right" ? swipe.drag.tx : null;
@@ -401,8 +438,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
             dragOverlay={dragOverlay}
             onDockDropZoneChange={setDragOverlay}
             onDockDragChange={setIsDockPanelDragging}
+            onClose={() => setLeftOpen(false)}
           >
-            {leftMixed?.children}
           </DockRail>
         ) : null}
 
@@ -414,8 +451,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
             className="dock-rail-backdrop"
             aria-label="Hide sidebar"
             onClick={() => {
-              if (leftOpen) setLayoutMode("sidebarHidden");
-              if (rightOpen) dock.setRightRailOpen(false);
+              if (leftOpen) setLeftOpen(false);
+              if (rightOpen) setRightOpen(false);
             }}
           />
         ) : null}
@@ -433,8 +470,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
             dragOverlay={dragOverlay}
             onDockDropZoneChange={setDragOverlay}
             onDockDragChange={setIsDockPanelDragging}
+            onClose={() => setRightOpen(false)}
           >
-            {rightMixed?.children}
           </DockRail>
         ) : null}
         <div id="ducky-skin-right" className="ducky-skin-slot ducky-skin-slot--right" aria-hidden="true" />

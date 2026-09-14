@@ -604,6 +604,8 @@ export interface ProjectFileEntry {
   path: string;
   is_dir: boolean;
   read_only?: boolean;
+  /** content = current island; core = UEFN digests; project = another recent island. */
+  kind?: "content" | "core" | "project";
 }
 
 export interface WorkspaceRootEntry {

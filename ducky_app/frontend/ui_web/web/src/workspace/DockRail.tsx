@@ -15,10 +15,12 @@ import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { DockRailDropOverlay } from "./DockRailDropOverlay";
 
 import {
+  OUTLINE_PANEL_WIDTH_MAX,
   OUTLINE_PANEL_WIDTH_MIN,
 } from "../hooks/useOutlinePanelWidth";
-import { SIDEBAR_WIDTH_MIN } from "../hooks/useSidebarWidth";
+import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from "../hooks/useSidebarWidth";
 import { notifyDockLayoutIdle } from "./dockLayoutEvents";
+import { railResizeEnd, railResizeFrame } from "./dockRailResize";
 import { targetRef } from "../ui-targets/registry";
 
 
@@ -73,6 +75,8 @@ export function DockRail({
 
   onDockDragChange,
 
+  onClose,
+
 }: {
 
   side: DockSide;
@@ -98,6 +102,8 @@ export function DockRail({
   onDockDropZoneChange?: (target: DockDropTarget) => void;
 
   onDockDragChange?: (dragging: boolean) => void;
+
+  onClose?: () => void;
 
 }) {
 
@@ -146,31 +152,39 @@ export function DockRail({
 
   );
 
+  const minWidth = side === "left" ? SIDEBAR_WIDTH_MIN : OUTLINE_PANEL_WIDTH_MIN;
+  const maxWidth = side === "left" ? SIDEBAR_WIDTH_MAX : OUTLINE_PANEL_WIDTH_MAX;
+
   const onResize = useCallback(
     (delta: number) => {
       setIsResizing(true);
       const el = shellRef.current;
       el?.classList.add("is-resizing");
-      const next =
-        side === "left"
-          ? Math.min(560, Math.max(SIDEBAR_WIDTH_MIN, widthRef.current + delta))
-          : Math.min(480, Math.max(OUTLINE_PANEL_WIDTH_MIN, widthRef.current - delta));
+      const next = railResizeFrame(side, widthRef.current, delta, maxWidth);
       widthRef.current = next;
       if (el) {
         el.style.setProperty("--dock-rail-width", `${next}px`);
         el.style.setProperty("--dock-shell-width", `${next + HANDLE_WIDTH}px`);
       }
-      resizeRailWidth(side, next);
+      if (next >= minWidth) resizeRailWidth(side, next);
     },
-    [resizeRailWidth, side],
+    [maxWidth, minWidth, resizeRailWidth, side],
   );
 
   const handleResizeEnd = useCallback(() => {
-    persistRailWidth();
+    const released = railResizeEnd(widthRef.current, minWidth, maxWidth);
+    if (released.close) {
+      persistRailWidth();
+      onClose?.();
+    } else {
+      widthRef.current = released.width;
+      resizeRailWidth(side, released.width);
+      persistRailWidth();
+    }
     notifyDockLayoutIdle();
     shellRef.current?.classList.remove("is-resizing");
     setIsResizing(false);
-  }, [persistRailWidth]);
+  }, [maxWidth, minWidth, onClose, persistRailWidth, resizeRailWidth, side]);
 
   useLayoutEffect(() => {
     if (railOpenRef.current === null) {

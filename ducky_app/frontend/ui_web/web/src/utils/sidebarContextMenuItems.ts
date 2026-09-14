@@ -83,9 +83,10 @@ export function duckyTreeCompactItem(
 export function duckyTreeAllProjectsItem(
   allProjects: boolean,
   onToggle: (value: boolean) => void,
+  id = "ducky-all-projects",
 ): ContextMenuItem {
   return {
-    id: "ducky-all-projects",
+    id,
     label: "All projects",
     switch: true,
     checked: allProjects,

@@ -10,6 +10,8 @@ import { useAppHeaderActions, useProblemsMenuOpen } from "../contexts/AppHeaderA
 import { useNavigationHistoryOptional } from "../navigation/NavigationHistoryContext";
 import { useRightRailOpen } from "../hooks/useRightRailOpen";
 import { useNarrowLayout } from "../hooks/useNarrowLayout";
+import { useOverlayRailSession } from "../hooks/useOverlayRailSession";
+import { toggleOverlayRail } from "../workspace/overlayRailSession";
 import { useAppearance } from "../theme/AppearanceContext";
 import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
@@ -380,8 +382,9 @@ export function Header({
   const showNav = !isFocus && !!nav;
   const sidebarEnabled = (isFocus || !isSettingsOverlay) && hasProject;
   const headerActions = useAppHeaderActions();
-  const { rightRailOpen, hasRightPanels, toggleRightRail, leftRailEnabled, rightRailEnabled } =
+  const { leftRailOpen, rightRailOpen, hasRightPanels, toggleRightRail, leftRailEnabled, rightRailEnabled } =
     useRightRailOpen();
+  const overlaySession = useOverlayRailSession();
   const pluginContrib = usePluginContributions();
   const { prefs: discordUiPrefs } = useDiscordUiPrefs();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
@@ -419,13 +422,33 @@ export function Header({
   const terminalAction = showEditorActions && hasProject ? headerActions.terminal : null;
   // The ledger is always reachable once a project is open, even with no other editor action.
   const showChanges = showEditorActions && hasProject;
-  const layoutToggle = LAYOUT_TOGGLE_META[layoutMode];
+  const overlayLeftOpen = overlaySession.left;
+  const overlayRightOpen = overlaySession.right;
+  const leftRailShown = compactHeader
+    ? overlayLeftOpen
+    : layoutMode !== "sidebarHidden" && leftRailOpen;
+  const rightRailShown = compactHeader ? overlayRightOpen : rightRailOpen;
+  const layoutToggle = LAYOUT_TOGGLE_META[leftRailShown ? "full" : "sidebarHidden"];
   const LayoutToggleIcon = layoutToggle.Icon;
-  const rightRailToggle = RIGHT_RAIL_TOGGLE_META[rightRailOpen ? "open" : "closed"];
+  const rightRailToggle = RIGHT_RAIL_TOGGLE_META[rightRailShown ? "open" : "closed"];
   const RightRailToggleIcon = rightRailToggle.Icon;
   const rightSidebarEnabled = sidebarEnabled && hasRightPanels;
   const showLeftSidebarToggle = leftRailEnabled;
   const showRightSidebarToggle = rightRailEnabled;
+  const onCycleLayout = () => {
+    if (compactHeader) {
+      toggleOverlayRail("left");
+      return;
+    }
+    cycleLayoutMode();
+  };
+  const onToggleRight = () => {
+    if (compactHeader) {
+      toggleOverlayRail("right");
+      return;
+    }
+    toggleRightRail();
+  };
 
   const { setProblemsMenuOpen } = useProblemsMenuOpen();
   const { openPalette } = useQuickOpenBridge();
@@ -546,11 +569,11 @@ export function Header({
               onBack={() => nav?.back()}
               onForward={() => nav?.forward()}
               layoutTitle={layoutToggle.title}
-              onCycleLayout={cycleLayoutMode}
+              onCycleLayout={onCycleLayout}
               sidebarEnabled={sidebarEnabled}
               showLeftToggle={showLeftSidebarToggle}
               rightTitle={rightRailToggle.title}
-              onToggleRight={toggleRightRail}
+              onToggleRight={onToggleRight}
               rightEnabled={rightSidebarEnabled}
               showRightToggle={showRightSidebarToggle}
               showWorkflow={showWorkflow}
@@ -580,7 +603,7 @@ export function Header({
               {showLeftSidebarToggle ? (
                 <button
                   type="button"
-                  onClick={cycleLayoutMode}
+                  onClick={onCycleLayout}
                   className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--${layoutMode} ${sidebarEnabled ? "" : "is-disabled"}`}
                   title={layoutToggle.title}
                 >
@@ -590,7 +613,7 @@ export function Header({
               {showRightSidebarToggle ? (
                 <button
                   type="button"
-                  onClick={toggleRightRail}
+                  onClick={onToggleRight}
                   className={`icon-btn no-drag sidebar-toggle-btn sidebar-toggle-btn--right sidebar-toggle-btn--${rightRailOpen ? "full" : "sidebarHidden"} ${rightSidebarEnabled ? "" : "is-disabled"}`}
                   title={rightRailToggle.title}
                 >

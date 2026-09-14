@@ -70,6 +70,10 @@ import {
   readDuckiesAllProjects,
   rememberDuckiesAllProjects,
 } from "../utils/duckiesTreePrefs";
+import {
+  readContentAllProjects,
+  rememberContentAllProjects,
+} from "../utils/contentTreePrefs";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { useUiTarget } from "../ui-targets/registry";
 
@@ -375,6 +379,11 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     },
     [load],
   );
+  const [contentAllProjects, setContentAllProjects] = useState(readContentAllProjects);
+  const toggleContentAllProjects = useCallback((value: boolean) => {
+    setContentAllProjects(value);
+    rememberContentAllProjects(value);
+  }, []);
 
   useEffect(() => {
     if (filesRefreshProp !== undefined) setFilesRefresh(filesRefreshProp);
@@ -680,8 +689,17 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       ...fileTreeCreateItems(createVerseFolderFlow, createVerseFileFlow, createTextFileFlow),
       contextMenuSeparator("content-sep-hidden"),
       showHiddenProjectFilesItem(showHiddenFiles, setShowHiddenFiles),
+      duckyTreeAllProjectsItem(contentAllProjects, toggleContentAllProjects, "content-all-projects"),
     ],
-    [createTextFileFlow, createVerseFileFlow, createVerseFolderFlow, showHiddenFiles, setShowHiddenFiles],
+    [
+      contentAllProjects,
+      createTextFileFlow,
+      createVerseFileFlow,
+      createVerseFolderFlow,
+      showHiddenFiles,
+      setShowHiddenFiles,
+      toggleContentAllProjects,
+    ],
   );
 
   const duckiesSectionMenuItems = useMemo(
@@ -1148,7 +1166,13 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
               ref={fileTreeRef}
               projectSlug={projectSlug}
               refreshToken={filesRefresh}
-              isActive={panelMode === "stacked" || panelTab === "files"}
+              allProjects={contentAllProjects}
+              isActive={
+                singlePanel === "files" ||
+                (bodiesOnly && dockActivePanelId === "files") ||
+                panelMode === "stacked" ||
+                panelTab === "files"
+              }
               activeFilePath={activeFilePath}
               parentPath={contentParentPath}
               onParentPathChange={handleParentPathChange}
