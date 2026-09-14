@@ -146,3 +146,36 @@ def test_catalog_has_builtin_ducky_nodes():
 
     types = {n["type"] for n in list_nodes()}
     assert {"start.manual", "start.cron", "ducky.prompt", "ducky.spawn", "flow.wait", "flow.branch", "tool.call"} <= types
+
+
+def test_emit_skips_when_trigger_config_channel_differs(monkeypatch):
+    from backend.automations import runner
+    from backend.automations.store import save_automation
+
+    monkeypatch.setattr(runner, "_run_message", lambda *a, **k: "run")
+    save_automation(
+        {
+            "name": "Chan",
+            "enabled": True,
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "t",
+                        "type": "discord.message",
+                        "x": 0,
+                        "y": 0,
+                        "config": {"channel_id": "want"},
+                    },
+                    {"id": "w", "type": "flow.wait", "x": 40, "y": 0, "config": {"seconds": 0}},
+                ],
+                "edges": [{"source": "t", "target": "w", "kind": "main"}],
+            },
+        }
+    )
+    miss = runner.emit_automation("discord.message", {"channel_id": "other", "content": "nope"})
+    assert miss["ok"] is True
+    assert miss["runs"] == []
+    hit = runner.emit_automation("discord.message", {"channel_id": "want", "content": "yes"})
+    assert hit["runs"]
+    assert hit["runs"][0]["ok"] is True
+    assert any(s.get("type") == "flow.wait" for s in hit["runs"][0]["steps"])

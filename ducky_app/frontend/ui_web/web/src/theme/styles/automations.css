@@ -135,16 +135,19 @@
   max-height: 360px;
   overflow: auto;
 }
+.aw-wire--draft { stroke: var(--accent); stroke-dasharray: 6 4; }
 .aw-port {
-  width: 12px;
-  height: 12px;
-  margin-top: 32px;
+  width: 14px;
+  height: 14px;
+  margin-top: 31px;
   border-radius: 50%;
   border: 2px solid var(--accent);
   background: var(--bg);
   padding: 0;
-  cursor: pointer;
+  cursor: crosshair;
   flex: 0 0 auto;
+  z-index: 2;
+  touch-action: none;
 }
 .aw-port--in { margin-left: -6px; }
 .aw-port--out { margin-right: -6px; }

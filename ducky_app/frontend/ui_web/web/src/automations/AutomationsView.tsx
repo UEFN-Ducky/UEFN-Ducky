@@ -51,6 +51,13 @@ export function AutomationsView() {
   const [pan, setPan] = useState({ x: 40, y: 40 });
   const [zoom, setZoom] = useState(1);
   const [wireFrom, setWireFrom] = useState<string | null>(null);
+  const [draftWire, setDraftWire] = useState<{
+    sourceId: string;
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+  } | null>(null);
   const [log, setLog] = useState<AutomationRunDto | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -59,6 +66,12 @@ export function AutomationsView() {
   const boardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const wireRef = useRef<{
+    sourceId: string;
+    dir: "in" | "out";
+    fromX: number;
+    fromY: number;
+  } | null>(null);
 
   const byType = useMemo(() => {
     const m = new Map<string, AutomationNodeDto>();
@@ -146,7 +159,7 @@ export function AutomationsView() {
     };
     patchGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     setSelectedNodeId(node.id);
-    setExpandedId(node.id);
+    setExpandedId("");
     setSpawn(null);
     setSpawnFilter("");
   };
@@ -199,6 +212,11 @@ export function AutomationsView() {
   };
 
   const onBoardPointerMove = (e: React.PointerEvent) => {
+    if (wireRef.current) {
+      const w = worldFromClient(e.clientX, e.clientY);
+      setDraftWire((d) => (d ? { ...d, toX: w.x, toY: w.y } : d));
+      return;
+    }
     if (panRef.current) {
       setPan({
         x: panRef.current.x + (e.clientX - panRef.current.px),
@@ -218,9 +236,52 @@ export function AutomationsView() {
     }));
   };
 
-  const endPointer = () => {
+  const connectNodes = (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    patchGraph((g) => {
+      const exists = g.edges.some((x) => x.source === sourceId && x.target === targetId);
+      return exists ? g : { ...g, edges: [...g.edges, { source: sourceId, target: targetId, kind: "main" }] };
+    });
+  };
+
+  const finishWire = (clientX: number, clientY: number) => {
+    const w = wireRef.current;
+    wireRef.current = null;
+    setWireFrom(null);
+    setDraftWire(null);
+    if (!w) return;
+    const stack = document.elementsFromPoint(clientX, clientY);
+    let tid = "";
+    for (const el of stack) {
+      if (!(el instanceof Element)) continue;
+      const nodeEl = el.closest("[data-aw-node]");
+      const id = nodeEl?.getAttribute("data-aw-node") || "";
+      if (id && id !== w.sourceId) {
+        tid = id;
+        break;
+      }
+    }
+    if (!tid) return;
+    if (w.dir === "out") connectNodes(w.sourceId, tid);
+    else connectNodes(tid, w.sourceId);
+  };
+
+  const endPointer = (e: React.PointerEvent) => {
+    if (wireRef.current) finishWire(e.clientX, e.clientY);
     dragRef.current = null;
     panRef.current = null;
+  };
+
+  const startWire = (e: React.PointerEvent, node: AutomationGraphNodeDto, dir: "in" | "out") => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const fromX = dir === "out" ? node.x + NODE_W : node.x;
+    const fromY = node.y + NODE_H / 2;
+    wireRef.current = { sourceId: node.id, dir, fromX, fromY };
+    setWireFrom(node.id);
+    setDraftWire({ sourceId: node.id, fromX, fromY, toX: fromX, toY: fromY });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const onBoardContextMenu = (e: React.MouseEvent) => {
@@ -247,22 +308,6 @@ export function AutomationsView() {
       dy: (e.clientY - board.top - pan.y) / zoom - node.y,
     };
     setSelectedNodeId(node.id);
-  };
-
-  const clickPort = (e: React.MouseEvent, nodeId: string, dir: "in" | "out") => {
-    e.stopPropagation();
-    if (dir === "out") {
-      setWireFrom(nodeId);
-      return;
-    }
-    if (wireFrom && wireFrom !== nodeId) {
-      const edge: AutomationGraphEdgeDto = { source: wireFrom, target: nodeId, kind: "main" };
-      patchGraph((g) => {
-        const exists = g.edges.some((x) => x.source === edge.source && x.target === edge.target && x.kind === edge.kind);
-        return exists ? g : { ...g, edges: [...g.edges, edge] };
-      });
-      setWireFrom(null);
-    }
   };
 
   const logCount = log?.steps?.length || 0;
@@ -357,6 +402,7 @@ export function AutomationsView() {
           onPointerDown={onBoardPointerDown}
           onPointerMove={onBoardPointerMove}
           onPointerUp={endPointer}
+          onPointerCancel={endPointer}
           onContextMenu={onBoardContextMenu}
         >
           <div className="aw-world" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
@@ -385,6 +431,12 @@ export function AutomationsView() {
                   />
                 );
               })}
+              {draftWire ? (
+                <path
+                  d={`M ${draftWire.fromX} ${draftWire.fromY} C ${draftWire.fromX + 40} ${draftWire.fromY}, ${draftWire.toX - 40} ${draftWire.toY}, ${draftWire.toX} ${draftWire.toY}`}
+                  className="aw-wire aw-wire--draft"
+                />
+              ) : null}
             </svg>
             {graph.nodes.map((node) => {
               const meta = byType.get(node.type);
@@ -392,10 +444,19 @@ export function AutomationsView() {
               return (
                 <div
                   key={node.id}
+                  data-aw-node={node.id}
                   className={`aw-node aw-node--${meta?.role || "action"}${selectedNodeId === node.id ? " is-selected" : ""}${wireFrom === node.id ? " is-wiring" : ""}${expanded ? " is-expanded" : ""}`}
                   style={{ left: node.x, top: node.y }}
                 >
-                  <button type="button" className="aw-port aw-port--in" onClick={(e) => clickPort(e, node.id, "in")} />
+                  <button
+                    type="button"
+                    className="aw-port aw-port--in"
+                    data-aw-node={node.id}
+                    onPointerDown={(e) => startWire(e, node, "in")}
+                    onPointerMove={onBoardPointerMove}
+                    onPointerUp={endPointer}
+                    onPointerCancel={endPointer}
+                  />
                   <div className="aw-node-card">
                     <div className="aw-node-body" onPointerDown={(e) => startNodeDrag(e, node)}>
                       <strong>{node.label || meta?.label || node.type}</strong>
@@ -446,7 +507,15 @@ export function AutomationsView() {
                       </div>
                     ) : null}
                   </div>
-                  <button type="button" className="aw-port aw-port--out" onClick={(e) => clickPort(e, node.id, "out")} />
+                  <button
+                    type="button"
+                    className="aw-port aw-port--out"
+                    data-aw-node={node.id}
+                    onPointerDown={(e) => startWire(e, node, "out")}
+                    onPointerMove={onBoardPointerMove}
+                    onPointerUp={endPointer}
+                    onPointerCancel={endPointer}
+                  />
                 </div>
               );
             })}

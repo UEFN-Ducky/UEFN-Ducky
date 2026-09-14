@@ -30,7 +30,7 @@ def run_automation(
     graph = wf.get("graph") or {}
     nodes = {str(n.get("id")): n for n in (graph.get("nodes") or []) if isinstance(n, dict) and n.get("id")}
     edges = [e for e in (graph.get("edges") or []) if isinstance(e, dict)]
-    starts = _start_ids(nodes, trigger_id=trigger_id, starter_id=starter_id)
+    starts = _start_ids(nodes, trigger_id=trigger_id, starter_id=starter_id, payload=payload or {})
     if not starts:
         return {"ok": False, "error": "no starter node", "steps": [], "id": wf["id"]}
     ctx: dict[str, Any] = dict(payload or {})
@@ -82,24 +82,37 @@ def emit_automation(trigger_id: str, payload: dict[str, Any] | None = None) -> d
         if not wf.get("enabled"):
             continue
         nodes = (wf.get("graph") or {}).get("nodes") or []
-        if any(_node_matches_trigger(n, tid) for n in nodes if isinstance(n, dict)):
+        if any(_node_matches_trigger(n, tid, payload) for n in nodes if isinstance(n, dict)):
             runs.append(run_automation(str(wf["id"]), trigger_id=tid, payload=payload or {}))
     return {"ok": True, "trigger_id": tid, "runs": runs}
 
 
-def _node_matches_trigger(node: dict[str, Any], trigger_id: str) -> bool:
-    if str(node.get("type") or "") == trigger_id:
-        return True
+def _node_matches_trigger(node: dict[str, Any], trigger_id: str, payload: dict[str, Any] | None = None) -> bool:
     cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
-    return str(cfg.get("trigger_id") or "") == trigger_id
+    if str(node.get("type") or "") != trigger_id and str(cfg.get("trigger_id") or "") != trigger_id:
+        return False
+    if not payload:
+        return True
+    for key, raw in cfg.items():
+        if key == "trigger_id" or raw in ("", None):
+            continue
+        if key in payload and str(payload[key]) != str(raw):
+            return False
+    return True
 
 
-def _start_ids(nodes: dict[str, dict[str, Any]], *, trigger_id: str, starter_id: str) -> list[str]:
+def _start_ids(
+    nodes: dict[str, dict[str, Any]],
+    *,
+    trigger_id: str,
+    starter_id: str,
+    payload: dict[str, Any] | None = None,
+) -> list[str]:
     if starter_id and starter_id in nodes:
         return [starter_id]
     starters = catalog.starter_types()
     if trigger_id:
-        hits = [nid for nid, n in nodes.items() if _node_matches_trigger(n, trigger_id)]
+        hits = [nid for nid, n in nodes.items() if _node_matches_trigger(n, trigger_id, payload)]
         if hits:
             return hits
     manuals = [nid for nid, n in nodes.items() if n.get("type") == "start.manual"]
