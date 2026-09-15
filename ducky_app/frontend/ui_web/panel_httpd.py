@@ -217,6 +217,10 @@ def request_is_authorized(host_header: str, path: str, cookie: str | None) -> bo
         return True
     if path.startswith("/__remote_login"):
         return True
+    # Opaque-origin plugin iframes cannot send cookies on fetch() / ES modules.
+    # Static files stay path-jailed to enabled plugins in try_serve_plugin_ui.
+    if path.startswith("/plugin-ui/") and ".." not in path:
+        return True
     if path in _LOCAL_BRIDGE_PATHS:
         return False
     return remote_cookie_ok(cookie, host)

@@ -5,7 +5,7 @@
  */
 
 import { BRIDGE_CHANNEL } from "./constants";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { getPluginThemeVars } from "./pluginTheme";
 import { pluginUiTabId, type BridgeRequest, type BridgeResponse } from "./types";
 
@@ -205,6 +205,7 @@ if (typeof window !== "undefined") {
 
 /** Re-pin the native pane from the current iframe rect + last reported inset. */
 export function pushBrowserPaneBounds(tabId: string, iframe?: HTMLIFrameElement | null): void {
+  if (isRemote()) return;
   const el = iframe && iframe.isConnected ? iframe : paneInsets.get(tabId)?.iframe;
   if (!el || !el.isConnected) return;
   // If the plugin's first browser.bounds failed, still pin to the full iframe —
@@ -243,6 +244,8 @@ export function pushBrowserPaneBounds(tabId: string, iframe?: HTMLIFrameElement 
   void api
     .browser_pane_set_bounds(tabId, x, y, w, h, vw, vh, visible)
     .then((res) => {
+      // Remote deny / missing method → undefined. Do not retry every frame.
+      if (res === undefined) return;
       // "pane not open" during boot must not poison the dedupe — retry next frame.
       if (!res || res.ok === false) lastSentBounds.delete(tabId);
     })
@@ -260,6 +263,7 @@ export function beginBrowserPaneMount(tabId: string): void {
   lastSentBounds.delete(tabId);
   // Stuck cover depth from address-bar autocomplete left every pane black.
   browserUiCoverDepth = 0;
+  if (isRemote()) return;
   // Immediately hide every other native pane so a stale YouTube layer cannot
   // sit on top of this tab's toolbar while we wait for the first bounds tick.
   const api = getApi();
@@ -280,6 +284,7 @@ export function hideBrowserPaneOnUnmount(tabId: string): void {
   lastSentBounds.delete(tabId);
   const entry = paneInsets.get(tabId);
   if (entry) entry.inset.visible = false;
+  if (isRemote()) return;
   void getApi()
     ?.browser_pane_set_bounds?.(tabId, 0, 0, 0, 0, 0, 0, false)
     ?.finally(() => {

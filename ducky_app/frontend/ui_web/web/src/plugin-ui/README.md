@@ -72,7 +72,8 @@ To add a method: one entry in `bridge.ts` → `BRIDGE_HANDLERS`.
 - iframe uses `sandbox="allow-scripts allow-pointer-lock"` — **no** `allow-same-origin`.
 - Plugin code cannot read app localStorage, cookies, or the host DOM.
 - Prefs go through the bridge into the host's `uefn-plugin-ui-prefs` store (scoped by plugin id).
-- POSTs to `/__panel_run` / `/__panel_event` from the iframe are rejected (`Origin: null`).
+- POSTs to `/__panel_run` / `/__panel_event` / `/__panel_api` from the iframe are rejected (`Origin: null`). Use the `postMessage` bridge instead.
+- Sandbox origin is opaque (`null`). Load sibling CSS/JS with `<script src>` / `<link href>` (classic subresources). `fetch()` and ES modules also work on remote: GET `/plugin-ui/` is cookie-exempt and served with `Access-Control-Allow-Origin: *`. Do not `fetch()`-eval your own app.js when a script tag will do.
 
 ## Tuning
 

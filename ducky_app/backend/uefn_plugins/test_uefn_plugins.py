@@ -394,6 +394,7 @@ def main() -> None:
         from backend.uefn_plugins.webview import (
             panel_post_origin_allowed,
             sanitize_entry,
+            send_plugin_ui_error,
         )
 
         demo_root = Path(tmp) / "UEFN-Ducky" / "uefn_plugins" / "demo"
@@ -414,6 +415,25 @@ def main() -> None:
             "http://127.0.0.1:4199/",
             request_host="u-1.app.uefnducky.org",
         )
+
+        class _Err:
+            def __init__(self) -> None:
+                self.status = 0
+                self.headers: list[tuple[str, str]] = []
+
+            def send_response(self, code: int) -> None:
+                self.status = code
+
+            def send_header(self, name: str, value: str) -> None:
+                self.headers.append((name, value))
+
+            def end_headers(self) -> None:
+                pass
+
+        err = _Err()
+        send_plugin_ui_error(err, 404)
+        assert err.status == 404
+        assert ("Access-Control-Allow-Origin", "*") in err.headers
 
         from backend.uefn_plugins.host import (
             filter_uefn_plugin_tools,

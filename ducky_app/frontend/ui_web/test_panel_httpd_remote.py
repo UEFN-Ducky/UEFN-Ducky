@@ -34,6 +34,19 @@ def test_remote_host_without_cookie_is_403(remote_auth):
     assert not httpd.request_is_authorized(host, "/", None)
     assert not httpd.request_is_authorized(host, "/assets/app.js", None)
     assert not httpd.request_is_authorized(host, "/__panel_api/list_conversations", None)
+    # Sandboxed plugin iframes fetch sibling assets with Origin: null (no cookie).
+    assert httpd.request_is_authorized(host, "/plugin-ui/brainrot-tcg/ui/app.js", None)
+    assert not httpd.request_is_authorized(host, "/plugin-ui/../__panel_api/x", None)
+
+
+def test_native_browser_pane_rpc_skipped_when_remote():
+    root = Path(httpd.__file__).resolve().parent / "web" / "src" / "plugin-ui"
+    bridge = (root / "bridge.ts").read_text(encoding="utf-8")
+    pane = (root / "PluginWebviewPane.tsx").read_text(encoding="utf-8")
+    assert "if (isRemote()) return;" in bridge
+    assert "if (isRemote()) return;" in pane
+    sw = Path(httpd.__file__).resolve().parent / "web" / "public" / "sw.js"
+    assert 'Access-Control-Allow-Origin' in sw.read_text(encoding="utf-8")
 
 
 def test_login_token_single_use_and_expiry(remote_auth, monkeypatch):

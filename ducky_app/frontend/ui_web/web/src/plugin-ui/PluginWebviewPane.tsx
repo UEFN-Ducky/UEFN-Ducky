@@ -21,6 +21,7 @@ import type { ChatTab } from "../types/panel";
 import { DucktactoeChatPopup } from "./DucktactoeChatPopup";
 import { isDucktactoeBoardTab } from "./ducktactoeBoardChat";
 import { PluginSurfaceBoundary } from "./PluginSurfaceBoundary";
+import { isRemote } from "../hooks/usePanelApi";
 
 export type PluginChatOverlayProps = {
   allChats: ChatTab[];
@@ -121,7 +122,9 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
   // Re-pin the native pane every frame from the live iframe rect (deduped inside
   // pushBrowserPaneBounds) — window resizes / sidebar toggles / split drags track
   // smoothly without waiting on the plugin's own (bridge round-trip) reports.
+  // Native WebView2 panes are desktop-only (REMOTE_DENY); skip the rAF on stream.
   useEffect(() => {
+    if (isRemote()) return;
     let raf = 0;
     const tick = () => {
       pushBrowserPaneBounds(tabId, iframeRef.current);

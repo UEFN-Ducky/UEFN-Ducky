@@ -13,7 +13,8 @@
  * desktop always sees the plain "/plugin-ui/…" path it serves.
  */
 const PREFIXES = ["plugin-ui/", "user-sounds/", "tool-captures/", "duckies/", "model-files/"];
-const CACHE = "ud-blob-v2";
+const CACHE = "ud-blob-v3";
+const CORS = { "Access-Control-Allow-Origin": "*" };
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (ev) => ev.waitUntil(self.clients.claim()));
@@ -43,7 +44,7 @@ async function viaPage(event, key) {
   const client =
     (await self.clients.get(event.clientId).catch(() => null)) ||
     (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))[0];
-  if (!client) return new Response("no page", { status: 503 });
+  if (!client) return new Response("no page", { status: 503, headers: CORS });
   const cache = await caches.open(CACHE);
   const cached = await cache.match(key);
   const etag = cached ? cached.headers.get("ETag") || "" : "";
@@ -58,9 +59,9 @@ async function viaPage(event, key) {
   });
   if (reply.status === 304 && cached) return cached;
   if (reply.status >= 400 || !reply.body) {
-    return cached || new Response(reply.error || "", { status: reply.status || 502 });
+    return cached || new Response(reply.error || "", { status: reply.status || 502, headers: CORS });
   }
-  const headers = { "Content-Type": reply.type || "application/octet-stream" };
+  const headers = { "Content-Type": reply.type || "application/octet-stream", ...CORS };
   if (reply.etag) headers.ETag = reply.etag;
   const res = new Response(reply.body, { status: 200, headers });
   if (reply.etag) cache.put(key, res.clone()).catch(() => {});

@@ -124,6 +124,16 @@ def resolve_plugin_ui_file(plugin_id: str, rel_path: str) -> Path | None:
     return target
 
 
+def send_plugin_ui_error(handler: Any, code: int) -> None:
+    """404/403 for plugin-ui with CORS so opaque-origin fetch() sees the status."""
+    handler.send_response(code)
+    handler.send_header("Content-Type", "text/plain")
+    handler.send_header("Content-Length", "0")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.end_headers()
+
+
 def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
     """Serve ``/plugin-ui/<id>/...`` if ``rel_path`` matches. Returns True when handled."""
     match = PLUGIN_UI_ROUTE_RE.match(rel_path)
@@ -132,13 +142,13 @@ def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
 
     file_path = resolve_plugin_ui_file(match.group(1), match.group(2))
     if file_path is None:
-        handler.send_error(404)
+        send_plugin_ui_error(handler, 404)
         return True
 
     try:
         data = file_path.read_bytes()
     except OSError:
-        handler.send_error(404)
+        send_plugin_ui_error(handler, 404)
         return True
 
     mime = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
