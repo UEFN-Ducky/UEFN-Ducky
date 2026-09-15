@@ -4,7 +4,7 @@ import { getApi, isRemote } from "../hooks/usePanelApi";
 import { ChoiceDropdown, ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
-import { contentRect, keyDiff, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
+import { contentRect, keyDiff, pickUeFnFollow, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
 import { getDirectTransport } from "../remote/directTransport";
 
 export { contentRect } from "./remoteWindowMath";
@@ -216,7 +216,10 @@ function useViewerActive(): boolean {
 }
 
 const LAUNCH_UEFN_VALUE = "__launch_uefn__";
+const LAUNCH_PROJECT_VALUE = "__launch_project__";
+const CLOSE_UEFN_VALUE = "__close_uefn__";
 const LAUNCH_WAIT_MS = 120_000;
+const SKIP_VIEW_IDS = new Set([LAUNCH_UEFN_VALUE, LAUNCH_PROJECT_VALUE, CLOSE_UEFN_VALUE]);
 
 let uefnLaunchLabel = "";
 const launchSubs = new Set<() => void>();
@@ -265,12 +268,12 @@ export function RemoteWindowSelect({
   const { confirm, alert } = useConfirmModal();
   const [rows, setRows] = useState<WindowViewRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const pendingUeFn = useRef(false);
+  const pendingUeFn = useRef<"hub" | "project" | null>(null);
   const seenUeFn = useRef<Set<string>>(new Set());
   const waitTimer = useRef(0);
 
   const stopWaiting = useCallback(() => {
-    pendingUeFn.current = false;
+    pendingUeFn.current = null;
     setBusy(false);
     setUeFnLaunching("");
     if (waitTimer.current) {
@@ -281,18 +284,20 @@ export function RemoteWindowSelect({
 
   const applyRows = useCallback(
     (next: WindowViewRow[]) => {
-      const uefn = next.filter((row) => row.kind === "uefn");
-      if (pendingUeFn.current) {
-        const fresh = uefn.find((row) => !seenUeFn.current.has(row.id));
-        if (fresh) {
-          stopWaiting();
-          onChange(fresh.id);
-        }
+      const nextId = pickUeFnFollow({
+        rows: next,
+        seenIds: seenUeFn.current,
+        pending: pendingUeFn.current,
+        selectedId: value,
+      });
+      if (nextId !== undefined) {
+        if (pendingUeFn.current && nextId) stopWaiting();
+        if (nextId !== value) onChange(nextId);
       }
-      seenUeFn.current = new Set(uefn.map((row) => row.id));
+      seenUeFn.current = new Set(next.filter((row) => row.kind === "uefn").map((row) => row.id));
       setRows(next);
     },
-    [onChange, stopWaiting],
+    [onChange, stopWaiting, value],
   );
 
   const load = useCallback(async () => {
@@ -316,27 +321,46 @@ export function RemoteWindowSelect({
   }, [busy, load]);
 
   const runUeFn = useCallback(
-    async (kind: "launch" | "restart") => {
+    async (kind: "hub" | "project" | "restart" | "close") => {
       const api = getApi();
-      const fn = kind === "restart" ? api?.restart_uefn_project : api?.launch_uefn_project;
+      const fn =
+        kind === "close"
+          ? api?.close_uefn
+          : kind === "restart"
+            ? api?.restart_uefn_project
+            : kind === "hub"
+              ? api?.launch_uefn
+              : api?.launch_uefn_project;
       if (!fn) {
         await alert("UEFN launch is unavailable on this panel.");
         return;
       }
-      if (kind === "restart") {
+      if (kind === "restart" || kind === "close") {
+        const closing = kind === "close";
         const ok = await confirm({
-          title: "Restart UEFN?",
-          message: "This closes Unreal Editor for Fortnite and reopens the current project. Unsaved editor work will be lost.",
-          confirmLabel: "Restart",
+          title: closing ? "Close UEFN?" : "Restart UEFN?",
+          message: closing
+            ? "This closes Unreal Editor for Fortnite. Unsaved editor work will be lost."
+            : "This closes Unreal Editor for Fortnite and reopens the current project. Unsaved editor work will be lost.",
+          confirmLabel: closing ? "Close" : "Restart",
           danger: true,
         });
         if (!ok) return;
         onChange("");
       }
-      const label = projectName.trim() || "UEFN";
+      if (kind === "close") {
+        try {
+          await fn();
+        } catch (e) {
+          await alert(e instanceof Error ? e.message : String(e));
+        }
+        void load();
+        return;
+      }
+      const label = kind === "hub" ? "UEFN" : projectName.trim() || "project";
       setBusy(true);
       setUeFnLaunching(label);
-      pendingUeFn.current = true;
+      pendingUeFn.current = kind === "hub" ? "hub" : "project";
       seenUeFn.current = new Set(rows.filter((row) => row.kind === "uefn").map((row) => row.id));
       if (waitTimer.current) window.clearTimeout(waitTimer.current);
       waitTimer.current = window.setTimeout(() => {
@@ -361,57 +385,80 @@ export function RemoteWindowSelect({
 
   if (!isRemote()) return null;
 
+  const island = projectName.trim();
   const uefnRows = rows.filter((row) => row.kind === "uefn");
-  const launchLabel = projectName.trim() ? `Launch ${projectName.trim()}` : "Launch UEFN";
   const otherRows = rows.filter((row) => row.kind !== "uefn");
 
   return (
     <div className="remote-window-select no-drag" onPointerDown={() => void load()}>
       <ChoiceDropdown
         size="compact"
+        accordion
+        className="choice-dropdown--buttons"
         aria-label="View"
         value={value}
         minWidth={280}
         placeholder="View"
         icon={<Icons.Monitor />}
         onChange={(id) => {
-          if (id === LAUNCH_UEFN_VALUE) return;
+          if (SKIP_VIEW_IDS.has(id)) return;
           onChange(id);
         }}
         options={[
-          { value: "", label: "Ducky", group: "This app" },
-          ...otherRows.map((row) => ({
-            value: row.id,
-            label: row.title,
-            group:
-              row.kind === "desktop" || row.kind === "monitor"
-                ? "Desktop"
-                : row.kind === "blender"
-                  ? "Blender"
-                  : "Windows",
-          })),
-          ...(uefnRows.length
-            ? uefnRows.map((row) => ({
-                value: row.id,
-                label: row.title,
-                group: "UEFN",
-                action: {
-                  label: busy ? "…" : "Restart",
-                  onClick: () => void runUeFn("restart"),
-                },
-              }))
-            : [
+          { value: "", label: "Ducky" },
+          {
+            value: LAUNCH_UEFN_VALUE,
+            label: "Launch UEFN",
+            group: "UEFN windows",
+            disabled: true,
+            action: {
+              label: busy ? "…" : "Launch",
+              onClick: () => void runUeFn("hub"),
+            },
+          },
+          ...(island
+            ? [
                 {
-                  value: LAUNCH_UEFN_VALUE,
-                  label: launchLabel,
-                  group: "UEFN",
+                  value: LAUNCH_PROJECT_VALUE,
+                  label: `Launch ${island}`,
+                  group: "UEFN windows",
                   disabled: true,
                   action: {
                     label: busy ? "…" : "Launch",
-                    onClick: () => void runUeFn("launch"),
+                    onClick: () => void runUeFn("project"),
                   },
                 },
-              ]),
+              ]
+            : []),
+          ...(uefnRows.length
+            ? [
+                {
+                  value: CLOSE_UEFN_VALUE,
+                  label: "Close UEFN",
+                  group: "UEFN windows",
+                  disabled: true,
+                  action: {
+                    label: busy ? "…" : "Close",
+                    danger: true,
+                    onClick: () => void runUeFn("close"),
+                  },
+                },
+                ...uefnRows.map((row) => ({
+                  value: row.id,
+                  label: row.title,
+                  group: "UEFN windows",
+                  action: {
+                    label: busy ? "…" : "Restart",
+                    onClick: () => void runUeFn("restart"),
+                  },
+                })),
+              ]
+            : []),
+          ...otherRows.map((row) => ({
+            value: row.id,
+            label: row.title,
+            group: "This desktop",
+          })),
         ]}
       />
     </div>

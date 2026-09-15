@@ -148,6 +148,11 @@ AGENT_HARD_RULES = (
     "never name a binding `Distance`. Inside `<suspends>` code prefer `branch` / "
     "`race` over `spawn`.\n"
     "- Windows shell: use `py -3`, never `python3`. Prefer MCP over shell.\n"
+    "- **AI-made plugins (HARD):** `ducky_plugin_*` only. `ducky_plugin_list` is "
+    "drafts **and** installed — never glob or shell AppData `uefn_plugins` / "
+    "`ai_plugins`. Empty → `ducky_plugin_scaffold`. Every plugin `register(api)` "
+    "must `@api.tool()` the user-facing actions (list/get/create/update/delete). "
+    'Load `skill_read_subskill("ducky", "ai_plugins")` before authoring.\n'
     "- Truncated MCP result → re-call with tighter args. Never Read/Grep "
     "`**/tool-results/**` or `**/agent-tools/**` dumps.\n"
     "- BEFORE Hub/level/device work: load matching skill (`uefn` / `islandsettings` / "

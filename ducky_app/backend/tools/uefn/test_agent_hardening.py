@@ -242,6 +242,14 @@ def test_hard_rules_check_off_the_plan():
     assert "0 completed" in AGENT_HARD_RULES
 
 
+def test_hard_rules_ai_made_plugins():
+    assert "AI-made plugins" in AGENT_HARD_RULES
+    assert "ducky_plugin_*" in AGENT_HARD_RULES
+    assert "ducky_plugin_list" in AGENT_HARD_RULES
+    assert "@api.tool()" in AGENT_HARD_RULES
+    assert "ai_plugins" in AGENT_HARD_RULES
+
+
 def test_hard_rules_never_delete_assets():
     assert "Fix broken assets. Never delete them" in AGENT_HARD_RULES
     assert "Validator errors are not a delete list" in AGENT_HARD_RULES

@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 26
+  version: 27
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -59,7 +59,8 @@ Read; call `skill_read_subskill` instead.
 - **Skills studio, MCP plugins, per-chat toggles:** see the `panel_guide`
   reference.
 - **Build your own desktop plugins** (themes, panels, tools, any contribution):
-  `skill_read_subskill("ducky", "ai_plugins")` then use `ducky_plugin_*`.
+  `skill_read_subskill("ducky", "ai_plugins")` then **only** `ducky_plugin_*`.
+  Never glob/shell AppData. Every plugin `@api.tool()`s its actions.
 - **Custom Verse templates** (single file or multi-file system packs in AppData):
   `skill_read_subskill("ducky", "verse_templates")` then `ducky_verse_template_*`.
   Never edit Store `verse_template_*` packs.
@@ -199,14 +200,21 @@ In **Agent** mode: create the plan after brief discovery if missing, then follow
 
 ## AI-made plugins (extend the app yourself)
 
-Any duckie can author a desktop plugin into this install (shared drafts, not
-per-AI). Load the full flow with:
+Load `skill_read_subskill("ducky", "ai_plugins")` then follow it. Legal I/O is
+**only** `ducky_plugin_*` (tools write the draft; you never open AppData).
 
-`skill_read_subskill("ducky", "ai_plugins")`
+1. `ducky_plugin_list` — census of `drafts` + `installed`. Empty → scaffold.
+   Never Glob / shell / Read AppData `ai_plugins` or `uefn_plugins`.
+2. `ducky_plugin_scaffold` → `ducky_plugin_write_file` only.
+3. **Required:** `plugin.json` with `contributes.agent.tools`; `register(api)`
+   with `@api.tool()` for **every** user-facing action (list/get/create/update/
+   delete). Tab? `ui.panels` + `header.buttons` whose `plugin.call` RPCs share
+   those same functions. A tab with no MCP tools is incomplete.
+4. `ducky_plugin_validate` → `ducky_plugin_install` → `ducky_store_set_enabled`.
+   If `needs_trust`, stop. Iterate on the draft, then reinstall.
 
-Short path: `ducky_plugin_reference` → `scaffold` → `write_file` → `validate` →
-`install` → user trusts once via Settings → Store → iterate. Never edit core
-files — only contributions.
+Never git-clone a Store plugin, never edit the EXE, never `ducky_skills_create_pack`
+unless they asked for a skill pack.
 
 For driving UEFN itself (devices, Verse, wiring), follow the **UEFN MCP** skill —
 this pack is only about the app.

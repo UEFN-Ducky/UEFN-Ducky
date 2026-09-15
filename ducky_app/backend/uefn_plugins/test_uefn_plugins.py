@@ -799,6 +799,7 @@ def main() -> None:
         from backend.uefn_plugins.store import appdata_ai_plugins_dir
         from backend.tools.panel.panel_ai_plugins import (
             install_ai_plugin,
+            list_ai_plugin_drafts,
             scaffold_ai_plugin,
             write_ai_plugin_file,
             validate_ai_plugin,
@@ -809,6 +810,9 @@ def main() -> None:
         assert "ai_plugins" in str(appdata_ai_plugins_dir())
         sc = scaffold_ai_plugin("ai_hello", label="AI Hello")
         assert sc.get("ok"), sc
+        census = list_ai_plugin_drafts("")
+        assert census.get("ok") and "installed" in census
+        assert any(d.get("id") == "ai_hello" for d in census.get("drafts") or [])
         try:
             _resolve_jailed(appdata_ai_plugins_dir() / "ai_hello", "../escape.py")
             raise AssertionError("jail should reject ..")

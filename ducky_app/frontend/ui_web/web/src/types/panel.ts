@@ -2032,6 +2032,8 @@ export interface PanelApi {
     window_id?: string;
     snapshot: Record<string, unknown>;
   }): Promise<void>;
+  get_header_visibility?(): Promise<{ hidden?: string[] }>;
+  save_header_visibility?(payload: { hidden: string[] }): Promise<void>;
   restore_focus_windows(groups?: FocusWindowSnapshot[]): Promise<void>;
   report_editor_state(relative_path: string, state: Record<string, unknown>): Promise<void>;
   close_this_window(): Promise<void>;
@@ -2837,8 +2839,12 @@ export interface PanelApi {
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
   list_running_agents(): Promise<string[]>;
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
-  /** Launch UnrealEditorFortnite.exe (optional island argv). Not startfile. */
+  /** Launch UnrealEditorFortnite.exe with Epic hub extras — no island. */
+  launch_uefn?(): Promise<{ ok: boolean; path?: string; exe?: string }>;
+  /** Launch UnrealEditorFortnite.exe with the current island argv. Not startfile. */
   launch_uefn_project?(): Promise<{ ok: boolean; path?: string; exe?: string }>;
+  /** Kill UnrealEditorFortnite.exe only. */
+  close_uefn?(): Promise<{ ok: boolean; killed?: boolean }>;
   /** Kill UnrealEditorFortnite.exe, then launch the current island again. */
   restart_uefn_project?(): Promise<{ ok: boolean; path?: string; killed?: boolean }>;
   rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;

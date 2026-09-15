@@ -1,3 +1,5 @@
+import { getApi } from "../hooks/usePanelApi";
+
 export const HEADER_VISIBILITY_KEY = "uefn-header-visibility";
 export const HEADER_VISIBILITY_EVENT = "uefn-header-visibility";
 
@@ -61,6 +63,18 @@ export function normalizeHeaderVisibility(raw: unknown): HeaderVisibilitySnapsho
 }
 
 export function persistHeaderVisibility(snapshot: HeaderVisibilitySnapshot): void {
+  writeHeaderVisibility(snapshot);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(HEADER_VISIBILITY_EVENT));
+  }
+  try {
+    void getApi()?.save_header_visibility?.({ hidden: snapshot.hidden });
+  } catch {
+    /* bridge not ready */
+  }
+}
+
+export function syncLocalHeaderVisibility(snapshot: HeaderVisibilitySnapshot): void {
   writeHeaderVisibility(snapshot);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(HEADER_VISIBILITY_EVENT));

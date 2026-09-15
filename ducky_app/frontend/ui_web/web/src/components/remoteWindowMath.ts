@@ -74,3 +74,30 @@ export function keyDiff(prev: string[], next: string[]): { down: string[]; up: s
     up: prev.filter((k) => !want.has(k)),
   };
 }
+
+/** Splash / Recent Projects hub — island windows append a project name. */
+export function isUeFnHubTitle(title: string): boolean {
+  return title.trim().toLowerCase() === "unreal editor for fortnite";
+}
+
+/** Next hwnd to watch after launch / splash death. `undefined` = keep current. */
+export function pickUeFnFollow(args: {
+  rows: { id: string; title: string; kind?: string }[];
+  seenIds: Iterable<string>;
+  pending: "hub" | "project" | null;
+  selectedId: string;
+}): string | undefined {
+  const seen = new Set(args.seenIds);
+  const uefn = args.rows.filter((r) => r.kind === "uefn");
+  const island = uefn.find((r) => !isUeFnHubTitle(r.title));
+  if (args.pending === "project") return island?.id;
+  if (args.pending === "hub") return uefn.find((r) => !seen.has(r.id))?.id ?? uefn[0]?.id;
+  if (args.selectedId && !args.rows.some((r) => r.id === args.selectedId)) {
+    return island?.id ?? uefn[0]?.id ?? "";
+  }
+  if (args.selectedId) {
+    const cur = args.rows.find((r) => r.id === args.selectedId);
+    if (cur && isUeFnHubTitle(cur.title) && island) return island.id;
+  }
+  return undefined;
+}

@@ -705,7 +705,7 @@ export function Header({
             <RemoteWindowSelect
               value={watchWindowId}
               onChange={onWatchWindowId}
-              projectName={project.name}
+              projectName={project.path?.trim() ? project.name : undefined}
             />
             <RemoteViewControls hwnd={watchWindowId} />
           </>

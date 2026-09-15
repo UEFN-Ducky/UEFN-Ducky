@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentRect, keyDiff, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
+import { contentRect, isUeFnHubTitle, keyDiff, pickUeFnFollow, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
 
 describe("rankVideoCodec", () => {
   it("prefers hardware-friendly H.264 profiles, then AV1, VP9, VP8", () => {
@@ -59,5 +59,41 @@ describe("stickLookDelta / keyDiff", () => {
     expect(look.dy).toBe(0);
     expect(keyDiff(["w"], ["w", "d"])).toEqual({ down: ["d"], up: [] });
     expect(keyDiff(["w", "a"], ["d"])).toEqual({ down: ["d"], up: ["w", "a"] });
+  });
+});
+
+describe("isUeFnHubTitle / pickUeFnFollow", () => {
+  it("treats the splash title as hub and project titles as islands", () => {
+    expect(isUeFnHubTitle("Unreal Editor for Fortnite")).toBe(true);
+    expect(isUeFnHubTitle("Roguelike - Unreal Editor for Fortnite")).toBe(false);
+    expect(isUeFnHubTitle("ExampleProject1 - Unreal Editor")).toBe(false);
+  });
+
+  it("waits for a project window instead of locking onto the splash", () => {
+    const splash = { id: "1", title: "Unreal Editor for Fortnite", kind: "uefn" };
+    expect(
+      pickUeFnFollow({ rows: [splash], seenIds: [], pending: "project", selectedId: "" }),
+    ).toBeUndefined();
+    const island = { id: "2", title: "Roguelike - Unreal Editor for Fortnite", kind: "uefn" };
+    expect(
+      pickUeFnFollow({
+        rows: [splash, island],
+        seenIds: ["1"],
+        pending: "project",
+        selectedId: "",
+      }),
+    ).toBe("2");
+  });
+
+  it("follows a dead splash hwnd to the next editor window", () => {
+    const island = { id: "2", title: "Roguelike - Unreal Editor for Fortnite", kind: "uefn" };
+    expect(
+      pickUeFnFollow({
+        rows: [island],
+        seenIds: ["1"],
+        pending: null,
+        selectedId: "1",
+      }),
+    ).toBe("2");
   });
 });

@@ -13,13 +13,6 @@ import { AgentCapsCard } from "./AgentCapsCard";
 
 const DEFAULT_BASE = "https://uefnducky.org";
 
-function formatSessionLeft(seconds: number): string {
-  if (seconds < 90) return "less than 2 min left";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 90) return `${minutes} min left`;
-  return `${Math.round(minutes / 60)} hr left`;
-}
-
 export function AccountTab() {
   const { confirm } = useConfirmModal();
   const [status, setStatus] = useState<DuckyOSAccountStatus | null>(null);
@@ -278,44 +271,6 @@ export function AccountTab() {
               </button>
               <button
                 type="button"
-                className="account-tab-btn account-tab-btn--danger"
-                onClick={handleLogout}
-                disabled={busy}
-              >
-                {busy ? "Signing out…" : "Log out"}
-              </button>
-            </div>
-          </div>
-
-          <div className="account-tab-card">
-            <div className="account-tab-signed-row">
-              <h3 className="account-tab-section-title">UEFN Ducky in Browser</h3>
-            </div>
-            <p className="account-tab-body">
-              Use this PC&apos;s panel from a browser. Off by default.
-            </p>
-            {remote?.enabled && !remote?.running ? (
-              <p className="account-tab-meta">Starting…</p>
-            ) : null}
-            {remote?.site_update_pending ? (
-              <p className="account-tab-body account-tab-warn-text">Update pending</p>
-            ) : null}
-            {remote?.error && !remote.site_update_pending ? (
-              <p className="account-tab-body account-tab-warn-text">{remote.error}</p>
-            ) : null}
-            {sessionList.length > 0 ? (
-              <ul className="account-tab-session-list">
-                {sessionList.map((row) => (
-                  <li key={row.n}>
-                    Browser session {row.n}
-                    {row.expires_in_s > 0 ? ` · ${formatSessionLeft(row.expires_in_s)}` : ""}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <div className="account-tab-actions">
-              <button
-                type="button"
                 className="account-tab-btn account-tab-btn--primary"
                 disabled={busy}
                 onClick={() => {
@@ -359,6 +314,14 @@ export function AccountTab() {
                   Sign out all sessions
                 </button>
               ) : null}
+              <button
+                type="button"
+                className="account-tab-btn account-tab-btn--danger"
+                onClick={handleLogout}
+                disabled={busy}
+              >
+                {busy ? "Signing out…" : "Log out"}
+              </button>
             </div>
           </div>
 

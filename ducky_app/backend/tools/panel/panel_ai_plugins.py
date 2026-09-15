@@ -21,103 +21,43 @@ from backend.server import mcp
 _SKIP_DIR_NAMES = frozenset({"scripts", "deploy", ".git", "__pycache__", ".venv", "node_modules"})
 _SECRET_SUFFIXES = frozenset({".dat", ".env", ".pem", ".key"})
 _MAX_FILE_CHARS = 512 * 1024
+_AI_PLUGINS_SKILL = (
+    Path(__file__).resolve().parents[3]
+    / "frontend"
+    / "skill_packs"
+    / "ducky"
+    / "references"
+    / "ai_plugins.md"
+)
 
-_PLUGIN_REFERENCE = """# AI desktop plugin reference
 
-Drafts live in `%LOCALAPPDATA%/UEFN-Ducky/ai_plugins/<id>/` (shared across all chats).
-Flow: `ducky_plugin_scaffold` → write files → `ducky_plugin_validate` → `ducky_plugin_install`
-→ user trusts once in Settings → Store → iterate by editing draft + reinstall.
+def _strip_skill_frontmatter(text: str) -> str:
+    raw = (text or "").lstrip("\ufeff")
+    if not raw.startswith("---"):
+        return raw.strip()
+    parts = raw.split("---", 2)
+    if len(parts) < 3:
+        return raw.strip()
+    return parts[2].strip()
 
-## Minimal plugin.json
 
-```json
-{
-  "id": "hello",
-  "kind": "plugin",
-  "version": "1.0.0",
-  "label": "Hello",
-  "description": "…",
-  "min_app_version": "1.0.0",
-  "default_enabled": false,
-  "secret_keys": [],
-  "contributes": {},
-  "backend": { "entry": "backend", "register": "register" }
-}
-```
+def _load_plugin_reference() -> str:
+    """Same recipe as skill_read_subskill('ducky', 'ai_plugins') — one file."""
+    try:
+        body = _strip_skill_frontmatter(_AI_PLUGINS_SKILL.read_text(encoding="utf-8"))
+    except OSError:
+        body = ""
+    if body:
+        return body
+    return (
+        "`ducky_plugin_list` is the census (drafts + installed). "
+        "Never glob/shell AppData. Scaffold → write_file → every `@api.tool()` "
+        "action → validate → install → ducky_store_set_enabled (stop on needs_trust)."
+    )
 
-Id: `^[a-z][a-z0-9_-]{0,63}$`. Never edit core app files — only this draft + contributions.
-Never write into a UEFN project outside `Content/**` and `.ducky/**`. Never mutate
-`*.digest.verse` (UEFN auto-edits those on Verse build). Scratch files go in
-`%LOCALAPPDATA%/UEFN-Ducky/`, not `Saved/` or the project root.
 
-## Contribution hooks (when plugin enabled)
-
-| Hook | Effect |
-|------|--------|
-| `appearance.profiles` | Theme profiles in Appearance |
-| `appearance.css` | Stylesheet after ThemeProvider (`[{ "entry": "ui/theme.css" }]`) |
-| `appearance.effects` | Background FX into `#ducky-fx-root` |
-| `appearance.skin` | Full chrome swap (frame/header portals) |
-| `ui.panels` | Sandboxed HTML at `/plugin-ui/<id>/…` |
-| `dock.panels` | Dock panels (`id`, `title`, `defaultSide`, `ui`) |
-| `editor.kinds` | Editor kinds |
-| `settings.tabs` / `settings.sections` | Settings UI |
-| `header.buttons` | Header icons |
-| `shell.boot` | Main-window script + `__duckyPluginHost` |
-| `sounds` / `hooks` | Appearance → Sounds |
-| `verse.templates` | New-file Verse scaffolds |
-| `agent.tools` | Optional category / intent for MCP tools |
-| `walkthrough` | First-enable coachmarks |
-
-## backend/register(api)
-
-```python
-def register(api) -> None:
-    @api.tool(intent=r"\\bhello\\b")
-    def hello_ping(msg: str = "hi") -> str:
-        '''Ping.'''
-        return f"pong: {msg}"
-    api.log("hello tools registered")
-```
-
-Also: `api.listener(cmd, params)`, `api.is_enabled()`, `api.log()`, `api.plugin_id`,
-`api.changeset.record(...)`, `api.connection(fn, label=…)`, `api.register_secret_test`,
-`api.register_llm_provider`, `api.register_ide_hookup`.
-
-## Changes ledger (`api.changeset` / `_ducky`)
-
-Mutating tools should record so Changes → Revert can unwind them. Slot:
-`{plugin_id}://{kind}/{id}/{facet}` (e.g. `blender://object/Cube/mesh`).
-
-1. **Sidecar** — return JSON with `_ducky: { program, kind, slot, before, inverse, created, revertable, summary, targets }`. The host journals it after the tool succeeds.
-2. **`api.changeset.record(command=..., kind=..., ident=..., facet=..., inverse=[...], ...)`** for a batch that is not one MCP call.
-
-Revert posts `inverse` back to that program (`execute_tool`), not UEFN `send_command`. Reads stay unrecorded.
-
-Enable/disable/uninstall the installed copy with `ducky_store_set_enabled` /
-`ducky_store_remove`. First enable of an AI plugin needs a user trust confirm
-(agents cannot auto-trust).
-
-## Gateway prompt caching
-
-Bytes before the growth point change only at an epoch.
-
-Host guarantees: byte-stable frozen system, append-only message view, sticky
-tool set (union during a chat; floor reset only at an epoch), and
-`prompt_cache_key` = conversation id. Volatile memory/plan/status is a last
-user message (`[Live context — …]`), never the system prefix. `enable_cache`
-on the payload only means “emit provider markers”; the frozen/dynamic split
-is unconditional.
-
-Plugin must:
-
-| Family | You do | Verify with |
-|--------|--------|-------------|
-| Anthropic-style | Use host `cache_utils` as-is (tools + system + last-history + mid-loop every ~15 content blocks when over 20) | `cache_read_input_tokens` grows turn over turn |
-| OpenAI-compatible | `openai_system_messages` + forward `cache.prompt_cache_key` | `prompt_tokens_details.cached_tokens` |
-| Ollama / local | Long `keep_alive`; `num_ctx` = host high-water + output headroom, allocated once, never resized; serialize identically | `prompt_eval_count` ≈ tail size on warm turns |
-| Gemini | Nothing — implicit; parse usage with the host helper | `cached_content_token_count` |
-"""
+# Lazy: tests and ducky_plugin_reference read the shipped skill (no gateway-cache fluff).
+_PLUGIN_REFERENCE = _load_plugin_reference()
 
 
 def _notify_plugins() -> None:
@@ -167,20 +107,33 @@ def _minimal_manifest(pid: str, label: str, description: str) -> dict[str, Any]:
         "min_app_version": "1.0.0",
         "default_enabled": False,
         "secret_keys": [],
-        "contributes": {},
+        "contributes": {
+            "agent.tools": {
+                "category": pid,
+                "intent_pattern": rf"\\b{pid}\\b",
+            }
+        },
         "backend": {"entry": "backend", "register": "register"},
     }
 
 
-def _register_stub() -> str:
+def _register_stub(plugin_id: str) -> str:
+    fn = plugin_id.replace("-", "_")
     return (
-        '"""AI-made UEFN desktop plugin — register MCP tools when enabled."""\n'
+        '"""AI-made UEFN desktop plugin — MCP tools required."""\n'
         "\n"
         "from __future__ import annotations\n"
         "\n"
         "\n"
         "def register(api) -> None:\n"
-        '    api.log("plugin registered")\n'
+        f'    @api.tool(intent=r"\\b{plugin_id}\\b")\n'
+        f"    def {fn}_list(kind: str = \"\") -> dict:\n"
+        '        """List records this plugin manages. Add get/upsert/delete for the domain."""\n'
+        "        return {\"ok\": True, \"items\": []}\n"
+        "\n"
+        f'    api.register_panel_rpc("list", '
+        f"lambda params=None: {fn}_list(str((params or {{}}).get(\"kind\") or \"\")))\n"
+        f'    api.log("{plugin_id} tools registered")\n'
     )
 
 
@@ -218,35 +171,61 @@ def scaffold_ai_plugin(plugin_id: str, label: str = "", description: str = "") -
     _write_json(root / "plugin.json", manifest)
     backend = root / "backend"
     backend.mkdir(exist_ok=True)
-    (backend / "__init__.py").write_text(_register_stub(), encoding="utf-8")
+    (backend / "__init__.py").write_text(_register_stub(pid), encoding="utf-8")
     return {"ok": True, "id": pid, "path": str(root), "manifest": manifest}
+
+
+def _slim_installed_plugins() -> list[dict[str, Any]]:
+    from backend.uefn_plugins.store import list_uefn_plugins
+
+    out: list[dict[str, Any]] = []
+    for row in list_uefn_plugins():
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id") or "").strip()
+        if not pid:
+            continue
+        out.append(
+            {
+                "id": pid,
+                "label": str(row.get("label") or pid),
+                "version": str(row.get("version") or ""),
+                "source": str(row.get("source") or ""),
+                "enabled": bool(row.get("enabled")),
+            }
+        )
+    return out
 
 
 def list_ai_plugin_drafts(plugin_id: str = "") -> dict[str, Any]:
     from backend.uefn_plugins.store import appdata_ai_plugins_dir, normalize_plugin_id
 
-    root = appdata_ai_plugins_dir()
-    if not root.is_dir():
-        return {"ok": True, "drafts": [], "files": []}
     sid = (plugin_id or "").strip()
     if not sid:
         drafts: list[dict[str, Any]] = []
-        for child in sorted(root.iterdir()):
-            if not child.is_dir():
-                continue
-            man_path = child / "plugin.json"
-            label = child.name
-            version = ""
-            if man_path.is_file():
-                try:
-                    man = json.loads(man_path.read_text(encoding="utf-8"))
-                    if isinstance(man, dict):
-                        label = str(man.get("label") or label)
-                        version = str(man.get("version") or "")
-                except (OSError, json.JSONDecodeError):
-                    pass
-            drafts.append({"id": child.name, "label": label, "version": version, "path": str(child)})
-        return {"ok": True, "drafts": drafts}
+        root = appdata_ai_plugins_dir()
+        if root.is_dir():
+            for child in sorted(root.iterdir()):
+                if not child.is_dir():
+                    continue
+                man_path = child / "plugin.json"
+                label = child.name
+                version = ""
+                if man_path.is_file():
+                    try:
+                        man = json.loads(man_path.read_text(encoding="utf-8"))
+                        if isinstance(man, dict):
+                            label = str(man.get("label") or label)
+                            version = str(man.get("version") or "")
+                    except (OSError, json.JSONDecodeError):
+                        pass
+                drafts.append(
+                    {"id": child.name, "label": label, "version": version, "path": str(child)}
+                )
+        return {"ok": True, "drafts": drafts, "installed": _slim_installed_plugins()}
+    root = appdata_ai_plugins_dir()
+    if not root.is_dir():
+        return {"ok": False, "error": f"draft not found: {sid}"}
     try:
         pid = normalize_plugin_id(sid)
     except ValueError as exc:
@@ -451,7 +430,13 @@ def ducky_plugin_scaffold(
 
 @mcp.tool()
 def ducky_plugin_list(id: str = "", pretty: bool = False) -> str:
-    """List AI plugin drafts, or files inside one draft when id is set."""
+    """Census of AI plugin drafts and installed desktop plugins.
+
+    Omit id: {drafts, installed} (id/label/version/source/enabled). This is the
+    inventory — never glob, ls, or PowerShell AppData ai_plugins / uefn_plugins.
+    Empty drafts and no matching installed id → ducky_plugin_scaffold.
+    With id: files inside that draft only.
+    """
     return tool_json(list_ai_plugin_drafts(id), pretty=pretty)
 
 
@@ -499,8 +484,8 @@ def ducky_plugin_delete_draft(id: str, confirm: bool = False, pretty: bool = Fal
 
 @mcp.tool()
 def ducky_plugin_reference(pretty: bool = False) -> str:
-    """Return the AI desktop-plugin authoring reference (contributions + register(api))."""
-    return tool_json({"ok": True, "markdown": _PLUGIN_REFERENCE}, pretty=pretty)
+    """Return the AI desktop-plugin recipe (same text as skill ducky/ai_plugins)."""
+    return tool_json({"ok": True, "markdown": _load_plugin_reference()}, pretty=pretty)
 
 
 def _self_check() -> None:
@@ -517,6 +502,10 @@ def _self_check() -> None:
         assert "ai_plugins" in str(appdata_ai_plugins_dir())
         sc = scaffold_ai_plugin("hello_ai", label="Hello AI", description="test")
         assert sc.get("ok"), sc
+        stub = (_draft_root("hello_ai") / "backend" / "__init__.py").read_text(encoding="utf-8")
+        assert "@api.tool" in stub and "hello_ai_list" in stub
+        man0 = json.loads((_draft_root("hello_ai") / "plugin.json").read_text(encoding="utf-8"))
+        assert (man0.get("contributes") or {}).get("agent.tools")
         bad = write_ai_plugin_file("hello_ai", "../escape.py", "x = 1")
         assert not bad.get("ok"), bad
         bad2 = write_ai_plugin_file("hello_ai", "backend/../../escape.py", "x = 1")
@@ -528,7 +517,9 @@ def _self_check() -> None:
         )
         assert wr.get("ok"), wr
         man = json.loads((_draft_root("hello_ai") / "plugin.json").read_text(encoding="utf-8"))
-        man["contributes"] = {"appearance.css": [{"entry": "ui/theme.css"}]}
+        contrib = dict(man.get("contributes") or {})
+        contrib["appearance.css"] = [{"entry": "ui/theme.css"}]
+        man["contributes"] = contrib
         wrj = write_ai_plugin_file("hello_ai", "plugin.json", json.dumps(man))
         assert wrj.get("ok"), wrj
         val = validate_ai_plugin("hello_ai")
@@ -537,8 +528,13 @@ def _self_check() -> None:
         assert b"plugin.json" in zipped and len(zipped) > 50
         listed = list_ai_plugin_drafts("hello_ai")
         assert "ui/theme.css" in listed.get("files", [])
+        census = list_ai_plugin_drafts("")
+        assert census.get("ok") and "installed" in census and "drafts" in census
+        assert any(d.get("id") == "hello_ai" for d in census.get("drafts") or [])
         deleted = delete_ai_plugin_draft("hello_ai", confirm=True)
         assert deleted.get("ok"), deleted
+        empty = list_ai_plugin_drafts("")
+        assert empty.get("ok") and empty.get("drafts") == [] and "installed" in empty
         print("panel_ai_plugins.py self-check ok")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

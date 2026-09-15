@@ -52,6 +52,17 @@ def load_window(window_id: str = "main") -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+def load_header() -> dict[str, Any]:
+    """Global header-button visibility (not per-window)."""
+    raw = load_window("_header")
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_header(snapshot: dict[str, Any]) -> None:
+    if isinstance(snapshot, dict):
+        save_window("_header", snapshot)
+
+
 def save_window(window_id: str, snapshot: dict[str, Any]) -> None:
     if not isinstance(snapshot, dict):
         return

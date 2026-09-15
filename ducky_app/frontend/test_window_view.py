@@ -6,7 +6,9 @@ from frontend.window_view import (
     fortnite_studio_launch_from_item,
     handle_stream_message,
     kind_for,
+    close_uefn,
     kill_uefn_cmd,
+    launch_uefn,
     launch_uefn_cmd,
     launch_uefn_project,
     map_norm_to_screen,
@@ -407,6 +409,34 @@ def test_launch_uefn_project_uses_editor(tmp_path, monkeypatch) -> None:
     )
     assert launch_uefn_project() == {"ok": True, "exe": exe, "path": str(island)}
     assert started == [(exe, str(island), extra)]
+
+
+def test_launch_uefn_hub_skips_project(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    exe = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
+    extra = ["-obfuscationid=abc"]
+    started: list[tuple] = []
+    monkeypatch.setattr(wv, "uefn_editor_launch", lambda: (exe, extra))
+    monkeypatch.setattr(
+        wv,
+        "_start_uefn",
+        lambda editor, project=None, extra=None: started.append((editor, project, extra)),
+    )
+    assert launch_uefn() == {"ok": True, "exe": exe, "path": ""}
+    assert started == [(exe, None, extra)]
+
+
+def test_close_uefn_kills_only(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: True)
+    monkeypatch.setattr(
+        wv,
+        "_start_uefn",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("close must not launch")),
+    )
+    assert close_uefn() == {"ok": True, "killed": True}
 
 
 def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:

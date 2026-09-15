@@ -233,10 +233,20 @@ class PanelApiWindowMixin:
 
         return list_window_views()
 
+    def launch_uefn(self) -> dict[str, Any]:
+        from frontend.window_view import launch_uefn
+
+        return launch_uefn()
+
     def launch_uefn_project(self) -> dict[str, Any]:
         from frontend.window_view import launch_uefn_project
 
         return launch_uefn_project()
+
+    def close_uefn(self) -> dict[str, Any]:
+        from frontend.window_view import close_uefn
+
+        return close_uefn()
 
     def restart_uefn_project(self) -> dict[str, Any]:
         from frontend.window_view import restart_uefn_project
@@ -447,6 +457,18 @@ class PanelApiWindowMixin:
         if not snapshot:
             return
         save_window(window_id, snapshot)
+
+    def get_header_visibility(self) -> dict[str, Any]:
+        from frontend.ui_web.workspace_dock import load_header
+
+        return load_header()
+
+    def save_header_visibility(self, payload: dict[str, Any] | str | None) -> None:
+        from frontend.ui_web.workspace_dock import save_header
+
+        data = _pa._coerce_mapping(payload, label="header visibility")
+        hidden = data.get("hidden")
+        save_header({"hidden": [str(x) for x in hidden if str(x).strip()] if isinstance(hidden, list) else []})
 
     def restore_focus_windows(self, groups: list | None = None) -> None:
         from frontend.ui_web import focus_windows

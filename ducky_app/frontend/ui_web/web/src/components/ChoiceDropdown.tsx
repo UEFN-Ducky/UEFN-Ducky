@@ -17,7 +17,7 @@ export type ChoiceOption = {
   /** Optional group header (radio/checkbox lists). */
   group?: string;
   /** Trailing row button (Launch / Restart). Does not change the selected value. */
-  action?: { label: string; onClick: () => void };
+  action?: { label: string; onClick: () => void; danger?: boolean };
 };
 
 type CommonProps = {
@@ -37,6 +37,8 @@ type CommonProps = {
   header?: ReactNode;
   /** Extra chrome below the option list. */
   footer?: ReactNode;
+  /** Named groups as collapsible <details> (ungrouped rows stay pinned). */
+  accordion?: boolean;
   /** Icon-only (or custom) trigger instead of the selected label. */
   trigger?: ReactNode;
   /** Header-style icon trigger; pairs with an open-state light (no chevron). */
@@ -102,6 +104,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
     emptyLabel = "No options",
     header,
     footer,
+    accordion,
     trigger,
     icon,
     hideChevron,
@@ -197,72 +200,30 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
           {options.length === 0 ? (
             <div className="choice-dropdown-empty">{emptyLabel}</div>
           ) : (
-            groups.map(({ group, items }) => (
-              <div key={group ?? "__ungrouped__"} className="choice-dropdown-group">
-                {group ? <div className="choice-dropdown-group-label">{group}</div> : null}
-                {items.map((opt) => {
-                  const actionOnly = Boolean(opt.action && opt.disabled);
-                  const selected = checkbox
-                    ? props.values.includes(opt.value)
-                    : props.value === opt.value;
-                  const actionBtn = opt.action ? (
-                    <button
-                      type="button"
-                      className="choice-dropdown-option-action"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        opt.action?.onClick();
-                        setOpen(false);
-                      }}
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      {opt.action.label}
-                    </button>
-                  ) : null;
-                  if (actionOnly) {
-                    return (
-                      <div key={opt.value} className="choice-dropdown-option is-action-only">
-                        <span className="choice-dropdown-option-copy">
-                          <span className="choice-dropdown-option-label">{opt.label}</span>
-                          {opt.hint ? (
-                            <span className="choice-dropdown-option-hint">{opt.hint}</span>
-                          ) : null}
-                        </span>
-                        {actionBtn}
-                      </div>
-                    );
-                  }
+            groups.map(({ group, items }) => {
+              const body = items.map((opt) => {
+                const actionOnly = Boolean(opt.action && opt.disabled);
+                const selected = checkbox
+                  ? props.values.includes(opt.value)
+                  : props.value === opt.value;
+                const actionBtn = opt.action ? (
+                  <button
+                    type="button"
+                    className={`choice-dropdown-option-action${opt.action.danger ? " is-danger" : ""}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      opt.action?.onClick();
+                      setOpen(false);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    {opt.action.label}
+                  </button>
+                ) : null;
+                if (actionOnly) {
                   return (
-                    <label
-                      key={opt.value}
-                      className={`choice-dropdown-option${selected ? " is-selected" : ""}${
-                        opt.disabled ? " is-disabled" : ""
-                      }`}
-                    >
-                      <input
-                        type={checkbox ? "checkbox" : "radio"}
-                        name={checkbox ? undefined : listId}
-                        value={opt.value}
-                        checked={selected}
-                        disabled={opt.disabled || disabled}
-                        onChange={() => {
-                          if (opt.disabled) return;
-                          if (checkbox) {
-                            toggleCheckbox(opt.value);
-                            return;
-                          }
-                          props.onChange(opt.value);
-                          setOpen(false);
-                        }}
-                      />
-                      {checkbox ? (
-                        <span className="choice-dropdown-check" aria-hidden>
-                          {selected ? <Icons.Check /> : null}
-                        </span>
-                      ) : (
-                        <span className="choice-dropdown-radio" aria-hidden />
-                      )}
+                    <div key={opt.value} className="choice-dropdown-option is-action-only">
                       <span className="choice-dropdown-option-copy">
                         <span className="choice-dropdown-option-label">{opt.label}</span>
                         {opt.hint ? (
@@ -270,11 +231,68 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
                         ) : null}
                       </span>
                       {actionBtn}
-                    </label>
+                    </div>
                   );
-                })}
-              </div>
-            ))
+                }
+                return (
+                  <label
+                    key={opt.value}
+                    className={`choice-dropdown-option${selected ? " is-selected" : ""}${
+                      opt.disabled ? " is-disabled" : ""
+                    }`}
+                  >
+                    <input
+                      type={checkbox ? "checkbox" : "radio"}
+                      name={checkbox ? undefined : listId}
+                      value={opt.value}
+                      checked={selected}
+                      disabled={opt.disabled || disabled}
+                      onChange={() => {
+                        if (opt.disabled) return;
+                        if (checkbox) {
+                          toggleCheckbox(opt.value);
+                          return;
+                        }
+                        props.onChange(opt.value);
+                        setOpen(false);
+                      }}
+                    />
+                    {checkbox ? (
+                      <span className="choice-dropdown-check" aria-hidden>
+                        {selected ? <Icons.Check /> : null}
+                      </span>
+                    ) : (
+                      <span className="choice-dropdown-radio" aria-hidden />
+                    )}
+                    <span className="choice-dropdown-option-copy">
+                      <span className="choice-dropdown-option-label">{opt.label}</span>
+                      {opt.hint ? (
+                        <span className="choice-dropdown-option-hint">{opt.hint}</span>
+                      ) : null}
+                    </span>
+                    {actionBtn}
+                  </label>
+                );
+              });
+              if (accordion && group) {
+                return (
+                  <details
+                    key={group}
+                    className="choice-dropdown-group is-accordion"
+                    {...{ defaultOpen: true }}
+                  >
+                    <summary className="choice-dropdown-group-label">{group}</summary>
+                    {body}
+                  </details>
+                );
+              }
+              return (
+                <div key={group ?? "__ungrouped__"} className="choice-dropdown-group">
+                  {group ? <div className="choice-dropdown-group-label">{group}</div> : null}
+                  {body}
+                </div>
+              );
+            })
           )}
           {footer ? <div className="choice-dropdown-footer">{footer}</div> : null}
         </div>

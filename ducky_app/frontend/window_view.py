@@ -286,14 +286,22 @@ def _start_uefn(exe: object, project: object | None = None, extra: object = None
     )
 
 
+def launch_uefn() -> dict[str, Any]:
+    """Editor hub only — no island argv."""
+    exe, extra = uefn_editor_launch()
+    _start_uefn(exe, None, extra)
+    return {"ok": True, "exe": exe, "path": ""}
+
+
 def launch_uefn_project() -> dict[str, Any]:
     exe, extra = uefn_editor_launch()
-    try:
-        path = uefnproject_path()
-    except RuntimeError:
-        path = None
+    path = uefnproject_path()
     _start_uefn(exe, path, extra)
-    return {"ok": True, "exe": exe, "path": str(path) if path else ""}
+    return {"ok": True, "exe": exe, "path": str(path)}
+
+
+def close_uefn() -> dict[str, Any]:
+    return {"ok": True, "killed": _kill_uefn_editor()}
 
 
 def restart_uefn_project() -> dict[str, Any]:

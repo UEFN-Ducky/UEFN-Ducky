@@ -130,7 +130,7 @@ standalone AppData skill pack or owned by another plugin.
 | `hooks` | Extra hookable events for Appearance → Sounds; emit via `ducky:hook` |
 | `automations.nodes` / `automations.triggers` | Palette tiles in the Automations editor. `register()`: `api.register_automation_node(type, handler)` and `api.emit_automation(trigger_id, payload)`. Disabled plugin → tiles and handlers gone. Leave `hooks` alone (sounds). |
 | `verse.templates` | New-file Verse scaffolds (`file`/`content` or multi-file `folder`+`files[]`) |
-| `agent.tools` | Optional category / intent for MCP tools registered via `api.tool()` (tool names auto-tracked) |
+| `agent.tools` | Category / intent for MCP tools registered via `api.tool()` (tool names auto-tracked). Chat AI-made plugins **must** `@api.tool()` every user-facing action. |
 | `llm.providers` | Rows under Settings → LLMs → Providers; click opens a detail slide (key, coding agent, plugin options) |
 | `llm.coding_agents` | Coding-agent block inside that provider’s detail slide (Claude Code, Codex, Cursor, Gemini CLI) |
 | `settings.sections` with `tab: "LLMs"` | Extra toggles in that provider’s detail slide (e.g. Anthropic/OpenAI prompt-cache markers) |
@@ -303,36 +303,26 @@ plugin vs skill pack.
 
 ## AI-made plugins (chat duckies)
 
-**In-app duckies:** `skill_read_subskill("ducky", "ai_plugins")` (shipped pack).
-**IDE agents:** also [references/ai_made_plugins.md](references/ai_made_plugins.md).
+**STOP — if a chat duckie or “make me a plugin” asked for this, do not use the
+git-repo checklist below.** That Store path is for humans in
+`Documents/GitHub/uefn-plugins/uefn-plugin-<id>/`. Chat uses `ducky_plugin_*`
+only. Recipe: `skill_read_subskill("ducky", "ai_plugins")` and
+[references/ai_made_plugins.md](references/ai_made_plugins.md).
 
-Shared per-install drafts (any duckie / IDE agent can edit any draft — not per-AI):
+- `ducky_plugin_list` is the census (drafts **and** installed). Never glob or
+  shell AppData `ai_plugins` / `uefn_plugins`.
+- Scaffold → `write_file` → **`@api.tool()` every user-facing action** →
+  validate → install → `ducky_store_set_enabled` (stop on `needs_trust`).
+- Do not edit `panel_ai_plugins.py` / the EXE to add a tab. Do not mix
+  `ducky_skills_create_pack` into plugin authoring.
 
-`%LOCALAPPDATA%/UEFN-Ducky/ai_plugins/<id>/`
+### Skill authoring from chat (not a plugin)
 
-Flow:
-
-1. `ducky_plugin_reference` — contribution + `register(api)` cheat sheet
-2. `ducky_plugin_scaffold(id, label, description)` — create draft
-3. `ducky_plugin_write_file` / `read_file` / `list` — path-jailed to the draft only (cannot touch core files)
-4. `ducky_plugin_validate` — `plugin.json`, `py_compile`, bundled skills
-5. `ducky_plugin_install` — zip → `import_plugin_from_bytes(source="ai")` into `uefn_plugins/`
-6. User trusts once (Settings → Store confirm; agents cannot pass `trust_local` for `source=ai`)
-7. Iterate: edit draft → validate → install again (same-source replace → live reload)
-
-Enable / disable / uninstall the installed copy with `ducky_store_set_enabled` /
-`ducky_store_remove`. Cross-source overwrite is refused (ai ≠ store ≠ local).
-
-Tools are intent-unlocked for phrases like "create a plugin", "theme", "AI plugin",
-`customize the app`. Implementation: `ducky_app/backend/tools/panel_ai_plugins.py`.
-
-### Skill authoring from chat
-
-- `ducky_skills_create_pack` — new user-owned pack
+- `ducky_skills_create_pack` — new user-owned pack (only if they asked for a skill)
 - `ducky_skills_write_subskill` — **additive** on Store packs (`origin: user`);
   Store updates preserve those refs. Overwriting store-origin SKILL.md / refs is refused.
 
-## Checklist for a new plugin
+## Checklist for a Store git plugin (not chat)
 
 - [ ] `uefn-plugins/uefn-plugin-<id>/plugin.json` valid id + version
 - [ ] `backend/register()` imports tools; tools check `is_plugin_enabled`

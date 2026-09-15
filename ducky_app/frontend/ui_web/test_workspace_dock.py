@@ -35,6 +35,13 @@ def test_save_and_load_window(backend: str, tmp_path: Path) -> None:
     assert _file(tmp_path).is_file() == (backend == "files")
 
 
+def test_header_visibility_round_trip(backend: str, tmp_path: Path) -> None:
+    wd.save_header({"hidden": ["search", "nav"]})
+    assert wd.load_header() == {"hidden": ["search", "nav"]}
+    wd.save_header("nope")  # type: ignore[arg-type]
+    assert wd.load_header() == {"hidden": ["search", "nav"]}
+
+
 def test_save_window_ignores_non_dict(backend: str, tmp_path: Path) -> None:
     wd.save_window("main", "nope")  # type: ignore[arg-type]
     assert wd.load_window("main") is None

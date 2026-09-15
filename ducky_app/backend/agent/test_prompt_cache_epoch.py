@@ -79,10 +79,15 @@ def test_overlap_ignores_live_tail_and_cache_control():
     )
 
 
-def test_plugin_reference_states_epoch_invariant():
-    from backend.tools.panel.panel_ai_plugins import _PLUGIN_REFERENCE
+def test_plugin_reference_is_chat_recipe_not_gateway_cache():
+    from backend.tools.panel.panel_ai_plugins import _load_plugin_reference
 
-    assert "Bytes before the growth point change only at an epoch." in _PLUGIN_REFERENCE
+    text = _load_plugin_reference()
+    assert "ducky_plugin_list" in text
+    assert "@api.tool()" in text
+    assert "Never glob" in text or "never glob" in text.lower()
+    assert "Gateway prompt caching" not in text
+    assert "Bytes before the growth point change only at an epoch." not in text
 
 
 def test_consecutive_turns_share_prefix_fingerprint():
