@@ -7,8 +7,6 @@ cannot paint "offline" while the header shows connected.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import json
 from typing import Any
 
@@ -78,18 +76,8 @@ def _call_epic_tool(toolset_name: str, tool_name: str, arguments: dict[str, Any]
         "tool_name": tool_name,
         "arguments": arguments or {},
     }
-
-    async def _run() -> str:
-        return await get_plugin_pool().call_tool("unreal__call_tool", args)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop is not None and loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(lambda: asyncio.run(_run())).result(timeout=_EPIC_CALL_TIMEOUT_SEC)
-    return asyncio.run(_run())
+    pool = get_plugin_pool()
+    return pool.run_sync(pool.call_tool("unreal__call_tool", args), timeout=_EPIC_CALL_TIMEOUT_SEC)
 
 
 def _coerce_snapshot(raw: Any, *, source: str) -> dict[str, Any] | None:

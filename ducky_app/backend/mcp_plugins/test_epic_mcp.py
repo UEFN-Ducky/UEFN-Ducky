@@ -33,10 +33,8 @@ def test_catalog_plugin_json_is_http_unreal_mcp() -> None:
 
 
 def test_catalog_seeds_mcp_json(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir()
+    store.appdata_dir().mkdir(parents=True, exist_ok=True)
     bundled = Path(__file__).resolve().parents[2] / "frontend" / "mcp_plugins"
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
     monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: bundled)
 
     class _Settings:

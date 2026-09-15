@@ -1628,6 +1628,17 @@ def ducky_terminal_read_output(session_id: str, max_chars: int = 8000, pretty: b
 
 
 @mcp.tool()
+def ducky_read_tool_spill(name: str, offset: int = 0, max_chars: int = 4000, pretty: bool = False) -> str:
+    """Page a spilled nested-tool result under AppData tool_spills (basename only)."""
+    from backend.agent.tool_spills import read_tool_spill
+
+    try:
+        return tool_json(read_tool_spill(name, offset=offset, max_chars=max_chars), pretty=pretty)
+    except ValueError as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+
+
+@mcp.tool()
 def ducky_terminal_list(pretty: bool = False) -> str:
     """List active integrated terminal sessions in the Ducky panel."""
     mgr = _terminal_manager()

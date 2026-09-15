@@ -1,4 +1,4 @@
-"""mcp.json store: migrate, disable filter, validate."""
+"""Nested MCP store: migrate, disable filter, validate. Rows in ducky.db."""
 
 from __future__ import annotations
 
@@ -13,22 +13,31 @@ from backend.mcp_plugins import store
 
 @pytest.fixture(autouse=True)
 def _fresh_row_store():
-    """Each test owns its own server map.
-
-    These tests set up an ``mcp.json`` under their own tmp_path, but the store
-    reads the ducky.db row store when it has anything in it — and one pytest
-    session shares one database. Without this reset a test inherits whichever
-    servers ran before it and never looks at the file it just wrote.
-    """
+    """Each test owns its own server map in ducky.db."""
+    from backend.store.importers import phase1
     from backend.store.repos import misc
 
     misc.mcp_servers_reset_for_tests()
+    phase1.reset_for_tests()
+    path = store.mcp_config_path()
+    if path.is_file():
+        path.unlink()
     yield
     misc.mcp_servers_reset_for_tests()
+    phase1.reset_for_tests()
 
 
-def test_migrate_legacy_folders_and_disabled(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
+def _no_catalog(monkeypatch) -> Path:
+    """Same AppData the isolated ducky.db uses — do not point appdata_dir elsewhere."""
+    appdata = store.appdata_dir()
+    appdata.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
+    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+    return appdata
+
+
+def test_migrate_legacy_folders_and_disabled(monkeypatch) -> None:
+    appdata = _no_catalog(monkeypatch)
     plugins = appdata / "mcp_plugins"
     (plugins / "my_tool").mkdir(parents=True)
     (plugins / "my_tool" / "plugin.json").write_text(
@@ -56,11 +65,6 @@ def test_migrate_legacy_folders_and_disabled(tmp_path: Path, monkeypatch) -> Non
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    # Avoid pulling real bundled catalog into this tmp appdata.
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
-
     class _Settings:
         enabled_mcp_plugins = ["my_tool"]
 
@@ -79,10 +83,8 @@ def test_migrate_legacy_folders_and_disabled(tmp_path: Path, monkeypatch) -> Non
     ):
         pool_mock.return_value.invalidate_tools_cache = lambda: None
         pool_mock.return_value.close_plugin = lambda _pid: None
-        path = store.ensure_mcp_config()
-        assert path.is_file()
-        data = json.loads(path.read_text(encoding="utf-8"))
-        servers = data["mcpServers"]
+        store.ensure_mcp_config()
+        servers = store.load_mcp_config()["mcpServers"]
         assert "my_tool" in servers
         assert servers["my_tool"].get("disabled") is not True
         assert "catalog_demo" in servers
@@ -112,12 +114,8 @@ def test_validate_rejects_bad_shape() -> None:
         pass
 
 
-def test_create_and_delete_custom(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir()
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+def test_create_and_delete_custom(monkeypatch) -> None:
+    _no_catalog(monkeypatch)
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
@@ -131,12 +129,8 @@ def test_create_and_delete_custom(tmp_path: Path, monkeypatch) -> None:
         assert "demo" not in store.load_mcp_config()["mcpServers"]
 
 
-def test_set_mcp_config_text_roundtrip(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir()
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+def test_set_mcp_config_text_roundtrip(monkeypatch) -> None:
+    _no_catalog(monkeypatch)
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
@@ -165,8 +159,7 @@ def test_set_mcp_config_text_roundtrip(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_manifest_from_block_uses_catalog_meta(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir()
+    store.appdata_dir().mkdir(parents=True, exist_ok=True)
     bundled = tmp_path / "bundled" / "catalog_demo"
     bundled.mkdir(parents=True)
     (bundled / "plugin.json").write_text(
@@ -194,7 +187,6 @@ def test_manifest_from_block_uses_catalog_meta(tmp_path: Path, monkeypatch) -> N
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
     monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: bundled.parent)
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
@@ -206,58 +198,46 @@ def test_manifest_from_block_uses_catalog_meta(tmp_path: Path, monkeypatch) -> N
         assert m["description"] == "From bundle"
         assert m["kind"] == "catalog"
         assert m["health_probe_tool"] == "ping"
-        # Connection comes from mcp.json seed
+        # Connection comes from the DB seed
         assert isinstance(m.get("server"), dict)
         assert m["server"].get("command")
 
 
-def test_retire_blender_nested_mcp(tmp_path: Path, monkeypatch) -> None:
+def test_retire_blender_nested_mcp(monkeypatch) -> None:
     """Blender is a Store desktop plugin — purge leftover nested MCP entries."""
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir()
-    cfg = appdata / "mcp.json"
-    cfg.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "blender": {
-                        "type": "stdio",
-                        "command": "uvx",
-                        "args": ["blender-mcp"],
-                        "kind": "custom",
-                        "label": "Blender",
-                    },
-                    "keep_me": {
-                        "type": "stdio",
-                        "command": "npx",
-                        "args": ["-y", "demo"],
-                        "kind": "custom",
-                        "label": "Keep",
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+    appdata = _no_catalog(monkeypatch)
     legacy = appdata / "mcp_plugins" / "blender"
     legacy.mkdir(parents=True)
     (legacy / "plugin.json").write_text('{"id":"blender"}', encoding="utf-8")
 
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
-
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
-        # Seed through the store, not by writing mcp.json alone: with the row
-        # store on (ADR 0003) mcp.json is an export that is never read back, so a
-        # file-only fixture left the starting server map empty and this test
-        # passed or failed on whether the "mcp" switch happened to be enabled.
-        store._write_servers(json.loads((appdata / "mcp.json").read_text(encoding="utf-8"))["mcpServers"])
-        store.ensure_mcp_config()
-        servers = store.load_mcp_config()["mcpServers"]
-        assert "blender" not in servers
-        assert "keep_me" in servers
+        store._write_servers(
+            {
+                "blender": {
+                    "type": "stdio",
+                    "command": "uvx",
+                    "args": ["blender-mcp"],
+                    "kind": "custom",
+                    "label": "Blender",
+                },
+                "keep_me": {
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "demo"],
+                    "kind": "custom",
+                    "label": "Keep",
+                },
+            }
+        )
+        from backend.store.repos import misc
+
+        assert set(misc.mcp_servers_get()) == {"blender", "keep_me"}
+        servers = dict(misc.mcp_servers_get())
+        store._retire_moved_to_desktop_plugin_mcp(servers)
+        store._write_servers(servers)
+        assert "blender" not in misc.mcp_servers_get()
+        assert "keep_me" in misc.mcp_servers_get()
         assert not legacy.is_dir()
 
 
@@ -268,11 +248,10 @@ def test_http_bind_key_normalizes_localhost() -> None:
     assert store.http_bind_key("") is None
 
 
-def test_refuse_enable_second_http_on_same_port(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir(parents=True)
-    cfg = {
-        "mcpServers": {
+def test_refuse_enable_second_http_on_same_port(monkeypatch) -> None:
+    _no_catalog(monkeypatch)
+    store._write_servers(
+        {
             "unreal-mcp": {
                 "type": "http",
                 "url": "http://127.0.0.1:8000/mcp",
@@ -287,11 +266,7 @@ def test_refuse_enable_second_http_on_same_port(tmp_path: Path, monkeypatch) -> 
                 "disabled": True,
             },
         }
-    }
-    (appdata / "mcp.json").write_text(json.dumps(cfg), encoding="utf-8")
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+    )
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
@@ -304,11 +279,10 @@ def test_refuse_enable_second_http_on_same_port(tmp_path: Path, monkeypatch) -> 
         assert "unreal-mcp" in store.get_enabled_plugin_ids()
 
 
-def test_heal_disables_duplicate_enabled_http_ports(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir(parents=True)
-    cfg = {
-        "mcpServers": {
+def test_heal_disables_duplicate_enabled_http_ports(monkeypatch) -> None:
+    _no_catalog(monkeypatch)
+    store._write_servers(
+        {
             "unreal-mcp": {
                 "type": "http",
                 "url": "http://127.0.0.1:8000/mcp",
@@ -322,11 +296,7 @@ def test_heal_disables_duplicate_enabled_http_ports(tmp_path: Path, monkeypatch)
                 "label": "Custom Epic",
             },
         }
-    }
-    (appdata / "mcp.json").write_text(json.dumps(cfg), encoding="utf-8")
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+    )
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
@@ -339,13 +309,8 @@ def test_heal_disables_duplicate_enabled_http_ports(tmp_path: Path, monkeypatch)
         assert "unreal-mcp" in rows["custom-epic"]["port_conflict_with"]
 
 
-def test_save_mcp_config_rejects_enabled_port_collision(tmp_path: Path, monkeypatch) -> None:
-    appdata = tmp_path / "UEFN-Ducky"
-    appdata.mkdir(parents=True)
-    (appdata / "mcp.json").write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
-    monkeypatch.setattr(store, "appdata_dir", lambda: appdata)
-    monkeypatch.setattr(store, "bundled_mcp_plugins_dir", lambda: None)
-    monkeypatch.setattr(store, "_list_bundled_catalog_manifests", lambda: [])
+def test_save_mcp_config_rejects_enabled_port_collision(monkeypatch) -> None:
+    _no_catalog(monkeypatch)
 
     with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
         pool.return_value.invalidate_tools_cache = lambda: None
@@ -361,3 +326,62 @@ def test_save_mcp_config_rejects_enabled_port_collision(tmp_path: Path, monkeypa
             raise AssertionError("expected ValueError")
         except ValueError as exc:
             assert "9000" in str(exc)
+
+
+def test_mcp_json_is_never_read_after_rows_exist(monkeypatch) -> None:
+    appdata = _no_catalog(monkeypatch)
+
+    with patch("backend.mcp_plugins.client_pool.get_plugin_pool") as pool:
+        pool.return_value.invalidate_tools_cache = lambda: None
+        store._write_servers(
+            {
+                "keep": {
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "keep"],
+                    "kind": "custom",
+                    "label": "Keep",
+                }
+            }
+        )
+        (appdata / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "poison": {
+                            "type": "stdio",
+                            "command": "evil",
+                            "args": [],
+                            "kind": "custom",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
+        servers = store.load_mcp_config()["mcpServers"]
+        assert "keep" in servers
+        assert "poison" not in servers
+        from backend.store.repos import misc
+
+        assert "keep" in misc.mcp_servers_get()
+        assert "poison" not in misc.mcp_servers_get()
+
+
+def test_ai_plugin_json_is_not_an_mcp_server(monkeypatch) -> None:
+    """Chat-authored plugin.json stays a desktop plugin file — never a nested MCP row."""
+    from backend.store.repos import misc
+    from backend.tools.panel.panel_ai_plugins import scaffold_ai_plugin, write_ai_plugin_file
+
+    _no_catalog(monkeypatch)
+    sc = scaffold_ai_plugin("ai_hello", label="AI Hello")
+    assert sc.get("ok"), sc
+    wr = write_ai_plugin_file(
+        "ai_hello",
+        "ui/theme.css",
+        ":root{--x:1}\n",
+    )
+    assert wr.get("ok"), wr
+    assert "ai_hello" not in misc.mcp_servers_get()
+    assert "ai_hello" not in store.load_mcp_config()["mcpServers"]

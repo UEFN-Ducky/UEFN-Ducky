@@ -1,8 +1,8 @@
 """Official in-editor Unreal MCP (nested under uefn-ducky).
 
-Epic binds http://127.0.0.1:8000/mcp. Client JSON lives in AppData mcp.json —
-never island-root .mcp.json. Ducky starts the server from the listener once
-Python is on; user just enables the project in the panel.
+Epic binds http://127.0.0.1:8000/mcp. Client config lives in ducky.db
+(mcp.json is an export) — never island-root .mcp.json. Ducky starts the server
+from the listener once Python is on; user just enables the project in the panel.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ _probe_cache: dict[str, Any] = {"at": 0.0, "result": None}
 
 
 def epic_mcp_url() -> str:
-    """Live URL from AppData mcp.json, else the catalog default."""
+    """Live URL from the nested MCP row, else the catalog default."""
     try:
         from backend.mcp_plugins.store import load_plugin_manifest, resolve_server_block
 

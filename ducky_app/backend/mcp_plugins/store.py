@@ -1,8 +1,10 @@
-"""Nested MCP servers — Cursor-shaped ``mcp.json`` under AppData.
+"""Nested MCP servers — rows in ``ducky.db``.
 
-Source of truth: ``%LOCALAPPDATA%/UEFN-Ducky/mcp.json`` with a ``mcpServers`` map.
-Catalog UI metadata still lives in bundled ``frontend/mcp_plugins/*/plugin.json``.
-Legacy per-folder ``mcp_plugins/<id>/plugin.json`` is migrated once, then unused.
+Source of truth: ``mcp_servers`` in ``%LOCALAPPDATA%/UEFN-Ducky/ducky.db``.
+``mcp.json`` is an export only (never read at runtime). A leftover file is
+imported once by ``store.importers.phase6``. Catalog UI metadata still lives
+in bundled ``frontend/mcp_plugins/*/plugin.json``. Legacy per-folder
+``mcp_plugins/<id>/plugin.json`` is migrated once, then unused.
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ _META_KEYS = frozenset(
 )
 
 # Nested MCP ids that now ship only as Store desktop plugins (uefn-plugin-*).
-# Drop leftover mcp.json entries + AppData mcp_plugins/<id> folders.
+# Drop leftover nested-MCP entries + AppData mcp_plugins/<id> folders.
 _MOVED_TO_DESKTOP_PLUGIN_MCP = frozenset({"blender"})
 
 # Prefer keeping this catalog id when healing same-port HTTP conflicts.
@@ -239,12 +241,6 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def _use_db() -> bool:
-    from backend.store.switch import use_db
-
-    return use_db("mcp")
-
-
 def _rows():
     from backend.store.importers import phase6
     from backend.store.repos import misc
@@ -254,28 +250,20 @@ def _rows():
 
 
 def _read_servers() -> dict[str, Any] | None:
-    """The server map: rows on the row store (mcp.json is only an export there)."""
-    if _use_db():
-        rows = _rows()
-        if rows.mcp_servers_present():
-            return rows.mcp_servers_get()
-        return None
-    data = _read_json(mcp_config_path())
-    if data and isinstance(data.get("mcpServers"), dict):
-        return {str(k): dict(v) for k, v in data["mcpServers"].items() if isinstance(v, dict)}
+    """The server map from ducky.db. ``mcp.json`` is never consulted."""
+    rows = _rows()
+    if rows.mcp_servers_present():
+        return rows.mcp_servers_get()
     return None
 
 
 def _write_servers(servers: dict[str, Any]) -> None:
-    if _use_db():
-        _rows().mcp_servers_replace({str(k): dict(v) for k, v in servers.items() if isinstance(v, dict)})
-        # Export for hand edits / support; never read back while the row store is on.
-        try:
-            _write_json(mcp_config_path(), {"mcpServers": servers})
-        except OSError:
-            pass
-        return
-    _write_json(mcp_config_path(), {"mcpServers": servers})
+    _rows().mcp_servers_replace({str(k): dict(v) for k, v in servers.items() if isinstance(v, dict)})
+    # Projection for support / Open folder; never read back.
+    try:
+        _write_json(mcp_config_path(), {"mcpServers": servers})
+    except OSError:
+        pass
 
 
 def validate_mcp_config(data: Any, *, resolve: bool = True) -> dict[str, Any]:
@@ -303,7 +291,7 @@ def validate_mcp_config(data: Any, *, resolve: bool = True) -> dict[str, Any]:
 
 
 def load_mcp_config() -> dict[str, Any]:
-    """Load ``mcp.json``, migrating / seeding as needed."""
+    """Load nested MCP servers from ducky.db, migrating / seeding as needed."""
     ensure_mcp_config()
     servers = _read_servers()
     if not servers:
@@ -342,12 +330,7 @@ def save_mcp_config(data: dict[str, Any]) -> Path:
 
 def get_mcp_config_text() -> str:
     ensure_mcp_config()
-    if _use_db():
-        return json.dumps({"mcpServers": _read_servers() or {}}, indent=2) + "\n"
-    path = mcp_config_path()
-    if path.is_file():
-        return path.read_text(encoding="utf-8")
-    return json.dumps({"mcpServers": {}}, indent=2) + "\n"
+    return json.dumps({"mcpServers": _read_servers() or {}}, indent=2) + "\n"
 
 
 def set_mcp_config_text(text: str) -> Path:
@@ -395,7 +378,7 @@ def _server_block_from_legacy_manifest(manifest: dict[str, Any]) -> dict[str, An
 
 
 def _catalog_ui_meta(manifest: dict[str, Any]) -> dict[str, Any]:
-    """UI metadata from a bundled catalog plugin.json (persisted into mcp.json)."""
+    """UI metadata from a bundled catalog plugin.json (persisted into the server row)."""
     out: dict[str, Any] = {
         "kind": "catalog",
         "label": str(manifest.get("label") or manifest.get("id") or "").strip(),
@@ -506,7 +489,7 @@ def _retire_moved_to_desktop_plugin_mcp(servers: dict[str, Any]) -> None:
 
 
 def ensure_mcp_config() -> Path:
-    """Create/migrate ``mcp.json`` if needed. Idempotent."""
+    """Create/migrate nested MCP rows if needed. Idempotent. Returns the export path."""
     path = mcp_config_path()
     current = _read_servers()
     if current is not None:
@@ -541,10 +524,10 @@ def ensure_mcp_config() -> Path:
 
 
 def seed_mcp_plugins(*, force: bool = False) -> list[str]:
-    """Ensure mcp.json exists and catalog servers are present (legacy name)."""
+    """Ensure nested MCP rows exist and catalog servers are present (legacy name)."""
     del force  # connection defaults refresh happens in ensure_mcp_config
     path = ensure_mcp_config()
-    return [f"mcp.json ready -> {path}"]
+    return [f"mcp servers ready -> {path}"]
 
 
 def _manifest_from_server_block(server_id: str, block: dict[str, Any]) -> dict[str, Any]:
@@ -559,7 +542,7 @@ def _manifest_from_server_block(server_id: str, block: dict[str, Any]) -> dict[s
         manifest = dict(catalog)
         manifest["id"] = pid
         manifest["kind"] = "catalog"
-        # Prefer live connection from mcp.json over bundled OS blocks.
+        # Prefer live connection from the DB row over bundled OS blocks.
         manifest["server"] = conn
         manifest.pop("server_windows", None)
         manifest.pop("server_unix", None)
@@ -936,7 +919,7 @@ def create_mcp_server(
 
 
 def update_mcp_server_manifest(server_id: str, manifest: dict[str, Any]) -> Path:
-    """Write a full synthetic manifest back into mcp.json (agent upsert)."""
+    """Write a full synthetic manifest back into the nested MCP row (agent upsert)."""
     pid = normalize_server_id(server_id)
     cfg = load_mcp_config()
     servers = cfg.setdefault("mcpServers", {})

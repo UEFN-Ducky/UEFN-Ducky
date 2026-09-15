@@ -1195,8 +1195,6 @@ class PanelApiStoreMixin:
         return self.test_mcp_server(plugin_id)
 
     def test_mcp_server(self, server_id: str) -> dict[str, Any]:
-        import asyncio
-
         from backend.agent.builtin_toolsets import count_builtin_group_tools, is_builtin_group
         from backend.mcp_plugins.client_pool import get_plugin_pool
         from backend.uefn_plugins.host import count_uefn_plugin_tools, is_uefn_agent_tool_plugin
@@ -1216,7 +1214,8 @@ class PanelApiStoreMixin:
                 "tool_count": count,
                 "stages": [{"stage": "list_tools", "ok": True, "tool_count": count}],
             }
-        return asyncio.run(get_plugin_pool().test_plugin(server_id.strip()))
+        pool = get_plugin_pool()
+        return pool.run_sync(pool.test_plugin(server_id.strip()))
 
     def create_mcp_plugin(
         self,

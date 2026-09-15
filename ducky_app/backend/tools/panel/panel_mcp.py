@@ -5,7 +5,7 @@ Guards: the core ``uefn`` bridge and built-in tool groups can't be clobbered
 (``force`` required), removals need explicit ``confirm``, and Apply merges rather
 than overwrites so other MCP servers in an IDE config survive.
 
-Nested servers live in AppData ``mcp.json`` and are proxied under the single
+Nested servers live in ducky.db and are proxied under the single
 IDE-facing ``uefn-ducky`` bridge.
 """
 
@@ -119,8 +119,6 @@ def ducky_mcp_list_tools(server_id: str = "", pretty: bool = False) -> str:
     nested servers' tools. Works even when inspecting a disabled server (connects
     temporarily). Returns {ok, tools: [{name, description, server_id, inputSchema?}]}`.
     """
-    import asyncio
-
     from backend.mcp_plugins.client_pool import get_plugin_pool
     from backend.mcp_plugins.store import (
         get_enabled_plugin_ids,
@@ -169,7 +167,8 @@ def ducky_mcp_list_tools(server_id: str = "", pretty: bool = False) -> str:
                 )
         return {"ok": True, "tool_count": len(tools_out), "tools": tools_out}
 
-    return tool_json(asyncio.run(_run()), pretty=pretty)
+    pool = get_plugin_pool()
+    return tool_json(pool.run_sync(_run()), pretty=pretty)
 
 
 @mcp.tool()
@@ -187,8 +186,6 @@ def ducky_mcp_set_plugin(
 @mcp.tool()
 def ducky_mcp_test_server(server_id: str, pretty: bool = False) -> str:
     """Test connectivity for a nested MCP server (list tools + optional health probe)."""
-    import asyncio
-
     from backend.mcp_plugins.client_pool import get_plugin_pool
     from backend.mcp_plugins.store import normalize_server_id
 
@@ -196,14 +193,15 @@ def ducky_mcp_test_server(server_id: str, pretty: bool = False) -> str:
         pid = normalize_server_id(server_id)
     except ValueError as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
-    return tool_json(asyncio.run(get_plugin_pool().test_plugin(pid)), pretty=pretty)
+    pool = get_plugin_pool()
+    return tool_json(pool.run_sync(pool.test_plugin(pid)), pretty=pretty)
 
 
 @mcp.tool()
 def ducky_mcp_upsert_server(
     id: str, config: dict[str, Any], apply: bool = False, force: bool = False, pretty: bool = False
 ) -> str:
-    """Add or update a nested MCP server in AppData mcp.json.
+    """Add or update a nested MCP server in ducky.db.
 
     config: {transport: "stdio"|"http"|"sse", command, args, env, url, headers,
     label, description, tool_prefix, intents}. Set `apply` to re-apply IDE configs after.

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import sys
+import threading
 import time
+from collections.abc import Callable, Coroutine
 from contextlib import AsyncExitStack, nullcontext
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -26,9 +29,34 @@ _HTTP_CONNECT_TIMEOUT_SEC = 2.0
 _HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
 _IDLE_EVICT_SEC = 15 * 60.0
+_POOL_RUN_TIMEOUT_SEC = 180.0
+_TOGGLE_HINT = (
+    "toggle this MCP (Settings → MCPs, or ducky_mcp_set_plugin) when the task is done."
+)
+
+_T = TypeVar("_T")
 
 
 from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
+
+
+def _pool_loop_bound(fn: Callable[..., Coroutine[Any, Any, _T]]) -> Callable[..., Coroutine[Any, Any, _T]]:
+    """Run the method on this pool's owned loop when `own_loop=True`."""
+
+    @functools.wraps(fn)
+    async def wrapped(self: PluginClientPool, *args: Any, **kwargs: Any) -> _T:
+        if not self._own_loop or self._loop is None:
+            return await fn(self, *args, **kwargs)
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop:
+            return await fn(self, *args, **kwargs)
+        coro = fn(self, *args, **kwargs)
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, self._loop))
+
+    return wrapped
 
 
 @dataclass
@@ -42,15 +70,68 @@ class PluginConnection:
 
 
 class PluginClientPool:
-    def __init__(self) -> None:
+    def __init__(self, *, own_loop: bool = False) -> None:
         self._connections: dict[str, PluginConnection] = {}
-        self._pool_lock = asyncio.Lock()
         self._tools_cache: list[Tool] | None = None
         self._tools_cache_ids: tuple[str, ...] | None = None
         # namespaced tool name -> its server's annotations (readOnlyHint etc.).
         # Lets the change journal tell a nested read from a nested mutation.
         self._tool_annotations: dict[str, Any] = {}
         self._failed_until: dict[str, float] = {}
+        self._own_loop = own_loop
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._loop_ready = threading.Event()
+        self._pool_lock: asyncio.Lock | None = None
+        if own_loop:
+            self._start_owned_loop()
+        else:
+            self._pool_lock = asyncio.Lock()
+
+    def _start_owned_loop(self) -> None:
+        def _runner() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._loop = loop
+            self._pool_lock = asyncio.Lock()
+            self._loop_ready.set()
+            loop.run_forever()
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+        self._thread = threading.Thread(target=_runner, name="mcp-plugin-pool", daemon=True)
+        self._thread.start()
+        if not self._loop_ready.wait(timeout=5) or self._pool_lock is None:
+            raise RuntimeError("plugin pool loop failed to start")
+
+    def run_sync(self, coro: Coroutine[Any, Any, _T], timeout: float = _POOL_RUN_TIMEOUT_SEC) -> _T:
+        """Run a pool coroutine from any thread. Never uses asyncio.run on a live loop."""
+        if self._own_loop and self._loop is not None:
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is self._loop:
+                raise RuntimeError("cannot run_sync from the plugin pool loop")
+            return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=timeout)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        raise RuntimeError("run_sync from a running loop requires own_loop=True")
+
+    async def run_async(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        if not self._own_loop or self._loop is None:
+            return await coro
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop:
+            return await coro
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, self._loop))
 
     def invalidate_tools_cache(self) -> None:
         self._tools_cache = None
@@ -157,19 +238,51 @@ class PluginClientPool:
 
     def close_plugin(self, plugin_id: str) -> None:
         self.invalidate_tools_cache()
-        conn = self._connections.pop(plugin_id, None)
-        if conn is None:
-            return
 
         async def _do_close() -> None:
+            conn = self._connections.pop(plugin_id, None)
+            if conn is None:
+                return
             await self._close_connection(conn)
 
+        if self._own_loop and self._loop is not None:
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is self._loop:
+                running.create_task(_do_close())
+                return
+            asyncio.run_coroutine_threadsafe(_do_close(), self._loop).result(timeout=30)
+            return
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(_do_close())
         except RuntimeError:
-            pass
+            asyncio.run(_do_close())
 
+    def shutdown_sync(self) -> None:
+        """Close every nested session, then stop the owned loop if any."""
+        if self._own_loop and self._loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(self.shutdown_all(), self._loop).result(timeout=30)
+            except Exception:
+                pass
+            loop = self._loop
+            loop.call_soon_threadsafe(loop.stop)
+            if self._thread is not None:
+                self._thread.join(timeout=5)
+            self._loop = None
+            self._thread = None
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.shutdown_all())
+            return
+        raise RuntimeError("shutdown_sync from a running loop requires own_loop=True")
+
+    @_pool_loop_bound
     async def shutdown_all(self) -> None:
         self.invalidate_tools_cache()
         async with self._pool_lock:
@@ -179,6 +292,7 @@ class PluginClientPool:
             if conn:
                 await self._close_connection(conn)
 
+    @_pool_loop_bound
     async def evict_idle(self, max_idle_sec: float = _IDLE_EVICT_SEC) -> int:
         """Close plugin connections unused for longer than ``max_idle_sec``."""
         now = time.time()
@@ -196,6 +310,7 @@ class PluginClientPool:
             self.invalidate_tools_cache()
         return len(stale)
 
+    @_pool_loop_bound
     async def list_tools_for_plugin(self, plugin_id: str) -> list[Tool]:
         conn = await self._get_or_create(plugin_id)
         session = await self._ensure_session(conn)
@@ -229,6 +344,7 @@ class PluginClientPool:
             )
         return namespaced
 
+    @_pool_loop_bound
     async def list_all_plugin_tools(self) -> list[Tool]:
         ensure_plugin_prefix_cache()
         ids = tuple(effective_plugin_ids())
@@ -247,6 +363,7 @@ class PluginClientPool:
             self._tools_cache_ids = ids
         return list(out)
 
+    @_pool_loop_bound
     async def call_tool(self, namespaced_name: str, arguments: dict[str, Any] | None) -> str:
         from backend.mcp_plugins.registry import parse_plugin_tool
 
@@ -266,8 +383,7 @@ class PluginClientPool:
             raise RuntimeError(
                 f"Nested MCP '{plugin_id}' session unavailable for tool "
                 f"'{original_name}': {detail}. The server may answer TCP but have a "
-                "dead MCP session — use the Ducky fallback tool for this step and "
-                "reconnect this MCP in Settings → MCPs when the task is done."
+                f"dead MCP session — use the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from e
         def _watchdog():
             # Epic's MCP runs on UEFN's Slate thread: a Save prompt it opens would
@@ -289,8 +405,7 @@ class PluginClientPool:
             raise RuntimeError(
                 f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
                 f"{_TOOL_TIMEOUT_SEC:.0f}s — server reachable but unresponsive. Use "
-                "the Ducky fallback tool for this step; reconnect this MCP in "
-                "Settings → MCPs when the task is done."
+                f"the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from None
         except Exception:
             # Dead pooled stream (ClosedResourceError etc.): the server restarted
@@ -309,22 +424,21 @@ class PluginClientPool:
                 raise RuntimeError(
                     f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
                     f"{_TOOL_TIMEOUT_SEC:.0f}s on a fresh session. Use the Ducky "
-                    "fallback tool for this step; reconnect this MCP in "
-                    "Settings → MCPs when the task is done."
+                    f"fallback tool for this step; {_TOGGLE_HINT}"
                 ) from None
             except Exception as e2:
                 detail = str(e2).strip() or type(e2).__name__
                 raise RuntimeError(
                     f"Nested MCP '{plugin_id}' tool '{original_name}' failed even "
                     f"after an automatic reconnect: {detail}. Use the Ducky fallback "
-                    "tool for this step; toggle this MCP in Settings → MCPs when the "
-                    "task is done."
+                    f"tool for this step; {_TOGGLE_HINT}"
                 ) from e2
         conn.last_used = time.time()
         if hasattr(raw, "content"):
             return _content_to_text(raw.content)
         return _content_to_text(raw)
 
+    @_pool_loop_bound
     async def test_plugin(self, plugin_id: str) -> dict[str, Any]:
         manifest = load_plugin_manifest(plugin_id)
         if not manifest:
@@ -405,5 +519,5 @@ _pool: PluginClientPool | None = None
 def get_plugin_pool() -> PluginClientPool:
     global _pool
     if _pool is None:
-        _pool = PluginClientPool()
+        _pool = PluginClientPool(own_loop=True)
     return _pool

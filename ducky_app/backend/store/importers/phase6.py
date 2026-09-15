@@ -25,7 +25,7 @@ def import_mcp_servers(root: Path) -> dict[str, Any]:
     clean = {str(k): dict(v) for k, v in servers.items() if isinstance(v, dict)}
     misc.mcp_servers_replace(clean)
     assert misc.mcp_servers_get() == clean, "mcp.json import verification failed"
-    # The file stays: it is re-exported on every save so hand edits and IDE tooling keep working.
+    # The file stays as an export (never read at runtime). Re-exported on save.
     return {"source": str(path), "found": True, "servers": len(clean)}
 
 

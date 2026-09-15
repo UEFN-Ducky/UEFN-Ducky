@@ -124,7 +124,7 @@ def sweep_old_backups(app_root: Path | None = None) -> int:
 # (the WebView2 profile, screenshots, node_modules of the coding-agent SDK…).
 _SWEEP_SKIP_DIRS = frozenset(
     {
-        "webview2_browser", "tool_captures", "coding_agents", "verse-lsp", "legacy", "snapshots",
+        "webview2_browser", "tool_captures", "tool_spills", "coding_agents", "verse-lsp", "legacy", "snapshots",
         "piper_tts", "meshy_hats", "meshy_free", "asset_previews", "mesh_previews", "listener",
         "uefn_plugins", "skill_packs", "ai_plugins", "mcp_plugins", "setup-engine", "exports", "imports",
     }
@@ -188,6 +188,7 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "changesets": ("Changesets leftover", "Pre-database write ledger. Now in ducky.db.", "cache"),
     "memory": ("Memory leftover", "Pre-database notes. Now in ducky.db.", "cache"),
     "tool_captures": ("Captures", "Screenshots and snips from tools.", "cache"),
+    "tool_spills": ("Tool spills", "Oversized nested MCP results spilled off the model context.", "cache"),
     "backups": ("Backups leftover", "Old JSON .bak copies. Snapshots replaced this.", "cache"),
     "listener": ("Listener", "UEFN Python listener shipped here. Recreated on app start.", "runtime"),
     "skill_packs": ("Skill packs", "Installed skill packs.", "install"),

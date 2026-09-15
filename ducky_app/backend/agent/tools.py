@@ -548,6 +548,7 @@ HOST_ONLY_TOOLS = frozenset(
         "ducky_terminal_read_output",
         "ducky_terminal_list",
         "ducky_terminal_close",
+        "ducky_read_tool_spill",
     }
 )
 
@@ -834,9 +835,12 @@ async def _execute_tool_inner(
             if _looks_like_tool_failure(name, text):
                 _record_plugin_sidecar(name, args, text, ok=False)
                 return ToolCallResult(ok=False, tool=name, error=text[:8000], duration_ms=ms)
-            _record_plugin_sidecar(name, args, text, ok=True)
+            from backend.agent.tool_spills import inline_or_spill
+
+            data = inline_or_spill(name, text)
+            _record_plugin_sidecar(name, args, data, ok=True)
             return _with_plan_tick_nudge(
-                name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+                name, ToolCallResult(ok=True, tool=name, data=data, duration_ms=ms)
             )
         except asyncio.CancelledError:
             ms = int((time.time() - t0) * 1000)
@@ -877,9 +881,12 @@ async def _execute_tool_inner(
             hint = _hint_for_error(name, text)
             _record_plugin_sidecar(name, args, text, ok=False)
             return ToolCallResult(ok=False, tool=name, error=text[:8000], hint=hint, duration_ms=ms)
-        _record_plugin_sidecar(name, args, text, ok=True)
+        from backend.agent.tool_spills import inline_or_spill
+
+        data = inline_or_spill(name, text)
+        _record_plugin_sidecar(name, args, data, ok=True)
         return _with_plan_tick_nudge(
-            name, ToolCallResult(ok=True, tool=name, data=text[:12000], duration_ms=ms)
+            name, ToolCallResult(ok=True, tool=name, data=data, duration_ms=ms)
         )
     except asyncio.CancelledError:
         ms = int((time.time() - t0) * 1000)

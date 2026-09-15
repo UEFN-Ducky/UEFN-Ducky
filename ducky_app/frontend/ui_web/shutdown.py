@@ -49,11 +49,9 @@ def _stop_all_terminals() -> None:
 
 def _stop_mcp_plugins() -> None:
     try:
-        import asyncio
-
         from backend.mcp_plugins.client_pool import get_plugin_pool
 
-        asyncio.run(get_plugin_pool().shutdown_all())
+        get_plugin_pool().shutdown_sync()
     except Exception:
         pass
 

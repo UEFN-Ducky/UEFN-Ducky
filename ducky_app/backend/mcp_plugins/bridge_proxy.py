@@ -1,6 +1,6 @@
 """Register nested MCP server tools onto the IDE-facing FastMCP bridge.
 
-Enabled servers from ``mcp.json`` are proxied as ``prefix__tool`` on the shared
+Enabled servers from ducky.db are proxied as ``prefix__tool`` on the shared
 ``uefn-ducky`` server so Cursor/Claude only need one MCP connection.
 """
 
@@ -65,20 +65,8 @@ def _make_proxy(namespaced_name: str, description: str) -> Callable[..., str]:
         del pretty
         from backend.mcp_plugins.client_pool import get_plugin_pool
 
-        async def _call() -> str:
-            return await get_plugin_pool().call_tool(namespaced_name, params or {})
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None and loop.is_running():
-            # Bridge call_tool usually runs in an event loop — nest safely.
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(lambda: asyncio.run(_call())).result(timeout=180)
-        return asyncio.run(_call())
+        pool = get_plugin_pool()
+        return pool.run_sync(pool.call_tool(namespaced_name, params or {}))
 
     _tool.__name__ = namespaced_name.replace("__", "_")
     _tool.__doc__ = (description or namespaced_name).strip() or namespaced_name
@@ -138,7 +126,16 @@ async def sync_nested_mcp_proxies_async() -> list[str]:
 def sync_nested_mcp_proxies(log: Callable[[str], None] | None = None) -> list[str]:
     """Sync proxy tools (safe at bridge start). Never raises."""
     try:
-        added = asyncio.run(sync_nested_mcp_proxies_async())
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is not None and running.is_running():
+            from backend.mcp_plugins.client_pool import get_plugin_pool
+
+            added = get_plugin_pool().run_sync(sync_nested_mcp_proxies_async())
+        else:
+            added = asyncio.run(sync_nested_mcp_proxies_async())
         if log is not None and added:
             log(f"nested MCP proxies: +{len(added)}")
         return added
@@ -154,7 +151,7 @@ def sync_nested_mcp_proxies(log: Callable[[str], None] | None = None) -> list[st
 
 
 def schedule_sync_nested_proxies() -> None:
-    """Best-effort resync after mcp.json changes in the panel process.
+    """Best-effort resync after nested MCP rows change in the panel process.
 
     The IDE bridge is a separate process — it picks up changes on reconnect.
     Syncing here keeps an in-process FastMCP (if any) aligned.
