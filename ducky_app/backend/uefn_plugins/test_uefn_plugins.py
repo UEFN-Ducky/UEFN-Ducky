@@ -393,6 +393,7 @@ def main() -> None:
 
         from backend.uefn_plugins.webview import (
             panel_post_origin_allowed,
+            plugin_ui_csp,
             sanitize_entry,
             send_plugin_ui_error,
         )
@@ -434,6 +435,12 @@ def main() -> None:
         send_plugin_ui_error(err, 404)
         assert err.status == 404
         assert ("Access-Control-Allow-Origin", "*") in err.headers
+        html_csp = plugin_ui_csp("text/html")
+        assert html_csp
+        assert "static.cloudflareinsights.com" not in html_csp
+        assert "unpkg.com" in html_csp
+        assert plugin_ui_csp("application/javascript") is None
+        assert plugin_ui_csp("text/css") is None
 
         from backend.uefn_plugins.host import (
             filter_uefn_plugin_tools,

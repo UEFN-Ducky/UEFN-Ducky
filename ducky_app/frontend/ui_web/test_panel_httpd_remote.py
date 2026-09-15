@@ -45,6 +45,10 @@ def test_native_browser_pane_rpc_skipped_when_remote():
     pane = (root / "PluginWebviewPane.tsx").read_text(encoding="utf-8")
     assert "if (isRemote()) return;" in bridge
     assert "if (isRemote()) return;" in pane
+    cover = bridge.split("export function setBrowserUiCover")[1].split("export function")[0]
+    scrub = bridge.split("export function scrubPluginShellInterference")[1].split("export function")[0]
+    assert "if (isRemote()) return;" in cover
+    assert "if (isRemote()) return;" in scrub
     sw = Path(httpd.__file__).resolve().parent / "web" / "public" / "sw.js"
     assert 'Access-Control-Allow-Origin' in sw.read_text(encoding="utf-8")
 

@@ -73,7 +73,7 @@ To add a method: one entry in `bridge.ts` → `BRIDGE_HANDLERS`.
 - Plugin code cannot read app localStorage, cookies, or the host DOM.
 - Prefs go through the bridge into the host's `uefn-plugin-ui-prefs` store (scoped by plugin id).
 - POSTs to `/__panel_run` / `/__panel_event` / `/__panel_api` from the iframe are rejected (`Origin: null`). Use the `postMessage` bridge instead.
-- Sandbox origin is opaque (`null`). Load sibling CSS/JS with `<script src>` / `<link href>` (classic subresources). `fetch()` and ES modules also work on remote: GET `/plugin-ui/` is cookie-exempt and served with `Access-Control-Allow-Origin: *`. Do not `fetch()`-eval your own app.js when a script tag will do.
+- Sandbox origin is opaque (`null`). Load sibling CSS/JS with `<script src>` / `<link href>` (classic subresources). `fetch()` and ES modules also work on remote: GET `/plugin-ui/` is cookie-exempt and served with `Access-Control-Allow-Origin: *`. Do not `fetch()`-eval your own app.js when a script tag will do. HTML responses send a CSP that blocks Cloudflare’s RUM beacon (`static.cloudflareinsights.com`) so the opaque iframe does not CORS-fail `/cdn-cgi/rum`. Extra script CDNs: unpkg, jsDelivr, cdnjs, esm.sh.
 
 ## Tuning
 

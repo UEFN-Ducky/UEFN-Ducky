@@ -124,6 +124,29 @@ def resolve_plugin_ui_file(plugin_id: str, rel_path: str) -> Path | None:
     return target
 
 
+# Opaque plugin iframes (Origin null) cannot CORS-post CF RUM. Do not allow
+# static.cloudflareinsights.com — that stops the injected beacon from running.
+PLUGIN_UI_HTML_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com "
+    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob: https:; "
+    "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net "
+    "https://cdnjs.cloudflare.com https://esm.sh data: blob:; "
+    "font-src 'self' data:; media-src 'self' data: blob:; "
+    "object-src 'none'; base-uri 'self'"
+)
+
+
+def plugin_ui_csp(mime: str) -> str | None:
+    """CSP for HTML plugin-ui only — JS/CSS keep working as classic subresources."""
+    kind = (mime or "").split(";", 1)[0].strip().lower()
+    if kind == "text/html":
+        return PLUGIN_UI_HTML_CSP
+    return None
+
+
 def send_plugin_ui_error(handler: Any, code: int) -> None:
     """404/403 for plugin-ui with CORS so opaque-origin fetch() sees the status."""
     handler.send_response(code)
@@ -159,6 +182,9 @@ def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
     handler.send_header("Content-Length", str(len(data)))
     handler.send_header("Cache-Control", "no-cache")
     handler.send_header("Access-Control-Allow-Origin", "*")
+    csp = plugin_ui_csp(mime)
+    if csp:
+        handler.send_header("Content-Security-Policy", csp)
     # Deny framing from anywhere except our loopback panel (defense in depth;
     # primary isolation is iframe sandbox without allow-same-origin).
     handler.send_header("X-Content-Type-Options", "nosniff")

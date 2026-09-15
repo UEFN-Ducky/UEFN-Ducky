@@ -129,6 +129,7 @@ let browserUiCoverDepth = 0;
 export function setBrowserUiCover(cover: boolean): void {
   browserUiCoverDepth += cover ? 1 : -1;
   if (browserUiCoverDepth < 0) browserUiCoverDepth = 0;
+  if (isRemote()) return;
   for (const tabId of paneInsets.keys()) {
     lastSentBounds.delete(tabId);
     pushBrowserPaneBounds(tabId);
@@ -170,6 +171,7 @@ export function scrubPluginShellInterference(): void {
     /* ignore */
   }
   browserUiCoverDepth = 0;
+  if (isRemote()) return;
   const api = getApi();
   // First bury every native pane so a mis-sized WebView cannot sit on the dock.
   if (typeof api?.browser_pane_hide_all === "function") {
