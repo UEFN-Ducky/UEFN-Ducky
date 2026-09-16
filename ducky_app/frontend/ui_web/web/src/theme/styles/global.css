@@ -694,6 +694,18 @@ input, textarea, select, button {
   justify-content: center;
   overflow: hidden;
 }
+.remote-window-view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+.remote-window-stage {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  will-change: transform;
+}
 .remote-window-overlay video {
   width: 100%;
   height: 100%;
@@ -775,6 +787,9 @@ input, textarea, select, button {
   width: 100%;
 }
 .remote-sticks {
+  --stick-left: 128px;
+  --stick-right: 128px;
+  --stick-mouse: 148px;
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -793,9 +808,20 @@ input, textarea, select, button {
 }
 .remote-stick--left {
   left: 16px;
+  width: var(--stick-left);
+  height: var(--stick-left);
 }
 .remote-stick--right {
   right: 16px;
+  width: var(--stick-right);
+  height: var(--stick-right);
+}
+.remote-stick--mouse {
+  left: 50%;
+  width: var(--stick-mouse);
+  height: var(--stick-mouse);
+  margin-left: calc(var(--stick-mouse) / -2);
+  bottom: calc(28px + max(var(--stick-left), var(--stick-right)) + 8px);
 }
 .remote-stick-knob {
   position: absolute;
@@ -810,15 +836,25 @@ input, textarea, select, button {
 .remote-stick-btns {
   pointer-events: auto;
   position: absolute;
-  bottom: 128px;
+  bottom: calc(28px + var(--stick-left) + 12px);
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  max-width: min(240px, calc(100% - 32px));
 }
 .remote-stick-btns--left {
   left: 16px;
 }
 .remote-stick-btns--right {
   right: 16px;
+  bottom: calc(28px + var(--stick-right) + 12px);
+  max-width: none;
+}
+.remote-stick-btns--mouse {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(28px + max(var(--stick-left), var(--stick-right)) + var(--stick-mouse) + 16px);
+  max-width: none;
 }
 .remote-stick-btn {
   min-width: 44px;
@@ -831,6 +867,47 @@ input, textarea, select, button {
   font-size: 13px;
   font-weight: 600;
   touch-action: none;
+}
+.remote-touch-ripple {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+  z-index: 4;
+  animation: remote-touch-hold 450ms ease-out forwards;
+}
+.remote-touch-ripple.is-locked {
+  animation: none;
+  transform: scale(1.15);
+  background: rgba(180, 180, 180, 0.38);
+  border-color: rgba(220, 220, 220, 0.92);
+}
+.remote-touch-ripple.is-tap {
+  animation: remote-touch-tap 280ms ease-out forwards;
+}
+@keyframes remote-touch-hold {
+  from {
+    transform: scale(0.35);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes remote-touch-tap {
+  from {
+    transform: scale(0.4);
+    opacity: 0.85;
+  }
+  to {
+    transform: scale(1.7);
+    opacity: 0;
+  }
 }
 .app-header-trailing button {
   -webkit-app-region: no-drag;

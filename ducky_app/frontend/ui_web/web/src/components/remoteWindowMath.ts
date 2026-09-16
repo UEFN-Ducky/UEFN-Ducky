@@ -101,3 +101,90 @@ export function pickUeFnFollow(args: {
   }
   return undefined;
 }
+
+/** Local Chrome-style pan/zoom of the stream view (not sent to the desktop). */
+export const VIEW_SCALE_MIN = 1;
+export const VIEW_SCALE_MAX = 4;
+
+export type ViewPanZoom = { panX: number; panY: number; scale: number };
+
+export function clampViewScale(scale: number): number {
+  return Math.min(VIEW_SCALE_MAX, Math.max(VIEW_SCALE_MIN, scale));
+}
+
+export function viewOrigin(view: ContentBox): { x: number; y: number } {
+  return { x: view.left + view.width / 2, y: view.top + view.height / 2 };
+}
+
+/** Client → untransformed view coords (transform-origin at view center). */
+export function mapViewPoint(
+  clientX: number,
+  clientY: number,
+  view: ContentBox,
+  panX: number,
+  panY: number,
+  scale: number,
+): { x: number; y: number } {
+  const s = scale || 1;
+  const o = viewOrigin(view);
+  return {
+    x: o.x + (clientX - o.x - panX) / s,
+    y: o.y + (clientY - o.y - panY) / s,
+  };
+}
+
+export function clampView(view: ContentBox, panX: number, panY: number, scale: number): ViewPanZoom {
+  const s = clampViewScale(scale);
+  const maxX = ((s - 1) * view.width) / 2;
+  const maxY = ((s - 1) * view.height) / 2;
+  return {
+    panX: Math.min(maxX, Math.max(-maxX, panX)),
+    panY: Math.min(maxY, Math.max(-maxY, panY)),
+    scale: s,
+  };
+}
+
+export function panZoomAround(
+  view: ContentBox,
+  panX: number,
+  panY: number,
+  scale: number,
+  nextScale: number,
+  aroundX: number,
+  aroundY: number,
+): ViewPanZoom {
+  const s0 = scale || 1;
+  const s1 = clampViewScale(nextScale);
+  const o = viewOrigin(view);
+  const ratio = s1 / s0;
+  return clampView(
+    view,
+    aroundX - o.x - (aroundX - o.x - panX) * ratio,
+    aroundY - o.y - (aroundY - o.y - panY) * ratio,
+    s1,
+  );
+}
+
+export function addViewPan(
+  view: ContentBox,
+  panX: number,
+  panY: number,
+  scale: number,
+  dx: number,
+  dy: number,
+): ViewPanZoom {
+  return clampView(view, panX + dx, panY + dy, scale);
+}
+
+export function pinchScale(prevDist: number, nextDist: number, scale: number): number {
+  if (prevDist < 1) return clampViewScale(scale);
+  return clampViewScale(scale * (nextDist / prevDist));
+}
+
+export function twoPointDist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+export function twoPointCenter(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}

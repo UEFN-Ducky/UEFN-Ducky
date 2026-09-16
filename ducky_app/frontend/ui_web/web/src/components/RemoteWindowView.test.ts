@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { contentRect, isUeFnHubTitle, keyDiff, pickUeFnFollow, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
+import {
+  addViewPan,
+  clampView,
+  contentRect,
+  isUeFnHubTitle,
+  keyDiff,
+  mapViewPoint,
+  panZoomAround,
+  pickUeFnFollow,
+  pinchScale,
+  rankVideoCodec,
+  stickLookDelta,
+  stickMoveKeys,
+} from "./remoteWindowMath";
 
 describe("rankVideoCodec", () => {
   it("prefers hardware-friendly H.264 profiles, then AV1, VP9, VP8", () => {
@@ -95,5 +108,47 @@ describe("isUeFnHubTitle / pickUeFnFollow", () => {
         selectedId: "1",
       }),
     ).toBe("2");
+  });
+});
+
+describe("view pan/zoom", () => {
+  const view = { left: 0, top: 0, width: 200, height: 200 };
+
+  it("mapViewPoint is identity at scale 1", () => {
+    expect(mapViewPoint(50, 80, view, 0, 0, 1)).toEqual({ x: 50, y: 80 });
+  });
+
+  it("pinch around center keeps pan at 0 and the center mapped", () => {
+    const next = panZoomAround(view, 0, 0, 1, 2, 100, 100);
+    expect(next.scale).toBe(2);
+    expect(next.panX).toBe(0);
+    expect(next.panY).toBe(0);
+    expect(mapViewPoint(100, 100, view, next.panX, next.panY, next.scale)).toEqual({ x: 100, y: 100 });
+  });
+
+  it("pinch around a point keeps that client point mapped", () => {
+    const next = panZoomAround(view, 0, 0, 1, 2, 50, 100);
+    const mapped = mapViewPoint(50, 100, view, next.panX, next.panY, next.scale);
+    expect(mapped.x).toBeCloseTo(50);
+    expect(mapped.y).toBeCloseTo(100);
+  });
+
+  it("clamps pan to zero at scale 1", () => {
+    expect(clampView(view, 40, -20, 1)).toEqual({ panX: 0, panY: 0, scale: 1 });
+  });
+
+  it("clamps pan to half the extra size at scale 2", () => {
+    expect(clampView(view, 999, 0, 2).panX).toBe(100);
+  });
+
+  it("pinchScale multiplies and clamps to 1..4", () => {
+    expect(pinchScale(100, 200, 1)).toBe(2);
+    expect(pinchScale(100, 800, 1)).toBe(4);
+    expect(pinchScale(100, 10, 1)).toBe(1);
+  });
+
+  it("addViewPan shifts then clamps", () => {
+    const z = panZoomAround(view, 0, 0, 1, 2, 100, 100);
+    expect(addViewPan(view, z.panX, z.panY, z.scale, 40, 0).panX).toBe(40);
   });
 });

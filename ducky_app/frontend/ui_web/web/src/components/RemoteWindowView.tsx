@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { ChoiceDropdown, ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
-import { contentRect, keyDiff, pickUeFnFollow, rankVideoCodec, stickLookDelta, stickMoveKeys } from "./remoteWindowMath";
+import {
+  addViewPan,
+  clampView,
+  contentRect,
+  keyDiff,
+  mapViewPoint,
+  panZoomAround,
+  pickUeFnFollow,
+  pinchScale,
+  rankVideoCodec,
+  stickLookDelta,
+  stickMoveKeys,
+  twoPointCenter,
+  twoPointDist,
+  type ViewPanZoom,
+} from "./remoteWindowMath";
 import { getDirectTransport } from "../remote/directTransport";
 
 export { contentRect } from "./remoteWindowMath";
@@ -12,12 +27,61 @@ export { contentRect } from "./remoteWindowMath";
 export type WindowViewRow = { id: string; title: string; kind?: string };
 
 type SendFn = (payload: Record<string, unknown>) => void;
-type ControlMode = "editor" | "play";
-type ControlState = { mode: ControlMode; overlay: boolean; look: number; deadzone: number };
+type ControlMode = "editor" | "play" | "editing";
+type ControlState = {
+  mode: ControlMode;
+  overlay: boolean;
+  look: number;
+  deadzone: number;
+  leftSize: number;
+  rightSize: number;
+};
 
 let boundSend: SendFn | null = null;
-let controlState: ControlState = { mode: "editor", overlay: true, look: 1, deadzone: 0.28 };
+let controlState: ControlState = {
+  mode: "editor",
+  overlay: true,
+  look: 1,
+  deadzone: 0.28,
+  leftSize: 128,
+  rightSize: 128,
+};
 const controlSubs = new Set<() => void>();
+
+let viewPanZoom: ViewPanZoom = { panX: 0, panY: 0, scale: 1 };
+let lastRemotePoint = { x: 0.5, y: 0.5 };
+
+function applyViewTransform(el: HTMLElement | null, next: ViewPanZoom) {
+  if (!el) return;
+  el.style.transform =
+    next.scale === 1 && next.panX === 0 && next.panY === 0
+      ? ""
+      : `translate(${next.panX}px, ${next.panY}px) scale(${next.scale})`;
+}
+
+let viewStage: HTMLElement | null = null;
+
+function getViewPanZoom(): ViewPanZoom {
+  return viewPanZoom;
+}
+
+export function setRemoteViewPanZoom(next: ViewPanZoom) {
+  if (viewPanZoom.panX === next.panX && viewPanZoom.panY === next.panY && viewPanZoom.scale === next.scale) {
+    applyViewTransform(viewStage, next);
+    return;
+  }
+  viewPanZoom = next;
+  applyViewTransform(viewStage, next);
+}
+
+export function resetRemoteViewPanZoom() {
+  setRemoteViewPanZoom({ panX: 0, panY: 0, scale: 1 });
+}
+
+function bindViewStage(el: HTMLElement | null) {
+  viewStage = el;
+  applyViewTransform(el, viewPanZoom);
+}
 
 function bindRemoteSend(fn: SendFn | null) {
   boundSend = fn;
@@ -49,9 +113,14 @@ export function useRemoteViewControls(): ControlState {
 
 const COMMANDS: { key: string; label: string }[] = [
   { key: " ", label: "Space" },
-  { key: "f", label: "F" },
-  { key: "g", label: "G" },
   { key: "Escape", label: "Esc" },
+];
+
+const EDITOR_TAPS: { key: string; label: string }[] = [
+  { key: "f", label: "F" },
+  { key: "w", label: "W" },
+  { key: "r", label: "R" },
+  { key: "g", label: "G" },
 ];
 
 function useWindowViews(enabled: boolean): WindowViewRow[] {
@@ -124,10 +193,20 @@ export function RemoteViewControls({ hwnd }: { hwnd: string }) {
           </button>
           <button
             type="button"
+            className={`plugin-header-menu-item${controls.mode === "editing" ? " is-active" : ""}`}
+            onClick={() => setRemoteViewControls({ mode: "editing" })}
+          >
+            Editing
+          </button>
+          <button
+            type="button"
             className="plugin-header-menu-item"
             onClick={() => setRemoteViewControls({ overlay: !controls.overlay })}
           >
             {controls.overlay ? "Hide sticks" : "Show sticks"}
+          </button>
+          <button type="button" className="plugin-header-menu-item" onClick={() => resetRemoteViewPanZoom()}>
+            Reset view
           </button>
           <label
             className="remote-control-slider"
@@ -157,6 +236,36 @@ export function RemoteViewControls({ hwnd }: { hwnd: string }) {
               step={0.01}
               value={controls.deadzone}
               onChange={(ev) => setRemoteViewControls({ deadzone: Number(ev.target.value) })}
+            />
+          </label>
+          <label
+            className="remote-control-slider"
+            onPointerDown={(ev) => ev.stopPropagation()}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <span>Left {Math.round(controls.leftSize)}</span>
+            <input
+              type="range"
+              min={88}
+              max={200}
+              step={1}
+              value={controls.leftSize}
+              onChange={(ev) => setRemoteViewControls({ leftSize: Number(ev.target.value) })}
+            />
+          </label>
+          <label
+            className="remote-control-slider"
+            onPointerDown={(ev) => ev.stopPropagation()}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <span>Right {Math.round(controls.rightSize)}</span>
+            <input
+              type="range"
+              min={88}
+              max={200}
+              step={1}
+              value={controls.rightSize}
+              onChange={(ev) => setRemoteViewControls({ rightSize: Number(ev.target.value) })}
             />
           </label>
           {COMMANDS.map((cmd) => (
@@ -472,8 +581,8 @@ function wsUrl(hwnd: string): string {
 
 type Rect = { left: number; top: number; width: number; height: number };
 
-function videoRect(video: HTMLVideoElement): Rect {
-  const r = video.getBoundingClientRect();
+function videoRect(video: HTMLVideoElement, viewport: HTMLElement): Rect {
+  const r = viewport.getBoundingClientRect();
   return contentRect(
     { left: r.left, top: r.top, width: r.width, height: r.height },
     video.videoWidth,
@@ -498,13 +607,30 @@ function overlaySize(el: HTMLElement | null): { w: number; h: number } | null {
   return { w: Math.round(r.width * dpr), h: Math.round(r.height * dpr) };
 }
 
+const HOLD_MS = 450;
+
+function spawnRipple(host: HTMLElement, clientX: number, clientY: number, kind: "hold" | "tap"): HTMLSpanElement {
+  const r = host.getBoundingClientRect();
+  const el = document.createElement("span");
+  el.className = kind === "tap" ? "remote-touch-ripple is-tap" : "remote-touch-ripple";
+  el.style.left = `${clientX - r.left}px`;
+  el.style.top = `${clientY - r.top}px`;
+  host.appendChild(el);
+  if (kind === "tap") window.setTimeout(() => el.remove(), 280);
+  return el;
+}
+
 /**
- * Pointer/key capture on the video. Moves are coalesced to one per animation
- * frame (a phone fires 120 Hz pointermove; SendInput on the desktop does not
- * need more than the encoder's frame rate). Down/up flush the pending move
- * first so ordering holds.
+ * Pointer/key capture on the video. Mouse stays immediate click/drag.
+ * Touch matches Chrome Remote Desktop: tap = click + ripple, press-and-hold
+ * then drag, two fingers pan/zoom the local view.
  */
-function attachInput(video: HTMLVideoElement, send: (payload: Record<string, unknown>) => void) {
+function attachInput(
+  video: HTMLVideoElement,
+  send: (payload: Record<string, unknown>) => void,
+  viewport: HTMLElement,
+  overlay: HTMLElement,
+) {
   let pendingMove: { x: number; y: number; button: number } | null = null;
   let raf = 0;
   const flush = () => {
@@ -513,30 +639,140 @@ function attachInput(video: HTMLVideoElement, send: (payload: Record<string, unk
     send({ type: "move", ...pendingMove });
     pendingMove = null;
   };
-  const point = (ev: { clientX: number; clientY: number }) => norm(videoRect(video), ev.clientX, ev.clientY);
+  const viewBox = () => {
+    const r = viewport.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  };
+  const point = (clientX: number, clientY: number) => {
+    const box = viewBox();
+    const vz = getViewPanZoom();
+    const p = mapViewPoint(clientX, clientY, box, vz.panX, vz.panY, vz.scale);
+    const n = norm(videoRect(video, viewport), p.x, p.y);
+    lastRemotePoint = n;
+    return n;
+  };
+  const pts = new Map<number, { x: number; y: number }>();
+  let holdTimer = 0;
+  let holdRipple: HTMLElement | null = null;
+  let pendingId = -1;
+  let dragId = -1;
+  let dragButton = 0;
+  let ignoreUntilClear = false;
+  let pinch: { dist: number; cx: number; cy: number } | null = null;
+
+  const clearHold = () => {
+    if (holdTimer) {
+      window.clearTimeout(holdTimer);
+      holdTimer = 0;
+    }
+    pendingId = -1;
+    holdRipple?.remove();
+    holdRipple = null;
+  };
+  const endDrag = (clientX: number, clientY: number) => {
+    if (dragId < 0) return;
+    flush();
+    send({ type: "up", ...point(clientX, clientY), button: dragButton });
+    dragId = -1;
+    holdRipple?.remove();
+    holdRipple = null;
+  };
+  const syncPinch = () => {
+    if (pts.size < 2) {
+      pinch = null;
+      return;
+    }
+    const [a, b] = [...pts.values()];
+    const dist = twoPointDist(a, b);
+    const c = twoPointCenter(a, b);
+    if (!pinch) {
+      pinch = { dist, cx: c.x, cy: c.y };
+      return;
+    }
+    const vz = getViewPanZoom();
+    const box = viewBox();
+    const scaled = panZoomAround(box, vz.panX, vz.panY, vz.scale, pinchScale(pinch.dist, dist, vz.scale), c.x, c.y);
+    setRemoteViewPanZoom(addViewPan(box, scaled.panX, scaled.panY, scaled.scale, c.x - pinch.cx, c.y - pinch.cy));
+    pinch = { dist, cx: c.x, cy: c.y };
+  };
+
   const onWheel = (ev: WheelEvent) => {
     ev.preventDefault();
     flush();
-    send({ type: "wheel", ...point(ev), delta: ev.deltaY > 0 ? 1 : -1 });
+    send({ type: "wheel", ...point(ev.clientX, ev.clientY), delta: ev.deltaY > 0 ? 1 : -1 });
   };
   const onDown = (ev: PointerEvent) => {
     ev.preventDefault();
     video.focus({ preventScroll: true });
-    try {
-      video.setPointerCapture(ev.pointerId);
-    } catch {
-      /* ignore */
+    pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    const mouse = ev.pointerType === "mouse";
+    if (mouse) {
+      try {
+        video.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      flush();
+      send({ type: "down", ...point(ev.clientX, ev.clientY), button: ev.button });
+      dragId = ev.pointerId;
+      dragButton = ev.button;
+      return;
     }
-    flush();
-    send({ type: "down", ...point(ev), button: ev.button });
-  };
-  const onUp = (ev: PointerEvent) => {
-    flush();
-    send({ type: "up", ...point(ev), button: ev.button });
+    if (pts.size >= 2) {
+      if (dragId >= 0) endDrag(ev.clientX, ev.clientY);
+      clearHold();
+      ignoreUntilClear = true;
+      syncPinch();
+      return;
+    }
+    if (ignoreUntilClear) return;
+    pendingId = ev.pointerId;
+    holdRipple = spawnRipple(overlay, ev.clientX, ev.clientY, "hold");
+    holdTimer = window.setTimeout(() => {
+      holdTimer = 0;
+      if (pendingId !== ev.pointerId) return;
+      pendingId = -1;
+      holdRipple?.classList.add("is-locked");
+      try {
+        video.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      flush();
+      send({ type: "down", ...point(ev.clientX, ev.clientY), button: 0 });
+      dragId = ev.pointerId;
+      dragButton = 0;
+    }, HOLD_MS);
   };
   const onMove = (ev: PointerEvent) => {
-    pendingMove = { ...point(ev), button: ev.button };
+    if (!pts.has(ev.pointerId)) return;
+    pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pts.size >= 2) {
+      syncPinch();
+      return;
+    }
+    if (ev.pointerId === pendingId && holdRipple) {
+      const box = overlay.getBoundingClientRect();
+      holdRipple.style.left = `${ev.clientX - box.left}px`;
+      holdRipple.style.top = `${ev.clientY - box.top}px`;
+    }
+    if (ev.pointerId !== dragId) return;
+    pendingMove = { ...point(ev.clientX, ev.clientY), button: dragButton };
     if (!raf) raf = requestAnimationFrame(flush);
+  };
+  const onUp = (ev: PointerEvent) => {
+    pts.delete(ev.pointerId);
+    if (ev.pointerId === dragId) {
+      endDrag(ev.clientX, ev.clientY);
+    } else if (ev.pointerId === pendingId) {
+      clearHold();
+      spawnRipple(overlay, ev.clientX, ev.clientY, "tap");
+      const p = point(ev.clientX, ev.clientY);
+      send({ type: "down", ...p, button: 0 });
+      send({ type: "up", ...p, button: 0 });
+    }
+    if (pts.size < 2) pinch = null;
+    if (pts.size === 0) ignoreUntilClear = false;
   };
   const onKeyDown = (ev: KeyboardEvent) => {
     ev.preventDefault();
@@ -551,15 +787,18 @@ function attachInput(video: HTMLVideoElement, send: (payload: Record<string, unk
   video.addEventListener("wheel", onWheel, { passive: false });
   video.addEventListener("pointerdown", onDown);
   video.addEventListener("pointerup", onUp);
+  video.addEventListener("pointercancel", onUp);
   video.addEventListener("pointermove", onMove);
   video.addEventListener("keydown", onKeyDown);
   video.addEventListener("keyup", onKeyUp);
   video.addEventListener("contextmenu", onContext);
   return () => {
     if (raf) cancelAnimationFrame(raf);
+    clearHold();
     video.removeEventListener("wheel", onWheel);
     video.removeEventListener("pointerdown", onDown);
     video.removeEventListener("pointerup", onUp);
+    video.removeEventListener("pointercancel", onUp);
     video.removeEventListener("pointermove", onMove);
     video.removeEventListener("keydown", onKeyDown);
     video.removeEventListener("keyup", onKeyUp);
@@ -649,13 +888,15 @@ function UefnStickPad({
   onChange: (nx: number, ny: number, active: boolean) => void;
 }) {
   const padRef = useRef<HTMLDivElement>(null);
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const knobRef = useRef<HTMLSpanElement>(null);
 
   const update = (clientX: number, clientY: number, active: boolean) => {
     const el = padRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const max = Math.max(1, r.width / 2);
+    const knobPx = Math.max(12, Math.min(22, r.width * (18 / 88)));
+    const travel = Math.max(8, max - knobPx);
     let nx = (clientX - (r.left + r.width / 2)) / max;
     let ny = (clientY - (r.top + r.height / 2)) / max;
     const mag = Math.hypot(nx, ny);
@@ -663,14 +904,14 @@ function UefnStickPad({
       nx /= mag;
       ny /= mag;
     }
-    setKnob({ x: nx, y: ny });
+    if (knobRef.current) knobRef.current.style.transform = `translate(${nx * travel}px, ${ny * travel}px)`;
     onChange(nx, ny, active);
   };
 
   const end = (ev: ReactPointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
     ev.stopPropagation();
-    setKnob({ x: 0, y: 0 });
+    if (knobRef.current) knobRef.current.style.transform = "";
     onChange(0, 0, false);
   };
 
@@ -693,7 +934,7 @@ function UefnStickPad({
       onPointerUp={end}
       onPointerCancel={end}
     >
-      <span className="remote-stick-knob" style={{ transform: `translate(${knob.x * 28}px, ${knob.y * 28}px)` }} />
+      <span ref={knobRef} className="remote-stick-knob" />
     </div>
   );
 }
@@ -702,23 +943,76 @@ function holdSend(send: SendFn, key: string, down: boolean) {
   send({ type: down ? "keydown" : "keyup", key });
 }
 
+function tapSend(send: SendFn, key: string) {
+  send({ type: "keydown", key });
+  window.setTimeout(() => send({ type: "keyup", key }), 80);
+}
+
+function StickBtn({
+  label,
+  onDown,
+  onUp,
+}: {
+  label: string;
+  onDown: () => void;
+  onUp?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="remote-stick-btn"
+      onPointerDown={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onDown();
+      }}
+      onPointerUp={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onUp?.();
+      }}
+      onPointerCancel={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onUp?.();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function UefnStickOverlay({
   send,
   mode,
   look,
   deadzone,
+  leftSize,
+  rightSize,
 }: {
   send: SendFn;
   mode: ControlMode;
   look: number;
   deadzone: number;
+  leftSize: number;
+  rightSize: number;
 }) {
   const moveHeld = useRef<string[]>([]);
   const looking = useRef(false);
   const lookVec = useRef({ nx: 0, ny: 0 });
   const lookRaf = useRef(0);
+  const mousing = useRef(false);
+  const mouseVec = useRef({ nx: 0, ny: 0 });
+  const mouseRaf = useRef(0);
   const lookTune = useRef({ look, deadzone });
   lookTune.current = { look, deadzone };
+  const sticksRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = sticksRef.current;
+    if (!el) return;
+    el.style.setProperty("--stick-left", `${leftSize}px`);
+    el.style.setProperty("--stick-right", `${rightSize}px`);
+  }, [leftSize, rightSize]);
 
   const cancelLook = useCallback(() => {
     if (lookRaf.current) cancelAnimationFrame(lookRaf.current);
@@ -728,11 +1022,20 @@ function UefnStickOverlay({
     send({ type: "up", x: 0.5, y: 0.5, button: 2 });
   }, [send]);
 
+  const cancelMouse = useCallback(() => {
+    if (mouseRaf.current) cancelAnimationFrame(mouseRaf.current);
+    mouseRaf.current = 0;
+    if (!mousing.current) return;
+    mousing.current = false;
+    send({ type: "up", x: lastRemotePoint.x, y: lastRemotePoint.y, button: 0 });
+  }, [send]);
+
   const releaseAll = useCallback(() => {
     for (const key of moveHeld.current) send({ type: "keyup", key });
     moveHeld.current = [];
     cancelLook();
-  }, [send, cancelLook]);
+    cancelMouse();
+  }, [send, cancelLook, cancelMouse]);
 
   useEffect(() => () => releaseAll(), [releaseAll, mode]);
 
@@ -773,51 +1076,76 @@ function UefnStickOverlay({
     lookRaf.current = requestAnimationFrame(tick);
   };
 
+  const onMousePad = (nx: number, ny: number, active: boolean) => {
+    mouseVec.current = { nx, ny };
+    if (!active) {
+      cancelMouse();
+      return;
+    }
+    if (!mousing.current) {
+      mousing.current = true;
+      send({ type: "move", ...lastRemotePoint });
+      send({ type: "down", ...lastRemotePoint, button: 0 });
+    }
+    if (mouseRaf.current) return;
+    const tick = () => {
+      if (!mousing.current) {
+        mouseRaf.current = 0;
+        return;
+      }
+      const { dx, dy } = stickLookDelta(
+        mouseVec.current.nx,
+        mouseVec.current.ny,
+        lookTune.current.look,
+        lookTune.current.deadzone,
+      );
+      if (dx || dy) send({ type: "move", dx, dy });
+      mouseRaf.current = requestAnimationFrame(tick);
+    };
+    mouseRaf.current = requestAnimationFrame(tick);
+  };
+
+  const clickTap = () => {
+    const p = lastRemotePoint;
+    send({ type: "down", ...p, button: 0 });
+    window.setTimeout(() => send({ type: "up", ...p, button: 0 }), 80);
+  };
+
   return (
-    <div className="remote-sticks">
+    <div className="remote-sticks" ref={sticksRef}>
       <UefnStickPad className="remote-stick remote-stick--left" onChange={onMove} />
       <UefnStickPad className="remote-stick remote-stick--right" onChange={onLook} />
-      {mode === "editor" ? (
-        <div className="remote-stick-btns remote-stick-btns--left">
-          <button
-            type="button"
-            className="remote-stick-btn"
-            onPointerDown={(ev) => {
-              ev.preventDefault();
-              holdSend(send, "q", true);
-            }}
-            onPointerUp={() => holdSend(send, "q", false)}
-            onPointerCancel={() => holdSend(send, "q", false)}
-          >
-            Q
-          </button>
-          <button
-            type="button"
-            className="remote-stick-btn"
-            onPointerDown={(ev) => {
-              ev.preventDefault();
-              holdSend(send, "e", true);
-            }}
-            onPointerUp={() => holdSend(send, "e", false)}
-            onPointerCancel={() => holdSend(send, "e", false)}
-          >
-            E
-          </button>
+      {mode === "editing" ? (
+        <>
+          <UefnStickPad className="remote-stick remote-stick--mouse" onChange={onMousePad} />
+          <div className="remote-stick-btns remote-stick-btns--mouse">
+            <StickBtn label="Click" onDown={clickTap} />
+          </div>
+        </>
+      ) : null}
+      {mode === "play" ? (
+        <div className="remote-stick-btns remote-stick-btns--right">
+          <StickBtn
+            label="Jump"
+            onDown={() => holdSend(send, " ", true)}
+            onUp={() => holdSend(send, " ", false)}
+          />
         </div>
       ) : (
-        <div className="remote-stick-btns remote-stick-btns--right">
-          <button
-            type="button"
-            className="remote-stick-btn"
-            onPointerDown={(ev) => {
-              ev.preventDefault();
-              holdSend(send, " ", true);
-            }}
-            onPointerUp={() => holdSend(send, " ", false)}
-            onPointerCancel={() => holdSend(send, " ", false)}
-          >
-            Jump
-          </button>
+        <div className="remote-stick-btns remote-stick-btns--left">
+          <StickBtn
+            label="Q"
+            onDown={() => holdSend(send, "q", true)}
+            onUp={() => holdSend(send, "q", false)}
+          />
+          <StickBtn
+            label="E"
+            onDown={() => holdSend(send, "e", true)}
+            onUp={() => holdSend(send, "e", false)}
+          />
+          {EDITOR_TAPS.map((cmd) => (
+            <StickBtn key={cmd.key} label={cmd.label} onDown={() => tapSend(send, cmd.key)} />
+          ))}
         </div>
       )}
     </div>
@@ -827,6 +1155,7 @@ function UefnStickOverlay({
 export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [phase, setPhase] = useState<Phase>("connecting");
@@ -863,6 +1192,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   useEffect(() => {
     attemptRef.current = 0;
     setAttempt(0);
+    resetRemoteViewPanZoom();
   }, [hwnd]);
 
   useEffect(() => {
@@ -1078,8 +1408,12 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         const size = overlaySize(el);
-        if (!size) return;
-        send({ type: "size", ...size });
+        if (size) send({ type: "size", ...size });
+        const view = viewRef.current;
+        if (!view) return;
+        const r = view.getBoundingClientRect();
+        const vz = getViewPanZoom();
+        setRemoteViewPanZoom(clampView({ left: r.left, top: r.top, width: r.width, height: r.height }, vz.panX, vz.panY, vz.scale));
       }, SIZE_DEBOUNCE_MS);
     });
     ro.observe(el);
@@ -1091,8 +1425,10 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
 
   useEffect(() => {
     const el = videoRef.current;
-    if (!el || !hwnd || phase !== "live") return;
-    return attachInput(el, send);
+    const view = viewRef.current;
+    const overlay = overlayRef.current;
+    if (!el || !view || !overlay || !hwnd || phase !== "live") return;
+    return attachInput(el, send, view, overlay);
   }, [hwnd, phase, attempt, send]);
 
   useEffect(() => {
@@ -1104,15 +1440,24 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
 
   return (
     <div className="remote-window-overlay" ref={overlayRef}>
-      <video
-        ref={videoRef}
-        className={phase === "live" ? "remote-window-canvas" : "remote-window-canvas is-offscreen"}
-        autoPlay
-        muted
-        playsInline
-        disablePictureInPicture
-        tabIndex={0}
-      />
+      <div className="remote-window-view" ref={viewRef}>
+        <div
+          className="remote-window-stage"
+          ref={(el) => {
+            bindViewStage(el);
+          }}
+        >
+          <video
+            ref={videoRef}
+            className={phase === "live" ? "remote-window-canvas" : "remote-window-canvas is-offscreen"}
+            autoPlay
+            muted
+            playsInline
+            disablePictureInPicture
+            tabIndex={0}
+          />
+        </div>
+      </div>
       {phase !== "live" ? (
         <div className="remote-window-status">
           <p className="remote-window-overlay-msg">
@@ -1133,7 +1478,14 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
         <span className="remote-window-stats">{statsLabel(stats)}</span>
       ) : null}
       {phase === "live" && controls.overlay && watchingUefn ? (
-        <UefnStickOverlay send={send} mode={controls.mode} look={controls.look} deadzone={controls.deadzone} />
+        <UefnStickOverlay
+          send={send}
+          mode={controls.mode}
+          look={controls.look}
+          deadzone={controls.deadzone}
+          leftSize={controls.leftSize}
+          rightSize={controls.rightSize}
+        />
       ) : null}
     </div>
   );
