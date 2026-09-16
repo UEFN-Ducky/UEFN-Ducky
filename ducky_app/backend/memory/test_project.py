@@ -351,17 +351,15 @@ def test_read_chat_cross_project(two_projects):
 
     from backend.tools.panel.ducky_panel import ducky_get_chat_context, ducky_read_chat
 
-    # Not visible without project= (chat lives in the other project).
-    with pytest.raises(ValueError):
-        ducky_read_chat(conv.id)
+    # All-projects access uses globally unique chat IDs; project is a lookup hint.
+    for project in ("", "ProjA", "ProjB"):
+        out = json.loads(ducky_read_chat(conv.id, project=project))
+        assert out["messages"][0]["content"] == "other-project knowledge"
 
-    out = json.loads(ducky_read_chat(conv.id, project="ProjB"))
-    assert out["messages"][0]["content"] == "other-project knowledge"
-
-    ctx = json.loads(ducky_get_chat_context(conv.id, project="ProjB"))
-    assert ctx["scope"] == "cross_project_summary"
-    assert ctx["message_count"] == 1
-    assert ctx["last_messages"][0]["content"] == "other-project knowledge"
+        ctx = json.loads(ducky_get_chat_context(conv.id, project=project))
+        assert ctx["scope"] == "cross_project_summary"
+        assert ctx["message_count"] == 1
+        assert ctx["last_messages"][0]["content"] == "other-project knowledge"
 
 
 def test_resolve_project_arg_unknown_raises(isolated_appdata, monkeypatch):

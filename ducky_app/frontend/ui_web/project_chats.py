@@ -357,6 +357,8 @@ def iter_conversations_by_project() -> list[tuple[str, Conversation]]:
 
 
 def project_slug_display_name(slug: str) -> str:
+    if slug == "_no_project":
+        return "No project"
     return _slug_display_names().get(slug) or slug
 
 
@@ -624,7 +626,19 @@ def _find_conversation_meta(conv_id: str, project_root: str | None = None) -> Pa
     return None
 
 
+def conversation_project_slug(conv_id: str, project_root: str | None = None) -> str | None:
+    """Return the stored owner, regardless of the project used to find the chat.
+
+    An unknown chat returns None; a projectless chat belongs to ``_no_project``.
+    """
+    if _use_db():
+        return _repo().conv_project_id(conv_id)
+    meta = _find_conversation_meta(conv_id, project_root)
+    return meta.parent.parent.parent.name if meta is not None else None
+
+
 def load_conversation(conv_id: str, project_root: str | None = None) -> Conversation | None:
+    """Load a globally unique chat ID; project_root is only a lookup hint."""
     if _use_db():
         # Ids are globally unique — don't filter by the active island slug.
         doc = _repo().conv_get(conv_id, with_messages=True)

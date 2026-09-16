@@ -110,14 +110,27 @@ def test_descendants_and_cascade_delete(backend: str, project: str) -> None:
     assert pc.load_conversation(grand.id, project) is None
 
 
-def test_conversation_from_other_project_is_invisible(backend: str, project: str, tmp_path: Path) -> None:
+def test_global_chat_lookup_preserves_project_listing_and_ownership(backend: str, project: str, tmp_path: Path) -> None:
     from frontend.ui_web import project_chats as pc
 
     other = str(tmp_path / "Other")
     Path(other).mkdir()
     conv = pc.create_conversation(title="Mine", project_root=project, skill_snapshot="x")
-    assert pc.load_conversation(conv.id, other) is None
+    pc.append_message(conv, _msg("assistant", "Home history"), project)
+    loaded = pc.load_conversation(conv.id, other)
+    assert loaded is not None
+    assert loaded.messages[0]["content"] == "Home history"
+    loaded.title = "Edited through All projects"
+    pc.save_conversation(loaded, other)
+
+    assert pc.load_conversation(conv.id, project).title == loaded.title
+    assert pc.conversation_project_slug(conv.id, other) == pc.project_slug(project)
     assert pc.list_all_conversation_metadata(other) == []
+    assert [c.id for c in pc.list_all_conversation_metadata(project)] == [conv.id]
+    assert pc.conversation_project_slug("missing-chat", other) is None
+    if backend == "files":
+        assert pc.conversation_path(conv.id, project).is_file()
+        assert not pc.conversation_path(conv.id, other).is_file()
 
 
 # --------------------------------------------------------------------------- db-only behaviour

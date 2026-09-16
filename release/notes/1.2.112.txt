@@ -1,0 +1,1 @@
+Fix chat context and project labels when reading chats across projects. Preserve All-projects access and each chat's original project.

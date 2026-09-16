@@ -12,12 +12,15 @@ from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
 from frontend.ui_web.project_switch import get_panel_project_info, list_panel_projects
 from frontend.ui_web.project_chats import (
     append_message,
+    conversation_project_slug,
     create_conversation,
     delete_conversation,
     list_conversations,
     load_conversation,
     load_folders,
     move_conversation,
+    project_slug,
+    project_slug_display_name,
     rename_conversation,
     save_conversation,
 )
@@ -65,12 +68,6 @@ def _resolve_project_root_arg(project: str) -> str:
     raise ValueError(
         f"Unknown project {project!r}. Known projects: {names} — see ducky_list_projects."
     )
-
-
-def _is_cross_project(root: str) -> bool:
-    from frontend.ui_web.project_switch import normalize_project_path
-
-    return normalize_project_path(root).lower() != normalize_project_path(_project_root()).lower()
 
 
 def _truncate_text(text: str, limit: int = _MAX_MESSAGE_CHARS) -> str:
@@ -595,9 +592,9 @@ def ducky_list_chats(folder_id: str | None = None, project: str = "", pretty: bo
 def ducky_read_chat(conv_id: str, project: str = "", pretty: bool = False) -> str:
     """Read message history from any panel chat by id (including user-created chats).
 
-    Pass `project` (path, name, or slug from ducky_list_projects) to read a chat from
-    ANOTHER project — a ducky's chat history is its working memory, so this is how you
-    check what a ducky elsewhere knows or decided.
+    Chat IDs work across all projects, without switching the active project.
+    Optional `project` (path, name, or slug from ducky_list_projects) is a lookup
+    hint; it does not restrict access or change the chat's owning project.
     """
     root = _resolve_project_root_arg(project)
     conv = load_conversation(conv_id.strip(), project_root=root)
@@ -1474,9 +1471,11 @@ def ducky_get_chat_context(
 ) -> str:
     """Read token breakdown and omitted segments for any panel chat.
 
-    Pass `project` (path, name, or slug from ducky_list_projects) to inspect a ducky
-    from ANOTHER project — that returns a summary of its stored context (the live
-    token breakdown only exists for the active project).
+    The chat's stored owning project determines the context: chats in the active
+    project get a live token breakdown; other chats get a stored-context summary
+    labeled with their own project. This never switches the active project.
+    Optional `project` (path, name, or slug from ducky_list_projects) is only a
+    lookup hint, as in ducky_read_chat; it cannot override the chat's owner.
     """
     conv_id = conv_id.strip()
     root = _resolve_project_root_arg(project)
@@ -1484,15 +1483,17 @@ def ducky_get_chat_context(
     if conv is None:
         raise ValueError(f"Conversation not found: {conv_id!r}")
 
-    if _is_cross_project(root):
-        from frontend.ui_web.project_chats import project_display_name
+    home_slug = conversation_project_slug(conv.id, project_root=root)
+    if home_slug is None:
+        raise ValueError(f"Conversation not found: {conv_id!r}")
 
+    if home_slug != project_slug(_project_root()):
         total_chars = sum(len(str(m.get("content") or "")) for m in conv.messages)
         return tool_json(
             {
                 "conv_id": conv.id,
                 "title": conv.title,
-                "project": project_display_name(root),
+                "project": project_slug_display_name(home_slug),
                 "scope": "cross_project_summary",
                 "message_count": len(conv.messages),
                 "approx_tokens": total_chars // 4,
@@ -1500,7 +1501,7 @@ def ducky_get_chat_context(
                 "note": (
                     "Live token breakdown is only computed for the active project; "
                     "this summarizes the ducky's stored context. Use ducky_read_chat "
-                    "with the same project for the full history."
+                    "with this conv_id for the full history."
                 ),
             },
             pretty=pretty,
