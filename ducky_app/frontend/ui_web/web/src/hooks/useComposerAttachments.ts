@@ -47,6 +47,30 @@ export function useComposerAttachments() {
     setError("");
   }, []);
 
+  /** Restore queued payloads without re-reading files or losing the current draft. */
+  const restoreAttachments = useCallback((items: MessageAttachmentDto[]) => {
+    const restored: ComposerAttachment[] = items.map((a) =>
+      a.kind === "image"
+        ? {
+            id: newId(),
+            kind: "image",
+            name: a.name,
+            mime: a.mime || "image/png",
+            dataUrl: `data:${a.mime || "image/png"};base64,${a.data_base64 ?? ""}`,
+            ...(a.project_path ? { projectPath: a.project_path } : {}),
+          }
+        : {
+            id: newId(),
+            kind: "file",
+            name: a.name,
+            mime: a.mime || "text/plain",
+            text: a.text ?? "",
+          },
+    );
+    setAttachments((prev) => [...restored, ...prev]);
+    setError("");
+  }, []);
+
   const addFiles = useCallback(
     async (
       files: FileList | File[],
@@ -140,6 +164,7 @@ export function useComposerAttachments() {
     removeAttachment,
     updateAttachmentImage,
     clearAttachments,
+    restoreAttachments,
     toApiAttachments,
     setError,
   };

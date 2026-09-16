@@ -8,6 +8,8 @@ import {
   makeQueuedPrompt,
   enqueuePrompt,
   takeNextPrompt,
+  takePromptForEdit,
+  subscribePromptQueue,
   takeNextPromptForDrain,
   releasePromptDrainLock,
   isPromptDrainLocked,
@@ -73,6 +75,40 @@ describe("promptQueue helpers", () => {
 
 describe("promptQueue store", () => {
   beforeEach(() => _resetPromptQueuesForTests());
+
+  it("removes an edited prompt before notifying subscribers so it cannot auto-send", () => {
+    const edited = makeQueuedPrompt("revise me", {
+      id: "edit",
+      mode: "plan",
+      model: "queued-model",
+      attachments: [{ kind: "file", name: "notes.txt", text: "keep this" }],
+    })!;
+    const remaining = q("still queued", "next");
+    enqueuePrompt("c1", edited);
+    enqueuePrompt("c1", remaining);
+    enqueuePrompt("c2", q("other chat", "edit"));
+    const observed: QueuedPrompt[][] = [];
+    subscribePromptQueue("c1", () => observed.push(getPromptQueue("c1")));
+
+    expect(takePromptForEdit("c1", "edit")).toBe(edited);
+    expect(observed).toEqual([[remaining]]);
+    expect(takePromptForEdit("c1", "edit")).toBeNull();
+    expect(takeNextPromptForDrain("c1")).toBe(remaining);
+    releasePromptDrainLock("c1");
+    expect(takeNextPromptForDrain("c1")).toBeNull();
+    expect(getPromptQueue("c2")).toHaveLength(1);
+
+    // Only an explicit resend puts the edited payload back in the queue.
+    enqueuePrompt("c1", { ...edited, text: "revised" });
+    expect(takeNextPromptForDrain("c1")?.text).toBe("revised");
+  });
+
+  it("does not restore a stale item that has already started draining", () => {
+    enqueuePrompt("c1", q("running now", "1"));
+    takeNextPromptForDrain("c1");
+    expect(takePromptForEdit("c1", "1")).toBeNull();
+    expect(isPromptDrainLocked("c1")).toBe(true);
+  });
 
   it("drains one at a time per chat", () => {
     enqueuePrompt("c1", q("a", "1"));

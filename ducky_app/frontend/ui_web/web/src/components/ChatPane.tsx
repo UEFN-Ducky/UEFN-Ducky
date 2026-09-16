@@ -44,7 +44,7 @@ import {
   subscribePromptQueue,
   takeNextPromptForDrain,
   releasePromptDrainLock,
-  updatePromptText,
+  takePromptForEdit,
   type QueuedPrompt,
 } from "../hooks/promptQueue";
 import { PromptQueueBar } from "./PromptQueueBar";
@@ -292,6 +292,7 @@ export function ChatPane({
     removeAttachment,
     updateAttachmentImage,
     clearAttachments,
+    restoreAttachments,
     toApiAttachments,
   } = useComposerAttachments();
 
@@ -1281,7 +1282,18 @@ export function ChatPane({
           <div className="chat-pane-input-area">
         <PromptQueueBar
           items={promptQueue}
-          onEdit={(id, text) => setPromptQueue(chat.id, updatePromptText(promptQueue, id, text))}
+          onEdit={(id) => {
+            const item = takePromptForEdit(chat.id, id);
+            if (!item) return;
+            setInputText((draft) =>
+              item.text && draft.trim() ? `${item.text}\n\n${draft}` : item.text || draft,
+            );
+            restoreAttachments(item.attachments);
+            setAgentMode(item.mode);
+            setSelectedModel(item.model);
+            setSelectedModelDisplayName(item.model);
+            requestAnimationFrame(() => textareaRef.current?.focus());
+          }}
           onSendNow={(id) => {
             // Promote this prompt, then stop the live turn so the idle drain
             // picks it up next — same end state as Stop, without a second click.

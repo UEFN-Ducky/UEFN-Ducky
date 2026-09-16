@@ -91,6 +91,15 @@ export function enqueuePrompt(chatId: string, item: QueuedPrompt): void {
   setPromptQueue(chatId, appendPrompt(getPromptQueue(chatId), item));
 }
 
+/** Remove from the live queue before restoring it to the composer for editing. */
+export function takePromptForEdit(chatId: string, id: string): QueuedPrompt | null {
+  const items = getPromptQueue(chatId);
+  const item = items.find((p) => p.id === id);
+  if (!item) return null;
+  setPromptQueue(chatId, removePrompt(items, id));
+  return item;
+}
+
 export function takeNextPrompt(chatId: string): QueuedPrompt | null {
   const { next, rest } = shiftPrompt(getPromptQueue(chatId));
   if (!next) return null;
