@@ -62,6 +62,24 @@ def test_late_caption_drag_does_not_stick_to_cursor(native):
     sc.PostMessageW.assert_not_called()
 
 
+def test_caption_system_menu_posts_to_owner_after_button_release(native):
+    user32, sc = native
+    user32.GetAsyncKeyState.return_value = 0
+    assert chrome.show_native_window_menu(SimpleNamespace(hwnd=202))
+    sc.PostMessageW.assert_called_once_with(202, chrome._WM_NCRBUTTONUP, chrome._HTCAPTION,
+                                           ((-40 & 0xFFFF) << 16) | (-100 & 0xFFFF))
+    user32.ReleaseCapture.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["window", "cursor"])
+def test_caption_menu_ignores_missing_window_or_cursor(native, missing):
+    user32, sc = native
+    if missing == "cursor":
+        user32.GetCursorPos = Mock(return_value=False)
+    assert not chrome.show_native_window_menu(SimpleNamespace(hwnd=0 if missing == "window" else 202))
+    sc.PostMessageW.assert_not_called()
+
+
 @pytest.mark.parametrize("reason", ["maximized", "released", "invalid"])
 def test_resize_does_not_start_after_release_or_when_maximized(native, monkeypatch, reason):
     user32, sc = native
@@ -84,8 +102,10 @@ def test_bridge_patches_edgechromiums_import_and_preserves_origin_window(monkeyp
     monkeypatch.setattr(chrome.install_sync_drag_bridge, "_installed", False, raising=False)
     resize = Mock()
     move = Mock()
+    menu = Mock()
     monkeypatch.setattr(chrome, "begin_native_window_resize", resize)
     monkeypatch.setattr(chrome, "begin_native_window_move", move)
+    monkeypatch.setattr(chrome, "show_native_window_menu", menu)
     focus = object()
 
     chrome.install_sync_drag_bridge()
@@ -93,6 +113,8 @@ def test_bridge_patches_edgechromiums_import_and_preserves_origin_window(monkeyp
     resize.assert_called_once_with(focus, "nw", double_click=True)
     edge.js_bridge_call(focus, "uefnNativeWindowMove", [-300, 20], "move")
     move.assert_called_once_with(focus, -300, 20)
+    edge.js_bridge_call(focus, "uefnNativeWindowMenu", [], "window-menu")
+    menu.assert_called_once_with(focus)
     edge.js_bridge_call(focus, "get_version", [], "ordinary")
     original.assert_called_once()
     wrapped, name, args, vid = original.call_args.args

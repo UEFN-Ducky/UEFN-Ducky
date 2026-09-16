@@ -161,6 +161,7 @@ _SWP_NOSIZE = 0x0001
 _SWP_NOZORDER = 0x0004
 _WM_NCLBUTTONDOWN = 0x00A1
 _WM_NCLBUTTONDBLCLK = 0x00A3
+_WM_NCRBUTTONUP = 0x00A5
 _WM_NCCALCSIZE = 0x0083
 _WM_NCHITTEST = 0x0084
 _WM_NCACTIVATE = 0x0086
@@ -664,6 +665,25 @@ def begin_native_window_move(
         return False
 
 
+def show_native_window_menu(window: object) -> bool:
+    """Open the owning window's standard system menu for a DOM caption right-click."""
+    if sys.platform != "win32":
+        return False
+    hwnd = _hwnd_from_pywebview(window)
+    if not hwnd:
+        return False
+    try:
+        pt = wintypes.POINT()
+        if not user32.GetCursorPos(ctypes.byref(pt)):
+            return False
+        lparam = ((int(pt.y) & 0xFFFF) << 16) | (int(pt.x) & 0xFFFF)
+        # DefWindowProc handles WM_NCRBUTTONUP on HTCAPTION by showing the
+        # system menu. Post so its modal loop never blocks the WebView callback.
+        return bool(_user32_sc.PostMessageW(hwnd, _WM_NCRBUTTONUP, _HTCAPTION, lparam))
+    except Exception:
+        return False
+
+
 def begin_native_window_resize(window: object, edge: str, *, double_click: bool = False) -> bool:
     """Hand off window resize to the OS (edge: n/s/e/w/nw/ne/sw/se).
 
@@ -1046,6 +1066,9 @@ def install_sync_drag_bridge() -> None:
                 schedule_evaluate_js(self._w, script)
 
         def patched(window: object, func_name: str, param: object, value_id: str) -> None:
+            if func_name == "uefnNativeWindowMenu":
+                show_native_window_menu(window)
+                return
             if func_name == "uefnNativeWindowMove":
                 sx = sy = None
                 if isinstance(param, (list, tuple)) and len(param) >= 2:

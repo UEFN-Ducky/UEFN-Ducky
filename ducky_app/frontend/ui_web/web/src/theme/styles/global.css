@@ -88,6 +88,15 @@ input, textarea, select, button {
 .app-drag-surface { cursor: default; }
 .pywebview-drag-region { cursor: default; }
 .no-drag { -webkit-app-region: no-drag; }
+/* Route header input through the DOM, including the client-side top resize
+   strip. WindowDrag hands actual movement to Win32; controls opt out by class. */
+body.native-window-chrome .app-header,
+body.native-window-chrome .app-header.drag-region,
+body.native-window-chrome .app-header.app-drag-surface,
+body.native-window-chrome .app-header .drag-region {
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
 .settings-input {
   -webkit-app-region: no-drag;
   width: 100%;
@@ -498,8 +507,7 @@ input, textarea, select, button {
   flex: 1;
   min-width: 0;
   width: auto;
-  /* Keep the full center caption in WebView2's native hit test. Individual
-     controls opt out with no-drag; empty space supports all OS window actions. */
+  /* Make blank space above and below the controls part of the caption too. */
   height: 100%;
 }
 .app-header-center .app-header-nav {

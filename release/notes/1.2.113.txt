@@ -1,0 +1,1 @@
+Improve Windows title-bar dragging and double-click maximize/restore across blank header space, including the Chat view. Preserve title-bar buttons, the Windows system menu, and native window resizing.

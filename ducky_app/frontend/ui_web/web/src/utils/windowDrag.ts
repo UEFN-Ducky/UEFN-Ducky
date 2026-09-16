@@ -18,7 +18,19 @@ export function isWindowDragTarget(target: EventTarget | null): boolean {
   return !!target.closest(DRAG_ROOT);
 }
 
-/** Sync Win32 caption drag. Must run during mousedown — the async PanelApi path is too late. */
+/** Header captions use DOM input on Windows, then enter the native move loop. */
+export function isHeaderDragTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest(".app-header") && isWindowDragTarget(target);
+}
+
+export function showNativeWindowMenu(): boolean {
+  const pw = (window as unknown as { pywebview?: PyWebViewMoveBridge }).pywebview;
+  if (!pw?._jsApiCallback) return false;
+  pw._jsApiCallback("uefnNativeWindowMenu", [], "window-menu");
+  return true;
+}
+
+/** Hand off while the mouse button is held; bypass the async PanelApi worker. */
 export function beginNativeWindowMove(screenX: number, screenY: number): boolean {
   const pw = (globalThis as unknown as { window?: { pywebview?: PyWebViewMoveBridge } }).window
     ?.pywebview;

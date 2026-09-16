@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
-import { beginNativeWindowMove, isWindowDragTarget } from "../utils/windowDrag";
+import { beginNativeWindowMove, isHeaderDragTarget, isWindowDragTarget, showNativeWindowMenu } from "../utils/windowDrag";
 
-/** Frameless drag: sync native move on mousedown (Aero Snap). JS fallback on other platforms. */
+/** Frameless captions enter the native move loop on Windows, with a JS fallback elsewhere. */
 export function WindowDrag() {
   useEffect(() => {
     if (isRemote()) return;
@@ -21,6 +21,7 @@ export function WindowDrag() {
     let origin = { x: 0, y: 0, width: 0, height: 0 };
     let rafId = 0;
     let pending: { x: number; y: number } | null = null;
+    let nativeDragStart: { x: number; y: number } | null = null;
 
     const flush = () => {
       rafId = 0;
@@ -39,23 +40,32 @@ export function WindowDrag() {
 
     const onDoubleClick = (e: MouseEvent) => {
       if (!isWindowDragTarget(e.target)) return;
-      // Native chrome: the OS maximises on double-click of the app-region caption.
-      // Firing toggle_maximize too would double-toggle and could wedge the move-loop.
-      // Evaluated live (not captured at mount) so a late pywebview injection is respected.
-      if (isNativeWindowChrome()) return;
+      // The header opts out of WebView2 caption regions, so this is its only
+      // double-click handler. Other native drag surfaces still belong to the OS.
+      if (isNativeWindowChrome() && !isHeaderDragTarget(e.target)) return;
       const api = getApi();
       if (api) void api.toggle_maximize();
+    };
+
+    const onContextMenu = (e: MouseEvent) => {
+      if (!isNativeWindowChrome() || !isHeaderDragTarget(e.target)) return;
+      if (showNativeWindowMenu()) e.preventDefault();
     };
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       if (!isWindowDragTarget(e.target)) return;
 
-      // Windows: WebView2 -webkit-app-region handles drag when the hit-tester is in
-      // sync (those regions never reach JS). Focus overlay captions are often missed
-      // (auto-hide header / max-height:0), so hand off to Win32 while LMB is down.
+      // The header uses DOM input consistently. Other native caption surfaces
+      // keep their existing fallback for events that WebView2 forwards to JS.
       if (isNativeWindowChrome()) {
-        beginNativeWindowMove(e.screenX, e.screenY);
+        if (isHeaderDragTarget(e.target)) {
+          // Let stationary clicks finish in the DOM so double-click works.
+          // Once the pointer moves, Win32 owns the drag, restore and Aero Snap.
+          nativeDragStart = { x: e.screenX, y: e.screenY };
+        } else {
+          beginNativeWindowMove(e.screenX, e.screenY);
+        }
         return;
       }
 
@@ -78,6 +88,15 @@ export function WindowDrag() {
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (nativeDragStart) {
+        if (!(e.buttons & 1)) {
+          nativeDragStart = null;
+        } else if (Math.abs(e.screenX - nativeDragStart.x) >= 4 || Math.abs(e.screenY - nativeDragStart.y) >= 4) {
+          nativeDragStart = null;
+          beginNativeWindowMove(e.screenX, e.screenY);
+        }
+        return;
+      }
       if (!dragging) return;
       const dx = (e.screenX - x0) / scale;
       const dy = (e.screenY - y0) / scale;
@@ -85,6 +104,7 @@ export function WindowDrag() {
     };
 
     const endDrag = () => {
+      nativeDragStart = null;
       pointerDown = false;
       if (!dragging) return;
       dragging = false;
@@ -97,18 +117,22 @@ export function WindowDrag() {
     };
 
     window.addEventListener("dblclick", onDoubleClick, true);
+    window.addEventListener("contextmenu", onContextMenu, true);
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
+    window.addEventListener("blur", endDrag);
 
     return () => {
       window.removeEventListener("pywebviewready", onReady);
       window.removeEventListener("dblclick", onDoubleClick, true);
+      window.removeEventListener("contextmenu", onContextMenu, true);
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
+      window.removeEventListener("blur", endDrag);
       endDrag();
     };
   }, []);
