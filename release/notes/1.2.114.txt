@@ -1,0 +1,1 @@
+Fix the 1.2.113 regression that could disable window dragging after startup. Initialize title-bar controls when the native window bridge becomes ready, and keep native dragging available until the replacement handler is attached.

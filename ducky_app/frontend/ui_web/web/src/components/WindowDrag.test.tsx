@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WindowDrag } from "./WindowDrag";
 import { WindowResize } from "./WindowResize";
@@ -50,6 +50,35 @@ afterEach(() => {
 });
 
 describe("Windows header input", () => {
+  it("starts dragging when the desktop bridge arrives after React mounts", () => {
+    delete (window as unknown as { pywebview?: unknown }).pywebview;
+    remote.mockReturnValue(true);
+    const { getByTestId } = mountCaption();
+    expect(document.body.classList.contains("native-caption-input-ready")).toBe(false);
+    Object.assign(window, { pywebview: { platform: "edgechromium", _jsApiCallback: bridge } });
+    remote.mockReturnValue(false);
+    act(() => { window.dispatchEvent(new Event("pywebviewready")); });
+    pointer(getByTestId("center"), "pointerdown");
+    pointer(window, "pointermove", 120, 24);
+    expect(bridge.mock.calls).toEqual([["uefnNativeWindowMove", [120, 24], "move"]]);
+    expect(document.body.classList.contains("native-caption-input-ready")).toBe(true);
+    fireEvent.doubleClick(getByTestId("center"));
+    expect(toggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles repeated bridge-ready events once and restores native captions on cleanup", () => {
+    const { getByTestId, unmount } = mountCaption();
+    act(() => {
+      window.dispatchEvent(new Event("pywebviewready"));
+      window.dispatchEvent(new Event("pywebviewready"));
+    });
+    expect(document.body.classList.contains("native-caption-input-ready")).toBe(true);
+    fireEvent.doubleClick(getByTestId("center"));
+    expect(toggleMaximize).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(document.body.classList.contains("native-caption-input-ready")).toBe(false);
+  });
+
   it.each(["left", "center", "right"])("hands movement from %s to Windows once, after pointer movement", (region) => {
     const { getByTestId } = mountCaption();
     pointer(getByTestId(region), "pointerdown");

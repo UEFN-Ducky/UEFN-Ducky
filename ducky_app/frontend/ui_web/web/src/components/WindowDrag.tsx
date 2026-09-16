@@ -6,13 +6,9 @@ import { beginNativeWindowMove, isHeaderDragTarget, isWindowDragTarget, showNati
 /** Frameless captions enter the native move loop on Windows, with a JS fallback elsewhere. */
 export function WindowDrag() {
   useEffect(() => {
-    if (isRemote()) return;
-    markNativeWindowChromeBody();
-    // pywebview injects window.pywebview asynchronously; if it wasn't ready at mount,
-    // re-mark once it is so the body class + native-chrome branch are correct.
-    const onReady = () => markNativeWindowChromeBody();
-    window.addEventListener("pywebviewready", onReady);
-
+    // React can mount before pywebview is injected. An initially "remote"
+    // result must not prevent the desktop handlers from starting later.
+    let installed = false;
     let dragging = false;
     let pointerDown = false;
     let x0 = 0;
@@ -116,13 +112,24 @@ export function WindowDrag() {
       document.body.classList.remove("is-window-dragging");
     };
 
-    window.addEventListener("dblclick", onDoubleClick, true);
-    window.addEventListener("contextmenu", onContextMenu, true);
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
-    window.addEventListener("blur", endDrag);
+    const onReady = () => {
+      if (isRemote()) return;
+      markNativeWindowChromeBody();
+      if (!installed) {
+        window.addEventListener("dblclick", onDoubleClick, true);
+        window.addEventListener("contextmenu", onContextMenu, true);
+        window.addEventListener("pointerdown", onPointerDown, true);
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", endDrag);
+        window.addEventListener("pointercancel", endDrag);
+        window.addEventListener("blur", endDrag);
+        installed = true;
+      }
+      // Only disable WebView2 caption input once its DOM replacement is attached.
+      document.body.classList.toggle("native-caption-input-ready", isNativeWindowChrome());
+    };
+    window.addEventListener("pywebviewready", onReady);
+    onReady();
 
     return () => {
       window.removeEventListener("pywebviewready", onReady);
@@ -133,6 +140,7 @@ export function WindowDrag() {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
       window.removeEventListener("blur", endDrag);
+      document.body.classList.remove("native-caption-input-ready");
       endDrag();
     };
   }, []);
