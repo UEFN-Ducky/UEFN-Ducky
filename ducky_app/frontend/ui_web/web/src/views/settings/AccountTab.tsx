@@ -95,12 +95,19 @@ export function AccountTab() {
     void refreshRemote();
     void refreshPcs();
     const starting = Boolean(remote?.enabled && !remote?.running);
+    const paired = Boolean(status.device_key_active);
     const id = window.setInterval(() => {
+      if (paired) {
+        const api = getApi();
+        void api?.duckyos_get_status?.().then((s) => {
+          if (s) applyStatus(s);
+        });
+      }
       void refreshRemote();
       void refreshPcs();
-    }, starting ? 3000 : 90_000);
+    }, starting || paired ? 3000 : 90_000);
     return () => window.clearInterval(id);
-  }, [status?.logged_in, remote?.enabled, remote?.running, refreshRemote, refreshPcs]);
+  }, [status?.logged_in, status?.device_key_active, remote?.enabled, remote?.running, refreshRemote, refreshPcs, applyStatus]);
 
   const run = async (fn: () => Promise<DuckyOSAccountStatus>) => {
     setBusy(true);

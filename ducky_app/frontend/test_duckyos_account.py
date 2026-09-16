@@ -462,6 +462,35 @@ def test_revoke_account_pc_clears_this_device() -> None:
     assert "device_key_id" not in saved[-1]
 
 
+def test_unpair_this_pc_keeps_session() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    blob = {
+        "device_key": "tok",
+        "device_key_id": "k1",
+        "session_value": "sess",
+        "email": "a@b.co",
+        "base_url": "https://uefnducky.org",
+    }
+    saved: list[dict] = []
+
+    with (
+        patch.object(acc, "_load_blob", return_value=blob),
+        patch.object(acc, "_save_blob", side_effect=saved.append),
+        patch.object(acc, "stop_presence_heartbeat"),
+        patch.object(acc, "stop_rpc_waiter"),
+        patch("frontend.remote_tunnel.stop_remote_tunnel"),
+        patch.object(acc, "publish_device_presence"),
+    ):
+        acc._unpair_this_pc()
+    assert "device_key" not in saved[-1]
+    assert "device_key_id" not in saved[-1]
+    assert saved[-1].get("session_value") == "sess"
+    assert saved[-1].get("email") == "a@b.co"
+
+
 def test_revoke_device_key_also_collects() -> None:
     from unittest.mock import patch
 
@@ -498,5 +527,6 @@ if __name__ == "__main__":
     test_plugin_collect_posts_v1_only()
     test_list_account_pcs_marks_mine()
     test_revoke_account_pc_clears_this_device()
+    test_unpair_this_pc_keeps_session()
     test_revoke_device_key_also_collects()
     print("ok")

@@ -122,6 +122,27 @@ def _clear_expired_auth() -> None:
     _clear_blob()
 
 
+def _unpair_this_pc() -> None:
+    """Drop this PC's device key; keep the website session if present."""
+    blob = _load_blob()
+    blob.pop("device_key", None)
+    blob.pop("device_key_id", None)
+    blob["device_key_error"] = ""
+    _save_blob(blob)
+    stop_presence_heartbeat()
+    stop_rpc_waiter()
+    try:
+        from frontend.remote_tunnel import stop_remote_tunnel
+
+        stop_remote_tunnel(deprovision=True)
+    except Exception:
+        pass
+    try:
+        publish_device_presence(live=False)
+    except Exception:
+        pass
+
+
 def _parse_set_cookie(headers: Any) -> dict[str, str]:
     """Extract name→value from Set-Cookie headers (urllib / http.client)."""
     out: dict[str, str] = {}
@@ -611,23 +632,7 @@ def revoke_account_pc(key_id: str = "") -> dict[str, Any]:
         error_code="revoke_failed",
     )
     if mine and key_id == mine:
-        blob = _load_blob()
-        blob.pop("device_key", None)
-        blob.pop("device_key_id", None)
-        blob["device_key_error"] = ""
-        _save_blob(blob)
-        stop_presence_heartbeat()
-        stop_rpc_waiter()
-        try:
-            from frontend.remote_tunnel import stop_remote_tunnel
-
-            stop_remote_tunnel(deprovision=True)
-        except Exception:
-            pass
-        try:
-            publish_device_presence(live=False)
-        except Exception:
-            pass
+        _unpair_this_pc()
     return {"ok": True, **get_status()}
 
 
@@ -1003,6 +1008,10 @@ def api_request(
             except (TypeError, ValueError, json.JSONDecodeError):
                 parsed = None
         if int(exc.code) == 401 and (blob.get("device_key") or blob.get("session_value")):
+            used_bearer = bool(extra_headers.get("Authorization"))
+            if used_bearer and blob.get("device_key"):
+                _unpair_this_pc()
+                raise DuckyOSAccountError("This PC was disconnected", code="device_unpaired") from exc
             _clear_expired_auth()
             raise DuckyOSAccountError("Session expired — log in again", code="session_expired") from exc
         return int(exc.code), parsed, raw
