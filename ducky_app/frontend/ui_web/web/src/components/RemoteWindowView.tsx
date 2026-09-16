@@ -325,10 +325,9 @@ function useViewerActive(): boolean {
 }
 
 const LAUNCH_UEFN_VALUE = "__launch_uefn__";
-const LAUNCH_PROJECT_VALUE = "__launch_project__";
 const CLOSE_UEFN_VALUE = "__close_uefn__";
 const LAUNCH_WAIT_MS = 120_000;
-const SKIP_VIEW_IDS = new Set([LAUNCH_UEFN_VALUE, LAUNCH_PROJECT_VALUE, CLOSE_UEFN_VALUE]);
+const SKIP_VIEW_IDS = new Set([LAUNCH_UEFN_VALUE, CLOSE_UEFN_VALUE]);
 
 let uefnLaunchLabel = "";
 const launchSubs = new Set<() => void>();
@@ -430,16 +429,14 @@ export function RemoteWindowSelect({
   }, [busy, load]);
 
   const runUeFn = useCallback(
-    async (kind: "hub" | "project" | "restart" | "close") => {
+    async (kind: "hub" | "restart" | "close") => {
       const api = getApi();
       const fn =
         kind === "close"
           ? api?.close_uefn
           : kind === "restart"
             ? api?.restart_uefn_project
-            : kind === "hub"
-              ? api?.launch_uefn
-              : api?.launch_uefn_project;
+            : api?.launch_uefn;
       if (!fn) {
         await alert("UEFN launch is unavailable on this panel.");
         return;
@@ -494,9 +491,9 @@ export function RemoteWindowSelect({
 
   if (!isRemote()) return null;
 
-  const island = projectName.trim();
   const uefnRows = rows.filter((row) => row.kind === "uefn");
   const otherRows = rows.filter((row) => row.kind !== "uefn");
+  const uefnOpen = uefnRows.length > 0;
 
   return (
     <div className="remote-window-select no-drag" onPointerDown={() => void load()}>
@@ -515,31 +512,7 @@ export function RemoteWindowSelect({
         }}
         options={[
           { value: "", label: "Ducky" },
-          {
-            value: LAUNCH_UEFN_VALUE,
-            label: "Launch UEFN",
-            group: "UEFN windows",
-            disabled: true,
-            action: {
-              label: busy ? "…" : "Launch",
-              onClick: () => void runUeFn("hub"),
-            },
-          },
-          ...(island
-            ? [
-                {
-                  value: LAUNCH_PROJECT_VALUE,
-                  label: `Launch ${island}`,
-                  group: "UEFN windows",
-                  disabled: true,
-                  action: {
-                    label: busy ? "…" : "Launch",
-                    onClick: () => void runUeFn("project"),
-                  },
-                },
-              ]
-            : []),
-          ...(uefnRows.length
+          ...(uefnOpen
             ? [
                 {
                   value: CLOSE_UEFN_VALUE,
@@ -562,7 +535,18 @@ export function RemoteWindowSelect({
                   },
                 })),
               ]
-            : []),
+            : [
+                {
+                  value: LAUNCH_UEFN_VALUE,
+                  label: "Launch UEFN",
+                  group: "UEFN windows",
+                  disabled: true,
+                  action: {
+                    label: busy ? "…" : "Launch",
+                    onClick: () => void runUeFn("hub"),
+                  },
+                },
+              ]),
           ...otherRows.map((row) => ({
             value: row.id,
             label: row.title,

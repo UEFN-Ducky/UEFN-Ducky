@@ -2454,8 +2454,73 @@
   line-height: 1.5;
 }
 
+.account-tab-card--login {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-tab-card--login .account-tab-actions {
+  margin-top: 0;
+}
+
+.account-tab-steps {
+  counter-reset: account-login-step;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-tab-steps li {
+  display: grid;
+  grid-template-columns: 1.75rem 1fr;
+  gap: 10px;
+  align-items: start;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+.account-tab-steps li::before {
+  counter-increment: account-login-step;
+  content: counter(account-login-step);
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+}
+
+.account-tab-code-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+.account-tab-code-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .account-tab-code {
-  margin: 0 0 8px 0;
+  margin: 0;
   font-size: 28px;
   font-weight: 700;
   letter-spacing: 0.12em;

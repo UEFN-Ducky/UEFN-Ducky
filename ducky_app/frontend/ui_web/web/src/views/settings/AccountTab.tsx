@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
@@ -12,6 +12,13 @@ import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
 import { AgentCapsCard } from "./AgentCapsCard";
 
 const DEFAULT_BASE = "https://uefnducky.org";
+
+/** Deep link + Log in both call duckyos_login; one in-flight RPC at a time. */
+let loginRpcInFlight = false;
+
+function isIgnorableLoginCode(code: string | undefined): boolean {
+  return code === "busy" || code === "cancelled";
+}
 
 export function AccountTab() {
   const { confirm } = useConfirmModal();
@@ -27,7 +34,9 @@ export function AccountTab() {
   const applyStatus = useCallback((next: DuckyOSAccountStatus) => {
     setStatus(next);
     if (next.base_url) setBaseUrl(next.base_url);
-    if (next.error) setError(next.error);
+    if (next.ok === false && next.error && !isIgnorableLoginCode(next.code)) {
+      setError(next.error);
+    }
     window.dispatchEvent(
       new CustomEvent(DUCKYOS_ACCOUNT_CHANGED, {
         detail: { logged_in: Boolean(next.logged_in) },
@@ -123,47 +132,101 @@ export function AccountTab() {
     }
   };
 
+  const pollRef = useRef(0);
+  const loggedInRef = useRef(false);
+  loggedInRef.current = Boolean(status?.logged_in);
+
+  const stopLoginUi = useCallback(() => {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = 0;
+    }
+    loginRpcInFlight = false;
+    setBusy(false);
+    setPairingCode("");
+  }, []);
+
   const handleBrowserLogin = useCallback(() => {
     const api = getApi();
     if (!api?.duckyos_login) return;
-    setPairingCode("");
-    const poll = window.setInterval(() => {
-      void api.duckyos_get_status?.().then((s) => {
-        if (s?.user_code) setPairingCode(s.user_code);
-      });
-    }, 500);
+    if (loggedInRef.current) return;
+    setBusy(true);
+    setError("");
+    if (!pollRef.current) {
+      pollRef.current = window.setInterval(() => {
+        void api.duckyos_get_status?.().then((s) => {
+          if (!s) return;
+          if (s.user_code) setPairingCode(s.user_code);
+          if (s.logged_in) {
+            applyStatus(s);
+            stopLoginUi();
+          }
+        });
+      }, 500);
+    }
+    if (loginRpcInFlight) return;
+    loginRpcInFlight = true;
     void (async () => {
-      setBusy(true);
-      setError("");
       try {
         const next = await api.duckyos_login(baseUrl.trim() || DEFAULT_BASE);
+        if (next.user_code) setPairingCode(next.user_code);
+        if (next.logged_in) {
+          applyStatus(next);
+          stopLoginUi();
+          return;
+        }
+        if (next.code === "cancelled") {
+          stopLoginUi();
+          return;
+        }
+        if (next.ok === false && next.error && !isIgnorableLoginCode(next.code)) {
+          applyStatus(next);
+          setError(next.error);
+          stopLoginUi();
+          return;
+        }
         applyStatus(next);
-        if (next.ok === false && next.error) setError(next.error);
+        // pending / already-in-progress: keep the code + poll until approved or Cancel
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        window.clearInterval(poll);
-        setPairingCode("");
-        setBusy(false);
+        stopLoginUi();
       }
     })();
-  }, [applyStatus, baseUrl]);
+  }, [applyStatus, baseUrl, stopLoginUi]);
 
   useEffect(() => {
-    const onLogin = () => handleBrowserLogin();
+    const onLogin = () => {
+      consumeAccountLoginRequest();
+      handleBrowserLogin();
+    };
     window.addEventListener(ACCOUNT_LOGIN_EVENT, onLogin);
     if (consumeAccountLoginRequest()) handleBrowserLogin();
     return () => window.removeEventListener(ACCOUNT_LOGIN_EVENT, onLogin);
   }, [handleBrowserLogin]);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = 0;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || status?.logged_in) return;
+    if (status?.browser_pending && status.user_code && !busy && !loginRpcInFlight) {
+      handleBrowserLogin();
+    }
+  }, [loaded, status?.browser_pending, status?.user_code, status?.logged_in, busy, handleBrowserLogin]);
 
   const handleCancel = () => {
     const api = getApi();
     if (api && typeof api.duckyos_cancel_login === "function") {
       void api.duckyos_cancel_login();
     }
-    setBusy(false);
-    setPairingCode("");
     setError("");
+    stopLoginUi();
   };
 
   const handleLogout = () => {
@@ -206,7 +269,7 @@ export function AccountTab() {
         <PluginWalkthroughReplayButton pluginId="account" label="Ducky Account" />
       </h2>
       <p className="account-tab-lead">
-        Sign in on uefnducky.org/ducky with the code shown here. Passwords never go through UEFN Ducky.
+        Passwords never go through UEFN Ducky. Sign in on the website, then connect this PC with a one-time code.
       </p>
 
       {error ? <div className="account-tab-error" role="alert">{error}</div> : null}
@@ -335,38 +398,45 @@ export function AccountTab() {
           <AgentCapsCard onError={setError} />
         </>
       ) : (
-        <div className="account-tab-card">
+        <div className="account-tab-card account-tab-card--login">
+          <ol className="account-tab-steps">
+            <li>
+              Press <strong>Open Profile</strong> — a new browser window opens to your Ducky profile, and this app shows a code.
+            </li>
+            <li>
+              On the site, add this PC and type the code shown here.
+            </li>
+            <li>This tab updates when the PC is connected.</li>
+          </ol>
           {busy ? (
-            <>
+            <div className="account-tab-code-wrap">
+              <p className="account-tab-code-label">Code to enter on the site</p>
               {pairingCode ? (
-                <>
-                  <p className="account-tab-code" aria-live="polite">
-                    {pairingCode}
-                  </p>
-                  <p className="account-tab-body">
-                    Open uefnducky.org/ducky and enter this code.
-                  </p>
-                </>
+                <p className="account-tab-code" aria-live="polite">
+                  {pairingCode}
+                </p>
               ) : (
                 <p className="account-tab-body">Getting a code…</p>
               )}
-              <div className="account-tab-actions">
-                <button type="button" className="account-tab-btn" onClick={handleCancel}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="account-tab-actions">
-              <button
-                type="button"
-                className="account-tab-btn account-tab-btn--primary"
-                onClick={handleBrowserLogin}
-              >
-                Log in
-              </button>
             </div>
-          )}
+          ) : null}
+          <div className="account-tab-actions">
+            <button
+              type="button"
+              className="account-tab-btn account-tab-btn--primary"
+              onClick={() => {
+                handleBrowserLogin();
+                openSite("/profile");
+              }}
+            >
+              {busy ? "Open Profile again" : "Open Profile"}
+            </button>
+            {busy ? (
+              <button type="button" className="account-tab-btn" onClick={handleCancel}>
+                Cancel
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 

@@ -225,6 +225,37 @@ def test_device_login_polls_until_token() -> None:
     assert "desktop-exchange" not in calls
 
 
+def test_start_browser_login_reattaches_when_lock_held() -> None:
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    acc._DEVICE_LOGIN.clear()
+    acc._DEVICE_LOGIN["user_code"] = "4FQG-UYNX"
+    assert acc._BROWSER_LOGIN_LOCK.acquire(blocking=False)
+    try:
+        with (
+            patch.object(acc, "_persist_base_url"),
+            patch.object(acc, "resolve_base_url", return_value="https://uefnducky.org"),
+            patch.object(
+                acc,
+                "get_status",
+                return_value={
+                    "logged_in": False,
+                    "user_code": "4FQG-UYNX",
+                    "browser_pending": True,
+                },
+            ),
+        ):
+            out = acc.start_browser_login("https://uefnducky.org", timeout_secs=30)
+        assert out["ok"] is True
+        assert out["user_code"] == "4FQG-UYNX"
+        assert out["browser_pending"] is True
+    finally:
+        acc._DEVICE_LOGIN.clear()
+        acc._BROWSER_LOGIN_LOCK.release()
+
+
 def test_plugin_collect_404_never_mentions_plugin() -> None:
     from unittest.mock import patch
 

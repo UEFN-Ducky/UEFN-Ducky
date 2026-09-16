@@ -24,6 +24,7 @@ import { RemoteWindowLaunching, RemoteWindowOverlay, useUeFnLaunching } from "./
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
 import { installDirectPeer } from "./remote/directPeer";
 import { isRemote } from "./hooks/usePanelApi";
+import { onApiReady } from "./hooks/onApiReady";
 import { WindowDrag } from "./components/WindowDrag";
 import { WindowResize } from "./components/WindowResize";
 import { ChatView } from "./views/ChatView";
@@ -166,6 +167,22 @@ export default function App() {
   // uefn-ducky:// deep links (website Store "Install in app") — live + cold start.
   useEffect(() => {
     return installDeepLinkListeners();
+  }, []);
+
+  // Signed-out launch: Plugins library → Ducky Account (do not auto-start pairing).
+  useEffect(() => {
+    if (isRemote()) return;
+    return onApiReady((api) => {
+      void (async () => {
+        try {
+          const row = await api.duckyos_get_status?.();
+          if (!row || row.logged_in) return;
+          requestOpenSettings("Account");
+        } catch {
+          /* ignore */
+        }
+      })();
+    });
   }, []);
 
   // Gateway Install/Enable/Disable → refresh Ducky model picker without restart.

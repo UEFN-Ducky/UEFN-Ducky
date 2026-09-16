@@ -462,7 +462,11 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
     _persist_base_url(base)
 
     if not _BROWSER_LOGIN_LOCK.acquire(blocking=False):
-        raise DuckyOSAccountError("A browser login is already in progress", code="busy")
+        # Deep link + Account tab both start login; show the live code instead of locking the UI.
+        status = get_status()
+        status["ok"] = True
+        status["browser_pending"] = True
+        return status
 
     _BROWSER_LOGIN_CANCEL.clear()
     _DEVICE_LOGIN.clear()
@@ -1894,7 +1898,7 @@ def open_site_path(path: str = "/teams") -> dict[str, Any]:
     import webbrowser
 
     url = _teams_site_url(path or "/teams")
-    webbrowser.open(url)
+    webbrowser.open(url, new=2)
     return {"ok": True, "url": url}
 
 
