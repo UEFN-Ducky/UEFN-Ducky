@@ -11,7 +11,7 @@ from backend.agent.model_capabilities import model_in_cache, supports_vision
 from backend.agent.multimodal_content import image_attachments
 
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
-_MAX_IMAGES = 4
+_MAX_IMAGES = 20
 _MAX_FILE_TEXT = 256 * 1024
 _DATA_URL_RE = re.compile(r"^data:[^;]+;base64,")
 

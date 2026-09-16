@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { ComposerAttachment, MessageAttachmentDto } from "../types/panel";
 
-const MAX_IMAGES = 4;
+const MAX_IMAGES = 20;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_TEXT = 256 * 1024;
 
