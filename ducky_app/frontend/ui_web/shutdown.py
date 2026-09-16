@@ -49,11 +49,17 @@ def _stop_all_terminals() -> None:
 
 def _stop_mcp_plugins() -> None:
     try:
-        from backend.mcp_plugins.client_pool import get_plugin_pool
+        from backend.mcp_plugins.client_pool import shutdown_plugin_pool
 
-        get_plugin_pool().shutdown_sync()
+        shutdown_plugin_pool()
     except Exception:
         pass
+
+
+def _stop_cpu_workers() -> None:
+    from backend.workspace.diff_workers import shutdown
+
+    shutdown()
 
 
 def _terminate_process() -> None:
@@ -134,6 +140,7 @@ def hard_exit(*, api: Any = None) -> None:
         _exit_started = True
 
     _stop_all_agents()
+    _stop_cpu_workers()
     _stop_all_terminals()
     _stop_mcp_plugins()
     release_panel_process()

@@ -1,0 +1,1 @@
+Lower idle CPU usage in Ducky and its MCP bridges. Fix cleanup after failed MCP connections and improve reconnect and shutdown reliability. Speed up large file comparisons with up to two on-demand CPU workers, while keeping small comparisons lightweight.

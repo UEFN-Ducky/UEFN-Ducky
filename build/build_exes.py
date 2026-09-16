@@ -252,6 +252,9 @@ def main() -> int:
     pip = [sys.executable, "-m", "pip", "install", "pyinstaller", "-r", str(req)]
     print(">", " ".join(pip))
     subprocess.run(pip, check=True, cwd=str(root))
+    from runtime_versions import validate as validate_runtime_versions
+
+    print(f"Verified MCP runtime: {validate_runtime_versions(req)}")
 
     # Branded .ico for the frozen EXE + Windows taskbar
     ducky_app = root / "ducky_app"

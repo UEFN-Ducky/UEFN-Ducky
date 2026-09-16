@@ -26,11 +26,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from backend.workspace import events, identity
+from backend.workspace.diff_workers import line_delta
 from backend.workspace.identity import RunContext
 from backend.workspace.journal import ChangeJournal, NullJournal
 from backend.workspace.paths import (
     content_hash,
-    line_delta,
     normalize_rel,
     rel_from_root,
     require_not_digest_path,
@@ -253,8 +253,10 @@ class ProjectWriter:
             before_hash = content_hash(before) if existed else ""
             if expected_hash is not None and before_hash != expected_hash:
                 raise StaleWrite(canonical, expected_hash, before_hash)
-            self._atomic_write(full, content)
             added, removed = line_delta(before, content)
+            # A cancelled/failed comparison must not leave an already-written
+            # file without its change record.
+            self._atomic_write(full, content)
             record = WriteRecord(
                 op=op,
                 path=canonical,

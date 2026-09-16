@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from backend.workspace import identity
+from backend.workspace.diff_workers import line_delta
 from backend.workspace.journal import FileChangeJournal, OUTCOME_OK
-from backend.workspace.paths import content_hash, island_root, line_delta, normalize_rel, rel_from_root
+from backend.workspace.paths import content_hash, island_root, normalize_rel, rel_from_root
 from backend.workspace.policy import ALLOW
 from backend.workspace.writer import TEXT_READ_MAX_BYTES, WriteRecord
 

@@ -187,6 +187,9 @@ def run() -> None:
 
 
 def _run_panel(api_holder: dict[str, object]) -> None:
+    from backend.workspace.diff_workers import enable as enable_diff_workers
+
+    enable_diff_workers()
     # The WinForms UI thread runs Python callbacks (pywebview bridge, evaluate_js
     # completions) and competes for the GIL with agent threads doing CPU-bound
     # stream/JSON work. The default 5ms switch interval lets busy threads starve

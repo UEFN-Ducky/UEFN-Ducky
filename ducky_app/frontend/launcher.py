@@ -271,6 +271,10 @@ def run_bridge() -> None:
         if _is_stdio_disconnect(exc):
             return
         raise
+    finally:
+        from backend.mcp_plugins.client_pool import shutdown_plugin_pool
+
+        shutdown_plugin_pool()
 
 
 def _sweep_stale_extracts() -> None:
@@ -306,6 +310,11 @@ def is_bridge_exe() -> bool:
 
 
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--runtime-smoke":
+        _ensure_repo_on_path()
+        from frontend.runtime_smoke import run as run_runtime_smoke
+
+        raise SystemExit(run_runtime_smoke(sys.argv[2]))
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()
@@ -361,4 +370,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Frozen worker processes must divert before main() starts the UI/bridge or
+    # scrubs PyInstaller's child-process environment.
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     main()

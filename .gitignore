@@ -8,6 +8,9 @@ __pycache__/
 venv/
 .env
 
+# Machine-specific profiles, logs, and local investigation reports.
+/docs/diagnostics/
+
 # --- Local MCP / agent configs (may hold tokens — never commit) ---
 .mcp.json
 .claude/settings.local.json

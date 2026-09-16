@@ -1,7 +1,11 @@
 # MCP bridge (host/mcp_server.py).
 # Install from repo root: py -m pip install -r requirements.txt
 # server.py uses the v1 FastMCP API, renamed in MCP 2.x.
-mcp[cli]>=1.0,<2
+# Tested together: AnyIO 4.14.2 fixes cancellation spinning on completed tasks.
+# Pin the shipped MCP runtime so an old satisfying dependency cannot survive a rebuild.
+mcp[cli]==1.28.1
+anyio==4.14.2
+httpx==0.28.1
 tzdata>=2024.1
 # Control panel: hide to notification area (tray) on close (Windows).
 pystray>=0.19.5

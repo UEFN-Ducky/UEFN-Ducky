@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import sys
 import threading
 import time
@@ -12,11 +13,13 @@ from contextlib import AsyncExitStack, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import Tool
 
 from backend.mcp_plugins.registry import namespace_tool_name
+from backend.mcp_plugins.session_owner import OwnedSession, SessionOwner
 from backend.mcp_plugins.store import (
     effective_plugin_ids,
     ensure_plugin_prefix_cache,
@@ -35,6 +38,7 @@ _TOGGLE_HINT = (
 )
 
 _T = TypeVar("_T")
+log = logging.getLogger(__name__)
 
 
 from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
@@ -45,7 +49,9 @@ def _pool_loop_bound(fn: Callable[..., Coroutine[Any, Any, _T]]) -> Callable[...
 
     @functools.wraps(fn)
     async def wrapped(self: PluginClientPool, *args: Any, **kwargs: Any) -> _T:
-        if not self._own_loop or self._loop is None:
+        if self._closed:
+            raise RuntimeError("plugin pool is closed")
+        if not self._own_loop:
             return await fn(self, *args, **kwargs)
         try:
             running = asyncio.get_running_loop()
@@ -64,9 +70,10 @@ class PluginConnection:
     plugin_id: str
     manifest: dict[str, Any]
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    stack: AsyncExitStack | None = None
-    session: ClientSession | None = None
+    owner: SessionOwner | None = None
+    session: OwnedSession | None = None
     last_used: float = 0.0
+    retired: bool = False
 
 
 class PluginClientPool:
@@ -83,6 +90,10 @@ class PluginClientPool:
         self._thread: threading.Thread | None = None
         self._loop_ready = threading.Event()
         self._pool_lock: asyncio.Lock | None = None
+        self._closing = False
+        self._closed = False
+        # Also retain owners whose cleanup timed out, until they actually exit.
+        self._owners: set[SessionOwner] = set()
         if own_loop:
             self._start_owned_loop()
         else:
@@ -95,11 +106,12 @@ class PluginClientPool:
             self._loop = loop
             self._pool_lock = asyncio.Lock()
             self._loop_ready.set()
-            loop.run_forever()
             try:
+                loop.run_forever()
+            finally:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
                 loop.close()
-            except Exception:
-                pass
 
         self._thread = threading.Thread(target=_runner, name="mcp-plugin-pool", daemon=True)
         self._thread.start()
@@ -108,21 +120,34 @@ class PluginClientPool:
 
     def run_sync(self, coro: Coroutine[Any, Any, _T], timeout: float = _POOL_RUN_TIMEOUT_SEC) -> _T:
         """Run a pool coroutine from any thread. Never uses asyncio.run on a live loop."""
+        if self._closed:
+            coro.close()
+            raise RuntimeError("plugin pool is closed")
         if self._own_loop and self._loop is not None:
             try:
                 running = asyncio.get_running_loop()
             except RuntimeError:
                 running = None
             if running is self._loop:
+                coro.close()
                 raise RuntimeError("cannot run_sync from the plugin pool loop")
-            return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=timeout)
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            try:
+                return future.result(timeout=timeout)
+            except TimeoutError:
+                future.cancel()
+                raise
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro)
+        coro.close()
         raise RuntimeError("run_sync from a running loop requires own_loop=True")
 
     async def run_async(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        if self._closed:
+            coro.close()
+            raise RuntimeError("plugin pool is closed")
         if not self._own_loop or self._loop is None:
             return await coro
         try:
@@ -144,6 +169,8 @@ class PluginClientPool:
 
     async def _get_or_create(self, plugin_id: str) -> PluginConnection:
         async with self._pool_lock:
+            if self._closing:
+                raise RuntimeError("plugin pool is shutting down")
             conn = self._connections.get(plugin_id)
             if conn is None:
                 manifest = load_plugin_manifest(plugin_id)
@@ -163,11 +190,14 @@ class PluginClientPool:
     def _clear_http_fail(self, plugin_id: str) -> None:
         self._failed_until.pop(plugin_id, None)
 
-    async def _ensure_session(self, conn: PluginConnection) -> ClientSession:
+    async def _ensure_session(self, conn: PluginConnection) -> OwnedSession:
         async with conn.lock:
-            if conn.session is not None:
+            if self._closing or conn.retired:
+                raise RuntimeError("plugin pool is shutting down")
+            if conn.session is not None and conn.owner is not None and conn.owner.alive:
                 conn.last_used = time.time()
                 return conn.session
+            await self._close_connection_unlocked(conn)
             skip_until = self._http_skip_until(conn.plugin_id)
             if skip_until and time.time() < skip_until:
                 raise ConnectionError(
@@ -177,72 +207,86 @@ class PluginClientPool:
             ttype = ""
             try:
                 block = resolve_server_block(conn.manifest)
-                stack = AsyncExitStack()
                 ttype = str(block.get("type") or "")
                 init_timeout = _CONNECT_TIMEOUT_SEC
                 if ttype in ("http", "sse"):
                     from backend.mcp_plugins.epic import tcp_probe_url
 
                     url = str(block.get("url") or "")
-                    if not tcp_probe_url(url):
+                    if not await asyncio.to_thread(tcp_probe_url, url):
                         self._mark_http_fail(conn.plugin_id)
                         raise ConnectionError(f"MCP HTTP unreachable: {url}")
                     init_timeout = _HTTP_CONNECT_TIMEOUT_SEC
-                if ttype == "http":
-                    from mcp.client.streamable_http import streamablehttp_client
+                if self._closing or conn.retired:
+                    raise ConnectionError(f"Nested MCP '{conn.plugin_id}' connection closed")
 
-                    transport = await stack.enter_async_context(
-                        streamablehttp_client(block["url"], headers=block.get("headers") or None)
-                    )
-                elif ttype == "sse":
-                    from mcp.client.sse import sse_client
+                async def open_session(stack: AsyncExitStack) -> ClientSession:
+                    if ttype == "http":
+                        from mcp.client.streamable_http import streamablehttp_client
 
-                    transport = await stack.enter_async_context(
-                        sse_client(block["url"], headers=block.get("headers") or None)
-                    )
-                else:
-                    params = StdioServerParameters(
-                        command=block["command"],
-                        args=block["args"],
-                        env=block.get("env") or None,
-                    )
-                    transport = await stack.enter_async_context(stdio_client(params))
-                # stdio/sse yield (read, write); streamable-http yields a third
-                # get_session_id callback we don't need — index instead of unpack.
-                read, write = transport[0], transport[1]
-                session = await stack.enter_async_context(ClientSession(read, write))
-                await asyncio.wait_for(session.initialize(), timeout=init_timeout)
-                conn.stack = stack
-                conn.session = session
+                        transport = await stack.enter_async_context(
+                            streamablehttp_client(block["url"], headers=block.get("headers") or None)
+                        )
+                    elif ttype == "sse":
+                        from mcp.client.sse import sse_client
+
+                        transport = await stack.enter_async_context(
+                            sse_client(block["url"], headers=block.get("headers") or None)
+                        )
+                    else:
+                        params = StdioServerParameters(
+                            command=block["command"], args=block["args"], env=block.get("env") or None,
+                        )
+                        transport = await stack.enter_async_context(stdio_client(params))
+                    session = await stack.enter_async_context(ClientSession(transport[0], transport[1]))
+                    # This scope nests INSIDE the transport/session scopes and
+                    # exits before them. All context entry/exit stays in the owner.
+                    with anyio.fail_after(init_timeout):
+                        await session.initialize()
+                    return session
+
+                owner = SessionOwner(conn.plugin_id, open_session)
+                conn.owner = owner
+                self._owners.add(owner)
+                owner._task.add_done_callback(lambda task: self._owners.discard(owner))
+                await owner.start()
+                conn.session = OwnedSession(owner, list_timeout=_CONNECT_TIMEOUT_SEC, tool_timeout=_TOOL_TIMEOUT_SEC)
                 conn.last_used = time.time()
                 self._clear_http_fail(conn.plugin_id)
-                return session
-            except Exception:
-                await self._close_connection_unlocked(conn)
-                if ttype in ("http", "sse"):
+                return conn.session
+            except BaseException as exc:
+                # The caller can be under an AnyIO cancelled scope. Shield the
+                # wait; cleanup itself runs in the original owner task.
+                with anyio.CancelScope(shield=True):
+                    await self._close_connection_unlocked(conn)
+                if isinstance(exc, Exception) and ttype in ("http", "sse"):
                     self._mark_http_fail(conn.plugin_id)
                 raise
 
     async def _close_connection_unlocked(self, conn: PluginConnection) -> None:
         conn.session = None
-        if conn.stack is not None:
-            try:
-                await conn.stack.aclose()
-            except Exception:
-                pass
-            conn.stack = None
+        if conn.owner is not None:
+            await conn.owner.close()
+            conn.owner = None
 
     async def _close_connection(self, conn: PluginConnection) -> None:
+        # An initializer holds conn.lock while awaiting the handshake. Stop its
+        # owner first so disabling/shutdown does not wait for that handshake.
+        if conn.owner is not None:
+            await conn.owner.close()
         async with conn.lock:
             await self._close_connection_unlocked(conn)
 
     def close_plugin(self, plugin_id: str) -> None:
+        if self._closed:
+            return
         self.invalidate_tools_cache()
 
         async def _do_close() -> None:
             conn = self._connections.pop(plugin_id, None)
             if conn is None:
                 return
+            conn.retired = True
             await self._close_connection(conn)
 
         if self._own_loop and self._loop is not None:
@@ -253,7 +297,7 @@ class PluginClientPool:
             if running is self._loop:
                 running.create_task(_do_close())
                 return
-            asyncio.run_coroutine_threadsafe(_do_close(), self._loop).result(timeout=30)
+            self.run_sync(_do_close(), timeout=30)
             return
         try:
             loop = asyncio.get_running_loop()
@@ -263,12 +307,13 @@ class PluginClientPool:
 
     def shutdown_sync(self) -> None:
         """Close every nested session, then stop the owned loop if any."""
+        if self._closed:
+            return
         if self._own_loop and self._loop is not None:
-            try:
-                asyncio.run_coroutine_threadsafe(self.shutdown_all(), self._loop).result(timeout=30)
-            except Exception:
-                pass
+            self.run_sync(self.shutdown_all(), timeout=30)
+            # Do not abandon live owners on a stopped loop if cleanup failed.
             loop = self._loop
+            self._closed = True
             loop.call_soon_threadsafe(loop.stop)
             if self._thread is not None:
                 self._thread.join(timeout=5)
@@ -279,6 +324,7 @@ class PluginClientPool:
             asyncio.get_running_loop()
         except RuntimeError:
             asyncio.run(self.shutdown_all())
+            self._closed = True
             return
         raise RuntimeError("shutdown_sync from a running loop requires own_loop=True")
 
@@ -286,11 +332,16 @@ class PluginClientPool:
     async def shutdown_all(self) -> None:
         self.invalidate_tools_cache()
         async with self._pool_lock:
-            ids = list(self._connections.keys())
-        for pid in ids:
-            conn = self._connections.pop(pid, None)
-            if conn:
-                await self._close_connection(conn)
+            self._closing = True
+            connections = list(self._connections.values())
+            for conn in connections:
+                conn.retired = True
+        results = await asyncio.gather(*(self._close_connection(conn) for conn in connections), return_exceptions=True)
+        results += await asyncio.gather(*(owner.close() for owner in list(self._owners)), return_exceptions=True)
+        errors = [result for result in results if isinstance(result, Exception)]
+        if errors:
+            raise ExceptionGroup("Nested MCP cleanup failed", errors)
+        self._connections.clear()
 
     @_pool_loop_bound
     async def evict_idle(self, max_idle_sec: float = _IDLE_EVICT_SEC) -> int:
@@ -301,10 +352,12 @@ class PluginClientPool:
                 pid
                 for pid, conn in self._connections.items()
                 if conn.session is not None and (now - conn.last_used) > max_idle_sec
+                and (conn.owner is None or not conn.owner.busy)
             ]
         for pid in stale:
             conn = self._connections.pop(pid, None)
             if conn:
+                conn.retired = True
                 await self._close_connection(conn)
         if stale:
             self.invalidate_tools_cache()
@@ -514,10 +567,20 @@ def _hint_for_spawn_error(low: str) -> str:
 
 
 _pool: PluginClientPool | None = None
+_singleton_lock = threading.Lock()
 
 
 def get_plugin_pool() -> PluginClientPool:
     global _pool
-    if _pool is None:
-        _pool = PluginClientPool(own_loop=True)
-    return _pool
+    with _singleton_lock:
+        if _pool is None:
+            _pool = PluginClientPool(own_loop=True)
+        return _pool
+
+
+def shutdown_plugin_pool() -> None:
+    """Stop an existing pool without creating a new thread during app shutdown."""
+    with _singleton_lock:
+        pool = _pool
+    if pool is not None:
+        pool.shutdown_sync()

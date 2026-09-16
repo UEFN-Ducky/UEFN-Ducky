@@ -3,7 +3,7 @@ import os
 import re
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 # SPECPATH[0] is the directory containing this file (PyInstaller).
 _spec_root = Path(SPECPATH[0]).resolve()  # type: ignore[name-defined]
@@ -19,6 +19,11 @@ import sys
 for _p in (str(ROOT), str(DUCKY_APP)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+sys.path.insert(0, str(ROOT / "build"))
+from runtime_versions import validate as validate_runtime_versions
+
+_runtime_versions = validate_runtime_versions(ROOT / "requirements.txt")
 
 backend_hidden = collect_submodules("backend")
 mcp_hidden = collect_submodules("mcp")
@@ -186,6 +191,12 @@ for _src, _dest in list(_datas):
     if not _p.is_file():
         raise RuntimeError(f"unified.spec: DATA source is not a file: {_src}")
 
+# Distribution metadata uses directory sources supported by PyInstaller. Keep
+# it separate from the file-only application payload validation above.
+_runtime_datas = []
+for _distribution in _runtime_versions:
+    _runtime_datas.extend(copy_metadata(_distribution))
+
 _tz_datas, _tz_bins, _tz_hidden = [], [], []
 try:
     from PyInstaller.utils.hooks import collect_all
@@ -215,7 +226,7 @@ a = Analysis(
     [str(FRONTEND / "launcher.py")],
     pathex=[str(ROOT), str(DUCKY_APP)],
     binaries=_tz_bins + _pty_bins,
-    datas=_datas + _tz_datas + _pty_datas,
+    datas=_datas + _runtime_datas + _tz_datas + _pty_datas,
     hiddenimports=list(backend_hidden)
     + list(mcp_hidden)
     + list(_tz_hidden)
