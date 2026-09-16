@@ -3227,7 +3227,7 @@ export interface SkillPackDto {
   description: string;
   kind: "bundled" | "custom" | "plugin" | "store" | string;
   path: string;
-  version: number;
+  version: number | string;
   license?: string;
   author?: string;
   copyright?: string;
@@ -3278,7 +3278,7 @@ export interface SkillPackGraphDto {
   label: string;
   description: string;
   kind: string;
-  version: number;
+  version: number | string;
   layout: Record<string, { x: number; y: number }>;
   nodes: SkillGraphNodeDto[];
   error?: string;
@@ -3309,7 +3309,7 @@ export interface SkillPackFilesDto {
   label: string;
   description: string;
   kind: string;
-  version: number;
+  version: number | string;
   path?: string;
   files: SkillPackFileDto[];
   error?: string;

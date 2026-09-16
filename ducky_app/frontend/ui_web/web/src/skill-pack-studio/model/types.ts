@@ -17,7 +17,7 @@ export interface PackSummary {
   label: string;
   description: string;
   kind: string;
-  version: number;
+  version: number | string;
   license: string;
   author: string;
   copyright: string;

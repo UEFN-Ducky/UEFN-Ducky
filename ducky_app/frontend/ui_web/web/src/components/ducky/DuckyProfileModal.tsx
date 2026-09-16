@@ -3,6 +3,7 @@ import { Modal, ModalActions } from "../Modal";
 import { UnsavedChangesModal } from "../UnsavedChangesModal";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { getApi } from "../../hooks/usePanelApi";
+import { onApiReady } from "../../hooks/onApiReady";
 import { BLANK_PROFILE_ID } from "../../generated/bundledAgentProfiles";
 import type {
   AgentProfileDto,
@@ -118,6 +119,8 @@ export function DuckyProfileModal({
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [leavePrompt, setLeavePrompt] = useState(false);
   const [leaveSaving, setLeaveSaving] = useState(false);
@@ -171,50 +174,63 @@ export function DuckyProfileModal({
     setCreating(false);
     setLeaveSaving(false);
     setLoading(true);
+    setLoadError("");
     setCreateStep(state.mode === "create" ? "pick" : "edit");
-    void (async () => {
-      const [, cat] = await Promise.all([refreshProfiles(), refreshCatalog()]);
-      if (!cat) return;
-      if (state.mode === "edit") {
-        const api = getApi();
-        const [mcp, skills] = await Promise.all([
-          api?.get_chat_mcp_plugins ? api.get_chat_mcp_plugins(state.chat.id) : null,
-          api?.get_conversation_skills ? api.get_conversation_skills(state.chat.id) : null,
-        ]);
-        const allToolIds = (cat.default_tool_ids ?? []).map(String);
-        const effectiveTools =
-          mcp?.ok && mcp.override
-            ? mcp.override
-            : mcp?.ok
-              ? (mcp.plugins ?? []).filter((p) => p.enabled).map((p) => p.id)
-              : allToolIds;
-        const disabledToolIds = allToolIds.filter((id) => !effectiveTools.includes(id));
-        const normStyle = normalizeStyle(state.chat.duckyStyle);
-        setSelectedProfileId(BLANK_PROFILE_ID);
-        const next = {
-          name: state.chat.duckyName?.trim() || styleLabel(normStyle),
-          duckyStyle: normStyle,
-          personality: state.chat.duckyPersonality || "",
-          whenToUse: "",
-          disabledPacks: [...(skills?.disabled_packs || [])],
-          enabledSubskills: { ...(skills?.enabled_subskills || {}) },
-          disabledToolIds,
-          model: "",
-          ttsVoice: state.chat.ttsVoice || "",
-          ttsSpeed: state.chat.ttsSpeed || 0,
-          thinkingEffort: state.chat.thinkingEffort || "off",
-        };
-        setForm(next);
-        markClean(next);
-      } else {
-        setSelectedProfileId(BLANK_PROFILE_ID);
-        const next = { ...catalogDefaults(cat), duckyStyle: defaultStyle };
-        setForm(next);
-        markClean(next);
-      }
-      setLoading(false);
-    })();
-  }, [open, state, refreshProfiles, refreshCatalog, defaultStyle, normalizeStyle, styleLabel, markClean]);
+    let cancelled = false;
+    const stopWaiting = onApiReady(() => {
+      void (async () => {
+        const [, cat] = await Promise.all([refreshProfiles(), refreshCatalog()]);
+        if (cancelled) return;
+        if (!cat) throw new Error("The agent editor catalog is unavailable. Please retry.");
+        if (state.mode === "edit") {
+          const api = getApi();
+          const [mcp, skills] = await Promise.all([
+            api?.get_chat_mcp_plugins ? api.get_chat_mcp_plugins(state.chat.id) : null,
+            api?.get_conversation_skills ? api.get_conversation_skills(state.chat.id) : null,
+          ]);
+          if (cancelled) return;
+          const allToolIds = (cat.default_tool_ids ?? []).map(String);
+          const effectiveTools =
+            mcp?.ok && mcp.override
+              ? mcp.override
+              : mcp?.ok
+                ? (mcp.plugins ?? []).filter((p) => p.enabled).map((p) => p.id)
+                : allToolIds;
+          const disabledToolIds = allToolIds.filter((id) => !effectiveTools.includes(id));
+          const normStyle = normalizeStyle(state.chat.duckyStyle);
+          setSelectedProfileId(BLANK_PROFILE_ID);
+          const next = {
+            name: state.chat.duckyName?.trim() || styleLabel(normStyle),
+            duckyStyle: normStyle,
+            personality: state.chat.duckyPersonality || "",
+            whenToUse: "",
+            disabledPacks: [...(skills?.disabled_packs || [])],
+            enabledSubskills: { ...(skills?.enabled_subskills || {}) },
+            disabledToolIds,
+            model: "",
+            ttsVoice: state.chat.ttsVoice || "",
+            ttsSpeed: state.chat.ttsSpeed || 0,
+            thinkingEffort: state.chat.thinkingEffort || "off",
+          };
+          setForm(next);
+          markClean(next);
+        } else {
+          setSelectedProfileId(BLANK_PROFILE_ID);
+          const next = { ...catalogDefaults(cat), duckyStyle: defaultStyle };
+          setForm(next);
+          markClean(next);
+        }
+      })().catch((error: unknown) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+      }).finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    });
+    return () => {
+      cancelled = true;
+      stopWaiting();
+    };
+  }, [open, state, refreshProfiles, refreshCatalog, defaultStyle, normalizeStyle, styleLabel, markClean, loadAttempt]);
   const applyProfileSelection = useCallback(
     (profileId: string, listed: AgentProfileDto[], cat: AgentProfileEditorCatalogDto) => {
       setSelectedProfileId(profileId);
@@ -532,7 +548,7 @@ export function DuckyProfileModal({
       hideHeader
       floatingClose
       footer={
-        showEditor ? (
+        showEditor && !loadError ? (
           <div className="ducky-profile-modal-footer">
             <div className="ducky-details-save-status" aria-live="polite">
               {hasUnsavedChanges ? "Pending changes" : "No changes"}
@@ -584,6 +600,13 @@ export function DuckyProfileModal({
       <div className={`ducky-editor-form ducky-profile-modal-body${showEditor ? " ducky-profile-modal-body--editor" : ""}`}>
         {loading ? (
           <div className="skill-checkbox-empty">Loading…</div>
+        ) : loadError ? (
+          <div role="alert">
+            <p>Could not load your duckies: {loadError}</p>
+            <button type="button" className="modal-btn" onClick={() => setLoadAttempt((n) => n + 1)}>
+              Retry
+            </button>
+          </div>
         ) : (
           <>
             {isCreate && createStep === "pick" ? (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FolderDto, FolderItem } from "../types/panel";
 import { getApi } from "./usePanelApi";
+import { onApiReady } from "./onApiReady";
 import { ARCHIVE_FOLDER_ID, isArchiveFolderId } from "../utils/archiveFolder";
 import { readDuckiesAllProjects } from "../utils/duckiesTreePrefs";
 import { buildFolderTree, wrapProjectsAsFolders } from "../utils/sidebarTree";
@@ -124,14 +125,8 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
 
   const load = useCallback(async () => {
     const api = getApi();
-    if (!api) {
-      setFolders([]);
-      setRootChats([]);
-      setHubChats([]);
-      setArchiveChats([]);
-      setFoldersLoaded(true);
-      return;
-    }
+    // A bridge still starting is not an empty library. onApiReady retries the load.
+    if (!api) return;
     const allProjects = readDuckiesAllProjects();
     const [folderRows, allConvs] = await Promise.all([
       api.list_folders(allProjects).then((rows) => (Array.isArray(rows) ? rows : []).filter((f) => !isArchiveFolderId(f.id))),
@@ -199,7 +194,7 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
 
   useEffect(() => {
     setFoldersLoaded(false);
-    void load();
+    return onApiReady(() => { void load(); });
   }, [load, refreshToken]);
 
   return {

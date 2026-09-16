@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.skills.versions import next_skill_version, skill_version, skill_version_key
+
 EXPORT_FORMAT = "ducky-skill-pack"
 EXPORT_FORMAT_VERSION = 3
 EXPORT_META_FILE = "export.json"
@@ -516,7 +518,7 @@ def _manifest_from_skill_dir(root: Path, pack_id: str, kind: str) -> dict[str, A
     manifest: dict[str, Any] = {
         "id": pack_id,
         "label": label,
-        "version": int(md.get("version") or 0),
+        "version": skill_version(md.get("version")),
         "kind": kind,
         "description": str(meta.get("description") or ""),
         "subskills": [
@@ -983,7 +985,7 @@ def list_skill_packs(*, include_text: bool = False) -> list[dict[str, Any]]:
             "label": str(manifest.get("label") or pack_id),
             "description": str(manifest.get("description") or ""),
             "kind": str(manifest.get("kind") or "custom"),
-            "version": int(manifest.get("version") or 0),
+            "version": skill_version(manifest.get("version")),
             "path": str(appdata_skill_packs_dir() / pack_id),
             "subskills": [],
         }
@@ -1079,11 +1081,11 @@ def _merge_pack_tree(src: Path, dest: Path, *, ref_origin: str = ORIGIN_SHIPPED)
             pass
 
 
-def _pack_version(root: Path) -> int:
+def _pack_version(root: Path) -> int | str:
     raw = _read(root / PACK_FILE)
     if raw is not None:
         meta, _ = parse_frontmatter(raw)
-        return int(_meta_map(meta).get("version") or 0)
+        return skill_version(_meta_map(meta).get("version"))
     return 0
 
 
@@ -1166,13 +1168,13 @@ def seed_skill_packs(*, force: bool = False) -> list[str]:
         dest_ver = _pack_version(dest_pack) if dest_pack.is_dir() else 0
         # Only touch shipped pack ids. Custom AppData packs (not in the bundle) are never
         # listed here, so Skills-studio / user packs are never deleted or overwritten.
-        if dest_pack.is_dir() and dest_ver > bundled_ver:
+        if dest_pack.is_dir() and skill_version_key(dest_ver) > skill_version_key(bundled_ver):
             logs.append(
                 f"Skill pack {pack_id} v{dest_ver} kept (newer than bundled v{bundled_ver})"
             )
             _write_pack_license_file(pack_id)
             continue
-        if dest_pack.is_dir() and not force and dest_ver >= bundled_ver:
+        if dest_pack.is_dir() and not force and skill_version_key(dest_ver) >= skill_version_key(bundled_ver):
             logs.append(f"Skill pack {pack_id} v{dest_ver} current")
             _write_pack_license_file(pack_id)
             continue
@@ -1242,7 +1244,7 @@ def _bump_pack_version(pack_id: str) -> Path:
     if not isinstance(md, dict):
         md = {}
         meta["metadata"] = md
-    md["version"] = int(md.get("version") or 0) + 1
+    md["version"] = next_skill_version(md.get("version"))
     path.write_text(serialize_frontmatter(meta, body), encoding="utf-8")
     return path
 
@@ -1493,7 +1495,7 @@ def get_skill_pack_files(pack_id: str) -> dict[str, Any]:
         "label": str(manifest.get("label") or pid),
         "description": str(manifest.get("description") or ""),
         "kind": str(manifest.get("kind") or "custom"),
-        "version": int(manifest.get("version") or 0),
+        "version": skill_version(manifest.get("version")),
         "path": str(appdata_skill_packs_dir() / pid),
         "files": files,
     }
@@ -1566,7 +1568,7 @@ def export_skill_pack_to_zip(pack_id: str, dest_path: Path) -> Path:
         "pack_id": pid,
         "label": str(manifest.get("label") or pid),
         "description": str(manifest.get("description") or ""),
-        "version": int(manifest.get("version") or 0),
+        "version": skill_version(manifest.get("version")),
         "license": str(manifest.get("license") or ""),
         "author": str(manifest.get("author") or ""),
         "copyright": str(manifest.get("copyright") or ""),
@@ -1655,14 +1657,14 @@ def _apply_export_meta_commercial(meta: dict[str, Any], export_meta: dict[str, A
     # Store bumps often land in export.json while SKILL.md lags — local catalog
     # reads metadata.version, so keep the higher of the two.
     try:
-        export_ver = int(export_meta.get("version") or 0)
+        export_ver = skill_version(export_meta.get("version"))
     except (TypeError, ValueError):
         export_ver = 0
     try:
-        cur_ver = int(md.get("version") or 0)
+        cur_ver = skill_version(md.get("version"))
     except (TypeError, ValueError):
         cur_ver = 0
-    if export_ver > cur_ver:
+    if skill_version_key(export_ver) > skill_version_key(cur_ver):
         md["version"] = export_ver
 
 
@@ -1724,13 +1726,13 @@ def import_skill_pack_from_zip(
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
     export_meta = info.get("export_meta") if isinstance(info.get("export_meta"), dict) else None
-    store_ver_int: int | None = None
+    store_ver: int | str | None = None
     if store_version is not None and str(store_version).strip():
         try:
-            # Skill packs use integer versions; Store may send "4" or "4.0.0".
-            store_ver_int = int(str(store_version).strip().split(".", 1)[0])
+            # Preserve semantic versions supplied by Store skill packs.
+            store_ver = skill_version(store_version)
         except ValueError:
-            store_ver_int = None
+            store_ver = None
     with zipfile.ZipFile(src_path, "r") as zf:
         for name in info["files"]:
             if name == PACK_FILE:
@@ -1741,13 +1743,13 @@ def import_skill_pack_from_zip(
                 if not isinstance(md, dict):
                     md = {}
                     meta["metadata"] = md
-                if store_ver_int is not None:
+                if store_ver is not None:
                     try:
-                        cur = int(md.get("version") or 0)
+                        cur = skill_version(md.get("version"))
                     except (TypeError, ValueError):
                         cur = 0
-                    if store_ver_int > cur:
-                        md["version"] = store_ver_int
+                    if skill_version_key(store_ver) > skill_version_key(cur):
+                        md["version"] = store_ver
                 md["source"] = src_kind
                 if slug:
                     md["store_slug"] = slug

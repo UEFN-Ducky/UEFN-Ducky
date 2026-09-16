@@ -2034,7 +2034,7 @@ def store_catalog() -> dict[str, Any]:
             pid = str(pack.get("id") or "")
             if pid:
                 installed_skills[pid] = {
-                    "version": int(pack.get("version") or 0),
+                    "version": pack.get("version") or 0,
                     "source": str(pack.get("source") or ""),
                     "store_slug": str(pack.get("store_slug") or ""),
                 }
@@ -2149,7 +2149,7 @@ def store_catalog() -> dict[str, Any]:
                 continue
             sk = installed_skills.get(slug)
             if sk is not None:
-                sk_ver = int(sk.get("version") or 0)
+                sk_ver = sk.get("version") or 0
                 local_rank = plugin_version_rank(sk_ver)
                 local_display = format_plugin_version(sk_ver)
                 # Catalog hit + installed → Store skill (pack may already stamp source).
