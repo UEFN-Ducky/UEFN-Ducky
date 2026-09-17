@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Icons } from "../icons/Icons";
-import { getApi } from "../hooks/usePanelApi";
 import { useUiTarget } from "../ui-targets/registry";
-import { captureSnipFile } from "./snipCapture";
+import { canSnip, captureSnipFile } from "./snipCapture";
 
 interface SnipButtonProps {
   disabled?: boolean;
@@ -18,7 +17,7 @@ export function SnipButton({ disabled, onCaptured }: SnipButtonProps) {
     label: "Snip",
     route: "chat",
   });
-  if (!getApi()?.snip_screen) return null;
+  if (!canSnip()) return null;
 
   const handleClick = async () => {
     if (busy) return;

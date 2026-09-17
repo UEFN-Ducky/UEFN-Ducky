@@ -1,14 +1,19 @@
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 
 export interface SnipResult {
   file: File;
   projectPath?: string;
 }
 
+/** Desktop app only — the web stream proxy makes every method look present. */
+export function canSnip(): boolean {
+  return !isRemote() && Boolean(getApi()?.snip_screen);
+}
+
 /** Runs the Windows region snipper and turns the reply into a PNG File. */
 export async function captureSnipFile(): Promise<SnipResult | null> {
   const api = getApi();
-  if (!api?.snip_screen) return null;
+  if (!canSnip() || !api?.snip_screen) return null;
   const res = await api.snip_screen();
   if (!res?.ok || !res.data_base64) return null;
   const bin = atob(res.data_base64);

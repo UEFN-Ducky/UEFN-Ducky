@@ -1106,6 +1106,7 @@ REMOTE_DENY = frozenset(
         "rtc_signal",
         "window_input",
         "window_box",
+        "snip_screen",
     }
 )
 

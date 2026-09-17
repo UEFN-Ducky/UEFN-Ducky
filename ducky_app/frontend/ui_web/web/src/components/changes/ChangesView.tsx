@@ -1,4 +1,4 @@
-import { readableLabel } from './ledgerPresentation';
+import { failedActionCopyText, readableLabel } from './ledgerPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type MouseEvent, type ReactNode } from "react";
 
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
@@ -285,6 +285,7 @@ export function ChangesView({
   const [diff, setDiff] = useState<DiffView | null>(null);
   /** Blocked/failed row opened for its reason + attempts. */
   const [detail, setDetail] = useState<{ run: ChangesetRunDto; row: ChangeRow } | null>(null);
+  const [detailCopied, setDetailCopied] = useState(false);
   const [manual, setManual] = useState<ChangesetManualRow[]>([]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
@@ -1107,6 +1108,21 @@ export function ChangesView({
       .join("\n");
     void copyText(text);
   }, [manual]);
+
+  const copyFailedDetail = useCallback(() => {
+    if (!detail) return;
+    const title = `${detail.row.outcome === "blocked" ? "Action blocked" : "Action failed"} — ${detail.row.kind === "file" ? basename(detail.row.path) : readableLabel(detail.row.label)}`;
+    void copyText(
+      failedActionCopyText({
+        title,
+        outcome: detail.row.outcome,
+        reason: detail.row.reason,
+        steps: detail.row.steps,
+      }),
+    ).then((ok) => {
+      if (ok) setDetailCopied(true);
+    });
+  }, [detail]);
 
   const visible = items.slice(view.start, view.end);
   const pair = diff ? diffPair(diff) : null;
@@ -1931,9 +1947,12 @@ export function ChangesView({
       {detail ? (
         <Modal
           open
-          onClose={() => setDetail(null)}
+          onClose={() => {
+            setDetail(null);
+            setDetailCopied(false);
+          }}
           title={`${detail.row.outcome === "blocked" ? "Action blocked" : "Action failed"} — ${detail.row.kind === "file" ? basename(detail.row.path) : readableLabel(detail.row.label)}`}
-          footer={<div className="changeset-diff-actions"><p className="json-diff-note">Deleting this history entry does not change your project.</p><button type="button" className="changeset-btn" onClick={() => void deleteRow(detail.run, detail.row)}>Delete history entry</button></div>}
+          footer={<div className="changeset-diff-actions"><p className="json-diff-note">Deleting this history entry does not change your project.</p><span className="changeset-diff-actions-btns"><button type="button" className="changeset-btn" onClick={copyFailedDetail}>{detailCopied ? "Copied" : "Copy"}</button><button type="button" className="changeset-btn changeset-btn--danger" onClick={() => void deleteRow(detail.run, detail.row)}>Delete history entry</button></span></div>}
           width={560}
           zIndex={modalContainer ? 40 : 100020}
           container={modalContainer}

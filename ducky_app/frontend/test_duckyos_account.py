@@ -229,6 +229,7 @@ def test_remote_deny_covers_native_and_secret_paths() -> None:
     assert "rtc_signal" in REMOTE_DENY
     assert "window_input" in REMOTE_DENY
     assert "window_box" in REMOTE_DENY
+    assert "snip_screen" in REMOTE_DENY
     assert "send_message" not in REMOTE_DENY
     assert "list_conversations" not in REMOTE_DENY
     assert "launch_uefn" not in REMOTE_DENY

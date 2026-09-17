@@ -12,6 +12,7 @@ const archiveChangesets = vi.fn();
 const deleteEntries = vi.fn();
 const revertEntry = vi.fn();
 const revertRunFn = vi.fn();
+const copyText = vi.fn().mockResolvedValue(true);
 
 vi.mock("../../hooks/usePanelApi", () => ({
   getApi: () => ({
@@ -23,6 +24,9 @@ vi.mock("../../hooks/usePanelApi", () => ({
     revert_changeset_entry: revertEntry,
     revert_changeset: revertRunFn,
   }),
+}));
+vi.mock("../../utils/copyText", () => ({
+  copyText,
 }));
 vi.mock("../../hooks/useAgentEventBus", () => ({
   subscribeAgentEvents: () => () => {},
@@ -53,6 +57,8 @@ beforeEach(() => {
   revertEntry.mockResolvedValue({ ok: true, reverted: [1], skipped_modified: [], errors: [] });
   revertRunFn.mockReset();
   revertRunFn.mockResolvedValue({ ok: true, reverted: [1], skipped_modified: [], errors: [] });
+  copyText.mockReset();
+  copyText.mockResolvedValue(true);
   // jsdom has no ResizeObserver; the view only uses it to track the viewport.
   vi.stubGlobal(
     "ResizeObserver",
@@ -383,6 +389,18 @@ describe("ChangesView", () => {
     await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
     fireEvent.click(screen.getByRole("button", { name: "Revert UEFN" }));
     await waitFor(() => expect(revertRunFn).toHaveBeenCalledWith(run.run_id, false, "uefn"));
+  });
+
+  it("copies the blocked ledger popup text", async () => {
+    render(<ChangesView />);
+    await waitFor(() => expect(screen.getByText("BLOCKED")).toBeTruthy());
+    fireEvent.click(screen.getByText("BLOCKED"));
+    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(copyText).toHaveBeenCalled());
+    const copied = String(copyText.mock.calls[0][0]);
+    expect(copied).toContain("Action blocked");
+    expect(copied).toContain("Out of lane");
   });
 
   it("lets you revert one write from the details pager", async () => {

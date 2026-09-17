@@ -13,6 +13,25 @@ export function readableLabel(value: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** Plain text of the failed/blocked ledger popup — title, note, reason, steps. */
+export function failedActionCopyText(input: {
+  title: string;
+  outcome: string;
+  reason: string;
+  steps: { tool: string; summary: string }[];
+}): string {
+  const status = input.outcome === "blocked" ? "blocked" : "failed";
+  const parts = [
+    input.title,
+    `This attempt was recorded as ${status}. Review the recorded reason below.`,
+    input.reason.trim() || "No details recorded.",
+  ];
+  if (input.steps.length > 1) {
+    parts.push(input.steps.map((s) => `${s.tool}${s.summary ? ` — ${s.summary}` : ""}`).join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
 /** Summarize only recorded facts; a tool response is not a world-state snapshot. */
 export function recordedResult(value: unknown): { title: string; facts: [string, string][] } | null {
   const outer = record(value);

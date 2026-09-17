@@ -1,4 +1,5 @@
 import { getApi } from "../hooks/usePanelApi";
+import { canSnip } from "./snipCapture";
 import type { AgentMode } from "../types/panel";
 
 /** What the composer knows about itself — decides which commands are offered. */
@@ -107,7 +108,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: "snip",
     description: "Capture a region of the screen into the composer.",
     keywords: ["screenshot", "capture"],
-    isAvailable: () => Boolean(getApi()?.snip_screen),
+    isAvailable: () => canSnip(),
     run: ({ captureSnip }) => captureSnip(),
   },
   {
