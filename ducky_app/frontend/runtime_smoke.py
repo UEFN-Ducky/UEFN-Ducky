@@ -90,12 +90,28 @@ async def _check_mcp() -> dict:
 
 
 def run(output: str) -> int:
+    report: dict = {"ok": False, "python": platform.python_version()}
+    try:
+        return _run(output, report)
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        Path(output).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        return 1
+
+
+def _run(output: str, report: dict) -> int:
+    # 1.2.133 shipped without backend.agent.prompt in the PYZ (SyntaxError during
+    # freeze). Import these first so a missing module fails smoke, not the GUI.
+    import backend.agent.hard_rules  # noqa: F401
+    import backend.agent.prompt  # noqa: F401
+    import backend.agent.runner  # noqa: F401
+    import backend.store.db  # noqa: F401
     from backend.workspace.diff_workers import DiffWorkers
     from backend.workspace.paths import line_delta
 
-    report = {"python": platform.python_version(), "versions": {
+    report["versions"] = {
         name: importlib.metadata.version(name) for name in ("mcp", "anyio", "httpx")
-    }}
+    }
     report["mcp"] = asyncio.run(_check_mcp())
     workers = DiffWorkers()
     before = "".join(f"Value_{n}:int = {n}\n" for n in range(10000))

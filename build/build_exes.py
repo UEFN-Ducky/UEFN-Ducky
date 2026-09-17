@@ -27,6 +27,7 @@ ships as plaintext and runs on UEFN's embedded 3.11 at load time.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -205,6 +206,43 @@ def _is_stale_artifact(path: Path, *, dev_build: bool, keep: Path) -> bool:
     return name.startswith("UEFN-Ducky-") or name.endswith(".pending.exe")
 
 
+def _run_runtime_smoke(exe: Path) -> int:
+    """Boot the frozen EXE headlessly. Fail the build if prompt/store imports die."""
+    report_path = Path(tempfile.gettempdir()) / "uefn_ducky_runtime_smoke.json"
+    try:
+        report_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    print(f"=== Runtime smoke ({exe.name} --runtime-smoke) ===")
+    try:
+        proc = subprocess.run(
+            [str(exe), "--runtime-smoke", str(report_path)],
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        print("ERROR: runtime-smoke timed out", file=sys.stderr)
+        return 1
+    if proc.returncode != 0:
+        detail = ""
+        if report_path.is_file():
+            detail = " " + report_path.read_text(encoding="utf-8", errors="replace")[:500]
+        print(f"ERROR: runtime-smoke rc={proc.returncode}{detail}", file=sys.stderr)
+        return 1
+    if not report_path.is_file():
+        print("ERROR: runtime-smoke wrote no report", file=sys.stderr)
+        return 1
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: runtime-smoke report is not JSON: {exc}", file=sys.stderr)
+        return 1
+    if not report.get("ok"):
+        print(f"ERROR: runtime-smoke not ok: {report}", file=sys.stderr)
+        return 1
+    print("runtime-smoke ok")
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
     dev_build = bool(args.dev)
@@ -375,6 +413,10 @@ def main() -> int:
             "  Close any running panel or bridge holding files in that folder.",
             file=sys.stderr,
         )
+        return 1
+
+    smoke_exe = wrote / f"{exe_stem}.exe"
+    if _run_runtime_smoke(smoke_exe) != 0:
         return 1
 
     # Guarantee "always NEW": dist/ must contain exactly the EXE we just built. Sweep older

@@ -273,6 +273,11 @@ a = Analysis(
         "sqlite3.dbapi2",
         "backend.store",
         "backend.store.db",
+        # 1.2.133: a SyntaxError in prompt.py dropped this from the PYZ and the
+        # panel died on boot with ModuleNotFoundError. Keep it explicit.
+        "backend.agent.prompt",
+        "backend.agent.runner",
+        "backend.agent.hard_rules",
     ],
     hookspath=[],
     hooksconfig={},
@@ -306,6 +311,17 @@ if not any(_n.startswith("_sqlite3") for _n in _binary_names):
     )
 if "backend.store.db" not in _pure_names:
     raise RuntimeError("unified.spec: frozen build is missing backend.store.db")
+_REQUIRED_PURE = (
+    "backend.agent.prompt",
+    "backend.agent.runner",
+    "backend.agent.hard_rules",
+)
+_missing_pure = [m for m in _REQUIRED_PURE if m not in _pure_names]
+if _missing_pure:
+    raise RuntimeError(
+        "unified.spec: frozen build missing modules (panel would crash on boot): "
+        + ", ".join(_missing_pure)
+    )
 
 pyz = PYZ(a.pure)
 

@@ -217,6 +217,15 @@ def test_hard_rules_42_20_chat_unarmed_marketplace():
     assert "Unarmed_Creative_V1_Common" in AGENT_HARD_RULES
     assert "/UnrealEngine.com/Marketplace" in AGENT_HARD_RULES
     assert "sys_chat_channels" in AGENT_HARD_RULES
+    # 1.2.133 freeze omitted backend.agent.prompt because this module was a
+    # SyntaxError (raw `{}` inside the prompt f-string). Importing it here is
+    # the gate that must fail before any Store publish.
+    from backend.agent.prompt import _rules_body
+
+    text = _rules_body(4200)
+    assert "IsMemberSpeaking" in text
+    assert "Unarmed_Creative_V1_Common" in text
+    assert "/UnrealEngine.com/Marketplace" in text
 
 
 def test_hard_rules_verse_build_lifecycle():

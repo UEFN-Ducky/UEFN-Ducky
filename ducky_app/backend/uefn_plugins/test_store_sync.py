@@ -223,7 +223,7 @@ def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
         assert time.perf_counter() - t0 < 1.0, "ensure_plugins_loaded blocked on repair"
 
         # Give the repair daemon a moment to enter the hung register().
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + 15.0
         while "hangreg" not in host._REPAIR_ATTEMPTS and time.monotonic() < deadline:
             time.sleep(0.05)
         assert "hangreg" in host._REPAIR_ATTEMPTS

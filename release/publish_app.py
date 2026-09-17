@@ -562,6 +562,28 @@ def _self_check() -> None:
     print("publish_app self-check ok")
 
 
+def run_regression_tests() -> None:
+    """Refuse to bump/upload unless pytest + panel vitest are green.
+
+    1.2.133 shipped a SyntaxError in ``backend.agent.prompt`` because publish
+    froze without running the suite. That module dropped out of the PYZ and
+    every install crashed on boot.
+    """
+    print("=== pytest (required before Store publish) ===")
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--tb=short"],
+        check=True,
+        cwd=str(ROOT),
+    )
+    web = ROOT / "ducky_app" / "frontend" / "ui_web" / "web"
+    npm = shutil.which("npm")
+    if not npm:
+        raise SystemExit("npm not found — panel vitest is required before Store publish")
+    print("=== vitest (panel) ===")
+    subprocess.run([npm, "test"], check=True, cwd=str(web))
+    print("regression tests ok")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=None, help="Skip build; publish this Setup exe")
@@ -597,6 +619,8 @@ def main() -> None:
     if args.print_version:
         print(read_version())
         return
+
+    run_regression_tests()
 
     _load_dotenv()
     base, key = ensure_store_env()

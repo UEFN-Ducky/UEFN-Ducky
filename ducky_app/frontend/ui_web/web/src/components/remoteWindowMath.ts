@@ -138,8 +138,8 @@ export function clampView(view: ContentBox, panX: number, panY: number, scale: n
   const maxX = ((s - 1) * view.width) / 2;
   const maxY = ((s - 1) * view.height) / 2;
   return {
-    panX: Math.min(maxX, Math.max(-maxX, panX)),
-    panY: Math.min(maxY, Math.max(-maxY, panY)),
+    panX: Math.min(maxX, Math.max(-maxX, panX)) + 0,
+    panY: Math.min(maxY, Math.max(-maxY, panY)) + 0,
     scale: s,
   };
 }
