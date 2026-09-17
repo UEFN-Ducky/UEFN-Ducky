@@ -50,7 +50,7 @@ import { UndoHistoryProvider, useUndoHistoryOptional } from "./navigation/UndoHi
 import { useNavigationShortcuts } from "./navigation/useNavigationShortcuts";
 import { useUndoShortcuts } from "./navigation/useUndoShortcuts";
 import { registerOpenSettingsView, requestOpenSettings } from "./navigation/openSettingsTab";
-import { installDeepLinkListeners, openAccountOrInstall } from "./navigation/deepLinks";
+import { installDeepLinkListeners } from "./navigation/deepLinks";
 import { nextChatLayoutMode, type ViewId } from "./types/panel";
 import { WINDOW_ID } from "./tabs/tabRegistryClient";
 import { persistDockSnapshot, readDockSnapshot } from "./workspace/workspaceDockStorage";
@@ -177,7 +177,7 @@ export default function App() {
         try {
           const row = await api.duckyos_get_status?.();
           if (!row || row.logged_in) return;
-          openAccountOrInstall();
+          requestOpenSettings("Account");
         } catch {
           /* ignore */
         }

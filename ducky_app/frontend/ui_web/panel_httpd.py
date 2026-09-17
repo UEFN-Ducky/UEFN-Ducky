@@ -243,11 +243,6 @@ def publish_panel_events(events: list[dict[str, object]]) -> None:
 
 
 def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dict[str, object]]]:
-    # since<0: new iframe primes to the live cursor so a disable-era
-    # remote_gone is not replayed on the next Open.
-    if since < 0:
-        with _event_cv:
-            return _event_seq, []
     deadline = time.monotonic() + max(0.0, timeout)
     with _event_cv:
         while _event_seq <= since:
@@ -762,7 +757,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 if parsed.path == "/__panel_events":
                     query = parse_qs(parsed.query)
                     try:
-                        since = int((query.get("since") or ["0"])[0])
+                        since = max(0, int((query.get("since") or ["0"])[0]))
                     except (TypeError, ValueError):
                         since = 0
                     cursor, events = _poll_panel_events(since)

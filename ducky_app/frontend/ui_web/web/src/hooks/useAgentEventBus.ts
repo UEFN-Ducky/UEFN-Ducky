@@ -102,25 +102,11 @@ export function nextEventPollRetryMs(prev: number): number {
   return Math.min(base * 2, EVENT_POLL_RETRY_MAX_MS);
 }
 
-async function primeEventCursor(): Promise<boolean> {
-  const response = await fetch("/__panel_events?since=-1", { cache: "no-store" });
-  if (!response.ok) return false;
-  const body = (await response.json()) as { cursor?: number };
-  if (typeof body.cursor === "number") httpCursor = body.cursor;
-  return true;
-}
-
 function startHttpEventPoll() {
   if (httpPollStarted) return;
   httpPollStarted = true;
   const poll = async () => {
     let retryMs = EVENT_POLL_RETRY_MIN_MS;
-    let primed = false;
-    try {
-      primed = await primeEventCursor();
-    } catch {
-      primed = false;
-    }
     while (httpPollStarted) {
       try {
         const response = await fetch(`/__panel_events?since=${httpCursor}`, {
@@ -139,7 +125,6 @@ function startHttpEventPoll() {
           for (const event of body.events) {
             const kind = String(event?.type || "");
             if (kind === "remote_gone" && window.parent !== window) {
-              if (!primed) continue;
               window.parent.postMessage({ type: "ud-remote-gone" }, "*");
               httpPollStarted = false;
               return;
@@ -155,7 +140,6 @@ function startHttpEventPoll() {
             fanOut(event);
           }
         }
-        primed = true;
       } catch {
         await new Promise<void>((resolve) => window.setTimeout(resolve, retryMs));
         retryMs = nextEventPollRetryMs(retryMs);

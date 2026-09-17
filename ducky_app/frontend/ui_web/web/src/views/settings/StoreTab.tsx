@@ -33,10 +33,8 @@ import {
 import {
   ACCOUNT_LOGIN_EVENT,
   ACCOUNT_LOGIN_KEY,
-  consumeAccountInstallHint,
   consumeStoreCategoryRequest,
   consumeStoreInstallRequest,
-  peekStoreInstallRequest,
 } from "../../navigation/deepLinks";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
@@ -122,8 +120,6 @@ export function StoreTab() {
   const [actionBusy, setActionBusy] = useState<Record<string, true>>({});
   const [error, setError] = useState("");
   const [detailItem, setDetailItem] = useState<DuckyOSStoreItemDto | null>(null);
-  const [pendingDetailSlug, setPendingDetailSlug] = useState<string | null>(null);
-  const [accountInstallHint, setAccountInstallHint] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [uninstallItem, setUninstallItem] = useState<DuckyOSStoreItemDto | null>(null);
   const [uninstallLabels, setUninstallLabels] = useState<string[]>([]);
@@ -360,22 +356,18 @@ export function StoreTab() {
     if (next) setDetailItem(next);
   }, [catalog, detailItem?.slug]);
 
-  // Website deep link (uefn-ducky://store/install/<slug>): keep the slug until
-  // the catalog actually has the item — never consume-then-bail to a blank pane.
+  // Website deep link (uefn-ducky://store/install/<slug>): once the catalog is
+  // loaded, open the item's detail page and auto-start the install.
   const deepLinkCheck = useRef<() => void>(() => {});
   deepLinkCheck.current = () => {
-    const req = peekStoreInstallRequest();
-    if (!req) return;
-    setActiveSection(null);
-    setPendingDetailSlug(req.slug);
     const items = catalog?.items || [];
     if (!items.length) return;
+    const req = consumeStoreInstallRequest();
+    if (!req) return;
     const item = items.find((i) => (i.slug || "").toLowerCase() === req.slug);
     if (!item) return;
-    consumeStoreInstallRequest();
-    setPendingDetailSlug(null);
+    setActiveSection(null);
     setDetailItem(item);
-    setAccountInstallHint(req.slug === "account" && consumeAccountInstallHint());
     if (
       req.autoInstall &&
       (item.state === "available" || item.state === "update") &&
@@ -887,7 +879,7 @@ export function StoreTab() {
   );
   const sectionData = activeSection ? sections.find((s) => s.key === activeSection) : undefined;
   const loggedIn = Boolean(status?.logged_in);
-  const view = detailItem || pendingDetailSlug ? "detail" : activeSection ? "section" : "main";
+  const view = detailItem ? "detail" : activeSection ? "section" : "main";
   const showSkeleton = catalogLoading && allItems.length === 0;
 
   // First paint of real cards: stagger reveal (skip when hydrating from cache).
@@ -900,7 +892,7 @@ export function StoreTab() {
   }, [allItems.length]);
 
   const storeNavLoc = useMemo<SettingsNavLocation>(() => {
-    const slug = detailItem?.slug || pendingDetailSlug || null;
+    const slug = detailItem?.slug || null;
     const section = activeSection;
     if (slug) {
       return {
@@ -919,7 +911,7 @@ export function StoreTab() {
       };
     }
     return { kind: "settings", tab: "Store", name: "Store" };
-  }, [detailItem, pendingDetailSlug, activeSection, sectionData?.title]);
+  }, [detailItem, activeSection, sectionData?.title]);
   useRecordStoreSettingsLocation(storeNavLoc);
 
   const storeDetailParentLoc = useMemo<SettingsNavLocation>(() => {
@@ -943,29 +935,23 @@ export function StoreTab() {
     const drill = loc.drill?.type === "store" ? loc.drill : null;
     if (!drill || (!drill.section && !drill.slug)) {
       setDetailItem(null);
-      setPendingDetailSlug(null);
       setActiveSection(null);
       pendingStoreSlug.current = null;
-      consumeStoreInstallRequest();
       return;
     }
     setActiveSection(drill.section);
     if (!drill.slug) {
       setDetailItem(null);
-      setPendingDetailSlug(null);
       pendingStoreSlug.current = null;
-      consumeStoreInstallRequest();
       return;
     }
     pendingStoreSlug.current = drill.slug;
     const item = allItems.find((i) => i.slug === drill.slug);
     if (item) {
       setDetailItem(item);
-      setPendingDetailSlug(null);
       pendingStoreSlug.current = null;
     } else {
       setDetailItem(null);
-      setPendingDetailSlug(drill.slug);
     }
   }, [allItems]);
   useApplySettingsDrill("Store", applyStoreDrill);
@@ -976,15 +962,10 @@ export function StoreTab() {
     const item = allItems.find((i) => i.slug === slug);
     if (!item) return;
     setDetailItem(item);
-    setPendingDetailSlug(null);
     pendingStoreSlug.current = null;
   }, [allItems]);
 
-  const closeStoreDetail = useCallback(() => {
-    setDetailItem(null);
-    setPendingDetailSlug(null);
-    consumeStoreInstallRequest();
-  }, []);
+  const closeStoreDetail = useCallback(() => setDetailItem(null), []);
   const closeStoreSection = useCallback(() => setActiveSection(null), []);
   const backFromDetail = useStoreSettingsLayerBack(storeDetailParentLoc, closeStoreDetail);
   const backFromSection = useStoreSettingsLayerBack(storeSectionParentLoc, closeStoreSection);
@@ -1296,12 +1277,10 @@ export function StoreTab() {
       <div className="ds-layer ds-layer--detail" ref={detailLayerRef}>
         <StoreDetailView
           item={detailItem}
-          pendingSlug={pendingDetailSlug}
           jobs={jobs}
           actionBusy={actionBusy}
           handlers={handlers}
           onBack={backFromDetail}
-          installHint={accountInstallHint}
         />
       </div>
 

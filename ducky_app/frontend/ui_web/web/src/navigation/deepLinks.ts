@@ -3,8 +3,7 @@
  * "Install in UEFN Ducky" button.
  *
  * Supported forms:
- *   uefn-ducky://login                     → Plugins → Ducky Account details
- *                                           (pairing starts from that page)
+ *   uefn-ducky://login                     → Settings → Account + start pairing
  *   uefn-ducky://store                     → open Settings → Store
  *   uefn-ducky://store/<slug>              → open the item's detail page
  *   uefn-ducky://store/install/<slug>      → open detail + auto-install
@@ -14,10 +13,6 @@ import { requestOpenSettings } from "./openSettingsTab";
 
 export const ACCOUNT_LOGIN_EVENT = "ducky:account-login";
 export const ACCOUNT_LOGIN_KEY = "uefn-account-login";
-/** Store catalog slug / plugin.json id for Ducky Account. */
-export const ACCOUNT_PLUGIN_ID = "account";
-/** Set when login opens Store details (Install hint if the plugin isn't on disk). */
-export const ACCOUNT_INSTALL_HINT_KEY = "uefn-account-install-hint";
 
 export function parseLoginDeepLink(raw: string): boolean {
   return /^uefn-ducky:\/\/login\/?(?:[?#].*)?$/i.test(String(raw || "").trim());
@@ -31,38 +26,6 @@ export function consumeAccountLoginRequest(): boolean {
     return true;
   } catch {
     return false;
-  }
-}
-
-export function consumeAccountInstallHint(): boolean {
-  try {
-    const raw = sessionStorage.getItem(ACCOUNT_INSTALL_HINT_KEY) || "";
-    if (!raw) return false;
-    sessionStorage.removeItem(ACCOUNT_INSTALL_HINT_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Always Plugins → Ducky Account details (never a blank Account tab). */
-export function openAccountOrInstall(opts?: { startLogin?: boolean }): void {
-  const startLogin = Boolean(opts?.startLogin);
-  if (startLogin) {
-    try {
-      sessionStorage.setItem(ACCOUNT_LOGIN_KEY, "1");
-    } catch {
-      /* ignore */
-    }
-  }
-  try {
-    sessionStorage.setItem(ACCOUNT_INSTALL_HINT_KEY, "1");
-  } catch {
-    /* ignore */
-  }
-  requestOpenStore({ slug: ACCOUNT_PLUGIN_ID });
-  if (startLogin) {
-    window.dispatchEvent(new CustomEvent(ACCOUNT_LOGIN_EVENT));
   }
 }
 
@@ -86,7 +49,13 @@ export function parseStoreDeepLink(raw: string): StoreDeepLink | null {
 
 export function handleDeepLink(raw: string): boolean {
   if (parseLoginDeepLink(raw)) {
-    openAccountOrInstall({ startLogin: true });
+    try {
+      sessionStorage.setItem(ACCOUNT_LOGIN_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    requestOpenSettings("Account");
+    window.dispatchEvent(new CustomEvent(ACCOUNT_LOGIN_EVENT));
     return true;
   }
   const parsed = parseStoreDeepLink(raw);
@@ -98,7 +67,7 @@ export function handleDeepLink(raw: string): boolean {
   return true;
 }
 
-export function peekStoreInstallRequest(): StoreDeepLink | null {
+export function consumeStoreInstallRequest(): StoreDeepLink | null {
   let raw = "";
   try {
     raw = sessionStorage.getItem(STORE_INSTALL_KEY) || "";
@@ -107,6 +76,11 @@ export function peekStoreInstallRequest(): StoreDeepLink | null {
   }
   if (!raw.trim()) return null;
   try {
+    sessionStorage.removeItem(STORE_INSTALL_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
     const parsed = JSON.parse(raw) as { slug?: string; install?: boolean };
     const slug = String(parsed.slug || "").toLowerCase();
     if (!slug) return null;
@@ -114,17 +88,6 @@ export function peekStoreInstallRequest(): StoreDeepLink | null {
   } catch {
     return null;
   }
-}
-
-export function consumeStoreInstallRequest(): StoreDeepLink | null {
-  const parsed = peekStoreInstallRequest();
-  if (!parsed) return null;
-  try {
-    sessionStorage.removeItem(STORE_INSTALL_KEY);
-  } catch {
-    /* ignore */
-  }
-  return parsed;
 }
 
 /** Pending category filter for Store (e.g. Installed) — consumed by StoreTab. */
@@ -175,7 +138,7 @@ export function requestOpenStore(opts?: {
   } catch {
     /* ignore */
   }
-  requestOpenSettings("Store", slug ? { storeSlug: slug } : undefined);
+  requestOpenSettings("Store");
   window.dispatchEvent(new CustomEvent("ducky:store-install"));
   window.dispatchEvent(new CustomEvent("ducky:store-navigate"));
 }

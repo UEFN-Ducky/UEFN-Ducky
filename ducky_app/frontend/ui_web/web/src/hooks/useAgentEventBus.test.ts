@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../types/panel";
 import { coalesceAgentEvents, nextEventPollRetryMs } from "./useAgentEventBus";
+
 describe("nextEventPollRetryMs", () => {
   it("doubles from 500ms and caps at 8s", () => {
     expect(nextEventPollRetryMs(500)).toBe(1000);

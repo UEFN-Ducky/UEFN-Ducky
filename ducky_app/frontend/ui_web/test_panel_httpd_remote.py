@@ -185,15 +185,6 @@ def test_new_viewer_kicks_old_one():
         httpd._window_viewers.clear()
 
 
-def test_poll_since_negative_skips_backlog():
-    httpd.publish_panel_events([{"type": "remote_gone"}])
-    cursor, events = httpd._poll_panel_events(-1, timeout=0.0)
-    assert events == []
-    assert cursor == httpd._event_seq
-    _replay_cursor, replayed = httpd._poll_panel_events(0, timeout=0.0)
-    assert any(e.get("type") == "remote_gone" for e in replayed)
-
-
 def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
     host = "u-abc.app.uefnducky.org"
     cookie = httpd.issue_remote_cookie(host)

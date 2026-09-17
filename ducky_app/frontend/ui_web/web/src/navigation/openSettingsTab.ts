@@ -88,7 +88,6 @@ let openSettingsEditorTab: (() => void) | null = null;
 const tabConsumers = new Set<(tab: SettingsTab) => void>();
 const duckyDeepLinkConsumers = new Set<(epoch: number) => void>();
 let lastRequestAt = 0;
-let lastRequestKey = "";
 
 function flushPendingTab(): void {
   const tab = pendingTab;
@@ -134,19 +133,11 @@ export function registerDuckyProfileDeepLink(fn: (epoch: number) => void): () =>
 
 export function requestOpenSettings(
   tab?: SettingsTab,
-  opts?: { duckyProfileId?: string; newDucky?: boolean; storeSlug?: string },
+  opts?: { duckyProfileId?: string; newDucky?: boolean },
 ): void {
   const now = Date.now();
-  const key = [
-    tab ? normalizeSettingsTab(tab) : "",
-    opts?.storeSlug || "",
-    opts?.duckyProfileId || "",
-    opts?.newDucky ? "1" : "",
-  ].join(":");
-  // Drop only identical repeats. A Store slug or tab change within 500ms must land.
-  if (key === lastRequestKey && now - lastRequestAt < 500) return;
+  if (now - lastRequestAt < 500) return;
   lastRequestAt = now;
-  lastRequestKey = key;
 
   if (tab) {
     pendingTab = normalizeSettingsTab(tab);

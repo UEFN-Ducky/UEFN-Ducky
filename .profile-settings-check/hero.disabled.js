@@ -631,11 +631,7 @@
   var pcStatesAt = 0;
   var pcStatesBusy = false;
   var pcCsrf = "";
-  function overlayOpen() {
-    return document.documentElement.classList.contains("ud-remote-open");
-  }
   function paintPcAvailability() {
-    if (overlayOpen()) return;
     var needsRefresh = false;
     var cards = Array.from(document.querySelectorAll(".ud-remote__pcs > .ud-remote__pc:not(.ud-remote__pc--add)"));
     cards.forEach(function (card) {
@@ -677,13 +673,12 @@
         if (open.textContent !== text) open.textContent = text;
       } else if (state === "live" && previous && previous !== "live") needsRefresh = true;
     });
-    if (needsRefresh && !overlayOpen()) {
+    if (needsRefresh) {
       var retry = document.querySelector(".ud-root [data-ud-retry]");
       if (retry) retry.click();
     }
   }
   async function refreshPcAvailability() {
-    if (overlayOpen()) return;
     if (!isProfile() || document.hidden || pcStatesBusy || !document.querySelector(".ud-remote__pcs")) return;
     if (Date.now() - pcStatesAt < 10000) return;
     pcStatesBusy = true; pcStatesAt = Date.now();
@@ -741,7 +736,6 @@
       stopWatchingProfile();
       watchedRoot = root;
       profileObserver = new MutationObserver(function () {
-        if (overlayOpen()) return;
         if (!isProfile() || !root.isConnected) {
           stopWatchingProfile();
           return;
@@ -774,8 +768,8 @@
     scan();
   }
   function watchAll() {
-    if (document.documentElement.getAttribute("data-uefn-route-watch") === "16") return;
-    document.documentElement.setAttribute("data-uefn-route-watch", "16");
+    if (document.documentElement.getAttribute("data-uefn-route-watch") === "15") return;
+    document.documentElement.setAttribute("data-uefn-route-watch", "15");
     document.addEventListener("ducky:route-applied", afterRoute);
   }
   window.DuckyBlockInits = window.DuckyBlockInits || {};
