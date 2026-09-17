@@ -357,7 +357,14 @@ def _wire_group_window(group: _FocusGroup) -> None:
         threading.Thread(target=_apply_icon, args=(window,), daemon=True, name="focus-window-icon").start()
         threading.Thread(target=_signal_api_ready, args=(window,), daemon=True, name="focus-api-ready").start()
 
+    def _on_closed() -> None:
+        from frontend.ui_web.ui_dispatch import drop_window
+
+        drop_window(window)
+        _unmark_closing(window)
+
     window.events.closing += _on_closing
+    window.events.closed += _on_closed
     window.events.shown += _on_shown
 
 

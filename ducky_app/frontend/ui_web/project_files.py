@@ -554,6 +554,12 @@ def _is_binary_file_name(name: str) -> bool:
     return _kinds_is_binary_file_name(name)
 
 
+def _read_file_header(target: Path) -> bytes:
+    """Sniff type without allocating the rest of a potentially huge file."""
+    with target.open("rb") as stream:
+        return stream.read(4096)
+
+
 def is_editable_text_file(relative_path: str) -> bool:
     """True for panel-editable text files under Content (not binary or locked)."""
     if is_locked_project_file(relative_path):
@@ -567,7 +573,7 @@ def is_editable_text_file(relative_path: str) -> bool:
         try:
             target = _decode_ext_path(relative_path)
             if target.is_file() and Path(target.name).suffix == "":
-                head = target.read_bytes()[:4096]
+                head = _read_file_header(target)
                 return classify_project_file(relative_path, head=head)["kind"] == "text"
         except (ValueError, OSError):
             return bool(info["editable"])
@@ -581,7 +587,7 @@ def is_editable_text_file(relative_path: str) -> bool:
     try:
         target = _resolve_relative(relative_path)
         if target.is_file() and not Path(target.name).suffix:
-            head = target.read_bytes()[:4096]
+            head = _read_file_header(target)
             return classify_project_file(relative_path, head=head)["kind"] == "text"
     except (ValueError, OSError):
         pass
@@ -640,6 +646,7 @@ def _include_in_workspace_tree_entry(name: str, is_dir: bool, show_hidden: bool 
 
 def list_project_file_paths() -> list[dict[str, str]]:
     """Flat list of project + workspace .verse files for sidebar filter / quick-open."""
+    global _file_paths_cache
     root = _project_root().resolve()
     try:
         content_mtime = _content_dir().stat().st_mtime
@@ -647,8 +654,9 @@ def list_project_file_paths() -> list[dict[str, str]]:
         content_mtime = 0.0
     show_hidden = _show_hidden_project_files()
     root_key = f"{root}|hidden={show_hidden}|ws={len(_workspace_folders())}|mtime={content_mtime}"
-    if root_key in _file_paths_cache:
-        return _file_paths_cache[root_key]
+    cached = _file_paths_cache.get(root_key)
+    if cached is not None:
+        return cached
 
     out: list[dict[str, str]] = []
     content = _content_dir()
@@ -683,7 +691,10 @@ def list_project_file_paths() -> list[dict[str, str]]:
                 full = Path(dirpath) / name
                 out.append({"path": _encode_abs_path(full), "name": name})
 
-    _file_paths_cache[root_key] = out
+    # The key changes with Content's mtime. Old versions are no longer useful,
+    # but previously each external file addition retained another entire tree.
+    # Replace atomically; existing callers can still finish using their list.
+    _file_paths_cache = {root_key: out}
     return out
 
 
@@ -919,7 +930,7 @@ def write_external_file(encoded: str, content: str) -> dict[str, object]:
     # Reject images/binaries even for unknown extensions (sniff on disk).
     if target.is_file():
         try:
-            head = target.read_bytes()[:4096]
+            head = _read_file_header(target)
         except OSError:
             head = None
         else:

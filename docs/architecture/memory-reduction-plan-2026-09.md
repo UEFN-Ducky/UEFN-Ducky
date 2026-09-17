@@ -4,6 +4,8 @@ Research date: September 17, 2026. Source baseline: commit `45eb20e`, applicatio
 
 Status: research plan with an implementation follow-up below. The research findings describe the original baseline. Measurement targets below remain proposed acceptance criteria, not achieved savings.
 
+Further investigation of build 1.2.136 reproduced additional retention/allocation problems, implemented targeted fixes, and added a process-family sampler. See [Memory reductions that preserve functionality](memory-preserving-fixes-2026-09.md) for the measured synthetic results, 124-test validation, current process breakdown, and remaining packaged validation work.
+
 ## Implementation follow-up — September 17, 2026
 
 The following changes are now implemented in the working tree:

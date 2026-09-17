@@ -19,11 +19,15 @@ import time
 import traceback
 from collections.abc import Callable
 from typing import Any
+from weakref import WeakValueDictionary
 
 _STALL_DUMP_AFTER_SEC = 3.0
 
 _lock = threading.Lock()
 _channels: dict[int, _Channel] = {}
+# A late producer must not recreate a worker for a destroyed window. Weak values
+# avoid retaining those windows or confusing a later object that reuses an id.
+_closed_windows: WeakValueDictionary[int, Any] = WeakValueDictionary()
 _watchdog_started = False
 
 
@@ -33,11 +37,33 @@ class _Channel:
     def __init__(self, label: str) -> None:
         self.queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self.label = label
+        self._admission_lock = threading.Lock()
+        self._stopped = False
         # monotonic timestamp of the evaluate_js currently inside pywebview; 0 when idle
         self.inflight_since = 0.0
         self.inflight_js_bytes = 0
         self.stall_dumped = False
         threading.Thread(target=self._worker, name=f"ui-dispatch-{label}", daemon=True).start()
+
+    def submit(self, kind: str, payload: Any) -> None:
+        with self._admission_lock:
+            if not self._stopped:
+                self.queue.put((kind, payload))
+
+    def stop(self) -> None:
+        """Release pending work even if the native call in flight never returns."""
+        with self._admission_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            while True:
+                try:
+                    self.queue.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    self.queue.task_done()
+            self.queue.put(("stop", None))
 
     def _worker(self) -> None:
         while True:
@@ -45,6 +71,8 @@ class _Channel:
             try:
                 if kind == "stop":
                     return
+                if self._stopped:
+                    continue
                 if kind == "js":
                     self._run_js(payload)
                 elif kind == "call":
@@ -52,6 +80,9 @@ class _Channel:
             except Exception:
                 pass
             finally:
+                # queue.get() blocks before assigning the next payload. Without
+                # this, an idle worker pins its last script/closure and window.
+                del payload
                 self.queue.task_done()
 
     def _run_js(self, payload: tuple[Any, str, float, int]) -> None:
@@ -96,9 +127,11 @@ def _label_for(window: Any) -> str:
         return "win"
 
 
-def _channel_for(window: Any) -> _Channel:
+def _channel_for(window: Any) -> _Channel | None:
     key = id(window) if window is not None else 0
     with _lock:
+        if window is not None and _closed_windows.get(key) is window:
+            return None
         ch = _channels.get(key)
         if ch is None:
             label = "ops" if window is None else _label_for(window)
@@ -113,9 +146,15 @@ def drop_window(window: Any) -> None:
     if window is None:
         return
     with _lock:
+        try:
+            _closed_windows[id(window)] = window
+        except TypeError:
+            # Actual pywebview windows support weak references; keep disposal
+            # safe for minimal native adapters that do not.
+            pass
         ch = _channels.pop(id(window), None)
     if ch is not None:
-        ch.queue.put(("stop", None))
+        ch.stop()
 
 
 def _dump_stall(ch: _Channel, waited_sec: float) -> None:
@@ -176,9 +215,13 @@ def schedule_evaluate_js(window: Any, js: str) -> None:
     if window is None or not js:
         return
     ch = _channel_for(window)
+    if ch is None:
+        return
     depth = ch.queue.qsize()
-    ch.queue.put(("js", (window, js, time.perf_counter(), depth)))
+    ch.submit("js", (window, js, time.perf_counter(), depth))
 
 
 def schedule_call(fn: Callable[[], None]) -> None:
-    _channel_for(None).queue.put(("call", fn))
+    ch = _channel_for(None)
+    if ch is not None:
+        ch.submit("call", fn)
