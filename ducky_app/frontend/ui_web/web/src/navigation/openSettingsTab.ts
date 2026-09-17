@@ -1,9 +1,6 @@
 import type { SettingsTab } from "../views/SettingsView";
 import { emitAppHook } from "../sfx/appHooks";
 
-/** Fired after DuckyOS login/logout so Settings can show/hide login-gated tabs (Store). */
-export const DUCKYOS_ACCOUNT_CHANGED = "duckyos-account-changed";
-
 const LAST_TAB_KEY = "uefn-panel-settings-active-tab";
 const LAST_SECTION_KEY = "uefn-panel-settings-sections";
 

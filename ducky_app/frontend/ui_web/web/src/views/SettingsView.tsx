@@ -24,7 +24,6 @@ import {
 import { burstConfettiFromElement } from "../utils/confettiBurst";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { useAppearance } from "../theme/AppearanceContext";
-import { AccountTab } from "./settings/AccountTab";
 import { AddToUefnTab } from "./settings/AddToUefnTab";
 import { AppDataTab } from "./settings/AppDataTab";
 import { AgentTab } from "./settings/AgentTab";
@@ -93,7 +92,6 @@ function coreTabLabel(tab: (typeof CORE_TABS)[number]): string {
 
 /** Host React forms still wired via builtin: ui ids from plugins. */
 const BUILTIN_SETTINGS_UI: Record<string, () => JSX.Element> = {
-  "builtin:account-settings": () => <AccountTab />,
   "builtin:languages-settings": () => <LanguagesTab />,
 };
 
@@ -604,9 +602,10 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
   const content = useMemo(() => {
     const renderPluginTabBody = (tab: PluginSettingsTab) => {
       const ui = (tab.ui || "").trim();
-      const Builtin = BUILTIN_SETTINGS_UI[ui];
+      const resolvedUi = ui === "builtin:account-settings" ? "panel:account-settings" : ui;
+      const Builtin = BUILTIN_SETTINGS_UI[resolvedUi];
       if (Builtin) return <Builtin />;
-      const panel = parsePanelUi(ui);
+      const panel = parsePanelUi(resolvedUi);
       if (panel && tab.plugin_id) {
         return (
           <div className="general-tab-shell plugin-settings-tab-shell">
