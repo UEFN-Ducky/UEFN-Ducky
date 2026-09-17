@@ -2346,11 +2346,42 @@
   color: var(--danger, #e5484d);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.message-bubble-interrupted-msg {
+  flex: 1 1 auto;
+  min-width: 0;
   word-break: break-word;
 }
 
-.message-bubble-interrupted-continue {
+.message-bubble-interrupted-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.message-bubble-interrupted .model-selector {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 180px;
+}
+
+.message-bubble-interrupted .model-selector-btn {
+  padding: 2px 8px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  border-color: var(--border);
+}
+
+.message-bubble-interrupted .model-selector-btn:hover:not(:disabled),
+.message-bubble-interrupted .model-selector-btn.is-open {
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.message-bubble-interrupted-continue {
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 45%, transparent);
   background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent);
@@ -6263,11 +6294,20 @@
   flex: 1 1 240px;
   margin: 0;
 }
-.changeset-diff-actions > button {
+.changeset-diff-actions-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.changeset-diff-actions > button,
+.changeset-diff-actions-btns .changeset-btn {
   min-height: 38px;
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
+}
+.changeset-diff-actions > button,
+.changeset-diff-actions-btns .changeset-btn--danger {
   border: 1px solid var(--red);
 }
 .modal-backdrop--contained .changeset-diff-modal {

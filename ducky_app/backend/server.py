@@ -82,7 +82,7 @@ mcp = FastMCP(
         "UnrealEditorFortnite AppData, or walking `.uasset`/`.umap` to hunt hashes — "
         "that freezes the editor main thread. Reading or writing one object's mangled "
         "`__verse_0x<HASH>_<Field>` property is allowed. Prefer "
-        "list_verse_property_hashes / get_verse_editables / wire_verse_*.\n\n"
+        "get_verse_editables / wire_verse_*.\n\n"
         "Performance: use compact responses (pretty=false), pagination (offset/limit/fields) on "
         "get_all_actors, list_assets, and search_assets.\n\n"
         "**Scene inventory:** Verse devices and custom-labeled actors are NOT Fort* actors. "

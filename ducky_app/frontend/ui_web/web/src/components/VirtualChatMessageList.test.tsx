@@ -96,6 +96,7 @@ function listProps(rows: ChatRow[]) {
     editableRowId: lastUserId(rows),
     composerMode: "agent" as const,
     composerModel: "m",
+    setComposerModel: noop,
     composerCodingAgent: "ducky",
     setComposerCodingAgent: noop,
     convId: "conv",

@@ -30,8 +30,9 @@ NEXT_FIX_ERRORS = "fix the Verse errors, then retry"
 NEXT_OPEN_UEFN = "Open the project in UEFN and run workspace_compile_verse, then retry once"
 NEXT_STALE_LOCKED = (
     "Hashes still missing after one compile+reload. Call get_verse_editables on "
-    "THIS SAME device. Do NOT call wire_* again until mangled_name is set. "
-    "Do not compile-loop. Do not place a second copy of the device."
+    "THIS SAME device. Do NOT call wire_* again until readable is true. "
+    "Do not compile-loop. Do not place a second copy of the device. "
+    "Check the field is still @editable in the .verse; do not refactor the class to avoid it."
 )
 
 _lock = threading.Lock()

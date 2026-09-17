@@ -166,7 +166,7 @@ def test_incomplete_map_is_not_cached():
     assert "Verse-NPCCore-catdog_spawn_controller" not in ns["_SCRIPT_PROPS_CACHE"]
 
 
-def test_resolve_for_wire_uses_export_text_instead_of_stale():
+def test_resolve_for_wire_falls_back_to_export_text():
     ns = _load_script_verse_properties()
     trigger = "__verse_0xA4892A98_Trigger"
     array_prop = "__verse_0x725305C1_TestProps"
@@ -177,15 +177,17 @@ def test_resolve_for_wire_uses_export_text_instead_of_stale():
     )
     verse_text = "@editable Trigger : button_device = ...\n@editable TestProps : []creative_prop = array{}"
 
-    def _resolve_field_prop(_script, field, _hashes):
-        return None
-
-    ns["_resolve_field_prop"] = _resolve_field_prop
-    ns["_cached_hashes"] = lambda: {}
+    table = []
+    for i in range(256):
+        c = i
+        for _ in range(8):
+            c = (c >> 1) ^ 0xEDB88320 if c & 1 else c >> 1
+        table.append(c)
+    ns["_CRC_TABLE"] = table
+    ns["_FIELD_NOT_READABLE"] = "not readable"
+    ns["_SCRIPT_PROPS_CACHE"] = {}
+    _exec_fn("verse_mangled_name", ns)
     ns["_verse_source_for_actor"] = lambda _actor: ("cls", verse_text, "x.verse")
-    ns["_parse_editables_from_verse"] = lambda text: (
-        ns["_EDITABLE_RE"].findall(text) if text else []
-    )
     ns["_EDITABLE_RE"] = re.compile(
         r"^\s*@editable(?:\s+<[^>]+>)?\s*\n\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)*\s*:",
         re.MULTILINE,
@@ -193,16 +195,8 @@ def test_resolve_for_wire_uses_export_text_instead_of_stale():
     ns["_EDITABLE_INLINE_RE"] = re.compile(
         r"@editable\s+(?:<[^>]+>\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)?"
     )
-    # Inline form in verse_text — parse_editables uses both regexes in the real fn.
-    # Exec the real parser so TestProps is found.
     _exec_fn("_parse_editables_from_verse", ns)
-    ns["_class_scoped_hash_scan"] = lambda _script, **_k: {}
-    ns["_probe_script_for_field"] = lambda *_a, **_k: None
-    ns["_lookup_field_hash_in_dirs"] = lambda *_a, **_k: None
-    ns["_wire_hash_search_dirs"] = lambda _s: []
-    ns["_augment_hash_cache"] = lambda *_a, **_k: None
     ns["_field_not_found_error"] = lambda *_a, **_k: "not found"
-    ns["unreal"] = ns["unreal"]
     _exec_fn("_hash_not_readable", ns)
     _exec_fn("_remember_resolved_prop", ns)
     _exec_fn("_resolve_field_prop_for_wire", ns)
@@ -211,11 +205,37 @@ def test_resolve_for_wire_uses_export_text_instead_of_stale():
     assert prop == array_prop
 
 
-def test_class_scan_used_when_any_field_unresolved():
+def test_verse_mangled_name_known_pairs():
+    table = []
+    for i in range(256):
+        c = i
+        for _ in range(8):
+            c = (c >> 1) ^ 0xEDB88320 if c & 1 else c >> 1
+        table.append(c)
+    ns: dict = {"_CRC_TABLE": table}
+    _exec_fn("verse_mangled_name", ns)
+    fn = ns["verse_mangled_name"]
+    known = {
+        "Trigger": "A4892A98",
+        "PlayerManager": "8E1BF1DC",
+        "AllPlayerSpawners": "E027EF92",
+        "HittableButton0": "888A0FAC",
+        "HittableButton1": "EDEDB314",
+        "FeedbackDisplay": "05586E45",
+        "CurrencyConfigs": "00206A09",
+        "CatSpawners": "DE71A4D4",
+    }
+    for field, hexhash in known.items():
+        assert fn(field) == f"__verse_0x{hexhash}_{field}", field
+
+
+def test_get_verse_editables_computes_mangled_name():
     start = _SRC.index("def get_verse_editables")
     end = _SRC.index("\ndef set_verse_editable")
     body = _SRC[start:end]
-    assert "_class_scoped_hash_scan" in body
-    assert "any(not prelim.get(f) for f in verse_fields)" in body
-    assert "resolution_tried" in body
+    assert "verse_mangled_name" in body
+    assert "_class_scoped_hash_scan" not in body
+    assert "_lookup_field_hash_in_dirs" not in body
+    assert "hash_source" in body
+    assert "readable" in body
     assert '"forbidden_until_compiled": []' in body

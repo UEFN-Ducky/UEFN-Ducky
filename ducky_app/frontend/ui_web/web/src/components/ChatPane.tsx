@@ -1252,6 +1252,7 @@ export function ChatPane({
                   editableRowId={editableRowId}
                   composerMode={agentMode}
                   composerModel={selectedModel}
+                  setComposerModel={setSelectedModel}
                   composerCodingAgent={codingAgent}
                   setComposerCodingAgent={setCodingAgent}
                   convId={chat.id}

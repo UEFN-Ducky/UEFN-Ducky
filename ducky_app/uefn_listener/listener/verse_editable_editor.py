@@ -6,8 +6,9 @@ working path is the inner ``Script`` subobject with compiler-mangled names:
 
     ``__verse_0x{HASH}_{FieldName}``
 
-Hash discovery: scan ``ValkyrieUploadTemp`` / ``__ExternalActors__`` ``.uasset``
-binaries for ``__verse_0x...`` strings (stable per compile).
+The hash is UE ``FCrc::StrCrc32`` of the field name (each char widened to 4 LE
+bytes), printed byte-swapped. It depends only on the name — identical in every
+project. Never scan ``.uasset`` / ``.umap`` for it.
 
 Verse-to-Verse refs (``?player_manager``): pass the target device's ``Script`` object.
 Creative device refs (``player_spawner_device``): create a wrapper under the manager
@@ -27,7 +28,6 @@ from listener import lookup
 from listener.save_coalesce import request_level_save
 from listener.serialize import is_live
 
-_VERSE_PROP_RE = re.compile(rb"__verse_0x[0-9A-Fa-f]{8}_[A-Za-z0-9_]+")
 _EDITABLE_RE = re.compile(
     r"^\s*@editable(?:\s+<[^>]+>)?\s*\n\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^>]+>)*\s*:",
     re.MULTILINE,
@@ -69,7 +69,6 @@ _FIELD_TYPE_RE = re.compile(
     re.MULTILINE,
 )
 
-_HASH_CACHE: Optional[Dict[str, str]] = None
 # Per Script-class verse source (avoids os.walk on every wire).
 _VERSE_SOURCE_CACHE: Dict[str, Tuple[str, str, str]] = {}
 # Per (class, field) inferred @editable type.
@@ -88,11 +87,33 @@ _STRUCT_CLASS_PATH_CACHE: Dict[str, str] = {}
 _SCRIPT_PROP_RE = re.compile(r"__verse_0x[0-9A-Fa-f]{8}_(.+)")
 # Tight name match for T3D / export-text (the capture regex is greedy).
 _SCRIPT_PROP_NAME_RE = re.compile(r"__verse_0x[0-9A-Fa-f]{8}_[A-Za-z0-9_]+")
-# Cap a single .uasset/.umap read while hash-scanning — the mangled property
-# name is near the export table, not deep in binary payload data.
-_MAX_HASH_SCAN_FILE_BYTES = 4 * 1024 * 1024
-# Per Script class: field -> mangled name from one bounded class-folder walk.
-_CLASS_SCAN_CACHE: Dict[str, Dict[str, str]] = {}
+
+_CRC_TABLE: List[int] = []
+for _i in range(256):
+    _c = _i
+    for _ in range(8):
+        _c = (_c >> 1) ^ 0xEDB88320 if _c & 1 else _c >> 1
+    _CRC_TABLE.append(_c)
+
+_FIELD_NOT_READABLE = (
+    "the compiled class does not have this field: (a) Verse build for this edit has "
+    "not landed (workspace_compile_verse once, wait, re-inspect the SAME device), "
+    "(b) the field is not @editable in source (var <private> etc.), (c) the Python "
+    "wrapper is stale (reload_listener once). Do NOT change the Verse type or "
+    "remove the @editable to work around this. Do NOT place another copy of the device."
+)
+
+
+def verse_mangled_name(field: str) -> str:
+    """``__verse_0x<HASH>_<Field>`` — UE FCrc::StrCrc32 of the field name, byte-swapped."""
+    crc = 0xFFFFFFFF
+    for ch in field:
+        v = ord(ch)
+        for k in range(4):
+            crc = (crc >> 8) ^ _CRC_TABLE[(crc ^ ((v >> (8 * k)) & 0xFF)) & 0xFF]
+    crc ^= 0xFFFFFFFF
+    swapped = int.from_bytes(crc.to_bytes(4, "little"), "big")
+    return f"__verse_0x{swapped:08X}_{field}"
 
 
 def _disk_project_content_dir() -> str | None:
@@ -130,339 +151,91 @@ def _valkyrie_upload_temp_roots() -> List[str]:
     return roots
 
 
-def _scan_roots() -> List[str]:
-    roots: List[str] = []
-    seen: set[str] = set()
-
-    def _add(path: str) -> None:
-        p = os.path.normpath(path)
-        if p not in seen and os.path.isdir(p):
-            seen.add(p)
-            roots.append(p)
-
-    disk_content = _disk_project_content_dir()
-    if disk_content:
-        _add(disk_content)
-        _add(os.path.join(disk_content, "__ExternalActors__"))
-
-    for valk in _valkyrie_upload_temp_roots():
-        _add(valk)
-
-    return roots
-
-
-def _priority_hash_scan_dirs() -> List[str]:
-    """Project-local paths scanned before the global file cap."""
-    dirs: List[str] = []
-    seen: set[str] = set()
-
-    def _add(path: str) -> None:
-        p = os.path.normpath(path)
-        if p not in seen and os.path.isdir(p):
-            seen.add(p)
-            dirs.append(p)
-
-    disk_content = _disk_project_content_dir()
-    if disk_content:
-        _add(os.path.join(disk_content, "__ExternalActors__"))
-        _add(os.path.join(disk_content, "_Verse"))
-
-    for valk in _valkyrie_upload_temp_roots():
-        try:
-            for root, dirnames, _ in os.walk(valk):
-                depth = root[len(valk) :].count(os.sep)
-                if depth > 10:
-                    dirnames.clear()
-                    continue
-                if os.path.basename(root) == "Verse":
-                    _add(root)
-                for dn in list(dirnames):
-                    if dn == "Verse":
-                        _add(os.path.join(root, dn))
-        except OSError:
-            continue
-
-    return dirs
-
-
-def _augment_hash_cache(field: str, prop: str) -> None:
-    global _HASH_CACHE
-    if _HASH_CACHE is None:
-        _HASH_CACHE = {}
-    _HASH_CACHE[field] = prop
-
-
-def _lookup_field_hash_in_dirs(
-    field: str,
-    dirs: List[str],
-    *,
-    max_files: int = 500,
-) -> Optional[str]:
-    """Targeted binary search for one field's mangled property name."""
-    suffix = f"_{field}".encode()
-    needle = re.compile(rb"__verse_0x[0-9A-Fa-f]{8}" + re.escape(suffix))
-    seen = 0
-    for d in dirs:
-        if not d or not os.path.isdir(d):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(d):
-            depth = dirpath[len(d) :].count(os.sep)
-            if depth > 14:
-                continue
-            for fn in filenames:
-                if not fn.endswith((".uasset", ".umap")):
-                    continue
-                seen += 1
-                if seen > max_files:
-                    return None
-                fp = os.path.join(dirpath, fn)
-                try:
-                    data = open(fp, "rb").read(_MAX_HASH_SCAN_FILE_BYTES)
-                except OSError:
-                    continue
-                m = needle.search(data)
-                if m:
-                    return m.group().decode()
-    return None
-
-
-def _probe_script_for_field(script: Any, field: str, hashes: Dict[str, str]) -> Optional[str]:
-    suffix = f"_{field}"
-    for prop in hashes.values():
-        if prop.endswith(suffix):
-            try:
-                script.get_editor_property(prop)
-                _augment_hash_cache(field, prop)
-                return prop
-            except Exception:
-                continue
-    return None
-
-
-def _cached_hashes() -> Dict[str, str]:
-    """Return the hash map without triggering a full-disk scan."""
-    if _HASH_CACHE is not None:
-        return dict(_HASH_CACHE)
-    return {}
-
-
-def _script_hash_scan_dirs(script: Any) -> List[str]:
-    """Disk folders likely holding this Script class's compiled Verse assets."""
-    dirs: List[str] = []
-    disk = _disk_project_content_dir()
-    if not disk:
-        return dirs
+def _prop_readable(script: Any, prop: str) -> bool:
     try:
-        cls_path = script.get_class().get_path_name()
-        pkg = cls_path.rsplit(".", 1)[0]
-        parts = pkg.strip("/").split("/", 1)
-        if len(parts) == 2:
-            rel = parts[1].replace("/", os.sep)
-            folder = os.path.normpath(os.path.join(disk, rel))
-            if os.path.isdir(folder):
-                dirs.append(folder)
-            parent = os.path.dirname(folder)
-            if parent and os.path.isdir(parent):
-                dirs.append(parent)
-            grand = os.path.dirname(parent)
-            if grand and os.path.isdir(grand) and os.path.basename(grand) == "_Verse":
-                dirs.append(grand)
+        script.get_editor_property(prop)
+        return True
     except Exception:
-        pass
-    return dirs
+        return False
 
 
-def _wire_hash_search_dirs(script: Any) -> List[str]:
-    """Small, fast search roots for one field during wiring (no global scan)."""
-    seen: set[str] = set()
-    out: List[str] = []
-    for d in _script_hash_scan_dirs(script) + _priority_hash_scan_dirs():
-        p = os.path.normpath(d)
-        if p not in seen and os.path.isdir(p):
-            seen.add(p)
-            out.append(p)
-    return out
-
-
-def _resolve_field_prop_cheap(script: Any, field: str, hashes: Dict[str, str]) -> Optional[str]:
-    """script_props / cached hashes / live property probe only — never touches disk."""
+def _resolve_field_prop_cheap(
+    script: Any,
+    field: str,
+    hashes: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Computed name if readable, else live Script reflection. Never touches disk."""
+    computed = verse_mangled_name(field)
+    if _prop_readable(script, computed):
+        return computed
     prop = _script_verse_properties(script).get(field)
-    if prop:
+    if prop and _prop_readable(script, prop):
         return prop
-    prop = hashes.get(field)
-    if prop:
-        return prop
-    return _probe_script_for_field(script, field, hashes)
-
-
-def _lookup_many_field_hashes_in_dirs(
-    fields: List[str],
-    dirs: List[str],
-    *,
-    max_files: int = 200,
-) -> Dict[str, str]:
-    """Resolve several missing fields in one directory walk instead of one walk each."""
-    remaining = {f: re.compile(rb"__verse_0x[0-9A-Fa-f]{8}_" + re.escape(f.encode())) for f in fields}
-    found: Dict[str, str] = {}
-    if not remaining:
-        return found
-    seen = 0
-    for d in dirs:
-        if not d or not os.path.isdir(d):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(d):
-            for fn in filenames:
-                if not fn.endswith((".uasset", ".umap")):
-                    continue
-                seen += 1
-                if seen > max_files:
-                    return found
-                fp = os.path.join(dirpath, fn)
-                try:
-                    data = open(fp, "rb").read(_MAX_HASH_SCAN_FILE_BYTES)
-                except OSError:
-                    continue
-                for field, needle in list(remaining.items()):
-                    m = needle.search(data)
-                    if m:
-                        found[field] = m.group().decode()
-                        del remaining[field]
-                if not remaining:
-                    return found
-    return found
-
-
-def _resolve_field_prop(script: Any, field: str, hashes: Dict[str, str]) -> Optional[str]:
-    prop = _resolve_field_prop_cheap(script, field, hashes)
-    if prop:
-        return prop
-    search_dirs = _wire_hash_search_dirs(script)
-    prop = _lookup_field_hash_in_dirs(field, search_dirs, max_files=120)
-    if prop:
-        _augment_hash_cache(field, prop)
-        cls_name = script.get_class().get_name()
-        _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
-        return prop
+    if hashes:
+        prop = hashes.get(field)
+        if prop and _prop_readable(script, prop):
+            return prop
     return None
+
+
+def _resolve_field_prop(
+    script: Any,
+    field: str,
+    hashes: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    return _resolve_field_prop_cheap(script, field, hashes)
 
 
 def _hash_not_readable(field: str, prop: str, exc: Exception) -> ValueError:
     return ValueError(
         f"Field {field!r} hash {prop!r} found but not readable on Script: {exc}. "
-        "Build Verse in UEFN, then reload_listener."
+        f"{_FIELD_NOT_READABLE}"
     )
 
 
 def _remember_resolved_prop(script: Any, field: str, prop: str) -> str:
-    _augment_hash_cache(field, prop)
     cls_name = script.get_class().get_name()
     _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
     return prop
 
 
 def _resolve_field_prop_for_wire(actor: unreal.Actor, script: Any, field: str) -> str:
-    """Resolve one field for wiring — never runs the 2000-file global hash scan."""
+    """Resolve one field for wiring — compute the mangled name, then probe the Script."""
     _cls, verse_text, _fp = _verse_source_for_actor(actor)
     verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
 
-    prop = _resolve_field_prop(script, field, _cached_hashes())
-    if not prop:
-        live = _script_verse_properties(script, required_fields=verse_fields or None)
-        prop = live.get(field)
-    if not prop:
-        scanned = _class_scoped_hash_scan(script)
-        prop = scanned.get(field) or _probe_script_for_field(script, field, scanned)
-    if not prop:
-        prop = _lookup_field_hash_in_dirs(field, _wire_hash_search_dirs(script), max_files=120)
+    computed = verse_mangled_name(field)
+    try:
+        script.get_editor_property(computed)
+        return _remember_resolved_prop(script, field, computed)
+    except Exception:
+        pass
 
+    live = _script_verse_properties(script, required_fields=verse_fields or None)
+    prop = live.get(field)
     if prop:
         try:
             script.get_editor_property(prop)
+            return _remember_resolved_prop(script, field, prop)
         except Exception as exc:
             raise _hash_not_readable(field, prop, exc) from exc
-        return _remember_resolved_prop(script, field, prop)
 
     if field not in verse_fields:
         raise ValueError(_field_not_found_error(actor, script, field, verse_fields))
 
     raise ValueError(
         f"Field {field!r} is in Verse source but has no compiled hash on this device yet. "
-        "STALE REFLECTION — the live Script has no readable hash after resolve. "
-        "Fix any compile errors, wait for the build, then get_verse_editables on THIS SAME "
-        "device and wire once. Do NOT place another copy of the device: a duplicate has "
-        "the same stale class and this instance gets the new hashes when the build finishes. "
+        f"STALE REFLECTION — {_FIELD_NOT_READABLE} "
         "Do not hammer wire_*/set_verse_editable."
     )
 
 
 def _require_field_for_wire(actor_path: str, field: str) -> tuple:
-    """Lightweight preflight for wire_* — one field, no global hash scan."""
+    """Lightweight preflight for wire_* — one field, computed name, no disk scan."""
     actor = lookup.require_actor(actor_path)
     script = _verse_script(actor)
     prop = _resolve_field_prop_for_wire(actor, script, field)
     return actor, script, prop
-
-
-def _scan_tree_for_hashes(
-    root: str,
-    found: Dict[str, str],
-    visited_dirs: set[str],
-    seen_files: int,
-    max_files: int,
-) -> int:
-    """Walk one root looking for ``__verse_0x...`` strings, capped by *max_files*.
-
-    *visited_dirs* is shared across every root in one ``_scan_property_hashes``
-    call so overlapping roots (e.g. a priority dir that is also a subdirectory
-    of a later global root) are never read twice.
-    """
-    for dirpath, _dirnames, filenames in os.walk(root):
-        if dirpath in visited_dirs:
-            continue
-        visited_dirs.add(dirpath)
-        if dirpath[len(root) :].count(os.sep) > 12:
-            continue
-        for fn in filenames:
-            if not fn.endswith((".uasset", ".umap")):
-                continue
-            seen_files += 1
-            if seen_files > max_files:
-                return seen_files
-            fp = os.path.join(dirpath, fn)
-            try:
-                data = open(fp, "rb").read(_MAX_HASH_SCAN_FILE_BYTES)
-            except OSError:
-                continue
-            for m in _VERSE_PROP_RE.finditer(data):
-                prop = m.group().decode()
-                field = prop.rsplit("_", 1)[-1]
-                found.setdefault(field, prop)
-    return seen_files
-
-
-def _scan_property_hashes(max_files: int = 800) -> Dict[str, str]:
-    """Map Verse field name -> mangled ``__verse_0x...`` property name."""
-    global _HASH_CACHE
-    if _HASH_CACHE is not None:
-        return dict(_HASH_CACHE)
-
-    found: Dict[str, str] = {}
-    visited_dirs: set[str] = set()
-    seen_files = 0
-
-    for priority in _priority_hash_scan_dirs():
-        seen_files = _scan_tree_for_hashes(priority, found, visited_dirs, seen_files, max_files)
-        if seen_files > max_files:
-            break
-
-    if seen_files <= max_files:
-        for root in _scan_roots():
-            seen_files = _scan_tree_for_hashes(root, found, visited_dirs, seen_files, max_files)
-            if seen_files > max_files:
-                break
-
-    _HASH_CACHE = found
-    return dict(found)
 
 
 def _verse_script(actor: unreal.Actor) -> Any:
@@ -474,22 +247,11 @@ def _verse_script(actor: unreal.Actor) -> Any:
 def _mangled_name(field: str, script: Any = None, actor: unreal.Actor | None = None) -> str:
     if script is not None and actor is not None:
         return _resolve_field_prop_for_wire(actor, script, field)
-    hashes = _cached_hashes()
     if script is not None:
-        prop = _resolve_field_prop(script, field, hashes)
+        prop = _resolve_field_prop_cheap(script, field)
         if prop:
             return prop
-    prop = hashes.get(field)
-    if not prop and script is not None:
-        prop = _lookup_field_hash_in_dirs(field, _wire_hash_search_dirs(script), max_files=120)
-        if prop:
-            _augment_hash_cache(field, prop)
-    if not prop:
-        raise ValueError(
-            f"Unknown Verse field {field!r} — not on this device's Script. "
-            "Call get_verse_editables(actor_path) for exact field names."
-        )
-    return prop
+    return verse_mangled_name(field)
 
 
 def _parse_editables_from_verse(content: str) -> List[str]:
@@ -547,7 +309,7 @@ def _script_export_text_properties(script: Any) -> Dict[str, str]:
 
     UEFN Python does not always expose ``export_text``; each API is tried and
     failures are logged. Empty result is not an error — caller falls back to
-    a class-scoped hash scan.
+    computing ``verse_mangled_name`` and probing the Script.
     """
     text = ""
     for attr in ("export_text", "get_export_text"):
@@ -648,31 +410,6 @@ def _script_verse_properties(
     if found and (not required_fields or set(required_fields).issubset(found)):
         _SCRIPT_PROPS_CACHE[cls_name] = found
     return found
-
-
-def _class_scoped_hash_scan(script: Any, *, max_files: int = 120) -> Dict[str, str]:
-    """One bounded walk of this Script class's folders — all ``__verse_0x`` names at once."""
-    try:
-        cls_name = script.get_class().get_name()
-    except Exception:
-        cls_name = ""
-    if cls_name:
-        cached = _CLASS_SCAN_CACHE.get(cls_name)
-        if cached is not None:
-            return dict(cached)
-    found: Dict[str, str] = {}
-    visited: set[str] = set()
-    seen = 0
-    dirs = _script_hash_scan_dirs(script)
-    if not dirs:
-        dirs = _wire_hash_search_dirs(script)
-    for d in dirs:
-        seen = _scan_tree_for_hashes(d, found, visited, seen, max_files)
-        if seen > max_files:
-            break
-    if cls_name:
-        _CLASS_SCAN_CACHE[cls_name] = found
-    return dict(found)
 
 
 def _verse_search_dirs() -> List[str]:
@@ -812,19 +549,16 @@ def _find_verse_snippet_for_field(field: str) -> Tuple[str, str]:
     return result
 
 
-def _fields_on_device_script(actor: unreal.Actor, hashes: Dict[str, str]) -> List[str]:
-    """@editable fields present on this device's Script (compiled hashes)."""
+def _fields_on_device_script(actor: unreal.Actor, hashes: Optional[Dict[str, str]] = None) -> List[str]:
+    """@editable fields present on this device's Script (computed name if readable)."""
     script = _verse_script(actor)
     props = _script_verse_properties(script)
     if props:
         return sorted(props.keys())
     found: List[str] = []
-    for field, prop in hashes.items():
-        try:
-            script.get_editor_property(prop)
+    for field, prop in (hashes or {}).items():
+        if _prop_readable(script, prop):
             found.append(field)
-        except Exception:
-            continue
     return sorted(found)
 
 
@@ -1006,7 +740,7 @@ def _wrapper_spec_for_field(actor: unreal.Actor, field: str) -> Optional[Tuple[s
         spec = _wrapper_spec_for_type(verse_type)
         if spec:
             return spec
-    prop = prop or _resolve_field_prop(script, field, _cached_hashes())
+    prop = prop or _resolve_field_prop(script, field)
     if not prop:
         return None
     try:
@@ -1099,7 +833,7 @@ def peek_verse_field_links(actor_path: str, field: str) -> dict:
         if actor is None:
             return out
         script = _verse_script(actor)
-        prop = _resolve_field_prop_cheap(script, field, _cached_hashes())
+        prop = _resolve_field_prop_cheap(script, field)
         if not prop:
             return out
         try:
@@ -1350,19 +1084,35 @@ def _resolve_target(field: str, target_path: str, parent_script: Any = None) -> 
     return target
 
 
+def _computed_hashes_from_verse() -> Dict[str, str]:
+    """Parse @editable names from project .verse files and compute mangled names."""
+    hashes: Dict[str, str] = {}
+    for verse_root in _verse_search_dirs():
+        for dirpath, _dn, filenames in os.walk(verse_root):
+            for fn in filenames:
+                if not fn.endswith(".verse"):
+                    continue
+                text = _read_verse_file(os.path.join(dirpath, fn))
+                if not text:
+                    continue
+                for field in _parse_editables_from_verse(text):
+                    hashes.setdefault(field, verse_mangled_name(field))
+    return hashes
+
+
 def list_verse_property_hashes(refresh: bool = False) -> dict:
-    global _HASH_CACHE
+    """Compute ``__verse_0x…`` names from @editable field names. ``refresh`` only clears caches."""
+    global _VERSE_SEARCH_DIRS_CACHE
     if refresh:
-        _HASH_CACHE = None
         _WIRING_READY_ACTORS.clear()
         _VERSE_SOURCE_CACHE.clear()
         _FIELD_TYPE_CACHE.clear()
         _SCRIPT_PROPS_CACHE.clear()
-        _CLASS_SCAN_CACHE.clear()
         _FIELD_SNIPPET_CACHE.clear()
         _STRUCT_CLASS_PATH_CACHE.clear()
-    hashes = _scan_property_hashes()
-    return {"properties": hashes, "count": len(hashes)}
+        _VERSE_SEARCH_DIRS_CACHE = None
+    hashes = _computed_hashes_from_verse()
+    return {"properties": hashes, "count": len(hashes), "source": "computed"}
 
 
 def _field_not_found_error(
@@ -1386,11 +1136,10 @@ def _require_can_wire(actor_path: str, field: str = "") -> None:
     actor = lookup.require_actor(actor_path)
     actor_key = actor.get_path_name()
     script = _verse_script(actor)
-    hashes = _cached_hashes()
     script_props = _script_verse_properties(script)
 
     if actor_key in _WIRING_READY_ACTORS:
-        if field and field not in script_props and _resolve_field_prop(script, field, hashes) is None:
+        if field and field not in script_props and _resolve_field_prop(script, field) is None:
             _cls, verse_text, _fp = _verse_source_for_actor(actor)
             verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
             raise ValueError(_field_not_found_error(actor, script, field, verse_fields))
@@ -1400,10 +1149,7 @@ def _require_can_wire(actor_path: str, field: str = "") -> None:
     verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
     if not verse_fields:
         verse_fields = sorted(script_props.keys())
-    resolved = dict(hashes)
-    resolved.update(script_props)
-    # Cheap-only pass (reflection + cache, no disk) for overall readiness — only
-    # the field actually being wired is worth a targeted disk search below.
+    resolved = dict(script_props)
     for f in verse_fields:
         prop = _resolve_field_prop_cheap(script, f, resolved)
         if prop:
@@ -1439,8 +1185,8 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
                 "Check the Verse source file exists and the device Script class matches."
             ),
             "next_step": (
-                "Read the class .verse for @editable names, then list_verse_property_hashes"
-                "(refresh=true) and retry get_verse_editables. Do not ask the user."
+                "Read the class .verse for @editable names, then get_verse_editables. "
+                "Do not ask the user."
             ),
         }
     hashed = [f for f in verse_fields if hashes.get(f)]
@@ -1449,14 +1195,13 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
             "status": "verse_compile_required",
             "can_wire": False,
             "message": (
-                f"Found {len(verse_fields)} @editable field(s) in .verse source but zero mangled "
-                "property hashes after reflection, export-text, cache, class-scoped scan, and "
-                "direct probes. The fields exist — resolve hashes, then wire."
+                f"Found {len(verse_fields)} @editable field(s) in .verse source but none are "
+                "readable on this Script — the compiled class does not have these fields yet."
             ),
             "next_step": (
-                "list_verse_property_hashes(refresh=true), then get_verse_editables, then "
-                "wire_verse_* once. Do not ask the user to Build Verse, paste T3D, or drag "
-                "Details refs."
+                "workspace_compile_verse once, wait for the build, then get_verse_editables "
+                "on THIS SAME device. Do not refactor the class. Do not ask the user to "
+                "Build Verse, paste T3D, or drag Details refs."
             ),
             "fields_from_source": verse_fields,
         }
@@ -1466,13 +1211,13 @@ def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
             "status": "partial",
             "can_wire": True,
             "message": (
-                f"{len(hashed)}/{len(verse_fields)} fields in global hash cache; "
-                f"missing from cache: {missing[:12]}. "
-                "This does NOT always mean Verse is uncompiled — tools resolve hashes on write."
+                f"{len(hashed)}/{len(verse_fields)} fields readable on this Script; "
+                f"not yet readable: {missing[:12]}. "
+                "Wire the readable fields now. For the rest: compile once, wait, re-inspect."
             ),
             "next_step": (
-                "Proceed with set_currency_config_entries / wire_verse_device_ref / patch_verse_array_entry. "
-                "If a write fails, list_verse_property_hashes(refresh=true)."
+                "Proceed with set_currency_config_entries / wire_verse_device_ref / "
+                "set_verse_editable. Do not remove or retype an @editable to dodge this."
             ),
         }
     return {
@@ -1487,26 +1232,18 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
     actor = lookup.require_actor(actor_path)
     script = _verse_script(actor)
     cls_name = script.get_class().get_name()
-    hashes = _cached_hashes()
-    resolution_tried: List[str] = []
+    resolution_tried: List[str] = ["computed"]
     _cls, verse_text, verse_file = _verse_source_for_actor(actor)
     verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
     script_props = _script_verse_properties(
         script, tried=resolution_tried, required_fields=verse_fields or None
     )
-    if hashes and "hash_cache" not in resolution_tried:
-        resolution_tried.append("hash_cache")
     if not verse_fields:
         verse_fields = sorted(script_props.keys())
     verse_types = _field_types_from_verse(verse_text) if verse_text else {}
     source_mode = "verse_file" if verse_text else ("script_props" if script_props else "none")
 
-    resolved_hashes = dict(hashes)
-    resolved_hashes.update(script_props)
-
-    # Cheap first: merged live reflection + cache. A class-scoped scan runs
-    # when any Verse-source field is still unresolved — not only when all miss
-    # (a resolved Trigger used to skip TestProps).
+    resolved_hashes: Dict[str, str] = dict(script_props)
     prelim: Dict[str, Optional[str]] = {}
     for field in verse_fields:
         prop = _resolve_field_prop_cheap(script, field, resolved_hashes)
@@ -1514,63 +1251,51 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
         if prop:
             resolved_hashes[field] = prop
 
-    if verse_fields and any(not prelim.get(f) for f in verse_fields):
-        scanned = _class_scoped_hash_scan(script)
-        resolution_tried.append("class_scan")
-        for field in verse_fields:
-            prop = scanned.get(field) or _probe_script_for_field(script, field, scanned)
-            if not prop:
-                continue
-            try:
-                script.get_editor_property(prop)
-            except Exception:
-                continue
-            prelim[field] = prop
-            resolved_hashes[field] = prop
-            _augment_hash_cache(field, prop)
-            _SCRIPT_PROPS_CACHE.setdefault(cls_name, {})[field] = prop
-        resolution_tried.append("probe")
-
+    not_readable_note = (
+        "Computed name is not readable on this Script — " + _FIELD_NOT_READABLE
+    )
     settings: Dict[str, dict] = {}
     for field in verse_fields:
-        entry: dict = {"field": field}
-        prop = prelim.get(field)
+        computed = verse_mangled_name(field)
+        prop = prelim.get(field) or computed
+        entry: dict = {
+            "field": field,
+            "mangled_name": computed,
+            "hash_source": "computed",
+        }
         verse_type = verse_types.get(field)
         is_array = _field_is_array_in_verse(verse_text, field) if verse_text else False
-        if prop:
-            entry["mangled_name"] = prop
-            if prop != hashes.get(field):
-                entry["hash_source"] = "script" if field in script_props else "resolved"
+        try:
+            val = script.get_editor_property(prop)
+            entry["readable"] = True
+            if prop != computed:
+                entry["mangled_name"] = prop
+                entry["hash_source"] = "script"
+            entry["value"] = str(val)
+            entry["overridden"] = bool(script.is_editor_property_overridden(prop))
+            if not is_array:
+                is_array = val is not None and hasattr(val, "__len__") and not isinstance(
+                    val, (str, bytes)
+                )
             try:
-                val = script.get_editor_property(prop)
-                entry["readable"] = True
-                entry["value"] = str(val)
-                entry["overridden"] = bool(script.is_editor_property_overridden(prop))
-                if not is_array:
-                    is_array = val is not None and hasattr(val, "__len__") and not isinstance(
-                        val, (str, bytes)
-                    )
-                try:
-                    entry["array_length"] = len(val) if val is not None else 0
-                except Exception:
-                    pass
-            except Exception as exc:
-                entry["readable"] = False
-                entry["error"] = str(exc)[:200]
-        else:
-            entry["mangled_name"] = None
-            entry["note"] = (
-                "Mangled name not resolved yet — list_verse_property_hashes(refresh=true) "
-                "then retry. Do not ask the user to Build Verse or paste T3D."
-            )
+                entry["array_length"] = len(val) if val is not None else 0
+            except Exception:
+                pass
+        except Exception as exc:
+            entry["readable"] = False
+            entry["error"] = str(exc)[:200]
+            entry["note"] = not_readable_note
         if include_wiring_hints:
             spec = _wrapper_spec_for_type(verse_type) if verse_type else None
-            if spec is None and prop:
+            if spec is None and entry.get("readable"):
                 spec = _wrapper_spec_from_script_value(script, prop)
             entry["wiring"] = _wiring_hint_from_meta(verse_type, is_array, spec)
         settings[field] = entry
 
-    readiness = _wiring_readiness(verse_fields, resolved_hashes)
+    readable_hashes = {
+        f: resolved_hashes[f] for f in verse_fields if settings[f].get("readable")
+    }
+    readiness = _wiring_readiness(verse_fields, readable_hashes)
 
     return {
         "actor_path": actor.get_path_name(),
@@ -1585,8 +1310,8 @@ def get_verse_editables(actor_path: str, *, include_wiring_hints: bool = True) -
         "STOP": not readiness.get("can_wire", False),
         "allowed_next_tools": (
             [
-                "list_verse_property_hashes",
                 "get_verse_editables",
+                "workspace_compile_verse",
                 "wire_verse_device_ref",
                 "wire_verse_device_array",
                 "set_verse_editable",

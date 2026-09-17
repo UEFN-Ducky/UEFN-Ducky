@@ -186,16 +186,16 @@ def test_get_verse_editables_skips_uasset_walk():
     start = src.index("def get_verse_editables")
     end = src.index("\ndef set_verse_editable")
     body = src[start:end]
-    assert "_lookup_many_field_hashes_in_dirs" not in body
+    assert "_lookup_many_field_hashes_in_dirs" not in src
+    assert "_class_scoped_hash_scan" not in src
+    assert "verse_mangled_name" in body
     assert "_resolve_field_prop_cheap" in body
-    assert "_class_scoped_hash_scan" in body
     assert "resolution_tried" in body
     assert "forbidden_until_compiled" in body
     assert '"execute_python"' not in body.split("forbidden_until_compiled", 1)[1][:400]
-    assert "_lookup_many_field_hashes_in_dirs" in src  # still used on the write path
     assert "if found" in src
     assert "_SCRIPT_PROPS_CACHE[cls_name] = found" in src
-    fn = src[src.index("def _script_verse_properties") : src.index("def _class_scoped_hash_scan")]
+    fn = src[src.index("def _script_verse_properties") : src.index("def _verse_search_dirs")]
     assert "required_fields" in fn
     assert "if found and (not required_fields or set(required_fields).issubset(found)):" in fn
     # Empty / incomplete maps must not be cached.

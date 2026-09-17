@@ -65,6 +65,7 @@ interface VirtualChatMessageListProps {
   editableRowId: string | null;
   composerMode: AgentMode;
   composerModel: string;
+  setComposerModel: (id: string) => void;
   composerCodingAgent: string;
   setComposerCodingAgent: (id: string) => void;
   convId: string;
@@ -172,6 +173,7 @@ interface ChatRowEnv {
   captureAskKeys: boolean;
   composerMode: AgentMode;
   composerModel: string;
+  setComposerModel: (id: string) => void;
   composerCodingAgent: string;
   setComposerCodingAgent: (id: string) => void;
   onResend: VirtualChatMessageListProps["onResend"];
@@ -286,6 +288,11 @@ const ChatRowView = memo(function ChatRowView({
         onOpenFile={env.onOpenFile}
         onStop={env.onStop}
         onContinue={showContinue ? env.onContinue : undefined}
+        selectedModel={env.composerModel}
+        setSelectedModel={env.setComposerModel}
+        codingAgent={env.composerCodingAgent}
+        setCodingAgent={env.setComposerCodingAgent}
+        convId={env.convId}
         showSpeakButton={showSpeakButton}
       />
     );
@@ -452,6 +459,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       editableRowId,
       composerMode,
       composerModel,
+      setComposerModel,
       composerCodingAgent,
       setComposerCodingAgent,
       convId,
@@ -737,6 +745,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         captureAskKeys,
         composerMode,
         composerModel,
+        setComposerModel,
         composerCodingAgent,
         setComposerCodingAgent,
         onResend,
@@ -757,6 +766,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         captureAskKeys,
         composerMode,
         composerModel,
+        setComposerModel,
         composerCodingAgent,
         setComposerCodingAgent,
         onResend,

@@ -161,19 +161,19 @@ def _execute_python_blocked(code: str) -> str | None:
     if "for name in dir(unreal)" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Use get_verse_editables / wire_verse_*. "
             "Do not ask the user to Build Verse."
         )
     if "valkyrie" in low and ("compile" in low or "build" in low):
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Use get_verse_editables / wire_verse_*. "
             "Do not ask the user to Build Verse."
         )
     if "scriptpropertyoverrides" in compact:
         return (
             "STOP: execute_python blocked for Verse compile/hash/property discovery. "
-            "Use get_verse_editables / list_verse_property_hashes / wire_verse_*. "
+            "Use get_verse_editables / wire_verse_*. "
             "Do not ask the user to Build Verse."
         )
     if "add_unique_transient_override" in low:
@@ -189,7 +189,7 @@ def _execute_python_blocked(code: str) -> str | None:
     if "_hash_cache" in low and ("=" in code or "seed" in low):
         return (
             "STOP: execute_python blocked for hash-cache seeding. "
-            "Build Verse in UEFN, then list_verse_property_hashes(refresh=true)."
+            "The mangled name is computed (verse_mangled_name). Use get_verse_editables / wire_verse_*."
         )
     # Certain-death reflection: constructing an asset-owned UObject with no outer,
     # then stitching it into an asset, is a native EXCEPTION_ACCESS_VIOLATION that
@@ -248,8 +248,7 @@ def _execute_python_blocked(code: str) -> str | None:
             "STOP: execute_python blocked — filesystem walks / Verse-hash binary scans freeze UEFN "
             "(runs on the editor main thread). Reading or writing a mangled "
             "`__verse_0x<HASH>_<Field>` property on one Script object is allowed. "
-            "Use list_verse_property_hashes(refresh=true), get_verse_editables, or "
-            "wire_verse_* instead of scanning disk."
+            "Use get_verse_editables or wire_verse_* instead of scanning disk."
         )
     if walking and any(
         n in compact or n in low
@@ -264,8 +263,7 @@ def _execute_python_blocked(code: str) -> str | None:
     ):
         return (
             "STOP: execute_python blocked — filesystem walks freeze UEFN "
-            "(runs on the editor main thread). Use list_verse_property_hashes(refresh=true), "
-            "get_verse_editables, or workspace_* tools instead."
+            "(runs on the editor main thread). Use get_verse_editables, or workspace_* tools instead."
         )
     return None
 

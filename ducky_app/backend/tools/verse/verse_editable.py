@@ -13,7 +13,11 @@ from backend.tools.verse.wire_preflight import note_resolved_fields, run_with_bu
 
 @plugin_mcp_tool("verse")
 def list_verse_property_hashes(refresh: bool = False, pretty: bool = False) -> str:
-    """List Verse @editable field names mapped to mangled __verse_0x... property names."""
+    """List Verse @editable field names mapped to computed __verse_0x... names.
+
+    Parses project .verse files and computes the mangled name (CRC32 of the field
+    name). `refresh` only clears in-memory caches — it does not scan disk.
+    """
     result = send_command("list_verse_property_hashes", {"refresh": refresh})
     return tool_json(result, pretty=pretty)
 
@@ -27,9 +31,10 @@ def get_verse_editables(
     """Read ALL @editable fields on a Verse device — mandatory before any wire/set.
 
     Parse the full JSON: `editables` (every field name, `wiring.tool`, `verse_type`,
-    `mangled_name`, current `value`), `resolution_tried`, `STOP`, `wiring.can_wire`,
-    `verse_source`. STOP is advisory: if `mangled_name` is null, call
-    `list_verse_property_hashes(refresh=true)`, re-inspect, then wire. Never ask
+    `mangled_name`, `readable`, current `value`), `resolution_tried`, `STOP`,
+    `wiring.can_wire`, `verse_source`. `mangled_name` is computed from the field
+    name (`__verse_0x<CRC32>_<Field>`). `readable: false` means the compiled class
+    lacks that field — compile once, wait, re-inspect the SAME device. Never ask
     the user to Build Verse, paste T3D, or drag Details. Scalar device refs
     (e.g. NPCSpawner1) use wire_verse_device_ref — not wire_verse_device_array.
     Never assume field names; only use keys returned here.
@@ -67,8 +72,12 @@ def set_verse_editable(
 ) -> str:
     """Set a Verse @editable field. Device refs: pass target_path (label). Scalars: pass value.
 
-    Example: set_verse_editable("MyDevice", "TargetDevice", target_path="OtherDevice")
-    — labels exactly as shown by find_devices, field names from inspect_verse_device.
+    Value fields (int / float / string / logic / []int / []float) wire the same way
+    as refs — pass value=. There is no extra "scalar slot" treatment; arrays and
+    strings are just as wireable as object refs. Example:
+    set_verse_editable("MyDevice", "BaseName", value="North")
+    set_verse_editable("MyDevice", "TargetDevice", target_path="OtherDevice")
+    — labels exactly as shown by find_devices, field names from get_verse_editables.
     """
     params: dict[str, Any] = {"actor_path": actor_path, "field": field}
     if target_path:
@@ -93,7 +102,7 @@ def wire_player_spawners(
     """Wire a manager device's AllPlayerSpawners array to spawn pads via wrapper SavedActor.
 
     Omit spawn_pad_paths to auto-detect pads attached under the manager in the outliner.
-    Example: wire_player_spawners("MyPlayerManager")
+    Example: wire_player_spawners(manager_path="Player Manager")
     """
     params: dict[str, Any] = {"manager_path": manager_path}
     if spawn_pad_paths:

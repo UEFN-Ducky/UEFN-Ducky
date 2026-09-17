@@ -75,8 +75,9 @@ def _hint_for_error(tool: str, text: str) -> str:
     low = text.lower()
     if "verse_compile_required" in low or ("stop" in low and "wiring blocked" in low):
         return (
-            "STOP is advisory. list_verse_property_hashes(refresh=true), "
-            "re-inspect, then wire_verse_* once. Do not ask the user to Build Verse."
+            "STOP is advisory. get_verse_editables on this same device; wire fields "
+            "with readable:true. If none are readable, compile once, wait, re-inspect. "
+            "Do not ask the user to Build Verse."
         )
     if tool.startswith("blender_"):
         return "Open Blender (addon auto-starts). Restart Blender once after first plugin install."
@@ -85,7 +86,8 @@ def _hint_for_error(tool: str, text: str) -> str:
     if "stale reflection" in low or "stale_locked" in low or "no compiled hash" in low:
         return (
             "Host already compiled + retried once. Do NOT call wire_* again. "
-            "get_verse_editables on this same device; wire only if mangled_name is set."
+            "get_verse_editables on this same device; wire only if readable is true. "
+            "Do not remove or retype the @editable."
         )
     if tool.startswith("wire_verse"):
         return (

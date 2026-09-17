@@ -149,6 +149,7 @@ function Harness({ committed }: { committed: ChatRow[] }) {
       editableRowId={editableRowId}
       composerMode="agent"
       composerModel="perf"
+      setComposerModel={noop}
       composerCodingAgent="ducky"
       setComposerCodingAgent={noop}
       convId="perf"

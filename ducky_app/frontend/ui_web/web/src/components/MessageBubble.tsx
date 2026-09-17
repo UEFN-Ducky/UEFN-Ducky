@@ -4,6 +4,7 @@ import type { OpenFileHandler } from "../types/richContent";
 import { SpeakMessageButton } from "../voice/VoiceControls";
 import { mapReadAlong, TtsReadAlong } from "../voice/TtsReadAlong";
 import { ttsEngine, type TtsProgress } from "../voice/ttsEngine";
+import { ModelSelector } from "./ModelSelector";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 import { ThinkingBlock } from "./ThinkingBlock";
 
@@ -25,6 +26,12 @@ interface MessageBubbleProps {
   onStop?: () => void;
   /** Resume this interrupted turn without sending a new user message. */
   onContinue?: () => void;
+  /** Same picker as the composer — pick a model, then Continue. */
+  selectedModel?: string;
+  setSelectedModel?: (id: string) => void;
+  codingAgent?: string;
+  setCodingAgent?: (id: string) => void;
+  convId?: string;
   /** Play-audio control — only the latest assistant reply should pass true. */
   showSpeakButton?: boolean;
 }
@@ -50,6 +57,11 @@ export const MessageBubble = memo(function MessageBubble({
   author,
   onStop,
   onContinue,
+  selectedModel = "",
+  setSelectedModel,
+  codingAgent,
+  setCodingAgent,
+  convId,
   showSpeakButton = false,
 }: MessageBubbleProps) {
   // Every bubble used to hold its own TTS subscription and re-render on every
@@ -107,15 +119,30 @@ export const MessageBubble = memo(function MessageBubble({
         {incomplete ? (
           <div className="message-bubble-interrupted" role="alert">
             <span className="message-bubble-interrupted-icon" aria-hidden="true">⚠</span>
-            <span>{error ? `Interrupted: ${error}` : "Interrupted before finishing"}</span>
+            <span className="message-bubble-interrupted-msg">
+              {error ? `Interrupted: ${error}` : "Interrupted before finishing"}
+            </span>
             {onContinue ? (
-              <button
-                type="button"
-                className="message-bubble-interrupted-continue"
-                onClick={onContinue}
-              >
-                Continue
-              </button>
+              <div className="message-bubble-interrupted-actions">
+                {setSelectedModel ? (
+                  <ModelSelector
+                    selectedModel={selectedModel}
+                    setSelectedModel={setSelectedModel}
+                    codingAgent={codingAgent}
+                    setCodingAgent={setCodingAgent}
+                    convId={convId}
+                    preserveSelection
+                    menuPlacement="bottom"
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className="message-bubble-interrupted-continue"
+                  onClick={onContinue}
+                >
+                  Continue
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null}
