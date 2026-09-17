@@ -6,6 +6,8 @@ const api = vi.hoisted(() => ({
   get_settings: vi.fn(),
   duckyos_get_status: vi.fn(),
   duckyos_list_pcs: vi.fn(),
+  duckyos_login: vi.fn(),
+  duckyos_open_teams_site: vi.fn(),
   remote_status: vi.fn(),
   remote_set_enabled: vi.fn(),
   remote_sign_out_all: vi.fn(),
@@ -26,6 +28,8 @@ beforeEach(() => {
     { keyId: "mine", name: "Studio PC", mine: true },
   ] });
   api.remote_status.mockResolvedValue({ enabled: true, running: true, sessions: 2 });
+  api.duckyos_login.mockResolvedValue({ logged_in: false, user_code: "ABCD-EFGH" });
+  api.duckyos_open_teams_site.mockResolvedValue({ ok: true });
 });
 afterEach(cleanup);
 
@@ -105,4 +109,14 @@ it("keeps the current state and reports a failed access change", async () => {
   expect((await screen.findByRole("alert")).textContent).toBe("Connection unavailable");
   await waitFor(() => expect((screen.getByRole("button", { name: "Disable" }) as HTMLButtonElement).disabled).toBe(false));
   expect(screen.getByText("Enabled")).toBeTruthy();
+});
+
+it("opens /profile?pair= after Open Profile gets a pairing code", async () => {
+  api.duckyos_get_status.mockResolvedValue({ logged_in: false });
+  render(<AccountTab />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Profile" }));
+  await waitFor(() =>
+    expect(api.duckyos_open_teams_site).toHaveBeenCalledWith("/profile?pair=ABCD-EFGH"),
+  );
+  expect(api.duckyos_login).toHaveBeenCalled();
 });
