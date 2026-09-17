@@ -23,7 +23,8 @@ def _annotate_stale_listener(result: dict) -> dict:
             "message": (
                 "UEFN is running an outdated MCP listener (missing verse_source_mode / script-hash fallback). "
                 "Verse is likely compiled — the tool code is stale. "
-                "Fix: keep UEFN-Ducky.exe running, call reload_listener; if that fails, fully restart UEFN."
+                "Fix: keep UEFN-Ducky.exe running, call reload_listener once; "
+                "if still stuck, stay on workspace_*. Never restart UEFN."
             ),
         }
     return result

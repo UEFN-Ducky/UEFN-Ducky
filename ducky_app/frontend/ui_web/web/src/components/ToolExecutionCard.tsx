@@ -365,7 +365,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
                   <div className="status-dot online tool-execution-card-waiting-dot" />
                   {externalAgent
                     ? "Running inside the coding agent…"
-                    : "Waiting for UEFN listener… If this lasts >30s, restart UEFN (listener wedged)."}
+                    : "Waiting for UEFN listener… If this lasts >30s, stay on workspace_* (listener wedged). Never restart UEFN."}
                 </div>
               )}
 

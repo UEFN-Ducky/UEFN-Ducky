@@ -112,11 +112,11 @@ export function ConnectionStatusDropdown({
   }, [open]);
 
   const duckyDetail = isWedged
-    ? "Wedged — restart UEFN"
+    ? "Wedged — reload_listener once, then stay on workspace_*"
     : isOnline
       ? `Connected · port ${status.port ?? 4200}${status.uptime_sec ? ` · up ${Math.floor(status.uptime_sec)}s` : ""}`
       : race
-        ? "Offline — restart UEFN to reconnect"
+        ? "Offline — listener init race; stay on workspace_*"
         : "Offline — open UEFN + start listener";
 
   const epicReason = String(status.epic_mcp_reason || "").trim();

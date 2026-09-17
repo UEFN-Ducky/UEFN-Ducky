@@ -16,8 +16,8 @@ def uefn_skill() -> str:
     Returns the combined enabled skill packs (UEFN operator + any toggled subskills).
     Workflow: ping → reload_listener if scalar_prop_wiring false → inspect_verse_device
     → wire_verse_device_ref (one field per call) → save_current_level.
-    If STOP is true, run workspace_compile_verse yourself, then reload_listener —
-    only ask the user to restart UEFN if STOP persists."""
+    If STOP is true, run workspace_compile_verse yourself, then reload_listener once.
+    Never restart UEFN. If still stuck stay on workspace_*."""
     try:
         seed_skill_packs()
         return build_skill_prompt(default_skill_selection())

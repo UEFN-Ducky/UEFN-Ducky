@@ -101,7 +101,7 @@ data:
   - `Assets.digest.verse` — this project's custom materials, meshes, prefabs as Verse identifiers (refreshed after Verse build)
   - Tools: `search_verse_digest` → `get_verse_api(name)` for full members; `list_verse_types` to enumerate (e.g. `name_filter=_device`, `digest=assets`); `list_verse_devices` for device class names. Content Browser weapon/item *assets* → `search_assets` (not digests).
 - **Fixing errors:** FIRST tool is `workspace_list_verse_errors` (not status/listener probes). Work only from its exact list — every reported file, line, and message. Fix each reported error at its reported location and re-run the tool after edits to confirm zero remain. Do not call it both before and after every write. Never guess what the errors are, never write placeholder/stub code to make an error "go away", and never claim errors are fixed without that read-back.
-- **Finish the turn yourself:** you have the tools — run the checks, apply the fixes, and only stop when the work is verified done or blocked on something only the user can do (e.g. restart UEFN). NEVER end a reply with "run X to check", "confirm it compiles", "tell me to continue", or a menu of next steps you could simply do now — do them.
+- **Finish the turn yourself:** you have the tools — run the checks, apply the fixes, and only stop when the work is verified done or blocked on something only the user can do (e.g. Epic MCP setup). NEVER end a reply with "run X to check", "confirm it compiles", "tell me to continue", or a menu of next steps you could simply do now — do them.
 - **Store (plugins/skills):** `ducky_store_search` / `ducky_store_categories` / `ducky_store_get` → `ducky_store_install` or `ducky_store_update`. New plugins with default_enabled turn on automatically; use `ducky_store_set_enabled` to toggle later. Uninstall with `ducky_store_remove(slug, confirm=true)`. Do not tell the user to sideload zips — use these tools (or Settings → Store).
 - **Desktop plugins (Blender, etc.):** Settings → Skills & MCP / the **Enabled Store desktop plugins** block is ground truth. Blender READY does **not** need the UEFN listener — never say “UEFN MCP reconnecting” or stall on Fortnite. Teach Connect only when Blender is **NOT READY**. Nested MCP ≠ Store desktop plugins.
 - **Modeling path (Blender vs UEFN):** You can model in **Blender** (`blender_*`) or **UEFN** (Static Mesh / Geometry Scripting). When the user asks to model/build a mesh and Blender is READY (or enabled) **and** they did not already say Blender or UEFN, ask **one** short question: Blender or UEFN? Then proceed on their answer. If they already named a path, or only one path is available, do not ask — just use it.
@@ -218,13 +218,14 @@ def get_system_prompt_parts(
             if not listener_online and beta.get("listener_init_race"):
                 beta_line += (
                     "\n- ⚠ **Listener init race:** both Beta flags on → Engine "
-                    "EditorToolset / Documents hooks may skip. Tell the user once: "
-                    "restart UEFN, or Tools → Execute Python Script → the island "
+                    "EditorToolset / Documents hooks may skip. Stay on "
+                    "`workspace_*`. Call `reload_listener` once. If still offline: "
+                    "Tools → Execute Python Script → the island "
                     "`Content/Python/init_unreal.py` (Ducky-managed — **never delete "
                     "it**) or `%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py`. "
-                    "Do **not** disable UEFN MCP Toolsets to “fix” Ducky. "
-                    "Continue Verse/`workspace_*` offline; Epic `unreal__*` if "
-                    "epic_mcp_online."
+                    "**Never restart UEFN.** Do **not** disable UEFN MCP Toolsets to "
+                    "“fix” Ducky. Continue Verse/`workspace_*` offline; Epic "
+                    "`unreal__*` if epic_mcp_online."
                 )
             elif beta.get("python_and_toolsets") and listener_online:
                 beta_line += (
@@ -256,7 +257,7 @@ def get_system_prompt_parts(
 """
     if listener_wedged:
         offline_rules += (
-            "- **Listener wedged:** Try `reload_listener` once; if still wedged, tell the user to restart UEFN.\n"
+            "- **Listener wedged:** Try `reload_listener` once; if still wedged, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**\n"
         )
 
     # Always present (even on an empty project) so the capture + cross-project

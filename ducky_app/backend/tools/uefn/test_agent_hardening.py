@@ -75,6 +75,8 @@ def test_hard_rules_place_like_content_drawer():
     assert "Place like Content Drawer" in AGENT_HARD_RULES
     assert "FortStaticMeshActor" in AGENT_HARD_RULES
     assert "BakeData" in AGENT_HARD_RULES
+    assert "mesh guard" in AGENT_HARD_RULES
+    assert "fix later" in AGENT_HARD_RULES
     # Fortnite catalog is allowed; the cook bug is placement method, not the folder.
     assert "never spawn or scatter" not in AGENT_HARD_RULES
 
@@ -264,7 +266,10 @@ def test_hard_rules_never_delete_assets():
 
 def test_hard_rules_offline_is_not_a_delete_queue():
     assert "not a delete queue" in AGENT_HARD_RULES
+    assert "never restart uefn" in AGENT_HARD_RULES.lower()
     assert "never restart uefn so you can delete" in AGENT_HARD_RULES.lower()
+    assert "Restart is only" not in AGENT_HARD_RULES
+    assert "restart UEFN after" not in AGENT_HARD_RULES
     assert "workspace_*" in AGENT_HARD_RULES
     assert "reload_listener" in AGENT_HARD_RULES
     inject = (
@@ -274,6 +279,8 @@ def test_hard_rules_offline_is_not_a_delete_queue():
         / "mcp_inject.py"
     ).read_text(encoding="utf-8")
     assert "never restart UEFN so you can delete" in inject
+    assert "Never restart UEFN" in inject
+    assert "Restart only after reload_listener" not in inject
     assert "Validator errors are not a delete list" in inject
 
 

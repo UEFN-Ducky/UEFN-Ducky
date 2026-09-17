@@ -36,7 +36,7 @@ describe("ConnectionStatusDropdown", () => {
     expect(screen.getByText("Connections")).toBeTruthy();
     expect(screen.getByText("Blender MCP")).toBeTruthy();
     expect(screen.getByText("Connected · localhost:9876")).toBeTruthy();
-    expect(screen.queryByText(/restart UEFN once/i)).toBeNull();
+    expect(screen.queryByText(/restart UEFN/i)).toBeNull();
     const settings = dialog.querySelector(".connection-status-menu-settings");
     const head = dialog.querySelector(".connection-status-menu-head");
     expect(settings && head && settings.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

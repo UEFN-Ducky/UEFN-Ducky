@@ -216,7 +216,7 @@ def fetch_listener_status(
     epic_reason = str(epic.get("epic_mcp_reason") or "")
     beta = read_uefn_beta_access(selected_project_root)
     if wedged:
-        status_text = "Listener wedged — restart UEFN (commands not processing)"
+        status_text = "Listener wedged — call reload_listener once, then stay on workspace_*"
     elif online and busy:
         cmd = f" · {current_command}" if current_command else ""
         status_text = f"Online · busy (editor command running{cmd})"
@@ -227,7 +227,7 @@ def fetch_listener_status(
     else:
         status_text = "Offline — open UEFN + deploy listener"
         if beta.get("listener_init_race"):
-            status_text = "Offline — restart UEFN to reconnect Ducky listener"
+            status_text = "Offline — listener init race; stay on workspace_*; reload_listener once"
     if epic_online:
         status_text = f"{status_text} · UEFN MCP online"
     elif epic_reason == "disabled":

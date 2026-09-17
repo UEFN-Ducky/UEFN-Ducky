@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 27
+  version: 28
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -73,7 +73,7 @@ Read; call `skill_read_subskill` instead.
 2. **UEFN comes online while the panel is open** → same ship runs again (offline→online).
 3. Start a **new chat** so tool schemas refresh (prompt cache is per-chat).
 
-If UEFN was already open with an old in-memory listener, call `reload_listener` once (or restart UEFN) so it loads the AppData copy just shipped.
+If UEFN was already open with an old in-memory listener, call `reload_listener` once so it loads the AppData copy just shipped. If still stuck, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**
 
 ### What auto-updates vs what is preserved
 
