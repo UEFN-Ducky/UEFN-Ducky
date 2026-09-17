@@ -369,6 +369,97 @@ def _message_item(message: dict[str, Any], index: int, tokens: int) -> dict[str,
     return {"label": f"{role} #{index}", "sublabel": preview, "tokens": tokens}
 
 
+def _apply_stale_clear_for_meter(
+    conv_msgs: list[dict[str, Any]],
+    *,
+    model: str,
+    provider: str,
+    tool_result_format: str,
+    conv_id: str = "",
+) -> list[dict[str, Any]]:
+    """Copy ``conv_msgs`` with the same stale-result stubs the runner will send."""
+    from backend.agent.context_memory import estimate_tokens, token_high_water
+    from backend.agent.context_trim import (
+        EXCLUDE_TOOLS,
+        IMAGE_CLEARED,
+        KEEP_RECENT_TOOL_RESULTS,
+        MIN_CLEARABLE_CHARS,
+        cleared_stub,
+        high_water_thresholds,
+        is_cleared_text,
+        plan_clears,
+    )
+    from backend.agent.serialization import format_tool_block_for_llm
+
+    entries: list[tuple[int, int, int]] = []  # msg_i, block_i (-1=images), size
+    texts: list[str] = []
+    names: list[str] = []
+    oks: list[bool] = []
+    for mi, message in enumerate(conv_msgs):
+        for bi, block in enumerate(message.get("blocks") or []):
+            if not isinstance(block, dict) or block.get("type") != "tool_call":
+                continue
+            name = str(block.get("name") or "")
+            if name in EXCLUDE_TOOLS:
+                continue
+            text = format_tool_block_for_llm(
+                block,
+                fmt="json" if tool_result_format == "json" else "toon",  # type: ignore[arg-type]
+            )
+            if is_cleared_text(text) or len(text) < MIN_CLEARABLE_CHARS:
+                continue
+            entries.append((mi, bi, estimate_tokens(text)))
+            texts.append(text)
+            names.append(name)
+            oks.append(str(block.get("status") or "") != "error")
+        if str(message.get("role") or "") == "user":
+            content = str(message.get("content") or "")
+            if content.lstrip().startswith("[capture attached") and not is_cleared_text(content):
+                img = _message_image_tokens(message)
+                if img > 0:
+                    entries.append((mi, -1, img))
+                    texts.append(content)
+                    names.append("")
+                    oks.append(True)
+
+    if not entries:
+        return conv_msgs
+    hw = token_high_water(context_limit=context_limit_for_model(model, provider))
+    trigger, target = high_water_thresholds(hw)
+    chosen = plan_clears(
+        [size for _, _, size in entries],
+        keep_recent=KEEP_RECENT_TOOL_RESULTS,
+        trigger=trigger,
+        target=target,
+    )
+    if not chosen:
+        return conv_msgs
+
+    out = list(conv_msgs)
+    copied: set[int] = set()
+    for item_i in chosen:
+        mi, bi, _ = entries[item_i]
+        if mi not in copied:
+            out[mi] = dict(out[mi])
+            blocks = out[mi].get("blocks")
+            if isinstance(blocks, list):
+                out[mi]["blocks"] = list(blocks)
+            copied.add(mi)
+        if bi < 0:
+            out[mi]["attachments"] = []
+            out[mi]["content"] = IMAGE_CLEARED
+            continue
+        blocks = out[mi].get("blocks")
+        if not isinstance(blocks, list) or bi >= len(blocks):
+            continue
+        block = dict(blocks[bi]) if isinstance(blocks[bi], dict) else {}
+        block["llm_content"] = cleared_stub(
+            oks[item_i], names[item_i], len(texts[item_i]), conv_id=conv_id
+        )
+        blocks[bi] = block
+    return out
+
+
 def _conversation_report(
     messages: list[dict[str, Any]],
     *,
@@ -379,6 +470,8 @@ def _conversation_report(
     context_summary: str = "",
     context_summary_through: int = 0,
     context_summary_tokens: int = 0,
+    conv_id: str = "",
+    apply_stale_clear: bool = True,
 ) -> tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]:
     """(summarized_tokens, conversation_tokens, summarized_items, conversation_items)."""
     if not messages:
@@ -389,6 +482,7 @@ def _conversation_report(
         keep,
         context_summary=context_summary,
         context_summary_through=context_summary_through,
+        conv_id=conv_id,
     )
     if len(compacted) < len(messages):
         summarized = count_tokens(
@@ -406,6 +500,14 @@ def _conversation_report(
         summarized = 0
         conv_msgs = messages
         summarized_items = []
+    if apply_stale_clear:
+        conv_msgs = _apply_stale_clear_for_meter(
+            conv_msgs,
+            model=model,
+            provider=provider,
+            tool_result_format=tool_result_format,
+            conv_id=conv_id,
+        )
     conversation = 0
     conv_items: list[dict[str, Any]] = []
     for i, m in enumerate(conv_msgs, start=1):
@@ -616,6 +718,8 @@ def _external_agent_breakdown(
         context_summary=str(getattr(conv, "context_summary", "") or ""),
         context_summary_through=int(getattr(conv, "context_summary_through", 0) or 0),
         context_summary_tokens=int(getattr(conv, "context_summary_tokens", 0) or 0),
+        conv_id=str(getattr(conv, "id", "") or ""),
+        apply_stale_clear=False,
     )
 
     known = mcp_tokens + skill_tokens + summarized_tokens + conversation_tokens
@@ -1071,6 +1175,7 @@ def compute_context_report(
         context_summary=str(getattr(conv, "context_summary", "") or ""),
         context_summary_through=int(getattr(conv, "context_summary_through", 0) or 0),
         context_summary_tokens=int(getattr(conv, "context_summary_tokens", 0) or 0),
+        conv_id=str(getattr(conv, "id", "") or ""),
     )
     items_by_id["summarized"] = summarized_items
     items_by_id["conversation"] = conversation_items

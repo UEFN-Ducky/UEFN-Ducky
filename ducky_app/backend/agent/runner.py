@@ -731,6 +731,7 @@ class AgentRunner:
             tool_schemas = self._provider_tools(self.config.provider, selected)
 
         conv = self.config.conv
+        trim_conv_id = self.config.conv_id or (str(getattr(conv, "id", "") or "") if conv is not None else "")
         provider_messages = self._history_to_provider(
             compact_messages(
                 working_history,
@@ -739,6 +740,7 @@ class AgentRunner:
                 context_summary_through=int(getattr(conv, "context_summary_through", 0) or 0)
                 if conv is not None
                 else 0,
+                conv_id=trim_conv_id,
             ),
             stub_tools=frozenset({"uefn_skill"}) if skill_text else frozenset(),
         )
@@ -761,6 +763,24 @@ class AgentRunner:
                 "cache_read_tokens": max(0, int(usage.get("cache_read_tokens") or 0)),
                 "cache_write_tokens": max(0, int(usage.get("cache_write_tokens") or 0)),
             }
+
+        last_step_prompt_tokens = 0
+        trim_high_water = 80_000
+        cache_cold = False
+        try:
+            from backend.agent.context_memory import token_high_water
+            from backend.agent.context_trim import should_force_clear
+            from frontend.settings import PanelSettings
+
+            trim_settings = PanelSettings.load()
+            trim_high_water = token_high_water(trim_settings, conv=conv)
+            last_ts = 0.0
+            stored = list(getattr(conv, "messages", None) or []) if conv is not None else []
+            if stored and isinstance(stored[-1], dict):
+                last_ts = float(stored[-1].get("ts") or 0)
+            cache_cold = should_force_clear(self.config.provider, last_ts)
+        except Exception:
+            pass
 
         turn = 0
         while True:
@@ -790,6 +810,21 @@ class AgentRunner:
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0,
             }
+
+            try:
+                from backend.agent.context_trim import clear_stale_tool_results
+
+                freed = clear_stale_tool_results(
+                    provider_messages,
+                    high_water=trim_high_water,
+                    prompt_tokens=last_step_prompt_tokens,
+                    force=cache_cold if turn == 0 else False,
+                    conv_id=trim_conv_id,
+                )
+            except Exception:
+                freed = 0
+            if freed:
+                yield AgentEvent(kind="status", text=f"Trimmed {freed:,} tokens of old tool output")
 
             stream_messages = provider_messages
             if volatile_tail:
@@ -853,6 +888,11 @@ class AgentRunner:
                     if event.usage:
                         step_usage = _accumulate_usage(event.usage)
 
+            last_step_prompt_tokens = (
+                int(step_usage.get("input_tokens") or 0)
+                + int(step_usage.get("cache_read_tokens") or 0)
+                + int(step_usage.get("cache_write_tokens") or 0)
+            )
             if step_usage["input_tokens"] or step_usage["output_tokens"]:
                 for key in total_usage:
                     total_usage[key] += step_usage.get(key, 0)

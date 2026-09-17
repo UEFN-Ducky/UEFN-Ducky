@@ -184,10 +184,17 @@ def mechanical_digest(messages: list[dict[str, Any]], *, max_lines: int = 40) ->
     return "Earlier conversation (mechanical digest):\n" + "\n".join(lines)
 
 
-def context_memory_head(summary: str) -> dict[str, Any]:
+def context_memory_head(summary: str, *, conv_id: str = "") -> dict[str, Any]:
+    prefix = CONTEXT_MEMORY_PREFIX
+    cid = (conv_id or "").strip()
+    if cid:
+        prefix = (
+            f"{prefix}\nFull history: ducky_read_chat({cid!r}) — "
+            "search it if a detail is missing here."
+        )
     return {
         "role": "user",
-        "content": f"{CONTEXT_MEMORY_PREFIX}\n\n{(summary or '').strip()}",
+        "content": f"{prefix}\n\n{(summary or '').strip()}",
     }
 
 
@@ -197,6 +204,7 @@ def build_compacted_messages(
     keep_last: int = 20,
     context_summary: str = "",
     context_summary_through: int = 0,
+    conv_id: str = "",
 ) -> list[dict[str, Any]]:
     """Append-only prompt view: frozen epoch head + messages[through:]. Never mutates ``messages``.
 
@@ -207,7 +215,7 @@ def build_compacted_messages(
     through = int(context_summary_through or 0)
     if through > 0 and summary:
         through = min(through, len(messages))
-        return [context_memory_head(summary)] + list(messages[through:])
+        return [context_memory_head(summary, conv_id=conv_id)] + list(messages[through:])
     return list(messages)
 
 
