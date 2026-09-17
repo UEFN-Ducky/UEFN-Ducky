@@ -124,15 +124,20 @@ def set_verse_texture_icon(
 
     texture_path: full path or bare name (T_Icon). Array rows: pass array_field + entry_index.
     """
-    result = send_command(
-        "set_verse_texture_icon",
-        {
-            "actor_path": actor_path,
-            "icon_field": icon_field,
-            "texture_path": texture_path,
-            "array_field": array_field,
-            "entry_index": entry_index,
-        },
+    result = run_with_build_retry(
+        lambda: send_command(
+            "set_verse_texture_icon",
+            {
+                "actor_path": actor_path,
+                "icon_field": icon_field,
+                "texture_path": texture_path,
+                "array_field": array_field,
+                "entry_index": entry_index,
+            },
+        ),
+        tool_name="set_verse_texture_icon",
+        actor_path=actor_path,
+        field=icon_field,
     )
     return tool_json(result, pretty=pretty)
 

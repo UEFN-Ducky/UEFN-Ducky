@@ -239,3 +239,10 @@ def test_get_verse_editables_computes_mangled_name():
     assert "hash_source" in body
     assert "readable" in body
     assert '"forbidden_until_compiled": []' in body
+
+
+def test_set_currency_config_entries_writes_extra_keys():
+    start = _SRC.index("def set_currency_config_entries")
+    body = _SRC[start : start + 1800]
+    assert 'if key in ("name", "CurrencyName", "display_order", "DisplayOrder")' in body
+    assert "_mangled_name(str(key))" in body

@@ -26,6 +26,8 @@ STALE_MARKERS: tuple[str, ...] = (
 )
 
 AUTO_RECOVERED = "compiled + reloaded listener"
+AUTO_RESYNCED = "resynced listener"
+UNKNOWN_FIELD_MARKER = "Unknown Verse field"
 NEXT_FIX_ERRORS = "fix the Verse errors, then retry"
 NEXT_OPEN_UEFN = "Open the project in UEFN and run workspace_compile_verse, then retry once"
 NEXT_STALE_LOCKED = (
@@ -45,6 +47,11 @@ def is_stale_reflection_error(text: str | None) -> bool:
         return False
     low = text.lower()
     return any(marker.lower() in low for marker in STALE_MARKERS)
+
+
+def is_unknown_verse_field_error(text: str | None) -> bool:
+    """Pre-CRC32 AppData listener: hash cache miss, not a missing Verse field."""
+    return bool(text) and UNKNOWN_FIELD_MARKER.lower() in text.lower()
 
 
 def _actor_idents(actor_path: str) -> tuple[str, ...]:
@@ -184,6 +191,17 @@ def _reload_listener() -> str:
         return f"reload_listener failed: {exc}"
 
 
+def _resync_stale_listener() -> str:
+    """Force AppData listener copy from this EXE, then reload UEFN Python."""
+    try:
+        from frontend.deploy import sync_listener_to_appdata
+
+        sync_listener_to_appdata(force=True)
+    except Exception as exc:  # noqa: BLE001 — still try reload; retry may work
+        return f"sync_listener_to_appdata failed: {exc}"
+    return _reload_listener()
+
+
 def run_with_build_retry(
     call: Callable[[], Any],
     *,
@@ -193,9 +211,12 @@ def run_with_build_retry(
 ) -> Any:
     """Call *call*; on a stale-reflection failure compile Verse, reload the listener, retry once.
 
+    ``Unknown Verse field`` is a stale AppData listener (pre-CRC32), not a missing
+    Verse field — force-sync the listener, reload, retry once. No Verse compile.
+
     Returns whatever ``call()`` returns. A recovered retry result carries
-    ``auto_recovered`` = ``"compiled + reloaded listener"``. Non-stale failures
-    are returned / re-raised unchanged.
+    ``auto_recovered`` = ``"compiled + reloaded listener"`` or ``"resynced listener"``.
+    Non-stale failures are returned / re-raised unchanged.
 
     A field that stays stale after that retry is locked so the next wire_* on
     the same device+field does not compile, hit the editor, or write another
@@ -219,6 +240,17 @@ def run_with_build_retry(
             return result
 
     _record_failure(tool_name, err)
+    if is_unknown_verse_field_error(err):
+        _resync_stale_listener()
+        try:
+            retried = call()
+        except Exception as exc:  # noqa: BLE001 — one resync only; no Verse compile
+            raise exc
+        err2 = error_text(retried)
+        if err2 is None:
+            return add_field(retried, "auto_recovered", AUTO_RESYNCED)
+        return retried
+
     if not is_stale_reflection_error(err):
         if raised is not None:
             raise raised

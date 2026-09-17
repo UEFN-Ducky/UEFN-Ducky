@@ -113,6 +113,42 @@ def listener_tree_stamp(root: Path) -> str:
 
 
 _DEPLOY_STAMP_NAME = ".deploy_stamp"
+_MANGLED_NAME_MARKER = "def verse_mangled_name"
+
+
+def _running_app_version() -> str:
+    try:
+        from frontend import __version__
+
+        return str(__version__)
+    except Exception:
+        return ""
+
+
+def _write_deploy_stamp(dest: Path, recency: float) -> None:
+    (dest / _DEPLOY_STAMP_NAME).write_text(
+        f"{_running_app_version()}\n{recency:.3f}\n",
+        encoding="utf-8",
+    )
+
+
+def _read_deploy_stamp(dest: Path) -> tuple[str, float]:
+    """``(version, recency)``. Empty version = pre-version float stamp → always recopy."""
+    stamp = dest / _DEPLOY_STAMP_NAME
+    try:
+        text = stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "", _source_recency(dest) if dest.is_dir() else 0.0
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        try:
+            return lines[0], float(lines[1])
+        except ValueError:
+            pass
+    try:
+        return "", float(lines[0] if lines else text)
+    except (ValueError, IndexError):
+        return "", _source_recency(dest) if dest.is_dir() else 0.0
 
 
 def _source_recency(src: Path) -> float:
@@ -135,14 +171,27 @@ def _source_recency(src: Path) -> float:
     return latest
 
 
-def _dest_recency(dest: Path) -> float:
-    stamp = dest / _DEPLOY_STAMP_NAME
+def _listener_core_stale(dest: Path) -> bool:
+    """True when AppData is the pre-CRC32 listener (lookup-then-fail Unknown Verse field)."""
+    editor = dest / "listener" / "verse_editable_editor.py"
     try:
-        return float(stamp.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        pass
-    # No stamp file (e.g. a manual hot-deploy copy) — fall back to tree mtimes.
-    return _source_recency(dest) if dest.is_dir() else 0.0
+        return _MANGLED_NAME_MARKER not in editor.read_text(encoding="utf-8")
+    except OSError:
+        return True
+
+
+def _should_skip_core_copy(*, pinned: bool, dest: Path, src_recency: float) -> bool:
+    """Skip only when this app version already shipped and dest is not older.
+
+    Version mismatch / bare-float stamps always recopy. Same-version newest-wins
+    still protects an older EXE from clobbering a newer AppData tree.
+    """
+    if _listener_core_stale(dest):
+        return False
+    stamp_ver, dest_recency = _read_deploy_stamp(dest)
+    if stamp_ver != _running_app_version():
+        return False
+    return abs(dest_recency - src_recency) <= 0.001 or (not pinned and dest_recency > src_recency)
 
 
 def _overlay_plugin_listeners(listener_root: Path) -> bool:
@@ -238,13 +287,8 @@ def overlay_plugin_listeners_to_appdata(*, reload: bool = True) -> bool:
             return False
         dest = synced
     changed = _overlay_plugin_listeners(dest)
-    if changed:
-        # Bump stamp so ship_newest / ping comparisons see a new tree.
-        try:
-            stamp = dest / _DEPLOY_STAMP_NAME
-            stamp.write_text(f"{_source_recency(dest):.3f}", encoding="utf-8")
-        except OSError:
-            pass
+    # Do not rewrite .deploy_stamp here — overlay mtimes used to look newer than
+    # the EXE and skip copying a new core (Unknown Verse field on stale listener).
     if reload:
         try:
             from backend.bridge import send_command
@@ -255,13 +299,14 @@ def overlay_plugin_listeners_to_appdata(*, reload: bool = True) -> bool:
     return changed
 
 
-def sync_listener_to_appdata() -> Path | None:
+def sync_listener_to_appdata(*, force: bool = False) -> Path | None:
     """Copy the listener source to ``%LOCALAPPDATA%/UEFN-Ducky/listener`` — NEWEST WINS.
 
     Called on UEFN-Ducky.exe / bridge launch. An old frozen exe must never clobber newer
     code already in AppData (repo hot-deploys, a newer exe's deploy) — that race shipped
     stale crash-prone handlers mid-session on 2026-07-11. ``UEFN_DUCKY_LISTENER_SRC``
-    stays authoritative (explicit pin → always overwrites).
+    stays authoritative (explicit pin → always overwrites). ``force=True`` recopies
+    even when the stamp says current (heal a skipped CRC32 listener).
 
     After the core tree is in place, enabled Store plugins' ``listener/`` folders are
     overlaid into ``listener/plugins/<plugin_id>/``.
@@ -273,16 +318,16 @@ def sync_listener_to_appdata() -> Path | None:
 
     pinned = bool((os.environ.get("UEFN_DUCKY_LISTENER_SRC") or "").strip())
     src_recency = _source_recency(src)
-    if dest.is_dir():
-        dest_recency = _dest_recency(dest)
-        if abs(dest_recency - src_recency) <= 0.001 or (not pinned and dest_recency > src_recency):
-            # Core tree already current — still refresh plugin overlays + user init.
-            _overlay_plugin_listeners(dest)
-            try:
-                refresh_inits()
-            except Exception:
-                pass
-            return dest
+    if dest.is_dir() and not force and _should_skip_core_copy(
+        pinned=pinned, dest=dest, src_recency=src_recency
+    ):
+        # Core tree already current — still refresh plugin overlays + user init.
+        _overlay_plugin_listeners(dest)
+        try:
+            refresh_inits()
+        except Exception:
+            pass
+        return dest
 
     # Every panel and coding-agent bridge is a separate process. A shared
     # listener.tmp lets simultaneous startups delete/copy each other's partial
@@ -295,7 +340,7 @@ def sync_listener_to_appdata() -> Path | None:
         if not (tmp / "listener" / "__init__.py").is_file() or not (tmp / "listener" / "config.py").is_file():
             raise OSError("Listener source copy is incomplete")
         _overlay_plugin_listeners(tmp)
-        (tmp / _DEPLOY_STAMP_NAME).write_text(f"{src_recency:.3f}", encoding="utf-8")
+        _write_deploy_stamp(tmp, src_recency)
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
         os.replace(tmp, dest)

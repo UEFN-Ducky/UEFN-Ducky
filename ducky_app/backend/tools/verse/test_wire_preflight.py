@@ -202,3 +202,34 @@ def test_host_wrapper_wire_array_accepts_many_targets(monkeypatch):
     assert sent[-1][1]["replace"] is True and sent[-1][1]["target_paths"] == ["M1"]
     with pytest.raises(ValueError, match="at least one"):
         ve.wire_verse_device_array("Dev", "Markers")
+
+
+UNKNOWN = "Unknown Verse field 'CurrencyConfigs' — not on this device's Script."
+
+
+def test_unknown_verse_field_resyncs_listener_then_retries(monkeypatch):
+    calls = _install_fakes(monkeypatch)
+    synced: list[bool] = []
+
+    def _sync(*, force: bool = False):
+        synced.append(force)
+        return None
+
+    monkeypatch.setattr("frontend.deploy.sync_listener_to_appdata", _sync)
+    call, state = _flaky(1, error=UNKNOWN)
+    out = wp.run_with_build_retry(call, tool_name="set_currency_config_entries")
+    assert out["ok"] is True
+    assert out["auto_recovered"] == "resynced listener"
+    assert state["n"] == 2
+    assert synced == [True]
+    assert calls == {"compile": 0, "reload": 1}
+
+
+def test_unknown_verse_field_second_failure_propagates_without_compile(monkeypatch):
+    calls = _install_fakes(monkeypatch)
+    monkeypatch.setattr("frontend.deploy.sync_listener_to_appdata", lambda **_k: None)
+    call, state = _flaky(5, error=UNKNOWN)
+    with pytest.raises(RuntimeError, match="Unknown Verse field"):
+        wp.run_with_build_retry(call, tool_name="set_currency_config_entries")
+    assert state["n"] == 2
+    assert calls == {"compile": 0, "reload": 1}

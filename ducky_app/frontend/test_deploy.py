@@ -23,6 +23,10 @@ def _listener_source(root: Path) -> Path:
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "config.py").write_text("PROTOCOL_VERSION = 'test'\n", encoding="utf-8")
+    (package / "verse_editable_editor.py").write_text(
+        "def verse_mangled_name(field: str) -> str:\n    return field\n",
+        encoding="utf-8",
+    )
     return source
 
 
@@ -256,3 +260,62 @@ def test_resolve_uefn_project_root_rejects_unrelated_folder(tmp_path: Path) -> N
     other.mkdir()
     with pytest.raises(ValueError, match="UEFN project folder"):
         deploy.resolve_uefn_project_root(other)
+
+
+def test_newer_app_version_recopies_even_when_dest_stamp_is_newer(tmp_path, monkeypatch) -> None:
+    source = _listener_source(tmp_path)
+    destination = tmp_path / "appdata" / "listener"
+    monkeypatch.setattr(deploy, "_source_listener_dir", lambda: source)
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: destination)
+    monkeypatch.setattr(deploy, "_running_app_version", lambda: "1.2.131")
+
+    assert deploy.sync_listener_to_appdata() == destination
+    sentinel = destination / "keep-if-not-recopied"
+    sentinel.write_text("present", encoding="utf-8")
+    (destination / deploy._DEPLOY_STAMP_NAME).write_text("1.2.130\n9999999999.000\n", encoding="utf-8")
+
+    assert deploy.sync_listener_to_appdata() == destination
+    assert not sentinel.is_file()
+    version, recency = deploy._read_deploy_stamp(destination)
+    assert version == "1.2.131"
+    assert recency == pytest.approx(deploy._source_recency(source), abs=0.001)
+
+
+def test_overlay_does_not_bump_core_stamp(tmp_path, monkeypatch) -> None:
+    source = _listener_source(tmp_path)
+    destination = tmp_path / "appdata" / "listener"
+    monkeypatch.setattr(deploy, "_source_listener_dir", lambda: source)
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: destination)
+    monkeypatch.setattr(deploy, "_overlay_plugin_listeners", lambda _dest: True)
+    monkeypatch.setattr("backend.bridge.send_command", lambda *a, **k: {"ok": True})
+
+    assert deploy.sync_listener_to_appdata() == destination
+    before = (destination / deploy._DEPLOY_STAMP_NAME).read_text(encoding="utf-8")
+    assert deploy.overlay_plugin_listeners_to_appdata(reload=False) is True
+    assert (destination / deploy._DEPLOY_STAMP_NAME).read_text(encoding="utf-8") == before
+
+
+def test_missing_verse_mangled_name_forces_copy(tmp_path, monkeypatch) -> None:
+    source = _listener_source(tmp_path)
+    destination = tmp_path / "appdata" / "listener"
+    monkeypatch.setattr(deploy, "_source_listener_dir", lambda: source)
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: destination)
+    monkeypatch.setattr(deploy, "_running_app_version", lambda: "1.2.130")
+
+    assert deploy.sync_listener_to_appdata() == destination
+    sentinel = destination / "keep-if-not-recopied"
+    sentinel.write_text("present", encoding="utf-8")
+    (destination / "listener" / "verse_editable_editor.py").write_text(
+        "def _mangled_name(field):\n    raise ValueError('Unknown Verse field')\n",
+        encoding="utf-8",
+    )
+    src_recency = deploy._source_recency(source)
+    (destination / deploy._DEPLOY_STAMP_NAME).write_text(
+        f"1.2.130\n{src_recency:.3f}\n", encoding="utf-8"
+    )
+
+    assert deploy.sync_listener_to_appdata() == destination
+    assert not sentinel.is_file()
+    assert "def verse_mangled_name" in (
+        destination / "listener" / "verse_editable_editor.py"
+    ).read_text(encoding="utf-8")

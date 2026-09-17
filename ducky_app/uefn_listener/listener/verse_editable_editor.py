@@ -1555,7 +1555,8 @@ def set_currency_config_entries(
     """Create ``CurrencyConfigs`` rows on a player wallet Verse device.
 
     Pass ``entries`` as list of dicts with ``name`` (or ``CurrencyName``) and optional
-    ``display_order`` / ``DisplayOrder``. Or pass ``count`` alone for empty rows.
+    ``display_order`` / ``DisplayOrder``. Extra keys (``Disabled``, …) are written
+    via computed mangled names. Or pass ``count`` alone for empty rows.
     """
     actor = lookup.require_actor(actor_path)
     script = _verse_script(actor)
@@ -1572,6 +1573,10 @@ def set_currency_config_entries(
                 entry.set_editor_property(name_prop, str(name))
                 order = spec.get("display_order", spec.get("DisplayOrder", i))
                 entry.set_editor_property(order_prop, int(order))
+                for key, value in spec.items():
+                    if key in ("name", "CurrencyName", "display_order", "DisplayOrder"):
+                        continue
+                    entry.set_editor_property(_mangled_name(str(key)), value)
             built.append(entry)
         script.set_editor_property(prop, built)
         script.modify()
