@@ -133,9 +133,6 @@ export function AccountTab() {
   const pollRef = useRef(0);
   const loggedInRef = useRef(false);
   loggedInRef.current = Boolean(status?.logged_in);
-  const pairingCodeRef = useRef("");
-  pairingCodeRef.current = pairingCode;
-  const pendingProfileOpenRef = useRef(false);
 
   const stopLoginUi = useCallback(() => {
     if (pollRef.current) {
@@ -143,38 +140,9 @@ export function AccountTab() {
       pollRef.current = 0;
     }
     loginRpcInFlight = false;
-    pendingProfileOpenRef.current = false;
     setBusy(false);
     setPairingCode("");
   }, []);
-
-  const openProfilePair = useCallback(
-    (code: string) => {
-      const c = String(code || "").trim();
-      if (!c) return;
-      const path = `/profile?pair=${encodeURIComponent(c)}`;
-      const api = getApi();
-      if (api && typeof api.duckyos_open_teams_site === "function") {
-        void api.duckyos_open_teams_site(path);
-        return;
-      }
-      const base = (status?.base_url || baseUrl || DEFAULT_BASE).replace(/\/$/, "");
-      window.open(`${base}${path}`, "_blank");
-    },
-    [baseUrl, status?.base_url],
-  );
-
-  const offerPairCode = useCallback(
-    (code: string) => {
-      const c = String(code || "").trim();
-      if (!c) return;
-      setPairingCode(c);
-      if (!pendingProfileOpenRef.current) return;
-      pendingProfileOpenRef.current = false;
-      openProfilePair(c);
-    },
-    [openProfilePair],
-  );
 
   const handleBrowserLogin = useCallback(() => {
     const api = getApi();
@@ -186,7 +154,7 @@ export function AccountTab() {
       pollRef.current = window.setInterval(() => {
         void api.duckyos_get_status?.().then((s) => {
           if (!s) return;
-          if (s.user_code) offerPairCode(s.user_code);
+          if (s.user_code) setPairingCode(s.user_code);
           if (s.logged_in) {
             applyStatus(s);
             stopLoginUi();
@@ -199,7 +167,7 @@ export function AccountTab() {
     void (async () => {
       try {
         const next = await api.duckyos_login(baseUrl.trim() || DEFAULT_BASE);
-        if (next.user_code) offerPairCode(next.user_code);
+        if (next.user_code) setPairingCode(next.user_code);
         if (next.logged_in) {
           applyStatus(next);
           stopLoginUi();
@@ -222,7 +190,7 @@ export function AccountTab() {
         stopLoginUi();
       }
     })();
-  }, [applyStatus, baseUrl, offerPairCode, stopLoginUi]);
+  }, [applyStatus, baseUrl, stopLoginUi]);
 
   useEffect(() => {
     const onLogin = () => {
@@ -465,14 +433,6 @@ export function AccountTab() {
               type="button"
               className="account-tab-btn account-tab-btn--primary"
               onClick={() => {
-                const existing = pairingCodeRef.current.trim();
-                if (existing) {
-                  pendingProfileOpenRef.current = false;
-                  handleBrowserLogin();
-                  openProfilePair(existing);
-                  return;
-                }
-                pendingProfileOpenRef.current = true;
                 handleBrowserLogin();
               }}
             >
