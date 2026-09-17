@@ -66,15 +66,17 @@ AGENT_HARD_RULES = (
     "Devices subfolders) — **never** `/Fortnite` (UI gallery only). Small `limit`; paginate "
     "with `offset`/`limit`/`fields`. Catalog map: "
     '`skill_read_subskill("leveldesign", "content_catalog")`.\n'
-    "- **Place like Content Drawer (HARD):** search `/Game/Creative/**` → spawn only "
-    "the Actor Blueprint (`…_C`) the Drawer would drop (Epic ActorTools and leftover "
-    "`spawn_actor` alike). Skip `StaticMesh` / FortStaticMeshActor / `/BakeData/` / "
-    "`/HLOD/` / `SM_*` mesh hits — page or search again. Epic ActorTools / "
-    "ProgrammaticToolset have **no** mesh guard; a wrong class there cook-fails. "
-    "Never spawn a mesh and fix later. Trees: `foliage_list_sources` then "
+    "- **Place like Content Drawer (HARD):** search `/Game/Creative/**` → keep only "
+    "the Actor Blueprint (`…_C`) the Drawer would drop. **5+ pieces:** Programmatic "
+    "`execute_tool_script` → `SceneTools.add_to_scene_from_class` with "
+    "`actor_type.refPath` = `Package.Asset_C`, then `set_actor_folder`. **Never** "
+    "`add_to_scene_from_asset` on `/Game/Creative` — that spawns FortStaticMeshActor "
+    "and cook-fails. Skip `StaticMesh` / `/BakeData/` / `/HLOD/` / `SM_*` / `…/Meshes/`. "
+    "Leftover `spawn_actor(asset_path=…_C, label=…, folder=…)` only for props Epic "
+    "cannot place. Trees: `foliage_list_sources` then "
     "`foliage_scatter(sources=those `_C` paths)`, or "
     '`search_assets(search="Tree", directory="/Game/Creative/Environments")` then '
-    "Epic ActorTools / `spawn_actor` on the `…_C` class.\n"
+    "`add_to_scene_from_class` / leftover `spawn_actor` on the `…_C` class.\n"
     "- Verse `*_device` names are **API types** — never "
     '`spawn_actor(actor_class="teleporter_device")`. Place Creative devices via Epic '
     "`unreal__call_tool` → `ValkyrieToolset.DeviceToolset` (`PlaceDevice`, "
@@ -187,6 +189,14 @@ AGENT_HARD_RULES = (
     '`workspace_list_dir("Verse")` then `workspace_write_file("Verse/<System>/<file>.verse", …)` '
     "(parents auto-created). Only `module_declarations.verse` (+ tiny helpers) at Verse "
     'root. Details: `skill_read_subskill("verse", "modules")`.\n'
+    "- **Separate systems (HARD):** currency, XP/levels, player registry, playtime are "
+    "their own packs for **every** island (`player_core`, `economy`, `progression`, "
+    "`time_tracker`). Tycoon / shop / arena / any mode **consume** them via "
+    "`player_manager` `?option` slots (`GetCurrencyProvider`, `GetXPAwarder`) — they "
+    "never own a wallet, `currency_config`, XP table, or second `player_manager`. "
+    '`workspace_list_dir("Verse")` first; missing folder → `verse_template_apply` that '
+    "pack. Never invent `tycoon_currency` inside `Verse/Tycoon/`. Details: "
+    '`skill_read_subskill("verse", "sys_architecture")`.\n'
     "- **Project assets only:** `create_material` / `create_material_instance` / "
     "`create_niagara_system` / `create_widget_blueprint` / `create_data_table` / "
     "`create_folder` / `import_asset` / `duplicate_asset` / `rename_asset` / "

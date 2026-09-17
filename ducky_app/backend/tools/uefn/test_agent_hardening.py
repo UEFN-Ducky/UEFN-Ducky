@@ -75,8 +75,8 @@ def test_hard_rules_place_like_content_drawer():
     assert "Place like Content Drawer" in AGENT_HARD_RULES
     assert "FortStaticMeshActor" in AGENT_HARD_RULES
     assert "BakeData" in AGENT_HARD_RULES
-    assert "mesh guard" in AGENT_HARD_RULES
-    assert "fix later" in AGENT_HARD_RULES
+    assert "add_to_scene_from_class" in AGENT_HARD_RULES
+    assert "add_to_scene_from_asset" in AGENT_HARD_RULES
     # Fortnite catalog is allowed; the cook bug is placement method, not the folder.
     assert "never spawn or scatter" not in AGENT_HARD_RULES
 
@@ -202,6 +202,14 @@ def test_get_verse_editables_skips_uasset_walk():
     assert "_SCRIPT_PROPS_CACHE[cls_name] = found" in fn
     assign_at = fn.index("_SCRIPT_PROPS_CACHE[cls_name] = found")
     assert "if found" in fn[:assign_at]
+
+
+def test_hard_rules_separate_systems():
+    assert "Separate systems" in AGENT_HARD_RULES
+    assert "GetCurrencyProvider" in AGENT_HARD_RULES
+    assert "GetXPAwarder" in AGENT_HARD_RULES
+    assert "tycoon_currency" in AGENT_HARD_RULES
+    assert "sys_architecture" in AGENT_HARD_RULES
 
 
 def test_hard_rules_verse_build_lifecycle():
@@ -509,6 +517,7 @@ if __name__ == "__main__":
     test_hard_rules_forbid_project_side_storage_except_ducky()
     test_hard_rules_forbid_digest_mutation()
     test_hard_rules_write_boundary_content_and_ducky()
+    test_hard_rules_separate_systems()
     test_hard_rules_verse_build_lifecycle()
     test_digest_path_guard_blocks_writes()
     test_writable_project_path_allowlist()
