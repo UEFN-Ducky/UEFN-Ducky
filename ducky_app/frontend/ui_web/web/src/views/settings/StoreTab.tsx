@@ -36,6 +36,7 @@ import {
   consumeStoreCategoryRequest,
   consumeStoreInstallRequest,
   peekStoreInstallRequest,
+  storeHistoryYieldsToDeepLink,
 } from "../../navigation/deepLinks";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
@@ -121,7 +122,9 @@ export function StoreTab() {
   const [actionBusy, setActionBusy] = useState<Record<string, true>>({});
   const [error, setError] = useState("");
   const [detailItem, setDetailItem] = useState<DuckyOSStoreItemDto | null>(null);
-  const [pendingDetailSlug, setPendingDetailSlug] = useState<string | null>(null);
+  const [pendingDetailSlug, setPendingDetailSlug] = useState<string | null>(
+    () => peekStoreInstallRequest()?.slug ?? null,
+  );
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [uninstallItem, setUninstallItem] = useState<DuckyOSStoreItemDto | null>(null);
   const [uninstallLabels, setUninstallLabels] = useState<string[]>([]);
@@ -938,6 +941,22 @@ export function StoreTab() {
 
   const pendingStoreSlug = useRef<string | null>(null);
   const applyStoreDrill = useCallback((loc: SettingsNavLocation) => {
+    const locSlug = loc.drill?.type === "store" ? String(loc.drill.slug || "") : "";
+    if (storeHistoryYieldsToDeepLink(locSlug)) {
+      const deep = peekStoreInstallRequest();
+      if (!deep) return;
+      setActiveSection(null);
+      setPendingDetailSlug(deep.slug);
+      const item = allItems.find((i) => (i.slug || "").toLowerCase() === deep.slug);
+      if (item) {
+        consumeStoreInstallRequest();
+        setPendingDetailSlug(null);
+        setDetailItem(item);
+      } else {
+        setDetailItem(null);
+      }
+      return;
+    }
     const drill = loc.drill?.type === "store" ? loc.drill : null;
     if (!drill || (!drill.section && !drill.slug)) {
       setDetailItem(null);
@@ -1295,6 +1314,7 @@ export function StoreTab() {
         <StoreDetailView
           item={detailItem}
           pendingSlug={pendingDetailSlug}
+          catalogReady={!catalogLoading}
           jobs={jobs}
           actionBusy={actionBusy}
           handlers={handlers}

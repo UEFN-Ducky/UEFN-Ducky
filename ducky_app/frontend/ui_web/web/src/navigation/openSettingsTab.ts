@@ -132,13 +132,29 @@ export function registerDuckyProfileDeepLink(fn: (epoch: number) => void): () =>
   return () => duckyDeepLinkConsumers.delete(fn);
 }
 
+/** Same key as deepLinks.STORE_INSTALL_KEY — inlined to avoid an import cycle. */
+const STORE_HANDSHAKE_KEY = "uefn-store-install";
+
+function hasPendingStoreHandshake(): boolean {
+  try {
+    return Boolean(sessionStorage.getItem(STORE_HANDSHAKE_KEY)?.trim());
+  } catch {
+    return false;
+  }
+}
+
 export function requestOpenSettings(
   tab?: SettingsTab,
   opts?: { duckyProfileId?: string; newDucky?: boolean; storeSlug?: string },
 ): void {
+  // uefn-ducky://store|<plugin>/<slug> wins over Account/plugin-tab steals.
+  let nextTab = tab ? normalizeSettingsTab(tab) : undefined;
+  if (nextTab && nextTab !== "Store" && (opts?.storeSlug || hasPendingStoreHandshake())) {
+    nextTab = "Store";
+  }
   const now = Date.now();
   const key = [
-    tab ? normalizeSettingsTab(tab) : "",
+    nextTab || "",
     opts?.storeSlug || "",
     opts?.duckyProfileId || "",
     opts?.newDucky ? "1" : "",
@@ -148,8 +164,8 @@ export function requestOpenSettings(
   lastRequestAt = now;
   lastRequestKey = key;
 
-  if (tab) {
-    pendingTab = normalizeSettingsTab(tab);
+  if (nextTab) {
+    pendingTab = nextTab;
     // Legacy sidebar tabs → nested header section (UiRpcBridge may also fire a finer section).
     if (tab === "Skills & MCP") {
       const section = readLastSettingsSections().llms === "mcps" || readLastSettingsSections().skillsMcp === "mcps"
@@ -192,7 +208,7 @@ export function requestOpenSettings(
   }
   flushPendingTab();
   if (opts?.duckyProfileId || opts?.newDucky) flushDuckyDeepLink();
-  emitAppHook("settings.opened", tab ? { tab: normalizeSettingsTab(tab) } : undefined);
+  emitAppHook("settings.opened", nextTab ? { tab: nextTab } : undefined);
 }
 
 /** DuckiesTab: consume a deep-link profile id once (clears after read). */

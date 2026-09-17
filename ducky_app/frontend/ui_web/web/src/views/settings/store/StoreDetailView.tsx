@@ -17,6 +17,8 @@ type Props = {
   item: DuckyOSStoreItemDto | null;
   /** Deep-link slug while the catalog row is still missing — never a blank pane. */
   pendingSlug?: string | null;
+  /** Catalog fetch finished — show a not-found pane instead of infinite loading. */
+  catalogReady?: boolean;
   /** Concurrent install/update jobs keyed by slug. */
   jobs: Record<string, CardBusy>;
   actionBusy: Record<string, true>;
@@ -25,7 +27,7 @@ type Props = {
 };
 
 /** Slide-in detail pane: identity + actions on the left, stats/about/tags on the right. */
-export function StoreDetailView({ item, pendingSlug, jobs, actionBusy, handlers, onBack }: Props) {
+export function StoreDetailView({ item, pendingSlug, catalogReady, jobs, actionBusy, handlers, onBack }: Props) {
   if (!item) {
     if (!pendingSlug) return null;
     return (
@@ -38,7 +40,9 @@ export function StoreDetailView({ item, pendingSlug, jobs, actionBusy, handlers,
             <span>Back</span>
           </button>
         </div>
-        <p className="ds-panel-desc">Loading {pendingSlug}…</p>
+        <p className="ds-panel-desc">
+          {catalogReady ? `No Plugins listing for ${pendingSlug}.` : `Loading ${pendingSlug}…`}
+        </p>
       </div>
     );
   }

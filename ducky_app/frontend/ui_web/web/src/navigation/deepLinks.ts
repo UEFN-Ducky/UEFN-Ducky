@@ -100,6 +100,13 @@ export function consumeStoreInstallRequest(): StoreDeepLink | null {
   return parsed;
 }
 
+/** Stale Store history (catalog / other slug) must not wipe an in-flight deep link. */
+export function storeHistoryYieldsToDeepLink(locSlug: string): boolean {
+  const pending = peekStoreInstallRequest();
+  if (!pending) return false;
+  return String(locSlug || "").toLowerCase() !== pending.slug;
+}
+
 /** Pending category filter for Store (e.g. Installed) — consumed by StoreTab. */
 export const STORE_CATEGORY_KEY = "uefn-store-category";
 

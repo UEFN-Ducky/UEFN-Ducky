@@ -9,6 +9,7 @@ describe("requestOpenSettings debounce", () => {
     t += 1000;
     vi.useFakeTimers();
     vi.setSystemTime(t);
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -39,6 +40,15 @@ describe("requestOpenSettings debounce", () => {
     requestOpenSettings("Store", { storeSlug: "meshy" });
     requestOpenSettings("Store", { storeSlug: "blender" });
     expect(fn).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("routes Account to Store while a store/<slug> handshake is pending", () => {
+    sessionStorage.setItem("uefn-store-install", JSON.stringify({ slug: "blender", install: false }));
+    const fn = vi.fn();
+    const stop = registerSettingsTabConsumer(fn);
+    requestOpenSettings("Account");
+    expect(fn.mock.calls.map((c) => c[0])).toEqual(["Store"]);
     stop();
   });
 });

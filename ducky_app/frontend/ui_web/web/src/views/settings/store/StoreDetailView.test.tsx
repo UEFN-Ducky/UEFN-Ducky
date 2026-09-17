@@ -33,4 +33,19 @@ describe("StoreDetailView pending slug", () => {
     );
     expect(container.innerHTML).toBe("");
   });
+
+  it("shows not-found copy when the catalog loaded without that slug", () => {
+    render(
+      <StoreDetailView
+        item={null}
+        pendingSlug="blender"
+        catalogReady
+        jobs={{}}
+        actionBusy={{}}
+        handlers={handlers}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText("No Plugins listing for blender.")).toBeTruthy();
+  });
 });

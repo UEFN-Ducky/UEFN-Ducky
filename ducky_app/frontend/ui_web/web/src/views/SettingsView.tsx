@@ -11,6 +11,7 @@ import {
   registerSettingsHistoryApplier,
   type SettingsNavLocation,
 } from "../navigation/settingsHistory";
+import { peekStoreInstallRequest, requestOpenStore } from "../navigation/deepLinks";
 import { useRecordSettingsLocation } from "../navigation/useSettingsHistory";
 import { CtrlWheelZoomRoot } from "../components/CtrlWheelZoomRoot";
 import { SplitResizeHandle } from "../components/SplitResizeHandle";
@@ -284,11 +285,6 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
   const [pluginsNavOpen, setPluginsNavOpen] = useState(readPluginsNavOpen);
   /** Store detail slug — highlights the matching row under Plugins. */
   const [storePluginFocus, setStorePluginFocus] = useState<string | null>(null);
-  /** Keep Store mounted after first visit so Update All Pending survives tab switches. */
-  const [storeMounted, setStoreMounted] = useState(() => activeTab === "Store");
-  useEffect(() => {
-    if (activeTab === "Store") setStoreMounted(true);
-  }, [activeTab]);
 
   useEffect(() => {
     const onFocus = (e: Event) => {
@@ -386,9 +382,17 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
       return;
     }
     if ((CORE_TABS as readonly string[]).includes(activeTab) || activeTab === "Support") return;
-    // Host builtin plugin tabs (ui id wired in BUILTIN_SETTINGS_UI) — keep while
-    // contrib list catches up after a remount / deep-link.
-    if (activeTab === "Discord" || activeTab === "Account" || activeTab === "Languages") return;
+    // Missing plugin settings tab (Account before install, anyone else's slug) →
+    // Plugins details, never a blank pane.
+    const slug = String(activeTab || "")
+      .trim()
+      .toLowerCase();
+    if (/^[a-z0-9][a-z0-9._-]*$/.test(slug)) {
+      if (!peekStoreInstallRequest()) requestOpenStore({ slug });
+      setActiveTab("Store");
+      rememberSettingsTab("Store");
+      return;
+    }
     setActiveTab("Store");
     rememberSettingsTab("Store");
   }, [activeTab, pluginTabs, pluginContrib.ready]);
@@ -621,15 +625,13 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
     return (
       <>
         {activeTab === "Support" && <SupportTab />}
-        {storeMounted ? (
-          <div
-            className="store-tab-host"
-            hidden={activeTab !== "Store"}
-            aria-hidden={activeTab !== "Store"}
-          >
-            <StoreTab />
-          </div>
-        ) : null}
+        <div
+          className="store-tab-host"
+          hidden={activeTab !== "Store"}
+          aria-hidden={activeTab !== "Store"}
+        >
+          <StoreTab />
+        </div>
         {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
         {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
         {activeTab === "General" && generalSection === "log_errors" && (
@@ -649,7 +651,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
         {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
       </>
     );
-  }, [activeTab, storeMounted, generalSection, logErrorsSection, plansSection, llmsSection, memorySection, audioSection, activePluginTab]);
+  }, [activeTab, generalSection, logErrorsSection, plansSection, llmsSection, memorySection, audioSection, activePluginTab]);
 
   return (
     <div className="settings-view no-drag">

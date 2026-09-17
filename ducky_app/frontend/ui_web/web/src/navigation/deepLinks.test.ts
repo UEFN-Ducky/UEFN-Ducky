@@ -11,6 +11,7 @@ import {
   parseStoreDeepLink,
   peekStoreInstallRequest,
   STORE_INSTALL_KEY,
+  storeHistoryYieldsToDeepLink,
 } from "./deepLinks";
 
 describe("uefn-ducky://store|plugin/<slug>", () => {
@@ -43,6 +44,23 @@ describe("uefn-ducky://store|plugin/<slug>", () => {
       slug: "account",
       install: true,
     });
+  });
+});
+
+describe("storeHistoryYieldsToDeepLink", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("lets catalog history wait while a store/<slug> handshake is live", () => {
+    sessionStorage.setItem(STORE_INSTALL_KEY, JSON.stringify({ slug: "blender", install: false }));
+    expect(storeHistoryYieldsToDeepLink("")).toBe(true);
+    expect(storeHistoryYieldsToDeepLink("meshy")).toBe(true);
+    expect(storeHistoryYieldsToDeepLink("blender")).toBe(false);
+  });
+
+  it("does not yield when no handshake is pending", () => {
+    expect(storeHistoryYieldsToDeepLink("")).toBe(false);
   });
 });
 
