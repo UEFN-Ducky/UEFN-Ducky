@@ -1,0 +1,26 @@
+<!doctype html><title>PC disabled status check</title><meta name="viewport" content="width=device-width">
+<style>:root{--ducky-color-accent:#fbb436;--ducky-color-text:#eee;--ducky-color-border:#333;--ducky-space-sm:8px}body{background:#111;color:#eee;font:15px system-ui;padding:24px}button{padding:12px}li{border:1px solid #444;border-radius:12px;list-style:none}.ducky-btn--primary{background:#fbb436;border:0;border-radius:12px;margin-top:auto}.ud-remote__pc-name{font-weight:bold}#results{white-space:pre-wrap}[hidden]{display:none!important}</style>
+<link rel="stylesheet" href="/shared.css"><link rel="stylesheet" href="/hero.disabled.css">
+<body data-page-path="/profile"><button id="run">Run status checks</button><pre id="results">Ready</pre><main id="app-content"><section class="ud-root ud-remote"><ul class="ud-remote__pcs"><li class="ud-remote__pc"><span class="ud-remote__pc-dot ud-remote__pc-dot--live"></span><span class="ud-remote__pc-name">Test PC</span><button class="ducky-btn ducky-btn--primary">Open</button></li></ul></section></main>
+<script>
+window.fixturePCs=[{keyId:'test',name:'Test PC',live:true,last_seen:1000}];
+window.fetch=async url=>new Response(JSON.stringify(url.endsWith('/auth/me')?{email:'test@example.com'}:{payload:{devices:window.fixturePCs}}),{status:200,headers:{'Content-Type':'application/json','x-ducky-csrf-token':'fixture'}});
+window.DuckyUI={modal:{open(){return Promise.resolve(false);}}};
+const results=document.querySelector('#results');
+const settle=()=>new Promise(r=>setTimeout(r,100));
+const assert=(v,t)=>{if(!v)throw Error(t);results.textContent+='PASS '+t+'\n';};
+document.querySelector('#run').onclick=async()=>{
+ results.textContent='';
+ try{
+ const card=document.querySelector('.ud-remote__pc'),dot=card.querySelector('.ud-remote__pc-dot'),open=card.querySelector('button');
+ async function state(live,last_seen){window.fixturePCs=[{keyId:'test',name:'Test PC',live,last_seen}];document.dispatchEvent(new Event('visibilitychange'));await settle();}
+ await state(true,1000);assert(dot.classList.contains('ud-remote__pc-dot--live')&&!open.disabled,'Enabled PC is green and opens');
+ await state(false,0);assert(dot.classList.contains('ud-remote__pc-dot--disabled')&&getComputedStyle(dot).backgroundColor==='rgb(251, 180, 54)','Desktop-disabled PC is yellow');
+ assert(card.querySelector('.ud-remote__pc-disabled').textContent==='Disabled from UEFN Ducky side','Desktop-disabled explanation is visible');
+ assert(open.disabled&&open.textContent==='Disabled','Disabled PC cannot open');
+ await state(true,2000);assert(dot.classList.contains('ud-remote__pc-dot--live')&&!card.querySelector('.ud-remote__pc-disabled')&&!open.disabled,'Re-enabled PC returns to green without reopening');
+ await state(false,1000);assert(dot.classList.contains('ud-remote__pc-dot--off')&&!card.querySelector('.ud-remote__pc-disabled'),'Offline is red, distinct from disabled');
+ await state(false,0);results.textContent+='ALL CHECKS PASSED';
+ }catch(e){results.textContent+='FAIL '+e.message;throw e;}
+};
+</script><script src="/hero.disabled.js"></script>

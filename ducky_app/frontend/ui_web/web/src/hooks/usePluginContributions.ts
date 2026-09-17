@@ -230,6 +230,7 @@ const EMPTY: PluginContributions = {
 };
 
 let _contrib: PluginContributions = EMPTY;
+let _contribSignature = "";
 const _listeners = new Set<() => void>();
 let _started = false;
 let _pollId: number | undefined;
@@ -278,41 +279,11 @@ async function refresh() {
             !!w && typeof w.id === "string" && Array.isArray(w.steps) && w.steps.length > 0,
         )
       : [];
-    const nextProviderIds = (
-      Array.isArray((next as { llm_providers?: Array<{ id?: string }> }).llm_providers)
-        ? (next as { llm_providers: Array<{ id?: string }> }).llm_providers
-        : []
-    )
-      .map((p) => String(p?.id || "").trim().toLowerCase())
-      .filter(Boolean)
-      .sort();
-    const prev = _contrib;
-    const prevProviderIds = prev.llm_providers.map((p) => p.id.trim().toLowerCase()).sort();
-    if (
-      prev.ready &&
-      prev.settings_tabs.length === settingsTabs.length &&
-      prev.settings_tabs.every(
-        (t, i) =>
-          t.id === settingsTabs[i]?.id &&
-          t.plugin_id === settingsTabs[i]?.plugin_id &&
-          t.label === settingsTabs[i]?.label,
-      ) &&
-      prev.enabled_ids.length === (Array.isArray(next.enabled_ids) ? next.enabled_ids.length : 0) &&
-      prev.enabled_ids.every(
-        (id, i) => id === (Array.isArray(next.enabled_ids) ? next.enabled_ids[i] : undefined),
-      ) &&
-      prevProviderIds.length === nextProviderIds.length &&
-      prevProviderIds.every((id, i) => id === nextProviderIds[i]) &&
-      prev.walkthroughs.length === nextWalkthroughs.length &&
-      prev.walkthroughs.every(
-        (w, i) =>
-          w.id === nextWalkthroughs[i]?.id &&
-          w.plugin_id === nextWalkthroughs[i]?.plugin_id &&
-          w.steps.length === nextWalkthroughs[i]?.steps.length,
-      )
-    ) {
-      return;
-    }
+    // Panel entries, UI routes and asset versions can change while tab labels
+    // and enabled IDs stay identical. Compare the complete payload so a Store
+    // update (including a late-arriving panel) cannot leave a stale registry.
+    const signature = JSON.stringify(next);
+    if (_contrib.ready && signature === _contribSignature) return;
     _setContrib({
       settings_tabs: settingsTabs,
       settings_sections: Array.isArray(next.settings_sections)
@@ -499,6 +470,7 @@ async function refresh() {
       enabled_ids: Array.isArray(next.enabled_ids) ? next.enabled_ids : [],
       ready: true,
     });
+    _contribSignature = signature;
   } catch {
     _pollMs = Math.min(_pollMs * 2, 8000);
   }

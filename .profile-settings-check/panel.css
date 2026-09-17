@@ -1,0 +1,223 @@
+.uefn-profile-panel{display:grid;gap:var(--ducky-space-xs);margin-bottom:var(--ducky-space-md)}.uefn-profile-panel h2{margin:0;font:var(--ducky-font-weightBold) var(--ducky-font-sizeH3) var(--ducky-font-heading);color:var(--ducky-color-text)}.uefn-profile-panel p{margin:0;font:var(--ducky-font-weightMedium) var(--ducky-font-sizeSm) var(--ducky-font-body);color:var(--ducky-color-textMuted)}
+/* Account tabs remain readable and easy to tap in the security modal. */
+#uefn-security-modal .registry-tabs {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap;
+  width: 100%; box-sizing: border-box; gap: 4px;
+}
+#uefn-security-modal .registry-tabs > .registry-tab-btn {
+  position: relative; z-index: 1; flex: 1 1 auto;
+  min-height: 44px; justify-content: center; padding: 10px 12px;
+}
+#uefn-security-modal .registry-tabs > .registry-tabs-indicator {
+  pointer-events: none; z-index: 0;
+}
+#uefn-security-modal .registry-tab-btn:focus-visible {
+  outline: 2px solid var(--ducky-color-accent); outline-offset: 2px;
+}
+
+
+/* Security modal: one heading, consistent fields and an explicit action area. */
+html body #uefn-security-modal .ducky-modal {
+  width: min(760px,calc(100vw - 24px)); max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px); min-width: 0; display: flex; flex-direction: column;
+}
+html body #uefn-security-modal .ducky-modal__header {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 20px 24px; flex: none;
+}
+html body #uefn-security-modal .ducky-modal__header h2 {
+  margin: 0; font-size: clamp(20px,3vw,24px); line-height: 1.25;
+}
+html body #uefn-security-modal .modal-close {
+  width: 44px; height: 44px; min-width: 44px; padding: 0; display: grid; place-items: center;
+}
+html body #uefn-security-modal .ducky-modal__body {
+  min-height: 0; overflow-y: auto; padding: 0 24px 24px;
+}
+html body #uefn-security-modal .b-account-security.ducky-card {
+  margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; width: 100%;
+}
+html body #uefn-security-modal .b-account-security > h3 { display: none; }
+html body #uefn-security-modal .b-account-security .account-security-body {
+  display: flex; flex-direction: column; gap: 24px; min-width: 0;
+}
+html body #uefn-security-modal .b-account-security .registry-tabs {
+  width: 100%; margin: 0; flex-wrap: nowrap; gap: 4px;
+}
+html body #uefn-security-modal .b-account-security .registry-tab-btn {
+  flex: 1 1 0; min-width: 0; gap: 8px; padding: 10px 8px; min-height: 44px;
+}
+html body #uefn-security-modal .b-account-security .ducky-tabs__panel[hidden] { display: none !important; }
+html body #uefn-security-modal .b-account-security .account-security__section {
+  margin: 0; min-width: 0; gap: 16px;
+}
+html body #uefn-security-modal .b-account-security .account-security__form {
+  display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; width: 100%; margin: 0;
+}
+html body #uefn-security-modal .account-security__form label {
+  display: grid; gap: 8px; font-weight: 600; margin-bottom: 8px;
+}
+html body #uefn-security-modal .account-security__form input {
+  width: 100%; min-width: 0; min-height: 48px; padding: 12px 14px; box-sizing: border-box;
+}
+html body #uefn-security-modal .account-security__form > p {
+  margin: 0; line-height: 1.5; overflow-wrap: anywhere; font-size: 14px;
+}
+html body #uefn-security-modal .b-account-security [data-acct-section="danger"] {
+  border-top: 1px solid var(--ducky-color-border); margin-top: 24px; padding-top: 24px;
+  align-items: stretch; text-align: left;
+}
+html body #uefn-security-modal .b-account-security .account-security__danger {
+  padding: 0; gap: 16px; align-items: flex-start; text-align: left;
+}
+html body #uefn-security-modal .b-account-security .account-security__danger-title {
+  max-width: none; font-size: 14px; line-height: 1.5; font-weight: 400; margin: 0;
+}
+html body #uefn-security-modal .b-account-security [data-acct-delete] {
+  align-self: flex-start; min-width: 0; min-height: 44px; padding: 10px 16px;
+}
+html body #uefn-security-modal .b-account-security .account-security__sessions {
+  margin: 0; padding: 0; gap: 12px; width: 100%;
+}
+html body #uefn-security-modal .b-account-security .account-security__session {
+  padding: 16px; gap: 16px; align-items: center; flex-wrap: wrap; min-width: 0;
+}
+html body #uefn-security-modal .b-account-security .account-security__copy {
+  flex: 1 1 220px; gap: 6px; overflow-wrap: anywhere;
+}
+html body #uefn-security-modal .b-account-security .account-security__row-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; max-width: 100%;
+}
+html body #uefn-security-modal .b-account-security .account-security__icon-btn {
+  width: auto; min-width: 44px; height: auto; min-height: 44px; padding: 10px 12px; gap: 8px;
+}
+html body #uefn-security-modal .account-security__icon-btn::after {
+  content: attr(aria-label); font-size: 14px; line-height: 1.3;
+}
+html body #uefn-security-modal .b-account-security [data-acct-revoke-others] {
+  align-self: flex-end; min-height: 44px; padding: 10px 16px; margin: 0;
+}
+@media (max-width: 600px) {
+  html body #uefn-security-modal .ducky-modal__header { padding: 16px; gap: 8px; }
+  html body #uefn-security-modal .ducky-modal__body { padding: 0 16px 16px; }
+  html body #uefn-security-modal .b-account-security .registry-tab-btn {
+    flex-direction: column; gap: 4px; font-size: 13px;
+  }
+    html body #uefn-security-modal .b-account-security .account-security__row-actions {
+    width: 100%; margin: 0;
+  }
+  html body #uefn-security-modal .b-account-security .account-security__icon-btn { flex: 1 1 auto; }
+}
+
+/* Profile header controls stay in normal flow; editing lives in General. */
+html body[data-page-path^="/profile"] #app-content .b-user-profile .user-profile-layout {
+  padding: 0 !important; flex-wrap: wrap !important; gap: 16px;
+}
+html body[data-page-path^="/profile"] #app-content .b-user-profile .user-profile-actions {
+  position: static !important; inset: auto !important; transform: none !important;
+  margin-left: auto; display: flex; align-items: center; align-self: center; gap: 8px;
+}
+html body #app-content .b-user-profile .user-profile-security-btn,
+html body #app-content .b-user-profile .user-profile-avatar-hover,
+html body #app-content .b-user-profile [data-profile-photo] { display: none !important; }
+html body #app-content .b-user-profile .user-profile-name-display,
+html body #app-content .b-user-profile .user-profile-avatar-btn { cursor: pointer; }
+html body #app-content .b-user-profile .user-profile-name-display {
+  overflow-wrap: anywhere; min-height: 44px; display: inline-flex; align-items: center;
+}
+html body #app-content .b-user-profile .user-profile-avatar-btn:focus-visible,
+html body #app-content .b-user-profile .user-profile-name-display:focus-visible {
+  outline: 2px solid var(--ducky-color-accent); outline-offset: 4px; border-radius: 8px;
+}
+
+/* Profile settings own their chrome outside the page content container. */
+html body #uefn-security-modal .b-account-security .registry-tabs {
+  display: flex !important; width: 100% !important; padding: 4px;
+  background: var(--ducky-color-sidebarBg, var(--ducky-color-cardBg));
+  border: 1px solid var(--ducky-color-border); border-radius: var(--ducky-radius-pill);
+  isolation: isolate; overflow: visible;
+}
+html body #uefn-security-modal .b-account-security .registry-tab-btn {
+  flex: 1 1 0 !important; width: auto !important; position: relative; z-index: 1;
+  background: transparent !important; border: 0; border-radius: var(--ducky-radius-pill);
+  color: var(--ducky-color-textMuted); display: inline-flex; align-items: center; justify-content: center;
+}
+html body #uefn-security-modal .b-account-security .registry-tab-btn.is-active {
+  color: var(--ducky-color-accentOn, #171717) !important;
+}
+html body #uefn-security-modal .b-account-security .registry-tabs-indicator {
+  display: block; position: absolute; z-index: 0; pointer-events: none;
+  background: var(--ducky-color-accent, #fbb436) !important; border-radius: var(--ducky-radius-pill);
+  box-shadow: var(--ducky-shadow-sm); box-sizing: border-box;
+}
+html body #uefn-security-modal .uefn-avatar-settings { margin: 0 0 8px; }
+html body #uefn-security-modal .uefn-avatar-change {
+  position: relative; display: inline-flex; align-items: center; gap: 20px;
+  padding: 4px; min-height: 80px; background: transparent; border: 0;
+  color: var(--ducky-color-text); text-align: left; cursor: pointer;
+}
+html body #uefn-security-modal .uefn-avatar-preview {
+  display: grid; place-items: center; flex: none; width: 72px; height: 72px;
+  border-radius: 50%; overflow: hidden; border: 1px solid var(--ducky-color-border);
+  background: var(--ducky-color-surfaceMuted, var(--ducky-color-sidebarBg)); font-size: 28px; font-weight: 600;
+}
+html body #uefn-security-modal .uefn-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+html body #uefn-security-modal .uefn-avatar-edit {
+  position: absolute; left: 52px; top: 52px; width: 28px; height: 28px; display: grid; place-items: center;
+  color: var(--ducky-color-accentOn, #171717); background: var(--ducky-color-accent, #fbb436);
+  border: 2px solid var(--ducky-color-cardBg); border-radius: 50%;
+}
+html body #uefn-security-modal .uefn-avatar-edit svg { width: 16px; height: 16px; }
+html body #uefn-security-modal .uefn-avatar-copy { display: grid; gap: 4px; }
+html body #uefn-security-modal .uefn-avatar-copy strong { font-size: 15px; font-weight: 600; }
+html body #uefn-security-modal .uefn-avatar-copy > span { font-size: 14px; color: var(--ducky-color-text); text-decoration: underline; text-underline-offset: 3px; }
+html body #uefn-security-modal .uefn-avatar-change:hover .uefn-avatar-copy > span { text-decoration: underline; }
+html body #uefn-security-modal .uefn-avatar-change:focus-visible {
+  outline: 2px solid var(--ducky-color-accent); outline-offset: 4px; border-radius: 12px;
+}
+html body #uefn-security-modal .uefn-avatar-settings [data-profile-photo] { display: none !important; }
+html body #uefn-security-modal [data-acct-profile] > label { margin: 0; font-size: 14px; }
+html body #uefn-security-modal .uefn-name-control { position: relative; min-width: 0; }
+html body #uefn-security-modal .uefn-name-control input {
+  padding-right: 92px; min-height: 56px; border: 1px solid var(--ducky-color-border);
+  border-radius: var(--ducky-radius-input,14px); color: var(--ducky-color-text);
+  background: var(--ducky-color-surfaceMuted,var(--ducky-color-sidebarBg));
+}
+html body #uefn-security-modal .uefn-name-control button[type="submit"] {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: auto; min-width: 72px; min-height: 44px; margin: 0; padding: 8px 14px;
+  border-radius: 10px; font-size: 14px;
+}
+html body #uefn-security-modal .uefn-account-details { display: grid; gap: 0; margin: 16px 0 0; }
+html body #uefn-security-modal .uefn-account-details > div {
+  display: grid; grid-template-columns: minmax(92px,1fr) minmax(0,3fr); gap: 20px;
+  padding: 16px 0; border-bottom: 1px solid var(--ducky-color-border); align-items: baseline;
+}
+html body #uefn-security-modal .uefn-account-details dt { font-size: 14px; font-weight: 500; color: var(--ducky-color-textMuted); }
+html body #uefn-security-modal .uefn-account-details dd { margin: 0; min-width: 0; }
+html body #uefn-security-modal .uefn-account-details dd p { margin: 0; font-size: 15px; color: var(--ducky-color-text); overflow-wrap: anywhere; }
+@media(max-width:420px) {
+  html body #uefn-security-modal .uefn-account-details > div { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* Account actions belong in General, outside the display name form. */
+html body #uefn-security-modal .uefn-account-logout {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--ducky-color-border);
+}
+html body #uefn-security-modal .uefn-account-logout h3 { margin: 0 0 4px; font-size: 15px; line-height: 1.4; }
+html body #uefn-security-modal .uefn-account-logout p { margin: 0; color: var(--ducky-color-textMuted); font-size: 14px; }
+html body #uefn-security-modal .uefn-account-logout form { margin: 0; flex: none; }
+html body #uefn-security-modal .uefn-account-logout .user-profile-logout-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: auto; min-width: 108px; min-height: 44px; height: auto; padding: 10px 16px;
+  border: 1px solid var(--ducky-color-border); border-radius: 12px;
+  background: transparent; color: var(--ducky-color-text); transform: none;
+}
+html body #uefn-security-modal .uefn-account-logout .user-profile-logout-btn span { display: inline !important; }
+html body #uefn-security-modal .uefn-account-logout .user-profile-logout-btn svg { width: 18px; height: 18px; flex: none; }
+html body #uefn-security-modal .uefn-account-logout .user-profile-logout-btn:hover { background: var(--ducky-color-surfaceMuted,var(--ducky-color-sidebarBg)); }
+html body #uefn-security-modal .uefn-account-logout .user-profile-logout-btn:focus-visible { outline: 2px solid var(--ducky-color-accent); outline-offset: 3px; }
+@media(max-width:420px) {
+  html body #uefn-security-modal .uefn-account-logout { align-items: flex-start; flex-direction: column; gap: 12px; }
+}

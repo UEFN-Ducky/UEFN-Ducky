@@ -49,7 +49,10 @@ def test_install_gate_waits_before_list_tools() -> None:
         return True
 
     try:
-        with patch.object(bridge_plugin_gate, "wait_until_plugins_loaded", _wait):
+        with (
+            patch.object(bridge_plugin_gate, "wait_until_plugins_loaded", _wait),
+            patch("backend.uefn_plugins.host.plugins_ready", return_value=False),
+        ):
             bridge_plugin_gate.install_bridge_plugin_gate(mcp, timeout=12.0)
             handler = server.request_handlers[LT]
             asyncio.run(handler(ListToolsRequest()))
@@ -62,6 +65,68 @@ def test_install_gate_waits_before_list_tools() -> None:
 
     assert waited == [12.0]
     assert listed == ["ok"]
+
+
+def test_list_tools_skips_wait_when_plugins_ready() -> None:
+    from backend.bridge import plugin_gate as bridge_plugin_gate
+    from backend.server import mcp
+    from mcp.types import ListToolsRequest as LT
+
+    waited: list[float] = []
+    listed: list[str] = []
+    cleared: list[int] = []
+
+    async def fake_list(_req):
+        listed.append("ok")
+        return SimpleNamespace(tools=[])
+
+    async def fake_call(_req):
+        return SimpleNamespace()
+
+    bridge_plugin_gate._installed = False
+    server = mcp._mcp_server
+    prev_list = server.request_handlers.get(LT)
+    prev_call = server.request_handlers.get(CallToolRequest)
+    server.request_handlers[LT] = fake_list
+    server.request_handlers[CallToolRequest] = fake_call
+
+    def _wait(timeout: float = 45.0) -> bool:
+        waited.append(timeout)
+        return True
+
+    def _clear(_mcp) -> None:
+        cleared.append(1)
+
+    try:
+        with (
+            patch.object(bridge_plugin_gate, "wait_until_plugins_loaded", _wait),
+            patch.object(bridge_plugin_gate, "clear_mcp_tool_cache", _clear),
+            patch("backend.uefn_plugins.host.plugins_ready", return_value=True),
+        ):
+            bridge_plugin_gate.install_bridge_plugin_gate(mcp, timeout=12.0)
+            handler = server.request_handlers[LT]
+            asyncio.run(handler(ListToolsRequest()))
+    finally:
+        if prev_list is not None:
+            server.request_handlers[LT] = prev_list
+        if prev_call is not None:
+            server.request_handlers[CallToolRequest] = prev_call
+        bridge_plugin_gate._installed = False
+
+    assert waited == []
+    assert cleared == []
+    assert listed == ["ok"]
+
+
+def test_cap_ui_result_truncates() -> None:
+    from frontend.ui_web.agent_modes import UI_TOOL_RESULT_MAX, _cap_ui_result
+
+    small = "ok"
+    assert _cap_ui_result(small) == small
+    big = "x" * (UI_TOOL_RESULT_MAX + 50)
+    out = _cap_ui_result(big)
+    assert len(out) < len(big)
+    assert "truncated" in out
 
 
 def test_call_tool_clears_stale_cache_for_missing_name() -> None:
@@ -146,6 +211,8 @@ def test_run_bridge_still_reaches_mcp_run_fast() -> None:
 if __name__ == "__main__":
     test_wait_plugins_loaded_timeout_false()
     test_install_gate_waits_before_list_tools()
+    test_list_tools_skips_wait_when_plugins_ready()
+    test_cap_ui_result_truncates()
     test_call_tool_clears_stale_cache_for_missing_name()
     test_run_bridge_still_reaches_mcp_run_fast()
     print("ok bridge_plugin_gate")

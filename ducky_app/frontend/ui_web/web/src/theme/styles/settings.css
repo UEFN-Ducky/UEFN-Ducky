@@ -2296,6 +2296,95 @@
 .account-tab-card--signed-in {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent);
+  gap: 20px;
+  min-width: 0;
+}
+
+.account-tab-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.account-tab-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--card));
+  color: var(--fg);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.account-tab-identity-text {
+  min-width: 0;
+}
+
+.account-tab-eyebrow {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-tab-name {
+  margin: 3px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.account-tab-account-email {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.account-tab-connection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 0;
+  border-block: 1px solid var(--border);
+}
+
+.account-tab-connection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.account-tab-device-name {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.account-tab-badge.account-tab-badge--muted {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.account-tab-card--signed-in .account-tab-actions {
+  margin-top: 0;
+}
+
+.account-tab-card--signed-in .account-tab-btn {
+  min-width: 104px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.account-tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .account-tab-card--caps .account-tab-subsection-title {
@@ -2620,6 +2709,32 @@
   padding: 0;
   display: grid;
   gap: 6px;
+}
+
+.account-tab-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.account-tab-sessions-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.account-tab-sessions .account-tab-btn {
+  align-self: flex-start;
+}
+
+.account-tab-sessions .account-tab-session-list li {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 0;
 }
 
 .account-tab-pc-list {

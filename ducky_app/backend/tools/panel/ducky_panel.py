@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Literal, Optional
 
@@ -126,15 +127,34 @@ async def ducky_get_tools(
     from backend.agent.tools import _slim_description, _slim_tool_schema, list_mcp_tools
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
 
+    n = (name or "").strip()
+    p = (pattern or "").strip()
+    lim = max(1, min(int(limit or 20), 50))
+
+    if not n and not p:
+        tools = await list_mcp_tools()
+        count = sum(
+            1
+            for t in tools
+            if str(getattr(t, "name", "") or "") not in EXCLUDED_TOOLS
+        )
+        return tool_json(
+            {
+                "count": count,
+                "hint": (
+                    "Pass name= or pattern= — empty catalog dumps stall the IDE. "
+                    "Then ducky_call_tool(name, arguments)."
+                ),
+            },
+            pretty=pretty,
+        )
+
     tools = await list_mcp_tools()
     by_name = {
         str(getattr(t, "name", "") or ""): t
         for t in tools
         if str(getattr(t, "name", "") or "") not in EXCLUDED_TOOLS
     }
-    n = (name or "").strip()
-    p = (pattern or "").strip()
-    lim = max(1, min(int(limit or 20), 50))
 
     if n:
         t = by_name.get(n)
@@ -221,17 +241,10 @@ async def ducky_get_tools(
             pretty=pretty,
         )
 
-    # Empty catalog — last resort (names + short blurbs only).
-    catalog = [
-        {"name": tname, "description": _truncate_desc(str(getattr(t, "description", "") or ""))}
-        for tname, t in sorted(by_name.items(), key=lambda kv: kv[0])
-    ]
     return tool_json(
         {
-            "catalog": catalog[:lim] if lim < len(catalog) else catalog,
-            "count": len(catalog),
-            "truncated": lim < len(catalog),
-            "hint": "Prefer pattern= or name=. Then ducky_call_tool(name, arguments).",
+            "count": len(by_name),
+            "hint": "Pass name= or pattern= — empty catalog dumps stall the IDE.",
         },
         pretty=pretty,
     )
@@ -275,9 +288,11 @@ async def ducky_call_tool(
     _ = (description or "").strip()
     result = await execute_tool(tool_name, args)
     if result.ok:
-        # Prefer raw tool payload (already JSON string from most tools).
-        data = result.data
-        if isinstance(data, str) and data.strip().startswith(("{", "[")):
+        from backend.agent.tool_spills import inline_or_spill
+
+        data = result.data if isinstance(result.data, str) else json.dumps(result.data)
+        data = inline_or_spill(tool_name, data)
+        if data.strip().startswith(("{", "[")):
             return data
         return tool_json({"ok": True, "tool": tool_name, "data": data}, pretty=pretty)
     return tool_json(

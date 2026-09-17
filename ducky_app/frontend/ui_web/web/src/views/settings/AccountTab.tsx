@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { onApiReady } from "../../hooks/onApiReady";
 import { getApi } from "../../hooks/usePanelApi";
-import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import type { DuckyOSAccountStatus, RemoteAccessStatus } from "../../types/panel";
 import {
   ACCOUNT_LOGIN_EVENT,
@@ -9,7 +8,6 @@ import {
 } from "../../navigation/deepLinks";
 import { DUCKYOS_ACCOUNT_CHANGED } from "../../navigation/openSettingsTab";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
-import { AgentCapsCard } from "./AgentCapsCard";
 
 const DEFAULT_BASE = "https://uefnducky.org";
 
@@ -21,10 +19,10 @@ function isIgnorableLoginCode(code: string | undefined): boolean {
 }
 
 export function AccountTab() {
-  const { confirm } = useConfirmModal();
   const [status, setStatus] = useState<DuckyOSAccountStatus | null>(null);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE);
   const [busy, setBusy] = useState(false);
+  const [accountAction, setAccountAction] = useState<"toggle" | "logout" | "disconnect" | null>(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [pairingCode, setPairingCode] = useState("");
@@ -232,7 +230,8 @@ export function AccountTab() {
   const handleLogout = () => {
     const api = getApi();
     if (!api?.duckyos_logout) return;
-    void run(() => api.duckyos_logout());
+    setAccountAction("logout");
+    void run(() => api.duckyos_logout()).finally(() => setAccountAction(null));
   };
 
   const openSite = (path = "/profile") => {
@@ -254,149 +253,168 @@ export function AccountTab() {
   }
 
   const loggedIn = Boolean(status?.logged_in);
-  const sessionList =
-    remote?.session_list && remote.session_list.length > 0
-      ? remote.session_list
-      : Array.from({ length: remote?.sessions ?? 0 }, (_, i) => ({
-          n: i + 1,
-          expires_in_s: 0,
-        }));
+  const displayName = status?.display_name?.trim() || status?.email?.trim() || "Ducky account";
+  const thisPc = pcs.find((pc) => pc.mine);
+  const sessions = remote?.session_list ?? Array.from(
+    { length: remote?.sessions ?? 0 },
+    (_, i) => ({ n: i + 1, expires_in_s: 0 }),
+  );
+  const accessState = !status?.device_key_active
+    ? "Not connected"
+    : !remote
+      ? "Checking connection…"
+      : remote.error
+        ? "Connection needs attention"
+        : !remote.enabled
+          ? "Disabled"
+          : remote.running
+            ? "Enabled"
+            : "Connecting…";
+  const accessDescription = !status?.device_key_active
+    ? "Log out and sign in again to connect this PC."
+    : !remote
+      ? "Checking browser access for this PC."
+      : remote.error
+        ? remote.error
+        : !remote.enabled
+          ? "Browser access is paused. Your account stays signed in."
+          : "Access this PC from your Ducky account in the browser.";
+
+  const handleToggle = async () => {
+    const api = getApi();
+    if (!api?.remote_set_enabled || !remote) return;
+    setBusy(true);
+    setAccountAction("toggle");
+    setError("");
+    try {
+      const next = await api.remote_set_enabled(!remote.enabled);
+      if (next.ok === false) {
+        setError(next.error || "Could not update browser access. Try again.");
+      } else {
+        setRemote(next);
+        if (next.error) setError(next.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      setAccountAction(null);
+    }
+  };
+
+  const handleDisconnectSessions = async () => {
+    const api = getApi();
+    if (!api?.remote_sign_out_all) return;
+    setBusy(true);
+    setAccountAction("disconnect");
+    setError("");
+    try {
+      const next = await api.remote_sign_out_all();
+      if (next.ok === false) {
+        setError(next.error || "Could not disconnect sessions. Try again.");
+      } else {
+        setRemote(next);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      setAccountAction(null);
+    }
+  };
 
   return (
     <div className="account-tab">
       <h2 className="account-tab-title">
         <span>Ducky Account</span>
-        <PluginWalkthroughReplayButton pluginId="account" label="Ducky Account" />
+        {!loggedIn && <PluginWalkthroughReplayButton pluginId="account" label="Ducky Account" />}
       </h2>
-      <p className="account-tab-lead">
-        Passwords never go through UEFN Ducky. Sign in on the website, then connect this PC with a one-time code.
-      </p>
+      {!loggedIn && (
+        <p className="account-tab-lead">
+          Sign in on the website, then connect this PC with a one-time code.
+          Your password stays on the website.
+        </p>
+      )}
 
       {error ? <div className="account-tab-error" role="alert">{error}</div> : null}
 
       {loggedIn ? (
-        <>
-          <div className="account-tab-card account-tab-card--signed-in">
-            <div className="account-tab-signed-row">
-              <span className="account-tab-badge">Signed in</span>
-              <span className="account-tab-email">{status?.email || "—"}</span>
+        <section className="account-tab-card account-tab-card--signed-in" aria-label="Connected account">
+          <div className="account-tab-identity">
+            <div className="account-tab-avatar" aria-hidden="true">
+              {Array.from(displayName)[0]?.toLocaleUpperCase()}
+            </div>
+            <div className="account-tab-identity-text">
+              <span className="account-tab-eyebrow">Signed in as</span>
+              <h3 className="account-tab-name">{displayName}</h3>
+              {status?.email && status.email !== displayName && (
+                <p className="account-tab-account-email">{status.email}</p>
+              )}
+            </div>
+          </div>
+          <div className="account-tab-connection">
+            <div className="account-tab-connection-heading">
+              <div>
+                <span className="account-tab-eyebrow">Browser access · This PC</span>
+                {thisPc?.name && <p className="account-tab-device-name">{thisPc.name}</p>}
+              </div>
+              <span className={`account-tab-badge${remote?.enabled && remote.running && !remote.error && status?.device_key_active ? "" : " account-tab-badge--muted"}`} role="status">
+                {accessState}
+              </span>
+            </div>
+            <p className="account-tab-body">{accessDescription}</p>
+          </div>
+          <div className="account-tab-actions">
+            <button
+              type="button"
+              className="account-tab-btn account-tab-btn--primary"
+              disabled={busy || !remote || !status?.device_key_active}
+              onClick={() => void handleToggle()}
+            >
+              {accountAction === "toggle" ? (remote?.enabled ? "Disabling…" : "Enabling…") : (remote?.enabled ? "Disable" : "Enable")}
+            </button>
+            <button
+              type="button"
+              className="account-tab-btn account-tab-btn--danger"
+              onClick={handleLogout}
+              disabled={busy}
+            >
+              {accountAction === "logout" ? "Logging out…" : "Log out"}
+            </button>
+          </div>
+          <p className="account-tab-meta">Log out disconnects this PC and removes the account from this app.</p>
+          <section className="account-tab-sessions" aria-label="Browser sessions">
+            <div className="account-tab-connection-heading">
+              <h3 className="account-tab-sessions-title">Browser sessions</h3>
+              {remote && <span className="account-tab-meta" role="status">{sessions.length} active</span>}
             </div>
             <p className="account-tab-meta">
-              {status?.device_key_active ? (
-                <strong className="account-tab-ok">This PC is connected</strong>
-              ) : (
-                <span className="account-tab-warn">This PC is not connected yet</span>
-              )}
+              Disconnect browser sessions to this PC. Your account stays signed in here.
             </p>
-            {pcs.length > 0 ? (
-              <ul className="account-tab-pc-list">
-                {pcs.map((pc) => (
-                  <li key={pc.keyId || pc.name}>
-                    <span>
-                      {pc.name || "UEFN Ducky"}
-                      {pc.mine ? " · this PC" : ""}
-                      {pc.live ? " · live" : " · offline"}
-                    </span>
-                    <button
-                      type="button"
-                      className="account-tab-btn account-tab-btn--danger"
-                      disabled={busy || !pc.keyId}
-                      onClick={() => {
-                        const keyId = String(pc.keyId || "");
-                        if (!keyId) return;
-                        void (async () => {
-                          const ok = await confirm({
-                            title: "Remove this PC?",
-                            message: "It will drop off uefnducky.org/ducky until you connect it again.",
-                            confirmLabel: "Remove",
-                            danger: true,
-                          });
-                          if (!ok) return;
-                          const api = getApi();
-                          if (!api?.duckyos_revoke_pc) return;
-                          setBusy(true);
-                          setError("");
-                          try {
-                            const next = await api.duckyos_revoke_pc(keyId);
-                            if (next.ok === false && next.error) setError(next.error);
-                            if (next.logged_in !== undefined) applyStatus(next);
-                            await refreshPcs();
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setBusy(false);
-                          }
-                        })();
-                      }}
-                    >
-                      Remove
-                    </button>
+            {sessions.length > 0 ? (
+              <ul className="account-tab-session-list">
+                {sessions.map((session) => (
+                  <li key={session.n}>
+                    <span>Browser session {session.n}</span>
+                    {session.expires_in_s > 0 && (
+                      <span>Expires in {Math.ceil(session.expires_in_s / 60)} min</span>
+                    )}
                   </li>
                 ))}
               </ul>
-            ) : null}
-            <div className="account-tab-actions">
-              <button type="button" className="account-tab-btn account-tab-btn--primary" onClick={() => openSite("/profile")}>
-                Open Profile in Browser
-              </button>
-              <button
-                type="button"
-                className="account-tab-btn account-tab-btn--primary"
-                disabled={busy}
-                onClick={() => {
-                  const api = getApi();
-                  const setEnabled = api?.remote_set_enabled;
-                  if (!setEnabled) return;
-                  void (async () => {
-                    setBusy(true);
-                    try {
-                      setRemote(await setEnabled(!remote?.enabled));
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : String(err));
-                    } finally {
-                      setBusy(false);
-                    }
-                  })();
-                }}
-              >
-                {remote?.enabled ? "Turn off" : "Turn on"}
-              </button>
-              {sessionList.length > 0 ? (
-                <button
-                  type="button"
-                  className="account-tab-btn"
-                  disabled={busy}
-                  onClick={() => {
-                    const setOut = getApi()?.remote_sign_out_all;
-                    if (!setOut) return;
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        setRemote(await setOut());
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : String(err));
-                      } finally {
-                        setBusy(false);
-                      }
-                    })();
-                  }}
-                >
-                  Sign out all sessions
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="account-tab-btn account-tab-btn--danger"
-                onClick={handleLogout}
-                disabled={busy}
-              >
-                {busy ? "Signing out…" : "Log out"}
-              </button>
-            </div>
-          </div>
-
-          <AgentCapsCard onError={setError} />
-        </>
+            ) : (
+              <p className="account-tab-meta">{remote ? "No active browser sessions." : "Session details unavailable."}</p>
+            )}
+            <button
+              type="button"
+              className="account-tab-btn"
+              disabled={busy || !remote || sessions.length === 0}
+              onClick={() => void handleDisconnectSessions()}
+            >
+              {accountAction === "disconnect" ? "Disconnecting…" : "Disconnect all sessions"}
+            </button>
+          </section>
+        </section>
       ) : (
         <div className="account-tab-card account-tab-card--login">
           <ol className="account-tab-steps">
@@ -439,8 +457,6 @@ export function AccountTab() {
           </div>
         </div>
       )}
-
-      {loggedIn ? null : <AgentCapsCard onError={setError} />}
     </div>
   );
 }

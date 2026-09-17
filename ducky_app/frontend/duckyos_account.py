@@ -561,6 +561,19 @@ def logout() -> dict[str, Any]:
     stop_rpc_waiter()
     blob = _load_blob()
     base = str(blob.get("base_url") or "").rstrip("/")
+    # End browser access while credentials are still available for deprovisioning.
+    try:
+        from frontend.ui_web.panel_httpd import kick_all_remote
+
+        kick_all_remote()
+    except Exception:
+        pass
+    try:
+        from frontend.remote_tunnel import stop_remote_tunnel
+
+        stop_remote_tunnel(deprovision=True)
+    except Exception:
+        pass
     _revoke_device_key(blob)
     if base and blob.get("session_value"):
         try:
@@ -1448,6 +1461,26 @@ def stop_rpc_waiter() -> None:
     _RPC_STOP.set()
 
 
+def notify_desktop_agent_done(
+    *,
+    title: str = "UEFN Ducky",
+    body: str = "Your agent finished.",
+) -> None:
+    """Tell the site to FCM the user's Android/web tokens. Best-effort."""
+    try:
+        _plugin_collect(
+            "uefn-ducky",
+            "desktop-agent-done",
+            {"title": title, "body": body},
+            unavailable_code="push_unavailable",
+            unavailable_msg="Can't send mobile notification right now.",
+            error_code="push_error",
+            timeout=12.0,
+        )
+    except Exception:
+        return
+
+
 def _plugin_collect(
     plugin_id: str,
     event: str,
@@ -1664,7 +1697,7 @@ def teams_snapshot(*, stale_seconds: int = 120) -> dict[str, Any]:
         "needs_team": bool(hub.get("needsTeam")) or not teams,
         "online": list(online_by_id.values()),
         "teams_url": _teams_site_url("/teams"),
-        "invite_url": _teams_site_url("/invite"),
+        "invite_url": _teams_site_url("/login"),
         "stale_seconds": int(stale_seconds),
         "quota": {
             "can_create": bool(quota_raw.get("canCreate")),
@@ -1836,7 +1869,7 @@ def team_invite(*, team_slug: str, email: str, role: str = "member") -> dict[str
         "teamSlug": str(team_slug or "").strip(),
         "email": str(email or "").strip(),
         "role": str(role or "member").strip() or "member",
-        "joinPath": "/invite",
+        "joinPath": "/login",
     }
     blob = _load_blob()
     base = str(blob.get("base_url") or resolve_base_url()).rstrip("/")

@@ -568,6 +568,12 @@ def _push_agent_stopped(
     close_changeset_run(run_id, reason)
     if reason != "done":
         return
+    try:
+        from frontend.duckyos_account import notify_desktop_agent_done
+
+        notify_desktop_agent_done()
+    except Exception:
+        pass
     # Private DM with a group member → short note on the group hub for everyone.
     try:
         from frontend.ui_web.group_orchestrator import announce_private_member_talk
@@ -693,6 +699,15 @@ def _tool_line(name: str, args: dict[str, Any], status: str = "", ms: int = 0) -
     return base
 
 
+UI_TOOL_RESULT_MAX = 16_384
+
+
+def _cap_ui_result(text: str, limit: int = UI_TOOL_RESULT_MAX) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n… [truncated — ducky_read_tool_spill]"
+
+
 def _tool_result_text(result: dict[str, Any] | None) -> str:
     if not result:
         return ""
@@ -710,7 +725,7 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
     raw_result = getattr(rec, "result", None) or {}
     if not isinstance(raw_result, dict):
         raw_result = {}
-    result_text = _tool_result_text(raw_result)
+    result_text = _cap_ui_result(_tool_result_text(raw_result))
     tool_payload: dict[str, Any] = {
         "name": rec.name,
         "arguments": args,

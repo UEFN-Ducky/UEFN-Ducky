@@ -18,6 +18,59 @@ def test_pkce_pair_s256() -> None:
     assert other != verifier
 
 
+def test_logout_disconnects_browser_access_and_removes_account() -> None:
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+
+    from frontend import duckyos_account as acc
+
+    events = []
+    blob = {"base_url": "https://example.test", "device_key_id": "this-pc", "device_key": "secret"}
+    kick = Mock(side_effect=lambda: events.append("sessions"))
+    stop = Mock(side_effect=lambda **kwargs: events.append("tunnel"))
+    with (
+        patch.dict(sys.modules, {
+            "frontend.ui_web.panel_httpd": SimpleNamespace(kick_all_remote=kick),
+            "frontend.remote_tunnel": SimpleNamespace(stop_remote_tunnel=stop),
+        }),
+        patch.object(acc, "_load_blob", return_value=blob),
+        patch.object(acc, "stop_presence_heartbeat"),
+        patch.object(acc, "stop_rpc_waiter"),
+        patch.object(acc, "_revoke_device_key", side_effect=lambda row: events.append("revoke")) as revoke,
+        patch.object(acc, "_clear_blob", side_effect=lambda: events.append("clear")),
+        patch.object(acc, "get_status", return_value={"logged_in": False}),
+    ):
+        assert acc.logout() == {"logged_in": False}
+    stop.assert_called_once_with(deprovision=True)
+    revoke.assert_called_once_with(blob)
+    assert events == ["sessions", "tunnel", "revoke", "clear"]
+
+
+def test_logout_clears_account_even_if_browser_cleanup_fails() -> None:
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+
+    from frontend import duckyos_account as acc
+
+    with (
+        patch.dict(sys.modules, {
+            "frontend.ui_web.panel_httpd": SimpleNamespace(kick_all_remote=Mock(side_effect=RuntimeError)),
+            "frontend.remote_tunnel": SimpleNamespace(stop_remote_tunnel=Mock(side_effect=RuntimeError)),
+        }),
+        patch.object(acc, "_load_blob", return_value={}),
+        patch.object(acc, "stop_presence_heartbeat"),
+        patch.object(acc, "stop_rpc_waiter"),
+        patch.object(acc, "_revoke_device_key") as revoke,
+        patch.object(acc, "_clear_blob") as clear,
+        patch.object(acc, "get_status", return_value={"logged_in": False}),
+    ):
+        assert acc.logout() == {"logged_in": False}
+    revoke.assert_called_once()
+    clear.assert_called_once()
+
+
 def test_auto_apply_store_updates_skips_local_and_unpaid() -> None:
     from unittest.mock import patch
 
