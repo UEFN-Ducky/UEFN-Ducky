@@ -22,6 +22,14 @@ function isStoreSettings(loc: NavLocation | null): loc is SettingsNavLocation {
   return Boolean(loc && loc.kind === "settings" && loc.tab === "Store");
 }
 
+/** Store main or section list — never a missing-slug detail pane. */
+export function isStoreCatalogLocation(loc: NavLocation | null): loc is SettingsNavLocation {
+  if (!isStoreSettings(loc)) return false;
+  const drill = loc.drill;
+  if (!drill || drill.type !== "store") return true;
+  return !drill.slug;
+}
+
 /** True when ``current`` is the Store list under ``detail`` (main or matching section). */
 export function isStoreListUnderDetail(
   current: NavLocation | null,
@@ -111,7 +119,7 @@ export function useStoreSettingsLayerBack(
   const nav = useNavigationHistoryOptional();
   return useCallback(() => {
     const prev = nav?.peekBack() ?? null;
-    if (nav?.canBack && isStoreSettings(prev)) {
+    if (nav?.canBack && isStoreCatalogLocation(prev)) {
       nav.back();
       return;
     }

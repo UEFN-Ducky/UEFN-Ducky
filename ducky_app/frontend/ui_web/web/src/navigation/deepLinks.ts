@@ -1,14 +1,16 @@
 /**
- * Browser → app deep links (uefn-ducky://…), e.g. the DuckyOS website Store's
- * "Install in UEFN Ducky" button.
+ * Browser → app deep links (uefn-ducky://…), e.g. a site plugin's
+ * "Open in UEFN Ducky" button. Any Store slug works — not just Account.
  *
  * Supported forms:
  *   uefn-ducky://login                     → Settings → Account + start pairing
  *   uefn-ducky://store                     → open Settings → Store
- *   uefn-ducky://store/<slug>              → open the item's detail page
+ *   uefn-ducky://store/<slug>              → Plugins details for that Store item
+ *   uefn-ducky://plugin/<slug>             → same (alias for plugin authors)
  *   uefn-ducky://store/install/<slug>      → open detail + auto-install
  */
 import { onApiReady } from "../hooks/onApiReady";
+import { emitAppHook } from "../sfx/appHooks";
 import { requestOpenSettings } from "./openSettingsTab";
 
 export const ACCOUNT_LOGIN_EVENT = "ducky:account-login";
@@ -39,7 +41,9 @@ export type StoreDeepLink = {
 
 export function parseStoreDeepLink(raw: string): StoreDeepLink | null {
   const url = String(raw || "").trim();
-  const match = url.match(/^uefn-ducky:\/\/store(?:\/(install)\/?)?(?:\/?([a-z0-9][a-z0-9._-]*))?\/?(?:[?#].*)?$/i);
+  const match = url.match(
+    /^uefn-ducky:\/\/(?:store|plugin)(?:\/(install)\/?)?(?:\/?([a-z0-9][a-z0-9._-]*))?\/?(?:[?#].*)?$/i,
+  );
   if (!match) return null;
   return {
     slug: (match[2] || "").toLowerCase(),
@@ -67,7 +71,7 @@ export function handleDeepLink(raw: string): boolean {
   return true;
 }
 
-export function consumeStoreInstallRequest(): StoreDeepLink | null {
+export function peekStoreInstallRequest(): StoreDeepLink | null {
   let raw = "";
   try {
     raw = sessionStorage.getItem(STORE_INSTALL_KEY) || "";
@@ -76,11 +80,6 @@ export function consumeStoreInstallRequest(): StoreDeepLink | null {
   }
   if (!raw.trim()) return null;
   try {
-    sessionStorage.removeItem(STORE_INSTALL_KEY);
-  } catch {
-    /* ignore */
-  }
-  try {
     const parsed = JSON.parse(raw) as { slug?: string; install?: boolean };
     const slug = String(parsed.slug || "").toLowerCase();
     if (!slug) return null;
@@ -88,6 +87,17 @@ export function consumeStoreInstallRequest(): StoreDeepLink | null {
   } catch {
     return null;
   }
+}
+
+export function consumeStoreInstallRequest(): StoreDeepLink | null {
+  const parsed = peekStoreInstallRequest();
+  if (!parsed) return null;
+  try {
+    sessionStorage.removeItem(STORE_INSTALL_KEY);
+  } catch {
+    /* ignore */
+  }
+  return parsed;
 }
 
 /** Pending category filter for Store (e.g. Installed) — consumed by StoreTab. */
@@ -138,7 +148,8 @@ export function requestOpenStore(opts?: {
   } catch {
     /* ignore */
   }
-  requestOpenSettings("Store");
+  requestOpenSettings("Store", slug ? { storeSlug: slug } : undefined);
+  if (slug) emitAppHook("store.opened", { slug, autoInstall: Boolean(opts?.autoInstall) });
   window.dispatchEvent(new CustomEvent("ducky:store-install"));
   window.dispatchEvent(new CustomEvent("ducky:store-navigate"));
 }

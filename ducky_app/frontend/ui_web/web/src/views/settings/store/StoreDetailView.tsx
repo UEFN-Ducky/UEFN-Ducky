@@ -15,6 +15,8 @@ import {
 
 type Props = {
   item: DuckyOSStoreItemDto | null;
+  /** Deep-link slug while the catalog row is still missing — never a blank pane. */
+  pendingSlug?: string | null;
   /** Concurrent install/update jobs keyed by slug. */
   jobs: Record<string, CardBusy>;
   actionBusy: Record<string, true>;
@@ -23,8 +25,23 @@ type Props = {
 };
 
 /** Slide-in detail pane: identity + actions on the left, stats/about/tags on the right. */
-export function StoreDetailView({ item, jobs, actionBusy, handlers, onBack }: Props) {
-  if (!item) return null;
+export function StoreDetailView({ item, pendingSlug, jobs, actionBusy, handlers, onBack }: Props) {
+  if (!item) {
+    if (!pendingSlug) return null;
+    return (
+      <div className="ds-detail">
+        <div className="ds-viewbar">
+          <button type="button" className="ds-back" onClick={onBack}>
+            <span className="ds-back-chevron" aria-hidden>
+              <Icons.ChevronLeft />
+            </span>
+            <span>Back</span>
+          </button>
+        </div>
+        <p className="ds-panel-desc">Loading {pendingSlug}…</p>
+      </div>
+    );
+  }
   const slug = item.slug || "";
   const installBusy = jobs[slug] ?? null;
   const busy = Boolean(actionBusy[slug] || actionBusy.__local__ || installBusy);

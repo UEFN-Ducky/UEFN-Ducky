@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sameLocation } from "./NavigationHistoryContext";
 import { sameSettingsDrill, sameSettingsLocation, type SettingsNavLocation } from "./settingsHistory";
-import { isStoreListUnderDetail } from "./useSettingsHistory";
+import { isStoreCatalogLocation, isStoreListUnderDetail } from "./useSettingsHistory";
 
 describe("sameSettingsDrill", () => {
   it("treats missing drills as equal", () => {
@@ -149,5 +149,30 @@ describe("isStoreListUnderDetail", () => {
   it("rejects other tabs (Support) so Back does not skip Plugins", () => {
     const support: SettingsNavLocation = { kind: "settings", tab: "Support", name: "Support" };
     expect(isStoreListUnderDetail(support, detailMain)).toBe(false);
+  });
+});
+
+describe("isStoreCatalogLocation", () => {
+  it("walks Back onto Store main or section, never a detail slug", () => {
+    expect(isStoreCatalogLocation({ kind: "settings", tab: "Store", name: "Store" })).toBe(true);
+    expect(
+      isStoreCatalogLocation({
+        kind: "settings",
+        tab: "Store",
+        drill: { type: "store", section: "installed", slug: null },
+        name: "Installed",
+      }),
+    ).toBe(true);
+    expect(
+      isStoreCatalogLocation({
+        kind: "settings",
+        tab: "Store",
+        drill: { type: "store", section: null, slug: "blender" },
+        name: "Blender",
+      }),
+    ).toBe(false);
+    expect(isStoreCatalogLocation({ kind: "settings", tab: "Account", name: "Account" })).toBe(
+      false,
+    );
   });
 });
