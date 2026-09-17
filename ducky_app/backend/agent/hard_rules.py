@@ -197,6 +197,15 @@ AGENT_HARD_RULES = (
     '`workspace_list_dir("Verse")` first; missing folder → `verse_template_apply` that '
     "pack. Never invent `tycoon_currency` inside `Verse/Tycoon/`. Details: "
     '`skill_read_subskill("verse", "sys_architecture")`.\n'
+    "- **42.20 Chat / Unarmed / Marketplace (HARD):** voice comms = `/Verse.org/Chat` "
+    "`voice_channel` + `AddChatChannel` on `GetSimulationEntity[]` — never invent "
+    "`IsSpeaking` (it is `IsMemberSpeaking`) or a custom radio. Punch / FPS melee = "
+    "grant `Unarmed_Creative_V1_Common{}` + place `gameplay_camera_first_person_device` "
+    "via Epic `PlaceDevice`. Entitlements = `using { /UnrealEngine.com/Marketplace }` "
+    "(`MakePriceVBucks`, `BuyOffer`, `GrantEntitlement`); `/Fortnite.com/Marketplace` "
+    "is deprecated. Island Coins stay `economy` / `GetCurrencyProvider`. Details: "
+    '`skill_read_subskill("verse", "sys_chat_channels")`, `sys_marketplace`, '
+    '`skill_read_subskill("scenegraph", "itemization")`.\n'
     "- **Project assets only:** `create_material` / `create_material_instance` / "
     "`create_niagara_system` / `create_widget_blueprint` / `create_data_table` / "
     "`create_folder` / `import_asset` / `duplicate_asset` / `rename_asset` / "

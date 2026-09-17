@@ -212,6 +212,13 @@ def test_hard_rules_separate_systems():
     assert "sys_architecture" in AGENT_HARD_RULES
 
 
+def test_hard_rules_42_20_chat_unarmed_marketplace():
+    assert "IsMemberSpeaking" in AGENT_HARD_RULES
+    assert "Unarmed_Creative_V1_Common" in AGENT_HARD_RULES
+    assert "/UnrealEngine.com/Marketplace" in AGENT_HARD_RULES
+    assert "sys_chat_channels" in AGENT_HARD_RULES
+
+
 def test_hard_rules_verse_build_lifecycle():
     assert "WinError 10054" in AGENT_HARD_RULES
     assert "VERSE_DEAD" in AGENT_HARD_RULES
