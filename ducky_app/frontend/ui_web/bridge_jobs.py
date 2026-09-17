@@ -8,6 +8,7 @@ bridge round-trips.
 
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import threading
 import time
@@ -18,33 +19,83 @@ from typing import Any
 # Parallelism for Store + LLM + skill draft + key tests at once.
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="bridge-job")
 _JOBS: dict[str, concurrent.futures.Future] = {}
-_JOB_STARTED_AT: dict[str, float] = {}
-_CANCELLED: set[str] = set()
+_JOB_CANCEL: dict[str, threading.Event] = {}
+_JOB_COMPLETED_AT: dict[str, float] = {}
+_CANCELLED: dict[str, float] = {}
 _LOCK = threading.Lock()
+_MAX_JOBS = 128
+# Bound the executor's otherwise unbounded submission queue, including cancelled
+# jobs whose Python functions are still running.
+_SLOTS = threading.BoundedSemaphore(64)
+_REAPER_STOP = threading.Event()
+_reaper_started = False
 
 # Instant jobs (Cursor key length-check) finish before the JS 100ms first poll.
 # Never drop a done Future until that grace window — otherwise poll returns
 # "unknown or expired job" and the UI shows bare "Test failed" after a real save.
 _STALE_GRACE_S = 120.0
+_REAP_INTERVAL_S = 30.0
+atexit.register(_REAPER_STOP.set)
+
+
+def _forget_locked(jid: str) -> threading.Event | None:
+    _JOB_COMPLETED_AT.pop(jid, None)
+    _JOBS.pop(jid, None)
+    return _JOB_CANCEL.pop(jid, None)
+
+
+def _reap_expired(now: float) -> None:
+    with _LOCK:
+        for jid, completed_at in list(_JOB_COMPLETED_AT.items()):
+            if now - completed_at >= _STALE_GRACE_S:
+                _forget_locked(jid)
+        for jid, cancelled_at in list(_CANCELLED.items()):
+            if now - cancelled_at >= _STALE_GRACE_S:
+                _CANCELLED.pop(jid, None)
+
+
+def _reaper() -> None:
+    while not _REAPER_STOP.wait(_REAP_INTERVAL_S):
+        _reap_expired(time.monotonic())
+
+
+def _completed(jid: str, future: concurrent.futures.Future) -> None:
+    with _LOCK:
+        if _JOBS.get(jid) is future:
+            _JOB_COMPLETED_AT[jid] = time.monotonic()
 
 
 def job_start(fn: Callable[[], Any]) -> dict[str, Any]:
     """Submit ``fn`` on a worker; return immediately with ``job_id``."""
+    global _reaper_started
     job_id = uuid.uuid4().hex
-    future = _EXECUTOR.submit(fn)
-    now = time.monotonic()
+    cancelled = threading.Event()
+    slots = _SLOTS
+
+    def run() -> Any:
+        try:
+            if not cancelled.is_set():
+                return fn()
+        finally:
+            slots.release()
+
+    _reap_expired(time.monotonic())
     with _LOCK:
-        stale = [
-            jid
-            for jid, fut in _JOBS.items()
-            if fut.done() and (now - _JOB_STARTED_AT.get(jid, now)) >= _STALE_GRACE_S
-        ]
-        for jid in stale[:48]:
-            _JOBS.pop(jid, None)
-            _JOB_STARTED_AT.pop(jid, None)
-            _CANCELLED.discard(jid)
+        if len(_JOBS) >= _MAX_JOBS or not slots.acquire(blocking=False):
+            return {"ok": False, "pending": False, "error": "Too many background jobs; wait for existing jobs to finish."}
+        try:
+            future = _EXECUTOR.submit(run)
+        except Exception:
+            slots.release()
+            raise
         _JOBS[job_id] = future
-        _JOB_STARTED_AT[job_id] = now
+        _JOB_CANCEL[job_id] = cancelled
+        if not _reaper_started:
+            threading.Thread(target=_reaper, daemon=True, name="bridge-job-reaper").start()
+            _reaper_started = True
+    # Already-complete futures invoke callbacks synchronously: register outside
+    # the lock, and only after the future has been published to pollers.
+    future.add_done_callback(lambda done: _completed(job_id, done))
     return {"ok": True, "job_id": job_id, "pending": True}
 
 
@@ -54,10 +105,15 @@ def job_cancel(job_id: str) -> dict[str, Any]:
     if not jid:
         return {"ok": False, "error": "job_id required"}
     with _LOCK:
-        _CANCELLED.add(jid)
-        future = _JOBS.get(jid)
-    if future is not None:
-        future.cancel()
+        cancelled = _forget_locked(jid)
+        if cancelled is not None:
+            if len(_CANCELLED) >= _MAX_JOBS:
+                _CANCELLED.pop(next(iter(_CANCELLED)))
+            _CANCELLED[jid] = time.monotonic()
+    if cancelled is not None:
+        # Future.cancel() leaves a work item queued in ThreadPoolExecutor. Keep
+        # the slot until our wrapper is actually dequeued, then skip its work.
+        cancelled.set()
     return {"ok": True, "cancelled": True, "job_id": jid}
 
 
@@ -71,9 +127,8 @@ def job_poll(job_id: str) -> dict[str, Any]:
         future = _JOBS.get(jid)
     if cancelled:
         with _LOCK:
-            _JOBS.pop(jid, None)
-            _JOB_STARTED_AT.pop(jid, None)
-            _CANCELLED.discard(jid)
+            _forget_locked(jid)
+            _CANCELLED.pop(jid, None)
         return {
             "ok": False,
             "pending": False,
@@ -90,9 +145,8 @@ def job_poll(job_id: str) -> dict[str, Any]:
     except Exception as exc:
         result = {"ok": False, "error": str(exc) or "job failed"}
     with _LOCK:
-        _JOBS.pop(jid, None)
-        _JOB_STARTED_AT.pop(jid, None)
-        _CANCELLED.discard(jid)
+        _forget_locked(jid)
+        _CANCELLED.pop(jid, None)
     if isinstance(result, dict):
         out = dict(result)
         out["pending"] = False
@@ -113,8 +167,8 @@ def job_wait(job_id: str, *, timeout: float = 90.0, poll_s: float = 0.05) -> dic
             return polled
         time.sleep(poll_s)
     with _LOCK:
-        fut = _JOBS.pop(jid, None)
-        _JOB_STARTED_AT.pop(jid, None)
-    if fut is not None:
-        fut.cancel()
+        cancelled = _forget_locked(jid)
+        _CANCELLED.pop(jid, None)
+    if cancelled is not None:
+        cancelled.set()
     return {"ok": False, "error": f"Job timed out after {int(timeout)}s"}

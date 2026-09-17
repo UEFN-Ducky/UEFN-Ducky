@@ -188,6 +188,13 @@ def update_channel(*, installed: bool) -> str:
     return "portable"
 
 
+def feed_is_paused(payload: dict[str, Any]) -> bool:
+    paused = payload.get("downloadsPaused")
+    if paused is True:
+        return True
+    return str(paused or "").strip().lower() in ("true", "1")
+
+
 def get_app_update_status() -> dict[str, Any]:
     """
     One payload for the panel UI and the updater: remote version compare plus
@@ -211,7 +218,7 @@ def get_app_update_status() -> dict[str, Any]:
         "release_notes": None,
         "versions": [],
         "download_url": download,
-        # none | no_release | up_to_date | update_available | error
+        # none | no_release | up_to_date | update_available | paused | error
         "feed_status": "none",
         "error": None,
     }
@@ -233,6 +240,13 @@ def get_app_update_status() -> dict[str, Any]:
     if error or payload is None:
         result["feed_status"] = "error"
         result["error"] = error or "Empty version-check response"
+        return result
+
+    if feed_is_paused(payload):
+        result["feed_status"] = "paused"
+        result["update_available"] = False
+        result["installer_url"] = None
+        result["installer_sha256"] = None
         return result
 
     remote = result.get("remote_version")

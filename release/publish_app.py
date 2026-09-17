@@ -734,8 +734,17 @@ def main() -> None:
         },
     )
     print(json.dumps(result, indent=2))
-    if result.get("ok") is False or result.get("error"):
-        raise SystemExit(result.get("error") or "uds_app_release failed")
+    released = result.get("payload") if isinstance(result.get("payload"), dict) else result
+    if released.get("ok") is False or result.get("error"):
+        raise SystemExit(released.get("error") or result.get("error") or "uds_app_release failed")
+    if store:
+        prev = released.get("previous") if isinstance(released.get("previous"), dict) else {}
+        prev_ver = str(prev.get("version") or "").strip()
+        prev_fid = str(prev.get("fileId") or prev.get("file_id") or "").strip()
+        if prev_ver == store and not prev_fid:
+            raise SystemExit(
+                f"Refusing: predecessor {store} has no installer file_id in history"
+            )
     print(f"ok — desktop apps will see {version} via collect/app-version")
     publish_panel_bundle(version)
 

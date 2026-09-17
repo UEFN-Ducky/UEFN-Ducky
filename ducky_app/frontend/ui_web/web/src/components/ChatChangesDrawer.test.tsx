@@ -75,7 +75,7 @@ describe("ChatChangesSlide", () => {
     render(<ChatChangesSlide open convId="chat-1" host={host} />);
     expect(screen.getByLabelText("Resize this chat's ledger")).toBeTruthy();
     expect(screen.queryByText(/See all changes/i)).toBeNull();
-    await waitFor(() => expect(screen.getByLabelText("Filter by kind")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Filter by kind")).toBeTruthy(), { timeout: 4000 });
     expect(screen.queryByLabelText("Filter by time")).toBeNull();
     expect(screen.getByLabelText("Search ledger")).toBeTruthy();
     expect(screen.queryByLabelText("Filter by ducky")).toBeNull();

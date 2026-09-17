@@ -65,28 +65,36 @@ def test_verse_diagnostics_rows_and_stamp(tmp_path: Path) -> None:
     assert dc._disk_fingerprint(str(root)) is not None
 
 
-def test_digest_trigram_search_matches_substring_scan(tmp_path: Path) -> None:
+def test_digest_trigram_search_matches_substring_scan(tmp_path: Path, monkeypatch) -> None:
     from backend.tools.verse import verse_digests as vd
 
-    vd.clear_cache()
-    digest = tmp_path / "Fortnite.digest.verse"
-    lines = ["using { /Verse.org/Simulation }", "npc_spawner_device<public> := class<final>(creative_device):", "    # Spawns NPCs when enabled", "    Enable<public>():void", "creative_prop<public> := class(creative_object):"]
-    digest.write_text("\n".join(lines), encoding="utf-8")
-    out = vd.search_verse_digest("spawner", digest_path=str(digest))
-    assert [m["line"] for m in out["matches"]] == [2]
-    assert out["matches"][0]["rank"] == 1
-    assert vd.search_verse_digest("Spawns", digest_path=str(digest))["matches"][0]["rank"] == 2
-    assert misc.digest_indexed_mtime(str(digest)) is not None
-    conn = db.connect()
-    assert conn.execute("SELECT count(*) FROM digest_lines").fetchone()[0] == 5
-    # a rewrite re-indexes once
-    digest.write_text("\n".join(lines + ["extra_thing := class():"]), encoding="utf-8")
-    import os
+    # Own AppData: this asserts the live digest_lines row count, which is
+    # session-global. Earlier tests leave other digest rows in the shared db.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    db.reset_for_tests()
+    try:
+        vd.clear_cache()
+        digest = tmp_path / "Fortnite.digest.verse"
+        lines = ["using { /Verse.org/Simulation }", "npc_spawner_device<public> := class<final>(creative_device):", "    # Spawns NPCs when enabled", "    Enable<public>():void", "creative_prop<public> := class(creative_object):"]
+        digest.write_text("\n".join(lines), encoding="utf-8")
+        out = vd.search_verse_digest("spawner", digest_path=str(digest))
+        assert [m["line"] for m in out["matches"]] == [2]
+        assert out["matches"][0]["rank"] == 1
+        assert vd.search_verse_digest("Spawns", digest_path=str(digest))["matches"][0]["rank"] == 2
+        assert misc.digest_indexed_mtime(str(digest)) is not None
+        conn = db.connect()
+        assert conn.execute("SELECT count(*) FROM digest_lines").fetchone()[0] == 5
+        # a rewrite re-indexes once
+        digest.write_text("\n".join(lines + ["extra_thing := class():"]), encoding="utf-8")
+        import os
 
-    os.utime(digest, (time.time() + 5, time.time() + 5))
-    vd.clear_cache()
-    assert vd.search_verse_digest("extra_thing", digest_path=str(digest))["count"] == 1
-    assert conn.execute("SELECT count(*) FROM digest_lines").fetchone()[0] == 6
+        os.utime(digest, (time.time() + 5, time.time() + 5))
+        vd.clear_cache()
+        assert vd.search_verse_digest("extra_thing", digest_path=str(digest))["count"] == 1
+        assert conn.execute("SELECT count(*) FROM digest_lines").fetchone()[0] == 6
+    finally:
+        vd.clear_cache()
+        db.reset_for_tests()
 
 
 def test_load_messages_paging_keeps_row_ids(tmp_path: Path) -> None:

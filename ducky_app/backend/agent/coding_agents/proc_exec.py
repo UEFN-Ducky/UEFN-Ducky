@@ -12,24 +12,51 @@ import os
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 _procs: dict[str, subprocess.Popen] = {}
 _procs_lock = threading.Lock()
 
 _STDERR_TAIL_CHARS = 8000
+_STDOUT_TAIL_CHARS = 4000
+
+
+def _terminate_process_tree(proc: subprocess.Popen) -> None:
+    """Cancel this owned CLI tree before killing its parent on Windows.
+
+    A parent-only kill can leave MCP children alive holding stdout/stderr open.
+    Do not use this on normal completion: agents can deliberately start services
+    that must outlive a turn. Never target an executable name or another client.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+        try:
+            subprocess.run(
+                [taskkill, "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if proc.poll() is None:
+        proc.kill()
 
 
 def register_process(conv_id: str, proc: subprocess.Popen) -> None:
     with _procs_lock:
         prev = _procs.get(conv_id)
-        if prev is not None and prev is not proc and prev.poll() is None:
-            try:
-                prev.kill()
-            except OSError:
-                pass
         _procs[conv_id] = proc
+    if prev is not None and prev is not proc:
+        try:
+            _terminate_process_tree(prev)
+        except OSError:
+            pass
 
 
 def unregister_process(conv_id: str, proc: subprocess.Popen) -> None:
@@ -45,7 +72,7 @@ def terminate_conv_process(conv_id: str) -> bool:
     if proc is None or proc.poll() is not None:
         return False
     try:
-        proc.kill()
+        _terminate_process_tree(proc)
     except OSError:
         return False
     return True
@@ -60,7 +87,6 @@ class ProcResult:
     stdout_lines: int = 0
     raw_tail: str = ""
     """Last unparsed stdout text, for error surfaces when no JSON arrived."""
-    _raw_ring: list[str] = field(default_factory=list, repr=False)
 
 
 def run_streaming_process(
@@ -126,14 +152,10 @@ def run_streaming_process(
         except (OSError, ValueError, BrokenPipeError):
             pass
 
-    stderr_chunks: list[str] = []
-
     def _drain_stderr() -> None:
         try:
             for line in proc.stderr or []:
-                stderr_chunks.append(line)
-                if sum(len(c) for c in stderr_chunks) > _STDERR_TAIL_CHARS * 2:
-                    del stderr_chunks[: len(stderr_chunks) // 2]
+                result.stderr_tail = (result.stderr_tail + line[-_STDERR_TAIL_CHARS:])[-_STDERR_TAIL_CHARS:]
         except (OSError, ValueError):
             pass
 
@@ -144,9 +166,7 @@ def run_streaming_process(
                 if not stripped:
                     continue
                 result.stdout_lines += 1
-                result._raw_ring.append(stripped)
-                if len(result._raw_ring) > 40:
-                    del result._raw_ring[:20]
+                result.raw_tail = (result.raw_tail + "\n" + stripped[-_STDOUT_TAIL_CHARS:])[-_STDOUT_TAIL_CHARS:].lstrip("\n")
                 try:
                     on_line(stripped)
                 except Exception:
@@ -169,11 +189,11 @@ def run_streaming_process(
         while proc.poll() is None:
             if cancel is not None and cancel.is_set():
                 result.cancelled = True
-                proc.kill()
+                _terminate_process_tree(proc)
                 break
             if deadline is not None and time.time() > deadline:
                 result.timed_out = True
-                proc.kill()
+                _terminate_process_tree(proc)
                 break
             time.sleep(0.1)
         proc.wait(timeout=10)
@@ -185,6 +205,4 @@ def run_streaming_process(
         unregister_process(conv_id, proc)
 
     result.returncode = proc.returncode if proc.returncode is not None else -1
-    result.stderr_tail = "".join(stderr_chunks)[-_STDERR_TAIL_CHARS:]
-    result.raw_tail = "\n".join(result._raw_ring)[-4000:]
     return result

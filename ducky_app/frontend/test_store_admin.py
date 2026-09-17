@@ -74,22 +74,30 @@ def test_actions_check_snapshot_vacuum_export_and_clear(tmp_path: Path) -> None:
     assert store_admin.action("bogus")["ok"] is False
 
 
-def test_restore_is_staged_and_applied_on_next_open() -> None:
-    root = _appdata()
-    kv.set_doc("cache_docs", "marker", "before")
-    snap = store_admin.action("snapshot")["snapshot"]
-    kv.set_doc("cache_docs", "marker", "after")
-    staged = store_admin.action("restore", snap)
-    assert staged["ok"] and staged["restart_required"]
-    assert store_admin.overview()["restore_pending"] is True
-    # "next boot": drop this process's connections and open again
+def test_restore_is_staged_and_applied_on_next_open(tmp_path: Path, monkeypatch) -> None:
+    # Own AppData: the session-wide ducky.db can still be open on a worker
+    # thread from an earlier test, and Windows then refuses the replace
+    # (WinError 32) even after this thread's connections are closed.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     db.reset_for_tests()
-    assert kv.get_doc("cache_docs", "marker") == "before"
-    assert not (root / store_admin.RESTORE_PENDING_NAME).exists()
-    assert any(p.name.startswith("ducky.db.replaced-") for p in root.iterdir())
-    assert store_admin.action("restore", "ducky-nope.db")["ok"] is False
-    store_admin.action("restore", snap)
-    assert store_admin.action("cancel_restore")["ok"] and store_admin.overview()["restore_pending"] is False
+    try:
+        root = _appdata()
+        kv.set_doc("cache_docs", "marker", "before")
+        snap = store_admin.action("snapshot")["snapshot"]
+        kv.set_doc("cache_docs", "marker", "after")
+        staged = store_admin.action("restore", snap)
+        assert staged["ok"] and staged["restart_required"]
+        assert store_admin.overview()["restore_pending"] is True
+        # "next boot": drop this process's connections and open again
+        db.reset_for_tests()
+        assert kv.get_doc("cache_docs", "marker") == "before"
+        assert not (root / store_admin.RESTORE_PENDING_NAME).exists()
+        assert any(p.name.startswith("ducky.db.replaced-") for p in root.iterdir())
+        assert store_admin.action("restore", "ducky-nope.db")["ok"] is False
+        store_admin.action("restore", snap)
+        assert store_admin.action("cancel_restore")["ok"] and store_admin.overview()["restore_pending"] is False
+    finally:
+        db.reset_for_tests()
 
 
 def test_retire_legacy_and_import_now() -> None:

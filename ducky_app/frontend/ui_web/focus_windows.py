@@ -330,6 +330,9 @@ def _create_focus_window(focus_id: str, title: str, display_title: str, wid: str
         js_api=_api,
     )
     window_bounds.track(window, f"focus:{focus_id}")
+    from frontend.ui_web.webview_memory import install as install_memory_policy
+
+    install_memory_policy(window)
     return window
 
 

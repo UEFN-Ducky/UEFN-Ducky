@@ -723,6 +723,9 @@ def _apply_bounds(pane: _Pane) -> None:
         control.Location = Point(int(round(ox + x * sx)), int(round(oy + y * sy)))
         control.Size = Size(max(int(round(w * sx)), 1), max(int(round(h * sy)), 1))
         control.Visible = bool(pane.visible and w > 2 and h > 2)
+        from frontend.ui_web.webview_memory import update_control
+
+        update_control(control, active=bool(control.Visible and form.Visible) and str(form.WindowState) != "Minimized")
         if control.Visible:
             try:
                 # Sibling of the app WebView2 — must stay above it or content is black.

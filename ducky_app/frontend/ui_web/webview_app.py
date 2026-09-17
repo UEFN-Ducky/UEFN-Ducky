@@ -449,6 +449,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         js_api=api,
     )
     window_bounds.track(window, "main")
+    from frontend.ui_web.webview_memory import install as install_memory_policy
+
+    install_memory_policy(window)
     window_holder["window"] = window
     api.bind_window(window, on_hide=on_hide, on_exit=on_exit)
     _boot_trace("create_window", t_window)

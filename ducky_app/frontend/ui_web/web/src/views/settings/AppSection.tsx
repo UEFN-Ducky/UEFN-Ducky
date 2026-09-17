@@ -15,7 +15,7 @@ import { PatchNotesList } from "./store/PatchNotesList";
 
 type AppActionPhase = "idle" | "checking" | "uninstalling";
 /** Result of the last manual update check. */
-type CheckResult = "idle" | "latest" | "no_release" | "update" | "error";
+type CheckResult = "idle" | "latest" | "no_release" | "update" | "error" | "paused";
 
 function AppInfoIcon() {
   return (
@@ -28,6 +28,7 @@ function AppInfoIcon() {
 
 function classifyCheck(next: AppUpdateStatus): CheckResult {
   if (next.error || next.feed_status === "error") return "error";
+  if (next.feed_status === "paused") return "paused";
   if (next.update_available || next.feed_status === "update_available") return "update";
   if (next.feed_status === "no_release") return "no_release";
   if (next.feed_status === "up_to_date" || next.remote_version) return "latest";
@@ -191,7 +192,9 @@ export function AppSection() {
       ? "Checking…"
       : checkResult === "latest"
         ? "You're on the latest"
-        : checkResult === "no_release"
+        : checkResult === "paused"
+          ? "Updates paused on the Store."
+          : checkResult === "no_release"
           ? "No Store release yet"
           : checkResult === "update" && remoteVersion
             ? `Update to v${remoteVersion}`

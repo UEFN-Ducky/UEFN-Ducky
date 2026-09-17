@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   readLastSettingsSections,
   readLastSettingsTab,
@@ -32,11 +32,8 @@ import { DuckiesTab } from "./settings/DuckiesTab";
 import { PlansTab, type PlansSectionTab } from "./settings/PlansTab";
 import { MemoryTab, type MemorySectionTab } from "./settings/MemoryTab";
 import { LogErrorsTab, type LogErrorsSectionTab } from "./settings/LogErrorsTab";
-import { AppearanceTab } from "./settings/AppearanceTab";
 import { AppearanceProfileHeader } from "./settings/AppearanceProfileBar";
-import { AudioTab, type AudioSectionTab } from "./settings/AudioTab";
-import { SkillsMcpTab } from "./settings/SkillsMcpTab";
-import { StoreTab } from "./settings/StoreTab";
+import type { AudioSectionTab } from "./settings/AudioTab";
 import { SupportTab } from "./settings/SupportTab";
 import { PluginSettingsSections } from "./settings/PluginSettingsSections";
 import { INSTALLED_CATEGORY } from "./settings/storeFilters";
@@ -52,6 +49,11 @@ import { resolvePluginHeaderIcon } from "../hooks/pluginHeaderActions";
 import { useSettingsSidebarWidth } from "./settings/useSettingsSidebarWidth";
 import { settingsTabTargetId, targetRef, useUiTarget } from "../ui-targets/registry";
 import { settingsTabTone } from "../components/quick-open/quickOpenRecents";
+
+const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => ({ default: m.AppearanceTab })));
+const AudioTab = lazy(() => import("./settings/AudioTab").then((m) => ({ default: m.AudioTab })));
+const SkillsMcpTab = lazy(() => import("./settings/SkillsMcpTab").then((m) => ({ default: m.SkillsMcpTab })));
+const StoreTab = lazy(() => import("./settings/StoreTab").then((m) => ({ default: m.StoreTab })));
 
 /** Re-enable when URC / urc.exe wiring is ready. */
 
@@ -962,7 +964,9 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
           ) : null}
 
           <section ref={contentTargetRef} className="settings-view-content selectable-text no-drag">
-            {content}
+            <Suspense fallback={<p role="status">Loading settings…</p>}>
+              {content}
+            </Suspense>
           </section>
         </CtrlWheelZoomRoot>
       </div>

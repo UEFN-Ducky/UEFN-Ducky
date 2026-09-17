@@ -31,7 +31,7 @@ export interface AppUpdateStatus {
   release_notes: string | null;
   versions?: DuckyOSStorePatchNote[];
   download_url: string;
-  /** none | no_release | up_to_date | update_available | error */
+  /** none | no_release | up_to_date | update_available | paused | error */
   feed_status?: string;
   error: string | null;
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from frontend.version_check import (
     absolute_installer_url,
     extract_release_versions,
+    feed_is_paused,
     is_remote_newer,
     parse_version_tuple,
     unwrap_collect_payload,
@@ -78,6 +79,12 @@ def test_extract_release_versions() -> None:
     assert fallback == [{"version": "1.2.40", "changelog": "one", "created_at": None}]
 
 
+def test_feed_is_paused() -> None:
+    assert feed_is_paused({"downloadsPaused": True, "currentVersion": "1.2.133"}) is True
+    assert feed_is_paused({"downloadsPaused": False, "currentVersion": "1.2.135"}) is False
+    assert feed_is_paused({"currentVersion": "1.2.135"}) is False
+
+
 def test_update_channel_dev_blocks_store() -> None:
     from frontend.version_check import update_channel
 
@@ -93,5 +100,6 @@ if __name__ == "__main__":
     test_unwrap_flat_legacy()
     test_absolute_installer_url()
     test_extract_release_versions()
+    test_feed_is_paused()
     test_update_channel_dev_blocks_store()
     print("ok")

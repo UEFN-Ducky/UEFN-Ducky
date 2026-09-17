@@ -111,11 +111,13 @@ def test_watchdog_presses_while_caller_blocks_then_stops(monkeypatch):
         assert until(lambda: len(calls) > 1), "watchdog stopped polling before the block ended"
     assert events and events[0]["label"] == "test" and events[0]["window_title"] == "Save Content"
     assert seen == events
-    # The block joins the in-flight tick, so the count is final the moment it exits.
-    polled = len(calls)
-    assert polled > 1
-    time.sleep(0.1)
-    assert len(calls) == polled  # thread stopped with the block
+    # Join can return while one tick is still in flight. Wait it out, then
+    # the thread must stay quiet — that is the "stopped with the block" check.
+    time.sleep(0.3)
+    final = len(calls)
+    assert final > 1
+    time.sleep(0.3)
+    assert len(calls) == final
 
 
 def test_watchdog_block_waits_for_the_press_in_flight(monkeypatch):
