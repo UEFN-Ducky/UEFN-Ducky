@@ -208,3 +208,24 @@ export function isDoubleTap(
   if (!prev) return false;
   return next.at - prev.at <= ms && Math.hypot(next.x - prev.x, next.y - prev.y) <= px;
 }
+
+/** Ghost mouse after an overlay touch — ignore mouse pointers on the video. */
+export const MOUSE_AFTER_TOUCH_MS = 500;
+
+export function ignoreMouseAfterTouch(lastTouchAt: number, now: number, ms = MOUSE_AFTER_TOUCH_MS): boolean {
+  if (lastTouchAt <= 0) return false;
+  return now - lastTouchAt < ms;
+}
+
+/** Control+z → keydown Control, z, keyup z, Control. */
+export function chordTap(keys: string[]): { type: "keydown" | "keyup"; key: string }[] {
+  return [
+    ...keys.map((key) => ({ type: "keydown" as const, key })),
+    ...[...keys].reverse().map((key) => ({ type: "keyup" as const, key })),
+  ];
+}
+
+/** RMB look / LMB release without teleporting the cursor. */
+export function buttonOnly(kind: "down" | "up", button: number): { type: "down" | "up"; button: number } {
+  return { type: kind, button };
+}

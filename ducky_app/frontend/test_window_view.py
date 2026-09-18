@@ -129,6 +129,9 @@ def test_look_move_sends_relative_dx(monkeypatch) -> None:
     handle_stream_message(9, b'{"type":"dblclick","x":0.5,"y":0.5}')
     assert calls[-1][1] == "dblclick"
     assert calls[-1][4]["dx"] is None
+    handle_stream_message(9, b'{"type":"down","button":2}')
+    assert calls[-1][4]["xy"] is False
+    assert calls[-1][4]["button"] == 2
 
 
 def test_inject_pointer_uses_window_box(monkeypatch) -> None:
@@ -184,6 +187,71 @@ def test_dblclick_is_four_events_one_position(monkeypatch) -> None:
     wv._pointer_on_box((100, 200, 300, 400), "dblclick", 0.5, 0.5)
     assert len(events) == 4
     assert all(e[0] == events[0][0] and e[1] == events[0][1] for e in events)
+
+
+def test_button_only_down_has_no_abs(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    events: list[tuple] = []
+    monkeypatch.setattr(wv, "_send_mice", lambda ev: events.extend(ev))
+    wv._pointer_on_box(None, "down", 0, 0, button=2)
+    assert len(events) == 1
+    assert events[0][3] == wv._BUTTON_DOWN[2]
+    assert not (events[0][3] & wv._ABS)
+    events.clear()
+    wv._pointer_on_box(None, "up", 0, 0, button=2)
+    assert events[0][3] == wv._BUTTON_UP[2]
+    assert not (events[0][3] & wv._ABS)
+
+
+def test_button_only_inject_does_not_raise(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    boxes: list[object] = []
+    monkeypatch.setattr(wv, "_pointer_on_box", lambda box, *_a, **_k: boxes.append(box))
+    raised: list[int] = []
+    monkeypatch.setattr(wv, "bring_to_front", lambda h: raised.append(h) or True)
+    wv.inject_pointer(5, "down", 0, 0, button=2, xy=False)
+    assert boxes == [None]
+    assert raised == []
+
+
+def test_inject_key_skips_raise_on_keyup(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    monkeypatch.setattr(wv, "_send_key", lambda *_a, **_k: None)
+    raised: list[int] = []
+    monkeypatch.setattr(wv, "bring_to_front", lambda h: raised.append(h) or True)
+    wv.inject_key(5, "z", down=False)
+    assert raised == []
+    wv.inject_key(5, "z", down=True)
+    assert raised == [5]
+
+
+def test_chord_does_not_raise_between_keys(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    monkeypatch.setattr(wv, "_send_key", lambda *_a, **_k: None)
+    fg = [0]
+    monkeypatch.setattr(wv, "_foreground_hwnd", lambda: fg[0])
+    raised: list[int] = []
+
+    def _raise(hwnd: int) -> bool:
+        raised.append(hwnd)
+        fg[0] = hwnd
+        return True
+
+    monkeypatch.setattr(wv, "_raise_window", _raise)
+    wv._LAST_RAISE.clear()
+    wv.inject_key(5, "Control", down=True)
+    wv.inject_key(5, "z", down=True)
+    assert raised == [5]
 
 
 def test_vk_for_named_and_function_keys() -> None:

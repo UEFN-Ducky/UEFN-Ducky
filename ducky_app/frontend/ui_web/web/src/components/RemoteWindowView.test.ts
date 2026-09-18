@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   addViewPan,
+  buttonOnly,
+  chordTap,
   clampView,
   contentRect,
+  ignoreMouseAfterTouch,
   isDoubleTap,
   isUeFnHubTitle,
   keyDiff,
@@ -176,5 +179,31 @@ describe("touch slop / double-tap", () => {
     expect(isDoubleTap(first, { x: 54, y: 22, at: 1500 })).toBe(false);
     expect(isDoubleTap(first, { x: 90, y: 20, at: 1100 })).toBe(false);
     expect(isDoubleTap(null, { x: 50, y: 20, at: 1000 })).toBe(false);
+  });
+});
+
+describe("look / undo overlay", () => {
+  it("chordTap is Control, z, then z, Control", () => {
+    expect(chordTap(["Control", "z"])).toEqual([
+      { type: "keydown", key: "Control" },
+      { type: "keydown", key: "z" },
+      { type: "keyup", key: "z" },
+      { type: "keyup", key: "Control" },
+    ]);
+  });
+
+  it("look start and end are button 2 with no x", () => {
+    const down = buttonOnly("down", 2);
+    const up = buttonOnly("up", 2);
+    expect(down).toEqual({ type: "down", button: 2 });
+    expect(up).toEqual({ type: "up", button: 2 });
+    expect("x" in down).toBe(false);
+    expect("x" in up).toBe(false);
+  });
+
+  it("ignoreMouseAfterTouch is true for 500ms after a touch, false after", () => {
+    expect(ignoreMouseAfterTouch(0, 100)).toBe(false);
+    expect(ignoreMouseAfterTouch(1000, 1300)).toBe(true);
+    expect(ignoreMouseAfterTouch(1000, 1500)).toBe(false);
   });
 });

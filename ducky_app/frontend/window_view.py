@@ -455,11 +455,14 @@ def _pointer_on_box(
     if kind == "move" and dx is not None:
         _send_mice([(int(dx), int(dy or 0), 0, 0x0001)])
         return
+    down = _BUTTON_DOWN.get(int(button), 0x0002)
+    up = _BUTTON_UP.get(int(button), 0x0004)
+    if kind in ("down", "up") and box is None:
+        _send_mice([(0, 0, 0, down if kind == "down" else up)])
+        return
     if not box:
         return
     ax, ay = _abs_xy(*map_norm_to_screen(box, nx, ny))
-    down = _BUTTON_DOWN.get(int(button), 0x0002)
-    up = _BUTTON_UP.get(int(button), 0x0004)
     if kind == "move":
         _send_mice([(ax, ay, 0, _ABS)])
         return
@@ -493,11 +496,16 @@ def inject_pointer(
     delta: int = 0,
     dx: int | None = None,
     dy: int | None = None,
+    xy: bool = True,
 ) -> None:
     if sys.platform != "win32" or hwnd <= 0 or _is_our_hwnd(hwnd):
         return
     if kind == "move" and dx is not None:
         _pointer_on_box(None, kind, nx, ny, dx=dx, dy=dy)
+        return
+    if not xy and kind in ("down", "up"):
+        # Button-only: no teleport, no ALT-raise (look / stuck-LMB clear).
+        _pointer_on_box(None, kind, 0.0, 0.0, button=button)
         return
     box = _window_box(hwnd)
     if not box:
@@ -514,7 +522,8 @@ def inject_key(hwnd: int, key: str, *, down: bool = True) -> None:
     vk = _vk_for_key(key)
     if not vk:
         return
-    bring_to_front(hwnd)
+    if down:
+        bring_to_front(hwnd)
     _send_key(vk, down=down)
 
 
@@ -534,14 +543,18 @@ def handle_stream_message(view: object, payload: bytes) -> None:
         return
     if kind in ("down", "up", "move", "wheel", "dblclick"):
         rel = "dx" in event
+        has_xy = "x" in event
         dx = int(event.get("dx") or 0) if rel else None
         dy = int(event.get("dy") or 0) if rel else None
-        nx = float(event.get("x") or 0)
-        ny = float(event.get("y") or 0)
+        nx = float(event.get("x") or 0) if has_xy else 0.0
+        ny = float(event.get("y") or 0) if has_xy else 0.0
         button = int(event.get("button") or 0)
         delta = int(event.get("delta") or 0)
         if screen:
             if sys.platform != "win32":
+                return
+            if not has_xy and kind in ("down", "up"):
+                _pointer_on_box(None, kind, 0.0, 0.0, button=button)
                 return
             box = _view_rect(
                 str(view).strip(),
@@ -550,7 +563,7 @@ def handle_stream_message(view: object, payload: bytes) -> None:
             )
             _pointer_on_box(box, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
         else:
-            inject_pointer(hid, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
+            inject_pointer(hid, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy, xy=has_xy)
         return
     if kind in ("key", "keydown", "keyup"):
         key = str(event.get("key") or "")

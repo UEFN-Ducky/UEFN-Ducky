@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ThinkingEffortFooter } from "./ThinkingEffortFooter";
+import { effortFire, effortSliderColor, ThinkingEffortFooter } from "./ThinkingEffortFooter";
 
 const MENU = {
   lo: "Faster",
@@ -35,5 +35,22 @@ describe("ThinkingEffortFooter", () => {
     expect(slider.disabled).toBe(false);
     fireEvent.change(slider, { target: { value: "2" } });
     expect(onChange).toHaveBeenCalledWith("high");
+  });
+});
+
+describe("effortFire", () => {
+  it("stays off at Faster and erupts near Smarter", () => {
+    expect(effortFire(0)).toEqual({ scale: 0, opacity: 0 });
+    expect(effortFire(0.5).scale).toBeCloseTo(0.5 ** 3 * 0.55);
+    expect(effortFire(1).scale).toBeCloseTo(0.55);
+    expect(effortFire(1).opacity).toBe(1);
+  });
+});
+
+describe("effortSliderColor", () => {
+  it("mixes Ducky green/amber/red tokens", () => {
+    expect(effortSliderColor(0)).toContain("var(--green)");
+    expect(effortSliderColor(0.5)).toContain("var(--amber)");
+    expect(effortSliderColor(1)).toContain("var(--red)");
   });
 });

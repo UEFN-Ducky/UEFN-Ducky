@@ -6,8 +6,11 @@ import { DropdownPanel } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import {
   addViewPan,
+  buttonOnly,
+  chordTap,
   clampView,
   contentRect,
+  ignoreMouseAfterTouch,
   isDoubleTap,
   keyDiff,
   mapViewPoint,
@@ -52,6 +55,11 @@ const controlSubs = new Set<() => void>();
 
 let viewPanZoom: ViewPanZoom = { panX: 0, panY: 0, scale: 1 };
 let lastRemotePoint = { x: 0.5, y: 0.5 };
+let lastOverlayTouchAt = 0;
+
+function markOverlayTouch(pointerType: string) {
+  if (pointerType !== "mouse") lastOverlayTouchAt = performance.now();
+}
 
 function applyViewTransform(el: HTMLElement | null, next: ViewPanZoom) {
   if (!el) return;
@@ -727,6 +735,7 @@ function attachInput(
   };
   const onDown = (ev: PointerEvent) => {
     ev.preventDefault();
+    if (ev.pointerType === "mouse" && ignoreMouseAfterTouch(lastOverlayTouchAt, performance.now())) return;
     video.focus({ preventScroll: true });
     pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     const mouse = ev.pointerType === "mouse";
@@ -927,6 +936,7 @@ function UefnStickPad({
   const end = (ev: ReactPointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
     ev.stopPropagation();
+    markOverlayTouch(ev.pointerType);
     if (knobRef.current) knobRef.current.style.transform = "";
     onChange(0, 0, false);
   };
@@ -964,6 +974,10 @@ function tapSend(send: SendFn, key: string) {
   window.setTimeout(() => send({ type: "keyup", key }), 80);
 }
 
+function tapChord(send: SendFn, keys: string[]) {
+  for (const ev of chordTap(keys)) send(ev);
+}
+
 function StickBtn({
   label,
   onDown,
@@ -985,11 +999,13 @@ function StickBtn({
       onPointerUp={(ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+        markOverlayTouch(ev.pointerType);
         onUp?.();
       }}
       onPointerCancel={(ev) => {
         ev.preventDefault();
         ev.stopPropagation();
+        markOverlayTouch(ev.pointerType);
         onUp?.();
       }}
     >
@@ -1035,7 +1051,7 @@ function UefnStickOverlay({
     lookRaf.current = 0;
     if (!looking.current) return;
     looking.current = false;
-    send({ type: "up", x: 0.5, y: 0.5, button: 2 });
+    send(buttonOnly("up", 2));
   }, [send]);
 
   const cancelMouse = useCallback(() => {
@@ -1071,8 +1087,8 @@ function UefnStickOverlay({
     }
     if (!looking.current) {
       looking.current = true;
-      send({ type: "move", x: 0.5, y: 0.5 });
-      send({ type: "down", x: 0.5, y: 0.5, button: 2 });
+      send(buttonOnly("up", 0));
+      send(buttonOnly("down", 2));
     }
     if (lookRaf.current) return;
     const tick = () => {
@@ -1148,21 +1164,27 @@ function UefnStickOverlay({
           />
         </div>
       ) : (
-        <div className="remote-stick-btns remote-stick-btns--left">
-          <StickBtn
-            label="Q"
-            onDown={() => holdSend(send, "q", true)}
-            onUp={() => holdSend(send, "q", false)}
-          />
-          <StickBtn
-            label="E"
-            onDown={() => holdSend(send, "e", true)}
-            onUp={() => holdSend(send, "e", false)}
-          />
-          {EDITOR_TAPS.map((cmd) => (
-            <StickBtn key={cmd.key} label={cmd.label} onDown={() => tapSend(send, cmd.key)} />
-          ))}
-        </div>
+        <>
+          <div className="remote-stick-btns remote-stick-btns--left">
+            <StickBtn
+              label="Q"
+              onDown={() => holdSend(send, "q", true)}
+              onUp={() => holdSend(send, "q", false)}
+            />
+            <StickBtn
+              label="E"
+              onDown={() => holdSend(send, "e", true)}
+              onUp={() => holdSend(send, "e", false)}
+            />
+            {EDITOR_TAPS.map((cmd) => (
+              <StickBtn key={cmd.key} label={cmd.label} onDown={() => tapSend(send, cmd.key)} />
+            ))}
+          </div>
+          <div className="remote-stick-btns remote-stick-btns--right">
+            <StickBtn label="Undo" onDown={() => tapChord(send, ["Control", "z"])} />
+            <StickBtn label="Redo" onDown={() => tapChord(send, ["Control", "y"])} />
+          </div>
+        </>
       )}
     </div>
   );

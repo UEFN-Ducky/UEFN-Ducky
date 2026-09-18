@@ -2127,8 +2127,9 @@ html.window-maximized .window-resize-grip {
 
 .model-selector-effort {
   flex-shrink: 0;
-  padding: 10px 12px 12px;
+  padding: 10px 12px 14px;
   border-top: 1px solid var(--border);
+  overflow: visible;
 }
 .model-selector-effort.is-disabled {
   opacity: 0.55;
@@ -2152,42 +2153,105 @@ html.window-maximized .window-resize-grip {
 }
 .model-selector-effort-slider {
   position: relative;
-  height: 28px;
-  margin-top: 2px;
+  height: 86px;
+  margin-top: 4px;
+  padding: 0 14px;
+  touch-action: none;
+  cursor: grab;
+}
+.model-selector-effort.is-disabled .model-selector-effort-slider {
+  cursor: not-allowed;
+}
+.model-selector-effort-slider:active {
+  cursor: grabbing;
+}
+.model-selector-effort-fire {
+  position: absolute;
+  left: 14px;
+  width: calc((100% - 28px) * var(--effort-heat, 0));
+  bottom: 18px;
+  height: 80px;
+  pointer-events: none;
+  z-index: 0;
+  color: var(--slider-color, var(--green));
+}
+.model-selector-effort-fire-inner {
+  width: 100%;
+  height: 100%;
+  transform-origin: bottom center;
+  opacity: var(--fire-opacity, 0);
+  transform: scaleY(var(--fire-scale, 0));
+  filter: drop-shadow(0 -4px 12px currentColor) blur(2px);
+  animation: effort-fire-glow 3s infinite alternate ease-in-out;
+  mix-blend-mode: screen;
+}
+.model-selector-effort-fire-screen {
+  mix-blend-mode: screen;
+}
+@keyframes effort-fire-glow {
+  0% { filter: drop-shadow(0 -2px 8px currentColor) blur(2px) brightness(0.9); }
+  33% { filter: drop-shadow(0 -5px 15px currentColor) blur(1.5px) brightness(1.15); }
+  66% { filter: drop-shadow(0 -3px 10px currentColor) blur(2.5px) brightness(0.95); }
+  100% { filter: drop-shadow(0 -6px 18px currentColor) blur(1px) brightness(1.2); }
 }
 .model-selector-effort-rail {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 50%;
-  height: 3px;
-  transform: translateY(-50%);
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--card));
+  box-shadow: inset 0 2px 6px color-mix(in srgb, var(--bg) 80%, transparent),
+    0 1px 0 color-mix(in srgb, var(--fg) 5%, transparent);
+  z-index: 2;
+  overflow: hidden;
   pointer-events: none;
 }
 .model-selector-effort-dots {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background-image: radial-gradient(circle, var(--muted) 1.5px, transparent 1.5px);
+  background-size: 10px 10px;
+  background-position: 0 0;
 }
 .model-selector-effort-fill {
   position: absolute;
   left: 0;
   top: 0;
   height: 100%;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--fg) 55%, transparent);
+  width: calc(100% * var(--effort-heat, 0));
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.model-selector-effort-fill-dots {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 480px;
+  height: 100%;
+  background-image: radial-gradient(circle, var(--slider-color, var(--green)) 2.5px, transparent 2.5px);
+  background-size: 10px 10px;
+  background-position: 0 0;
 }
 .model-selector-effort-thumb {
   position: absolute;
-  top: 50%;
-  width: 4px;
-  height: 14px;
-  border-radius: 1px;
-  background: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
-  transform: translate(-50%, -50%);
+  left: calc(14px + (100% - 28px) * var(--effort-heat, 0));
+  bottom: 0;
+  width: 28px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--fg);
+  box-shadow: -2px 0 8px color-mix(in srgb, var(--bg) 60%, transparent);
+  transform: translateX(-50%);
+  z-index: 10;
+  pointer-events: none;
+}
+.model-selector-effort-slider:active .model-selector-effort-thumb {
+  transform: translateX(-50%) scale(1.05);
 }
 .model-selector-effort-range {
   position: absolute;
@@ -2195,7 +2259,7 @@ html.window-maximized .window-resize-grip {
   width: 100%;
   margin: 0;
   opacity: 0;
-  cursor: pointer;
+  pointer-events: none;
   appearance: none;
   -webkit-appearance: none;
   background: transparent;
@@ -2211,12 +2275,13 @@ html.window-maximized .window-resize-grip {
   outline: none;
 }
 .model-selector-effort-slider:focus-within .model-selector-effort-rail {
-  box-shadow: 0 0 0 1px var(--border-focus, #2563eb);
+  box-shadow: inset 0 2px 6px color-mix(in srgb, var(--bg) 80%, transparent),
+    0 0 0 1px var(--border-focus, var(--accent));
 }
 .model-selector-effort-range::-webkit-slider-runnable-track {
   background: transparent;
   border: none;
-  height: 3px;
+  height: 30px;
 }
 .model-selector-effort-range::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -2232,7 +2297,7 @@ html.window-maximized .window-resize-grip {
 .model-selector-effort-range::-moz-range-track {
   background: transparent;
   border: none;
-  height: 3px;
+  height: 30px;
 }
 .model-selector-effort-range::-moz-range-thumb {
   appearance: none;
