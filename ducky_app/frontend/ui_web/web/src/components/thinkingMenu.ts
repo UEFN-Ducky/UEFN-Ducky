@@ -11,12 +11,29 @@ export type ThinkingMenu = {
   levels: ThinkingMenuLevel[];
 };
 
+export const DISABLED_THINKING_MENU: ThinkingMenu = {
+  lo: "Faster",
+  hi: "Smarter",
+  levels: [
+    { id: "off", label: "Off", thinking_tokens: 0, hint: "This model has no extended thinking" },
+  ],
+};
+
 export function catalogThinkingMenu(
   row: { thinkingMenu?: ThinkingMenu | null } | null | undefined,
 ): ThinkingMenu | null {
   const levels = row?.thinkingMenu?.levels;
   if (!levels?.length) return null;
   return row!.thinkingMenu!;
+}
+
+/** Slider stays on screen: gateway menu, or a one-step Off rail. */
+export function footerThinkingMenu(menu: ThinkingMenu | null | undefined): ThinkingMenu {
+  return menu?.levels?.length ? menu : DISABLED_THINKING_MENU;
+}
+
+export function thinkingSliderEnabled(menu: ThinkingMenu | null | undefined): boolean {
+  return (menu?.levels?.length ?? 0) > 1;
 }
 
 export function effortInMenu(menu: ThinkingMenu | null | undefined, effort: string): string {

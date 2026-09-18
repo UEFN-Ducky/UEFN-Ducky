@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DISABLED_THINKING_MENU,
   effortInMenu,
   effortSuffix,
+  footerThinkingMenu,
   formatEffortReadout,
   formatTokenText,
+  thinkingSliderEnabled,
 } from "./thinkingMenu";
 
 const MENU = {
@@ -29,5 +32,12 @@ describe("thinkingMenu", () => {
     expect(formatTokenText(MENU.levels[3])).toBe("no token cap");
     expect(formatEffortReadout("Opus 5", MENU.levels[0])).toBe("Opus 5 · Off · 0 thinking tokens");
     expect(effortSuffix(MENU, "off")).toBe(" · Off");
+  });
+
+  it("keeps a disabled Off rail when the gateway sent no menu", () => {
+    expect(footerThinkingMenu(null)).toBe(DISABLED_THINKING_MENU);
+    expect(thinkingSliderEnabled(null)).toBe(false);
+    expect(thinkingSliderEnabled(MENU)).toBe(true);
+    expect(thinkingSliderEnabled({ levels: [{ id: "off" }] })).toBe(false);
   });
 });

@@ -133,12 +133,12 @@ def test_adapter_falls_back_when_no_daemon(monkeypatch, tmp_path) -> None:
     assert spawned == [["--port", "4200"]]
 
 
-def test_adapter_relays_to_daemon() -> None:
+def test_adapter_relays_to_daemon(monkeypatch, tmp_path) -> None:
     """Adapter hello + tools/list via the same frames the daemon speaks."""
     from frontend import shared_mcp_adapter as ad
 
     mcp = FakeMcp()
-    thread = _serve(mcp)
+    thread = _serve(mcp, monkeypatch, tmp_path)
     try:
         state = shared_mcp.wait_ready(8.0)
         sock = ad._try_hello({"host": state["host"], "port": state["port"], "token": state["token"], "key": state["key"]})

@@ -49,6 +49,17 @@ function normId(id: string): string {
   return (id || "").trim().toLowerCase().replace(/-/g, "_");
 }
 
+function catalogRowFor(id: string, rows: CatalogModelRow[]): CatalogModelRow | undefined {
+  const mid = (id || "").trim();
+  if (!mid) return undefined;
+  const bare = mid.includes(":") ? mid.slice(mid.indexOf(":") + 1) : mid;
+  return (
+    rows.find((c) => c.id === mid) ||
+    rows.find((c) => c.id === bare) ||
+    rows.find((c) => c.id.endsWith(`:${bare}`))
+  );
+}
+
 function agentShortLabel(agentId: string, agents: CodingAgentDto[]): string {
   const key = normId(agentId);
   if (key === "ducky") return "Ducky";
@@ -232,7 +243,7 @@ export function ModelSelector({
     (agentId: string): CatalogModelRow[] => {
       const agent = agents.find((a) => normId(a.id) === normId(agentId));
       return (agent?.models || []).map((m): CatalogModelRow => {
-        const catalog = visibleModels.find((c) => c.id === m.id);
+        const catalog = catalogRowFor(m.id, visibleModels);
         return {
           id: normalizeCodingAgentModelId(agentId, m.id),
           name: m.name,
@@ -873,14 +884,12 @@ export function ModelSelector({
                 </div>
               </div>
             </div>
-            {navGateway && previewMenu ? (
-              <ThinkingEffortFooter
-                menu={previewMenu}
-                modelName={previewRow?.name || ""}
-                effort={thinkingEffort}
-                onChange={persistEffort}
-              />
-            ) : null}
+            <ThinkingEffortFooter
+              menu={previewMenu}
+              modelName={previewRow?.name || ""}
+              effort={thinkingEffort}
+              onChange={persistEffort}
+            />
           </div>
         ) : (
           <>
@@ -888,14 +897,12 @@ export function ModelSelector({
             <div className="model-selector-scroll">
               {renderFlatOrVendor(flatRows, singleAgent, normalizedSelectedModel)}
             </div>
-            {previewMenu ? (
-              <ThinkingEffortFooter
-                menu={previewMenu}
-                modelName={previewRow?.name || ""}
-                effort={thinkingEffort}
-                onChange={persistEffort}
-              />
-            ) : null}
+            <ThinkingEffortFooter
+              menu={previewMenu}
+              modelName={previewRow?.name || ""}
+              effort={thinkingEffort}
+              onChange={persistEffort}
+            />
           </>
         )}
       </DropdownPanel>
