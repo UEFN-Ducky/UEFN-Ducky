@@ -304,12 +304,18 @@ def _call_result(raw: Any) -> dict[str, Any]:
 
 async def _list_tools(mcp: Any) -> list[dict[str, Any]]:
     if not getattr(mcp, "_ducky_skip_plugin_wait", False):
+        # Same readiness as plugin_gate.list_tools_after_plugins: Store plugins,
+        # then nested Epic/HTTP proxies, so the catalog matches a dedicated bridge.
         try:
             from backend.bridge.plugin_gate import wait_until_plugins_loaded
-            from backend.uefn_plugins.host import plugins_ready
 
-            if not plugins_ready():
-                await asyncio.to_thread(wait_until_plugins_loaded, 45.0)
+            await asyncio.to_thread(wait_until_plugins_loaded, 45.0)
+        except Exception:
+            pass
+        try:
+            from backend.mcp_plugins.bridge_proxy import wait_until_nested_proxies_synced
+
+            await asyncio.to_thread(wait_until_nested_proxies_synced, 20.0)
         except Exception:
             pass
     tools = await mcp.list_tools()
@@ -480,7 +486,9 @@ def serve_daemon(mcp: Any) -> None:
     _ensure_loop()
     conn_seq = 0
     # No adapter within the grace window (spawner died / raced) → do not linger.
-    threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop()).start()
+    grace = threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop())
+    grace.daemon = True
+    grace.start()
     try:
         while not _stop.is_set():
             try:

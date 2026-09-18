@@ -282,7 +282,11 @@ def run_bridge() -> None:
             from backend.bridge.shared_mcp import serve_daemon
 
             serve_daemon(mcp)
-            return
+            # Idle exit must be prompt: warmup/plugin threads may be non-daemon.
+            from backend.mcp_plugins.client_pool import shutdown_plugin_pool
+
+            shutdown_plugin_pool()
+            os._exit(0)
         mcp.run()
     except KeyboardInterrupt:
         raise
