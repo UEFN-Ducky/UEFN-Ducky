@@ -2152,15 +2152,15 @@ html.window-maximized .window-resize-grip {
 }
 .model-selector-effort-slider {
   position: relative;
-  height: 66px;
-  margin-top: 4px;
+  height: 28px;
+  margin-top: 2px;
 }
 .model-selector-effort-rail {
   position: absolute;
-  left: 21px;
-  right: 21px;
+  left: 10px;
+  right: 10px;
   top: 50%;
-  height: 24px;
+  height: 3px;
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -2168,40 +2168,25 @@ html.window-maximized .window-resize-grip {
   display: block;
   width: 100%;
   height: 100%;
-  border-radius: 999px;
-  background-color: color-mix(in srgb, var(--fg) 10%, transparent);
-  background-image: radial-gradient(
-    circle closest-side,
-    color-mix(in srgb, var(--fg) 42%, transparent) 3px,
-    transparent 3.45px
-  );
-  background-size: 12px 12px;
-  background-position: 0 50%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
 }
-.model-selector-effort-ticks {
+.model-selector-effort-fill {
   position: absolute;
-  inset: 0;
-}
-.model-selector-effort-ticks i {
-  position: absolute;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--fg) 28%, transparent);
-  transform: translate(-50%, -50%);
-}
-.model-selector-effort-ticks i.is-on {
-  background: color-mix(in srgb, var(--fg) 70%, transparent);
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--fg) 55%, transparent);
 }
 .model-selector-effort-thumb {
   position: absolute;
   top: 50%;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  width: 8px;
+  height: 16px;
+  border-radius: 2px;
   background: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22);
   transform: translate(-50%, -50%);
 }
 .model-selector-effort-range {
@@ -2277,6 +2262,36 @@ html.window-maximized .window-resize-grip {
 .model-selector-cap.is-max .model-selector-cap-track i {
   background: #ef4444;
 }
+.model-selector-cap-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.model-selector-cap-notice span {
+  flex: 1;
+  min-width: 0;
+}
+.model-selector-cap-notice button {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--tab-hover);
+  color: var(--fg);
+  font-size: 11px;
+  cursor: pointer;
+}
+.model-selector-cap-notice button:hover:not(:disabled) {
+  background: var(--tab-active);
+}
+.model-selector-cap-notice button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 .model-selector-btn.is-open {
   background: var(--tab-active);
@@ -2330,6 +2345,9 @@ html.window-maximized .window-resize-grip {
   max-height: min(280px, calc(var(--dropdown-max-height, 360px) - 88px));
   overflow-x: hidden;
   overflow-y: auto;
+}
+.dropdown-panel--fill .model-selector-scroll {
+  max-height: none;
 }
 
 .model-selector-provider-label {
@@ -2478,6 +2496,8 @@ html.window-maximized .window-resize-grip {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  flex: 1 1 auto;
+  height: 100%;
 }
 
 .model-selector-navhdr {

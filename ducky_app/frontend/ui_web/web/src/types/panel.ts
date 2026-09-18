@@ -2898,6 +2898,13 @@ export interface PanelApi {
       reset?: string;
       readout?: string;
     }>;
+    notice?: {
+      message: string;
+      action?: string;
+      action_label?: string;
+      provider_id?: string;
+      agent_id?: string;
+    };
   }>;
   get_provider_usage(provider_id?: string, days?: number): Promise<ProviderUsageReport>;
   get_ducky_usage(ducky_name?: string, profile_id?: string, days?: number): Promise<DuckyUsageReport>;

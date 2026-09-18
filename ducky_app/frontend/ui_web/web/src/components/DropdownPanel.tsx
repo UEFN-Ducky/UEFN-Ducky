@@ -17,6 +17,10 @@ interface DropdownPanelProps {
   zIndex?: number;
   /** Children own scrolling (model list). Without this the panel and the list both scroll. */
   clip?: boolean;
+  /** Preferred panel height in px. Capped by leftover viewport space. */
+  idealHeight?: number;
+  /** Stretch to maxHeight so footers (effort/usage) stay pinned and the list can grow. */
+  fill?: boolean;
 }
 
 type DropdownCoords = {
@@ -42,6 +46,8 @@ export function DropdownPanel({
   width,
   zIndex = 100010,
   clip = false,
+  idealHeight = IDEAL_H,
+  fill = false,
 }: DropdownPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scopeClass = useScopedClass("dropdown-panel");
@@ -65,11 +71,12 @@ export function DropdownPanel({
       const spaceAbove = Math.max(0, rect.top - GAP - EDGE);
       // Honor preferred placement when it fits; otherwise flip to the roomier side.
       const preferTop = placement === "top";
+      const want = Math.max(120, idealHeight);
       const openDown =
         preferTop
           ? spaceAbove < 160 && spaceBelow > spaceAbove
-          : spaceBelow >= Math.min(IDEAL_H, spaceAbove) || spaceBelow >= spaceAbove;
-      const maxHeight = Math.max(120, Math.min(IDEAL_H, openDown ? spaceBelow : spaceAbove));
+          : spaceBelow >= Math.min(want, spaceAbove) || spaceBelow >= spaceAbove;
+      const maxHeight = Math.max(120, Math.min(want, openDown ? spaceBelow : spaceAbove));
       const next: DropdownCoords = openDown
         ? {
             left,
@@ -94,7 +101,7 @@ export function DropdownPanel({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open, anchorRef, placement, minWidth, width]);
+  }, [open, anchorRef, placement, minWidth, width, idealHeight]);
 
   useEffect(() => {
     if (!open) return;
@@ -136,7 +143,7 @@ export function DropdownPanel({
       ) : null}
       <div
         ref={panelRef}
-        className={`dropdown-panel no-drag is-positioned ${scopeClass}${clip ? " dropdown-panel--clip" : ""}`}
+        className={`dropdown-panel no-drag is-positioned ${scopeClass}${clip ? " dropdown-panel--clip" : ""}${fill ? " dropdown-panel--fill" : ""}`}
       >
         {children}
       </div>

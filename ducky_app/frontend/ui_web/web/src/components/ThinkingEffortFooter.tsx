@@ -43,15 +43,7 @@ export function ThinkingEffortFooter({ menu, modelName, effort, onChange }: Thin
       <div className="model-selector-effort-slider">
         <div className="model-selector-effort-rail" aria-hidden="true">
           <span className="model-selector-effort-dots" />
-          <span className="model-selector-effort-ticks">
-            {levels.map((row, i) => (
-              <i
-                key={row.id || i}
-                className={i <= index ? "is-on" : ""}
-                style={{ left: `${last === 0 ? 0 : (i / last) * 100}%` }}
-              />
-            ))}
-          </span>
+          <span className="model-selector-effort-fill" style={{ width: `${pct * 100}%` }} />
           <span className="model-selector-effort-thumb" style={{ left: `${pct * 100}%` }} />
         </div>
         <input

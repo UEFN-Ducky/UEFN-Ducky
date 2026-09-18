@@ -25,8 +25,9 @@ import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import type { CodingAgentDto } from "../types/panel";
 import { ThinkingEffortFooter } from "./ThinkingEffortFooter";
-import { effortGlow, GatewayUsageFooter, type UsageWindow } from "./GatewayUsageFooter";
+import { effortGlow, GatewayUsageFooter, type UsageNotice, type UsageWindow } from "./GatewayUsageFooter";
 import { catalogThinkingMenu, effortInMenu, effortSuffix } from "./thinkingMenu";
+import { openCodingAgentLoginUi } from "../walkthrough/openCodingAgentLogin";
 
 function formatContext(n: number): string {
   if (!n || n <= 0) return "";
@@ -128,6 +129,9 @@ export function ModelSelector({
   const [openVendor, setOpenVendor] = useState<string | null>(null);
   const [hoverRow, setHoverRow] = useState<CatalogModelRow | null>(null);
   const [usageWindows, setUsageWindows] = useState<UsageWindow[]>([]);
+  const [usageNotice, setUsageNotice] = useState<UsageNotice | null>(null);
+  const [usageBusy, setUsageBusy] = useState(false);
+  const [usageTick, setUsageTick] = useState(0);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
   const triggerRef = useMergedRef(anchorRef, uiTargetRef);
@@ -355,42 +359,79 @@ export function ModelSelector({
     () => gatewayForSelection(gateways, codingAgent, selectedProviderKey),
     [gateways, codingAgent, selectedProviderKey],
   );
+  const activeGateway = useMemo(
+    () => gateways.find((g) => g.id === navGateway) || null,
+    [gateways, navGateway],
+  );
   const usageProvider = (
+    hoverRow?.providerKey ||
+    activeGateway?.providerKey ||
     selectedGateway?.providerKey ||
     previewRow?.providerKey ||
     ""
   ).trim();
-  const usageModel = (previewRow?.id || "").trim();
+  const usageModel = (hoverRow?.id || previewRow?.id || "").trim();
   const glow = effortGlow(selectedMenu, thinkingEffort);
 
   useEffect(() => {
     if (!isOpen || !usageProvider) {
       setUsageWindows([]);
+      setUsageNotice(null);
       return;
     }
     const api = getApi();
     if (!api?.get_gateway_usage) {
       setUsageWindows([]);
+      setUsageNotice(null);
       return;
     }
     let cancelled = false;
+    setUsageBusy(true);
     void api.get_gateway_usage(usageProvider, usageModel).then(
       (res) => {
         if (cancelled) return;
         setUsageWindows(Array.isArray(res?.windows) ? (res.windows as UsageWindow[]) : []);
+        const notice = res?.notice;
+        setUsageNotice(
+          notice && typeof notice.message === "string" && notice.message.trim()
+            ? (notice as UsageNotice)
+            : null,
+        );
+        setUsageBusy(false);
       },
       () => {
-        if (!cancelled) setUsageWindows([]);
+        if (!cancelled) {
+          setUsageWindows([]);
+          setUsageNotice(null);
+          setUsageBusy(false);
+        }
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [isOpen, usageProvider, usageModel]);
+  }, [isOpen, usageProvider, usageModel, usageTick]);
 
-  const activeGateway = useMemo(
-    () => gateways.find((g) => g.id === navGateway) || null,
-    [gateways, navGateway],
+  const onUsageAction = () => {
+    const action = (usageNotice?.action || "retry").toLowerCase();
+    if (action === "login") {
+      void openCodingAgentLoginUi({
+        providerId: usageNotice?.provider_id || usageProvider,
+        title: "Log in to see plan limits",
+        body: usageNotice?.message || "",
+      });
+      return;
+    }
+    setUsageTick((n) => n + 1);
+  };
+
+  const usageFooter = (
+    <GatewayUsageFooter
+      windows={usageWindows}
+      notice={usageNotice}
+      busy={usageBusy}
+      onAction={onUsageAction}
+    />
   );
 
   const viewApiRows = useMemo(() => {
@@ -899,6 +940,8 @@ export function ModelSelector({
         minWidth={300}
         width={320}
         clip
+        fill
+        idealHeight={560}
       >
         {twoLevel ? (
           <div className="model-selector-nav" data-level={navGateway ? 1 : 0}>
@@ -938,7 +981,7 @@ export function ModelSelector({
               effort={thinkingEffort}
               onChange={persistEffort}
             />
-            <GatewayUsageFooter windows={usageWindows} />
+            {usageFooter}
           </div>
         ) : (
           <>
@@ -952,7 +995,7 @@ export function ModelSelector({
               effort={thinkingEffort}
               onChange={persistEffort}
             />
-            <GatewayUsageFooter windows={usageWindows} />
+            {usageFooter}
           </>
         )}
       </DropdownPanel>

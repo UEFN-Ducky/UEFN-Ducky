@@ -22,6 +22,24 @@ describe("GatewayUsageFooter", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("shows a refresh notice and button when the session is stale", () => {
+    const onAction = () => {};
+    render(
+      <GatewayUsageFooter
+        windows={[]}
+        notice={{
+          message: "Claude login expired. Log in to see 5-hour and weekly limits.",
+          action: "login",
+          action_label: "Log in",
+          provider_id: "anthropic",
+        }}
+        onAction={onAction}
+      />,
+    );
+    expect(screen.getByText(/Claude login expired/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
+  });
+
   it("draws plan bars with reset and percent", () => {
     render(
       <GatewayUsageFooter

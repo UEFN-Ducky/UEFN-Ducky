@@ -14,6 +14,14 @@ export type UsageWindow = {
   readout?: string;
 };
 
+export type UsageNotice = {
+  message: string;
+  action?: string;
+  action_label?: string;
+  provider_id?: string;
+  agent_id?: string;
+};
+
 function windowRows(windows: UsageWindow[] | null | undefined): UsageWindow[] {
   if (!windows?.length) return [];
   return windows.filter((w) => Number(w.limit) > 0);
@@ -32,9 +40,20 @@ function readoutOf(w: UsageWindow): string {
 }
 
 /** Live plan caps under Faster/Smarter. Hidden when the gateway sent none. */
-export function GatewayUsageFooter({ windows }: { windows: UsageWindow[] | null | undefined }) {
+export function GatewayUsageFooter({
+  windows,
+  notice,
+  busy = false,
+  onAction,
+}: {
+  windows: UsageWindow[] | null | undefined;
+  notice?: UsageNotice | null;
+  busy?: boolean;
+  onAction?: () => void;
+}) {
   const rows = windowRows(windows);
-  if (!rows.length) return null;
+  const msg = (notice?.message || "").trim();
+  if (!rows.length && !msg) return null;
   return (
     <div className="model-selector-usage" onClick={(e) => e.stopPropagation()}>
       {rows.map((w) => {
@@ -53,6 +72,16 @@ export function GatewayUsageFooter({ windows }: { windows: UsageWindow[] | null 
           </div>
         );
       })}
+      {msg ? (
+        <div className="model-selector-cap-notice">
+          <span>{msg}</span>
+          {notice?.action_label && onAction ? (
+            <button type="button" disabled={busy} onClick={onAction}>
+              {busy ? "Working…" : notice.action_label}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

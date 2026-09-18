@@ -388,15 +388,19 @@ Pass `fetch_usage=` on `api.register_llm_provider`. Host pulls fresh when the
 model picker opens (even with no API key — Claude/Codex login still counts).
 Return live vendor windows only — never hardcoded Plus/Pro tables. Optional
 `reset` / `readout` strings are shown as-is (e.g. "Resets in 4d 3h", "1% left").
+If the vendor session is stale, return a `notice` (no windows) so the picker
+footer can say so and offer Refresh / Log in:
 
 ```python
 def fetch_usage(api_key: str, *, model: str = "") -> dict:
     return {"windows": [
         {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests", "reset": "Resets in 1h"},
     ]}
+    # or: {"windows": [], "notice": {"message": "Claude login expired.", "action": "login",
+    #      "action_label": "Log in", "provider_id": "anthropic", "agent_id": "claude_code"}}
 ```
 
-Missing hook or empty `windows` hides the sliders.
+Missing hook or empty `windows` hides the bars. A `notice` still shows under the slider.
 
 ### contributes.llm.coding_agents
 

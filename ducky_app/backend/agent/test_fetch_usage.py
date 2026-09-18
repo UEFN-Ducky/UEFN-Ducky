@@ -55,6 +55,25 @@ def test_fetch_usage_without_key_still_calls_plugin() -> None:
         out = fetch_usage("anthropic", "")
     assert out["windows"][0]["label"] == "5-hour limit"
     assert out["windows"][0]["readout"] == "100%"
+    assert "notice" not in out
+
+
+def test_normalize_notice_when_windows_empty() -> None:
+    out = normalize_usage_windows(
+        {
+            "windows": [],
+            "notice": {
+                "message": "Claude login expired.",
+                "action": "login",
+                "action_label": "Log in",
+                "provider_id": "anthropic",
+                "agent_id": "claude_code",
+            },
+        }
+    )
+    assert out["windows"] == []
+    assert out["notice"]["action"] == "login"
+    assert out["notice"]["provider_id"] == "anthropic"
 
 
 def test_fetch_usage_missing_hook() -> None:

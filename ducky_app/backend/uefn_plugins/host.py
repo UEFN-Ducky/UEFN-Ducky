@@ -550,7 +550,7 @@ def register_llm_provider_factory(
     - tool_schema: \"openai\" | \"anthropic\" | \"gemini\"
     - key_optional: True for URL gateways (Ollama)
     - normalize_secret: ``(raw) -> str`` before test/fetch
-    - fetch_usage: ``(api_key, *, model=\"\") -> {windows: [...]}`` live quota sliders
+    - fetch_usage: ``(api_key, *, model=\"\") -> {windows, notice?}`` live quota sliders
     """
     from backend.uefn_plugins.store import normalize_plugin_id
 

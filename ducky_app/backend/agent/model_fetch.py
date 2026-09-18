@@ -116,11 +116,32 @@ def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False) ->
     return models
 
 
+def _normalize_usage_notice(raw: Any) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    message = str(raw.get("message") or "").strip()
+    if not message:
+        return None
+    action = str(raw.get("action") or "retry").strip().lower() or "retry"
+    if action not in ("retry", "login"):
+        action = "retry"
+    label = str(raw.get("action_label") or ("Log in" if action == "login" else "Refresh")).strip()
+    notice = {"message": message, "action": action, "action_label": label or "Refresh"}
+    provider_id = str(raw.get("provider_id") or "").strip().lower()
+    agent_id = str(raw.get("agent_id") or "").strip().lower()
+    if provider_id:
+        notice["provider_id"] = provider_id
+    if agent_id:
+        notice["agent_id"] = agent_id
+    return notice
+
+
 def normalize_usage_windows(raw: Any) -> dict[str, Any]:
     """Clamp plugin `fetch_usage` output. Missing/junk → empty windows."""
+    notice = _normalize_usage_notice(raw.get("notice") if isinstance(raw, dict) else None)
     rows = raw.get("windows") if isinstance(raw, dict) else None
     if not isinstance(rows, list):
-        return {"windows": []}
+        return {"windows": [], **({"notice": notice} if notice else {})}
     out: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -146,7 +167,10 @@ def normalize_usage_windows(raw: Any) -> dict[str, Any]:
         if readout:
             item["readout"] = readout
         out.append(item)
-    return {"windows": out}
+    result: dict[str, Any] = {"windows": out}
+    if notice and not out:
+        result["notice"] = notice
+    return result
 
 
 def _usage_registration(provider: str) -> tuple[str, dict[str, Any]]:
