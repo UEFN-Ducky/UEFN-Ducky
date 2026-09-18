@@ -192,6 +192,8 @@ def _join_host_workers(timeout: float = 5.0) -> None:
         if t is threading.current_thread():
             continue
         if t.name in ("uefn-plugins-repair", "appdata-maintenance"):
+            if t.ident is None:
+                continue
             t.join(timeout)
 
 
