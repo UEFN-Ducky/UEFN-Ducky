@@ -2102,54 +2102,34 @@ html.window-maximized .window-resize-grip {
   flex-shrink: 0;
 }
 
-/* ── EffortSelector (Anthropic thinking) ── */
-.effort-selector {
-  position: relative;
+.model-selector-effort {
+  flex-shrink: 0;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
 }
-.effort-selector-trigger {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+.model-selector-effort-readout {
   font-size: 11px;
-  color: var(--fg-dim);
-  cursor: pointer;
-}
-.effort-selector-trigger:hover {
-  background: var(--tab-hover);
-}
-.effort-selector-menu {
-  min-width: 180px;
-  padding: 4px;
-}
-.effort-selector-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--fg);
-  cursor: pointer;
-  text-align: left;
+  line-height: 1.3;
 }
-.effort-selector-option:hover,
-.effort-selector-option.is-active {
-  background: var(--tab-active);
-}
-.effort-selector-option-label {
-  font-size: 12px;
-  font-weight: 400;
-}
-.effort-selector-option-hint {
+.model-selector-effort-hint {
+  margin-top: 2px;
   font-size: 10px;
   color: var(--muted);
+}
+.model-selector-effort-axis {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.model-selector-effort-range {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent, #6ee7b7);
 }
 
 .model-selector-btn.is-open {
@@ -3179,15 +3159,6 @@ html.window-maximized .window-resize-grip {
 
 .ducky-editor-model-row .ducky-favorite-models--chips {
   margin: 0;
-}
-
-.ducky-editor-model-row .effort-selector-trigger {
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  color: var(--text);
-  font-size: 12px;
 }
 
 .ducky-favorite-models--chips {

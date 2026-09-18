@@ -272,6 +272,9 @@ class PanelSettings:
     starter_llm_gateways_seeded: bool = False
     """First-run Store install of Anthropic / Cursor / OpenAI already attempted."""
 
+    shared_mcp: bool = False
+    """Prototype: one FastMCP daemon for multiple IDE adapters. Off by default; env UEFN_DUCKY_SHARED_MCP wins."""
+
     follow_code_enabled: bool = False
     """Play the agent's file walkthrough in the editor (content sync always happens). Off unless the user turns it on."""
 
@@ -439,6 +442,7 @@ class PanelSettings:
             or not self.allow_see_other_programs
             or bool(self.walkthrough_completed)
             or self.starter_llm_gateways_seeded
+            or self.shared_mcp
             or self.follow_code_enabled
             or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"

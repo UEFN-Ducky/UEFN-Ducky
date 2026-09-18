@@ -1,3 +1,4 @@
+import type { ThinkingMenu } from "../components/thinkingMenu";
 import { getApi } from "./usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
 
@@ -14,6 +15,7 @@ export interface CatalogModelRow {
   priceOut: number | null;
   isLocal: boolean;
   supportsThinkingEffort?: boolean | null;
+  thinkingMenu?: ThinkingMenu | null;
 }
 
 let cachedModels: CatalogModelRow[] | null = null;
@@ -118,6 +120,7 @@ type ApiModelRow = {
   price_out?: number | null;
   is_local?: boolean;
   supports_thinking_effort?: boolean | null;
+  thinking_menu?: ThinkingMenu | null;
 };
 
 function applyDefaultFromSettings(defaultModel: string, agentModel: string) {
@@ -145,6 +148,7 @@ function mapApiRow(row: ApiModelRow, fallbackKey: string): CatalogModelRow {
     isLocal: !!row.is_local,
     supportsThinkingEffort:
       row.supports_thinking_effort == null ? null : !!row.supports_thinking_effort,
+    thinkingMenu: row.thinking_menu?.levels?.length ? row.thinking_menu : null,
   };
 }
 

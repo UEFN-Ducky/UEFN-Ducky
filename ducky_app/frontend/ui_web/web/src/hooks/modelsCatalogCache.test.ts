@@ -73,6 +73,11 @@ describe("modelsCatalogCache", () => {
             price_in: null,
             price_out: null,
             is_local: false,
+            thinking_menu: {
+              lo: "Faster",
+              hi: "Smarter",
+              levels: [{ id: "off", label: "Off", thinking_tokens: 0 }],
+            },
           },
         ],
         default_model: "openai:gpt-4o",
@@ -84,5 +89,6 @@ describe("modelsCatalogCache", () => {
     expect(runBridgeJob).not.toHaveBeenCalled();
     expect(getCachedModels()?.[0]?.id).toBe("gpt-4o");
     expect(getCachedModels()?.[0]?.providerKey).toBe("openai");
+    expect(getCachedModels()?.[0]?.thinkingMenu?.levels[0].id).toBe("off");
   });
 });

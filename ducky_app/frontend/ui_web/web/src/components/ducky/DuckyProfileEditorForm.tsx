@@ -22,12 +22,8 @@ import { DuckyProfileLedger } from "./DuckyProfileLedger";
 import { DuckyProfileStats } from "./DuckyProfileStats";
 import { useDuckyCatalog } from "./DuckyCatalogContext";
 import type { DuckyProfileFormState } from "./duckyProfileForm";
-import { modelShowsThinkingEffort } from "./duckyProfileForm";
-import { getCachedModels } from "../../hooks/modelsCatalogCache";
-import { usePluginContributions } from "../../hooks/usePluginContributions";
 import { DuckyModelPicker } from "./DuckyModelPicker";
 import type { DuckyEditTarget } from "./duckyProfileTypes";
-import { EffortSelector } from "../EffortSelector";
 import { useTtsVoiceOptions } from "../../voice/pluginVoices";
 import { SpeedDropdown } from "../../voice/SpeedDropdown";
 
@@ -202,17 +198,6 @@ export function DuckyProfileEditorForm({
 }: DuckyProfileEditorFormProps) {
   const { allStyles, defaultStyle, uploadPng, deleteCustom } = useDuckyCatalog();
   const { alert, confirm } = useConfirmModal();
-  const pluginContrib = usePluginContributions();
-  const showThinkingEffort = useMemo(() => {
-    const thinkingProviders = (pluginContrib.llm_providers || [])
-      .filter((p) => p.shows_thinking_effort)
-      .map((p) => p.id);
-    const agents = (pluginContrib.llm_coding_agents || []).map((a) => ({
-      id: a.id,
-      shows_thinking_effort: !!a.shows_thinking_effort,
-    }));
-    return modelShowsThinkingEffort(form.model, agents, thinkingProviders, getCachedModels());
-  }, [form.model, pluginContrib.llm_providers, pluginContrib.llm_coding_agents]);
   const [uploading, setUploading] = useState(false);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [sectionTabLocal, setSectionTabLocal] = useState<DuckyProfileSectionTab>("profile");
@@ -490,15 +475,10 @@ export function DuckyProfileEditorForm({
                   onChange={(model) => setForm((prev) => ({ ...prev, model }))}
                   hint=""
                   leadingIcon={<Icons.Brain />}
+                  convId={editChat?.id || ""}
+                  thinkingEffort={form.thinkingEffort || "off"}
+                  onEffortChange={(thinkingEffort) => setForm((prev) => ({ ...prev, thinkingEffort }))}
                 />
-                {showThinkingEffort ? (
-                  <EffortSelector
-                    convId={editChat?.id || ""}
-                    provider="anthropic"
-                    value={form.thinkingEffort || "off"}
-                    onChange={(thinkingEffort) => setForm((prev) => ({ ...prev, thinkingEffort }))}
-                  />
-                ) : null}
               </div>
               <div className="ducky-favorite-models ducky-favorite-models--chips">
                 <div className={`ducky-favorite-models-chip${form.ttsVoice.trim() ? " is-selected" : ""}`}>

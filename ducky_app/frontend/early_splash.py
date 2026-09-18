@@ -117,9 +117,10 @@ def show() -> Any | None:
     label: Any | None = None
     if logo is not None:
         try:
+            from frontend.tray_icon import open_png
             from PIL import Image, ImageTk
 
-            img = Image.open(logo).convert("RGBA").resize((_DUCK_PX, _DUCK_PX), Image.Resampling.LANCZOS)
+            img = open_png(logo).convert("RGBA").resize((_DUCK_PX, _DUCK_PX), Image.Resampling.LANCZOS)
             img = _matte_for_colorkey(img)
             _photo = ImageTk.PhotoImage(img)
             label = tk.Label(frame, image=_photo, bg=_KEY, borderwidth=0, highlightthickness=0)

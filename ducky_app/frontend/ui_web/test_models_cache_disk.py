@@ -16,7 +16,17 @@ def test_model_cache_disk_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(pa, "default_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(pa, "_model_cache", {})
     pa._model_cache["anthropic"] = [
-        ModelInfo(id="claude-x", display_name="Claude X", supports_vision=True, price_in=3.0)
+        ModelInfo(
+            id="claude-x",
+            display_name="Claude X",
+            supports_vision=True,
+            price_in=3.0,
+            thinking_menu={
+                "lo": "Faster",
+                "hi": "Smarter",
+                "levels": [{"id": "off", "label": "Off", "thinking_tokens": 0}],
+            },
+        )
     ]
     monkeypatch.setattr(pa, "_contributed_provider_ids", lambda: set())
 
@@ -28,6 +38,7 @@ def test_model_cache_disk_round_trip(tmp_path, monkeypatch):
 
     m = pa._model_cache["anthropic"][0]
     assert m.id == "claude-x" and m.supports_vision and m.price_in == 3.0
+    assert m.thinking_menu and m.thinking_menu["levels"][0]["id"] == "off"
     # Capability lookups (vision/tools/pricing) must also work from the disk load.
     assert get_model_info("anthropic", "claude-x") is not None
 

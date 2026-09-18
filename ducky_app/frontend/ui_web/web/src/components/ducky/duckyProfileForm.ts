@@ -30,7 +30,7 @@ export interface DuckyProfileFormState {
   ttsVoice: string;
   /** Talking-speed multiplier; 0 uses Settings → Voice default speed. */
   ttsSpeed: number;
-  /** Anthropic extended-thinking effort (off|low|medium|high). */
+  /** Gateway-advertised thinking stop (off unless the catalog has a menu). */
   thinkingEffort: string;
 }
 
@@ -70,12 +70,12 @@ export function codingAgentFromModel(
   return "ducky";
 }
 
-function catalogSupportsThinkingEffort(
+function catalogHasThinkingMenu(
   catalog: CatalogModelRow[] | null | undefined,
   backend: string,
   modelId: string,
-): boolean | null {
-  if (!catalog?.length || !backend || !modelId) return null;
+): boolean {
+  if (!catalog?.length || !backend || !modelId) return false;
   const be = backend.trim().toLowerCase();
   const mid = modelId.trim();
   const qualified = `${be}:${mid}`;
@@ -84,35 +84,22 @@ function catalogSupportsThinkingEffort(
     const id = String(row.id || "").trim();
     if (pk && pk !== be) continue;
     if (id !== mid && id !== qualified && !id.endsWith(`:${mid}`)) continue;
-    if (row.supportsThinkingEffort != null) return !!row.supportsThinkingEffort;
+    return !!(row.thinkingMenu?.levels?.length);
   }
-  return null;
+  return false;
 }
 
-/** True when the Effort control should show (per-model flag, else plugin/heuristic). */
+/** True when the gateway advertised a thinking_menu for this model. */
 export function modelShowsThinkingEffort(
   model: string,
-  codingAgents: { id: string; shows_thinking_effort?: boolean }[] = [],
-  thinkingProviderIds: string[] = [],
+  _codingAgents: { id: string; shows_thinking_effort?: boolean }[] = [],
+  _thinkingProviderIds: string[] = [],
   catalog: CatalogModelRow[] | null = getCachedModels(),
 ): boolean {
   const parsed = parseFavoriteSelection(model);
   const backend = (parsed?.backend || "").trim().toLowerCase();
   const modelId = (parsed?.modelId || "").trim();
-  const flagged = catalogSupportsThinkingEffort(catalog, backend, modelId);
-  if (flagged != null) return flagged;
-  const agent = codingAgentFromModel(model);
-  if (agent !== "ducky") {
-    const key = agent.trim().toLowerCase().replace(/-/g, "_");
-    const row = codingAgents.find(
-      (a) => String(a.id || "").trim().toLowerCase().replace(/-/g, "_") === key,
-    );
-    if (row?.shows_thinking_effort) return true;
-  }
-  if (backend && thinkingProviderIds.includes(backend)) return true;
-  // Model-name heuristic when contributions / catalog are not loaded yet.
-  const m = (model || "").toLowerCase();
-  return m.includes("claude") || m.includes("astra") || m.includes("gpt-6");
+  return catalogHasThinkingMenu(catalog, backend, modelId);
 }
 
 /** Empty is fine (global Default Model applies); reject unusable saved values. */
@@ -183,6 +170,7 @@ export function formToConfig(
   form: DuckyProfileFormState,
   chatTitle?: string,
   profileId?: string,
+  catalog: CatalogModelRow[] | null = getCachedModels(),
 ): DuckyConfigDto {
   const model = form.model.trim();
   const config: DuckyConfigDto = {
@@ -196,7 +184,7 @@ export function formToConfig(
     coding_agent: codingAgentFromModel(model),
     tts_voice: form.ttsVoice.trim(),
     tts_speed: form.ttsSpeed || 0,
-    thinking_effort: modelShowsThinkingEffort(model, [], [], getCachedModels())
+    thinking_effort: modelShowsThinkingEffort(model, [], [], catalog)
       ? form.thinkingEffort || "off"
       : "off",
   };

@@ -347,6 +347,27 @@ Browse taxonomy: plugins that only contribute `llm.providers` are inferred as
 `gateways` + `plugins` for Store filters. Publish with
 `categories: ["plugins", "gateways"]`.
 
+### `fetch_models` thinking_menu (not contributes.hooks)
+
+The composer effort slider is filled by the gateway, not the host. On each
+`ModelInfo` from `api.register_llm_provider(..., fetch_models=)`, set:
+
+```python
+thinking_menu={
+  "lo": "Faster",
+  "hi": "Smarter",
+  "levels": [
+    {"id": "off", "label": "Off", "thinking_tokens": 0, "hint": "No extended thinking"},
+    {"id": "low", "label": "Low", "thinking_tokens": 2048, "hint": "2048 thinking tokens"},
+  ],
+}
+```
+
+`thinking_tokens` is the exact cap you will send (`0` = Off). Use `null` plus an
+honest hint when the vendor has no cap (`reasoning_effort=high, no token cap`).
+Always include Off. The host never invents Off/Low/Med/High or 2k/8k/16k.
+`contributes.hooks` is for Appearance sounds — do not use it for this menu.
+
 ### contributes.llm.coding_agents
 
 Coding-agent block inside that gateway’s **provider detail slide** while the

@@ -24,6 +24,22 @@ def test_matte_for_colorkey_kills_soft_edges() -> None:
     assert out.getpixel((1, 0)) == (255, 200, 0, 255)
 
 
+def test_open_png_skips_avif_codec() -> None:
+    """PNG decode must not load Pillow's AVIF native codec."""
+    from frontend.tray_icon import open_png
+
+    path = early_splash._logo_png()
+    assert path is not None
+    import sys
+
+    for name in ("PIL.AvifImagePlugin", "PIL._avif"):
+        sys.modules.pop(name, None)
+    img = open_png(path)
+    assert img.size[0] > 0
+    assert "PIL.AvifImagePlugin" not in sys.modules
+    assert "PIL._avif" not in sys.modules
+
+
 def test_handoff_defaults_are_short() -> None:
     """Stale panel.pid must not burn ~20s of connect timeouts on cold start."""
     import inspect
@@ -37,5 +53,6 @@ def test_handoff_defaults_are_short() -> None:
 if __name__ == "__main__":
     test_logo_png_resolves_in_dev_tree()
     test_matte_for_colorkey_kills_soft_edges()
+    test_open_png_skips_avif_codec()
     test_handoff_defaults_are_short()
     print("ok")

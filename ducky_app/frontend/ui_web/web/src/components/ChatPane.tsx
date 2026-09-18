@@ -3,8 +3,6 @@ import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
 import { ModelSelector } from "./ModelSelector";
-import { EffortSelector } from "./EffortSelector";
-import { modelShowsThinkingEffort } from "./ducky/duckyProfileForm";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
@@ -193,29 +191,6 @@ export function ChatPane({
   const [catalogReady, setCatalogReady] = useState(() => isModelsCatalogReady());
   const [modelsCount, setModelsCount] = useState(() => getCachedModels()?.length ?? 0);
   const pluginContrib = usePluginContributions();
-  const showThinkingEffort = useMemo(() => {
-    const thinkingProviders = (pluginContrib.llm_providers || [])
-      .filter((p) => p.shows_thinking_effort)
-      .map((p) => p.id);
-    const agents = (pluginContrib.llm_coding_agents || []).map((a) => ({
-      id: a.id,
-      shows_thinking_effort: !!a.shows_thinking_effort,
-    }));
-    const qualified =
-      codingAgent !== "ducky"
-        ? `${codingAgent}:${selectedModel || "default"}`
-        : chat.provider
-          ? `${chat.provider}:${selectedModel || "default"}`
-          : selectedModel;
-    return modelShowsThinkingEffort(qualified, agents, thinkingProviders, getCachedModels());
-  }, [
-    codingAgent,
-    selectedModel,
-    chat.provider,
-    pluginContrib.llm_providers,
-    pluginContrib.llm_coding_agents,
-    modelsCount,
-  ]);
   const hasApiKey = useHasApiKey();
   const { confirm } = useConfirmModal();
   const [isFocused, setIsFocused] = useState(false);
@@ -1510,15 +1485,9 @@ export function ChatPane({
                       openSignal={modelPickerSignal}
                       onModelMetaChange={handleModelMetaChange}
                       uiTarget="chat.composer.model"
+                      thinkingEffort={thinkingEffort}
+                      onEffortChange={setThinkingEffort}
                     />
-                    {showThinkingEffort ? (
-                      <EffortSelector
-                        convId={chat.id}
-                        provider={chat.provider || codingAgent || "anthropic"}
-                        value={thinkingEffort}
-                        onChange={setThinkingEffort}
-                      />
-                    ) : null}
                   </div>
                 </>
               ) : null}

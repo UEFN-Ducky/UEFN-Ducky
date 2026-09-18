@@ -54,6 +54,19 @@ def test_current_writer_falls_back_to_user(monkeypatch) -> None:
     assert writer["run_id"] == ""
 
 
+def test_shared_call_skips_process_env(monkeypatch) -> None:
+    monkeypatch.setenv(identity.ENV_RUN_ID, "env-run")
+    monkeypatch.setenv(identity.ENV_CONV_ID, "env-conv")
+    token = identity.mark_shared()
+    try:
+        assert identity.resolve_context() is None
+        assert identity.current_writer()["source"] == identity.SOURCE_USER
+    finally:
+        identity.reset_shared(token)
+    assert identity.resolve_context() is not None
+    assert identity.current_writer()["run_id"] == "env-run"
+
+
 def test_current_writer_prefers_bound_context_over_env(monkeypatch) -> None:
     monkeypatch.setenv(identity.ENV_CONV_ID, "env-conv")
     token = identity.bind(RunContext(run_id="r", conv_id="bound-conv"))

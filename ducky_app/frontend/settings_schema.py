@@ -271,6 +271,12 @@ FIELD_META: dict[str, FieldMeta] = {
         "Starter LLM gateways seeded", "internal",
         description="First-run Store install of Anthropic, Cursor, and OpenAI already ran once.",
     ),
+    "shared_mcp": FieldMeta(
+        "Shared MCP backend",
+        "internal",
+        settable=True,
+        description="Prototype one FastMCP daemon for IDE adapters. Off by default. UEFN_DUCKY_SHARED_MCP overrides.",
+    ),
 }
 
 

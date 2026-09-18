@@ -129,6 +129,9 @@ if _mcp_plugins.is_dir():
             else f"frontend/mcp_plugins/{parent.replace(chr(92), '/')}"
         )
         _datas.append((str(path), dest))
+_bridge_host_js = DUCKY_APP / "backend" / "agent" / "coding_agents" / "mcp_bridge_host.mjs"
+if _bridge_host_js.is_file():
+    _datas.append((str(_bridge_host_js), "backend/agent/coding_agents"))
 # ADR 0003: the store's SQL migrations ship as data (importlib cannot find .sql in the PYZ).
 _migrations = DUCKY_APP / "backend" / "store" / "migrations"
 if _migrations.is_dir():

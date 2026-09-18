@@ -29,6 +29,15 @@ _ICO_SIZES = (16, 32, 48, 64, 128, 256)
 _TRAY_SIZE = 64
 
 
+def open_png(path: Path):
+    """Decode a PNG without Pillow's Image.init() codec sweep (AVIF/WebP/JPEG2000)."""
+    from PIL.PngImagePlugin import PngImageFile
+
+    img = PngImageFile(str(path))
+    img.load()
+    return img
+
+
 def _imports_ok() -> bool:
     try:
         import pystray  # noqa: F401
@@ -84,8 +93,9 @@ def resolve_status_png_path(mode: ConnectionIcon) -> Path | None:
 def write_ico_from_png(dest: Path, png: Path) -> None:
     """Write multi-size ``.ico`` from a PNG source, preserving alpha transparency."""
     from PIL import Image
+    from PIL import IcoImagePlugin  # noqa: F401 — register ICO save without Image.init()
 
-    src = Image.open(png).convert("RGBA")
+    src = open_png(png).convert("RGBA")
     images: list[Image.Image] = []
     for sz in _ICO_SIZES:
         images.append(src.resize((sz, sz), Image.Resampling.LANCZOS))
@@ -154,7 +164,7 @@ def load_status_image(mode: ConnectionIcon):
     png = resolve_status_png_path(mode)
     if not png:
         raise FileNotFoundError(f"Missing PNG for connection mode: {mode}")
-    img = Image.open(png).convert("RGBA")
+    img = open_png(png).convert("RGBA")
     if img.size != (_TRAY_SIZE, _TRAY_SIZE):
         img = img.resize((_TRAY_SIZE, _TRAY_SIZE), Image.Resampling.LANCZOS)
     return img

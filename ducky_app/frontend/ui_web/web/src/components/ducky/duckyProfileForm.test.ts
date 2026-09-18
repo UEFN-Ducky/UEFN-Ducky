@@ -124,33 +124,49 @@ describe("duckyProfileForm model selection", () => {
     expect(config.disabled_tool_ids).toEqual(["blender"]);
   });
 
-  it("formToConfig writes thinking_effort for Anthropic and Astra models", () => {
+  it("formToConfig writes thinking_effort only when the catalog has a menu", () => {
+    const menu = {
+      lo: "Faster",
+      hi: "Smarter",
+      levels: [{ id: "off", label: "Off", thinking_tokens: 0 }],
+    };
+    const catalog = [
+      {
+        provider: "Anthropic",
+        providerKey: "anthropic",
+        id: "claude-sonnet-4-20250514",
+        name: "Claude Sonnet 4",
+        supportsVision: true,
+        supportsTools: true,
+        supportsWebSearch: false,
+        contextLimit: 200000,
+        priceIn: null,
+        priceOut: null,
+        isLocal: false,
+        thinkingMenu: menu,
+      },
+    ];
     const form = baseForm({
       model: "anthropic:claude-sonnet-4-20250514",
       thinkingEffort: "high",
     });
-    expect(formToConfig(form).thinking_effort).toBe("high");
-    expect(formToConfig(baseForm({ model: "openai:gpt-6-astra", thinkingEffort: "high" })).thinking_effort).toBe(
-      "high",
-    );
+    expect(formToConfig(form, undefined, undefined, catalog).thinking_effort).toBe("high");
     expect(formToConfig(baseForm({ model: "openai:gpt-4o", thinkingEffort: "high" })).thinking_effort).toBe(
       "off",
     );
+    expect(formToConfig(form).thinking_effort).toBe("off");
   });
 
-  it("shows the effort picker for Claude and Astra", () => {
-    expect(modelShowsThinkingEffort("anthropic:claude-sonnet-4")).toBe(true);
-    expect(modelShowsThinkingEffort("openai:gpt-6-astra")).toBe(true);
+  it("shows the effort picker only from thinking_menu, never a name heuristic", () => {
+    expect(modelShowsThinkingEffort("anthropic:claude-sonnet-4")).toBe(false);
+    expect(modelShowsThinkingEffort("openai:gpt-6-astra")).toBe(false);
     expect(modelShowsThinkingEffort("openai:gpt-4o")).toBe(false);
-  });
-
-  it("prefers a per-model catalog flag over the name heuristic", () => {
     const catalog = [
       {
         provider: "OpenAI",
         providerKey: "openai",
-        id: "gpt-4o",
-        name: "GPT-4o",
+        id: "gpt-5",
+        name: "GPT-5",
         supportsVision: true,
         supportsTools: true,
         supportsWebSearch: false,
@@ -158,7 +174,7 @@ describe("duckyProfileForm model selection", () => {
         priceIn: null,
         priceOut: null,
         isLocal: false,
-        supportsThinkingEffort: true,
+        thinkingMenu: { levels: [{ id: "off", thinking_tokens: 0 }] },
       },
       {
         provider: "Anthropic",
@@ -172,32 +188,9 @@ describe("duckyProfileForm model selection", () => {
         priceIn: null,
         priceOut: null,
         isLocal: false,
-        supportsThinkingEffort: false,
-      },
-      {
-        provider: "Cursor",
-        providerKey: "cursor",
-        id: "composer-2.5",
-        name: "Composer 2.5",
-        supportsVision: true,
-        supportsTools: true,
-        supportsWebSearch: false,
-        contextLimit: 0,
-        priceIn: null,
-        priceOut: null,
-        isLocal: false,
-        supportsThinkingEffort: false,
       },
     ];
-    expect(modelShowsThinkingEffort("openai:gpt-4o", [], [], catalog)).toBe(true);
+    expect(modelShowsThinkingEffort("openai:gpt-5", [], [], catalog)).toBe(true);
     expect(modelShowsThinkingEffort("anthropic:claude-sonnet-4", [], [], catalog)).toBe(false);
-    expect(
-      modelShowsThinkingEffort(
-        "cursor:composer-2.5",
-        [{ id: "cursor", shows_thinking_effort: true }],
-        [],
-        catalog,
-      ),
-    ).toBe(false);
   });
 });

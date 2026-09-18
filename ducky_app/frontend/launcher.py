@@ -193,12 +193,17 @@ def run_bridge() -> None:
 
     args = sys.argv[2:] if len(sys.argv) > 2 else []
     run_id_arg = ""
+    shared_daemon = False
     for i, arg in enumerate(args):
         if arg == "--port" and i + 1 < len(args):
             bridge.set_port_override(int(args[i + 1]))
         elif arg == "--ducky-run-id" and i + 1 < len(args):
             run_id_arg = str(args[i + 1] or "").strip()
-    if run_id_arg:
+        elif arg == "--shared-daemon":
+            shared_daemon = True
+    # Dedicated stdio only: process env is that client's identity. The shared
+    # daemon binds RunContext per connection instead.
+    if run_id_arg and not shared_daemon:
         from backend.workspace.identity import ENV_RUN_ID
 
         os.environ[ENV_RUN_ID] = run_id_arg
@@ -264,6 +269,11 @@ def run_bridge() -> None:
 
     threading.Thread(target=_bridge_warmup, daemon=True, name="bridge-warmup").start()
     try:
+        if shared_daemon:
+            from backend.bridge.shared_mcp import serve_daemon
+
+            serve_daemon(mcp)
+            return
         mcp.run()
     except KeyboardInterrupt:
         raise

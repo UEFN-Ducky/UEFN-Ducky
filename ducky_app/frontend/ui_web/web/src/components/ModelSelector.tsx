@@ -24,6 +24,8 @@ import {
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import type { CodingAgentDto } from "../types/panel";
+import { ThinkingEffortFooter } from "./ThinkingEffortFooter";
+import { catalogThinkingMenu, effortInMenu, effortSuffix } from "./thinkingMenu";
 
 function formatContext(n: number): string {
   if (!n || n <= 0) return "";
@@ -81,6 +83,8 @@ interface ModelSelectorProps {
   openSignal?: number;
   /** Spotlight id when this trigger is the chat composer control. */
   uiTarget?: string;
+  thinkingEffort?: string;
+  onEffortChange?: (effort: string) => void;
 }
 
 export function ModelSelector({
@@ -98,6 +102,8 @@ export function ModelSelector({
   placeholder = "Pick a model",
   openSignal = 0,
   uiTarget = "",
+  thinkingEffort = "off",
+  onEffortChange,
 }: ModelSelectorProps) {
   const contrib = usePluginContributions();
   const [isOpen, setIsOpen] = useState(false);
@@ -108,6 +114,7 @@ export function ModelSelector({
   // null = gateway list; provider key = that gateway’s models (+ nested CLIs).
   const [navGateway, setNavGateway] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
+  const [hoverRow, setHoverRow] = useState<CatalogModelRow | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
   const triggerRef = useMergedRef(anchorRef, uiTargetRef);
@@ -238,6 +245,7 @@ export function ModelSelector({
           priceIn: m.price_in ?? catalog?.priceIn ?? null,
           priceOut: m.price_out ?? catalog?.priceOut ?? null,
           isLocal: false,
+          thinkingMenu: catalog?.thinkingMenu ?? (m.thinking_menu?.levels?.length ? m.thinking_menu : null),
         };
       });
     },
@@ -286,6 +294,24 @@ export function ModelSelector({
         ? visibleModels.filter((m) => normId(m.providerKey) === normId(selectedProviderKey))
         : visibleModels;
   const currentModelData = committedModels.find((m) => m.id === normalizedSelectedModel);
+  const selectedMenu = catalogThinkingMenu(currentModelData);
+  const previewRow = hoverRow || currentModelData;
+  const previewMenu = catalogThinkingMenu(previewRow);
+
+  const persistEffort = useCallback(
+    (next: string) => {
+      onEffortChange?.(next);
+      if (!convId) return;
+      void getApi()?.set_conversation_thinking_effort?.(convId, next);
+    },
+    [convId, onEffortChange],
+  );
+
+  useEffect(() => {
+    if (!selectedMenu) return;
+    const snapped = effortInMenu(selectedMenu, thinkingEffort);
+    if (snapped !== (thinkingEffort || "off").trim().toLowerCase()) persistEffort(snapped);
+  }, [selectedMenu, thinkingEffort, persistEffort]);
   const catalogReady = codingAgent !== "ducky" || isModelsCatalogReady();
   const agentLabel = agentShortLabel(codingAgent, agents);
   const displayName =
@@ -301,6 +327,7 @@ export function ModelSelector({
           !hasUsableModels({ modelsCount: visibleModels.length, agents })
         ? "No models"
         : currentModelData?.name ?? (selectedModel || placeholder);
+  const triggerLabel = `${displayName}${effortSuffix(selectedMenu, thinkingEffort)}`;
 
   useEffect(() => {
     onModelMetaChange?.({
@@ -371,6 +398,7 @@ export function ModelSelector({
     setNav(null);
     setSearch("");
     setOpenVendor(null);
+    setHoverRow(null);
   }, [setNav]);
 
   const requestClose = useCallback(() => {
@@ -478,6 +506,8 @@ export function ModelSelector({
       const api = getApi();
       setCodingAgent?.(agentId);
       setSelectedModel(row.id);
+      const nextMenu = catalogThinkingMenu(row);
+      persistEffort(effortInMenu(nextMenu, thinkingEffort));
       if (agentId !== "ducky") {
         if (api && convId && api.set_conversation_coding_agent) {
           void api.set_conversation_coding_agent(convId, agentId, row.id);
@@ -497,11 +527,13 @@ export function ModelSelector({
     [
       codingAgent,
       convId,
+      persistEffort,
       preserveSelection,
       setSelectedModel,
       setCodingAgent,
       requestClose,
       agentIsUnavailable,
+      thinkingEffort,
     ],
   );
 
@@ -517,6 +549,7 @@ export function ModelSelector({
         ref={opts.hitRef ? firstHitRef : undefined}
         className={`model-selector-option${isSel ? " is-selected" : ""}${disabled ? " is-disabled" : ""}`}
         title={disabled ? "Unavailable — enable in Settings → LLMs" : undefined}
+        onMouseEnter={() => setHoverRow(m)}
         onClick={() => {
           if (!disabled) pickModel(m, opts.agentId, m.providerKey);
         }}
@@ -793,9 +826,9 @@ export function ModelSelector({
         className={`no-drag model-selector-btn${isOpen ? " is-open" : ""}`}
         onClick={() => (isOpen ? requestClose() : openDropdown())}
         disabled={!canOpen}
-        title={displayName}
+        title={triggerLabel}
       >
-        <span className="model-selector-btn-label">{displayName}</span>
+        <span className="model-selector-btn-label">{triggerLabel}</span>
         {(canOpen || selectedModel) && <Icons.ChevronDown />}
       </button>
 
@@ -840,6 +873,14 @@ export function ModelSelector({
                 </div>
               </div>
             </div>
+            {navGateway && previewMenu ? (
+              <ThinkingEffortFooter
+                menu={previewMenu}
+                modelName={previewRow?.name || ""}
+                effort={thinkingEffort}
+                onChange={persistEffort}
+              />
+            ) : null}
           </div>
         ) : (
           <>
@@ -847,6 +888,14 @@ export function ModelSelector({
             <div className="model-selector-scroll">
               {renderFlatOrVendor(flatRows, singleAgent, normalizedSelectedModel)}
             </div>
+            {previewMenu ? (
+              <ThinkingEffortFooter
+                menu={previewMenu}
+                modelName={previewRow?.name || ""}
+                effort={thinkingEffort}
+                onChange={persistEffort}
+              />
+            ) : null}
           </>
         )}
       </DropdownPanel>

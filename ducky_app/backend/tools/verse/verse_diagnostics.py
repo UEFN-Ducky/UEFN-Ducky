@@ -8,17 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.verse_editor.agent_sync import build_open_verse_file_batch
 from frontend.ui_web.verse_editor.feature_flag import verse_editor_enabled
-from frontend.ui_web.verse_editor.lsp.diagnostics_cache import load_for_ui
-from frontend.ui_web.verse_editor.lsp.diagnostics_scan import scan_project_verse_diagnostics
 from frontend.ui_web.verse_editor.lsp.project_root import normalize_verse_lsp_project_root
-from frontend.ui_web.verse_editor.panel_events import (
-    push_agent_event,
-    push_verse_diagnostics_progress,
-    push_verse_diagnostics_sync,
-)
-from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
 from backend.bridge import resolve_workspace_path
 from backend.tools.verse.compile_hints import hints_for
 from backend.tools.verse.verse_stats import record_compile, record_tool_failure
@@ -44,6 +35,7 @@ def _project_root() -> str:
 
 def _ui_progress(root: str):
     """Stream agent-triggered scan progress to the problems dropdown in every window."""
+    from frontend.ui_web.verse_editor.panel_events import push_verse_diagnostics_progress
 
     def on_progress(**kwargs: object) -> None:
         push_verse_diagnostics_progress({**kwargs, "project_root": root})
@@ -78,12 +70,17 @@ def workspace_list_verse_errors(pretty: bool = False, full: bool = False, rescan
     root = _project_root()
     if not root:
         raise ValueError("No UEFN project root configured in panel settings")
+    from frontend.ui_web.verse_editor.lsp.diagnostics_cache import load_for_ui, stale_keys
+    from frontend.ui_web.verse_editor.panel_events import push_verse_diagnostics_sync
+
     if rescan:
-        from frontend.ui_web.verse_editor.lsp import diagnostics_cache
+        from frontend.ui_web.verse_editor.lsp.diagnostics_scan import (
+            scan_project_verse_diagnostics,
+        )
 
         if full:
             scan_project_verse_diagnostics(root, full=True, on_progress=_ui_progress(root))
-        elif diagnostics_cache.stale_keys(root):
+        elif stale_keys(root):
             scan_project_verse_diagnostics(root, full=False, on_progress=_ui_progress(root))
     # load_for_ui reconciles against disk (deleted/moved files pruned), so the
     # payload is authoritative — always replace the UI registry with it.
@@ -102,6 +99,9 @@ def workspace_open_verse_file(
     pretty: bool = False,
 ) -> str:
     """Open a .verse file in the Ducky editor at line/column (does not activate tab)."""
+    from frontend.ui_web.verse_editor.agent_sync import build_open_verse_file_batch
+    from frontend.ui_web.verse_editor.panel_events import push_agent_event
+
     if not verse_editor_enabled():
         raise ValueError("Verse editor is disabled")
     rel = relative_path.strip().replace("\\", "/")
@@ -162,6 +162,8 @@ def workspace_compile_verse(pretty: bool = False) -> str:
     Fail-fast when the Workflow Server is unreachable — use workspace_list_verse_errors
     for Problems-panel diagnostics (offline OK) instead of retrying compile.
     """
+    from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
+
     client = get_workflow_client()
     if not client.connected:
         try:
@@ -187,14 +189,23 @@ def workspace_compile_verse(pretty: bool = False) -> str:
     root = _project_root()
     scan: dict[str, Any] = {}
     if root:
-        from frontend.ui_web.verse_editor.lsp import diagnostics_cache
+        from frontend.ui_web.verse_editor.lsp.diagnostics_cache import (
+            files_for_ui,
+            load,
+            load_for_ui,
+            stale_keys,
+        )
+        from frontend.ui_web.verse_editor.lsp.diagnostics_scan import (
+            scan_project_verse_diagnostics,
+        )
+        from frontend.ui_web.verse_editor.panel_events import push_verse_diagnostics_sync
 
         # Builds only re-check changed/stale files — never a full-project rescan.
-        if diagnostics_cache.stale_keys(root):
+        if stale_keys(root):
             scan = scan_project_verse_diagnostics(root, full=False, on_progress=_ui_progress(root))
         else:
             scan = {
-                "files": diagnostics_cache.files_for_ui(diagnostics_cache.load(root)),
+                "files": files_for_ui(load(root)),
                 "scanned": 0,
                 "with_errors": 0,
                 "with_warnings": 0,
@@ -234,6 +245,8 @@ def workspace_compile_verse(pretty: bool = False) -> str:
 @plugin_mcp_tool("verse")
 def workspace_push_verse_changes(verse_only: bool = True, pretty: bool = False) -> str:
     """Push Verse changes to the running UEFN session (hot reload)."""
+    from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
+
     client = get_workflow_client()
     if not client.connected:
         try:

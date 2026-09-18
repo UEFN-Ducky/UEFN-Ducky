@@ -26,6 +26,9 @@ interface DuckyModelPickerProps {
   menuPlacement?: "top" | "bottom";
   /** Hide models that cannot run tools. Off so Ollama / local catalogs stay visible. */
   requireTools?: boolean;
+  thinkingEffort?: string;
+  onEffortChange?: (effort: string) => void;
+  convId?: string;
 }
 
 function normalizeAgentModelId(_agentId: string, modelId: string): string {
@@ -65,6 +68,9 @@ export function DuckyModelPicker({
   allowClear = true,
   menuPlacement,
   requireTools = false,
+  thinkingEffort,
+  onEffortChange,
+  convId,
 }: DuckyModelPickerProps) {
   const value = (model || "").trim();
   const contrib = usePluginContributions();
@@ -122,6 +128,9 @@ export function DuckyModelPicker({
       requireTools={requireTools}
       placeholder={placeholder}
       menuPlacement={placement}
+      thinkingEffort={thinkingEffort}
+      onEffortChange={onEffortChange}
+      convId={convId}
     />
   );
 

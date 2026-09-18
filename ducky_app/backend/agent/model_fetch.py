@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 _CACHE_MAX = 512
@@ -36,6 +36,16 @@ class ModelInfo:
     is_local: bool = False
     # None = unknown (UI falls back to provider flag / name heuristic).
     supports_thinking_effort: bool | None = None
+    # Gateway-owned effort stops. Host never invents levels besides Off=0.
+    thinking_menu: dict[str, Any] | None = None
+
+
+_MODEL_INFO_FIELDS = {f.name for f in fields(ModelInfo)}
+
+
+def model_info_from_row(row: dict[str, Any]) -> ModelInfo:
+    """Build ModelInfo from a cache/API dict, ignoring unknown keys."""
+    return ModelInfo(**{k: v for k, v in row.items() if k in _MODEL_INFO_FIELDS})
 
 
 def get_model_info(provider: str, model_id: str) -> ModelInfo | None:

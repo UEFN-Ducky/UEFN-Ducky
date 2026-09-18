@@ -150,7 +150,11 @@ def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any
     prov = (provider or "").strip().lower()
     label = provider_label(prov) or PROVIDER_LABELS.get(prov, prov.title())
     rows: list[dict[str, Any]] = []
+    from backend.agent.thinking_effort import ensure_thinking_menu
+
     for m in models:
+        menu = ensure_thinking_menu(getattr(m, "thinking_menu", None))
+        supports = True if menu else getattr(m, "supports_thinking_effort", None)
         rows.append(
             {
                 "provider": label,
@@ -164,7 +168,8 @@ def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any
                 "price_in": m.price_in,
                 "price_out": m.price_out,
                 "is_local": m.is_local,
-                "supports_thinking_effort": getattr(m, "supports_thinking_effort", None),
+                "supports_thinking_effort": supports,
+                "thinking_menu": menu,
             }
         )
     return rows
@@ -251,7 +256,7 @@ def _load_model_cache_from_disk() -> None:
     kept the splash up for 20s+. Prune against live gateways after plugins load
     (``_warm_model_cache`` / ``_prune_model_caches_to_enabled_providers``).
     """
-    from backend.agent.model_fetch import ModelInfo, _cache_provider_models
+    from backend.agent.model_fetch import _cache_provider_models, model_info_from_row
 
     try:
         raw = _read_models_cache_doc()
@@ -261,7 +266,7 @@ def _load_model_cache_from_disk() -> None:
             if not isinstance(prov, str) or not isinstance(rows, list):
                 continue
             try:
-                models = [ModelInfo(**row) for row in rows if isinstance(row, dict)]
+                models = [model_info_from_row(row) for row in rows if isinstance(row, dict)]
             except Exception:
                 continue
             if models:

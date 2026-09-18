@@ -92,6 +92,7 @@ class RunContext:
 
 
 _ctx: ContextVar[RunContext | None] = ContextVar("ducky_run_context", default=None)
+_shared: ContextVar[bool] = ContextVar("ducky_shared_mcp_call", default=False)
 
 
 def bind(ctx: RunContext) -> Token:
@@ -100,6 +101,15 @@ def bind(ctx: RunContext) -> Token:
 
 def reset(token: Token) -> None:
     _ctx.reset(token)
+
+
+def mark_shared() -> Token:
+    """Daemon tool calls: do not fall back to process DUCKY_* env."""
+    return _shared.set(True)
+
+
+def reset_shared(token: Token) -> None:
+    _shared.reset(token)
 
 
 def current() -> RunContext | None:
@@ -127,8 +137,17 @@ def from_env(environ: Mapping[str, str] | None = None) -> RunContext | None:
 
 
 def resolve_context() -> RunContext | None:
-    """Bound context first, then the process environment. None means a human."""
-    return current() or from_env()
+    """Bound context first, then the process environment. None means a human.
+
+    Shared-daemon calls bind identity per request and must not pick up leftover
+    process ``DUCKY_*`` env from another client.
+    """
+    bound = current()
+    if bound is not None:
+        return bound
+    if _shared.get():
+        return None
+    return from_env()
 
 
 def user_writer(*, tool: str = "") -> dict[str, Any]:

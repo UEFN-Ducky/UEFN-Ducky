@@ -26,6 +26,9 @@ def coding_agents_tmp_dir() -> Path:
 
 def _windows_hidden_bridge_block(base: dict[str, Any]) -> dict[str, Any]:
     """Wrap the UEFN stdio bridge so Windows does not flash a console window."""
+    command = str(base.get("command") or "")
+    if Path(command).stem.lower() == "node":
+        return base
     if os.name != "nt":
         return base
     node = shutil.which("node") or shutil.which("node.exe")

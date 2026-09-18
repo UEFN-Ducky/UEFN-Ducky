@@ -18,6 +18,7 @@ from frontend.starter_llm_gateways import (
 def isolated_appdata(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
     monkeypatch.delenv("UEFN_DUCKY_PROJECT_ROOT", raising=False)
     return tmp_path
 
