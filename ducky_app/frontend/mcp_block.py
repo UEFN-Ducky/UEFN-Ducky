@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime
-from frontend.settings import PanelSettings, default_app_data_dir
+from frontend.settings import PanelSettings
 
 # Windows MCP clients that declare an explicit ``env`` block for a stdio server
 # typically REPLACE the child process's environment instead of merging it with
@@ -127,57 +125,12 @@ def shared_mcp_enabled(settings: PanelSettings | None = None) -> bool:
     return enabled(settings)
 
 
-def ensure_bridge_host_js() -> Path | None:
-    """Node stdio host (hidden console + optional shared-daemon adapter)."""
-    src = (
-        Path(__file__).resolve().parent.parent
-        / "backend"
-        / "agent"
-        / "coding_agents"
-        / "mcp_bridge_host.mjs"
-    )
-    if src.is_file():
-        return src
-    dest = default_app_data_dir() / "coding_agents" / "mcp_bridge_host.mjs"
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_file():
-            dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-        elif not dest.is_file():
-            return None
-        return dest
-    except OSError:
-        return dest if dest.is_file() else None
-
-
-def _is_node_command(command: str) -> bool:
-    return Path(command).stem.lower() == "node"
-
-
-def _shared_adapter_block(base: dict, settings: PanelSettings) -> dict:
-    if not shared_mcp_enabled(settings):
-        return base
-    node = shutil.which("node") or shutil.which("node.exe")
-    host = ensure_bridge_host_js()
-    if not node or host is None:
-        return base
-    command = str(base.get("command") or "")
-    args = list(base.get("args") or [])
-    if not command or _is_node_command(command):
-        return base
-    env = dict(base.get("env") or {})
-    env["DUCKY_SHARED_MCP"] = "1"
-    env["DUCKY_BRIDGE_ARGV"] = json.dumps([command, *args])
-    return {
-        "type": "stdio",
-        "command": node,
-        "args": [str(host)],
-        "env": env,
-    }
-
-
 def resolve_bridge_args(settings: PanelSettings) -> list[str]:
     port_args = ["--port", str(settings.port)]
+    # Flag-on: same exe, but ``--adapter`` relays to the one shared daemon instead
+    # of loading FastMCP per IDE. Falls back to dedicated in-process when no daemon.
+    if shared_mcp_enabled(settings):
+        port_args = port_args + ["--adapter"]
     if is_packaged_runtime() or latest_built_exe() is not None:
         return ["bridge"] + port_args
     entry = Path(__file__).resolve().parent / "launcher.py"
@@ -195,12 +148,9 @@ def build_uefn_server_block(settings: PanelSettings) -> dict:
     root = (getattr(settings, "uefn_project_root", "") or "").strip()
     if root and not env.get("UEFN_DUCKY_PROJECT_ROOT"):
         env["UEFN_DUCKY_PROJECT_ROOT"] = root
-    return _shared_adapter_block(
-        {
-            "type": "stdio",
-            "command": resolve_bridge_command(),
-            "args": resolve_bridge_args(settings),
-            "env": env,
-        },
-        settings,
-    )
+    return {
+        "type": "stdio",
+        "command": resolve_bridge_command(),
+        "args": resolve_bridge_args(settings),
+        "env": env,
+    }

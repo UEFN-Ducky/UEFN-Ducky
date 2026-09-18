@@ -177,6 +177,15 @@ def run_bridge() -> None:
     # Plugin register() skips IDE mcp.json rewrites in this mode (reconnect loop).
     os.environ["UEFN_DUCKY_MCP_BRIDGE"] = "1"
 
+    if "--adapter" in sys.argv[2:]:
+        # Shared MCP (flag-on installs): stdlib relay to the one daemon. Runs before
+        # any FastMCP import so this process stays ~10 MB. No daemon → dedicated below.
+        from frontend.shared_mcp_adapter import run as run_adapter
+
+        sys.argv = [a for a in sys.argv if a != "--adapter"]
+        if run_adapter(sys.argv[2:]):
+            return
+
     _patch_mcp_request_responder_idempotent()
 
     from backend import bridge

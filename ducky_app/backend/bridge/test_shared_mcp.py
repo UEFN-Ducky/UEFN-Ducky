@@ -111,14 +111,45 @@ def test_server_block_unchanged_when_flag_off(monkeypatch) -> None:
     assert "DUCKY_SHARED_MCP" not in (block.get("env") or {})
 
 
-def test_server_block_wraps_when_flag_on(monkeypatch) -> None:
+def test_server_block_adds_adapter_when_flag_on(monkeypatch) -> None:
+    """Same exe, one extra arg; no node dependency."""
     monkeypatch.setenv("UEFN_DUCKY_SHARED_MCP", "1")
-    block = mcp_block.build_uefn_server_block(PanelSettings())
-    if not (mcp_block.shutil.which("node") or mcp_block.shutil.which("node.exe")):
-        pytest.skip("node not installed")
-    assert (block.get("env") or {}).get("DUCKY_SHARED_MCP") == "1"
-    assert "DUCKY_BRIDGE_ARGV" in (block.get("env") or {})
-    assert any("mcp_bridge_host.mjs" in str(a) for a in block.get("args") or [])
+    on = mcp_block.build_uefn_server_block(PanelSettings())
+    monkeypatch.setenv("UEFN_DUCKY_SHARED_MCP", "0")
+    off = mcp_block.build_uefn_server_block(PanelSettings())
+    assert on["command"] == off["command"]
+    assert on["args"] == off["args"] + ["--adapter"]
+    assert "--adapter" not in off["args"]
+
+
+def test_adapter_falls_back_when_no_daemon(monkeypatch, tmp_path) -> None:
+    """No daemon reachable -> run() is False so run_bridge continues dedicated."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(ad, "_spawn_daemon", lambda args: spawned.append(args))
+    assert ad.connect(["--port", "4200"], timeout_s=0.3) is None
+    assert spawned == [["--port", "4200"]]
+
+
+def test_adapter_relays_to_daemon() -> None:
+    """Adapter hello + tools/list via the same frames the daemon speaks."""
+    from frontend import shared_mcp_adapter as ad
+
+    mcp = FakeMcp()
+    thread = _serve(mcp)
+    try:
+        state = shared_mcp.wait_ready(8.0)
+        sock = ad._try_hello({"host": state["host"], "port": state["port"], "token": state["token"], "key": state["key"]})
+        assert sock is not None
+        ad._write_frame(sock, {"op": "mcp", "id": 1, "method": "tools/list", "params": {}})
+        reply = ad._read_frame(sock)
+        assert [t["name"] for t in reply["result"]["tools"]] == ["ping", "workspace_write_file"]
+        sock.close()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
 
 
 def test_keys_compatible() -> None:

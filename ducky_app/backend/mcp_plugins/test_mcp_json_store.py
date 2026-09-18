@@ -21,7 +21,11 @@ def _fresh_row_store():
     phase1.reset_for_tests()
     path = store.mcp_config_path()
     if path.is_file():
-        path.unlink()
+        try:
+            path.unlink()
+        except PermissionError:
+            # Windows: another pytest/panel handle can hold mcp.json for a beat.
+            pass
     yield
     misc.mcp_servers_reset_for_tests()
     phase1.reset_for_tests()

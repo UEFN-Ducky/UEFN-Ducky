@@ -21,6 +21,7 @@ _ENV = "UEFN_DUCKY_SHARED_MCP"
 _STATE_NAME = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
 _IDLE_EXIT_S = 3.0
+_STARTUP_GRACE_S = 60.0
 
 _loop: asyncio.AbstractEventLoop | None = None
 _clients = 0
@@ -361,6 +362,10 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
         }
     if method == "ping" or method == "notifications/initialized":
         return {}
+    if method == "resources/list":
+        return {"resources": []}
+    if method == "prompts/list":
+        return {"prompts": []}
     if method == "tools/list":
         return {"tools": _run(_list_tools(mcp))}
     if method == "tools/call":
@@ -431,9 +436,33 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
         close_handle(handle)
 
 
+def _acquire_single_instance() -> Any | None:
+    """Exclusive OS lock so adapter races cannot start two daemons. None = another owns it."""
+    path = state_path().with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path, "a+b")  # noqa: SIM115 — held for the process lifetime
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 def serve_daemon(mcp: Any) -> None:
     """Block until idle after the last adapter disconnects."""
     global _shared_serving, _clients, _listen_sock
+    lock = _acquire_single_instance()
+    if lock is None:
+        return  # a daemon is already serving; the adapter will find it via state
     _shared_serving = True
     _stop.clear()
     token = secrets.token_hex(16)
@@ -450,6 +479,8 @@ def serve_daemon(mcp: Any) -> None:
     _ready.set()
     _ensure_loop()
     conn_seq = 0
+    # No adapter within the grace window (spawner died / raced) → do not linger.
+    threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop()).start()
     try:
         while not _stop.is_set():
             try:
@@ -486,6 +517,10 @@ def serve_daemon(mcp: Any) -> None:
         _listen_sock = None
         _clear_state()
         _shared_serving = False
+        try:
+            lock.close()
+        except OSError:
+            pass
 
 
 def request_stop() -> None:
