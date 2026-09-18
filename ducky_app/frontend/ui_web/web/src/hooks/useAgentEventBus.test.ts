@@ -16,6 +16,11 @@ describe("remoteGoneIsLive", () => {
     expect(remoteGoneIsLive(true, "remote_gone")).toBe(true);
     expect(remoteGoneIsLive(true, "text_delta")).toBe(false);
   });
+
+  it("does not treat HTTP 403 as a kick (cookie flakes retry)", () => {
+    expect(remoteGoneIsLive(true, "forbidden")).toBe(false);
+    expect(remoteGoneIsLive(true, "403")).toBe(false);
+  });
 });
 
 describe("coalesceAgentEvents", () => {

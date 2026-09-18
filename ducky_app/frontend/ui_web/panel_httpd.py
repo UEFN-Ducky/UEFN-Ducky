@@ -22,14 +22,16 @@ PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 # Cloudflare (and any reverse proxy) needs HTTP/1.1 + Content-Length.
 # Default BaseHTTPRequestHandler is HTTP/1.0 and 502s under keep-alive.
 _HTTP_PROTOCOL = "HTTP/1.1"
-# Document errors never show Python's "Error response" page. Iframe → parent
-# SPA; top-level → site /profile.
+# Document errors never show Python's "Error response" page. Iframe 403 is a
+# cookie flake, not a kick (kicks are `type: remote_gone` on the event stream).
+# Top-level → site /profile. `_GONE_HTML` is the explicit kick document only.
 _SITE_PROFILE = "https://uefnducky.org/profile"
 _GONE_HTML = (
     b'<!doctype html><meta charset="utf-8"><script>'
     b'parent.postMessage({type:"ud-remote-gone"},"*")'
     b"</script>"
 )
+_IFRAME_ERROR_HTML = b'<!doctype html><meta charset="utf-8">'
 _COOKIE_NAME = "ducky_remote"
 _COOKIE_IDLE_S = 12 * 3600
 _LOGIN_TTL_S = 120
@@ -496,9 +498,9 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 if dest == "iframe":
                     self.send_response(code)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(_GONE_HTML)))
+                    self.send_header("Content-Length", str(len(_IFRAME_ERROR_HTML)))
                     self.end_headers()
-                    self.wfile.write(_GONE_HTML)
+                    self.wfile.write(_IFRAME_ERROR_HTML)
                     return
                 self.send_response(302)
                 self.send_header("Location", _SITE_PROFILE)
@@ -758,7 +760,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     self.send_header("Location", "/")
                     self.send_header(
                         "Set-Cookie",
-                        f"{_COOKIE_NAME}={cookie}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={_COOKIE_IDLE_S}",
+                        f"{_COOKIE_NAME}={cookie}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age={_COOKIE_IDLE_S}",
                     )
                     self.send_header("Content-Length", "0")
                     self.end_headers()

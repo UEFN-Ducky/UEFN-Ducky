@@ -140,6 +140,19 @@ def test_dispatch_desktop_rpc_allowlist() -> None:
     assert "not allowed" in str(denied.get("error") or "")
 
 
+def test_dispatch_remote_release_clears_sessions() -> None:
+    from unittest.mock import patch
+
+    from frontend.duckyos_account import dispatch_desktop_rpc
+
+    with patch("frontend.ui_web.panel_httpd.sign_out_all_remote") as drop:
+        out = dispatch_desktop_rpc("remote_release", {})
+    assert out == {"ok": True, "result": True}
+    drop.assert_called_once_with()
+    gone = dispatch_desktop_rpc("kick_all_remote", {})
+    assert gone["ok"] is False
+
+
 class _StubApi:
     def list_folders(self, parent_id: str = "") -> list[str]:
         return [parent_id or "root"]
@@ -603,6 +616,7 @@ if __name__ == "__main__":
     test_tool_blocked_by_caps_see_toggles()
     test_name_allowed_matches_filter()
     test_dispatch_desktop_rpc_allowlist()
+    test_dispatch_remote_release_clears_sessions()
     test_call_panel_method_maps_kwargs_and_positional()
     test_remote_endpoint_shape_when_disabled()
     test_remote_endpoint_starting_when_tunnel_has_no_host()

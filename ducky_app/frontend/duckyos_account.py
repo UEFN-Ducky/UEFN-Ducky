@@ -1064,6 +1064,7 @@ RPC_ALLOWLIST = frozenset(
         "get_changeset",
         "remote_snapshot",
         "remote_endpoint",
+        "remote_release",
         "rtc_connect",
         "rtc_report",
     }
@@ -1303,6 +1304,14 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
     if name == "remote_endpoint":
         try:
             return {"ok": True, "result": _remote_endpoint()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    if name == "remote_release":
+        try:
+            from frontend.ui_web import panel_httpd
+
+            panel_httpd.sign_out_all_remote()
+            return {"ok": True, "result": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     if name == "rtc_connect":

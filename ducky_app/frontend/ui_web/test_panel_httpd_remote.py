@@ -157,6 +157,29 @@ def test_html_errors_never_show_python_404():
     assert 'parent.postMessage({type:"ud-remote-gone"},"*")' in src
     assert "https://uefnducky.org/profile" in src
     assert "def send_error" in src
+    send_error = src.split("def send_error", 1)[1].split("def log_message", 1)[0]
+    assert "_GONE_HTML" not in send_error
+    assert "_IFRAME_ERROR_HTML" in send_error
+    assert b"ud-remote-gone" in httpd._GONE_HTML
+    assert b"ud-remote-gone" not in httpd._IFRAME_ERROR_HTML
+
+
+def test_remote_cookie_samesite_none_secure():
+    src = Path(httpd.__file__).read_text(encoding="utf-8")
+    cookie_line = next(line for line in src.splitlines() if "Set-Cookie" in line or "_COOKIE_NAME}={cookie}" in line)
+    assert "SameSite=None" in src
+    assert "SameSite=Lax" not in src
+    assert "HttpOnly" in cookie_line or "HttpOnly" in src
+    assert "; Secure;" in src
+
+
+def test_event_bus_retries_poll_403_instead_of_gone():
+    src = (
+        Path(httpd.__file__).resolve().parent / "web" / "src" / "hooks" / "useAgentEventBus.ts"
+    ).read_text(encoding="utf-8")
+    assert "response.status === 403 && window.parent" not in src
+    assert "remoteGoneIsLive" in src
+    assert 'type: "ud-remote-gone"' in src
 
 
 def test_new_viewer_kicks_old_one():
