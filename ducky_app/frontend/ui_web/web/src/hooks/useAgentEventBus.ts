@@ -102,17 +102,24 @@ export function nextEventPollRetryMs(prev: number): number {
   return Math.min(base * 2, EVENT_POLL_RETRY_MAX_MS);
 }
 
+/** Stale `remote_gone` in catch-up must not kick a new overlay iframe. */
+export function remoteGoneIsLive(catchUpDone: boolean, kind: string): boolean {
+  return catchUpDone && kind === "remote_gone";
+}
+
 function startHttpEventPoll() {
   if (httpPollStarted) return;
   httpPollStarted = true;
   const poll = async () => {
     let retryMs = EVENT_POLL_RETRY_MIN_MS;
+    let catchUpDone = false;
     while (httpPollStarted) {
       try {
         const response = await fetch(`/__panel_events?since=${httpCursor}`, {
           cache: "no-store",
         });
         if (response.status === 403 && window.parent !== window) {
+          if (!catchUpDone) throw new Error("event poll 403");
           window.parent.postMessage({ type: "ud-remote-gone" }, "*");
           httpPollStarted = false;
           return;
@@ -124,7 +131,7 @@ function startHttpEventPoll() {
         if (Array.isArray(body.events)) {
           for (const event of body.events) {
             const kind = String(event?.type || "");
-            if (kind === "remote_gone" && window.parent !== window) {
+            if (remoteGoneIsLive(catchUpDone, kind) && window.parent !== window) {
               window.parent.postMessage({ type: "ud-remote-gone" }, "*");
               httpPollStarted = false;
               return;
@@ -140,6 +147,7 @@ function startHttpEventPoll() {
             fanOut(event);
           }
         }
+        catchUpDone = true;
       } catch {
         await new Promise<void>((resolve) => window.setTimeout(resolve, retryMs));
         retryMs = nextEventPollRetryMs(retryMs);

@@ -211,6 +211,13 @@ def kick_all_remote() -> None:
     publish_panel_events([{"type": "remote_gone"}])
 
 
+def _drop_replayed_remote_gone(since: int, events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """New overlay iframes poll since=0 and must not replay a historical kick."""
+    if since > 0:
+        return events
+    return [event for event in events if event.get("type") != "remote_gone"]
+
+
 def request_is_authorized(host_header: str, path: str, cookie: str | None) -> bool:
     host = (host_header or "").strip().lower()
     if host_is_local(host):
@@ -253,7 +260,9 @@ def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dic
         rows = [(seq, event) for seq, event in _event_backlog if seq > since][0:500]
         if not rows:
             return _event_seq, []
-        return rows[-1][0], [event for _, event in rows]
+        cursor = rows[-1][0]
+        events = _drop_replayed_remote_gone(since, [event for _, event in rows])
+        return cursor, events
 
 
 def register_window_rtc(session_id: str, sock: object) -> None:

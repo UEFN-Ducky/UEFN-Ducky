@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../types/panel";
-import { coalesceAgentEvents, nextEventPollRetryMs } from "./useAgentEventBus";
+import { coalesceAgentEvents, nextEventPollRetryMs, remoteGoneIsLive } from "./useAgentEventBus";
 
 describe("nextEventPollRetryMs", () => {
   it("doubles from 500ms and caps at 8s", () => {
     expect(nextEventPollRetryMs(500)).toBe(1000);
     expect(nextEventPollRetryMs(4000)).toBe(8000);
     expect(nextEventPollRetryMs(8000)).toBe(8000);
+  });
+});
+
+describe("remoteGoneIsLive", () => {
+  it("ignores remote_gone on catch-up and kicks only after the poller is live", () => {
+    expect(remoteGoneIsLive(false, "remote_gone")).toBe(false);
+    expect(remoteGoneIsLive(true, "remote_gone")).toBe(true);
+    expect(remoteGoneIsLive(true, "text_delta")).toBe(false);
   });
 });
 

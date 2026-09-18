@@ -210,5 +210,8 @@ def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
         assert httpd._window_viewers == []
         _cursor, events = httpd._poll_panel_events(before, timeout=0.0)
         assert any(e.get("type") == "remote_gone" for e in events)
+        _catch_cursor, catchup = httpd._poll_panel_events(0, timeout=0.0)
+        assert _catch_cursor >= _cursor
+        assert not any(e.get("type") == "remote_gone" for e in catchup)
     finally:
         httpd._window_viewers.clear()
