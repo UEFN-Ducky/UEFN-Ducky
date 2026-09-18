@@ -3,6 +3,7 @@ import {
   addViewPan,
   clampView,
   contentRect,
+  isDoubleTap,
   isUeFnHubTitle,
   keyDiff,
   mapViewPoint,
@@ -12,6 +13,7 @@ import {
   rankVideoCodec,
   stickLookDelta,
   stickMoveKeys,
+  withinSlop,
 } from "./remoteWindowMath";
 
 describe("rankVideoCodec", () => {
@@ -150,5 +152,29 @@ describe("view pan/zoom", () => {
   it("addViewPan shifts then clamps", () => {
     const z = panZoomAround(view, 0, 0, 1, 2, 100, 100);
     expect(addViewPan(view, z.panX, z.panY, z.scale, 40, 0).panX).toBe(40);
+  });
+
+  it("pinch-zoomed close X still maps to the same content pixel", () => {
+    const x = 188;
+    const y = 12;
+    const next = panZoomAround(view, 0, 0, 1, 3, x, y);
+    const mapped = mapViewPoint(x, y, view, next.panX, next.panY, next.scale);
+    expect(mapped.x).toBeCloseTo(188);
+    expect(mapped.y).toBeCloseTo(12);
+  });
+});
+
+describe("touch slop / double-tap", () => {
+  it("jitter under 12px is still a tap at the down point", () => {
+    expect(withinSlop(100, 100, 106, 104)).toBe(true);
+    expect(withinSlop(100, 100, 120, 100)).toBe(false);
+  });
+
+  it("two close taps are a double-click at the first point", () => {
+    const first = { x: 50, y: 20, at: 1000 };
+    expect(isDoubleTap(first, { x: 54, y: 22, at: 1300 })).toBe(true);
+    expect(isDoubleTap(first, { x: 54, y: 22, at: 1500 })).toBe(false);
+    expect(isDoubleTap(first, { x: 90, y: 20, at: 1100 })).toBe(false);
+    expect(isDoubleTap(null, { x: 50, y: 20, at: 1000 })).toBe(false);
   });
 });

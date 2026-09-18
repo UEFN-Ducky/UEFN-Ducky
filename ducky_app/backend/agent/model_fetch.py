@@ -116,6 +116,80 @@ def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False) ->
     return models
 
 
+def normalize_usage_windows(raw: Any) -> dict[str, Any]:
+    """Clamp plugin `fetch_usage` output. Missing/junk → empty windows."""
+    rows = raw.get("windows") if isinstance(raw, dict) else None
+    if not isinstance(rows, list):
+        return {"windows": []}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            limit = float(row.get("limit") or 0)
+            used = float(row.get("used") or 0)
+        except (TypeError, ValueError):
+            continue
+        if limit <= 0:
+            continue
+        used = max(0.0, min(used, limit))
+        wid = str(row.get("id") or "").strip() or f"w{len(out)}"
+        label = str(row.get("label") or wid).strip() or wid
+        unit = str(row.get("unit") or "").strip()
+        item: dict[str, Any] = {"id": wid, "label": label, "used": used, "limit": limit}
+        if unit:
+            item["unit"] = unit
+        out.append(item)
+    return {"windows": out}
+
+
+def _usage_registration(provider: str) -> tuple[str, dict[str, Any]]:
+    """LLM provider row, or coding-agent `token_provider` fallback."""
+    from backend.uefn_plugins.host import (
+        get_coding_agent_registration,
+        get_llm_provider_registration,
+    )
+
+    name = (provider or "").strip().lower()
+    reg = get_llm_provider_registration(name) or {}
+    if callable(reg.get("fetch_usage")):
+        return name, reg
+    agent = get_coding_agent_registration(name) or {}
+    token = str(agent.get("token_provider") or "").strip().lower()
+    if token:
+        return token, get_llm_provider_registration(token) or {}
+    return name, reg
+
+
+def fetch_usage(provider: str, api_key: str, *, model: str = "") -> dict[str, Any]:
+    """Live quota windows from the gateway plugin. Never cached."""
+    name, reg = _usage_registration(provider)
+    key = (api_key or "").strip()
+    try:
+        norm = reg.get("normalize_secret")
+        if callable(norm):
+            try:
+                key = str(norm(key) or "").strip()
+            except Exception:
+                pass
+        if not key and name != (provider or "").strip().lower():
+            from backend.agent.secrets import get_key
+
+            key = str(get_key(name) or "").strip()
+        if not key and not reg.get("key_optional"):
+            return {"windows": []}
+        fn = reg.get("fetch_usage")
+        if not callable(fn):
+            return {"windows": []}
+        try:
+            raw = fn(key, model=str(model or ""))
+        except TypeError:
+            raw = fn(key)
+        return normalize_usage_windows(raw)
+    except Exception:
+        return {"windows": []}
+
+
 def _int_from_record(record: dict[str, Any], *keys: str) -> int | None:
     for key in keys:
         val = record.get(key)

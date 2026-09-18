@@ -12,6 +12,14 @@ from backend.store.switch import use_db
 from frontend.app_paths import resolve_app_data_dir
 
 _RUN_CAP = 20
+KIND_AUTOMATION = "automation"
+KIND_PIPELINE = "pipeline"
+_KINDS = frozenset({KIND_AUTOMATION, KIND_PIPELINE})
+
+
+def normalize_kind(raw: Any) -> str:
+    key = str(raw or "").strip().lower()
+    return key if key in _KINDS else KIND_AUTOMATION
 
 
 def normalize_graph(raw: Any) -> dict[str, Any]:
@@ -52,11 +60,13 @@ def normalize_graph(raw: Any) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def empty_workflow(*, name: str = "Untitled") -> dict[str, Any]:
+def empty_workflow(*, name: str = "Untitled", kind: str = KIND_AUTOMATION) -> dict[str, Any]:
     now = time.time()
     return {
         "id": str(uuid.uuid4()),
         "name": (name or "Untitled").strip() or "Untitled",
+        "kind": normalize_kind(kind),
+        "description": "",
         "enabled": True,
         "graph": {"nodes": [], "edges": []},
         "runs": [],
@@ -65,8 +75,12 @@ def empty_workflow(*, name: str = "Untitled") -> dict[str, Any]:
     }
 
 
-def list_automations() -> list[dict[str, Any]]:
-    return [_summary(w) for w in _all()]
+def list_automations(kind: str = KIND_AUTOMATION) -> list[dict[str, Any]]:
+    want = normalize_kind(kind) if kind else ""
+    rows = _all()
+    if want:
+        rows = [w for w in rows if normalize_kind(w.get("kind")) == want]
+    return [_summary(w) for w in rows]
 
 
 def get_automation(workflow_id: str) -> dict[str, Any] | None:
@@ -79,11 +93,19 @@ def get_automation(workflow_id: str) -> dict[str, Any] | None:
 def save_automation(doc: dict[str, Any]) -> dict[str, Any]:
     now = time.time()
     existing = _get(str(doc.get("id") or "").strip()) if doc.get("id") else None
-    out = existing or empty_workflow(name=str(doc.get("name") or "Untitled"))
+    seed_kind = doc.get("kind") if existing is None else existing.get("kind")
+    out = existing or empty_workflow(
+        name=str(doc.get("name") or "Untitled"),
+        kind=str(seed_kind or KIND_AUTOMATION),
+    )
     if str(doc.get("id") or "").strip():
         out["id"] = str(doc["id"]).strip()
     if "name" in doc:
         out["name"] = str(doc.get("name") or "").strip() or out["name"]
+    if "kind" in doc:
+        out["kind"] = normalize_kind(doc.get("kind"))
+    if "description" in doc:
+        out["description"] = str(doc.get("description") or "")
     if "enabled" in doc:
         out["enabled"] = bool(doc.get("enabled"))
     if "graph" in doc:
@@ -119,6 +141,8 @@ def _summary(wf: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": wf["id"],
         "name": wf.get("name") or "",
+        "kind": normalize_kind(wf.get("kind")),
+        "description": str(wf.get("description") or ""),
         "enabled": bool(wf.get("enabled")),
         "updated": float(wf.get("updated") or 0.0),
         "last_run": float(wf.get("last_run") or 0.0),
@@ -188,4 +212,6 @@ def _read_file(path: Path) -> dict[str, Any] | None:
     data["graph"] = normalize_graph(data.get("graph"))
     if not isinstance(data.get("runs"), list):
         data["runs"] = []
+    data["kind"] = normalize_kind(data.get("kind"))
+    data["description"] = str(data.get("description") or "")
     return data

@@ -720,7 +720,7 @@ body.native-caption-input-ready .app-header .drag-region {
   object-fit: contain;
 }
 .remote-window-canvas {
-  cursor: crosshair;
+  cursor: none;
   outline: none;
   touch-action: none;
   user-select: none;

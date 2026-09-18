@@ -5,16 +5,33 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from backend.automations import catalog, plugin
-from backend.automations.store import append_run, get_automation
+from backend.automations.store import (
+    KIND_PIPELINE,
+    append_run,
+    get_automation,
+    normalize_kind,
+)
 
 _log = logging.getLogger("automations")
 _MAX_STEPS = 64
 # ponytail: wait sleeps the runner thread; 120s ceiling. Per-node async if graphs nest waits.
 _WAIT_CAP_S = 120.0
-_ACTION_TYPES = frozenset({"ducky.prompt", "ducky.spawn", "flow.wait", "flow.branch", "tool.call"})
+_AGENT_WAIT_CAP_S = 900.0
+_ACTION_TYPES = frozenset(
+    {
+        "ducky.prompt",
+        "ducky.spawn",
+        "flow.wait",
+        "flow.branch",
+        "tool.call",
+        "pipeline.agent",
+        "pipeline.finish",
+    }
+)
 
 
 def run_automation(
@@ -34,6 +51,8 @@ def run_automation(
     if not starts:
         return {"ok": False, "error": "no starter node", "steps": [], "id": wf["id"]}
     ctx: dict[str, Any] = dict(payload or {})
+    _prepare_run_ctx(ctx, wf)
+    ident_token = _bind_hub_identity(ctx)
     steps: list[dict[str, Any]] = []
     started = time.time()
     ok = True
@@ -41,23 +60,29 @@ def run_automation(
     seen = 0
     queue = list(starts)
     visited: set[str] = set()
-    while queue and seen < _MAX_STEPS:
-        nid = queue.pop(0)
-        node = nodes.get(nid)
-        if node is None or nid in visited:
-            continue
-        visited.add(nid)
-        seen += 1
-        step = _exec_node(node, ctx)
-        steps.append(step)
-        if not step.get("ok", True):
-            ok = False
-            error = str(step.get("error") or "step failed")
-            break
-        if step.get("result") and isinstance(step["result"], dict):
-            ctx.update({k: v for k, v in step["result"].items() if k not in ("ok",)})
-        kind = "true" if step.get("branch") else "false" if "branch" in step else "main"
-        queue.extend(_next_ids(nid, edges, kind))
+    try:
+        while queue and seen < _MAX_STEPS:
+            nid = queue.pop(0)
+            node = nodes.get(nid)
+            if node is None or nid in visited:
+                continue
+            visited.add(nid)
+            seen += 1
+            step = _exec_node(node, ctx)
+            steps.append(step)
+            if not step.get("ok", True):
+                ok = False
+                error = str(step.get("error") or "step failed")
+                break
+            if step.get("result") and isinstance(step["result"], dict):
+                ctx.update({k: v for k, v in step["result"].items() if k not in ("ok",)})
+            kind = "true" if step.get("branch") else "false" if "branch" in step else "main"
+            queue.extend(_next_ids(nid, edges, kind))
+    finally:
+        if ident_token is not None:
+            from backend.workspace import identity
+
+            identity.reset(ident_token)
     ended = time.time()
     run = {
         "started": started,
@@ -68,7 +93,45 @@ def run_automation(
         "steps": steps,
     }
     append_run(wf["id"], run)
-    return {"ok": ok, "error": error, "id": wf["id"], "steps": steps, "conv_id": ctx.get("conv_id")}
+    return {
+        "ok": ok,
+        "error": error,
+        "id": wf["id"],
+        "steps": steps,
+        "conv_id": ctx.get("conv_id"),
+        "files": ctx.get("files") or [],
+        "text": ctx.get("text") or ctx.get("assistant_text") or "",
+    }
+
+
+def run_pipeline(
+    pipeline_id: str,
+    *,
+    prompt: str = "",
+    files: list[Any] | None = None,
+    caller_conv_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    wf = get_automation(pipeline_id)
+    if wf is None or normalize_kind(wf.get("kind")) != KIND_PIPELINE:
+        return {"ok": False, "error": "pipeline not found", "steps": []}
+    body = dict(payload or {})
+    caller = (caller_conv_id or str(body.get("caller_conv_id") or "")).strip()
+    if not caller:
+        try:
+            from backend.workspace.identity import current
+
+            bound = current()
+        except Exception:
+            bound = None
+        if bound and bound.conv_id:
+            caller = bound.conv_id
+    if prompt:
+        body["prompt"] = prompt
+    if files is not None:
+        body["files"] = files
+    body["caller_conv_id"] = caller
+    return run_automation(pipeline_id, trigger_id="start.chat", payload=body)
 
 
 def emit_automation(trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -80,6 +143,8 @@ def emit_automation(trigger_id: str, payload: dict[str, Any] | None = None) -> d
     runs: list[dict[str, Any]] = []
     for wf in _all():
         if not wf.get("enabled"):
+            continue
+        if normalize_kind(wf.get("kind")) == KIND_PIPELINE:
             continue
         nodes = (wf.get("graph") or {}).get("nodes") or []
         if any(_node_matches_trigger(n, tid, payload) for n in nodes if isinstance(n, dict)):
@@ -153,17 +218,20 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
                 time.sleep(secs)
             return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": {"waited": secs}}
         if ntype == "flow.branch":
-            branch = _eval_branch(cfg, payload)
-            return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "branch": branch, "result": {"branch": branch}}
+            return {**_branch_node(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "tool.call":
             return {**_call_tool(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
+        if ntype == "pipeline.agent":
+            return {**_pipeline_agent(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
+        if ntype == "pipeline.finish":
+            return {**_pipeline_finish(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         handler = plugin.get_handler(ntype)
         if handler is None:
             # Starters / plugin triggers need no handler — just pass the payload on.
             if ntype.startswith("start.") or ntype not in _ACTION_TYPES:
                 return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": dict(payload)}
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": f"no handler for {ntype}"}
-        result = handler({"config": cfg, "payload": payload, "node": node})
+        result = handler(_plugin_ctx(cfg, payload, node))
         if isinstance(result, dict) and result.get("ok") is False:
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": result.get("error") or "plugin node failed", "result": result}
         return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": result}
@@ -206,14 +274,373 @@ def _run_message(conv_id: str, text: str, mode: str, model: str) -> str:
     return str(run_message(conv_id, text, mode, model) or "")
 
 
+def _run_message_and_wait(
+    conv_id: str,
+    text: str,
+    mode: str,
+    model: str,
+    *,
+    timeout_sec: float,
+    parent: str = "",
+    attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from frontend.ui_web.agent_modes import run_message_and_wait
+
+    return dict(
+        run_message_and_wait(
+            conv_id,
+            text,
+            mode,
+            model,
+            timeout_sec=timeout_sec,
+            parent=parent,
+            attachments=attachments,
+        )
+        or {}
+    )
+
+
+def _prepare_run_ctx(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
+    kind = normalize_kind(wf.get("kind"))
+    ctx.setdefault("_workflow_kind", kind)
+    if kind != KIND_PIPELINE:
+        return
+    caller = str(ctx.get("caller_conv_id") or "").strip()
+    if caller and not ctx.get("artifact_dir"):
+        from backend.automations.artifacts import caller_run_dir
+
+        run_id = str(ctx.get("pipeline_run_id") or uuid.uuid4())
+        ctx["pipeline_run_id"] = run_id
+        ctx["artifact_dir"] = str(caller_run_dir(caller, run_id))
+    ctx.setdefault("files", [])
+    _ensure_pipeline_group(ctx, wf)
+
+
+def _bind_hub_identity(ctx: dict[str, Any]):
+    hub = str(ctx.get("group_id") or "").strip()
+    if not hub:
+        return None
+    from backend.workspace.identity import RunContext, bind
+
+    return bind(
+        RunContext(
+            run_id=str(ctx.get("pipeline_run_id") or ""),
+            conv_id=hub,
+            group_id=hub,
+            leader_conv_id=str(ctx.get("caller_conv_id") or ""),
+        )
+    )
+
+
+def _caller_group_home(caller: str) -> tuple[str, bool]:
+    """Return (folder_id, already_grouped)."""
+    if not caller:
+        return "", False
+    from frontend.ui_web.group_orchestrator import is_group_conversation
+    from frontend.ui_web.project_chats import load_conversation
+
+    conv = load_conversation(caller)
+    if conv is None:
+        return "", False
+    folder = str(getattr(conv, "folder_id", "") or "")
+    if is_group_conversation(conv):
+        return folder, True
+    parent_id = str(getattr(conv, "parent_conv_id", "") or "").strip()
+    if parent_id:
+        parent = load_conversation(parent_id)
+        if parent is not None and is_group_conversation(parent):
+            return str(getattr(parent, "folder_id", "") or folder), True
+    return folder, False
+
+
+def _ensure_pipeline_group(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
+    if str(ctx.get("group_id") or "").strip():
+        return
+    from frontend.ui_web.project_chats import load_conversation, save_conversation
+
+    caller = str(ctx.get("caller_conv_id") or "").strip()
+    parent_folder, already_grouped = _caller_group_home(caller)
+    try:
+        from backend.tools.panel.ducky_panel import _panel_api
+
+        created = _panel_api().group_create(name=str(wf.get("name") or "Pipeline"), folder_id=parent_folder)
+    except Exception as exc:
+        _log.warning("pipeline group_create failed: %s", exc)
+        return
+    if not created.get("ok"):
+        _log.warning("pipeline group_create failed: %s", created.get("error"))
+        return
+    hub_id = str(created.get("id") or "").strip()
+    ctx["group_id"] = hub_id
+    ctx["group_folder_id"] = str(created.get("folder_id") or "")
+    ctx["conv_id"] = hub_id
+    if not hub_id:
+        return
+    if caller and not already_grouped:
+        try:
+            from backend.tools.panel.ducky_panel import _panel_api
+
+            _panel_api().group_add_member(hub_id, caller, as_leader=True)
+        except Exception as exc:
+            _log.warning("pipeline group_add_member failed: %s", exc)
+        return
+    if caller:
+        hub = load_conversation(hub_id)
+        if hub is not None:
+            hub.leader_conv_id = caller
+            save_conversation(hub)
+
+
+def _plugin_ctx(cfg: dict[str, Any], payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "config": cfg,
+        "payload": payload,
+        "node": node,
+        "kind": str(payload.get("_workflow_kind") or "automation"),
+        "files": payload.get("files") or [],
+        "artifact_dir": str(payload.get("artifact_dir") or ""),
+    }
+
+
+def _resolve_profile(ducky: str) -> dict[str, Any] | None:
+    from frontend.agent_profiles import get_agent_profile, list_agent_profiles_available
+
+    key = (ducky or "").strip()
+    if not key:
+        return None
+    profile = get_agent_profile(key)
+    if profile:
+        return profile
+    low = key.lower()
+    matches = [
+        row
+        for row in list_agent_profiles_available()
+        if str(row.get("name") or "").strip().lower() == low
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _agent_spawn_kwargs(profile: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from backend.tools.panel.ducky_panel import _profile_spawn_kwargs
+
+        return dict(_profile_spawn_kwargs(profile))
+    except Exception:
+        return {
+            "ducky_style": str(profile.get("ducky_style") or "classic"),
+            "ducky_name": str(profile.get("name") or ""),
+            "profile_id": str(profile.get("id") or ""),
+            "ducky_personality": str(profile.get("ducky_personality") or ""),
+        }
+
+
+def _pipeline_agent(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    from backend.automations.artifacts import chat_dir, copy_files_into, list_files
+
+    ducky = str(cfg.get("ducky") or cfg.get("profile_id") or payload.get("ducky") or "").strip()
+    if not ducky:
+        return {"ok": False, "error": "ducky profile required"}
+    profile = _resolve_profile(ducky)
+    if profile is None:
+        return {"ok": False, "error": f"unknown ducky: {ducky}"}
+    kwargs = _agent_spawn_kwargs(profile)
+    seat = _seat_agent_cluster(cfg, payload, profile, kwargs)
+    if not seat.get("ok"):
+        return seat
+    conv_id = str(seat.get("conv_id") or "")
+    if not conv_id:
+        return {"ok": False, "error": "group_invite did not return a member"}
+    worker_dir = chat_dir(conv_id)
+    incoming = payload.get("files") or []
+    copy_files_into(incoming, worker_dir)
+    prompt = str(cfg.get("prompt") or payload.get("prompt") or "")
+    timeout = min(max(float(cfg.get("timeout_sec") or 180.0), 1.0), _AGENT_WAIT_CAP_S)
+    caller = str(payload.get("caller_conv_id") or "").strip()
+    wait = _run_message_and_wait(
+        conv_id,
+        prompt,
+        str(cfg.get("mode") or "agent"),
+        str(cfg.get("model") or kwargs.get("model") or ""),
+        timeout_sec=timeout,
+        parent=caller,
+        attachments=_files_as_attachments(incoming),
+    )
+    if str(wait.get("status") or "") != "done":
+        return {
+            "ok": False,
+            "error": str(wait.get("error") or wait.get("status") or "agent failed"),
+            "result": {"conv_id": conv_id, **wait},
+        }
+    files = list_files(worker_dir)
+    dest = str(payload.get("artifact_dir") or "")
+    if dest:
+        from pathlib import Path
+
+        files = copy_files_into(files, Path(dest))
+    text = str(wait.get("assistant_text") or "")
+    return {
+        "ok": True,
+        "result": {
+            "conv_id": conv_id,
+            "assistant_text": text,
+            "text": text,
+            "files": files,
+            "agent_group_id": seat.get("group_id") or "",
+            "agent_group_folder_id": seat.get("group_folder_id") or "",
+        },
+    }
+
+
+def _seat_agent_cluster(
+    cfg: dict[str, Any],
+    payload: dict[str, Any],
+    profile: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    title = str(cfg.get("title") or kwargs.get("ducky_name") or profile.get("name") or "Agent")
+    parent_folder = str(payload.get("group_folder_id") or "")
+    try:
+        from backend.tools.panel.ducky_panel import _panel_api
+
+        api = _panel_api()
+        created = api.group_create(name=title, folder_id=parent_folder)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if not created.get("ok"):
+        return {"ok": False, "error": str(created.get("error") or "group_create failed")}
+    nest_id = str(created.get("id") or "").strip()
+    pid = str(profile.get("id") or "").strip()
+    try:
+        invited = api.group_invite(nest_id, pid, model=str(cfg.get("model") or kwargs.get("model") or ""))
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if not invited.get("ok"):
+        return {"ok": False, "error": str(invited.get("error") or "group_invite failed")}
+    member = invited.get("member") if isinstance(invited.get("member"), dict) else {}
+    return {
+        "ok": True,
+        "conv_id": str(member.get("member_conv_id") or ""),
+        "group_id": nest_id,
+        "group_folder_id": str(created.get("folder_id") or ""),
+    }
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
+def _files_as_attachments(files: Any) -> list[dict[str, Any]]:
+    import base64
+    from pathlib import Path
+
+    out: list[dict[str, Any]] = []
+    for raw in files or []:
+        src = Path(raw["path"] if isinstance(raw, dict) else raw)
+        if src.suffix.lower() not in _IMAGE_EXTS or not src.is_file():
+            continue
+        mime = "image/jpeg" if src.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+        if src.suffix.lower() == ".gif":
+            mime = "image/gif"
+        elif src.suffix.lower() == ".webp":
+            mime = "image/webp"
+        out.append(
+            {
+                "kind": "image",
+                "name": src.name,
+                "mime": mime,
+                "data_base64": base64.b64encode(src.read_bytes()).decode("ascii"),
+            }
+        )
+    return out
+
+
+def _pipeline_finish(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    caller = str(cfg.get("caller_conv_id") or payload.get("caller_conv_id") or "").strip()
+    if not caller:
+        return {"ok": True, "result": {"posted": False, "reason": "no caller"}}
+    from frontend.ui_web.project_chats import append_message, load_conversation
+
+    conv = load_conversation(caller)
+    if conv is None:
+        return {"ok": False, "error": f"caller chat not found: {caller}"}
+    text = str(cfg.get("message") or payload.get("text") or payload.get("assistant_text") or "Pipeline finished.")
+    files = payload.get("files") or []
+    if files:
+        paths = "\n".join(
+            str(row.get("path") if isinstance(row, dict) else row) for row in files
+        )
+        text = f"{text}\n\nFiles:\n{paths}"
+    append_message(conv, {"role": "assistant", "content": text, "text": text, "ts": time.time()})
+    return {"ok": True, "result": {"posted": True, "caller_conv_id": caller, "text": text, "files": files}}
+
+
+def _branch_node(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    mode = str(cfg.get("mode") or "data").strip().lower() or "data"
+    if mode == "agent":
+        judge = _pipeline_agent(cfg, payload)
+        if not judge.get("ok"):
+            return {**judge, "branch": False}
+        text = str((judge.get("result") or {}).get("text") or "")
+        branch = _agent_decides(text, str(cfg.get("equals") or ""))
+        return {
+            "ok": True,
+            "branch": branch,
+            "result": {**(judge.get("result") or {}), "branch": branch, "judge_text": text},
+        }
+    branch = _eval_branch(cfg, payload)
+    return {"ok": True, "branch": branch, "result": {"branch": branch}}
+
+
+def _payload_get(payload: dict[str, Any], field: str) -> Any:
+    if not field:
+        return payload
+    cur: Any = payload
+    for part in field.split("."):
+        if isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
 def _eval_branch(cfg: dict[str, Any], payload: dict[str, Any]) -> bool:
     field = str(cfg.get("field") or "").strip()
-    if not field:
-        return bool(payload)
-    value = payload.get(field)
+    value = _payload_get(payload, field) if field else payload
+    op = str(cfg.get("op") or "").strip().lower()
+    if op == "exists":
+        return value not in (None, "", [], {})
+    if op == "contains" or cfg.get("contains"):
+        return _value_contains(value, str(cfg.get("contains") or cfg.get("equals") or ""))
     if "equals" in cfg and str(cfg.get("equals") or "") != "":
         return str(value) == str(cfg.get("equals"))
     return bool(value)
+
+
+def _value_contains(value: Any, needle: str) -> bool:
+    if needle == "":
+        return bool(value)
+    if isinstance(value, list):
+        return any(_value_contains(item, needle) for item in value)
+    if isinstance(value, dict):
+        blob = " ".join(str(v) for v in value.values())
+        return needle in blob or needle in str(value)
+    return needle in str(value or "")
+
+
+_YES = frozenset({"yes", "true", "approve", "ok", "pass"})
+_NO = frozenset({"no", "false", "reject", "fail"})
+
+
+def _agent_decides(text: str, equals: str) -> bool:
+    low = (text or "").strip().lower()
+    if equals:
+        return equals.lower() in low or low == equals.lower()
+    for token in _NO:
+        if token in low.split() or f" {token} " in f" {low} ":
+            return False
+    for token in _YES:
+        if token in low.split() or f" {token} " in f" {low} ":
+            return True
+    return bool(low)
 
 
 def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

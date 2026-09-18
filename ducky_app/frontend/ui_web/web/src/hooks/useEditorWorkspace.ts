@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ChatTab, EditorTab, EditorLayoutState, EditorWorkspaceSnapshot, FocusWindowSnapshot } from "../types/panel";
-import { automationsTabId, changesTabId } from "../types/panel";
+import { automationsTabId, changesTabId, pipelinesTabId } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { collectTabIds, createDefaultLayout, repairLayout } from "../utils/editorLayoutOps";
 
@@ -70,6 +70,12 @@ async function validateSnapshot(
         id: automationsTabId(),
         kind: "automations",
         name: tab.name || "Automations",
+      });
+    } else if (tab.kind === "pipelines") {
+      openTabs.push({
+        id: pipelinesTabId(),
+        kind: "pipelines",
+        name: tab.name || "Pipelines",
       });
     } else if (tab.kind === "ducky-profile" && tab.path) {
       openTabs.push({

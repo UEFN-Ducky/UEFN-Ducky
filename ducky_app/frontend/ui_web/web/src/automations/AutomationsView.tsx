@@ -15,7 +15,7 @@ import { Icons } from "../icons/Icons";
 
 const NODE_W = 200;
 const NODE_H = 76;
-const GROUP_ORDER = ["Starting", "Triggers", "Duckies", "Tools", "Logic"];
+const GROUP_ORDER = ["Starting", "Triggers", "Agents", "Duckies", "Tools", "Logic", "Finish"];
 
 function emptyGraph(): AutomationGraphDto {
   return { nodes: [], edges: [] };
@@ -43,7 +43,7 @@ function groupCatalog(catalog: AutomationNodeDto[], query: string) {
   return keys.map((k) => [k, map.get(k) || []] as const);
 }
 
-export function AutomationsView() {
+export function AutomationsView({ kind = "automation" }: { kind?: "automation" | "pipeline" }) {
   const [rows, setRows] = useState<AutomationSummaryDto[]>([]);
   const [catalog, setCatalog] = useState<AutomationNodeDto[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -82,15 +82,18 @@ export function AutomationsView() {
     return m;
   }, [catalog]);
 
+  const isPipeline = kind === "pipeline";
+
   const refreshList = useCallback(async () => {
     const api = getApi();
-    const [list, nodes] = await Promise.all([
-      api?.list_automations?.(),
-      api?.list_automation_nodes?.(),
-    ]);
-    setRows(list?.automations || []);
+    const [list, nodes] = await Promise.all(
+      isPipeline
+        ? [api?.list_pipelines?.(), api?.list_pipeline_nodes?.()]
+        : [api?.list_automations?.(), api?.list_automation_nodes?.()],
+    );
+    setRows((isPipeline ? list?.pipelines : list?.automations) || []);
     setCatalog(nodes?.nodes || []);
-  }, []);
+  }, [isPipeline]);
 
   useEffect(() => {
     void refreshList();
@@ -107,27 +110,30 @@ export function AutomationsView() {
 
   const loadOne = useCallback(async (id: string) => {
     const api = getApi();
-    const res = await api?.get_automation?.(id);
-    if (res?.automation) {
-      setDraft(res.automation);
+    const res = isPipeline ? await api?.get_pipeline?.(id) : await api?.get_automation?.(id);
+    const row = res?.automation || res?.pipeline;
+    if (row) {
+      setDraft(row);
       setSelectedId(id);
       setSelectedNodeId("");
       setExpandedId("");
-      setLog((res.automation.runs || []).slice(-1)[0] || null);
+      setLog((row.runs || []).slice(-1)[0] || null);
     }
-  }, []);
+  }, [isPipeline]);
 
   const persist = useCallback(async (next: AutomationDto) => {
     const api = getApi();
-    const res = await api?.save_automation?.(next);
-    if (res?.automation) {
-      setDraft(res.automation);
-      setSelectedId(res.automation.id);
+    const payload = { ...next, kind };
+    const res = isPipeline ? await api?.save_pipeline?.(payload) : await api?.save_automation?.(payload);
+    const row = res?.automation || res?.pipeline;
+    if (row) {
+      setDraft(row);
+      setSelectedId(row.id);
       await refreshList();
-      return res.automation;
+      return row;
     }
     return next;
-  }, [refreshList]);
+  }, [isPipeline, kind, refreshList]);
 
   const createNew = useCallback(async () => {
     setPickerOpen(true);
@@ -138,7 +144,9 @@ export function AutomationsView() {
       const created = await persist({
         id: "",
         name: template?.name || "Untitled",
+        description: template?.description || "",
         enabled: true,
+        kind,
         graph: template?.graph || emptyGraph(),
       } as AutomationDto);
       setSelectedNodeId("");
@@ -183,7 +191,9 @@ export function AutomationsView() {
     await persist(draft);
     setBusy(true);
     try {
-      const res = await getApi()?.run_automation?.(draft.id);
+      const res = isPipeline
+        ? await getApi()?.run_pipeline?.(draft.id)
+        : await getApi()?.run_automation?.(draft.id);
       if (res) {
         setLog(res);
         setLogOpen(true);
@@ -326,7 +336,7 @@ export function AutomationsView() {
     <div className="aw-root">
       <aside className="aw-list">
         <div className="aw-list-head">
-          <strong>Automations</strong>
+          <strong>{isPipeline ? "Pipelines" : "Automations"}</strong>
           <button type="button" className="icon-btn" title="New workflow" onClick={() => void createNew()}>
             +
           </button>
@@ -356,6 +366,15 @@ export function AutomationsView() {
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 onBlur={saveDraft}
               />
+              {isPipeline ? (
+                <input
+                  className="aw-name"
+                  placeholder="Description (so a ducky can pick this recipe)"
+                  value={draft.description || ""}
+                  onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                  onBlur={saveDraft}
+                />
+              ) : null}
               <label className="aw-enable">
                 <input
                   type="checkbox"
@@ -392,7 +411,8 @@ export function AutomationsView() {
                 type="button"
                 onClick={async () => {
                   if (!draft.id) return;
-                  await getApi()?.delete_automation?.(draft.id);
+                  if (isPipeline) await getApi()?.delete_pipeline?.(draft.id);
+                  else await getApi()?.delete_automation?.(draft.id);
                   setDraft(null);
                   setSelectedId("");
                   await refreshList();
@@ -402,7 +422,11 @@ export function AutomationsView() {
               </button>
             </>
           ) : (
-            <span className="aw-empty-hint">Create a workflow or pick a template — right-click the canvas to add nodes.</span>
+            <span className="aw-empty-hint">
+              {isPipeline
+                ? "Create a pipeline — Chat start, Agent, plugin nodes, Finish. Right-click the canvas to add nodes."
+                : "Create a workflow or pick a template — right-click the canvas to add nodes."}
+            </span>
           )}
         </div>
         <div
@@ -557,7 +581,11 @@ export function AutomationsView() {
                   ))}
                 </ol>
               ) : (
-                <p>Test a graph to see steps here. Timers only fire while the panel is running.</p>
+                <p>
+                  {isPipeline
+                    ? "Test a pipeline to see steps here. Finish posts back to the calling chat."
+                    : "Test a graph to see steps here. Timers only fire while the panel is running."}
+                </p>
               )}
             </div>
           ) : null}
@@ -610,6 +638,7 @@ export function AutomationsView() {
         onClose={() => setPickerOpen(false)}
         onSelect={(t) => void createFromTemplate(t)}
         currentGraph={draft?.graph || null}
+        system={kind}
       />
     </div>
   );

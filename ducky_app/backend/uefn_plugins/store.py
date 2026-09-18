@@ -129,6 +129,56 @@ def plugin_dir(plugin_id: str) -> Path:
     return appdata_uefn_plugins_dir() / normalize_plugin_id(plugin_id)
 
 
+_PLUGIN_ICON_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def plugin_icon_data_url(plugin_id: str) -> str:
+    """data: URL for assets/icon.* — empty if missing. Cached by mtime."""
+    import base64
+
+    try:
+        pid = normalize_plugin_id(plugin_id)
+    except ValueError:
+        return ""
+    root = plugin_dir(pid)
+    candidates = (
+        ("assets/icon.svg", "image/svg+xml"),
+        ("assets/icon.png", "image/png"),
+        ("assets/icon.jpg", "image/jpeg"),
+        ("assets/icon.jpeg", "image/jpeg"),
+        ("icon.svg", "image/svg+xml"),
+        ("icon.png", "image/png"),
+    )
+    newest = 0.0
+    hit: tuple[Path, str] | None = None
+    for rel, mime in candidates:
+        path = root / rel
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        if st.st_mtime >= newest:
+            newest = st.st_mtime
+            hit = (path, mime)
+            break
+    if hit is None:
+        _PLUGIN_ICON_CACHE.pop(pid, None)
+        return ""
+    cached = _PLUGIN_ICON_CACHE.get(pid)
+    if cached and cached[0] == newest:
+        return cached[1]
+    path, mime = hit
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if not raw or len(raw) > 64 * 1024:
+        return ""
+    url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    _PLUGIN_ICON_CACHE[pid] = (newest, url)
+    return url
+
+
 def get_enabled_plugin_ids() -> list[str]:
     from frontend.settings import PanelSettings
 

@@ -128,10 +128,10 @@ standalone AppData skill pack or owned by another plugin.
 | `appearance.skin` | Full chrome swap into host portals (frame/header/left/right) |
 | `sounds` | Audio files listed in Appearance → Sounds (`plugin:<id>:<soundId>`) |
 | `hooks` | Extra hookable events for Appearance → Sounds; emit via `ducky:hook` |
-| `automations.nodes` / `automations.triggers` | Palette tiles in the Automations editor. `register()`: `api.register_automation_node(type, handler)` and `api.emit_automation(trigger_id, payload)`. Disabled plugin → tiles and handlers gone. Leave `hooks` alone (sounds). |
+| `automations.nodes` / `automations.triggers` | Palette tiles in Automations **and** Pipelines (omit `systems` = both; `"systems": ["pipeline"]` = Pipelines only). `register()`: `api.register_automation_node` / `api.register_pipeline_node` (same table) and `api.emit_automation`. Disabled plugin → tiles and handlers gone. Leave `hooks` alone (sounds). |
 | `verse.templates` | New-file Verse scaffolds (`file`/`content` or multi-file `folder`+`files[]`) |
 | `agent.tools` | Category / intent for MCP tools registered via `api.tool()` (tool names auto-tracked). Chat AI-made plugins **must** `@api.tool()` every user-facing action. |
-| `llm.providers` | Rows under Settings → LLMs → Providers; click opens a detail slide (key, coding agent, plugin options). Effort slider is `ModelInfo.thinking_menu` from `fetch_models` — not this contribute. |
+| `llm.providers` | Rows under Settings → LLMs → Providers; click opens a detail slide (key, coding agent, plugin options). Effort slider is `ModelInfo.thinking_menu` from `fetch_models`. Usage sliders are `fetch_usage` on `api.register_llm_provider` — not this contribute. |
 | `llm.coding_agents` | Coding-agent block inside that provider’s detail slide (Claude Code, Codex, Cursor, Gemini CLI) |
 | `settings.sections` with `tab: "LLMs"` | Extra toggles in that provider’s detail slide (e.g. Anthropic/OpenAI prompt-cache markers) |
 | `api.register_ide_hookup(kind)` | Own IDE MCP+skills Apply (cursor / claude / antigravity); auto-applies on register; UI in that provider’s LLMs detail |

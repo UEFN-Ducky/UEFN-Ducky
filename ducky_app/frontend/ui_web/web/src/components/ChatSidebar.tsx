@@ -75,6 +75,7 @@ import {
   rememberContentAllProjects,
 } from "../utils/contentTreePrefs";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
+import { requestOpenPipelinesTab } from "../navigation/openPipelinesTab";
 import { useUiTarget } from "../ui-targets/registry";
 
 function shouldBlockSidebarHotkey(target: EventTarget | null): boolean {
@@ -363,6 +364,11 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     kind: "button",
     label: "Automations",
     route: "automations",
+  });
+  const pipelinesTargetRef = useUiTarget("header.pipelines", {
+    kind: "button",
+    label: "Pipelines",
+    route: "pipelines",
   });
   const { treeRefreshToken, showHiddenFiles, setShowHiddenFiles } = useProjectFilesSettings();
   const [duckiesCompact, setDuckiesCompact] = useState(readDuckiesCompact);
@@ -999,6 +1005,13 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
         onClick={() => requestOpenAutomationsTab()}
       >
         <Icons.Clock />
+      </SectionIconButton>
+      <SectionIconButton
+        buttonRef={(el) => pipelinesTargetRef(el)}
+        title="Pipelines"
+        onClick={() => requestOpenPipelinesTab()}
+      >
+        <Icons.GitBranch />
       </SectionIconButton>
       <DuckyArchiveDropdown
         archiveChats={archiveChats}

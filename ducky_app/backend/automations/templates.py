@@ -69,8 +69,10 @@ def delete_custom(template_id: str) -> bool:
     return True
 
 
-def list_templates() -> list[dict[str, Any]]:
+def list_templates(system: str = "") -> list[dict[str, Any]]:
     """Plugin contrib (enabled only) + user custom templates."""
+    from backend.automations.catalog import node_in_system
+
     out: list[dict[str, Any]] = []
     try:
         from backend.uefn_plugins.host import get_ui_contributions
@@ -89,7 +91,12 @@ def list_templates() -> list[dict[str, Any]]:
         tid = str(row.get("id") or "").strip()
         if not tid:
             continue
+        if not node_in_system(row, system):
+            continue
         name = str(row.get("label") or row.get("name") or tid)
+        graph = normalize_graph(row.get("graph"))
+        required = _template_requires(row, graph)
+        missing = [p for p in required if p not in enabled]
         out.append(
             {
                 "id": f"plugin:{pid}:{tid}" if pid else tid,
@@ -99,11 +106,52 @@ def list_templates() -> list[dict[str, Any]]:
                 "icon": str(row.get("icon") or "⚡"),
                 "kind": "plugin",
                 "plugin_id": pid,
-                "graph": normalize_graph(row.get("graph")),
+                "systems": row.get("systems"),
+                "graph": graph,
+                "requires_plugins": required,
+                "missing_plugins": missing,
+                "ready": not missing,
             }
         )
     out.extend(list_custom())
     return out
+
+
+_NODE_PLUGIN = {
+    "discord.send": "discord",
+    "discord.message": "discord",
+    "uefn.game.start": "tester",
+    "uefn.player.wait": "tester",
+    "uefn.player.teleport": "tester",
+    "uefn.log.expect": "tester",
+}
+
+
+def _template_requires(row: dict[str, Any], graph: dict[str, Any]) -> list[str]:
+    seen: list[str] = []
+    for raw in row.get("requires_plugins") or []:
+        pid = str(raw or "").strip()
+        if pid and pid not in seen:
+            seen.append(pid)
+    for node in graph.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        ntype = str(node.get("type") or "")
+        pid = _NODE_PLUGIN.get(ntype)
+        if not pid and ntype == "tool.call":
+            cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+            name = str(cfg.get("name") or "")
+            if name.startswith("meshy_"):
+                pid = "meshy"
+            elif name.startswith("blender_"):
+                pid = "blender"
+            elif name.startswith("studio3d_"):
+                pid = "studio3d"
+            elif name.startswith("discord_"):
+                pid = "discord"
+        if pid and pid not in seen:
+            seen.append(pid)
+    return seen
 
 
 def _dir(*, for_write: bool = False) -> Path:

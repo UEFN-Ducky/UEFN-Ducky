@@ -8,6 +8,7 @@ import {
   addViewPan,
   clampView,
   contentRect,
+  isDoubleTap,
   keyDiff,
   mapViewPoint,
   panZoomAround,
@@ -18,6 +19,7 @@ import {
   stickMoveKeys,
   twoPointCenter,
   twoPointDist,
+  withinSlop,
   type ViewPanZoom,
 } from "./remoteWindowMath";
 import { getDirectTransport } from "../remote/directTransport";
@@ -606,8 +608,8 @@ function spawnRipple(host: HTMLElement, clientX: number, clientY: number, kind: 
 
 /**
  * Pointer/key capture on the video. Mouse stays immediate click/drag.
- * Touch matches Chrome Remote Desktop: tap = click + ripple, press-and-hold
- * then drag, two fingers pan/zoom the local view.
+ * Touch: tap at the down pixel (slop ignores jitter), double-tap = dblclick,
+ * hold then move past slop = drag, two fingers pan/zoom the local view.
  */
 function attachInput(
   video: HTMLVideoElement,
@@ -639,17 +641,29 @@ function attachInput(
   let holdTimer = 0;
   let holdRipple: HTMLElement | null = null;
   let pendingId = -1;
+  let held = false;
   let dragId = -1;
   let dragButton = 0;
   let ignoreUntilClear = false;
   let pinch: { dist: number; cx: number; cy: number } | null = null;
+  let downAt = { x: 0, y: 0 };
+  let downMapped = { x: 0.5, y: 0.5 };
+  let lastTap: { x: number; y: number; at: number; mapped: { x: number; y: number } } | null = null;
 
+  const capture = (id: number) => {
+    try {
+      video.setPointerCapture(id);
+    } catch {
+      /* ignore */
+    }
+  };
   const clearHold = () => {
     if (holdTimer) {
       window.clearTimeout(holdTimer);
       holdTimer = 0;
     }
     pendingId = -1;
+    held = false;
     holdRipple?.remove();
     holdRipple = null;
   };
@@ -660,6 +674,32 @@ function attachInput(
     dragId = -1;
     holdRipple?.remove();
     holdRipple = null;
+  };
+  const tapAtDown = () => {
+    spawnRipple(overlay, downAt.x, downAt.y, "tap");
+    const now = performance.now();
+    const mapped = downMapped;
+    lastRemotePoint = mapped;
+    const prev = lastTap;
+    if (prev && isDoubleTap(prev, { x: downAt.x, y: downAt.y, at: now })) {
+      send({ type: "dblclick", ...prev.mapped, button: 0 });
+      lastTap = null;
+      return;
+    }
+    send({ type: "down", ...mapped, button: 0 });
+    send({ type: "up", ...mapped, button: 0 });
+    lastTap = { x: downAt.x, y: downAt.y, at: now, mapped };
+  };
+  const startDrag = () => {
+    if (pendingId < 0 || dragId >= 0) return;
+    capture(pendingId);
+    holdRipple?.classList.add("is-locked");
+    flush();
+    send({ type: "down", ...downMapped, button: 0 });
+    lastRemotePoint = downMapped;
+    dragId = pendingId;
+    dragButton = 0;
+    pendingId = -1;
   };
   const syncPinch = () => {
     if (pts.size < 2) {
@@ -691,11 +731,7 @@ function attachInput(
     pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     const mouse = ev.pointerType === "mouse";
     if (mouse) {
-      try {
-        video.setPointerCapture(ev.pointerId);
-      } catch {
-        /* ignore */
-      }
+      capture(ev.pointerId);
       flush();
       send({ type: "down", ...point(ev.clientX, ev.clientY), button: ev.button });
       dragId = ev.pointerId;
@@ -710,22 +746,17 @@ function attachInput(
       return;
     }
     if (ignoreUntilClear) return;
+    capture(ev.pointerId);
     pendingId = ev.pointerId;
+    held = false;
+    downAt = { x: ev.clientX, y: ev.clientY };
+    downMapped = point(ev.clientX, ev.clientY);
     holdRipple = spawnRipple(overlay, ev.clientX, ev.clientY, "hold");
     holdTimer = window.setTimeout(() => {
       holdTimer = 0;
       if (pendingId !== ev.pointerId) return;
-      pendingId = -1;
+      held = true;
       holdRipple?.classList.add("is-locked");
-      try {
-        video.setPointerCapture(ev.pointerId);
-      } catch {
-        /* ignore */
-      }
-      flush();
-      send({ type: "down", ...point(ev.clientX, ev.clientY), button: 0 });
-      dragId = ev.pointerId;
-      dragButton = 0;
     }, HOLD_MS);
   };
   const onMove = (ev: PointerEvent) => {
@@ -735,10 +766,14 @@ function attachInput(
       syncPinch();
       return;
     }
-    if (ev.pointerId === pendingId && holdRipple) {
-      const box = overlay.getBoundingClientRect();
-      holdRipple.style.left = `${ev.clientX - box.left}px`;
-      holdRipple.style.top = `${ev.clientY - box.top}px`;
+    if (ev.pointerId === pendingId) {
+      if (holdRipple) {
+        const box = overlay.getBoundingClientRect();
+        holdRipple.style.left = `${ev.clientX - box.left}px`;
+        holdRipple.style.top = `${ev.clientY - box.top}px`;
+      }
+      if (held && !withinSlop(downAt.x, downAt.y, ev.clientX, ev.clientY)) startDrag();
+      return;
     }
     if (ev.pointerId !== dragId) return;
     pendingMove = { ...point(ev.clientX, ev.clientY), button: dragButton };
@@ -750,10 +785,7 @@ function attachInput(
       endDrag(ev.clientX, ev.clientY);
     } else if (ev.pointerId === pendingId) {
       clearHold();
-      spawnRipple(overlay, ev.clientX, ev.clientY, "tap");
-      const p = point(ev.clientX, ev.clientY);
-      send({ type: "down", ...p, button: 0 });
-      send({ type: "up", ...p, button: 0 });
+      if (!ignoreUntilClear) tapAtDown();
     }
     if (pts.size < 2) pinch = null;
     if (pts.size === 0) ignoreUntilClear = false;

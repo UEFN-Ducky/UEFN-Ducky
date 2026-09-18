@@ -207,6 +207,15 @@ def _dedupe_contrib_rows(
     return out
 
 
+def _plugin_icon_url(plugin_id: str) -> str:
+    try:
+        from backend.uefn_plugins.store import plugin_icon_data_url
+
+        return plugin_icon_data_url(plugin_id) or ""
+    except Exception:
+        return ""
+
+
 def get_ui_contributions() -> dict[str, Any]:
     """Snapshot contrib registry for Settings UI — does not wait on register()."""
     enabled = list(get_enabled_plugin_ids())
@@ -253,6 +262,7 @@ def get_ui_contributions() -> dict[str, Any]:
                                 "shows_thinking_effort"
                             )
                         ),
+                        "icon_data_url": _plugin_icon_url(str(row.get("plugin_id") or "")),
                     }
                     for row in _dedupe_contrib_rows(_CONTRIBUTIONS["llm_providers"])
                 ],
@@ -540,6 +550,7 @@ def register_llm_provider_factory(
     - tool_schema: \"openai\" | \"anthropic\" | \"gemini\"
     - key_optional: True for URL gateways (Ollama)
     - normalize_secret: ``(raw) -> str`` before test/fetch
+    - fetch_usage: ``(api_key, *, model=\"\") -> {windows: [...]}`` live quota sliders
     """
     from backend.uefn_plugins.store import normalize_plugin_id
 
@@ -1437,6 +1448,7 @@ def _automation_template_row(row: Any, pid: str) -> dict[str, Any] | None:
     from backend.automations.store import normalize_graph
 
     name = str(row.get("label") or row.get("name") or tid).strip() or tid
+    req = [str(x).strip() for x in (row.get("requires_plugins") or []) if str(x).strip()]
     return {
         "id": tid,
         "label": name,
@@ -1445,6 +1457,8 @@ def _automation_template_row(row: Any, pid: str) -> dict[str, Any] | None:
         "icon": str(row.get("icon") or "⚡"),
         "graph": normalize_graph(row.get("graph")),
         "plugin_id": pid,
+        "systems": row.get("systems"),
+        "requires_plugins": req,
     }
 
 
@@ -2678,6 +2692,10 @@ class _PluginApi:
         if handler is not None:
             return decorator(handler)
         return decorator
+
+    def register_pipeline_node(self, node_type: str, handler: Any = None) -> Any:
+        """Alias of register_automation_node — same handler table, both palettes."""
+        return self.register_automation_node(node_type, handler)
 
     def emit_automation(self, trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Fire enabled workflows whose starter matches ``trigger_id``."""

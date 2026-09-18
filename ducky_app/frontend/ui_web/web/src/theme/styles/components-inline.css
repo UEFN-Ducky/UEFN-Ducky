@@ -2091,6 +2091,29 @@ html.window-maximized .window-resize-grip {
   max-width: 100%;
 }
 
+.model-selector-btn--icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 8px;
+  box-shadow: 0 0 calc(2px + 16px * var(--effort-glow, 0))
+    color-mix(in srgb, var(--accent, #7c5cff) calc(var(--effort-glow, 0) * 85%), transparent);
+}
+
+.model-selector-btn-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 4px;
+  display: block;
+}
+
+.model-selector-btn--icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .model-selector-btn-label {
   min-width: 0;
   overflow: hidden;
@@ -2199,6 +2222,18 @@ html.window-maximized .window-resize-grip {
   outline: 1px solid var(--border-focus, #2563eb);
   outline-offset: 2px;
   border-radius: 999px;
+}
+
+.model-selector-usage {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+.model-selector-usage .model-selector-effort {
+  border-top: none;
+  padding-top: 8px;
+}
+.model-selector-usage .model-selector-effort + .model-selector-effort {
+  padding-top: 4px;
 }
 
 .model-selector-btn.is-open {

@@ -1608,6 +1608,18 @@ class PanelApiSettingsMixin:
         s.validate()
         s.save()
 
+    def get_gateway_usage(self, provider: str = "", model: str = "") -> dict[str, Any]:
+        """Live quota windows from the selected gateway plugin. Never cached."""
+        from backend.agent.model_fetch import fetch_usage
+        from backend.agent.secrets import get_key
+
+        prov = str(provider or "").strip().lower()
+        try:
+            key = str(get_key(prov) or "") if prov else ""
+            return fetch_usage(prov, key, model=str(model or ""))
+        except Exception:
+            return {"windows": []}
+
     def get_provider_usage(self, provider_id: str = "", days: int = 7) -> dict[str, Any]:
         """7-day (default) usage report for one provider / coding agent, or all."""
         from frontend.ui_web.provider_usage_log import usage_report

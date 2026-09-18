@@ -67,7 +67,7 @@ function screenTrack(): Promise<MediaStreamTrack> {
     });
   }
   const opts = {
-    video: { frameRate: { ideal: MAX_FPS, max: MAX_FPS }, displaySurface: "monitor" },
+    video: { frameRate: { ideal: MAX_FPS, max: MAX_FPS }, displaySurface: "monitor", cursor: "never" },
     audio: false,
     selfBrowserSurface: "exclude",
     surfaceSwitching: "exclude",

@@ -4,6 +4,7 @@ import { Modal } from "../components/Modal";
 import { Icons } from "../icons/Icons";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
+import { handleDeepLink } from "../navigation/deepLinks";
 import type { AutomationGraphDto, AutomationTemplateDto } from "../types/panel";
 
 const BLANK_ID = "__blank__";
@@ -13,6 +14,7 @@ interface AutomationTemplatePickerProps {
   onClose: () => void;
   onSelect: (template: AutomationTemplateDto | null) => void;
   currentGraph?: AutomationGraphDto | null;
+  system?: "automation" | "pipeline";
 }
 
 export function AutomationTemplatePicker({
@@ -20,6 +22,7 @@ export function AutomationTemplatePicker({
   onClose,
   onSelect,
   currentGraph,
+  system = "automation",
 }: AutomationTemplatePickerProps) {
   const { confirm } = useConfirmModal();
   const [view, setView] = useState<"picker" | "creator">("picker");
@@ -42,14 +45,14 @@ export function AutomationTemplatePicker({
     }
     setLoading(true);
     try {
-      const res = await api.list_automation_templates();
+      const res = await api.list_automation_templates(system);
       setTemplates(res?.templates || []);
     } catch {
       setTemplates([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [system]);
 
   useEffect(() => {
     if (!open) {
@@ -79,15 +82,27 @@ export function AutomationTemplatePicker({
     return "blank empty workflow".includes(q);
   })();
 
+  const locked = Boolean(selected && selected.ready === false);
+  const missing = selected?.missing_plugins || [];
+
+  const openStoreSlug = useCallback((slug: string) => {
+    handleDeepLink(`uefn-ducky://store/${slug}`);
+  }, []);
+
   const handleCreate = useCallback(() => {
     if (loading || creating) return;
+    if (locked) {
+      const slug = missing[0] || "";
+      if (slug) openStoreSlug(slug);
+      return;
+    }
     setCreating(true);
     window.setTimeout(() => {
       onSelect(selectedId === BLANK_ID ? null : selected);
       onClose();
       setCreating(false);
     }, 200);
-  }, [creating, loading, onClose, onSelect, selected, selectedId]);
+  }, [creating, loading, locked, missing, onClose, onSelect, openStoreSlug, selected, selectedId]);
 
   const openCreateView = useCallback((row: AutomationTemplateDto | null) => {
     setEditing(row);
@@ -229,15 +244,29 @@ export function AutomationTemplatePicker({
               {filtered.map((template) => {
                 const isSelected = template.id === selectedId;
                 const plugin = template.kind === "plugin";
+                const isLocked = template.ready === false;
+                const need = template.missing_plugins || [];
                 return (
                   <button
                     key={template.id}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    className={`vtm-card${isSelected ? " is-selected" : ""}`}
-                    onClick={() => setSelectedId(template.id)}
+                    className={`vtm-card${isSelected ? " is-selected" : ""}${isLocked ? " is-locked" : ""}`}
+                    onClick={() => {
+                      if (isLocked) {
+                        const slug = need[0] || "";
+                        if (slug) openStoreSlug(slug);
+                        return;
+                      }
+                      setSelectedId(template.id);
+                    }}
                     onDoubleClick={() => {
+                      if (isLocked) {
+                        const slug = need[0] || "";
+                        if (slug) openStoreSlug(slug);
+                        return;
+                      }
                       onSelect(template);
                       onClose();
                     }}
@@ -248,8 +277,27 @@ export function AutomationTemplatePicker({
                     <span className="vtm-card-body">
                       <span className="vtm-card-name">{template.name}</span>
                       <span className={`vtm-badge${plugin ? " vtm-badge--system" : ""}`}>
-                        {plugin ? `Plugin (${template.plugin_id || "store"})` : "Yours"}
+                        {isLocked
+                          ? `Needs ${need.join(", ")}`
+                          : plugin
+                            ? `Plugin (${template.plugin_id || "store"})`
+                            : "Yours"}
                       </span>
+                      {isLocked
+                        ? need.map((slug) => (
+                            <span
+                              key={slug}
+                              role="link"
+                              className="vtm-chip"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openStoreSlug(slug);
+                              }}
+                            >
+                              {slug}
+                            </span>
+                          ))
+                        : null}
                     </span>
                     {isSelected ? (
                       <span className="vtm-card-check" aria-hidden>
@@ -317,7 +365,7 @@ export function AutomationTemplatePicker({
             <button type="button" className="vtm-btn vtm-btn--ghost" onClick={handleClose}>
               Cancel
             </button>
-            <button type="button" className="vtm-btn vtm-btn--primary" disabled={loading || creating} onClick={handleCreate}>
+            <button type="button" className="vtm-btn vtm-btn--primary" disabled={loading || creating || locked} onClick={handleCreate}>
               {creating ? (
                 <>
                   <span className="vtm-spin" aria-hidden>

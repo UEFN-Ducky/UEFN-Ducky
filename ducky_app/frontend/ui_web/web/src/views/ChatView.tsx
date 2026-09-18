@@ -47,6 +47,7 @@ import {
   pluginUiTabId,
   settingsTabId,
   automationsTabId,
+  pipelinesTabId,
   changesTabId,
   usageTabId,
 } from "../types/panel";
@@ -54,6 +55,7 @@ import { registerShowChatComposer } from "../navigation/openChatComposer";
 import { registerOpenSettingsEditorTab } from "../navigation/openSettingsTab";
 import { registerOpenChangesTab } from "../navigation/openChangesTab";
 import { registerOpenAutomationsTab } from "../navigation/openAutomationsTab";
+import { registerOpenPipelinesTab } from "../navigation/openPipelinesTab";
 import { emitAppHook } from "../sfx/appHooks";
 import { registerOpenDiscordTab, setDiscordTabOpen } from "../navigation/openDiscordTab";
 import { registerOpenPlanTab, type OpenPlanRequest } from "../navigation/openPlanTab";
@@ -316,6 +318,17 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   useEffect(() => {
     return registerOpenAutomationsTab(openAutomationsTab);
   }, [openAutomationsTab]);
+
+  const openPipelinesTab = useCallback(() => {
+    const id = pipelinesTabId();
+    void openOrFocusTab(id, () =>
+      openTab({ id, kind: "pipelines", name: "Pipelines" }, { activate: true }),
+    );
+  }, [openTab]);
+
+  useEffect(() => {
+    return registerOpenPipelinesTab(openPipelinesTab);
+  }, [openPipelinesTab]);
 
   const openDuckyProfileTab = useCallback(
     (req: { profileId: string; name: string; duckyStyle?: string }) => {

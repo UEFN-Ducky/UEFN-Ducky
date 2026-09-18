@@ -1108,6 +1108,20 @@
   box-shadow: 0 0 0 1px var(--vtm-brand-ring);
 }
 
+.vtm-card.is-locked {
+  opacity: 0.5;
+}
+
+.vtm-chip {
+  display: inline-block;
+  margin: 0.2rem 0.25rem 0 0;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--vtm-border);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
 .vtm-card-icon {
   flex-shrink: 0;
   display: flex;

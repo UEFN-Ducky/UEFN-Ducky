@@ -157,11 +157,10 @@ def verse_test_run(start_session: bool = False, pretty: bool = False) -> str:
 
     session: dict[str, Any] = {"started": False}
     if start_session:
-        try:
-            session = send_command("play_in_editor", {})
-            session["started"] = True
-        except Exception as exc:
-            session = {"started": False, "error": str(exc)}
+        from backend.tools.tester.session_play import start_game
+
+        session = start_game()
+        session["started"] = bool(session.get("ok"))
 
     return tool_json(
         {"compile": compile_data, "push": push_data, "session": session},

@@ -1,20 +1,32 @@
-"""PanelApi surface for Automations (graphs, catalog, test run)."""
+"""PanelApi surface for Automations and Pipelines (graphs, catalog, test run)."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from backend.automations.store import KIND_AUTOMATION, KIND_PIPELINE, normalize_kind
 
 
 class PanelApiAutomationsMixin:
     def list_automation_nodes(self) -> dict[str, Any]:
         from backend.automations.catalog import list_nodes
 
-        return {"ok": True, "nodes": list_nodes()}
+        return {"ok": True, "nodes": list_nodes(system=KIND_AUTOMATION)}
+
+    def list_pipeline_nodes(self) -> dict[str, Any]:
+        from backend.automations.catalog import list_nodes
+
+        return {"ok": True, "nodes": list_nodes(system=KIND_PIPELINE)}
 
     def list_automations(self) -> dict[str, Any]:
         from backend.automations.store import list_automations
 
-        return {"ok": True, "automations": list_automations()}
+        return {"ok": True, "automations": list_automations(kind=KIND_AUTOMATION)}
+
+    def list_pipelines(self) -> dict[str, Any]:
+        from backend.automations.store import list_automations
+
+        return {"ok": True, "pipelines": list_automations(kind=KIND_PIPELINE)}
 
     def get_automation(self, workflow_id: str) -> dict[str, Any]:
         from backend.automations.store import get_automation
@@ -24,12 +36,30 @@ class PanelApiAutomationsMixin:
             return {"ok": False, "error": "automation not found"}
         return {"ok": True, "automation": wf}
 
+    def get_pipeline(self, pipeline_id: str) -> dict[str, Any]:
+        from backend.automations.store import get_automation
+
+        wf = get_automation(pipeline_id)
+        if wf is None or normalize_kind(wf.get("kind")) != KIND_PIPELINE:
+            return {"ok": False, "error": "pipeline not found"}
+        return {"ok": True, "pipeline": wf, "automation": wf}
+
     def save_automation(self, doc: dict[str, Any] | None = None, **extra: Any) -> dict[str, Any]:
         from backend.automations.store import save_automation
 
         payload = dict(doc or {})
         payload.update(extra)
+        payload.setdefault("kind", KIND_AUTOMATION)
         return {"ok": True, "automation": save_automation(payload)}
+
+    def save_pipeline(self, doc: dict[str, Any] | None = None, **extra: Any) -> dict[str, Any]:
+        from backend.automations.store import save_automation
+
+        payload = dict(doc or {})
+        payload.update(extra)
+        payload["kind"] = KIND_PIPELINE
+        saved = save_automation(payload)
+        return {"ok": True, "pipeline": saved, "automation": saved}
 
     def delete_automation(self, workflow_id: str) -> dict[str, Any]:
         from backend.automations.store import delete_automation
@@ -37,6 +67,9 @@ class PanelApiAutomationsMixin:
         if not delete_automation(workflow_id):
             return {"ok": False, "error": "automation not found"}
         return {"ok": True}
+
+    def delete_pipeline(self, pipeline_id: str) -> dict[str, Any]:
+        return self.delete_automation(pipeline_id)
 
     def run_automation(
         self,
@@ -54,15 +87,38 @@ class PanelApiAutomationsMixin:
             starter_id=starter_id,
         )
 
+    def run_pipeline(
+        self,
+        pipeline_id: str,
+        prompt: str = "",
+        files: list[Any] | None = None,
+        caller_conv_id: str = "",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from backend.automations.runner import run_pipeline
+
+        return run_pipeline(
+            pipeline_id,
+            prompt=prompt,
+            files=files,
+            caller_conv_id=caller_conv_id,
+            payload=payload or {},
+        )
+
     def emit_automation(self, trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         from backend.automations.runner import emit_automation
 
         return emit_automation(trigger_id, payload or {})
 
-    def list_automation_templates(self) -> dict[str, Any]:
+    def list_automation_templates(self, system: str = KIND_AUTOMATION) -> dict[str, Any]:
         from backend.automations.templates import list_templates
 
-        return {"ok": True, "templates": list_templates()}
+        return {"ok": True, "templates": list_templates(system=system)}
+
+    def list_pipeline_templates(self) -> dict[str, Any]:
+        from backend.automations.templates import list_templates
+
+        return {"ok": True, "templates": list_templates(system=KIND_PIPELINE)}
 
     def save_custom_automation_template(
         self,

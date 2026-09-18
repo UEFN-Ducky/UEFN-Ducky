@@ -655,6 +655,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                                 ),
                                 cancel_on_timeout=bool(payload.get("cancel_on_timeout", True)),
                                 parent=str(payload.get("parent_conv_id") or ""),
+                                attachments=attachments,
                                 _local=True,
                             )
                             self._send_json(200, outcome)

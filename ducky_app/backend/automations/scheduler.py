@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from backend.automations.runner import run_automation
-from backend.automations.store import _all
+from backend.automations.store import KIND_AUTOMATION, _all, normalize_kind
 
 _log = logging.getLogger("automations")
 _LOCK = threading.Lock()
@@ -70,6 +70,8 @@ def _tick() -> None:
     now_dt = datetime.now()
     for wf in _all():
         if not wf.get("enabled"):
+            continue
+        if normalize_kind(wf.get("kind")) != KIND_AUTOMATION:
             continue
         last = float(wf.get("last_run") or 0.0)
         for node in (wf.get("graph") or {}).get("nodes") or []:

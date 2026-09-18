@@ -309,7 +309,14 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     if (activeTab.kind === "automations") {
       return (
         <Suspense fallback={<p className="aw-empty-hint">Loading automations…</p>}>
-          <AutomationsView />
+          <AutomationsView kind="automation" />
+        </Suspense>
+      );
+    }
+    if (activeTab.kind === "pipelines") {
+      return (
+        <Suspense fallback={<p className="aw-empty-hint">Loading pipelines…</p>}>
+          <AutomationsView kind="pipeline" />
         </Suspense>
       );
     }

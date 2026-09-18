@@ -188,3 +188,23 @@ export function twoPointDist(a: { x: number; y: number }, b: { x: number; y: num
 export function twoPointCenter(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
+
+/** Finger jitter under this CSS-px distance is still a tap, not a drag. */
+export const TOUCH_SLOP = 12;
+/** Second tap within this window at the first tap's pixel is a double-click. */
+export const DBLTAP_MS = 350;
+export const DBLTAP_PX = 24;
+
+export function withinSlop(ax: number, ay: number, bx: number, by: number, slop = TOUCH_SLOP): boolean {
+  return Math.hypot(bx - ax, by - ay) <= slop;
+}
+
+export function isDoubleTap(
+  prev: { x: number; y: number; at: number } | null,
+  next: { x: number; y: number; at: number },
+  ms = DBLTAP_MS,
+  px = DBLTAP_PX,
+): boolean {
+  if (!prev) return false;
+  return next.at - prev.at <= ms && Math.hypot(next.x - prev.x, next.y - prev.y) <= px;
+}

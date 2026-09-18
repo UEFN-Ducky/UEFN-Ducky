@@ -184,22 +184,36 @@ Host Automations editor (header Clock). **Not** `contributes.hooks` (Appearance 
   ],
   "nodes": [
     { "id": "email.send", "label": "Send email", "group": "Email",
-      "config_fields": [{ "id": "to", "label": "To", "type": "string" }] }
+      "config_fields": [{ "id": "to", "label": "To", "type": "string" }] },
+    { "id": "image.rembg", "label": "Remove background", "group": "Images",
+      "systems": ["pipeline"],
+      "config_fields": [] }
   ],
   "templates": [
     { "id": "email-inbox", "label": "Email to a ducky", "icon": "✉️",
       "description": "New mail spawns a ducky with the subject.",
+      "graph": { "nodes": [], "edges": [] } },
+    { "id": "cutout", "label": "Agent then rembg", "icon": "✂️",
+      "systems": ["pipeline"],
+      "description": "Chat start → Agent → remove_background → Finish.",
       "graph": { "nodes": [], "edges": [] } }
   ]
 }
 ```
 
+Omit `systems` to show a node/template in Automations **and** Pipelines. `"systems": ["pipeline"]` is Pipelines only.
+
 ```python
 def register(api):
     @api.register_automation_node("email.send")
     def send(ctx):
-        # ctx = {config, payload, node}
+        # ctx = {config, payload, node, kind, files, artifact_dir}
         return {"ok": True}
+
+    @api.register_pipeline_node("image.rembg")
+    def rembg(ctx):
+        # files = [{path, name}, ...]; write next to artifact_dir / that chat's folder
+        return {"ok": True, "files": ctx.get("files") or []}
 
     # poll or webhook, then:
     api.emit_automation("email.received", {"subject": "…"})
@@ -367,6 +381,20 @@ thinking_menu={
 honest hint when the vendor has no cap (`reasoning_effort=high, no token cap`).
 Always include Off. The host never invents Off/Low/Med/High or 2k/8k/16k.
 `contributes.hooks` is for Appearance sounds — do not use it for this menu.
+
+### `fetch_usage` (quota sliders)
+
+Pass `fetch_usage=` on `api.register_llm_provider`. Host pulls fresh when the
+model picker opens. Return live vendor windows only — never hardcoded Plus/Pro tables.
+
+```python
+def fetch_usage(api_key: str, *, model: str = "") -> dict:
+    return {"windows": [
+        {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests"},
+    ]}
+```
+
+Missing hook or empty `windows` hides the sliders.
 
 ### contributes.llm.coding_agents
 

@@ -130,6 +130,7 @@ _HEAVY_COMMANDS: set[str] = set(
         "exec_console_command",
         "take_high_res_screenshot",
         "play_in_editor",
+        "move_player_pawn",
         "stop_pie",
         "set_object_property",
         "set_viewport_camera",

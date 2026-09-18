@@ -133,6 +133,7 @@ new tools. Not a separate `ducky_skills_*` pack.
 | Dock / Settings / header | `dock.panels`, `settings.tabs` / `sections`, `header.buttons` |
 | Theme / CSS / FX / skin | `appearance.profiles` / `css` / `effects` / `skin` |
 | Verse scaffolds | `verse.templates` |
+| Pipeline / automation nodes | `automations.nodes` (+ optional `"systems": ["pipeline"]`) and `@api.register_pipeline_node` / `register_automation_node`. Handler ctx is `{config, payload, node, kind, files, artifact_dir}`. Ship a template that wires `start.chat` → `pipeline.agent` → your node → `pipeline.finish`. |
 | Bundled skill | `skills/<id>/SKILL.md` in the draft |
 
 Also: `api.listener`, `api.is_enabled()`, `api.log()`, `api.plugin_id`,

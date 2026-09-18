@@ -430,6 +430,8 @@ export function EditorTabs({
                   <Icons.Diff />
                 ) : tab.kind === "automations" ? (
                   <Icons.Clock />
+                ) : tab.kind === "pipelines" ? (
+                  <Icons.GitBranch />
                 ) : tab.kind === "verse-translated" ? (
                   <Icons.Globe />
                 ) : (

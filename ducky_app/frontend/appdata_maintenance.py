@@ -181,7 +181,7 @@ _CHILD_LIMIT = 80
 # name -> (label, description, kind)
 # kind: cache | user | install | runtime | settings | other
 _KNOWN: dict[str, tuple[str, str, str]] = {
-    "chats": ("Chats leftover", "Pre-database conversation files. Safe to delete after import.", "cache"),
+    "chats": ("Chat files", "Per-chat pipeline run files (and leftover pre-database conversations).", "user"),
     "workspace": ("Workspace leftover", "Pre-database editor layout. Now in ducky.db.", "cache"),
     "file_history": ("File history leftover", "Pre-database undo snapshots. Now in ducky.db.", "cache"),
     "verse_diagnostics": ("Diagnostics leftover", "Pre-database Verse scan cache. Now in ducky.db.", "cache"),

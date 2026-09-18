@@ -38,6 +38,7 @@ _ROUTES = (
     "chat",
     "changes",
     "automations",
+    "pipelines",
     "skills_studio",
     "terminals",
     "plans",

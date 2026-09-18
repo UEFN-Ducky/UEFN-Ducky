@@ -101,7 +101,17 @@ def test_first_boot_imports_everything_and_leaves_no_stray_files(tmp_path: Path)
     assert not (project / ".ducky" / "plans").exists()
 
     top = sorted(p.name for p in root.iterdir())
-    assert set(top) <= {"ducky.db", "ducky.db-wal", "ducky.db-shm", "legacy", "snapshots", "mcp.json", "config.json"}, top
+    assert set(top) <= {
+        "ducky.db",
+        "ducky.db-wal",
+        "ducky.db-shm",
+        "legacy",
+        "snapshots",
+        "mcp.json",
+        "config.json",
+        "listener",
+        "skill_packs",
+    }, top
     legacy_stores = sorted(p.name for p in (root / "legacy").iterdir())
     for store in ("settings", "projects", "chats", "changesets", "file_history", "memory", "plan_templates", "usage", "cache_docs", "logs", "perf", "backups"):
         assert store in legacy_stores, (store, legacy_stores)

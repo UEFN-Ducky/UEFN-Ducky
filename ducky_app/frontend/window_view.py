@@ -429,6 +429,18 @@ def fit_window(hwnd: int, width: int, height: int) -> bool:
     return True
 
 
+# MOVE | ABSOLUTE | VIRTUALDESK — click at a pixel without SetCursorPos (which
+# un-hides the cursor and a later button event can miss by a move).
+_ABS = 0x0001 | 0x8000 | 0x4000
+_BUTTON_DOWN = {0: 0x0002, 1: 0x0020, 2: 0x0008}
+_BUTTON_UP = {0: 0x0004, 1: 0x0040, 2: 0x0010}
+
+
+def _abs_xy(x: int, y: int) -> tuple[int, int]:
+    sl, st, sw, sh, _pw, _ph = _screen_metrics()
+    return int((x - sl) * 65535 / max(1, sw - 1)), int((y - st) * 65535 / max(1, sh - 1))
+
+
 def _pointer_on_box(
     box: tuple[int, int, int, int] | None,
     kind: str,
@@ -441,24 +453,34 @@ def _pointer_on_box(
     dy: int | None = None,
 ) -> None:
     if kind == "move" and dx is not None:
-        _send_mouse(0x0001, 0, int(dx), int(dy or 0))
+        _send_mice([(int(dx), int(dy or 0), 0, 0x0001)])
         return
     if not box:
         return
-    x, y = map_norm_to_screen(box, nx, ny)
-    import ctypes
-
-    ctypes.windll.user32.SetCursorPos(int(x), int(y))
-    flags_down = {0: 0x0002, 1: 0x0020, 2: 0x0008}
-    flags_up = {0: 0x0004, 1: 0x0040, 2: 0x0010}
+    ax, ay = _abs_xy(*map_norm_to_screen(box, nx, ny))
+    down = _BUTTON_DOWN.get(int(button), 0x0002)
+    up = _BUTTON_UP.get(int(button), 0x0004)
     if kind == "move":
+        _send_mice([(ax, ay, 0, _ABS)])
         return
     if kind == "wheel":
-        _send_mouse(0x0800, int(delta) * 120)
+        _send_mice([(ax, ay, 0, _ABS), (0, 0, int(delta) * 120, 0x0800)])
         return
-    flag = flags_down.get(int(button), 0x0002) if kind == "down" else flags_up.get(int(button), 0x0004)
-    if kind in ("down", "up"):
-        _send_mouse(flag, 0)
+    if kind == "dblclick":
+        _send_mice(
+            [
+                (ax, ay, 0, _ABS | down),
+                (ax, ay, 0, _ABS | up),
+                (ax, ay, 0, _ABS | down),
+                (ax, ay, 0, _ABS | up),
+            ]
+        )
+        return
+    if kind == "down":
+        _send_mice([(ax, ay, 0, _ABS | down)])
+        return
+    if kind == "up":
+        _send_mice([(ax, ay, 0, _ABS | up)])
 
 
 def inject_pointer(
@@ -477,10 +499,11 @@ def inject_pointer(
     if kind == "move" and dx is not None:
         _pointer_on_box(None, kind, nx, ny, dx=dx, dy=dy)
         return
-    box = _client_box(hwnd) or _window_box(hwnd)
+    box = _window_box(hwnd)
     if not box:
         return
-    if kind != "move":
+    # Raise before a new press, never between down/up or the two clicks of a dblclick.
+    if kind not in ("move", "up"):
         bring_to_front(hwnd)
     _pointer_on_box(box, kind, nx, ny, button=button, delta=delta, dx=dx, dy=dy)
 
@@ -509,7 +532,7 @@ def handle_stream_message(view: object, payload: bytes) -> None:
         if hid:
             fit_window(hid, int(event.get("w") or 0), int(event.get("h") or 0))
         return
-    if kind in ("down", "up", "move", "wheel"):
+    if kind in ("down", "up", "move", "wheel", "dblclick"):
         rel = "dx" in event
         dx = int(event.get("dx") or 0) if rel else None
         dy = int(event.get("dy") or 0) if rel else None
@@ -761,22 +784,6 @@ def _window_box(hwnd: int) -> tuple[int, int, int, int] | None:
     return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
 
 
-def _client_box(hwnd: int) -> tuple[int, int, int, int] | None:
-    import ctypes
-    from ctypes import wintypes
-
-    user32 = ctypes.windll.user32
-    if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
-        return None
-    rect = wintypes.RECT()
-    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-        return None
-    pt = wintypes.POINT(int(rect.left), int(rect.top))
-    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
-        return None
-    return int(pt.x), int(pt.y), int(pt.x + rect.right), int(pt.y + rect.bottom)
-
-
 def _hwnd_pid(hwnd: int) -> int:
     import ctypes
     from ctypes import wintypes
@@ -826,12 +833,20 @@ def _input_structs():
     return ctypes, extra, Mouse, Key, Input
 
 
-def _send_mouse(flags: int, data: int, dx: int = 0, dy: int = 0) -> None:
-    ctypes, extra, Mouse, _Key, Input = _input_structs()
-    inp = Input()
-    inp.type = 0
-    inp.union.mi = Mouse(int(dx), int(dy), int(data) & 0xFFFFFFFF, int(flags), 0, ctypes.pointer(extra))
-    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(Input))
+def _send_mice(events: list[tuple[int, int, int, int]]) -> None:
+    """One SendInput for N mouse events. Each tuple is (dx, dy, data, flags)."""
+    if not events:
+        return
+    ctypes, _extra, Mouse, _Key, Input = _input_structs()
+    n = len(events)
+    arr = (Input * n)()
+    extras = []
+    for i, (dx, dy, data, flags) in enumerate(events):
+        extra = ctypes.c_ulong(0)
+        extras.append(extra)
+        arr[i].type = 0
+        arr[i].union.mi = Mouse(int(dx), int(dy), int(data) & 0xFFFFFFFF, int(flags), 0, ctypes.pointer(extra))
+    ctypes.windll.user32.SendInput(n, ctypes.byref(arr), ctypes.sizeof(Input))
 
 
 def _send_key(vk: int, *, down: bool) -> None:

@@ -16,6 +16,7 @@ export type PickerGateway = {
   nestedAgents: CodingAgentDto[];
   /** When the coding agent id matches the provider (Cursor), models come from the agent. */
   primaryAgentId: string | null;
+  iconDataUrl?: string;
 };
 
 function norm(id: string): string {
@@ -74,6 +75,7 @@ export function buildPickerGateways(
       order: typeof p.order === "number" ? p.order : 100,
       nestedAgents: nested,
       primaryAgentId: primary ? norm(primary.id) : null,
+      iconDataUrl: String(p.icon_data_url || "").trim(),
     });
   }
   return out.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));

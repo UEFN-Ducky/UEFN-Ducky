@@ -1165,6 +1165,7 @@ def run_message_and_wait(
     push: PushFn | None = None,
     cancel_on_timeout: bool = True,
     parent: str = "",
+    attachments: list[dict[str, Any]] | None = None,
     _local: bool = False,
 ) -> dict[str, Any]:
     """Send a message, run the target chat's agent, and block until done or timeout."""
@@ -1180,6 +1181,7 @@ def run_message_and_wait(
                 "cancel_on_timeout": bool(cancel_on_timeout),
                 # Carry the spawning chat so the panel nests the child under it.
                 "parent_conv_id": parent,
+                "attachments": attachments or None,
             },
             http_timeout=(
                 None
@@ -1258,7 +1260,16 @@ def run_message_and_wait(
             _child_waiters.setdefault(parent_active, set()).add(conv_id)
 
     try:
-        run_message(conv_id, text, mode, model, push=collecting_push, force=True, parent=parent)
+        run_message(
+            conv_id,
+            text,
+            mode,
+            model,
+            push=collecting_push,
+            force=True,
+            parent=parent,
+            attachments=attachments,
+        )
         # timeout_sec <= 0: wait until the agent finishes (no wall-clock interrupt).
         # A pending ask_user pauses the clock — the agent is waiting on the user, not stalled.
         if float(timeout_sec) <= 0:

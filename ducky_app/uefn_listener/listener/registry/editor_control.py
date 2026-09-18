@@ -174,7 +174,51 @@ def get_editor_stats() -> dict:
 register("exec_console_command")(exec_console_command)
 register("save_all_dirty")(save_all_dirty)
 register("take_high_res_screenshot")(take_high_res_screenshot)
+def move_player_pawn(
+    label: str = "",
+    x: float | None = None,
+    y: float | None = None,
+    z: float | None = None,
+) -> dict:
+    """Move the first game-world player pawn to a labeled actor or x,y,z."""
+    gw = None
+    try:
+        gw = unreal.EditorLevelLibrary.get_game_world()
+    except Exception:
+        gw = None
+    if gw is None:
+        return {"ok": False, "error": "no game world — start play first"}
+    pawn = None
+    try:
+        pc = unreal.GameplayStatics.get_player_controller(gw, 0)
+        pawn = pc.get_pawn() if pc is not None and hasattr(pc, "get_pawn") else None
+    except Exception:
+        pawn = None
+    if pawn is None:
+        return {"ok": False, "error": "no player pawn"}
+    loc = None
+    name = (label or "").strip()
+    if name:
+        sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+        for actor in list(sub.get_all_level_actors() or []):
+            try:
+                if str(actor.get_actor_label()) == name:
+                    loc = actor.get_actor_location()
+                    break
+            except Exception:
+                continue
+        if loc is None:
+            return {"ok": False, "error": f"actor not found: {name}"}
+    elif x is not None and y is not None and z is not None:
+        loc = unreal.Vector(float(x), float(y), float(z))
+    else:
+        return {"ok": False, "error": "label or x,y,z required"}
+    pawn.set_actor_location(loc, False, False)
+    return {"ok": True, "label": name, "location": {"x": loc.x, "y": loc.y, "z": loc.z}}
+
+
 register("play_in_editor")(play_in_editor)
 register("stop_pie")(stop_pie)
+register("move_player_pawn")(move_player_pawn)
 register("set_object_property")(set_object_property)
 register("get_editor_stats")(get_editor_stats)

@@ -161,7 +161,8 @@ export type EditorTabKind =
   | "verse-translated"
   | "ducky-profile"
   | "changes"
-  | "automations";
+  | "automations"
+  | "pipelines";
 
 export interface EditorTab {
   id: string;
@@ -227,6 +228,11 @@ export function automationsTabId(): string {
   return "automations:main";
 }
 
+/** Singleton Pipelines editor tab. */
+export function pipelinesTabId(): string {
+  return "pipelines:main";
+}
+
 export interface AutomationGraphNodeDto {
   id: string;
   type: string;
@@ -273,6 +279,8 @@ export interface AutomationDto {
   id: string;
   name: string;
   enabled: boolean;
+  kind?: "automation" | "pipeline";
+  description?: string;
   graph: AutomationGraphDto;
   runs?: AutomationRunDto[];
   updated?: number;
@@ -282,6 +290,8 @@ export interface AutomationDto {
 export interface AutomationSummaryDto {
   id: string;
   name: string;
+  kind?: "automation" | "pipeline";
+  description?: string;
   enabled: boolean;
   updated?: number;
   last_run?: number;
@@ -302,6 +312,9 @@ export interface AutomationTemplateDto {
   icon?: string;
   kind?: string;
   plugin_id?: string;
+  requires_plugins?: string[];
+  missing_plugins?: string[];
+  ready?: boolean;
   graph: AutomationGraphDto;
 }
 
@@ -312,6 +325,7 @@ export interface AutomationNodeDto {
   role?: string;
   description?: string;
   plugin_id?: string;
+  systems?: string[];
   config_fields?: AutomationFieldDto[];
 }
 
@@ -2165,7 +2179,9 @@ export interface PanelApi {
   duckyos_store_grant?(sessionId: string, slug?: string): Promise<{ ok?: boolean; error?: string; code?: string; slug?: string; alreadyOwned?: boolean }>;
   list_uefn_plugins?(): Promise<{ ok?: boolean; error?: string; plugins?: UefnPluginDto[] }>;
   list_automation_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
-  list_automation_templates?(): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
+  list_pipeline_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
+  list_automation_templates?(system?: string): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
+  list_pipeline_templates?(): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
   save_custom_automation_template?(
     name: string,
     description?: string,
@@ -2174,19 +2190,46 @@ export interface PanelApi {
     template_id?: string,
   ): Promise<{ ok?: boolean; error?: string; template?: AutomationTemplateDto }>;
   delete_custom_automation_template?(template_id: string): Promise<{ ok?: boolean; error?: string }>;
-  list_automations?(): Promise<{ ok?: boolean; automations?: AutomationSummaryDto[] }>;
-  get_automation?(workflow_id: string): Promise<{ ok?: boolean; error?: string; automation?: AutomationDto }>;
+  list_automations?(): Promise<{ ok?: boolean; automations?: AutomationSummaryDto[]; pipelines?: AutomationSummaryDto[] }>;
+  list_pipelines?(): Promise<{ ok?: boolean; pipelines?: AutomationSummaryDto[]; automations?: AutomationSummaryDto[] }>;
+  get_automation?(workflow_id: string): Promise<{
+    ok?: boolean;
+    error?: string;
+    automation?: AutomationDto;
+    pipeline?: AutomationDto;
+  }>;
+  get_pipeline?(pipeline_id: string): Promise<{
+    ok?: boolean;
+    error?: string;
+    pipeline?: AutomationDto;
+    automation?: AutomationDto;
+  }>;
   save_automation?(doc: Partial<AutomationDto> & { graph?: AutomationGraphDto }): Promise<{
     ok?: boolean;
     error?: string;
     automation?: AutomationDto;
+    pipeline?: AutomationDto;
+  }>;
+  save_pipeline?(doc: Partial<AutomationDto> & { graph?: AutomationGraphDto }): Promise<{
+    ok?: boolean;
+    error?: string;
+    pipeline?: AutomationDto;
+    automation?: AutomationDto;
   }>;
   delete_automation?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
+  delete_pipeline?(pipeline_id: string): Promise<{ ok?: boolean; error?: string }>;
   run_automation?(
     workflow_id: string,
     trigger_id?: string,
     payload?: Record<string, unknown>,
     starter_id?: string,
+  ): Promise<AutomationRunDto>;
+  run_pipeline?(
+    pipeline_id: string,
+    prompt?: string,
+    files?: unknown[],
+    caller_conv_id?: string,
+    payload?: Record<string, unknown>,
   ): Promise<AutomationRunDto>;
   emit_automation?(
     trigger_id: string,
@@ -2842,6 +2885,12 @@ export interface PanelApi {
     draft?: string,
     include_content?: boolean,
   ): Promise<ContextUsage>;
+  get_gateway_usage?(
+    provider: string,
+    model?: string,
+  ): Promise<{
+    windows: Array<{ id: string; label: string; used: number; limit: number; unit?: string }>;
+  }>;
   get_provider_usage(provider_id?: string, days?: number): Promise<ProviderUsageReport>;
   get_ducky_usage(ducky_name?: string, profile_id?: string, days?: number): Promise<DuckyUsageReport>;
   reset_context(conv_id: string, segments: string[], mode?: AgentMode, model?: string): Promise<ContextControlResult>;

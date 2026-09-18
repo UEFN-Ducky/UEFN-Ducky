@@ -74,6 +74,8 @@ import { peekStoreCatalogCache, rememberStoreCatalog } from "../../hooks/storeCa
 import { StoreHeroSkeleton, StoreSkeletonRows } from "./store/StoreSkeleton";
 import { useUiTarget } from "../../ui-targets/registry";
 import { maybeStartPluginWalkthrough } from "../../walkthrough";
+import { useVersionCheck } from "../../hooks/useVersionCheck";
+import { startAppUpdate } from "../../update/appUpdate";
 
 /** Manual catalog refresh cooldown — stop hammering the Store collect endpoint. */
 const MANUAL_REFRESH_COOLDOWN_MS = 5000;
@@ -102,6 +104,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export function StoreTab() {
   const { confirm } = useConfirmModal();
+  const appUpdate = useVersionCheck();
   const storeRootRef = useUiTarget("settings.store.root", {
     kind: "settings_field",
     label: "Store",
@@ -1230,6 +1233,35 @@ export function StoreTab() {
                 </button>
               </div>
             </div>
+
+            {appUpdate.status?.update_available ? (
+              <div className="ds-app-update" role="status">
+                <div className="ds-app-update-copy">
+                  <strong>
+                    UEFN Ducky v{appUpdate.status.remote_version || "new"} is available
+                  </strong>
+                  <span>
+                    Update the desktop app to get the latest features — plugins alone are not
+                    enough.
+                  </span>
+                  {appUpdate.status.release_notes ? (
+                    <span className="ds-app-update-notes">{appUpdate.status.release_notes}</span>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="ds-app-update-btn"
+                  onClick={() =>
+                    void startAppUpdate({
+                      localVersion: appUpdate.status?.local_version,
+                      remoteVersion: appUpdate.status?.remote_version,
+                    })
+                  }
+                >
+                  Update now
+                </button>
+              </div>
+            ) : null}
 
             {filtering ? (
               filteredItems.length > 0 ? (

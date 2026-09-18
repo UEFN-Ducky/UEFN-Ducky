@@ -424,6 +424,64 @@
   border-radius: 12px;
 }
 
+.ds-app-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -8px 0 20px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f5c400;
+  color: #1a1400;
+}
+
+.ds-app-update-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ds-app-update-copy strong {
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.ds-app-update-copy span {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #3a2d00;
+}
+
+.ds-app-update-notes {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ds-app-update-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #1a1400;
+  color: #f5c400;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ds-app-update-btn:hover {
+  filter: brightness(1.08);
+  color: #ffe566;
+}
+
 .ds-search {
   position: relative;
   flex: 1;

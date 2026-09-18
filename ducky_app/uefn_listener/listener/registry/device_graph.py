@@ -264,12 +264,33 @@ def session_status() -> dict:
             method = "get_game_world"
         except Exception:
             pass
+    player_count = _player_count()
     return {
         "playing": bool(playing),
         "method": method,
+        "has_player": player_count > 0,
+        "player_count": player_count,
         "world_name": world.get_name() if world else None,
         "project_dir": str(unreal.Paths.project_dir()),
     }
+
+
+def _player_count() -> int:
+    try:
+        gw = unreal.EditorLevelLibrary.get_game_world()
+        if gw is None:
+            return 0
+        n = 0
+        for i in range(4):
+            pc = unreal.GameplayStatics.get_player_controller(gw, i)
+            if pc is None:
+                continue
+            pawn = pc.get_pawn() if hasattr(pc, "get_pawn") else None
+            if pawn:
+                n += 1
+        return n
+    except Exception:
+        return 0
 
 
 #: Above this, a level-wide snapshot is refused rather than run on the game thread.

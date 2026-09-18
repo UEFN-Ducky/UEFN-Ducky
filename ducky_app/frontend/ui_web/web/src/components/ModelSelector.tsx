@@ -25,6 +25,7 @@ import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import type { CodingAgentDto } from "../types/panel";
 import { ThinkingEffortFooter } from "./ThinkingEffortFooter";
+import { effortGlow, GatewayUsageFooter, type UsageWindow } from "./GatewayUsageFooter";
 import { catalogThinkingMenu, effortInMenu, effortSuffix } from "./thinkingMenu";
 
 function formatContext(n: number): string {
@@ -126,6 +127,7 @@ export function ModelSelector({
   const [navGateway, setNavGateway] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
   const [hoverRow, setHoverRow] = useState<CatalogModelRow | null>(null);
+  const [usageWindows, setUsageWindows] = useState<UsageWindow[]>([]);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
   const triggerRef = useMergedRef(anchorRef, uiTargetRef);
@@ -349,6 +351,42 @@ export function ModelSelector({
 
   const canOpen = gateways.length > 0 || models.length > 0 || agents.length > 0;
   const query = search.trim().toLowerCase();
+  const selectedGateway = useMemo(
+    () => gatewayForSelection(gateways, codingAgent, selectedProviderKey),
+    [gateways, codingAgent, selectedProviderKey],
+  );
+  const usageProvider = (
+    selectedGateway?.providerKey ||
+    previewRow?.providerKey ||
+    ""
+  ).trim();
+  const usageModel = (previewRow?.id || "").trim();
+  const glow = effortGlow(selectedMenu, thinkingEffort);
+
+  useEffect(() => {
+    if (!isOpen || !usageProvider) {
+      setUsageWindows([]);
+      return;
+    }
+    const api = getApi();
+    if (!api?.get_gateway_usage) {
+      setUsageWindows([]);
+      return;
+    }
+    let cancelled = false;
+    void api.get_gateway_usage(usageProvider, usageModel).then(
+      (res) => {
+        if (cancelled) return;
+        setUsageWindows(Array.isArray(res?.windows) ? (res.windows as UsageWindow[]) : []);
+      },
+      () => {
+        if (!cancelled) setUsageWindows([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, usageProvider, usageModel]);
 
   const activeGateway = useMemo(
     () => gateways.find((g) => g.id === navGateway) || null,
@@ -834,13 +872,23 @@ export function ModelSelector({
       <button
         ref={triggerRef}
         type="button"
-        className={`no-drag model-selector-btn${isOpen ? " is-open" : ""}`}
+        className={`no-drag model-selector-btn model-selector-btn--icon${isOpen ? " is-open" : ""}`}
+        style={{ ["--effort-glow" as string]: String(glow) }}
         onClick={() => (isOpen ? requestClose() : openDropdown())}
         disabled={!canOpen}
         title={triggerLabel}
+        aria-label={triggerLabel}
       >
-        <span className="model-selector-btn-label">{triggerLabel}</span>
-        {(canOpen || selectedModel) && <Icons.ChevronDown />}
+        {selectedGateway?.iconDataUrl ? (
+          <img
+            className="model-selector-btn-logo"
+            src={selectedGateway.iconDataUrl}
+            alt=""
+            draggable={false}
+          />
+        ) : (
+          <Icons.Duck />
+        )}
       </button>
 
       <DropdownPanel
@@ -890,6 +938,7 @@ export function ModelSelector({
               effort={thinkingEffort}
               onChange={persistEffort}
             />
+            <GatewayUsageFooter windows={usageWindows} />
           </div>
         ) : (
           <>
@@ -903,6 +952,7 @@ export function ModelSelector({
               effort={thinkingEffort}
               onChange={persistEffort}
             />
+            <GatewayUsageFooter windows={usageWindows} />
           </>
         )}
       </DropdownPanel>

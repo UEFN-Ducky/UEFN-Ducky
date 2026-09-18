@@ -126,6 +126,64 @@ def test_look_move_sends_relative_dx(monkeypatch) -> None:
     handle_stream_message(9, b'{"type":"down","x":0.5,"y":0.5,"button":2}')
     assert calls[-1][4]["dx"] is None
     assert calls[-1][4]["button"] == 2
+    handle_stream_message(9, b'{"type":"dblclick","x":0.5,"y":0.5}')
+    assert calls[-1][1] == "dblclick"
+    assert calls[-1][4]["dx"] is None
+
+
+def test_inject_pointer_uses_window_box(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    monkeypatch.setattr(wv, "_window_box", lambda hwnd: (0, 0, 800, 600))
+    boxes: list[object] = []
+    monkeypatch.setattr(wv, "_pointer_on_box", lambda box, *_a, **_k: boxes.append(box))
+    monkeypatch.setattr(wv, "bring_to_front", lambda h: True)
+    wv.inject_pointer(5, "down", 0.99, 0.01)
+    assert boxes == [(0, 0, 800, 600)]
+
+
+def test_inject_up_does_not_raise(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_is_our_hwnd", lambda hwnd: False)
+    monkeypatch.setattr(wv, "_window_box", lambda hwnd: (0, 0, 800, 600))
+    monkeypatch.setattr(wv, "_pointer_on_box", lambda *_a, **_k: None)
+    raised: list[int] = []
+    monkeypatch.setattr(wv, "bring_to_front", lambda h: raised.append(h) or True)
+    wv.inject_pointer(5, "up", 0.5, 0.5)
+    assert raised == []
+    wv.inject_pointer(5, "down", 0.5, 0.5)
+    assert raised == [5]
+    wv.inject_pointer(5, "dblclick", 0.5, 0.5)
+    assert raised == [5, 5]
+
+
+def test_pointer_down_up_share_absolute_coords(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    events: list[tuple] = []
+    monkeypatch.setattr(wv, "_send_mice", lambda ev: events.extend(ev))
+    monkeypatch.setattr(wv, "_screen_metrics", lambda: (0, 0, 1920, 1080, 1920, 1080))
+    box = (100, 200, 300, 400)
+    wv._pointer_on_box(box, "down", 0.5, 0.5, button=0)
+    wv._pointer_on_box(box, "up", 0.5, 0.5, button=0)
+    assert len(events) == 2
+    assert events[0][0] == events[1][0] and events[0][1] == events[1][1]
+    assert events[0][3] & wv._ABS and events[1][3] & wv._ABS
+
+
+def test_dblclick_is_four_events_one_position(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    events: list[tuple] = []
+    monkeypatch.setattr(wv, "_send_mice", lambda ev: events.extend(ev))
+    monkeypatch.setattr(wv, "_screen_metrics", lambda: (0, 0, 1920, 1080, 1920, 1080))
+    wv._pointer_on_box((100, 200, 300, 400), "dblclick", 0.5, 0.5)
+    assert len(events) == 4
+    assert all(e[0] == events[0][0] and e[1] == events[0][1] for e in events)
 
 
 def test_vk_for_named_and_function_keys() -> None:

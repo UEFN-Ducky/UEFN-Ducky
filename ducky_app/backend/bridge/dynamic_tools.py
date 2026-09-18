@@ -191,6 +191,7 @@ _NEVER_EXPOSE = frozenset(
         "pcg_generate",
         "pcg_get_graph_info",
         "play_in_editor",
+        "move_player_pawn",
         "project_memory_append",
         "project_memory_delete",
         "project_memory_get",

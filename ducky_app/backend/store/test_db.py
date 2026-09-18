@@ -112,7 +112,14 @@ def test_upgrade_from_previous_schema_does_not_deadlock(tmp_path: Path) -> None:
     upgraded panel at boot. A schema-(head-1) database must open on a worker
     thread within seconds and leave a pre-migrate snapshot behind."""
     conn = db.connect()
-    conn.execute("DROP TABLE automations")  # 0007 is the migration 1.2.90 added
+    # Leave a 0007-shaped table so 0008 (kind + description) can ALTER.
+    conn.execute("DROP TABLE automations")
+    conn.execute(
+        "CREATE TABLE automations ("
+        "id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, "
+        "graph TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}', runs TEXT NOT NULL DEFAULT '[]', "
+        "updated REAL NOT NULL DEFAULT 0, last_run REAL NOT NULL DEFAULT 0)"
+    )
     conn.execute(f"PRAGMA user_version={db.head_version() - 1}")
     db.reset_for_tests()
 

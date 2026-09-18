@@ -71,6 +71,15 @@ describe("parseFocusId / focusIdToEditorTab", () => {
     });
   });
 
+  it("parses the Pipelines singleton tab", () => {
+    expect(parseFocusId("pipelines:main")).toEqual({ kind: "pipelines" });
+    expect(focusIdToEditorTab("pipelines:main", "Pipelines")).toEqual({
+      id: "pipelines:main",
+      kind: "pipelines",
+      name: "Pipelines",
+    });
+  });
+
   it("parses ducky-profile pop-out tabs", () => {
     expect(parseFocusId("ducky-profile:audio")).toEqual({
       kind: "ducky-profile",
