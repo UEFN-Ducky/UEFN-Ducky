@@ -32,7 +32,18 @@ def _install_fakes(monkeypatch, *, compile_payload=None, compile_raises=None):
     system.reload_listener = _reload  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "backend.tools.verse.verse_diagnostics", diag)
     monkeypatch.setitem(sys.modules, "backend.tools.core.system", system)
+    # Default: hashes already landed, so wait returns on the first poll.
+    monkeypatch.setattr(wp, "_inspect_editables", lambda _p: {"all_readable": True})
     return calls
+
+
+def _fast_clock(monkeypatch, *, wait_s: float = 20.0, poll_s: float = 5.0) -> None:
+    t = {"n": 0.0}
+    monkeypatch.setattr(wp, "_now", lambda: t["n"])
+    monkeypatch.setattr(wp, "_sleep", lambda s: t.__setitem__("n", t["n"] + float(s)))
+    monkeypatch.setattr(wp, "HASH_WAIT_S", wait_s)
+    monkeypatch.setattr(wp, "HASH_POLL_S", poll_s)
+    monkeypatch.setattr(wp, "HASH_POLL_MAX_S", poll_s)
 
 
 def _flaky(fail_times: int, error: str = STALE):
@@ -233,3 +244,134 @@ def test_unknown_verse_field_second_failure_propagates_without_compile(monkeypat
         wp.run_with_build_retry(call, tool_name="set_currency_config_entries")
     assert state["n"] == 2
     assert calls == {"compile": 0, "reload": 1}
+
+
+def test_waits_until_hash_readable_then_retries_once(monkeypatch):
+    calls = _install_fakes(monkeypatch)
+    _fast_clock(monkeypatch)
+    polls = {"n": 0}
+
+    def _inspect(_path: str):
+        polls["n"] += 1
+        return {"editables": {"BaseName": {"readable": polls["n"] >= 2}}}
+
+    monkeypatch.setattr(wp, "_inspect_editables", _inspect)
+    call, state = _flaky(1)
+    out = wp.run_with_build_retry(
+        call, tool_name="set_verse_editable", actor_path="Base", field="BaseName"
+    )
+    assert out["ok"] is True
+    assert out["auto_recovered"] == wp.AUTO_RECOVERED
+    assert state["n"] == 2
+    assert polls["n"] >= 2
+    assert calls == {"compile": 1, "reload": 1}
+
+
+def test_hash_wait_timeout_locks_without_retry(monkeypatch):
+    calls = _install_fakes(monkeypatch)
+    _fast_clock(monkeypatch)
+    monkeypatch.setattr(
+        wp, "_inspect_editables", lambda _p: {"editables": {"BaseName": {"readable": False}}}
+    )
+    call, state = _flaky(5)
+    out = wp.run_with_build_retry(
+        call, tool_name="set_verse_editable", actor_path="Base", field="BaseName"
+    )
+    assert out["ok"] is False
+    assert out["stale_locked"] is True
+    assert state["n"] == 1
+    assert calls == {"compile": 1, "reload": 1}
+
+    call2, state2 = _flaky(5)
+    out2 = wp.run_with_build_retry(
+        call2, tool_name="set_verse_editable", actor_path="Base", field="BaseName"
+    )
+    assert out2["stale_locked"] is True
+    assert state2["n"] == 0
+    assert calls == {"compile": 1, "reload": 1}
+
+
+def test_compile_10054_waits_then_retries(monkeypatch):
+    calls = _install_fakes(
+        monkeypatch,
+        compile_raises=OSError(10054, "An existing connection was forcibly closed"),
+    )
+    call, state = _flaky(1)
+    out = wp.run_with_build_retry(
+        call, tool_name="wire_verse_device_ref", actor_path="Dev", field="HittableButton0"
+    )
+    assert out["ok"] is True
+    assert out["auto_recovered"] == wp.AUTO_RECOVERED
+    assert state["n"] == 2
+    assert calls["compile"] == 1
+    assert calls["reload"] == 1
+
+
+def test_unknown_field_missing_on_device_locks(monkeypatch):
+    calls = _install_fakes(monkeypatch)
+    monkeypatch.setattr("frontend.deploy.sync_listener_to_appdata", lambda **_k: None)
+    monkeypatch.setattr(
+        wp,
+        "_inspect_editables",
+        lambda _p: {
+            "editables": {
+                "HouseProp": {"readable": True},
+                "BaseName": {"readable": True},
+            }
+        },
+    )
+    call, state = _flaky(5, error=UNKNOWN)
+    out = wp.run_with_build_retry(
+        call,
+        tool_name="set_currency_config_entries",
+        actor_path="North_TycoonController",
+        field="CurrencyConfigs",
+    )
+    assert out["ok"] is False
+    assert out["stale_locked"] is True
+    assert "CurrencyConfigs" in out["error"]
+    assert "HouseProp" in out["fields"]
+    assert calls == {"compile": 0, "reload": 1}
+    assert state["n"] == 2
+
+    call2, state2 = _flaky(5, error=UNKNOWN)
+    out2 = wp.run_with_build_retry(
+        call2,
+        tool_name="set_currency_config_entries",
+        actor_path="North_TycoonController",
+        field="CurrencyConfigs",
+    )
+    assert out2["stale_locked"] is True
+    assert state2["n"] == 0
+    assert calls == {"compile": 0, "reload": 1}
+
+
+def test_currency_and_resize_lock_same_field_key(monkeypatch):
+    _install_fakes(monkeypatch)
+    _fast_clock(monkeypatch)
+    monkeypatch.setattr(wp, "_inspect_editables", lambda _p: {"editables": {}})
+
+    import backend.tools.verse.verse_editable as ve
+    import backend.tools.verse.verse_focused as vf
+
+    sent = {"n": 0}
+
+    def _stale(command, params=None, timeout=None):
+        sent["n"] += 1
+        raise RuntimeError(STALE)
+
+    monkeypatch.setattr(ve, "send_command", _stale)
+    monkeypatch.setattr(vf, "send_command", _stale)
+
+    out = json.loads(ve.set_currency_config_entries("Wallet", count=1))
+    assert out["stale_locked"] is True
+    first_hits = sent["n"]
+    assert first_hits == 1
+
+    out2 = json.loads(ve.set_currency_config_entries("Wallet", count=1))
+    assert out2["stale_locked"] is True
+    assert sent["n"] == first_hits
+
+    out3 = json.loads(vf.resize_verse_array("Wallet", "CurrencyConfigs", 2))
+    assert out3["stale_locked"] is True
+    assert sent["n"] == first_hits

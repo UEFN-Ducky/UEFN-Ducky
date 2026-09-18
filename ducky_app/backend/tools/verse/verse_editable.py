@@ -258,5 +258,7 @@ def set_currency_config_entries(
     result = run_with_build_retry(
         lambda: send_command("set_currency_config_entries", params),
         tool_name="set_currency_config_entries",
+        actor_path=actor_path,
+        field="CurrencyConfigs",
     )
     return tool_json(result, pretty=pretty)

@@ -73,6 +73,8 @@ def resize_verse_array(
             },
         ),
         tool_name="resize_verse_array_field",
+        actor_path=actor_path,
+        field=array_field,
     )
     return tool_json(result, pretty=pretty)
 
@@ -104,5 +106,7 @@ def patch_verse_array_entry(
             },
         ),
         tool_name="patch_verse_array_entry",
+        actor_path=actor_path,
+        field=array_field,
     )
     return tool_json(result, pretty=pretty)

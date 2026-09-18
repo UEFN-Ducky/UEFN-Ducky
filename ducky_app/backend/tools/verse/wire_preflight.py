@@ -1,12 +1,12 @@
-"""Wiring preflight: auto-compile + listener reload when Verse reflection is stale.
+"""Wiring preflight: auto-compile + wait for hashes when Verse reflection is stale.
 
 Host-side only (never runs inside the UEFN listener). A wire/set call that fails
 because the Verse class was not built yet ("STALE REFLECTION", "no compiled
-hash", "Verse class not found", …) is retried ONCE after
-``workspace_compile_verse`` + ``reload_listener``. Anything else propagates
-unchanged.
+hash", "Verse class not found", …) compiles once, reloads the listener, waits
+until ``get_verse_editables`` shows that field readable, then retries ONCE.
+``[WinError 10054]`` means the build started — same wait, no extra compile.
 
-A field that is still stale after that one retry is locked: further wire_*
+A field that is still stale after that wait+retry is locked: further wire_*
 calls on the same device+field return immediately (no compile, no editor, no
 ledger spam). Unlock when ``get_verse_editables`` shows a mangled hash.
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any, Callable, Iterable
 
 STALE_MARKERS: tuple[str, ...] = (
@@ -36,6 +37,15 @@ NEXT_STALE_LOCKED = (
     "Do not compile-loop. Do not place a second copy of the device. "
     "Check the field is still @editable in the .verse; do not refactor the class to avoid it."
 )
+NEXT_UNKNOWN_FIELD = (
+    "Field is not on this device's Script. Call get_verse_editables on THIS SAME "
+    "device and use an exact key. Do not compile. Do not retry this field on this actor."
+)
+# ponytail: 90s ceiling covers a typical Verse relink; raise HASH_WAIT_S if islands
+# regularly take longer, or poll list_verse_types first if inspect load is an issue.
+HASH_WAIT_S = 90.0
+HASH_POLL_S = 3.0
+HASH_POLL_MAX_S = 8.0
 
 _lock = threading.Lock()
 # (actor_ident, field) → last error. actor_ident is a lowercase label or path tail.
@@ -52,6 +62,109 @@ def is_stale_reflection_error(text: str | None) -> bool:
 def is_unknown_verse_field_error(text: str | None) -> bool:
     """Pre-CRC32 AppData listener: hash cache miss, not a missing Verse field."""
     return bool(text) and UNKNOWN_FIELD_MARKER.lower() in text.lower()
+
+
+def is_build_started_error(text: str | None) -> bool:
+    """Workflow RPC died because UEFN tore the socket down to start a Verse build."""
+    if not text:
+        return False
+    low = text.lower()
+    return (
+        "10054" in text
+        or "connection reset" in low
+        or "forcibly closed" in low
+        or "previous link task did not complete" in low
+    )
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _sleep(seconds: float) -> None:
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def _inspect_editables(actor_path: str) -> dict[str, Any] | None:
+    try:
+        from backend.bridge import send_command
+
+        raw = send_command(
+            "get_verse_editables",
+            {"actor_path": actor_path, "include_wiring_hints": False},
+        )
+    except Exception:  # noqa: BLE001 — inspect must not mask the original wire error
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _editable_info(payload: dict[str, Any], field: str) -> dict[str, Any] | None:
+    editables = payload.get("editables")
+    if not isinstance(editables, dict):
+        return None
+    if field in editables and isinstance(editables[field], dict):
+        return editables[field]
+    key = field.lower()
+    for name, info in editables.items():
+        if str(name).lower() == key and isinstance(info, dict):
+            return info
+    return None
+
+
+def _editable_keys(payload: dict[str, Any] | None) -> list[str]:
+    if not payload or not isinstance(payload.get("editables"), dict):
+        return []
+    return [str(k) for k in payload["editables"]]
+
+
+def _similar_fields(field: str, keys: Iterable[str]) -> list[str]:
+    fl = (field or "").lower()
+    if not fl:
+        return []
+    out: list[str] = []
+    for key in keys:
+        kl = str(key).lower()
+        if fl in kl or kl in fl:
+            out.append(str(key))
+    return out
+
+
+def field_readable_on_device(actor_path: str, field: str) -> bool:
+    if not actor_path or not field:
+        return True
+    payload = _inspect_editables(actor_path)
+    if not payload:
+        return False
+    if payload.get("all_readable"):
+        note_resolved_fields(actor_path, [field])
+        return True
+    info = _editable_info(payload, field)
+    if info and info.get("readable") is True:
+        note_resolved_fields(actor_path, [field])
+        return True
+    return False
+
+
+def wait_for_field_hash(actor_path: str, field: str) -> bool:
+    """Poll get_verse_editables until *field* is readable, or HASH_WAIT_S elapses."""
+    if not actor_path or not field:
+        return True
+    deadline = _now() + HASH_WAIT_S
+    delay = HASH_POLL_S
+    while True:
+        if field_readable_on_device(actor_path, field):
+            return True
+        remaining = deadline - _now()
+        if remaining <= 0:
+            return False
+        _sleep(min(delay, remaining))
+        delay = min(HASH_POLL_MAX_S, delay + 1.0)
 
 
 def _actor_idents(actor_path: str) -> tuple[str, ...]:
@@ -202,6 +315,87 @@ def _resync_stale_listener() -> str:
     return _reload_listener()
 
 
+def _one_retry(
+    call: Callable[[], Any],
+    *,
+    tool_name: str,
+    actor_path: str,
+    field: str,
+    recovered_tag: str,
+) -> Any:
+    try:
+        retried = call()
+    except Exception as exc:  # noqa: BLE001 — classify stale vs other
+        err2 = str(exc)
+        if is_stale_reflection_error(err2):
+            lock_stale_field(actor_path, field, err2)
+            return _stale_locked_payload(tool_name, err2)
+        raise
+    err2 = error_text(retried)
+    if err2 and is_stale_reflection_error(err2):
+        lock_stale_field(actor_path, field, err2)
+        return _stale_locked_payload(tool_name, err2)
+    if actor_path and field:
+        unlock_stale_field(actor_path, field)
+    return add_field(retried, "auto_recovered", recovered_tag)
+
+
+def _wait_then_retry(
+    call: Callable[[], Any],
+    *,
+    tool_name: str,
+    actor_path: str,
+    field: str,
+    err: str,
+) -> Any:
+    if not wait_for_field_hash(actor_path, field):
+        lock_stale_field(actor_path, field, err)
+        return _stale_locked_payload(tool_name, err)
+    return _one_retry(
+        call,
+        tool_name=tool_name,
+        actor_path=actor_path,
+        field=field,
+        recovered_tag=AUTO_RECOVERED,
+    )
+
+
+def _unknown_field_after_resync(
+    *,
+    tool_name: str,
+    actor_path: str,
+    field: str,
+    err: str,
+    raised: BaseException | None,
+    result: Any,
+) -> Any:
+    """After one listener resync: missing key → lock; otherwise propagate."""
+    if actor_path and field:
+        payload = _inspect_editables(actor_path)
+        keys = _editable_keys(payload)
+        if payload is not None and _editable_info(payload, field) is None:
+            similar = _similar_fields(field, keys)
+            msg = (
+                f"Unknown Verse field {field!r} — not on this device's Script. "
+                f"Actual fields: {keys[:20]}"
+            )
+            if similar:
+                msg += f". Similar: {similar}"
+            lock_stale_field(actor_path, field, msg)
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "error": msg,
+                "stale_locked": True,
+                "fields": keys,
+                "similar": similar,
+                "next": NEXT_UNKNOWN_FIELD,
+            }
+    if raised is not None:
+        raise raised
+    return result
+
+
 def run_with_build_retry(
     call: Callable[[], Any],
     *,
@@ -209,16 +403,17 @@ def run_with_build_retry(
     actor_path: str = "",
     field: str = "",
 ) -> Any:
-    """Call *call*; on a stale-reflection failure compile Verse, reload the listener, retry once.
+    """Call *call*; on stale reflection compile once, wait for the hash, retry once.
 
     ``Unknown Verse field`` is a stale AppData listener (pre-CRC32), not a missing
     Verse field — force-sync the listener, reload, retry once. No Verse compile.
+    If the field is still absent on this Script after that, lock it.
 
     Returns whatever ``call()`` returns. A recovered retry result carries
     ``auto_recovered`` = ``"compiled + reloaded listener"`` or ``"resynced listener"``.
     Non-stale failures are returned / re-raised unchanged.
 
-    A field that stays stale after that retry is locked so the next wire_* on
+    A field that stays stale after that wait+retry is locked so the next wire_* on
     the same device+field does not compile, hit the editor, or write another
     ledger row.
     """
@@ -245,10 +440,26 @@ def run_with_build_retry(
         try:
             retried = call()
         except Exception as exc:  # noqa: BLE001 — one resync only; no Verse compile
-            raise exc
+            return _unknown_field_after_resync(
+                tool_name=tool_name,
+                actor_path=actor_path,
+                field=field,
+                err=str(exc),
+                raised=exc,
+                result=None,
+            )
         err2 = error_text(retried)
         if err2 is None:
             return add_field(retried, "auto_recovered", AUTO_RESYNCED)
+        if is_unknown_verse_field_error(err2):
+            return _unknown_field_after_resync(
+                tool_name=tool_name,
+                actor_path=actor_path,
+                field=field,
+                err=err2,
+                raised=None,
+                result=retried,
+            )
         return retried
 
     if not is_stale_reflection_error(err):
@@ -258,22 +469,33 @@ def run_with_build_retry(
 
     try:
         payload = _compile_verse()
-    except Exception as exc:  # noqa: BLE001 — Workflow Server not connected / UEFN closed
+    except Exception as exc:  # noqa: BLE001 — 10054 = build started; else UEFN closed
+        compile_err = str(exc)
+        if is_build_started_error(compile_err):
+            _reload_listener()
+            return _wait_then_retry(
+                call,
+                tool_name=tool_name,
+                actor_path=actor_path,
+                field=field,
+                err=err,
+            )
         return {
             "ok": False,
             "tool": tool_name,
             "error": err,
-            "compile_error": str(exc),
+            "compile_error": compile_err,
             "next": NEXT_OPEN_UEFN,
         }
 
     compile_info = payload.get("compile") if isinstance(payload.get("compile"), dict) else {}
+    raw_compile = json.dumps(payload, default=str)
     num_errors = 0
     try:
         num_errors = int(compile_info.get("numErrors") or 0)
     except (TypeError, ValueError):
         num_errors = 0
-    if num_errors > 0:
+    if num_errors > 0 and not is_build_started_error(raw_compile):
         return {
             "ok": False,
             "tool": tool_name,
@@ -283,19 +505,18 @@ def run_with_build_retry(
         }
 
     _reload_listener()
-    try:
-        retried = call()
-    except Exception as exc:  # noqa: BLE001 — classify stale vs other
-        err2 = str(exc)
-        if is_stale_reflection_error(err2):
-            lock_stale_field(actor_path, field, err2)
-            return _stale_locked_payload(tool_name, err2)
-        raise
-
-    err2 = error_text(retried)
-    if err2 and is_stale_reflection_error(err2):
-        lock_stale_field(actor_path, field, err2)
-        return _stale_locked_payload(tool_name, err2)
-    if actor_path and field:
-        unlock_stale_field(actor_path, field)
-    return add_field(retried, "auto_recovered", AUTO_RECOVERED)
+    if is_build_started_error(raw_compile) or num_errors == 0:
+        return _wait_then_retry(
+            call,
+            tool_name=tool_name,
+            actor_path=actor_path,
+            field=field,
+            err=err,
+        )
+    return {
+        "ok": False,
+        "tool": tool_name,
+        "error": err,
+        "compile": compile_info,
+        "next": NEXT_FIX_ERRORS,
+    }
