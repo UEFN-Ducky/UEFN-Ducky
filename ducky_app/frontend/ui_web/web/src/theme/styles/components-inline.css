@@ -2152,15 +2152,15 @@ html.window-maximized .window-resize-grip {
 }
 .model-selector-effort-slider {
   position: relative;
-  height: 22px;
+  height: 66px;
   margin-top: 4px;
 }
 .model-selector-effort-rail {
   position: absolute;
-  left: 7px;
-  right: 7px;
+  left: 21px;
+  right: 21px;
   top: 50%;
-  height: 8px;
+  height: 24px;
   transform: translateY(-50%);
   pointer-events: none;
 }
@@ -2172,10 +2172,10 @@ html.window-maximized .window-resize-grip {
   background-color: color-mix(in srgb, var(--fg) 10%, transparent);
   background-image: radial-gradient(
     circle closest-side,
-    color-mix(in srgb, var(--fg) 42%, transparent) 1px,
-    transparent 1.15px
+    color-mix(in srgb, var(--fg) 42%, transparent) 3px,
+    transparent 3.45px
   );
-  background-size: 4px 4px;
+  background-size: 12px 12px;
   background-position: 0 50%;
 }
 .model-selector-effort-ticks {
@@ -2185,8 +2185,8 @@ html.window-maximized .window-resize-grip {
 .model-selector-effort-ticks i {
   position: absolute;
   top: 50%;
-  width: 4px;
-  height: 4px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--fg) 28%, transparent);
   transform: translate(-50%, -50%);
@@ -2197,8 +2197,8 @@ html.window-maximized .window-resize-grip {
 .model-selector-effort-thumb {
   position: absolute;
   top: 50%;
-  width: 14px;
-  height: 14px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
@@ -2226,14 +2226,56 @@ html.window-maximized .window-resize-grip {
 
 .model-selector-usage {
   flex-shrink: 0;
+  padding: 8px 12px 12px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.model-selector-usage .model-selector-effort {
-  border-top: none;
-  padding-top: 8px;
+.model-selector-cap-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.3;
 }
-.model-selector-usage .model-selector-effort + .model-selector-effort {
-  padding-top: 4px;
+.model-selector-cap-label {
+  color: var(--fg);
+  font-weight: 600;
+  min-width: 0;
+}
+.model-selector-cap-reset {
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-selector-cap-pct {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.model-selector-cap-track {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  overflow: hidden;
+}
+.model-selector-cap-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #3b82f6;
+}
+.model-selector-cap.is-hot .model-selector-cap-track i {
+  background: #f59e0b;
+}
+.model-selector-cap.is-max .model-selector-cap-track i {
+  background: #ef4444;
 }
 
 .model-selector-btn.is-open {

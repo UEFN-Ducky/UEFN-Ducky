@@ -13,7 +13,7 @@ def test_normalize_empty_and_three_windows() -> None:
     out = normalize_usage_windows(
         {
             "windows": [
-                {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests"},
+                {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests", "reset": "Resets in 2 hr"},
                 {"id": "weekly", "label": "Weekly", "used": 5, "limit": 10},
                 {"id": "monthly", "label": "Monthly", "used": 1, "limit": 2, "unit": "tokens"},
                 {"id": "bad", "used": 1, "limit": 0},
@@ -23,6 +23,38 @@ def test_normalize_empty_and_three_windows() -> None:
     assert [w["id"] for w in out["windows"]] == ["hourly", "weekly", "monthly"]
     assert out["windows"][0]["used"] == 12
     assert out["windows"][0]["limit"] == 40
+    assert out["windows"][0]["reset"] == "Resets in 2 hr"
+
+
+def test_fetch_usage_without_key_still_calls_plugin() -> None:
+    def _fn(api_key: str, *, model: str = "") -> dict:
+        assert api_key == ""
+        return {
+            "windows": [
+                {
+                    "id": "hourly",
+                    "label": "5-hour limit",
+                    "used": 100,
+                    "limit": 100,
+                    "reset": "Resets in 2 hr 41 min",
+                    "readout": "100%",
+                }
+            ]
+        }
+
+    with (
+        patch(
+            "backend.uefn_plugins.host.get_llm_provider_registration",
+            return_value={"fetch_usage": _fn},
+        ),
+        patch(
+            "backend.uefn_plugins.host.get_coding_agent_registration",
+            return_value={},
+        ),
+    ):
+        out = fetch_usage("anthropic", "")
+    assert out["windows"][0]["label"] == "5-hour limit"
+    assert out["windows"][0]["readout"] == "100%"
 
 
 def test_fetch_usage_missing_hook() -> None:

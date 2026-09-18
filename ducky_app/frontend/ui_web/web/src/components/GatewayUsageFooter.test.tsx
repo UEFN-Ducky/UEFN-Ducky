@@ -22,17 +22,19 @@ describe("GatewayUsageFooter", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("draws a disabled slider per window", () => {
+  it("draws plan bars with reset and percent", () => {
     render(
       <GatewayUsageFooter
         windows={[
-          { id: "hourly", label: "Hourly", used: 12, limit: 40, unit: "requests" },
-          { id: "monthly", label: "Monthly", used: 1, limit: 2 },
+          { id: "hourly", label: "5-hour limit", used: 100, limit: 100, reset: "Resets in 2 hr 41 min", readout: "100%" },
+          { id: "weekly", label: "Weekly limit", used: 99, limit: 100, reset: "Resets in 4d 3h", readout: "1% left" },
         ]}
       />,
     );
-    expect(screen.getByLabelText("Hourly 12 / 40 requests")).toHaveProperty("disabled", true);
-    expect(screen.getByLabelText("Monthly 1 / 2")).toBeTruthy();
+    expect(screen.getByText("5-hour limit")).toBeTruthy();
+    expect(screen.getByText("100%")).toBeTruthy();
+    expect(screen.getByText("1% left")).toBeTruthy();
+    expect(screen.getByText("Resets in 2 hr 41 min")).toBeTruthy();
   });
 });
 

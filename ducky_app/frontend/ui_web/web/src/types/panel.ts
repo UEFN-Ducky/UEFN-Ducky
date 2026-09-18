@@ -2889,7 +2889,15 @@ export interface PanelApi {
     provider: string,
     model?: string,
   ): Promise<{
-    windows: Array<{ id: string; label: string; used: number; limit: number; unit?: string }>;
+    windows: Array<{
+      id: string;
+      label: string;
+      used: number;
+      limit: number;
+      unit?: string;
+      reset?: string;
+      readout?: string;
+    }>;
   }>;
   get_provider_usage(provider_id?: string, days?: number): Promise<ProviderUsageReport>;
   get_ducky_usage(ducky_name?: string, profile_id?: string, days?: number): Promise<DuckyUsageReport>;

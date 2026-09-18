@@ -10,52 +10,45 @@ export type UsageWindow = {
   used: number;
   limit: number;
   unit?: string;
+  reset?: string;
+  readout?: string;
 };
-
-function formatAmt(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (n >= 10_000) return `${Math.round(n / 1000)}K`;
-  if (n >= 1000) return n.toLocaleString();
-  return String(Math.round(n * 10) / 10);
-}
 
 function windowRows(windows: UsageWindow[] | null | undefined): UsageWindow[] {
   if (!windows?.length) return [];
   return windows.filter((w) => Number(w.limit) > 0);
 }
 
-/** Read-only quota rails under the Faster/Smarter slider. Hidden when empty. */
+function pctOf(w: UsageWindow): number {
+  const limit = Number(w.limit);
+  if (!Number.isFinite(limit) || limit <= 0) return 0;
+  return Math.max(0, Math.min(100, (Number(w.used) / limit) * 100));
+}
+
+function readoutOf(w: UsageWindow): string {
+  const text = (w.readout || "").trim();
+  if (text) return text;
+  return `${Math.round(pctOf(w))}%`;
+}
+
+/** Live plan caps under Faster/Smarter. Hidden when the gateway sent none. */
 export function GatewayUsageFooter({ windows }: { windows: UsageWindow[] | null | undefined }) {
   const rows = windowRows(windows);
   if (!rows.length) return null;
   return (
     <div className="model-selector-usage" onClick={(e) => e.stopPropagation()}>
       {rows.map((w) => {
-        const limit = Number(w.limit);
-        const used = Math.max(0, Math.min(Number(w.used) || 0, limit));
-        const pct = limit === 0 ? 0 : used / limit;
-        const unit = (w.unit || "").trim();
-        const label = `${w.label} ${formatAmt(used)} / ${formatAmt(limit)}${unit ? ` ${unit}` : ""}`;
+        const pct = pctOf(w);
+        const tone = pct >= 99 ? "is-max" : pct >= 80 ? "is-hot" : "";
         return (
-          <div key={w.id || w.label} className="model-selector-effort is-disabled">
-            <div className="model-selector-effort-readout">{label}</div>
-            <div className="model-selector-effort-slider">
-              <div className="model-selector-effort-rail" aria-hidden="true">
-                <span className="model-selector-effort-dots" />
-                <span className="model-selector-effort-thumb" style={{ left: `${pct * 100}%` }} />
-              </div>
-              <input
-                type="range"
-                className="model-selector-effort-range"
-                min={0}
-                max={limit}
-                step="any"
-                value={used}
-                disabled
-                aria-label={label}
-                readOnly
-              />
+          <div key={w.id || w.label} className={`model-selector-cap ${tone}`.trim()}>
+            <div className="model-selector-cap-top">
+              <span className="model-selector-cap-label">{w.label}</span>
+              {w.reset ? <span className="model-selector-cap-reset">{w.reset}</span> : null}
+              <span className="model-selector-cap-pct">{readoutOf(w)}</span>
+            </div>
+            <div className="model-selector-cap-track" aria-hidden="true">
+              <i style={{ width: `${pct}%` }} />
             </div>
           </div>
         );

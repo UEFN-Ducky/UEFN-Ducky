@@ -58,9 +58,8 @@ export function formatEffortReadout(
   level: ThinkingMenuLevel | undefined,
 ): string {
   const label = (level?.label || level?.id || "Off").trim();
-  const tokenText = formatTokenText(level);
   const name = (modelName || "").trim();
-  return name ? `${name} · ${label} · ${tokenText}` : `${label} · ${tokenText}`;
+  return name ? `${name} · ${label}` : label;
 }
 
 export function effortSuffix(menu: ThinkingMenu | null | undefined, effort: string): string {

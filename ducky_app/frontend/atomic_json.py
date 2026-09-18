@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -163,12 +163,22 @@ def _make_backup(target: Path) -> None:
 
 
 def _write_temp(target: Path, payload: str) -> Path:
-    tmp = target.parent / f"{target.name}.tmp.{uuid.uuid4().hex}"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(payload)
-        f.flush()
-        os.fsync(f.fileno())
-    return tmp
+    # mkstemp keeps the name short — `{target}.tmp.{32-hex}` blows Windows MAX_PATH
+    # under pytest-of-*/.../conversations/<uuid>/conversation.json.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return Path(tmp_name)
 
 
 def _replace_with_retries(tmp: Path, target: Path) -> None:

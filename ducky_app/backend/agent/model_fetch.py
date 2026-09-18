@@ -136,9 +136,15 @@ def normalize_usage_windows(raw: Any) -> dict[str, Any]:
         wid = str(row.get("id") or "").strip() or f"w{len(out)}"
         label = str(row.get("label") or wid).strip() or wid
         unit = str(row.get("unit") or "").strip()
+        reset = str(row.get("reset") or "").strip()
+        readout = str(row.get("readout") or "").strip()
         item: dict[str, Any] = {"id": wid, "label": label, "used": used, "limit": limit}
         if unit:
             item["unit"] = unit
+        if reset:
+            item["reset"] = reset
+        if readout:
+            item["readout"] = readout
         out.append(item)
     return {"windows": out}
 
@@ -176,8 +182,6 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "") -> dict[str, An
             from backend.agent.secrets import get_key
 
             key = str(get_key(name) or "").strip()
-        if not key and not reg.get("key_optional"):
-            return {"windows": []}
         fn = reg.get("fetch_usage")
         if not callable(fn):
             return {"windows": []}

@@ -385,12 +385,14 @@ Always include Off. The host never invents Off/Low/Med/High or 2k/8k/16k.
 ### `fetch_usage` (quota sliders)
 
 Pass `fetch_usage=` on `api.register_llm_provider`. Host pulls fresh when the
-model picker opens. Return live vendor windows only — never hardcoded Plus/Pro tables.
+model picker opens (even with no API key — Claude/Codex login still counts).
+Return live vendor windows only — never hardcoded Plus/Pro tables. Optional
+`reset` / `readout` strings are shown as-is (e.g. "Resets in 4d 3h", "1% left").
 
 ```python
 def fetch_usage(api_key: str, *, model: str = "") -> dict:
     return {"windows": [
-        {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests"},
+        {"id": "hourly", "label": "Hourly", "used": 12, "limit": 40, "unit": "requests", "reset": "Resets in 1h"},
     ]}
 ```
 

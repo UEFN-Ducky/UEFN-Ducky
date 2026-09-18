@@ -22,8 +22,8 @@ describe("ThinkingEffortFooter", () => {
     const slider = screen.getByRole("slider", { name: "Thinking effort" });
     expect(slider).toBeTruthy();
     expect(slider).toHaveProperty("disabled", true);
-    expect(screen.getByText("GPT-6-Astra · Off · 0 thinking tokens")).toBeTruthy();
-    expect(screen.getByText("This model has no extended thinking")).toBeTruthy();
+    expect(screen.getByText("GPT-6-Astra · Off")).toBeTruthy();
+    expect(screen.queryByText("This model has no extended thinking")).toBeNull();
   });
 
   it("moves through gateway levels when the menu is present", () => {

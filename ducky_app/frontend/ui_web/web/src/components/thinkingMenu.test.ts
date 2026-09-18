@@ -30,7 +30,7 @@ describe("thinkingMenu", () => {
   it("prints exact token counts, not ~2k", () => {
     expect(formatTokenText(MENU.levels[1])).toBe("2048 thinking tokens");
     expect(formatTokenText(MENU.levels[3])).toBe("no token cap");
-    expect(formatEffortReadout("Opus 5", MENU.levels[0])).toBe("Opus 5 · Off · 0 thinking tokens");
+    expect(formatEffortReadout("Opus 5", MENU.levels[0])).toBe("Opus 5 · Off");
     expect(effortSuffix(MENU, "off")).toBe(" · Off");
   });
 

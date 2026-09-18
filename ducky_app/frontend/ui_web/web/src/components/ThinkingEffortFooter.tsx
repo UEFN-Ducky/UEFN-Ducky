@@ -36,7 +36,6 @@ export function ThinkingEffortFooter({ menu, modelName, effort, onChange }: Thin
       onClick={(e) => e.stopPropagation()}
     >
       <div className="model-selector-effort-readout">{formatEffortReadout(modelName, level)}</div>
-      {level?.hint ? <div className="model-selector-effort-hint">{level.hint}</div> : null}
       <div className="model-selector-effort-labels">
         <span>{lo}</span>
         <span>{hi}</span>
