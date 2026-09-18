@@ -2182,11 +2182,11 @@ html.window-maximized .window-resize-grip {
 .model-selector-effort-thumb {
   position: absolute;
   top: 50%;
-  width: 8px;
-  height: 16px;
-  border-radius: 2px;
+  width: 4px;
+  height: 14px;
+  border-radius: 1px;
   background: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
   transform: translate(-50%, -50%);
 }
 .model-selector-effort-range {
@@ -2197,16 +2197,63 @@ html.window-maximized .window-resize-grip {
   opacity: 0;
   cursor: pointer;
   appearance: none;
+  -webkit-appearance: none;
   background: transparent;
+  accent-color: transparent;
+  color: transparent;
 }
 .model-selector-effort-range:disabled {
   cursor: not-allowed;
 }
+.model-selector-effort-range:focus,
 .model-selector-effort-range:focus-visible {
-  opacity: 1;
-  outline: 1px solid var(--border-focus, #2563eb);
-  outline-offset: 2px;
-  border-radius: 999px;
+  opacity: 0;
+  outline: none;
+}
+.model-selector-effort-slider:focus-within .model-selector-effort-rail {
+  box-shadow: 0 0 0 1px var(--border-focus, #2563eb);
+}
+.model-selector-effort-range::-webkit-slider-runnable-track {
+  background: transparent;
+  border: none;
+  height: 3px;
+}
+.model-selector-effort-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  opacity: 0;
+}
+.model-selector-effort-range::-moz-range-track {
+  background: transparent;
+  border: none;
+  height: 3px;
+}
+.model-selector-effort-range::-moz-range-thumb {
+  appearance: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  opacity: 0;
+}
+.model-selector-effort-range::-ms-track {
+  background: transparent;
+  border-color: transparent;
+  color: transparent;
+}
+.model-selector-effort-range::-ms-thumb {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border: none;
+  opacity: 0;
 }
 
 .model-selector-usage {
@@ -2273,6 +2320,9 @@ html.window-maximized .window-resize-grip {
 .model-selector-cap-notice span {
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .model-selector-cap-notice button {
   flex-shrink: 0;

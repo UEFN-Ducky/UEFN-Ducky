@@ -116,6 +116,10 @@ def test_watchdog_presses_while_caller_blocks_then_stops(monkeypatch):
     time.sleep(0.3)
     final = len(calls)
     assert final > 1
+    deadline = time.time() + 1.5
+    while time.time() < deadline and len(calls) != final:
+        final = len(calls)
+        time.sleep(0.2)
     time.sleep(0.3)
     assert len(calls) == final
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, fields
 from typing import Any
 
 _CACHE_MAX = 512
+_USAGE_TTL_S = 120.0
 
 _CAPABILITY_CACHE: dict[tuple[str, str], ModelInfo] = {}
+_USAGE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 # USD per 1M tokens: (input, output, cached_input, cache_write) — used by plugins
 _PricingRow = tuple[float, float, float | None, float | None]
 
@@ -56,8 +59,16 @@ def get_model_info(provider: str, model_id: str) -> ModelInfo | None:
     return _CAPABILITY_CACHE.get((prov, mid))
 
 
+def reset_usage_cache(provider: str | None = None) -> None:
+    if provider:
+        _USAGE_CACHE.pop(provider.strip().lower(), None)
+    else:
+        _USAGE_CACHE.clear()
+
+
 def clear_model_cache(provider: str | None = None) -> None:
     """Drop cached model metadata (e.g. after API key change)."""
+    reset_usage_cache(provider)
     if provider:
         prov = provider.strip().lower()
         for key in [k for k in _CAPABILITY_CACHE if k[0] == prov]:
@@ -191,9 +202,13 @@ def _usage_registration(provider: str) -> tuple[str, dict[str, Any]]:
     return name, reg
 
 
-def fetch_usage(provider: str, api_key: str, *, model: str = "") -> dict[str, Any]:
-    """Live quota windows from the gateway plugin. Never cached."""
+def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = False) -> dict[str, Any]:
+    """Live quota windows from the gateway plugin. Cached ~2 min; Refresh forces."""
     name, reg = _usage_registration(provider)
+    if not force:
+        hit = _USAGE_CACHE.get(name)
+        if hit and (time.monotonic() - hit[0]) < _USAGE_TTL_S:
+            return hit[1]
     key = (api_key or "").strip()
     try:
         norm = reg.get("normalize_secret")
@@ -208,14 +223,31 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "") -> dict[str, An
             key = str(get_key(name) or "").strip()
         fn = reg.get("fetch_usage")
         if not callable(fn):
-            return {"windows": []}
+            return _usage_or_cached(name, {"windows": []})
         try:
             raw = fn(key, model=str(model or ""))
         except TypeError:
             raw = fn(key)
-        return normalize_usage_windows(raw)
+        return _usage_or_cached(name, normalize_usage_windows(raw))
     except Exception:
-        return {"windows": []}
+        return _usage_or_cached(name, {"windows": []})
+
+
+def _usage_or_cached(name: str, out: dict[str, Any]) -> dict[str, Any]:
+    if out.get("windows"):
+        _USAGE_CACHE[name] = (time.monotonic(), out)
+        return out
+    hit = _USAGE_CACHE.get(name)
+    cached = hit[1] if hit else {}
+    notice = out.get("notice") if isinstance(out.get("notice"), dict) else None
+    if notice and str(notice.get("action") or "").lower() == "login":
+        _USAGE_CACHE[name] = (time.monotonic(), out)
+        return out
+    if cached.get("windows"):
+        return cached
+    if notice:
+        _USAGE_CACHE[name] = (time.monotonic(), out)
+    return out
 
 
 def _int_from_record(record: dict[str, Any], *keys: str) -> int | None:

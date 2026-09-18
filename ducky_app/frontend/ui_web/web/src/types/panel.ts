@@ -2888,6 +2888,7 @@ export interface PanelApi {
   get_gateway_usage?(
     provider: string,
     model?: string,
+    refresh?: boolean,
   ): Promise<{
     windows: Array<{
       id: string;

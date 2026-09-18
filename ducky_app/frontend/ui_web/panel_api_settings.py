@@ -1608,15 +1608,15 @@ class PanelApiSettingsMixin:
         s.validate()
         s.save()
 
-    def get_gateway_usage(self, provider: str = "", model: str = "") -> dict[str, Any]:
-        """Live quota windows from the selected gateway plugin. Never cached."""
+    def get_gateway_usage(self, provider: str = "", model: str = "", refresh: bool = False) -> dict[str, Any]:
+        """Live quota windows from the selected gateway plugin. Cached ~2 min."""
         from backend.agent.model_fetch import fetch_usage
         from backend.agent.secrets import get_key
 
         prov = str(provider or "").strip().lower()
         try:
             key = str(get_key(prov) or "") if prov else ""
-            return fetch_usage(prov, key, model=str(model or ""))
+            return fetch_usage(prov, key, model=str(model or ""), force=bool(refresh))
         except Exception:
             return {"windows": []}
 

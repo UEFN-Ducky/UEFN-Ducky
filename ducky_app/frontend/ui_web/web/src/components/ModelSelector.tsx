@@ -132,6 +132,7 @@ export function ModelSelector({
   const [usageNotice, setUsageNotice] = useState<UsageNotice | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageTick, setUsageTick] = useState(0);
+  const usageForceRef = useRef(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
   const triggerRef = useMergedRef(anchorRef, uiTargetRef);
@@ -364,53 +365,54 @@ export function ModelSelector({
     [gateways, navGateway],
   );
   const usageProvider = (
-    hoverRow?.providerKey ||
     activeGateway?.providerKey ||
     selectedGateway?.providerKey ||
-    previewRow?.providerKey ||
     ""
   ).trim();
-  const usageModel = (hoverRow?.id || previewRow?.id || "").trim();
   const glow = effortGlow(selectedMenu, thinkingEffort);
+  const usageByProviderRef = useRef<Record<string, { windows: UsageWindow[]; notice: UsageNotice | null }>>(
+    {},
+  );
 
   useEffect(() => {
-    if (!isOpen || !usageProvider) {
-      setUsageWindows([]);
-      setUsageNotice(null);
-      return;
-    }
+    if (!isOpen || !usageProvider) return;
     const api = getApi();
-    if (!api?.get_gateway_usage) {
-      setUsageWindows([]);
-      setUsageNotice(null);
-      return;
+    if (!api?.get_gateway_usage) return;
+    const refresh = usageForceRef.current;
+    usageForceRef.current = false;
+    const cached = usageByProviderRef.current[usageProvider];
+    if (cached) {
+      setUsageWindows(cached.windows);
+      setUsageNotice(cached.notice);
+      setUsageBusy(false);
+      if (!refresh) return;
     }
     let cancelled = false;
-    setUsageBusy(true);
-    void api.get_gateway_usage(usageProvider, usageModel).then(
+    if (!cached) setUsageBusy(true);
+    void api.get_gateway_usage(usageProvider, "", refresh).then(
       (res) => {
         if (cancelled) return;
-        setUsageWindows(Array.isArray(res?.windows) ? (res.windows as UsageWindow[]) : []);
-        const notice = res?.notice;
-        setUsageNotice(
-          notice && typeof notice.message === "string" && notice.message.trim()
-            ? (notice as UsageNotice)
-            : null,
-        );
+        const windows = Array.isArray(res?.windows) ? (res.windows as UsageWindow[]) : [];
+        const noticeRaw = res?.notice;
+        const notice =
+          noticeRaw && typeof noticeRaw.message === "string" && noticeRaw.message.trim()
+            ? (noticeRaw as UsageNotice)
+            : null;
+        const nextWindows = windows.length ? windows : cached?.windows ?? [];
+        const nextNotice = nextWindows.length ? null : (notice ?? cached?.notice ?? null);
+        usageByProviderRef.current[usageProvider] = { windows: nextWindows, notice: nextNotice };
+        setUsageWindows(nextWindows);
+        setUsageNotice(nextNotice);
         setUsageBusy(false);
       },
       () => {
-        if (!cancelled) {
-          setUsageWindows([]);
-          setUsageNotice(null);
-          setUsageBusy(false);
-        }
+        if (!cancelled) setUsageBusy(false);
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [isOpen, usageProvider, usageModel, usageTick]);
+  }, [isOpen, usageProvider, usageTick]);
 
   const onUsageAction = () => {
     const action = (usageNotice?.action || "retry").toLowerCase();
@@ -422,6 +424,7 @@ export function ModelSelector({
       });
       return;
     }
+    usageForceRef.current = true;
     setUsageTick((n) => n + 1);
   };
 
@@ -542,7 +545,7 @@ export function ModelSelector({
     setIsOpen(true);
     histCountRef.current = 0;
     pushHist();
-    void loadAgents();
+    if (!agents.length) void loadAgents();
   };
 
   const openDropdownRef = useRef(openDropdown);
