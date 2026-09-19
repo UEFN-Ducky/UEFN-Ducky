@@ -174,29 +174,10 @@ def _parse_shading_model(raw: str):
 
 
 def _replace_existing(full: str) -> None:
-    """Clear the way for a create that replaces an asset of the same name.
+    """Clear the way for a create that replaces an unreferenced asset of the same name."""
+    from listener.asset_delete import delete_unreferenced_project_asset
 
-    Replacing is long-standing behaviour here, but deleting an asset something
-    else still uses silently breaks those assets — and it is the one path that
-    reaches delete_asset without the refusal every other caller gets. Refuse
-    that case; replacing an unreferenced asset is harmless.
-    """
-    if not unreal.EditorAssetLibrary.does_asset_exist(full):
-        return
-    referencers = []
-    try:
-        from listener.registry.assets_pipeline import get_referencers
-
-        referencers = list(get_referencers(full).get("referencers") or [])
-    except Exception:
-        referencers = []
-    if referencers:
-        shown = ", ".join(referencers[:5]) + ("…" if len(referencers) > 5 else "")
-        raise ValueError(
-            f"Refused: {full} already exists and is used by {len(referencers)} asset(s): {shown}. "
-            "Replacing it would break them. Edit it in place, or create it under a different name."
-        )
-    unreal.EditorAssetLibrary.delete_asset(full)
+    delete_unreferenced_project_asset(full)
 
 
 def create_material(

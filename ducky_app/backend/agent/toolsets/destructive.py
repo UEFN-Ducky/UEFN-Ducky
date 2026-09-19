@@ -5,17 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-DELETE_REFUSED = "delete_refused"
-DELETE_REFUSED_HINT = (
-    "Never delete island content. Fix broken refs (search / reimport / relink / "
-    "duplicate / fixup_redirectors). Delete only in the UEFN Content Browser. "
-    "Editor offline is not a delete queue — stay on workspace_*; never restart UEFN so you can delete."
-)
-
-
-def delete_refused_payload(tool: str, **extra: Any) -> dict[str, Any]:
-    return {"error": DELETE_REFUSED, "tool": tool, "hint": DELETE_REFUSED_HINT, **extra}
-
 
 def allow_destructive_execution(
     pending: Sequence[Any],
@@ -32,8 +21,6 @@ def allow_destructive_execution(
 DESTRUCTIVE_TOOLS = frozenset(
     {
         "shutdown",
-        "delete_actors",
-        "delete_asset",
         # Replace ALL rows of a data table in one call.
         "fill_data_table_from_json",
         "fill_data_table_from_csv",

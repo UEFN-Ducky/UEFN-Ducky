@@ -181,11 +181,29 @@ def cmd_spawn_actor(
 
 @register("delete_actors")
 def cmd_delete_actors(actor_paths: List[str]) -> dict:
-    raise ValueError(
-        "Refused: never delete island actors. Fix the asset/device instead. "
-        "Remove actors only in the UEFN Outliner. "
-        "Editor offline is not a delete queue — do not restart UEFN to delete."
-    )
+    paths = [p for p in (actor_paths or []) if str(p).strip()]
+    if not paths:
+        raise ValueError("actor_paths is required")
+    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    removed: List[str] = []
+    missing: List[str] = []
+    with unreal.ScopedEditorTransaction("Ducky delete actors"):
+        for ident in paths:
+            actor = lookup.find_actor(ident)
+            if actor is None or not is_live(actor):
+                missing.append(ident)
+                continue
+            label = ""
+            try:
+                label = actor.get_actor_label()
+            except Exception:
+                pass
+            actor_sub.destroy_actor(actor)
+            removed.append(label or ident)
+    lookup.invalidate()
+    if not removed:
+        raise ValueError(f"actor not found: {missing[0] if missing else paths[0]}")
+    return {"success": True, "removed": removed, "missing": missing}
 
 
 @register("set_actor_transform")

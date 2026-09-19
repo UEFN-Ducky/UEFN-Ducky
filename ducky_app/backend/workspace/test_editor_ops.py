@@ -137,12 +137,14 @@ def test_create_folder_is_nothing_to_undo() -> None:
     assert classify("create_folder").revertable == REVERT_NONE
 
 
-def test_refused_deletes_are_recorded_but_never_revertable() -> None:
+def test_directory_nukes_stay_refused_and_deletes_are_not_revertable() -> None:
     for command in ("delete_actors", "delete_asset", "delete_directory"):
         spec = classify(command)
         assert spec.mutates == MUT_WRITE
         assert spec.revertable == REVERT_NONE
-        assert "refused" in spec.note
+    assert "refused" in classify("delete_directory").note
+    assert "refused" not in classify("delete_asset").note
+    assert "refused" not in classify("delete_actors").note
 
 
 def test_creations_are_marked_and_share_the_exists_facet() -> None:

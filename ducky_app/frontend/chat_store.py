@@ -114,6 +114,8 @@ class Conversation:
     """Exact API token log: total_input, total_output, calls[]."""
     prompt_cache_snapshot: dict[str, Any] | None = None
     """Frozen cacheable system-prompt blocks + tool names for prompt caching."""
+    rules_app_version: str = ""
+    """EXE version whose bootstrap was last injected on this chat (BYOA resume)."""
 
     coding_agent: str = "ducky"
     """Coding-agent path: ducky | claude_code | codex | cursor."""
@@ -183,6 +185,7 @@ class Conversation:
             "uefn_plugins": self.uefn_plugins,
             "token_usage": self.token_usage,
             "prompt_cache_snapshot": self.prompt_cache_snapshot,
+            "rules_app_version": (self.rules_app_version or "").strip(),
             "coding_agent": (self.coding_agent or "ducky").strip() or "ducky",
             "thinking_effort": (self.thinking_effort or "").strip().lower(),
             "upstream_session_id": (self.upstream_session_id or "").strip(),
@@ -267,6 +270,7 @@ class Conversation:
             prompt_cache_snapshot=(
                 d.get("prompt_cache_snapshot") if isinstance(d.get("prompt_cache_snapshot"), dict) else None
             ),
+            rules_app_version=str(d.get("rules_app_version", "") or "").strip(),
             coding_agent=str(d.get("coding_agent", "ducky") or "ducky"),
             thinking_effort=str(d.get("thinking_effort", "") or "").strip().lower(),
             upstream_session_id=str(d.get("upstream_session_id", "") or ""),

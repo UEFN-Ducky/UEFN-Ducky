@@ -69,9 +69,8 @@ Read; call `skill_read_subskill` instead.
 
 **Automatic** — no Settings → Apply needed:
 
-1. **Launch the new EXE (or any IDE MCP reconnect)** → `ship_newest_everywhere` copies the listener to AppData, upgrades shipped skill packs into Cursor / Claude / Antigravity **and** AppData (used by the in-panel UEFN-Ducky agent), and rewrites each IDE's `uefn` MCP entry to this EXE.
+1. **Launch the new EXE (or any IDE MCP reconnect)** → `ship_newest_everywhere` copies the listener to AppData, upgrades shipped skill packs into Cursor / Claude / Antigravity **and** AppData (used by the in-panel UEFN-Ducky agent), and rewrites each IDE's `uefn` MCP entry to this EXE. Old chats pick up new rules, skills, and tools on the next send.
 2. **UEFN comes online while the panel is open** → same ship runs again (offline→online).
-3. Start a **new chat** so tool schemas refresh (prompt cache is per-chat).
 
 If UEFN was already open with an old in-memory listener, call `reload_listener` once so it loads the AppData copy just shipped. If still stuck, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**
 

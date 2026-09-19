@@ -275,6 +275,7 @@ _ANIMATION_TOOLS = frozenset(
         "search_assets",
         "spawn_actor",
         "save_asset",
+        "delete_asset",
     }
 )
 

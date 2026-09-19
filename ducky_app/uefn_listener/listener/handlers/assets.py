@@ -128,11 +128,9 @@ def cmd_rename_asset(old_path: str, new_path: str) -> dict:
 
 @register("delete_asset")
 def cmd_delete_asset(asset_path: str) -> dict:
-    raise ValueError(
-        "Refused: never delete island content. Fix broken refs "
-        "(search / reimport / relink / duplicate). Delete only in the Content Browser. "
-        "Editor offline is not a delete queue — do not restart UEFN to delete."
-    )
+    from listener.asset_delete import delete_unreferenced_project_asset
+
+    return delete_unreferenced_project_asset(asset_path)
 
 
 @register("delete_directory")

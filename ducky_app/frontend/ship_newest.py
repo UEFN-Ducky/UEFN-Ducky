@@ -54,6 +54,33 @@ def _write_ship_stamp() -> None:
         pass
 
 
+def _read_ship_stamp() -> dict | None:
+    try:
+        data = json.loads(_stamp_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def conversation_cache_bust_needed(stamp: dict | None, version: str) -> bool:
+    return str((stamp or {}).get("version") or "") != str(version)
+
+
+def maybe_bust_conversation_caches_for_app_version() -> bool:
+    """Wipe frozen prompt snapshots when this EXE is newer than ship_stamp."""
+    from frontend import __version__
+
+    if not conversation_cache_bust_needed(_read_ship_stamp(), __version__):
+        return False
+    try:
+        from frontend.ui_web.project_chats import invalidate_all_projects_conversation_caches
+
+        invalidate_all_projects_conversation_caches()
+    except Exception:
+        return False
+    return True
+
+
 def ship_newest_everywhere(
     *,
     apply_ides: bool = True,
@@ -80,6 +107,11 @@ def ship_newest_everywhere(
         out.append(line)
         if log is not None:
             log(line)
+
+    # Even skip-if-recent must wipe when stamp.version is still the old EXE —
+    # frozen rules / skill index / MCP / tool_index recapture on the next send.
+    if maybe_bust_conversation_caches_for_app_version():
+        _log("conversation caches wiped (app version changed)")
 
     if skip_if_recently_shipped and not force_skills and _recent_ship_stamp():
         _log("ship_newest: skipped (same exe/version shipped recently)")

@@ -27,6 +27,37 @@ PushFn = Callable[[dict[str, Any]], None]
 _HISTORY_PREFIX_MAX_CHARS = 6000
 
 
+def inject_bootstrap_if_stale(
+    conv: Any,
+    prompt_text: str,
+    system_prompt: str,
+    *,
+    app_version: str,
+    session_id: str = "",
+) -> str:
+    """Prepend the live EXE bootstrap once per version on coding-agent resume.
+
+    Cursor / Codex / Grok only send ``system_prompt`` on the first turn. After
+    an EXE update, paste the current bootstrap onto the user prompt and stamp
+    ``rules_app_version`` so old chats pick up rules, skill packs, and tools.
+    New sessions already get ``system_prompt`` from the adapter — stamp only.
+    """
+    stamped = str(getattr(conv, "rules_app_version", "") or "")
+    if stamped == str(app_version):
+        return prompt_text
+    conv.rules_app_version = str(app_version)
+    if not (session_id or "").strip():
+        return prompt_text
+    body = (system_prompt or "").strip()
+    if not body:
+        return prompt_text
+    return (
+        "## Ducky bootstrap updated (this EXE)\n"
+        f"{body}\n\n"
+        f"{prompt_text}"
+    )
+
+
 def _thinking_env(agent_id: str, thinking_effort: str) -> dict[str, str]:
     """Host effort plus optional plugin ``register_coding_agent(thinking_env=…)``."""
     from backend.agent.thinking_effort import normalize_thinking_effort
@@ -557,6 +588,15 @@ def run_coding_agent_message(
         skills_dir=skills_dir,
         skill_names=skill_names,
         native_skills=bool(reg.get("native_skills")),
+    )
+    from frontend import __version__
+
+    prompt_text = inject_bootstrap_if_stale(
+        conv,
+        prompt_text,
+        system_prompt,
+        app_version=__version__,
+        session_id=session_id,
     )
     from frontend.ui_web.workspace_bootstrap import build_run_context, record_external_edits
 

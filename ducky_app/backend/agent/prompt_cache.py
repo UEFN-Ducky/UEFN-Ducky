@@ -141,6 +141,10 @@ def _drift_lines(live_blocks: dict[str, str], frozen_blocks: dict[str, str]) -> 
                 lines.append(f"\n### Updated skill\n{live}\n")
             elif key == "mcp" and live:
                 lines.append(f"\n### Updated MCP instructions\n{live}\n")
+            elif key == "rules" and live:
+                lines.append(f"\n### Updated rules\n{live}\n")
+            elif key == "tool_index" and live:
+                lines.append(f"\n### Updated tool index\n{live}\n")
     return lines
 
 

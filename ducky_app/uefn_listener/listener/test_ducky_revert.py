@@ -1,8 +1,7 @@
 """The revert-only delete path refuses anything it cannot prove is safe.
 
-Ducky refuses deletion everywhere else. This command is the single exception,
-so its guards are the tests that matter most here: the journal asking for it is
-never enough on its own.
+``delete_asset`` shares the same mechanical gate. The journal asking for a
+revert is never enough on its own.
 """
 
 from __future__ import annotations
@@ -121,6 +120,14 @@ def mod(monkeypatch):
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
 
+    ad_spec = importlib.util.spec_from_file_location(
+        "listener.asset_delete",
+        Path(__file__).resolve().parent / "asset_delete.py",
+    )
+    asset_delete = importlib.util.module_from_spec(ad_spec)
+    monkeypatch.setitem(sys.modules, "listener.asset_delete", asset_delete)
+    ad_spec.loader.exec_module(asset_delete)
+
     spec = importlib.util.spec_from_file_location("ducky_revert_under_test", MODULE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -207,6 +214,15 @@ def test_an_unreferenced_asset_in_the_project_is_removed(mod) -> None:
     mod._state["assets"] = {path}
     result = call(mod, kind="asset", id=path)
     assert result == {"ok": True, "kind": "asset", "removed": path}
+    assert mod._state["deleted"] == [path]
+
+
+def test_a_self_referencer_does_not_block_delete(mod) -> None:
+    path = "/MyProject/Anims/AS_Empty"
+    mod._state["assets"] = {path}
+    mod._state["referencers"] = {path: [path, path + ".AS_Empty"]}
+    result = call(mod, kind="asset", id=path)
+    assert result["ok"] is True and result["removed"] == path
     assert mod._state["deleted"] == [path]
 
 

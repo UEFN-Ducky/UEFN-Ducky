@@ -13,7 +13,7 @@ metadata:
 |---------|-----|
 | `ping` fails / listener offline | User: open the UEFN project; the panel should show "Listener online". If the panel is closed, launch `UEFN-Ducky.exe`. |
 | Wrong project responding | Panel Settings → project root; the listener follows the open UEFN project. |
-| Empty tool results after an EXE update | Launch the new EXE once (or reconnect MCP) — `ship_newest_everywhere` refreshes listener + skills + IDE MCP configs. Then start a **new chat**. |
+| Empty tool results after an EXE update | Launch the new EXE once (or reconnect MCP) — `ship_newest_everywhere` refreshes listener + skills + IDE MCP configs. Old chats pick up new rules, skills, and tools on the next send. |
 | Stale MCP after reinstall | Open the new EXE once — it rewrites Cursor/Claude/Antigravity `mcp.json` to itself. |
 
 For MCP-side recovery (STOP stays true, tools hang after `reload_listener`), see

@@ -276,16 +276,18 @@ def test_hard_rules_ai_made_plugins():
     assert "ai_plugins" in AGENT_HARD_RULES
 
 
-def test_hard_rules_never_delete_assets():
-    assert "Fix broken assets. Never delete them" in AGENT_HARD_RULES
+def test_hard_rules_fix_unless_user_asked_to_delete():
+    assert "Fix assets. Delete only when asked" in AGENT_HARD_RULES
     assert "Validator errors are not a delete list" in AGENT_HARD_RULES
     assert "delete_asset" in AGENT_HARD_RULES
     assert "fixup_redirectors" in AGENT_HARD_RULES
+    assert "explicitly asked" in AGENT_HARD_RULES
     from backend.agent.prompt import _rules_body
 
     prompt = _rules_body(4200)
     assert "needs approval" not in prompt
-    assert "Never `delete_asset`" in prompt or "never `delete_asset`" in prompt.lower()
+    assert "do not delete unless the user asked" in prompt.lower()
+    assert "delete_asset" in prompt
 
 
 def test_hard_rules_offline_is_not_a_delete_queue():
@@ -308,42 +310,51 @@ def test_hard_rules_offline_is_not_a_delete_queue():
     assert "Validator errors are not a delete list" in inject
 
 
-def test_listener_delete_commands_always_refuse():
+def test_listener_delete_directory_still_refuses():
     root = Path(__file__).resolve().parents[3] / "uefn_listener" / "listener"
     assets = (root / "handlers" / "assets.py").read_text(encoding="utf-8")
+    start = assets.index("def cmd_delete_directory")
+    body = assets[start : start + 600]
+    assert "raise ValueError" in body
+    assert "never delete" in body.lower()
+    assert "EditorAssetLibrary.delete" not in body
+
+
+def test_listener_delete_asset_uses_shared_safety_gate():
+    root = Path(__file__).resolve().parents[3] / "uefn_listener" / "listener"
+    assets = (root / "handlers" / "assets.py").read_text(encoding="utf-8")
+    da = assets[assets.index("def cmd_delete_asset") : assets.index("def cmd_delete_directory")]
+    assert "delete_unreferenced_project_asset" in da
     actors = (root / "handlers" / "actors.py").read_text(encoding="utf-8")
-    for src, name in (
-        (assets, "def cmd_delete_asset"),
-        (assets, "def cmd_delete_directory"),
-        (actors, "def cmd_delete_actors"),
-    ):
-        start = src.index(name)
-        body = src[start : start + 600]
-        assert "raise ValueError" in body
-        assert "never delete" in body.lower()
-        assert "EditorAssetLibrary.delete" not in body
-        assert "destroy_actor" not in body
+    dn = actors[actors.index("def cmd_delete_actors") : actors.index("def cmd_set_actor_transform")]
+    assert "destroy_actor" in dn
+    assert "never delete island actors" not in dn.lower()
 
 
-def test_mcp_delete_wrappers_never_call_listener():
+def test_mcp_delete_wrappers_call_listener():
     assets = Path(__file__).resolve().parents[0] / "assets.py"
     actors = Path(__file__).resolve().parents[0] / "actors.py"
     asset_body = assets.read_text(encoding="utf-8")
     actor_body = actors.read_text(encoding="utf-8")
     da = asset_body[asset_body.index("def delete_asset") : asset_body.index("def duplicate_asset")]
     dn = actor_body[actor_body.index("def delete_actors") : actor_body.index("def set_actor_transform")]
-    assert "send_command" not in da
-    assert "delete_refused" in da
-    assert "send_command" not in dn
-    assert "delete_refused" in dn
+    assert "send_command" in da
+    assert "delete_refused" not in da
+    assert "user asked" in da
+    assert "send_command" in dn
+    assert "delete_refused" not in dn
 
 
 def test_runner_never_auto_approves_destructive():
+    from backend.agent.toolsets import is_destructive
     from backend.agent.toolsets.destructive import allow_destructive_execution
 
-    assert allow_destructive_execution(["delete_asset"], None) is False
-    assert allow_destructive_execution(["delete_asset"], lambda _p: True) is True
-    assert allow_destructive_execution(["delete_asset"], lambda _p: False) is False
+    assert is_destructive("delete_asset") is False
+    assert is_destructive("delete_actors") is False
+    assert is_destructive("shutdown") is True
+    assert allow_destructive_execution(["shutdown"], None) is False
+    assert allow_destructive_execution(["shutdown"], lambda _p: True) is True
+    assert allow_destructive_execution(["shutdown"], lambda _p: False) is False
     assert allow_destructive_execution([], None) is True
     runner = (
         Path(__file__).resolve().parents[2] / "agent" / "runner.py"
