@@ -18,7 +18,6 @@ EXCLUDED_TOOLS = frozenset(
         "spawn_actor_batch",
         "set_verse_fields",
         # Low-level read duplicates
-        "get_verse_editables",
         "get_device_settings",
         "list_creative_devices",
         "set_device_settings",

@@ -22,9 +22,11 @@ TOOLS = CORE_TOOLS | EXTENDED_TOOLS
 PLAN_TOOLS = frozenset(
     {
         "ping",
-        "reload_listener",
         "get_project_info",
         "get_level_info",
         "uefn_skill",
+        "changeset_list",
+        "changeset_contents",
+        "changeset_export",
     }
 )

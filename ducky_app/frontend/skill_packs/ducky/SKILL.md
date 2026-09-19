@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 28
+  version: 29
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -19,12 +19,8 @@ agents to a listener running inside the UEFN editor (port 4200).
 
 This skill covers **using the app** — where things live, setup, and recovery.
 
-**Editor work (HARD):** official UEFN MCP first (`ducky_get_status` → nested
-`unreal__*` when `epic_mcp_online`), Ducky listener second, `execute_python` last
-and never for spawn/move/materials. Map: `skill_read_subskill("uefn", "epic_mcp")`.
 Save/Yes popup locking MCP: Ducky presses Save on it automatically while a tool
-waits; if the editor still reports busy, call `dismiss_uefn_modal` (Ducky host) —
-do not retry `execute_python` or `unreal__*`.
+waits; if the editor still reports busy, call `dismiss_uefn_modal` (Ducky host).
 
 ## Where things live
 
@@ -168,34 +164,13 @@ per call.
 
 ## Plans (outline tree)
 
-Multi-step work uses **one plan per chat** with an outline of main → subplans
-(not separate nested chat plans). **Always call the plan tools** — never leave only
-a prose "Fix plan" / markdown checklist in chat.
-
-- `ducky_create_plan(title, overview, body_markdown, nodes=[{id,content,status,children}])`
-- `ducky_plan_add_node` / `ducky_plan_update_node` / `ducky_plan_delete_node` / `ducky_plan_move_node`
-- `ducky_get_plan()` — plan + outline numbering (`1`, `1.1`, `1.1.1`, …)
-- `ducky_list_plans` — **current project only**
-- Templates (global, reusable): `ducky_list_plan_templates`, `ducky_create_plan_template`,
-  `ducky_instantiate_plan_template` — instances are snapshots; edits never cross
-
-**Field roles:** `overview` = short summary only; `body_markdown` = description;
-`nodes` = JSON **array** argument (never paste nodes/XML into overview — empty nodes
-→ UI "0 of 0 steps").
-
-**Followable shape:** Diagnose → Fix → Verify; each leaf = one action + Done-when
-(name the tool when known). Parents cannot complete while nested subplans are unfinished.
-Work depth-first on open leaves. **CHECK OFF every step** — `in_progress` BEFORE
-the work, `completed` when Done-when is met — with `ducky_plan_update_node`.
-Re-check the plan every tool round. Mutators are blocked until a leaf is
-`in_progress`. If findings flip the approach, update the tree before more
-mutators — never thrash off-plan.
-
-Settings → Plans has **Templates** | **Project Plans** tabs (like Skills | MCPs).
-
-In **Plan** mode: create/update the outline only — do not modify the level. The
-user reviews, then switches to **Agent** mode (or **Send to ducky**) to execute.
-In **Agent** mode: create the plan after brief discovery if missing, then follow it.
+Multi-step work uses `ducky_create_plan` — never a prose Fix plan. Field roles:
+`overview` = short summary; `body_markdown` = description; `nodes` = JSON array.
+Follow the app `PLAN_PROTOCOL` (Diagnose → Fix → Verify; tick
+`ducky_plan_update_node`). Templates: `ducky_list_plan_templates` /
+`ducky_instantiate_plan_template` (try `verify-loop`). Settings → Plans has
+Templates | Project Plans. Plan mode: outline only. Agent mode: follow and
+check off.
 
 ## AI-made plugins (extend the app yourself)
 

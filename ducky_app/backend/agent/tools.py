@@ -94,6 +94,32 @@ def _hint_for_error(tool: str, text: str) -> str:
             "Check get_verse_editables mangled_name / resolution_tried, then wire. "
             "STOP is advisory — do not abort or ask the user to Build Verse."
         )
+    if "10054" in low or "winerror 10054" in low:
+        return (
+            "WinError 10054 means the Verse build started. Wait and poll "
+            "list_verse_types — never retry workspace_compile_verse."
+        )
+    if "tool excluded" in low:
+        return (
+            "That tool is excluded from the agent floor. Use ducky_get_tools / "
+            "ducky_call_tool for a focused wrapper. get_verse_editables is callable."
+        )
+    if (
+        "class not found" in low
+        or "class_not_found" in low
+        or "not a valid class" in low
+        or "failed to find class" in low
+    ):
+        return (
+            "spawn_actor class not found: use an Actor Blueprint …_C from "
+            "search_assets(/Game/Creative), never a Verse *_device type name."
+        )
+    if tool.startswith("unreal__") or "unreal__" in low:
+        return (
+            "Epic toolset error: retry ONCE (unreal__describe_toolset then "
+            "unreal__call_tool). If it fails again, degrade to the closest Ducky "
+            "listener tool and finish the task."
+        )
     return ""
 
 
@@ -731,6 +757,12 @@ async def execute_tool(
     key_name = _guard_key_name(name, arguments or {})
     if result.ok:
         hammer_guard.note_success(key_name)
+        try:
+            from backend.agent import verify_evidence
+
+            verify_evidence.record_ok(key_name, arguments or {})
+        except Exception:
+            pass
         return result
     if result.error == "Cancelled":
         return result

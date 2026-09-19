@@ -91,6 +91,14 @@ def test_plan_tools_declared_override(monkeypatch):
     assert is_plan_safe_tool("custom_weird_read")
 
 
+def test_plan_mode_blocks_reload_allows_changeset_reads():
+    assert not is_plan_safe_tool("reload_listener")
+    assert is_plan_safe_tool("changeset_list")
+    assert is_plan_safe_tool("changeset_contents")
+    assert is_plan_safe_tool("changeset_export")
+    assert not is_plan_safe_tool("changeset_revert")
+
+
 def test_plugin_surface_reads_plan_safe():
     assert is_plan_safe_tool("get_ik_rig_info")
     assert is_plan_safe_tool("get_retarget_preset")

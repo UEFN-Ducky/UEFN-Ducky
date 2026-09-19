@@ -232,12 +232,15 @@ _ALLOW_EXACT: frozenset[str] = frozenset(
         "ducktactoe_state",
         "landscape_list",
         "verse_template_list",
+        "changeset_list",
+        "changeset_contents",
+        "changeset_export",
     }
 )
 
 _BLOCK_EXACT: frozenset[str] = frozenset(
     {
-        "reload_listener",  # mild side effect; keep Agent unless already in PLAN_TOOLS
+        "reload_listener",
         "shutdown",
         "take_high_res_screenshot",
         "exec_console_command",

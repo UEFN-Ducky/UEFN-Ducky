@@ -438,6 +438,48 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(second["id"], plans.DEMO_TEMPLATE_ID)
         ids = [r["template_id"] for r in plans.list_templates()]
         self.assertEqual(ids.count(plans.DEMO_TEMPLATE_ID), 1)
+        self.assertEqual(ids.count(plans.VERIFY_LOOP_TEMPLATE_ID), 1)
+
+    def test_verify_leaf_requires_evidence(self) -> None:
+        from backend.agent import verify_evidence as ve
+
+        plans.create_plan(
+            "chat-verify",
+            title="Fix verse",
+            nodes=[
+                {"id": "fix", "content": "Fix the file", "status": "pending", "children": []},
+                {
+                    "id": "v1",
+                    "content": "Verify: workspace_compile_verse",
+                    "status": "pending",
+                    "children": [],
+                },
+            ],
+            project_root=self.root,
+        )
+        plans.update_node("chat-verify", "fix", status="completed", project_root=self.root)
+        with self.assertRaises(ValueError) as ctx:
+            plans.update_node("chat-verify", "v1", status="completed", project_root=self.root)
+        self.assertIn("check tool", str(ctx.exception).lower())
+        tok = ve.bind_conversation("chat-verify")
+        try:
+            ve.record_ok("workspace_compile_verse")
+            plans.update_node("chat-verify", "v1", status="completed", project_root=self.root)
+        finally:
+            ve.reset_conversation(tok)
+        loaded = plans.load_plan("chat-verify", project_root=self.root)
+        assert loaded is not None
+        verify = next(n for n in loaded["nodes"] if n["id"] == "v1")
+        self.assertEqual(verify["status"], "completed")
+
+    def test_ensure_verify_loop_template_idempotent(self) -> None:
+        first = plans.ensure_verify_loop_template()
+        assert first is not None
+        self.assertEqual(first["id"], plans.VERIFY_LOOP_TEMPLATE_ID)
+        self.assertTrue(any(plans.is_verify_leaf(n) for n in plans._flatten_nodes(first["nodes"])))
+        second = plans.ensure_verify_loop_template()
+        assert second is not None
+        self.assertEqual(second["id"], first["id"])
 
     def test_push_plan_updated_uses_resolve_push(self) -> None:
         plan = {

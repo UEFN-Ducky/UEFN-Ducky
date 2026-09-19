@@ -51,7 +51,6 @@ def cmd_bulk_wire_verse_device(
     wiring: dict,
     skip_missing: bool = False,
     save_level: bool = False,
-    verify: bool = False,
 ) -> dict:
     return bulk_removed_error()
 
@@ -65,7 +64,6 @@ def cmd_setup_verse_device(
     folder: str = "",
     spawn_if_exists: str = "skip",
     save_level: bool = True,
-    verify: bool = True,
     skip_missing: bool = False,
 ) -> dict:
     return bulk_removed_error()

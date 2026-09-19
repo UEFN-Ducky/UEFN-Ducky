@@ -101,17 +101,10 @@ def _deployed_skill_md(pack_id: str) -> str | None:
         if cond:
             ref_lines.append(f"  Load when: {cond}")
     if ref_lines:
-        # Prefer MCP skill_read_subskill: IDE Read on ~/.claude|~/.cursor/skills
-        # hits workspace permission prompts and fails. Keep ids (not file paths)
-        # so agents do not try filesystem Reads of references/*.md.
         body = (
             body.strip()
-            + "\n\n## Reference files\n\n"
-            + "Tags: [yours]=you created, [store]=Store, [shipped]=bundled, [plugin]=plugin.\n\n"
-            + f'Load with MCP `skill_read_subskill("{pack_id}", "<id>")` when needed. '
-            + "Do **not** use the IDE Read/open-file tool on "
-            + "`~/.claude/skills`, `~/.cursor/skills`, or `references/*.md` paths "
-            + "(outside the project workspace — permission prompts / always errors).\n\n"
+            + f'\n\nRefs: skill_read_subskill("{pack_id}", "<id>") — never IDE-Read '
+            + "`~/.claude/skills` / `~/.cursor/skills` / `references/*.md`.\n"
             + "\n".join(ref_lines)
         )
     return _skill.serialize_frontmatter(meta, body)

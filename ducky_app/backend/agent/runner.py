@@ -548,6 +548,9 @@ class AgentRunner:
         set_tool_result_format(self.config.tool_result_format)
         plan_token = set_plan_only(bool(self.config.plan_only))
         hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
+        from backend.agent import verify_evidence
+
+        verify_token = verify_evidence.bind_conversation(self.config.conv_id)
         identity_token = run_identity.bind(self.config.run_context())
         try:
             async for event in self._run_turn_inner(
@@ -562,6 +565,7 @@ class AgentRunner:
         finally:
             run_identity.reset(identity_token)
             hammer_guard.reset_conversation(hammer_token)
+            verify_evidence.reset_conversation(verify_token)
             reset_plan_only(plan_token)
 
     async def _run_turn_inner(

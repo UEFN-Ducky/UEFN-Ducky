@@ -11,6 +11,7 @@ from typing import Any
 _DESC_MAX = 200
 _DESC_MAX_LOCAL = 70
 _META_TOOLS = frozenset({"ducky_get_tools", "ducky_call_tool", "ducky_find_tools"})
+_BLURB_GROUPS = frozenset({"core", "workspace", "panel", "verse", "testing"})
 _CACHE_LOCK = threading.Lock()
 # key: (desc_max, tool_name_tuple) → text
 _INDEX_CACHE: dict[tuple[int, tuple[str, ...]], str] = {}
@@ -64,8 +65,13 @@ def build_tool_index_text(
         "Floor tools (workspace_*, ducky_get_status, ducky_ask_user, get/call) are always in tools[].",
     ]
     for group in sorted(grouped):
+        items = sorted(grouped[group], key=lambda x: x[0])
         lines.append(f"\n### {group}")
-        for name, desc in sorted(grouped[group], key=lambda x: x[0]):
+        if group not in _BLURB_GROUPS:
+            names = [name for name, _ in items]
+            lines.append(f"{group}: {len(names)} tools ({', '.join(f'`{n}`' for n in names)})")
+            continue
+        for name, desc in items:
             if desc:
                 lines.append(f"- `{name}` — {desc}")
             else:

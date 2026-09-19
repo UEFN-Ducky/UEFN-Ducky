@@ -41,10 +41,15 @@ def test_build_skill_prompt_keeps_core_lazy() -> None:
     assert "[yours]=" in text or "[shipped]" in text or "[store]" in text or "[plugin]" in text
     # Full core SKILL.md bodies stay lazy — do not dump operator essays.
     assert "Never paste the contents of a file" not in text
-    # Every non-denied pack id should appear with an origin tag.
+    from backend.skills.store import _is_specialist_pack
+
+    # Specialist blender packs collapse to one line unless the ducky opted in.
     for pid in list_pack_ids():
-        assert f"`{pid}` [" in text
-    # Subskills are listed under packs (lazy index for non-always_on).
+        if _is_specialist_pack(pid):
+            assert f"`{pid}`" in text
+        else:
+            assert f"`{pid}` [" in text
+    # Subskills are listed as id + tag only (no descriptions).
     assert "  - `core` [" in text
 
 

@@ -294,13 +294,14 @@ def _place_mesh_actors(
     xforms: List[unreal.Transform],
     level_folder: str,
     label_prefix: str,
-) -> int:
+) -> tuple[int, list[str]]:
     """Spawn tagged actors the way Content Drawer does (Blueprint/Actor class).
 
     Never ``spawn_actor_from_object(StaticMesh)`` for Fortnite catalog — that
     creates FortStaticMeshActor with a direct mesh ref and cook-fails on BakeData.
     """
     added = 0
+    labels: list[str] = []
     for i, xf in enumerate(xforms):
         try:
             loc = xf.translation
@@ -316,15 +317,21 @@ def _place_mesh_actors(
                 actor.set_actor_scale3d(sc)
             except Exception:
                 pass
+            label = f"{label_prefix}_{i:03d}"
             try:
-                actor.set_actor_label(f"{label_prefix}_{i:03d}")
+                actor.set_actor_label(label)
             except Exception:
-                pass
+                try:
+                    label = actor.get_actor_label()
+                except Exception:
+                    label = ""
             _tag_actor(actor, level_folder)
             added += 1
+            if label:
+                labels.append(label)
         except Exception:
             break
-    return added
+    return added, labels
 
 
 def _placeable_name(obj) -> str:
@@ -1117,6 +1124,7 @@ def foliage_scatter(
     used_backend = "hism" if use_hism else "content_drawer_actors"
     added = 0
     details = []
+    placed_labels: list[str] = []
     for i, obj in enumerate(resolved):
         xforms = transforms_by_key[i]
         if not xforms:
@@ -1125,8 +1133,15 @@ def foliage_scatter(
             if use_hism:
                 _actor, hism = _spawn_hism_container(obj, center, base_z, folder)
                 n = _add_hism_instances(hism, xforms)
+                try:
+                    placed_labels.append(_actor.get_actor_label())
+                except Exception:
+                    pass
             else:
-                n = _place_mesh_actors(obj, xforms, folder, f"WG_Foliage_{_placeable_name(obj)}")
+                n, labels = _place_mesh_actors(
+                    obj, xforms, folder, f"WG_Foliage_{_placeable_name(obj)}"
+                )
+                placed_labels.extend(labels)
             added += n
             details.append({"source": _placeable_path(obj), "instances": n, "backend": used_backend})
         except Exception as e:
@@ -1135,6 +1150,7 @@ def foliage_scatter(
     lookup.invalidate()
     return {
         "ok": True,
+        "labels": placed_labels,
         "foliage_backend": used_backend,
         "placement_mode": mode,
         "seed": int(seed),

@@ -256,7 +256,10 @@ def cmd_set_actor_properties(actor_path: str, properties: Dict[str, Any]) -> dic
     for prop, value in properties.items():
         try:
             target.set_editor_property(prop, value)
-            set_results[prop] = "ok"
+            try:
+                set_results[prop] = serialize(target.get_editor_property(prop))
+            except Exception:
+                set_results[prop] = value
         except Exception as e:
             set_results[prop] = f"<error: {e}>"
     # An arbitrary property write can change the label (index key) or other

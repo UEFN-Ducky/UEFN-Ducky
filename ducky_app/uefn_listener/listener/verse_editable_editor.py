@@ -1789,7 +1789,6 @@ def bulk_wire_verse_device(
     wiring: Dict[str, Any],
     skip_missing: bool = False,
     save_level: bool = False,
-    verify: bool = False,
 ) -> dict:
     """Wire many @editable fields on one Verse device in a single call."""
     actor = lookup.require_actor(actor_path)
@@ -1840,9 +1839,6 @@ def bulk_wire_verse_device(
         request_level_save()
         out["save"] = "scheduled"
 
-    if verify:
-        out["verify"] = get_verse_editables(actor_path)
-
     return out
 
 
@@ -1854,7 +1850,6 @@ def setup_verse_device(
     folder: str = "",
     spawn_if_exists: str = "skip",
     save_level: bool = True,
-    verify: bool = True,
     skip_missing: bool = False,
 ) -> dict:
     """Spawn (if needed), label, and bulk-wire any Verse device class."""
@@ -1908,7 +1903,6 @@ def setup_verse_device(
         wiring,
         skip_missing=skip_missing,
         save_level=save_level,
-        verify=verify,
     )
 
     return {

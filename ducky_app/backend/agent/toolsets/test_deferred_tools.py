@@ -56,13 +56,15 @@ def test_tool_index_groups_and_excludes_meta():
     catalog = "\n".join(line for line in text.splitlines() if line.startswith("- "))
     assert "`ducky_get_tools`" not in catalog
     assert "`ducky_call_tool`" not in catalog
-    assert "`blender_status`" in catalog
+    assert "`blender_status`" in text
+    assert "desktop: 1 tools" in text
     assert "### desktop" in text
     assert "### nested:foo" in text
+    assert "nested:foo: 1 tools" in text
 
 
 def test_tool_index_local_desc_max_shorter():
-    tools = [_T("blender_status", "x" * 200)]
+    tools = [_T("workspace_read_file", "x" * 200)]
     fat = build_tool_index_text(tools, desc_max=200)
     slim = build_tool_index_text(tools, desc_max=70)
     assert len(slim) < len(fat)

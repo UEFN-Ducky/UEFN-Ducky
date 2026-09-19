@@ -27,6 +27,11 @@ from backend.agent.write_claim_guard import (
     fake_write_warning,
     record_write_from_tool,
 )
+from backend.agent.verify_evidence import (
+    append_verify_warning,
+    fake_verify_warning,
+    handoff_warning,
+)
 from backend.agent.toolsets import is_plan_safe_tool
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 
@@ -1120,6 +1125,16 @@ async def _run_agent_loop(
                 if write_warning:
                     assistant_msg = append_write_claim_warning(assistant_msg, write_warning)
                     push({"type": "delegation_warning", "text": write_warning, "conv_id": conv.id})
+                verify_warning = fake_verify_warning(assistant_msg)
+                if verify_warning:
+                    assistant_msg = append_verify_warning(assistant_msg, verify_warning)
+                    push({"type": "delegation_warning", "text": verify_warning, "conv_id": conv.id})
+                handoff = handoff_warning(assistant_msg)
+                if handoff:
+                    assistant_msg = append_verify_warning(
+                        assistant_msg, handoff, title="Hand-off"
+                    )
+                    push({"type": "delegation_warning", "text": handoff, "conv_id": conv.id})
                 append_message(conv, assistant_msg)
                 stop_reason = "done"
                 push({"type": "assistant_done", "conv_id": conv.id})

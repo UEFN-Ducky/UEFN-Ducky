@@ -305,7 +305,19 @@ def recompile_material(material_path: str) -> dict:
     unreal.MaterialEditingLibrary.recompile_material(mat)
     mat.modify(True)
     saved = unreal.EditorAssetLibrary.save_loaded_asset(mat, only_if_is_dirty=False)
-    return {"material_path": material_path, "saved": bool(saved)}
+    compile_status = "ok" if saved else "save_failed"
+    err_fn = getattr(unreal.MaterialEditingLibrary, "get_num_material_errors", None)
+    if callable(err_fn):
+        try:
+            nerr = int(err_fn(mat) or 0)
+            compile_status = "ok" if nerr == 0 else f"errors:{nerr}"
+        except Exception:
+            pass
+    return {
+        "material_path": material_path,
+        "saved": bool(saved),
+        "compile_status": compile_status,
+    }
 
 
 def assign_material_to_mesh(

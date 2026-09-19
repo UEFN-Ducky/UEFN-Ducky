@@ -822,14 +822,21 @@ def resolve_conversation_selection(conv: Any, settings: Any) -> SkillSelection:
 # --- Prompt assembly (index-only — full bodies via skill_read_subskill) ---
 
 
-def _short_desc(text: str, limit: int = 140) -> str:
-    one = " ".join(str(text or "").strip().split())
-    if len(one) <= limit:
-        return one
-    return one[: limit - 1].rstrip() + "…"
-
-
 _ALWAYS_ON_PROMPT_CAP = 4000  # chars of injected always_on bodies (excludes index)
+
+# Same-source Blender specialist packs — one index line unless the ducky
+# opted in via enabled_subskills[pack_id].
+_SPECIALIST_SUFFIXES = ("-style", "-mood", "-worlds", "-artist")
+_SPECIALIST_PREFIXES = ("genre-",)
+
+
+def _is_specialist_pack(pack_id: str) -> bool:
+    p = (pack_id or "").strip().lower()
+    return p.endswith(_SPECIALIST_SUFFIXES) or p.startswith(_SPECIALIST_PREFIXES)
+
+
+def _specialist_opted_in(sel: SkillSelection, pack_id: str) -> bool:
+    return pack_id in (sel.enabled_subskills or {})
 
 
 def build_skill_prompt(selection: SkillSelection | None = None) -> str:
@@ -851,7 +858,12 @@ def build_skill_prompt(selection: SkillSelection | None = None) -> str:
     any_pack = False
     always_bodies: list[str] = []
     always_budget = _ALWAYS_ON_PROMPT_CAP
+    collapsed: list[str] = []
     for pack_id in sel.enabled_packs:
+        if _is_specialist_pack(pack_id) and not _specialist_opted_in(sel, pack_id):
+            collapsed.append(pack_id)
+            any_pack = True
+            continue
         manifest = load_pack_manifest(pack_id)
         if not manifest:
             continue
@@ -859,26 +871,13 @@ def build_skill_prompt(selection: SkillSelection | None = None) -> str:
         pack_tag = _pack_origin_tag(manifest)
         tag = _index_tag_label(pack_tag)
         label = str(manifest.get("label") or pack_id)
-        desc = _short_desc(str(manifest.get("description") or ""))
-        if desc:
-            lines.append(f"- `{pack_id}` [{tag}] — {label}: {desc}")
-        else:
-            lines.append(f"- `{pack_id}` [{tag}] — {label}")
+        lines.append(f"- `{pack_id}` [{tag}] — {label}")
         for sub in list_subskills(manifest):
             sid = str(sub.get("id") or "")
             if not sid or not _subskill_allowed(pack_id, sub):
                 continue
-            sub_tag = _index_tag_label(_subskill_origin_tag(sub, pack_tag))
-            if sid == CORE_ID:
-                lines.append(f"  - `{sid}` [{sub_tag}]")
-                continue
-            sub_desc = _short_desc(str(sub.get("description") or sub.get("label") or ""))
-            if sub_desc:
-                lines.append(f"  - `{sid}` [{sub_tag}] — {sub_desc}")
-            else:
-                lines.append(f"  - `{sid}` [{sub_tag}]")
             # Inject non-core always_on bodies (capped) so agents get hard rules.
-            if bool(sub.get("always_on")) and always_budget > 0:
+            if sid != CORE_ID and bool(sub.get("always_on")) and always_budget > 0:
                 body = (read_subskill_body(pack_id, sid) or "").strip()
                 if body:
                     chunk = f"### {pack_id}/{sid}\n\n{body}"
@@ -886,6 +885,15 @@ def build_skill_prompt(selection: SkillSelection | None = None) -> str:
                         chunk = chunk[: always_budget - 1].rstrip() + "…"
                     always_bodies.append(chunk)
                     always_budget -= len(chunk)
+            sub_tag = _index_tag_label(_subskill_origin_tag(sub, pack_tag))
+            lines.append(f"  - `{sid}` [{sub_tag}]")
+    if collapsed:
+        listed = ", ".join(f"`{pid}`" for pid in collapsed[:40])
+        extra = f" +{len(collapsed) - 40} more" if len(collapsed) > 40 else ""
+        lines.append(
+            f"- blender-styles [shipped] — {len(collapsed)} style/mood/world/artist/genre "
+            f"packs: {listed}{extra}. Load one with skill_read_subskill when that look is needed."
+        )
     if not any_pack:
         return "(no skill packs available)"
     if always_bodies:
@@ -911,7 +919,12 @@ def build_skill_prompt_compact(selection: SkillSelection | None = None) -> str:
         "",
     ]
     any_pack = False
+    collapsed: list[str] = []
     for pack_id in sel.enabled_packs:
+        if _is_specialist_pack(pack_id) and not _specialist_opted_in(sel, pack_id):
+            collapsed.append(pack_id)
+            any_pack = True
+            continue
         manifest = load_pack_manifest(pack_id)
         if not manifest:
             continue
@@ -925,6 +938,13 @@ def build_skill_prompt_compact(selection: SkillSelection | None = None) -> str:
             if not sid or not _subskill_allowed(pack_id, sub):
                 continue
             lines.append(f"  - `{sid}`")
+    if collapsed:
+        listed = ", ".join(f"`{pid}`" for pid in collapsed[:40])
+        extra = f" +{len(collapsed) - 40} more" if len(collapsed) > 40 else ""
+        lines.append(
+            f"- blender-styles — {len(collapsed)} packs: {listed}{extra}. "
+            "Load one with skill_read_subskill when needed."
+        )
     if not any_pack:
         return "(no skill packs available)"
     return "\n".join(lines)

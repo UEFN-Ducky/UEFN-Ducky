@@ -237,32 +237,54 @@ def verify_against_plan(
                 "text": "No implementation summary provided — cannot verify against the plan.",
             }
         )
-    elif not plan:
+    from backend.agent.verify_evidence import evidence_names, has_evidence
+
+    ev = evidence_names()
+    if not has_evidence():
+        comments.append(
+            {
+                "severity": "Critical",
+                "text": (
+                    "No check tool returned ok this turn. Run workspace_compile_verse, "
+                    "get_verse_editables, GetDeviceProperties, verse_test_run, "
+                    "validate_uefn_asset, take_high_res_screenshot, or changeset_list "
+                    "before claiming verified."
+                ),
+            }
+        )
+    else:
+        comments.append(
+            {
+                "severity": "Minor",
+                "text": "Check tools this turn: " + ", ".join(ev),
+            }
+        )
+    if not plan:
         comments.append(
             {
                 "severity": "Minor",
                 "text": "Task has no written plan; treat the summary as the source of truth.",
             }
         )
-    else:
-        # Heuristic keyword coverage
-        plan_words = {w.lower() for w in plan.replace(",", " ").split() if len(w) > 4}
-        summary_l = summary.lower()
-        missing = sorted(w for w in plan_words if w not in summary_l)[:12]
-        if missing:
-            comments.append(
-                {
-                    "severity": "Major",
-                    "text": "Plan topics not clearly addressed in the summary: " + ", ".join(missing),
-                }
-            )
-        else:
-            comments.append(
-                {
-                    "severity": "Minor",
-                    "text": "Summary appears to cover the main plan keywords.",
-                }
-            )
+    from backend.agent.coding_agents import plans as plans_mod
+
+    for cid in task.get("conv_ids") or []:
+        doc = plans_mod.load_plan(str(cid), project_root)
+        if not doc:
+            continue
+        for node in plans_mod._flatten_nodes(doc.get("nodes")):
+            if not plans_mod.is_verify_leaf(node):
+                continue
+            if str(node.get("status") or "") != "completed":
+                comments.append(
+                    {
+                        "severity": "Major",
+                        "text": (
+                            f"Verify leaf `{node.get('id')}` is not completed: "
+                            f"{node.get('content') or ''}"
+                        ),
+                    }
+                )
     if isinstance(target, dict):
         target["status"] = "verified" if not any(c["severity"] == "Critical" for c in comments) else "needs_work"
         target["verify_comments"] = comments

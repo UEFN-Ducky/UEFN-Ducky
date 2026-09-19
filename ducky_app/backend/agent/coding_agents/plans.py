@@ -347,11 +347,29 @@ def _rollup_completed_parents(nodes: list[dict[str, Any]] | None) -> None:
             walk(node)
 
 
+def is_verify_leaf(node: dict[str, Any] | None) -> bool:
+    """True for a leaf whose id or content names a Verify step."""
+    if not isinstance(node, dict):
+        return False
+    kids = node.get("children") or []
+    if isinstance(kids, list) and kids:
+        return False
+    blob = f"{node.get('id') or ''} {node.get('content') or ''}".lower()
+    return "verify" in blob or "verification" in blob
+
+
 def _apply_status_gate(node: dict[str, Any], status: str) -> str:
-    """Refuse completed unless all descendants are done; return effective status."""
+    """Refuse completed unless descendants are done and Verify leaves have evidence."""
     st = _normalize_status(status)
     if st == "completed" and not _descendants_done(node):
         raise ValueError("cannot complete a subplan while nested subplans are unfinished")
+    if st == "completed" and is_verify_leaf(node):
+        from backend.agent.verify_evidence import has_evidence
+
+        if not has_evidence():
+            raise ValueError(
+                "cannot complete a Verify leaf until a check tool returned ok this turn"
+            )
     return st
 
 
@@ -1242,6 +1260,7 @@ def update_template(
 
 
 DEMO_TEMPLATE_ID = "demo-getting-started"
+VERIFY_LOOP_TEMPLATE_ID = "verify-loop"
 
 
 def ensure_demo_plan_template() -> dict[str, Any] | None:
@@ -1269,8 +1288,79 @@ def ensure_demo_plan_template() -> dict[str, Any] | None:
     )
 
 
+def ensure_verify_loop_template() -> dict[str, Any] | None:
+    """Seed Diagnose → Fix → Verify with a check-tool Done-when."""
+    existing = load_template(VERIFY_LOOP_TEMPLATE_ID)
+    if existing:
+        return existing
+    now = time.time()
+    return save_template(
+        {
+            "id": VERIFY_LOOP_TEMPLATE_ID,
+            "kind": "template",
+            "title": "Verify loop",
+            "overview": "Diagnose → Fix → Verify. The Verify leaf names a check tool.",
+            "body_markdown": "",
+            "nodes": [
+                {
+                    "id": "diagnose",
+                    "content": "Diagnose — inspect the failure",
+                    "status": "pending",
+                    "kind": "subplan",
+                    "children": [
+                        {
+                            "id": "d1",
+                            "content": "Read errors / census (workspace_list_verse_errors)",
+                            "status": "pending",
+                            "kind": "step",
+                            "children": [],
+                        }
+                    ],
+                },
+                {
+                    "id": "fix",
+                    "content": "Fix — apply the smallest change",
+                    "status": "pending",
+                    "kind": "subplan",
+                    "children": [
+                        {
+                            "id": "f1",
+                            "content": "Edit files or wire the device",
+                            "status": "pending",
+                            "kind": "step",
+                            "children": [],
+                        }
+                    ],
+                },
+                {
+                    "id": "verify",
+                    "content": "Verify — run the check tool",
+                    "status": "pending",
+                    "kind": "subplan",
+                    "children": [
+                        {
+                            "id": "v1",
+                            "content": (
+                                "Verify: workspace_compile_verse / get_verse_editables / "
+                                "verse_test_run (Done-when: check tool ok)"
+                            ),
+                            "status": "pending",
+                            "kind": "step",
+                            "children": [],
+                        }
+                    ],
+                },
+            ],
+            "created_at": now,
+            "updated_at": now,
+            "status": "template",
+        }
+    )
+
+
 def list_templates() -> list[dict[str, Any]]:
     ensure_demo_plan_template()
+    ensure_verify_loop_template()
     rows: list[dict[str, Any]] = []
     sources: list[tuple[str, dict[str, Any]]] = []
     if _use_db():
