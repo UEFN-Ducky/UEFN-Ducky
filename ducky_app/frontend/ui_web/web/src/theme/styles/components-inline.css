@@ -2127,7 +2127,7 @@ html.window-maximized .window-resize-grip {
 
 .model-selector-effort {
   flex-shrink: 0;
-  padding: 10px 12px 14px;
+  padding: 6px 12px 10px;
   border-top: 1px solid var(--border);
   overflow: visible;
 }
@@ -2147,15 +2147,19 @@ html.window-maximized .window-resize-grip {
 .model-selector-effort-labels {
   display: flex;
   justify-content: space-between;
-  margin-top: 10px;
-  font-size: 10px;
+  margin-top: 6px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
   color: var(--muted);
 }
 .model-selector-effort-slider {
   position: relative;
-  height: 86px;
+  height: 40px;
   margin-top: 4px;
   padding: 0 14px;
+  overflow: visible;
   touch-action: none;
   cursor: grab;
 }

@@ -26,6 +26,19 @@ describe("ThinkingEffortFooter", () => {
     expect(screen.queryByText("This model has no extended thinking")).toBeNull();
   });
 
+  it("puts Faster and Smarter under the slider", () => {
+    const { container } = render(
+      <ThinkingEffortFooter menu={MENU} modelName="GPT-6-Astra" effort="off" onChange={() => {}} />,
+    );
+    const root = container.querySelector(".model-selector-effort");
+    const classes = [...(root?.children ?? [])].map((el) => el.className);
+    expect(classes.indexOf("model-selector-effort-slider")).toBeLessThan(
+      classes.indexOf("model-selector-effort-labels"),
+    );
+    expect(screen.getByText("Faster")).toBeTruthy();
+    expect(screen.getByText("Smarter")).toBeTruthy();
+  });
+
   it("moves through gateway levels when the menu is present", () => {
     const onChange = vi.fn();
     render(

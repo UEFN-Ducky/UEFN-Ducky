@@ -130,10 +130,6 @@ export function ThinkingEffortFooter({ menu, modelName, effort, onChange }: Thin
       onClick={(e) => e.stopPropagation()}
     >
       <div className="model-selector-effort-readout">{formatEffortReadout(modelName, level)}</div>
-      <div className="model-selector-effort-labels">
-        <span>{lo}</span>
-        <span>{hi}</span>
-      </div>
       <div
         className="model-selector-effort-slider"
         onPointerDown={(e) => {
@@ -180,6 +176,10 @@ export function ThinkingEffortFooter({ menu, modelName, effort, onChange }: Thin
             if (next?.id) onChange(next.id);
           }}
         />
+      </div>
+      <div className="model-selector-effort-labels">
+        <span>{lo}</span>
+        <span>{hi}</span>
       </div>
     </div>
   );
