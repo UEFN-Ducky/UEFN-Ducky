@@ -27,8 +27,31 @@ function readFileAsText(file: File): Promise<string> {
   });
 }
 
-export function useComposerAttachments() {
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+export function composerAttachmentsFromDto(items: MessageAttachmentDto[]): ComposerAttachment[] {
+  return items.map((a) =>
+    a.kind === "image"
+      ? {
+          id: newId(),
+          kind: "image" as const,
+          name: a.name,
+          mime: a.mime || "image/png",
+          dataUrl: `data:${a.mime || "image/png"};base64,${a.data_base64 ?? ""}`,
+          ...(a.project_path ? { projectPath: a.project_path } : {}),
+        }
+      : {
+          id: newId(),
+          kind: "file" as const,
+          name: a.name,
+          mime: a.mime || "text/plain",
+          text: a.text ?? "",
+        },
+  );
+}
+
+export function useComposerAttachments(initial: MessageAttachmentDto[] = []) {
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
+    composerAttachmentsFromDto(initial),
+  );
   const [error, setError] = useState("");
 
   const removeAttachment = useCallback((id: string) => {
@@ -49,25 +72,14 @@ export function useComposerAttachments() {
 
   /** Restore queued payloads without re-reading files or losing the current draft. */
   const restoreAttachments = useCallback((items: MessageAttachmentDto[]) => {
-    const restored: ComposerAttachment[] = items.map((a) =>
-      a.kind === "image"
-        ? {
-            id: newId(),
-            kind: "image",
-            name: a.name,
-            mime: a.mime || "image/png",
-            dataUrl: `data:${a.mime || "image/png"};base64,${a.data_base64 ?? ""}`,
-            ...(a.project_path ? { projectPath: a.project_path } : {}),
-          }
-        : {
-            id: newId(),
-            kind: "file",
-            name: a.name,
-            mime: a.mime || "text/plain",
-            text: a.text ?? "",
-          },
-    );
+    const restored = composerAttachmentsFromDto(items);
     setAttachments((prev) => [...restored, ...prev]);
+    setError("");
+  }, []);
+
+  /** Tab restore: overwrite, do not append onto leftover chips. */
+  const replaceAttachments = useCallback((items: MessageAttachmentDto[]) => {
+    setAttachments(composerAttachmentsFromDto(items));
     setError("");
   }, []);
 
@@ -165,6 +177,7 @@ export function useComposerAttachments() {
     updateAttachmentImage,
     clearAttachments,
     restoreAttachments,
+    replaceAttachments,
     toApiAttachments,
     setError,
   };

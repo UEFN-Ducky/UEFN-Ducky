@@ -39,4 +39,23 @@ describe("restoring queued attachments", () => {
     act(() => result.current.clearAttachments());
     expect(result.current.attachments).toEqual([]);
   });
+
+  it("seeds from initial DTOs and replaceAttachments overwrites instead of appending", () => {
+    const seeded: MessageAttachmentDto[] = [
+      { kind: "file", name: "draft.txt", mime: "text/plain", text: "cached draft" },
+      {
+        kind: "image", name: "card.png", mime: "image/png",
+        data_base64: "aW1hZ2U=", project_path: "Saved/DuckyCaptures/card.png",
+      },
+    ];
+    const { result } = renderHook(() => useComposerAttachments(seeded));
+    expect(result.current.toApiAttachments()).toEqual(seeded);
+
+    const next: MessageAttachmentDto[] = [
+      { kind: "file", name: "other.txt", mime: "text/plain", text: "switched chat" },
+    ];
+    act(() => result.current.replaceAttachments(next));
+    expect(result.current.toApiAttachments()).toEqual(next);
+    expect(result.current.attachments).toHaveLength(1);
+  });
 });

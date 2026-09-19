@@ -1,4 +1,4 @@
-import type { AgentMode } from "../types/panel";
+import type { AgentMode, MessageAttachmentDto } from "../types/panel";
 import { boundedGet, boundedSet } from "../utils/boundedMap";
 
 export interface CachedChatComposerState {
@@ -7,6 +7,7 @@ export interface CachedChatComposerState {
   selectedModel: string;
   selectedModelDisplayName: string;
   codingAgent?: string;
+  attachments?: MessageAttachmentDto[];
 }
 
 /** Same cap as the message cache: a session can open any number of chats. */

@@ -268,8 +268,9 @@ export function ChatPane({
     updateAttachmentImage,
     clearAttachments,
     restoreAttachments,
+    replaceAttachments,
     toApiAttachments,
-  } = useComposerAttachments();
+  } = useComposerAttachments(initialComposer?.attachments ?? []);
 
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const previewAttachment = useMemo((): MessageAttachmentDto | null => {
@@ -393,8 +394,9 @@ export function ChatPane({
       selectedModel,
       selectedModelDisplayName,
       codingAgent,
+      attachments: toApiAttachments(),
     });
-  }, [chat.id, inputText, agentMode, selectedModel, selectedModelDisplayName, codingAgent]);
+  }, [chat.id, inputText, agentMode, selectedModel, selectedModelDisplayName, codingAgent, attachments, toApiAttachments]);
 
   useEffect(() => {
     // Server echoes for model/agent changes must not overwrite the local
@@ -411,7 +413,8 @@ export function ChatPane({
     setSelectedModelDisplayName(matchingCached?.selectedModelDisplayName ?? chat.model ?? "");
     setCodingAgent(nextCodingAgent);
     setThinkingEffort(chat.thinkingEffort || "off");
-  }, [chat.id, chat.model, chat.codingAgent, chat.thinkingEffort]);
+    replaceAttachments(matchingCached?.attachments ?? []);
+  }, [chat.id, chat.model, chat.codingAgent, chat.thinkingEffort, replaceAttachments]);
 
   // New-ducky race: tab opens before list_all_conversations includes the chat, so
   // the first ChatPane paint is a stub with no model. Adopt model/agent once the
@@ -1469,7 +1472,10 @@ export function ChatPane({
                 onClosePanel={() => setContextPanelOpen(false)}
                 onOpenFile={handleOpenFile}
                 onContextChanged={handleContextChanged}
-                onClearDraft={() => setInputText("")}
+                onClearDraft={() => {
+                  setInputText("");
+                  clearAttachments();
+                }}
               />
               {!chat.isGroup ? (
                 <>
