@@ -12,6 +12,16 @@ from typing import Any
 from frontend.atomic_json import write_json_atomic
 from frontend.settings import PanelSettings, default_app_data_dir
 
+# Single copy of the Diagnose→Fix→Verify protocol (prompt / MCP / BYOA / modes).
+PLAN_PROTOCOL = (
+    "Followable `nodes`: Diagnose → Fix → Verify; each leaf = one action + Done-when "
+    "(name the check tool). `ducky_plan_update_node` `in_progress` BEFORE the work, "
+    "`completed` when Done-when is met. Mutators are blocked until a leaf is "
+    "in_progress. If the approach changes, update the tree before more mutators — "
+    "never thrash off-plan. Templates: `ducky_create_plan_template` / "
+    "`ducky_instantiate_plan_template`. Plan mode: create/update then stop."
+)
+
 _NODE_STATUSES = frozenset({"pending", "in_progress", "completed", "cancelled"})
 _DONE = frozenset({"completed", "cancelled"})
 _NODE_KINDS = frozenset({"step", "subplan"})

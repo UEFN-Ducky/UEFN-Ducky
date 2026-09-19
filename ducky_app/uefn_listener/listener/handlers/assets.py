@@ -133,11 +133,19 @@ def cmd_delete_asset(asset_path: str) -> dict:
     return delete_unreferenced_project_asset(asset_path)
 
 
+@register("delete_project_folder")
+def cmd_delete_project_folder(directory: str) -> dict:
+    from listener.asset_delete import delete_project_folder
+
+    return delete_project_folder(directory)
+
+
 @register("delete_directory")
 def cmd_delete_directory(directory: str) -> dict:
     raise ValueError(
-        "Refused: never delete island content. Fix broken refs "
-        "(search / reimport / relink / duplicate). Delete only in the Content Browser. "
+        "Refused: never delete arbitrary island trees. "
+        "User-asked character/folder delete uses delete_project_folder. "
+        "Fix broken refs (search / reimport / relink / duplicate). "
         "Editor offline is not a delete queue — do not restart UEFN to delete."
     )
 

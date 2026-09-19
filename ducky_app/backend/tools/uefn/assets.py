@@ -86,14 +86,63 @@ def rename_asset(old_path: str, new_path: str, pretty: bool = False) -> str:
     return tool_json(result, pretty=pretty)
 
 
+def _panel_project_root() -> str:
+    try:
+        from frontend.settings import PanelSettings
+
+        return (PanelSettings.load().uefn_project_root or "").strip()
+    except Exception:
+        return ""
+
+
+def _lore_after_gone(asset_path: str) -> dict:
+    root = _panel_project_root()
+    if not root:
+        return {"skipped": "no_project"}
+    from frontend.ui_web.verse_editor.urc.lore_host import after_asset_gone, has_lore
+
+    if not has_lore(root):
+        return {"skipped": "no_lore"}
+    return after_asset_gone(root, asset_path)
+
+
 @plugin_mcp_tool("uefn")
 def delete_asset(asset_path: str, pretty: bool = False) -> str:
     """Delete one unreferenced project asset. Call only when the user asked to delete it.
 
     Fix / reimport / relink otherwise. Refuses Engine / Fortnite / catalog
-    paths and anything still referenced.
+    paths and anything still referenced (including mesh/skel/mat siblings).
+    Already-gone still drops a Lore pending add so CheckIn cannot rehash a missing file.
+    Whole character folder: ``delete_project_folder``.
     """
     result = send_command("delete_asset", {"asset_path": asset_path})
+    if result.get("ok"):
+        result = {**result, "lore": _lore_after_gone(asset_path)}
+    return tool_json(result, pretty=pretty)
+
+
+@plugin_mcp_tool("uefn")
+def delete_project_folder(directory: str, pretty: bool = False) -> str:
+    """Delete one project folder the user asked to remove (character/unit).
+
+    Lore-drops pending adds under that tree first, then removes the folder
+    when nothing outside it still references it. ``delete_directory`` stays refused.
+    """
+    root = _panel_project_root()
+    from frontend.ui_web.verse_editor.urc.lore_host import (
+        content_rel_from_asset_path,
+        drop_missing_orphans,
+        drop_pending_adds,
+        has_lore,
+    )
+
+    rel = content_rel_from_asset_path(directory)
+    folder = rel[: -len(".uasset")] if rel.lower().endswith(".uasset") else rel
+    if root and has_lore(root):
+        drop_pending_adds(root, prefixes=[folder])
+    result = send_command("delete_project_folder", {"directory": directory})
+    if result.get("ok") and root and has_lore(root):
+        result = {**result, "lore": drop_missing_orphans(root, prefixes=[folder])}
     return tool_json(result, pretty=pretty)
 
 

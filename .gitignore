@@ -44,3 +44,6 @@ ducky_app/frontend/ui_web/web/public/verse-workflow/
 
 # e2e artifact
 tests/e2e/remote_view/last-viewer.png
+
+# Cursor local plans — not product
+.cursor/plans/

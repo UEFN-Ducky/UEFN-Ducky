@@ -138,7 +138,7 @@ def test_create_folder_is_nothing_to_undo() -> None:
 
 
 def test_directory_nukes_stay_refused_and_deletes_are_not_revertable() -> None:
-    for command in ("delete_actors", "delete_asset", "delete_directory"):
+    for command in ("delete_actors", "delete_asset", "delete_project_folder", "delete_directory"):
         spec = classify(command)
         assert spec.mutates == MUT_WRITE
         assert spec.revertable == REVERT_NONE

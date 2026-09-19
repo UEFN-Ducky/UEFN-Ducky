@@ -31,8 +31,7 @@ def require_project_asset_path(asset_path: str) -> str:
         )
     if not root and head.lower() in ("engine", "game"):
         raise ValueError(
-            f"Refused: {path} is not clearly inside this project's content — "
-            "remove it in the Content Browser"
+            f"Refused: {path} is not clearly inside this project's content"
         )
     return path
 
@@ -51,7 +50,14 @@ def delete_unreferenced_project_asset(asset_path: str) -> dict:
     """
     path = require_project_asset_path(asset_path)
     if not unreal.EditorAssetLibrary.does_asset_exist(path):
-        return {"ok": True, "kind": "asset", "removed": "", "note": "asset no longer exists"}
+        return {
+            "ok": True,
+            "kind": "asset",
+            "removed": "",
+            "gone": True,
+            "path": path,
+            "note": "asset no longer exists",
+        }
     referencers: List[str] = []
     try:
         from listener.registry.assets_pipeline import get_referencers
@@ -63,16 +69,55 @@ def delete_unreferenced_project_asset(asset_path: str) -> dict:
         ]
     except Exception as exc:
         raise ValueError(
-            f"Refused: could not check what references {path} ({exc}) — "
-            "remove it in the Content Browser"
+            f"Refused: could not check what references {path} ({exc})"
         ) from exc
     if referencers:
         shown = ", ".join(referencers[:5]) + ("…" if len(referencers) > 5 else "")
         raise ValueError(
             f"Refused: {path} is still used by {len(referencers)} asset(s): {shown}. "
-            "Removing it would break them — relink / fixup_redirectors first, or "
-            "delete it in the Content Browser if you are sure."
+            "Removing it would break them — relink / fixup_redirectors first. "
+            "To remove a whole character folder, call delete_project_folder."
         )
     unreal.EditorAssetLibrary.delete_asset(path)
     log_msg(f"deleted asset {path}", "info")
     return {"ok": True, "kind": "asset", "removed": path}
+
+
+def _inside_folder(ref: str, folder: str) -> bool:
+    r = (ref or "").split(".")[0].rstrip("/").lower()
+    f = folder.rstrip("/").lower()
+    return bool(r) and (r == f or r.startswith(f + "/"))
+
+
+def delete_project_folder(directory: str) -> dict:
+    """Remove one project folder when nothing outside it still references it."""
+    path = require_project_asset_path((directory or "").strip().rstrip("/"))
+    listed: List[str] = []
+    try:
+        listed = [str(a) for a in (unreal.EditorAssetLibrary.list_assets(path, True, False) or [])]
+    except Exception:
+        listed = []
+    external: List[str] = []
+    try:
+        from listener.registry.assets_pipeline import get_referencers
+
+        for asset in listed:
+            pkg = str(asset).split(".")[0]
+            for ref in list(get_referencers(pkg).get("referencers") or []):
+                if _is_self_ref(str(ref), pkg) or _inside_folder(str(ref), path):
+                    continue
+                external.append(str(ref))
+    except Exception as exc:
+        raise ValueError(f"Refused: could not check folder referencers ({exc})") from exc
+    if external:
+        shown = ", ".join(external[:5]) + ("…" if len(external) > 5 else "")
+        raise ValueError(
+            f"Refused: {path} is still used outside the folder by {len(external)} asset(s): {shown}"
+        )
+    ok = bool(unreal.EditorAssetLibrary.delete_directory(path))
+    if not ok and not listed:
+        return {"ok": True, "kind": "folder", "removed": path, "note": "folder already empty"}
+    if not ok:
+        raise ValueError(f"Refused: editor could not delete folder {path}")
+    log_msg(f"deleted folder {path}", "info")
+    return {"ok": True, "kind": "folder", "removed": path}

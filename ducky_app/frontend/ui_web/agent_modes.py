@@ -28,6 +28,7 @@ from backend.agent.write_claim_guard import (
     record_write_from_tool,
 )
 from backend.agent.toolsets import is_plan_safe_tool
+from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 
 PushFn = Callable[[dict[str, Any]], None]
 
@@ -38,10 +39,7 @@ _PLAN_SUFFIX = (
     "Do not modify the level, devices, or project files until the user confirms. "
     "REQUIRED: end by calling `ducky_create_plan` (or `ducky_update_plan`) — never leave "
     "only a prose Fix plan / markdown checklist in chat. "
-    "Followable `nodes`: Diagnose → Fix → Verify; each leaf = one action + Done-when "
-    "(name the tool when known). Nest subplans; rearrange with "
-    "`ducky_plan_move_node` / add/update/delete. "
-    "Templates: `ducky_create_plan_template` / `ducky_instantiate_plan_template`. "
+    f"{PLAN_PROTOCOL} "
     "Then STOP — user reviews and switches to Agent mode (or Send to ducky). "
     "Do not execute in Plan mode."
 )
@@ -49,12 +47,8 @@ _PLAN_SUFFIX = (
 _AGENT_SUFFIX = (
     "\n\n[Mode: Agent] Multi-step work: if this chat has no plan yet, create one with "
     "`ducky_create_plan` after brief discovery (a few inspects), BEFORE mutators. "
-    "If a plan is already in context / `ducky_get_plan`, FOLLOW it and CHECK OFF every "
-    "leaf — `ducky_plan_update_node(node_id, status=in_progress)` BEFORE the step, "
-    "`completed` when Done-when is met, then the next leaf. Re-check the plan every "
-    "tool round. Mutators are blocked until a leaf is in_progress. Never replace the "
-    "tool plan with chat prose. Off-plan thrashing (retrying diagnoses without updating "
-    "the tree) is forbidden — rewrite the outline first when the approach changes."
+    f"{PLAN_PROTOCOL} "
+    "Never replace the tool plan with chat prose."
 )
 
 _panel_push: PushFn | None = None
