@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  clearLlmsShortcutJump,
+  llmsJumpRecordAction,
   openLlmsProviderSettings,
+  peekLlmsShortcutJump,
   registerSettingsTabConsumer,
   requestOpenSettings,
   takePendingLlmsProvider,
@@ -19,6 +22,8 @@ describe("requestOpenSettings debounce", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    clearLlmsShortcutJump();
+    takePendingLlmsProvider();
   });
 
   it("drops identical tab+slug repeats within 500ms", () => {
@@ -46,6 +51,45 @@ describe("requestOpenSettings debounce", () => {
     requestOpenSettings("Store", { storeSlug: "blender" });
     expect(fn).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  it("openLlmsProviderSettings keeps a jump id until the destination is recorded", async () => {
+    const fn = vi.fn();
+    const stop = registerSettingsTabConsumer(fn);
+    openLlmsProviderSettings("ollama");
+    expect(peekLlmsShortcutJump()).toBe("ollama");
+    expect(takePendingLlmsProvider()).toBe("ollama");
+    expect(peekLlmsShortcutJump()).toBe("ollama");
+    const list = { drill: undefined };
+    const dest = { drill: { type: "llms" as const, providerId: "ollama" } };
+    expect(llmsJumpRecordAction(peekLlmsShortcutJump(), list, false)).toBe("skip");
+    expect(peekLlmsShortcutJump()).toBe("ollama");
+    expect(llmsJumpRecordAction(peekLlmsShortcutJump(), dest, false)).toBe("record");
+    expect(llmsJumpRecordAction(peekLlmsShortcutJump(), dest, true)).toBe("replace");
+    clearLlmsShortcutJump();
+    expect(peekLlmsShortcutJump()).toBeNull();
+    stop();
+  });
+
+  it("skips an intermediate LLMs-list loc during a picker jump", () => {
+    expect(
+      llmsJumpRecordAction("anthropic", { drill: undefined }, false),
+    ).toBe("skip");
+    expect(
+      llmsJumpRecordAction(
+        "anthropic",
+        { drill: { type: "llms", providerId: "openai" } },
+        true,
+      ),
+    ).toBe("skip");
+    expect(
+      llmsJumpRecordAction(
+        "anthropic",
+        { drill: { type: "llms", providerId: "anthropic" } },
+        false,
+      ),
+    ).toBe("record");
+    expect(llmsJumpRecordAction(null, { drill: undefined }, false)).toBe("record");
   });
 
   it("openLlmsProviderSettings opens LLMs and selects that provider", async () => {

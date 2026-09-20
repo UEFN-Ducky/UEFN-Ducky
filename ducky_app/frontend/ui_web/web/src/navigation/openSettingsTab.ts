@@ -209,11 +209,14 @@ export function requestOpenSettings(
 }
 
 let pendingLlmsProviderId: string | null = null;
+/** Stays set until the destination provider slide is recorded (not consumed on the list). */
+let llmsShortcutJumpId: string | null = null;
 
 /** Settings → LLMs → that provider slide. Opens Settings if needed; navigates if already open. */
 export function openLlmsProviderSettings(providerId?: string): void {
   const id = (providerId || "").trim().toLowerCase();
   pendingLlmsProviderId = id || null;
+  llmsShortcutJumpId = id;
   requestOpenSettings("LLMs");
   queueMicrotask(() => {
     window.dispatchEvent(
@@ -228,6 +231,32 @@ export function takePendingLlmsProvider(): string | null {
   const id = pendingLlmsProviderId;
   pendingLlmsProviderId = null;
   return id;
+}
+
+export function peekLlmsShortcutJump(): string | null {
+  return llmsShortcutJumpId;
+}
+
+export function clearLlmsShortcutJump(): void {
+  llmsShortcutJumpId = null;
+}
+
+export type LlmsJumpLoc = {
+  drill?: { type?: string; providerId?: string | null } | null;
+};
+
+/** Skip the LLMs-list record while a picker/login jump is in flight. */
+export function llmsJumpRecordAction(
+  jumpId: string | null,
+  loc: LlmsJumpLoc,
+  currentIsLlmsSettings: boolean,
+): "skip" | "replace" | "record" {
+  if (jumpId == null) return "record";
+  const dest = !jumpId
+    ? !loc.drill
+    : loc.drill?.type === "llms" && (loc.drill.providerId || "").toLowerCase() === jumpId;
+  if (!dest) return "skip";
+  return currentIsLlmsSettings ? "replace" : "record";
 }
 
 /** DuckiesTab: consume a deep-link profile id once (clears after read). */

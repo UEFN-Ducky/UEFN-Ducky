@@ -2435,9 +2435,6 @@ html.window-maximized .window-resize-grip {
 }
 
 .model-selector-search-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
   padding: 4px 4px 8px;
   position: sticky;
   top: 0;
@@ -2446,8 +2443,6 @@ html.window-maximized .window-resize-grip {
 }
 
 .model-selector-search {
-  flex: 1;
-  min-width: 0;
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
@@ -2668,32 +2663,6 @@ html.window-maximized .window-resize-grip {
 .model-selector-plugin-slot:empty {
   display: none;
   border: 0;
-}
-
-.model-selector-effort-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-}
-
-.model-selector-effort-row .model-selector-effort {
-  flex: 1;
-  min-width: 0;
-}
-
-.model-selector-effort-row .model-selector-gear {
-  margin: 0 8px 16px 0;
-}
-
-.model-selector-provider-label-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.model-selector-provider-label-row .model-selector-provider-label {
-  flex: 1;
-  min-width: 0;
 }
 
 .model-selector-navhdr-title {

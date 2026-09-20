@@ -22,13 +22,19 @@ import {
   type PluginLlmProvider,
 } from "../../hooks/usePluginContributions";
 import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
-import { requestOpenSettings, takePendingLlmsProvider } from "../../navigation/openSettingsTab";
+import {
+  clearLlmsShortcutJump,
+  llmsJumpRecordAction,
+  peekLlmsShortcutJump,
+  requestOpenSettings,
+  takePendingLlmsProvider,
+} from "../../navigation/openSettingsTab";
+import { useNavigationHistoryOptional } from "../../navigation/NavigationHistoryContext";
 import { LlmPluginSlot } from "../../plugin-ui/llmPluginSlots";
 import { targetRef, useUiTarget } from "../../ui-targets/registry";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
 import {
   useApplySettingsDrill,
-  useRecordSettingsLocation,
   useSettingsHistoryBack,
 } from "../../navigation/useSettingsHistory";
 import {
@@ -313,7 +319,8 @@ export function AgentTab() {
   const [testingKey, setTestingKey] = useState<string | null>(() => inFlightTest.key);
   const [testElapsed, setTestElapsed] = useState(0);
   const [usageTarget, setUsageTarget] = useState<{ id: string; label: string } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => takePendingLlmsProvider());
+  const nav = useNavigationHistoryOptional();
 
   const providers = contrib.llm_providers;
   const selected = useMemo(
@@ -366,7 +373,19 @@ export function AgentTab() {
       name: usageTarget ? `${label} usage` : label,
     };
   }, [selectedId, usageTarget, providers]);
-  useRecordSettingsLocation(llmsNavLoc);
+  useEffect(() => {
+    const jump = peekLlmsShortcutJump();
+    const current = nav?.peekCurrent();
+    const action = llmsJumpRecordAction(
+      jump,
+      llmsNavLoc,
+      Boolean(current && current.kind === "settings" && current.tab === "LLMs"),
+    );
+    if (action === "skip") return;
+    if (action === "replace") nav?.replace(llmsNavLoc);
+    else nav?.record(llmsNavLoc);
+    if (jump != null) clearLlmsShortcutJump();
+  }, [llmsNavLoc, nav]);
 
   const applyLlmsDrill = useCallback(
     (loc: SettingsNavLocation) => {

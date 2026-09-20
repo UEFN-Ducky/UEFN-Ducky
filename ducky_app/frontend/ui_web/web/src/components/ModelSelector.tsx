@@ -547,21 +547,12 @@ export function ModelSelector({
         pluginId={slotGateway?.pluginId || ""}
         model={normalizedSelectedModel}
       />
-      <div className="model-selector-effort-row">
-        <ThinkingEffortFooter
-          menu={previewMenu}
-          modelName={previewRow?.name || ""}
-          effort={thinkingEffort}
-          onChange={persistEffort}
-        />
-        {slotGateway ? (
-          <LlmSettingsGear
-            providerId={slotGateway.id}
-            label={slotGateway.label}
-            onOpen={requestClose}
-          />
-        ) : null}
-      </div>
+      <ThinkingEffortFooter
+        menu={previewMenu}
+        modelName={previewRow?.name || ""}
+        effort={thinkingEffort}
+        onChange={persistEffort}
+      />
     </>
   );
 
@@ -869,13 +860,6 @@ export function ModelSelector({
         onChange={(e) => setSearch(e.target.value)}
         autoFocus
       />
-      {slotGateway ? (
-        <LlmSettingsGear
-          providerId={slotGateway.id}
-          label={slotGateway.label}
-          onOpen={requestClose}
-        />
-      ) : null}
     </div>
   );
 
@@ -886,23 +870,16 @@ export function ModelSelector({
         <>
           {gatewaySearchHits.map(({ gateway: gw, api, nested }) => (
             <div key={gw.id} className="model-selector-provider-group">
-              <div className="model-selector-provider-label-row">
-                <button
-                  type="button"
-                  className="model-selector-provider-label"
-                  onClick={() => drillInto(gw.id)}
-                >
-                  <span className="model-selector-provider-caret">
-                    <Icons.ChevronRight />
-                  </span>
-                  <span className="model-selector-provider-name">{gw.label}</span>
-                </button>
-                <LlmSettingsGear
-                  providerId={gw.id}
-                  label={gw.label}
-                  onOpen={requestClose}
-                />
-              </div>
+              <button
+                type="button"
+                className="model-selector-provider-label"
+                onClick={() => drillInto(gw.id)}
+              >
+                <span className="model-selector-provider-caret">
+                  <Icons.ChevronRight />
+                </span>
+                <span className="model-selector-provider-name">{gw.label}</span>
+              </button>
               {api.map((m) => {
                 const hitRef = firstHit;
                 if (hitRef) firstHit = false;
@@ -963,11 +940,6 @@ export function ModelSelector({
                     <Icons.Check />
                   </span>
                 )}
-                <LlmSettingsGear
-                  providerId={gw.id}
-                  label={gw.label}
-                  onOpen={requestClose}
-                />
                 <span className="model-selector-disclosure">
                   <Icons.ChevronRight />
                 </span>
@@ -1040,7 +1012,7 @@ export function ModelSelector({
               ) : (
                 <span className="model-selector-navhdr-title">Pick model</span>
               )}
-              {activeGateway ? (
+              {navGateway && activeGateway ? (
                 <LlmSettingsGear
                   providerId={activeGateway.id}
                   label={activeGateway.label}
