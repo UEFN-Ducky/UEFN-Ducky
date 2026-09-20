@@ -2640,25 +2640,26 @@ html.window-maximized .window-resize-grip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   flex-shrink: 0;
-  background: transparent;
-  border: none;
+  background: var(--btn-bg, var(--tab-hover));
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--muted);
+  color: var(--fg);
   cursor: pointer;
 }
 
 .model-selector-gear:hover {
   color: var(--fg);
   background: var(--tab-hover);
+  border-color: var(--fg-dim, var(--border));
 }
 
 .model-selector-plugin-slot {
   flex-shrink: 0;
-  max-height: 180px;
+  max-height: 240px;
   overflow-x: hidden;
   overflow-y: auto;
   border-top: 1px solid var(--border);

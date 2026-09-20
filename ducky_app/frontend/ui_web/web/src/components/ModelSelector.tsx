@@ -75,7 +75,7 @@ function LlmSettingsGear({
         openLlmsProviderSettings(providerId);
       }}
     >
-      <Icons.Gear />
+      <Icons.Settings />
     </button>
   );
 }

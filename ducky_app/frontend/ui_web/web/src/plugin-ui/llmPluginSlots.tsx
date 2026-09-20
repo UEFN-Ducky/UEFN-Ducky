@@ -1,6 +1,8 @@
 /**
  * Host mounts for LLM plugins (Settings slide + model picker footer).
  * Fire once on open / provider / model change — plugins must not poll the DOM.
+ *
+ * Mount is a sibling of a React marker so plugin innerHTML survives picker re-renders.
  */
 import { useLayoutEffect, useRef } from "react";
 import { emitAppHook } from "../sfx/appHooks";
@@ -48,22 +50,55 @@ type SlotProps = {
   model?: string;
 };
 
+function ensureMount(
+  marker: HTMLElement,
+  surface: LlmPluginSurface,
+  existing: HTMLDivElement | null,
+): HTMLDivElement {
+  const mount = existing || document.createElement("div");
+  const parent = marker.parentNode;
+  if (parent && mount.parentNode !== parent) {
+    parent.insertBefore(mount, marker.nextSibling);
+  }
+  mount.className = surface === "picker" ? "model-selector-plugin-slot" : "llms-plugin-slot";
+  return mount;
+}
+
 /** Empty mount. Plugins listen for `ducky:llm-slot` and render into `detail.mount`. */
 export function LlmPluginSlot({ surface, open, providerId, pluginId, model }: SlotProps) {
-  const ref = useRef<HTMLDivElement>(null);
+  const markerRef = useRef<HTMLSpanElement>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
   const live = open && !!(providerId || "").trim();
   const pid = (pluginId || "").trim();
   const mid = (model || "").trim();
   const id = (providerId || "").trim();
 
   useLayoutEffect(() => {
+    const marker = markerRef.current;
+    if (!live || !marker?.parentNode) {
+      emitLlmPluginSlot({
+        surface,
+        open: false,
+        providerId: id,
+        pluginId: pid,
+        model: mid,
+        mount: null,
+      });
+      return;
+    }
+    const mount = ensureMount(marker, surface, mountRef.current);
+    mountRef.current = mount;
+    mount.setAttribute("data-ducky-llm-slot", surface);
+    mount.setAttribute("data-provider", id);
+    mount.setAttribute("data-plugin", pid);
+    mount.setAttribute("data-model", mid);
     emitLlmPluginSlot({
       surface,
-      open: live,
-      providerId: live ? id : "",
+      open: true,
+      providerId: id,
       pluginId: pid,
       model: mid,
-      mount: live ? ref.current : null,
+      mount,
     });
     return () => {
       emitLlmPluginSlot({
@@ -77,15 +112,12 @@ export function LlmPluginSlot({ surface, open, providerId, pluginId, model }: Sl
     };
   }, [surface, live, id, pid, mid]);
 
-  if (!live) return null;
-  return (
-    <div
-      ref={ref}
-      className={surface === "picker" ? "model-selector-plugin-slot" : "llms-plugin-slot"}
-      data-ducky-llm-slot={surface}
-      data-provider={id}
-      data-plugin={pid}
-      data-model={mid}
-    />
-  );
+  useLayoutEffect(() => {
+    return () => {
+      mountRef.current?.remove();
+      mountRef.current = null;
+    };
+  }, []);
+
+  return <span ref={markerRef} className="model-selector-plugin-slot-marker" hidden />;
 }
