@@ -115,6 +115,26 @@ describe("workspace dock sidebar snapshot", () => {
       "history",
       "tester",
       "groupchat",
+      "unknown",
     ]);
+    expect(sidebarPanelCatalog(["tester", "groupchat", "ollama-live", "NOPE"])).toEqual([
+      "chats",
+      "files",
+      "outline",
+      "history",
+      "tester",
+      "groupchat",
+      "ollama-live",
+    ]);
+  });
+
+  it("puts a contributed plugin dock on a rail after opt-in", () => {
+    let snap = defaultDockSnapshot();
+    snap = withPanelOnSide(snap, "ollama-live", "left");
+    expect(panelsOnSide(snap, "left")).toContain("ollama-live");
+    expect(panelsOnSide(snap, "right")).not.toContain("ollama-live");
+    snap = withPanelOnSide(snap, "ollama-live", "right");
+    expect(panelsOnSide(snap, "right")).toContain("ollama-live");
+    expect(panelsOnSide(snap, "left")).not.toContain("ollama-live");
   });
 });

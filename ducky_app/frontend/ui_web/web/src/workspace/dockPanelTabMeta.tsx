@@ -9,7 +9,7 @@ export type DockPanelTabMeta = {
   icon: ReactNode;
 };
 
-export const DOCK_PANEL_TAB_META: Record<DockPanelId, DockPanelTabMeta> = {
+export const DOCK_PANEL_TAB_META: Record<string, DockPanelTabMeta> = {
   chats: { id: "chats", title: "Duckies", headerTitle: "Duckies", icon: <Icons.Duck /> },
   files: { id: "files", title: "Verse", headerTitle: "Content", icon: <Icons.Verse /> },
   outline: { id: "outline", title: "Outline", headerTitle: "Outline", icon: <Icons.Outline /> },
@@ -19,10 +19,25 @@ export const DOCK_PANEL_TAB_META: Record<DockPanelId, DockPanelTabMeta> = {
   discordhub: { id: "discordhub", title: "Discord", headerTitle: "Discord", icon: <Icons.Chat /> },
 };
 
-export function dockPanelTabsInOrder(panelIds: DockPanelId[], stackOrder: DockPanelId[]) {
+export function dockPanelTabMeta(id: DockPanelId, title?: string): DockPanelTabMeta {
+  return (
+    DOCK_PANEL_TAB_META[id] ?? {
+      id,
+      title: title || id,
+      headerTitle: title || id,
+      icon: <Icons.Puzzle />,
+    }
+  );
+}
+
+export function dockPanelTabsInOrder(
+  panelIds: DockPanelId[],
+  stackOrder: DockPanelId[],
+  titles?: Record<string, string>,
+) {
   const ordered = stackOrder.filter((id) => panelIds.includes(id));
   for (const id of panelIds) {
     if (!ordered.includes(id)) ordered.push(id);
   }
-  return ordered.map((id) => DOCK_PANEL_TAB_META[id]);
+  return ordered.map((id) => dockPanelTabMeta(id, titles?.[id]));
 }

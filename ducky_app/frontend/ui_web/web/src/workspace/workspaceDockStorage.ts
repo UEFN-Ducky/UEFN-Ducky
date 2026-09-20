@@ -10,16 +10,26 @@ import {
 } from "../hooks/useSidebarWidth";
 import { getApi } from "../hooks/usePanelApi";
 
-export type DockPanelId = "chats" | "files" | "outline" | "history" | "tester" | "groupchat" | "discordhub";
+/** Builtin rails plus plugin `dock.panels` ids (`groupchat`, `ollama-live`, …). */
+export type DockPanelId = string;
 export type DockSide = "left" | "right";
 /** How the panels docked on a rail lay out: one tab bar, or a resizable vertical stack. */
 export type DockPanelMode = "tabs" | "stacked";
 
-// `discordhub` was merged into `groupchat` (one Discord panel) — kept in the type
-// union for saved-layout compatibility but no longer a rendered panel.
+// `discordhub` was merged into `groupchat` (one Discord panel) — kept in defaults
+// for saved-layout compatibility but no longer a rendered panel.
 export const ALL_DOCK_PANELS: DockPanelId[] = ["chats", "files", "outline", "history", "tester", "groupchat"];
 /** Always listed in Appearance → Sidebar. Plugin-gated ids join this when they contribute. */
 export const BUILTIN_DOCK_PANELS: DockPanelId[] = ["chats", "files", "outline", "history"];
+
+export function isSidebarFamilyId(id: DockPanelId): boolean {
+  return id === "chats" || id === "files";
+}
+
+/** Outline/History/Tester plus every plugin dock (Discord, Ollama, …). */
+export function isAuxDockId(id: DockPanelId): boolean {
+  return !isSidebarFamilyId(id);
+}
 export const MIN_DOCK_PANEL_HEIGHT = 80;
 
 export const DOCK_STORAGE_KEY = "uefn-workspace-dock-layout";
@@ -222,10 +232,13 @@ function migrateFromLegacy(): WorkspaceDockSnapshot {
   return base;
 }
 
+const DOCK_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
 /** Map retired dock ids onto their successors before filtering. */
 function migrateDockPanelId(id: string): DockPanelId | null {
   if (id === "discordhub") return "groupchat";
-  if (ALL_DOCK_PANELS.includes(id as DockPanelId)) return id as DockPanelId;
+  if (ALL_DOCK_PANELS.includes(id)) return id;
+  if (DOCK_ID_RE.test(id)) return id;
   return null;
 }
 
@@ -262,7 +275,7 @@ export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDock
         ? Object.fromEntries(
             Object.entries(stack.panelFlex).filter(
               ([id, value]) =>
-                ALL_DOCK_PANELS.includes(id as DockPanelId) &&
+                migrateDockPanelId(id) != null &&
                 typeof value === "number" &&
                 Number.isFinite(value) &&
                 value > 0,
@@ -271,8 +284,8 @@ export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDock
         : fallback.panelFlex;
     const collapsed = { ...defaultCollapsed(), ...stack.collapsed };
     const focused =
-      stack.focusedPanel && ALL_DOCK_PANELS.includes(stack.focusedPanel)
-        ? stack.focusedPanel
+      stack.focusedPanel && migrateDockPanelId(String(stack.focusedPanel))
+        ? migrateDockPanelId(String(stack.focusedPanel))!
         : order[0] ?? fallback.focusedPanel;
     return { order, splitRatio, panelFlex, familySplitRatio, collapsed, focusedPanel: focused };
   };
@@ -430,7 +443,12 @@ export function persistDockSnapshot(snapshot: WorkspaceDockSnapshot, windowId = 
 
 export function panelsOnSide(snapshot: WorkspaceDockSnapshot, side: DockSide): DockPanelId[] {
   const hidden = new Set(snapshot.hiddenPanels);
-  const ids = ALL_DOCK_PANELS.filter((id) => snapshot.panelSide[id] === side && !hidden.has(id));
+  const known = new Set<string>(ALL_DOCK_PANELS);
+  for (const raw of Object.keys(snapshot.panelSide)) {
+    const id = migrateDockPanelId(raw);
+    if (id) known.add(id);
+  }
+  const ids = [...known].filter((id) => snapshot.panelSide[id] === side && !hidden.has(id));
   const stack = side === "left" ? snapshot.left : snapshot.right;
   const ordered = stack.order.filter((id) => ids.includes(id));
   for (const id of ids) {
@@ -439,10 +457,16 @@ export function panelsOnSide(snapshot: WorkspaceDockSnapshot, side: DockSide): D
   return ordered;
 }
 
-/** Built-ins plus enabled-plugin dock slots the host already renders. */
+/** Built-ins plus every enabled plugin `dock.panels` id. */
 export function sidebarPanelCatalog(contributedIds: Iterable<string>): DockPanelId[] {
-  const contrib = new Set(contributedIds);
-  const extra = ALL_DOCK_PANELS.filter((id) => !BUILTIN_DOCK_PANELS.includes(id) && contrib.has(id));
+  const seen = new Set<string>(BUILTIN_DOCK_PANELS);
+  const extra: DockPanelId[] = [];
+  for (const raw of contributedIds) {
+    const id = migrateDockPanelId(String(raw));
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    extra.push(id);
+  }
   return [...BUILTIN_DOCK_PANELS, ...extra];
 }
 

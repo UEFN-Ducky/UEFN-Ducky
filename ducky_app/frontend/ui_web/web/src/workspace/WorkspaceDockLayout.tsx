@@ -23,7 +23,7 @@ import { isVerseFile } from "../verse-editor/utils/isVerseFile";
 import { Icons } from "../icons/Icons";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { dockDropTargetSide } from "../utils/dockPanelDrag";
-import type { DockPanelId } from "./workspaceDockStorage";
+import { isAuxDockId, type DockPanelId } from "./workspaceDockStorage";
 import {
   effectiveRailOpen,
   resetOverlayRailSession,
@@ -45,25 +45,21 @@ function filterPanelsForVariant(
   ids: DockPanelId[],
   variant: "default" | "focus",
   discordTabOpen: boolean,
-  discordPluginOn: boolean,
-  testerPluginOn: boolean,
+  contrib: PluginContributions,
 ) {
+  const testerPluginOn = pluginContributesDockPanel(contrib, "tester");
+  const discordPluginOn = pluginContributesDockPanel(contrib, "groupchat");
   if (variant === "focus") {
     return ids.filter(
       (id) => id === "outline" || id === "history" || (id === "tester" && testerPluginOn),
     );
   }
-  // One Discord view at a time: while the Discord tab is open, the dock panel
-  // vanishes from its rail. The dock snapshot is untouched, so closing the tab
-  // restores the panel to its exact side/order/size.
-  let next = ids;
-  if (discordTabOpen || !discordPluginOn) {
-    next = next.filter((id) => id !== "groupchat" && id !== "discordhub");
-  }
-  if (!testerPluginOn) {
-    next = next.filter((id) => id !== "tester");
-  }
-  return next;
+  return ids.filter((id) => {
+    if (id === "chats" || id === "files" || id === "outline" || id === "history") return true;
+    if (id === "tester") return testerPluginOn;
+    if (id === "groupchat" || id === "discordhub") return discordPluginOn && !discordTabOpen;
+    return pluginContributesDockPanel(contrib, id);
+  });
 }
 
 function hasSidebarPanels(ids: DockPanelId[]) {
@@ -71,36 +67,26 @@ function hasSidebarPanels(ids: DockPanelId[]) {
 }
 
 function hasVerseAuxPanels(ids: DockPanelId[]) {
-  return ids.some(isVerseFamilyId);
+  return ids.some(isAuxDockId);
 }
 
-function isVerseFamilyId(id: DockPanelId) {
-  return (
-    id === "outline" ||
-    id === "history" ||
-    id === "tester" ||
-    id === "groupchat" ||
-    id === "discordhub"
-  );
-}
-
-function discordDockPlaceholder() {
+function pluginDockPlaceholder(title: string) {
   return (
     <div className="dock-panel-placeholder" style={{ padding: 12, opacity: 0.7 }}>
-      Enable Discord plugin
+      Enable {title}
     </div>
   );
 }
 
-function discordDockChildren(pluginContrib: PluginContributions) {
-  const pluginUi = dockPanelPluginUi(pluginContrib, "groupchat");
+function pluginDockChildren(pluginContrib: PluginContributions, dockId: string, title: string) {
+  const pluginUi = dockPanelPluginUi(pluginContrib, dockId);
   if (pluginUi) {
-    return (
-      <PluginWebviewPane tabId={pluginUiTabId(pluginUi.pluginId, pluginUi.uiPanelId)} />
-    );
+    return <PluginWebviewPane tabId={pluginUiTabId(pluginUi.pluginId, pluginUi.uiPanelId)} />;
   }
-  return discordDockPlaceholder();
+  return pluginDockPlaceholder(title);
 }
+
+const NATIVE_AUX_IDS = new Set(["outline", "history", "tester", "groupchat", "discordhub"]);
 
 function useVersePanelDefs(
   versePath: string | undefined,
@@ -116,7 +102,27 @@ function useVersePanelDefs(
   const tester = useTesterDockPanel(testerEnabled);
 
   return useMemo(
-    () => ({
+    () => {
+      const extras: Record<string, {
+        title: string;
+        icon: ReactNode;
+        children: ReactNode;
+        actions?: ReactNode;
+        busy?: boolean;
+        busyTitle?: string;
+        onTearOffOutside?: (at: { screenX: number; screenY: number }) => void;
+      }> = {};
+      for (const row of pluginContrib.dock_panels) {
+        const id = String(row.id || "").trim();
+        if (!id || NATIVE_AUX_IDS.has(id)) continue;
+        const title = String(row.title || id);
+        extras[id] = {
+          title,
+          icon: <Icons.Puzzle />,
+          children: pluginDockChildren(pluginContrib, id, title),
+        };
+      }
+      return {
       outline: {
         title: "Outline",
         icon: <Icons.Outline />,
@@ -151,15 +157,17 @@ function useVersePanelDefs(
           </button>
         ),
         onTearOffOutside: onTearOffDiscord,
-        children: discordDockChildren(pluginContrib),
+        children: pluginDockChildren(pluginContrib, "groupchat", "Discord Ducky"),
       },
       discordhub: {
         title: "Discord",
         icon: <Icons.Chat />,
         actions: undefined,
-        children: discordDockPlaceholder(),
+        children: pluginDockPlaceholder("Discord"),
       },
-    }),
+      ...extras,
+    };
+    },
     [
       outline.actions,
       outline.children,
@@ -228,21 +236,18 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
 
     const discordTabOpen = useDiscordTabOpen();
     const pluginContrib = usePluginContributions();
-    const discordPluginOn = pluginContributesDockPanel(pluginContrib, "groupchat");
     const testerPluginOn = pluginContributesDockPanel(pluginContrib, "tester");
     const leftPanelIds = filterPanelsForVariant(
       dock.leftPanels,
       variant,
       discordTabOpen,
-      discordPluginOn,
-      testerPluginOn,
+      pluginContrib,
     );
     const rightPanelIds = filterPanelsForVariant(
       dock.rightPanels,
       variant,
       discordTabOpen,
-      discordPluginOn,
-      testerPluginOn,
+      pluginContrib,
     );
 
     const leftSidebarOnLeft = variant === "default" && hasSidebarPanels(leftPanelIds);
@@ -327,8 +332,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       />
     );
 
-    const leftVerseIds = leftPanelIds.filter(isVerseFamilyId);
-    const rightVerseIds = rightPanelIds.filter(isVerseFamilyId);
+    const leftVerseIds = leftPanelIds.filter(isAuxDockId);
+    const rightVerseIds = rightPanelIds.filter(isAuxDockId);
 
     const leftMixed = useMemo(() => {
       if (!leftSidebarOnLeft && !verseOnLeft) return null;

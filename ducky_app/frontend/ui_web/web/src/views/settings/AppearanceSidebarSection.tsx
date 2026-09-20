@@ -3,7 +3,7 @@ import { AppearanceAccordionSplit } from "./AppearanceAccordionSplit";
 import { useDockSidePanelMode } from "../../hooks/useDockSidePanelMode";
 import { useDockSidebarSettings } from "../../hooks/useDockSidebarSettings";
 import { usePluginContributions } from "../../hooks/usePluginContributions";
-import { DOCK_PANEL_TAB_META } from "../../workspace/dockPanelTabMeta";
+import { dockPanelTabMeta } from "../../workspace/dockPanelTabMeta";
 import {
   panelsOnSide,
   sidebarPanelCatalog,
@@ -113,7 +113,7 @@ function RailPreview({
 
 function previewLabels(snapshot: ReturnType<typeof useDockSidebarSettings>["snapshot"], side: DockSide): [string, string] {
   const ids = panelsOnSide(snapshot, side);
-  const titles = ids.map((id) => DOCK_PANEL_TAB_META[id]?.headerTitle ?? id);
+  const titles = ids.map((id) => dockPanelTabMeta(id).headerTitle);
   return [titles[0] ?? "Empty", titles[1] ?? titles[0] ?? "Empty"];
 }
 
@@ -144,9 +144,11 @@ function AppearanceSidebarPreview() {
 function SidebarRailBlock({
   side,
   catalog,
+  titles,
 }: {
   side: DockSide;
   catalog: DockPanelId[];
+  titles: Record<string, string>;
 }) {
   const { isOnSide, setPanelOnSide, setRailEnabled, leftRailEnabled, rightRailEnabled } =
     useDockSidebarSettings();
@@ -166,12 +168,12 @@ function SidebarRailBlock({
       <h4 className="appearance-category-title">Panels</h4>
       <div className="general-tab-toggle-card appearance-sidebar-panel-list">
         {catalog.map((id) => {
-          const meta = DOCK_PANEL_TAB_META[id];
+          const meta = dockPanelTabMeta(id, titles[id]);
           return (
             <SettingsToggleRow
               key={`${side}-${id}`}
               id={`appearance-sidebar-${side}-${id}`}
-              label={meta?.headerTitle ?? id}
+              label={meta.headerTitle}
               checked={isOnSide(id, side)}
               onChange={(on) => setPanelOnSide(id, on ? side : null)}
             />
@@ -185,12 +187,15 @@ function SidebarRailBlock({
 export function AppearanceSidebarSectionBlock() {
   const contrib = usePluginContributions();
   const catalog = sidebarPanelCatalog(contrib.dock_panels.map((panel) => panel.id));
+  const titles = Object.fromEntries(
+    contrib.dock_panels.map((panel) => [panel.id, panel.title || panel.id]),
+  );
 
   return (
     <AppearanceAccordionSplit preview={<AppearanceSidebarPreview />}>
       <div className="appearance-layout-controls">
-        <SidebarRailBlock side="left" catalog={catalog} />
-        <SidebarRailBlock side="right" catalog={catalog} />
+        <SidebarRailBlock side="left" catalog={catalog} titles={titles} />
+        <SidebarRailBlock side="right" catalog={catalog} titles={titles} />
       </div>
     </AppearanceAccordionSplit>
   );

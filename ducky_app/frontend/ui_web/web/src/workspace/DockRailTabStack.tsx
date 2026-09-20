@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { SidebarPanelTabs } from "../components/sidebar/SidebarPanelTabs";
+import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useWorkspaceDock } from "./WorkspaceDockContext";
 import { dockPanelTabsInOrder } from "./dockPanelTabMeta";
 import { insertIndexForTabDrop } from "./dockTabInsertIndex";
@@ -28,11 +29,15 @@ export function DockRailTabStack({
   children: ReactNode;
 }) {
   const dock = useWorkspaceDock();
+  const contrib = usePluginContributions();
   const stack = dock.stackForSide(side);
 
   if (panelIds.length === 0) return null;
 
-  const tabs = dockPanelTabsInOrder(panelIds, stack.order).map((tab) => {
+  const titles = Object.fromEntries(
+    contrib.dock_panels.map((panel) => [panel.id, panel.title || panel.id]),
+  );
+  const tabs = dockPanelTabsInOrder(panelIds, stack.order, titles).map((tab) => {
     const busy = busyByPanel?.[tab.id];
     return busy ? { ...tab, busy: !!busy.busy, busyTitle: busy.busyTitle } : tab;
   });

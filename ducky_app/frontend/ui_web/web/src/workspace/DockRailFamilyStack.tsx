@@ -1,10 +1,10 @@
 import { type Ref } from "react";
 import type { ChatSidebarHandle, ChatSidebarProps } from "../components/ChatSidebar";
 import { ChatSidebar } from "../components/ChatSidebar";
-import { VerseAuxDockPanels, type VerseFamilyId, type VerseFamilyPanels } from "./VerseAuxDockPanels";
+import { VerseAuxDockPanels, type VerseFamilyPanels } from "./VerseAuxDockPanels";
 import { DockRailTabStack } from "./DockRailTabStack";
 import { useWorkspaceDock } from "./WorkspaceDockContext";
-import { activePanelForList } from "./workspaceDockStorage";
+import { activePanelForList, isAuxDockId, isSidebarFamilyId } from "./workspaceDockStorage";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import type { DockPanelId, DockSide } from "./workspaceDockStorage";
 
@@ -27,15 +27,8 @@ export function DockRailFamilyStack({
 }) {
   const dock = useWorkspaceDock();
 
-  const sidebarIds = panelIds.filter((id): id is "chats" | "files" => id === "chats" || id === "files");
-  const verseIds = panelIds.filter(
-    (id): id is VerseFamilyId =>
-      id === "outline" ||
-      id === "history" ||
-      id === "tester" ||
-      id === "groupchat" ||
-      id === "discordhub",
-  );
+  const sidebarIds = panelIds.filter(isSidebarFamilyId);
+  const verseIds = panelIds.filter(isAuxDockId);
   const hasSidebar = sidebarIds.length > 0;
   const hasVerse = verseIds.length > 0;
 
@@ -56,8 +49,8 @@ export function DockRailFamilyStack({
         busyTitle: "Ducky working",
       },
       tester: {
-        busy: !!versePanels.tester.busy,
-        busyTitle: versePanels.tester.busyTitle,
+        busy: !!versePanels.tester?.busy,
+        busyTitle: versePanels.tester?.busyTitle,
       },
     };
     return (

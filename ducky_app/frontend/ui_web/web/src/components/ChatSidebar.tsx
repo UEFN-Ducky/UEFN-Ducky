@@ -173,7 +173,7 @@ export interface ChatSidebarProps {
   unifiedStackPanelIds?: DockPanelId[];
   unifiedStackVersePanels?: Partial<
     Record<
-      "outline" | "history" | "tester" | "groupchat" | "discordhub",
+      string,
       {
         title: string;
         icon?: ReactNode;
@@ -1303,35 +1303,11 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     > = {};
     if (sideFilePanels.includes("chats")) panels.chats = stackedPanelDefs.chats;
     if (sideFilePanels.includes("files")) panels.files = stackedPanelDefs.files;
-    if (unifiedStackPanelIds.includes("outline") && unifiedStackVersePanels?.outline) {
-      panels.outline = {
-        ...unifiedStackVersePanels.outline,
-        icon: <Icons.Outline />,
-      };
-    }
-    if (unifiedStackPanelIds.includes("history") && unifiedStackVersePanels?.history) {
-      panels.history = {
-        ...unifiedStackVersePanels.history,
-        icon: <Icons.Clock />,
-      };
-    }
-    if (unifiedStackPanelIds.includes("tester") && unifiedStackVersePanels?.tester) {
-      panels.tester = {
-        ...unifiedStackVersePanels.tester,
-        icon: <Icons.Check />,
-      };
-    }
-    if (unifiedStackPanelIds.includes("groupchat") && unifiedStackVersePanels?.groupchat) {
-      panels.groupchat = {
-        ...unifiedStackVersePanels.groupchat,
-        icon: <Icons.Chat />,
-      };
-    }
-    if (unifiedStackPanelIds.includes("discordhub") && unifiedStackVersePanels?.discordhub) {
-      panels.discordhub = {
-        ...unifiedStackVersePanels.discordhub,
-        icon: <Icons.Chat />,
-      };
+    for (const id of unifiedStackPanelIds) {
+      if (id === "chats" || id === "files") continue;
+      const vp = unifiedStackVersePanels?.[id];
+      if (!vp) continue;
+      panels[id] = { ...vp, icon: vp.icon };
     }
     return panels as Record<DockPanelId, (typeof panels)[DockPanelId] & { children: ReactNode }>;
   }, [
