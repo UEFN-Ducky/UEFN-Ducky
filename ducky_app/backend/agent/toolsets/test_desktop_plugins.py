@@ -46,21 +46,3 @@ def test_desktop_plugins_block_not_ready(monkeypatch) -> None:
 def test_desktop_plugins_block_empty(monkeypatch) -> None:
     monkeypatch.setattr("backend.uefn_plugins.host.uefn_agent_tool_rows", lambda: [])
     assert dp.enabled_desktop_plugins_prompt_block() == ""
-
-
-def test_desktop_plugins_block_compact(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.uefn_agent_tool_rows",
-        lambda: [
-            {
-                "id": "adobe",
-                "label": "Adobe",
-                "tool_names": ["illustrator_create_document"] + [f"t{i}" for i in range(80)],
-            }
-        ],
-    )
-    fat = dp.enabled_desktop_plugins_prompt_block()
-    slim = dp.enabled_desktop_plugins_prompt_block(compact=True)
-    assert "adobe" in slim.lower()
-    assert "illustrator_create_document" not in slim
-    assert len(slim) < len(fat)

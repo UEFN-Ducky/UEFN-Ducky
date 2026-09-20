@@ -35,33 +35,6 @@ def test_build_cache_payload_always_splits_when_markers_off():
     assert "Plan" in payload.dynamic_system
 
 
-def test_local_slim_v2_snapshot_refreezes():
-    from backend.agent.prompt_cache import frozen_prefix_for_conv
-
-    conv = SimpleNamespace(
-        prompt_cache_snapshot={
-            "version": 2,
-            "local_slim": True,
-            "blocks": {"intro": "OLD FAT INDEX " * 200, "tool_index": "### core\n- `illustrator_create_document`\n"},
-            "tool_names": ["ducky_get_tools"],
-        }
-    )
-    parts = {
-        "local_slim": "1",
-        "tool_index": "LOCAL SHORT INDEX\n",
-        "mcp": "",
-        "listener_port": "4200",
-    }
-    _blocks, prefix = frozen_prefix_for_conv(
-        conv,
-        parts,
-        omit=frozenset({"rules", "skill", "personality"}),
-        freeze_enabled=True,
-    )
-    assert "LOCAL SHORT INDEX" in prefix
-    assert conv.prompt_cache_snapshot["version"] == 3
-
-
 def test_sticky_tools_subset_unchanged_union_grows():
     conv = SimpleNamespace(
         prompt_cache_snapshot={"version": 2, "blocks": {"intro": "x"}, "tool_names": ["a", "b"]}

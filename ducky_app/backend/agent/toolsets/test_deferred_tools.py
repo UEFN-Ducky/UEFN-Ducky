@@ -8,12 +8,7 @@ from types import SimpleNamespace
 
 from backend.agent.run_context import reset_plan_only, set_plan_only
 from backend.agent.toolsets import CORE_TOOLS, effective_tool_name, select_tools
-from backend.agent.toolsets.tool_index import (
-    build_tool_index_text,
-    local_tool_index_text,
-    tool_index_prompt_block_sync,
-    truncate_desc,
-)
+from backend.agent.toolsets.tool_index import build_tool_index_text, truncate_desc
 
 
 class _T:
@@ -74,18 +69,6 @@ def test_tool_index_local_desc_max_shorter():
     slim = build_tool_index_text(tools, desc_max=70)
     assert len(slim) < len(fat)
     assert "… [truncated]" in slim or "... [truncated]" in slim
-
-
-def test_local_tool_index_omits_catalog():
-    text = local_tool_index_text()
-    assert "catalog omitted" in text
-    assert "ducky_find_tools" in text
-    assert "illustrator" not in text.lower() or "illustrator_" not in text
-    assert len(text) < 800
-    # desc_max at local threshold must not list every MCP tool.
-    synced = tool_index_prompt_block_sync(desc_max=70)
-    assert synced == text
-    assert "### core" not in synced
 
 
 def test_effective_tool_name_unwraps_call():

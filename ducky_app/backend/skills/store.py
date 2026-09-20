@@ -904,15 +904,11 @@ def build_skill_prompt(selection: SkillSelection | None = None) -> str:
     return "\n".join(lines)
 
 
-def build_skill_prompt_compact(
-    selection: SkillSelection | None = None,
-    *,
-    packs_only: bool = False,
-) -> str:
-    """Local/Ollama: pack titles (and optional subskill ids). No blurbs / bodies.
+def build_skill_prompt_compact(selection: SkillSelection | None = None) -> str:
+    """Local/Ollama: pack + subskill titles only (no blurbs, no always-on bodies).
 
-    ``packs_only`` drops the subskill tree (~4k → a few hundred tokens).
-    Full SKILL.md / refs stay lazy via ``skill_read_subskill``.
+    Full SKILL.md / refs stay lazy via ``skill_read_subskill`` — same architecture,
+    ~7k → ~2k tokens for a full pack install.
     """
     sel = selection or default_skill_selection()
     lines: list[str] = [
@@ -937,26 +933,18 @@ def build_skill_prompt_compact(
         tag = _index_tag_label(pack_tag)
         label = str(manifest.get("label") or pack_id)
         lines.append(f"- `{pack_id}` [{tag}] — {label}")
-        if packs_only:
-            continue
         for sub in list_subskills(manifest):
             sid = str(sub.get("id") or "")
             if not sid or not _subskill_allowed(pack_id, sub):
                 continue
             lines.append(f"  - `{sid}`")
     if collapsed:
-        if packs_only:
-            lines.append(
-                f"- blender-styles — {len(collapsed)} packs. "
-                "Load one with skill_read_subskill when needed."
-            )
-        else:
-            listed = ", ".join(f"`{pid}`" for pid in collapsed[:40])
-            extra = f" +{len(collapsed) - 40} more" if len(collapsed) > 40 else ""
-            lines.append(
-                f"- blender-styles — {len(collapsed)} packs: {listed}{extra}. "
-                "Load one with skill_read_subskill when needed."
-            )
+        listed = ", ".join(f"`{pid}`" for pid in collapsed[:40])
+        extra = f" +{len(collapsed) - 40} more" if len(collapsed) > 40 else ""
+        lines.append(
+            f"- blender-styles — {len(collapsed)} packs: {listed}{extra}. "
+            "Load one with skill_read_subskill when needed."
+        )
     if not any_pack:
         return "(no skill packs available)"
     return "\n".join(lines)

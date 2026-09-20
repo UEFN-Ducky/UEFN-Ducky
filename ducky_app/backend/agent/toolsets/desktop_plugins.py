@@ -49,7 +49,7 @@ def _live_status_for(plugin_id: str) -> str:
     )
 
 
-def enabled_desktop_plugins_prompt_block(*, compact: bool = False) -> str:
+def enabled_desktop_plugins_prompt_block() -> str:
     """Inject into agent system prompt so duckies see MCP/plugin truth."""
     try:
         from backend.uefn_plugins.host import uefn_agent_tool_rows
@@ -62,21 +62,6 @@ def enabled_desktop_plugins_prompt_block(*, compact: bool = False) -> str:
         return ""
     if not rows:
         return ""
-
-    if compact:
-        lines = [
-            "## Enabled Store desktop plugins",
-            "READY/ENABLED tools work now (no UEFN wait). Find schemas with `ducky_find_tools`.",
-        ]
-        for row in rows:
-            pid = str(row.get("id") or "").strip()
-            if not pid:
-                continue
-            label = str(row.get("label") or pid)
-            status = _live_status_for(pid)
-            ready = "READY" if "READY" in status or "ENABLED" in status else "NOT READY"
-            lines.append(f"- **{label}** (`{pid}`): {ready}")
-        return "\n".join(lines) + "\n"
 
     lines = [
         "## Enabled Store desktop plugins (live MCP status)",
