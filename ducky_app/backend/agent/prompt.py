@@ -307,26 +307,36 @@ def get_system_prompt_parts(
         "`verse_template_*` packs; prefer applying a template over pasting one-off code.\n\n"
         f"{runtime_context}"
     )
-    # Lazy: FastMCP pulls ~800ms+; only needed when building a live agent prompt.
-    from backend.server import mcp
+    if local_slim:
+        # AGENT_HARD_RULES + PLAN_PROTOCOL already live in rules — do not
+        # re-send the 5k FastMCP instructions blob to a local model.
+        mcp_block = (
+            "Local LLM: floor tools are in tools[]. Everything else is "
+            "`ducky_find_tools` → `ducky_get_tools` → `ducky_call_tool`. "
+            "Adobe / Illustrator / Photoshop are `adobe_*` / `illustrator_*` / "
+            "`photoshop_*` — look them up, do not wait for UEFN."
+        )
+    else:
+        from backend.server import mcp
 
-    mcp_block = mcp.instructions or ""
+        mcp_block = mcp.instructions or ""
     try:
         from backend.agent.toolsets.desktop_plugins import enabled_desktop_plugins_prompt_block
 
-        desktop_block = enabled_desktop_plugins_prompt_block()
+        desktop_block = enabled_desktop_plugins_prompt_block(compact=local_slim)
         if desktop_block:
             mcp_block = f"{mcp_block}\n\n{desktop_block}".strip()
     except Exception:
         pass
-    try:
-        from backend.agent.toolsets.mcp_plugins import enabled_mcp_plugins_prompt_block
+    if not local_slim:
+        try:
+            from backend.agent.toolsets.mcp_plugins import enabled_mcp_plugins_prompt_block
 
-        plugin_block = enabled_mcp_plugins_prompt_block()
-        if plugin_block:
-            mcp_block = f"{mcp_block}\n\n{plugin_block}".strip()
-    except Exception:
-        pass
+            plugin_block = enabled_mcp_plugins_prompt_block()
+            if plugin_block:
+                mcp_block = f"{mcp_block}\n\n{plugin_block}".strip()
+        except Exception:
+            pass
     skill_block = skill_text or ""
     if local_slim:
         try:
@@ -343,7 +353,7 @@ def get_system_prompt_parts(
                         sel = resolve_conversation_selection(conv, PanelSettings.load())
                 except Exception:
                     sel = None
-            skill_block = build_skill_prompt_compact(sel)
+            skill_block = build_skill_prompt_compact(sel, packs_only=True)
             if mode_suffix:
                 skill_block = f"{skill_block}\n{mode_suffix}".strip()
         except Exception:
@@ -355,12 +365,12 @@ def get_system_prompt_parts(
     try:
         from backend.agent.toolsets.tool_index import (
             _DESC_MAX,
-            _DESC_MAX_LOCAL,
+            local_tool_index_text,
             tool_index_prompt_block_sync,
         )
 
-        tool_index_block = tool_index_prompt_block_sync(
-            desc_max=_DESC_MAX_LOCAL if local_slim else _DESC_MAX
+        tool_index_block = (
+            local_tool_index_text() if local_slim else tool_index_prompt_block_sync(desc_max=_DESC_MAX)
         )
     except Exception:
         pass

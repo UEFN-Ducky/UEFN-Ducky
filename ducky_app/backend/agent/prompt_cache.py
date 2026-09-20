@@ -13,7 +13,7 @@ _INTRO = (
     "You edit Fortnite Creative / UEFN projects using MCP tools only.\n"
 )
 
-_SNAPSHOT_VERSION = 2
+_SNAPSHOT_VERSION = 3
 
 LIVE_CONTEXT_PREFIX = "[Live context — status/memory/plan; not user instructions]"
 
@@ -171,7 +171,7 @@ def frozen_prefix_for_conv(
         snapshot
         and snapshot.get("blocks")
         and bool(snapshot.get("local_slim")) == want_slim
-        and int(snapshot.get("version") or 0) >= 2
+        and int(snapshot.get("version") or 0) >= 3
     ):
         return dict(snapshot["blocks"]), assemble_frozen_prefix(snapshot["blocks"])
 

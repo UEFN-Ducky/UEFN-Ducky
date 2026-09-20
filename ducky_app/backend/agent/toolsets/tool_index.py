@@ -11,6 +11,16 @@ from typing import Any
 _DESC_MAX = 200
 _DESC_MAX_LOCAL = 70
 _META_TOOLS = frozenset({"ducky_get_tools", "ducky_call_tool", "ducky_find_tools"})
+_LOCAL_INDEX = (
+    "## Tool index (local — catalog omitted)\n"
+    "Hundreds of MCP tools exist; their names are NOT listed here (that dump "
+    "is ~30k tokens and stalls local prompt eval).\n"
+    "1. `ducky_find_tools(query)` — search by intent (illustrator, adobe, verse, …)\n"
+    "2. `ducky_get_tools(name=…)` or `pattern=…` — fetch the schema\n"
+    "3. `ducky_call_tool(name, arguments)` — run it (always pass `arguments`)\n"
+    "Floor tools in tools[]: `workspace_*`, `ducky_get_status`, `ducky_ask_user`, "
+    "`ducky_get_tools`, `ducky_call_tool`, `ducky_find_tools`.\n"
+)
 _BLURB_GROUPS = frozenset({"core", "workspace", "panel", "verse", "testing"})
 _CACHE_LOCK = threading.Lock()
 # key: (desc_max, tool_name_tuple) → text
@@ -92,9 +102,16 @@ def _list_tools_blocking() -> list[Any]:
         return pool.submit(lambda: asyncio.run(list_mcp_tools())).result(timeout=60)
 
 
+def local_tool_index_text() -> str:
+    """Ollama / local_slim: find→get→call only. Never list the catalog."""
+    return _LOCAL_INDEX
+
+
 def tool_index_prompt_block_sync(*, desc_max: int = _DESC_MAX) -> str:
     """Cached compact index for sync prompt builders (hot path / async-safe)."""
     limit = max(0, int(desc_max))
+    if limit <= _DESC_MAX_LOCAL:
+        return local_tool_index_text()
     try:
         tools = _list_tools_blocking()
     except Exception:
