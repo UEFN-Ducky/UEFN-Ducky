@@ -40,6 +40,11 @@ for _mod in _PLUGIN_HOST_CODING:
     if _mod not in backend_hidden:
         backend_hidden.append(_mod)
 
+# AI plugins import stdlib html at runtime (PyInstaller misses it).
+for _mod in ("html", "html.parser", "html.entities"):
+    if _mod not in backend_hidden:
+        backend_hidden.append(_mod)
+
 # Keep the one-file EXE lean — block heavy optional deps PyInstaller may trace from the global env.
 _HEAVY_EXCLUDES = [
     "torch",

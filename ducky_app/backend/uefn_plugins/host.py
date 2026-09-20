@@ -838,7 +838,12 @@ def call_panel_rpc(plugin_id: str, method: str, params: dict[str, Any] | None = 
         wait_plugin_toggles(timeout=8.0)
         with _LOCK:
             fn = (_PANEL_RPC.get(pid) or {}).get(name)
-        if fn is None and pid not in _REGISTERED:
+        empty = not (_PANEL_RPC.get(pid) or {})
+        if fn is None and (empty or pid not in _REGISTERED):
+            # Registered-but-empty happens after invalidate + reload race.
+            if empty:
+                with _LOCK:
+                    _REGISTERED.discard(pid)
             root = plugin_dir(pid)
             manifest = load_plugin_manifest(pid)
             if manifest is not None and root.is_dir():

@@ -41,8 +41,7 @@ def _announce_run(wf: dict[str, Any], *, phase: str, detail: str = "", run_id: s
         from frontend.ui_web.agent_modes import push_ui_event
 
         push_ui_event(payload)
-        if run_id and phase in ("done", "error"):
-            push_ui_event({**payload, "id": f"graph-run:{wid}:{run_id}"})
+        if phase in ("done", "error"):
             push_ui_event({"type": "graphs_changed"})
     except Exception:
         pass

@@ -15,7 +15,6 @@ import {
   syncReadyGraphJobs,
   workflowIdFromJobId,
 } from "../hooks/graphActivity";
-import { getApi } from "../hooks/usePanelApi";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { requestOpenPipelinesTab } from "../navigation/openPipelinesTab";
@@ -43,47 +42,26 @@ export function BackgroundActivityDropdown() {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const working = countWorkingBackgroundJobs(jobs);
-  const ready = jobs.filter((j) => j.phase === "ready").length;
-  const nowCount = working + ready;
-  const live = jobs.filter((j) => j.phase === "working" || j.phase === "ready");
+  const nowCount = working;
+  const live = jobs.filter((j) => j.phase === "working");
   const past = jobs.filter((j) => j.phase !== "working" && j.phase !== "ready");
 
   useEffect(() => {
-    const load = () => {
-      const api = getApi();
-      if (!api) return;
-      void Promise.all([api.list_automations?.(), api.list_pipelines?.()]).then(([autos, pipes]) => {
-        syncReadyGraphJobs(
-          [...(autos?.automations || []), ...(pipes?.pipelines || [])],
-          jobsRef.current,
-        );
-      });
-    };
-    load();
+    const wipeIdle = () => syncReadyGraphJobs([], jobsRef.current);
+    wipeIdle();
     return subscribePanelPush((event) => {
       if (event.type === "background_job") applyBackgroundJobPush(event);
-      if (event.type === "graphs_changed") load();
+      if (event.type === "graphs_changed") wipeIdle();
     });
   }, []);
 
   useEffect(() => {
-    if (open) {
-      const api = getApi();
-      if (!api) return;
-      void Promise.all([api.list_automations?.(), api.list_pipelines?.()]).then(([autos, pipes]) => {
-        syncReadyGraphJobs(
-          [...(autos?.automations || []), ...(pipes?.pipelines || [])],
-          jobsRef.current,
-        );
-      });
-    }
+    if (open) syncReadyGraphJobs([], jobsRef.current);
   }, [open]);
 
   const title = working
     ? `${working} running in the background`
-    : ready
-      ? `${ready} ready to run`
-      : "Background activity";
+    : "Background activity";
 
   return (
     <div className="connection-status-root no-drag">

@@ -19,22 +19,22 @@ afterEach(() => {
 });
 
 describe("graphActivity", () => {
-  it("lists enabled graphs as ready and drops them when disabled", () => {
+  it("does not list idle graphs as ready to run", () => {
+    applyBackgroundJobPush({
+      type: "background_job",
+      id: graphJobId("idle"),
+      title: "Image to island",
+      phase: "ready",
+      detail: "Ready to run",
+    });
     syncReadyGraphJobs(
       [
+        { id: "idle", name: "Image to island", kind: "pipeline", enabled: true, node_count: 3 },
         { id: "a", name: "Nightly", kind: "automation", enabled: true, node_count: 2 },
-        { id: "p", name: "Art", kind: "pipeline", enabled: true, node_count: 3 },
-        { id: "off", name: "Off", kind: "automation", enabled: false, node_count: 2 },
-        { id: "empty", name: "Empty", kind: "pipeline", enabled: true, node_count: 0 },
       ],
-      [],
+      _peekBackgroundJobsForTests(),
     );
-    const jobs = _peekBackgroundJobsForTests();
-    expect(jobs.map((j) => j.id).sort()).toEqual([graphJobId("a"), graphJobId("p")].sort());
-    expect(jobs.every((j) => j.phase === "ready" && j.detail === "Ready to run")).toBe(true);
-
-    syncReadyGraphJobs([{ id: "p", name: "Art", kind: "pipeline", enabled: true, node_count: 3 }], jobs);
-    expect(_peekBackgroundJobsForTests().map((j) => j.id)).toEqual([graphJobId("p")]);
+    expect(_peekBackgroundJobsForTests().some((j) => j.phase === "ready")).toBe(false);
   });
 
   it("does not clobber a running graph with ready", () => {

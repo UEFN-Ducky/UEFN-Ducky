@@ -27,7 +27,8 @@ function readPersisted(): BackgroundJob[] {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { jobs?: BackgroundJob[] };
-    return Array.isArray(parsed?.jobs) ? parsed.jobs.slice(0, MAX_ITEMS) : [];
+    const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : [];
+    return jobs.filter((j) => j && j.phase && j.phase !== "ready").slice(0, MAX_ITEMS);
   } catch {
     return [];
   }
@@ -73,6 +74,16 @@ export function upsertBackgroundJob(patch: Partial<BackgroundJob> & { id: string
   const id = String(patch.id || "").trim();
   const now = Date.now();
   const prev = snapshot.jobs.find((j) => j.id === id);
+  if ((patch.phase || "") === "ready") {
+    if (prev) dismissBackgroundJob(id);
+    return prev || {
+      id,
+      source: String(patch.source || "app"),
+      title: String(patch.title || id),
+      phase: "ready",
+      ts: now,
+    };
+  }
   const next: BackgroundJob = {
     id,
     source: String(patch.source || prev?.source || "app"),

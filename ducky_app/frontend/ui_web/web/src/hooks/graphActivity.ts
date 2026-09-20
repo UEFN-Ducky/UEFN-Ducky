@@ -57,27 +57,12 @@ export function applyBackgroundJobPush(event: PanelPushEvent | (Partial<Backgrou
 }
 
 export function syncReadyGraphJobs(
-  rows: Array<Pick<AutomationSummaryDto, "id" | "name" | "kind" | "enabled" | "node_count">>,
+  _rows: Array<Pick<AutomationSummaryDto, "id" | "name" | "kind" | "enabled" | "node_count">>,
   current: BackgroundJob[],
 ): void {
-  const wanted = new Set<string>();
-  for (const row of rows) {
-    const wid = String(row.id || "").trim();
-    if (!wid || !row.enabled || !(row.node_count || 0)) continue;
-    const id = graphJobId(wid);
-    wanted.add(id);
-    const prev = current.find((j) => j.id === id);
-    if (prev?.phase === "working") continue;
-    upsertBackgroundJob({
-      id,
-      source: row.kind === "pipeline" ? "pipeline" : "automation",
-      title: row.name || wid,
-      detail: "Ready to run",
-      phase: "ready",
-    });
-  }
   for (const job of current) {
-    if (!job.id.startsWith(GRAPH_JOB_PREFIX) || job.phase === "working") continue;
-    if (job.phase === "ready" && !wanted.has(job.id)) dismissBackgroundJob(job.id);
+    if (job.id.startsWith(GRAPH_JOB_PREFIX) && job.phase === "ready") {
+      dismissBackgroundJob(job.id);
+    }
   }
 }

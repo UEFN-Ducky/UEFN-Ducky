@@ -33,6 +33,16 @@ describe("backgroundActivity", () => {
     expect(_peekBackgroundJobsForTests()[0]?.detail).toBe("ready");
   });
 
+  it("ignores idle ready-to-run spam", () => {
+    upsertBackgroundJob({
+      id: "graph:idle",
+      title: "Image to island",
+      phase: "ready",
+      detail: "Ready to run",
+    });
+    expect(_peekBackgroundJobsForTests().some((j) => j.phase === "ready")).toBe(false);
+  });
+
   it("clearFinished keeps only working jobs", () => {
     upsertBackgroundJob({ id: "a", title: "A", phase: "working" });
     upsertBackgroundJob({ id: "b", title: "B", phase: "done" });
