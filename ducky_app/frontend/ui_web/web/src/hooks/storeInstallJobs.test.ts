@@ -21,9 +21,11 @@ import {
   takeStoreCatalogDirty,
 } from "./storeInstallJobs";
 import { installProgressPct } from "../views/settings/store/storeData";
+import { _peekBackgroundJobsForTests, _resetBackgroundActivityForTests } from "./backgroundActivity";
 
 afterEach(() => {
   _resetStoreInstallJobsForTests();
+  _resetBackgroundActivityForTests();
   vi.useRealTimers();
 });
 
@@ -43,6 +45,7 @@ describe("storeInstallJobs", () => {
     // Overlay may still show working, but no live runner — reclaim can restart.
     expect(isStoreInstallBusy("studio3d")).toBe(false);
     expect(_peekStoreJobForTests("studio3d")?.phase).toBe("working");
+    expect(_peekBackgroundJobsForTests().some((j) => j.id === "store:studio3d" && j.phase === "working")).toBe(true);
     patchStoreJob("studio3d", null);
     expect(_peekStoreJobForTests("studio3d")).toBeUndefined();
   });

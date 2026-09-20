@@ -133,6 +133,23 @@ function makeHostApi(pluginId: string) {
         if (api?.plugin_cache_clear) await api.plugin_cache_clear(pid, key || "");
       },
     },
+    jobs: {
+      upsert(job: {
+        id: string;
+        title?: string;
+        detail?: string;
+        percent?: number | null;
+        phase?: "working" | "done" | "error";
+        cancelable?: boolean;
+        source?: string;
+      }): void {
+        window.dispatchEvent(
+          new CustomEvent("ducky:background-job", {
+            detail: { ...job, source: job.source || pid },
+          }),
+        );
+      },
+    },
     /** Core ChoiceDropdown (radio/checkbox panel) for shell.boot UIs. */
     mountChoiceDropdown(
       container: HTMLElement,
@@ -222,6 +239,11 @@ export function usePluginShellBoots(): void {
         get: async () => ({}),
         set: async () => undefined,
         clear: async () => undefined,
+      },
+      jobs: defaultApi?.jobs ?? {
+        upsert: (job: { id: string }) => {
+          window.dispatchEvent(new CustomEvent("ducky:background-job", { detail: job }));
+        },
       },
       mountChoiceDropdown: (
         container: HTMLElement,

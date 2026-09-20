@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { CardBusy } from "../views/settings/store/storeData";
+import { installProgressPct } from "../views/settings/store/storeData";
+import { upsertBackgroundJob } from "./backgroundActivity";
 
 /**
  * In-flight Store install/update jobs — survives Settings tab switches.
@@ -193,6 +195,14 @@ export function patchStoreJob(slug: string, next: CardBusy | null): void {
   }
   snapshot = { jobs: { ...jobs, [slug]: next }, hiddenToasts: hidden };
   emit();
+  upsertBackgroundJob({
+    id: `store:${slug}`,
+    source: "store",
+    title: next.name || next.label || slug,
+    detail: next.queued ? "Queued" : next.phase === "error" ? "Failed" : next.step,
+    percent: installProgressPct(next),
+    phase: next.phase,
+  });
 }
 
 export function revealStoreJobToast(slug: string): void {

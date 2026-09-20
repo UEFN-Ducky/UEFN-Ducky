@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
+import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
@@ -702,6 +703,8 @@ export function Header({
             {saveAction.saving ? "Saving…" : "Save"}
           </button>
         ) : null}
+
+        <BackgroundActivityDropdown />
 
         <div className="app-header-divider" />
 
