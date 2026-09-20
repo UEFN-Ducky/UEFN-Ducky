@@ -998,6 +998,12 @@ async def _run_agent_loop(
     delegation_tools_called: set[str] = set()
     written_relpaths: set[str] = set()
     write_failures: list[str] = []
+    from backend.agent.coding_agents.runner import _TurnCheckpoint
+    from frontend.ui_web.project_chats import upsert_in_flight_assistant
+
+    ckpt = _TurnCheckpoint(conv, "ducky", run_id)
+    push = ckpt.wrap(push)
+    ckpt.seed()
     try:
         async for event in runner.run_turn(
             user_text,
@@ -1053,18 +1059,17 @@ async def _run_agent_loop(
                 if event.text == "Cancelled":
                     partial = event.partial_message
                     if partial:
-                        append_message(conv, partial)
-                        save_conversation(conv)
+                        upsert_in_flight_assistant(conv, partial, run_id=run_id)
                     stop_reason = "cancelled"
                 else:
                     partial = event.partial_message
                     err_text = event.text or "LLM error"
                     if partial:
-                        append_message(conv, partial)
+                        upsert_in_flight_assistant(conv, partial, run_id=run_id)
                     else:
                         # Persist so reload / empty stream still shows the crash
                         # (UI used to drop standalone role=error rows → empty Done).
-                        append_message(
+                        upsert_in_flight_assistant(
                             conv,
                             {
                                 "role": "assistant",
@@ -1073,8 +1078,8 @@ async def _run_agent_loop(
                                 "error": err_text,
                                 "ts": time.time(),
                             },
+                            run_id=run_id,
                         )
-                    save_conversation(conv)
                     _log_agent_crash(
                         conv,
                         provider=config.provider,
@@ -1135,7 +1140,7 @@ async def _run_agent_loop(
                         assistant_msg, handoff, title="Hand-off"
                     )
                     push({"type": "delegation_warning", "text": handoff, "conv_id": conv.id})
-                append_message(conv, assistant_msg)
+                upsert_in_flight_assistant(conv, assistant_msg, run_id=run_id)
                 stop_reason = "done"
                 push({"type": "assistant_done", "conv_id": conv.id})
                 return stop_reason

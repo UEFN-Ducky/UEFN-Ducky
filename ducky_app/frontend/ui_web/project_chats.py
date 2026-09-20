@@ -1338,6 +1338,58 @@ def upsert_in_flight_assistant(
         save_conversation(conv, project_root, touch_updated=True)
 
 
+def heal_usage_orphaned_turn(
+    conv: Conversation,
+    *,
+    project_root: str | None = None,
+) -> bool:
+    """Usage was saved mid-run but the assistant row never landed (embedded Ducky/Ollama)."""
+    last: dict[str, Any] | None = None
+    for m in reversed(conv.messages or []):
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+            last = m
+            break
+    if last is None or last.get("role") != "user":
+        return False
+    usage = getattr(conv, "token_usage", None)
+    calls = usage.get("calls") if isinstance(usage, dict) else None
+    if not isinstance(calls, list) or not calls:
+        return False
+    user_ts = float(last.get("ts") or 0)
+    if not any(isinstance(c, dict) and float(c.get("ts") or 0) > user_ts for c in calls):
+        return False
+    upsert_in_flight_assistant(
+        conv,
+        {
+            "role": "assistant",
+            "content": "",
+            "text": "",
+            "ts": time.time(),
+            "incomplete": True,
+            "error": KILLED_TURN_ERROR,
+        },
+        run_id=f"heal-{conv.id}",
+        project_root=project_root,
+    )
+    return True
+
+
+def heal_usage_orphaned_turns_for_project(project_root: str | None = None) -> int:
+    """Boot: persist a killed-turn stub when token_usage outran the transcript."""
+    healed = 0
+    for stub in list_conversations(project_root=project_root):
+        usage = getattr(stub, "token_usage", None)
+        calls = usage.get("calls") if isinstance(usage, dict) else None
+        if not isinstance(calls, list) or not calls:
+            continue
+        conv = load_conversation(stub.id, project_root)
+        if conv is None:
+            continue
+        if heal_usage_orphaned_turn(conv, project_root=project_root):
+            healed += 1
+    return healed
+
+
 def heal_killed_coding_turn(
     conv_id: str,
     run_id: str,

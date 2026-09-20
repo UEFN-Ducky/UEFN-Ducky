@@ -11,6 +11,7 @@ from frontend.ui_web.project_chats import (
     KILLED_TURN_ERROR,
     create_conversation,
     heal_killed_coding_turn,
+    heal_usage_orphaned_turn,
     load_conversation,
     upsert_in_flight_assistant,
 )
@@ -101,3 +102,24 @@ def test_heal_killed_turn_adds_stub_when_only_user_left():
         assert last["incomplete"] is True
         assert last["error"] == KILLED_TURN_ERROR
         assert last["run_id"] == "dead-run"
+
+
+def test_heal_usage_orphaned_turn_when_calls_outran_transcript():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        conv = create_conversation(PanelSettings.load(), "", title="Ollama", project_root=root)
+        conv.messages = [{"role": "user", "text": "city", "content": "city", "ts": 10}]
+        conv.token_usage = {"calls": [{"ts": 20, "step": 1, "input_tokens": 100, "output_tokens": 8}]}
+        from frontend.ui_web.project_chats import save_conversation
+
+        save_conversation(conv, root)
+        loaded = load_conversation(conv.id, project_root=root)
+        assert loaded is not None
+        assert heal_usage_orphaned_turn(loaded, project_root=root) is True
+        fresh = load_conversation(conv.id, project_root=root)
+        assert fresh is not None
+        last = fresh.messages[-1]
+        assert last["role"] == "assistant"
+        assert last["incomplete"] is True
+        assert last["error"] == KILLED_TURN_ERROR
+        assert heal_usage_orphaned_turn(fresh, project_root=root) is False

@@ -46,16 +46,21 @@ def _close_orphans(journal: FileChangeJournal, root: str) -> None:
 
 def heal_orphans_on_panel_boot() -> None:
     """Panel process just started — no agent threads exist. Unstick leftover RUNNING rows."""
-    journal = _journal()
-    if journal is None:
-        return
     try:
         root = _project_root()
     except Exception:
         return
     if not root:
         return
-    _close_orphans(journal, root)
+    journal = _journal()
+    if journal is not None:
+        _close_orphans(journal, root)
+    try:
+        from frontend.ui_web.project_chats import heal_usage_orphaned_turns_for_project
+
+        heal_usage_orphaned_turns_for_project(root)
+    except Exception:
+        pass
 
 
 def list_changesets(*, conv_id: str = "", group_id: str = "", limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:
