@@ -302,6 +302,8 @@ export interface AutomationFieldDto {
   id: string;
   label?: string;
   type?: string;
+  provider?: string;
+  options?: Array<{ id: string; label?: string }>;
 }
 
 export interface AutomationTemplateDto {
@@ -2182,6 +2184,15 @@ export interface PanelApi {
   list_pipeline_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
   list_automation_templates?(system?: string): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
   list_pipeline_templates?(): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
+  list_generated_images?(): Promise<{
+    ok?: boolean;
+    images?: Array<{ name: string; media_url?: string; prompt?: string; gateway?: string; model?: string }>;
+  }>;
+  get_generated_image_attachment?(name: string): Promise<{
+    ok?: boolean;
+    error?: string;
+    attachment?: MessageAttachmentDto;
+  }>;
   save_custom_automation_template?(
     name: string,
     description?: string,

@@ -83,6 +83,7 @@ import { isEnglishLang } from "../views/settings/translationLanguages";
 import { VoiceControls, type LiveVoiceUiHandlers } from "../voice/VoiceControls";
 import { VoiceOverlay } from "../voice/VoiceOverlay";
 import { SnipButton } from "./SnipButton";
+import { GeneratedImagesButton } from "./GeneratedImagesButton";
 import { ChatChangesButton, ChatChangesSlide, useLedgerOpen } from "./ChatChangesDrawer";
 import { captureSnipFile } from "./snipCapture";
 import { SlashCommandMenu } from "./SlashCommandMenu";
@@ -1509,6 +1510,10 @@ export function ChatPane({
                     projectPath: meta?.projectPath,
                   })
                 }
+              />
+              <GeneratedImagesButton
+                disabled={modelsUnavailable || Boolean(chat.isGroup)}
+                onPick={(att) => restoreAttachments([att])}
               />
               <VoiceControls
                 chatId={chat.id}

@@ -145,7 +145,16 @@ def test_catalog_has_builtin_ducky_nodes():
     from backend.automations.catalog import list_nodes
 
     types = {n["type"] for n in list_nodes()}
-    assert {"start.manual", "start.cron", "ducky.prompt", "ducky.spawn", "flow.wait", "flow.branch", "tool.call"} <= types
+    assert {
+        "start.manual",
+        "start.cron",
+        "ducky.prompt",
+        "ducky.spawn",
+        "flow.wait",
+        "flow.foreach",
+        "flow.branch",
+        "tool.call",
+    } <= types
 
 
 def test_emit_skips_when_trigger_config_channel_differs(monkeypatch):
@@ -211,6 +220,40 @@ def test_pipeline_catalog_nodes():
     assert "ducky.spawn" not in pipe
     assert "start.chat" not in auto
     assert "tool.call" in auto and "tool.call" in pipe
+
+
+def test_catalog_keeps_select_options(monkeypatch):
+    from backend.automations import catalog
+    from backend.uefn_plugins import host, store as pstore
+
+    monkeypatch.setattr(
+        host,
+        "get_ui_contributions",
+        lambda: {
+            "automations_nodes": [
+                {
+                    "id": "openai.complete",
+                    "label": "OpenAI complete",
+                    "plugin_id": "openai",
+                    "config_fields": [
+                        {"id": "model", "type": "model", "provider": "openai"},
+                        {
+                            "id": "size",
+                            "type": "select",
+                            "options": [{"id": "1024x1024", "label": "1024×1024"}],
+                        },
+                    ],
+                }
+            ],
+            "automations_triggers": [],
+        },
+    )
+    monkeypatch.setattr(pstore, "get_enabled_plugin_ids", lambda: ["openai"])
+    node = next(n for n in catalog.list_nodes("pipeline") if n["type"] == "openai.complete")
+    model = next(f for f in node["config_fields"] if f["id"] == "model")
+    size = next(f for f in node["config_fields"] if f["id"] == "size")
+    assert model["type"] == "model" and model["provider"] == "openai"
+    assert size["options"][0]["id"] == "1024x1024"
 
 
 def test_plugin_node_systems_filter(monkeypatch):
@@ -603,3 +646,83 @@ def test_list_templates_stamps_missing_plugins(monkeypatch):
     assert row["ready"] is False
     assert "meshy" in row["missing_plugins"]
     assert "blender" in row["missing_plugins"]
+
+
+def test_foreach_runs_body_per_item():
+    from backend.automations import runner
+    from backend.automations.store import save_automation
+
+    wf = save_automation(
+        {
+            "name": "Each",
+            "enabled": True,
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+                    {"id": "f", "type": "flow.foreach", "x": 40, "y": 0, "config": {"field": "cards"}},
+                    {"id": "w", "type": "flow.wait", "x": 80, "y": 0, "config": {"seconds": 0}},
+                    {"id": "d", "type": "flow.wait", "x": 120, "y": 0, "config": {"seconds": 0}, "label": "done"},
+                ],
+                "edges": [
+                    {"source": "s", "target": "f", "kind": "main"},
+                    {"source": "f", "target": "w", "kind": "each"},
+                    {"source": "f", "target": "d", "kind": "done"},
+                ],
+            },
+        }
+    )
+    out = runner.run_automation(wf["id"], payload={"cards": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]})
+    assert out["ok"] is True
+    waits = [s for s in out["steps"] if s.get("type") == "flow.wait"]
+    assert sum(1 for s in waits if s.get("id") == "w") == 2
+    assert sum(1 for s in waits if s.get("id") == "d") == 1
+    empty = runner.run_automation(wf["id"], payload={"cards": []})
+    assert empty["ok"] is True
+    empty_waits = [s for s in empty["steps"] if s.get("type") == "flow.wait"]
+    assert sum(1 for s in empty_waits if s.get("id") == "w") == 0
+    assert sum(1 for s in empty_waits if s.get("id") == "d") == 1
+
+
+def test_pipeline_finish_attaches_png(tmp_path, monkeypatch):
+    from backend.automations import runner
+    from backend.automations.store import KIND_PIPELINE, save_automation
+    from backend.workspace import identity
+    from backend.workspace.identity import RunContext
+
+    png = tmp_path / "card.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04\x00\x01"
+        b"\xdd\x8d\xb4\x1c\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    caller = create_conversation(PanelSettings.load(), "", title="CallerImg")
+    wf = save_automation(
+        {
+            "name": "Img",
+            "kind": KIND_PIPELINE,
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
+                    {"id": "f", "type": "pipeline.finish", "x": 80, "y": 0, "config": {"message": "art ready"}},
+                ],
+                "edges": [{"source": "s", "target": "f", "kind": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(
+        runner,
+        "_ensure_pipeline_group",
+        lambda ctx, wf: ctx.update({"group_id": "hub-img", "conv_id": "hub-img"}),
+    )
+    token = identity.bind(RunContext(run_id="rimg", conv_id=caller.id))
+    try:
+        out = runner.run_pipeline(wf["id"], prompt="hi", files=[{"path": str(png), "name": "card.png"}])
+    finally:
+        identity.reset(token)
+    assert out["ok"] is True
+    loaded = load_conversation(caller.id)
+    assert loaded is not None
+    asst = [m for m in loaded.messages if isinstance(m, dict) and m.get("role") == "assistant"]
+    assert asst
+    atts = asst[-1].get("attachments") or []
+    assert atts and atts[0].get("kind") == "image"

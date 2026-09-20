@@ -17,7 +17,8 @@ from backend.automations.store import (
 )
 
 _log = logging.getLogger("automations")
-_MAX_STEPS = 64
+_MAX_STEPS = 256
+_FOREACH_CAP = 50
 # ponytail: wait sleeps the runner thread; 120s ceiling. Per-node async if graphs nest waits.
 _WAIT_CAP_S = 120.0
 _AGENT_WAIT_CAP_S = 900.0
@@ -26,6 +27,7 @@ _ACTION_TYPES = frozenset(
         "ducky.prompt",
         "ducky.spawn",
         "flow.wait",
+        "flow.foreach",
         "flow.branch",
         "tool.call",
         "pipeline.agent",
@@ -53,31 +55,9 @@ def run_automation(
     ctx: dict[str, Any] = dict(payload or {})
     _prepare_run_ctx(ctx, wf)
     ident_token = _bind_hub_identity(ctx)
-    steps: list[dict[str, Any]] = []
     started = time.time()
-    ok = True
-    error = ""
-    seen = 0
-    queue = list(starts)
-    visited: set[str] = set()
     try:
-        while queue and seen < _MAX_STEPS:
-            nid = queue.pop(0)
-            node = nodes.get(nid)
-            if node is None or nid in visited:
-                continue
-            visited.add(nid)
-            seen += 1
-            step = _exec_node(node, ctx)
-            steps.append(step)
-            if not step.get("ok", True):
-                ok = False
-                error = str(step.get("error") or "step failed")
-                break
-            if step.get("result") and isinstance(step["result"], dict):
-                ctx.update({k: v for k, v in step["result"].items() if k not in ("ok",)})
-            kind = "true" if step.get("branch") else "false" if "branch" in step else "main"
-            queue.extend(_next_ids(nid, edges, kind))
+        steps, ok, error, _seen = _walk(nodes, edges, ctx, starts)
     finally:
         if ident_token is not None:
             from backend.workspace import identity
@@ -188,7 +168,7 @@ def _start_ids(
 
 
 def _next_ids(source: str, edges: list[dict[str, Any]], kind: str) -> list[str]:
-    if kind in ("true", "false"):
+    if kind in ("true", "false", "each", "done"):
         specific = [
             str(e.get("target"))
             for e in edges
@@ -196,11 +176,101 @@ def _next_ids(source: str, edges: list[dict[str, Any]], kind: str) -> list[str]:
         ]
         if specific:
             return specific
+        if kind == "done":
+            return []
     return [
         str(e.get("target"))
         for e in edges
         if str(e.get("source")) == source and str(e.get("kind") or "main") == "main"
     ]
+
+
+def _foreach_items(ctx: dict[str, Any], field: str) -> list[Any]:
+    raw = _payload_get(ctx, field or "cards")
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return list(raw)[:_FOREACH_CAP]
+    return [raw]
+
+
+def _apply_foreach_item(ctx: dict[str, Any], item: Any) -> None:
+    ctx["item"] = item
+    if isinstance(item, dict):
+        ctx["card"] = item
+        cid = item.get("id") or item.get("card_id")
+        if cid:
+            ctx["card_id"] = cid
+        art = item.get("art") if isinstance(item.get("art"), dict) else {}
+        prompt = item.get("prompt") or art.get("prompt") or item.get("name") or item.get("description") or ""
+        if prompt:
+            ctx["prompt"] = str(prompt)
+        return
+    if item not in (None, ""):
+        ctx["prompt"] = str(item)
+
+
+def _walk(
+    nodes: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    ctx: dict[str, Any],
+    start_ids: list[str],
+    *,
+    stop_at: str = "",
+    seen: int = 0,
+) -> tuple[list[dict[str, Any]], bool, str, int]:
+    steps: list[dict[str, Any]] = []
+    queue = list(start_ids)
+    visited: set[str] = set()
+    ok = True
+    error = ""
+    while queue and seen < _MAX_STEPS:
+        nid = queue.pop(0)
+        if not nid or nid == stop_at:
+            continue
+        node = nodes.get(nid)
+        if node is None or nid in visited:
+            continue
+        visited.add(nid)
+        seen += 1
+        ntype = str(node.get("type") or "")
+        if ntype == "flow.foreach":
+            cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+            field = str(cfg.get("field") or "cards")
+            items = _foreach_items(ctx, field)
+            steps.append(
+                {
+                    "ok": True,
+                    "id": nid,
+                    "type": ntype,
+                    "label": str(node.get("label") or ntype),
+                    "result": {"count": len(items), "field": field},
+                }
+            )
+            each_ids = _next_ids(nid, edges, "each")
+            for item in items:
+                _apply_foreach_item(ctx, item)
+                nested, n_ok, n_err, seen = _walk(
+                    nodes, edges, ctx, each_ids, stop_at=nid, seen=seen
+                )
+                steps.extend(nested)
+                if not n_ok:
+                    return steps, False, n_err, seen
+            queue.extend(_next_ids(nid, edges, "done"))
+            continue
+        step = _exec_node(node, ctx)
+        steps.append(step)
+        if not step.get("ok", True):
+            ok = False
+            error = str(step.get("error") or "step failed")
+            break
+        if step.get("result") and isinstance(step["result"], dict):
+            ctx.update({k: v for k, v in step["result"].items() if k not in ("ok",)})
+        kind = "true" if step.get("branch") else "false" if "branch" in step else "main"
+        queue.extend(_next_ids(nid, edges, kind))
+    if seen >= _MAX_STEPS and queue:
+        return steps, False, "step budget exceeded", seen
+    return steps, ok, error, seen
 
 
 def _exec_node(node: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +287,15 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
             if secs:
                 time.sleep(secs)
             return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": {"waited": secs}}
+        if ntype == "flow.foreach":
+            items = _foreach_items(payload, str(cfg.get("field") or "cards"))
+            return {
+                "ok": True,
+                "id": node.get("id"),
+                "type": ntype,
+                "label": label,
+                "result": {"count": len(items), "field": str(cfg.get("field") or "cards")},
+            }
         if ntype == "flow.branch":
             return {**_branch_node(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "tool.call":
@@ -564,12 +643,11 @@ def _pipeline_finish(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, 
         return {"ok": False, "error": f"caller chat not found: {caller}"}
     text = str(cfg.get("message") or payload.get("text") or payload.get("assistant_text") or "Pipeline finished.")
     files = payload.get("files") or []
-    if files:
-        paths = "\n".join(
-            str(row.get("path") if isinstance(row, dict) else row) for row in files
-        )
-        text = f"{text}\n\nFiles:\n{paths}"
-    append_message(conv, {"role": "assistant", "content": text, "text": text, "ts": time.time()})
+    attachments = _files_as_attachments(files)
+    msg: dict[str, Any] = {"role": "assistant", "content": text, "text": text, "ts": time.time()}
+    if attachments:
+        msg["attachments"] = attachments
+    append_message(conv, msg)
     return {"ok": True, "result": {"posted": True, "caller_conv_id": caller, "text": text, "files": files}}
 
 

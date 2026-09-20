@@ -157,3 +157,19 @@ class PanelApiAutomationsMixin:
         if not delete_custom(template_id):
             return {"ok": False, "error": "template not found"}
         return {"ok": True}
+
+    def list_generated_images(self) -> dict[str, Any]:
+        from frontend.ui_web.generated_images import list_generated_images
+
+        return {"ok": True, "images": list_generated_images()}
+
+    def get_generated_image_attachment(self, name: str) -> dict[str, Any]:
+        from frontend.ui_web.generated_images import attachment_from_path, resolve_generated_image_path
+
+        try:
+            att = attachment_from_path(resolve_generated_image_path(name))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not att:
+            return {"ok": False, "error": "not an image"}
+        return {"ok": True, "attachment": att}

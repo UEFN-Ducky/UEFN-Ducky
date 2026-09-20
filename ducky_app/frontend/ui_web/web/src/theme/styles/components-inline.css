@@ -2940,6 +2940,36 @@ html.window-maximized .window-resize-grip {
   line-height: 1.45;
 }
 
+.generated-images-btn-wrap { position: relative; }
+.generated-images-flyout {
+  position: absolute;
+  bottom: 42px;
+  right: 0;
+  z-index: 20;
+  width: 240px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0006;
+}
+.generated-images-empty { padding: 10px 12px; color: var(--muted); font-size: 12px; }
+.generated-images-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.generated-images-row:hover { background: var(--hover); }
+.generated-images-row img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; }
+
 /* ── ComposerAttachMenu ── */
 .composer-attach-menu {
   position: relative;

@@ -188,6 +188,7 @@ _KNOWN: dict[str, tuple[str, str, str]] = {
     "changesets": ("Changesets leftover", "Pre-database write ledger. Now in ducky.db.", "cache"),
     "memory": ("Memory leftover", "Pre-database notes. Now in ducky.db.", "cache"),
     "tool_captures": ("Captures", "Screenshots and snips from tools.", "cache"),
+    "generated_images": ("Generated images", "Gateway and agent image generations kept for chat reuse.", "user"),
     "tool_spills": ("Tool spills", "Oversized nested MCP results spilled off the model context.", "cache"),
     "backups": ("Backups leftover", "Old JSON .bak copies. Snapshots replaced this.", "cache"),
     "listener": ("Listener", "UEFN Python listener shipped here. Recreated on app start.", "runtime"),

@@ -998,6 +998,7 @@ async def _run_agent_loop(
     delegation_tools_called: set[str] = set()
     written_relpaths: set[str] = set()
     write_failures: list[str] = []
+    generated_atts: list[dict[str, Any]] = []
     from backend.agent.coding_agents.runner import _TurnCheckpoint
     from frontend.ui_web.project_chats import upsert_in_flight_assistant
 
@@ -1039,6 +1040,14 @@ async def _run_agent_loop(
             elif event.kind == "tool_end" and event.tool:
                 rec = event.tool
                 record_write_from_tool(rec, written_relpaths, write_failures)
+                try:
+                    from frontend.ui_web.generated_images import attachments_from_tool_result
+
+                    data = rec.result if isinstance(rec.result, dict) else {}
+                    inner = data.get("data") if isinstance(data.get("data"), dict) else data
+                    generated_atts.extend(attachments_from_tool_result(rec.name, inner))
+                except Exception:
+                    pass
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
                 _push_tool_done(push, conv.id, rec)
@@ -1122,6 +1131,10 @@ async def _run_agent_loop(
                 )
             elif event.kind == "done" and event.assistant_message:
                 assistant_msg = event.assistant_message
+                if generated_atts:
+                    assistant_msg = dict(assistant_msg)
+                    existing = list(assistant_msg.get("attachments") or [])
+                    assistant_msg["attachments"] = existing + generated_atts
                 warning = fake_delegation_warning(conv, assistant_msg, delegation_tools_called)
                 if warning:
                     assistant_msg = append_delegation_warning(assistant_msg, warning)

@@ -105,6 +105,15 @@ BUILTIN_NODES: list[dict[str, Any]] = [
         "config_fields": [{"id": "seconds", "label": "Seconds", "type": "number"}],
     },
     {
+        "type": "flow.foreach",
+        "label": "For each",
+        "group": "Logic",
+        "role": "action",
+        "systems": list(_BOTH),
+        "description": "Run the each-wire once per item in a payload list, then follow done.",
+        "config_fields": [{"id": "field", "label": "List field", "type": "string"}],
+    },
+    {
         "type": "flow.branch",
         "label": "Branch",
         "group": "Logic",
@@ -207,8 +216,8 @@ def _plugin_node(
     }
 
 
-def _fields(raw: Any) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
+def _fields(raw: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     if not isinstance(raw, list):
         return out
     for f in raw:
@@ -217,11 +226,23 @@ def _fields(raw: Any) -> list[dict[str, str]]:
         fid = str(f.get("id") or "").strip()
         if not fid:
             continue
-        out.append(
-            {
-                "id": fid,
-                "label": str(f.get("label") or fid),
-                "type": str(f.get("type") or "string"),
-            }
-        )
+        row: dict[str, Any] = {
+            "id": fid,
+            "label": str(f.get("label") or fid),
+            "type": str(f.get("type") or "string"),
+        }
+        if f.get("provider"):
+            row["provider"] = str(f.get("provider") or "")
+        opts = f.get("options")
+        if isinstance(opts, list):
+            clean: list[dict[str, str]] = []
+            for opt in opts:
+                if isinstance(opt, dict) and (opt.get("id") or opt.get("value")):
+                    oid = str(opt.get("id") or opt.get("value") or "")
+                    clean.append({"id": oid, "label": str(opt.get("label") or oid)})
+                elif isinstance(opt, str) and opt.strip():
+                    clean.append({"id": opt, "label": opt})
+            if clean:
+                row["options"] = clean
+        out.append(row)
     return out

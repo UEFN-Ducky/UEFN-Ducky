@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutomationTemplatePicker } from "./AutomationTemplatePicker";
 import type {
   AutomationDto,
+  AutomationFieldDto,
   AutomationGraphDto,
   AutomationGraphEdgeDto,
   AutomationGraphNodeDto,
@@ -644,6 +645,69 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
   );
 }
 
+function FieldInput({
+  field,
+  node,
+  pluginId,
+  onChange,
+}: {
+  field: AutomationFieldDto;
+  node: AutomationGraphNodeDto;
+  pluginId?: string;
+  onChange: (n: AutomationGraphNodeDto) => void;
+}) {
+  const value = String(node.config[field.id] ?? "");
+  const set = (next: string | number) =>
+    onChange({ ...node, config: { ...node.config, [field.id]: next } });
+  const [models, setModels] = useState<Array<{ id: string; name?: string }>>([]);
+  const provider =
+    field.provider || (pluginId === "google" ? "gemini" : pluginId) || "";
+
+  useEffect(() => {
+    if (field.type !== "model" || !provider) return;
+    let cancelled = false;
+    void getApi()
+      ?.get_models(provider)
+      ?.then((rows) => {
+        if (!cancelled && Array.isArray(rows)) setModels(rows);
+      })
+      ?.catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [field.type, provider]);
+
+  if (field.type === "textarea") {
+    return (
+      <textarea rows={4} value={value} onChange={(e) => set(e.target.value)} />
+    );
+  }
+  if (field.type === "select" || field.type === "model") {
+    const opts =
+      field.type === "model"
+        ? models.map((m) => ({ id: m.id, label: m.name || m.id }))
+        : field.options || [];
+    return (
+      <select value={value} onChange={(e) => set(e.target.value)}>
+        <option value="">(default)</option>
+        {opts.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label || o.id}
+          </option>
+        ))}
+        {value && !opts.some((o) => o.id === value) ? <option value={value}>{value}</option> : null}
+      </select>
+    );
+  }
+  return (
+    <input
+      type={field.type === "number" ? "number" : "text"}
+      value={value}
+      onChange={(e) => set(field.type === "number" ? Number(e.target.value) : e.target.value)}
+    />
+  );
+}
+
 function NodeInspector({
   node,
   meta,
@@ -677,27 +741,7 @@ function NodeInspector({
       {fields.map((f) => (
         <label key={f.id}>
           {f.label || f.id}
-          {f.type === "textarea" ? (
-            <textarea
-              rows={4}
-              value={String(node.config[f.id] ?? "")}
-              onChange={(e) => onChange({ ...node, config: { ...node.config, [f.id]: e.target.value } })}
-            />
-          ) : (
-            <input
-              type={f.type === "number" ? "number" : "text"}
-              value={String(node.config[f.id] ?? "")}
-              onChange={(e) =>
-                onChange({
-                  ...node,
-                  config: {
-                    ...node.config,
-                    [f.id]: f.type === "number" ? Number(e.target.value) : e.target.value,
-                  },
-                })
-              }
-            />
-          )}
+          <FieldInput field={f} node={node} pluginId={meta?.plugin_id} onChange={onChange} />
         </label>
       ))}
       {edges.length > 0 ? (
@@ -710,6 +754,8 @@ function NodeInspector({
                 <option value="main">main</option>
                 <option value="true">true</option>
                 <option value="false">false</option>
+                <option value="each">each</option>
+                <option value="done">done</option>
               </select>
             </label>
           ))}

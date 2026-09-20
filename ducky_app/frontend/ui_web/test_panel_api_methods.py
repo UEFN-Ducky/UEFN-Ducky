@@ -238,6 +238,8 @@ _PUBLIC_METHODS = frozenset({
     'list_conversations_for_file',
     'list_custom_verse_templates',
     'list_ducky_catalog',
+    'list_generated_images',
+    'get_generated_image_attachment',
     'list_changesets',
     'get_changeset',
     'get_changeset_entry_contents',
