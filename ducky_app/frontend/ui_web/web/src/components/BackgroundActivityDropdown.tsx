@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import {
   clearFinishedBackgroundJobs,
@@ -6,37 +6,90 @@ import {
   dismissBackgroundJob,
   requestBackgroundJobCancel,
   useBackgroundActivity,
+  type BackgroundJob,
 } from "../hooks/backgroundActivity";
+import { applyBackgroundJobPush, GRAPH_JOB_PREFIX, syncReadyGraphJobs } from "../hooks/graphActivity";
+import { getApi } from "../hooks/usePanelApi";
+import { subscribePanelPush } from "../hooks/usePanelPushBus";
+import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
+import { requestOpenPipelinesTab } from "../navigation/openPipelinesTab";
 import { DropdownPanel } from "./DropdownPanel";
 
 function phaseClass(phase: string): string {
-  if (phase === "done") return "is-ok";
+  if (phase === "done" || phase === "ready") return "is-ok";
   if (phase === "error") return "is-off";
   return "is-warn";
 }
 
+function openGraphJob(job: BackgroundJob): void {
+  if (!job.id.startsWith(GRAPH_JOB_PREFIX) && !job.id.startsWith("graph-run:")) return;
+  if (job.source === "pipeline") requestOpenPipelinesTab();
+  else requestOpenAutomationsTab();
+}
+
 export function BackgroundActivityDropdown() {
   const { jobs } = useBackgroundActivity();
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const working = countWorkingBackgroundJobs(jobs);
-  const live = jobs.filter((j) => j.phase === "working");
-  const past = jobs.filter((j) => j.phase !== "working");
+  const ready = jobs.filter((j) => j.phase === "ready").length;
+  const nowCount = working + ready;
+  const live = jobs.filter((j) => j.phase === "working" || j.phase === "ready");
+  const past = jobs.filter((j) => j.phase !== "working" && j.phase !== "ready");
+
+  useEffect(() => {
+    const load = () => {
+      const api = getApi();
+      if (!api) return;
+      void Promise.all([api.list_automations?.(), api.list_pipelines?.()]).then(([autos, pipes]) => {
+        syncReadyGraphJobs(
+          [...(autos?.automations || []), ...(pipes?.pipelines || [])],
+          jobsRef.current,
+        );
+      });
+    };
+    load();
+    return subscribePanelPush((event) => {
+      if (event.type === "background_job") applyBackgroundJobPush(event);
+      if (event.type === "graphs_changed") load();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      const api = getApi();
+      if (!api) return;
+      void Promise.all([api.list_automations?.(), api.list_pipelines?.()]).then(([autos, pipes]) => {
+        syncReadyGraphJobs(
+          [...(autos?.automations || []), ...(pipes?.pipelines || [])],
+          jobsRef.current,
+        );
+      });
+    }
+  }, [open]);
+
+  const title = working
+    ? `${working} running in the background`
+    : ready
+      ? `${ready} ready to run`
+      : "Background activity";
 
   return (
     <div className="connection-status-root no-drag">
       <button
         ref={anchorRef}
         type="button"
-        className={`no-drag connection-status-btn${open ? " is-active" : ""}${working ? " has-store-update" : ""}`}
-        title={working ? `${working} running in the background` : "Background activity"}
+        className={`no-drag connection-status-btn${open ? " is-active" : ""}${nowCount ? " has-store-update" : ""}`}
+        title={title}
         aria-label="Background activity"
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
       >
         <Icons.Inbox />
-        {working ? <span className="store-job-badge bg-activity-badge">{working > 8 ? "8+" : working}</span> : null}
+        {nowCount ? <span className="store-job-badge bg-activity-badge">{nowCount > 8 ? "8+" : nowCount}</span> : null}
       </button>
       <DropdownPanel
         anchorRef={anchorRef}
@@ -51,7 +104,12 @@ export function BackgroundActivityDropdown() {
             <p className="bg-activity-empty">Nothing running. You can keep working.</p>
           ) : (
             live.map((job) => (
-              <div key={job.id} className={`connection-status-menu-row ${phaseClass(job.phase)}`}>
+              <div
+                key={job.id}
+                className={`connection-status-menu-row ${phaseClass(job.phase)}`}
+                role={job.id.startsWith(GRAPH_JOB_PREFIX) ? "button" : undefined}
+                onClick={job.id.startsWith(GRAPH_JOB_PREFIX) ? () => openGraphJob(job) : undefined}
+              >
                 <span className="connection-status-menu-dot" aria-hidden />
                 <div className="connection-status-menu-text">
                   <span className="connection-status-menu-label">{job.title}</span>

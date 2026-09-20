@@ -18,6 +18,8 @@ const PANEL_PUSH_TYPES = new Set<string>([
   "uefn_plugin_trust_request",
   "browser_pane_state",
   "browser_pane_new_window",
+  "background_job",
+  "graphs_changed",
 ]);
 
 type AgentEventListener = (event: AgentEvent) => void;

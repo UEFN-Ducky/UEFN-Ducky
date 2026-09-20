@@ -726,3 +726,31 @@ def test_pipeline_finish_attaches_png(tmp_path, monkeypatch):
     assert asst
     atts = asst[-1].get("attachments") or []
     assert atts and atts[0].get("kind") == "image"
+
+
+def test_run_announces_header_jobs(monkeypatch):
+    from backend.automations import runner
+    from backend.automations.store import save_automation
+
+    events: list[dict] = []
+    monkeypatch.setattr(runner, "_run_message", lambda *a, **k: "run")
+    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", events.append)
+    wf = save_automation(
+        {
+            "name": "Tray",
+            "enabled": True,
+            "graph": {
+                "nodes": [{"id": "m", "type": "start.manual", "x": 0, "y": 0, "config": {}}],
+                "edges": [],
+            },
+        }
+    )
+    out = runner.run_automation(wf["id"])
+    assert out["ok"] is True
+    jobs = [e for e in events if e.get("type") == "background_job"]
+    phases = [e.get("phase") for e in jobs]
+    assert "working" in phases
+    assert "done" in phases
+    assert any(e.get("id") == f"graph:{wf['id']}" and e.get("phase") == "working" for e in jobs)
+    assert any(str(e.get("id") or "").startswith(f"graph-run:{wf['id']}:") for e in jobs)
+    assert any(e.get("type") == "graphs_changed" for e in events)

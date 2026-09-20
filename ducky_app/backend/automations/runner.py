@@ -22,6 +22,32 @@ _FOREACH_CAP = 50
 # ponytail: wait sleeps the runner thread; 120s ceiling. Per-node async if graphs nest waits.
 _WAIT_CAP_S = 120.0
 _AGENT_WAIT_CAP_S = 900.0
+def _announce_run(wf: dict[str, Any], *, phase: str, detail: str = "", run_id: str = "") -> None:
+    """Header activity tray — running/finished graphs. Never blocks the walk."""
+    wid = str(wf.get("id") or "").strip()
+    if not wid:
+        return
+    kind = normalize_kind(wf.get("kind"))
+    title = str(wf.get("name") or wid)
+    payload = {
+        "type": "background_job",
+        "id": f"graph:{wid}",
+        "source": kind,
+        "title": title,
+        "detail": detail,
+        "phase": phase,
+    }
+    try:
+        from frontend.ui_web.agent_modes import push_ui_event
+
+        push_ui_event(payload)
+        if run_id and phase in ("done", "error"):
+            push_ui_event({**payload, "id": f"graph-run:{wid}:{run_id}"})
+            push_ui_event({"type": "graphs_changed"})
+    except Exception:
+        pass
+
+
 _ACTION_TYPES = frozenset(
     {
         "ducky.prompt",
@@ -56,13 +82,23 @@ def run_automation(
     _prepare_run_ctx(ctx, wf)
     ident_token = _bind_hub_identity(ctx)
     started = time.time()
+    ok = False
+    error = ""
+    steps: list[Any] = []
     try:
+        _announce_run(wf, phase="working", detail="Running")
         steps, ok, error, _seen = _walk(nodes, edges, ctx, starts)
     finally:
         if ident_token is not None:
             from backend.workspace import identity
 
             identity.reset(ident_token)
+        _announce_run(
+            wf,
+            phase="done" if ok else "error",
+            detail=(error or "Finished") if ok else (error or "Failed"),
+            run_id=str(int(started)),
+        )
     ended = time.time()
     run = {
         "started": started,

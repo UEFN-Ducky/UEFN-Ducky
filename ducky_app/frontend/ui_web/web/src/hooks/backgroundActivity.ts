@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 /** Header activity tray — live jobs + recent history. Plugins push via `ducky:background-job`. */
 
-export type BackgroundJobPhase = "working" | "done" | "error";
+export type BackgroundJobPhase = "working" | "ready" | "done" | "error";
 
 export type BackgroundJob = {
   id: string;

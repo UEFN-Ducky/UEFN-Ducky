@@ -1628,8 +1628,14 @@ export interface PanelPushEvent {
     | "coding_agents_updated"
     | "uefn_plugin_trust_request"
     | "browser_pane_state"
-    | "browser_pane_new_window";
+    | "browser_pane_new_window"
+    | "background_job"
+    | "graphs_changed";
   provider?: string;
+  id?: string;
+  phase?: "working" | "ready" | "done" | "error";
+  percent?: number | null;
+  cancelable?: boolean;
   ok?: boolean;
   detail?: string;
   appearance?: AppearanceDto;

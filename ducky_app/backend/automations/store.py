@@ -17,6 +17,15 @@ KIND_PIPELINE = "pipeline"
 _KINDS = frozenset({KIND_AUTOMATION, KIND_PIPELINE})
 
 
+def _announce_graphs_changed() -> None:
+    try:
+        from frontend.ui_web.agent_modes import push_ui_event
+
+        push_ui_event({"type": "graphs_changed"})
+    except Exception:
+        pass
+
+
 def normalize_kind(raw: Any) -> str:
     key = str(raw or "").strip().lower()
     return key if key in _KINDS else KIND_AUTOMATION
@@ -116,12 +125,16 @@ def save_automation(doc: dict[str, Any]) -> dict[str, Any]:
     if "last_run" in doc:
         out["last_run"] = float(doc.get("last_run") or 0.0)
     _put(out)
+    _announce_graphs_changed()
     return out
 
 
 def delete_automation(workflow_id: str) -> bool:
     wid = (workflow_id or "").strip()
-    return bool(wid) and _delete(wid)
+    ok = bool(wid) and _delete(wid)
+    if ok:
+        _announce_graphs_changed()
+    return ok
 
 
 def append_run(workflow_id: str, run: dict[str, Any]) -> dict[str, Any] | None:
