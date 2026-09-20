@@ -436,10 +436,10 @@ class _FakeGroups:
         self.invited: list[tuple] = []
         self._n = 0
 
-    def group_create(self, name: str = "", folder_id: str = ""):
+    def group_create(self, name: str = "", folder_id: str = "", open_tab: bool = True):
         self._n += 1
         hid = f"hub-{self._n}"
-        self.created.append({"name": name, "folder_id": folder_id, "id": hid})
+        self.created.append({"name": name, "folder_id": folder_id, "id": hid, "open_tab": open_tab})
         return {"ok": True, "id": hid, "folder_id": folder_id or f"folder-{self._n}"}
 
     def group_add_member(self, group_id: str, conv_id: str, as_leader: bool = False):
@@ -449,6 +449,32 @@ class _FakeGroups:
     def group_invite(self, group_id: str, profile_id: str, model: str = "", write_allowed=None):
         self.invited.append((group_id, profile_id))
         return {"ok": True, "member": {"member_conv_id": f"mem-{profile_id}"}}
+
+
+def test_wait_pipeline_skips_group(monkeypatch):
+    from backend.automations import runner
+    from backend.automations.store import KIND_PIPELINE, save_automation
+
+    fake = _FakeGroups()
+    monkeypatch.setattr("backend.tools.panel.ducky_panel._panel_api", lambda: fake)
+    caller = create_conversation(PanelSettings.load(), "", title="Solo")
+    wf = save_automation(
+        {
+            "name": "No swarm",
+            "kind": KIND_PIPELINE,
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
+                    {"id": "w", "type": "flow.wait", "x": 40, "y": 0, "config": {"seconds": 0}},
+                ],
+                "edges": [{"source": "s", "target": "w", "kind": "main"}],
+            },
+        }
+    )
+    out = runner.run_pipeline(wf["id"], prompt="go", caller_conv_id=caller.id)
+    assert out["ok"] is True
+    assert fake.created == []
+    assert fake.added == []
 
 
 def test_pipeline_group_seats_solo_caller(monkeypatch):
@@ -469,6 +495,7 @@ def test_pipeline_group_seats_solo_caller(monkeypatch):
                 "nodes": [
                     {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
                     {"id": "w", "type": "flow.wait", "x": 40, "y": 0, "config": {"seconds": 0}},
+                    {"id": "a", "type": "pipeline.agent", "x": 80, "y": 0, "config": {}},
                 ],
                 "edges": [{"source": "s", "target": "w", "kind": "main"}],
             },
@@ -476,8 +503,11 @@ def test_pipeline_group_seats_solo_caller(monkeypatch):
     )
     out = runner.run_pipeline(wf["id"], prompt="go", caller_conv_id=caller.id)
     assert out["ok"] is True
-    assert fake.created
-    assert fake.added and fake.added[0][1] == caller.id and fake.added[0][2] is True
+    assert fake.created and fake.created[0].get("open_tab") is False
+    assert fake.added == []
+    hub = load_conversation(fake.created[0]["id"])
+    if hub is not None:
+        assert getattr(hub, "leader_conv_id", "") == caller.id
 
 
 def test_pipeline_group_does_not_move_grouped_caller(monkeypatch):
@@ -500,6 +530,7 @@ def test_pipeline_group_does_not_move_grouped_caller(monkeypatch):
                 "nodes": [
                     {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
                     {"id": "w", "type": "flow.wait", "x": 40, "y": 0, "config": {"seconds": 0}},
+                    {"id": "a", "type": "pipeline.agent", "x": 80, "y": 0, "config": {}},
                 ],
                 "edges": [{"source": "s", "target": "w", "kind": "main"}],
             },
@@ -507,7 +538,7 @@ def test_pipeline_group_does_not_move_grouped_caller(monkeypatch):
     )
     out = runner.run_pipeline(wf["id"], caller_conv_id=caller.id)
     assert out["ok"] is True
-    assert fake.created
+    assert fake.created and fake.created[0].get("open_tab") is False
     assert fake.added == []
     hub_run = load_conversation(fake.created[0]["id"])
     if hub_run is not None:

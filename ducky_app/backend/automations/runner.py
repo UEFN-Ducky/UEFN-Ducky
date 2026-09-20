@@ -428,7 +428,8 @@ def _prepare_run_ctx(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
         ctx["pipeline_run_id"] = run_id
         ctx["artifact_dir"] = str(caller_run_dir(caller, run_id))
     ctx.setdefault("files", [])
-    _ensure_pipeline_group(ctx, wf)
+    if _pipeline_needs_group(wf):
+        _ensure_pipeline_group(ctx, wf)
 
 
 def _bind_hub_identity(ctx: dict[str, Any]):
@@ -468,17 +469,27 @@ def _caller_group_home(caller: str) -> tuple[str, bool]:
     return folder, False
 
 
+def _pipeline_needs_group(wf: dict[str, Any]) -> bool:
+    """Only swarm tiles need a hub. Image/device graphs must not kidnap the chat."""
+    types = {str(n.get("type") or "") for n in (wf.get("graph") or {}).get("nodes") or [] if isinstance(n, dict)}
+    return bool(types & {"pipeline.agent", "ducky.spawn"})
+
+
 def _ensure_pipeline_group(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
     if str(ctx.get("group_id") or "").strip():
         return
     from frontend.ui_web.project_chats import load_conversation, save_conversation
 
     caller = str(ctx.get("caller_conv_id") or "").strip()
-    parent_folder, already_grouped = _caller_group_home(caller)
+    parent_folder, _already_grouped = _caller_group_home(caller)
     try:
         from backend.tools.panel.ducky_panel import _panel_api
 
-        created = _panel_api().group_create(name=str(wf.get("name") or "Pipeline"), folder_id=parent_folder)
+        created = _panel_api().group_create(
+            name=str(wf.get("name") or "Pipeline"),
+            folder_id=parent_folder,
+            open_tab=False,
+        )
     except Exception as exc:
         _log.warning("pipeline group_create failed: %s", exc)
         return
@@ -488,17 +499,9 @@ def _ensure_pipeline_group(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
     hub_id = str(created.get("id") or "").strip()
     ctx["group_id"] = hub_id
     ctx["group_folder_id"] = str(created.get("folder_id") or "")
-    ctx["conv_id"] = hub_id
     if not hub_id:
         return
-    if caller and not already_grouped:
-        try:
-            from backend.tools.panel.ducky_panel import _panel_api
-
-            _panel_api().group_add_member(hub_id, caller, as_leader=True)
-        except Exception as exc:
-            _log.warning("pipeline group_add_member failed: %s", exc)
-        return
+    # ponytail: leader pointer only — do not move the caller's chat into the hub.
     if caller:
         hub = load_conversation(hub_id)
         if hub is not None:
@@ -618,7 +621,7 @@ def _seat_agent_cluster(
         from backend.tools.panel.ducky_panel import _panel_api
 
         api = _panel_api()
-        created = api.group_create(name=title, folder_id=parent_folder)
+        created = api.group_create(name=title, folder_id=parent_folder, open_tab=False)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     if not created.get("ok"):

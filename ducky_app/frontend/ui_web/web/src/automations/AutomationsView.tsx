@@ -12,11 +12,22 @@ import type {
   AutomationTemplateDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
+import { takePendingGraphFocus } from "../hooks/graphActivity";
 import { Icons } from "../icons/Icons";
+import { copyText } from "../utils/copyText";
+import { formatRunLog, runLogHasContent } from "./runLog";
 
 const NODE_W = 200;
 const NODE_H = 76;
+const LOG_H_MIN = 140;
+const LOG_H_MAX = 560;
+const LOG_H_DEFAULT = 220;
 const GROUP_ORDER = ["Starting", "Triggers", "Agents", "Duckies", "Tools", "Logic", "Finish"];
+
+export function clampLogHeight(h: number, boardH = 0): number {
+  const cap = boardH > 0 ? Math.max(LOG_H_MIN, boardH - 24) : LOG_H_MAX;
+  return Math.min(LOG_H_MAX, cap, Math.max(LOG_H_MIN, h));
+}
 
 function emptyGraph(): AutomationGraphDto {
   return { nodes: [], edges: [] };
@@ -63,6 +74,9 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
   } | null>(null);
   const [log, setLog] = useState<AutomationRunDto | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [logCopied, setLogCopied] = useState(false);
+  const [logHeight, setLogHeight] = useState(LOG_H_DEFAULT);
+  const logResizeRef = useRef<{ startY: number; startH: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [spawn, setSpawn] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [spawnFilter, setSpawnFilter] = useState("");
@@ -121,6 +135,24 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
       setLog((row.runs || []).slice(-1)[0] || null);
     }
   }, [isPipeline]);
+
+  useEffect(() => {
+    const open = (id: string) => {
+      if (!id) return;
+      void loadOne(id);
+      setLogOpen(true);
+    };
+    const queued = takePendingGraphFocus(kind);
+    if (queued) open(queued);
+    const onFocus = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ kind?: string; id?: string }>).detail;
+      if (detail?.kind !== kind || !detail.id) return;
+      takePendingGraphFocus(kind);
+      open(detail.id);
+    };
+    window.addEventListener("ducky:focus-graph", onFocus);
+    return () => window.removeEventListener("ducky:focus-graph", onFocus);
+  }, [kind, loadOne]);
 
   const persist = useCallback(async (next: AutomationDto) => {
     const api = getApi();
@@ -216,12 +248,46 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
   };
 
   const onBoardWheel = (e: React.WheelEvent) => {
+    if (e.target instanceof Element && e.target.closest(".aw-log-dock, .aw-log-fab")) return;
     e.preventDefault();
     const next = Math.min(4, Math.max(0.2, zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
     setZoom(next);
   };
 
+  const copyLog = useCallback(
+    (override?: string) => {
+      const text = override || formatRunLog(log, draft?.name);
+      if (!text) return;
+      void copyText(text).then((ok) => {
+        if (!ok) return;
+        setLogCopied(true);
+        window.setTimeout(() => setLogCopied(false), 2000);
+      });
+    },
+    [log, draft?.name],
+  );
+
+  const onLogResizeDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    logResizeRef.current = { startY: e.clientY, startH: logHeight };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onLogResizeMove = (e: React.PointerEvent) => {
+    const drag = logResizeRef.current;
+    if (!drag) return;
+    e.stopPropagation();
+    setLogHeight(clampLogHeight(drag.startH + (drag.startY - e.clientY), boardRef.current?.clientHeight || 0));
+  };
+
+  const onLogResizeUp = () => {
+    logResizeRef.current = null;
+  };
+
   const onBoardPointerDown = (e: React.PointerEvent) => {
+    if (e.target instanceof Element && e.target.closest(".aw-log-dock, .aw-log-fab")) return;
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       panRef.current = { x: pan.x, y: pan.y, px: e.clientX, py: e.clientY };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -307,6 +373,7 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
 
   const onBoardContextMenu = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
+    if (t.closest(".aw-log-dock") || t.closest(".aw-log-fab")) return;
     if (t.closest(".aw-node") || t.closest(".aw-port") || t.closest(".aw-wire")) {
       e.preventDefault();
       return;
@@ -331,7 +398,7 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
     setSelectedNodeId(node.id);
   };
 
-  const logCount = log?.steps?.length || 0;
+  const logCount = log?.steps?.length || (runLogHasContent(log) ? 1 : 0);
 
   return (
     <div className="aw-root">
@@ -555,27 +622,60 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
               );
             })}
           </div>
-          <button
-            type="button"
-            className={`aw-log-fab${logOpen ? " is-open" : ""}`}
-            title={logOpen ? "Hide run log" : "Run log"}
-            aria-expanded={logOpen}
-            onClick={() => setLogOpen((v) => !v)}
+        </div>
+        <button
+          type="button"
+          className={`aw-log-fab${logOpen ? " is-open" : ""}`}
+          title={logOpen ? "Hide run log" : "Run log"}
+          aria-expanded={logOpen}
+          onClick={() => setLogOpen((v) => !v)}
+        >
+          <Icons.Sliders />
+          {logCount ? <span className="aw-log-fab-badge">{logCount}</span> : null}
+        </button>
+        {logOpen ? (
+          <div
+            className="aw-log-dock"
+            style={{ height: logHeight }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onWheel={(e) => e.stopPropagation()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const picked = window.getSelection()?.toString().trim();
+              copyLog(picked || undefined);
+            }}
           >
-            <Icons.Sliders />
-            {logCount ? <span className="aw-log-fab-badge">{logCount}</span> : null}
-          </button>
-          {logOpen ? (
-            <div className="aw-log-dock">
-              <div className="aw-log-dock-head">
-                <strong>Run log</strong>
-                <button type="button" className="icon-btn" title="Hide" onClick={() => setLogOpen(false)}>
-                  ×
-                </button>
-              </div>
-              {log?.steps?.length ? (
+            <div
+              className="aw-log-resize"
+              title="Drag to resize"
+              onPointerDown={onLogResizeDown}
+              onPointerMove={onLogResizeMove}
+              onPointerUp={onLogResizeUp}
+              onPointerCancel={onLogResizeUp}
+            />
+            <div className="aw-log-dock-head">
+              <strong>Run log</strong>
+              <button
+                type="button"
+                className="aw-log-copy"
+                title="Copy log"
+                disabled={!runLogHasContent(log)}
+                onClick={() => copyLog()}
+              >
+                {logCopied ? "Copied" : "Copy log"}
+              </button>
+              <button type="button" className="icon-btn" title="Hide" onClick={() => setLogOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="aw-log-dock-body selectable-text">
+              {runLogHasContent(log) ? (
                 <ol>
-                  {log.steps.map((s, i) => (
+                  {log?.ok === false && log.error ? <li className="is-err">{log.error}</li> : null}
+                  {(log?.steps || []).map((s, i) => (
                     <li key={i} className={s.ok === false ? "is-err" : ""}>
                       {s.label || s.type} {s.ok === false ? `— ${s.error}` : "ok"}
                     </li>
@@ -589,8 +689,8 @@ export function AutomationsView({ kind = "automation" }: { kind?: "automation" |
                 </p>
               )}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
       {spawn ? (
         <div className="aw-spawn-scrim" onMouseDown={() => setSpawn(null)}>

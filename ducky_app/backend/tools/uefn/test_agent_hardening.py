@@ -267,6 +267,10 @@ def test_hard_rules_ai_made_plugins():
     assert "ducky_plugin_list" in AGENT_HARD_RULES
     assert "@api.tool()" in AGENT_HARD_RULES
     assert "ai_plugins" in AGENT_HARD_RULES
+    assert "var(--" in AGENT_HARD_RULES
+    assert "hardcode" in AGENT_HARD_RULES
+    assert "pipeline" in AGENT_HARD_RULES
+    assert "automations" in AGENT_HARD_RULES
 
 
 def test_hard_rules_fix_unless_user_asked_to_delete():

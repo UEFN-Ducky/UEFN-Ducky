@@ -3,9 +3,18 @@ import {
   _peekBackgroundJobsForTests,
   _resetBackgroundActivityForTests,
 } from "./backgroundActivity";
-import { applyBackgroundJobPush, graphJobId, syncReadyGraphJobs } from "./graphActivity";
+import {
+  applyBackgroundJobPush,
+  graphJobId,
+  requestFocusGraph,
+  takePendingGraphFocus,
+  workflowIdFromJobId,
+  syncReadyGraphJobs,
+} from "./graphActivity";
 
 afterEach(() => {
+  takePendingGraphFocus("pipeline");
+  takePendingGraphFocus("automation");
   _resetBackgroundActivityForTests();
 });
 
@@ -41,5 +50,17 @@ describe("graphActivity", () => {
       _peekBackgroundJobsForTests(),
     );
     expect(_peekBackgroundJobsForTests()[0]?.phase).toBe("working");
+  });
+
+  it("parses workflow id from live and finished job ids", () => {
+    expect(workflowIdFromJobId(graphJobId("abc"))).toBe("abc");
+    expect(workflowIdFromJobId("graph-run:abc:171000")).toBe("abc");
+  });
+
+  it("queues a graph focus for the editor", () => {
+    requestFocusGraph("pipeline", "play");
+    expect(takePendingGraphFocus("automation")).toBe("");
+    expect(takePendingGraphFocus("pipeline")).toBe("play");
+    expect(takePendingGraphFocus("pipeline")).toBe("");
   });
 });

@@ -1448,6 +1448,8 @@ export interface AgentEvent {
   parent_conv_id?: string;
   child_conv_id?: string;
   title?: string;
+  /** chats_changed: false keeps the sidebar in sync without stealing the open tab. */
+  open?: boolean;
   status?: LinkedAgentStatus;
   /** Group voice: which ducky just finished speaking this turn. */
   author?: MessageAuthorDto;

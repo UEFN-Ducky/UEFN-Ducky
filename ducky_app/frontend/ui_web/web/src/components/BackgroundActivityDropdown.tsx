@@ -8,7 +8,13 @@ import {
   useBackgroundActivity,
   type BackgroundJob,
 } from "../hooks/backgroundActivity";
-import { applyBackgroundJobPush, GRAPH_JOB_PREFIX, syncReadyGraphJobs } from "../hooks/graphActivity";
+import {
+  applyBackgroundJobPush,
+  GRAPH_JOB_PREFIX,
+  requestFocusGraph,
+  syncReadyGraphJobs,
+  workflowIdFromJobId,
+} from "../hooks/graphActivity";
 import { getApi } from "../hooks/usePanelApi";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
@@ -22,9 +28,12 @@ function phaseClass(phase: string): string {
 }
 
 function openGraphJob(job: BackgroundJob): void {
-  if (!job.id.startsWith(GRAPH_JOB_PREFIX) && !job.id.startsWith("graph-run:")) return;
-  if (job.source === "pipeline") requestOpenPipelinesTab();
+  const wid = workflowIdFromJobId(job.id);
+  if (!wid) return;
+  const kind = job.source === "pipeline" ? "pipeline" : "automation";
+  if (kind === "pipeline") requestOpenPipelinesTab();
   else requestOpenAutomationsTab();
+  requestFocusGraph(kind, wid);
 }
 
 export function BackgroundActivityDropdown() {

@@ -111,7 +111,24 @@ def _minimal_manifest(pid: str, label: str, description: str) -> dict[str, Any]:
             "agent.tools": {
                 "category": pid,
                 "intent_pattern": rf"\\b{pid}\\b",
-            }
+            },
+            "automations": {
+                "nodes": [
+                    {
+                        "id": f"{pid}.run",
+                        "label": clean_label,
+                        "group": clean_label,
+                    }
+                ],
+                "templates": [
+                    {
+                        "id": f"{pid}-run",
+                        "label": f"Run {clean_label}",
+                        "description": f"Chat start → Agent → {clean_label} → Finish.",
+                        "graph": {"nodes": [], "edges": []},
+                    }
+                ],
+            },
         },
         "backend": {"entry": "backend", "register": "register"},
     }
@@ -130,6 +147,12 @@ def _register_stub(plugin_id: str) -> str:
         f"    def {fn}_list(kind: str = \"\") -> dict:\n"
         '        """List records this plugin manages. Add get/upsert/delete for the domain."""\n'
         "        return {\"ok\": True, \"items\": []}\n"
+        "\n"
+        f'    @api.register_pipeline_node("{plugin_id}.run")\n'
+        f"    def {fn}_run(ctx: dict) -> dict:\n"
+        '        """Pipeline/automation node — same helper as the list tool."""\n'
+        "        cfg = ctx.get(\"config\") or {}\n"
+        f"        return {fn}_list(str(cfg.get(\"kind\") or \"\"))\n"
         "\n"
         f'    api.register_panel_rpc("list", '
         f"lambda params=None: {fn}_list(str((params or {{}}).get(\"kind\") or \"\")))\n"
@@ -504,8 +527,13 @@ def _self_check() -> None:
         assert sc.get("ok"), sc
         stub = (_draft_root("hello_ai") / "backend" / "__init__.py").read_text(encoding="utf-8")
         assert "@api.tool" in stub and "hello_ai_list" in stub
+        assert "register_pipeline_node" in stub and "hello_ai.run" in stub
         man0 = json.loads((_draft_root("hello_ai") / "plugin.json").read_text(encoding="utf-8"))
-        assert (man0.get("contributes") or {}).get("agent.tools")
+        contrib0 = man0.get("contributes") or {}
+        assert contrib0.get("agent.tools")
+        auto0 = contrib0.get("automations") or {}
+        assert any(n.get("id") == "hello_ai.run" for n in auto0.get("nodes") or [])
+        assert auto0.get("templates")
         bad = write_ai_plugin_file("hello_ai", "../escape.py", "x = 1")
         assert not bad.get("ok"), bad
         bad2 = write_ai_plugin_file("hello_ai", "backend/../../escape.py", "x = 1")

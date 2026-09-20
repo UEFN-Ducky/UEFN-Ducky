@@ -288,6 +288,7 @@ def notify_chats_changed(
     folder_id: str = "",
     *,
     push: PushFn | None = None,
+    open_tab: bool = True,
 ) -> None:
     """Tell the React panel to reload the sidebar (new chat/folder from MCP tools)."""
     event: dict[str, Any] = {"type": "chats_changed"}
@@ -295,6 +296,8 @@ def notify_chats_changed(
         event["conv_id"] = conv_id
         event["title"] = title
         event["folder_id"] = folder_id
+    if not open_tab:
+        event["open"] = False
     # #region agent log
     _dbg_vis("V-B", "agent_modes.py:notify_chats_changed", "notify fired",
              {"conv_id": conv_id, "in_bridge": _in_bridge_process(),

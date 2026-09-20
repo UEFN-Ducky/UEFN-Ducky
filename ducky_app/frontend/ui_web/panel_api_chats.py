@@ -294,7 +294,7 @@ class PanelApiChatsMixin:
         )
         return {"ok": True}
 
-    def group_create(self, name: str = "", folder_id: str = "") -> dict[str, Any]:
+    def group_create(self, name: str = "", folder_id: str = "", open_tab: bool = True) -> dict[str, Any]:
         """Create a group as a folder: folder click opens the group hub chat."""
         title = (name or "").strip() or "Group"
         settings = _pa.PanelSettings.load()
@@ -319,7 +319,7 @@ class PanelApiChatsMixin:
                 f.group_hub_id = conv.id
                 break
         _pa.save_folders(folders)
-        _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id)
+        _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, open_tab=bool(open_tab))
         return {
             "ok": True,
             "id": conv.id,

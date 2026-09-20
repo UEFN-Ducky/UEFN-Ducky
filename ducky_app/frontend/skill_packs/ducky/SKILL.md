@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 29
+  version: 31
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -186,6 +186,13 @@ Load `skill_read_subskill("ducky", "ai_plugins")` then follow it. Legal I/O is
    those same functions. A tab with no MCP tools is incomplete.
 4. `ducky_plugin_validate` → `ducky_plugin_install` → `ducky_store_set_enabled`.
    If `needs_trust`, stop. Iterate on the draft, then reinstall.
+5. **Tabs: Appearance CSS vars only** (`var(--bg)` / `--fg` / `--accent` / …).
+   Never hardcode colors unless they specified a design — then mention the
+   default.
+6. **Always** automations/pipeline nodes + a template wrapping the same
+   functions (themes too), bundled `skills/<id>/SKILL.md`, and changeset on
+   mutators. Tab toggles use `settings.sections`; first-enable gets a
+   walkthrough.
 
 Never git-clone a Store plugin, never edit the EXE, never `ducky_skills_create_pack`
 unless they asked for a skill pack.

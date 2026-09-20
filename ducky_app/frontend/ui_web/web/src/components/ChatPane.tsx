@@ -1417,6 +1417,10 @@ export function ChatPane({
                     return;
                   }
                 }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();

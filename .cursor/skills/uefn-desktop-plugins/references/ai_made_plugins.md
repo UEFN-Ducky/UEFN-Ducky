@@ -24,6 +24,26 @@ AppData folders.
    Install-from-file, never `cp` into AppData, never edit `ducky_app/` / the EXE
    to add a tab. Never `ducky_skills_create_pack` unless they asked for a
    **skill pack**.
+5. **Tabs: Appearance CSS vars only.** Style with `var(--bg)`, `var(--fg)`,
+   `var(--fg-dim)`, `var(--muted)`, `var(--border)`, `var(--card)`,
+   `var(--accent)`, `var(--accent-hover)`, `var(--btn-bg)`, `var(--red)`,
+   `var(--green)`, `var(--font-family)`, … — apply the host snapshot on load
+   (`theme.get`) and on `appearance_theme`. **Never** hardcode `#hex`, `rgb()`,
+   or named theme colors. Exception: they specified a design/colors — use those
+   tokens only, keep Ducky vars for the rest. **Always mention** the Appearance
+   default when you start the UI or when you depart from it.
+6. **Always pipeline + automation** (themes too). `contributes.automations.nodes`
+   + `@api.register_pipeline_node` that calls the **same** functions as
+   `@api.tool()`. Ship `automations.templates` with graph `start.chat` →
+   `pipeline.agent` → your node → `pipeline.finish`. Omit `systems` so the tile
+   is on both palettes.
+7. **Bundled skill** `skills/<id>/SKILL.md` inside the draft (not
+   `ducky_skills_*`).
+8. **Mutators record changeset** (`api.changeset.record`, slot
+   `{plugin_id}://{kind}/{id}/{facet}`).
+9. **Tab UX (if they asked for a tab):** #5 plus `prefs.get` / `prefs.set`;
+   empty + error states; `var(--border-focus)` on focus-visible. Any toggle →
+   `settings.tabs` + `settings.sections`. First-enable → `contributes.walkthrough`.
 
 ## Path (no forks)
 
