@@ -1708,6 +1708,10 @@
   gap: 8px;
 }
 
+.llms-plugin-slot:empty {
+  display: none;
+}
+
 .llms-provider-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);

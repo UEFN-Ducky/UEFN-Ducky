@@ -3,6 +3,7 @@ import { WINDOW_ID } from "../tabs/tabRegistryClient";
 import {
   DOCK_CHANGE_EVENT,
   dockStorageKey,
+  flushDockSnapshotToDisk,
   persistDockSnapshot,
   readDockSnapshot,
   withPanelOnSide,
@@ -40,10 +41,12 @@ export function useDockSidebarSettings() {
 
   const setRailEnabled = useCallback((side: DockSide, enabled: boolean) => {
     persistDockSnapshot(withRailEnabled(readDockSnapshot(WINDOW_ID), side, enabled), WINDOW_ID);
+    flushDockSnapshotToDisk(WINDOW_ID);
   }, []);
 
   const setPanelOnSide = useCallback((panelId: DockPanelId, targetSide: DockSide | null) => {
     persistDockSnapshot(withPanelOnSide(readDockSnapshot(WINDOW_ID), panelId, targetSide), WINDOW_ID);
+    flushDockSnapshotToDisk(WINDOW_ID);
   }, []);
 
   return {

@@ -208,6 +208,28 @@ export function requestOpenSettings(
   emitAppHook("settings.opened", nextTab ? { tab: nextTab } : undefined);
 }
 
+let pendingLlmsProviderId: string | null = null;
+
+/** Settings → LLMs → that provider slide. Opens Settings if needed; navigates if already open. */
+export function openLlmsProviderSettings(providerId?: string): void {
+  const id = (providerId || "").trim().toLowerCase();
+  pendingLlmsProviderId = id || null;
+  requestOpenSettings("LLMs");
+  queueMicrotask(() => {
+    window.dispatchEvent(
+      new CustomEvent("ducky:settings-section", { detail: { tab: "LLMs", section: "llms" } }),
+    );
+    window.dispatchEvent(new CustomEvent("ducky:llms-select-provider", { detail: { id: id || null } }));
+  });
+}
+
+/** AgentTab: apply a picker/login deep-link once Settings mounts. */
+export function takePendingLlmsProvider(): string | null {
+  const id = pendingLlmsProviderId;
+  pendingLlmsProviderId = null;
+  return id;
+}
+
 /** DuckiesTab: consume a deep-link profile id once (clears after read). */
 export function takePendingDuckyProfileId(): string | null {
   const id = pendingDuckyProfileId;

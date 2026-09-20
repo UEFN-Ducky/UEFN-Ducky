@@ -22,7 +22,8 @@ import {
   type PluginLlmProvider,
 } from "../../hooks/usePluginContributions";
 import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
-import { requestOpenSettings } from "../../navigation/openSettingsTab";
+import { requestOpenSettings, takePendingLlmsProvider } from "../../navigation/openSettingsTab";
+import { LlmPluginSlot } from "../../plugin-ui/llmPluginSlots";
 import { targetRef, useUiTarget } from "../../ui-targets/registry";
 import type { SettingsNavLocation } from "../../navigation/settingsHistory";
 import {
@@ -394,8 +395,7 @@ export function AgentTab() {
   useApplySettingsDrill("LLMs", applyLlmsDrill);
 
   useEffect(() => {
-    const onSelect = (event: Event) => {
-      const id = (event as CustomEvent<{ id?: string | null }>).detail?.id;
+    const apply = (id?: string | null) => {
       if (!id) {
         setSelectedId(null);
         setUsageTarget(null);
@@ -403,6 +403,10 @@ export function AgentTab() {
       }
       setSelectedId(String(id));
       setUsageTarget(null);
+    };
+    apply(takePendingLlmsProvider());
+    const onSelect = (event: Event) => {
+      apply((event as CustomEvent<{ id?: string | null }>).detail?.id);
     };
     window.addEventListener("ducky:llms-select-provider", onSelect);
     return () => window.removeEventListener("ducky:llms-select-provider", onSelect);
@@ -790,6 +794,12 @@ export function AgentTab() {
                 >
                   <PluginSettingsSections pluginId={selected.plugin_id} compact />
                 </div>
+                <LlmPluginSlot
+                  surface="settings"
+                  open
+                  providerId={selected.id}
+                  pluginId={selected.plugin_id}
+                />
               </div>
             </div>
           ) : null}

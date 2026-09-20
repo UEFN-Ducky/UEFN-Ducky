@@ -2,7 +2,7 @@
  * Open Settings → LLMs → a gateway slide and spotlight the coding-agent login row.
  * Chat never collects OAuth codes; this is the only login surface.
  */
-import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { openLlmsProviderSettings } from "../navigation/openSettingsTab";
 import { registerTour, startTour, unregisterTour } from "./WalkthroughService";
 
 export const CODING_AGENT_LOGIN_TOUR = "coding_agent.login";
@@ -17,11 +17,7 @@ function wait(ms: number): Promise<void> {
 }
 
 function openProvider(providerId: string): void {
-  requestOpenSettings("LLMs");
-  window.dispatchEvent(
-    new CustomEvent("ducky:settings-section", { detail: { tab: "LLMs", section: "llms" } }),
-  );
-  window.dispatchEvent(new CustomEvent("ducky:llms-select-provider", { detail: { id: providerId } }));
+  openLlmsProviderSettings(providerId);
 }
 
 export async function openCodingAgentLoginUi(opts?: {

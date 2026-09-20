@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const saveWorkspaceDock = vi.fn();
+vi.mock("../hooks/usePanelApi", () => ({
+  getApi: () => ({ save_workspace_dock: saveWorkspaceDock }),
+}));
+
 import {
+  applyDiskDockSnapshot,
   defaultDockSnapshot,
+  dockStorageKey,
   normalizeSnapshot,
   panelsOnSide,
+  readDockSnapshot,
   sidebarPanelCatalog,
   withPanelOnSide,
   withRailEnabled,
@@ -12,6 +21,7 @@ const mem = new Map<string, string>();
 
 beforeEach(() => {
   mem.clear();
+  saveWorkspaceDock.mockReset();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => mem.get(key) ?? null,
     setItem: (key: string, value: string) => {
@@ -69,6 +79,31 @@ describe("workspace dock sidebar snapshot", () => {
     const snap = withRailEnabled(defaultDockSnapshot(), "left", false);
     expect(snap.leftRailEnabled).toBe(false);
     expect(snap.leftRailOpen).toBe(true);
+  });
+
+  it("keeps disabled rails through normalize and boot hydrate", () => {
+    expect(normalizeSnapshot({ leftRailEnabled: false, rightRailEnabled: false }, "main").leftRailEnabled).toBe(
+      false,
+    );
+    expect(normalizeSnapshot({ leftRailEnabled: "false", rightRailOpen: "0" }, "main").leftRailEnabled).toBe(
+      false,
+    );
+
+    const local = withRailEnabled(withRailEnabled(defaultDockSnapshot(), "left", false), "right", false);
+    mem.set(dockStorageKey("main"), JSON.stringify(local));
+    // Old AppData predates the kill-switch keys — do not default them back on.
+    const hydrated = applyDiskDockSnapshot({ version: 1, leftWidth: 280 }, "main");
+    expect(hydrated.leftRailEnabled).toBe(false);
+    expect(hydrated.rightRailEnabled).toBe(false);
+    expect(applyDiskDockSnapshot({ leftRailEnabled: false, rightRailEnabled: true }, "main").rightRailEnabled).toBe(
+      true,
+    );
+  });
+
+  it("does not write AppData defaults when localStorage is empty", () => {
+    const empty = readDockSnapshot("main");
+    expect(empty.leftRailEnabled).toBe(true);
+    expect(saveWorkspaceDock).not.toHaveBeenCalled();
   });
 
   it("lists built-ins plus contributed plugin dock ids", () => {

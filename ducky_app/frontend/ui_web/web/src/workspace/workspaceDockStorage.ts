@@ -280,10 +280,14 @@ export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDock
   base.left = normalizeStack(data.left, base.left);
   base.right = normalizeStack(data.right, base.right);
 
-  if (typeof data.leftRailOpen === "boolean") base.leftRailOpen = data.leftRailOpen;
-  if (typeof data.rightRailOpen === "boolean") base.rightRailOpen = data.rightRailOpen;
-  if (typeof data.leftRailEnabled === "boolean") base.leftRailEnabled = data.leftRailEnabled;
-  if (typeof data.rightRailEnabled === "boolean") base.rightRailEnabled = data.rightRailEnabled;
+  const leftOpen = coerceDockBool(data.leftRailOpen);
+  if (leftOpen !== undefined) base.leftRailOpen = leftOpen;
+  const rightOpen = coerceDockBool(data.rightRailOpen);
+  if (rightOpen !== undefined) base.rightRailOpen = rightOpen;
+  const leftEnabled = coerceDockBool(data.leftRailEnabled);
+  if (leftEnabled !== undefined) base.leftRailEnabled = leftEnabled;
+  const rightEnabled = coerceDockBool(data.rightRailEnabled);
+  if (rightEnabled !== undefined) base.rightRailEnabled = rightEnabled;
   if (Array.isArray(data.hiddenPanels)) {
     base.hiddenPanels = uniqueDockPanelIds(data.hiddenPanels);
   } else {
@@ -303,6 +307,29 @@ export function normalizeSnapshot(raw: unknown, windowId: string): WorkspaceDock
   return base;
 }
 
+export function coerceDockBool(value: unknown): boolean | undefined {
+  if (value === true || value === false) return value;
+  if (value === 1 || value === "true" || value === "1") return true;
+  if (value === 0 || value === "false" || value === "0") return false;
+  return undefined;
+}
+
+const RAIL_BOOL_KEYS = ["leftRailOpen", "rightRailOpen", "leftRailEnabled", "rightRailEnabled"] as const;
+
+/** AppData hydrate: disk wins when it named the flag; local keeps kill-switches disk predates. */
+export function applyDiskDockSnapshot(raw: unknown, windowId: string): WorkspaceDockSnapshot {
+  const disk = normalizeSnapshot(raw, windowId);
+  if (!raw || typeof raw !== "object") return disk;
+  const data = raw as Record<string, unknown>;
+  const local = readDockSnapshot(windowId);
+  const next = { ...disk };
+  for (const key of RAIL_BOOL_KEYS) {
+    if (coerceDockBool(data[key]) === undefined) next[key] = local[key];
+  }
+  if (!Array.isArray(data.hiddenPanels)) next.hiddenPanels = local.hiddenPanels;
+  return next;
+}
+
 export function readDockSnapshot(windowId = "main"): WorkspaceDockSnapshot {
   const key = dockStorageKey(windowId);
   try {
@@ -311,30 +338,18 @@ export function readDockSnapshot(windowId = "main"): WorkspaceDockSnapshot {
       raw = localStorage.getItem(DOCK_STORAGE_KEY);
       if (raw) {
         const snapshot = normalizeSnapshot(JSON.parse(raw), windowId);
-        persistDockSnapshot(snapshot, windowId);
+        // ponytail: migrate the unprefixed key locally only — writing AppData here
+        // stomps a saved disabled rail when WebView storage is empty on boot.
+        writeLocalDockSnapshot(snapshot, windowId);
         return snapshot;
       }
     }
     if (!raw) {
-      if (windowId === "main") {
-        const migrated = migrateFromLegacy();
-        persistDockSnapshot(migrated, windowId);
-        return migrated;
-      }
-      const defaults = defaultFocusDockSnapshot();
-      persistDockSnapshot(defaults, windowId);
-      return defaults;
+      return windowId === "main" ? migrateFromLegacy() : defaultFocusDockSnapshot();
     }
     return normalizeSnapshot(JSON.parse(raw), windowId);
   } catch {
-    if (windowId === "main") {
-      const migrated = migrateFromLegacy();
-      persistDockSnapshot(migrated, windowId);
-      return migrated;
-    }
-    const defaults = defaultFocusDockSnapshot();
-    persistDockSnapshot(defaults, windowId);
-    return defaults;
+    return windowId === "main" ? migrateFromLegacy() : defaultFocusDockSnapshot();
   }
 }
 
@@ -359,6 +374,12 @@ export function syncLocalDockSnapshot(snapshot: WorkspaceDockSnapshot, windowId 
 
 const _diskTimers = new Map<string, number>();
 const _pendingDisk = new Map<string, WorkspaceDockSnapshot>();
+let _localWriteAt = 0;
+
+/** True when Appearance/header already saved this session — hydrate must not stomp it. */
+export function localDockWriteIsNewerThan(startedAt: number): boolean {
+  return _localWriteAt >= startedAt;
+}
 
 function writeDockSnapshotToDisk(snapshot: WorkspaceDockSnapshot, windowId: string): void {
   try {
@@ -399,6 +420,7 @@ export function flushDockSnapshotToDisk(windowId = "main"): void {
 }
 
 export function persistDockSnapshot(snapshot: WorkspaceDockSnapshot, windowId = "main"): void {
+  _localWriteAt = Date.now();
   const changed = writeLocalDockSnapshot(snapshot, windowId);
   if (changed) {
     window.dispatchEvent(new CustomEvent(DOCK_CHANGE_EVENT, { detail: { windowId } }));

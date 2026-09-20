@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerSettingsTabConsumer, requestOpenSettings } from "./openSettingsTab";
+import {
+  openLlmsProviderSettings,
+  registerSettingsTabConsumer,
+  requestOpenSettings,
+  takePendingLlmsProvider,
+} from "./openSettingsTab";
 
 describe("requestOpenSettings debounce", () => {
   let t = 0;
@@ -40,6 +45,26 @@ describe("requestOpenSettings debounce", () => {
     requestOpenSettings("Store", { storeSlug: "meshy" });
     requestOpenSettings("Store", { storeSlug: "blender" });
     expect(fn).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("openLlmsProviderSettings opens LLMs and selects that provider", async () => {
+    const fn = vi.fn();
+    const stop = registerSettingsTabConsumer(fn);
+    const sections: unknown[] = [];
+    const providers: unknown[] = [];
+    const onSection = (e: Event) => sections.push((e as CustomEvent).detail);
+    const onProvider = (e: Event) => providers.push((e as CustomEvent).detail);
+    window.addEventListener("ducky:settings-section", onSection);
+    window.addEventListener("ducky:llms-select-provider", onProvider);
+    openLlmsProviderSettings("ollama");
+    expect(fn).toHaveBeenCalledWith("LLMs");
+    expect(takePendingLlmsProvider()).toBe("ollama");
+    await Promise.resolve();
+    expect(sections).toEqual([{ tab: "LLMs", section: "llms" }]);
+    expect(providers).toEqual([{ id: "ollama" }]);
+    window.removeEventListener("ducky:settings-section", onSection);
+    window.removeEventListener("ducky:llms-select-provider", onProvider);
     stop();
   });
 

@@ -54,7 +54,7 @@ export interface ConnectionStatusDropdownProps {
   extra?: ReactNode;
 }
 
-/** Header duck icon: click toggles Ducky listener + Epic MCP connection panel. */
+/** Header duck icon: click toggles Ducky MCP + UEFN listener + Epic MCP connection panel. */
 export function ConnectionStatusDropdown({
   status,
   projectName,
@@ -127,22 +127,7 @@ export function ConnectionStatusDropdown({
       : `Offline${epicReason ? ` · ${epicReason}` : ""}`;
 
   const panelProject = projectName?.trim() || "";
-  const uefnProject = status.uefn_project_name?.trim() || "";
-  const duckyMcpOk = Boolean(isOnline && status.project_match !== false && (uefnProject || panelProject));
-  const duckyMcpWarn =
-    status.project_match === false || (!isOnline && Boolean(uefnProject || panelProject));
-  let duckyMcpDetail: string;
-  if (status.project_match === false && panelProject && uefnProject) {
-    duckyMcpDetail = `Mismatch · UEFN ${uefnProject} ≠ panel ${panelProject}`;
-  } else if (duckyMcpOk) {
-    duckyMcpDetail = `Connected · ${uefnProject || panelProject}`;
-  } else if (!isOnline && (panelProject || uefnProject)) {
-    duckyMcpDetail = `Offline · ${panelProject || uefnProject}`;
-  } else if (panelProject || uefnProject) {
-    duckyMcpDetail = panelProject || uefnProject;
-  } else {
-    duckyMcpDetail = isOnline ? "Connected" : "No project selected";
-  }
+  const duckyMcpDetail = panelProject ? `Connected · ${panelProject}` : "Connected";
 
   const title = status.status_text?.trim() || (isOnline ? "Online" : "Offline");
 
@@ -182,9 +167,9 @@ export function ConnectionStatusDropdown({
         ) : null}
         {extra}
         <div className="connection-status-menu-head">Connections</div>
-        <Row label="Ducky listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
+        <Row label="Ducky MCP" detail={duckyMcpDetail} ok />
+        <Row label="UEFN listener" detail={duckyDetail} ok={isOnline && !isWedged} warn={isWedged || race} />
         <Row label="UEFN MCP" detail={epicDetail} ok={epicOnline} />
-        <Row label="Ducky MCP" detail={duckyMcpDetail} ok={duckyMcpOk} warn={duckyMcpWarn} />
         {(status.plugin_connections ?? []).map((row) => (
           <Row
             key={row.id}

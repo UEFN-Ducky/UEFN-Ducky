@@ -17,9 +17,9 @@ interface DropdownPanelProps {
   zIndex?: number;
   /** Children own scrolling (model list). Without this the panel and the list both scroll. */
   clip?: boolean;
-  /** Preferred panel height in px. Capped by leftover viewport space. */
+  /** Max panel height in px. Capped by leftover viewport space. Short lists shrink. */
   idealHeight?: number;
-  /** Stretch to maxHeight so footers (effort/usage) stay pinned and the list can grow. */
+  /** Pin footers and let the list scroll when content hits the cap. */
   fill?: boolean;
 }
 

@@ -7,7 +7,8 @@ import {
   type DockSide,
   type WorkspaceDockSnapshot,
   flushDockSnapshotToDisk,
-  normalizeSnapshot,
+  applyDiskDockSnapshot,
+  localDockWriteIsNewerThan,
   panelsOnSide,
   persistDockSnapshot,
   readDockSnapshot,
@@ -35,12 +36,14 @@ export function useWorkspaceDockLayout(windowId: string) {
   useEffect(() => {
     return onApiReady((api) => {
       if (!api.get_workspace_dock) return;
+      const hydrateStartedAt = Date.now();
       hydratingRef.current = true;
       void api
         .get_workspace_dock(windowId)
         .then((raw) => {
+          if (localDockWriteIsNewerThan(hydrateStartedAt)) return;
           if (raw && typeof raw === "object" && Object.keys(raw).length > 0) {
-            const next = normalizeSnapshot(raw, windowId);
+            const next = applyDiskDockSnapshot(raw, windowId);
             setSnapshot((prev) =>
               JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
             );
@@ -274,15 +277,17 @@ export function useWorkspaceDockLayout(windowId: string) {
   const setRailEnabled = useCallback(
     (side: DockSide, enabled: boolean) => {
       commit((prev) => withRailEnabled(prev, side, enabled));
+      flushDockSnapshotToDisk(windowId);
     },
-    [commit],
+    [commit, windowId],
   );
 
   const setPanelOnSide = useCallback(
     (panelId: DockPanelId, targetSide: DockSide | null) => {
       commit((prev) => withPanelOnSide(prev, panelId, targetSide));
+      flushDockSnapshotToDisk(windowId);
     },
-    [commit],
+    [commit, windowId],
   );
 
   const setPanelModeForSide = useCallback(

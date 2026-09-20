@@ -8,6 +8,8 @@ export const DUCKY_HOOK_EVENT = "ducky:hook";
 export type AppHookId =
   | "tab.changed"
   | "settings.opened"
+  | "llms.settings"
+  | "model.picker"
   | "store.opened"
   | "agent.selected"
   | "agent.done"
@@ -24,6 +26,8 @@ export interface AppHookDef {
 export const APP_HOOKS: AppHookDef[] = [
   { id: "tab.changed", label: "Tab changed" },
   { id: "settings.opened", label: "Settings opened" },
+  { id: "llms.settings", label: "LLM settings slide" },
+  { id: "model.picker", label: "Model picker opened" },
   { id: "store.opened", label: "Plugin details opened" },
   { id: "agent.selected", label: "Agent selected" },
   { id: "agent.done", label: "Agent finished" },

@@ -1768,7 +1768,8 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
   overflow: hidden;
 }
 .dropdown-panel--fill {
-  height: var(--dropdown-max-height);
+  /* Cap only — short catalogs shrink to content instead of padding to idealHeight. */
+  max-height: var(--dropdown-max-height);
 }
 .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
