@@ -324,13 +324,12 @@ class _TurnCheckpoint:
                 self.blocks[-1]["text"] = (self.blocks[-1].get("text") or "") + text
             else:
                 self.blocks.append({"type": "thinking", "text": text})
-            self.flush(force=False)
+            # ponytail: keep tokens in RAM. Disk flush during generate stalls Ollama/MCP.
         elif t in ("text_delta", "text") and text:
             if self.blocks and self.blocks[-1].get("type") == "text":
                 self.blocks[-1]["text"] = (self.blocks[-1].get("text") or "") + text
             else:
                 self.blocks.append({"type": "text", "text": text})
-            self.flush(force=False)
         elif t == "tool":
             tool = ev.get("tool") if isinstance(ev.get("tool"), dict) else {}
             self.blocks.append(

@@ -87,6 +87,33 @@ def test_turn_checkpoint_flushes_on_tool_done():
         assert [e["type"] for e in events] == ["tool", "tool_done"]
 
 
+def test_turn_checkpoint_does_not_flush_on_text_delta():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        conv = create_conversation(PanelSettings.load(), "", title="Ollama", project_root=root)
+        conv.messages = [{"role": "user", "text": "go", "content": "go", "ts": 1}]
+        from frontend.ui_web.project_chats import save_conversation
+
+        save_conversation(conv, root)
+        ckpt = _TurnCheckpoint(conv, "ducky", "run-slow", project_root=root)
+        push = ckpt.wrap(lambda _ev: None)
+        ckpt.seed()
+        seeded = load_conversation(conv.id, project_root=root)
+        assert seeded is not None
+        seed_hash = (seeded.messages[-1].get("blocks") or [])[:]
+        for _ in range(40):
+            push({"type": "text_delta", "text": "x"})
+        mid = load_conversation(conv.id, project_root=root)
+        assert mid is not None
+        assert (mid.messages[-1].get("blocks") or []) == seed_hash
+        push({"type": "tool", "tool": {"name": "ping", "status": "pending"}})
+        done = load_conversation(conv.id, project_root=root)
+        assert done is not None
+        blocks = done.messages[-1].get("blocks") or []
+        assert any(b.get("type") == "text" and "x" in (b.get("text") or "") for b in blocks)
+        assert blocks[-1].get("name") == "ping"
+
+
 def test_heal_killed_turn_adds_stub_when_only_user_left():
     with tempfile.TemporaryDirectory() as tmp:
         root = str(Path(tmp))
