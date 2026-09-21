@@ -184,10 +184,15 @@ async def _complete_text(
                 f"{pname} gateway is not installed — Settings → Store → Gateways"
             )
 
-        api_key = get_key(pname)
-        if not api_key and pname != "ollama":
+        try:
+            from backend.uefn_plugins.host import resolve_gateway_credential
+
+            api_key = resolve_gateway_credential(pname)
+        except Exception:
+            api_key = get_key(pname) or ""
+        if not api_key:
             raise ValueError(f"No API key for {pname}")
-        provider = make_provider(pname, api_key or "", model)
+        provider = make_provider(pname, api_key, model)
         cancel = threading.Event()
         text = ""
         async for event in provider.stream_turn(

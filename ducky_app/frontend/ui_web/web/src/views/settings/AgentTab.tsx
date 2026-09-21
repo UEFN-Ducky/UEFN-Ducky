@@ -5,6 +5,7 @@ import { Icons } from "../../icons/Icons";
 import { ChoiceDropdown } from "../../components/ChoiceDropdown";
 import { TruncatedText } from "../../components/TruncatedText";
 import { ProviderUsageReport } from "../../components/usage/ProviderUsageReport";
+import { GatewayUsageFooter, type UsageWindow } from "../../components/GatewayUsageFooter";
 import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
 import type { PanelPushEvent } from "../../types/panel";
 import {
@@ -311,6 +312,28 @@ function FollowCodeSection() {
   );
 }
 
+function HostedGatewayUsage({ providerId }: { providerId: string }) {
+  const [windows, setWindows] = useState<UsageWindow[]>([]);
+  useEffect(() => {
+    const api = getApi();
+    if (!api?.get_gateway_usage || !providerId) return;
+    let cancelled = false;
+    void api.get_gateway_usage(providerId, "", false).then(
+      (res) => {
+        if (cancelled) return;
+        setWindows(Array.isArray(res?.windows) ? (res.windows as UsageWindow[]) : []);
+      },
+      () => {
+        if (!cancelled) setWindows([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId]);
+  return <GatewayUsageFooter windows={windows} />;
+}
+
 export function AgentTab() {
   const contrib = usePluginContributions();
   const [keySaved, setKeySaved] = useState<Record<string, boolean>>({});
@@ -576,12 +599,13 @@ export function AgentTab() {
 
   const secretKey = selected ? selected.secret_key || selected.id : "";
   const isUrl = selected?.kind === "url";
-  const saved = secretKey ? !!keySaved[secretKey] : false;
+  const hosted = !!selected?.key_optional && selected.kind !== "url";
+  const saved = secretKey ? !!keySaved[secretKey] || (hosted && !!keySaved[selected?.id || ""]) : false;
   const status = secretKey ? keyStatus[secretKey] : undefined;
   const testing = !!secretKey && testingKey === secretKey;
   const draftValue = secretKey ? (draftKeys[secretKey] ?? "") : "";
   const justSaved = saved && !testing && !status && !draftValue.trim();
-  const canTest = !!selected && (isUrl || !!draftValue.trim());
+  const canTest = !!selected && (hosted || isUrl || !!draftValue.trim());
 
   return (
     <div className="llms-tab">
@@ -606,7 +630,11 @@ export function AgentTab() {
               >
                 {providers.map((row) => {
                   const key = row.secret_key || row.id;
-                  const rowSaved = !!keySaved[key] || !!agentOkByPlugin[row.id.trim().toLowerCase()];
+                  const hostedRow = !!row.key_optional && row.kind !== "url";
+                  const rowSaved =
+                    !!keySaved[key] ||
+                    (hostedRow && !!keySaved[row.id]) ||
+                    !!agentOkByPlugin[row.id.trim().toLowerCase()];
                   return (
                     <button
                       key={row.id}
@@ -728,8 +756,9 @@ export function AgentTab() {
               </header>
 
               <div className="duckies-tab-detail-scroll">
-                {/* API key / URL only when this Store plugin contributes an llm.providers row. */}
-                {selected.secret_key || selected.kind === "url" ? (
+                {hosted ? (
+                  <HostedGatewayUsage providerId={selected.id} />
+                ) : selected.secret_key || selected.kind === "url" ? (
                   <section className="general-tab-section" ref={llmsKeySectionRef}>
                     <GeneralSectionHeader
                       icon={<KeyIcon />}

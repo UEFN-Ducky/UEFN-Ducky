@@ -273,7 +273,6 @@ class PanelApiSettingsMixin:
         from backend.uefn_plugins.host import (
             ensure_plugins_loaded_async,
             get_contributions,
-            get_llm_provider_registration,
             get_ui_contributions,
             plugins_ready,
         )
@@ -307,6 +306,8 @@ class PanelApiSettingsMixin:
 
         # Include every enabled gateway secret_key (and provider id) so saved keys
         # still show after a Store Update even if factory registration races.
+        from backend.uefn_plugins.host import resolve_gateway_credential
+
         for row in get_contributions().get("llm_providers") or []:
             if not isinstance(row, dict):
                 continue
@@ -317,15 +318,21 @@ class PanelApiSettingsMixin:
             ):
                 if key:
                     status[key] = has_key(key)
-            # URL gateways (Ollama) work with default localhost — treat as ready
-            # so the model catalog loads without requiring a saved secret.
-            if pid:
-                reg = get_llm_provider_registration(pid) or {}
-                if reg.get("key_optional") or str(row.get("kind") or "").strip().lower() == "url":
-                    status[pid] = True
-                    sk = str(row.get("secret_key") or "").strip()
-                    if sk:
-                        status[sk] = True
+            if not pid:
+                continue
+            cred = ""
+            try:
+                cred = resolve_gateway_credential(pid)
+            except Exception:
+                cred = ""
+            kind = str(row.get("kind") or "").strip().lower()
+            # URL gateways work with default localhost. Hosted providers with
+            # normalize_secret (UEFN Ducky) are ready only when that secret resolves.
+            if cred or kind == "url":
+                status[pid] = True
+                sk = str(row.get("secret_key") or "").strip()
+                if sk:
+                    status[sk] = True
         return status
 
     def has_any_api_key(self) -> bool:
@@ -1528,7 +1535,13 @@ class PanelApiSettingsMixin:
                 }
             )
         else:
-            api_key = draft if draft and draft != "••••••••" else get_key(prov)
+            api_key = draft if draft and draft != "••••••••" else ""
+            try:
+                from backend.uefn_plugins.host import resolve_gateway_credential
+
+                api_key = resolve_gateway_credential(prov, api_key)
+            except Exception:
+                api_key = api_key or (get_key(prov) or "")
             if not api_key:
                 return {"ok": False, "detail": "No key"}
             saved = _pa.PanelSettings.load().agent_model
@@ -1538,13 +1551,25 @@ class PanelApiSettingsMixin:
                 or (saved.strip() if saved else "")
             )
             if not test_model:
-                return {"ok": False, "detail": "Unknown provider"}
+                try:
+                    models = fetch_models(prov, api_key)
+                    test_model = models[0].id if models else ""
+                except Exception:
+                    test_model = ""
+            if not test_model:
+                return {"ok": False, "detail": "No models for this gateway"}
 
         try:
             p = make_provider(prov, api_key, test_model)
             ok, detail = asyncio.run(p.test_connection())
             if ok:
-                set_key(prov, api_key)
+                # Hosted providers resolve a different secret (device key). Do not
+                # copy it into this provider's credentials.dat slot.
+                persist = kind == "url" or bool(draft and draft != "••••••••") or not callable(
+                    (prov_reg or {}).get("normalize_secret")
+                )
+                if persist:
+                    set_key(prov, api_key)
                 clear_model_cache(prov)
                 invalidate_detect_cache()
 

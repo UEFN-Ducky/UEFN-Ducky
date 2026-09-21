@@ -151,6 +151,7 @@ export type PluginLlmProvider = {
   order?: number;
   plugin_id: string;
   shows_thinking_effort?: boolean;
+  key_optional?: boolean;
   icon_data_url?: string;
 };
 

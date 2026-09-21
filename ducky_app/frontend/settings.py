@@ -294,14 +294,17 @@ class PanelSettings:
     def validate(self) -> None:
         if self.port < 1 or self.port > 65535:
             raise ValueError("port must be 1-65535")
-        # Builtins + known gateway runtime ids (plugin may be off; keep legacy settings valid).
-        if self.agent_provider and self.agent_provider not in (
-            "anthropic",
-            "gemini",
-            "openai",
-            "ollama",
-        ):
-            raise ValueError("agent_provider must be empty or a gateway id")
+        # Builtins + contributed gateway ids (UEFN Ducky, Cursor's API sibling, …).
+        if self.agent_provider:
+            allowed = {"anthropic", "gemini", "openai", "ollama"}
+            try:
+                from frontend.favorite_models import api_backends
+
+                allowed |= {str(p).strip().lower() for p in api_backends() if str(p).strip()}
+            except Exception:
+                pass
+            if self.agent_provider not in allowed:
+                raise ValueError("agent_provider must be empty or a gateway id")
         if self.tool_result_format not in ("toon", "json"):
             raise ValueError("tool_result_format must be toon or json")
         if self.voice_spoken_style not in ("summary", "speak_along"):

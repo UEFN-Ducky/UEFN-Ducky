@@ -3534,6 +3534,14 @@
   padding-bottom: 24px;
 }
 
+.llms-tab .duckies-tab-detail-scroll > .model-selector-usage {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 65%, var(--bg));
+}
+
 @media (max-width: 640px) {
   .llms-default-model-row {
     flex-direction: column;

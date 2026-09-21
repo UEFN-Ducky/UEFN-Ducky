@@ -17,6 +17,7 @@ export type PickerGateway = {
   /** When the coding agent id matches the provider (Cursor), models come from the agent. */
   primaryAgentId: string | null;
   iconDataUrl?: string;
+  showsThinkingEffort: boolean;
 };
 
 function norm(id: string): string {
@@ -76,6 +77,7 @@ export function buildPickerGateways(
       nestedAgents: nested,
       primaryAgentId: primary ? norm(primary.id) : null,
       iconDataUrl: String(p.icon_data_url || "").trim(),
+      showsThinkingEffort: p.shows_thinking_effort !== false,
     });
   }
   return out.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));

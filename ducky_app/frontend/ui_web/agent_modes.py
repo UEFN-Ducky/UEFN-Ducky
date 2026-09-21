@@ -803,23 +803,12 @@ async def _run_ask_async(
         ducky_label=str(getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or ""),
     )
     try:
-        api_key = get_key(provider_name)
-        if not api_key:
-            try:
-                from backend.uefn_plugins.host import (
-                    get_contributions,
-                    get_llm_provider_registration,
-                )
+        try:
+            from backend.uefn_plugins.host import resolve_gateway_credential
 
-                reg = get_llm_provider_registration(provider_name) or {}
-                if reg.get("key_optional"):
-                    for row in get_contributions().get("llm_providers") or []:
-                        if str(row.get("id") or "").strip().lower() == provider_name:
-                            api_key = str(row.get("default_url") or "").strip()
-                            break
-                    api_key = api_key or "http://localhost:11434"
-            except Exception:
-                api_key = ""
+            api_key = resolve_gateway_credential(provider_name)
+        except Exception:
+            api_key = get_key(provider_name) or ""
         if not api_key:
             push({"type": "error", "text": f"No API key for {provider_name}", "conv_id": conv.id})
             return stop_reason
@@ -1490,16 +1479,14 @@ def run_message(
                 save_conversation(conv)
             except Exception:
                 pass
-        if not get_key(provider_name):
-            # URL gateways (Ollama) are key_optional — default localhost is fine.
-            try:
-                from backend.uefn_plugins.host import get_llm_provider_registration
+        try:
+            from backend.uefn_plugins.host import resolve_gateway_credential
 
-                reg = get_llm_provider_registration(provider_name) or {}
-                if not reg.get("key_optional"):
-                    push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
-                    return ""
-            except Exception:
+            if not resolve_gateway_credential(provider_name):
+                push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
+                return ""
+        except Exception:
+            if not get_key(provider_name):
                 push({"type": "error", "text": "No API key configured", "conv_id": conv_id})
                 return ""
 

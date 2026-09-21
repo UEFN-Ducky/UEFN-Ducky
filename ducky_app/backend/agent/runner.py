@@ -580,7 +580,12 @@ class AgentRunner:
     ) -> AsyncIterator[AgentEvent]:
         if bridge is None:
             bridge = _CancelBridge(self._cancel, thread_cancel)
-        api_key = get_key(self.config.provider)
+        try:
+            from backend.uefn_plugins.host import resolve_gateway_credential
+
+            api_key = resolve_gateway_credential(self.config.provider)
+        except Exception:
+            api_key = get_key(self.config.provider) or ""
         if not api_key:
             yield AgentEvent(kind="error", text=f"No API key for {self.config.provider}. Set one in Settings → Agent.")
             return

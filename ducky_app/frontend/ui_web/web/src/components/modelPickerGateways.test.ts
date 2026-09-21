@@ -74,7 +74,15 @@ describe("buildPickerGateways", () => {
     expect(anthropic.nestedAgents.map((a) => a.id)).toEqual(["claude_code"]);
   });
 
-  it("resolves selection to parent gateway", () => {
+    it("hides thinking effort when the gateway says so", () => {
+      const gws = buildPickerGateways(
+        [{ ...providers[0], id: "uefn_ducky", label: "UEFN Ducky", plugin_id: "account", secret_key: "uefn_ducky", order: 0, shows_thinking_effort: false }],
+        [],
+      );
+      expect(gws[0].showsThinkingEffort).toBe(false);
+    });
+
+    it("resolves selection to parent gateway", () => {
     const gws = buildPickerGateways(providers, agents);
     expect(gatewayForSelection(gws, "codex", "")?.id).toBe("openai");
     expect(gatewayForSelection(gws, "ducky", "anthropic")?.id).toBe("anthropic");

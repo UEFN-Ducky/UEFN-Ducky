@@ -528,12 +528,14 @@ export function ModelSelector({
         pluginId={slotGateway?.pluginId || ""}
         model={normalizedSelectedModel}
       />
-      <ThinkingEffortFooter
-        menu={selectedMenu}
-        modelName={currentModelData?.name || ""}
-        effort={thinkingEffort}
-        onChange={persistEffort}
-      />
+      {slotGateway?.showsThinkingEffort !== false ? (
+        <ThinkingEffortFooter
+          menu={selectedMenu}
+          modelName={currentModelData?.name || ""}
+          effort={thinkingEffort}
+          onChange={persistEffort}
+        />
+      ) : null}
     </>
   );
 

@@ -59,7 +59,11 @@ def models_dropdown(cached: list[str], saved_model: str = "") -> list[str]:
 def default_provider_with_key(has_key_fn) -> str | None:
     from backend.agent.providers import all_providers
 
-    for p in all_providers():
+    ids = [p for p in all_providers() if p]
+    # Account plugin: UEFN Ducky is the hosted default when the device is signed in.
+    if "uefn_ducky" in ids and has_key_fn("uefn_ducky"):
+        return "uefn_ducky"
+    for p in ids:
         if has_key_fn(p):
             return p
     return None

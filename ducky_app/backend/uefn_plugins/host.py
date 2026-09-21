@@ -216,6 +216,15 @@ def _plugin_icon_url(plugin_id: str) -> str:
         return ""
 
 
+def _provider_shows_thinking(row: dict[str, Any]) -> bool:
+    factory = _LLM_PROVIDER_FACTORIES.get(str(row.get("id") or "")) or {}
+    if "shows_thinking_effort" in factory:
+        return bool(factory.get("shows_thinking_effort"))
+    if "shows_thinking_effort" in row:
+        return bool(row.get("shows_thinking_effort"))
+    return True
+
+
 def get_ui_contributions() -> dict[str, Any]:
     """Snapshot contrib registry for Settings UI — does not wait on register()."""
     enabled = list(get_enabled_plugin_ids())
@@ -257,11 +266,7 @@ def get_ui_contributions() -> dict[str, Any]:
                 [
                     {
                         **row,
-                        "shows_thinking_effort": bool(
-                            (_LLM_PROVIDER_FACTORIES.get(str(row.get("id") or "")) or {}).get(
-                                "shows_thinking_effort"
-                            )
-                        ),
+                        "shows_thinking_effort": _provider_shows_thinking(row),
                         "icon_data_url": _plugin_icon_url(str(row.get("plugin_id") or "")),
                     }
                     for row in _dedupe_contrib_rows(_CONTRIBUTIONS["llm_providers"])
@@ -646,6 +651,40 @@ def get_llm_provider_registration(provider_id: str) -> dict[str, Any] | None:
     with _LOCK:
         row = _LLM_PROVIDER_FACTORIES.get(provid)
         return dict(row) if row else None
+
+
+def resolve_gateway_credential(provider_id: str, raw: str = "") -> str:
+    """Saved key, then plugin ``normalize_secret``, then URL default (Ollama).
+
+    Hosted providers like UEFN Ducky keep the device key in ``duckyos_account``
+    and resolve it here — they must not require a pasted LLM secret.
+    """
+    from backend.agent.secrets import get_key
+
+    name = str(provider_id or "").strip().lower()
+    if not name:
+        return ""
+    key = str(raw or "").strip() or str(get_key(name) or "").strip()
+    reg = get_llm_provider_registration(name) or {}
+    norm = reg.get("normalize_secret")
+    if callable(norm):
+        try:
+            key = str(norm(key) or "").strip()
+        except Exception:
+            pass
+    if key:
+        return key
+    row = None
+    for candidate in get_contributions().get("llm_providers") or []:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("id") or "").strip().lower() == name:
+            row = candidate
+            break
+    kind = str((row or {}).get("kind") or "").strip().lower()
+    if kind == "url" or (reg.get("key_optional") and kind != "secret"):
+        return str((row or {}).get("default_url") or "").strip() or "http://localhost:11434"
+    return ""
 
 
 def get_coding_agent_registration(agent_id: str) -> dict[str, Any] | None:
@@ -2317,7 +2356,10 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             "default_url": str(prov.get("default_url") or "").strip(),
             "order": order,
             "plugin_id": pid,
+            "key_optional": bool(prov.get("key_optional")),
         }
+        if "shows_thinking_effort" in prov:
+            entry["shows_thinking_effort"] = bool(prov.get("shows_thinking_effort"))
         _CONTRIBUTIONS["llm_providers"].append(entry)
 
     for agent in contributes.get("llm.coding_agents") or contributes.get("llm_coding_agents") or []:

@@ -555,7 +555,11 @@ def _messages_to_ui(conv, project_root: str | None = None) -> list[dict[str, Any
 
 def _warm_model_cache() -> None:
     from backend.agent.model_fetch import fetch_models
-    from backend.agent.secrets import get_key, has_key
+    from backend.uefn_plugins.host import (
+        get_contributions,
+        get_llm_provider_registration,
+        resolve_gateway_credential,
+    )
 
     changed = False
     # Contributed ids first — factory register can lag a Store install, and
@@ -567,11 +571,23 @@ def _warm_model_cache() -> None:
             continue
         seen.add(provider)
         providers.append(provider)
+    contrib_optional = {
+        str(row.get("id") or "").strip().lower()
+        for row in (get_contributions().get("llm_providers") or [])
+        if isinstance(row, dict) and row.get("key_optional")
+    }
     for provider in providers:
-        if not has_key(provider):
-            continue
+        cred = ""
         try:
-            models = fetch_models(provider, get_key(provider))
+            cred = resolve_gateway_credential(provider)
+        except Exception:
+            cred = ""
+        if not cred:
+            reg = get_llm_provider_registration(provider) or {}
+            if not reg.get("key_optional") and provider not in contrib_optional:
+                continue
+        try:
+            models = fetch_models(provider, cred)
             if models:
                 _model_cache[provider] = list(models)
                 changed = True

@@ -98,7 +98,12 @@ def _parse_draft(text: str) -> dict[str, Any]:
 
 
 async def _complete_text(*, provider_name: str, model: str, system: str, user: str) -> str:
-    api_key = get_key(provider_name)
+    try:
+        from backend.uefn_plugins.host import resolve_gateway_credential
+
+        api_key = resolve_gateway_credential(provider_name)
+    except Exception:
+        api_key = get_key(provider_name) or ""
     if not api_key:
         raise ValueError(f"No API key for {provider_name}")
     provider = make_provider(provider_name, api_key, model)

@@ -12,10 +12,16 @@ def complete_prompt(provider: str, prompt: str, model: str = "") -> dict[str, An
     text = (prompt or "").strip()
     if not text:
         return {"ok": False, "error": "prompt required"}
-    from backend.agent.secrets import get_key
     from backend.agent.providers import make_provider
 
-    key = get_key(provider) or ""
+    try:
+        from backend.uefn_plugins.host import resolve_gateway_credential
+
+        key = resolve_gateway_credential(provider)
+    except Exception:
+        from backend.agent.secrets import get_key
+
+        key = get_key(provider) or ""
     prov = make_provider(provider, key, model=model)
 
     async def _run() -> dict[str, Any]:

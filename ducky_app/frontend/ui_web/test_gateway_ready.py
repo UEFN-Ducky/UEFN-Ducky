@@ -48,3 +48,64 @@ def test_has_any_api_key_sees_contributed_key_before_factory():
         api = PanelApi()
         assert api.get_key_status().get("openai") is True
         assert api.has_any_api_key() is True
+
+
+def test_resolve_gateway_credential_uses_normalize_not_localhost():
+    from backend.uefn_plugins.host import resolve_gateway_credential
+
+    with (
+        patch(
+            "backend.uefn_plugins.host.get_llm_provider_registration",
+            return_value={
+                "key_optional": True,
+                "normalize_secret": lambda raw: "dky_v1_device",
+            },
+        ),
+        patch(
+            "backend.uefn_plugins.host.get_contributions",
+            return_value={"llm_providers": [{"id": "uefn_ducky", "kind": "secret"}]},
+        ),
+        patch("backend.agent.secrets.get_key", return_value=None),
+    ):
+        assert resolve_gateway_credential("uefn_ducky") == "dky_v1_device"
+
+
+def test_warm_model_cache_fetches_contrib_key_optional_without_factory():
+    from frontend.ui_web import panel_api as pa
+    from backend.agent.model_fetch import ModelInfo
+
+    pa._model_cache.clear()
+    fake = [{"id": "uefn_ducky", "label": "UEFN Ducky", "key_optional": True, "kind": "secret"}]
+
+    def _fetch(provider: str, _cred: str):
+        assert provider == "uefn_ducky"
+        return [ModelInfo(id="ducky-brain", display_name="UEFN Ducky")]
+
+    with (
+        patch("backend.uefn_plugins.host.get_contributions", return_value={"llm_providers": fake}),
+        patch("backend.uefn_plugins.host.get_llm_provider_registration", return_value={}),
+        patch("backend.uefn_plugins.host.resolve_gateway_credential", return_value=""),
+        patch("frontend.ui_web.panel_api._contributed_provider_ids", return_value={"uefn_ducky"}),
+        patch("frontend.ui_web.panel_api.all_providers", return_value=()),
+        patch("backend.agent.model_fetch.fetch_models", _fetch),
+        patch("frontend.ui_web.panel_api._save_model_cache_to_disk"),
+    ):
+        pa._warm_model_cache()
+    assert pa._model_cache["uefn_ducky"][0].id == "ducky-brain"
+
+
+def test_resolve_gateway_credential_url_defaults_localhost():
+    from backend.uefn_plugins.host import resolve_gateway_credential
+
+    with (
+        patch(
+            "backend.uefn_plugins.host.get_llm_provider_registration",
+            return_value={"key_optional": True},
+        ),
+        patch(
+            "backend.uefn_plugins.host.get_contributions",
+            return_value={"llm_providers": [{"id": "ollama", "kind": "url"}]},
+        ),
+        patch("backend.agent.secrets.get_key", return_value=None),
+    ):
+        assert resolve_gateway_credential("ollama") == "http://localhost:11434"

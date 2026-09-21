@@ -62,6 +62,7 @@ def test_panel_api_init_does_not_await_plugins() -> None:
         return
 
     plugins_host.ensure_plugins_loaded_async = _fake_async  # type: ignore[assignment]
+    original_warm = panel_api._warm_model_cache
     panel_api._warm_model_cache = _fake_warm  # type: ignore[attr-defined]
     try:
         # Force "not ready" so a regress that sync-waits would hang or take forever.
@@ -80,6 +81,7 @@ def test_panel_api_init_does_not_await_plugins() -> None:
         print(f"ok PanelApi() {elapsed_ms:.0f}ms without awaiting plugins")
     finally:
         plugins_host.ensure_plugins_loaded_async = original_async  # type: ignore[assignment]
+        panel_api._warm_model_cache = original_warm  # type: ignore[attr-defined]
         plugins_host._LOADED = was_loaded
         plugins_host._UI_READY = was_ui_ready
 
