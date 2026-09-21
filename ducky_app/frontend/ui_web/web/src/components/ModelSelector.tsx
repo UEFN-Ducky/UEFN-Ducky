@@ -13,7 +13,6 @@ import {
   type PickerGateway,
 } from "./modelPickerGateways";
 import {
-  getCachedDefaultModel,
   getCachedModels,
   installModelsCatalogAutoRefresh,
   isModelsCatalogReady,
@@ -156,7 +155,6 @@ export function ModelSelector({
   // null = gateway list; provider key = that gateway’s models (+ nested CLIs).
   const [navGateway, setNavGateway] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
-  const [hoverRow, setHoverRow] = useState<CatalogModelRow | null>(null);
   const [usageWindows, setUsageWindows] = useState<UsageWindow[]>([]);
   const [usageNotice, setUsageNotice] = useState<UsageNotice | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
@@ -172,13 +170,6 @@ export function ModelSelector({
   const histCountRef = useRef(0);
   const suppressPopRef = useRef(false);
 
-  const applyDefaultSelection = useCallback(
-    (_allModels: CatalogModelRow[], _defaultModel: string, _current: string) => {
-      // Never invent a model.
-    },
-    [],
-  );
-
   const visibleModels = useMemo(
     () => (requireTools ? models.filter((m) => m.supportsTools) : models),
     [models, requireTools],
@@ -189,16 +180,9 @@ export function ModelSelector({
     [contrib.llm_providers, contrib.llm_coding_agents, agents],
   );
 
-  const syncFromCatalog = useCallback(
-    (allModels: CatalogModelRow[]) => {
-      setModels(allModels);
-      if (preserveSelection) return;
-      if (codingAgent !== "ducky") return;
-      const pool = requireTools ? allModels.filter((m) => m.supportsTools) : allModels;
-      applyDefaultSelection(pool, getCachedDefaultModel(), selectedModel);
-    },
-    [applyDefaultSelection, codingAgent, preserveSelection, requireTools, selectedModel],
-  );
+  const syncFromCatalog = useCallback((allModels: CatalogModelRow[]) => {
+    setModels(allModels);
+  }, []);
 
   useEffect(() => {
     if (catalogRows) {
@@ -342,8 +326,6 @@ export function ModelSelector({
         : visibleModels;
   const currentModelData = committedModels.find((m) => m.id === normalizedSelectedModel);
   const selectedMenu = catalogThinkingMenu(currentModelData);
-  const previewRow = hoverRow || currentModelData;
-  const previewMenu = catalogThinkingMenu(previewRow);
 
   const persistEffort = useCallback(
     (next: string) => {
@@ -521,7 +503,6 @@ export function ModelSelector({
     setNav(null);
     setSearch("");
     setOpenVendor(null);
-    setHoverRow(null);
   }, [setNav]);
 
   const requestClose = useCallback(() => {
@@ -548,8 +529,8 @@ export function ModelSelector({
         model={normalizedSelectedModel}
       />
       <ThinkingEffortFooter
-        menu={previewMenu}
-        modelName={previewRow?.name || ""}
+        menu={selectedMenu}
+        modelName={currentModelData?.name || ""}
         effort={thinkingEffort}
         onChange={persistEffort}
       />
@@ -663,7 +644,6 @@ export function ModelSelector({
       } else if (setCodingAgent && agentId !== codingAgent && api && convId && api.set_conversation_coding_agent) {
         void api.set_conversation_coding_agent(convId, "ducky");
       }
-      requestClose();
     },
     [
       codingAgent,
@@ -672,7 +652,6 @@ export function ModelSelector({
       preserveSelection,
       setSelectedModel,
       setCodingAgent,
-      requestClose,
       agentIsUnavailable,
       thinkingEffort,
     ],
@@ -690,7 +669,6 @@ export function ModelSelector({
         ref={opts.hitRef ? firstHitRef : undefined}
         className={`model-selector-option${isSel ? " is-selected" : ""}${disabled ? " is-disabled" : ""}`}
         title={disabled ? "Unavailable — enable in Settings → LLMs" : undefined}
-        onMouseEnter={() => setHoverRow(m)}
         onClick={() => {
           if (!disabled) pickModel(m, opts.agentId, m.providerKey);
         }}

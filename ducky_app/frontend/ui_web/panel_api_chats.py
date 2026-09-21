@@ -408,8 +408,9 @@ class PanelApiChatsMixin:
                 return {"ok": False, "error": laned.get("error"), "member": row}
             group = _pa.load_conversation(group_id) or group
             row = next((m for m in group_members(group) if m.get("member_conv_id") == member.id), row)
-        # Reload sidebar only — do not notify the member id (that auto-opens a tab).
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        # Reload sidebar only — do not notify the member id (that auto-opens a tab)
+        # and do not re-select the group (that remounts the pane on a stale roster).
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         return {
             "ok": True,
             "member": row,
@@ -432,7 +433,7 @@ class PanelApiChatsMixin:
             return {"ok": False, "error": "Member not in this group"}
         group.leader_conv_id = mid
         _pa.save_conversation(group)
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         return {"ok": True, "leader_conv_id": mid, "group_members": members}
 
     def group_add_member(
@@ -491,7 +492,7 @@ class PanelApiChatsMixin:
         if as_leader or not (getattr(group, "leader_conv_id", None) or "").strip():
             group.leader_conv_id = cid
         _pa.save_conversation(group)
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         return {
             "ok": True,
             "leader_conv_id": (getattr(group, "leader_conv_id", None) or "").strip(),
@@ -534,7 +535,7 @@ class PanelApiChatsMixin:
             next_members.append(normalize_member(row, index=i))
         group.group_members = next_members
         _pa.save_conversation(group)
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         return {"ok": True, "group_members": next_members}
 
     # -- write lanes ------------------------------------------------------------
@@ -567,7 +568,7 @@ class PanelApiChatsMixin:
         group.group_members = next_members
         _pa.save_conversation(group)
         lane_engine.invalidate_lane_cache(mid)
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         lane = next((m.get("write_allowed") for m in next_members if m.get("member_conv_id") == mid), None)
         events.emit(events.LaneChangedEvent(group.id, mid, None if lane is None else tuple(lane)).to_dict())
         return {
@@ -606,7 +607,7 @@ class PanelApiChatsMixin:
         return {"ok": not verdict["errors"], "normalized": lane, **verdict}
 
     def group_remove(self, group_id: str, member_conv_id: str) -> dict[str, Any]:
-        from frontend.ui_web.group_orchestrator import group_members
+        from frontend.ui_web.group_orchestrator import evict_member_from_group, group_members
 
         group = _pa.load_conversation(group_id)
         if not group or not getattr(group, "is_group", False):
@@ -617,8 +618,10 @@ class PanelApiChatsMixin:
         leader = (getattr(group, "leader_conv_id", None) or "").strip()
         if leader and leader == mid:
             group.leader_conv_id = str(kept[0].get("member_conv_id") or "") if kept else ""
+        # Persist leader/roster first so a later folder-sync cannot pull this member back.
         _pa.save_conversation(group)
-        _pa.notify_chats_changed(group.id, group.title, group.folder_id)
+        evict_member_from_group(mid)
+        _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         return {
             "ok": True,
             "group_members": kept,
@@ -957,6 +960,9 @@ class PanelApiChatsMixin:
         if not isinstance(folders, list) or not isinstance(chats, list):
             raise ValueError("layout payload must include folders and chats arrays")
         _pa.apply_sidebar_layout(folders=folders, chats=chats)
+        # Drag in/out of a group folder is a roster change — refresh IN THIS CHAT
+        # after disk is saved (the optimistic tree is too early to fetch against).
+        _pa.notify_chats_changed(open_tab=False)
 
     def load_messages(
         self, conv_id: str, before_id: int | None = None, limit: int | None = None

@@ -49,6 +49,27 @@ export function shortWhenToUse(text: string, maxWords = 10): string {
   return `${words.slice(0, maxWords).join(" ")}…`;
 }
 
+/** Sidebar duckies that can join this group (not hubs, not already seated, not in another swarm). */
+export function inviteableChats(
+  allChats: ChatTab[],
+  members: GroupMemberDto[],
+  groupId: string,
+): ChatTab[] {
+  const seated = new Set(members.map((m) => m.member_conv_id).filter(Boolean));
+  const gid = (groupId || "").trim();
+  return allChats
+    .filter((c) => {
+      if (!c.id || c.id === gid) return false;
+      if (c.isGroup) return false;
+      if (seated.has(c.id)) return false;
+      const parent = (c.parentConvId || "").trim();
+      if (parent) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => (a.duckyName || a.name || "").localeCompare(b.duckyName || b.name || ""));
+}
+
 /** Library profile title (Verse Coder) — never avatar style (Artist). */
 function memberDuckyName(
   m: GroupMemberDto,
@@ -233,6 +254,11 @@ export function GroupMemberStrip({
     [profiles, invitedIds],
   );
 
+  const existingChats = useMemo(
+    () => inviteableChats(allChats, members, groupId),
+    [allChats, members, groupId],
+  );
+
   const invite = useCallback(
     async (profileId: string) => {
       const api = getApi();
@@ -242,6 +268,27 @@ export function GroupMemberStrip({
       try {
         // Profile's own model / Default Model — no per-invite override here.
         const res = await api.group_invite(groupId, profileId);
+        if (!res?.ok) {
+          setError(res?.error || "Invite failed");
+          return;
+        }
+        onMembersChange(res.group_members || []);
+        setPickerOpen(false);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [groupId, onMembersChange],
+  );
+
+  const addExisting = useCallback(
+    async (convId: string) => {
+      const api = getApi();
+      if (!api?.group_add_member) return;
+      setBusy(true);
+      setError("");
+      try {
+        const res = await api.group_add_member(groupId, convId);
         if (!res?.ok) {
           setError(res?.error || "Invite failed");
           return;
@@ -737,39 +784,65 @@ export function GroupMemberStrip({
                   </span>
                 </span>
               </button>
-              {available.length === 0 ? (
+              {existingChats.length === 0 && available.length === 0 ? (
                 <div className="group-member-picker-empty">
                   {profiles.length === 0
                     ? "No duckies yet — create one above"
                     : "Everyone is already in"}
                 </div>
               ) : (
-                available.map((p) => {
-                  const duckyName = (p.name || "").trim() || labelFor(p.ducky_style);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className="group-member-picker-item group-member-picker-invite"
-                      disabled={busy}
-                      onClick={() => void invite(p.id)}
-                      title={p.when_to_use || p.name}
-                    >
-                      <DuckyAvatar
-                        styleId={p.ducky_style}
-                        size={DUCKY_AVATAR_SIZES.compact}
+                <>
+                  {existingChats.map((c) => {
+                    const duckyName = (c.duckyName || c.name || "").trim() || labelFor(c.duckyStyle);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="group-member-picker-item group-member-picker-invite"
+                        disabled={busy}
+                        onClick={() => void addExisting(c.id)}
                         title={duckyName}
-                        className="group-member-picker-avatar"
-                      />
-                      <span className="group-member-picker-meta">
-                        <span className="group-member-picker-name">{duckyName}</span>
-                        <span className="group-member-picker-when">
-                          {shortWhenToUse(p.when_to_use || p.ducky_personality || "", 10)}
+                      >
+                        <DuckyAvatar
+                          styleId={c.duckyStyle}
+                          size={DUCKY_AVATAR_SIZES.compact}
+                          title={duckyName}
+                          className="group-member-picker-avatar"
+                        />
+                        <span className="group-member-picker-meta">
+                          <span className="group-member-picker-name">{duckyName}</span>
+                          <span className="group-member-picker-when">Add this ducky</span>
                         </span>
-                      </span>
-                    </button>
-                  );
-                })
+                      </button>
+                    );
+                  })}
+                  {available.map((p) => {
+                    const duckyName = (p.name || "").trim() || labelFor(p.ducky_style);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="group-member-picker-item group-member-picker-invite"
+                        disabled={busy}
+                        onClick={() => void invite(p.id)}
+                        title={p.when_to_use || p.name}
+                      >
+                        <DuckyAvatar
+                          styleId={p.ducky_style}
+                          size={DUCKY_AVATAR_SIZES.compact}
+                          title={duckyName}
+                          className="group-member-picker-avatar"
+                        />
+                        <span className="group-member-picker-meta">
+                          <span className="group-member-picker-name">{duckyName}</span>
+                          <span className="group-member-picker-when">
+                            {shortWhenToUse(p.when_to_use || p.ducky_personality || "", 10)}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
               )}
             </div>
           ) : null}

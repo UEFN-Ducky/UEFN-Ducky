@@ -11,6 +11,7 @@ from frontend.ui_web.group_orchestrator import (
     announce_private_member_talk,
     build_member_prompt,
     extract_mention_target,
+    evict_member_from_group,
     find_member_by_name,
     is_group_turn_prompt,
     is_subagent_conversation,
@@ -24,6 +25,7 @@ from frontend.ui_web.group_orchestrator import (
 )
 from frontend.ui_web.project_chats import (
     append_message,
+    apply_sidebar_layout,
     create_conversation,
     create_folder,
     load_conversation,
@@ -403,3 +405,142 @@ def test_announce_skips_orchestrated_group_turns():
         hub = load_conversation(group.id, project_root=root)
         assert hub is not None
         assert hub.messages == []
+
+
+def _wired_group(root: str, name: str = "Squad"):
+    settings = PanelSettings.load()
+    folder = create_folder(name, "", root)
+    hub = create_conversation(settings, folder.id, title=name, project_root=root)
+    hub.is_group = True
+    hub.group_members = []
+    save_conversation(hub, root)
+    folders = load_folders(root)
+    for f in folders:
+        if f.id == folder.id:
+            f.group_hub_id = hub.id
+            break
+    save_folders(folders, root)
+    return settings, folder, hub
+
+
+def test_sync_copies_profile_id_from_conversation():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        settings, folder, hub = _wired_group(root)
+        member = create_conversation(
+            settings,
+            folder.id,
+            title="VerseDev",
+            ducky_name="VerseDev",
+            profile_id="verse-coder",
+            project_root=root,
+        )
+        rows = sync_group_members_from_folder(hub, root)
+        row = next(r for r in rows if r["member_conv_id"] == member.id)
+        assert row["profile_id"] == "verse-coder"
+
+
+def test_evict_member_then_sync_does_not_resurrect():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        settings, folder, hub = _wired_group(root)
+        member = create_conversation(
+            settings,
+            folder.id,
+            title="VerseDev",
+            ducky_name="VerseDev",
+            profile_id="verse-coder",
+            parent_conv_id=hub.id,
+            project_root=root,
+        )
+        hub.leader_conv_id = member.id
+        save_conversation(hub, root)
+        assert member.id in {r["member_conv_id"] for r in sync_group_members_from_folder(hub, root)}
+
+        hub = load_conversation(hub.id, project_root=root)
+        assert hub is not None
+        hub.leader_conv_id = ""
+        hub.group_members = [m for m in hub.group_members if m.get("member_conv_id") != member.id]
+        save_conversation(hub, root)
+        evict_member_from_group(member.id, root)
+
+        fresh = load_conversation(member.id, project_root=root)
+        assert fresh is not None
+        assert (fresh.folder_id or "") == ""
+        assert (fresh.parent_conv_id or "") == ""
+
+        rows = sync_group_members_from_folder(hub, root)
+        assert member.id not in {r["member_conv_id"] for r in rows}
+
+
+def test_evict_nested_group_un_nests_folder():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        settings, folder, hub = _wired_group(root)
+        child_folder = create_folder("Nested Squad", folder.id, root)
+        child_hub = create_conversation(
+            settings, child_folder.id, title="Nested Squad", project_root=root
+        )
+        child_hub.is_group = True
+        child_hub.group_members = []
+        save_conversation(child_hub, root)
+        folders = load_folders(root)
+        for f in folders:
+            if f.id == child_folder.id:
+                f.group_hub_id = child_hub.id
+                break
+        save_folders(folders, root)
+        assert child_hub.id in {r["member_conv_id"] for r in sync_group_members_from_folder(hub, root)}
+
+        evict_member_from_group(child_hub.id, root)
+        nested = next(f for f in load_folders(root) if (getattr(f, "group_hub_id", None) or "") == child_hub.id)
+        assert (nested.parent_id or "") == ""
+        rows = sync_group_members_from_folder(hub, root)
+        assert child_hub.id not in {r["member_conv_id"] for r in rows}
+
+
+def test_sidebar_layout_drag_into_and_out_of_group_updates_roster():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        settings, folder, hub = _wired_group(root)
+        verse = create_conversation(
+            settings,
+            folder.id,
+            title="Verse",
+            parent_conv_id=hub.id,
+            project_root=root,
+        )
+        hub.leader_conv_id = verse.id
+        save_conversation(hub, root)
+        sync_group_members_from_folder(hub, root)
+        ui = create_conversation(settings, "", title="UI", project_root=root)
+
+        apply_sidebar_layout(
+            folders=[{"id": folder.id, "parent_id": "", "sort_order": 0}],
+            chats=[
+                {"id": verse.id, "folder_id": folder.id, "sort_order": 0},
+                {"id": ui.id, "folder_id": folder.id, "sort_order": 1},
+            ],
+            project_root=root,
+        )
+        hub = load_conversation(hub.id, project_root=root)
+        assert hub is not None
+        ids = {m["member_conv_id"] for m in hub.group_members}
+        assert {verse.id, ui.id} <= ids
+        ui = load_conversation(ui.id, project_root=root)
+        assert ui is not None and ui.parent_conv_id == hub.id
+
+        apply_sidebar_layout(
+            folders=[{"id": folder.id, "parent_id": "", "sort_order": 0}],
+            chats=[
+                {"id": verse.id, "folder_id": folder.id, "sort_order": 0},
+                {"id": ui.id, "folder_id": "", "sort_order": 0},
+            ],
+            project_root=root,
+        )
+        hub = load_conversation(hub.id, project_root=root)
+        assert hub is not None
+        ids = {m["member_conv_id"] for m in hub.group_members}
+        assert ui.id not in ids
+        ui = load_conversation(ui.id, project_root=root)
+        assert ui is not None and (ui.parent_conv_id or "") == ""

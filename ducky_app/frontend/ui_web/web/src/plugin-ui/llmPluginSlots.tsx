@@ -100,24 +100,22 @@ export function LlmPluginSlot({ surface, open, providerId, pluginId, model }: Sl
       model: mid,
       mount,
     });
-    return () => {
-      emitLlmPluginSlot({
-        surface,
-        open: false,
-        providerId: id,
-        pluginId: pid,
-        model: mid,
-        mount: null,
-      });
-    };
   }, [surface, live, id, pid, mid]);
 
   useLayoutEffect(() => {
     return () => {
+      emitLlmPluginSlot({
+        surface,
+        open: false,
+        providerId: "",
+        pluginId: "",
+        model: "",
+        mount: null,
+      });
       mountRef.current?.remove();
       mountRef.current = null;
     };
-  }, []);
+  }, [surface]);
 
   return <span ref={markerRef} className="model-selector-plugin-slot-marker" hidden />;
 }

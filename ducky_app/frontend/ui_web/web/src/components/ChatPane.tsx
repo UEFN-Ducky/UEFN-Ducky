@@ -329,14 +329,23 @@ export function ChatPane({
     setLiveVoiceHandlers(handlers);
   }, []);
   useEffect(() => {
-    setGroupMembers(chat.groupMembers || []);
+    setGroupMembers(chat.isGroup ? chat.groupMembers || [] : []);
+  }, [chat.id, chat.isGroup]);
+
+  useEffect(() => {
     if (!chat.isGroup) return;
     const api = getApi();
     if (!api?.group_members) return;
-    void api.group_members(chat.id).then((res) => {
-      if (res?.ok && Array.isArray(res.members)) setGroupMembers(res.members);
+    const convId = chat.id;
+    let cancelled = false;
+    void api.group_members(convId).then((res) => {
+      if (cancelled || !res?.ok || !Array.isArray(res.members)) return;
+      setGroupMembers(res.members);
     });
-  }, [chat.id, chat.isGroup, chat.groupMembers]);
+    return () => {
+      cancelled = true;
+    };
+  }, [chat.id, chat.isGroup]);
 
   const { committed, turnMessages } = useMemo(
     () => splitTurnMessages(messages, agentRunning),
@@ -568,6 +577,14 @@ export function ChatPane({
     useCallback(
       (event) => {
         if (event.conv_id && event.conv_id !== chat.id) return;
+        if (event.type === "chats_changed") {
+          const api = getApi();
+          if (!chat.isGroup || !api?.group_members) return;
+          void api.group_members(chat.id).then((res) => {
+            if (res?.ok && Array.isArray(res.members)) setGroupMembers(res.members);
+          });
+          return;
+        }
         if (event.type === "plan_updated") {
           setChatPlan(event.plan ?? null);
           setChatPlanProgress(event.progress ?? null);
@@ -619,9 +636,9 @@ export function ChatPane({
           }
         }
       },
-      [chat.id, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
+      [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
     ),
-    [chat.id, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
+    [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
   );
 
   useEffect(() => {

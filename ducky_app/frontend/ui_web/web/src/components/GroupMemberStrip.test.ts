@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { laneTitle, shortLaneLabel, shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
+import { inviteableChats, laneTitle, shortLaneLabel, shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
+import type { ChatTab, GroupMemberDto } from "../types/panel";
 
 describe("shortWhenToUse", () => {
   it("keeps short blurbs", () => {
@@ -37,5 +38,23 @@ describe("shortModelLabel", () => {
 
   it("falls back for empty", () => {
     expect(shortModelLabel("")).toBe("Default model");
+  });
+});
+
+describe("inviteableChats", () => {
+  const verse: ChatTab = { id: "verse", name: "VerseDev" };
+  const level: ChatTab = { id: "level", name: "LevelDesigner" };
+  const seated: ChatTab = { id: "seated", name: "Seated" };
+  const otherGroup: ChatTab = { id: "other", name: "Other", parentConvId: "hub-b" };
+  const nested: ChatTab = { id: "nested", name: "Art Team", isGroup: true };
+  const members: GroupMemberDto[] = [{ member_conv_id: "seated", name: "Seated", profile_id: "" }];
+
+  it("lists root duckies that are not already in the group", () => {
+    const ids = inviteableChats(
+      [verse, level, seated, otherGroup, nested, { id: "hub", name: "Group1", isGroup: true }],
+      members,
+      "hub",
+    ).map((c) => c.id);
+    expect(ids).toEqual(["level", "verse"]);
   });
 });

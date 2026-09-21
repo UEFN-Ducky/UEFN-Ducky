@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { emitLlmPluginSlot, subscribeLlmPluginSlot, type LlmPluginSlotDetail } from "./llmPluginSlots";
+import { emitLlmPluginSlot, LlmPluginSlot, subscribeLlmPluginSlot, type LlmPluginSlotDetail } from "./llmPluginSlots";
 
 describe("llmPluginSlots", () => {
   afterEach(() => {
@@ -32,5 +33,26 @@ describe("llmPluginSlots", () => {
     expect(seen[0]?.mount).toBe(mount);
     expect(seen[0]?.providerId).toBe("ollama");
     expect(seen[1]?.mount).toBeNull();
+  });
+
+  it("keeps the picker slot open when only the model changes", () => {
+    const seen: boolean[] = [];
+    const stop = subscribeLlmPluginSlot((d) => {
+      if (d.surface === "picker") seen.push(d.open);
+    });
+    const { rerender, unmount } = render(
+      <div>
+        <LlmPluginSlot surface="picker" open providerId="anthropic" pluginId="anthropic" model="a" />
+      </div>,
+    );
+    rerender(
+      <div>
+        <LlmPluginSlot surface="picker" open providerId="anthropic" pluginId="anthropic" model="b" />
+      </div>,
+    );
+    expect(seen.includes(false)).toBe(false);
+    expect(seen.some(Boolean)).toBe(true);
+    unmount();
+    stop();
   });
 });

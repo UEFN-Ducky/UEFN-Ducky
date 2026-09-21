@@ -108,6 +108,37 @@ def is_subagent_conversation(conv: Any, project_root: str | None = None) -> bool
 _NESTED_GROUP_DEPTH = 3
 
 
+def evict_member_from_group(member_conv_id: str, project_root: str | None = None) -> None:
+    """Move a leaf member to Duckies root, or un-nest a subgroup folder. Does not edit roster."""
+    from frontend.ui_web.project_chats import load_folders, move_conversation, save_folders
+
+    mid = (member_conv_id or "").strip()
+    if not mid:
+        return
+    member = load_conversation(mid, project_root=project_root)
+    if member is None:
+        return
+    if is_group_conversation(member):
+        folders = load_folders(project_root)
+        changed = False
+        for folder in folders:
+            hub = (getattr(folder, "group_hub_id", None) or "").strip()
+            if hub != mid:
+                continue
+            if (folder.parent_id or "") != "":
+                folder.parent_id = ""
+                changed = True
+            break
+        if changed:
+            save_folders(folders, project_root)
+    else:
+        move_conversation(mid, "", project_root)
+        member = load_conversation(mid, project_root=project_root) or member
+    if (getattr(member, "parent_conv_id", None) or "").strip():
+        member.parent_conv_id = ""
+        save_conversation(member, project_root)
+
+
 def _group_folder_id(group_id: str, project_root: str | None = None) -> str:
     from frontend.ui_web.project_chats import load_folders
 
@@ -171,7 +202,9 @@ def sync_group_members_from_folder(group: Any, project_root: str | None = None) 
                 "coding_agent": str(getattr(conv, "coding_agent", None) or prev.get("coding_agent") or ""),
                 "tts_voice": str(getattr(conv, "tts_voice", None) or prev.get("tts_voice") or ""),
                 "tts_speed": float(getattr(conv, "tts_speed", None) or prev.get("tts_speed") or 0.0),
-                "profile_id": str(prev.get("profile_id") or ""),
+                "profile_id": str(
+                    prev.get("profile_id") or getattr(conv, "profile_id", None) or ""
+                ),
                 "is_group": False,
             },
             index=len(new_rows),
@@ -285,6 +318,38 @@ def sync_group_members_from_folder(group: Any, project_root: str | None = None) 
     group.group_members = new_rows
     save_conversation(group, project_root)
     return new_rows
+
+
+def reconcile_group_rosters_from_folders(project_root: str | None = None) -> list[str]:
+    """Rebuild every group roster from its folder; clear parent on duckies that left."""
+    from frontend.ui_web.project_chats import list_conversations, load_folders
+
+    hub_ids: list[str] = []
+    folder_of_hub: dict[str, str] = {}
+    for folder in load_folders(project_root):
+        hub = (getattr(folder, "group_hub_id", None) or "").strip()
+        if not hub:
+            continue
+        folder_of_hub[hub] = folder.id
+        group = load_conversation(hub, project_root=project_root)
+        if not group or not is_group_conversation(group):
+            continue
+        sync_group_members_from_folder(group, project_root)
+        hub_ids.append(hub)
+
+    hub_set = set(hub_ids)
+    for conv in list_conversations(project_root=project_root):
+        if is_group_conversation(conv):
+            continue
+        parent = (getattr(conv, "parent_conv_id", None) or "").strip()
+        if not parent or parent not in hub_set:
+            continue
+        expected = folder_of_hub.get(parent, "")
+        if (getattr(conv, "folder_id", None) or "") == expected:
+            continue
+        conv.parent_conv_id = ""
+        save_conversation(conv, project_root)
+    return hub_ids
 
 
 def group_leader_member(

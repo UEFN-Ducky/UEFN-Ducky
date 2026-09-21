@@ -1509,18 +1509,20 @@ def apply_sidebar_layout(
     save_folders(current_folders, project_root)
 
     chat_updates = {str(row.get("id", "")): row for row in chats if isinstance(row, dict) and row.get("id")}
-    if not chat_updates:
-        return
+    if chat_updates:
+        all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
+        by_conv_id = {c.id: c for c in all_convs}
+        for conv_id, row in chat_updates.items():
+            conv = by_conv_id.get(conv_id)
+            if conv is None:
+                raise ValueError(f"Unknown conversation: {conv_id}")
+            folder_id = str(row.get("folder_id", conv.folder_id) or "")
+            if folder_id and folder_id not in by_folder_id:
+                raise ValueError(f"Unknown folder for chat: {folder_id}")
+            conv.folder_id = folder_id
+            conv.sort_order = float(row.get("sort_order", conv.sort_order))
+            save_conversation(conv, project_root, touch_updated=False)
 
-    all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
-    by_conv_id = {c.id: c for c in all_convs}
-    for conv_id, row in chat_updates.items():
-        conv = by_conv_id.get(conv_id)
-        if conv is None:
-            raise ValueError(f"Unknown conversation: {conv_id}")
-        folder_id = str(row.get("folder_id", conv.folder_id) or "")
-        if folder_id and folder_id not in by_folder_id:
-            raise ValueError(f"Unknown folder for chat: {folder_id}")
-        conv.folder_id = folder_id
-        conv.sort_order = float(row.get("sort_order", conv.sort_order))
-        save_conversation(conv, project_root, touch_updated=False)
+    from frontend.ui_web.group_orchestrator import reconcile_group_rosters_from_folders
+
+    reconcile_group_rosters_from_folders(project_root)
