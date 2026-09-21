@@ -2072,6 +2072,11 @@ export interface PanelApi {
   minimize_window(): Promise<void>;
   get_version(): Promise<string>;
   get_app_update_status(): Promise<AppUpdateStatus>;
+  get_app_patch_notes(): Promise<{
+    versions: DuckyOSStorePatchNote[];
+    cached: boolean;
+    error?: string | null;
+  }>;
   get_install_info(): Promise<InstallInfo>;
   apply_update(): Promise<UpdaterResult>;
   get_update_progress(): Promise<UpdateProgress>;
@@ -2163,7 +2168,7 @@ export interface PanelApi {
   remote_set_enabled?(enabled: boolean): Promise<RemoteAccessStatus>;
   remote_sign_out_all?(): Promise<RemoteAccessStatus>;
   duckyos_store_catalog?(): Promise<DuckyOSStoreCatalog>;
-  duckyos_store_versions?(slug: string): Promise<DuckyOSStoreVersions>;
+  duckyos_store_versions?(slug: string, latestVersion?: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(
     slug: string,
     version?: string,

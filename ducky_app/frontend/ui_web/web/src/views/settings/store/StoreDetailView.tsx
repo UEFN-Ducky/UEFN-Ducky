@@ -172,7 +172,7 @@ export function StoreDetailView({ item, pendingSlug, catalogReady, jobs, actionB
             </div>
           </div>
 
-          <StorePatchNotes slug={slug} />
+          <StorePatchNotes slug={slug} latestVersion={item.latest_version} />
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import type { AgentEvent, MessageAuthorDto } from "../types/panel";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
-import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { openLlmsProviderSettings, requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
 import { requestOpenAutomationsTab } from "../navigation/openAutomationsTab";
 import { requestOpenPipelinesTab } from "../navigation/openPipelinesTab";
@@ -57,6 +57,10 @@ function handleNavigate(params: Record<string, unknown>): RpcResult {
   const itemId = String(params.item_id ?? "").trim();
   const tab = SETTINGS_TAB[route];
   if (tab) {
+    if (route === "settings.llms" && itemId) {
+      openLlmsProviderSettings(itemId);
+      return { ok: true, route, tab, item_id: itemId };
+    }
     requestOpenSettings(tab);
     const section = SETTINGS_SECTION[route];
     if (section) {

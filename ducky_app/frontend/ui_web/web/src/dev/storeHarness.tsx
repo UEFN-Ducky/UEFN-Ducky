@@ -223,7 +223,7 @@ const mockApi = {
   get_listener_status: async () => ({ ok: true }),
   duckyos_get_status: async () => ({ ok: true, logged_in: false, email: "" }),
   duckyos_store_catalog: async () => ({ ok: true, items: catalog.map((i) => ({ ...i })) }),
-  duckyos_store_versions: async (slug: string) => {
+  duckyos_store_versions: async (slug: string, _latestVersion?: string) => {
     const count = slug === "discord" ? 12 : 2;
     return {
       ok: true,

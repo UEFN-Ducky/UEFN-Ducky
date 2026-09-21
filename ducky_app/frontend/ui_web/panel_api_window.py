@@ -502,6 +502,11 @@ class PanelApiWindowMixin:
 
         return get_app_update_status()
 
+    def get_app_patch_notes(self) -> dict[str, Any]:
+        from frontend.version_check import get_app_patch_notes
+
+        return get_app_patch_notes()
+
     def get_install_info(self) -> dict[str, Any]:
         from frontend.install_info import get_install_info
 

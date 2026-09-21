@@ -232,6 +232,15 @@ def get_app_update_status() -> dict[str, Any]:
         remote = _extract_remote_version(payload)
         if remote:
             result["remote_version"] = remote
+        from frontend.patch_notes_cache import put as cache_put
+
+        cache_put("app", __version__, result["versions"])
+    else:
+        from frontend.patch_notes_cache import get as cache_get
+
+        cached = cache_get("app")
+        if cached:
+            result["versions"] = cached["versions"]
 
     # Self-update installer fields stay installed-production only.
     if channel != "installed" or not is_packaged_runtime():
@@ -267,3 +276,22 @@ def get_app_update_status() -> dict[str, Any]:
     else:
         result["feed_status"] = "up_to_date"
     return result
+
+
+def get_app_patch_notes() -> dict[str, Any]:
+    """Cached Store notes for the running build. Network only after a version bump."""
+    from frontend.patch_notes_cache import get as cache_get
+    from frontend.patch_notes_cache import put as cache_put
+
+    cached = cache_get("app")
+    if cached and cached.get("version") == __version__:
+        return {"versions": cached["versions"], "cached": True, "error": None}
+
+    payload, error = fetch_remote_payload()
+    if payload:
+        versions = extract_release_versions(payload)
+        cache_put("app", __version__, versions)
+        return {"versions": versions, "cached": False, "error": None}
+    if cached:
+        return {"versions": cached["versions"], "cached": True, "error": error}
+    return {"versions": [], "cached": False, "error": error}

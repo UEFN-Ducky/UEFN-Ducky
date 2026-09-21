@@ -2272,11 +2272,22 @@ def store_catalog() -> dict[str, Any]:
     return {"ok": True, "items": items_out}
 
 
-def store_item_versions(slug: str) -> dict[str, Any]:
-    """Public changelog rows for a Store item (paginated in the panel UI)."""
+def store_item_versions(slug: str, latest_version: str | None = None) -> dict[str, Any]:
+    """Public changelog rows for a Store item (paginated in the panel UI).
+
+    Cache-first: refetch only when ``latest_version`` differs from the stored
+    version (or there is no cache). Offline returns cached rows.
+    """
     sid = str(slug or "").strip()
     if not sid:
         return {"ok": False, "error": "slug required", "code": "bad_request", "versions": []}
+    want = str(latest_version or "").strip()
+    from frontend.patch_notes_cache import get as cache_get
+    from frontend.patch_notes_cache import put as cache_put
+
+    cached = cache_get(f"item:{sid}")
+    if cached and (not want or cached.get("version") == want):
+        return {"ok": True, "slug": sid, "versions": cached["versions"], "cached": True}
     try:
         payload = _store_collect(
             "item-versions",
@@ -2285,6 +2296,15 @@ def store_item_versions(slug: str) -> dict[str, Any]:
             timeout=20.0,
         )
     except DuckyOSAccountError as exc:
+        if cached:
+            return {
+                "ok": True,
+                "slug": sid,
+                "versions": cached["versions"],
+                "cached": True,
+                "error": exc.message,
+                "code": exc.code,
+            }
         return {"ok": False, "error": exc.message, "code": exc.code, "versions": []}
     raw = payload.get("versions") if isinstance(payload.get("versions"), list) else []
     versions: list[dict[str, Any]] = []
@@ -2302,6 +2322,8 @@ def store_item_versions(slug: str) -> dict[str, Any]:
                 "created_at": created or None,
             }
         )
+    stored = want or (versions[0]["version"] if versions else "")
+    cache_put(f"item:{sid}", stored, versions)
     return {"ok": True, "slug": sid, "versions": versions}
 
 

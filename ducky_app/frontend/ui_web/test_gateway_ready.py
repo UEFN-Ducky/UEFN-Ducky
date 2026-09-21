@@ -109,3 +109,11 @@ def test_resolve_gateway_credential_url_defaults_localhost():
         patch("backend.agent.secrets.get_key", return_value=None),
     ):
         assert resolve_gateway_credential("ollama") == "http://localhost:11434"
+
+
+def test_ducky_brain_is_the_hosted_account_gateway():
+    from backend.agent.model_pricing import infer_provider
+
+    assert infer_provider("ducky-brain") == "uefn_ducky"
+    assert infer_provider("uefn_ducky:ducky-brain") == "uefn_ducky"
+    assert infer_provider("claude_code:ducky-brain") == "uefn_ducky"

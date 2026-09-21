@@ -1448,7 +1448,6 @@ def run_message(
     from backend.agent.coding_agents.base import normalize_coding_agent
 
     coding_agent = normalize_coding_agent(getattr(conv, "coding_agent", None) or "ducky")
-    external = coding_agent != "ducky"
 
     # Exact model for this conversation only — never invent from global settings.
     turn_model = (model or getattr(conv, "model", None) or "").strip()
@@ -1464,6 +1463,25 @@ def run_message(
             }
         )
         return ""
+
+    # UEFN Ducky is not a local model. The turn is a site-chat post; the Brain
+    # workflow chooses the agent and what to show. A leftover Claude Code flag
+    # must not receive --model ducky-brain.
+    from backend.agent.model_pricing import infer_provider
+
+    recorded_provider = (getattr(conv, "provider", None) or "").strip().lower()
+    if recorded_provider == "uefn_ducky" or infer_provider(turn_model) == "uefn_ducky":
+        coding_agent = "ducky"
+        conv.coding_agent = "ducky"
+        conv.provider = "uefn_ducky"
+        if ":" in turn_model:
+            turn_model = turn_model.split(":")[-1].strip() or turn_model
+            conv.model = turn_model
+        try:
+            save_conversation(conv)
+        except Exception:
+            pass
+    external = coding_agent != "ducky"
 
     if external:
         provider_name = (getattr(conv, "provider", None) or "").strip()

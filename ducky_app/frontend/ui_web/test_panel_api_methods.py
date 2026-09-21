@@ -156,6 +156,7 @@ _PUBLIC_METHODS = frozenset({
     'fingerprint_project_dirs',
     'focus_tab',
     'get_agent_profile_editor_catalog',
+    'get_app_patch_notes',
     'get_app_update_status',
     'get_appearance',
     'get_automation',

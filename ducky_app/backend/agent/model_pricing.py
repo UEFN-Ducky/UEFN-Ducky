@@ -32,6 +32,9 @@ def infer_provider(model: str) -> str:
     if not raw:
         return ""
     m = raw.lower()
+    # Hosted account chat. The Brain workflow picks gateways — never Claude/Ollama.
+    if m == "ducky-brain" or m.endswith(":ducky-brain"):
+        return "uefn_ducky"
 
     # Qualified "provider:model" (and "ollama:qwen3.6:latest" → provider=ollama).
     known = (
@@ -42,6 +45,7 @@ def infer_provider(model: str) -> str:
         "cursor",
         "kimi",
         "spacexai",
+        "uefn_ducky",
     )
     if ":" in raw:
         prefix = raw.split(":", 1)[0].strip().lower()

@@ -5,9 +5,10 @@ import { PatchNotesList } from "./PatchNotesList";
 
 type Props = {
   slug: string;
+  latestVersion?: string;
 };
 
-export function StorePatchNotes({ slug }: Props) {
+export function StorePatchNotes({ slug, latestVersion }: Props) {
   const [notes, setNotes] = useState<DuckyOSStorePatchNote[] | null>(null);
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export function StorePatchNotes({ slug }: Props) {
         cancelled = true;
       };
     }
-    void api.duckyos_store_versions(slug).then((res) => {
+    void api.duckyos_store_versions(slug, latestVersion).then((res) => {
       if (cancelled) return;
       setNotes(Array.isArray(res.versions) ? res.versions : []);
     }).catch(() => {
@@ -29,7 +30,7 @@ export function StorePatchNotes({ slug }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, latestVersion]);
 
   return (
     <div className="ds-panel ds-patch-notes">

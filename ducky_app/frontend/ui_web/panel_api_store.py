@@ -281,11 +281,11 @@ class PanelApiStoreMixin:
             result = {"ok": False, "error": str(exc), "code": "error", "items": []}
         return _cache_store_catalog(result)
 
-    def duckyos_store_versions(self, slug: str) -> dict[str, Any]:
+    def duckyos_store_versions(self, slug: str, latest_version: str = "") -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, store_item_versions
 
         try:
-            return store_item_versions(str(slug or ""))
+            return store_item_versions(str(slug or ""), str(latest_version or "") or None)
         except DuckyOSAccountError as exc:
             return {"ok": False, "error": exc.message, "code": exc.code, "versions": []}
         except Exception as exc:

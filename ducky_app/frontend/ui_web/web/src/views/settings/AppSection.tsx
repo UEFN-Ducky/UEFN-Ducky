@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
-import type { AppUpdateStatus } from "../../types/panel";
+import type { AppUpdateStatus, DuckyOSStorePatchNote } from "../../types/panel";
 import {
   getAppUpdateState,
   startAppUpdate,
@@ -70,6 +70,7 @@ function updateProgressLabel(update: AppUpdateState): string {
 
 export function AppSection() {
   const [status, setStatus] = useState<AppUpdateStatus | null>(null);
+  const [notes, setNotes] = useState<DuckyOSStorePatchNote[] | null>(null);
   const [localVersionOnly, setLocalVersionOnly] = useState<string | null>(null);
   const [phase, setPhase] = useState<AppActionPhase>("idle");
   const [checkResult, setCheckResult] = useState<CheckResult>("idle");
@@ -93,7 +94,7 @@ export function AppSection() {
     return next;
   };
 
-  /** Local version immediately; Store feed for patch notes (and update status). */
+  /** Local version + cached notes. Live update check is the button only. */
   useEffect(() => {
     return onApiReady(() => {
       const api = getApi();
@@ -105,7 +106,16 @@ export function AppSection() {
           })
           .catch(() => {});
       }
-      void refreshStatus();
+      if (api && typeof api.get_app_patch_notes === "function") {
+        void api
+          .get_app_patch_notes()
+          .then((next) => {
+            setNotes(Array.isArray(next.versions) ? next.versions : []);
+          })
+          .catch(() => setNotes([]));
+      } else {
+        setNotes([]);
+      }
     });
   }, []);
 
@@ -135,6 +145,7 @@ export function AppSection() {
       }
       const result = classifyCheck(next);
       setCheckResult(result);
+      if (Array.isArray(next.versions)) setNotes(next.versions);
       if (result === "error") {
         setErrorText(next.error || "Could not reach the update feed.");
       }
@@ -285,7 +296,7 @@ export function AppSection() {
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
       ) : null}
       <div className="general-tab-app-notes">
-        <PatchNotesList notes={status ? status.versions || [] : null} />
+        <PatchNotesList notes={notes} />
       </div>
     </section>
   );
