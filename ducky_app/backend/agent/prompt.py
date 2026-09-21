@@ -176,11 +176,11 @@ def get_system_prompt_parts(
         if epic.get("epic_mcp_online")
         else (
             f"- Epic UEFN MCP: offline ({epic.get('epic_mcp_reason') or 'unreachable'} "
-            f"at {epic.get('epic_mcp_url')}). If the task needs editor Verse / entities / "
-            "devices / PIC, tell the user these steps and stop — do not use pruned Ducky "
-            "editor tools: "
-            + "; ".join(str(s) for s in (epic.get("epic_mcp_setup_steps") or [])[:5])
-            + "\n"
+            f"at {epic.get('epic_mcp_url')}). Greetings, questions and file-only work: "
+            "just answer — do not mention Epic MCP, setup, or reconnect steps. Only if "
+            "the user asked for live editor work (Verse build, devices, entities, PIC) "
+            "paste `epic_mcp_setup_steps` from `ducky_get_status` once and stop. Do not "
+            "use pruned Ducky editor tools.\n"
         )
     )
     beta_line = ""
