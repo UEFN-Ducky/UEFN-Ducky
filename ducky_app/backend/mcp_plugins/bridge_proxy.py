@@ -61,12 +61,13 @@ def _remove_proxy_tool(name: str) -> None:
 
 
 def _make_proxy(namespaced_name: str, description: str) -> Callable[..., str]:
-    def _tool(params: dict[str, Any] | None = None, pretty: bool = False) -> str:
+    async def _tool(params: dict[str, Any] | None = None, pretty: bool = False) -> str:
         del pretty
         from backend.mcp_plugins.client_pool import get_plugin_pool
 
-        pool = get_plugin_pool()
-        return pool.run_sync(pool.call_tool(namespaced_name, params or {}))
+        # Async so a Cursor interrupt cancels the nested Epic call instead of
+        # leaving SessionOwner busy and timing out the next unreal__* hit.
+        return await get_plugin_pool().call_tool(namespaced_name, params or {})
 
     _tool.__name__ = namespaced_name.replace("__", "_")
     _tool.__doc__ = (description or namespaced_name).strip() or namespaced_name

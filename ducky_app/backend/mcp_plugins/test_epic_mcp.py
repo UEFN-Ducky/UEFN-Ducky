@@ -65,6 +65,16 @@ def test_catalog_seeds_mcp_json(tmp_path: Path, monkeypatch) -> None:
         assert manifest["kind"] == "catalog"
 
 
+def test_http_transport_timeouts_cover_long_editor_calls() -> None:
+    from backend.mcp_plugins.client_pool import _TOOL_TIMEOUT_SEC, _http_transport_kwargs
+
+    kw = _http_transport_kwargs({"headers": {"X": "1"}})
+    assert kw["timeout"] == _TOOL_TIMEOUT_SEC
+    assert kw["timeout"] >= 180
+    assert kw["sse_read_timeout"] >= 180
+    assert kw["headers"] == {"X": "1"}
+
+
 def test_http_down_editor_list_tools_fails_fast(monkeypatch) -> None:
     monkeypatch.setattr("backend.mcp_plugins.epic.tcp_probe_url", lambda *_a, **_k: False)
     pool = PluginClientPool()

@@ -46,5 +46,6 @@ def test_sync_adds_and_removes_proxies() -> None:
         asyncio.run(bridge_proxy.sync_nested_mcp_proxies_async())
         assert bridge_proxy._PROXY_TOOL_NAMES == {"demo__ping"}
         assert "demo__pong" not in tm._tools
+        assert asyncio.iscoroutinefunction(tm._tools["demo__ping"])
 
     bridge_proxy._PROXY_TOOL_NAMES.clear()

@@ -37,6 +37,15 @@ _TOGGLE_HINT = (
     "toggle this MCP (Settings → MCPs, or ducky_mcp_set_plugin) when the task is done."
 )
 
+
+def _http_transport_kwargs(block: dict[str, Any]) -> dict[str, Any]:
+    """Epic PlaceDevice / execute_tool_script regularly outlive the SDK 30s default."""
+    return {
+        "headers": block.get("headers") or None,
+        "timeout": _TOOL_TIMEOUT_SEC,
+        "sse_read_timeout": _TOOL_TIMEOUT_SEC,
+    }
+
 _T = TypeVar("_T")
 log = logging.getLogger(__name__)
 
@@ -225,13 +234,13 @@ class PluginClientPool:
                         from mcp.client.streamable_http import streamablehttp_client
 
                         transport = await stack.enter_async_context(
-                            streamablehttp_client(block["url"], headers=block.get("headers") or None)
+                            streamablehttp_client(block["url"], **_http_transport_kwargs(block))
                         )
                     elif ttype == "sse":
                         from mcp.client.sse import sse_client
 
                         transport = await stack.enter_async_context(
-                            sse_client(block["url"], headers=block.get("headers") or None)
+                            sse_client(block["url"], **_http_transport_kwargs(block))
                         )
                     else:
                         params = StdioServerParameters(
