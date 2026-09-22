@@ -1195,7 +1195,6 @@ def seed_skill_packs(*, force: bool = False) -> list[str]:
             _write_pack_license_file(pack_id)
             continue
         if dest_pack.is_dir() and not force and skill_version_key(dest_ver) >= skill_version_key(bundled_ver):
-            logs.append(f"Skill pack {pack_id} v{dest_ver} current")
             _write_pack_license_file(pack_id)
             continue
         if dest_pack.is_dir() and _is_pack_dir(dest_pack):

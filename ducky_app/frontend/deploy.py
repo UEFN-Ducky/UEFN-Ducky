@@ -682,9 +682,7 @@ def ensure_project_init(project_root: Path) -> list[str]:
     dest_init = dest_py / "init_unreal.py"
     text = _init_text()
     logs: list[str] = []
-    if dest_init.is_file() and dest_init.read_text(encoding="utf-8").strip() == text.strip():
-        logs.append(f"init_unreal.py already up to date: {dest_init}")
-    else:
+    if not (dest_init.is_file() and dest_init.read_text(encoding="utf-8").strip() == text.strip()):
         dest_init.write_text(text, encoding="utf-8")
         logs.append(f"Installed init_unreal.py -> {dest_init}")
     _clear_python_cache(dest_py)
@@ -764,14 +762,36 @@ def refresh_inits(project_root: Path | None = None) -> list[str]:
     return logs
 
 
-def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
+_shared_deploy_lock = threading.Lock()
+_shared_deploy_done = False
+
+
+def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = True) -> list[str]:
     """Write the island listener stub, then quarantine any other project ``.py``.
 
     Listener source is refreshed into ``%LOCALAPPDATA%/UEFN-Ducky/listener`` by
     ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch. The only
     island Python file is ``Content/Python/init_unreal.py``.
+
+    ``shared=False`` skips the once-per-process work (all-project init refresh,
+    listener hint, skill sync). Startup can call this from both project-switch
+    and ``deploy_all_recent_projects``; only the first shared call runs that block.
     """
-    logs = refresh_inits(project_root)
+    global _shared_deploy_done
+    do_shared = False
+    if shared:
+        with _shared_deploy_lock:
+            if not _shared_deploy_done:
+                _shared_deploy_done = True
+                do_shared = True
+    if do_shared:
+        logs = refresh_inits(project_root)
+    else:
+        logs = []
+        try:
+            logs.extend(ensure_project_init(project_root))
+        except Exception as exc:
+            logs.append(f"init refresh failed for {project_root}: {exc}")
     logs.extend(quarantine_project_python(project_root, deep=True))
     py_log = enable_uefn_project_python(project_root)
     if py_log:
@@ -783,15 +803,16 @@ def deploy_listener(project_root: Path, listener_port: int) -> list[str]:
             logs.append("Enabled Epic MCP Auto Start in UEFN Editor.ini")
     except Exception:
         pass
-    logs.append(f"Listener port fixed at {int(listener_port)}")
-    logs.append(
-        "Listener: with UEFN MCP Toolsets, ForceEnablePython only runs Engine "
-        "EditorToolset init_unreal — Ducky hooks that file (ducky_listener_boot). "
-        "Restart UEFN after Deploy, or Tools → Execute Python Script → "
-        "%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py"
-    )
+    if do_shared:
+        logs.append(f"Listener port fixed at {int(listener_port)}")
+        logs.append(
+            "Listener: with UEFN MCP Toolsets, ForceEnablePython only runs Engine "
+            "EditorToolset init_unreal — Ducky hooks that file (ducky_listener_boot). "
+            "Restart UEFN after Deploy, or Tools → Execute Python Script → "
+            "%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py"
+        )
 
-    from frontend.skill_deploy import sync_skill_on_mcp_update
+        from frontend.skill_deploy import sync_skill_on_mcp_update
 
-    logs.extend(sync_skill_on_mcp_update())
+        logs.extend(sync_skill_on_mcp_update())
     return logs

@@ -8,6 +8,7 @@ Both are trimmed on every write and read so only the last 24 hours remain.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -57,6 +58,26 @@ def trim() -> None:
     """Drop anything older than 24 hours. Safe to call anytime."""
     _trim_file(_ERRORS_NAME)
     _trim_file(_ACTIVITY_NAME)
+
+
+def _scrub_home(text: str) -> str:
+    """Replace the user's home directory with ``~``; keep the path after it.
+
+    Covers ``C:\\Users\\name``, ``C:/Users/name``, and the repr form
+    ``C:\\\\Users\\\\name`` (dicts logged via ``str`` / ``%s``).
+    """
+    if not text:
+        return text
+    home = str(Path.home()).rstrip("\\/")
+    if not home:
+        return text
+    spellings = [home.replace("\\", "\\\\"), home, home.replace("\\", "/")]
+    seen: list[str] = []
+    for spelling in spellings:
+        if spelling and spelling not in seen:
+            seen.append(spelling)
+    seen.sort(key=len, reverse=True)
+    return re.sub("|".join(re.escape(s) for s in seen), "~", text, flags=re.IGNORECASE)
 
 
 def format_entries(entries: list[dict]) -> list[str]:
@@ -114,7 +135,7 @@ def _ingest_listener_file(name: str) -> None:
         except ValueError:
             continue
         if isinstance(row, dict) and row.get("message"):
-            rows.append({"ts": row.get("ts") or time.time(), "source": row.get("source"), "message": row.get("message")})
+            rows.append({"ts": row.get("ts") or time.time(), "source": row.get("source"), "message": _scrub_home(str(row.get("message") or ""))})
     try:
         if rows:
             repo.insert_many(_KIND[name], rows)
@@ -124,7 +145,7 @@ def _ingest_listener_file(name: str) -> None:
 
 
 def _append(name: str, source: str, message: str, *, dedupe: bool) -> None:
-    message = (message or "").strip()
+    message = _scrub_home((message or "").strip())
     if not message:
         return
     if _use_db():
@@ -159,7 +180,7 @@ def _read(name: str, limit: int) -> list[dict]:
             kind = _KIND[name]
             repo.trim(kind, older_than=time.time() - MAX_AGE_S, keep=MAX_ENTRIES)
             return [
-                {"ts": r["ts"], "source": r["source"], "message": r["message"]}
+                {"ts": r["ts"], "source": r["source"], "message": _scrub_home(str(r["message"] or ""))}
                 for r in repo.newest(kind, limit=max(1, int(limit)))
             ]
         except Exception:
@@ -179,6 +200,8 @@ def _read(name: str, limit: int) -> list[dict]:
             except ValueError:
                 continue
             if isinstance(row, dict):
+                row = dict(row)
+                row["message"] = _scrub_home(str(row.get("message") or ""))
                 out.append(row)
     except OSError:
         return []

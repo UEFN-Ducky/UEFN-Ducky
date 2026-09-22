@@ -58,8 +58,9 @@ def write_skill_beside_config(config_path: Path, text: str | None = None) -> Pat
         dest = Path(config_path).parent / PROJECT_SKILL_FILENAME
         dest.parent.mkdir(parents=True, exist_ok=True)
         body = _skill.load_skill_text() if text is None else text
-        _write_if_changed(dest, body.encode("utf-8"))
-        return dest
+        if _write_if_changed(dest, body.encode("utf-8")):
+            return dest
+        return None
     except OSError:
         return None
 

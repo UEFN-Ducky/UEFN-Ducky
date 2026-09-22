@@ -27,10 +27,10 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
     if current and current not in seen:
         paths.insert(0, current)
 
-    for path in paths:
+    for i, path in enumerate(paths):
         try:
             root = resolve_uefn_project_root(Path(path))
-            project_lines = deploy_listener(root, PANEL_LISTENER_PORT)
+            project_lines = deploy_listener(root, PANEL_LISTENER_PORT, shared=(i == 0))
             for ln in project_lines:
                 lines.append(ln)
                 if log:

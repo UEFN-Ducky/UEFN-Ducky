@@ -10,6 +10,7 @@ from frontend import deploy
 
 @pytest.fixture(autouse=True)
 def _isolate_init_refresh(monkeypatch, tmp_path_factory) -> None:
+    deploy._shared_deploy_done = False
     monkeypatch.setattr("frontend.ui_web.recent_projects.load_recent_projects", lambda: [])
     monkeypatch.setattr(
         deploy, "documents_unreal_python_dir", lambda: tmp_path_factory.mktemp("docs_python")

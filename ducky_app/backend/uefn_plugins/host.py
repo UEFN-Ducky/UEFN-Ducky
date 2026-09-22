@@ -2684,7 +2684,7 @@ class _PluginApi:
                 # Same plugin after reload_plugins() (MCP entry survives invalidate):
                 # re-track ownership without double-registering on FastMCP.
                 _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener)
-                self.log(f"MCP tool already registered: {tool_name}")
+                _log.debug("[%s] MCP tool already registered: %s", pid, tool_name)
                 return func
 
             @functools.wraps(func)
@@ -2697,7 +2697,7 @@ class _PluginApi:
 
             mcp.tool(name=tool_name)(wrapper)
             _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener)
-            self.log(f"MCP tool registered: {tool_name}")
+            _log.debug("[%s] MCP tool registered: %s", pid, tool_name)
             return wrapper
 
         if fn is not None:
@@ -2733,7 +2733,7 @@ class _PluginApi:
 
         def decorator(fn: Any) -> Any:
             register_node(self.plugin_id, node_type, fn)
-            self.log(f"Automation node registered: {node_type}")
+            _log.debug("[%s] Automation node registered: %s", self.plugin_id, node_type)
             return fn
 
         if handler is not None:
@@ -2757,7 +2757,7 @@ class _PluginApi:
         (never raise across the JS bridge unless the host should surface an error).
         """
         register_panel_rpc(self.plugin_id, name, fn)
-        self.log(f"Panel RPC registered: {name}")
+        _log.debug("[%s] Panel RPC registered: %s", self.plugin_id, name)
 
     def register_tts_voices(self, list_voices_fn: Any) -> None:
         """Register ``list_voices() -> [{id, label}]`` — dynamic voices for the picker.

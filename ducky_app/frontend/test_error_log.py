@@ -29,6 +29,52 @@ def test_activity_roundtrip(tmp_path: Path, monkeypatch) -> None:
     assert rows[0]["source"] == "panel"
 
 
+def test_scrub_home_keeps_tail() -> None:
+    home = str(Path.home()).rstrip("\\/")
+    win_tail = "AppData\\Roaming\\Claude\\claude_desktop_config.json"
+    posix_tail = "AppData/Roaming/Claude/claude_desktop_config.json"
+    assert error_log._scrub_home(home + "\\" + win_tail) == "~\\" + win_tail
+    assert error_log._scrub_home(home.replace("\\", "/") + "/" + posix_tail) == "~/" + posix_tail
+    doubled = home.replace("\\", "\\\\") + "\\\\" + win_tail.replace("\\", "\\\\")
+    scrubbed = error_log._scrub_home(doubled)
+    assert "~" in scrubbed
+    assert home not in scrubbed
+    assert "claude_desktop_config.json" in scrubbed
+
+
+def test_scrub_home_on_write(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(error_log, "default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(error_log, "_use_db", lambda: False)
+    home = str(Path.home()).rstrip("\\/")
+    error_log.record_activity("panel", f"Skill copy -> {home}\\.cursor\\UEFN-Ducky-SKILL.md")
+    error_log.record_error("deploy", f"failed {home}/Documents/Fortnite Projects/Tycoony/Content/Python/init_unreal.py")
+    act = error_log.read_activity()[0]["message"]
+    err = error_log.read_errors()[0]["message"]
+    assert home not in act and home not in err
+    assert act == "Skill copy -> ~\\.cursor\\UEFN-Ducky-SKILL.md"
+    assert "~" in err and "init_unreal.py" in err
+
+
+def test_scrub_home_on_read_legacy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(error_log, "default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(error_log, "_use_db", lambda: False)
+    home = str(Path.home()).rstrip("\\/")
+    path = tmp_path / "errors.jsonl"
+    path.write_text(
+        json.dumps({
+            "ts": time.time(),
+            "source": "panel",
+            "message": f"init_unreal.py already up to date: {home}\\Documents\\Fortnite Projects\\Tycoony\\Content\\Python\\init_unreal.py",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    msg = error_log.read_errors()[0]["message"]
+    assert home not in msg
+    assert msg.startswith("~") or "~\\" in msg
+    assert "Documents\\Fortnite Projects\\Tycoony\\Content\\Python\\init_unreal.py" in msg
+
+
 def test_redact_strips_keys() -> None:
     assert "[redacted]" in _redact("Authorization Bearer sk-abc123456789")
     assert "sk-abc123456789" not in _redact("key sk-abc123456789 leftover")
