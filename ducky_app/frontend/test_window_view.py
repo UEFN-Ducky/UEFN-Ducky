@@ -395,11 +395,15 @@ def test_kill_uefn_cmd_is_editor_only() -> None:
 def test_launch_uefn_cmd_goes_through_editor() -> None:
     exe = r"C:\Epic\Fortnite\Engine\Binaries\Win64\UnrealEditorFortnite.exe"
     island = r"C:\islands\Demo.uefnproject"
-    assert launch_uefn_cmd(exe, island) == [exe, island]
+    assert launch_uefn_cmd(exe, island) == [exe, f"-ValkyrieProject={island}"]
     assert launch_uefn_cmd(exe) == [exe]
     extra = ["-obfuscationid=abc"]
     shipping = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
-    assert launch_uefn_cmd(shipping, island, extra) == [shipping, extra[0], island]
+    assert launch_uefn_cmd(shipping, island, extra) == [
+        shipping,
+        extra[0],
+        f"-ValkyrieProject={island}",
+    ]
 
 
 def test_fortnite_roots_from_launcher_dat() -> None:
@@ -553,16 +557,30 @@ def test_launch_uefn_hub_skips_project(monkeypatch) -> None:
     assert started == [(exe, None, extra)]
 
 
-def test_close_uefn_kills_only(monkeypatch) -> None:
+def test_close_uefn_kills_when_no_window(monkeypatch) -> None:
     import frontend.window_view as wv
 
+    monkeypatch.setattr(wv, "_request_uefn_close", lambda: 0)
     monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: True)
     monkeypatch.setattr(
         wv,
         "_start_uefn",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("close must not launch")),
     )
-    assert close_uefn() == {"ok": True, "killed": True}
+    assert close_uefn() == {"ok": True, "graceful": False, "killed": True}
+
+
+def test_close_uefn_graceful_skips_kill(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(wv, "_request_uefn_close", lambda: 1)
+    monkeypatch.setattr(wv, "_wait_uefn_exit", lambda _timeout: True)
+    monkeypatch.setattr(
+        wv,
+        "_kill_uefn_editor",
+        lambda: (_ for _ in ()).throw(AssertionError("taskkill after a clean close")),
+    )
+    assert close_uefn() == {"ok": True, "graceful": True, "killed": False}
 
 
 def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:
@@ -572,6 +590,7 @@ def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None
     island.write_text("{}", encoding="utf-8")
     exe = r"C:\Epic\Fortnite\FortniteGame\Binaries\Win64\UnrealEditorFortnite-Win64-Shipping.exe"
     order: list[str] = []
+    monkeypatch.setattr(wv, "_request_uefn_close", lambda: 0)
     monkeypatch.setattr(wv, "_kill_uefn_editor", lambda: order.append("kill") or True)
     monkeypatch.setattr(wv, "uefn_editor_launch", lambda: (exe, []))
     monkeypatch.setattr(wv, "uefnproject_path", lambda: island)
@@ -583,3 +602,16 @@ def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None
     out = restart_uefn_project()
     assert out["ok"] is True and out["killed"] is True
     assert order == ["kill", f"start:{exe}:{island}"]
+
+
+def test_wait_uefn_ready_times_out(monkeypatch) -> None:
+    import frontend.window_view as wv
+
+    monkeypatch.setattr(
+        "backend.bridge.client.listener_get_health",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    out = wv.wait_uefn_ready(timeout=1.0)
+    assert out["ok"] is False
+    assert "timed out" in out["error"]

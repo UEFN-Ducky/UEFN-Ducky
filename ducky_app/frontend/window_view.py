@@ -161,12 +161,17 @@ def launch_uefn_cmd(
     project: object | None = None,
     extra: object = None,
 ) -> list[str]:
-    """Open UEFN through the editor binary — ``.uefnproject`` has no working association."""
+    """Open UEFN through the editor binary.
+
+    A bare ``.uefnproject`` path is ignored (the hub still highlights the last
+    island). ``-ValkyrieProject=<path>`` is the switch the shipping editor
+    actually opens. Verified: hub selected ExampleProject1, this argv opened Tycoony.
+    """
     cmd = [str(exe)]
     if extra:
         cmd.extend(str(a) for a in extra if str(a).strip())
     if project:
-        cmd.append(str(project))
+        cmd.append(f"-ValkyrieProject={project}")
     return cmd
 
 
@@ -263,13 +268,18 @@ def _kill_uefn_editor() -> bool:
         return False
     import subprocess
 
-    r = subprocess.run(
+    # taskkill returns non-zero when either image is missing, even if the one
+    # that was running got killed. Trust the process check, not the exit code.
+    was = _uefn_running()
+    subprocess.run(
         kill_uefn_cmd(),
         capture_output=True,
         text=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    return r.returncode == 0
+    if not was:
+        return False
+    return not _uefn_running()
 
 
 def _start_uefn(exe: object, project: object | None = None, extra: object = None) -> None:
@@ -293,21 +303,156 @@ def launch_uefn() -> dict[str, Any]:
     return {"ok": True, "exe": exe, "path": ""}
 
 
-def launch_uefn_project() -> dict[str, Any]:
+def launch_uefn_project(root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     exe, extra = uefn_editor_launch()
-    path = uefnproject_path()
+    path = uefnproject_path(root) if root else uefnproject_path()
     _start_uefn(exe, path, extra)
     return {"ok": True, "exe": exe, "path": str(path)}
 
 
-def close_uefn() -> dict[str, Any]:
-    return {"ok": True, "killed": _kill_uefn_editor()}
+_WM_CLOSE = 0x0010
+_CLOSE_WAIT_S = 30.0
+_READY_CAP_S = 300.0
 
 
-def restart_uefn_project() -> dict[str, Any]:
-    killed = _kill_uefn_editor()
-    out = launch_uefn_project()
-    out["killed"] = killed
+def _request_uefn_close() -> int:
+    """Post WM_CLOSE to UEFN's top-level windows. 0 when none are up."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        from backend.tools.core.uefn_modal import _enum_uefn_windows
+    except Exception:
+        return 0
+    wins = _enum_uefn_windows()
+    mains = [w for w in wins if not w.get("owned")] or list(wins)
+    if not mains:
+        return 0
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    posted = 0
+    for win in mains:
+        if user32.PostMessageW(int(win["hwnd"]), _WM_CLOSE, 0, 0):
+            posted += 1
+    return posted
+
+
+def _uefn_running() -> bool:
+    if sys.platform != "win32":
+        return False
+    import subprocess
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    for image in (_UEFN_SHIPPING_EXE, _UEFN_EDITOR_EXE):
+        # /FO CSV — the default table truncates the image name, so the shipping
+        # exe never matched and a live editor looked already closed.
+        r = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH", "/FO", "CSV"],
+            capture_output=True,
+            text=True,
+            creationflags=flags,
+        )
+        if image.lower() in (r.stdout or "").lower():
+            return True
+    return False
+
+
+def _wait_uefn_exit(timeout: float) -> bool:
+    import time
+
+    try:
+        from backend.tools.core.uefn_modal import auto_dismiss_save_modal
+    except Exception:
+        auto_dismiss_save_modal = None  # type: ignore[assignment]
+    deadline = time.time() + max(0.0, float(timeout))
+    while time.time() < deadline:
+        if not _uefn_running():
+            return True
+        if auto_dismiss_save_modal is not None:
+            try:
+                auto_dismiss_save_modal()
+            except Exception:
+                pass
+        time.sleep(0.4)
+    return not _uefn_running()
+
+
+def close_uefn(*, timeout: float = _CLOSE_WAIT_S) -> dict[str, Any]:
+    """Ask UEFN to close, press Save if that modal appears, then taskkill.
+
+    Graceful path is WM_CLOSE plus the existing save-modal press. ``taskkill /F``
+    runs only when the process is still up after ``timeout`` seconds.
+    """
+    if _request_uefn_close() and _wait_uefn_exit(timeout):
+        return {"ok": True, "graceful": True, "killed": False}
+    return {"ok": True, "graceful": False, "killed": _kill_uefn_editor()}
+
+
+def wait_uefn_ready(
+    *,
+    timeout: float = 180.0,
+    root: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Poll listener health until it is online and the open island matches."""
+    import time
+
+    from backend.bridge.client import listener_get_health
+    from backend.bridge.status import _project_from_health
+    from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+
+    cap = min(max(float(timeout or 0), 1.0), _READY_CAP_S)
+    started = time.time()
+    deadline = started + cap
+    if root:
+        try:
+            selected = str(Path(uefnproject_path(root)).parent)
+        except Exception:
+            selected = str(root)
+    else:
+        selected = (PanelSettings.load().uefn_project_root or "").strip()
+    last_name = ""
+    while time.time() < deadline:
+        health = listener_get_health(int(PANEL_LISTENER_PORT), timeout=0.8)
+        if isinstance(health, dict) and health.get("status") == "ok":
+            _proj_dir, name, match = _project_from_health(
+                health, selected_project_root=selected
+            )
+            last_name = name
+            # Health says match=True before a project name exists. Require the name
+            # when a project was requested, so "hub, no island" is not ready.
+            if match and (name or not selected):
+                return {
+                    "ok": True,
+                    "seconds": round(time.time() - started, 1),
+                    "project_name": name,
+                    "project_match": True,
+                }
+        time.sleep(2.0)
+    return {
+        "ok": False,
+        "error": "timed out waiting for UEFN",
+        "seconds": round(time.time() - started, 1),
+        "project_name": last_name,
+        "project_match": False,
+    }
+
+
+def restart_uefn_project(
+    root: str | os.PathLike[str] | None = None,
+    *,
+    wait: bool = False,
+    timeout: float = 180.0,
+) -> dict[str, Any]:
+    closed = close_uefn()
+    out = launch_uefn_project(root)
+    out["killed"] = bool(closed.get("killed"))
+    out["graceful"] = bool(closed.get("graceful"))
+    if wait:
+        ready = wait_uefn_ready(timeout=timeout, root=root)
+        out["ready"] = ready
+        if not ready.get("ok"):
+            out["ok"] = False
+            out["error"] = ready.get("error") or "UEFN did not come online"
     return out
 
 

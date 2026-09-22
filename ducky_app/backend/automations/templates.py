@@ -69,11 +69,131 @@ def delete_custom(template_id: str) -> bool:
     return True
 
 
+_PRIVATE_PROMPT = (
+    "Load skill_read_subskill('ducky', 'publish_private'). Do only Upload to "
+    "Private Version. When 'Private version has been created!' is up, copy the "
+    "island code, press OK to close the popup, and put the code in your reply."
+)
+_MEMORY_PROMPT = (
+    "Load skill_read_subskill('ducky', 'publish_private'). Do Launch Memory "
+    "Calculation. First set the Launch Session menu to Launch on this PC if "
+    "another platform is selected. If 'Private version has been created!' "
+    "appears, copy the code, put it in your reply, and press OK so the client "
+    "can start the calculation. Report the memory result when it returns."
+)
+
+
+BUILTIN_TEMPLATES: list[dict[str, Any]] = [
+    {
+        "id": "builtin:restart-uefn",
+        "name": "Restart UEFN into project",
+        "label": "Restart UEFN into project",
+        "description": "Close UEFN and reopen the current project, then wait until connected.",
+        "icon": "↻",
+        "kind": "builtin",
+        "systems": ["automation"],
+        "graph": {
+            "nodes": [
+                {"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+                {"id": "r", "type": "uefn.restart", "x": 220, "y": 0, "config": {"timeout": 180}},
+            ],
+            "edges": [{"source": "s", "target": "r", "kind": "main"}],
+        },
+    },
+    {
+        "id": "builtin:publish-private",
+        "name": "Upload private version to code",
+        "label": "Upload private version to code",
+        "description": "Project > Upload to Private Version, press Copy, press OK, post the code.",
+        "icon": "↑",
+        "kind": "builtin",
+        "systems": ["pipeline"],
+        "graph": {
+            "nodes": [
+                {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
+                {"id": "w", "type": "uefn.wait_ready", "x": 200, "y": 0, "config": {"timeout": 180}},
+                {
+                    "id": "a",
+                    "type": "pipeline.agent",
+                    "x": 420,
+                    "y": 0,
+                    "config": {
+                        "ducky": "verse-coder",
+                        "timeout_sec": 900,
+                        "prompt": _PRIVATE_PROMPT,
+                    },
+                },
+                {"id": "f", "type": "pipeline.finish", "x": 660, "y": 0, "config": {}},
+            ],
+            "edges": [
+                {"source": "s", "target": "w", "kind": "main"},
+                {"source": "w", "target": "a", "kind": "main"},
+                {"source": "a", "target": "f", "kind": "main"},
+            ],
+        },
+    },
+    {
+        "id": "builtin:memory-calculation",
+        "name": "Launch memory calculation",
+        "label": "Launch memory calculation",
+        "description": (
+            "Set Launch on this PC, then Project > Launch Memory Calculation. "
+            "If a private-code popup appears, Copy, post the code, and press OK."
+        ),
+        "icon": "▦",
+        "kind": "builtin",
+        "systems": ["pipeline"],
+        "graph": {
+            "nodes": [
+                {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
+                {"id": "w", "type": "uefn.wait_ready", "x": 200, "y": 0, "config": {"timeout": 180}},
+                {
+                    "id": "a",
+                    "type": "pipeline.agent",
+                    "x": 420,
+                    "y": 0,
+                    "config": {
+                        "ducky": "verse-coder",
+                        "timeout_sec": 900,
+                        "prompt": _MEMORY_PROMPT,
+                    },
+                },
+                {"id": "f", "type": "pipeline.finish", "x": 660, "y": 0, "config": {}},
+            ],
+            "edges": [
+                {"source": "s", "target": "w", "kind": "main"},
+                {"source": "w", "target": "a", "kind": "main"},
+                {"source": "a", "target": "f", "kind": "main"},
+            ],
+        },
+    },
+]
+
+
 def list_templates(system: str = "") -> list[dict[str, Any]]:
-    """Plugin contrib (enabled only) + user custom templates."""
+    """Builtin templates, then plugin contrib (enabled only), then user custom."""
     from backend.automations.catalog import node_in_system
 
     out: list[dict[str, Any]] = []
+    for row in BUILTIN_TEMPLATES:
+        if not node_in_system(row, system):
+            continue
+        name = str(row.get("label") or row.get("name") or row.get("id"))
+        out.append(
+            {
+                "id": str(row["id"]),
+                "name": name,
+                "label": name,
+                "description": str(row.get("description") or ""),
+                "icon": str(row.get("icon") or "⚡"),
+                "kind": "builtin",
+                "systems": row.get("systems"),
+                "graph": normalize_graph(row.get("graph")),
+                "requires_plugins": [],
+                "missing_plugins": [],
+                "ready": True,
+            }
+        )
     try:
         from backend.uefn_plugins.host import get_ui_contributions
         from backend.uefn_plugins.store import get_enabled_plugin_ids

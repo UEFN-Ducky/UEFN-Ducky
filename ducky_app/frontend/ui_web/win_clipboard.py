@@ -54,3 +54,33 @@ def set_clipboard_text(text: str) -> bool:
         return True
     finally:
         user32.CloseClipboard()
+
+
+def get_clipboard_text() -> str:
+    """Read Unicode text from the clipboard. Empty when none or not Windows."""
+    if sys.platform != "win32":
+        return ""
+    user32, kernel32 = _win()
+    user32.GetClipboardData.argtypes = [ctypes.c_uint]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    opened = False
+    for _ in range(8):
+        if user32.OpenClipboard(None):
+            opened = True
+            break
+        time.sleep(0.05)
+    if not opened:
+        return ""
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return ""
+        locked = kernel32.GlobalLock(handle)
+        if not locked:
+            return ""
+        try:
+            return ctypes.wstring_at(locked)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()

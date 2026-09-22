@@ -142,6 +142,51 @@ BUILTIN_NODES: list[dict[str, Any]] = [
             {"id": "arguments_json", "label": "Arguments JSON", "type": "textarea"},
         ],
     },
+    {
+        "type": "uefn.close",
+        "label": "Close UEFN",
+        "group": "UEFN",
+        "role": "action",
+        "systems": list(_BOTH),
+        "description": "WM_CLOSE, press Save, taskkill only if UEFN is still up.",
+        "config_fields": [],
+    },
+    {
+        "type": "uefn.restart",
+        "label": "Restart UEFN",
+        "group": "UEFN",
+        "role": "action",
+        "systems": list(_BOTH),
+        "description": "Close UEFN, reopen the project, wait until the listener matches.",
+        "config_fields": [
+            {"id": "project", "label": "Project path (blank = current)", "type": "string"},
+            {"id": "timeout", "label": "Wait timeout (seconds)", "type": "number"},
+        ],
+    },
+    {
+        "type": "uefn.wait_ready",
+        "label": "Wait for UEFN",
+        "group": "UEFN",
+        "role": "action",
+        "systems": list(_BOTH),
+        "description": "Poll until the listener is online and the open island matches (max 300s).",
+        "config_fields": [
+            {"id": "project", "label": "Project path (blank = current)", "type": "string"},
+            {"id": "timeout", "label": "Timeout (seconds)", "type": "number"},
+        ],
+    },
+    {
+        "type": "uefn.wait_window",
+        "label": "Wait for UEFN window",
+        "group": "UEFN",
+        "role": "action",
+        "systems": list(_BOTH),
+        "description": "Wait until a UEFN window title matches (max 300s).",
+        "config_fields": [
+            {"id": "title_regex", "label": "Title regex", "type": "string"},
+            {"id": "timeout", "label": "Timeout (seconds)", "type": "number"},
+        ],
+    },
 ]
 
 

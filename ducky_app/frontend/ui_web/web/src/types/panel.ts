@@ -2945,12 +2945,12 @@ export interface PanelApi {
   list_window_views?(): Promise<{ id: string; title: string; kind?: string }[]>;
   /** Launch UnrealEditorFortnite.exe with Epic hub extras — no island. */
   launch_uefn?(): Promise<{ ok: boolean; path?: string; exe?: string }>;
-  /** Launch UnrealEditorFortnite.exe with the current island argv. Not startfile. */
+  /** Launch UnrealEditorFortnite.exe into the current island (-ValkyrieProject). */
   launch_uefn_project?(): Promise<{ ok: boolean; path?: string; exe?: string }>;
-  /** Kill UnrealEditorFortnite.exe only. */
-  close_uefn?(): Promise<{ ok: boolean; killed?: boolean }>;
-  /** Kill UnrealEditorFortnite.exe, then launch the current island again. */
-  restart_uefn_project?(): Promise<{ ok: boolean; path?: string; killed?: boolean }>;
+  /** WM_CLOSE UEFN, press Save, taskkill only if it is still up. */
+  close_uefn?(): Promise<{ ok: boolean; killed?: boolean; graceful?: boolean }>;
+  /** Close UEFN, then launch the current island again. */
+  restart_uefn_project?(): Promise<{ ok: boolean; path?: string; killed?: boolean; graceful?: boolean }>;
   rtc_signal?(session_id: string, payload: Record<string, unknown>): Promise<boolean>;
   /** Direct Remote View: the page posts its full-ICE answer for a viewer session. */
   direct_rtc_answer?(session: string, answer: { type: string; sdp: string } | null, fingerprint?: string, error?: string): Promise<boolean>;

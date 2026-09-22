@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 31
+  version: 33
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -60,6 +60,13 @@ Read; call `skill_read_subskill` instead.
 - **Custom Verse templates** (single file or multi-file system packs in AppData):
   `skill_read_subskill("ducky", "verse_templates")` then `ducky_verse_template_*`.
   Never edit Store `verse_template_*` packs.
+- **Open/close UEFN, private version, memory calculation:**
+  `skill_read_subskill("ducky", "publish_private")`. Reopen the current island
+  with `ducky_restart_uefn` (`-ValkyrieProject=`, then wait until connected).
+  Private version is Project → **Upload to Private Version...**. Memory
+  calculation is Project → **Launch Memory Calculation**, and only after the
+  Launch Session menu is **Launch on this PC**. Copy the code, send it, then
+  press **OK** on `Private version has been created!`.
 
 ## After an EXE update / reinstall / UEFN reopen
 
@@ -68,7 +75,7 @@ Read; call `skill_read_subskill` instead.
 1. **Launch the new EXE (or any IDE MCP reconnect)** → `ship_newest_everywhere` copies the listener to AppData, upgrades shipped skill packs into Cursor / Claude / Antigravity **and** AppData (used by the in-panel UEFN-Ducky agent), and rewrites each IDE's `uefn` MCP entry to this EXE. Old chats pick up new rules, skills, and tools on the next send.
 2. **UEFN comes online while the panel is open** → same ship runs again (offline→online).
 
-If UEFN was already open with an old in-memory listener, call `reload_listener` once so it loads the AppData copy just shipped. If still stuck, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**
+If UEFN was already open with an old in-memory listener, call `reload_listener` once so it loads the AppData copy just shipped. If still stuck, stay on `workspace_*` / `ducky_get_status`. Do not restart the editor to refresh a stale listener. Reopening the current island is `ducky_restart_uefn` (see `publish_private`).
 
 ### What auto-updates vs what is preserved
 

@@ -367,15 +367,57 @@ def ducky_set_project(path: str = "", name: str = "", pretty: bool = False) -> s
 
 
 @mcp.tool()
-def ducky_launch_uefn(pretty: bool = False) -> str:
-    """Start Unreal Editor for Fortnite with the panel's current island.
+def ducky_launch_uefn(project: str = "", pretty: bool = False) -> str:
+    """Start Unreal Editor for Fortnite in a project (not the hub).
 
-    Host-side Windows launch (Fortnite Studio shipping exe + ``.uefnproject`` argv).
+    Host-side Windows launch. Passes ``-ValkyrieProject=<path>`` — a bare
+    ``.uefnproject`` path is ignored and the hub opens the last island instead.
+    ``project`` is a folder or ``.uefnproject``; empty uses the panel's current island.
     Use when UEFN is closed. Does not restart a running editor.
     """
     from frontend.window_view import launch_uefn_project
 
-    return tool_json(launch_uefn_project(), pretty=pretty)
+    return tool_json(launch_uefn_project(project or None), pretty=pretty)
+
+
+@mcp.tool()
+def ducky_close_uefn(pretty: bool = False) -> str:
+    """Close Unreal Editor for Fortnite.
+
+    Posts WM_CLOSE and presses Save if that modal appears. taskkill /F only if
+    the process is still up after about 30 seconds.
+    """
+    from frontend.window_view import close_uefn
+
+    return tool_json(close_uefn(), pretty=pretty)
+
+
+@mcp.tool()
+def ducky_restart_uefn(project: str = "", timeout: float = 180, pretty: bool = False) -> str:
+    """Close UEFN, reopen it in the project, and wait until the listener matches.
+
+    ``project`` empty uses the panel's current island. ``timeout`` caps the wait
+    (max 300s). Requires the island to have been connected before — the listener
+    boots from the project's init_unreal.py.
+    """
+    from frontend.window_view import restart_uefn_project
+
+    return tool_json(
+        restart_uefn_project(project or None, wait=True, timeout=timeout),
+        pretty=pretty,
+    )
+
+
+@mcp.tool()
+def ducky_wait_uefn_ready(timeout: float = 180, project: str = "", pretty: bool = False) -> str:
+    """Wait until the UEFN listener is online and the open island matches.
+
+    ``project`` empty uses the panel's current island. Polls GET health (no
+    editor command). Returns project_name when ready.
+    """
+    from frontend.window_view import wait_uefn_ready
+
+    return tool_json(wait_uefn_ready(timeout=timeout, root=project or None), pretty=pretty)
 
 
 @mcp.tool()

@@ -41,6 +41,122 @@ def dismiss_uefn_modal(pretty: bool = False) -> str:
     return tool_json(dismiss_uefn_save_modal(allow_bare_enter=True), pretty=pretty)
 
 
+def _window_mcp(result: dict[str, Any], *, pretty: bool) -> Any:
+    """JSON plus an MCP image when the result has a PNG path."""
+    text = tool_json(result, pretty=pretty)
+    path = str(result.get("path") or "").strip()
+    if not path or not os.path.isfile(path):
+        return text
+    try:
+        from mcp.server.fastmcp import Image
+
+        return [text, Image(path=path)]
+    except Exception:
+        return text
+
+
+@mcp.tool()
+def uefn_window_list(title_regex: str = "", pretty: bool = False) -> str:
+    """List visible UEFN top-level windows (hwnd, title, screen rect).
+
+    ``title_regex`` is optional and case-insensitive. Slate buttons are not
+    listed — only the native window title.
+    """
+    from backend.tools.core.uefn_windows import list_uefn_windows
+
+    return tool_json(list_uefn_windows(title_regex), pretty=pretty)
+
+
+@mcp.tool()
+def uefn_window_capture(hwnd: int = 0, title_regex: str = "", pretty: bool = False) -> Any:
+    """Screenshot one UEFN window into AppData tool_captures and return the image.
+
+    Pass ``hwnd`` from uefn_window_list, or a ``title_regex``.
+    """
+    from backend.tools.core.uefn_windows import capture_uefn_window
+
+    return _window_mcp(capture_uefn_window(hwnd=hwnd, title_regex=title_regex), pretty=pretty)
+
+
+@mcp.tool()
+def uefn_window_click(
+    hwnd: int,
+    nx: float,
+    ny: float,
+    button: int = 0,
+    dblclick: bool = False,
+    pretty: bool = False,
+) -> str:
+    """Click a normalized point inside a UEFN window (0..1 from the top-left).
+
+    Real pointer click. Use after uefn_window_capture so nx/ny match the image.
+    """
+    from backend.tools.core.uefn_windows import click_uefn_window
+
+    return tool_json(
+        click_uefn_window(hwnd, nx, ny, button=button, dblclick=dblclick),
+        pretty=pretty,
+    )
+
+
+@mcp.tool()
+def uefn_window_key(hwnd: int, key: str, pretty: bool = False) -> str:
+    """Send one key to a UEFN window (Enter, Escape, a letter)."""
+    from backend.tools.core.uefn_windows import key_uefn_window
+
+    return tool_json(key_uefn_window(hwnd, key), pretty=pretty)
+
+
+@mcp.tool()
+def uefn_wait_window(title_regex: str, timeout: float = 120, pretty: bool = False) -> str:
+    """Wait until a UEFN window title matches. Timeout is capped at 300s."""
+    from backend.tools.core.uefn_windows import wait_uefn_window
+
+    return tool_json(wait_uefn_window(title_regex, timeout=timeout), pretty=pretty)
+
+
+@mcp.tool()
+def clipboard_get_text(pretty: bool = False) -> str:
+    """Read the current Windows clipboard text."""
+    from frontend.ui_web.win_clipboard import get_clipboard_text
+
+    return tool_json({"ok": True, "text": get_clipboard_text()}, pretty=pretty)
+
+
+@mcp.tool()
+def ducky_publish_private_version(
+    timeout: float = 180,
+    copy_nx: float = -1,
+    copy_ny: float = -1,
+    done_nx: float = -1,
+    done_ny: float = -1,
+    pretty: bool = False,
+) -> Any:
+    """Wait for 'Private version has been created!', capture it, press Copy, then OK.
+
+    Clicks the cached Copy spot when the dialog is the same size as last time.
+    Pass copy_nx/copy_ny (0..1) from a capture to click and remember that spot
+    once the clipboard holds an island code like 1234-5678-9012. done_nx/done_ny
+    is the OK button that closes the popup (memory calculation stays blocked
+    until OK). -1 means 'not passed'.
+    Menu clicks are skill_read_subskill("ducky", "publish_private"):
+    Upload to Private Version, or Launch Memory Calculation after Launch on this PC.
+    """
+    from backend.tools.core.uefn_windows import publish_private_version
+
+    def _opt(value: float) -> float | None:
+        return None if value < 0 else float(value)
+
+    result = publish_private_version(
+        timeout=timeout,
+        copy_nx=_opt(copy_nx),
+        copy_ny=_opt(copy_ny),
+        done_nx=_opt(done_nx),
+        done_ny=_opt(done_ny),
+    )
+    return _window_mcp(result, pretty=pretty)
+
+
 #: Internal listener commands agents must never call by name. These exist for
 #: user-initiated recovery (undoing a run), not for agents to invoke.
 _INTERNAL_COMMAND_PREFIX = "ducky_revert_"

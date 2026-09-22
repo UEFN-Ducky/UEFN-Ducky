@@ -785,3 +785,41 @@ def test_run_announces_header_jobs(monkeypatch):
     assert any(e.get("id") == f"graph:{wf['id']}" and e.get("phase") == "working" for e in jobs)
     assert not any(str(e.get("id") or "").startswith("graph-run:") for e in jobs)
     assert any(e.get("type") == "graphs_changed" for e in events)
+
+
+def test_uefn_wait_ready_node_reports_timeout(monkeypatch):
+    from backend.automations import runner
+
+    monkeypatch.setattr(
+        "frontend.window_view.wait_uefn_ready",
+        lambda **_k: {"ok": False, "error": "timed out waiting for UEFN", "project_match": False},
+    )
+    step = runner._exec_node(
+        {"id": "w", "type": "uefn.wait_ready", "config": {"timeout": 1}},
+        {},
+    )
+    assert step["ok"] is False
+    assert "timed out" in step["error"]
+
+
+def test_builtin_uefn_templates_listed():
+    from backend.automations.templates import list_templates
+
+    autos = {row["id"] for row in list_templates("automation")}
+    pipes = {row["id"] for row in list_templates("pipeline")}
+    assert "builtin:restart-uefn" in autos
+    assert "builtin:restart-uefn" not in pipes
+    assert "builtin:publish-private" in pipes
+    assert "builtin:publish-private" not in autos
+    assert "builtin:memory-calculation" in pipes
+    assert "builtin:memory-calculation" not in autos
+    from backend.automations.templates import _MEMORY_PROMPT, _PRIVATE_PROMPT
+
+    for prompt in (_PRIVATE_PROMPT, _MEMORY_PROMPT):
+        assert "Calculate Memory" not in prompt
+        assert "Publish Project" not in prompt
+    assert "Upload to Private Version" in _PRIVATE_PROMPT
+    assert "press OK" in _PRIVATE_PROMPT
+    assert "Launch on this PC" in _MEMORY_PROMPT
+    assert "Launch Memory Calculation" in _MEMORY_PROMPT
+    assert "press OK" in _MEMORY_PROMPT

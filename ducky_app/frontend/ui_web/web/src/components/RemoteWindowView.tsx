@@ -335,9 +335,10 @@ function useViewerActive(): boolean {
 }
 
 const LAUNCH_UEFN_VALUE = "__launch_uefn__";
+const LAUNCH_UEFN_HUB_VALUE = "__launch_uefn_hub__";
 const CLOSE_UEFN_VALUE = "__close_uefn__";
 const LAUNCH_WAIT_MS = 120_000;
-const SKIP_VIEW_IDS = new Set([LAUNCH_UEFN_VALUE, CLOSE_UEFN_VALUE]);
+const SKIP_VIEW_IDS = new Set([LAUNCH_UEFN_VALUE, LAUNCH_UEFN_HUB_VALUE, CLOSE_UEFN_VALUE]);
 
 let uefnLaunchLabel = "";
 const launchSubs = new Set<() => void>();
@@ -439,14 +440,16 @@ export function RemoteWindowSelect({
   }, [busy, load]);
 
   const runUeFn = useCallback(
-    async (kind: "hub" | "restart" | "close") => {
+    async (kind: "hub" | "project" | "restart" | "close") => {
       const api = getApi();
       const fn =
         kind === "close"
           ? api?.close_uefn
           : kind === "restart"
             ? api?.restart_uefn_project
-            : api?.launch_uefn;
+            : kind === "project"
+              ? api?.launch_uefn_project
+              : api?.launch_uefn;
       if (!fn) {
         await alert("UEFN launch is unavailable on this panel.");
         return;
@@ -548,14 +551,28 @@ export function RemoteWindowSelect({
             : [
                 {
                   value: LAUNCH_UEFN_VALUE,
-                  label: "Launch UEFN",
+                  label: projectName.trim() ? `Launch ${projectName.trim()}` : "Launch UEFN",
                   group: "UEFN windows",
                   disabled: true,
                   action: {
                     label: busy ? "…" : "Launch",
-                    onClick: () => void runUeFn("hub"),
+                    onClick: () => void runUeFn(projectName.trim() ? "project" : "hub"),
                   },
                 },
+                ...(projectName.trim()
+                  ? [
+                      {
+                        value: LAUNCH_UEFN_HUB_VALUE,
+                        label: "Launch UEFN hub",
+                        group: "UEFN windows",
+                        disabled: true,
+                        action: {
+                          label: busy ? "…" : "Hub",
+                          onClick: () => void runUeFn("hub"),
+                        },
+                      },
+                    ]
+                  : []),
               ]),
           ...otherRows.map((row) => ({
             value: row.id,

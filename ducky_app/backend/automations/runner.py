@@ -57,6 +57,10 @@ _ACTION_TYPES = frozenset(
         "tool.call",
         "pipeline.agent",
         "pipeline.finish",
+        "uefn.close",
+        "uefn.restart",
+        "uefn.wait_ready",
+        "uefn.wait_window",
     }
 )
 
@@ -308,6 +312,38 @@ def _walk(
     return steps, ok, error, seen
 
 
+def _uefn_node(node: dict[str, Any], ntype: str, label: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    timeout = float(cfg.get("timeout") or 180)
+    project = str(cfg.get("project") or "").strip() or None
+    if ntype == "uefn.close":
+        from frontend.window_view import close_uefn
+
+        result: dict[str, Any] = close_uefn()
+    elif ntype == "uefn.restart":
+        from frontend.window_view import restart_uefn_project
+
+        result = restart_uefn_project(project, wait=True, timeout=timeout)
+    elif ntype == "uefn.wait_ready":
+        from frontend.window_view import wait_uefn_ready
+
+        result = wait_uefn_ready(timeout=timeout, root=project)
+    else:
+        from backend.tools.core.uefn_windows import wait_uefn_window
+
+        result = wait_uefn_window(str(cfg.get("title_regex") or ""), timeout=timeout)
+    ok = bool(result.get("ok"))
+    step: dict[str, Any] = {
+        "ok": ok,
+        "id": node.get("id"),
+        "type": ntype,
+        "label": label,
+        "result": result,
+    }
+    if not ok:
+        step["error"] = str(result.get("error") or "step failed")
+    return step
+
+
 def _exec_node(node: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     ntype = str(node.get("type") or "")
     cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
@@ -339,6 +375,8 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
             return {**_pipeline_agent(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "pipeline.finish":
             return {**_pipeline_finish(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
+        if ntype in ("uefn.close", "uefn.restart", "uefn.wait_ready", "uefn.wait_window"):
+            return _uefn_node(node, ntype, label, cfg)
         handler = plugin.get_handler(ntype)
         if handler is None:
             # Starters / plugin triggers need no handler — just pass the payload on.

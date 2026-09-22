@@ -247,7 +247,8 @@ def bootstrap_system_prompt(
         # Source-file pins (test_agent_hardening): keep these literals even though
         # AGENT_HARD_RULES already states them for the running agent.
         "Validator errors are not a delete list. "
-        "Never restart UEFN. never restart UEFN so you can delete.\n"
+        "Never restart UEFN. never restart UEFN so you can delete. "
+        "Opening the current island uses ducky_restart_uefn (publish_private).\n"
         "\n## Chat replies\n"
         f"{CHAT_REPORT_RULE}"
         "\n## Ask the user (HARD)\n"

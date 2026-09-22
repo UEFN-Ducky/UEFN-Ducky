@@ -38,6 +38,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/tools/panel/panel_ai_plugins.py::_self_check": "self-check temp dir",
     "backend/tools/panel/panel_verse_templates.py::_self_check": "self-check temp dir",
     "backend/tools/verse/verse_stats.py::_append": "stats ledger under AppData",
+    "backend/tools/core/uefn_windows.py::_save_clicks": "Copy/OK click cache under AppData",
     "frontend/ui_web/project_files.py::write_external_file": "ext: files live outside the project",
     "frontend/ui_web/project_files.py::purge_undo_trash": "undo-trash housekeeping, not project content",
     # `perform` callbacks: the filesystem step of ProjectWriter.path_op, run under its
