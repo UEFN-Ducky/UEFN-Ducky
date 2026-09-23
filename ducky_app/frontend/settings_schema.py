@@ -159,6 +159,13 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Cheap API model that refines the auto role title (empty = keyword names only).",
     ),
+    "web_access": FieldMeta(
+        "Web search",
+        "LLMs",
+        settable=True,
+        enum=("off", "ask", "on"),
+        description="Whether duckies may search the public web. ask = confirm once per chat.",
+    ),
     "prompt_caching_enabled": FieldMeta(
         "Legacy provider cache markers fallback", "LLMs", settable=True
     ),

@@ -148,7 +148,7 @@ def _workspace_folders() -> list[dict[str, str]]:
     key = str(root)
     if key in _workspace_folders_cache:
         return _workspace_folders_cache[key]
-    ws = discover_verse_workspace(str(root))
+    ws = discover_verse_workspace(str(root), include_watch_files=False)
     folders = ws.get("workspace_folders") or []
     if not isinstance(folders, list):
         folders = []
@@ -624,16 +624,32 @@ def _list_directory_entries(target: Path, *, content_tree: bool) -> list[dict[st
     entries: list[dict[str, str | bool]] = []
     include = _include_in_content_tree if content_tree else _include_in_workspace_tree_entry
     show_hidden = _show_hidden_project_files()
+    # The caller already authorized this directory. Resolve settings / Content
+    # once per listing, rather than repeating DB reads and root discovery for
+    # every child (particularly expensive for large asset folders).
+    root = _project_root().resolve()
+    target = target.resolve()
+    content = (root / CONTENT_DIR).resolve()
+    active_content = _is_path_under(target, content)
     try:
-        names = sorted(os.listdir(target), key=lambda s: s.lower())
+        with os.scandir(target) as scan:
+            children = sorted(scan, key=lambda entry: entry.name.lower())
     except OSError as exc:
         raise ValueError(str(exc)) from exc
-    for name in names:
+    for child in children:
+        name = child.name
         full = target / name
-        is_dir = full.is_dir()
+        is_dir = child.is_dir()
         if not include(name, is_dir, show_hidden):
             continue
-        entry_rel = _entry_path_for_target(full)
+        resolved = full.resolve()
+        if resolved.parent != target:
+            # Symlinks/junctions still need their destination authorized.
+            entry_rel = _entry_path_for_target(full)
+        elif active_content:
+            entry_rel = resolved.relative_to(root).as_posix()
+        else:
+            entry_rel = f"{ABS_PATH_PREFIX}{resolved.as_posix()}"
         entries.append({"name": name, "path": entry_rel, "is_dir": is_dir})
     return entries
 

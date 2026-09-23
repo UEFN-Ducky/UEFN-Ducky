@@ -6,6 +6,7 @@ import { observeProjectRoot } from "./projectSwitchController";
 import type { ProjectInfo } from "../types/panel";
 
 const EMPTY: ProjectInfo = { path: "", name: "No project", slug: "_no_project" };
+export const PROJECT_SELECTED_EVENT = "ducky:project-selected";
 
 /** Route every project-info update through the switch controller before storing it, so a
  * root change fires the centralized per-project resets exactly once at the earliest signal. */
@@ -18,10 +19,14 @@ export function useProject(pollMs = 15000, refreshToken = 0, onRemoteChange?: ()
   const [project, setProject] = useState<ProjectInfo>(EMPTY);
   const apiRef = useRef<ReturnType<typeof getApi>>(null);
   const inFlightRef = useRef(false);
+  const revisionRef = useRef(0);
+  const projectRef = useRef(project);
+  projectRef.current = project;
 
   useEffect(() => {
     let pollId: number | undefined;
     let started = false;
+    let disposed = false;
 
     const cleanupWait = onApiReady((api) => {
       if (started) return;
@@ -31,9 +36,13 @@ export function useProject(pollMs = 15000, refreshToken = 0, onRemoteChange?: ()
       const poll = () => {
         if (inFlightRef.current) return;
         inFlightRef.current = true;
+        const revision = revisionRef.current;
         void api
           .get_project_info()
-          .then((info) => applyProjectInfo(setProject, info))
+          .then((info) => {
+            if (!disposed && revision === revisionRef.current && info) applyProjectInfo(setProject, info);
+          })
+          .catch(() => { /* Retry on the next poll. */ })
           .finally(() => {
             inFlightRef.current = false;
           });
@@ -44,6 +53,7 @@ export function useProject(pollMs = 15000, refreshToken = 0, onRemoteChange?: ()
     });
 
     return () => {
+      disposed = true;
       cleanupWait();
       if (pollId !== undefined) window.clearInterval(pollId);
     };
@@ -55,20 +65,38 @@ export function useProject(pollMs = 15000, refreshToken = 0, onRemoteChange?: ()
     if (!api || inFlightRef.current) return;
 
     inFlightRef.current = true;
+    const revision = revisionRef.current;
+    let disposed = false;
     void api
       .get_project_info()
-      .then((info) => applyProjectInfo(setProject, info))
+      .then((info) => {
+        if (!disposed && revision === revisionRef.current && info) applyProjectInfo(setProject, info);
+      })
+      .catch(() => { /* A push or the next poll can retry. */ })
       .finally(() => {
         inFlightRef.current = false;
       });
+    return () => { disposed = true; };
   }, [refreshToken]);
 
   useEffect(() => {
-    return subscribePanelPush((event) => {
+    const apply = (info: ProjectInfo) => {
+      revisionRef.current++;
+      const changed = projectRef.current.path !== info.path;
+      projectRef.current = info;
+      applyProjectInfo(setProject, info);
+      if (changed) onRemoteChange?.();
+    };
+    const selected = (event: Event) => apply((event as CustomEvent<ProjectInfo>).detail);
+    window.addEventListener(PROJECT_SELECTED_EVENT, selected);
+    const unsubscribe = subscribePanelPush((event) => {
       if (event.type !== "project_changed" || !event.project) return;
-      applyProjectInfo(setProject, event.project);
-      onRemoteChange?.();
+      apply(event.project);
     });
+    return () => {
+      unsubscribe();
+      window.removeEventListener(PROJECT_SELECTED_EVENT, selected);
+    };
   }, [onRemoteChange]);
 
   return project;

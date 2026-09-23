@@ -110,6 +110,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const CategoryIcon = category.icon;
   const Body = category.Body ?? DefaultBody;
   const isAskUser = meta.name === "ducky_ask_user";
+  const isWebLookup = meta.name === "web_search" || meta.name === "web_fetch";
   const [askSession, setAskSession] = useState(() =>
     convId ? getAskUserSessionForConv(convId) : null,
   );
@@ -190,8 +191,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
     [expanded, isAskUser, meta.arguments],
   );
   const resultText = useMemo(
-    () => (expanded || isAskUser ? formatPayload(meta.result) : ""),
-    [expanded, isAskUser, meta.result],
+    () => (expanded || isAskUser || isWebLookup ? formatPayload(meta.result) : ""),
+    [expanded, isAskUser, isWebLookup, meta.result],
   );
   const llmTokens = meta.llmTokens ?? 0;
   const tokenSuffix =
@@ -346,8 +347,25 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
+        {isWebLookup && !isCancelled && !isGuardBlocked && !isRunning ? (
+          <div className="tool-execution-card-body">
+            <Body
+              toolName={meta.name}
+              args={meta.arguments}
+              argsText=""
+              resultText={resultText}
+              isSuccess={isSuccess}
+              isError={!isSuccess}
+              showResult
+              hideArgs={false}
+              hint={meta.hint}
+              onOpenFile={onOpenFile}
+            />
+          </div>
+        ) : null}
+
         <div className={`tool-card-collapse${expanded ? " is-open" : ""}`}>
-          {expanded && !isAskUser ? (
+          {expanded && !isAskUser && !isWebLookup ? (
           <div className="tool-card-collapse-inner">
             {(chatList || listedChat) && onOpenChat && !isRunning ? (
               <div className="tool-execution-card-chat-list-wrap">

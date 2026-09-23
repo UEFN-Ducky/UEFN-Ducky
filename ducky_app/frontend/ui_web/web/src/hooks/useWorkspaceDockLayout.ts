@@ -1,3 +1,4 @@
+import { reorderStackedPanels, type StackedPanelDropEdge } from "../utils/stackedPanelDropHint";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MIN_DOCK_PANEL_HEIGHT,
@@ -18,7 +19,7 @@ import {
   withRailEnabled,
   DOCK_CHANGE_EVENT,
 } from "../workspace/workspaceDockStorage";
-import { resizeStackedPanelSplit } from "../utils/stackedPanelFlex";
+import { resizeStackedPanelSplit, type StackedPanelResizeSnapshot } from "../utils/stackedPanelFlex";
 import { onApiReady } from "./onApiReady";
 
 export type { DockPanelId, DockPanelMode, DockSide, WorkspaceDockSnapshot };
@@ -194,16 +195,11 @@ export function useWorkspaceDockLayout(windowId: string) {
   );
 
   const swapPanels = useCallback(
-    (side: DockSide, panelA: DockPanelId, panelB: DockPanelId) => {
+    (side: DockSide, panelA: DockPanelId, panelB: DockPanelId, edge?: StackedPanelDropEdge) => {
       if (panelA === panelB) return;
       commit((prev) => {
         const stack = side === "left" ? prev.left : prev.right;
-        const order = [...stack.order];
-        const i = order.indexOf(panelA);
-        const j = order.indexOf(panelB);
-        if (i < 0 || j < 0) return prev;
-        order[i] = panelB;
-        order[j] = panelA;
+        const order = reorderStackedPanels(stack.order, panelA, panelB, edge);
         const nextStack = { ...stack, order };
         return side === "left" ? { ...prev, left: nextStack } : { ...prev, right: nextStack };
       });
@@ -212,27 +208,27 @@ export function useWorkspaceDockLayout(windowId: string) {
   );
 
   const resizeSplit = useCallback(
-    (side: DockSide, splitIndex: number, deltaPx: number, containerHeight: number) => {
+    (side: DockSide, splitIndex: number, deltaPx: number, containerHeight: number, resizeSnapshot?: StackedPanelResizeSnapshot<DockPanelId>) => {
       if (containerHeight <= 0) return;
-      commit((prev) => {
-        const stack = side === "left" ? prev.left : prev.right;
-        const next = resizeStackedPanelSplit(
-          {
-            order: stack.order,
-            collapsed: stack.collapsed,
-            panelFlex: stack.panelFlex,
-            splitRatio: stack.splitRatio,
-            minPanelHeight: MIN_DOCK_PANEL_HEIGHT,
-          },
-          splitIndex,
-          deltaPx,
-          containerHeight,
-        );
-        const nextStack = { ...stack, panelFlex: next.panelFlex, splitRatio: next.splitRatio };
-        return side === "left" ? { ...prev, left: nextStack } : { ...prev, right: nextStack };
-      });
+      const prev = snapshotRef.current;
+      const stack = side === "left" ? prev.left : prev.right;
+      const next = resizeStackedPanelSplit(
+        {
+          order: stack.order,
+          collapsed: stack.collapsed,
+          panelFlex: stack.panelFlex,
+          splitRatio: stack.splitRatio,
+          minPanelHeight: MIN_DOCK_PANEL_HEIGHT,
+        },
+        splitIndex, deltaPx, containerHeight, resizeSnapshot,
+      );
+      const nextStack = { ...stack, panelFlex: next.panelFlex, splitRatio: next.splitRatio };
+      // The release event flushes its last movement and persists in the same tick.
+      // Update the ref synchronously; save once on release instead of every frame.
+      snapshotRef.current = { ...prev, [side]: nextStack };
+      setSnapshot(snapshotRef.current);
     },
-    [commit],
+    [],
   );
 
   const resizeFamilySplit = useCallback(

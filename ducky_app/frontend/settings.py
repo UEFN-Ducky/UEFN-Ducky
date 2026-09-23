@@ -187,6 +187,9 @@ class PanelSettings:
     chat_title_model: str = ""
     """Cheap API model that refines the auto role title (empty = keyword names only)."""
 
+    web_access: str = "ask"
+    """Public web lookup: off, ask once per chat, or on."""
+
     prompt_caching_enabled: bool = True
     """Legacy fallback when Anthropic/OpenAI plugin prefs omit promptCaching."""
 
@@ -313,6 +316,8 @@ class PanelSettings:
             self.follow_code_speed = "normal"
         if self.mic_permission not in ("ask", "allow", "block"):
             self.mic_permission = "ask"
+        if self.web_access not in ("off", "ask", "on"):
+            self.web_access = "ask"
         try:
             self.tts_volume = max(0.0, min(1.0, float(self.tts_volume)))
         except (TypeError, ValueError):
@@ -431,6 +436,7 @@ class PanelSettings:
             or self.memory_summary_model.strip()
             or not self.chat_auto_title
             or self.chat_title_model.strip()
+            or self.web_access != "ask"
             or not self.prompt_caching_enabled
             or not self.freeze_prompt_prefix
             or self.anthropic_extended_cache_ttl
@@ -589,7 +595,7 @@ def apply_workspace_env(project_root: str) -> None:
 
     from frontend.ui_web.verse_editor.lsp.verse_workspace import discover_verse_workspace
 
-    ws = discover_verse_workspace(root)
+    ws = discover_verse_workspace(root, include_watch_files=False)
     folder_paths = [f["path"] for f in (ws.get("workspace_folders") or []) if isinstance(f, dict) and f.get("path")]
     os.environ["UEFN_VSCODE_WORKSPACE_FOLDERS"] = _json.dumps(folder_paths or [root])
     os.environ["UEFN_DUCKY_PROJECT_ROOT"] = root

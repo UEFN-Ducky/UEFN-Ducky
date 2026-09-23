@@ -152,6 +152,15 @@ class Conversation:
     file_count: int = 0
     """Sidebar aggregate: unique session files touched by write/path tools."""
 
+    web_access_allowed: bool = False
+    """This chat may search the public web without asking again."""
+
+    web_access_denied: bool = False
+    """This chat refused web search."""
+
+    web_fetch_urls: list[str] = field(default_factory=list)
+    """Canonical URLs from the latest web_search. The only fetch allowlist."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -197,6 +206,9 @@ class Conversation:
             "group_members": list(self.group_members or []),
             "tool_call_count": int(self.tool_call_count or 0),
             "file_count": int(self.file_count or 0),
+            "web_access_allowed": bool(self.web_access_allowed),
+            "web_access_denied": bool(self.web_access_denied),
+            "web_fetch_urls": [str(u) for u in (self.web_fetch_urls or [])],
         }
 
     @classmethod
@@ -288,6 +300,13 @@ class Conversation:
             ),
             tool_call_count=int(d.get("tool_call_count", 0) or 0),
             file_count=int(d.get("file_count", 0) or 0),
+            web_access_allowed=bool(d.get("web_access_allowed", False)),
+            web_access_denied=bool(d.get("web_access_denied", False)),
+            web_fetch_urls=(
+                [str(u) for u in d["web_fetch_urls"] if str(u).strip()]
+                if isinstance(d.get("web_fetch_urls"), list)
+                else []
+            ),
         )
 
 

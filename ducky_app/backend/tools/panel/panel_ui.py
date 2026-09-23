@@ -217,7 +217,21 @@ def ducky_walkthrough_run(steps: list[dict[str, Any]], pretty: bool = False) -> 
 
 
 def _resolve_ask_user_conv_id() -> str:
-    """Active embedded chat, else DUCKY_CONV_ID (coding-agent MCP child)."""
+    """Chat this tool call belongs to.
+
+    A coding agent on the shared bridge binds its chat on the request. That
+    id wins, so web search and the permission question land in that chat.
+    Otherwise the open embedded chat, then DUCKY_CONV_ID on a dedicated bridge.
+    """
+    try:
+        from backend.workspace import identity as run_identity
+
+        ctx = run_identity.current()
+        bound = (ctx.conv_id if ctx is not None else "") or ""
+        if bound.strip():
+            return bound.strip()
+    except Exception:
+        pass
     try:
         from frontend.ui_web.agent_modes import get_active_conv_id
 
@@ -291,4 +305,8 @@ def ducky_ask_user(
     out = panel_rpc("ask_user", payload, timeout=_MAX_ASK_USER_WAIT_S)
     if isinstance(out, dict) and not out.get("error"):
         out = {**out, "questions": cleaned}
+        if conv_id:
+            from backend.tools.core.web_lookup import remember_web_permission
+
+            remember_web_permission(conv_id, out)
     return tool_json(out, pretty=pretty)

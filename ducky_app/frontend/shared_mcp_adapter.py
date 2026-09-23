@@ -70,6 +70,45 @@ def _write_frame(sock: socket.socket, payload: dict) -> None:
     sock.sendall(struct.pack(">I", len(raw)) + raw)
 
 
+def _our_version() -> str:
+    return (os.environ.get("UEFN_DUCKY_APP_VERSION") or "").strip()
+
+
+def _state_version(state: dict) -> str:
+    key = state.get("key") if isinstance(state.get("key"), dict) else {}
+    return str(key.get("version") or "")
+
+
+def _stale(state: dict) -> bool:
+    """A daemon from another app version must not keep serving this exe."""
+    ours = _our_version()
+    return bool(ours) and _state_version(state) != ours
+
+
+def _stop_bridge_pid(pid: int) -> None:
+    """End a leftover UEFN-Ducky-Bridge that is holding the shared daemon."""
+    if pid <= 0 or pid == os.getpid() or os.name != "nt":
+        return
+    flags = subprocess.CREATE_NO_WINDOW
+    try:
+        listed = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5, creationflags=flags,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if "uefn-ducky-bridge" not in (listed.stdout or "").lower():
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=5, creationflags=flags,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def _try_hello(state: dict) -> socket.socket | None:
     try:
         sock = socket.create_connection((str(state.get("host") or "127.0.0.1"), int(state["port"])), timeout=2.0)
@@ -108,15 +147,25 @@ def _spawn_daemon(bridge_args: list[str]) -> None:
 
 
 def connect(bridge_args: list[str], timeout_s: float = 30.0) -> socket.socket | None:
-    """Existing daemon first; spawn one only if nobody answers."""
+    """Existing daemon first; spawn one only if nobody answers.
+
+    A daemon from a different app version is stopped (it still holds the
+    single-instance lock) so this exe can serve tools such as web_search.
+    """
     state = _read_state()
-    if state and (sock := _try_hello(state)):
+    if state and _stale(state):
+        _stop_bridge_pid(int(state.get("pid") or 0))
+        deadline = time.time() + 3.0
+        while time.time() < deadline and state and _stale(state):
+            time.sleep(0.1)
+            state = _read_state()
+    if state and not _stale(state) and (sock := _try_hello(state)):
         return sock
     _spawn_daemon(bridge_args)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         state = _read_state()
-        if state and (sock := _try_hello(state)):
+        if state and not _stale(state) and (sock := _try_hello(state)):
             return sock
         time.sleep(0.1)
     return None

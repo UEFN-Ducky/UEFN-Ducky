@@ -234,6 +234,55 @@ function ChatTitleSection() {
 }
 
 /** Ducky-owned freeze — works for every gateway. Provider cache markers live in plugins. */
+const WEB_ACCESS_OPTIONS = [
+  { value: "ask", label: "Ask once per chat" },
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+];
+
+function WebAccessSection() {
+  const [loaded, setLoaded] = useState(false);
+  const [access, setAccess] = useState("ask");
+
+  useEffect(() => {
+    return onApiReady((api) => {
+      void api.get_settings().then((settings) => {
+        const mode = (settings.web_access || "ask").trim();
+        setAccess(mode === "on" || mode === "off" ? mode : "ask");
+        setLoaded(true);
+      });
+    });
+  }, []);
+
+  return (
+    <div className="general-tab-toggle-card">
+      <div className="general-tab-toggle-row">
+        <div className="general-tab-toggle-row-text">
+          <label htmlFor="select-web-access" className="general-tab-toggle-label">
+            Web search
+          </label>
+        </div>
+        <ChoiceDropdown
+          id="select-web-access"
+          className="llms-speed-select"
+          size="compact"
+          aria-label="Web search"
+          mode="radio"
+          value={access}
+          disabled={!loaded}
+          options={WEB_ACCESS_OPTIONS}
+          onChange={(next) => {
+            const mode = next === "on" || next === "off" ? next : "ask";
+            setAccess(mode);
+            const api = getApi();
+            if (api) void api.save_agent_settings({ web_access: mode });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PromptPrefixSection() {
   const [loaded, setLoaded] = useState(false);
   const [freezePrefix, setFreezePrefix] = useState(true);
@@ -684,6 +733,11 @@ export function AgentTab() {
                   </div>
                 ) : null}
               </div>
+            </section>
+
+            <section className="general-tab-section">
+              <GeneralSectionHeader icon={<Icons.Globe />} title="Web search" />
+              <WebAccessSection />
             </section>
 
             <section className="general-tab-section">

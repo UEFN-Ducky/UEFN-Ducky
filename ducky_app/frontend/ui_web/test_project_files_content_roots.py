@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import frontend.ui_web.project_files as pf
+
+
+def test_large_directory_loads_project_settings_once(tmp_path: Path, monkeypatch):
+    project = tmp_path / "Island"
+    content = project / "Content"
+    content.mkdir(parents=True)
+    for index in range(100):
+        (content / f"asset{index}.uasset").touch()
+    root = Mock(return_value=project)
+    monkeypatch.setattr(pf, "_project_root", root)
+    monkeypatch.setattr(pf, "_show_hidden_project_files", lambda: False)
+    entries = pf._list_directory_entries(content, content_tree=True)
+    assert len(entries) == 100
+    assert all(str(entry["path"]).startswith("Content/") for entry in entries)
+    assert root.call_count == 1
 
 
 def test_empty_workspace_is_not_cached(tmp_path: Path, monkeypatch):
     project = tmp_path / "Isle"
     project.mkdir()
     monkeypatch.setattr(pf, "_project_root", lambda: project)
-    monkeypatch.setattr(pf, "discover_verse_workspace", lambda _root: {"workspace_folders": []})
+    monkeypatch.setattr(pf, "discover_verse_workspace", lambda _root, **_kwargs: {"workspace_folders": []})
     pf._workspace_folders_cache.clear()
     assert pf._workspace_folders() == []
     assert str(project.resolve()) not in pf._workspace_folders_cache
@@ -22,7 +38,7 @@ def test_content_folder_is_injected_when_discover_omits_it(tmp_path: Path, monke
     content = project / "Content"
     content.mkdir(parents=True)
     monkeypatch.setattr(pf, "_project_root", lambda: project)
-    monkeypatch.setattr(pf, "discover_verse_workspace", lambda _root: {"workspace_folders": []})
+    monkeypatch.setattr(pf, "discover_verse_workspace", lambda _root, **_kwargs: {"workspace_folders": []})
     pf._workspace_folders_cache.clear()
     folders = pf._workspace_folders()
     assert len(folders) == 1

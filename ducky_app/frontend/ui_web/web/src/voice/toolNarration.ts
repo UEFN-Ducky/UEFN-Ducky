@@ -51,6 +51,7 @@ const TOOL_PURPOSE: Record<string, string> = {
   PowerShell: "running PowerShell",
   file_change: "editing files",
   web_search: "searching the web",
+  web_fetch: "reading a page",
   duplicate_asset: "duplicating an asset",
   create_anim_preset: "creating an animation preset",
   create_character_blueprint: "creating a character blueprint",

@@ -13,10 +13,11 @@ const DEFAULT_POLL_MS = 1500;
 export function useWatchProjectTree(
   dirPaths: readonly string[],
   onChanged: (changed: string[]) => void,
-  options?: { enabled?: boolean; pollMs?: number },
+  options?: { enabled?: boolean; pollMs?: number; projectKey?: string },
 ): void {
   const enabled = options?.enabled ?? true;
   const pollMs = options?.pollMs ?? DEFAULT_POLL_MS;
+  const projectKey = options?.projectKey;
   const fpRef = useRef<Map<string, string>>(new Map());
   const pathsRef = useRef(dirPaths);
   pathsRef.current = dirPaths;
@@ -26,12 +27,14 @@ export function useWatchProjectTree(
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let inFlight = false;
     let stopPoll: (() => void) | undefined;
 
     const poll = async () => {
       const api = getApi();
       const paths = pathsRef.current;
-      if (!api?.fingerprint_project_dirs || cancelled || paths.length === 0) return;
+      if (!api?.fingerprint_project_dirs || cancelled || inFlight || paths.length === 0) return;
+      inFlight = true;
       try {
         const { fingerprints } = await api.fingerprint_project_dirs([...paths]);
         if (cancelled) return;
@@ -50,6 +53,8 @@ export function useWatchProjectTree(
         if (changed.length) onChangedRef.current(changed);
       } catch {
         // transient read error — next poll retries
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -64,5 +69,5 @@ export function useWatchProjectTree(
       stop();
       stopPoll?.();
     };
-  }, [enabled, pollMs]);
+  }, [enabled, pollMs, projectKey]);
 }

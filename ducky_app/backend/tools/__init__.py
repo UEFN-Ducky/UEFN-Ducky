@@ -7,6 +7,7 @@ from backend.tools.core import changesets  # noqa: F401
 from backend.tools.core import code_diagnostics  # noqa: F401
 from backend.tools.core import hints  # noqa: F401
 from backend.tools.core import system  # noqa: F401
+from backend.tools.core import web_lookup  # noqa: F401
 from backend.tools.panel import ducky_panel  # noqa: F401
 from backend.tools.panel import panel_ai_plugins  # noqa: F401
 from backend.tools.panel import panel_automations  # noqa: F401

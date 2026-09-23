@@ -22,7 +22,7 @@ const GAP_SLOP_PX = 6;
  * Collapsed rows count the full height so Duckies/Outline/History reorder without expanding.
  */
 export function stackedPanelDropHint<TId extends string>(
-  panels: StackedPanelHitRect<TId>[],
+  panels: readonly StackedPanelHitRect<TId>[],
   draggedId: TId,
   pointerY: number,
 ): StackedPanelDropHint<TId> | null {
@@ -45,17 +45,29 @@ export function stackedPanelDropHint<TId extends string>(
   if (!best) return null;
 
   const { panel } = best;
-  const draggedIsAbove = dragged.top < panel.top;
-  const height = Math.max(1, panel.bottom - panel.top);
-  const pastMid =
-    (draggedIsAbove && pointerY > panel.top + height / 2) ||
-    (!draggedIsAbove && pointerY < panel.top + height / 2);
-
-  // Collapsed headers are ~28px — require any hover in the band, not midpoint.
-  if (!panel.collapsed && !pastMid) return null;
-
   return {
     targetId: panel.id,
-    edge: draggedIsAbove ? "before" : "after",
+    edge: pointerY < (panel.top + panel.bottom) / 2 ? "before" : "after",
   };
+}
+
+/** Move to the indicated edge, preserving the relative order of other panels. */
+export function reorderStackedPanels<TId extends string>(
+  order: readonly TId[],
+  draggedId: TId,
+  targetId: TId,
+  edge?: StackedPanelDropEdge,
+): TId[] {
+  const next = [...order];
+  const from = next.indexOf(draggedId);
+  const target = next.indexOf(targetId);
+  if (from < 0 || target < 0 || from === target) return next;
+  if (!edge) {
+    // Existing tab/context-menu callers still request a swap.
+    [next[from], next[target]] = [next[target]!, next[from]!];
+    return next;
+  }
+  next.splice(from, 1);
+  next.splice(next.indexOf(targetId) + (edge === "after" ? 1 : 0), 0, draggedId);
+  return next;
 }

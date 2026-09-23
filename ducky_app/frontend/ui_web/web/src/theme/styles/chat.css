@@ -3791,6 +3791,7 @@
   --tool-cat-screenshot: #c084fc;
   --tool-cat-landscape: #34d399;
   --tool-cat-walkthrough: #fbbf24;
+  --tool-cat-web: #38bdf8;
   --tool-cat-generic: #d4d4d8;
 }
 
@@ -3855,6 +3856,76 @@
   --tool-accent: var(--tool-cat-walkthrough);
   border-color: color-mix(in srgb, var(--tool-cat-walkthrough) 40%, transparent);
   background-color: color-mix(in srgb, var(--tool-cat-walkthrough) 10%, transparent);
+}
+
+.tool-execution-card-shell--success.tool-execution-card-shell--cat-web,
+.tool-execution-card-shell--running.tool-execution-card-shell--cat-web {
+  --tool-accent: var(--tool-cat-web);
+  border-color: color-mix(in srgb, var(--tool-cat-web) 40%, transparent);
+  background-color: color-mix(in srgb, var(--tool-cat-web) 10%, transparent);
+}
+
+.tool-card-web {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-card-web-query strong {
+  font-weight: 600;
+}
+
+.tool-card-web-images {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tool-card-web-thumb-link {
+  display: block;
+}
+
+.tool-card-web-thumb {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.tool-card-web-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-card-web-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-card-web-link {
+  color: var(--tool-accent, var(--accent));
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tool-card-web-host,
+.tool-card-web-snippet,
+.tool-card-web-note {
+  opacity: 0.82;
+}
+
+.tool-card-web-snippet {
+  margin: 0;
+}
+
+.tool-card-web-note--error {
+  opacity: 1;
 }
 
 .tool-execution-card-shell--success.tool-execution-card-shell--cat-generic,

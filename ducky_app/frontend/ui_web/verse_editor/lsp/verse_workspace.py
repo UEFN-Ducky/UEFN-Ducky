@@ -268,25 +268,7 @@ def _saved_layout_folders(project_root: Path, saved: Path) -> list[dict[str, str
 
 def _collect_watch_files(folder_paths: list[str]) -> list[str]:
     """vproject / vpackage files verse-lsp expects via didChangeWatchedFiles."""
-    patterns = ("*.vproject", "*.vpackage")
-    found: list[str] = []
-    seen: set[str] = set()
-    for raw in folder_paths:
-        base = Path(raw)
-        if not base.is_dir():
-            if base.suffix.lower() in {".vproject", ".vpackage"} and base.is_file():
-                key = str(base.resolve())
-                if key not in seen:
-                    seen.add(key)
-                    found.append(key)
-            continue
-        for pattern in patterns:
-            for path in base.rglob(pattern):
-                if path.is_file():
-                    key = str(path.resolve())
-                    if key not in seen:
-                        seen.add(key)
-                        found.append(key)
+    paths = [Path(raw) for raw in folder_paths]
     saved_parent = None
     for raw in folder_paths:
         p = Path(raw)
@@ -298,17 +280,30 @@ def _collect_watch_files(folder_paths: list[str]) -> list[str]:
             saved_parent = p.parent.parent.parent
             break
     if saved_parent is not None:
-        for pattern in patterns:
-            for path in saved_parent.rglob(pattern):
-                if path.is_file():
-                    key = str(path.resolve())
-                    if key not in seen:
-                        seen.add(key)
-                        found.append(key)
-    return found
+        paths.append(saved_parent)
+    # Scan each directory once, not once per extension and again for every
+    # overlapping Saved root. World-partition asset stores cannot hold Verse
+    # package metadata and may contain hundreds of thousands of directories.
+    skip = {".git", ".urc", "__externalactors__", "__externalobjects__", "node_modules"}
+    roots: list[Path] = []
+    found: set[str] = set()
+    for base in sorted({p.resolve() for p in paths}, key=lambda p: len(p.parts)):
+        if any(base == root or root in base.parents for root in roots):
+            continue
+        if base.is_file():
+            if base.suffix.lower() in {".vproject", ".vpackage"}:
+                found.add(str(base))
+            continue
+        roots.append(base)
+        for directory, dirs, files in os.walk(base):
+            dirs[:] = [name for name in dirs if name.lower() not in skip]
+            for name in files:
+                if Path(name).suffix.lower() in {".vproject", ".vpackage"}:
+                    found.add(str((Path(directory) / name).resolve()))
+    return sorted(found)
 
 
-def discover_verse_workspace(project_root: str) -> dict[str, Any]:
+def discover_verse_workspace(project_root: str, *, include_watch_files: bool = True) -> dict[str, Any]:
     """
     Return workspace_folders [{name, path}] and watch_files [abs paths].
 
@@ -362,7 +357,9 @@ def discover_verse_workspace(project_root: str) -> dict[str, Any]:
             folders.append({"name": "vproject (read-only)", "path": shadow_dir})
 
     paths = [f["path"] for f in folders]
-    watch_files = _collect_watch_files(paths)
+    # Browsing folders, switching projects and checking the LSP fingerprint need
+    # only root metadata. Never recursively walk Content on those UI paths.
+    watch_files = _collect_watch_files(paths) if include_watch_files else []
 
     if shadow_vproject is not None:
         real_key = str(real_vproject.resolve())
@@ -391,7 +388,7 @@ def workspace_folder_fingerprint(project_root: str) -> str:
     if not (project_root or "").strip():
         return ""
     try:
-        ws = discover_verse_workspace(project_root)
+        ws = discover_verse_workspace(project_root, include_watch_files=False)
     except Exception:
         return ""
     folders = ws.get("workspace_folders") or []

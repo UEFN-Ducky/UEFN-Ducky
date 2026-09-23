@@ -42,6 +42,9 @@ function render(slug: string, foldersLoaded: boolean) {
 beforeEach(() => {
   vi.useFakeTimers();
   api.save_editor_workspace.mockClear();
+  api.stat_project_file.mockReset().mockImplementation(async (path: string) => ({ path, mtime_ns: 1, size: 1, exists: true }));
+  api.close_all_focus_windows.mockClear();
+  api.restore_focus_windows.mockClear();
   api.get_editor_workspace.mockReset().mockResolvedValue({
     version: 1,
     openTabs: savedTabs,
@@ -92,4 +95,39 @@ it("retries a restore that was cancelled before the snapshot was applied", async
   rerender({ foldersLoaded: true, openTabs: [] });
   await act(async () => { await vi.advanceTimersByTimeAsync(10); });
   expect(initLayoutState).toHaveBeenCalledTimes(1);
+});
+
+it("validates restored files concurrently with a bounded request count", async () => {
+  const files: EditorTab[] = Array.from({ length: 12 }, (_, i) => ({
+    id: `file:${i}.verse`, kind: "file", path: `${i}.verse`, name: `${i}.verse`,
+  }));
+  api.get_editor_workspace.mockResolvedValue({ version: 1, openTabs: files, layout: createDefaultLayout(files.map((t) => t.id)) });
+  const releases: (() => void)[] = [];
+  api.stat_project_file.mockImplementation((path: string) => new Promise((resolve) => {
+    releases.push(() => resolve({ path, mtime_ns: 1, size: 1, exists: true }));
+  }));
+  const { initLayoutState } = render(`parallel-${Math.random()}`, true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  expect(api.stat_project_file).toHaveBeenCalledTimes(4);
+  for (let batch = 0; batch < 3; batch++) {
+    await act(async () => { releases.splice(0).forEach((release) => release()); });
+  }
+  expect(initLayoutState).toHaveBeenCalledWith(files, expect.anything());
+});
+
+it("stops queuing old file checks after a restore is cancelled", async () => {
+  const files: EditorTab[] = Array.from({ length: 12 }, (_, i) => ({
+    id: `file:${i}.verse`, kind: "file", path: `${i}.verse`, name: `${i}.verse`,
+  }));
+  api.get_editor_workspace.mockResolvedValue({ version: 1, openTabs: files, layout: createDefaultLayout(files.map((t) => t.id)) });
+  const releases: (() => void)[] = [];
+  api.stat_project_file.mockImplementation((path: string) => new Promise((resolve) => {
+    releases.push(() => resolve({ path, mtime_ns: 1, size: 1, exists: true }));
+  }));
+  const { initLayoutState, unmount } = render(`cancel-checks-${Math.random()}`, true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  unmount();
+  await act(async () => { releases.splice(0).forEach((release) => release()); });
+  expect(api.stat_project_file).toHaveBeenCalledTimes(4);
+  expect(initLayoutState).not.toHaveBeenCalled();
 });

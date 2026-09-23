@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SplitResizeHandle } from "../SplitResizeHandle";
 import { CtrlWheelZoomRoot } from "../CtrlWheelZoomRoot";
@@ -13,8 +13,9 @@ import { classifySidebarDragOut } from "../../utils/sidebarDragOut";
 import {
   stackedPanelDropHint,
   type StackedPanelDropHint,
+  type StackedPanelDropEdge,
 } from "../../utils/stackedPanelDropHint";
-import { flexGrowForStackedPanel } from "../../utils/stackedPanelFlex";
+import { resolveStackedPanelFlex, type StackedPanelResizeSnapshot } from "../../utils/stackedPanelFlex";
 import type { DockSide } from "../../workspace/workspaceDockStorage";
 
 const DRAG_THRESHOLD_PX = 5;
@@ -59,7 +60,7 @@ export function SidebarStackedPanel<TId extends string>({
   actions?: ReactNode;
   onContextMenu?: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
-  onSwapPanels: (panelA: TId, panelB: TId) => void;
+  onSwapPanels: (panelA: TId, panelB: TId, edge?: StackedPanelDropEdge) => void;
   dropHint: StackedPanelDropHint<TId> | null;
   onDropHintChange?: (hint: StackedPanelDropHint<TId> | null) => void;
   stackRef: MutableRefObject<HTMLDivElement | null>;
@@ -82,6 +83,8 @@ export function SidebarStackedPanel<TId extends string>({
   const lastPointerRef = useRef({ clientX: 0, clientY: 0, screenX: 0, screenY: 0 });
   const panelElRef = useRef<HTMLDivElement | null>(null);
   const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const onHeaderPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -93,6 +96,7 @@ export function SidebarStackedPanel<TId extends string>({
       )
         return;
       e.preventDefault();
+      dragCleanupRef.current?.();
       const headerEl = e.currentTarget;
       headerEl.setPointerCapture(e.pointerId);
       dragStartY.current = e.clientY;
@@ -107,9 +111,9 @@ export function SidebarStackedPanel<TId extends string>({
         screenY: e.screenY,
       };
       setGhostPos(null);
-      onDragStateChange(panelId);
 
       const onPointerMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
         lastPointerRef.current = {
           clientX: ev.clientX,
           clientY: ev.clientY,
@@ -119,11 +123,12 @@ export function SidebarStackedPanel<TId extends string>({
         const movedY = Math.abs(ev.clientY - dragStartY.current) > DRAG_THRESHOLD_PX;
         const movedX = Math.abs(ev.clientX - dragStartX.current) > HORIZONTAL_DRAG_THRESHOLD_PX;
         if (movedY || movedX) {
+          if (!dragMovedRef.current) onDragStateChange(panelId);
           dragMovedRef.current = true;
-          setGhostPos({ x: ev.clientX, y: ev.clientY });
         }
 
         if (!dragMovedRef.current) return;
+        setGhostPos({ x: ev.clientX, y: ev.clientY });
 
         pendingDropTargetRef.current = null;
         pendingDropHintRef.current = null;
@@ -146,7 +151,12 @@ export function SidebarStackedPanel<TId extends string>({
           return;
         }
 
-        const panelEls = stack.querySelectorAll<HTMLElement>(".sidebar-stacked-panel");
+        const stackRect = stack.getBoundingClientRect();
+        if (ev.clientX < stackRect.left || ev.clientX > stackRect.right) {
+          onDropHintChange?.(null);
+          return;
+        }
+        const panelEls = stack.querySelectorAll<HTMLElement>(":scope > .sidebar-stacked-panel");
         if (panelEls.length < 2) {
           onDropHintChange?.(null);
           return;
@@ -171,12 +181,22 @@ export function SidebarStackedPanel<TId extends string>({
         onDropHintChange?.(hint);
       };
 
-      const endDrag = () => {
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", endDrag);
+        window.removeEventListener("pointercancel", cancelDrag);
+        window.removeEventListener("blur", cancelDrag);
+        headerEl.removeEventListener("lostpointercapture", cancelDrag);
+        dragCleanupRef.current = null;
         try {
           headerEl.releasePointerCapture(e.pointerId);
         } catch {
           // ignore if capture was already released
         }
+      };
+
+      const finishDrag = (cancelled: boolean) => {
+        cleanup();
 
         const dropTarget = pendingDropTargetRef.current;
         const dropHintPending = pendingDropHintRef.current;
@@ -189,10 +209,8 @@ export function SidebarStackedPanel<TId extends string>({
         setGhostPos(null);
         pendingDropTargetRef.current = null;
         pendingDropHintRef.current = null;
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", endDrag);
-        window.removeEventListener("pointercancel", endDrag);
 
+        if (cancelled) return;
         if (dropTarget && onMovePanelToSide && dockSide) {
           const targetRail = document.querySelector<HTMLElement>(`.dock-rail--${dropTarget.side}`);
           const panelCount =
@@ -200,7 +218,7 @@ export function SidebarStackedPanel<TId extends string>({
           const insertIndex = dockDropInsertIndex(dropTarget, panelCount);
           onMovePanelToSide(panelId, dropTarget.side, insertIndex);
         } else if (dropHintPending) {
-          onSwapPanels(panelId, dropHintPending.targetId);
+          onSwapPanels(panelId, dropHintPending.targetId, dropHintPending.edge);
         } else if (didDrag && onTearOffOutside) {
           const zone = classifySidebarDragOut(pointer);
           if (zone?.kind === "outside") {
@@ -214,10 +232,22 @@ export function SidebarStackedPanel<TId extends string>({
           dragMovedRef.current = false;
         }, 0);
       };
+      const endDrag = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        onPointerMove(ev);
+        finishDrag(false);
+      };
+      const cancelDrag = (ev: Event) => {
+        if ("pointerId" in ev && ev.pointerId !== e.pointerId) return;
+        finishDrag(true);
+      };
+      dragCleanupRef.current = cleanup;
 
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", endDrag);
-      window.addEventListener("pointercancel", endDrag);
+      window.addEventListener("pointercancel", cancelDrag);
+      window.addEventListener("blur", cancelDrag);
+      headerEl.addEventListener("lostpointercapture", cancelDrag);
     },
     [
       dockSide,
@@ -307,8 +337,8 @@ export function SidebarStackedPanels<TId extends string>({
   panelFlex?: Partial<Record<TId, number>>;
   collapsed: Record<TId, boolean>;
   onToggleCollapsed: (id: TId) => void;
-  onSwapPanels: (panelA: TId, panelB: TId) => void;
-  onResizeSplit: (splitIndex: number, deltaPx: number, containerHeight: number) => void;
+  onSwapPanels: (panelA: TId, panelB: TId, edge?: StackedPanelDropEdge) => void;
+  onResizeSplit: (splitIndex: number, deltaPx: number, containerHeight: number, snapshot?: StackedPanelResizeSnapshot<TId>) => void;
   onPersistSplit: () => void;
   onMovePanelToSide?: (panelId: TId, targetSide: DockSide, insertIndex?: number) => void;
   dockSide?: DockSide;
@@ -333,6 +363,7 @@ export function SidebarStackedPanels<TId extends string>({
 }) {
   const [draggingPanelId, setDraggingPanelId] = useState<TId | null>(null);
   const [dropHint, setDropHint] = useState<StackedPanelDropHint<TId> | null>(null);
+  const resizeRef = useRef<{ snapshot: StackedPanelResizeSnapshot<TId>; height: number; delta: number } | null>(null);
 
   const setDraggingId = useCallback(
     (id: TId | null) => {
@@ -344,26 +375,20 @@ export function SidebarStackedPanels<TId extends string>({
   );
 
   const handleSwapPanels = useCallback(
-    (panelA: TId, panelB: TId) => {
-      onSwapPanels(panelA, panelB);
+    (panelA: TId, panelB: TId, edge?: StackedPanelDropEdge) => {
+      onSwapPanels(panelA, panelB, edge);
     },
     [onSwapPanels],
   );
 
-  const openCount = order.reduce((n, id) => n + (collapsed[id] ? 0 : 1), 0);
+  // CSS intentionally leaves unused space when flex-grow values sum to < 1.
+  // Normalize visible panels after collapse/moves so the rail always stays full.
+  const panelWeights = resolveStackedPanelFlex({ order, collapsed, panelFlex, splitRatio, minPanelHeight });
 
-  const flexInput = { order, collapsed, panelFlex, splitRatio, minPanelHeight };
-
-  const flexFor = (id: TId): number => {
-    if (openCount === 0) return 0;
-    if (openCount === 1 && !collapsed[id]) return 1;
-    return flexGrowForStackedPanel(flexInput, id);
-  };
-
-  const showSplitAfter = (id: TId, index: number): boolean => {
+  const showSplitAfter = (_id: TId, index: number): boolean => {
     if (index >= order.length - 1) return false;
-    const nextId = order[index + 1]!;
-    return !collapsed[id] && !collapsed[nextId];
+    return order.slice(0, index + 1).some((id) => !collapsed[id])
+      && order.slice(index + 1).some((id) => !collapsed[id]);
   };
 
   return (
@@ -385,11 +410,11 @@ export function SidebarStackedPanels<TId extends string>({
             busy={panel.busy}
             busyTitle={panel.busyTitle}
             collapsed={collapsed[id]}
-            flexGrow={flexFor(id)}
+            flexGrow={panelWeights.get(id) ?? 0}
             actions={panel.actions}
             onContextMenu={panel.onContextMenu}
             onToggleCollapse={() => onToggleCollapsed(id)}
-            onSwapPanels={handleSwapPanels as (panelA: string, panelB: string) => void}
+            onSwapPanels={handleSwapPanels as (panelA: string, panelB: string, edge?: StackedPanelDropEdge) => void}
             dropHint={dropHint}
             onDropHintChange={setDropHint as (hint: StackedPanelDropHint<string> | null) => void}
             stackRef={stackRef}
@@ -412,11 +437,30 @@ export function SidebarStackedPanels<TId extends string>({
               className="sidebar-panel-split"
               orientation="vertical"
               ariaLabel="Resize sidebar panels"
-              onDrag={(delta) => {
-                const h = stackRef.current?.clientHeight ?? 0;
-                onResizeSplit(index, delta, h);
+              onDragStart={() => {
+                const panelHeights: Partial<Record<TId, number>> = {};
+                let height = 0;
+                const elements = stackRef.current?.querySelectorAll<HTMLElement>(":scope > .sidebar-stacked-panel");
+                elements?.forEach((el) => {
+                  const panelId = el.dataset.panelId as TId;
+                  if (!collapsed[panelId]) {
+                    const panelHeight = el.getBoundingClientRect().height;
+                    panelHeights[panelId] = panelHeight;
+                    height += panelHeight;
+                  }
+                });
+                resizeRef.current = { snapshot: { order: [...order], panelHeights }, height, delta: 0 };
               }}
-              onDragEnd={onPersistSplit}
+              onDrag={(delta) => {
+                const resize = resizeRef.current;
+                if (!resize) return;
+                resize.delta += delta;
+                onResizeSplit(index, resize.delta, resize.height, resize.snapshot);
+              }}
+              onDragEnd={() => {
+                resizeRef.current = null;
+                onPersistSplit();
+              }}
             />,
           );
         }

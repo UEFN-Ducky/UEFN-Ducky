@@ -31,11 +31,21 @@ describe("resolveToolCategory", () => {
     expect(resolveToolCategory("ducky_terminal_run").id).toBe("terminal");
   });
 
-  it("only file writes and ask-user stay standalone (reads/bash fold into accordion)", () => {
+  it("maps web search to its own card", () => {
+    expect(resolveToolCategory("web_search").id).toBe("web");
+    expect(resolveToolCategory("web_fetch").id).toBe("web");
+    expect(resolveToolCategory("web_search").Body).toBeTruthy();
+    expect(isStandaloneToolCard("web_search")).toBe(true);
+    expect(isStandaloneToolCard("web_fetch")).toBe(true);
+    expect(resolveToolCategory("search_assets").id).toBe("search");
+  });
+
+  it("only file writes, ask-user, and web lookup stay standalone (reads/bash fold into accordion)", () => {
     expect(isStandaloneToolCard("workspace_write_file")).toBe(true);
     expect(isStandaloneToolCard("Write")).toBe(true);
     expect(isStandaloneToolCard("Edit")).toBe(true);
     expect(isStandaloneToolCard("ducky_ask_user")).toBe(true);
+    expect(isStandaloneToolCard("web_search")).toBe(true);
     expect(isStandaloneToolCard("workspace_read_file")).toBe(false);
     expect(isStandaloneToolCard("Read")).toBe(false);
     expect(isStandaloneToolCard("Bash")).toBe(false);

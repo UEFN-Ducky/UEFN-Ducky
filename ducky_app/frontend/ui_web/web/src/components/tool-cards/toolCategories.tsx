@@ -5,6 +5,7 @@ import { SkillBody } from "./bodies/SkillBody";
 import { TerminalBody } from "./bodies/TerminalBody";
 import { ScreenshotBody } from "./bodies/ScreenshotBody";
 import { SearchBody } from "./bodies/SearchBody";
+import { WebSearchBody } from "./bodies/WebSearchBody";
 import { AskUserBody } from "./bodies/AskUserBody";
 import { WalkthroughBody } from "./bodies/WalkthroughBody";
 
@@ -24,7 +25,6 @@ const SEARCH_TOOLS = new Set([
   "grep",
   "semSearch",
   "ToolSearch",
-  "web_search",
 ]);
 
 const SCREENSHOT_TOOLS = new Set([
@@ -104,7 +104,12 @@ function isFileWriteTool(name: string): boolean {
  * so they don't sit between chat bubbles.
  */
 export function isStandaloneToolCard(toolName: string): boolean {
-  return isFileWriteTool(toolName) || toolName === "ducky_ask_user";
+  return (
+    isFileWriteTool(toolName) ||
+    toolName === "ducky_ask_user" ||
+    toolName === "web_search" ||
+    toolName === "web_fetch"
+  );
 }
 
 /**
@@ -160,6 +165,13 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     icon: () => <Icons.Python />,
     label: (name) => humanToolLabel(name),
     match: (name) => PYTHON_TOOLS.has(name) || nameIncludes(name, "python"),
+  },
+  {
+    id: "web",
+    icon: () => <Icons.Globe />,
+    label: (name) => humanToolLabel(name),
+    match: (name) => name === "web_search" || name === "web_fetch",
+    Body: WebSearchBody,
   },
   {
     id: "search",

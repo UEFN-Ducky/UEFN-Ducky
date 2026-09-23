@@ -122,6 +122,36 @@ def test_server_block_adds_adapter_when_flag_on(monkeypatch) -> None:
     assert "--adapter" not in off["args"]
 
 
+def test_adapter_stops_stale_daemon_before_spawn(monkeypatch, tmp_path) -> None:
+    """An older shared daemon must not keep answering a newer app."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "9.9.9")
+    state_dir = tmp_path / "UEFN-Ducky"
+    state_dir.mkdir()
+    path = state_dir / "shared_mcp.json"
+    path.write_text(json.dumps({
+        "host": "127.0.0.1",
+        "port": 1,
+        "token": "t",
+        "key": {"version": "1.0.0", "port": "4200", "project": ""},
+        "pid": 999999,
+    }), encoding="utf-8")
+    stopped: list[int] = []
+
+    def _stop(pid: int) -> None:
+        stopped.append(pid)
+        path.unlink()
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(ad, "_stop_bridge_pid", _stop)
+    monkeypatch.setattr(ad, "_spawn_daemon", lambda args: spawned.append(args))
+    assert ad.connect(["--port", "4200"], timeout_s=0.3) is None
+    assert stopped == [999999]
+    assert spawned == [["--port", "4200"]]
+
+
 def test_adapter_falls_back_when_no_daemon(monkeypatch, tmp_path) -> None:
     """No daemon reachable -> run() is False so run_bridge continues dedicated."""
     from frontend import shared_mcp_adapter as ad

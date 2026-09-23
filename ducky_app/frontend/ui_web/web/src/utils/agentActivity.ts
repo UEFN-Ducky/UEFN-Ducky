@@ -70,6 +70,7 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   PowerShell: "PowerShell",
   file_change: "Editing files",
   web_search: "Searching the web",
+  web_fetch: "Reading a page",
 };
 
 export function formatToolDuration(ms: number): string {

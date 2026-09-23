@@ -180,7 +180,10 @@ def run_bridge() -> None:
     if "--adapter" in sys.argv[2:]:
         # Shared MCP (flag-on installs): stdlib relay to the one daemon. Runs before
         # any FastMCP import so this process stays ~10 MB. No daemon → dedicated below.
+        from frontend import __version__
         from frontend.shared_mcp_adapter import run as run_adapter
+
+        os.environ["UEFN_DUCKY_APP_VERSION"] = str(__version__)
 
         sys.argv = [a for a in sys.argv if a != "--adapter"]
         if run_adapter(sys.argv[2:]):

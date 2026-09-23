@@ -51,6 +51,9 @@ class PanelApiSettingsMixin:
             "memory_summary_model": s.memory_summary_model or "",
             "chat_auto_title": bool(getattr(s, "chat_auto_title", True)),
             "chat_title_model": getattr(s, "chat_title_model", "") or "",
+            "web_access": (
+                s.web_access if getattr(s, "web_access", "ask") in ("off", "ask", "on") else "ask"
+            ),
             "follow_code_enabled": bool(getattr(s, "follow_code_enabled", False)),
             "follow_code_speed": (
                 s.follow_code_speed
@@ -581,6 +584,9 @@ class PanelApiSettingsMixin:
             s.chat_auto_title = bool(patch.get("chat_auto_title"))
         if "chat_title_model" in patch:
             s.chat_title_model = str(patch.get("chat_title_model") or "").strip()
+        if "web_access" in patch:
+            access = str(patch.get("web_access") or "ask").strip().lower()
+            s.web_access = access if access in ("off", "ask", "on") else "ask"
         if "follow_code_enabled" in patch:
             s.follow_code_enabled = _pa._patch_bool(patch.get("follow_code_enabled"))
         if "follow_code_speed" in patch:

@@ -9,6 +9,7 @@ import {
   markEditorTabDropped,
 } from "../utils/editorTabDrag";
 import { dragHasOsFiles, isChatAttachDropTarget, OPEN_EXTERNAL_TARGET } from "../utils/osFileDrag";
+import { useDragOverlayIdle } from "../hooks/useDragOverlayIdle";
 import { getApi } from "../hooks/usePanelApi";
 import {
   getSidebarEditorDropPreview,
@@ -62,15 +63,21 @@ export function EditorTabDropSurface({
     if (clearTarget) getApi()?.set_import_drop_target?.("")?.catch?.(() => {});
   }, []);
 
+  const releaseDropOverlay = useCallback(() => {
+    setDropZone(null);
+    disarmExternalDrop(true);
+  }, [disarmExternalDrop]);
+  const dropOverlayIdle = useDragOverlayIdle(releaseDropOverlay);
+
   // Same stuck-overlay path as EditorGroupPane: cancel / drop-on-tab-strip skips leave+drop.
   useEffect(() => {
     const clear = () => {
-      setDropZone(null);
-      disarmExternalDrop(true);
+      dropOverlayIdle.cancel();
+      releaseDropOverlay();
     };
     document.addEventListener("dragend", clear);
     return () => document.removeEventListener("dragend", clear);
-  }, [disarmExternalDrop]);
+  }, [dropOverlayIdle, releaseDropOverlay]);
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
@@ -90,6 +97,7 @@ export function EditorTabDropSurface({
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         armExternalDrop();
+        dropOverlayIdle.bump();
         return;
       }
       if (!isEditorTabDrag(e)) return;
@@ -97,8 +105,9 @@ export function EditorTabDropSurface({
       e.dataTransfer.dropEffect = "move";
       const rect = e.currentTarget.getBoundingClientRect();
       setDropZone(dropZoneFromPointer(rect, e.clientX, e.clientY));
+      dropOverlayIdle.bump();
     },
-    [armExternalDrop],
+    [armExternalDrop, dropOverlayIdle],
   );
 
   const handleDragLeave = useCallback(
@@ -113,6 +122,8 @@ export function EditorTabDropSurface({
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      // A late idle hide would clear the import target before the native drop reads it.
+      dropOverlayIdle.cancel();
       if (dragHasOsFiles(e.dataTransfer)) {
         // Let it bubble to pywebview's native document drop handler, which reads the OS
         // path and fires ducky:external-files-open. Just drop the overlay.
@@ -135,7 +146,7 @@ export function EditorTabDropSurface({
       if (!tabId || !sourceGroupId) return;
       onDropTab(targetGroupId, tabId, sourceGroupId, zone);
     },
-    [dropZone, onDropTab, targetGroupId, disarmExternalDrop],
+    [dropZone, onDropTab, targetGroupId, disarmExternalDrop, dropOverlayIdle],
   );
 
   return (

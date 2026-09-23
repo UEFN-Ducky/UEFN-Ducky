@@ -18,6 +18,8 @@ def test_host_vs_editor_classification(monkeypatch) -> None:
     assert tools.is_host_only_tool("list_verse_digests")
     assert tools.is_host_only_tool("ducky_spawn_chat")
     assert tools.is_host_only_tool("blender_status")
+    assert tools.is_host_only_tool("web_search")
+    assert tools.is_host_only_tool("web_fetch")
     assert not tools.is_host_only_tool("spawn_actor")
     assert not tools.is_host_only_tool("create_material")
 
@@ -26,6 +28,8 @@ def test_host_vs_editor_classification(monkeypatch) -> None:
     assert not tools._requires_uefn_listener("ducky_spawn_chat")
     assert not tools._requires_uefn_listener("list_verse_digests")
     assert not tools._requires_uefn_listener("ducktactoe_move")
+    assert not tools._requires_uefn_listener("web_search")
+    assert not tools._requires_uefn_listener("web_fetch")
     assert tools._requires_uefn_listener("spawn_actor")
     assert tools._requires_uefn_listener("save_current_level")
     assert tools._requires_uefn_listener("create_material")

@@ -35,11 +35,11 @@ import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
 import { isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName, ABS_PATH_PREFIX } from "../verse-editor/utils/isVerseFile";
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 import { getApi } from "../hooks/usePanelApi";
-import { onApiReady } from "../hooks/onApiReady";
+import { useWorkspaceTreeData } from "../hooks/useWorkspaceTreeData";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { useUndoHistoryOptional } from "../navigation/UndoHistoryContext";
 import { useScopedClass } from "../utils/scopedCss";
-import type { EditorDropZone, ProjectFileEntry, WorkspaceRootEntry } from "../types/panel";
+import type { EditorDropZone, ProjectFileEntry } from "../types/panel";
 import { ContextMenu, useContextMenuState } from "./ContextMenu";
 import {
   contextMenuSeparator,
@@ -111,17 +111,10 @@ function hoverPlacementForDockSide(dockSide: DockSide = "left"): EditorTabHoverC
 
 const FILE_TREE_SPLIT_KEY = "uefn-file-tree-split";
 const MIN_FILE_TREE_PANE_PX = 72;
-/** Header row + border-top + scroll bottom pad — matches file-tree CSS density. */
-const FILE_TREE_CORE_CHROME_PX = 23 + 8;
-const FILE_TREE_ROW_PX = 22;
-
-function uefnCoreNaturalHeightPx(fileCount: number): number {
-  return FILE_TREE_CORE_CHROME_PX + Math.max(0, fileCount) * FILE_TREE_ROW_PX;
-}
-
 function readFileTreeSplitRatio(): number {
   try {
-    const n = Number(localStorage.getItem(FILE_TREE_SPLIT_KEY));
+    const stored = localStorage.getItem(FILE_TREE_SPLIT_KEY);
+    const n = stored === null ? NaN : Number(stored);
     if (Number.isFinite(n)) return Math.min(0.85, Math.max(0.15, n));
   } catch {
     // ignore
@@ -785,24 +778,23 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     ref,
   ) {
     const hoverPlacement = hoverPlacementForDockSide(dockSide);
-    const [rootEntries, setRootEntries] = useState<ProjectFileEntry[]>([]);
-    const [workspaceRoots, setWorkspaceRoots] = useState<WorkspaceRootEntry[]>([]);
-    const workspaceRootsRef = useRef(workspaceRoots);
-    workspaceRootsRef.current = workspaceRoots;
-    const [cache, setCache] = useState<DirCache>(() => new Map());
-    const cacheRef = useRef(cache);
-    cacheRef.current = cache;
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
     const expandedPathsRef = useRef(expandedPaths);
     expandedPathsRef.current = expandedPaths;
+    const { rootEntries, workspaceRoots, cache, setCache, error, setError, loadingRoot,
+      loadingPaths, setLoadingPaths, loadDir, reloadTree } = useWorkspaceTreeData(
+      projectSlug, refreshToken, isActive, expandedPathsRef,
+    );
+    const workspaceRootsRef = useRef(workspaceRoots);
+    workspaceRootsRef.current = workspaceRoots;
+    const cacheRef = useRef(cache);
+    cacheRef.current = cache;
     const [uefnCoreExpanded, setUefnCoreExpanded] = useState(false);
     const [fileTreeSplitRatio, setFileTreeSplitRatio] = useState(readFileTreeSplitRatio);
     const fileTreeSplitRef = useRef(fileTreeSplitRatio);
     fileTreeSplitRef.current = fileTreeSplitRatio;
     const fileTreeSplitContainerRef = useRef<HTMLDivElement | null>(null);
-    const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
-    const [error, setError] = useState<string | null>(null);
-    const [loadingRoot, setLoadingRoot] = useState(true);
+    const fileTreeResizeRef = useRef({ height: 0, ratio: 0, delta: 0 });
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [dropHint, setDropHint] = useState<DropHint | null>(null);
     // Highlight state for an in-progress Explorer file drop onto the Content root.
@@ -902,33 +894,27 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const showUefnCorePane = workspaceRootEntries.length > 0;
     const uefnCoreLoading = workspaceRootEntries.some((root) => loadingPaths.has(root.path));
 
-    const clampFileTreeSplitRatio = useCallback((ratio: number, height: number, fileCount: number) => {
+    const clampFileTreeSplitRatio = useCallback((ratio: number, height: number) => {
       if (height <= 0) return ratio;
-      const minRatio = MIN_FILE_TREE_PANE_PX / height;
-      // Content ratio floor: core must not grow past its file-list height.
-      const minContentRatio = Math.max(minRatio, 1 - uefnCoreNaturalHeightPx(fileCount) / height);
-      const maxContentRatio = 1 - minRatio;
-      return Math.max(minContentRatio, Math.min(maxContentRatio, ratio));
+      const minRatio = Math.min(0.5, MIN_FILE_TREE_PANE_PX / height);
+      return Math.max(minRatio, Math.min(1 - minRatio, ratio));
     }, []);
 
     const resizeFileTreeSplit = useCallback((deltaPx: number) => {
-      const height = fileTreeSplitContainerRef.current?.clientHeight ?? 0;
-      if (height <= 0) return;
-      const deltaRatio = deltaPx / height;
-      const fileCount = filteredUefnCoreFiles.length;
-      setFileTreeSplitRatio((prev) => {
-        const next = clampFileTreeSplitRatio(prev + deltaRatio, height, fileCount);
-        fileTreeSplitRef.current = next;
-        return next;
-      });
-    }, [clampFileTreeSplitRatio, filteredUefnCoreFiles.length]);
+      const start = fileTreeResizeRef.current;
+      if (start.height <= 0) return;
+      start.delta += deltaPx;
+      const next = clampFileTreeSplitRatio(start.ratio + start.delta / start.height, start.height);
+      fileTreeSplitRef.current = next;
+      setFileTreeSplitRatio(next);
+    }, [clampFileTreeSplitRatio]);
 
     useEffect(() => {
       if (!uefnCoreExpanded) return;
       const height = fileTreeSplitContainerRef.current?.clientHeight ?? 0;
       if (height <= 0) return;
       setFileTreeSplitRatio((prev) => {
-        const next = clampFileTreeSplitRatio(prev, height, filteredUefnCoreFiles.length);
+        const next = clampFileTreeSplitRatio(prev, height);
         if (next === prev) return prev;
         fileTreeSplitRef.current = next;
         return next;
@@ -936,8 +922,11 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     }, [uefnCoreExpanded, filteredUefnCoreFiles.length, clampFileTreeSplitRatio]);
 
     useEffect(() => {
-      setWorkspaceFolderAbsPaths(workspaceRoots.filter((root) => root.read_only).map((root) => root.path));
-    }, [workspaceRoots]);
+      setWorkspaceFolderAbsPaths([
+        ...workspaceRoots.filter((root) => root.read_only).map((root) => root.path),
+        ...rootEntries.filter(isProjectContentRoot).map((entry) => entry.path.slice(ABS_PATH_PREFIX.length)),
+      ]);
+    }, [workspaceRoots, rootEntries]);
 
     const prepareContextForEntry = useCallback(
       (entry: ProjectFileEntry) => {
@@ -961,101 +950,11 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-    const loadDir = useCallback(async (relativePath: string) => {
-      const api = getApi();
-      if (!api) return [];
-      const listing = await api.list_project_files(relativePath || WORKSPACE_ROOTS_PATH);
-      return Array.isArray(listing?.entries) ? listing.entries : [];
-    }, []);
-
-    const reloadTree = useCallback(async () => {
-      const api = getApi();
-      if (!api) return;
-      setError(null);
-      try {
-        let digestAbs: string[] = [];
-        if (api.list_workspace_roots) {
-          const roots = await api.list_workspace_roots();
-          const rootList = Array.isArray(roots) ? roots : [];
-          setWorkspaceRoots(rootList);
-          digestAbs = rootList.filter((root) => root.read_only).map((root) => root.path);
-        }
-        const entries = await loadDir(WORKSPACE_ROOTS_PATH);
-        const projectAbs = entries
-          .filter(isProjectContentRoot)
-          .map((entry) => entry.path.slice(ABS_PATH_PREFIX.length));
-        setWorkspaceFolderAbsPaths([...digestAbs, ...projectAbs]);
-        setRootEntries(entries);
-        const nextCache = new Map([[WORKSPACE_ROOTS_PATH, entries]]);
-        const wsPaths = entries
-          .filter((entry) => entry.read_only && !isProjectContentRoot(entry))
-          .map((entry) => entry.path);
-        const contentWs = entries.find((entry) => !entry.read_only);
-        const prefetchPaths = contentWs ? [contentWs.path, ...wsPaths] : wsPaths;
-        await Promise.all(
-          prefetchPaths.map(async (path) => {
-            try {
-              nextCache.set(path, await loadDir(path));
-            } catch {
-              // Workspace root may be unavailable offline.
-            }
-          }),
-        );
-        const pathsToRestore = [...expandedPathsRef.current].filter(
-          (path) =>
-            path !== WORKSPACE_ROOTS_PATH &&
-            path !== UEFN_CORE_SECTION_PATH &&
-            isBrowsableTreeDir(path),
-        );
-        await Promise.all(
-          pathsToRestore.map(async (path) => {
-            try {
-              nextCache.set(path, await loadDir(path));
-            } catch {
-              // Folder may have been moved or deleted since last expand.
-            }
-          }),
-        );
-        setCache(nextCache);
-        setExpandedPaths((prev) => {
-          const next = new Set(prev);
-          if (parentPathRef.current && parentPathRef.current !== WORKSPACE_ROOTS_PATH) {
-            next.add(parentPathRef.current);
-          }
-          return next;
-        });
-      } catch (e) {
-        setRootEntries([]);
-        setCache(new Map());
-        setError(e instanceof Error ? e.message : "Failed to load workspace files");
-      }
-    }, [loadDir]);
-
-    const initTree = useCallback(async () => {
-      setLoadingRoot(true);
-      try {
-        await reloadTree();
-        onParentPathChange(CONTENT_ROOT);
-      } finally {
-        setLoadingRoot(false);
-      }
-    }, [reloadTree, onParentPathChange]);
-
     useEffect(() => {
-      let cancelled = false;
-      const stop = onApiReady(() => {
-        if (!cancelled) void initTree();
-      });
-      return () => {
-        cancelled = true;
-        stop();
-      };
-    }, [initTree, projectSlug, refreshToken]);
-
-    useEffect(() => {
-      if (isActive) void reloadTree();
-    }, [isActive, reloadTree]);
-
+      setExpandedPaths(new Set());
+      setSelection(emptySelection());
+      onParentPathChange(CONTENT_ROOT);
+    }, [projectSlug, onParentPathChange]);
     const contentRootPath = contentRootEntry?.path;
     useEffect(() => {
       if (!allProjects || !contentRootPath) return;
@@ -1080,8 +979,9 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       return [...dirs];
     }, [expandedPaths]);
 
-    useWatchProjectTree(watchedTreeDirs, () => void reloadTree(), {
+    useWatchProjectTree(watchedTreeDirs, () => void reloadTree(true), {
       enabled: isActive && !filtering,
+      projectKey: projectSlug,
     });
 
     useEffect(() => {
@@ -1218,7 +1118,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
           });
         }
         setCache(new Map());
-        await reloadTree();
+        await reloadTree(true);
         if (expandPath) {
           await ensureLoaded(expandPath);
         }
@@ -2167,7 +2067,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
 
     const useSplitLayout = showUefnCorePane && !filtering;
     const coreMaxHeightStyle = uefnCoreExpanded
-      ? ({ ["--file-tree-core-max-height"]: `${(1 - fileTreeSplitRatio) * 100}%` } as CSSProperties)
+      ? ({ ["--file-tree-core-height"]: `${(1 - fileTreeSplitRatio) * 100}%` } as CSSProperties)
       : undefined;
 
     return (
@@ -2226,6 +2126,12 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
                       className="file-tree-pane-split"
                       orientation="vertical"
                       ariaLabel="Resize Content and UEFN Core"
+                      onDragStart={() => {
+                        const container = fileTreeSplitContainerRef.current;
+                        const height = container?.getBoundingClientRect().height ?? 0;
+                        const coreHeight = container?.querySelector(".file-tree-pane--core")?.getBoundingClientRect().height ?? 0;
+                        fileTreeResizeRef.current = { height, ratio: height > 0 ? 1 - coreHeight / height : fileTreeSplitRef.current, delta: 0 };
+                      }}
                       onDrag={resizeFileTreeSplit}
                       onDragEnd={() => persistFileTreeSplitRatio(fileTreeSplitRef.current)}
                     />

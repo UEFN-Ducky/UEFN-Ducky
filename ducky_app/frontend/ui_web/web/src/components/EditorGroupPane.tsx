@@ -16,6 +16,7 @@ import { useTerminalsSettings } from "../contexts/TerminalsSettingsContext";
 import { duckyProfileIdFromTab } from "../types/panel";
 import { dropZoneFromPointer } from "../utils/editorLayoutOps";
 import { getEditorTabDragData, getEditorTabGroupDragData, handleExternalTabDrop, isEditorTabDrag, markEditorTabDropped } from "../utils/editorTabDrag";
+import { useDragOverlayIdle } from "../hooks/useDragOverlayIdle";
 import { getApi } from "../hooks/usePanelApi";
 import { dragHasOsFiles, isChatAttachDropTarget, OPEN_EXTERNAL_TARGET } from "../utils/osFileDrag";
 import type { ChatTab, FolderItem } from "../types/panel";
@@ -126,16 +127,23 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     if (clearTarget) getApi()?.set_import_drop_target?.("")?.catch?.(() => {});
   }, []);
 
+  const releaseDropOverlay = useCallback(() => {
+    setDropZone(null);
+    disarmExternalDrop(true);
+  }, [disarmExternalDrop]);
+  const dropOverlayIdle = useDragOverlayIdle(releaseDropOverlay);
+
   // dragleave/drop often miss when a tab drag cancels or ends on the tab strip —
   // without dragend the blue split overlay stays stuck over the pane.
+  // dragover also stops in that case; the idle timer hides the box then.
   useEffect(() => {
     const clear = () => {
-      setDropZone(null);
-      disarmExternalDrop(true);
+      dropOverlayIdle.cancel();
+      releaseDropOverlay();
     };
     document.addEventListener("dragend", clear);
     return () => document.removeEventListener("dragend", clear);
-  }, [disarmExternalDrop]);
+  }, [dropOverlayIdle, releaseDropOverlay]);
 
   const groupTabs = useMemo(
     () =>
@@ -174,6 +182,7 @@ export const EditorGroupPane = memo(function EditorGroupPane({
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         armExternalDrop();
+        dropOverlayIdle.bump();
         return;
       }
       if (!isEditorTabDrag(e)) return;
@@ -181,12 +190,15 @@ export const EditorGroupPane = memo(function EditorGroupPane({
       e.stopPropagation();
       const rect = e.currentTarget.getBoundingClientRect();
       setDropZone(dropZoneFromPointer(rect, e.clientX, e.clientY));
+      dropOverlayIdle.bump();
     },
-    [armExternalDrop],
+    [armExternalDrop, dropOverlayIdle],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      // A late idle hide would clear the import target before the native drop reads it.
+      dropOverlayIdle.cancel();
       if (dragHasOsFiles(e.dataTransfer)) {
         // Let it bubble to pywebview's native document drop handler, which reads the OS
         // path and fires ducky:external-files-open. Just drop the overlay; the window
@@ -210,7 +222,7 @@ export const EditorGroupPane = memo(function EditorGroupPane({
       if (!tabId || !sourceGroupId) return;
       onDropTab(group.id, tabId, sourceGroupId, zone);
     },
-    [dropZone, group.id, onDropTab, disarmExternalDrop],
+    [dropZone, group.id, onDropTab, disarmExternalDrop, dropOverlayIdle],
   );
 
   const renderContent = () => {

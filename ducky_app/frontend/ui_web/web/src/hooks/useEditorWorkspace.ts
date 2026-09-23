@@ -32,10 +32,28 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function validateSnapshot(
+async function existingSnapshotFiles(snapshot: EditorWorkspaceSnapshot, cancelled: () => boolean): Promise<Set<string>> {
+  const paths = [...new Set([
+    ...(snapshot.openTabs ?? []).flatMap((tab) => tab.kind === "file" && tab.path ? [tab.path] : []),
+    ...(snapshot.focusWindows ?? []).flatMap((fw) => fw.tabIds.filter((id) => id.startsWith("file:")).map((id) => id.slice(5))),
+  ].map((path) => path.replace(/\\/g, "/")))];
+  const existing = new Set<string>();
+  let index = 0;
+  const worker = async () => {
+    while (!cancelled() && index < paths.length) {
+      const path = paths[index++]!;
+      if (await fileExists(path)) existing.add(path);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, paths.length) }, worker));
+  return existing;
+}
+
+function validateSnapshot(
   snapshot: EditorWorkspaceSnapshot,
   allChats: ChatTab[],
-): Promise<{ openTabs: EditorTab[]; layout: EditorLayoutState }> {
+  existingFiles: Set<string>,
+): { openTabs: EditorTab[]; layout: EditorLayoutState } {
   const chatById = new Map(allChats.map((c) => [c.id, c]));
   const openTabs: EditorTab[] = [];
 
@@ -50,7 +68,7 @@ async function validateSnapshot(
       });
     } else if (tab.kind === "file" && tab.path) {
       const norm = tab.path.replace(/\\/g, "/");
-      if (await fileExists(norm)) {
+      if (existingFiles.has(norm)) {
         openTabs.push({ ...tab, path: norm });
       }
     } else if (tab.kind === "settings") {
@@ -155,6 +173,7 @@ export function useEditorWorkspace({
   initLayoutState,
 }: UseEditorWorkspaceOptions) {
   const isRestoringRef = useRef(false);
+  const restoreGenerationRef = useRef(0);
   const stateRef = useRef({ openTabs, layout });
   const allChatsRef = useRef(allChats);
   const projectSlugRef = useRef(projectSlug);
@@ -203,6 +222,7 @@ export function useEditorWorkspace({
 
     let cancelled = false;
     let settled = false;
+    const generation = ++restoreGenerationRef.current;
 
     const restore = async () => {
       isRestoringRef.current = true;
@@ -220,12 +240,15 @@ export function useEditorWorkspace({
         if (switchingProject) {
           await api.close_all_focus_windows();
         }
+        if (cancelled) return;
         const raw = await api.get_editor_workspace(projectSlug);
+        if (cancelled) return;
         const focusWindows = (raw as EditorWorkspaceSnapshot).focusWindows ?? [];
         // Snapshot hygiene: validateSnapshot drops file tabs whose path no longer
         // exists (renamed/deleted files never come back as ghost tabs). Main tabs
         // only — focus windows reopen after layout init.
-        const validated = await validateSnapshot(raw as EditorWorkspaceSnapshot, allChatsRef.current);
+        const existingFiles = await existingSnapshotFiles(raw as EditorWorkspaceSnapshot, () => cancelled);
+        const validated = validateSnapshot(raw as EditorWorkspaceSnapshot, allChatsRef.current, existingFiles);
 
         if (cancelled) return;
 
@@ -247,7 +270,7 @@ export function useEditorWorkspace({
               if (id.startsWith("chat:")) {
                 if (chatIds.has(id.slice(5))) tabIds.push(id);
               } else if (id.startsWith("file:")) {
-                if (await fileExists(id.slice(5))) tabIds.push(id);
+                if (existingFiles.has(id.slice(5).replace(/\\/g, "/"))) tabIds.push(id);
               } else {
                 tabIds.push(id);
               }
@@ -263,13 +286,16 @@ export function useEditorWorkspace({
             await api.restore_focus_windows(restoredFocus);
           }
         }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("[workspace] restore failed", error);
+          if (_restoredWorkspaceSlug === projectSlug) _restoredWorkspaceSlug = previousSlug;
+        }
       } finally {
         if (!cancelled) {
           window.setTimeout(() => {
-            isRestoringRef.current = false;
+            if (restoreGenerationRef.current === generation) isRestoringRef.current = false;
           }, 0);
-        } else {
-          isRestoringRef.current = false;
         }
       }
     };
@@ -277,10 +303,11 @@ export function useEditorWorkspace({
     void restore();
     return () => {
       cancelled = true;
+      restoreGenerationRef.current++;
       isRestoringRef.current = false;
       // Cancelled before the snapshot was applied (remount, foldersLoaded flap): let
       // the next run retry instead of treating this project as restored.
-      if (!settled) _restoredWorkspaceSlug = previousSlug;
+      if (!settled && _restoredWorkspaceSlug === projectSlug) _restoredWorkspaceSlug = previousSlug;
     };
   }, [projectSlug, foldersLoaded, initLayoutState]);
 

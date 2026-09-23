@@ -113,8 +113,8 @@ export function VerseAuxDockPanels({
         panelFlex={stack.panelFlex}
         collapsed={collapsedForStack}
         onToggleCollapsed={(id) => dock.toggleCollapsed(side, id)}
-        onSwapPanels={(panelA, panelB) => dock.swapPanels(side, panelA, panelB)}
-        onResizeSplit={(splitIndex, delta, h) => dock.resizeSplit(side, splitIndex, delta, h)}
+        onSwapPanels={(panelA, panelB, edge) => dock.swapPanels(side, panelA, panelB, edge)}
+        onResizeSplit={(splitIndex, delta, h, snapshot) => dock.resizeSplit(side, splitIndex, delta, h, snapshot)}
         onPersistSplit={dock.persistSplit}
         onMovePanelToSide={(panelId, targetSide, insertIndex) => dock.movePanel(panelId, targetSide, insertIndex)}
         dockSide={side}
@@ -133,8 +133,8 @@ export function VerseAuxDockPanels({
       panelFlex={stack.panelFlex}
       collapsed={collapsedForStack}
       onToggleCollapsed={(id) => dock.toggleCollapsed(side, id)}
-      onSwapPanels={(panelA, panelB) => dock.swapPanels(side, panelA, panelB)}
-      onResizeSplit={(splitIndex, delta, h) => dock.resizeSplit(side, splitIndex, delta, h)}
+      onSwapPanels={(panelA, panelB, edge) => dock.swapPanels(side, panelA, panelB, edge)}
+      onResizeSplit={(splitIndex, delta, h, snapshot) => dock.resizeSplit(side, splitIndex, delta, h, snapshot)}
       onPersistSplit={dock.persistSplit}
       onMovePanelToSide={(panelId, targetSide, insertIndex) => dock.movePanel(panelId, targetSide, insertIndex)}
       dockSide={side}

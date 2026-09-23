@@ -62,7 +62,7 @@ export function RichInline({ text, onOpenFile }: { text: string; onOpenFile?: Op
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       urlTransform={richUrlTransform}
-      allowedElements={["p", "strong", "em", "code", "a", "del", "br"]}
+      allowedElements={["p", "strong", "em", "code", "a", "del", "br", "img"]}
       unwrapDisallowed
       skipHtml
       components={{
@@ -70,6 +70,7 @@ export function RichInline({ text, onOpenFile }: { text: string; onOpenFile?: Op
         strong: ({ children }) => <RichEmphasis>{children}</RichEmphasis>,
         code: ({ children }) => <RichCodeBlock text={String(children)} inline onOpenFile={onOpenFile} />,
         a: ({ href, children }) => <RichLink href={href} onOpenFile={onOpenFile}>{children}</RichLink>,
+        img: ({ alt }) => (alt ? <span>{alt}</span> : null),
       }}
     >
       {text}

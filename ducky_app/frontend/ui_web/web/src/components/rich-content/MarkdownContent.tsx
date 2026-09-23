@@ -56,6 +56,7 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
       th: ({ children }) => <th className="rich-table-th">{children}</th>,
       td: ({ children }) => <td className="rich-table-td">{children}</td>,
       hr: () => <hr className="rich-hr" />,
+      img: ({ alt }) => (alt ? <span>{alt}</span> : null),
     };
   }, [onOpenFile]);
 

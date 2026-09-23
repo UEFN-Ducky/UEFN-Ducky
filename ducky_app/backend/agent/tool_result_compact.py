@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 API_TOOL_RESULT_MAX = 2200
-TOOL_RESULT_MAX_OVERRIDES = {"workspace_list_verse_errors": 9000}
+TOOL_RESULT_MAX_OVERRIDES = {
+    "workspace_list_verse_errors": 9000,
+    "web_search": 80_000,
+    "web_fetch": 80_000,
+}
 
 
 def tool_result_max(tool_name: str) -> int:

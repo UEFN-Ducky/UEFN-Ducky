@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 from frontend.ui_web.verse_editor.lsp.verse_workspace import (
     _expand_builtin_digest_folders,
@@ -10,6 +11,36 @@ from frontend.ui_web.verse_editor.lsp.verse_workspace import (
     discover_verse_workspace,
     workspace_folder_fingerprint,
 )
+
+
+def test_folder_only_discovery_and_fingerprint_never_scan_content(tmp_path: Path, monkeypatch):
+    from frontend.ui_web.verse_editor.lsp import verse_workspace as ws
+
+    project = tmp_path / "FastIsland"
+    (project / "Content").mkdir(parents=True)
+    scan = Mock(side_effect=AssertionError("UI root discovery must not walk Content"))
+    monkeypatch.setattr(ws, "_collect_watch_files", scan)
+    result = ws.discover_verse_workspace(str(project), include_watch_files=False)
+    assert result["workspace_folders"][0]["path"] == str((project / "Content").resolve())
+    assert ws.workspace_folder_fingerprint(str(project))
+    scan.assert_not_called()
+
+
+def test_watch_discovery_walks_overlapping_roots_once_and_skips_asset_stores(tmp_path: Path, monkeypatch):
+    from frontend.ui_web.verse_editor.lsp import verse_workspace as ws
+
+    content = tmp_path / "Content"
+    nested = content / "Verse"
+    nested.mkdir(parents=True)
+    package = nested / "module.vpackage"
+    package.write_text("{}", encoding="utf-8")
+    actors = content / "__ExternalActors__" / "ManyAssets"
+    actors.mkdir(parents=True)
+    walk = Mock(wraps=ws.os.walk)
+    monkeypatch.setattr(ws.os, "walk", walk)
+    result = ws._collect_watch_files([str(content), str(nested)])
+    assert result == [str(package.resolve())]
+    assert walk.call_count == 1
 
 
 def _touch_digest(folder: Path, name: str) -> None:

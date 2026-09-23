@@ -1,3 +1,4 @@
+import type { StackedPanelDropEdge } from "../utils/stackedPanelDropHint";
 import {
   useCallback,
   useEffect,
@@ -41,6 +42,7 @@ import { useSidebarWidth } from "../hooks/useSidebarWidth";
 import { OPEN_SIDEBAR_PANEL_EVENT } from "../navigation/openSidebarPanel";
 import { getApi } from "../hooks/usePanelApi";
 import { SidebarStackedPanels } from "./sidebar/SidebarStackedPanels";
+import type { StackedPanelResizeSnapshot } from "../utils/stackedPanelFlex";
 import { SidebarPanelTabs } from "./sidebar/SidebarPanelTabs";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { insertIndexForTabDrop } from "../workspace/dockTabInsertIndex";
@@ -339,9 +341,9 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
           setFocusedPanel: (id: SidebarPanelTab) => dock.setFocusedPanel(dockSide, id),
           toggleCollapsed: (id: SidebarPanelTab) => dock.toggleCollapsed(dockSide, id),
           swapOrder: () => dock.swapOrder(dockSide),
-          swapPanels: (a: SidebarPanelTab, b: SidebarPanelTab) => dock.swapPanels(dockSide, a, b),
-          resizeSplit: (splitIndex: number, delta: number, h: number) =>
-            dock.resizeSplit(dockSide, splitIndex, delta, h),
+          swapPanels: (a: SidebarPanelTab, b: SidebarPanelTab, edge?: StackedPanelDropEdge) => dock.swapPanels(dockSide, a, b, edge),
+          resizeSplit: (splitIndex: number, delta: number, h: number, snapshot?: StackedPanelResizeSnapshot<SidebarPanelTab>) =>
+            dock.resizeSplit(dockSide, splitIndex, delta, h, snapshot),
           persistSplit: dock.persistSplit,
         }
       : legacyStackedLayout;
@@ -1454,8 +1456,8 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
         panelFlex={dockStack!.panelFlex}
         collapsed={unifiedStackCollapsed}
         onToggleCollapsed={(id) => dock!.toggleCollapsed(dockSide, id)}
-        onSwapPanels={(panelA, panelB) => dock!.swapPanels(dockSide, panelA, panelB)}
-        onResizeSplit={(splitIndex, delta, h) => dock!.resizeSplit(dockSide, splitIndex, delta, h)}
+        onSwapPanels={(panelA, panelB, edge) => dock!.swapPanels(dockSide, panelA, panelB, edge)}
+        onResizeSplit={(splitIndex, delta, h, snapshot) => dock!.resizeSplit(dockSide, splitIndex, delta, h, snapshot)}
         onPersistSplit={dock!.persistSplit}
         onMovePanelToSide={(panelId, targetSide, insertIndex) =>
           dock!.movePanel(panelId, targetSide, insertIndex)

@@ -210,6 +210,8 @@ _ALLOW_EXACT: frozenset[str] = frozenset(
         "gdrive_list",
         "gdrive_search",
         "gdrive_file_info",
+        "web_search",
+        "web_fetch",
         "browser_status",
         "browser_cdp_info",
         "browser_runtime_info",

@@ -1,3 +1,8 @@
+/** Claude Code names Ducky tools `mcp__uefn__web_search`. Cards match the bare name. */
+function stripMcpServerPrefix(name: string): string {
+  return name.replace(/^mcp__[^_]+__/i, "");
+}
+
 /**
  * Cursor Composer / SDK often wraps MCP calls as CallMcpTool / mcp / tool
  * { toolName, args } instead of emitting the real tool name.
@@ -8,7 +13,7 @@ export function unwrapCodingAgentTool(
   name: string,
   args: Record<string, unknown> | undefined | null,
 ): { name: string; arguments: Record<string, unknown> } {
-  const n = (name || "").trim() || "tool";
+  const n = stripMcpServerPrefix((name || "").trim() || "tool");
   const a =
     args && typeof args === "object" && !Array.isArray(args)
       ? (args as Record<string, unknown>)
@@ -38,5 +43,5 @@ export function unwrapCodingAgentTool(
       /* keep empty */
     }
   }
-  return { name: inner, arguments: innerArgs };
+  return { name: stripMcpServerPrefix(inner), arguments: innerArgs };
 }

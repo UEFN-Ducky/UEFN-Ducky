@@ -127,6 +127,7 @@ body.native-caption-input-ready .app-header .drag-region {
   min-height: 0;
 }
 .split-resize-handle {
+  touch-action: none;
   flex-shrink: 0;
   width: 1px;
   align-self: stretch;
@@ -3076,21 +3077,15 @@ button.sidebar-chat-nest-toggle {
 .sidebar-stacked-panel {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 28px;
   overflow: hidden;
-  transition: flex-grow 220ms ease;
 }
 .sidebar-stacked-panel.is-collapsed {
   /* Match the stacked header's border-box height so the hidden body gets no space. */
   min-height: 28px;
 }
-/* no easing while the user drags the split handle — track the pointer directly */
-.sidebar-stacked-panels:has(> .sidebar-panel-split.is-dragging) .sidebar-stacked-panel {
-  transition: none;
-}
 .sidebar-stacked-panel.is-collapsed .sidebar-stacked-panel-body {
   visibility: hidden;
-  transition: visibility 0s linear 220ms;
 }
 .sidebar-stacked-panel.is-dragging {
   opacity: 0.35;
@@ -3156,6 +3151,7 @@ button.sidebar-chat-nest-toggle {
   display: block;
 }
 .sidebar-section-header--draggable {
+  touch-action: none;
   cursor: grab;
   user-select: none;
 }
@@ -3494,10 +3490,6 @@ button.sidebar-chat-nest-toggle {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  transition: flex-grow 220ms ease;
-}
-.file-tree-split:has(> .file-tree-pane-split.is-dragging) .file-tree-pane {
-  transition: none;
 }
 .file-tree-pane-scroll {
   flex: 1 1 0%;
@@ -3511,13 +3503,10 @@ button.sidebar-chat-nest-toggle {
 }
 .file-tree-pane--core {
   border-top: 1px solid var(--border);
-  /* Size to files; ratio only shortens via --file-tree-core-max-height. Never taller than content. */
-  flex: 0 1 auto;
-  max-height: min(var(--file-tree-core-max-height, 100%), max-content);
-  transition: max-height 220ms ease;
+  flex: 0 0 var(--file-tree-core-height, 38%);
 }
 .file-tree-pane--core .file-tree-pane-scroll {
-  flex: 0 1 auto;
+  flex: 1 1 0%;
 }
 .file-tree-pane--core-collapsed {
   border-top: 1px solid var(--border);
@@ -3534,10 +3523,6 @@ button.sidebar-chat-nest-toggle {
   flex: 0 0 0;
   padding: 0;
   overflow: hidden;
-  transition: visibility 0s linear 220ms;
-}
-.file-tree-split:has(> .file-tree-pane-split.is-dragging) .file-tree-pane--core {
-  transition: none;
 }
 .file-tree-shell {
   display: flex;

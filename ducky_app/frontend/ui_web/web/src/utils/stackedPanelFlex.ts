@@ -1,12 +1,18 @@
 export type StackedPanelFlexInput<TId extends string> = {
-  order: TId[];
+  order: readonly TId[];
   collapsed: Record<TId, boolean>;
   panelFlex?: Partial<Record<TId, number>>;
   splitRatio: number;
   minPanelHeight: number;
 };
 
-function openPanelIds<TId extends string>(order: TId[], collapsed: Record<TId, boolean>): TId[] {
+export type StackedPanelResizeSnapshot<TId extends string> = {
+  order: TId[];
+  /** Rendered heights of open panels only, captured once at pointer-down. */
+  panelHeights: Partial<Record<TId, number>>;
+};
+
+function openPanelIds<TId extends string>(order: readonly TId[], collapsed: Record<TId, boolean>): TId[] {
   return order.filter((id) => !collapsed[id]);
 }
 
@@ -80,42 +86,50 @@ export function resizeStackedPanelSplit<TId extends string>(
   splitIndex: number,
   deltaPx: number,
   containerHeight: number,
+  snapshot?: StackedPanelResizeSnapshot<TId>,
 ): { panelFlex: Partial<Record<TId, number>>; splitRatio: number } {
-  const { order, collapsed, panelFlex, splitRatio, minPanelHeight } = input;
-  if (containerHeight <= 0 || deltaPx === 0) {
+  const { collapsed, panelFlex, splitRatio, minPanelHeight } = input;
+  const order = snapshot?.order ?? input.order;
+  if (containerHeight <= 0 || !Number.isFinite(deltaPx)) {
     return { panelFlex: panelFlex ?? {}, splitRatio };
   }
 
-  const deltaRatio = deltaPx / containerHeight;
-  const topId = order[splitIndex];
-  const bottomId = order[splitIndex + 1];
-  if (!topId || !bottomId || collapsed[topId] || collapsed[bottomId]) {
+  // A collapsed header occupies fixed space. Resize through it to the nearest
+  // open panels on either side, then push farther panels when a minimum is hit.
+  const above = order.slice(0, splitIndex + 1).filter((id) => !collapsed[id]).reverse();
+  const below = order.slice(splitIndex + 1).filter((id) => !collapsed[id]);
+  if (!above.length || !below.length) {
     return { panelFlex: panelFlex ?? {}, splitRatio };
   }
 
-  const flex = resolveStackedPanelFlex(input);
+  const flex = resolveStackedPanelFlex({ ...input, order });
   const openIds = openPanelIds(order, collapsed);
-  const totalWeight = openIds.reduce((sum, id) => {
-    const stored = panelFlex?.[id];
-    if (typeof stored === "number" && Number.isFinite(stored) && stored > 0) return sum + stored;
-    return sum + (flex.get(id) ?? 0);
-  }, 0);
-  if (totalWeight <= 0) return { panelFlex: panelFlex ?? {}, splitRatio };
+  const heights = new Map(openIds.map((id) => [
+    id, snapshot?.panelHeights[id] ?? (flex.get(id)! * containerHeight),
+  ]));
+  const totalHeight = [...heights.values()].reduce((sum, height) => sum + height, 0);
+  if (totalHeight <= 0) return { panelFlex: panelFlex ?? {}, splitRatio };
+  // In a crowded rail, don't make an already-small panel jump on first movement.
+  const minimum = (id: TId) => Math.min(minPanelHeight, heights.get(id)!);
+  const donors = deltaPx > 0 ? below : above;
+  const receiver = (deltaPx > 0 ? above : below)[0]!;
+  let remaining = Math.abs(deltaPx);
+  let transferred = 0;
+  for (const id of donors) {
+    const height = heights.get(id)!;
+    const amount = Math.min(remaining, Math.max(0, height - minimum(id)));
+    heights.set(id, height - amount);
+    remaining -= amount;
+    transferred += amount;
+  }
+  heights.set(receiver, heights.get(receiver)! + transferred);
 
-  const deltaWeight = deltaRatio * totalWeight;
-  let topFlex = (panelFlex?.[topId] ?? flex.get(topId)!) + deltaWeight;
-  let bottomFlex = (panelFlex?.[bottomId] ?? flex.get(bottomId)!) - deltaWeight;
-
-  const minWeight = (minPanelHeight / containerHeight) * totalWeight;
-  topFlex = Math.max(minWeight, topFlex);
-  bottomFlex = Math.max(minWeight, bottomFlex);
-
+  // Keep the visible stack's weight sum stable, including in family sub-stacks.
+  const totalWeight = openIds.reduce((sum, id) => sum + flexGrowForStackedPanel({ ...input, order }, id), 0);
   const nextPanelFlex: Partial<Record<TId, number>> = { ...panelFlex };
   for (const id of openIds) {
-    if (nextPanelFlex[id] == null) nextPanelFlex[id] = flex.get(id) ?? 1;
+    nextPanelFlex[id] = (heights.get(id)! / totalHeight) * totalWeight;
   }
-  nextPanelFlex[topId] = topFlex;
-  nextPanelFlex[bottomId] = bottomFlex;
 
   const nextSplitRatio =
     openIds.length === 2

@@ -1,4 +1,6 @@
+import { reorderStackedPanels, type StackedPanelDropEdge } from "../utils/stackedPanelDropHint";
 import { useCallback, useRef, useState } from "react";
+import { resizeStackedPanelSplit, type StackedPanelResizeSnapshot } from "../utils/stackedPanelFlex";
 
 export type VerseOutlinePanelId = "outline" | "history";
 
@@ -100,14 +102,9 @@ export function useVerseOutlinePanelLayout() {
   }, [persistOrder]);
 
   const swapPanels = useCallback(
-    (panelA: VerseOutlinePanelId, panelB: VerseOutlinePanelId) => {
+    (panelA: VerseOutlinePanelId, panelB: VerseOutlinePanelId, edge?: StackedPanelDropEdge) => {
       setOrder((prev) => {
-        const next = [...prev];
-        const i = next.indexOf(panelA);
-        const j = next.indexOf(panelB);
-        if (i < 0 || j < 0) return prev;
-        next[i] = panelB;
-        next[j] = panelA;
+        const next = reorderStackedPanels(prev, panelA, panelB, edge);
         persistOrder(next);
         return next;
       });
@@ -116,21 +113,16 @@ export function useVerseOutlinePanelLayout() {
   );
 
   const resizeSplit = useCallback(
-    (splitIndex: number, deltaPx: number, containerHeight: number) => {
+    (splitIndex: number, deltaPx: number, containerHeight: number, snapshot?: StackedPanelResizeSnapshot<VerseOutlinePanelId>) => {
       if (containerHeight <= 0) return;
-      const deltaRatio = deltaPx / containerHeight;
-      setSplitRatio((prev) => {
-        const minRatio = MIN_VERSE_OUTLINE_PANEL_HEIGHT / containerHeight;
-        const maxRatio = 1 - minRatio;
-        const next =
-          splitIndex === 0
-            ? Math.max(minRatio, Math.min(maxRatio, prev + deltaRatio))
-            : Math.max(minRatio, Math.min(maxRatio, prev - deltaRatio));
-        splitRef.current = next;
-        return next;
-      });
+      const next = resizeStackedPanelSplit(
+        { order, collapsed, splitRatio: splitRef.current, minPanelHeight: MIN_VERSE_OUTLINE_PANEL_HEIGHT },
+        splitIndex, deltaPx, containerHeight, snapshot,
+      ).splitRatio;
+      splitRef.current = next;
+      setSplitRatio(next);
     },
-    [],
+    [order, collapsed],
   );
 
   return {

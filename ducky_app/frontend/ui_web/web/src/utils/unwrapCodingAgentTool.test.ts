@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isStandaloneToolCard } from "../components/tool-cards/toolCategories";
 import { unwrapCodingAgentTool } from "./unwrapCodingAgentTool";
 
 describe("unwrapCodingAgentTool", () => {
@@ -82,6 +83,18 @@ describe("unwrapCodingAgentTool", () => {
       name: "find_devices",
       arguments: { label_filter: "Player" },
     });
+  });
+
+  it("strips the Claude Code mcp server prefix so web search stays a picture card", () => {
+    const unwrapped = unwrapCodingAgentTool("mcp__uefn__web_search", {
+      query: "brainrot tukut",
+      images: true,
+    });
+    expect(unwrapped).toEqual({
+      name: "web_search",
+      arguments: { query: "brainrot tukut", images: true },
+    });
+    expect(isStandaloneToolCard(unwrapped.name)).toBe(true);
   });
 
   it("keeps generic tool when there is no inner MCP name", () => {

@@ -6,6 +6,7 @@ import type { ProjectInfo, RecentProject } from "../types/panel";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { useOptionalEditorWorkspaceFlush } from "../contexts/EditorWorkspaceBridge";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
+import { PROJECT_SELECTED_EVENT } from "../hooks/useProject";
 
 interface ProjectSelectorProps {
   project: ProjectInfo;
@@ -39,6 +40,8 @@ export function ProjectSelector({
   const anchorRef = useRef<HTMLButtonElement>(null);
   const ignoreAnchorRef = useRef(false);
   const pickingRef = useRef(false);
+  const switchRevisionRef = useRef(0);
+  const switchChainRef = useRef(Promise.resolve());
 
   const close = useCallback(() => setIsOpen(false), []);
 
@@ -52,17 +55,25 @@ export function ProjectSelector({
     async (path: string) => {
       const api = getApi();
       if (!api) return;
-      try {
+      close();
+      const revision = ++switchRevisionRef.current;
+      // Serialize writes to the global project setting; queued clicks supersede
+      // each other instead of racing and finishing on the wrong island.
+      const pending = switchChainRef.current.then(async () => {
+        if (revision !== switchRevisionRef.current) return;
         await flushFromBridge?.();
-        await api.set_project_root(path);
+        if (revision !== switchRevisionRef.current) return;
+        const info = await api.set_project_root(path);
+        if (revision !== switchRevisionRef.current) return;
+        window.dispatchEvent(new CustomEvent(PROJECT_SELECTED_EVENT, { detail: info }));
         onProjectChanged?.();
-      } catch (e) {
+      }).catch((e: unknown) => {
         // A backend hiccup (e.g. settings save contended by another instance) must not
         // leave the dropdown stuck open with an unhandled rejection.
         console.error("[project-selector] switch failed", e);
-      } finally {
-        close();
-      }
+      });
+      switchChainRef.current = pending;
+      await pending;
     },
     [close, flushFromBridge, onProjectChanged],
   );

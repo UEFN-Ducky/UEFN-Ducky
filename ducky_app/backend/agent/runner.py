@@ -168,6 +168,37 @@ def _partial_assistant_message(
     return msg
 
 
+def with_user_request(volatile_tail: str, user_text: str) -> str:
+    """Live-context tail, with the user's request as its last line."""
+    tail = (volatile_tail or "").strip()
+    request = " ".join((user_text or "").split())
+    if not tail or not request:
+        return tail
+    return f"{tail}\n\nReply to the user's request: {request}"
+
+
+def forced_web_search(user_text: str, tool_names: list[str]) -> ToolCallRequest | None:
+    """Step 1 for a clear search request: the app calls web_search itself."""
+    if "web_search" not in tool_names:
+        return None
+    from backend.tools.core.web_lookup import web_intent
+
+    found = web_intent(user_text)
+    if not found:
+        return None
+    query, images = found
+    return ToolCallRequest(
+        id="web-search-1",
+        name="web_search",
+        arguments={"query": query, "images": images},
+    )
+
+
+async def _no_provider_events():
+    if False:
+        yield StreamEvent(kind=StreamEventKind.DONE)
+
+
 def _cancelled_event(
     blocks: list[dict[str, Any]],
     assistant_text: str,
@@ -552,6 +583,9 @@ class AgentRunner:
 
         verify_token = verify_evidence.bind_conversation(self.config.conv_id)
         identity_token = run_identity.bind(self.config.run_context())
+        from backend.tools.core.web_lookup import begin_web_turn, end_web_turn
+
+        web_token = begin_web_turn()
         try:
             async for event in self._run_turn_inner(
                 user_text,
@@ -563,6 +597,7 @@ class AgentRunner:
             ):
                 yield event
         finally:
+            end_web_turn(web_token)
             run_identity.reset(identity_token)
             hammer_guard.reset_conversation(hammer_token)
             verify_evidence.reset_conversation(verify_token)
@@ -678,7 +713,7 @@ class AgentRunner:
         # Frozen/dynamic split is host-owned and unconditional. enable_cache
         # only adds provider markers. Volatile memory/plan/status is a tail message.
         system = prompt_cache.frozen_system
-        volatile_tail = (prompt_cache.dynamic_system or "").strip()
+        volatile_tail = with_user_request(prompt_cache.dynamic_system, user_text)
         stream_cache = markers_only_payload(prompt_cache) if prompt_cache.enable_cache else None
 
         working_history = list(history)
@@ -717,6 +752,7 @@ class AgentRunner:
             return
         omit_tools = "tools" in self.config.context_omit
         tool_schemas: list[dict[str, Any]] = []
+        selected_names: list[str] = []
         if not omit_tools:
             selected = select_tools(
                 all_tools,
@@ -738,6 +774,7 @@ class AgentRunner:
                 by_name = {t.name: t for t in all_tools}
                 selected = [by_name[n] for n in names if n in by_name]
             tool_schemas = self._provider_tools(self.config.provider, selected)
+            selected_names = [t.name for t in selected]
 
         conv = self.config.conv
         trim_conv_id = self.config.conv_id or (str(getattr(conv, "id", "") or "") if conv is not None else "")
@@ -844,14 +881,20 @@ class AgentRunner:
                     )
                 ]
 
-            async for event in self._iter_provider_stream(
-                provider,
-                system=system,
-                messages=stream_messages,
-                tools=tool_schemas,
-                cache=stream_cache,
-                thread_cancel=thread_cancel,
-            ):
+            forced = forced_web_search(user_text, selected_names) if turn == 0 else None
+            if forced is not None:
+                tool_calls = [forced]
+                provider_stream = _no_provider_events()
+            else:
+                provider_stream = self._iter_provider_stream(
+                    provider,
+                    system=system,
+                    messages=stream_messages,
+                    tools=tool_schemas,
+                    cache=stream_cache,
+                    thread_cancel=thread_cancel,
+                )
+            async for event in provider_stream:
                 if bridge.is_set():
                     yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                     return

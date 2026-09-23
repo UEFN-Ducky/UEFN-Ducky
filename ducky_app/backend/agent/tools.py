@@ -267,7 +267,11 @@ MARKDOWN_TOOLS = frozenset({"uefn_skill"})
 API_TOOL_RESULT_MAX = 2200
 # Tools whose payload IS the deliverable get a bigger budget: capping the error
 # list to a stub left the model editing blind (it "fixed errors" it never saw).
-TOOL_RESULT_MAX_OVERRIDES = {"workspace_list_verse_errors": 9000}
+TOOL_RESULT_MAX_OVERRIDES = {
+    "workspace_list_verse_errors": 9000,
+    "web_search": 80_000,
+    "web_fetch": 80_000,
+}
 
 # User-paced panel tools (modal / walkthrough) need longer than the default 180s.
 # ducky_ask_user NEVER times out — the agent suspends until the user answers;
@@ -577,6 +581,8 @@ HOST_ONLY_TOOLS = frozenset(
         "ducky_terminal_list",
         "ducky_terminal_close",
         "ducky_read_tool_spill",
+        "web_search",
+        "web_fetch",
     }
 )
 

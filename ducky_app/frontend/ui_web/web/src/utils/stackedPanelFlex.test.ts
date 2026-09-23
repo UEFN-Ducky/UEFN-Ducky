@@ -51,4 +51,63 @@ describe("stackedPanelFlex", () => {
       5,
     );
   });
+
+  it("tracks pixels using the rendered open heights, excluding collapsed headers and sashes", () => {
+    const input = { ...base, collapsed: { a: false, b: true, c: false } };
+    const snapshot = { order: ["a", "b", "c"], panelHeights: { a: 300, c: 200 } };
+    const next = resizeStackedPanelSplit(input, 0, 60, 500, snapshot);
+    const weights = resolveStackedPanelFlex({ ...input, ...next });
+    expect(weights.get("a")! * 500).toBeCloseTo(360);
+    expect(weights.get("c")! * 500).toBeCloseTo(140);
+    expect(resizeStackedPanelSplit(input, 1, 60, 500, snapshot)).toEqual(next);
+  });
+
+  it("pushes farther panels after the nearest panel reaches its minimum", () => {
+    const snapshot = { order: ["a", "b", "c"], panelHeights: { a: 200, b: 100, c: 300 } };
+    const next = resizeStackedPanelSplit(base, 0, 120, 600, snapshot);
+    const weights = resolveStackedPanelFlex({ ...base, ...next });
+    expect(weights.get("a")! * 600).toBeCloseTo(320);
+    expect(weights.get("b")! * 600).toBeCloseTo(80);
+    expect(weights.get("c")! * 600).toBeCloseTo(200);
+  });
+
+  it("clamps the transfer without changing the total or unrelated panel sizes", () => {
+    const input = { ...base, panelFlex: { a: 2, b: 1, c: 3 } };
+    const next = resizeStackedPanelSplit(input, 0, 10000, 600);
+    expect(next.panelFlex.a).toBeCloseTo(4.4);
+    expect(next.panelFlex.b).toBeCloseTo(0.8);
+    expect(next.panelFlex.c).toBeCloseTo(0.8);
+    expect(Object.values(next.panelFlex).reduce((a, b) => a + b, 0)).toBeCloseTo(6);
+    const up = resizeStackedPanelSplit(input, 1, -10000, 600);
+    expect(up.panelFlex.a).toBeCloseTo(0.8);
+    expect(up.panelFlex.b).toBeCloseTo(0.8);
+    expect(up.panelFlex.c).toBeCloseTo(4.4);
+  });
+
+  it("uses total movement from the grab point, including reversal and return to origin", () => {
+    const snapshot = { order: ["a", "b", "c"], panelHeights: { a: 200, b: 100, c: 300 } };
+    const first = resizeStackedPanelSplit(base, 0, 1000, 600, snapshot);
+    const reversed = resizeStackedPanelSplit({ ...base, ...first }, 0, 10, 600, snapshot);
+    expect(resolveStackedPanelFlex({ ...base, ...reversed }).get("a")! * 600).toBeCloseTo(210);
+    const origin = resizeStackedPanelSplit({ ...base, ...reversed }, 0, 0, 600, snapshot);
+    expect(resolveStackedPanelFlex({ ...base, ...origin }).get("a")! * 600).toBeCloseTo(200);
+  });
+
+  it("uses the visible family order and preserves panels outside that stack", () => {
+    const input = { ...base, panelFlex: { a: 2, b: 5, c: 3 } };
+    const snapshot = { order: ["c", "a"], panelHeights: { c: 300, a: 200 } };
+    const next = resizeStackedPanelSplit(input, 0, 50, 500, snapshot);
+    expect(next.panelFlex.c).toBeCloseTo(3.5);
+    expect(next.panelFlex.a).toBeCloseTo(1.5);
+    expect(next.panelFlex.b).toBe(5);
+  });
+
+  it("does not jump when a crowded rail starts below the preferred minimum", () => {
+    const snapshot = { order: ["a", "b", "c"], panelHeights: { a: 40, b: 50, c: 60 } };
+    const next = resizeStackedPanelSplit(base, 0, 20, 150, snapshot);
+    const weights = resolveStackedPanelFlex({ ...base, ...next });
+    expect(weights.get("a")! * 150).toBeCloseTo(40);
+    expect(weights.get("b")! * 150).toBeCloseTo(50);
+    expect(weights.get("c")! * 150).toBeCloseTo(60);
+  });
 });

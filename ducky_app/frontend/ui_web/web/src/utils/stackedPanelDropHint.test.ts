@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stackedPanelDropHint } from "./stackedPanelDropHint";
+import { reorderStackedPanels, stackedPanelDropHint } from "./stackedPanelDropHint";
 
 const stack = [
   { id: "content", top: 0, bottom: 400, collapsed: false },
@@ -20,16 +20,18 @@ describe("stackedPanelDropHint", () => {
   it("shows a line when dragging a collapsed panel up over another collapsed one", () => {
     expect(stackedPanelDropHint([...stack], "history", 440)).toEqual({
       targetId: "outline",
-      edge: "after",
+      edge: "before",
     });
   });
 
-  it("still requires midpoint for expanded panels", () => {
-    // Duckies sits below Content — only the upper half of Content accepts the drop.
-    expect(stackedPanelDropHint([...stack], "duckies", 250)).toBeNull();
-    expect(stackedPanelDropHint([...stack], "duckies", 100)).toEqual({
+  it("accepts both halves of an expanded panel with the corresponding insertion edge", () => {
+    expect(stackedPanelDropHint([...stack], "duckies", 250)).toEqual({
       targetId: "content",
       edge: "after",
+    });
+    expect(stackedPanelDropHint([...stack], "duckies", 100)).toEqual({
+      targetId: "content",
+      edge: "before",
     });
   });
 
@@ -38,5 +40,15 @@ describe("stackedPanelDropHint", () => {
       targetId: "outline",
       edge: "before",
     });
+  });
+
+  it("inserts at the highlighted edge without swapping intervening panels", () => {
+    const order = ["content", "duckies", "outline", "history"];
+    expect(reorderStackedPanels(order, "history", "content", "before"))
+      .toEqual(["history", "content", "duckies", "outline"]);
+    expect(reorderStackedPanels(order, "content", "outline", "after"))
+      .toEqual(["duckies", "outline", "content", "history"]);
+    expect(reorderStackedPanels(order, "duckies", "outline", "before")).toEqual(order);
+    expect(reorderStackedPanels(order, "history", "outline", "after")).toEqual(order);
   });
 });

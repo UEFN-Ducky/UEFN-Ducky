@@ -362,9 +362,9 @@ export function DockRail({
 
                 onToggleCollapsed={(id) => dock.toggleCollapsed(side, id)}
 
-                onSwapPanels={(panelA, panelB) => dock.swapPanels(side, panelA, panelB)}
+                onSwapPanels={(panelA, panelB, edge) => dock.swapPanels(side, panelA, panelB, edge)}
 
-                onResizeSplit={(splitIndex, delta, h) => dock.resizeSplit(side, splitIndex, delta, h)}
+                onResizeSplit={(splitIndex, delta, h, snapshot) => dock.resizeSplit(side, splitIndex, delta, h, snapshot)}
 
                 onPersistSplit={dock.persistSplit}
 

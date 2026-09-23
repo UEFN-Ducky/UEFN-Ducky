@@ -19,9 +19,18 @@ from backend.agent.coding_agents.proc_exec import ProcResult
 LOGIN_MARKERS = ("sign in", "log in", "login", "oauth", "not logged", "authenticate", "/login")
 
 
+_JSON_RESULT_CAP = 32_000
+
+
 def truncate_tool_result(text: str, max_chars: int = 4000) -> str:
-    """Trim a tool-result string for the panel UI, flagging truncation."""
+    """Trim a tool-result string for the panel UI, flagging truncation.
+
+    A JSON object (web search, with its picture list) stays whole up to 32k
+    characters. Cutting it at 4k leaves invalid JSON and drops the pictures.
+    """
     text = (text or "").strip()
+    if text.startswith("{") and text.endswith("}") and len(text) <= _JSON_RESULT_CAP:
+        return text
     if len(text) > max_chars:
         text = text[:max_chars] + "…(truncated)"
     return text
