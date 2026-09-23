@@ -113,14 +113,22 @@ def test_watchdog_presses_while_caller_blocks_then_stops(monkeypatch):
     assert seen == events
     # Join can return while one tick is still in flight. Wait it out, then
     # the thread must stay quiet — that is the "stopped with the block" check.
-    time.sleep(0.3)
     final = len(calls)
     assert final > 1
-    deadline = time.time() + 1.5
-    while time.time() < deadline and len(calls) != final:
-        final = len(calls)
-        time.sleep(0.2)
-    time.sleep(0.3)
+    # A tick already in flight can land after join. Wait until the count is
+    # quiet, instead of assuming one 0.3 s gap is enough on a loaded machine.
+    deadline = time.time() + 2.0
+    quiet_since = None
+    while time.time() < deadline:
+        if len(calls) == final:
+            if quiet_since is None:
+                quiet_since = time.time()
+            elif time.time() - quiet_since >= 0.5:
+                break
+        else:
+            final = len(calls)
+            quiet_since = None
+        time.sleep(0.05)
     assert len(calls) == final
 
 

@@ -8,7 +8,7 @@ from typing import Any, Optional
 import unreal
 
 from listener.dispatch import register
-from listener.project_paths import content_root, pin_project_folder
+from listener.project_paths import content_root, import_destination_leaf, pin_project_folder
 
 
 def _asset_registry():
@@ -38,7 +38,9 @@ def import_asset(source_file: str, destination_path: str, replace_existing: bool
     """Import a file (fbx/png/wav/...) into a content path under the active project."""
     if not os.path.isfile(source_file):
         raise ValueError(f"Source file not found: {source_file}")
-    destination_path = pin_project_folder(destination_path, default_leaf="Imported")
+    destination_path = pin_project_folder(
+        destination_path, default_leaf=import_destination_leaf(source_file)
+    )
     task = unreal.AssetImportTask()
     task.filename = source_file
     task.destination_path = destination_path

@@ -12,7 +12,7 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
-from listener.project_paths import pin_project_folder
+from listener.project_paths import pin_project_folder, require_island_ref
 from listener.serialize import serialize
 
 # Curated short names that work in UEFN material graphs (no Custom/HLSL).
@@ -326,6 +326,7 @@ def assign_material_to_mesh(
     slot_index: int = 0,
     component_name: str = "",
 ) -> dict:
+    require_island_ref(material_path)
     actor = lookup.require_actor(actor_path)
     mesh = _get_mesh_component(actor, component_name)
     mat = unreal.EditorAssetLibrary.load_asset(material_path)
@@ -359,6 +360,7 @@ def list_material_expressions(material_path: str) -> dict:
 
 def create_material_instance(asset_name: str, parent_material_path: str, folder: str = "") -> dict:
     """Create a MaterialInstanceConstant with the given parent (replaces an existing asset of the same name)."""
+    require_island_ref(parent_material_path)
     folder = pin_project_folder(folder, default_leaf="Materials")
     parent = _load_material_interface(parent_material_path)
     unreal.EditorAssetLibrary.make_directory(folder)
