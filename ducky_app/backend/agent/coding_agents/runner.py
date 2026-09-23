@@ -6,9 +6,11 @@ passes and stores a session_id — how resume works is the plugin's job.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 from backend.agent.coding_agents.base import get_adapter, normalize_coding_agent
@@ -102,6 +104,70 @@ def read_session_id(conv: Conversation, agent_id: str) -> str:
 
 def store_session_id(conv: Conversation, agent_id: str, session_id: str) -> None:
     conv.upstream_session_id = f"{agent_id}:{session_id.strip()}" if session_id.strip() else ""
+
+
+def claude_project_slug(project_root: str) -> str:
+    """Claude Code's ~/.claude/projects folder name for a working directory."""
+    return "".join("-" if ch in ":\\/ " else ch for ch in (project_root or "").strip())
+
+
+def claude_session_log(project_root: str, session_id: str) -> Path:
+    sid = (session_id or "").strip()
+    return Path.home() / ".claude" / "projects" / claude_project_slug(project_root) / f"{sid}.jsonl"
+
+
+def uefn_mcp_pending_in_log(path: Path) -> bool:
+    """True when the saved Claude log still lists the uefn server as pending or failed."""
+    if not path.is_file():
+        return False
+    try:
+        raw = path.read_bytes()[-400_000:]
+    except OSError:
+        return False
+    text = raw.decode("utf-8", errors="ignore")
+    pending: list[Any] | None = None
+    failed: list[Any] | None = None
+    for line in text.splitlines():
+        if "pendingMcpServers" not in line and "failedMcpServers" not in line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        att = row.get("attachment") if isinstance(row.get("attachment"), dict) else row
+        if not isinstance(att, dict):
+            continue
+        if "pendingMcpServers" in att or "failedMcpServers" in att:
+            pending = list(att.get("pendingMcpServers") or [])
+            failed = list(att.get("failedMcpServers") or [])
+    names = [str(item) for item in (pending or [])] + [str(item) for item in (failed or [])]
+    return "uefn" in names
+
+
+def last_turn_called_uefn(conv: Any) -> bool:
+    messages = getattr(conv, "messages", None) or []
+    for msg in reversed(list(messages)):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        return "mcp__uefn__" in json.dumps(msg.get("blocks") or [], ensure_ascii=False)
+    return False
+
+
+def drop_dead_claude_session(conv: Conversation, agent_id: str, project_root: str) -> str:
+    """Drop --resume when the last turn never reached uefn and the log still says so.
+
+    Claude keeps pendingMcpServers for the life of that session id. A fresh
+    launch is the only way the next turn gets mcp__uefn__ tool names.
+    """
+    session_id = read_session_id(conv, agent_id)
+    if agent_id != "claude_code" or not session_id:
+        return session_id
+    if last_turn_called_uefn(conv):
+        return session_id
+    if uefn_mcp_pending_in_log(claude_session_log(project_root, session_id)):
+        store_session_id(conv, agent_id, "")
+        return ""
+    return session_id
 
 
 def record_coding_agent_usage(
@@ -566,7 +632,11 @@ def run_coding_agent_message(
         elif auth_result is not None:
             return auth_result
 
-    session_id = read_session_id(conv, agent_id) if adapter.capabilities.resume else ""
+    session_id = (
+        drop_dead_claude_session(conv, agent_id, project_root)
+        if adapter.capabilities.resume
+        else ""
+    )
 
     image_paths = collect_image_paths(conv, project_root)
 

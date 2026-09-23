@@ -22,6 +22,9 @@ _STATE_NAME = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
 _IDLE_EXIT_S = 3.0
 _STARTUP_GRACE_S = 60.0
+# Handshake must finish while another tool call is still running. A cold
+# plugin load may wait this long; a ready load does not wait at all.
+_LIST_WAIT_S = 3.0
 
 _loop: asyncio.AbstractEventLoop | None = None
 _clients = 0
@@ -302,24 +305,53 @@ def _call_result(raw: Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": "" if raw is None else str(raw)}], "isError": False}
 
 
-async def _list_tools(mcp: Any) -> list[dict[str, Any]]:
-    if not getattr(mcp, "_ducky_skip_plugin_wait", False):
-        # Same readiness as plugin_gate.list_tools_after_plugins: Store plugins,
-        # then nested Epic/HTTP proxies, so the catalog matches a dedicated bridge.
+def _plugins_ready() -> bool:
+    try:
+        from backend.uefn_plugins.host import plugins_ready
+
+        return bool(plugins_ready())
+    except Exception:
+        return False
+
+
+def _snapshot_tools(mcp: Any) -> list[Any]:
+    """Registered tools, read off the asyncio loop.
+
+    A blocked tools/call (ducky_ask_user, a long editor call) must not hold
+    tools/list. The tool manager dict is the catalog Claude needs to leave
+    "still connecting".
+    """
+    tm = getattr(mcp, "_tool_manager", None)
+    raw = getattr(tm, "_tools", None) if tm is not None else None
+    if isinstance(raw, dict) and raw:
+        return list(raw.values())
+    return []
+
+
+def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
+    """tools/list body. Caller thread — never queued behind a tool call."""
+    if not getattr(mcp, "_ducky_skip_plugin_wait", False) and not _plugins_ready():
         try:
             from backend.bridge.plugin_gate import wait_until_plugins_loaded
 
-            await asyncio.to_thread(wait_until_plugins_loaded, 45.0)
+            wait_until_plugins_loaded(_LIST_WAIT_S)
         except Exception:
             pass
         try:
             from backend.mcp_plugins.bridge_proxy import wait_until_nested_proxies_synced
 
-            await asyncio.to_thread(wait_until_nested_proxies_synced, 20.0)
+            wait_until_nested_proxies_synced(_LIST_WAIT_S)
         except Exception:
             pass
-    tools = await mcp.list_tools()
+    tools = _snapshot_tools(mcp)
+    if not tools:
+        tools = _run(_async_list_tools(mcp))
     return [_tool_row(t) for t in tools]
+
+
+async def _async_list_tools(mcp: Any) -> list[Any]:
+    listed = await mcp.list_tools()
+    return list(listed or [])
 
 
 async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any) -> dict[str, Any]:
@@ -373,7 +405,7 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
     if method == "prompts/list":
         return {"prompts": []}
     if method == "tools/list":
-        return {"tools": _run(_list_tools(mcp))}
+        return {"tools": list_tools_for_handshake(mcp)}
     if method == "tools/call":
         name = str(params.get("name") or "")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}

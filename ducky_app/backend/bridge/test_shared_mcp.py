@@ -16,25 +16,31 @@ from frontend import mcp_block
 from frontend.settings import PanelSettings
 
 
+def _fake_tools() -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            name="ping",
+            description="p",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        SimpleNamespace(
+            name="workspace_write_file",
+            description="w",
+            inputSchema={"type": "object"},
+        ),
+    ]
+
+
 class FakeMcp:
     _ducky_skip_plugin_wait = True
 
     def __init__(self) -> None:
         self.seen: list[str] = []
+        tools = _fake_tools()
+        self._tool_manager = SimpleNamespace(_tools={t.name: t for t in tools})
 
     async def list_tools(self):
-        return [
-            SimpleNamespace(
-                name="ping",
-                description="p",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            SimpleNamespace(
-                name="workspace_write_file",
-                description="w",
-                inputSchema={"type": "object"},
-            ),
-        ]
+        return _fake_tools()
 
     async def call_tool(self, name, arguments):
         from backend.workspace.identity import current
@@ -46,6 +52,10 @@ class FakeMcp:
             import asyncio
 
             await asyncio.sleep(20)
+        if (arguments or {}).get("block"):
+            # Blocks the daemon loop the way ducky_ask_user does. tools/list
+            # must still return from the tool-manager snapshot.
+            time.sleep(4)
         return [{"type": "text", "text": f"{name}:{run_id}"}]
 
 
@@ -276,6 +286,62 @@ def test_hello_rejects_incompatible_key(monkeypatch, tmp_path) -> None:
                 host=str(state.get("host") or "127.0.0.1"),
                 port=int(state.get("port") or 0),
             )
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+
+
+def test_ready_plugins_skip_the_long_wait(monkeypatch) -> None:
+    """A loaded plugin host returns the catalog without the 45s/20s waits."""
+    waited: list[float] = []
+
+    def _wait(timeout: float = 45.0) -> bool:
+        waited.append(float(timeout))
+        return True
+
+    monkeypatch.setattr("backend.uefn_plugins.host.plugins_ready", lambda: True)
+    monkeypatch.setattr("backend.bridge.plugin_gate.wait_until_plugins_loaded", _wait)
+    monkeypatch.setattr(
+        "backend.mcp_plugins.bridge_proxy.wait_until_nested_proxies_synced", _wait
+    )
+    tool = SimpleNamespace(name="ducky_plugin_scaffold", description="s", inputSchema={})
+    mcp = SimpleNamespace(
+        _ducky_skip_plugin_wait=False,
+        _tool_manager=SimpleNamespace(_tools={tool.name: tool}),
+    )
+    rows = shared_mcp.list_tools_for_handshake(mcp)
+    assert [t["name"] for t in rows] == ["ducky_plugin_scaffold"]
+    assert waited == []
+
+
+def test_tools_list_returns_while_a_call_blocks_the_loop(monkeypatch, tmp_path) -> None:
+    mcp = FakeMcp()
+    thread = _serve(mcp, monkeypatch, tmp_path)
+    try:
+        a = _hello("run-a")
+        b = _hello("run-b")
+        shared_mcp.write_frame(
+            a,
+            {
+                "op": "mcp",
+                "id": 9,
+                "method": "tools/call",
+                "params": {"name": "ping", "arguments": {"block": True}},
+            },
+        )
+        time.sleep(0.3)
+        started = time.monotonic()
+        listed = _rpc(b, "tools/list")
+        assert time.monotonic() - started < 2.0
+        assert [t["name"] for t in listed["tools"]] == ["ping", "workspace_write_file"]
+        # Let the blocked call finish so its thread does not write a closed socket.
+        time.sleep(4.2)
+        try:
+            shared_mcp.read_frame(a)
+        except Exception:
+            pass
+        shared_mcp.close_handle(a)
+        shared_mcp.close_handle(b)
     finally:
         shared_mcp.request_stop()
         thread.join(timeout=6)

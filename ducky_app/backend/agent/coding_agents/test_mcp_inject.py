@@ -39,3 +39,5 @@ def test_bootstrap_includes_chat_report_template() -> None:
     assert "> **Loose end:**" in text
     # The report shape forbids echoing written files back into chat.
     assert "link them instead" in text
+    assert "select:mcp__uefn__<tool>" in text
+    assert "Settings" in text
