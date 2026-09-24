@@ -687,6 +687,21 @@ def workspace_roots() -> list[str]:
     return _configured_project_roots()
 
 
+def _recent_project_roots() -> list[str]:
+    """Projects in the header dropdown. Read-only extra roots; writes stay on the active one."""
+    try:
+        from frontend.ui_web.recent_projects import load_recent_projects
+    except Exception:
+        return []
+    out: list[str] = []
+    for item in load_recent_projects():
+        try:
+            out.append(os.path.realpath(os.path.abspath(item)))
+        except OSError:
+            continue
+    return out
+
+
 def _is_under_root(candidate: str, root: str) -> bool:
     cand = os.path.realpath(os.path.abspath(candidate))
     root_r = os.path.realpath(os.path.abspath(root))
@@ -711,6 +726,9 @@ def resolve_workspace_path(relative_or_absolute: str) -> str:
         full = os.path.realpath(os.path.abspath(p))
         for r in roots:
             if _is_under_root(full, r):
+                return full
+        for recent in _recent_project_roots():
+            if _is_under_root(full, recent):
                 return full
         raise ValueError(f"Path is outside allowed workspace folders: {relative_or_absolute!r}")
     primary = roots[0]

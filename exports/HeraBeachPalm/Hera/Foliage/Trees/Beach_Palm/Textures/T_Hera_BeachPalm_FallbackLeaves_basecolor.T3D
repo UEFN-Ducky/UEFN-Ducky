@@ -1,0 +1,11 @@
+Begin Object Class=/Script/Engine.Texture2D Name="T_Hera_BeachPalm_FallbackLeaves_basecolor" ExportPath="/Script/Engine.Texture2D'/Hera/Foliage/Trees/Beach_Palm/Textures/T_Hera_BeachPalm_FallbackLeaves_basecolor.T_Hera_BeachPalm_FallbackLeaves_basecolor'"
+   Begin Object Class=/Script/Engine.AssetImportData Name="AssetImportData" ExportPath="/Script/Engine.AssetImportData'/Hera/Foliage/Trees/Beach_Palm/Textures/T_Hera_BeachPalm_FallbackLeaves_basecolor.T_Hera_BeachPalm_FallbackLeaves_basecolor:AssetImportData'"
+   End Object
+   Begin Object Name="AssetImportData" ExportPath="/Script/Engine.AssetImportData'/Hera/Foliage/Trees/Beach_Palm/Textures/T_Hera_BeachPalm_FallbackLeaves_basecolor.T_Hera_BeachPalm_FallbackLeaves_basecolor:AssetImportData'"
+   End Object
+   ImportedSize=(X=2048,Y=2048)
+   Source=(BlockDataOffsets=(0))
+   LightingGuid=6740D107457D007BC6E10390DD64F7D9
+   AssetImportData="/Script/Engine.AssetImportData'AssetImportData'"
+   CustomProperties TextureSourceData PayloadSize=0 
+End Object

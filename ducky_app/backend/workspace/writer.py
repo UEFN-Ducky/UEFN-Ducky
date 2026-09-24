@@ -405,7 +405,9 @@ class ProjectWriter:
         full = self._path_resolver(rel)
         require_not_digest_path(full)
         require_writable_project_path(full)
-        canonical = rel_from_root(full, root) or rel
+        canonical = rel_from_root(full, root)
+        if not canonical:
+            raise ValueError(f"Path is outside the active project: {rel_in!r}")
         return canonical, full, root
 
     def _resolve_for_read(self, rel_in: str) -> tuple[str, str, str]:
