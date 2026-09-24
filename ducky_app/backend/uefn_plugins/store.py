@@ -24,8 +24,9 @@ PLUGIN_SKILL_FILE = "SKILL.md"
 _PLUGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 # Sources that need the one-time user trust prompt on first enable.
 _TRUST_REQUIRED_SOURCES = frozenset({"local", "ai"})
-# ponytail: 32MB covers Discord-sized UI bundles; bump if a plugin ships heavy assets.
-MAX_PLUGIN_ZIP_BYTES = 32 * 1024 * 1024
+# Art-heavy plugins can carry complete card catalogs. Keep a bounded archive
+# limit while allowing their image bundles to install.
+MAX_PLUGIN_ZIP_BYTES = 100 * 1024 * 1024
 # Zip-bomb guard: extraction happens at install, before the local-trust prompt.
 MAX_PLUGIN_UNCOMPRESSED_BYTES = 4 * MAX_PLUGIN_ZIP_BYTES
 

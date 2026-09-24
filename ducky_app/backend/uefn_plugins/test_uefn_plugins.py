@@ -513,8 +513,26 @@ def main() -> None:
             assert not (root.parent / escapee).exists(), escapee
             assert not (root / "hostile" / escapee).exists(), escapee
 
-        # Zip bomb: refuse when declared uncompressed size exceeds the cap.
+        # Both manifest parsing and installation enforce the compressed ZIP cap.
         import backend.uefn_plugins.store as store_mod
+
+        capped_zip = _zip_plugin("oversize", 1)
+        saved_zip_cap = store_mod.MAX_PLUGIN_ZIP_BYTES
+        store_mod.MAX_PLUGIN_ZIP_BYTES = len(capped_zip) - 1
+        try:
+            try:
+                store_mod.parse_plugin_manifest_from_zip(capped_zip)
+                assert False, "oversized manifest ZIP was accepted"
+            except ValueError as exc:
+                assert "zip exceeds max size" in str(exc), exc
+            too_big = import_plugin_from_bytes(capped_zip, source="local", replace=True)
+            assert not too_big.get("ok"), too_big
+            assert "zip exceeds max size" in str(too_big.get("error") or ""), too_big
+            assert not (root / "oversize").exists()
+        finally:
+            store_mod.MAX_PLUGIN_ZIP_BYTES = saved_zip_cap
+
+        # Zip bomb: refuse when declared uncompressed size exceeds the cap.
 
         saved_cap = store_mod.MAX_PLUGIN_UNCOMPRESSED_BYTES
         store_mod.MAX_PLUGIN_UNCOMPRESSED_BYTES = 1024
