@@ -344,6 +344,14 @@ def main() -> None:
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()
+    # OpenSSL can build a different chain than Windows from the same store and
+    # report "certificate has expired" on PCs where Edge connects fine.
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
     _sweep_stale_extracts()
     if is_bridge_exe() or (len(sys.argv) > 1 and sys.argv[1] == "bridge"):
         run_bridge()

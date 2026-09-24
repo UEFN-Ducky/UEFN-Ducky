@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urljoin
 
@@ -136,6 +140,35 @@ def absolute_installer_url(url: str | None, *, base_url: str) -> str | None:
     return urljoin(base_url.rstrip("/") + "/", text.lstrip("/"))
 
 
+def describe_clock_skew(server_date: str | None, now: float) -> str | None:
+    """Plain-language hint when the PC clock is >10 min off the server ``Date`` header."""
+    try:
+        server = parsedate_to_datetime(server_date or "")
+    except (TypeError, ValueError):
+        return None
+    if server is None or abs(now - server.timestamp()) < 600:
+        return None
+    local = datetime.fromtimestamp(now).astimezone()
+    return (
+        f"Your PC clock is wrong: it says {local:%d %b %Y %H:%M}, but the real time is "
+        f"{server.astimezone():%d %b %Y %H:%M}. Secure connections fail until Windows "
+        "date & time is correct (turn on 'Set time automatically')."
+    )
+
+
+def clock_skew_message(base: str) -> str | None:
+    """Read only the server ``Date`` header (unverified TLS; the body is never used)."""
+    req = urllib.request.Request(base, method="HEAD", headers={"User-Agent": f"UEFN-Ducky/{__version__}"})
+    try:
+        with urllib.request.urlopen(req, timeout=5, context=ssl._create_unverified_context()) as resp:
+            date = resp.headers.get("Date")
+    except urllib.error.HTTPError as exc:
+        date = exc.headers.get("Date")
+    except Exception:
+        return None
+    return describe_clock_skew(date, time.time())
+
+
 def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(payload, error)`` for the Store app-version collect endpoint."""
     base = update_base_url()
@@ -156,6 +189,8 @@ def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="replace")
     except (OSError, urllib.error.URLError, ValueError) as exc:
+        if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+            return None, clock_skew_message(base) or str(exc)
         return None, str(exc)
 
     try:

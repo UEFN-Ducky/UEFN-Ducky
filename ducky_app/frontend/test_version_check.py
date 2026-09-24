@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from frontend.version_check import (
     absolute_installer_url,
+    describe_clock_skew,
     extract_release_versions,
     feed_is_paused,
     is_remote_newer,
@@ -15,6 +16,16 @@ from frontend.version_check import (
 def test_parse_version_tuple() -> None:
     assert parse_version_tuple("1.0.441") == (1, 0, 441)
     assert parse_version_tuple("bad") is None
+
+
+def test_describe_clock_skew() -> None:
+    server = "Thu, 24 Sep 2026 17:30:00 GMT"
+    real = 1790271000.0  # that instant
+    assert describe_clock_skew(server, real + 60) is None
+    assert "clock is wrong" in (describe_clock_skew(server, real + 400 * 86400) or "")
+    assert "clock is wrong" in (describe_clock_skew(server, real - 3600) or "")
+    assert describe_clock_skew(None, real) is None
+    assert describe_clock_skew("garbage", real) is None
 
 
 def test_is_remote_newer() -> None:
