@@ -1975,7 +1975,7 @@ export interface PanelApi {
   open_focus_window_at_point(focus_id: string, title: string, screen_x: number, screen_y: number): Promise<boolean>;
   open_focus_window_group?(tabs: { focus_id: string; title: string }[]): Promise<void>;
   list_focus_tab_ids?(): Promise<string[]>;
-  adopt_tab_into_this_focus_window(focus_id: string, title: string): Promise<void>;
+  adopt_tab_into_this_focus_window(focus_id: string, title: string, wid?: string): Promise<void>;
   raise_focus_window(focus_id: string): Promise<void>;
   browser_pane_open?(pane_id: string, url?: string, wid?: string): Promise<BrowserPaneState>;
   browser_pane_set_bounds?(
@@ -2053,7 +2053,7 @@ export interface PanelApi {
   notify_focus_tab_active(focus_id: string, title: string): Promise<void>;
   report_focus_window_layout(birth_tab_id: string, layout: EditorLayoutState): Promise<void>;
   return_tab_to_main(focus_id: string, title: string): Promise<boolean>;
-  close_focus_window(focus_id: string): Promise<void>;
+  close_focus_window(focus_id: string, reason?: string): Promise<void>;
   close_all_focus_windows(): Promise<void>;
   get_editor_workspace(slug?: string): Promise<EditorWorkspaceSnapshot>;
   save_editor_workspace(payload: EditorWorkspaceSnapshot): Promise<void>;
@@ -2067,7 +2067,8 @@ export interface PanelApi {
   save_header_visibility?(payload: { hidden: string[] }): Promise<void>;
   restore_focus_windows(groups?: FocusWindowSnapshot[]): Promise<void>;
   report_editor_state(relative_path: string, state: Record<string, unknown>): Promise<void>;
-  close_this_window(): Promise<void>;
+  /** `wid` = this window's registry id; without it the host closes the ACTIVE window. */
+  close_this_window(reason?: string, wid?: string): Promise<void>;
   is_focus_window(): Promise<boolean>;
   toggle_maximize(): Promise<boolean>;
   is_window_maximized?(): Promise<boolean>;

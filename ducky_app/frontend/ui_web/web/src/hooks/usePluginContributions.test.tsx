@@ -5,8 +5,11 @@ import { afterEach, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   get: vi.fn(),
   push: undefined as undefined | ((event: { type: string }) => void),
+  apiReady: false,
 }));
-vi.mock("./usePanelApi", () => ({ getApi: () => ({ get_uefn_plugin_contributions: mock.get }) }));
+vi.mock("./usePanelApi", () => ({
+  getApi: () => (mock.apiReady ? { get_uefn_plugin_contributions: mock.get } : null),
+}));
 vi.mock("./onApiReady", () => ({ onApiReady: (fn: () => void) => { fn(); return () => {}; } }));
 vi.mock("./usePanelPushBus", () => ({
   installPanelPushBus: () => {},
@@ -14,6 +17,18 @@ vi.mock("./usePanelPushBus", () => ({
 }));
 import { usePluginContributions } from "./usePluginContributions";
 afterEach(cleanup);
+
+// Runs first: the registry is module state, and this is its cold start.
+it("stays not-ready until the API is injected (focus windows boot before it)", async () => {
+  mock.get.mockResolvedValue({ ok: true, enabled_ids: ["browser"] });
+  const { result } = renderHook(usePluginContributions);
+  await new Promise((r) => setTimeout(r, 1000));
+  expect(result.current.ready).toBe(false);
+
+  mock.apiReady = true;
+  await waitFor(() => expect(result.current.ready).toBe(true), { timeout: 3000 });
+  expect(result.current.enabled_ids).toEqual(["browser"]);
+});
 
 it("refreshes unchanged tabs when Store updates their UI or registers a panel later", async () => {
   const tab = { id: "Account", plugin_id: "account", label: "Ducky Account", ui: "builtin:account-settings" };

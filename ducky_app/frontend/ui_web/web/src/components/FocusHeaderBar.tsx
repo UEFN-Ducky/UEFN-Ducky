@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Header } from "./Header";
 import { EditorTabs } from "./EditorTabs";
 import { getApi } from "../hooks/usePanelApi";
+import { WINDOW_ID } from "../tabs/tabRegistryClient";
 import { useTerminalsSettings } from "../contexts/TerminalsSettingsContext";
 import type { ChatTab, EditorLayoutState, EditorTab, ListenerStatus } from "../types/panel";
 
@@ -143,6 +144,6 @@ export function FocusHeaderBar({
 export function useFocusCloseWindow() {
   return useCallback(() => {
     const api = getApi();
-    if (api) void api.close_this_window();
+    if (api) void api.close_this_window("header close button", WINDOW_ID);
   }, []);
 }

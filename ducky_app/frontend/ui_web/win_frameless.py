@@ -955,10 +955,13 @@ def install_pywebview_chrome_patches() -> None:
                 except Exception:
                     _log.exception("WebView2 ship settings failed")
                 try:
+                    from frontend.ui_web.focus_windows import is_main_window
                     from frontend.ui_web.webview_recover import attach_process_failed
 
+                    win = getattr(self, "pywebview_window", None)
+                    label = "main" if is_main_window(win) else f"focus:{getattr(win, 'title', '')}"
                     self._ducky_process_failed_handler = attach_process_failed(
-                        sender.CoreWebView2, label="main"
+                        sender.CoreWebView2, label=label
                     )
                 except Exception:
                     _log.exception("WebView2 ProcessFailed hook failed")

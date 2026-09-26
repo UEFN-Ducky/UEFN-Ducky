@@ -48,6 +48,25 @@ def _focus_url(focus_id: str, title: str, wid: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
 
+def _log_close(wid: str, reason: str, tab_ids: list[str]) -> None:
+    """One activity row per focus-window close, so "it just disappeared" names its path.
+
+    Off-thread: callers include the WinForms closing handler, and a DB write that
+    waits on busy_timeout there would freeze the window.
+    """
+    message = f"closed {wid} ({reason}) tabs={','.join(tab_ids) or '-'}"
+
+    def write() -> None:
+        try:
+            from frontend.error_log import record_activity
+
+            record_activity("focus-window", message)
+        except Exception:
+            pass
+
+    threading.Thread(target=write, daemon=True, name="focus-close-log").start()
+
+
 def _drop_registry_window(wid: str) -> None:
     """Deregister a closing window IMMEDIATELY — heartbeat expiry is crash-only.
     A dead window left in the registry ghost-owns its tabs for up to 30s, during
@@ -342,10 +361,13 @@ def _wire_group_window(group: _FocusGroup) -> None:
     def _on_closing() -> bool:
         _mark_closing(window)
         with _lock:
-            if group in _focus_groups:
+            os_close = group in _focus_groups
+            if os_close:
                 _focus_groups.remove(group)
             returning = dict(group.tabs)
             group.tabs.clear()
+        if os_close:
+            _log_close(group.wid, "os close", list(returning))
         # Closing the whole OS window must not lose its tabs: hand every file/chat
         # tab back to the main window (same path as closing a single tab). Done
         # outside the lock — it schedules JS on the main window.
@@ -662,11 +684,11 @@ def return_tab_to_main(focus_id: str, title: str) -> bool:
         if group is None:
             return False
     _notify_main_window("__uefnFocusTabReturn", focus_id, title)
-    close_focus_window(focus_id)
+    close_focus_window(focus_id, reason="last tab returned to main")
     return True
 
 
-def close_focus_window(focus_id: str) -> None:
+def close_focus_window(focus_id: str, *, reason: str = "") -> None:
     focus_id = (focus_id or "").strip()
     if not focus_id:
         return
@@ -679,6 +701,7 @@ def close_focus_window(focus_id: str) -> None:
         remaining = len(group.tabs)
 
     if remaining == 0:
+        _log_close(group.wid, reason or "last tab closed", [focus_id])
         _destroy_group(group)
     else:
         _push_focus_event(group.window, "__uefnFocusTabClose", focus_id, title)
@@ -757,7 +780,7 @@ def close_all_focus_windows() -> None:
         _destroy_window(group.window)
 
 
-def close_window(window: Any) -> None:
+def close_window(window: Any, *, reason: str = "") -> None:
     if window is _main_window:
         return
 
@@ -767,8 +790,10 @@ def close_window(window: Any) -> None:
             return
         if group in _focus_groups:
             _focus_groups.remove(group)
+        tab_ids = list(group.tabs)
         group.tabs.clear()
 
+    _log_close(group.wid, reason or "close_this_window", tab_ids)
     _mark_closing(window)
     _drop_registry_window(group.wid)
     _destroy_window(window)

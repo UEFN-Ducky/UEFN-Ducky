@@ -257,7 +257,10 @@ function _stopPoll() {
 
 async function refresh() {
   const api = getApi();
-  if (!api || typeof api.get_uefn_plugin_contributions !== "function") {
+  // Focus windows boot before pywebview injects the API. Reporting ready with
+  // no enabled ids here made them close every plugin tab — and then themselves.
+  if (!api) return;
+  if (typeof api.get_uefn_plugin_contributions !== "function") {
     if (!_contrib.ready) _setContrib({ ..._contrib, ready: true });
     return;
   }

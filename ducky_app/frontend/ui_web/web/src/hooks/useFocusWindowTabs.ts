@@ -10,7 +10,7 @@ import type { TerminalShell } from "../terminal/types";
 
 import { basename, isVerseFile, projectRelativePath } from "../verse-editor/utils/isVerseFile";
 
-import { installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openOrFocusTab, releaseAllTabs, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
+import { WINDOW_ID, installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openOrFocusTab, releaseAllTabs, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
 import { registerUsageTabFocusIfOpen } from "../navigation/openUsageTab";
 import { clearBrowserPaneBounds, orphanedPluginTabs } from "../plugin-ui";
 import { usePluginContributions } from "./usePluginContributions";
@@ -315,9 +315,9 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
         reportOpenTabsNow(remaining.map((t) => t.id));
         if (remaining.length === 0) {
           releaseAllTabs();
-          if (api) await api.close_this_window();
+          if (api) await api.close_this_window("last terminal tab hidden", WINDOW_ID);
         } else if (api) {
-          await api.close_focus_window(tabId);
+          await api.close_focus_window(tabId, "terminal tab hidden");
         }
         return;
       }
@@ -333,10 +333,10 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
       reportOpenTabsNow(remaining.map((t) => t.id));
       if (remaining.length === 0) {
         releaseAllTabs();
-        if (api) await api.close_this_window();
+        if (api) await api.close_this_window("last tab closed", WINDOW_ID);
         return;
       }
-      if (api) await api.close_focus_window(tabId);
+      if (api) await api.close_focus_window(tabId, "tab closed");
     },
     [parkTerminalTab, guardUnsavedChanges],
   );
@@ -364,7 +364,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
       await killTerminalTab(tab);
       if (remaining.length === 0) {
         releaseAllTabs();
-        await getApi()?.close_this_window();
+        await getApi()?.close_this_window("last terminal killed", WINDOW_ID);
       }
     },
     [parkedTabs, killTerminalTab, confirm],
@@ -419,7 +419,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
   useEffect(() => {
     return installTabRegistryListener(
       (tabId) => openTabsRef.current.some((t) => t.id === tabId),
-      (tabId) => {
+      (tabId, by) => {
         if (Date.now() - mountedAtRef.current < 2500) {
           return;
         }
@@ -428,7 +428,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
         // Keep Python group.tabs in sync — otherwise the next Focus short-circuits to
         // Activate on a ghost id and the window stays empty ("No tabs open.").
         // close_focus_window destroys the OS window when this was the last tab.
-        void getApi()?.close_focus_window(tabId);
+        void getApi()?.close_focus_window(tabId, `tab claimed by ${by}`);
         if (remaining.length === 0) {
           releaseAllTabs();
         }
@@ -455,7 +455,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
   useEffect(() => {
     return setExternalTabDropHandler((tab) => {
       editorRef.current.openTab(tab, { activate: true });
-      void getApi()?.adopt_tab_into_this_focus_window(tab.id, tab.name);
+      void getApi()?.adopt_tab_into_this_focus_window(tab.id, tab.name, WINDOW_ID);
     });
   }, []);
 
@@ -486,7 +486,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
       reportOpenTabsNow(remaining.map((t) => t.id));
       if (remaining.length === 0) {
         releaseAllTabs();
-        void getApi()?.close_this_window();
+        void getApi()?.close_this_window("file deleted", WINDOW_ID);
       }
     });
   }, []);
@@ -509,7 +509,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
     reportOpenTabsNow(remaining.map((t) => t.id));
     if (remaining.length === 0) {
       releaseAllTabs();
-      void getApi()?.close_this_window();
+      void getApi()?.close_this_window(`plugin disabled: ${doomed.map((t) => t.id).join(",")}`, WINDOW_ID);
     }
   }, [pluginContrib.ready, pluginContrib.enabled_ids, editor.openTabs]);
 

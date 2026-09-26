@@ -30,6 +30,7 @@ import type { ChatTab, EditorDropZone, EditorTab } from "../types/panel";
 import { fileTabId } from "../types/panel";
 import { focusIdToEditorTab } from "../hooks/useFocusWindow";
 import { getApi } from "../hooks/usePanelApi";
+import { WINDOW_ID } from "../tabs/tabRegistryClient";
 import { openSidebarProjectFile } from "../utils/openSidebarProjectFile";
 import { focusActivatedEditorTab, openProjectFileAt } from "../utils/openProjectFileAt";
 import { collectActiveTabIds, collectTabIds, findGroupForTab } from "../utils/editorLayoutOps";
@@ -488,7 +489,7 @@ function FocusViewMain({
       dropTabOnGroup(targetGroupId, tabId, sourceGroupId, zone);
       if (external) {
         const tab = openTabsRef.current.find((t) => t.id === tabId);
-        void getApi()?.adopt_tab_into_this_focus_window(tabId, tab?.name ?? titleFromTabId(tabId));
+        void getApi()?.adopt_tab_into_this_focus_window(tabId, tab?.name ?? titleFromTabId(tabId), WINDOW_ID);
       }
     },
     [dropTabOnGroup, layout.groups, titleFromTabId],

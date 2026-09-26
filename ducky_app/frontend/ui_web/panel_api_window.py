@@ -215,10 +215,11 @@ class PanelApiWindowMixin:
 
         return focus_windows.open_focus_window_at_point(focus_id, title, int(screen_x), int(screen_y))
 
-    def adopt_tab_into_this_focus_window(self, focus_id: str, title: str) -> None:
+    def adopt_tab_into_this_focus_window(self, focus_id: str, title: str, wid: str = "") -> None:
         from frontend.ui_web import focus_windows
 
-        w = self._resolve_window()
+        # A drop target is not activated by the drag — the active window is the source.
+        w = focus_windows.window_for_wid(str(wid or "")) or self._resolve_window()
         if w is None:
             raise RuntimeError("no window")
         focus_windows.adopt_tab_into_focus_window(focus_id, title, w)
@@ -420,10 +421,10 @@ class PanelApiWindowMixin:
 
         return bool(focus_windows.return_tab_to_main(focus_id, title))
 
-    def close_focus_window(self, focus_id: str) -> None:
+    def close_focus_window(self, focus_id: str, reason: str = "") -> None:
         from frontend.ui_web import focus_windows
 
-        focus_windows.close_focus_window(focus_id)
+        focus_windows.close_focus_window(focus_id, reason=str(reason or ""))
 
     def close_all_focus_windows(self) -> None:
         from frontend.ui_web import focus_windows
@@ -480,13 +481,15 @@ class PanelApiWindowMixin:
 
         report_state(relative_path, state)
 
-    def close_this_window(self) -> None:
+    def close_this_window(self, reason: str = "", wid: str = "") -> None:
         from frontend.ui_web import focus_windows
 
-        w = self._resolve_window()
+        # The JS API is shared by every window, so "active window" is whichever
+        # one has focus — not the caller. The caller's wid names it exactly.
+        w = focus_windows.window_for_wid(str(wid or "")) or self._resolve_window()
         if w is None or w is self._window:
             return
-        focus_windows.close_window(w)
+        focus_windows.close_window(w, reason=str(reason or ""))
 
     def is_focus_window(self) -> bool:
         from frontend.ui_web import focus_windows

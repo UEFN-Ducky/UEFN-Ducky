@@ -179,7 +179,7 @@ export function installFileDeleteListener(
  * `activateLocal` focuses an already-open tab. */
 export function installTabRegistryListener(
   hasTab: (tabId: string) => boolean,
-  closeLocal: (tabId: string) => void,
+  closeLocal: (tabId: string, byWindowId: string) => void,
   activateLocal: (tabId: string) => void,
 ): () => void {
   return subscribeAgentEvents((event: AgentEvent) => {
@@ -193,7 +193,7 @@ export function installTabRegistryListener(
         return;
       }
       log("closing local copy — claimed by other window", { tabId: ev.tab_id, by: ev.window_id });
-      closeLocal(ev.tab_id);
+      closeLocal(ev.tab_id, ev.window_id ?? "");
     } else if (event.type === "tab_focus_request" && ev.window_id === WINDOW_ID) {
       log("focus request — activating", ev.tab_id);
       activateLocal(ev.tab_id);
