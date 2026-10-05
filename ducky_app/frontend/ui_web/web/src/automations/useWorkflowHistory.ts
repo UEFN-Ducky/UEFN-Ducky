@@ -17,6 +17,10 @@ function changeLabel(before: AutomationDto, after: AutomationDto): string {
   if (JSON.stringify(before.graph.groups) !== JSON.stringify(after.graph.groups)) return "Edit groups";
   if (JSON.stringify(before.graph.edges) !== JSON.stringify(after.graph.edges)) return "Edit connections";
   if (before.graph.nodes.some((node, i) => node.x !== after.graph.nodes[i]?.x || node.y !== after.graph.nodes[i]?.y)) return "Move nodes";
+  const changed = before.graph.nodes.findIndex((node, i) => JSON.stringify(node) !== JSON.stringify(after.graph.nodes[i]));
+  const was = before.graph.nodes[changed], now = after.graph.nodes[changed];
+  if (was && now && was.type !== now.type) return now.type === "code.js" ? "Edit as custom code" : was.type === "code.js" ? "Revert to built-in" : "Edit node";
+  if (was && now && now.type === "code.js" && was.config.code !== now.config.code) return "Edit code";
   return "Edit node";
 }
 

@@ -5,7 +5,7 @@ import { AutomationsView } from "./AutomationsView";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
-const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn() }));
+const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 vi.mock("./AutomationTemplatePicker", () => ({
   AutomationTemplatePicker: ({ open, owners, ownerId, onOwnerChange, onSelect }: {
@@ -102,6 +102,8 @@ function editNode(id = "a") {
   fireEvent.pointerUp(document.querySelector(".aw-board")!, { button: 0, pointerId: 9 });
 }
 const details = () => screen.queryByRole("complementary", { name: "Details" });
+/** The details panel's tabs, one per selected item (not a node's Settings / Code). */
+const selectedTabs = () => within(screen.getByRole("tablist", { name: "Selected items" })).getAllByRole("tab");
 /** Details header: Edit, type into the text itself, then Save (or leave it editing). */
 function editText(fields: { name?: string; description?: string }, save = true) {
   const panel = details()!;
@@ -731,7 +733,7 @@ describe("details panel", () => {
     expect(within(panel).queryByRole("textbox")).toBeNull();  // written out, not in boxes, until Edit
     expect(within(panel).getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeTruthy();
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Selected items" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     expect(details()).toBeNull();
     editNode();
@@ -741,13 +743,13 @@ describe("details panel", () => {
   it("shows a tab for each selected item and opens the last one picked", async () => {
     await open();
     ctrlClick("s"); ctrlClick("a");
-    const tabs = screen.getAllByRole("tab");
+    const tabs = selectedTabs();
     expect(tabs.map((tab) => tab.lastElementChild?.textContent)).toEqual(["Chat input", "Pause"]);
     expect(tabs[1].getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("2 selected")).toBeTruthy();
     fireEvent.click(tabs[0]);
     expect(details()?.querySelector(".aw-insp-name")?.textContent).toBe("Chat input");
-    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("tablist", { name: "Selected items" }), { key: "ArrowRight" });
     expect(details()?.querySelector(".aw-insp-name")?.textContent).toBe("Pause");
   });
   it("never scrolls the page to show a tab while the panel slides in", async () => {
@@ -756,9 +758,9 @@ describe("details panel", () => {
     try {
       await open();
       ctrlClick("s"); ctrlClick("a"); ctrlClick("b");
-      fireEvent.click(screen.getAllByRole("tab")[0]);
-      fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
-      expect(screen.getAllByRole("tab")[2].getAttribute("aria-selected")).toBe("true");
+      fireEvent.click(selectedTabs()[0]);
+      fireEvent.keyDown(screen.getByRole("tablist", { name: "Selected items" }), { key: "ArrowLeft" });
+      expect(selectedTabs()[2].getAttribute("aria-selected")).toBe("true");
       expect(scroll).not.toHaveBeenCalled();
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
@@ -834,7 +836,7 @@ describe("details panel", () => {
   it("edits the name and description where they are written and saves them together", async () => {
     await open();
     editNode("s");
-    expect(screen.queryByText("Settings")).toBeNull();  // Chat input has nothing else to set
+    expect(details()!.querySelector(".aw-insp-settings")).toBeNull();  // Chat input has nothing else to set
     editText({ name: "Image input", description: "Send your island concept" });
     await waitFor(() => expect(saved.graph.nodes[0]).toEqual(expect.objectContaining({ label: "Image input", description: "Send your island concept" })));
     expect(api.save_workflow).toHaveBeenCalledTimes(1);  // one save for both
@@ -914,7 +916,7 @@ describe("workflow multi-selection and groups", () => {
     fireEvent.pointerDown(title, { button: 0, ctrlKey: true });
     fireEvent.click(title, { ctrlKey: true });
     expect(selected()).toEqual(['a', 'b']);
-    expect(screen.getAllByRole('tab').map((tab) => tab.lastElementChild?.textContent)).toEqual(['Pause', 'Continue']);
+    expect(selectedTabs().map((tab) => tab.lastElementChild?.textContent)).toEqual(['Pause', 'Continue']);
     expect(api.save_workflow).not.toHaveBeenCalled();
   });
 
@@ -963,7 +965,7 @@ describe("workflow multi-selection and groups", () => {
     await makeGroup();
     expect(document.querySelector('.aw-group-title')?.textContent).toBe('Group');
     // The new group opens in the panel, ahead of its nodes.
-    expect(screen.getAllByRole('tab').map((tab) => tab.lastElementChild?.textContent)).toEqual(['Group', 'Chat input', 'Pause']);
+    expect(selectedTabs().map((tab) => tab.lastElementChild?.textContent)).toEqual(['Group', 'Chat input', 'Pause']);
     fireEvent.click(within(details()!).getByRole('button', { name: 'Edit' }));
     const input = within(details()!).getByRole('textbox', { name: 'Group name' });
     input.textContent = 'Island setup';
@@ -1209,7 +1211,7 @@ describe("icons, fitting and agent focus", () => {
     }
     fireEvent.click(screen.getByRole("button", { name: "Group selection" }));
     await waitFor(() => expect(saved.graph.groups).toHaveLength(1));
-    fireEvent.click(screen.getByRole("tab", { name: "Group" }));
+    fireEvent.click(within(screen.getByRole("tablist", { name: "Selected items" })).getByRole("tab", { name: "Group" }));
     fireEvent.click(within(details()!).getByRole("button", { name: "Edit" }));
     fireEvent.click(screen.getByRole("button", { name: "Group icon" }));
     fireEvent.click(screen.getByRole("button", { name: "Icon 🏆" }));
@@ -1903,7 +1905,7 @@ describe("image nodes", () => {
   it("folds a node's Settings, and folded stays folded", async () => {
     await openPipe();
     editNode("gen");
-    const fold = () => within(details()!).getByText("Settings").closest("details") as HTMLDetailsElement;
+    const fold = () => details()!.querySelector("details.aw-insp-settings") as HTMLDetailsElement;
     expect(fold().open).toBe(true);
     fold().open = false;
     fireEvent(fold(), new Event("toggle"));
@@ -1976,6 +1978,98 @@ describe("no workflows yet", () => {
     fireEvent.click(screen.getByText("Example"));
     await screen.findByRole("button", { name: "Connect from Pause" });
     expect(document.querySelector(".aw-list-foot")).toBeNull();  // a workflow is open: the canvas has the room
+  });
+});
+
+describe("custom code nodes", () => {
+  const CODE = "// @ts-check\nexport const node = { kind: \"step\", inputs: [], outputs: [] };\nexport default async function run(input, ducky) {\n  return {};\n}\n";
+  const canvas = () => document.querySelector('.aw-board')!;
+  const catalog = [
+    { type: "start.chat", label: "Chat", role: "starter", group: "Starting" },
+    { type: "flow.wait", label: "Wait", group: "Logic", config_fields: [{ id: "seconds", label: "Seconds", type: "number" }] },
+    { type: "code.js", label: "Custom code", role: "action", group: "Code", description: "Run your own JavaScript" },
+  ];
+  beforeEach(() => {
+    api.list_workflow_nodes.mockResolvedValue({ nodes: catalog });
+    api.check_workflow_node_code.mockResolvedValue({ ok: true, problems: [], pins: { exec: true, inputs: [], outputs: [] }, settings_spec: [], uses: { tools: [], builtins: [] }, code_sha: "s" });
+    api.workflow_code_api.mockResolvedValue({ ok: true, dts: "declare module \"ducky\" { export interface Ducky {} }" });
+    api.get_workflow_node_code.mockImplementation(async (_id: string, nodeId: string) => {
+      const node = saved.graph.nodes.find((item) => item.id === nodeId);
+      return node?.type === "code.js"
+        ? { ok: true, kind: "custom", code: node.config.code, code_sha: "sha1", pins: node.config.pins, settings_spec: [], uses: { tools: [], builtins: [] }, problems: [], convertible: true, reason: "", approved: true }
+        : { ok: true, kind: "builtin", code: "// generated", code_sha: "g", pins: { exec: true, inputs: [], outputs: [] }, settings_spec: [], uses: { tools: [], builtins: [] }, problems: [], convertible: true, reason: "", approved: true };
+    });
+  });
+  function withCodeNode() {
+    saved.graph.nodes.push({ id: "c", type: "code.js", label: "My code", x: 840, y: 0, config: { code: CODE, code_sha: "sha1", pins: { exec: true, inputs: [], outputs: [] }, settings: {}, inputs: {} } });
+  }
+  const codeTab = () => within(details()!).getByRole("tab", { name: /Code/ });
+
+  it("adds a Custom code node from the palette's Code group, ready to run the blank template", async () => {
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Add nodes" }));
+    const menu = screen.getByRole("dialog", { name: "Add node" });
+    await waitFor(() => expect([...menu.querySelectorAll(".aw-acc-name")].map((el) => el.textContent)).toContain("Code"));
+    fireEvent.click(within(menu).getByRole("button", { name: /Custom code/ }));
+    const added = document.querySelector('.aw-node .aw-code-badge')?.closest("[data-aw-node]");
+    expect(added).toBeTruthy();
+    expect(added!.querySelector(".aw-node-title strong")?.textContent).toBe("Custom code");
+    await save();
+    const node = saved.graph.nodes.find((item) => item.type === "code.js")!;
+    expect(String(node.config.code)).toContain("export default async function run(input, ducky)");
+    expect(node.config.pins).toEqual({ exec: true, inputs: [{ id: "text", type: "text", label: "Text" }], outputs: [{ id: "text", type: "text", label: "Text" }] });
+  });
+
+  it("keeps Custom code out of a team workflow's palette", async () => {
+    await open("Daily check");
+    fireEvent.click(screen.getByRole("button", { name: "Add nodes" }));
+    const menu = screen.getByRole("dialog", { name: "Add node" });
+    await waitFor(() => expect(menu.textContent).toContain("Wait"));
+    expect(within(menu).queryByRole("button", { name: /Custom code/ })).toBeNull();
+  });
+
+  it("Ctrl+Z in the code editor undoes the text there, not the graph; typing is one undo step", async () => {
+    withCodeNode();
+    await open();
+    editNode("c");
+    fireEvent.click(codeTab());
+    expect(codeTab().getAttribute("aria-selected")).toBe("true");
+    expect(window.localStorage.getItem("ducky.workflows.detailsTab")).toBe("code");
+    const box = within(details()!).getByRole("textbox", { name: "Code" }) as HTMLTextAreaElement;
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: `${CODE}// one\n` } });
+    fireEvent.change(box, { target: { value: `${CODE}// one\n// two\n` } });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    fireEvent.keyDown(box, { key: "z", ctrlKey: true });
+    fireEvent.blur(box);
+    await save();
+    expect(saved.graph.nodes.find((item) => item.id === "c")?.config.code).toBe(`${CODE}// one\n// two\n`);
+    // On the canvas, one Ctrl+Z takes back the whole typing session.
+    fireEvent.keyDown(canvas(), { key: "z", ctrlKey: true });
+    await waitFor(() => expect(saved.graph.nodes.find((item) => item.id === "c")?.config.code).toBe(CODE));
+  });
+
+  it("a failed code step in the run log opens its Code tab at the line", async () => {
+    withCodeNode();
+    saved.runs = [{ ok: false, error: "My code: Line 2: boom", steps: [{ id: "c", type: "code.js", label: "My code", ok: false, error: "Line 2: boom", code_error: { line: 2, col: 3, message: "boom" } }] }];
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Run log" }));
+    fireEvent.click(screen.getByRole("button", { name: "My code — Line 2: boom" }));
+    expect(details()?.querySelector(".aw-insp-name")?.textContent).toBe("My code");
+    expect(codeTab().getAttribute("aria-selected")).toBe("true");
+    expect(within(details()!).getByRole("button", { name: "Last run failed: Line 2: boom" })).toBeTruthy();
+  });
+
+  it("shows the generated code of a built-in on its Code tab", async () => {
+    await open();
+    editNode("a");
+    fireEvent.click(codeTab());
+    const box = await within(details()!).findByRole("textbox", { name: /Code of Wait/ }) as HTMLTextAreaElement;
+    expect(box.value).toBe("// generated");
+    expect(api.get_workflow_node_code).toHaveBeenCalledWith("p", "a");
+    // Settings stays the default view for everyone else.
+    fireEvent.click(within(details()!).getByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeTruthy();
   });
 });
 

@@ -1425,3 +1425,96 @@
 .aw-terminal-output > strong { display: block; font-size: 11px; margin-bottom: 4px; }
 .aw-terminal-output pre { margin: 0; padding: 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; background: var(--bg); font: 11px/1.4 monospace; }
 .aw-terminal-output.is-compact pre { height: 106px; max-height: 106px; }
+
+/* Node details: Settings | Code under the name. */
+.aw-insp-subtabs { flex-shrink: 0; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
+.aw-insp-subtab { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 3px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.aw-insp-subtab:hover { color: var(--text); background: var(--bg-hover); }
+.aw-insp-subtab[aria-selected="true"] { color: var(--text); background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+.aw-insp-subpanel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (pointer: coarse) { .aw-insp-subtab { min-height: 40px; } }
+
+/* Custom code: the </> mark on cards, tabs and the Code strip. */
+.aw-code-badge { display: inline-grid; place-items: center; flex: 0 0 auto; padding: 0 5px; min-width: 22px; height: 18px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); font-family: var(--font-mono); font-size: 10px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.aw-node-title > .aw-code-badge { position: relative; z-index: 2; margin-left: 6px; background: color-mix(in srgb, var(--wf-canvas) 45%, transparent); color: var(--wf-node-text); }
+.aw-node-title > .aw-code-badge + .aw-lock-badge { margin-left: 4px; }
+
+/* Code tab: the strip, the editor, its buttons, Test. */
+.aw-code-tab { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.aw-code-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.aw-code-strip strong { color: var(--text); font-weight: 600; }
+.aw-code-strip > .aw-code-chip-wrap, .aw-code-strip > .aw-code-chip { margin-left: auto; }
+.aw-code-note, .aw-code-why { margin: 0; }
+.aw-code-editor { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.aw-code-monaco { height: 340px; }
+.aw-inspector.is-wide .aw-code-monaco { height: min(62vh, 640px); }
+.aw-code-plain { display: block; min-height: 280px; padding: 8px 10px; color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre; overflow: auto; resize: vertical; }
+.aw-code-plain:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+@media (pointer: coarse) { .aw-code-plain { font-size: 14px; } }
+.aw-code-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.aw-code-actions button, .aw-code-confirm-actions button, .aw-code-review button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.aw-code-actions button:hover:not(:disabled), .aw-code-confirm-actions button:hover, .aw-code-review button:hover { background: var(--bg-hover); }
+.aw-code-actions button:disabled { opacity: 0.5; cursor: default; }
+.aw-code-actions button[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.aw-code-actions button svg, .aw-code-confirm-actions button svg, .aw-code-review button svg { width: 13px; height: 13px; }
+.aw-code-actions .is-primary, .aw-code-confirm-actions .is-primary, .aw-code-review .is-primary { border-color: var(--accent); background: var(--accent); color: var(--fg-inverse); }
+.aw-code-actions .is-primary:hover:not(:disabled), .aw-code-confirm-actions .is-primary:hover, .aw-code-review .is-primary:hover { background: var(--accent-hover, var(--accent)); }
+@media (pointer: coarse) { .aw-code-actions button, .aw-code-confirm-actions button, .aw-code-review button { min-height: 40px; } }
+
+/* The problems chip and its list. */
+.aw-code-chip-wrap { position: relative; display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.aw-code-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text-muted); font: inherit; font-size: 11px; font-weight: 600; }
+button.aw-code-chip { cursor: pointer; }
+.aw-code-chip svg { width: 12px; height: 12px; }
+.aw-code-chip.is-ok { color: var(--wf-run-path); }
+.aw-code-chip.is-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.aw-code-chip.is-warning { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
+.aw-code-problems { display: flex; flex-direction: column; gap: 2px; width: 100%; max-height: 180px; margin: 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.aw-code-strip .aw-code-chip-wrap:has(.aw-code-problems) { flex-basis: 100%; }
+.aw-code-problems button { width: 100%; padding: 4px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.aw-code-problems button:hover { background: var(--bg-hover); }
+.aw-code-problems button.is-error { color: var(--danger); }
+.aw-code-problems button.is-warning { color: var(--amber); }
+
+/* Confirm boxes (convert, revert), the agent-change review, the pins preview. */
+.aw-code-confirm, .aw-code-review, .aw-code-pins { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); font-size: 12px; }
+.aw-code-confirm p, .aw-code-review p { margin: 0; color: var(--text); line-height: 1.5; }
+.aw-code-confirm .aw-code-confirm-warn { color: var(--amber); font-weight: 600; }
+.aw-code-wires { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 0 0 16px; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
+.aw-code-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.aw-code-review { border-color: color-mix(in srgb, var(--amber) 55%, var(--border)); }
+.aw-code-review button { align-self: flex-start; }
+.aw-code-pins > strong { color: var(--text-muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.aw-code-pins ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 11px; }
+.aw-code-pins .is-added { color: var(--wf-run-path); }
+.aw-code-pins .is-removed { color: var(--amber); }
+
+/* Errors that jump to their line: the last run's, Test's. */
+.aw-code-error-line { align-self: flex-start; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 6px; background: var(--red-dim); color: var(--danger); font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.aw-code-error-line:disabled { cursor: default; }
+
+/* Test: inputs, Dry run, what came back. */
+.aw-code-test { padding-top: 12px; border-top: 1px solid var(--border); }
+.aw-code-test-inputs { gap: 10px; }
+.aw-code-result { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wf-run-path) 40%, var(--border)); border-radius: 10px; font-size: 12px; }
+.aw-code-result.is-error { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.aw-code-result > strong { color: var(--text-muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.aw-code-result-head { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.aw-code-result-head svg { width: 13px; height: 13px; }
+.aw-code-result.is-ok .aw-code-result-head svg { color: var(--wf-run-path); }
+.aw-code-result.is-error .aw-code-result-head svg { color: var(--danger); }
+.aw-code-calls { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.aw-code-calls code { font-size: 12px; }
+.aw-code-calls small { color: var(--text-muted); }
+
+/* Compare on a phone: one column, added and removed lines marked. */
+.aw-code-diff-plain { max-height: 420px; margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+.aw-code-diff-plain .is-added { display: block; background: color-mix(in srgb, var(--wf-run-path) 16%, transparent); }
+.aw-code-diff-plain .is-removed { display: block; background: var(--red-dim); color: var(--text-muted); }
+
+/* Run log: a failed custom code step opens its code. */
+.aw-log-step-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.aw-log-step-link:hover { text-decoration-style: solid; }

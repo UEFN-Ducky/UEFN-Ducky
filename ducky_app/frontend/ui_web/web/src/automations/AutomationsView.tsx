@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { useWorkflowHistory, editableWorkflow } from "./useWorkflowHistory";
 import { AutomationTemplatePicker } from "./AutomationTemplatePicker";
-import { WorkflowInspector, type InspectorTab } from "./WorkflowInspector";
+import { readDetailsTab, WorkflowInspector, writeDetailsTab, type DetailsTab, type InspectorTab } from "./WorkflowInspector";
+import { blankCodeConfig, CODE_TYPE, dropWires, isCodeNode, wiresDropped } from "./codeNode";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { CanvasMenu } from "./CanvasMenu";
 import type {
@@ -44,7 +45,7 @@ import { formatRunLog, runLogHasContent } from "./runLog";
 import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
 import type { LiveNodeRun } from "./LiveNodeStatus";
 
-import { GroupIcon, isEndNode, nodeLabel, nodeRole, nodeSummary, NodeIcon, useNodeFaces } from "./NodeVisuals";
+import { basedOnNode, GroupIcon, isEndNode, nodeLabel, nodeRole, nodeSummary, NodeIcon, useNodeFaces } from "./NodeVisuals";
 import { cleanGroups, deleteNodes, groupBounds, groupDepth, groupLocked, groupMembers, groupNodes, intersects, nodeLocked, removeGroup, selectionRect, ungroupNodes, type GraphRect } from "./workflowGroups";
 import { buildFolderTree, folderName, folderPaths, loadEmptyFolders, movedPath, normalizeFolder, parentFolder, saveEmptyFolders } from "./workflowFolders";
 import { describeSignature } from "./FunctionSettings";
@@ -58,7 +59,7 @@ const LOG_H_DEFAULT = 220;
 const FEATURED_TEMPLATES = ["builtin:pipe-prompt-image", "builtin:pipe-prompt-3d-uefn", "builtin:pipe-character-full", "builtin:playtest-start", "builtin:pipe-title-card"];
 
 const GROUP_ORDER = ["Starting", "Triggers", "Inputs", "Functions", "Agents", "Duckies", "Text & AI", "Images", "Image tools", "3D", "3D tools", "Characters",
-  "Blender", "UEFN", "Play test", "Lists", "Documents", "Tools", "Logic", "Utility", "End"];
+  "Blender", "UEFN", "Play test", "Lists", "Documents", "Tools", "Logic", "Code", "Utility", "End"];
 /** Canvas units a group's title takes above its box at 100%; nested boxes leave this room.
  *  Zoomed out the title is drawn bigger (groupTitleScale) so it stays readable. */
 const GROUP_TITLE_PX = 44;
@@ -192,6 +193,8 @@ const LIST_W = { min: 180, max: 480, initial: 220 };
 /** Editor width at or below which it uses the phone layout (matches @container 680px in the CSS). */
 const PHONE_EDITOR_W = 680;
 const INSPECTOR_W = { min: 280, max: 640, initial: 340 };
+/** The details panel's width while Pop out is on in a node's Code tab (the CSS caps it to the editor). */
+const CODE_WIDE_W = 760;
 type PanelWidths = { list: number; inspector: number };
 
 function fitWidth(value: unknown, limits: { min: number; max: number; initial: number }): number {
@@ -308,13 +311,16 @@ function previewText(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
-function RunSteps({ steps }: { steps: AutomationRunStepDto[] }) {
-  return <>{steps.map((s, i) => (
-    <li key={i} className={s.ok === false ? "is-err" : ""} data-aw-log-node={s.id || undefined}>
-      {s.label || s.type} {s.ok === false ? `— ${s.error}` : s.stop ? "ok · no Return reached, this path stopped" : "ok"}
+/** `onOpenCode`: a failed custom code step opens its code at the line that failed. */
+function RunSteps({ steps, onOpenCode }: { steps: AutomationRunStepDto[]; onOpenCode?: (step: AutomationRunStepDto) => void }) {
+  return <>{steps.map((s, i) => {
+    const text = `${s.label || s.type} ${s.ok === false ? `— ${s.error}` : s.stop ? "ok · no Return reached, this path stopped" : "ok"}`;
+    const code = !!onOpenCode && !!s.id && s.ok === false && (!!s.code_error || s.type === CODE_TYPE);
+    return <li key={i} className={s.ok === false ? "is-err" : ""} data-aw-log-node={s.id || undefined}>
+      {code ? <button type="button" className="aw-log-step-link" title="Open its code at the line that failed" onClick={() => onOpenCode?.(s)}>{text}</button> : text}
       {s.substeps?.length ? <ol className="aw-log-substeps"><RunSteps steps={s.substeps} /></ol> : null}
-    </li>
-  ))}</>;
+    </li>;
+  })}</>;
 }
 
 export function AutomationsView() {
@@ -432,6 +438,13 @@ export function AutomationsView() {
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
   /** The details panel tab last picked or clicked on the canvas ("node:<id>", "group:<id>", "edge:<i>"). */
   const [inspectorKey, setInspectorKey] = useState("");
+  // A node's details show Settings or Code (kept on this PC); Pop out widens them for code.
+  const [detailsTab, setDetailsTab] = useState<DetailsTab>(readDetailsTab);
+  const pickDetailsTab = (tab: DetailsTab) => { setDetailsTab(tab); writeDetailsTab(tab); };
+  const [codeWide, setCodeWide] = useState(false);
+  const [codeFocus, setCodeFocus] = useState<{ nodeId: string; line: number; nonce: number } | null>(null);
+  /** The custom code node being typed in: its wires to pins the code drops stay until typing ends. */
+  const codeSession = useRef("");
   const [groupsCollapsed, setGroupsCollapsed] = useState(false);
   const [pan, setPan] = useState({ x: 280, y: 160 });
   const [zoom, setZoom] = useState(1);
@@ -1019,7 +1032,7 @@ export function AutomationsView() {
       type: entry.type,
       x: 0,
       y: 0,
-      config: entry.type === "pipeline.agent" ? { ducky: "__new__" } : entry.workflowId ? { workflow_id: entry.workflowId, args: {} } : {},
+      config: entry.type === "pipeline.agent" ? { ducky: "__new__" } : entry.workflowId ? { workflow_id: entry.workflowId, args: {} } : entry.type === CODE_TYPE ? blankCodeConfig() : {},
       label: entry.label,
       description: entry.description || "",
     };
@@ -1077,15 +1090,17 @@ export function AutomationsView() {
   /** Play on one node (you pressing it is the approval for its paid steps), or "Use
    *  this" on a picture (the steps that take the picture on screen). */
   const runNode = async (nodeId: string, how: "run" | "keep" = "run") => {
-    if (!draft?.id || busy || runningNode) return;
+    // The newest draft: code typed a moment ago reaches it just before the click.
+    const doc = history.current.current || draft;
+    if (!doc?.id || busy || runningNode) return;
     const gen = loadGen.current;
     setRunningNode(nodeId);
     setLogOpen(true);
     try {
-      await saveBeforeRun(draft);
+      await saveBeforeRun(doc);
       const res = how === "keep"
-        ? await runBridgeJob<AutomationRunDto>("keep_workflow_preview", [draft.id, nodeId], RUN_TIMEOUT_MS)
-        : await runBridgeJob<AutomationRunDto>("run_workflow_node", [draft.id, nodeId, true], RUN_TIMEOUT_MS);
+        ? await runBridgeJob<AutomationRunDto>("keep_workflow_preview", [doc.id, nodeId], RUN_TIMEOUT_MS)
+        : await runBridgeJob<AutomationRunDto>("run_workflow_node", [doc.id, nodeId, true], RUN_TIMEOUT_MS);
       if (res && gen === loadGen.current) {
         setLog(res);
         if (res.ok === false && res.error) setActionError(res.error);
@@ -1111,15 +1126,18 @@ export function AutomationsView() {
   // no Return before an input.
   const spawnDir = spawn?.wire?.dir;
   const spawnPin = spawn?.wire?.pin ? spawn.wire.pinType || "any" : "";
+  const teamWorkflow = draft?.owner?.kind === "team";
   const spawnGroups = useMemo(() => groupCatalog([...catalog, ...functionTiles].filter((tile) => {
+    if (tile.type === CODE_TYPE && teamWorkflow) return false;  // custom code runs in Local workflows only for now
     if (spawnPin) {
-      const pins = nodePins({ id: "", type: tile.type, x: 0, y: 0, config: (tile as PaletteTile).workflowId ? { workflow_id: (tile as PaletteTile).workflowId } : {} }, tile, rows);
+      const config = (tile as PaletteTile).workflowId ? { workflow_id: (tile as PaletteTile).workflowId } : tile.type === CODE_TYPE ? blankCodeConfig() : {};
+      const pins = nodePins({ id: "", type: tile.type, x: 0, y: 0, config }, tile, rows);
       return !!firstFit(spawnDir === "out" ? pins.inputs : pins.outputs, spawnPin as PinType, spawnDir === "out");
     }
     if (tile.exec === false && spawnDir) return false;  // a white wire can't reach a data node
     return spawnDir === "out" ? !(tile.role === "starter" || tile.type.startsWith("start.") || tile.type === "flow.input")
       : spawnDir === "in" ? !END_TYPES.has(tile.type) : true;
-  }), spawnFilter), [catalog, functionTiles, spawnFilter, spawnDir, spawnPin, rows]);
+  }), spawnFilter), [catalog, functionTiles, spawnFilter, spawnDir, spawnPin, rows, teamWorkflow]);
 
   const worldFromClient = (clientX: number, clientY: number) => {
     const board = boardRef.current?.getBoundingClientRect();
@@ -1193,12 +1211,12 @@ export function AutomationsView() {
     await refreshList();
   };
 
-  const saveGraphChange = (fn: (current: AutomationGraphDto) => AutomationGraphDto) => {
+  const saveGraphChange = (fn: (current: AutomationGraphDto) => AutomationGraphDto, label?: string) => {
     if (!draft || readOnly) return;
     const nextGraph = fn(draft.graph);
     if (nextGraph === draft.graph) return;
     const next = { ...draft, graph: nextGraph };
-    setDraft(next);
+    setDraft(next, label);
     setTextSaveError(false);
     void persist(next).catch(() => setTextSaveError(true));
   };
@@ -1240,8 +1258,67 @@ export function AutomationsView() {
     } catch { if (gen === loadGen.current) { setTextSaveError(true); setHistoryStatus("Could not restore version."); } }
   };
 
+  /** A node's settings or code changed in its details: into the draft. A data wire whose pin
+   *  is gone goes too, except while code is typed (a half-typed pin name must not cut wires;
+   *  they go when typing ends). */
+  const changeNode = (next: AutomationGraphNodeDto, label?: string) => {
+    if (nodeLocked(graph, next.id) || !draft || readOnly) return;
+    const typing = label === "Edit code" && codeSession.current === next.id;
+    setDraft((current) => {
+      if (!current) return current;
+      const g = { ...current.graph, nodes: current.graph.nodes.map((n) => (n.id === next.id ? next : n)) };
+      const pins = nodePins(next, byType.get(next.type), rows);
+      return { ...current, graph: cleanGroups(typing ? g : dropWires(g, wiresDropped(g, next.id, pins))) };
+    }, label);
+  };
+
+  /** Edit as custom code / Revert to built-in: one undo step, saved at once. */
+  const replaceNode = (next: AutomationGraphNodeDto, label: string) => {
+    if (nodeLocked(graph, next.id)) { notify(lockedNote([next.id], "changed")); return; }
+    endEdit();
+    saveGraphChange((current) => {
+      const g = { ...current, nodes: current.nodes.map((n) => (n.id === next.id ? next : n)) };
+      return dropWires(g, wiresDropped(g, next.id, nodePins(next, byType.get(next.type), rows)));
+    }, label);
+  };
+
+  /** Typing in a node's code is one undo step from focus to blur (the editor is left out of
+   *  the focused-field steps below); then wires to pins it no longer has are disconnected,
+   *  in the same step. */
+  const codeTyping = (phase: "begin" | "end", nodeId: string) => {
+    if (phase === "begin") { codeSession.current = nodeId; beginEdit(); return; }
+    if (codeSession.current !== nodeId) return;
+    codeSession.current = "";
+    const current = history.current.current;
+    const node = current?.graph.nodes.find((item) => item.id === nodeId);
+    if (current && node && isCodeNode(node) && !readOnly) {
+      const dropped = wiresDropped(current.graph, nodeId, nodePins(node, byType.get(node.type), rows));
+      if (dropped.length) setDraft({ ...current, graph: dropWires(current.graph, dropped) }, "Edit code");
+    }
+    endEdit();
+  };
+
+  /** A failed custom code step in the run log: select it and open its code at that line. */
+  const openCodeAt = (step: AutomationRunStepDto) => {
+    if (!step.id || !nodesById.has(step.id)) return;
+    setSelectedEdge(null);
+    setSelectedNodeIds([step.id]);
+    setInspectorKey(`node:${step.id}`);
+    setDetailsTab("code");
+    setCodeFocus((current) => ({ nodeId: step.id!, line: step.code_error?.line || 1, nonce: (current?.nonce || 0) + 1 }));
+    fitView([step.id], true);
+  };
+
+  /** Each node's newest step in the shown run: its inputs, log and code error. */
+  const lastSteps = useMemo(() => {
+    const out: Record<string, AutomationRunStepDto> = {};
+    for (const step of log?.steps || []) if (step.id) out[step.id] = step;  // a loop's later pass wins
+    return out;
+  }, [log]);
+
   const onGraphKeyDown = (event: React.KeyboardEvent) => {
-    if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+    // Typing fields and the code editor keep their own keys (Ctrl+Z undoes text there, not the graph).
+    if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), .monaco-editor")) return;
     const key = event.key.toLowerCase();
     if ((event.ctrlKey || event.metaKey) && !event.altKey && (key === "z" || key === "y") && draft) {
       event.preventDefault(); event.stopPropagation();
@@ -1882,6 +1959,8 @@ export function AutomationsView() {
   }, [spawn]);
 
   const logCount = log?.steps?.length || (runLogHasContent(log) ? 1 : 0);
+  const activeTab = inspectorTabs.find((tab) => tab.key === inspectorKey) || inspectorTabs[0];
+  const codeWideOn = codeWide && detailsTab === "code" && activeTab?.kind === "node";
   const clearLog = async () => {
     const id = draft?.id;
     setLog(null);
@@ -1891,9 +1970,9 @@ export function AutomationsView() {
 
   return (
     <div ref={rootRef} className={`aw-root${listCollapsed ? " is-list-collapsed" : ""}${draft ? " has-workflow" : ""}${inspectorTabs.length ? " has-inspector" : ""}${resizingPanel ? " is-resizing" : ""}`} onKeyDown={onGraphKeyDown}
-      style={{ "--aw-list-w": `${panelWidths.list}px`, "--aw-insp-w": `${panelWidths.inspector}px`, ...Object.fromEntries(PANELS.map((name) => [`--aw-z-${name}`, String(panelZoom[name])])) } as React.CSSProperties}
-      onFocusCapture={(event) => { if (event.target.matches("input:not(.aw-spawn-search), textarea")) beginEdit(); }}
-      onBlurCapture={(event) => { if (event.target.matches("input, textarea")) endEdit(); }}>
+      style={{ "--aw-list-w": `${panelWidths.list}px`, "--aw-insp-w": `${codeWideOn ? Math.max(panelWidths.inspector, CODE_WIDE_W) : panelWidths.inspector}px`, ...Object.fromEntries(PANELS.map((name) => [`--aw-z-${name}`, String(panelZoom[name])])) } as React.CSSProperties}
+      onFocusCapture={(event) => { if (event.target.matches("input:not(.aw-spawn-search), textarea") && !event.target.closest(".aw-code-editor")) beginEdit(); }}
+      onBlurCapture={(event) => { if (event.target.matches("input, textarea") && !event.target.closest(".aw-code-editor")) endEdit(); }}>
       <WorkflowList listId={sectionId + "-list"} listRef={listRef} owners={owners} rows={rows} activeId={draft ? selectedId : ""}
         collapsed={listCollapsed} nowMs={nowMs} onToggleCollapsed={() => setListCollapsed((collapsed) => !collapsed)}
         onOpen={(id) => { void loadOne(id); const width = rootRef.current?.clientWidth || 0; if (width > 0 && width <= PHONE_EDITOR_W) setListCollapsed(true); }} onCreate={createNew}
@@ -2118,8 +2197,10 @@ export function AutomationsView() {
                   >{EXEC_PIN}</button> : null}
                   <div className="aw-node-card" onPointerDown={(e) => startNodeDrag(e, node)} title={calls ? `${label} — double-click to open the workflow it runs` : label}
                     onDoubleClick={() => { if (calls) void loadOne(calls); }}>
-                    <div className="aw-node-title"><strong>{label}</strong>{locked ? <span className="aw-lock-badge" role="img" aria-label="Locked" title="Locked: unlock it in its details to move or change it"><Icons.Lock /></span> : null}</div>
-                    <div className="aw-node-mark" aria-hidden="true"><NodeIcon meta={meta} node={node} faces={faces} /></div>
+                    <div className="aw-node-title"><strong>{label}</strong>
+                      {isCodeNode(node) ? <span className="aw-code-badge" role="img" aria-label="Custom code" title="Custom code: open its details, then Code">&lt;/&gt;</span> : null}
+                      {locked ? <span className="aw-lock-badge" role="img" aria-label="Locked" title="Locked: unlock it in its details to move or change it"><Icons.Lock /></span> : null}</div>
+                    <div className="aw-node-mark" aria-hidden="true"><NodeIcon meta={meta} node={node} faces={faces} basedMeta={byType.get(basedOnNode(node)?.type || "")} /></div>
                     {layout.hasPins && !overview ? (
                       <div className="aw-node-body aw-node-body--pins">
                         {pins.exec ? <div className="aw-node-exec-row">{summary ? <span className="aw-node-sub">{summary}</span> : null}</div> : null}
@@ -2230,11 +2311,16 @@ export function AutomationsView() {
           onActivate={setInspectorKey}
           onClose={() => { setSelectedNodeIds([]); setSelectedEdge(null); }}
           onOpenWorkflow={(id) => void loadOne(id)}
-          onNodeChange={(next) => !nodeLocked(graph, next.id) && patchGraph((g) => {
-            const pins = nodePins(next, byType.get(next.type), rows);
-            return { ...g, nodes: g.nodes.map((n) => (n.id === next.id ? next : n)), edges: g.edges.filter((edge) => edge.kind !== "data"
-              || (edge.target !== next.id || pins.inputs.some((pin) => pin.id === edge.target_pin)) && (edge.source !== next.id || pins.outputs.some((pin) => pin.id === edge.source_pin))) };
-          })}
+          onNodeChange={changeNode}
+          onNodeReplace={replaceNode}
+          onCodeSession={codeTyping}
+          team={teamWorkflow}
+          detailsTab={detailsTab}
+          onDetailsTab={pickDetailsTab}
+          codeWide={codeWide}
+          onCodeWide={setCodeWide}
+          codeFocus={codeFocus}
+          lastSteps={lastSteps}
           pinsOf={pinsOf}
           nodeOutputs={lastOutputs}
           liveNodes={liveNodes}
@@ -2263,7 +2349,7 @@ export function AutomationsView() {
           onDisconnect={(index) => void confirmDelete("Remove this connection?", "Remove", () => disconnect(index))}
           onGroupSelection={selectionGroupable ? groupSelection : undefined}
         /> : null}
-        {draft && inspectorTabs.length ? <PanelResizeHandle label="Resize details panel" className="aw-resize--inspector" value={panelWidths.inspector} min={INSPECTOR_W.min} max={INSPECTOR_W.max} edge="left"
+        {draft && inspectorTabs.length && !codeWideOn ? <PanelResizeHandle label="Resize details panel" className="aw-resize--inspector" value={panelWidths.inspector} min={INSPECTOR_W.min} max={INSPECTOR_W.max} edge="left"
           onResize={(inspector) => setPanelWidths((current) => ({ ...current, inspector }))} onActive={setResizingPanel} /> : null}
         {/* Always mounted so it can grow out of (and shrink back into) the Run log button. */}
         <div
@@ -2320,7 +2406,7 @@ export function AutomationsView() {
               ) : runLogHasContent(log) ? (<>
                 <ol>
                   {log?.ok === false && log.error ? <li className="is-err">{log.error}</li> : null}
-                  <RunSteps steps={log?.steps || []} />
+                  <RunSteps steps={log?.steps || []} onOpenCode={openCodeAt} />
                 </ol>
                 {log?.outputs && Object.keys(log.outputs).length ? <p className="aw-log-returned">Returned: {Object.entries(log.outputs).map(([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`).join(", ")}</p> : null}
               </>) : (

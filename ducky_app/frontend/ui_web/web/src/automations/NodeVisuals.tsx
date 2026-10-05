@@ -88,11 +88,23 @@ const EMOJI: Record<string, string> = {
   "blender.open": "🟠", "blender.render": "🎬", "blender.export": "📤", "uefn.import": "🚚",
   "list.make": "📋", "list.get": "👉", "list.count": "🔢", "list.join": "🔗", "list.filter": "🧹", "list.map": "🔀",
   "pdf.text": "📄", "pdf.images": "🖼️", "util.save_file": "💾",
+  "code.js": "💻",
 };
 
-export function NodeIcon({ meta, node, faces = {} }: { meta?: AutomationNodeDto; node?: AutomationGraphNodeDto; faces?: Record<string, string> }) {
+/** The built-in a custom code node was made from, as a node of that type (for its icon). */
+export function basedOnNode(node: AutomationGraphNodeDto | undefined): AutomationGraphNodeDto | null {
+  if (node?.type !== "code.js") return null;
+  const raw = node.config.based_on as { type?: unknown; config?: unknown } | undefined;
+  const type = typeof raw?.type === "string" ? raw.type : "";
+  return type ? { ...node, type, config: raw?.config && typeof raw.config === "object" ? raw.config as Record<string, unknown> : {} } : null;
+}
+
+/** `basedMeta`: a custom code node made from a built-in keeps that built-in's icon. */
+export function NodeIcon({ meta, node, faces = {}, basedMeta }: { meta?: AutomationNodeDto; node?: AutomationGraphNodeDto; faces?: Record<string, string>; basedMeta?: AutomationNodeDto }) {
   const catalog = useDuckyCatalogOptional();
   if (node?.icon) return <span className="aw-node-icon" aria-hidden>{resolvePluginHeaderIcon(node.icon)}</span>;  // picked in its details
+  const based = basedOnNode(node);
+  if (based) return <NodeIcon meta={basedMeta} node={based} faces={faces} />;
   if (meta?.plugin_id && meta.icon) return <span className="aw-node-icon" aria-hidden>{resolvePluginHeaderIcon(meta.icon)}</span>;
   if (meta?.group === "Agents" || meta?.group === "Duckies" || node?.type === "pipeline.agent") {
     const assignment = String(node?.config.ducky || node?.config.profile_id || "");

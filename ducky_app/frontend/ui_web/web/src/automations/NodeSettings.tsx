@@ -12,13 +12,45 @@ import { ExpressionField, FilePicker, NamesField } from "./PinFields";
 import { nodePins } from "./pins";
 
 export function hasNodeSettings(node: AutomationGraphNodeDto, meta?: AutomationNodeDto) {
+  if (node.type === "code.js") return codeSettingsSpec(node).length > 0 || codeBuiltins(node).length > 0;
   return node.type === "tool.call" || !!meta?.config_fields?.length;
+}
+
+/** The settings a custom code node's code declares (kept from its last good check). */
+function codeSettingsSpec(node: AutomationGraphNodeDto): AutomationFieldDto[] {
+  return Array.isArray(node.config.settings_spec) ? (node.config.settings_spec as AutomationFieldDto[]).filter((field) => !!field && typeof field.id === "string" && !!field.id) : [];
+}
+
+function codeBuiltins(node: AutomationGraphNodeDto): string[] {
+  const uses = node.config.uses as { builtins?: unknown } | undefined;
+  return Array.isArray(uses?.builtins) ? uses.builtins.map(String) : [];
+}
+
+/** A custom code node: the settings its code declares (values kept in config.settings, the
+ *  declared default shown until one is set) and its own Spend switch for paid built-ins. */
+function CodeSettings({ node, onChange }: { node: AutomationGraphNodeDto; onChange: (node: AutomationGraphNodeDto) => void }) {
+  const values = (node.config.settings && typeof node.config.settings === "object" ? node.config.settings : {}) as Record<string, unknown>;
+  const builtins = codeBuiltins(node);
+  const spend = node.config.spend === true;
+  return <div className="aw-insp-form">
+    {codeSettingsSpec(node).map((field) => <ConfigField key={field.id} field={field}
+      node={{ ...node, config: { ...(field.default !== undefined ? { [field.id]: field.default } : {}), ...values } }}
+      onChange={(edited) => onChange({ ...node, config: { ...node.config, settings: { ...values, [field.id]: edited.config[field.id] } } })} />)}
+    {builtins.length ? <div className="aw-field aw-spend">
+      <button type="button" role="switch" aria-checked={spend} aria-label="Spend credits" className={`aw-spend-toggle${spend ? " is-on" : ""}`}
+        onClick={() => onChange({ ...node, config: { ...node.config, spend: !spend } })}>
+        <span>Spend credits</span><span className="aw-switch" aria-hidden="true"><span /></span>
+      </button>
+      <small className="aw-field-hint">Its code runs {builtins.join(", ")}. {spend ? "Paid ones spend when the workflow runs." : "Off: paid ones spend only when you press play."}</small>
+    </div> : null}
+  </div>;
 }
 
 /** Run workflow nodes list the other workflows; `onOpen` jumps to the one it runs. */
 type WorkflowChoices = { workflows?: AutomationSummaryDto[]; currentId?: string; onOpen?: (id: string) => void };
 
 export function NodeSettings({ node, meta, onChange, workflows = [], currentId, onOpen }: { node: AutomationGraphNodeDto; meta?: AutomationNodeDto; onChange: (node: AutomationGraphNodeDto) => void } & WorkflowChoices) {
+  if (node.type === "code.js") return <CodeSettings node={node} onChange={onChange} />;
   return <div className="aw-insp-form">
     {node.type === "tool.call" ? <ToolSettings node={node} onChange={onChange} />
       : node.type === "workflow.call" ? <CallSettings node={node} workflows={workflows} currentId={currentId} onChange={onChange} onOpen={onOpen} />

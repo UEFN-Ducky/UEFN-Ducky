@@ -35,6 +35,15 @@ describe("workflow edit history", () => {
     expect(result.current.entries).toHaveLength(1);
     expect(result.current.go(1)).toBeNull();
   });
+  it("names custom code steps: convert, typing in the code, revert", () => {
+    const { result } = renderHook(useWorkflowHistory);
+    act(() => result.current.reset(doc()));
+    const setNode = (patch: Record<string, unknown>) => act(() => result.current.setDraft(current => ({ ...current!, graph: { ...current!.graph, nodes: [{ ...current!.graph.nodes[0], ...patch }] } })));
+    setNode({ type: "code.js", config: { code: "a", based_on: { type: "flow.wait", config: {} } } });
+    setNode({ config: { code: "ab", based_on: { type: "flow.wait", config: {} } } });
+    setNode({ type: "flow.wait", config: {} });
+    expect(result.current.entries.map((entry) => entry.label)).toEqual(["Opened workflow", "Edit as custom code", "Edit code", "Revert to built-in"]);
+  });
   it("undoes graph, settings, membership, and saved-version restores without mutating earlier snapshots", () => {
     const { result } = renderHook(useWorkflowHistory);
     act(() => result.current.reset(doc()));

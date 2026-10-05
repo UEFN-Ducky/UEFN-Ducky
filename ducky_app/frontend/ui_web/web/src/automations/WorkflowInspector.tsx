@@ -7,10 +7,12 @@ import type {
   AutomationGraphGroupDto,
   AutomationGraphNodeDto,
   AutomationNodeDto,
+  AutomationRunStepDto,
   AutomationSummaryDto,
 } from "../types/panel";
 import { NodeSettings, hasNodeSettings } from "./NodeSettings";
-import { GroupIcon, NodeIcon, nodeLabel, nodeRole } from "./NodeVisuals";
+import { basedOnNode, GroupIcon, NodeIcon, nodeLabel, nodeRole } from "./NodeVisuals";
+import { CodeTab } from "./CodeTab";
 import { IconPicker } from "./IconPicker";
 import { PinsSection } from "./PinFields";
 import { LiveNodeStatus, type LiveNodeRun } from "./LiveNodeStatus";
@@ -31,8 +33,16 @@ export type InspectorActions = {
   onActivate: (key: string) => void;
   onClose: () => void;
   onOpenWorkflow: (id: string) => void;
-  /** Settings edits go into the draft; Save keeps them. */
-  onNodeChange: (node: AutomationGraphNodeDto) => void;
+  /** Settings edits go into the draft; Save keeps them. `label` names the undo step. */
+  onNodeChange: (node: AutomationGraphNodeDto, label?: string) => void;
+  /** Edit as custom code / Revert to built-in: the node changes type in the draft and is saved. */
+  onNodeReplace?: (node: AutomationGraphNodeDto, label: string) => void;
+  /** Typing in a node's code begins and ends one undo step. */
+  onCodeSession?: (phase: "begin" | "end", nodeId: string) => void;
+  /** Settings or Code under a node's name (kept on this PC). */
+  onDetailsTab?: (tab: DetailsTab) => void;
+  /** Pop out: the details panel widens while the Code tab is open. */
+  onCodeWide?: (wide: boolean) => void;
   /** Name and description save as soon as they are committed. */
   onNodeText: (id: string, patch: { label?: string; description?: string }) => void;
   /** "" goes back to the color of its kind. */
@@ -73,7 +83,26 @@ type Props = InspectorActions & {
   nodeOutputs?: Record<string, Record<string, unknown>>;
   /** The run going on now (or just ended): each step's state, time, error and terminal log. */
   liveNodes?: Record<string, LiveNodeRun>;
+  /** Each node's newest step in the last run (inputs, log, code error). */
+  lastSteps?: Record<string, AutomationRunStepDto>;
+  /** A team's workflow (custom code runs in Local ones only for now). */
+  team?: boolean;
+  detailsTab?: DetailsTab;
+  codeWide?: boolean;
+  /** Open this node's Code tab at a line (a failed code step clicked in the run log). */
+  codeFocus?: { nodeId: string; line: number; nonce: number } | null;
 };
+
+export type DetailsTab = "settings" | "code";
+export const DETAILS_TAB_KEY = "ducky.workflows.detailsTab";
+
+export function readDetailsTab(): DetailsTab {
+  try { return window.localStorage.getItem(DETAILS_TAB_KEY) === "code" ? "code" : "settings"; } catch { return "settings"; }
+}
+
+export function writeDetailsTab(tab: DetailsTab) {
+  try { window.localStorage.setItem(DETAILS_TAB_KEY, tab); } catch { /* private mode */ }
+}
 
 const COLOR_NAMES: Record<string, string> = { "": "Plain", red: "Red", amber: "Gold", green: "Green", blue: "Blue", purple: "Purple" };
 
@@ -192,7 +221,7 @@ function tabLabel(tab: InspectorTab, byType: Map<string, AutomationNodeDto>, gra
 }
 
 function TabIcon({ tab, byType, faces }: { tab: InspectorTab; byType: Map<string, AutomationNodeDto>; faces: Record<string, string> }) {
-  if (tab.kind === "node") return <NodeIcon meta={byType.get(tab.node.type)} node={tab.node} faces={faces} />;
+  if (tab.kind === "node") return <NodeIcon meta={byType.get(tab.node.type)} node={tab.node} faces={faces} basedMeta={byType.get(basedOnNode(tab.node)?.type || "")} />;
   if (tab.kind === "group") return <GroupIcon icon={tab.group.icon} />;
   return <span className="aw-node-icon" aria-hidden><Icons.GitBranch /></span>;
 }
@@ -240,7 +269,7 @@ export function WorkflowInspector(props: Props) {
     [...(tabsRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') || [])].find((el) => el.dataset.tabKey === next.key)?.focus({ preventScroll: true });
   };
 
-  return <aside ref={(el) => { panelRef.current = el; targetRef("workflows.details", { route: "workflows", label: "Details panel" })(el); }} className={`aw-inspector${open ? " is-open" : ""}`} aria-label="Details" data-aw-zoom="details" aria-hidden={!open}>
+  return <aside ref={(el) => { panelRef.current = el; targetRef("workflows.details", { route: "workflows", label: "Details panel" })(el); }} className={`aw-inspector${open ? " is-open" : ""}${props.codeWide && active?.kind === "node" && props.detailsTab === "code" ? " is-wide" : ""}`} aria-label="Details" data-aw-zoom="details" aria-hidden={!open}>
     <header className="aw-insp-head">
       <strong>{shown.length > 1 ? `${shown.length} selected` : active?.kind === "group" ? "Group" : active?.kind === "edge" ? "Connection" : "Node"}</strong>
       {head.lockedNote ? <span className="aw-insp-state" title={head.lockedNote}><Icons.Lock /> Locked</span> : null}
@@ -356,30 +385,59 @@ function SettingsFold({ children }: { children: ReactNode }) {
   </details>;
 }
 
-function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, liveNodes, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
+function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, liveNodes, lastSteps, team, detailsTab = "settings", codeWide = false, codeFocus, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
   const meta = byType.get(node.type);
+  const basedMeta = byType.get(basedOnNode(node)?.type || "");
   const label = nodeLabel(node, meta);
   const group = graph.groups?.find((item) => item.node_ids.includes(node.id));
   const lockedBy = node.locked ? undefined : lockingGroup(graph.groups || [], group?.id);
-  const frozen = readOnly || !!node.locked || !!lockedBy;
+  const locked = !!node.locked || !!lockedBy;
+  const frozen = readOnly || locked;
+  const tabsId = useId();
+  // A failed code step clicked in the run log: its Code tab, at the error line.
+  const reveal = codeFocus && codeFocus.nodeId === node.id ? { line: codeFocus.line, nonce: codeFocus.nonce } : null;
+  const tab: DetailsTab = detailsTab;
+  const pick = (next: DetailsTab) => on.onDetailsTab?.(next);
+  const onTabKey = (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = tab === "code" ? "settings" : "code";
+    pick(next);
+    event.currentTarget.querySelector<HTMLElement>(`[data-details-tab="${next}"]`)?.focus({ preventScroll: true });
+  };
   return <>
-    <DetailsHead icon={<IconPicker icon={node.icon} shown={<NodeIcon meta={meta} node={node} faces={faces} />} label="Node icon" disabled={frozen || !editing} onChange={(icon) => on.onNodeIcon(node.id, icon)} />} kind={[meta?.label || node.type, meta?.group].filter(Boolean).join(" · ")}
+    <DetailsHead icon={<IconPicker icon={node.icon} shown={<NodeIcon meta={meta} node={node} faces={faces} basedMeta={basedMeta} />} label="Node icon" disabled={frozen || !editing} onChange={(icon) => on.onNodeIcon(node.id, icon)} />} kind={[meta?.label || node.type, meta?.group].filter(Boolean).join(" · ")}
       name={label} nameLabel="Node name" description={node.description ?? ""} fallback={meta?.description} editable={!frozen} editing={editing} onEditing={onEditing}
       onSave={(patch) => on.onNodeText(node.id, { ...(patch.name !== undefined ? { label: patch.name } : {}), ...(patch.description !== undefined ? { description: patch.description } : {}) })} />
     {editing && !frozen ? <fieldset className="aw-insp-section aw-insp-look">
       <ColorField label="Color" value={node.color || ""} plainLabel="By kind" className={`aw-swatches--${nodeRole(node, meta)}`} onChange={(color) => on.onNodeColor(node.id, color)} />
     </fieldset> : null}
     {liveNodes?.[node.id] ? <LiveNodeStatus run={liveNodes[node.id]!} /> : null}
-    {pinsOf ? <PinsSection node={node} pins={pinsOf(node)} graph={graph} outputs={nodeOutputs?.[node.id]} frozen={frozen}
-      onNodeChange={on.onNodeChange} /> : null}
-    {hasNodeSettings(node, meta) ? <SettingsFold>
-      <fieldset className="aw-insp-fold" disabled={frozen}>
-        <NodeSettings node={node} meta={meta} workflows={workflows} currentId={currentId} onOpen={on.onOpenWorkflow} onChange={on.onNodeChange} />
-      </fieldset>
-    </SettingsFold> : null}
-    {frozen || !group ? null : <div className="aw-insp-actions">
-      <button type="button" title="Move it out of its group (Ctrl+Shift+G)" onClick={() => on.onTakeOut(node.id)}>Take out of {group.name}</button>
-    </div>}
+    <div className="aw-insp-subtabs" role="tablist" aria-label="Node details" onKeyDown={onTabKey}>
+      {(["settings", "code"] as const).map((key) => <button key={key} type="button" role="tab" data-details-tab={key} id={`${tabsId}-${key}`} aria-controls={`${tabsId}-panel`}
+        aria-selected={tab === key} tabIndex={tab === key ? 0 : -1} className="aw-insp-subtab" onClick={() => pick(key)}>
+        {key === "settings" ? "Settings" : <><span className="aw-code-badge" aria-hidden="true">&lt;/&gt;</span> Code</>}
+      </button>)}
+    </div>
+    <div className="aw-insp-subpanel" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
+      {tab === "code" ? <CodeTab workflowId={currentId || ""} node={node} graph={graph} byType={byType} workflows={workflows}
+        pins={pinsOf ? pinsOf(node) : { exec: true, inputs: [], outputs: [] }} readOnly={readOnly} locked={locked} team={!!team}
+        lastStep={lastSteps?.[node.id]} reveal={reveal} wide={codeWide} onWide={(wide) => on.onCodeWide?.(wide)}
+        onNodeChange={on.onNodeChange} onNodeReplace={(next, label) => on.onNodeReplace?.(next, label)}
+        onCodeSession={(phase, id) => on.onCodeSession?.(phase, id)} onRunNode={on.onRunNode} runningNode={on.runningNode} /> : <>
+        {pinsOf ? <PinsSection node={node} pins={pinsOf(node)} graph={graph} outputs={nodeOutputs?.[node.id]} frozen={frozen}
+          onNodeChange={on.onNodeChange} /> : null}
+        {hasNodeSettings(node, meta) ? <SettingsFold>
+          <fieldset className="aw-insp-fold" disabled={frozen}>
+            <NodeSettings node={node} meta={meta} workflows={workflows} currentId={currentId} onOpen={on.onOpenWorkflow} onChange={on.onNodeChange} />
+          </fieldset>
+        </SettingsFold> : null}
+        {frozen || !group ? null : <div className="aw-insp-actions">
+          <button type="button" title="Move it out of its group (Ctrl+Shift+G)" onClick={() => on.onTakeOut(node.id)}>Take out of {group.name}</button>
+        </div>}
+      </>}
+    </div>
   </>;
 }
 
