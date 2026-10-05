@@ -47,3 +47,81 @@ def test_without_it_the_popup_asks(monkeypatch) -> None:
     out = mgr.run_agent_command("s1", "npm test", conv_id="c1", approval_timeout_s=1)
     assert out == {"ok": False, "error": "command not approved (timed out)"}
     assert [e["type"] for e in events] == ["terminal_command_pending"] and session.ran == []
+
+
+class _Exits(_Session):
+    """A command that takes a while and ends with an exit code."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__()
+        self.code = code
+        self.timeouts: list[float] = []
+
+    def run_command(self, command: str, **kw) -> dict:
+        __import__("time").sleep(0.2)
+        self.ran.append(command)
+        self.timeouts.append(kw.get("timeout_s"))
+        return {"ok": True, "exit_code": self.code, "output_tail": f"{command} finished"}
+
+
+def test_a_waited_command_returns_when_it_ends_with_its_exit_code(monkeypatch) -> None:
+    """A workflow step used to come back before its command even started."""
+    mgr, _session, _events = _manager(monkeypatch)
+    session = _Exits(0)
+    monkeypatch.setattr(mgr, "get_session", lambda _sid: session)
+    out = mgr.run_agent_command("s1", "py release/publish_app.py", auto_approve=True, command_timeout_s=3600)
+    assert session.ran == ["py release/publish_app.py"] and session.timeouts == [3600]
+    assert out["ok"] is True and out["exit_code"] == 0 and out["output_tail"] == "py release/publish_app.py finished"
+
+
+def test_a_failing_command_is_not_ok(monkeypatch) -> None:
+    mgr, _session, _events = _manager(monkeypatch)
+    session = _Exits(2)
+    monkeypatch.setattr(mgr, "get_session", lambda _sid: session)
+    out = mgr.run_agent_command("s1", "npm test", auto_approve=True, command_timeout_s=5)
+    assert out["ok"] is False and out["exit_code"] == 2 and "exit code 2" in out["error"]
+    assert out["output_tail"] == "npm test finished"
+
+
+def test_allow_on_the_popup_runs_it_once_for_the_waiting_agent(monkeypatch) -> None:
+    import threading
+
+    mgr, _session, events = _manager(monkeypatch)
+    session = _Exits(0)
+    monkeypatch.setattr(mgr, "get_session", lambda _sid: session)
+    result: dict = {}
+    worker = threading.Thread(target=lambda: result.update(mgr.run_agent_command("s1", "npm test", approval_timeout_s=5)))
+    worker.start()
+    for _ in range(100):
+        if events:
+            break
+        __import__("time").sleep(0.02)
+    assert mgr.approve_command(events[0]["request_id"])["ok"]
+    worker.join(5)
+    assert result["ok"] is True and session.ran == ["npm test"]
+
+
+def test_the_done_marker_is_found_when_split_across_two_reads() -> None:
+    import threading
+
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    session = TerminalSession(shell="bash", cwd="C:/repo")
+    chunks = [b"Uploaded.\r\n__DUCKY_DO", b"NE__0__\r\n$ "]
+
+    class _Pty:
+        exitstatus = 0
+
+        def isalive(self) -> bool:
+            return True
+
+        def read(self, _n: int) -> bytes:
+            if chunks:
+                return chunks.pop(0)
+            session._stop.set()
+            return b""
+
+    session._pty = _Pty()
+    session._pending_done = threading.Event()
+    session._read_loop()
+    assert session._pending_done.is_set() and session._pending_exit_code == 0

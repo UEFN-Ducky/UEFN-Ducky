@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 import uuid
 from typing import Any, Callable
 
@@ -209,6 +208,8 @@ class TerminalManager:
         *,
         background: bool = False,
         push_pending: bool = True,
+        runner_waits: bool = False,
+        timeout_s: float = 300.0,
     ) -> dict[str, Any]:
         cmd = (command or "").strip()
         if not cmd:
@@ -230,6 +231,8 @@ class TerminalManager:
             source=source or "agent",
             conv_id=conv_id,
             background=background,
+            runner_waits=runner_waits and not background,
+            timeout_s=float(timeout_s),
         )
         with self._lock:
             self._pending[request_id] = pending
@@ -260,6 +263,8 @@ class TerminalManager:
             return {"ok": False, "error": "session not found"}
         pending.approved = True
         pending.decided.set()
+        if pending.runner_waits:
+            return {"ok": True, "request_id": request_id, "run": {"ok": True, "status": "approved"}}
         if pending.background:
             result = session.run_command(pending.command, background=True)
         else:
@@ -267,7 +272,7 @@ class TerminalManager:
             threading.Thread(
                 target=session.run_command,
                 args=(pending.command,),
-                kwargs={"background": False, "timeout_s": 300.0},
+                kwargs={"background": False, "timeout_s": pending.timeout_s},
                 daemon=True,
                 name=f"terminal-run-{request_id}",
             ).start()
@@ -310,7 +315,11 @@ class TerminalManager:
         command_timeout_s: float = 300.0,
         auto_approve: bool = False,
     ) -> dict[str, Any]:
-        """auto_approve: the chat said "Allow everything", so no Allow/Deny pop-up."""
+        """auto_approve: the chat said "Allow everything", so no Allow/Deny pop-up.
+
+        wait (not background): the command runs on this thread and the result is its
+        exit code; a command that fails is ok=False."""
+        runs_here = wait and not background
         req = self.request_command(
             session_id,
             command,
@@ -318,6 +327,8 @@ class TerminalManager:
             conv_id=conv_id,
             background=background,
             push_pending=not auto_approve,
+            runner_waits=runs_here,
+            timeout_s=command_timeout_s,
         )
         if not req.get("ok"):
             return req
@@ -331,31 +342,27 @@ class TerminalManager:
         session = self.get_session(session_id)
         if session is None:
             return {"ok": False, "error": "session not found"}
-        if not wait or background:
+        if not runs_here:
             return {
                 "ok": True,
                 "request_id": request_id,
                 "session_id": session_id,
                 "status": "running",
             }
-        limit = float(command_timeout_s)
-        deadline = (time.time() + max(1.0, limit)) if limit > 0 else None
-        while session.is_busy() and (deadline is None or time.time() < deadline):
-            time.sleep(0.1)
-        if session.is_busy():
-            return {
-                "ok": False,
-                "error": "command timed out",
-                "output_tail": session.read_output_tail(),
-                "request_id": request_id,
-                "session_id": session_id,
-            }
-        return {
-            "ok": True,
+        ran = session.run_command(command.strip(), background=False, timeout_s=command_timeout_s)
+        out: dict[str, Any] = {
+            "ok": bool(ran.get("ok")),
             "request_id": request_id,
             "session_id": session_id,
-            "output_tail": session.read_output_tail(),
+            "output_tail": str(ran.get("output_tail") or session.read_output_tail()),
         }
+        if not out["ok"]:
+            return {**out, "error": str(ran.get("error") or "command failed")}
+        code = ran.get("exit_code")
+        out["exit_code"] = code
+        if code not in (None, 0):
+            return {**out, "ok": False, "error": f"Command failed (exit code {code})."}
+        return out
 
     def read_output(self, session_id: str, max_chars: int = 8000) -> dict[str, Any]:
         session = self.get_session(session_id)

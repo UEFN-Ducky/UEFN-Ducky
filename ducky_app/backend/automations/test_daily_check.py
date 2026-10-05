@@ -136,7 +136,7 @@ def test_fortnite_servers_node_leads_true_or_false(monkeypatch):
 def _tool_replies(monkeypatch, replies: list[Any], on_call=None) -> list[int]:
     calls: list[int] = []
 
-    def call(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    def call(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") -> dict[str, Any]:
         calls.append(payload.get("attempt"))
         if on_call:
             on_call(len(calls))

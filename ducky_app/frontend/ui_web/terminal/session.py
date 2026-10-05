@@ -134,6 +134,9 @@ class PendingCommand:
     decided: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
     rejection_reason: str = ""
+    # The agent that asked runs it itself and waits for the exit code.
+    runner_waits: bool = False
+    timeout_s: float = 300.0
 
 
 class TerminalSession:
@@ -176,6 +179,8 @@ class TerminalSession:
         self._error = ""
         self._pending_done: threading.Event | None = None
         self._pending_exit_code: int | None = None
+        # The end of the last chunk: the done marker can be split across two reads.
+        self._done_scan = ""
 
     def spawn(self) -> None:
         import os
@@ -235,7 +240,9 @@ class TerminalSession:
                     self._on_output(text)
                 except Exception:
                     pass
-            match = _DONE_RE.search(text)
+            scan = self._done_scan + text
+            match = _DONE_RE.search(scan)
+            self._done_scan = "" if match else scan[-32:]
             if match and self._pending_done is not None:
                 try:
                     self._pending_exit_code = int(match.group(1))

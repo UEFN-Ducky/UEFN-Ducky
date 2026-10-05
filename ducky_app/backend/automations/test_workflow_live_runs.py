@@ -149,3 +149,62 @@ def test_a_ducky_that_answered_is_not_cancelled_later(monkeypatch):
     finally:
         runner._CANCEL.reset(token)
     assert stopped == []
+
+
+def _terminal_step(nid: str, arguments: dict) -> dict:
+    return {"id": nid, "type": "tool.call", "config": {"name": "ducky_terminal_run", "arguments": arguments}}
+
+
+def test_a_command_typed_into_a_local_workflow_runs_without_asking(events, monkeypatch):
+    """Saving the command in the workflow approved it; one filled in while it runs still asks.
+    The steps are one straight line: each reads the terminal the run opened."""
+    from types import SimpleNamespace
+    from backend.tools.panel import ducky_panel
+
+    asked: list[tuple[str, str, bool]] = []
+
+    def run_agent_command(session_id, command, **kw):
+        asked.append((session_id, command, kw["auto_approve"]))
+        return {"ok": True, "exit_code": 0, "output_tail": ""} if kw["auto_approve"] else {"ok": False, "error": "command not approved (timed out)"}
+
+    monkeypatch.setattr(ducky_panel, "_terminal_manager", lambda: SimpleNamespace(
+        run_agent_command=run_agent_command,
+        spawn=lambda **kw: {"ok": True, "session_id": "t1"},
+        get_session=lambda _sid: None,
+    ))
+    session = "{{nodes.terminal.result.data.session_id}}"
+    graph = {"nodes": [
+        {"id": "s", "type": "start.manual", "config": {}},
+        {"id": "terminal", "type": "tool.call", "config": {"name": "ducky_terminal_open", "arguments": {"shell": "bash"}}},
+        _terminal_step("build", {"session_id": session, "command": "py -3 -u release/publish_app.py"}),
+        _terminal_step("filled", {"session_id": session, "command": "echo {{workflow_name}}"}),
+        {"id": "e", "type": "flow.end", "config": {}},
+    ], "edges": [{"source": a, "target": b, "kind": "main"} for a, b in (("s", "terminal"), ("terminal", "build"), ("build", "filled"), ("filled", "e"))]}
+    wid = str(store.save_workflow({"name": "Release", "graph": graph})["id"])
+    out = runner.run_workflow(wid)
+    assert asked == [("t1", "py -3 -u release/publish_app.py", True), ("t1", "echo Release", False)]
+    assert not out["ok"] and "not approved" in out["error"]
+    assert not runner.typed_command_approved("py -3 -u release/publish_app.py")  # only while its step runs
+
+
+def test_a_team_workflow_or_a_wired_command_still_asks(monkeypatch):
+    from types import SimpleNamespace
+    from backend.server import mcp
+
+    seen: list[bool] = []
+    monkeypatch.setattr(mcp._tool_manager, "get_tool", lambda name: SimpleNamespace(
+        fn=lambda **kw: seen.append(runner.typed_command_approved(kw["command"])) or {"ok": True}))
+    owners = {"mine": {"kind": "local"}, "theirs": {"kind": "team"}}
+    monkeypatch.setattr(runner, "get_workflow", lambda wid: {"id": wid, "owner": owners[wid]})
+    typed = {"name": "ducky_terminal_run", "arguments": {"session_id": "t1", "command": "git push"}}
+    for wid, cfg, payload in (
+        ("mine", typed, {}),
+        ("theirs", typed, {}),
+        ("mine", {"name": "ducky_terminal_run"}, {"arguments": {"session_id": "t1", "command": "git push"}}),
+    ):
+        token = runner._CALL_STACK.set((wid,))
+        try:
+            runner._call_tool(cfg, payload)
+        finally:
+            runner._CALL_STACK.reset(token)
+    assert seen == [True, False, False]

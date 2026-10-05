@@ -1719,14 +1719,16 @@ def ducky_terminal_run(
     pretty: bool = False,
 ) -> str:
     """Run a shell command in a panel terminal after user approves it in the Allow/Deny popup
-    (no popup when this chat said "Allow everything")."""
+    (no popup when this chat said "Allow everything", or when the command is typed into
+    the Local workflow running it)."""
     mgr = _terminal_manager()
     auto = False
     chat = _terminal_chat(conv_id)
+    from backend.automations.runner import typed_command_approved
     from backend.tools.panel.permission_prompt import _never_runs, _project_root, allows_everything, note_shell_dir, shell_dir
 
     shell = f"term:{session_id.strip()}"
-    if chat and allows_everything(chat):
+    if (chat and allows_everything(chat)) or typed_command_approved(command):
         session = mgr.get_session(session_id.strip())
         refused = _never_runs(command, getattr(session, "cwd", "") or _project_root(), shell_dir(shell))
         if refused:

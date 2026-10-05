@@ -19,7 +19,7 @@ from backend.automations import catalog, glbops, imageops, listops, media, notif
 from backend.automations.expr import ExprError, as_number, as_text, evaluate, truthy
 from backend.automations.files import file_ref, is_file_ref, kind_of, run_folder, with_url
 from backend.automations.pins import DATA_KIND, node_pins
-from backend.automations.store import all_workflows, append_run, get_workflow, runs_here, signature_of
+from backend.automations.store import LOCAL, all_workflows, append_run, get_workflow, runs_here, signature_of
 
 _log = logging.getLogger("automations")
 _MAX_STEPS = 256
@@ -46,6 +46,9 @@ _ACTIVE_LOCK = threading.Lock()
 # Live view: the editor lights up the step running now and the wire it came along.
 _LIVE: ContextVar[tuple[str, str] | None] = ContextVar("workflow_live", default=None)
 _OUTPUT_PARENTS: ContextVar[tuple[tuple[str, str, str], ...]] = ContextVar("workflow_output_parents", default=())
+# A command typed into a saved Local workflow runs without the Allow/Deny pop-up:
+# saving it there was the approval. One filled in while the run goes still asks.
+_TYPED_COMMAND: ContextVar[str] = ContextVar("workflow_typed_command", default="")
 STOPPED = "Stopped"
 
 
@@ -2003,6 +2006,26 @@ def _terminal_output_stream(session_id: str, node_id: str) -> tuple[threading.Ev
     return stopped, thread
 
 
+def typed_command_approved(command: str) -> bool:
+    """ducky_terminal_run: this exact command is typed into the Local workflow running it."""
+    typed = _TYPED_COMMAND.get()
+    return bool(typed) and typed == command
+
+
+def _typed_command(name: str, cfg: dict[str, Any], raw: dict[str, Any]) -> str:
+    """The command typed into this Run terminal step of a Local workflow, else ''."""
+    if name != "ducky_terminal_run" or (cfg.get("arguments") is None and not cfg.get("arguments_json")):
+        return ""
+    command = raw.get("command")
+    if not isinstance(command, str) or not command.strip() or _PLACEHOLDER.search(command):
+        return ""
+    stack = _CALL_STACK.get()
+    wf = get_workflow(stack[-1]) if stack else None
+    if wf is None or str((wf.get("owner") or {}).get("kind") or LOCAL) != LOCAL:
+        return ""
+    return command
+
+
 def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") -> dict[str, Any]:
     import inspect
 
@@ -2029,9 +2052,11 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") 
         return {"ok": False, "error": f"tool has no fn: {name}"}
     arguments = _template(raw, payload)
     stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
+    typed_token = _TYPED_COMMAND.set(_typed_command(name, cfg, raw))
     try:
         result = fn(**arguments)
     finally:
+        _TYPED_COMMAND.reset(typed_token)
         if stream:
             stream[0].set()
             stream[1].join(timeout=1)
