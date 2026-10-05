@@ -970,8 +970,6 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
     try:
         if payload.get("_spend_approved") and (ntype in media.BACKENDS):
             cfg = {**cfg, "spend": True}  # a person pressed play on this run: that is the approval
-        if ntype in media.AGENT_NODES and str(cfg.get("backend") or "") == media.AGENT_BACKEND:
-            return {**_agent_picture(node, cfg, values, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype in media.BACKENDS:
             return {**media.run_media(ntype, cfg, values, _node_folder(node)), "id": node.get("id"), "type": ntype, "label": label}
         if ntype in _FOLDER_OPS:
@@ -1767,50 +1765,6 @@ def _pipeline_agent(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
             "agent_group_id": seat.get("group_id") or "",
             "agent_group_folder_id": seat.get("group_folder_id") or "",
         },
-    }
-
-
-_PICTURE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
-
-
-def _agent_picture(node: dict[str, Any], cfg: dict[str, Any], values: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Text to Image on "an agent or model of yours": a fresh ducky on that gateway model or
-    agent makes the picture with whatever it has here (an image tool, an image model,
-    Photoshop, Blender, code that draws) and saves it in this node's folder. Spend credits
-    off = it is told to use free ways only."""
-    prompt = _as_text(values.get("prompt")).strip()
-    if not prompt:
-        return {"ok": False, "gate": True, "error": "Nothing in Prompt: wire text in or type it in the details."}
-    folder = _node_folder(node)
-    folder.mkdir(parents=True, exist_ok=True)
-    before = {p.name for p in folder.iterdir()}
-    spend = cfg.get("spend") is True
-    model = str(cfg.get("agent_model") or "").strip()
-    instructions = (
-        "Make ONE picture for the prompt at the end, with whatever you have on this PC: an image tool, "
-        "an image model, Photoshop, Blender, or code that draws it.\n"
-        + ("You may spend credits on a paid image tool for this one picture.\n" if spend
-           else "Use only free ways: don't spend credits on paid tools.\n")
-        + f"Save the finished picture as a PNG or JPG in this folder:\n{folder}\n"
-        "Then reply with its file name. Don't ask questions; if nothing here can make a picture, say so in one line.\n\n"
-        f"Prompt:\n{prompt}"
-    )
-    step = _pipeline_agent({"ducky": "", "model": model, "prompt": instructions, "title": str(node.get("label") or "Picture"),
-                            "timeout_sec": _AGENT_WAIT_CAP_S}, payload)
-    if not step.get("ok"):
-        return {"ok": False, "error": str(step.get("error") or "The agent didn't finish.")}
-    done = step.get("result") if isinstance(step.get("result"), dict) else {}
-    reply = str(done.get("text") or "").strip()
-    made = [p for p in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime) if p.name not in before and p.suffix.lower() in _PICTURE_EXTS]
-    made += [Path(str(f["path"])) for f in done.get("files") or [] if isinstance(f, dict) and str(f.get("path") or "").lower().endswith(_PICTURE_EXTS)]
-    if not made:
-        return {"ok": False, "error": "The agent made no picture." + (f" It said: {reply[:300]}" if reply else "")}
-    main = str(made[-1])
-    image = {**file_ref(main, "image"), "provider": "agent", "backend": media.AGENT_BACKEND}
-    return {
-        "ok": True,
-        "outputs": {"image": with_url(image), "files": [with_url(file_ref(str(p), "image")) for p in made]},
-        "result": {"backend": f"Agent · {model or 'default model'}", "reply": reply[:2000], "conv_id": done.get("conv_id") or ""},
     }
 
 

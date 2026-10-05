@@ -322,14 +322,14 @@ def test_only_installed_gateways_are_listed(tools, monkeypatch):
 def test_text_to_image_lists_only_what_the_plugins_turned_on_declare(tools, monkeypatch, image_generators):
     monkeypatch.setattr(media, "gateway_image_nodes", lambda: [])
     image_generators[:] = [row for row in image_generators if row["plugin_id"] == "meshy"]
-    assert [b["id"] for b in media.backends_for("image.generate")] == ["meshy_text_to_image", "agent"]
+    assert [b["id"] for b in media.backends_for("image.generate")] == ["meshy_text_to_image"]
     step = run("image.generate", {"spend": True}, {"prompt": "a duck"})
     assert step["ok"], step
     assert tools.calls[0] == ("meshy_text_to_image", {**tools.calls[0][1], "prompt": "a duck", "ai_model": "nano-banana"})
     image_generators.clear()
-    assert [b["id"] for b in media.backends_for("image.generate")] == ["agent"]
+    assert [b["id"] for b in media.backends_for("image.generate")] == []
     none = run("image.generate", {"spend": True}, {"prompt": "a duck"})
-    assert none["ok"] is False and "An agent or model of yours" in none["error"]
+    assert none["ok"] is False and "No direct image backend" in none["error"]
 
 
 def test_a_picture_template_names_its_plugin_while_that_plugin_is_off(monkeypatch, image_generators):
@@ -878,31 +878,37 @@ def test_auto_transform_mesh_scales_to_real_size(model, tmp_path):
     assert "sensible height" in run("mesh.auto_scale", {}, {"mesh": ref(make_glb(tmp_path / "b2.glb"), "mesh")})["error"]
 
 
-def test_text_to_image_on_an_agent_saves_what_it_made(monkeypatch, tmp_path):
-    asked: list[dict[str, Any]] = []
+def test_image_node_never_starts_an_agent(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Image generation started an agent")
+    monkeypatch.setattr(runner, "_pipeline_agent", forbidden)
+    assert "agent" not in {row["id"] for row in media.backends_for("image.generate")}
+    step = run("image.generate", {"backend": "agent", "agent_model": "cursor:auto", "spend": True}, {"prompt": "a duck"})
+    assert not step["ok"] and "Choose a direct image backend" in step["error"]
 
-    def fake_agent(cfg, payload):
-        asked.append(cfg)
-        folder = Path(re.search(r"in this folder:\n(.+)\n", cfg["prompt"]).group(1))
-        png(folder / "duck.png")
-        return {"ok": True, "result": {"text": "duck.png", "files": [], "conv_id": "c9"}}
 
-    monkeypatch.setattr(runner, "_pipeline_agent", fake_agent)
-    rows = {b["id"]: b for b in media.backends_for("image.generate")}
-    assert rows["agent"]["available"] and rows["agent"]["agent"] is True
-    step = run("image.generate", {"backend": "agent", "agent_model": "cursor:auto"}, {"prompt": "a happy duck"})
+def test_missing_image_backend_does_not_charge_another_provider(tools):
+    step = run("image.generate", {"backend": "missing_image", "spend": True}, {"prompt": "a duck"})
+    assert not step["ok"] and "missing_image is unavailable" in step["error"]
+    assert tools.calls == []
+
+
+def test_image_fields_never_use_the_generic_chat_model_picker(monkeypatch):
+    from backend.uefn_plugins import host
+    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "test.image", "config_fields": [{"id": "model", "type": "model", "provider": "test"}]}]})
+    assert media.gateway_image_fields("test.image")[0]["type"] == "text"
+
+
+def test_image_gateway_uses_its_own_model_and_settings(tools, gateway, monkeypatch):
+    from backend.uefn_plugins import host
+    fields = [{"id": "prompt", "type": "textarea"}, {"id": "model", "type": "select", "options": [{"id": "image-test", "label": "Image test"}]}, {"id": "size", "type": "text"}]
+    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "openai.image", "config_fields": fields}]})
+    row = next(row for row in media.backends_for("image.generate") if row["id"] == "openai_image")
+    assert row["config_fields"] == fields[1:]
+    step = run("image.generate", {"backend": "openai_image", "spend": True, "gateway_config": {"openai_image": {"model": "image-test", "size": "1024x1536", "prompt": "wrong"}, "google_imagen": {"model": "wrong"}}}, {"prompt": "a duck"})
     assert step["ok"], step
-    assert asked[0]["model"] == "cursor:auto" and asked[0]["ducky"] == ""
-    assert "a happy duck" in asked[0]["prompt"] and "only free ways" in asked[0]["prompt"]  # Spend credits off
-    assert step["outputs"]["image"]["path"].endswith("duck.png") and step["result"]["reply"] == "duck.png"
-    run("image.generate", {"backend": "agent", "spend": True}, {"prompt": "a happy duck"})
-    assert "may spend credits" in asked[1]["prompt"]
-
-
-def test_an_agent_that_makes_no_picture_says_what_it_said(monkeypatch):
-    monkeypatch.setattr(runner, "_pipeline_agent", lambda cfg, payload: {"ok": True, "result": {"text": "Nothing here can draw.", "files": []}})
-    step = run("image.generate", {"backend": "agent"}, {"prompt": "a duck"})
-    assert step["ok"] is False and "made no picture" in step["error"] and "Nothing here can draw." in step["error"]
+    assert gateway[0]["config"] == {"model": "image-test", "size": "1024x1536", "prompt": "a duck"}
+    assert tools.calls == []
 
 
 def test_ask_a_model_runs_on_the_picked_gateway_or_agent(monkeypatch):

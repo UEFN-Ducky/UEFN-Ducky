@@ -141,11 +141,18 @@ describe("image and 3D nodes", () => {
     expect(screen.queryByRole("radio", { name: /Tripo v3/ })).toBeNull();  // its plugin isn't set up here: not offered
   });
 
-  it("offers any gateway or agent to make the picture, picked from the app's model list", async () => {
-    const withAgent = { ...meta, backends: [...(meta.backends || []), { id: "agent", label: "An agent or model of yours", plugin: "Your gateways and agents", credits: 0, cost: "Its own tools", available: true, agent: true }] };
-    render(<Editor config={{ backend: "agent" }} meta={withAgent} />);
-    expect(screen.getByRole("button", { name: /^Model:/ })).toBeTruthy();  // the full picker, as a labeled button
-    expect(screen.getByText(/the agent uses only free ways/)).toBeTruthy();
+  it("edits the direct image handler model and size without an agent picker", async () => {
+    const imageMeta: AutomationNodeDto = { ...meta, type: "image.generate", backends: [{ id: "openai_image", label: "OpenAI image", plugin: "OpenAI", credits: 0, available: true, model: "image-a", config_fields: [
+      { id: "model", label: "Image model", type: "select", options: [{ id: "image-a", label: "Image A" }, { id: "image-b", label: "Image B" }] },
+      { id: "size", label: "Size", type: "text" },
+    ] }] };
+    render(<Editor config={{ backend: "openai_image" }} meta={imageMeta} />);
+    expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Image model" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Image B" }));
+    expect(current.config.gateway_config).toEqual({ openai_image: { model: "image-b" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Size" }), { target: { value: "1024x1536" } });
+    expect(current.config.gateway_config).toEqual({ openai_image: { model: "image-b", size: "1024x1536" } });
   });
 
   it("a saved backend whose plugin is off says why", () => {

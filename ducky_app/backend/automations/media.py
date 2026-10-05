@@ -227,9 +227,24 @@ def _gateway(plugin_id: str, node: str) -> dict[str, Any]:
     """An AI gateway plugin's own image node, billed to the person's API key (no credits)."""
     known = GATEWAY_IMAGES.get(plugin_id)
     name = _manifest_label(plugin_id) or (known[4] if known else plugin_id.title())
-    bid, label, model, key, _name = known or (f"{plugin_id}_image", f"{name} image", "", plugin_id, name)
-    return {"id": bid, "label": label, "plugin": name, "plugin_id": plugin_id, "node": node, "key": key, "model": model,
-            "credits": 0, "paid": True, "args": _prompt}
+    bid, _label, model, key, _name = known or (f"{plugin_id}_image", f"{name} image", "", plugin_id, name)
+    return {"id": bid, "label": f"{name} image", "plugin": name, "plugin_id": plugin_id, "node": node, "key": key, "model": model,
+            "config_fields": gateway_image_fields(node), "credits": 0, "paid": True, "args": _prompt}
+
+
+def gateway_image_fields(node: str) -> list[dict[str, Any]]:
+    """Use the image handler's own controls, never the gateway's chat/agent models."""
+    try:
+        from backend.uefn_plugins.host import get_ui_contributions
+
+        spec = next((row for row in get_ui_contributions().get("automations_nodes", []) if row.get("id") == node), {})
+        fields = [dict(field) for field in spec.get("config_fields", []) if field.get("id") != "prompt"]
+        for field in fields:
+            if field.get("type") == "model":
+                field["type"] = "text"  # no image capability list: allow an explicit image model ID
+        return fields or [{"id": "model", "label": "Image model", "type": "text"}]
+    except Exception:
+        return [{"id": "model", "label": "Image model", "type": "text"}]
 
 
 def gateway_image_nodes() -> list[tuple[str, str]]:
@@ -411,15 +426,10 @@ def cost_text(row: dict[str, Any]) -> str:
     return "Your own API key" if row.get("node") else f"~{row['credits']} credits"
 
 
-# Text to Image on any gateway model or agent you have (the runner starts a ducky on it).
-AGENT_BACKEND = "agent"
-AGENT_NODES = frozenset({"image.generate"})
-
-
 def backends_for(ntype: str) -> list[dict[str, Any]]:
     """The node's backends for its details dropdown: who makes it (the installed plugin's
-    name), what it costs, and whether it can run here (if not, why). Text to Image also
-    offers "an agent or model of yours" (picked from the app's live model list)."""
+    name), what it costs, and whether it can run here (if not, why). Image gateway
+    controls come from the plugin's direct image handler."""
     out: list[dict[str, Any]] = []
     for row in table(ntype):
         ready = is_ready(row)
@@ -427,23 +437,25 @@ def backends_for(ntype: str) -> list[dict[str, Any]]:
         out.append({
             "id": row["id"], "label": row["label"], "plugin": label, "credits": row["credits"], "cost": cost_text(row),
             "available": ready, **({} if ready else {"reason": why_not(row, label)}),
+            **({"config_fields": row["config_fields"], "model": row["model"]} if row.get("node") else {}),
         })
-    if ntype in AGENT_NODES:
-        out.append({"id": AGENT_BACKEND, "label": "An agent or model of yours", "plugin": "Your gateways and agents",
-                    "credits": 0, "cost": "Its own tools", "available": True, "agent": True})
     return out
 
 
 def pick_backend(ntype: str, wanted: Any) -> dict[str, Any]:
     """The picked backend; with none picked, the first one that can run here."""
     rows = table(ntype)
+    if ntype == "image.generate" and wanted == "agent":
+        raise ValueError("Choose a direct image backend in this node's details. The saved agent backend cannot generate images directly.")
     if not rows:
-        if ntype in AGENT_NODES:
-            raise ValueError("Nothing here makes pictures yet: pick An agent or model of yours in the details, or turn on an image plugin from the Store.")
+        if ntype == "image.generate":
+            raise ValueError("No direct image backend is installed. Turn on an image-capable gateway or image plugin from the Store.")
         raise ValueError(f"No backends for {ntype}.")
     picked = next((row for row in rows if row["id"] == str(wanted or "")), None)
     if picked is not None:
         return picked
+    if ntype == "image.generate" and wanted:
+        raise ValueError(f"Image backend {wanted} is unavailable. Choose a direct image backend in this node's details.")
     return next((row for row in rows if is_ready(row)), rows[0])
 
 
@@ -538,7 +550,10 @@ def _run_gateway(ntype: str, backend: dict[str, Any], cfg: dict[str, Any], input
     except (ValueError, OSError) as exc:
         return {"ok": False, "gate": True, "error": str(exc)}
     try:
-        data = handler({"config": {"prompt": args["prompt"], "model": backend["model"]}, "payload": {}})
+        settings = (cfg.get("gateway_config") or {}).get(backend["id"], {})
+        allowed = {field["id"] for field in backend["config_fields"]}
+        settings = {key: value for key, value in settings.items() if key in allowed and value not in (None, "")}
+        data = handler({"config": {"model": backend["model"], **settings, "prompt": args["prompt"]}, "payload": {}})
     except Exception as exc:  # noqa: BLE001 - a plugin's failure is this node's error
         return {"ok": False, "error": f"{backend['label']}: {exc}"}
     if not isinstance(data, dict) or not data.get("ok"):

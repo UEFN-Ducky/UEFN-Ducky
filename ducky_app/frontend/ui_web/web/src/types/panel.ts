@@ -297,8 +297,9 @@ export interface AutomationBackendDto {
   available: boolean;
   /** Why it can't run here: install, turn on, or add the key. */
   reason?: string;
-  /** Text to Image on any gateway model or agent (picked in config.agent_model). */
-  agent?: boolean;
+  /** Controls declared by the direct image handler, including its image models. */
+  config_fields?: AutomationFieldDto[];
+  model?: string;
 }
 
 export interface AutomationGraphGroupDto {

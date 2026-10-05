@@ -45,25 +45,28 @@ function costOf(row: AutomationBackendDto) {
   return row.cost || `~${row.credits} credits`;
 }
 
-/** Filled from what this PC has: installed, switched-on (and keyed) plugins, plus (Text to
- *  Image) any gateway model or agent from the app's live list. A saved pick that is no longer
- *  available stays listed so it can say what to do. */
+/** Image gateways expose their own image settings. Unavailable gateways explain setup. */
 function BackendField({ node, backends, onChange }: { node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; onChange: (node: AutomationGraphNodeDto) => void }) {
   const id = useId();
   const picked = pickedBackend(node, backends);
-  const shown = backends.filter((row) => row.available || row.id === picked?.id);
+  const shown = node.type === "image.generate" ? backends : backends.filter((row) => row.available || row.id === picked?.id);
   const setConfig = (patch: Record<string, unknown>) => onChange({ ...node, config: { ...node.config, ...patch } });
   return <div className="aw-field">
     <label className="aw-field-label" htmlFor={id}>Backend</label>
     <ChoiceDropdown id={id} aria-label="Backend" size="compact" value={picked?.id || ""}
       options={shown.map((row) => ({ value: row.id, label: row.label, disabled: !row.available,
-        hint: row.agent ? "Any gateway or agent you have: it makes the picture with its own tools" : row.available ? `${costOf(row)} · ${row.plugin}` : `${row.plugin} · ${row.reason || "not set up"}` }))}
+        hint: row.available ? `${costOf(row)} · ${row.plugin}` : `${row.plugin} · ${row.reason || "not set up"}` }))}
       onChange={(value) => setConfig({ backend: value })} />
     {picked && !picked.available ? <small className="aw-field-error" role="status">{picked.reason || `Needs the ${picked.plugin} plugin.`}</small> : null}
-    {picked?.agent ? <div className="aw-model-field">
-      <DuckyModelPicker model={String(node.config.agent_model || "")} onChange={(model) => setConfig({ agent_model: model || undefined })}
-        label="" hint="" placeholder="The app's default model" menuPlacement="bottom" labeled />
-    </div> : null}
+    {!picked && node.type === "image.generate" ? <small className="aw-field-error" role="status">Turn on an image-capable gateway or image plugin in the Store.</small> : null}
+    {node.type === "image.generate" && node.config.backend === "agent" ? <small className="aw-field-error" role="status">Choose a direct image backend to replace the saved agent backend.</small> : null}
+    {picked?.config_fields?.map((field) => {
+      const configs = (node.config.gateway_config || {}) as Record<string, Record<string, unknown>>;
+      const config = configs[picked.id] || {};
+      return <ConfigField key={`${picked.id}:${field.id}`} field={field}
+        node={{ ...node, config: { model: picked.model, ...config } }}
+        onChange={(edited) => setConfig({ gateway_config: { ...configs, [picked.id]: edited.config } })} />;
+    })}
   </div>;
 }
 
@@ -76,9 +79,7 @@ function SpendField({ node, backends, onChange }: { node: AutomationGraphNodeDto
       onClick={() => onChange({ ...node, config: { ...node.config, spend: on ? undefined : true } })}>
       <span>Spend credits</span><span className="aw-switch" aria-hidden="true"><span /></span>
     </button>
-    <small className="aw-field-hint">{picked?.agent
-      ? (on ? "The agent may spend credits on a paid image tool for each picture." : "Off: the agent uses only free ways to make the picture.")
-      : <>{picked ? (picked.cost && !picked.credits ? `${picked.label} is billed to your ${picked.plugin} API key each run.` : `About ${picked.credits} credits each run on ${picked.label} (${picked.plugin}).`) : ""} {on ? "It runs when the workflow does." : "Off: the run stops here and says so, nothing is spent."}</>}</small>
+    <small className="aw-field-hint">{picked ? (picked.cost && !picked.credits ? `${picked.label} is billed to your ${picked.plugin} API key each run.` : `About ${picked.credits} credits each run on ${picked.label} (${picked.plugin}).`) : ""} {on ? "It runs when the workflow does." : "Off: the run stops here and says so, nothing is spent."}</small>
   </div>;
 }
 
