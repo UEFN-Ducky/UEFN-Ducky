@@ -7,6 +7,12 @@ import pytest
 from backend.automations.expr import ExprError, check, evaluate
 
 
+def test_validation_failure_only_runs_in_selected_branch():
+    assert evaluate("ok ? value : fail('Upload did not complete')", {"ok": True, "value": 42}) == 42
+    with pytest.raises(ExprError, match="Upload did not complete"):
+        evaluate("ok ? value : fail('Upload did not complete')", {"ok": False})
+
+
 @pytest.mark.parametrize("src, scope, expected", [
     ("score > 10", {"score": 12}, True),
     ("score > 10 && name.includes('duck')", {"score": 12, "name": "rubber duck"}, True),

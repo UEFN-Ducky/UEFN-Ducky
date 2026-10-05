@@ -333,7 +333,13 @@ def _matches(text: Any, pattern: Any) -> bool:
         raise ExprError(f"matches(): {exc}") from exc
 
 
+def _fail(message: Any = "Workflow validation failed") -> None:
+    """Stop an expression-driven workflow with an actionable validation error."""
+    raise ExprError(as_text(message))
+
+
 _FUNCTIONS: dict[str, Any] = {
+    "fail": _fail,
     "len": lambda v: _length(v) or 0,
     "number": as_number,
     "text": as_text,
