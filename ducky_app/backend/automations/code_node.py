@@ -307,7 +307,8 @@ def run_step(
     return step
 
 
-def _last_inputs(wf: dict[str, Any], node_id: str) -> dict[str, Any]:
+def last_inputs(wf: dict[str, Any], node_id: str) -> dict[str, Any]:
+    """The input values this node ran with in its latest recorded run here ({} if none)."""
     for run in reversed(list(wf.get("runs") or [])):
         for step in reversed(run.get("steps") or []) if isinstance(run, dict) else ():
             if isinstance(step, dict) and step.get("id") == node_id and isinstance(step.get("inputs"), dict):
@@ -362,7 +363,7 @@ def draft(
         _runner._ACTIVE.setdefault(wid, set()).add(cancel)
     calls: list[dict[str, Any]] = []
     try:
-        step = run_step(node, ctx, _last_inputs(wf, str(node["id"])) if inputs is None else inputs,
+        step = run_step(node, ctx, last_inputs(wf, str(node["id"])) if inputs is None else inputs,
                         code=code, settings=settings, dry_run=dry_run, calls=calls)
     finally:
         with _runner._ACTIVE_LOCK:
