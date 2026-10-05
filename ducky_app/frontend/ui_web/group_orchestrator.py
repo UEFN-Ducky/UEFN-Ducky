@@ -1008,7 +1008,7 @@ def _persist_group_attachments(
     from frontend.ui_web.conversation_attachments import persist_message_attachments
     from frontend.ui_web.project_chats import get_conversations_dir
 
-    parsed = parse_attachment_dicts(attachments)
+    parsed = parse_attachment_dicts(attachments, current=True, enforce_image_cap=False)
     if not parsed:
         return []
     settings = PanelSettings.load()
@@ -1065,15 +1065,22 @@ def run_group_turn(
     # Router and member prompt need words; the hub row keeps the user's text.
     spoken = text or "See the attachment."
 
+    # Validate/persist attachments before registering the session: a bad video must
+    # not leave the group stuck as "already running".
+    ts = time.time()
+    try:
+        stored = _persist_group_attachments(group_id, ts, raw_attachments)
+    except ValueError as exc:
+        push_fn({"type": "error", "text": str(exc), "conv_id": group_id})
+        return ""
+
     run_id = str(uuid.uuid4())
     cancel = threading.Event()
     with _group_lock:
         _group_sessions[group_id] = cancel
 
     # Persist the user turn on the group transcript immediately.
-    ts = time.time()
     user_msg: dict[str, Any] = {"role": "user", "content": text, "text": text, "ts": ts}
-    stored = _persist_group_attachments(group_id, ts, raw_attachments)
     if stored:
         user_msg["attachments"] = stored
     append_message(conv, user_msg)

@@ -14,6 +14,7 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from frontend.settings import PANEL_LISTENER_PORT, default_app_data_dir
@@ -65,7 +66,7 @@ _TOOL_CAPTURE_RE = re.compile(r"^tool-captures/([A-Za-z0-9._-]+\.(?:png|jpe?g|we
 # backend/automations/files.py so only files the app linked are served.
 _WORKFLOW_MEDIA_RE = re.compile(r"^workflow-media/([0-9a-f]{32})/([A-Za-z0-9_-]+)/[^/]+$")
 _CHAT_ATTACHMENT_RE = re.compile(
-    r"^chat-attachments/([A-Za-z0-9._-]{1,80})/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))$",
+    r"^chat-attachments/([A-Za-z0-9._-]{1,80})/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp|mp4|webm|mov|mkv))$",
     re.IGNORECASE,
 )
 _GENERATED_IMAGE_RE = re.compile(r"^generated-images/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
@@ -444,6 +445,43 @@ def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, 
         raise ValueError("Unsatisfiable range")
     end = min(end, file_size - 1)
     return start, end
+
+
+_MAX_RANGE_CHUNK = 4 * 1024 * 1024
+_COPY_CHUNK = 1024 * 1024
+
+
+def _plan_file_range(file_path: Path, range_header: str | None) -> tuple[int, dict[str, str], int, int]:
+    """``(status, headers, start, length)`` for a file honoring a single ``Range``.
+
+    Video seeking needs 206. Open-ended (``bytes=N-``) and oversized suffix ranges are
+    capped at ``_MAX_RANGE_CHUNK`` so a browser's ``bytes=0-`` probe never loads the whole file.
+    """
+    size = file_path.stat().st_size
+    try:
+        byte_range = _parse_range_header(range_header, size)
+    except ValueError:
+        return 416, {"Content-Range": f"bytes */{size}"}, 0, 0
+    if byte_range is None:
+        return 200, {"Accept-Ranges": "bytes"}, 0, size
+    start, end = byte_range
+    spec = (range_header or "")[len("bytes=") :].split(",", 1)[0].strip()
+    if (spec.endswith("-") or spec.startswith("-")) and end - start + 1 > _MAX_RANGE_CHUNK:
+        end = start + _MAX_RANGE_CHUNK - 1
+    headers = {"Accept-Ranges": "bytes", "Content-Range": f"bytes {start}-{end}/{size}"}
+    return 206, headers, start, end - start + 1
+
+
+def _copy_file_range(fh: Any, start: int, length: int, sink: Any) -> None:
+    """Write ``length`` bytes of ``fh`` from ``start`` to ``sink`` in 1 MiB chunks."""
+    fh.seek(start)
+    remaining = length
+    while remaining > 0:
+        chunk = fh.read(min(_COPY_CHUNK, remaining))
+        if not chunk:
+            break
+        sink.write(chunk)
+        remaining -= len(chunk)
 
 
 def verify_panel_dist(dist_root: Path) -> None:
@@ -900,16 +938,20 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         self.send_error(404)
                         return
                     try:
-                        data = file_path.read_bytes()
+                        status, extra, start, length = _plan_file_range(file_path, self.headers.get("Range"))
+                        fh = file_path.open("rb")
                     except OSError:
                         self.send_error(404)
                         return
-                    self.send_response(200)
-                    self.send_header("Content-Type", media_content_type(file_path))
-                    self.send_header("Content-Length", str(len(data)))
-                    self.send_header("Cache-Control", "private, max-age=3600")
-                    self.end_headers()
-                    self.wfile.write(data)
+                    with fh:
+                        self.send_response(status)
+                        self.send_header("Content-Type", media_content_type(file_path))
+                        self.send_header("Content-Length", str(length))
+                        for key, value in extra.items():
+                            self.send_header(key, value)
+                        self.send_header("Cache-Control", "private, max-age=3600")
+                        self.end_headers()
+                        _copy_file_range(fh, start, length, self.wfile)
                     return
 
                 wf_media = _WORKFLOW_MEDIA_RE.match(rel)

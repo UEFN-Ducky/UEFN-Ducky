@@ -175,6 +175,18 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Cheap API model that refines the auto role title (empty = keyword names only).",
     ),
+    "video_max_mb": FieldMeta(
+        "Max video size (MB)", "Videos", settable=True,
+        description="Largest video a chat message may carry (10–200).",
+    ),
+    "video_frames_per_video": FieldMeta(
+        "Frames per video", "Videos", settable=True,
+        description="Frames extracted per video for models without native video (1–40, 0 = Auto).",
+    ),
+    "max_images_per_message": FieldMeta(
+        "Max images per message", "Videos", settable=True,
+        description="Images per chat message, video frames included (1–100, 0 = Auto).",
+    ),
     "web_access": FieldMeta(
         "Web search",
         "LLMs",

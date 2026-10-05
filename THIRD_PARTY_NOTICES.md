@@ -35,6 +35,16 @@ not affiliated with or endorsed by Epic Games, Inc.
 
 ## Bundled dependencies
 
+### FFmpeg
+- **License:** LGPL-2.1-or-later (BtbN `win64-lgpl-shared` build; no GPL components)
+- **Shipped as:** `tools/ffmpeg/` inside the app (`ffmpeg.exe`, `ffprobe.exe`, shared DLLs) together
+  with the archive's `LICENSE.txt`. Verified by SHA-256 at build time. The DLLs sit beside the
+  executables and can be replaced with your own build of the same FFmpeg version.
+- **Use:** run only as a separate process to extract frames and audio from chat videos; UEFN-Ducky
+  does not link against it. Source: https://ffmpeg.org and the BtbN release
+  `autobuild-2026-08-31-13-27` (https://github.com/BtbN/FFmpeg-Builds). Running from source
+  (not packaged) downloads the same pinned build into `%LOCALAPPDATA%\UEFN-Ducky\tools\ffmpeg\`.
+
 ### @lore-vcs/sdk
 - **License:** MIT
 - **Copyright:** © 2026 Epic Games, Inc.

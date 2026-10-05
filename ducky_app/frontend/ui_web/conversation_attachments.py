@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import base64
 import re
+import shutil
 import time
+import unicodedata
 import uuid
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import Any
 
 from backend.agent.message_attachment import MessageAttachment
 
-_UNSAFE_CHARS = re.compile(r"[^\w.\-]+")
+_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _CONV_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
-_CHAT_FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$", re.IGNORECASE)
+_CHAT_FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|mp4|webm|mov|mkv)$", re.IGNORECASE)
 NO_CHAT_CAPTURE_ERROR = "Screenshot was not saved: no active chat."
 
 
 def _safe_attachment_filename(name: str) -> str:
     base = Path(name).name or "attachment"
+    # Fold to ASCII so stored names always match the media-serving URL patterns.
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
     safe = _UNSAFE_CHARS.sub("_", base).strip("._")
     return (safe or "attachment")[:120]
 
@@ -33,6 +38,31 @@ def conversation_attachments_dir(conv_id: str, project_root: str | None, convers
 
 def conversation_meta_path(conv_id: str, conversations_dir: Path) -> Path:
     return conversations_dir / conv_id / "conversation.json"
+
+
+def _copy_prep_siblings(src: Path, dest: Path) -> bool:
+    """Carry cached frames/transcript files over (renamed to the persisted video's name).
+
+    Best-effort: they are only a cache; the send path re-extracts when they are missing.
+    Returns True when the transcript is still being produced (the sender must not start a second one)."""
+    from backend.agent.video import prep
+
+    st = prep.prep_status(src.name)
+    if not st.get("sendable") and st["state"] not in ("ready", "error"):
+        return False  # frames still being written: the send path extracts for itself
+    try:
+        siblings = list(src.parent.glob(glob_escape(src.name) + ".*"))
+    except OSError:
+        return False
+    for sib in siblings:
+        suffix = sib.name[len(src.name):]
+        if not suffix or suffix.endswith((".audio.mp3", ".part.jpg", ".part")):
+            continue
+        try:
+            shutil.copyfile(sib, dest.with_name(dest.name + suffix))
+        except OSError:
+            pass
+    return st["state"] == "transcribing"
 
 
 def persist_message_attachments(
@@ -62,6 +92,31 @@ def persist_message_attachments(
             except Exception:
                 continue
             out.append({"kind": "image", "name": att.name, "mime": att.mime or "image/png", "path": rel})
+        elif att.kind == "video" and att.file_path:
+            from backend.agent.video.staging import VIDEO_MIME_EXT
+
+            ext = VIDEO_MIME_EXT.get(att.mime, ".mp4")
+            if Path(filename).suffix.lower() not in VIDEO_MIME_EXT.values():
+                filename += ext
+                rel = f"attachments/{filename}"
+                full = conv_path / rel
+            try:
+                shutil.copyfile(att.file_path, full)
+            except OSError as exc:
+                raise ValueError(f"Could not save video {att.name!r}: {exc}") from exc
+            transcribing = _copy_prep_siblings(Path(att.file_path), full)
+            video_row: dict[str, Any] = {
+                "kind": "video",
+                "name": att.name,
+                "mime": att.mime,
+                "path": rel,
+                "size_bytes": att.size_bytes,
+            }
+            if att.transcript:
+                video_row["transcript"] = att.transcript
+            elif transcribing:
+                video_row["transcript_note"] = "Transcript not ready when sent"
+            out.append(video_row)
         elif att.kind == "file":
             full.write_text(att.text or "", encoding="utf-8")
             out.append(
@@ -96,6 +151,26 @@ def hydrate_attachment_dict(
         return {**raw, "data_base64": data}
     if kind == "file":
         return {**raw, "text": full.read_text(encoding="utf-8")}
+    if kind == "video":
+        conv_path = conversation_dir(conv_id, None, conversations_dir)
+        frames = []
+        for fr in raw.get("frames") or []:
+            if not isinstance(fr, dict) or not fr.get("path"):
+                continue
+            fp = conv_path / str(fr["path"])
+            frames.append(
+                {
+                    **fr,
+                    "abs_path": str(fp),
+                    "media_url": build_chat_attachment_url(conv_id, fp.name),
+                }
+            )
+        return {
+            **raw,
+            "abs_path": str(full),
+            "media_url": build_chat_attachment_url(conv_id, full.name),
+            "frames": frames,
+        }
     return raw
 
 

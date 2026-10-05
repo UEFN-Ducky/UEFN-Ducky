@@ -277,6 +277,12 @@ def main() -> int:
 
     _validate_listener_source(root / "ducky_app" / "uefn_listener")  # spec bundles plaintext uefn_listener/ → bundle/uefn_listener
 
+    # Pinned ffmpeg for tools/ffmpeg (SHA-256 verified; fails the build on mismatch).
+    sys.path.insert(0, str(here))
+    from fetch_ffmpeg import ensure_bundle as ensure_ffmpeg_bundle
+
+    ensure_ffmpeg_bundle()
+
     _build_react_panel(root)
     # Freeze the panel before PyInstaller. npm rebuilds during Analysis replace
     # hashed assets, and PyInstaller then skips the missing files.

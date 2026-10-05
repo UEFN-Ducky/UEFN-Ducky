@@ -257,7 +257,7 @@ def record_coding_agent_usage(
 
 
 def collect_image_paths(conv: Conversation, project_root: str | None = None) -> list[str]:
-    """Absolute paths of image attachments on the chat's latest user message.
+    """Absolute paths of images (and video frames) on the chat's latest user message.
 
     Uploaded images are persisted under conversations/<id>/attachments/ with a
     relative ``path``; resolve them so the coding agent can actually see them.
@@ -274,14 +274,21 @@ def collect_image_paths(conv: Conversation, project_root: str | None = None) -> 
     conv_dir = get_conversations_dir(project_root) / conv.id
     out: list[str] = []
     for att in attachments:
-        if not isinstance(att, dict) or att.get("kind") != "image":
+        if not isinstance(att, dict):
             continue
-        rel = str(att.get("path") or "").strip()
-        if not rel:
+        if att.get("kind") == "image":
+            rels = [att.get("path")]
+        elif att.get("kind") == "video":
+            rels = [f.get("path") for f in att.get("frames") or [] if isinstance(f, dict)]
+        else:
             continue
-        full = (conv_dir / rel).resolve()
-        if full.is_file():
-            out.append(str(full))
+        for rel in rels:
+            rel = str(rel or "").strip()
+            if not rel:
+                continue
+            full = (conv_dir / rel).resolve()
+            if full.is_file():
+                out.append(str(full))
     return out
 
 

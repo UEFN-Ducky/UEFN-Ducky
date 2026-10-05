@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from backend.agent.attachments import attachments_from_message_dict
-from backend.agent.multimodal_content import image_attachments
+from backend.agent.multimodal_content import media_attachments
 from backend.agent.prompt import compact_messages, get_system_prompt_parts
 from backend.agent.prompt_cache import (
     LIVE_CONTEXT_PREFIX,
@@ -564,7 +564,7 @@ class AgentRunner:
                 ProviderMessage(
                     role="user",
                     content=str(m.get("content") or m.get("text") or ""),
-                    attachments=image_attachments(
+                    attachments=media_attachments(
                         attachments_from_message_dict(
                             m,
                             conv_id=self.config.conv_id or None,
@@ -573,6 +573,13 @@ class AgentRunner:
                     ),
                 )
             )
+        from backend.agent.video.budget import apply_media_budget
+
+        apply_media_budget(
+            [pm.attachments for pm in out if pm.role == "user" and pm.attachments],
+            provider=self.config.provider,
+            model=self.config.model or "",
+        )
         return out
 
     async def run_turn(

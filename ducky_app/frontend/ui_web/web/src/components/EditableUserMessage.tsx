@@ -34,17 +34,24 @@ function attachmentSrc(att: MessageAttachmentDto): string | null {
   return `data:${mime};base64,${att.data_base64}`;
 }
 
+function formatSeconds(t: number): string {
+  const s = Math.floor(t);
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
 /** Read-only thumbnails/chips for the message's attachments. */
 function AttachmentStrip({
   images,
   files,
+  videos,
   onPreview,
 }: {
   images: MessageAttachmentDto[];
   files: MessageAttachmentDto[];
+  videos: MessageAttachmentDto[];
   onPreview?: (att: MessageAttachmentDto) => void;
 }) {
-  if (images.length === 0 && files.length === 0) return null;
+  if (images.length === 0 && files.length === 0 && videos.length === 0) return null;
   return (
     <div className="message-bubble-attachments">
       {images.map((att) => {
@@ -69,6 +76,28 @@ function AttachmentStrip({
           </button>
         );
       })}
+      {videos.map((att) => (
+        <div key={`vid-${att.name}-${att.media_url ?? ""}`} className="message-bubble-attachment-video-wrap">
+          {att.media_url ? (
+            <video src={att.media_url} controls preload="metadata" className="message-bubble-attachment-video" />
+          ) : (
+            <span className="message-bubble-attachment-file-name">{att.name}</span>
+          )}
+          {att.frames && att.frames.length > 0 ? (
+            <details className="message-bubble-video-frames">
+              <summary>{att.frames.length} frames sent to the AI</summary>
+              <div className="message-bubble-video-frames-grid">
+                {att.frames.map((f, i) => (
+                  <figure key={f.media_url ?? i}>
+                    {f.media_url ? <img src={f.media_url} alt={`Frame ${i + 1}`} /> : null}
+                    <figcaption>{formatSeconds(f.t_s)}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ))}
       {files.map((att) => (
         <button
           key={`file-${att.name}`}
@@ -109,6 +138,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
   const items = attachments ?? [];
   const images = items.filter((a) => a.kind === "image");
   const files = items.filter((a) => a.kind === "file");
+  const videos = items.filter((a) => a.kind === "video");
 
   const [preview, setPreview] = useState<MessageAttachmentDto | null>(null);
   const [editing, setEditing] = useState(false);
@@ -215,7 +245,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
       <div className="message-bubble-user-wrap">
         <div className="message-bubble-user-row">
           <div className="msg-edit-box" ref={boxRef}>
-            <AttachmentStrip images={images} files={files} />
+            <AttachmentStrip images={images} files={files} videos={videos} />
             <textarea
               ref={textareaRef}
               value={draft}
@@ -327,7 +357,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
               ) : null}
             </div>
           ) : null}
-          <AttachmentStrip images={images} files={files} onPreview={setPreview} />
+          <AttachmentStrip images={images} files={files} videos={videos} onPreview={setPreview} />
           {text ? (
             <div
               ref={textRef}

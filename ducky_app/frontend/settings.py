@@ -199,6 +199,15 @@ class PanelSettings:
     chat_title_model: str = ""
     """Cheap API model that refines the auto role title (empty = keyword names only)."""
 
+    video_max_mb: int = 100
+    """Largest video a chat message may carry (Settings → Videos, 10–200)."""
+
+    video_frames_per_video: int = 0
+    """Frames extracted per video for non-Gemini models (1–40, 0 = Auto from the model)."""
+
+    max_images_per_message: int = 0
+    """Images per message, video frames included (1–100, 0 = Auto from the model)."""
+
     web_access: str = "ask"
     """Public web lookup: off, ask once per chat, or on."""
 
@@ -454,6 +463,9 @@ class PanelSettings:
             or self.memory_compress_messages != 40
             or self.memory_compress_tokens != 80_000
             or self.memory_index_max_chars != 2_500
+            or self.video_max_mb != 100
+            or self.video_frames_per_video != 0
+            or self.max_images_per_message != 0
             or self.memory_summary_model.strip()
             or not self.chat_auto_title
             or not self.first_open_tours

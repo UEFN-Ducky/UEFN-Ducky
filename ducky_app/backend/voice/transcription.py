@@ -47,6 +47,15 @@ def _openai_key() -> str:
     return key
 
 
+def openai_transcription_available() -> bool:
+    """True when the OpenAI gateway is present and a key is set (never raises)."""
+    try:
+        _openai_key()
+    except Exception:
+        return False
+    return True
+
+
 def _log_voice_usage(*, model: str, input_tokens: int = 1, output_tokens: int = 0) -> None:
     """Fail-soft: voice STT uses the OpenAI key outside chat — still show in Settings usage."""
     try:

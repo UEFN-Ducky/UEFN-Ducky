@@ -16,7 +16,7 @@ from frontend.ui_web.project_chats import append_message, load_conversation, sav
 from frontend.ui_web.token_usage import record_api_call, token_usage_report
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
 from backend.agent.attachments import attachments_from_message_dict, parse_attachment_dicts
-from backend.agent.multimodal_content import image_attachments
+from backend.agent.multimodal_content import media_attachments
 from backend.agent.providers import make_provider
 from backend.agent.providers.base import ProviderMessage, StreamEventKind
 from backend.agent.runner import AgentRunner, RunConfig
@@ -871,7 +871,7 @@ async def _run_ask_async(
                     ProviderMessage(
                         role="user",
                         content=str(m.get("content", "")),
-                        attachments=image_attachments(
+                        attachments=media_attachments(
                             attachments_from_message_dict(m, conv_id=conv.id, project_root=project_root)
                         ),
                     )
@@ -882,8 +882,15 @@ async def _run_ask_async(
             if messages and messages[-1].role == "assistant":
                 messages.append(ProviderMessage(role="user", content="Continue."))
         else:
-            current_images = image_attachments(parse_attachment_dicts(user_attachments))
+            current_images = media_attachments(parse_attachment_dicts(user_attachments))
             messages.append(ProviderMessage(role="user", content=user_text, attachments=current_images))
+        from backend.agent.video.budget import apply_media_budget
+
+        apply_media_budget(
+            [pm.attachments for pm in messages if pm.role == "user" and pm.attachments],
+            provider=provider_name or "",
+            model=model or "",
+        )
         if volatile_tail:
             messages.append(
                 ProviderMessage(
@@ -1215,6 +1222,37 @@ def _note_run_starter(conv_id: str, parent: str, started_by: str | None) -> None
         note_started_by(conv_id, parent if started_by is None else started_by)
     except Exception:
         pass
+
+
+def _backfill_video_frames(
+    conv: Any, conv_id: str, provider: str, external: bool, push: Any, project_root: Any, model: str = ""
+) -> None:
+    """Give earlier videos frames when the current recipient can't take them natively."""
+    if external:
+        return  # coding agents only ever get the latest message's files, never history frames
+    if not any(
+        isinstance(m, dict)
+        and m.get("role") == "user"
+        and any(isinstance(r, dict) and r.get("kind") == "video" for r in m.get("attachments") or [])
+        for m in conv.messages
+    ):
+        return
+    from backend.agent.video.send import backfill_history_frames
+    from frontend.ui_web.project_chats import get_conversations_dir
+
+    changed = backfill_history_frames(
+        conv.messages,
+        conv_dir=get_conversations_dir(project_root) / conv_id,
+        provider=provider,
+        external=external,
+        push_status=lambda text: push({"type": "status", "text": text, "conv_id": conv_id}),
+        model=model,
+    )
+    if changed:
+        try:
+            save_conversation(conv)
+        except Exception:
+            pass
 
 
 def run_message_and_wait(
@@ -1572,6 +1610,9 @@ def run_message(
             save_conversation(conv)
         except Exception:
             pass
+        _backfill_video_frames(
+            conv, conv_id, provider_name or "", external, push, settings.uefn_project_root, turn_model
+        )
         history = list(conv.messages)
     else:
         try:
@@ -1592,18 +1633,56 @@ def run_message(
             content = dedupe_exact_blocks(content)
             user_text = dedupe_exact_blocks(user_text)
 
-        attachments_parsed = parse_attachment_dicts(attachments)
+        try:
+            attachments_parsed = parse_attachment_dicts(
+                attachments, current=True, provider=provider_name or "", model=turn_model
+            )
+        except ValueError as e:
+            push({"type": "error", "text": str(e), "conv_id": conv_id})
+            return ""
         ts = time.time()
         from frontend.ui_web.conversation_attachments import persist_message_attachments
         from frontend.ui_web.project_chats import get_conversations_dir
 
-        stored_attachments = persist_message_attachments(
-            conv_id,
-            ts,
-            attachments_parsed,
-            get_conversations_dir(settings.uefn_project_root),
-            settings.uefn_project_root,
+        conversations_dir = get_conversations_dir(settings.uefn_project_root)
+        try:
+            stored_attachments = persist_message_attachments(
+                conv_id,
+                ts,
+                attachments_parsed,
+                conversations_dir,
+                settings.uefn_project_root,
+            )
+        except ValueError as e:
+            push({"type": "error", "text": str(e), "conv_id": conv_id})
+            return ""
+        conv_dir_path = conversations_dir / conv_id
+        from backend.agent.video.send import (
+            external_video_hint,
+            prepare_video_frames,
+            runtime_video_dict,
         )
+
+        if any(r.get("kind") == "video" for r in stored_attachments):
+            try:
+                prepare_video_frames(
+                    stored_attachments,
+                    conv_dir=conv_dir_path,
+                    provider=provider_name or "",
+                    external=external,
+                    push_status=lambda text: push({"type": "status", "text": text, "conv_id": conv_id}),
+                    model=turn_model,
+                )
+            except ValueError as e:
+                push({"type": "error", "text": str(e), "conv_id": conv_id})
+                return ""
+            if external:
+                hints = [
+                    external_video_hint(r, conv_dir_path)
+                    for r in stored_attachments
+                    if r.get("kind") == "video"
+                ]
+                content = (content + "\n\n" if content else "") + "\n".join(hints)
         current_user_attachments = [
             {
                 "kind": a.kind,
@@ -1612,6 +1691,11 @@ def run_message(
                 **({"data_base64": a.data_base64} if a.kind == "image" else {"text": a.text}),
             }
             for a in attachments_parsed
+            if a.kind != "video"
+        ] + [
+            runtime_video_dict(r, conv_dir_path)
+            for r in stored_attachments
+            if r.get("kind") == "video"
         ]
 
         user_msg: dict[str, Any] = {"role": "user", "content": content, "text": user_text, "ts": ts}
@@ -1622,6 +1706,9 @@ def run_message(
             from backend.agent.chat_title import start_auto_title
 
             start_auto_title(conv, user_text or content, push=push)
+        _backfill_video_frames(
+            conv, conv_id, provider_name or "", external, push, settings.uefn_project_root, turn_model
+        )
         history = list(conv.messages[:-1])
 
     from frontend.ui_web.context_omit import context_omit_set

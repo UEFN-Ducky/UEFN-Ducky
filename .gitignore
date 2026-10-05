@@ -29,6 +29,9 @@ release/installer/host/wv2/
 build/__pycache__/
 build/unified-work/
 build/pyinstaller-dist/
+build/ffmpeg-bundle/
+build/ffmpeg-bundle.tmp/
+build/ffmpeg-bundle.zip.part
 build/.editor-pyc-work/
 build/editor-pyc/
 build/editor_bundle.zip

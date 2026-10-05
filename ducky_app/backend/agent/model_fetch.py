@@ -37,6 +37,10 @@ class ModelInfo:
     price_cached_in: float | None = None
     price_cache_write: float | None = None
     is_local: bool = False
+    # Per-request image cap / native video+audio input support; None = unknown.
+    max_images: int | None = None
+    supports_video: bool | None = None
+    supports_audio: bool | None = None
     # None = unknown (UI falls back to provider flag / name heuristic).
     supports_thinking_effort: bool | None = None
     # Gateway-owned effort stops. Host never invents levels besides Off=0.

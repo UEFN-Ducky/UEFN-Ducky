@@ -52,6 +52,7 @@ import { settingsTabTone } from "../components/quick-open/quickOpenRecents";
 
 const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => ({ default: m.AppearanceTab })));
 const AudioTab = lazy(() => import("./settings/AudioTab").then((m) => ({ default: m.AudioTab })));
+const VideosTab = lazy(() => import("./settings/VideosTab").then((m) => ({ default: m.VideosTab })));
 const SkillsMcpTab = lazy(() => import("./settings/SkillsMcpTab").then((m) => ({ default: m.SkillsMcpTab })));
 const StoreTab = lazy(() => import("./settings/StoreTab").then((m) => ({ default: m.StoreTab })));
 
@@ -66,6 +67,7 @@ const CORE_TABS = [
   "LLMs",
   "Appearance",
   "Audio",
+  "Videos",
 ] as const;
 
 export type SettingsTab = string;
@@ -85,6 +87,7 @@ const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], () => JSX.Element> = {
   LLMs: Icons.Brain,
   Appearance: Icons.Sparkles,
   Audio: Icons.Speaker,
+  Videos: Icons.Play,
 };
 
 /** Sidebar label — Store tab is the Plugins page (catalog + installed). */
@@ -649,6 +652,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
         )}
         {activeTab === "Appearance" && <AppearanceTab />}
         {activeTab === "Audio" && <AudioTab sectionTab={audioSection} />}
+        {activeTab === "Videos" && <VideosTab />}
         {activePluginTab ? renderPluginTabBody(activePluginTab) : null}
       </>
     );

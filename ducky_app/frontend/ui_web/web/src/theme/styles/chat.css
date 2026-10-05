@@ -7067,3 +7067,34 @@
 .modal-backdrop--contained .changeset-diff-modal {
   max-height: min(70vh, calc(100% - 72px));
 }
+
+.message-bubble-attachment-video {
+  max-width: 360px;
+  max-height: 240px;
+  border-radius: 6px;
+  display: block;
+}
+.message-bubble-video-frames summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.message-bubble-video-frames-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 4px;
+  margin-top: 4px;
+}
+.message-bubble-video-frames-grid figure {
+  margin: 0;
+  font-size: 10px;
+  text-align: center;
+}
+.message-bubble-video-frames-grid img {
+  width: 100%;
+  border-radius: 4px;
+}
+.attachment-preview-video {
+  max-width: 100%;
+  max-height: 70vh;
+}

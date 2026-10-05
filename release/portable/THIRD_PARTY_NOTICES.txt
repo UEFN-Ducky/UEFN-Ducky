@@ -11,6 +11,19 @@ Typical components in a PyInstaller-frozen build (non-exhaustive):
 - PyInstaller bootloader and bundling (GPL with exception; https://pyinstaller.org)
 - Transitive wheels from requirements.txt (each under its own license; run pip-licenses or similar for an exact list)
 
+FFmpeg
+------
+
+UEFN-Ducky bundles FFmpeg (ffmpeg.exe, ffprobe.exe and shared DLLs) in tools/ffmpeg/,
+together with its LICENSE.txt. It is used to extract frames and audio from chat videos.
+
+- License: LGPL-2.1-or-later (BtbN win64-lgpl-shared build; no GPL components).
+- Build: BtbN autobuild-2026-08-31-13-27 (FFmpeg n9.0.1), unmodified.
+- The libraries are shared DLLs beside the executables, so you may replace them with your
+  own build of the same FFmpeg version.
+- UEFN-Ducky runs FFmpeg only as a separate process and does not link against it.
+- Source: https://ffmpeg.org and https://github.com/BtbN/FFmpeg-Builds
+
 Epic / UEFN
 -----------
 

@@ -101,6 +101,13 @@ if _listener.is_dir():
         _parent = rel.parent.as_posix()
         _dest_dir = "bundle/uefn_listener" if _parent == "." else f"bundle/uefn_listener/{_parent}"
         _datas.append((str(path), _dest_dir))
+# ffmpeg (LGPL, pinned) ships under tools/ffmpeg; build/fetch_ffmpeg.py populates the folder.
+_ffmpeg_bundle = ROOT / "build" / "ffmpeg-bundle"
+if not (_ffmpeg_bundle / "ffmpeg.exe").is_file():
+    raise RuntimeError("unified.spec: ffmpeg bundle missing - run build/fetch_ffmpeg.py")
+for path in sorted(_ffmpeg_bundle.iterdir()):
+    if path.is_file() and path.name != ".installed":
+        _datas.append((str(path), "tools/ffmpeg"))
 # One boot file — island stub, Documents Python, and Engine Toolset hook.
 _init = FRONTEND / "init_unreal.py"
 if _init.is_file():

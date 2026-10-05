@@ -64,7 +64,7 @@ export function AttachmentPreviewModal({ open, attachment, onClose, onSaveDrawin
   if (!attachment) return null;
 
   const imageSrc = attachmentImageSrc(attachment);
-  const title = attachment.name || (attachment.kind === "image" ? "Image" : "File");
+  const title = attachment.name || (attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : "File");
   const canDraw = attachment.kind === "image" && !!imageSrc && !!onSaveDrawing;
 
   const strokeTo = (e: ReactPointerEvent<HTMLCanvasElement>, begin: boolean) => {
@@ -182,6 +182,8 @@ export function AttachmentPreviewModal({ open, attachment, onClose, onSaveDrawin
               />
             )}
           </div>
+        ) : attachment.kind === "video" && attachment.media_url ? (
+          <video src={attachment.media_url} controls autoPlay className="attachment-preview-video" />
         ) : attachment.kind === "file" ? (
           <pre className="attachment-preview-file selectable-text">{attachment.text || ""}</pre>
         ) : (

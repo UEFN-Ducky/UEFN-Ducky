@@ -7372,3 +7372,14 @@
 .dbtab-importers {
   margin-top: 10px;
 }
+
+.videos-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.videos-tab-actions {
+  display: flex;
+  gap: 8px;
+}

@@ -600,3 +600,50 @@ def test_group_turn_keeps_image_attachment(monkeypatch):
     assert user["attachments"][0]["name"] == "shot.png"
     assert captured["attachments"] == [shot]
     assert "See the attachment." in captured["text"]
+
+
+def test_group_turn_bad_video_does_not_wedge_the_group(monkeypatch):
+    import frontend.ui_web.group_orchestrator as go
+
+    hub = SimpleNamespace(
+        id="hub", is_group=True, messages=[],
+        group_members=[{"member_conv_id": "m1", "name": "Painter", "profile_id": "p"}],
+        title="Group", model="", folder_id="",
+    )
+    events: list[dict] = []
+
+    def boom(*_a, **_k):
+        raise ValueError("Video 'a.mp4' is no longer available — attach it again.")
+
+    monkeypatch.setattr(go, "load_conversation", lambda cid, project_root=None: hub if cid == "hub" else None)
+    monkeypatch.setattr(go, "append_message", lambda conv, message, project_root=None: conv.messages.append(message))
+    monkeypatch.setattr(go, "sync_group_members_from_folder", lambda group, project_root=None: go.group_members(group))
+    monkeypatch.setattr(go, "_persist_group_attachments", boom)
+    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda _gid: False)
+    vid = {"kind": "video", "name": "a.mp4", "mime": "video/mp4"}
+
+    assert run_group_turn("hub", "hi", attachments=[vid], push=events.append) == ""
+    assert "hub" not in go._group_sessions
+    assert not go.is_group_running("hub")
+    assert hub.messages == []
+    assert events[-1]["type"] == "error" and "no longer available" in events[-1]["text"]
+    # A second attempt is reported with the same error, never "already running".
+    run_group_turn("hub", "hi", attachments=[vid], push=events.append)
+    assert all("already running" not in e["text"] for e in events)
+
+
+def test_hub_persist_does_not_cap_images(monkeypatch, tmp_path):
+    import base64
+
+    from frontend.ui_web import group_orchestrator as go
+
+    seen = {}
+    monkeypatch.setattr(
+        "frontend.ui_web.conversation_attachments.persist_message_attachments",
+        lambda gid, ts, parsed, d, root: seen.setdefault("n", len(parsed)) and [],
+    )
+    monkeypatch.setattr("frontend.ui_web.project_chats.get_conversations_dir", lambda root=None: tmp_path)
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 16).decode()
+    raw = [{"kind": "image", "name": f"{i}.png", "mime": "image/png", "data_base64": png} for i in range(30)]
+    go._persist_group_attachments("g1", 1.0, raw)
+    assert seen["n"] == 30

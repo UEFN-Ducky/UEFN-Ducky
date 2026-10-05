@@ -280,6 +280,8 @@ export function ChatPane({
     attachments,
     error: attachmentError,
     hasImages,
+    hasPendingVideos,
+    retryVideo,
     addFiles,
     removeAttachment,
     updateAttachmentImage,
@@ -287,7 +289,7 @@ export function ChatPane({
     restoreAttachments,
     replaceAttachments,
     toApiAttachments,
-  } = useComposerAttachments(initialComposer?.attachments ?? []);
+  } = useComposerAttachments(initialComposer?.attachments ?? [], { convId: chat.id });
 
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const previewAttachment = useMemo((): MessageAttachmentDto | null => {
@@ -300,6 +302,9 @@ export function ChatPane({
         mime: att.mime,
         data_base64: att.dataUrl.replace(/^data:[^;]+;base64,/, ""),
       };
+    }
+    if (att.kind === "video") {
+      return { kind: "video", name: att.name, mime: att.mime, media_url: att.previewUrl };
     }
     return { kind: "file", name: att.name, mime: att.mime, text: att.text };
   }, [attachments, previewAttachmentId]);
@@ -838,13 +843,14 @@ export function ChatPane({
   const hasText = !!inputText.trim();
   const hasContent = hasText || attachments.length > 0;
   // Group hubs have no model of their own — the answering member decides vision.
-  const visionBlocked = !chat.isGroup && hasImages && !modelSupportsVision && !externalAgent;
+  const visionBlocked = !chat.isGroup && (hasImages || attachments.some((a) => a.kind === "video")) && !modelSupportsVision && !externalAgent;
   const canCompose =
     (chat.isGroup
       ? groupMembers.length > 0 && (groupUsesExternalOnly || (hasApiKey && !noModelsAvailable))
       : externalAgent || (!noModelsAvailable && hasApiKey && !!selectedModel)) &&
     hasContent &&
-    !visionBlocked;
+    !visionBlocked &&
+    !hasPendingVideos;
   // UI-facing "no models" state — suppressed for groups whose every member
   // already runs an external coding agent (Claude Code, …), which needs no
   // API key. Distinct from noModelsAvailable, which single-chat canCompose
@@ -1497,6 +1503,7 @@ export function ChatPane({
               attachments={attachments}
               onRemove={removeAttachment}
               onPreview={(att) => setPreviewAttachmentId(att.id)}
+              onRetry={retryVideo}
             />
             <AttachmentPreviewModal
               open={previewAttachment !== null}
