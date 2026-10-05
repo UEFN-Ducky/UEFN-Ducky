@@ -240,15 +240,32 @@ if not _pty_bins and not _pty_datas:
         "would break in the frozen exe. Is pywinpty installed in the build env?"
     )
 
+_v8_datas, _v8_bins, _v8_hidden = [], [], []
+try:
+    from PyInstaller.utils.hooks import collect_all
+
+    # Custom code workflow nodes run in V8. The pip distribution is "mini-racer",
+    # the package "py_mini_racer"; it loads mini_racer.dll and icudtl.dat from its
+    # own folder, so both must be frozen next to it.
+    _v8_datas, _v8_bins, _v8_hidden = collect_all("py_mini_racer")
+except Exception:
+    pass
+if not any("mini_racer" in str(entry[0]).lower() for entry in _v8_bins + _v8_datas):
+    raise RuntimeError(
+        "unified.spec: collect_all('py_mini_racer') found no mini_racer.dll: Custom "
+        "code nodes would fail in the frozen exe. Is mini-racer installed in the build env?"
+    )
+
 a = Analysis(
     [str(FRONTEND / "launcher.py")],
     pathex=[str(ROOT), str(DUCKY_APP)],
-    binaries=_tz_bins + _pty_bins,
-    datas=_datas + _runtime_datas + _tz_datas + _pty_datas,
+    binaries=_tz_bins + _pty_bins + _v8_bins,
+    datas=_datas + _runtime_datas + _tz_datas + _pty_datas + _v8_datas,
     hiddenimports=list(backend_hidden)
     + list(mcp_hidden)
     + list(_tz_hidden)
     + list(_pty_hidden)
+    + list(_v8_hidden)
     + list(_PLUGIN_HOST_CODING)
     + [
         "frontend",

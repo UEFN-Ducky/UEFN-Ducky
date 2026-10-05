@@ -26,3 +26,5 @@ pywinpty>=2.0.13; platform_system == "Windows"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
 toon_format @ git+https://github.com/toon-format/toon-python.git
+# Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
+mini-racer==0.14.1
