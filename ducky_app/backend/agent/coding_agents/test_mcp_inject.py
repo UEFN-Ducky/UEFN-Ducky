@@ -41,3 +41,13 @@ def test_bootstrap_includes_chat_report_template() -> None:
     assert "link them instead" in text
     assert "select:mcp__uefn__<tool>" in text
     assert "Settings" in text
+
+
+def test_bootstrap_sends_file_reads_to_ducky_tools_not_the_shell() -> None:
+    text = bootstrap_system_prompt(project_root="/tmp/p", listener_online=False, conv_id="chat-a")
+    assert "## Files and git (no shell)" in text
+    # Codex runs tools from a code runner and reads other projects by absolute path.
+    assert "tools.mcp__uefn__workspace_search" in text
+    assert "other Ducky projects" in text
+    for shell_read in ("Get-Content", "Select-String", "rg", "git grep", "exec_command"):
+        assert shell_read in text

@@ -201,17 +201,22 @@ CODING_AGENT_FOLDER_NOTE = (
 # file in the context. The `uefn` server reads only the lines asked for.
 FILE_TOOLS_RULE = (
     "\n## Files and git (no shell)\n"
-    "Read, search and edit project files with the `uefn` workspace tools, not your shell "
-    "(no Get-Content, Select-String, dir, cat, grep, sed or Python one-liners):\n"
+    "Find, read, search and inspect git with the `uefn` workspace tools, never your shell: no "
+    "Get-Content, Select-String, Get-ChildItem, dir, ls, cat, type, rg, grep, findstr, git grep, "
+    "git status/diff/log/show, sed or Python one-liners, and none of these wrapped in "
+    "exec_command either (rg is not installed here). They work in the open project (relative "
+    "paths) and in every other folder you were given, the person's other Ducky projects "
+    "(absolute paths, e.g. path=\"C:/Users/.../OtherRepo\"). In a code runner call them as "
+    "`tools.mcp__uefn__workspace_search({...})`.\n"
     '- find files: `workspace_find` ("*.py", "src/**/mcp*"); a folder tree: `workspace_tree`\n'
     '- search text: `workspace_search` (output_mode="files" first on a broad search, then "content" with context)\n'
     "- read: `workspace_file_outline` for a big file, then `workspace_read_file` with start_line/end_line; "
     "several files at once: `workspace_read_files`\n"
-    "- edit: `workspace_edit_file` (exact text), `workspace_multi_edit` (several in one file), "
-    "`workspace_replace_lines` (a line range), `workspace_write_file` (new or whole file), "
-    "`workspace_move_file`, `workspace_delete_file`\n"
-    "- git reads: `workspace_git` (status, diff, log, show, ls-files, blame)\n"
-    "Use your shell only for builds, tests and git changes.\n"
+    "- edit in the open project: `workspace_edit_file` (exact text), `workspace_multi_edit` (several "
+    "in one file), `workspace_replace_lines` (a line range), `workspace_write_file` (new or whole "
+    "file), `workspace_move_file`, `workspace_delete_file`; in another project, your own edit/patch tool\n"
+    "- git reads: `workspace_git` (status, diff, log, show, ls-files, blame, grep), path= picks the repository\n"
+    "Use your shell only to build, test, run the app and change git (commit, push).\n"
 )
 
 

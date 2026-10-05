@@ -261,7 +261,8 @@ def workspace_read_file(
     line_numbers: bool = False,
     pretty: bool = False,
 ) -> str:
-    """Read a text file from the project. Use this instead of a shell cat / Get-Content.
+    """Read a text file: relative to the open project, or an absolute path in any of the
+    person's other Ducky projects. Use this instead of a shell cat / Get-Content.
 
     start_line / end_line (1-based, inclusive) read just those lines; without them the first
     2000 lines come back, with a note where the rest starts. line_numbers=true prefixes each

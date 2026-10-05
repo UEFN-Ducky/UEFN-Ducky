@@ -226,6 +226,33 @@ def test_move_and_delete_use_the_undoable_project_operations(project, monkeypatc
     assert out == {"path": "README.md", "deleted": True, "restorable": True}
 
 
+def test_reads_reach_another_of_the_persons_projects_by_absolute_path(project, monkeypatch, tmp_path) -> None:
+    root, _ = project
+    other = tmp_path / "OtherRepo"
+    (other / "lib").mkdir(parents=True)
+    (other / "lib" / "media.py").write_text("AGENT_BACKEND = 'agent'\n\ndef pick():\n    return AGENT_BACKEND\n", encoding="utf-8")
+    inner = wc.resolve_workspace_path
+
+    def resolve(path: str) -> str:
+        # The real resolver accepts absolute paths inside any recent project.
+        if Path(path).is_absolute():
+            full = Path(path).resolve()
+            assert other in full.parents or full == other, "outside the person's projects"
+            return str(full)
+        return inner(path)
+
+    monkeypatch.setattr(wc, "resolve_workspace_path", resolve)
+    monkeypatch.setattr(system, "resolve_workspace_path", resolve)
+    want = str(other / "lib" / "media.py").replace("\\", "/")
+    hits = _call(wc.workspace_search, "AGENT_BACKEND", path=str(other), glob="lib/*.py")
+    assert {(m["path"], m["line"]) for m in hits["matches"]} == {(want, 1), (want, 4)}
+    assert _call(wc.workspace_find, "lib/*.py", path=str(other))["files"] == [want]
+    read = _call(wc.workspace_read_files, [want], start_line=3, end_line=4)["files"][0]
+    assert read["path"] == want and read["content"] == "def pick():\n    return AGENT_BACKEND"
+    # The open project's own paths stay relative.
+    assert _call(wc.workspace_find, "*.ts")["files"] == ["src/pkg/util.ts"]
+
+
 # ---------------------------------------------------------------- git
 
 

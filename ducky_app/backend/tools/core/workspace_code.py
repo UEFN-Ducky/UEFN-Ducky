@@ -49,10 +49,24 @@ def _project_root() -> str:
 
 
 def _rel(full: str, root: str) -> str:
+    """Relative inside the open project; absolute for a file in another of the
+    person's projects, so the path can be passed straight back to these tools
+    (a ``../..`` path would be refused as escaping the project)."""
     try:
-        return os.path.relpath(full, root).replace("\\", "/")
+        rel = os.path.relpath(full, root)
     except ValueError:
         return full.replace("\\", "/")
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return full.replace("\\", "/")
+    return rel.replace("\\", "/")
+
+
+def _match_base(start: str, root: str) -> str:
+    """What a folder glob (``src/**/*.py``) is relative to: the open project, or the
+    folder searched when it is in another project."""
+    if _rel(start, root) != start.replace("\\", "/"):
+        return root
+    return start if os.path.isdir(start) else os.path.dirname(start)
 
 
 def _walk_files(start: str):
@@ -153,9 +167,10 @@ def workspace_read_files(
     start_line / end_line (1-based, inclusive) apply to every file; without them each file
     shows its first 2000 lines. line_numbers=true prefixes each line with its number.
     Read a big file's outline first (workspace_file_outline), then only the lines you need.
+    Paths are relative to the open project, or absolute in any of the person's other Ducky projects.
     """
     if not paths:
-        raise ValueError("paths is required: a list of project-relative file paths")
+        raise ValueError("paths is required: a list of file paths (project-relative or absolute)")
     root = _project_root()
     files: list[dict[str, Any]] = []
     for path in list(paths)[:20]:
@@ -260,6 +275,7 @@ def workspace_tree(path: str = ".", depth: int = 3, max_entries: int = 400, pret
     """A folder tree (folders end with /), down to ``depth`` levels. Use this instead of
     shell tree / dir /s / Get-ChildItem -Recurse. Skips .git, node_modules, build output,
     Saved/Intermediate. Folders deeper than ``depth`` show how many entries they hold.
+    path: a folder in the open project, or an absolute path in any of the person's other Ducky projects.
     """
     start = resolve_workspace_path(path or ".")
     if not os.path.isdir(start):
@@ -318,7 +334,8 @@ def workspace_search(
     """Search text in project files (like ripgrep). Use this instead of a shell grep, Select-String or git grep.
 
     pattern: the text to find (regex=true for a regular expression). path: a folder or file
-    under the project (default: the whole project). glob: only these files, e.g. "*.py" or
+    in the open project (default: all of it), or an absolute path in any of the person's
+    other Ducky projects. glob: only these files, e.g. "*.py" or
     "src/**/*.ts" (comma-separated for several). context: lines shown before and after each hit.
     output_mode: "content" (matching lines), "files" (just the files, with hit counts) or
     "count" (totals) — "files" first is cheapest on a broad search.
@@ -336,6 +353,7 @@ def workspace_search(
         raise ValueError(f"Not a valid regular expression: {exc}. Pass regex=false to search the plain text.") from exc
     root = _project_root()
     start = resolve_workspace_path(path or ".")
+    base = _match_base(start, root)
     globs = _globs(glob)
     context = max(0, min(int(context or 0), 10))
     limit = max(1, min(int(max_results or 100), 1000))
@@ -349,7 +367,7 @@ def workspace_search(
             truncated = f"Stopped after {int(_SEARCH_SECONDS)} s: narrow path or glob."
             break
         rel = _rel(full, root)
-        if globs and not any(_path_matches(rel, g) for g in globs):
+        if globs and not any(_path_matches(_rel(full, base), g) for g in globs):
             continue
         text = _read_text(full)
         if text is None:
@@ -395,11 +413,13 @@ def workspace_find(pattern: str = "*", path: str = ".", max_results: int = 200, 
     """Find files by name or path pattern (like a glob or git ls-files). Use this instead of shell dir / Get-ChildItem listings.
 
     pattern: "*.py", "**/test_*.py", "src/**/mcp*", or a plain word (any path containing it).
-    path: a folder under the project (default: the whole project). Returns project-relative paths.
+    path: a folder in the open project (default: all of it), or an absolute path in any of the
+    person's other Ducky projects. Returns paths relative to the open project, absolute elsewhere.
     Skips .git, node_modules, build output, Saved/Intermediate and binary files.
     """
     root = _project_root()
     start = resolve_workspace_path(path or ".")
+    base = _match_base(start, root)
     limit = max(1, min(int(max_results or 200), 2000))
     deadline = time.monotonic() + _SEARCH_SECONDS
     found: list[str] = []
@@ -408,9 +428,8 @@ def workspace_find(pattern: str = "*", path: str = ".", max_results: int = 200, 
         if time.monotonic() > deadline:
             truncated = f"Stopped after {int(_SEARCH_SECONDS)} s: narrow path or pattern."
             break
-        rel = _rel(full, root)
-        if _path_matches(rel, pattern or "*"):
-            found.append(rel)
+        if _path_matches(_rel(full, base), pattern or "*"):
+            found.append(_rel(full, root))
             if len(found) >= limit:
                 truncated = f"Stopped at {limit} files: narrow path or pattern, or raise max_results."
                 break
@@ -609,6 +628,8 @@ def _git_args_refused(command: str, args: list[str]) -> str:
 def workspace_git(command: str, args: Optional[list[str]] = None, path: str = ".", pretty: bool = False) -> str:
     """Read-only git in the project: status, diff, log, show, ls-files, blame, branch, grep, rev-parse, shortlog, describe, tag. Use this instead of running git through a shell.
 
+    path: where to run it, in the open project (default) or an absolute path in any of the
+    person's other Ducky projects (that folder's repository).
     args: the rest of the command line as a list, e.g. command="log", args=["--oneline", "-20"]
     or command="diff", args=["HEAD", "--", "src/app.py"]. Commits, pushes and other changes
     stay in the shell, where they ask first.
