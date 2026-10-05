@@ -244,6 +244,31 @@ names them; ask the user, and only after they agree pass
 | `clear_workflow_runs` | Clear log |
 | `emit_workflow_trigger` | fire a plugin trigger to test listeners |
 | `list_workflow_templates` / `save_workflow_template` (with `category`) / `delete_workflow_template` | New workflow picker |
+| `get_workflow_node_code` / `edit_workflow_node_code` / `test_workflow_node` / `workflow_code_api` | a node's JavaScript (Custom code, below) |
+
+### Code nodes (Custom code)
+
+Every node's details have a Code tab with the JavaScript it runs. Built-ins keep
+running their own step; editing a node's code turns it into a **Custom code** node
+(`code.js`) in that workflow only. Local workflows only (a team's refuses it).
+
+- **When**: only when no node or setting does it — a small transform, a few tool
+  calls in a row, a check with its own message. A Custom code node is one step: it
+  never picks a route (keep If / Branch / loops as nodes).
+- **API**: call `workflow_code_api` (with `tools=[...]` for the tools you will call)
+  instead of writing it from memory: the `ducky` object, the `node` declaration
+  (pins, settings, `tools`, `builtins` it may use) and examples.
+- **Later steps** read its outputs as `{{nodes.<id>.<pin>}}` or by wiring its pins;
+  its result never lands in the run's own fields.
+- **Order**: `get_workflow_node_code` → `edit_workflow_node_code` with `edits`
+  (`[{old, new}]`, each matching once) and `expected_sha` = the `code_sha` you read →
+  `test_workflow_node` (dry run first: tool calls are listed, not made) → then
+  `dry_run=false`. `revert=true` brings back the built-in it came from. Wires to pins
+  that are gone are dropped and listed in `wires_dropped`.
+- Locked nodes are refused like `save_workflow`. Code you save doesn't run on its
+  own until the user runs or reviews it (or the chat allows everything): tell them.
+- `get_workflow` leaves code out (`code_sha`, `code_lines`); saving that graph back
+  keeps each node's code.
 
 ### Showing the user (they watch it happen)
 
