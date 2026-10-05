@@ -168,6 +168,35 @@ def read_version() -> str:
     return m.group(2)
 
 
+def first_sentences(subjects: list[str], limit: int = 700) -> str:
+    """Release notes from commit subjects (oldest first): the first sentence of each, the
+    newest kept when they don't all fit in ``limit`` chars, read oldest first."""
+    picked: list[str] = []
+    size = 0
+    for subject in reversed(subjects):
+        first = re.split(r"(?<=[.!?])\s", subject.strip(), maxsplit=1)[0]
+        if not first:
+            continue
+        if not first.endswith((".", "!", "?")):
+            first += "."
+        if first in picked:
+            continue
+        if picked and size + 1 + len(first) > limit:
+            break
+        picked.append(first)
+        size += len(first) + 1
+    return " ".join(reversed(picked))
+
+
+def notes_from_git() -> str:
+    """What changed since the last release: the commits after the last version bump."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, check=True).stdout
+
+    last = git("log", "-1", "--format=%H", "--", INIT_PY.relative_to(ROOT).as_posix()).strip()
+    return first_sentences(git("log", "--reverse", "--no-merges", "--format=%s", f"{last}..HEAD" if last else "-20").splitlines())
+
+
 def write_version(version: str) -> None:
     text = INIT_PY.read_text(encoding="utf-8")
     m = _VERSION_RE.search(text)
@@ -553,6 +582,8 @@ def _self_check() -> None:
             raise AssertionError(f"expected {bad!r} to be rejected")
         except ValueError:
             pass
+    assert first_sentences(["Faster chats. Details here.", "Fix the build", "Fix the build"]) == "Faster chats. Fix the build."
+    assert first_sentences(["A" * 20 + ".", "B" * 20 + "."], limit=30) == "B" * 20 + "."  # the newest
     assert assert_uefn_ducky_store_base("https://uefnducky.org").endswith("uefnducky.org")
     try:
         assert_uefn_ducky_store_base("https://duckyos.org")
@@ -604,6 +635,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, default=None, help="Skip build; publish this Setup exe")
     parser.add_argument("--notes", default="", help="Release notes for the in-app toast")
+    parser.add_argument(
+        "--notes-from-git",
+        action="store_true",
+        help="Without --notes: the first sentence of each commit since the last release",
+    )
     parser.add_argument("--version", default="", help="Override version (only with --no-bump)")
     parser.add_argument(
         "--set-version",
@@ -635,6 +671,10 @@ def main() -> None:
     if args.print_version:
         print(read_version())
         return
+
+    if args.notes_from_git and not args.notes.strip():
+        args.notes = notes_from_git()
+        print(f"notes: {args.notes or '(no commits since the last release)'}")
 
     run_security_gate()
     run_regression_tests()
