@@ -25,6 +25,7 @@ _RUN_CAP = 20
 LOCAL = "local"
 _LOCAL_OWNER = {"id": LOCAL, "kind": LOCAL, "label": "Local", "state": "ok", "readOnly": False, "reason": ""}
 _BUILTIN_STARTERS = {"start.manual", "start.chat", "start.cron", "flow.input"}
+CODE_TYPE = "code.js"
 _FOLDER_NAME_MAX = 64
 _FOLDER_PATH_MAX = 512
 # Named colors a node or a group box can take (the editor maps them to theme colors).
@@ -281,6 +282,7 @@ def delete_workflow(workflow_id: str) -> bool:
             ok = owned.remove(scope, wid)
             owned.forget(scope["account"], [wid])
     if ok:
+        _forget_approvals(wid)
         _announce_graphs_changed()
     return ok
 
@@ -297,6 +299,10 @@ def copy_workflow(workflow_id: str, owner: str, *, move: bool = False) -> dict[s
             raise KeyError("workflow not found")
         src, doc = found
         dst = owned.writable(owned.scope_for(owner, src["account"]))
+        if dst["kind"] == "team" and _has_code((doc.get("graph") or {}).get("nodes")):
+            from backend.automations.code_approval import TEAM_REFUSAL
+
+            raise ValueError(TEAM_REFUSAL)
         if move:
             owned.writable(src)
             if src["id"] == dst["id"]:
@@ -502,7 +508,7 @@ def _db_save(doc: dict[str, Any], owner: str, *, archive: bool = True) -> dict[s
     out = deepcopy(existing) if existing else empty_workflow(name=str(doc.get("name") or "Untitled"))
     if wid:
         out["id"] = wid
-    _merge(out, doc)
+    _merge(out, doc, team=scope["kind"] == "team")
     if archive:  # filing keeps its place in the list
         out["updated"] = time.time()
     aid = scope["account"]
@@ -514,7 +520,7 @@ def _db_save(doc: dict[str, Any], owner: str, *, archive: bool = True) -> dict[s
     return _view(out, owned.owner_view(scope), owned.state(aid, wid), owned.runs(aid, wid))
 
 
-def _merge(out: dict[str, Any], doc: dict[str, Any]) -> None:
+def _merge(out: dict[str, Any], doc: dict[str, Any], *, team: bool = False) -> None:
     if "name" in doc:
         out["name"] = str(doc.get("name") or "").strip() or out["name"]
     if "description" in doc:
@@ -524,7 +530,91 @@ def _merge(out: dict[str, Any], doc: dict[str, Any]) -> None:
     if "folder" in doc:
         out["folder"] = normalize_folder(doc.get("folder"))
     if "graph" in doc:
-        out["graph"] = normalize_graph(doc.get("graph"))
+        out["graph"] = _with_code(normalize_graph(doc.get("graph")), out.get("graph"), team=team)
+
+
+# --------------------------------------------------------------------------- custom code nodes
+
+
+def _has_code(nodes: Any) -> bool:
+    return any(isinstance(n, dict) and n.get("type") == CODE_TYPE for n in nodes or [])
+
+
+def _forget_approvals(workflow_id: str) -> None:
+    try:
+        from backend.automations.code_approval import forget
+
+        forget(workflow_id)
+    except Exception:
+        pass
+
+
+def _with_code(graph: dict[str, Any], before: Any, *, team: bool) -> dict[str, Any]:
+    """Every Custom code node as saved: blank code filled in, its sha and problems
+    refreshed, and its pins, settings and tools read from the code (kept from the last
+    good check while the code has errors, so wires survive a half-typed edit). A node
+    sent without its code but with the saved code's sha keeps the saved code. Saves
+    are refused only for code that is too big, or for code in a team's workflow."""
+    nodes = [n for n in graph.get("nodes") or [] if n.get("type") == CODE_TYPE]
+    if not nodes:
+        return graph
+    if team:
+        from backend.automations.code_approval import TEAM_REFUSAL
+
+        raise ValueError(TEAM_REFUSAL)
+    from backend.automations import code_check
+
+    old = {str(n.get("id")): n for n in normalize_graph(before).get("nodes") or [] if n.get("type") == CODE_TYPE}
+    total = 0
+    for node in nodes:
+        cfg = node["config"]
+        name = node.get("label") or node["id"]
+        was = (old.get(node["id"]) or {}).get("config") or {}
+        code = cfg.get("code")
+        if not isinstance(code, str):
+            sha = str(cfg.get("code_sha") or "")
+            if sha and sha == str(was.get("code_sha") or "") and isinstance(was.get("code"), str):
+                code = was["code"]
+            elif sha:
+                raise ValueError(f"{name}: it came without its code and its code_sha isn't the saved one. "
+                                 "Send the code, or read the workflow again for the current code_sha.")
+            else:
+                code = ""
+        if not code.strip():
+            from backend.automations.code_api import BLANK_CODE
+
+            code = BLANK_CODE
+        size = code_check.code_bytes(code)
+        if size > code_check.MAX_NODE_BYTES:
+            raise ValueError(f"{name}: its code is {size // 1024} KB; a node holds at most {code_check.MAX_NODE_BYTES // 1024} KB.")
+        total += size
+        checked = code_check.check(code)
+        cfg["code"] = code
+        cfg["code_sha"] = checked["code_sha"]
+        cfg["problems"] = checked["problems"]
+        if checked["ok"]:
+            cfg["pins"] = checked["pins"]
+            cfg["settings_spec"] = checked["settings_spec"]
+            cfg["uses"] = checked["uses"]
+        else:
+            for key, empty in (("pins", {"exec": True, "inputs": [], "outputs": []}), ("settings_spec", []),
+                               ("uses", {"tools": [], "builtins": []})):
+                kept = was.get(key) if key in was else cfg.get(key)
+                cfg[key] = kept if isinstance(kept, type(empty)) else empty
+            from backend.automations.pins import clean_pins
+
+            pins = cfg["pins"]
+            cfg["pins"] = {"exec": pins.get("exec", True) is not False,
+                           "inputs": clean_pins(pins.get("inputs")), "outputs": clean_pins(pins.get("outputs"))}
+        for key in ("settings", "inputs"):
+            if not isinstance(cfg.get(key), dict):
+                cfg[key] = {}
+        cfg["spend"] = cfg.get("spend") is True
+        if "based_on" in cfg and not (isinstance(cfg["based_on"], dict) and cfg["based_on"].get("type")):
+            cfg.pop("based_on")
+    if total > code_check.MAX_WORKFLOW_BYTES:
+        raise ValueError(f"This workflow holds {total // 1024} KB of code; the most is {code_check.MAX_WORKFLOW_BYTES // 1024} KB.")
+    return graph
 
 
 # --------------------------------------------------------------------------- files mode (Local only)
