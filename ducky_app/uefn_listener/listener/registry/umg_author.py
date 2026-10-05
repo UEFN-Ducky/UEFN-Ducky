@@ -23,23 +23,21 @@ _UMG = "UMGToolSet.UMGToolSet"
 _VERSE_FIELDS = "VerseFieldsToolset.VerseFieldsToolset"
 
 # Short names agents pass. Resolved to unreal classes AddWidget accepted live.
-# Text classes are not in ListWidgetClasses; AddWidget rejects them.
+# Text / TextBlock resolve to the palette UEFN_TextBlock_C (umg.add_widget places it).
 _CLASS_ALIASES = {
     "CustomButton": "UIFrameworkCustomButtonWidget",
 }
 
 _NO_TEXT = (
-    "UEFN AddWidget has no text widget. TextBlock, CommonTextBlock, RichTextBlock, "
-    "UIFrameworkTextBlock, and VerseFortniteUIFrameworkTextBlock are rejected. "
-    "Put the label on a CustomButton or a nested User Widget."
+    "AddWidget rejects CommonTextBlock, RichTextBlock, UIFrameworkTextBlock, and "
+    "VerseFortniteUIFrameworkTextBlock. Use class 'Text' (palette UEFN_TextBlock_C); "
+    "set its label with properties.text."
 )
 _NO_PRESET_BUTTON = (
     "AddWidget rejects VerseFortniteUIFrameworkButton_Loud, _Quiet, and _Regular. "
     "The palette button is CustomButton (UIFrameworkCustomButtonWidget)."
 )
 _REJECTED_WIDGET_CLASSES = {
-    "Text": _NO_TEXT,
-    "TextBlock": _NO_TEXT,
     "CommonTextBlock": _NO_TEXT,
     "RichTextBlock": _NO_TEXT,
     "UIFrameworkTextBlock": _NO_TEXT,
@@ -130,6 +128,8 @@ def _class_ref(widget_class: str) -> str:
         raise ValueError("widget class is required")
     if name.startswith("/"):
         return name
+    if name in _mod().TEXT_ALIASES:
+        return _mod().UEFN_TEXT_BLOCK
     rejected = _REJECTED_WIDGET_CLASSES.get(name)
     if rejected:
         raise ValueError(rejected)
@@ -350,7 +350,7 @@ def _add_child(wbp, widget_class: str, widget_name: str, parent_ref: str) -> dic
         "parentWidget": {"refPath": parent_ref} if parent_ref else None,
         "childIndex": -1,
     }
-    return _execute(_UMG, "AddWidget", payload)
+    return _mod().add_widget(payload)
 
 
 def _place_node(wbp, spec: dict, parent_ref: str) -> dict:

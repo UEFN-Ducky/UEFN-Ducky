@@ -74,6 +74,48 @@ _KNOWN_OBJECT_TOOLS = (
     "set_properties",
 )
 
+# The palette "Text Block" (ListWidgetClasses). AddWidget whitelists it but cannot
+# construct it ("classe non prise en charge"); TextBlock and UEFNTextBlockBase are
+# "not permitted". ReplaceWidgetWithTemplate on a placeholder Image works — verified
+# live in UEFN, Oct 5 2026. Its text property is `text`.
+UEFN_TEXT_BLOCK = "/Game/Valkyrie/UMG/UEFN_TextBlock.UEFN_TextBlock_C"
+TEXT_ALIASES = ("Text", "TextBlock", "UEFNTextBlock", "UEFN_TextBlock", "UEFN_TextBlock_C", "UEFNTextBlockBase")
+_TEMPLATE_ONLY_CLASSES = (UEFN_TEXT_BLOCK,)
+_PLACEHOLDER_CLASS = "/Script/UMG.Image"
+
+
+def add_widget(payload: dict) -> dict:
+    """UMGToolSet.AddWidget, routing template-only classes through an Image placeholder."""
+    class_ref = payload["widgetClass"]["refPath"]
+    if class_ref not in _TEMPLATE_ONLY_CLASSES:
+        return _execute_tool(_UMG_TOOLSET, "AddWidget", payload)
+    added = _execute_tool(
+        _UMG_TOOLSET, "AddWidget", {**payload, "widgetClass": {"refPath": _PLACEHOLDER_CLASS}}
+    )
+    info = added.get("result") or {}
+    if isinstance(info, dict) and isinstance(info.get("returnValue"), dict):
+        info = info["returnValue"]
+    widget_ref = (info.get("widget") or {}).get("refPath") if isinstance(info, dict) else None
+    if not widget_ref:
+        raise ValueError(f"AddWidget placeholder for {class_ref} returned no widget: {added}")
+    replaced = _execute_tool(
+        _UMG_TOOLSET,
+        "ReplaceWidgetWithTemplate",
+        {
+            "widgetBlueprint": payload["widgetBlueprint"],
+            "widgetToReplace": {"refPath": widget_ref},
+            "templateClass": {"refPath": class_ref},
+        },
+    )
+    report = replaced.get("result") or {}
+    if isinstance(report, dict) and isinstance(report.get("returnValue"), dict):
+        report = report["returnValue"]
+    if isinstance(report, dict) and report.get("bSuccess") is False:
+        raise ValueError(f"ReplaceWidgetWithTemplate({class_ref}) failed: {report}")
+    if isinstance(info, dict):
+        info = {**info, "widgetClassPath": {"refPath": class_ref}}
+    return {**added, "result": info, "tool": "AddWidget+ReplaceWidgetWithTemplate"}
+
 
 def _capabilities() -> dict:
     return {name: hasattr(unreal, name) for name in _UMG_CLASSES}
@@ -444,9 +486,10 @@ def add_widget_to_tree(
 ) -> dict:
     """Add a widget under a panel via UMGToolSet.AddWidget (capability-gated).
 
-    ``widget_class`` is an unreal class name (e.g. TextBlock, CanvasPanel, Button)
-    or a soft class path. ``parent_ref_path`` is the panel's refPath from
-    get_widget_blueprint_info; leave empty to add as / replace root.
+    ``widget_class`` is an unreal class name (e.g. Text, CanvasPanel, Image)
+    or a soft class path; Text resolves to the palette UEFN_TextBlock_C.
+    ``parent_ref_path`` is the panel's refPath from get_widget_blueprint_info;
+    leave empty to add as / replace root.
     """
     wbp = _load_asset(widget_path)
     class_ref = _resolve_widget_class_ref(widget_class)
@@ -457,7 +500,7 @@ def add_widget_to_tree(
         "parentWidget": {"refPath": parent_ref_path} if parent_ref_path else None,
         "childIndex": -1,
     }
-    result = _execute_tool(_UMG_TOOLSET, "AddWidget", payload)
+    result = add_widget(payload)
     _compile_and_save(wbp)
     return {
         "widget_path": _ref_path(wbp),
@@ -527,14 +570,16 @@ def set_widget_property(
 def _resolve_widget_class_ref(widget_class: str) -> str:
     name = (widget_class or "").strip()
     if not name:
-        raise ValueError("widget_class is required (e.g. 'TextBlock', 'CanvasPanel')")
+        raise ValueError("widget_class is required (e.g. 'Text', 'CanvasPanel')")
     if name.startswith("/"):
         return name
+    if name in TEXT_ALIASES:
+        return UEFN_TEXT_BLOCK
     cls = getattr(unreal, name, None)
     if cls is None:
         raise ValueError(
             f"unreal.{name} not found. Pass a class name exposed on unreal "
-            f"(TextBlock, CanvasPanel, Button, Image, …) or a soft class path."
+            f"(Text, CanvasPanel, Image, …) or a soft class path."
         )
     # Soft path for Class objects
     try:
