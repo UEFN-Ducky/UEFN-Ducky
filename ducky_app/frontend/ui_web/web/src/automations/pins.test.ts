@@ -34,6 +34,25 @@ describe("pins", () => {
     expect(nodePins(node("input.text"), { type: "input.text", label: "Text", exec: false, outputs: [{ id: "value", label: "Text", type: "text" }] }).exec).toBe(false);
   });
 
+  it("reads a custom code node's pins from what its code declared (config.pins), like pins.py", () => {
+    const meta: AutomationNodeDto = { type: "code.js", label: "Custom code", group: "Code", inputs: [{ id: "catalog", label: "Catalog", type: "text" }] };
+    const code = node("code.js", { pins: {
+      exec: true,
+      inputs: [{ id: "command", type: "text", label: "Command", required: true }, { id: "odd", type: "weird" }, { id: "command", type: "number" }, { type: "text" }],
+      outputs: [{ id: "exit_code", type: "number", label: "Exit code" }],
+    } });
+    expect(nodePins(code, meta)).toEqual({
+      exec: true,
+      inputs: [{ id: "command", label: "Command", type: "text", required: true }, { id: "odd", label: "odd", type: "any" }],
+      outputs: [{ id: "exit_code", label: "Exit code", type: "number" }],
+    });
+    // A value node (kind "value") has no white pins; only exec: true makes a step.
+    expect(nodePins(node("code.js", { pins: { exec: false, inputs: [], outputs: [{ id: "v", type: "json" }] } }), meta).exec).toBe(false);
+    expect(nodePins(node("code.js", { pins: { inputs: [], outputs: [] } }), meta).exec).toBe(false);
+    // Not checked yet: no pins, white pins as the catalog says.
+    expect(nodePins(node("code.js"), meta)).toEqual({ exec: true, inputs: [], outputs: [] });
+  });
+
   it("makes a pin per name: Make List inputs, Extract data outputs", () => {
     expect(nodePins(node("list.make"), undefined).inputs.map((pin) => pin.id)).toEqual(["a", "b"]);
     expect(nodePins(node("list.make", { names: ["x", "y", "z"] }), undefined).inputs.map((pin) => pin.id)).toEqual(["x", "y", "z"]);

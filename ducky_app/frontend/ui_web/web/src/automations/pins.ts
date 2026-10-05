@@ -49,8 +49,33 @@ function typesOf(raw: unknown): Record<string, PinType> {
 
 export type NodePins = { exec: boolean; inputs: PinDto[]; outputs: PinDto[] };
 
+/** A declared pin list (custom code): id, label, type (+ required, default, description); unknown types become any. */
+export function cleanPins(raw: unknown): PinDto[] {
+  const out: PinDto[] = [];
+  for (const row of Array.isArray(raw) ? raw : []) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Record<string, unknown>;
+    const id = String(item.id ?? "").trim();
+    if (!id || out.some((pin) => pin.id === id)) continue;
+    const pin: PinDto = { id, label: String(item.label || id), type: cleanType(item.type) };
+    if (item.required) pin.required = true;
+    if ("default" in item) pin.default = item.default;
+    if (item.description) pin.description = String(item.description);
+    out.push(pin);
+  }
+  return out;
+}
+
+/** A custom code node's pins: what its code declared (config.pins, kept from the last good check). */
+export function codePins(config: Record<string, unknown>, meta?: AutomationNodeDto): NodePins {
+  const pins = config.pins && typeof config.pins === "object" ? config.pins as Record<string, unknown> : null;
+  if (!pins) return { exec: meta?.exec !== false, inputs: [], outputs: [] };
+  return { exec: pins.exec === true, inputs: cleanPins(pins.inputs), outputs: cleanPins(pins.outputs) };
+}
+
 /** Pins of one node on the graph: the type's own, or worked out from its settings. */
 export function nodePins(node: AutomationGraphNodeDto, meta: AutomationNodeDto | undefined, workflows: AutomationSummaryDto[] = []): NodePins {
+  if (node.type === "code.js") return codePins(node.config || {}, meta);
   let inputs = (meta?.inputs || []).map((pin) => ({ ...pin, type: cleanType(pin.type) }));
   let outputs = (meta?.outputs || []).map((pin) => ({ ...pin, type: cleanType(pin.type) }));
   const config = node.config || {};

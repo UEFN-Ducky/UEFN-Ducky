@@ -335,6 +335,105 @@ export interface AutomationRunStepDto {
   substeps?: AutomationRunStepDto[];
   /** Run workflow nodes: it has Return nodes and none was reached, so this path ended. */
   stop?: boolean;
+  /** The input values it ran with (long text cut, files as file refs). */
+  inputs?: Record<string, unknown>;
+  /** Custom code steps: what ducky.log wrote (the last 16 KB). */
+  log?: string;
+  /** Custom code steps that threw: where in the code, and why. */
+  code_error?: CodeErrorDto;
+}
+
+/** Custom code nodes (type "code.js"): a problem the check found, 1-based line and column. */
+export interface CodeProblemDto {
+  line: number;
+  col: number;
+  message: string;
+  severity: "error" | "warning";
+}
+
+/** Where a custom code step failed (its line in the node's code). */
+export interface CodeErrorDto {
+  line?: number;
+  col?: number;
+  message: string;
+}
+
+/** The pins a custom code node declares (kept from its last good check). */
+export interface CodePinsDto {
+  exec: boolean;
+  inputs: PinDto[];
+  outputs: PinDto[];
+}
+
+/** The MCP tools and built-in node types a custom code node may call. */
+export interface CodeUsesDto {
+  tools: string[];
+  builtins: string[];
+}
+
+/** check_workflow_node_code: the code's declaration parsed, and what is wrong with it. */
+export interface CodeCheckDto {
+  ok: boolean;
+  error?: string;
+  problems: CodeProblemDto[];
+  node?: Record<string, unknown> | null;
+  pins: CodePinsDto;
+  settings_spec: AutomationFieldDto[];
+  uses: CodeUsesDto;
+  code_sha: string;
+}
+
+/** A custom code node made from a built-in: which one, and its settings when it was converted. */
+export interface CodeBasedOnDto {
+  type: string;
+  config: Record<string, unknown>;
+  code_sha?: string;
+}
+
+/** get_workflow_node_code: the JavaScript a node runs (a built-in's is generated from its settings). */
+export interface WorkflowNodeCodeDto {
+  ok?: boolean;
+  error?: string;
+  kind: "builtin" | "custom" | "flow";
+  code: string;
+  code_sha: string;
+  based_on?: CodeBasedOnDto | null;
+  /** The built-in's generated code it was made from, for Compare. */
+  based_on_code?: string;
+  pins: CodePinsDto;
+  settings_spec: AutomationFieldDto[];
+  uses: CodeUsesDto;
+  problems: CodeProblemDto[];
+  /** Whether Edit as custom code can turn it into a custom code node; `reason` says why not, or what changes. */
+  convertible: boolean;
+  reason: string;
+  /** Its code may run unattended: a person ran it, saved it, or reviewed it. */
+  approved: boolean;
+  /** The inputs of its latest recorded run, for Test. */
+  last_inputs?: Record<string, unknown>;
+}
+
+/** test_workflow_node: one run of a custom code node's (unsaved) code. */
+export interface CodeTestResultDto {
+  ok: boolean;
+  outputs?: Record<string, unknown>;
+  log?: string;
+  tool_calls?: Array<{ name: string; args?: unknown; dry_run?: boolean }>;
+  error?: CodeErrorDto | null;
+  ms?: number;
+}
+
+/** workflow_code_api: the `ducky` object's types and docs, for the code editor. */
+export interface WorkflowCodeApiDto {
+  ok?: boolean;
+  error?: string;
+  /** declare module "ducky" { ... } */
+  dts: string;
+  manifest?: Array<{ name: string; ts: string; doc: string; async?: boolean }>;
+  blank?: string;
+  declaration_schema?: unknown;
+  examples?: unknown;
+  tools_dts?: string;
 }
 
 export interface AutomationRunDto {
@@ -435,6 +534,8 @@ export interface AutomationFieldDto {
   options?: Array<{ id: string; label?: string }>;
   /** file / files fields: what can be picked (image, audio, video, mesh, pdf, svg, any). */
   accept?: string;
+  /** Custom code settings: the value used while none is set. */
+  default?: unknown;
 }
 
 export interface AutomationTemplateDto {
@@ -2642,6 +2743,24 @@ export interface PanelApi {
   keep_workflow_preview?(workflowId: string, nodeId: string): Promise<AutomationRunDto>;
   /** '' when an If / Expression condition parses, else what is wrong. */
   check_workflow_expression?(expression: string): Promise<{ ok?: boolean; error?: string }>;
+  /** Custom code: the JavaScript a node runs (a built-in's generated from its saved settings). */
+  get_workflow_node_code?(workflowId: string, nodeId: string): Promise<WorkflowNodeCodeDto>;
+  /** Custom code: parse the declaration and check the code without saving it. */
+  check_workflow_node_code?(code: string): Promise<CodeCheckDto>;
+  /** Custom code: run one node's code (the unsaved draft when `code` is given) without saving;
+   *  a dry run records its tool and built-in calls instead of making them. */
+  test_workflow_node?(
+    workflowId: string,
+    nodeId: string,
+    code?: string | null,
+    inputs?: Record<string, unknown> | null,
+    settings?: Record<string, unknown> | null,
+    dryRun?: boolean,
+  ): Promise<CodeTestResultDto>;
+  /** Custom code: a person read this code, so it may run unattended on this PC. */
+  approve_workflow_node_code?(workflowId: string, nodeId: string, codeSha: string): Promise<{ ok?: boolean; error?: string }>;
+  /** Custom code: the `ducky` object's types (module "ducky") and typed args for the named tools. */
+  workflow_code_api?(tools?: string[] | null): Promise<WorkflowCodeApiDto>;
   run_workflow?(
     workflow_id: string,
     prompt?: string,
