@@ -221,9 +221,13 @@ def _install_trace(conn: sqlite3.Connection, path: Path) -> None:
 
 
 def _configure(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    # Switching to WAL takes an exclusive lock and fails at once ("database is
+    # locked") while another connection writes; the file stays WAL once set, so
+    # only switch a file that is not already.
+    if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
+        conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA cache_size=-32768")
