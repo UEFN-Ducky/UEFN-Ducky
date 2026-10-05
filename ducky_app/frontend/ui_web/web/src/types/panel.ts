@@ -1833,6 +1833,7 @@ export interface PanelPushEvent {
     | "graph_focus"
     | "workflow_run"
     | "workflow_step"
+    | "workflow_output"
     | "templates_changed"
     | "starter_plugins_progress";
   provider?: string;
@@ -1864,6 +1865,9 @@ export interface PanelPushEvent {
   note?: string;
   /** workflow_run / workflow_step: which run, the step (node id) and the step it came from. */
   run?: string;
+  /** workflow_output: bounded terminal snapshot for this node. */
+  output?: string;
+  session_id?: string;
   node?: string;
   from?: string;
   /** workflow_run: started | done | error | stopped; workflow_step: running | ok | error | stopped. */

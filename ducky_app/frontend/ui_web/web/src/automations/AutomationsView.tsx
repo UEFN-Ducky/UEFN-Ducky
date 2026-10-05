@@ -41,6 +41,7 @@ import { WORKFLOWS_EDITOR_TOUR_ID, WORKFLOWS_FIRST_BUILD_TOUR_ID, WORKFLOWS_INTR
 import { Icons } from "../icons/Icons";
 import { copyText } from "../utils/copyText";
 import { formatRunLog, runLogHasContent } from "./runLog";
+import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
 
 import { GroupIcon, isEndNode, nodeLabel, nodeRole, nodeSummary, NodeIcon, useNodeFaces } from "./NodeVisuals";
 import { cleanGroups, deleteNodes, groupBounds, groupDepth, groupLocked, groupMembers, groupNodes, intersects, nodeLocked, removeGroup, selectionRect, ungroupNodes, type GraphRect } from "./workflowGroups";
@@ -253,6 +254,7 @@ const RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 /** A run as it happens: the step running now, the wire it came along, how each step went. */
 type LiveState = "running" | "ok" | "error" | "stopped";
 export type LiveRun = {
+  outputs: Record<string, TerminalSnapshot>;
   run: string;
   active: string;
   from: string;
@@ -264,8 +266,12 @@ export type LiveRun = {
 
 export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): LiveRun | null {
   const run = String(event.run || "");
-  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [] };
+  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {} };
   const base = current && current.run === run ? current : fresh;
+  if (event.type === "workflow_output") {
+    if (!event.node || (current && current.run !== run)) return current;
+    return { ...base, outputs: { ...base.outputs, [event.node]: { output: event.output || "", sessionId: event.session_id || "" } } };
+  }
   if (event.type === "workflow_run") {
     if (event.state === "started") return fresh;
     const finished = event.state === "stopped" ? "stopped" : event.state === "error" ? "error" : "done";
@@ -561,7 +567,7 @@ export function AutomationsView() {
       const workflowsSynced = event.type === "plugin_scope_changed" && !!event.plugins?.includes("ducky.automations");
       if (event.type === "graphs_changed" || event.type === "duckyos_account_changed" || workflowsSynced) void refreshList();
       // The open workflow running (Play, a schedule, a chat): light up where it is.
-      if ((event.type === "workflow_run" || event.type === "workflow_step") && event.id && event.id === draftIdRef.current) setLive((current) => liveRunReducer(current, event));
+      if ((event.type === "workflow_run" || event.type === "workflow_step" || event.type === "workflow_output") && event.id && event.id === draftIdRef.current) setLive((current) => liveRunReducer(current, event));
     });
     return () => { cancelled = true; stopWaiting(); stop(); };
   }, [refreshList]);
@@ -1100,7 +1106,7 @@ export function AutomationsView() {
   // Typed pins: a card grows a row per pin; zoomed far out it is only its title bar.
   const pinsById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, nodePins(node, byType.get(node.type), rows)])), [graph.nodes, byType, rows]);
   const pinsOf = (node: AutomationGraphNodeDto): NodePins => pinsById.get(node.id) || nodePins(node, byType.get(node.type), rows);
-  const layoutOf = (node: AutomationGraphNodeDto, compact = overview): NodeLayout => nodeLayout(pinsOf(node), compact, cardExtra(node, pinsOf(node)));
+  const layoutOf = (node: AutomationGraphNodeDto, compact = overview): NodeLayout => nodeLayout(pinsOf(node), compact, cardExtra(node, pinsOf(node)) + (live?.outputs[node.id] ? 144 : 0));
   const nodeSize = (node?: AutomationGraphNodeDto) => ({ width: NODE_WIDTH, height: node ? layoutOf(node).height : overview ? NODE_HEIGHT_COMPACT : NODE_HEIGHT });
   const lastOutputs = log?.node_outputs || {};
   const groups = graph.groups || [];
@@ -2113,6 +2119,7 @@ export function AutomationsView() {
                     ) : (
                       <div className="aw-node-body">{!overview && summary ? <span className="aw-node-sub">{summary}</span> : null}</div>
                     )}
+                    {!overview && live?.outputs[node.id] ? <TerminalOutput snapshot={live.outputs[node.id]} compact /> : null}
                   </div>
                   {pins.inputs.map((pin) => <button key={`in-${pin.id}`} type="button" aria-label={`${label}: ${pin.label} (input)`} title={`${pin.label} · ${pin.type}`}
                     data-aw-pin="in" data-aw-pin-id={pin.id} data-aw-node={node.id}
@@ -2202,6 +2209,7 @@ export function AutomationsView() {
           })}
           pinsOf={pinsOf}
           nodeOutputs={lastOutputs}
+          terminalOutputs={live?.outputs}
           onRunNode={readOnly ? undefined : (id) => void runNode(id)}
           runningNode={runningNode}
           onNodeText={updateNodeText}

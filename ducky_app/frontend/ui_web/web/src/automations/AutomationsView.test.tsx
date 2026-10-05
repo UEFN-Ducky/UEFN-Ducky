@@ -1424,6 +1424,25 @@ describe("several workflows, live runs, outline and team sync", () => {
     expect(document.querySelector('[data-aw-node="a"]')?.classList.contains("is-run-stopped")).toBe(true);
   });
 
+  it("shows terminal output on the running node and in its details before completion", async () => {
+    await open();
+    const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "terminal-run", ...event } as never); });
+    push({ type: "workflow_run", state: "started" });
+    push({ type: "workflow_step", node: "a", state: "running" });
+    push({ type: "workflow_output", node: "a", session_id: "fresh", output: "\u001b[32mCompiling plugin...\u001b[0m\r\n" });
+    const card = document.querySelector('[data-aw-node="a"]')!;
+    expect(card.textContent).toContain("Compiling plugin...");
+    expect(card.textContent).not.toContain("\u001b");
+    expect(card.classList.contains("is-run-running")).toBe(true);
+    fireEvent.pointerDown(card.querySelector(".aw-node-card")!, { button: 0 });
+    fireEvent.pointerUp(card.querySelector(".aw-node-card")!, { button: 0 });
+    await waitFor(() => expect(details()?.textContent).toContain("Compiling plugin..."));
+    push({ type: "workflow_output", node: "a", output: "Upload completed", session_id: "fresh" });
+    expect(card.textContent).toContain("Upload completed");
+    push({ type: "workflow_output", run: "older-run", node: "a", output: "stale output" });
+    expect(card.textContent).not.toContain("stale output");
+  });
+
   it("lists every group and node in the outline and brings the picked one into view", async () => {
     saved.graph.groups = [{ id: "g", name: "Setup", node_ids: ["s", "a"] }];
     await open();

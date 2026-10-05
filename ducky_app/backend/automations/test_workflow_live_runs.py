@@ -8,6 +8,46 @@ import pytest
 from backend.automations import runner, store
 
 
+def test_terminal_output_arrives_before_tool_finishes_and_reaches_parent(monkeypatch):
+    from types import SimpleNamespace
+    from backend.server import mcp
+    from frontend.ui_web.terminal import manager
+
+    seen = []
+    arrived = threading.Event()
+    output = {"text": "Building plugin..."}
+
+    def push(event):
+        seen.append(event)
+        arrived.set()
+
+    monkeypatch.setattr(runner, "_push", push)
+    monkeypatch.setattr(manager, "get_terminal_manager", lambda: SimpleNamespace(
+        read_output=lambda session_id, max_chars: {"output": output["text"]}))
+
+    def command(**arguments):
+        assert arguments["session_id"] == "fresh-session"
+        assert arrived.wait(2), "Output must arrive while the tool is still running"
+        output["text"] = "Upload complete"
+        return {"ok": True, "output_tail": output["text"]}
+
+    monkeypatch.setattr(mcp._tool_manager, "get_tool", lambda name: SimpleNamespace(fn=command))
+    live_token = runner._LIVE.set(("child", "child-run"))
+    parent_token = runner._OUTPUT_PARENTS.set((("release", "parent-run", "build"),))
+    try:
+        result = runner._call_tool({"name": "ducky_terminal_run", "arguments": {
+            "session_id": "{{terminal}}"}}, {"terminal": "fresh-session"}, "command")
+    finally:
+        runner._LIVE.reset(live_token)
+        runner._OUTPUT_PARENTS.reset(parent_token)
+    assert result["ok"]
+    assert {(event["id"], event["run"], event["node"]) for event in seen} == {
+        ("child", "child-run", "command"), ("release", "parent-run", "build")}
+    assert any(event["output"] == "Building plugin..." for event in seen)
+    assert seen[-1]["output"] == "Upload complete"
+    assert all(event["type"] == "workflow_output" and event["session_id"] == "fresh-session" for event in seen)
+
+
 @pytest.fixture()
 def events(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "use_db", lambda *_: False)

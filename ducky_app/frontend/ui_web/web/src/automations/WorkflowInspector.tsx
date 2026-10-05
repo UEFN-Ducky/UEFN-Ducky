@@ -13,6 +13,7 @@ import { NodeSettings, hasNodeSettings } from "./NodeSettings";
 import { GroupIcon, NodeIcon, nodeLabel, nodeRole } from "./NodeVisuals";
 import { IconPicker } from "./IconPicker";
 import { PinsSection } from "./PinFields";
+import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
 import type { NodePins } from "./pins";
 import { GROUP_COLORS, groupLocked, groupMembers, nodeLocked } from "./workflowGroups";
 import { targetRef } from "../ui-targets/registry";
@@ -70,6 +71,7 @@ type Props = InspectorActions & {
   pinsOf?: (node: AutomationGraphNodeDto) => NodePins;
   /** The last run's values per node and output pin. */
   nodeOutputs?: Record<string, Record<string, unknown>>;
+  terminalOutputs?: Record<string, TerminalSnapshot>;
 };
 
 const COLOR_NAMES: Record<string, string> = { "": "Plain", red: "Red", amber: "Gold", green: "Green", blue: "Blue", purple: "Purple" };
@@ -353,7 +355,7 @@ function SettingsFold({ children }: { children: ReactNode }) {
   </details>;
 }
 
-function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
+function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, terminalOutputs, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
   const meta = byType.get(node.type);
   const label = nodeLabel(node, meta);
   const group = graph.groups?.find((item) => item.node_ids.includes(node.id));
@@ -368,6 +370,7 @@ function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentI
     </fieldset> : null}
     {pinsOf ? <PinsSection node={node} pins={pinsOf(node)} graph={graph} outputs={nodeOutputs?.[node.id]} frozen={frozen}
       onNodeChange={on.onNodeChange} /> : null}
+    {terminalOutputs?.[node.id] ? <TerminalOutput snapshot={terminalOutputs[node.id]} /> : null}
     {hasNodeSettings(node, meta) ? <SettingsFold>
       <fieldset className="aw-insp-fold" disabled={frozen}>
         <NodeSettings node={node} meta={meta} workflows={workflows} currentId={currentId} onOpen={on.onOpenWorkflow} onChange={on.onNodeChange} />

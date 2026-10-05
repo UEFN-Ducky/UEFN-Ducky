@@ -90,7 +90,7 @@ export function nodeLayout(pins: NodePins, compact = false, extra = 0): NodeLayo
     const mid = NODE_HEIGHT_COMPACT / 2;
     return { height: NODE_HEIGHT_COMPACT, rows, execY: mid, hasPins, inputY: Object.fromEntries(pins.inputs.map((pin) => [pin.id, mid])), outputY: Object.fromEntries(pins.outputs.map((pin) => [pin.id, mid])) };
   }
-  if (!hasPins) return { height: NODE_HEIGHT, rows, execY: PORT_Y, hasPins, inputY: {}, outputY: {} };
+  if (!hasPins) return { height: NODE_HEIGHT + extra, rows, execY: PORT_Y, hasPins, inputY: {}, outputY: {} };
   const top = NODE_TITLE_HEIGHT + (pins.exec ? EXEC_ROW : DATA_TOP_GAP);
   const rowY = (index: number) => top + index * PIN_ROW + PIN_ROW / 2;
   return {

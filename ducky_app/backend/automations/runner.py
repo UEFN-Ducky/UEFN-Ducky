@@ -45,6 +45,7 @@ _ACTIVE: dict[str, set[threading.Event]] = {}
 _ACTIVE_LOCK = threading.Lock()
 # Live view: the editor lights up the step running now and the wire it came along.
 _LIVE: ContextVar[tuple[str, str] | None] = ContextVar("workflow_live", default=None)
+_OUTPUT_PARENTS: ContextVar[tuple[tuple[str, str, str], ...]] = ContextVar("workflow_output_parents", default=())
 STOPPED = "Stopped"
 
 
@@ -999,7 +1000,7 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
         if ntype == "flow.branch":
             return {**_branch_node(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "tool.call":
-            called = _call_tool(cfg, payload)
+            called = _call_tool(cfg, payload, str(node.get("id") or ""))
             result = called.get("result")
             text = result.get("text") if isinstance(result, dict) and isinstance(result.get("text"), str) else _as_text(result)
             return {**called, "outputs": {"result": result, "text": text}, "id": node.get("id"), "type": ntype, "label": label}
@@ -1019,7 +1020,13 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
         if ntype == "flow.output":
             return {**_output_node(cfg, payload, values), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "workflow.call":
-            step = _call_workflow(cfg, payload, values)
+            live = _LIVE.get()
+            target = (*live, str(node.get("id") or "")) if live else None
+            output_token = _OUTPUT_PARENTS.set((*_OUTPUT_PARENTS.get(), target) if target else _OUTPUT_PARENTS.get())
+            try:
+                step = _call_workflow(cfg, payload, values)
+            finally:
+                _OUTPUT_PARENTS.reset(output_token)
             returned = (step.get("result") or {}).get("returned") if step.get("ok") else None
             return {**step, **({"outputs": dict(returned)} if isinstance(returned, dict) else {}), "id": node.get("id"), "type": ntype, "label": label}
         if ntype in ("uefn.open_project", "uefn.launch", "uefn.close", "uefn.restart", "uefn.wait_ready", "uefn.wait_window"):
@@ -1956,7 +1963,47 @@ def _agent_decides(text: str, equals: str) -> bool:
     return bool(low)
 
 
-def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _terminal_output_stream(session_id: str, node_id: str) -> tuple[threading.Event, threading.Thread] | None:
+    """Publish bounded terminal snapshots to the command and each calling node."""
+    live = _LIVE.get()
+    if not live or not node_id or not session_id:
+        return None
+    from frontend.ui_web.terminal.manager import get_terminal_manager
+
+    manager = get_terminal_manager()
+    targets = (*_OUTPUT_PARENTS.get(), (*live, node_id))
+    stopped = threading.Event()
+
+    def watch() -> None:
+        previous: str | None = None
+        while True:
+            try:
+                output = manager.read_output(session_id, max_chars=16000)
+                text = str(output.get("output") or "")
+                if text != previous:
+                    previous = text
+                    for wid, run_id, target in targets:
+                        _push({"type": "workflow_output", "id": wid, "run": run_id, "node": target,
+                               "session_id": session_id, "output": text})
+            except Exception:
+                _log.debug("Terminal output snapshot failed", exc_info=True)
+            if stopped.wait(0.25):
+                # Read once more after the tool returns, including its final lines.
+                try:
+                    output = manager.read_output(session_id, max_chars=16000)
+                    for wid, run_id, target in targets:
+                        _push({"type": "workflow_output", "id": wid, "run": run_id, "node": target,
+                               "session_id": session_id, "output": str(output.get("output") or "")})
+                except Exception:
+                    _log.debug("Final terminal output snapshot failed", exc_info=True)
+                return
+
+    thread = threading.Thread(target=watch, name="workflow-terminal-output", daemon=True)
+    thread.start()
+    return stopped, thread
+
+
+def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") -> dict[str, Any]:
     import inspect
 
     name = str(cfg.get("name") or payload.get("tool") or "").strip()
@@ -1980,7 +2027,14 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     fn = getattr(tool, "fn", None)
     if fn is None:
         return {"ok": False, "error": f"tool has no fn: {name}"}
-    result = fn(**_template(raw, payload))
+    arguments = _template(raw, payload)
+    stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
+    try:
+        result = fn(**arguments)
+    finally:
+        if stream:
+            stream[0].set()
+            stream[1].join(timeout=1)
     if inspect.isawaitable(result):
         return {"ok": False, "error": "async tool — register a sync plugin node instead"}
     out: dict[str, Any] = {"tool": name, "output": result}

@@ -1406,3 +1406,7 @@
 .aw-fold > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 140ms ease; }
 .aw-fold[open] > summary::before { transform: rotate(45deg); }
 .aw-fold[open] > summary { margin-bottom: 8px; }
+.aw-terminal-output { padding: 8px; min-width: 0; color: var(--fg); }
+.aw-terminal-output > strong { display: block; font-size: 11px; margin-bottom: 4px; }
+.aw-terminal-output pre { margin: 0; padding: 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; background: var(--bg); font: 11px/1.4 monospace; }
+.aw-terminal-output.is-compact pre { height: 106px; max-height: 106px; }
