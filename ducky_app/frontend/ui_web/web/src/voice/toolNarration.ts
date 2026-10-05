@@ -4,7 +4,7 @@
  */
 
 import type { ToolCallData } from "../types/panel";
-import { humanToolLabel } from "../utils/agentActivity";
+import { humanToolLabel, shellActivityText } from "../utils/agentActivity";
 
 const TOOL_PURPOSE: Record<string, string> = {
   workspace_read_file: "reading the file",
@@ -88,11 +88,6 @@ function salientArg(args: Record<string, unknown> | undefined): string {
   if (!args || typeof args !== "object") return "";
   const path = args.relative_path ?? args.path ?? args.destination_path ?? args.asset_path;
   if (typeof path === "string" && path.trim()) return spokenBasename(path.trim());
-  const command = args.command;
-  if (typeof command === "string" && command.trim()) {
-    const short = command.trim().length > 48 ? `${command.trim().slice(0, 47).trim()}…` : command.trim();
-    return short;
-  }
   const query = args.query ?? args.q ?? args.search ?? args.name_filter;
   if (typeof query === "string" && query.trim()) return query.trim();
   return "";
@@ -101,6 +96,11 @@ function salientArg(args: Record<string, unknown> | undefined): string {
 /** "Writing the file prey dot verse." */
 export function spokenToolStart(tool: Pick<ToolCallData, "name" | "arguments"> | undefined | null): string {
   const name = tool?.name || "something";
+  // A shell command is never read out; say what it is doing ("Running tests.").
+  const command = tool?.arguments?.command;
+  if (typeof command === "string" && command.trim()) {
+    return `${shellActivityText(command, tool?.arguments?.description)}.`;
+  }
   const purpose = purposeOf(name);
   const arg = salientArg(tool?.arguments);
   return arg ? `${purpose.charAt(0).toUpperCase()}${purpose.slice(1)} ${arg}.` : `${purpose.charAt(0).toUpperCase()}${purpose.slice(1)}.`;

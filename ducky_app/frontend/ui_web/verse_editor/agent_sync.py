@@ -24,6 +24,9 @@ _WRITE_TOOLS = frozenset(
         "Write",
         "Edit",
         "StrReplace",
+        "workspace_edit_file",
+        "workspace_multi_edit",
+        "workspace_replace_lines",
     }
 )
 _CREATE_TOOLS = frozenset({"create_project_verse_file", "create_project_file", "Write"})
@@ -331,7 +334,7 @@ def _parse_write_content(
         except json.JSONDecodeError:
             pass
     # Path-only Cursor Edit — after from disk; before from cache/history in build_file_edit_meta.
-    if rel and tool_name in ("Edit", "StrReplace", "Write", _WRITE_TOOL):
+    if rel and tool_name in ("Edit", "StrReplace", "Write", _WRITE_TOOL, "workspace_multi_edit", "workspace_replace_lines"):
         return rel, "", None
     return rel, "", None
 

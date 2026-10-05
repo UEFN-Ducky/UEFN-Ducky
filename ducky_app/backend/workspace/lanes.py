@@ -447,6 +447,11 @@ def _move(args: Mapping[str, Any]) -> list[str]:
 
 PATH_ARGS: dict[str, Callable[[Mapping[str, Any]], list[str]]] = {
     "workspace_write_file": lambda a: [normalize_rel(str(a.get("relative_path") or a.get("path") or ""))],
+    "workspace_edit_file": lambda a: [normalize_rel(str(a.get("relative_path") or ""))],
+    "workspace_multi_edit": lambda a: [normalize_rel(str(a.get("relative_path") or ""))],
+    "workspace_replace_lines": lambda a: [normalize_rel(str(a.get("relative_path") or ""))],
+    "workspace_move_file": lambda a: [normalize_rel(str(a.get("source") or "")), normalize_rel(str(a.get("destination") or ""))],
+    "workspace_delete_file": lambda a: [normalize_rel(str(a.get("relative_path") or ""))],
     "create_project_verse_file": _create_verse,
     "create_project_file": _create_file,
     "rename_project_entry": _rename,

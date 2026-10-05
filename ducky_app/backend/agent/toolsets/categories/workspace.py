@@ -19,6 +19,17 @@ EXTENDED_TOOLS = frozenset(
         "workspace_open_verse_file",
         "workspace_push_verse_changes",
         "code_open_file",
+        "workspace_edit_file",
+        "workspace_search",
+        "workspace_find",
+        "workspace_read_files",
+        "workspace_file_outline",
+        "workspace_tree",
+        "workspace_multi_edit",
+        "workspace_replace_lines",
+        "workspace_move_file",
+        "workspace_delete_file",
+        "workspace_git",
     }
 )
 

@@ -10,6 +10,9 @@ from backend.agent.toolsets import effective_tool_name
 WRITE_TOOLS = frozenset(
     {
         "workspace_write_file",
+        "workspace_edit_file",
+        "workspace_multi_edit",
+        "workspace_replace_lines",
         "create_project_verse_file",
     }
 )

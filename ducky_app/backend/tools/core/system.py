@@ -253,8 +253,21 @@ def workspace_list_dir(relative_path: str = ".", path: str = "", pretty: bool = 
 
 
 @mcp.tool()
-def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = False) -> str:
-    """Read a text file from the VS Code workspace on host disk."""
+def workspace_read_file(
+    relative_path: str = "",
+    path: str = "",
+    start_line: int = 0,
+    end_line: int = 0,
+    line_numbers: bool = False,
+    pretty: bool = False,
+) -> str:
+    """Read a text file from the project. Use this instead of a shell cat / Get-Content.
+
+    start_line / end_line (1-based, inclusive) read just those lines; without them the first
+    2000 lines come back, with a note where the rest starts. line_numbers=true prefixes each
+    line with its number (for workspace_replace_lines). For a big file, read its
+    workspace_file_outline first and then only the lines you need.
+    """
     rel_in = (relative_path or "").strip() or (path or "").strip()
     if not rel_in:
         raise ValueError("relative_path is required (path= also accepted)")
@@ -278,10 +291,12 @@ def workspace_read_file(relative_path: str = "", path: str = "", pretty: bool = 
             except OSError:
                 pass
         raise ValueError(f"Not a file: {file_path}. {hint}")
-    with open(file_path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
+    from backend.tools.core.workspace_code import read_lines
+
+    part = read_lines(file_path, start_line, end_line, line_numbers)
+    text = part.pop("_full_text")
     rel = relative_path.strip().replace("\\", "/")
-    payload = {"path": file_path, "content": text}
+    payload = {"path": file_path, **part}
     try:
         from backend.workspace.runtime import get_writer
 

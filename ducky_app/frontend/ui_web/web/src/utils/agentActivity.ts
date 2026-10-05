@@ -27,6 +27,17 @@ export function splitTurnMessages(messages: ChatMessage[], inFlight: boolean) {
 
 const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   workspace_read_file: "Read file",
+  workspace_read_files: "Read files",
+  workspace_file_outline: "File outline",
+  workspace_tree: "Folder tree",
+  workspace_search: "Search File Content",
+  workspace_find: "Find files",
+  workspace_edit_file: "Edit file",
+  workspace_multi_edit: "Edit file",
+  workspace_replace_lines: "Edit file",
+  workspace_move_file: "Move file",
+  workspace_delete_file: "Delete file",
+  workspace_git: "Git",
   workspace_write_file: "Write file",
   workspace_list_verse_errors: "Verse errors",
   workspace_list_dir: "List Directories",
@@ -92,6 +103,36 @@ export function humanToolLabel(toolName: string): string {
   return TOOL_ACTIVITY_LABELS[toolName] ?? TOOL_ACTIVITY_LABELS[bare] ?? bare.replace(/_/g, " ");
 }
 
+// What a shell command is doing, in a few words: the status line never shows the raw
+// command (`"C:\Windows\...\powershell.exe" -Command ...`); the tool card still has it.
+const SHELL_ACTIVITY: Array<[RegExp, string]> = [
+  [/\b(pytest|vitest|jest|mocha|cargo\s+test|go\s+test|(npm|pnpm|yarn)\s+(run\s+)?test|unittest|playwright\s+test)\b/i, "Running tests"],
+  [/\bgit\s+(commit|merge|rebase|cherry-pick)\b/i, "Committing"],
+  [/\bgit\s+push\b/i, "Pushing"],
+  [/\bgit\s+(pull|fetch|clone)\b/i, "Fetching from git"],
+  [/\bgit\s+\w/i, "Checking git"],
+  [/\b(rg|grep|findstr|select-string|ag)\b/i, "Searching files"],
+  [/\b(npm|pnpm|yarn|pip|uv|cargo)\s+(install|add|ci|sync)\b/i, "Installing packages"],
+  [/\b(tsc|vite\s+build|cargo\s+(build|check)|(npm|pnpm|yarn)\s+(run\s+)?build|msbuild|dotnet\s+build|make|cmake|pyinstaller)\b/i, "Building"],
+  [/\b(eslint|ruff|mypy|prettier|clippy|lint)\b/i, "Checking code"],
+  [/\b(get-content|gc|cat|type|head|tail|less|more|awk)\b|\bsed\s+-n\b/i, "Reading files"],
+  [/\b(get-childitem|gci|ls|dir|tree|find)\b/i, "Listing files"],
+  [/\b(curl|wget|invoke-webrequest|invoke-restmethod|iwr|irm)\b/i, "Fetching from the web"],
+  [/\b(sqlite3|psql|mysql)\b/i, "Querying a database"],
+  [/\b(python|py|node|deno|bun)\b/i, "Running a script"],
+];
+
+export function shellActivityText(command: string, description?: unknown): string {
+  const said = typeof description === "string" ? description.trim() : "";
+  if (said) return said.length > 80 ? `${said.slice(0, 77)}…` : said;
+  // Look past the wrapper (`powershell.exe -Command "..."`, `bash -lc '...'`) at what it runs.
+  const inner = command.replace(/^\s*"?[^"\s]*(powershell|pwsh|bash|cmd|sh)(\.exe)?"?\s+(-NoProfile\s+)?(-Command|-c|-lc|\/c)\s+/i, "");
+  for (const [rx, label] of SHELL_ACTIVITY) {
+    if (rx.test(inner)) return label;
+  }
+  return "Running a command";
+}
+
 function toolLineText(msg: ChatMessage): string {
   const rawArgs = msg.tool?.arguments ?? {};
   const unwrapped = unwrapCodingAgentTool(
@@ -108,10 +149,12 @@ function toolLineText(msg: ChatMessage): string {
     if (typeof path === "string" && path.trim()) {
       return `${label} · ${path.trim().replace(/\\/g, "/")}`;
     }
-    const command = args.command;
+    const command = args.command ?? args.cmd;
     if (typeof command === "string" && command.trim()) {
-      const short = command.trim().length > 60 ? `${command.trim().slice(0, 57)}…` : command.trim();
-      return `${label} · ${short}`;
+      return shellActivityText(command, args.description);
+    }
+    if (Array.isArray(command) && command.length) {
+      return shellActivityText(command.map(String).join(" "), args.description);
     }
     const query = args.query ?? args.q;
     if (typeof query === "string" && query.trim()) {

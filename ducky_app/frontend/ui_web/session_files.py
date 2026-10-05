@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-_WRITE_TOOLS = frozenset({"workspace_write_file", "create_project_verse_file", "create_project_file"})
-_PATH_TOOLS = frozenset({"rename_project_entry", "move_project_entry"})
+_WRITE_TOOLS = frozenset(
+    {
+        "workspace_write_file",
+        "workspace_edit_file",
+        "workspace_multi_edit",
+        "workspace_replace_lines",
+        "create_project_verse_file",
+        "create_project_file",
+    }
+)
+_PATH_TOOLS = frozenset({"rename_project_entry", "move_project_entry", "workspace_move_file"})
 
 
 def _norm_path(path: str) -> str:
@@ -13,7 +22,7 @@ def _norm_path(path: str) -> str:
 
 
 def _path_from_args(args: dict[str, Any]) -> str:
-    for key in ("relative_path", "path", "source_relative", "dest_parent_relative"):
+    for key in ("relative_path", "path", "destination", "source_relative", "dest_parent_relative"):
         raw = args.get(key)
         if isinstance(raw, str) and raw.strip():
             return _norm_path(raw)

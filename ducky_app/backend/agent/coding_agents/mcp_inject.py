@@ -192,9 +192,26 @@ CODING_AGENT_FOLDER_NOTE = (
     "Project kind: folder project (a plain folder or code repo, not a UEFN island). Every "
     "file under the project root is editable, .py included, except .git/ internals; the "
     "island rules about Content/, Verse/, digests and never writing Python do not apply. "
-    "Use your own shell tool for git, builds and tests: any command that needs approval "
-    "shows an Allow/Deny card in this chat, so wait for it. Never push, publish or deploy "
-    "unless the user asks.\n"
+    "Use your own shell only for builds, tests and git changes (commit, push): any command "
+    "that needs approval shows an Allow/Deny card in this chat, so wait for it. Never push, "
+    "publish or deploy unless the user asks.\n"
+)
+
+# Every shell call is its own step in the chat, slow to start on Windows, and a whole
+# file in the context. The `uefn` server reads only the lines asked for.
+FILE_TOOLS_RULE = (
+    "\n## Files and git (no shell)\n"
+    "Read, search and edit project files with the `uefn` workspace tools, not your shell "
+    "(no Get-Content, Select-String, dir, cat, grep, sed or Python one-liners):\n"
+    '- find files: `workspace_find` ("*.py", "src/**/mcp*"); a folder tree: `workspace_tree`\n'
+    '- search text: `workspace_search` (output_mode="files" first on a broad search, then "content" with context)\n'
+    "- read: `workspace_file_outline` for a big file, then `workspace_read_file` with start_line/end_line; "
+    "several files at once: `workspace_read_files`\n"
+    "- edit: `workspace_edit_file` (exact text), `workspace_multi_edit` (several in one file), "
+    "`workspace_replace_lines` (a line range), `workspace_write_file` (new or whole file), "
+    "`workspace_move_file`, `workspace_delete_file`\n"
+    "- git reads: `workspace_git` (status, diff, log, show, ls-files, blame)\n"
+    "Use your shell only for builds, tests and git changes.\n"
 )
 
 
@@ -279,6 +296,7 @@ def bootstrap_system_prompt(
         "connecting, call ToolSearch with query `select:mcp__uefn__<tool>` (that call waits). "
         "Do not tell the user the tools are missing, and do not send them to Settings, "
         "until that search returns.\n"
+        f"{FILE_TOOLS_RULE}"
         "\n## Workflows\n"
         "Read, build and run workflows with Ducky tools: `find_workflows`, `list_workflow_nodes`, "
         "`get_workflow`, `save_workflow`, `run_workflow`, `run_workflow_node`. Never search Ducky's "

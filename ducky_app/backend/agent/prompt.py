@@ -115,8 +115,11 @@ FOLDER_PROJECT_NOTE = (
     "`workspace_*` paths are relative to the folder root (for example `src/app.py`) and every "
     "file under it is editable, `.py` included, except `.git/` internals. The island rules "
     "about `Content/`, `Verse/`, digests and never writing Python apply to UEFN islands only, "
-    "not to this project. Run git, builds and tests with `ducky_terminal_run` (the user "
-    "approves each command). Never push, publish or deploy unless the user asks.\n"
+    "not to this project. Find, search, read and edit files with `workspace_find`, "
+    "`workspace_search`, `workspace_file_outline` + `workspace_read_file` (start_line/end_line), "
+    "`workspace_edit_file` / `workspace_multi_edit`, and read git with `workspace_git`. Run "
+    "builds, tests and git changes with `ducky_terminal_run` (the user approves each command). "
+    "Never push, publish or deploy unless the user asks.\n"
 )
 
 
