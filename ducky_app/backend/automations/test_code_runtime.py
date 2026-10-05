@@ -516,3 +516,52 @@ def test_catalog_and_runner_know_custom_code():
     assert spec["default_config"]["code"] == code_api.BLANK_CODE and spec["default_config"]["pins"] == code_api.BLANK_PINS
     assert "code.js" in runner._ACTION_TYPES
     assert runner.public_payload({"_person_started": True, "_spend_approved": True, "x": 1}) == {"x": 1}
+
+
+# --------------------------------------------------------------------------- long UEFN waits
+
+
+def _stop_soon() -> tuple[threading.Event, contextvars.Token]:
+    cancel = threading.Event()
+    threading.Timer(0.3, cancel.set).start()
+    return cancel, runner._CANCEL.set(cancel)
+
+
+def test_waiting_for_uefn_ends_when_stopped_and_frees_the_open_lock(monkeypatch, tmp_path):
+    from frontend import window_view
+    from frontend.ui_web import project_switch
+
+    from backend.automations import uefn
+
+    project = tmp_path / "Island.uefnproject"
+    project.write_text("{}")
+    monkeypatch.setattr(window_view, "_uefn_running", lambda: True)
+    monkeypatch.setattr(project_switch, "switch_panel_project", lambda **kw: pytest.fail("switched a project that never got ready"))
+    monkeypatch.setattr(window_view, "wait_uefn_ready", lambda **kw: time.sleep(5) or {"ok": True})
+    _cancel, token = _stop_soon()
+    started = time.time()
+    try:
+        out = uefn.open_project(str(project), timeout=120)
+    finally:
+        runner._CANCEL.reset(token)
+    assert out == {"ok": False, "stopped": True, "error": "Stopped"}
+    assert time.time() - started < 2.0
+    assert uefn._open_lock.acquire(timeout=0.1)  # a new run can open UEFN right away
+    uefn._open_lock.release()
+
+
+@pytest.mark.parametrize("ntype, config, patch", [
+    ("uefn.player.wait", {"timeout": 60}, "backend.tools.tester.session_play.wait_for_player"),
+    ("uefn.log.expect", {"regex": "x", "timeout": 60}, "backend.tools.tester.session_play.expect_log"),
+    ("uefn.wait_ready", {"timeout": 60}, "frontend.window_view.wait_uefn_ready"),
+])
+def test_play_test_waits_end_when_stopped(monkeypatch, ntype, config, patch):
+    monkeypatch.setattr(patch, lambda *a, **k: time.sleep(5) or {"ok": True})
+    _cancel, token = _stop_soon()
+    started = time.time()
+    try:
+        step = runner._exec_node({"id": "w", "type": ntype, "config": config}, {})
+    finally:
+        runner._CANCEL.reset(token)
+    assert step["ok"] is False and "Stopped" in step["error"]
+    assert time.time() - started < 2.0

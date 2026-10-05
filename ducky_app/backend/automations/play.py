@@ -79,6 +79,7 @@ def _project_state(project: str) -> dict[str, Any]:
 
 
 def start_game(cfg: dict[str, Any]) -> dict[str, Any]:
+    from backend.automations.uefn import until_stopped
     from backend.tools.tester.session_play import start_game as _start, wait_for_player
 
     status = _uefn_online()
@@ -99,7 +100,7 @@ def start_game(cfg: dict[str, Any]) -> dict[str, Any]:
         result = {"playing": True, "already_playing": False, "started": True, "source": started.get("source", "")}
     wait_s = float(cfg.get("wait_player") or 0)
     if wait_s > 0:
-        waited = wait_for_player(min(wait_s, _PLAYER_WAIT_CAP_S))
+        waited = until_stopped(wait_for_player, min(wait_s, _PLAYER_WAIT_CAP_S))
         result.update(_session_fields(waited))
         if not waited.get("ok"):
             return {"ok": False, "error": str(waited.get("error") or "no player joined"), "result": result}
@@ -123,10 +124,11 @@ def stop_game(_cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def wait_player(cfg: dict[str, Any]) -> dict[str, Any]:
+    from backend.automations.uefn import until_stopped
     from backend.tools.tester.session_play import wait_for_player
 
     timeout = min(max(float(cfg.get("timeout") or 60), 1.0), _PLAYER_WAIT_CAP_S)
-    waited = wait_for_player(timeout)
+    waited = until_stopped(wait_for_player, timeout)
     result = _session_fields(waited)
     if not waited.get("ok"):
         return {"ok": False, "error": str(waited.get("error") or "no player joined"), "result": result}
@@ -134,11 +136,12 @@ def wait_player(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def expect_log(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    from backend.automations.uefn import until_stopped
     from backend.tools.tester.session_play import expect_log as _expect
 
     timeout = min(max(float(cfg.get("timeout") or 30), 1.0), _LOG_WAIT_CAP_S)
     since = payload.get("log_offset") if cfg.get("from_start") is not True else 0
-    found = _expect(str(cfg.get("regex") or ""), timeout, int(since or 0))
+    found = until_stopped(_expect, str(cfg.get("regex") or ""), timeout, int(since or 0))
     result = {
         "log_matches": list(found.get("log_matches") or []),
         "log_count": int(found.get("count") or 0),

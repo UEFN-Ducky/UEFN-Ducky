@@ -1001,17 +1001,20 @@ def _uefn_node(node: dict[str, Any], ntype: str, label: str, cfg: dict[str, Any]
 
         result = close_uefn()
     elif ntype == "uefn.restart":
+        from backend.automations.uefn import until_stopped
         from frontend.window_view import restart_uefn_project
 
-        result = restart_uefn_project(project, wait=True, timeout=timeout)
+        result = until_stopped(restart_uefn_project, project, wait=True, timeout=timeout)
     elif ntype == "uefn.wait_ready":
+        from backend.automations.uefn import until_stopped
         from frontend.window_view import wait_uefn_ready
 
-        result = wait_uefn_ready(timeout=timeout, root=project)
+        result = until_stopped(wait_uefn_ready, timeout=timeout, root=project)
     else:
+        from backend.automations.uefn import until_stopped
         from backend.tools.core.uefn_windows import wait_uefn_window
 
-        result = wait_uefn_window(str(cfg.get("title_regex") or ""), timeout=timeout)
+        result = until_stopped(wait_uefn_window, str(cfg.get("title_regex") or ""), timeout=timeout)
     ok = bool(result.get("ok"))
     step: dict[str, Any] = {
         "ok": ok,
