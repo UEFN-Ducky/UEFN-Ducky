@@ -93,6 +93,16 @@ def remove(account: str, scope: str, plugin: str, kind: str, key: str, *, tombst
             conn.execute(f"DELETE FROM plugin_data WHERE {where}", args)
 
 
+def plugin_ids(account: str, scope: str) -> list[str]:
+    """Plugin ids with live, non-sensitive rows in one scope."""
+    out = db.connect().execute(
+        "SELECT DISTINCT plugin_id FROM plugin_data WHERE account_id=? AND scope_id=? AND deleted=0 AND sensitive=0 "
+        "ORDER BY plugin_id",
+        (account, scope),
+    ).fetchall()
+    return [str(r[0]) for r in out]
+
+
 def rows(account: str, scope: str, plugin: str, kind: str, prefix: str = "") -> list[dict[str, Any]]:
     out = db.connect().execute(
         f"SELECT {_COLS} FROM plugin_data WHERE account_id=? AND scope_id=? AND plugin_id=? AND kind=? "
