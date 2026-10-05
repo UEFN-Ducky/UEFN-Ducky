@@ -1868,7 +1868,7 @@ def _files_as_attachments(files: Any) -> list[dict[str, Any]]:
 
 def _pipeline_finish(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     caller = str(cfg.get("caller_conv_id") or payload.get("caller_conv_id") or "").strip()
-    text = str(cfg.get("message") or payload.get("text") or payload.get("assistant_text") or "Workflow complete.")
+    text = _as_text(_template(cfg.get("message") or payload.get("text") or payload.get("assistant_text") or "Workflow complete.", payload))
     files = payload.get("files") or []
     if not caller:
         return {"ok": True, "result": {"posted": False, "text": text, "files": files}}
@@ -1980,10 +1980,12 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     fn = getattr(tool, "fn", None)
     if fn is None:
         return {"ok": False, "error": f"tool has no fn: {name}"}
-    result = fn(**raw)
+    result = fn(**_template(raw, payload))
     if inspect.isawaitable(result):
         return {"ok": False, "error": "async tool — register a sync plugin node instead"}
     out: dict[str, Any] = {"tool": name, "output": result}
+    if isinstance(result, dict):
+        out["data"] = result
     if isinstance(result, str) and result.lstrip().startswith("{"):
         # Most host tools return tool_json(...) text; expose it so a Branch can
         # read e.g. data.compile.numErrors.
@@ -1993,6 +1995,9 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
             parsed = None
         if isinstance(parsed, dict):
             out["data"] = parsed
+    data = out.get("data")
+    if isinstance(data, dict) and data.get("ok") is False:
+        return {"ok": False, "error": str(data.get("error") or f"{name} failed"), "result": out}
     return {"ok": True, "result": out}
 
 
@@ -2002,6 +2007,10 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
 def _template(value: Any, payload: dict[str, Any]) -> Any:
     """``{{field.path}}`` reads an earlier step's value: alone it keeps the value's
     type (a list stays a list), inside other text it becomes text."""
+    if isinstance(value, dict):
+        return {key: _template(item, payload) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_template(item, payload) for item in value]
     if not isinstance(value, str):
         return value
     whole = _PLACEHOLDER.fullmatch(value.strip())

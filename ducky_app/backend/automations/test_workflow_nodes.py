@@ -961,3 +961,30 @@ def test_play_is_the_approval_and_use_this_sends_on_the_previewed_picture(tools)
     assert tools.calls[-1][1]["source_file"] == picture
     lone = _save({"nodes": [graph["nodes"][1], graph["nodes"][2]], "edges": [graph["edges"][1]]}, "Lone")
     assert "Nothing takes this picture" in runner.keep_preview(lone, "view")["error"]
+
+
+@pytest.mark.parametrize("encoded", [False, True])
+def test_tool_failure_stops_workflow_and_resolves_nested_arguments(monkeypatch, encoded):
+    from types import SimpleNamespace
+    from backend.server import mcp
+    seen = []
+    def fail(**kwargs):
+        seen.append(kwargs)
+        result = {"ok": False, "error": "command not approved"}
+        return json.dumps(result) if encoded else result
+    monkeypatch.setattr(mcp._tool_manager, "get_tool", lambda name: SimpleNamespace(fn=fail))
+    graph = {"nodes": [
+        {"id": "start", "type": "start.manual", "config": {}},
+        {"id": "tool", "type": "tool.call", "config": {"name": "fake", "arguments": {"nested": {"session_id": "{{session}}"}}}},
+        {"id": "finish", "type": "pipeline.finish", "config": {}},
+    ], "edges": [{"source": "start", "target": "tool", "kind": "main"}, {"source": "tool", "target": "finish", "kind": "main"}]}
+    wid = _save(graph)
+    result = runner.run_workflow(wid, payload={"session": "s123"})
+    assert not result["ok"] and "command not approved" in result["error"]
+    assert seen == [{"nested": {"session_id": "s123"}}]
+    assert not any(step["id"] == "finish" for step in result["steps"])
+
+
+def test_finish_interpolates_result_in_report():
+    result = runner._pipeline_finish({"message": "Release failed: {{error}}"}, {"error": "upload rejected"})
+    assert result["result"]["text"] == "Release failed: upload rejected"
