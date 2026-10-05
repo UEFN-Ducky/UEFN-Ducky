@@ -85,18 +85,25 @@ class PanelApiAutomationsMixin:
     def save_workflow(self, doc: dict[str, Any] | None = None, owner: str = "", **extra: Any) -> dict[str, Any]:
         from backend.automations.store import save_workflow
 
+        from backend.automations.code_approval import approve_workflow
+
         payload = dict(doc or {})
         payload.update(extra)
         try:
-            return {"ok": True, "workflow": save_workflow(payload, owner=owner)}
+            saved = save_workflow(payload, owner=owner)
         except (PermissionError, ValueError) as exc:
             return _refused(exc)
+        approve_workflow(saved, "person")  # a person saved this code in the editor
+        return {"ok": True, "workflow": saved}
 
     def copy_workflow(self, workflow_id: str, owner: str, move: bool = False) -> dict[str, Any]:
+        from backend.automations.code_approval import approve_workflow
         from backend.automations.store import copy_workflow
 
         try:
-            return {"ok": True, "workflow": copy_workflow(workflow_id, owner, move=bool(move))}
+            copied = copy_workflow(workflow_id, owner, move=bool(move))
+            approve_workflow(copied, "person")
+            return {"ok": True, "workflow": copied}
         except KeyError:
             return {"ok": False, "error": "workflow not found"}
         except (PermissionError, ValueError) as exc:
@@ -154,10 +161,11 @@ class PanelApiAutomationsMixin:
     ) -> dict[str, Any]:
         from backend.automations.runner import run_workflow
 
+        # Test in the editor: a person started it, so its Custom code may run.
         return run_workflow(
             workflow_id,
             trigger_id=trigger_id,
-            payload=payload or {},
+            payload={**(payload or {}), "_person_started": True},
             starter_id=starter_id,
             prompt=prompt,
             files=files,
@@ -169,7 +177,76 @@ class PanelApiAutomationsMixin:
         approve_spend: the person pressed play, so paid steps this run needs may spend."""
         from backend.automations.runner import run_node
 
-        return run_node(workflow_id, node_id, approve_spend=bool(approve_spend))
+        return run_node(workflow_id, node_id, approve_spend=bool(approve_spend), person=True)
+
+    def get_workflow_node_code(self, workflow_id: str, node_id: str) -> dict[str, Any]:
+        """Code tab: the JavaScript a node runs (a built-in's as generated code)."""
+        from backend.tools.panel.panel_automations import node_code
+
+        return node_code(workflow_id, node_id)
+
+    def edit_workflow_node_code(
+        self,
+        workflow_id: str,
+        node_id: str,
+        code: str | None = None,
+        edits: list[Any] | None = None,
+        revert: bool = False,
+        expected_sha: str | None = None,
+    ) -> dict[str, Any]:
+        """Write a node's code (or revert it) and save; a person's save approves it."""
+        from backend.tools.panel.panel_automations import edit_node_code
+
+        return edit_node_code(workflow_id, node_id, code=code, edits=edits, revert=bool(revert),
+                              expected_sha=expected_sha, person=True)
+
+    def test_workflow_node(
+        self,
+        workflow_id: str,
+        node_id: str,
+        code: str | None = None,
+        inputs: dict[str, Any] | None = None,
+        settings: dict[str, Any] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Code tab's Test: run one Custom code node with draft code, nothing saved."""
+        from backend.automations.runner import run_code_draft
+
+        return run_code_draft(workflow_id, node_id, code=code, inputs=inputs, settings=settings,
+                              dry_run=bool(dry_run), person=True)
+
+    def workflow_code_api(self, tools: list[str] | None = None) -> dict[str, Any]:
+        """The ducky API's types and docs for the Code tab's editor."""
+        from backend.tools.panel.panel_automations import code_api_reference
+
+        return code_api_reference(tools)
+
+    def check_workflow_node_code(self, code: str = "") -> dict[str, Any]:
+        """Problems in draft code as it is typed (nothing runs, nothing saved)."""
+        from backend.automations.code_check import check
+
+        return check(str(code or ""))
+
+    def approve_workflow_node_code(self, workflow_id: str, node_id: str, code_sha: str) -> dict[str, Any]:
+        """Review: the person read this exact code and lets it run on its own here."""
+        from backend.automations.code_approval import approve, is_local, node_sha
+        from backend.automations.store import get_workflow
+
+        wf = get_workflow(workflow_id)
+        if wf is None:
+            return {"ok": False, "error": "workflow not found"}
+        node = next((n for n in (wf.get("graph") or {}).get("nodes") or [] if str(n.get("id")) == str(node_id)), None)
+        if node is None or node.get("type") != "code.js":
+            return {"ok": False, "error": "That node isn't Custom code in the saved workflow; save first."}
+        if not is_local(wf):
+            from backend.automations.code_approval import TEAM_REFUSAL
+
+            return {"ok": False, "error": TEAM_REFUSAL}
+        sha = node_sha(node)
+        if str(code_sha or "").strip() != sha:
+            return {"ok": False, "error": "The code changed since you opened it; review it again.", "code_sha": sha}
+        approve(str(wf["id"]), str(node["id"]), sha, "person")
+        return {"ok": True, "approved": True, "code_sha": sha}
 
     def keep_workflow_preview(self, workflow_id: str, node_id: str) -> dict[str, Any]:
         """A Preview's "Use this": run the steps that take what it shows, with that value."""

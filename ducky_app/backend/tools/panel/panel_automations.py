@@ -63,14 +63,34 @@ def list_workflows(pretty: bool = False) -> str:
 
 
 @mcp.tool()
-def get_workflow(workflow_id: str, pretty: bool = False) -> str:
-    """Full workflow graph, owner, and this PC's last run log."""
+def get_workflow(workflow_id: str, include_code: bool = False, pretty: bool = False) -> str:
+    """Full workflow graph, owner, and this PC's last run log.
+
+    Custom code nodes (type code.js) carry code_sha and code_lines instead of their code;
+    read one with get_workflow_node_code, or pass include_code=true for every node's code.
+    Saving the graph back without code keeps each node's code while its code_sha matches."""
     from backend.automations.store import get_workflow as _get
 
     wf = _get(workflow_id)
     if wf is None:
         return tool_json({"ok": False, "error": "workflow not found"}, pretty=pretty)
-    return tool_json({"ok": True, "workflow": wf}, pretty=pretty)
+    return tool_json({"ok": True, "workflow": wf if include_code else without_code(wf)}, pretty=pretty)
+
+
+def without_code(wf: dict[str, Any]) -> dict[str, Any]:
+    """The workflow with each Custom code node's code swapped for its line count."""
+    graph = wf.get("graph") or {}
+    if not any(isinstance(n, dict) and n.get("type") == "code.js" for n in graph.get("nodes") or []):
+        return wf
+    nodes = []
+    for node in graph.get("nodes") or []:
+        cfg = node.get("config") if isinstance(node, dict) and isinstance(node.get("config"), dict) else None
+        if node.get("type") == "code.js" and cfg is not None and isinstance(cfg.get("code"), str):
+            cfg = {k: v for k, v in cfg.items() if k != "code"}
+            cfg["code_lines"] = len(node["config"]["code"].splitlines())
+            node = {**node, "config": cfg}
+        nodes.append(node)
+    return {**wf, "graph": {**graph, "nodes": nodes}}
 
 
 @mcp.tool()
@@ -118,6 +138,9 @@ def save_workflow(
     values become fields for the next steps (also under "returned"). share=true runs it
     on a copy of this run's fields and brings every field back. If it has flow.output
     nodes and none is reached, the caller's path stops there.
+
+    Custom code nodes (type code.js) are edited with edit_workflow_node_code, not here; a
+    graph sent back without their code keeps it while code_sha matches.
     """
     from backend.automations.locks import changed_nodes, locked_changes
     from backend.automations.store import get_workflow as _get, save_workflow as _save
@@ -155,8 +178,12 @@ def save_workflow(
         saved = _save(doc, owner=owner)
     except (PermissionError, ValueError) as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    if _chat_allows_everything():
+        from backend.automations.code_approval import approve_workflow
+
+        approve_workflow(saved, "chat")
     _reveal_graph(str(saved.get("id") or ""), "saved", nodes=changed_nodes(before.get("graph"), saved.get("graph")))
-    return tool_json({"ok": True, "workflow": saved}, pretty=pretty)
+    return tool_json({"ok": True, "workflow": without_code(saved)}, pretty=pretty)
 
 
 @mcp.tool()
@@ -562,3 +589,331 @@ def delete_workflow_template(template_id: str, pretty: bool = False) -> str:
     if not delete_custom(template_id):
         return tool_json({"ok": False, "error": "template not found"}, pretty=pretty)
     return tool_json({"ok": True, "id": (template_id or "").strip()}, pretty=pretty)
+
+
+# --------------------------------------------------------------------------- custom code nodes
+
+
+def _node_of(wf: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    nid = str(node_id or "").strip()
+    return next((n for n in (wf.get("graph") or {}).get("nodes") or [] if isinstance(n, dict) and str(n.get("id")) == nid), None)
+
+
+def _pins_of(node: dict[str, Any], specs: dict[str, Any]) -> dict[str, Any] | None:
+    """A node's pins as the runner sees them; None for a node whose plugin is off."""
+    from backend.automations.pins import node_pins
+    from backend.automations.runner import _signature
+
+    cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+    if node.get("type") == "code.js":
+        pins = cfg.get("pins") if isinstance(cfg.get("pins"), dict) else {}
+        return {"exec": pins.get("exec", True) is not False, "inputs": list(pins.get("inputs") or []), "outputs": list(pins.get("outputs") or [])}
+    spec = specs.get(str(node.get("type") or ""))
+    return node_pins(node, spec, _signature) if spec is not None else None
+
+
+def _last_inputs(wf: dict[str, Any], node_id: str) -> dict[str, Any]:
+    """What the node ran with last on this PC (its newest step record that kept them)."""
+    for run in reversed(list(wf.get("runs") or [])):
+        for step in reversed(list(run.get("steps") or []) if isinstance(run, dict) else []):
+            if isinstance(step, dict) and str(step.get("id")) == node_id and isinstance(step.get("inputs"), dict):
+                return dict(step["inputs"])
+    return {}
+
+
+def node_code(workflow_id: str, node_id: str) -> dict[str, Any]:
+    """The JavaScript one node runs (a built-in's as generated code), with its pins,
+    problems, what it was made from and whether it may run on its own here."""
+    from backend.automations import code_check, codegen
+    from backend.automations.catalog import node_specs
+    from backend.automations.code_approval import is_approved
+    from backend.automations.store import get_workflow as _get
+
+    wf = _get(workflow_id)
+    if wf is None:
+        return {"ok": False, "error": "workflow not found"}
+    node = _node_of(wf, node_id)
+    if node is None:
+        return {"ok": False, "error": f"node not found: {node_id}"}
+    wid, nid = str(wf["id"]), str(node["id"])
+    cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+    specs = node_specs()
+    if node.get("type") == "code.js":
+        code = cfg.get("code") if isinstance(cfg.get("code"), str) else ""
+        checked = code_check.check(code)
+        based = cfg.get("based_on") if isinstance(cfg.get("based_on"), dict) and cfg["based_on"].get("type") else None
+        was = {"id": nid, "type": based["type"], "label": node.get("label") or "", "config": dict(based.get("config") or {})} if based else None
+        based_code = codegen.generate(was, specs)["code"] if was else None
+        out: dict[str, Any] = {
+            "kind": "custom", "code": code, "code_sha": checked["code_sha"], "based_on": based, "based_on_code": based_code,
+            "pins": _pins_of(node, specs), "settings_spec": list(cfg.get("settings_spec") or []),
+            "uses": cfg.get("uses") if isinstance(cfg.get("uses"), dict) else checked["uses"],
+            "problems": checked["problems"], "convertible": True, "reason": "",
+            "approved": is_approved(wid, nid, checked["code_sha"]),
+        }
+    else:
+        made = codegen.generate(node, specs)
+        checked = code_check.check(made["code"]) if made["kind"] != "flow" else None
+        out = {
+            "kind": "flow" if made["kind"] == "flow" else "builtin", "code": made["code"],
+            "code_sha": code_check.code_sha(made["code"]), "based_on": None, "based_on_code": None,
+            "pins": _pins_of(node, specs) or {"exec": True, "inputs": [], "outputs": []}, "settings_spec": [],
+            "uses": checked["uses"] if checked else {"tools": [], "builtins": []},
+            "problems": checked["problems"] if checked else [],
+            "convertible": bool(made["convertible"]), "reason": made["reason"], "approved": True,
+        }
+    return {"ok": True, **out, "last_inputs": _last_inputs(wf, nid)}
+
+
+def _apply_edits(code: str, edits: list[Any]) -> str:
+    for n, edit in enumerate(edits, 1):
+        old = edit.get("old") if isinstance(edit, dict) else None
+        new = edit.get("new") if isinstance(edit, dict) else None
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError(f"Edit {n}: give old (text in the code now) and new (what replaces it).")
+        found = code.count(old)
+        if found != 1:
+            where = "isn't in the code" if not found else f"is in the code {found} times"
+            raise ValueError(f"Edit {n}: its old text {where}; it must match exactly once (take in more of the lines around it).")
+        code = code.replace(old, new, 1)
+    return code
+
+
+def _drop_wires(graph: dict[str, Any], node_id: str, pins: dict[str, Any], specs: dict[str, Any]) -> list[dict[str, Any]]:
+    """Take out the wires that no longer fit the node's pins; returns what was dropped."""
+    from backend.automations.pins import DATA_KIND, accepts
+
+    nodes = {str(n.get("id")): n for n in graph.get("nodes") or [] if isinstance(n, dict)}
+    ins = {p["id"]: p for p in pins.get("inputs") or []}
+    outs = {p["id"]: p for p in pins.get("outputs") or []}
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for edge in graph.get("edges") or []:
+        reason = ""
+        source, target = str(edge.get("source")), str(edge.get("target"))
+        if edge.get("kind") == DATA_KIND and node_id in (source, target):
+            feeds_me = target == node_id
+            pin_id = str(edge.get("target_pin") if feeds_me else edge.get("source_pin"))
+            mine = (ins if feeds_me else outs).get(pin_id)
+            other = nodes.get(source if feeds_me else target)
+            other_pins = _pins_of(other, specs) if other is not None else None
+            if mine is None:
+                reason = f"no {'input' if feeds_me else 'output'} {pin_id!r} any more"
+            elif other_pins is not None:
+                their_id = edge.get("source_pin") if feeds_me else edge.get("target_pin")
+                theirs = next((p for p in other_pins["outputs" if feeds_me else "inputs"] if p["id"] == their_id), None)
+                if theirs is not None:
+                    into, out = (mine, theirs) if feeds_me else (theirs, mine)
+                    if not accepts(into["type"], out["type"]):
+                        reason = f"{out['type']} can't feed {into['type']} any more"
+        elif edge.get("kind") != DATA_KIND and node_id in (source, target) and not pins.get("exec", True):
+            reason = "a value node has no white pins"
+        if reason:
+            dropped.append({**{k: edge[k] for k in ("source", "target", "kind", "source_pin", "target_pin") if k in edge}, "reason": reason})
+        else:
+            kept.append(edge)
+    graph["edges"] = kept
+    return dropped
+
+
+def edit_node_code(
+    workflow_id: str,
+    node_id: str,
+    *,
+    code: str | None = None,
+    edits: list[Any] | None = None,
+    revert: bool = False,
+    expected_sha: str | None = None,
+    allow_locked_changes: bool = False,
+    person: bool = False,
+) -> dict[str, Any]:
+    """Write a node's code (a built-in becomes Custom code in this workflow only), or
+    revert it to the built-in it was made from, through the normal save. ``person``: a
+    person saved it in the editor, which approves the code; an agent's save approves
+    only when its chat allows everything."""
+    from copy import deepcopy
+
+    from backend.automations import code_check, codegen
+    from backend.automations.catalog import node_specs
+    from backend.automations.code_approval import approve_workflow
+    from backend.automations.locks import locked_changes
+    from backend.automations.pins import check_wires, node_pins
+    from backend.automations.runner import _signature
+    from backend.automations.store import get_workflow as _get, save_workflow as _save
+
+    wf = _get(workflow_id)
+    if wf is None:
+        return {"ok": False, "error": "workflow not found"}
+    graph = deepcopy(wf.get("graph") or {"nodes": [], "edges": []})
+    node = _node_of({"graph": graph}, node_id)
+    if node is None:
+        return {"ok": False, "error": f"node not found: {node_id}"}
+    nid, ntype = str(node["id"]), str(node.get("type") or "")
+    cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+    specs = node_specs()
+    if revert:
+        based = cfg.get("based_on") if isinstance(cfg.get("based_on"), dict) else None
+        if ntype != "code.js":
+            return {"ok": False, "error": "This node runs its built-in step already."}
+        if not based or not based.get("type"):
+            return {"ok": False, "error": "This Custom code node wasn't made from a built-in node, so there is nothing to revert to."}
+        node["type"], node["config"] = str(based["type"]), deepcopy(dict(based.get("config") or {}))
+        spec = specs.get(node["type"])
+        pins = node_pins(node, spec, _signature) if spec is not None else None
+    else:
+        if code is not None and edits:
+            return {"ok": False, "error": "Pass code (the whole module) or edits, not both."}
+        if ntype == "code.js":
+            current = cfg.get("code") if isinstance(cfg.get("code"), str) else ""
+            based = None
+        else:
+            made = codegen.generate(node, specs)
+            if not made["convertible"]:
+                return {"ok": False, "error": made["reason"] or "This node can't become custom code."}
+            current = made["code"]
+            based = {"type": ntype, "config": deepcopy(cfg), "code_sha": code_check.code_sha(current)}
+        if expected_sha and str(expected_sha).strip() != code_check.code_sha(current):
+            return {"ok": False, "conflict": True, "code_sha": code_check.code_sha(current),
+                    "error": "The code changed since you read it. Read it again with get_workflow_node_code, then edit that."}
+        if code is not None:
+            new_code = code
+        elif edits:
+            try:
+                new_code = _apply_edits(current, list(edits))
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+        else:
+            return {"ok": False, "error": "Pass code (the whole module), edits ([{old, new}]) or revert=true."}
+        if not isinstance(new_code, str):
+            return {"ok": False, "error": "code is the whole JavaScript module, as text."}
+        checked = code_check.check(new_code)
+        if based is not None:
+            spec = specs.get(ntype)
+            kept_pins = node_pins(node, spec, _signature) if spec is not None else {"exec": True, "inputs": [], "outputs": []}
+            node["config"] = {"code": new_code, "based_on": based, "inputs": dict(cfg["inputs"]) if isinstance(cfg.get("inputs"), dict) else {},
+                              "settings": {}, "spend": cfg.get("spend") is True, "pins": kept_pins}
+        else:
+            kept_pins = _pins_of(node, specs)
+            node["config"] = {k: v for k, v in cfg.items() if k != "code_sha"}
+            node["config"]["code"] = new_code
+        node["type"] = "code.js"
+        pins = checked["pins"] if checked["ok"] else kept_pins
+        node["config"]["pins"] = pins  # what the wire checks below see (the save sets it the same way)
+    dropped = _drop_wires(graph, nid, pins, specs) if pins is not None else []
+    misfits = check_wires(graph, specs, _signature)
+    if misfits:
+        return {"ok": False, "error": "Some data wires don't fit: " + "; ".join(misfits[:10]), "wires": misfits}
+    if not allow_locked_changes:
+        held = locked_changes(wf.get("graph"), graph)
+        if held:
+            return {"ok": False, "locked": held,
+                    "error": "The user locked " + ", ".join(held) + ". Leave locked nodes exactly as they are, "
+                    "or ask the user; pass allow_locked_changes=true only after they agree."}
+    try:
+        saved = _save({"id": str(wf["id"]), "graph": graph})
+    except (PermissionError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    if person or _chat_allows_everything():
+        approve_workflow(saved, "person" if person else "chat")
+    after = _node_of(saved, nid) or {}
+    after_cfg = after.get("config") if isinstance(after.get("config"), dict) else {}
+    custom = after.get("type") == "code.js"
+    return {
+        "ok": True,
+        "code_sha": after_cfg.get("code_sha") if custom else None,
+        "pins": _pins_of(after, specs) if after else pins,
+        "wires_dropped": dropped,
+        "problems": list(after_cfg.get("problems") or []) if custom else [],
+        "workflow": saved,
+    }
+
+
+@mcp.tool()
+def get_workflow_node_code(workflow_id: str, node_id: str, pretty: bool = False) -> str:
+    """The JavaScript one workflow node runs, to read before you change it.
+
+    kind "builtin": a built-in node, shown as the code it would be (its Python step keeps
+    running until you edit it). kind "custom": a Custom code node (type code.js); based_on
+    and based_on_code are the built-in it was made from. kind "flow": a route node (If,
+    Branch, loops, starts, ends, Run workflow), which code can't replace (convertible
+    false, reason says why). Also: code_sha (pass it as expected_sha when you edit),
+    pins, settings_spec, uses (tools and built-ins it may call), problems, approved
+    (false = it won't run on its own until a person runs or reviews it) and last_inputs
+    (what it ran with last, for test_workflow_node)."""
+    return tool_json(node_code(workflow_id, node_id), pretty=pretty)
+
+
+@mcp.tool()
+def edit_workflow_node_code(
+    workflow_id: str,
+    node_id: str,
+    code: str | None = None,
+    edits: list[dict[str, str]] | None = None,
+    revert: bool = False,
+    expected_sha: str | None = None,
+    allow_locked_changes: bool = False,
+    pretty: bool = False,
+) -> str:
+    """Change the JavaScript of one workflow node and save the workflow.
+
+    Read it first with get_workflow_node_code. Prefer edits=[{"old": "exact text now",
+    "new": "replacement"}] (each old must match exactly once) over code (the whole module),
+    and pass expected_sha (the code_sha you read) so a newer change is never overwritten.
+    The first edit of a built-in turns it into a Custom code node in this workflow only;
+    revert=true turns it back into the built-in it was made from. Pins come from the
+    code's node declaration; data wires whose pins are gone are dropped and listed in
+    wires_dropped. Locked nodes are refused like save_workflow. Code you save runs on its
+    own only after a person runs or reviews it (or this chat allows everything): test it
+    with test_workflow_node first (dry run). The ducky API: workflow_code_api."""
+    out = edit_node_code(workflow_id, node_id, code=code, edits=edits, revert=bool(revert), expected_sha=expected_sha,
+                         allow_locked_changes=bool(allow_locked_changes), person=False)
+    saved = out.pop("workflow", None)
+    if out.get("ok") and saved:
+        _reveal_graph(str(saved.get("id") or ""), "saved", nodes=[str(node_id)])
+    return tool_json(out, pretty=pretty)
+
+
+@mcp.tool()
+async def test_workflow_node(
+    workflow_id: str,
+    node_id: str,
+    code: str | None = None,
+    inputs: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    dry_run: bool = True,
+    pretty: bool = False,
+) -> str:
+    """Run one Custom code node now without saving: its saved code, or draft code.
+
+    inputs default to what it ran with last (get_workflow_node_code last_inputs); settings
+    override its settings. dry_run (default) records each ducky.tool / ducky.builtin call
+    instead of making it, so nothing outside changes; run dry first, then dry_run=false.
+    Returns {ok, outputs, log, tool_calls, error: {message, line, col}, ms}."""
+    from backend.automations.runner import run_code_draft
+
+    out = await asyncio.to_thread(run_code_draft, workflow_id, node_id, code=code, inputs=inputs, settings=settings,
+                                  dry_run=bool(dry_run), person=False)
+    return tool_json(out, pretty=pretty)
+
+
+def code_api_reference(tools: list[str] | None = None) -> dict[str, Any]:
+    """What workflow_code_api answers (the panel's Code tab asks for the same)."""
+    from backend.automations import code_api, code_check, codegen
+
+    return {
+        "ok": True,
+        "dts": code_api.dts(),
+        "manifest": code_api.MANIFEST,
+        "blank": code_api.BLANK_CODE,
+        "declaration_schema": code_check.DECLARATION_SCHEMA,
+        "examples": codegen.EXAMPLES,
+        "tools_dts": codegen.tools_dts(tools),
+    }
+
+
+@mcp.tool()
+def workflow_code_api(tools: list[str] | None = None, pretty: bool = False) -> str:
+    """What Custom code can use: the ducky API as TypeScript (dts), each call (manifest),
+    the blank node, the node declaration's schema and examples. tools=[names] adds
+    tools_dts: the arguments each of those MCP tools takes, for ducky.tool(name, args)."""
+    return tool_json(code_api_reference(tools), pretty=pretty)
