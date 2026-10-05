@@ -33,7 +33,7 @@ def infer_provider(model: str) -> str:
         return ""
     m = raw.lower()
     # Hosted account chat. The Brain workflow picks gateways — never Claude/Ollama.
-    if m == "ducky-brain" or m.endswith(":ducky-brain"):
+    if m in ("ducky-brain", "ducky-ai") or m.endswith(":ducky-brain") or m.endswith(":ducky-ai"):
         return "uefn_ducky"
 
     # Qualified "provider:model" (and "ollama:qwen3.6:latest" → provider=ollama).

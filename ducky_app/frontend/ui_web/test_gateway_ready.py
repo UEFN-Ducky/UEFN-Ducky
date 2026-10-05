@@ -117,3 +117,5 @@ def test_ducky_brain_is_the_hosted_account_gateway():
     assert infer_provider("ducky-brain") == "uefn_ducky"
     assert infer_provider("uefn_ducky:ducky-brain") == "uefn_ducky"
     assert infer_provider("claude_code:ducky-brain") == "uefn_ducky"
+    assert infer_provider("ducky-ai") == "uefn_ducky"
+    assert infer_provider("uefn_ducky:ducky-ai") == "uefn_ducky"
