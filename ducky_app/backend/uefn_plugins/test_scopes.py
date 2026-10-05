@@ -260,8 +260,11 @@ def test_copy_local_into_a_team_is_one_way_and_keeps_the_teams_items(who: _Who, 
     assert cards.items() == {"card.mo": {"v": "local"}, "card.pip": {"v": "team"}}
     assert cards.get_file("assets/pip.png") == b"PNG local"
     assert _sync(store)["state"] == "ok"
-    pushed = sorted(p["key"] for r in store.requests for p in r.get("pushes") or [])
+    pushes = [p for r in store.requests for p in r.get("pushes") or []]
+    pushed = sorted(p["key"] for p in pushes if p["pluginId"] == "brainrot-tcg")
     assert pushed == ["assets/pip.png", "card.mo", "card.pip"] and "secret" not in repr(store.requests)
+    personal = team_sync.share_plugin_id(ana, "brainrot-tcg")
+    assert sorted(p["key"] for p in pushes if p["pluginId"] == personal) == ["card.mo", "card.pip"]
     # The Local copy is untouched.
     scopes.link_plugin("brainrot-tcg", scopes.PERSONAL)
     assert cards.items() == {"card.mo": {"v": "local"}, "card.pip": {"v": "local"}}
