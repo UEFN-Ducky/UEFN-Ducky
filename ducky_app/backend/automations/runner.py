@@ -32,7 +32,10 @@ _AGENT_WAIT_CAP_S = 900.0
 # workflow inherits from its caller besides the inputs it is given.
 _CALL_DEPTH_CAP = 8
 _CALL_STACK: ContextVar[tuple[str, ...]] = ContextVar("workflow_call_stack", default=())
-_RUN_PLUMBING = ("caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id", "files")
+# "_person_started": a person pressed play on the run, so the workflows it runs count as run by them.
+_RUN_PLUMBING = ("caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id", "files", "_person_started")
+# Run fields only the app sets: what a person did (pressed play, approved spending).
+_PERSON_KEYS = ("_person_started", "_spend_approved")
 _RETURN_KEY = "_returned"
 # Shared runs hand every field back except where this run reports and its own returns.
 _NOT_SHARED_BACK = frozenset({_RETURN_KEY, "caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id"})
@@ -260,14 +263,22 @@ def _feeders(flow: _Dataflow, nid: str) -> set[str]:
     return seen
 
 
-def run_node(workflow_id: str, node_id: str, *, approve_spend: bool = False, kept_from: list[str] | None = None) -> dict[str, Any]:
+def run_node(
+    workflow_id: str,
+    node_id: str,
+    *,
+    approve_spend: bool = False,
+    kept_from: list[str] | None = None,
+    person: bool = False,
+) -> dict[str, Any]:
     """Run one node now. Everything wired into it reuses what it made last run (so a
     paid generator upstream doesn't run again); a node never run before runs, steps too.
     Once what it made was kept ("Use this"), it starts over: everything wired into it
     runs again (the next card that needs a picture, its prompt…). A Preview makes what
     it shows again (try again).
     approve_spend: a person pressed play, so paid steps this run needs may spend.
-    kept_from: "Use this" — the nodes whose output this run takes and so uses up."""
+    kept_from: "Use this" — the nodes whose output this run takes and so uses up.
+    person: a person (the panel) started it, not an agent: custom code they run counts as reviewed."""
     wf = get_workflow(workflow_id)
     if wf is None:
         return {"ok": False, "error": "workflow not found", "steps": []}
@@ -290,6 +301,8 @@ def run_node(workflow_id: str, node_id: str, *, approve_spend: bool = False, kep
     ctx: dict[str, Any] = {"caller_conv_id": _caller("")}
     if approve_spend:
         ctx["_spend_approved"] = True
+    if person:
+        ctx["_person_started"] = True
     _prepare_run_ctx(ctx, wf)
     ctx["nodes"] = dict(flow.outputs)
     wid = str(wf["id"])
@@ -332,6 +345,25 @@ def run_node(workflow_id: str, node_id: str, *, approve_spend: bool = False, kep
         record["kept"] = list(kept_from)
     append_run(wid, record)
     return {"ok": ok, "error": error, "id": wid, "steps": steps, "node_outputs": node_outputs}
+
+
+def run_code_draft(
+    workflow_id: str,
+    node_id: str,
+    code: str | None = None,
+    inputs: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    dry_run: bool = False,
+    person: bool = False,
+) -> dict[str, Any]:
+    """Run one Custom code node now with draft code (None: its saved code), without
+    saving it or logging a run. inputs None: what it ran with last time. dry_run: its
+    ducky.tool / ducky.builtin calls are listed, not made. person: a person pressed Test.
+
+    Returns {"ok", "outputs", "log", "tool_calls", "error": {"message","line","col"} | None, "ms"}."""
+    from backend.automations import code_node
+
+    return code_node.draft(workflow_id, node_id, code, inputs, settings, dry_run, person)
 
 
 def stop_workflow(workflow_id: str) -> bool:
@@ -444,6 +476,7 @@ _ACTION_TYPES = frozenset(
         "fortnite.servers",
         "notify.message",
         "ui.spotlight",
+        "code.js",
     }
 )
 
@@ -481,6 +514,8 @@ def run_workflow(
     if files is not None:
         ctx["files"] = files
     ctx["caller_conv_id"] = _caller(caller_conv_id or str(ctx.get("caller_conv_id") or ""))
+    if ctx["caller_conv_id"] and not _CALL_STACK.get():
+        ctx.pop("_person_started", None)  # a chat's ducky started it, not a person in the editor
     ctx["workflow_name"] = str(wf.get("name") or "")
     _prepare_run_ctx(ctx, wf)
     ident_token = _bind_hub_identity(ctx)
@@ -604,11 +639,18 @@ def _caller(explicit: str) -> str:
     return str(bound.conv_id) if bound and bound.conv_id else ""
 
 
+def public_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """A run payload from outside (an agent's tool call, a trigger) without the fields
+    only the app sets for what a person did."""
+    return {key: value for key, value in (payload or {}).items() if key not in _PERSON_KEYS}
+
+
 def emit_trigger(trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run every enabled workflow on this PC whose trigger node matches ``trigger_id``."""
     tid = (trigger_id or "").strip()
     if not tid:
         return {"ok": False, "error": "trigger_id required", "runs": []}
+    payload = public_payload(payload)
     runs: list[dict[str, Any]] = []
     for wf in all_workflows():
         if not wf.get("enabled") or not runs_here(wf):
@@ -887,7 +929,42 @@ def _repeat_done(nid: str, cfg: dict[str, Any], ctx: dict[str, Any], flow: _Data
     return False  # nothing to check: every try runs (Repeat N times)
 
 
+_INPUTS_CAP = 16000
+
+
+def _shrink(value: Any, cap: int, depth: int = 0) -> Any:
+    if is_file_ref(value):
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= cap else value[:cap] + "…"
+    if isinstance(value, (list, tuple)):
+        return [_shrink(item, cap, depth + 1) for item in list(value)[:50]]
+    if isinstance(value, dict):
+        if depth > 4:
+            return "…"
+        return {str(key): _shrink(item, cap, depth + 1) for key, item in list(value.items())[:50]}
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _shrink(str(value), cap, depth)
+
+
+def _bounded_inputs(values: dict[str, Any]) -> dict[str, Any]:
+    """The input values a step ran with, for its run record: about 16 KB at most, long
+    text cut, file refs kept whole."""
+    for cap in (4000, 1000, 200, 40):
+        out = {str(key): _shrink(value, cap) for key, value in values.items()}
+        if len(json.dumps(out, ensure_ascii=False, default=str)) <= _INPUTS_CAP:
+            return out
+    return {str(key): "…" for key in values}
+
+
 def _exec_stoppable(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run one step; its record keeps the input values it ran with."""
+    step = _exec_stoppable_step(node, payload, inputs)
+    return step if inputs is None else {**step, "inputs": _bounded_inputs(inputs)}
+
+
+def _exec_stoppable_step(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one step on its own thread so Stop ends the run at once; a step that was
     still working (a tool, UEFN, a ducky) finishes in the background, unused."""
     cancel = _CANCEL.get()
@@ -980,6 +1057,10 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
             return {**_FOLDER_OPS[ntype](cfg, values, _node_folder(node)), "id": node.get("id"), "type": ntype, "label": label}
         if ntype in _DATA_HANDLERS:
             return {**_DATA_HANDLERS[ntype](cfg, values, payload), "id": node.get("id"), "type": ntype, "label": label}
+        if ntype == "code.js":
+            from backend.automations import code_node
+
+            return {**code_node.run_step(node, payload, values), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "ducky.prompt":
             return {**_prompt_ducky(cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         if ntype == "ducky.spawn":
@@ -2027,9 +2108,7 @@ def _typed_command(name: str, cfg: dict[str, Any], raw: dict[str, Any]) -> str:
 
 
 def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") -> dict[str, Any]:
-    import inspect
-
-    name = str(cfg.get("name") or payload.get("tool") or "").strip()
+    name =str(cfg.get("name") or payload.get("tool") or "").strip()
     if not name:
         return {"ok": False, "error": "tool name required"}
     raw = cfg.get("arguments")
@@ -2042,6 +2121,14 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") 
         raw = payload.get("arguments") or {}
     if not isinstance(raw, dict):
         return {"ok": False, "error": "arguments must be an object"}
+    return _invoke_tool(name, _template(raw, payload), node_id, _typed_command(name, cfg, raw))
+
+
+def _invoke_tool(name: str, arguments: dict[str, Any], node_id: str = "", typed: str = "") -> dict[str, Any]:
+    """Call a host or plugin MCP tool by name (sync tools only), streaming a terminal
+    command's output live into the node. ``typed``: the command that may skip the pop-up."""
+    import inspect
+
     from backend.server import mcp
 
     tool = mcp._tool_manager.get_tool(name)
@@ -2050,9 +2137,8 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") 
     fn = getattr(tool, "fn", None)
     if fn is None:
         return {"ok": False, "error": f"tool has no fn: {name}"}
-    arguments = _template(raw, payload)
     stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
-    typed_token = _TYPED_COMMAND.set(_typed_command(name, cfg, raw))
+    typed_token = _TYPED_COMMAND.set(typed)
     try:
         result = fn(**arguments)
     finally:
@@ -2061,6 +2147,8 @@ def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") 
             stream[0].set()
             stream[1].join(timeout=1)
     if inspect.isawaitable(result):
+        if inspect.iscoroutine(result):
+            result.close()
         return {"ok": False, "error": "async tool — register a sync plugin node instead"}
     out: dict[str, Any] = {"tool": name, "output": result}
     if isinstance(result, dict):

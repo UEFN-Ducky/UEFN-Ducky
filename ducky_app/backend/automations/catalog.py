@@ -6,8 +6,10 @@ marks a data node (no white pins: it runs when a value it makes is needed).
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
+from backend.automations.code_api import BLANK_CODE, BLANK_PINS, BLANK_USES
 from backend.automations.node_library import LIBRARY
 from backend.automations.pins import clean_pins
 
@@ -359,6 +361,20 @@ BUILTIN_NODES: list[dict[str, Any]] = [
             {"id": "name", "label": "Tool name", "type": "string"},
             {"id": "arguments_json", "label": "Arguments JSON", "type": "textarea"},
         ],
+    },
+    {
+        "type": "code.js",
+        "label": "Custom code",
+        "group": "Code",
+        "role": "action",
+        "description": (
+            "Runs the JavaScript in its Code tab: the pins, settings, tools and nodes it uses are declared at the top. "
+            "Local workflows only; code an agent changed runs after you review it or run it once yourself."
+        ),
+        # Its pins live in config.pins (written from the code on save); a new one starts as the blank template.
+        "config_fields": [],
+        "default_config": {"code": BLANK_CODE, "code_sha": hashlib.sha256(BLANK_CODE.encode("utf-8")).hexdigest(), "pins": BLANK_PINS, "uses": BLANK_USES, "settings_spec": [], "problems": [],
+                           "settings": {}, "inputs": {}, "spend": False},
     },
     {
         "type": "uefn.open_project",

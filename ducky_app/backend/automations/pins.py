@@ -83,6 +83,14 @@ def node_pins(
     cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
     inputs = clean_pins(spec.get("inputs"))
     outputs = clean_pins(spec.get("outputs"))
+    if ntype == "code.js":
+        # Custom code: the pins its code declares, as the last good check wrote them.
+        declared = cfg.get("pins") if isinstance(cfg.get("pins"), dict) else {}
+        return {
+            "exec": declared.get("exec", True) is not False,
+            "inputs": clean_pins(declared.get("inputs")),
+            "outputs": clean_pins(declared.get("outputs")),
+        }
     if ntype == "flow.input":
         types = _typed(cfg.get("inputs"))
         outputs = [{"id": name, "label": name, "type": types.get(name, "any")} for name in _names(cfg.get("inputs"))]
