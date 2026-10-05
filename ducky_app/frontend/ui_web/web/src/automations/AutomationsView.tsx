@@ -42,6 +42,7 @@ import { Icons } from "../icons/Icons";
 import { copyText } from "../utils/copyText";
 import { formatRunLog, runLogHasContent } from "./runLog";
 import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
+import type { LiveNodeRun } from "./LiveNodeStatus";
 
 import { GroupIcon, isEndNode, nodeLabel, nodeRole, nodeSummary, NodeIcon, useNodeFaces } from "./NodeVisuals";
 import { cleanGroups, deleteNodes, groupBounds, groupDepth, groupLocked, groupMembers, groupNodes, intersects, nodeLocked, removeGroup, selectionRect, ungroupNodes, type GraphRect } from "./workflowGroups";
@@ -255,6 +256,8 @@ const RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 type LiveState = "running" | "ok" | "error" | "stopped";
 export type LiveRun = {
   outputs: Record<string, TerminalSnapshot>;
+  /** When each step started and ended (ms), for its details. */
+  times: Record<string, { started: number; ended?: number }>;
   run: string;
   active: string;
   from: string;
@@ -266,7 +269,7 @@ export type LiveRun = {
 
 export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): LiveRun | null {
   const run = String(event.run || "");
-  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {} };
+  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {}, times: {} };
   const base = current && current.run === run ? current : fresh;
   if (event.type === "workflow_output") {
     if (!event.node || (current && current.run !== run)) return current;
@@ -283,7 +286,7 @@ export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): 
   if (state === "running") {
     const wire = event.from ? `${event.from}>${node}` : "";
     return {
-      ...base, active: node, from: event.from || "", states: { ...base.states, [node]: "running" },
+      ...base, active: node, from: event.from || "", states: { ...base.states, [node]: "running" }, times: { ...base.times, [node]: { started: Date.now() } },
       passed: wire && !base.passed.includes(wire) ? [...base.passed, wire] : base.passed,
       lines: [...base.lines, { node, label: event.label || node, state }],
     };
@@ -291,7 +294,8 @@ export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): 
   const lines = [...base.lines];
   const at = lines.map((line) => line.node).lastIndexOf(node);
   if (at >= 0) lines[at] = { ...lines[at], state, ...(event.error ? { error: event.error } : {}) };
-  return { ...base, active: base.active === node ? "" : base.active, states: { ...base.states, [node]: state }, lines };
+  const times = { ...base.times, [node]: { started: base.times[node]?.started ?? Date.now(), ended: Date.now() } };
+  return { ...base, active: base.active === node ? "" : base.active, states: { ...base.states, [node]: state }, lines, times };
 }
 
 /** A Preview node's content: text as is, data as JSON, a file by name. */
@@ -587,6 +591,29 @@ export function AutomationsView() {
     if (!live?.finished) return;
     const timer = window.setTimeout(() => setLive((current) => current === live ? null : current), 8000);
     return () => window.clearTimeout(timer);
+  }, [live]);
+  // The details follow the step running now, unless something else was picked meanwhile.
+  const selectionRef = useRef({ nodes: selectedNodeIds, edge: selectedEdge });
+  selectionRef.current = { nodes: selectedNodeIds, edge: selectedEdge };
+  const followedRef = useRef("");
+  useEffect(() => {
+    const active = live?.active || "";
+    if (!active) return;
+    const { nodes, edge } = selectionRef.current;
+    if (edge === null && (!nodes.length || (nodes.length === 1 && nodes[0] === followedRef.current))) {
+      setSelectedNodeIds([active]);
+      setInspectorKey(`node:${active}`);
+    }
+    followedRef.current = active;
+  }, [live?.active]);
+  // Each step of the run going on now: its state, time, error and terminal log.
+  const liveNodes = useMemo(() => {
+    if (!live) return undefined;
+    const nodes: Record<string, LiveNodeRun> = {};
+    for (const [id, state] of Object.entries(live.states)) nodes[id] = { state, ...live.times[id] };
+    for (const line of live.lines) if (line.error && nodes[line.node]) nodes[line.node]!.error = line.error;
+    for (const [id, output] of Object.entries(live.outputs)) nodes[id] = { ...(nodes[id] || { state: "running" }), output };
+    return nodes;
   }, [live]);
 
   useEffect(() => {
@@ -2019,8 +2046,9 @@ export function AutomationsView() {
                   const d = wirePath(from.x, from.y, to.x, to.y);
                   const hot = selectedEdge === i || selectedNodeIds.includes(e.source) || selectedNodeIds.includes(e.target);
                   const flowing = !!live && (live.active === e.target || live.active === e.source);
+                  const carried = !flowing && live?.states[e.source] === "ok" && live?.states[e.target] === "ok";
                   return (
-                    <g key={`${e.source}-${e.source_pin}-${e.target}-${e.target_pin}`} data-aw-wire={`${e.source}.${e.source_pin}>${e.target}.${e.target_pin}`} className={`aw-edge aw-edge--data aw-pin-type--${cleanType(out.type)}${hot ? " is-hot" : ""}${flowing ? " is-live" : ""}`}
+                    <g key={`${e.source}-${e.source_pin}-${e.target}-${e.target_pin}`} data-aw-wire={`${e.source}.${e.source_pin}>${e.target}.${e.target_pin}`} className={`aw-edge aw-edge--data aw-pin-type--${cleanType(out.type)}${hot ? " is-hot" : ""}${flowing ? " is-live" : carried ? " is-passed" : ""}`}
                       onClick={(ev) => { ev.stopPropagation(); boardRef.current?.focus({ preventScroll: true }); setSelectedNodeIds([]); setSelectedEdge(i); setInspectorKey(`edge:${i}`); }}>
                       <path className="aw-edge-glow" d={d} />
                       <path className="aw-edge-hit" d={d} />
@@ -2209,7 +2237,7 @@ export function AutomationsView() {
           })}
           pinsOf={pinsOf}
           nodeOutputs={lastOutputs}
-          terminalOutputs={live?.outputs}
+          liveNodes={liveNodes}
           onRunNode={readOnly ? undefined : (id) => void runNode(id)}
           runningNode={runningNode}
           onNodeText={updateNodeText}

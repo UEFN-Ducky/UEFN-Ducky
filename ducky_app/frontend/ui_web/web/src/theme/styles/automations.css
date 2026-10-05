@@ -1019,11 +1019,12 @@
 .aw-list-row.is-picked { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
 .aw-list-row.is-picked:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
-/* A run as it happens: the step running now glows, its wire runs thick and bright,
-   finished steps keep a quiet outline (Appearance → Workflows: Running step). */
+/* A run as it happens: the current step glows yellow and its wire runs thick and bright,
+   finished steps glow grey and the wires the run took glow green
+   (Appearance → Workflows: Current step, Finished step, Wires the run took). */
 .aw-node.is-run-running .aw-node-card { border-color: var(--wf-run); box-shadow: 0 0 0 2px var(--wf-run), 0 0 26px color-mix(in srgb, var(--wf-run) 55%, transparent); animation: aw-run-pulse 1.1s ease-in-out infinite; }
 @keyframes aw-run-pulse { 50% { box-shadow: 0 0 0 3px var(--wf-run), 0 0 42px color-mix(in srgb, var(--wf-run) 72%, transparent); } }
-.aw-node.is-run-ok .aw-node-card { border-color: color-mix(in srgb, var(--wf-run) 70%, var(--wf-node-border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--wf-run) 55%, transparent), 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent); }
+.aw-node.is-run-ok .aw-node-card { border-color: color-mix(in srgb, var(--wf-run-done) 75%, var(--wf-node-border)); box-shadow: 0 0 0 1px var(--wf-run-done), 0 0 20px color-mix(in srgb, var(--wf-run-done) 45%, transparent), 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent); }
 .aw-node.is-run-error .aw-node-card { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger), 0 0 22px color-mix(in srgb, var(--danger) 50%, transparent); }
 .aw-node.is-run-stopped .aw-node-card { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber); }
 .aw-edge.is-live { --aw-edge-color: var(--wf-run); }
@@ -1031,8 +1032,22 @@
 .aw-edge.is-live .aw-edge-glow { stroke-width: calc(var(--wf-wire-glow) * 3); opacity: 0.55; animation: aw-wire-glow 0.9s ease-in-out infinite; }
 .aw-edge.is-live .aw-edge-arrow { filter: drop-shadow(0 0 6px var(--wf-run)); }
 @keyframes aw-wire-glow { 50% { opacity: 0.22; } }
-.aw-edge.is-passed { --aw-edge-color: color-mix(in srgb, var(--wf-run) 75%, var(--aw-tint, var(--aw-role-color))); }
+.aw-edge.is-passed { --aw-edge-color: var(--wf-run-path); }
 .aw-edge.is-passed .aw-wire { stroke-width: calc(var(--wf-wire-width) + 1px); }
+.aw-edge.is-passed .aw-edge-glow { stroke-width: calc(var(--wf-wire-glow) * 2); opacity: 0.45; }
+.aw-edge.is-passed .aw-edge-arrow { filter: drop-shadow(0 0 4px var(--wf-run-path)); }
+/* Details: what the selected step is doing in this run. */
+.aw-node-live { display: grid; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wf-run-done) 40%, transparent); border-radius: 8px; }
+.aw-node-live.is-running { border-color: color-mix(in srgb, var(--wf-run) 60%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--wf-run) 22%, transparent); }
+.aw-node-live.is-error { border-color: var(--danger); }
+.aw-node-live.is-stopped { border-color: var(--amber); }
+.aw-node-live > strong { font-size: 0.78em; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wf-node-muted); }
+.aw-node-live-state { display: flex; align-items: center; gap: 6px; margin: 0; font-variant-numeric: tabular-nums; }
+.aw-node-live.is-running .aw-node-live-state { color: var(--wf-run); }
+.aw-node-live.is-ok .aw-node-live-state { color: var(--wf-run-path); }
+.aw-node-live-state svg { width: 13px; height: 13px; }
+.aw-node-live-error { margin: 0; color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.aw-node-live .aw-terminal-output { padding: 0; }
 .aw-live-line.is-running { color: var(--wf-run); }
 .aw-live-line.is-stopped { color: var(--amber); }
 .aw-toolbar .aw-toolbar-actions > .aw-stop { color: var(--danger); }
@@ -1183,8 +1198,8 @@
 .aw-folder-field { display: flex; flex-wrap: wrap; gap: 6px; }
 .aw-folder-field > input { flex: 1 1 160px; min-width: 0; }
 .aw-folder-field > .aw-file-pick { align-self: stretch; }
-.aw-insp-head-actions > .aw-run-node { color: var(--wf-run); }
-.aw-insp-head-actions > .aw-run-node.is-running { background: color-mix(in srgb, var(--wf-run) 14%, transparent); }
+.aw-insp-head-actions > .aw-run-node { color: var(--wf-run-path); }
+.aw-insp-head-actions > .aw-run-node.is-running { background: color-mix(in srgb, var(--wf-run-path) 14%, transparent); }
 .aw-pin-out-files { display: flex; flex-wrap: wrap; gap: 6px; }
 .aw-pin-out-file { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; max-width: 96px; padding: 4px; border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }
 .aw-pin-out-file img { width: 88px; height: 66px; object-fit: contain; border-radius: 4px; }

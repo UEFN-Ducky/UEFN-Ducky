@@ -171,7 +171,9 @@
   --wf-grid-minor: rgba(237, 237, 237, 0.05);
   --wf-grid-major: rgba(237, 237, 237, 0.1);
   --wf-select: #e8a317;
-  --wf-run: #3ddc84;
+  --wf-run: #facc15;
+  --wf-run-done: #9ca3af;
+  --wf-run-path: #3ddc84;
   --wf-group: #8c8c8c;
   --wf-panel: rgba(10, 10, 10, 0.58);
   --wf-node-body: #141414;

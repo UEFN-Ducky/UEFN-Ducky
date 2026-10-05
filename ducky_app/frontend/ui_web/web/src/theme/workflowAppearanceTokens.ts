@@ -22,7 +22,10 @@ export const WORKFLOW_COLOR_TOKENS: WorkflowColorToken[] = [
   { id: "wf-grid-minor", name: "Grid lines", group: "canvas", auto: faint("fg", 0.05) },
   { id: "wf-grid-major", name: "Grid major lines", group: "canvas", auto: faint("fg", 0.1) },
   { id: "wf-select", name: "Selection outline", group: "canvas", auto: from("amber") },
-  { id: "wf-run", name: "Running step and its wire", group: "canvas", auto: from("green") },
+  // A run as it happens: the current step yellow, finished steps grey, the wires it took green.
+  { id: "wf-run", name: "Current step", group: "canvas", auto: fixed("#facc15") },
+  { id: "wf-run-done", name: "Finished step", group: "canvas", auto: fixed("#9ca3af") },
+  { id: "wf-run-path", name: "Wires the run took", group: "canvas", auto: from("green") },
   { id: "wf-group", name: "Plain group frame", group: "canvas", auto: fixed("#8c8c8c") },
   // See-through panels over the canvas (list, top bar, details, bottom toolbar); see --wf-panel-blur.
   { id: "wf-panel", name: "Panels over the canvas", group: "canvas", auto: (vars) => hexToRgba(colorToHexAndAlpha(vars.bg!).hex, 0.58) },

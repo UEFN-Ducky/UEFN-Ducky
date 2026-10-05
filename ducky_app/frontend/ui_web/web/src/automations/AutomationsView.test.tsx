@@ -1424,6 +1424,43 @@ describe("several workflows, live runs, outline and team sync", () => {
     expect(document.querySelector('[data-aw-node="a"]')?.classList.contains("is-run-stopped")).toBe(true);
   });
 
+  it("glows the current step, greys finished ones, greens the wires taken, and the details follow and say what is happening", async () => {
+    saved.graph.edges.push({ source: "a", target: "b", kind: "main" });
+    await open();
+    const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "release", ...event } as never); });
+    push({ type: "workflow_run", state: "started" });
+    push({ type: "workflow_step", node: "s", state: "running", label: "Chat" });
+    await waitFor(() => expect(details()?.textContent).toContain("Running"));  // nothing was picked: the details follow the run
+    push({ type: "workflow_step", node: "s", state: "ok" });
+    push({ type: "workflow_step", node: "a", state: "running", from: "s", label: "Pause" });
+    const node = (id: string) => document.querySelector(`[data-aw-node="${id}"]`)!;
+    const wire = (id: string) => document.querySelector(`[data-aw-wire="${id}:main"]`)!;
+    expect(node("a").classList.contains("is-run-running")).toBe(true);
+    expect(node("s").classList.contains("is-run-ok")).toBe(true);
+    expect(wire("s>a").classList.contains("is-live")).toBe(true);
+    await waitFor(() => expect(within(details()!).getByLabelText("This run").textContent).toMatch(/Running · \d+s/));
+    expect(details()?.textContent).toContain("Pause");
+    push({ type: "workflow_step", node: "a", state: "ok" });
+    push({ type: "workflow_step", node: "b", state: "running", from: "a", label: "Continue" });
+    push({ type: "workflow_step", node: "b", state: "error", error: "Command failed (exit code 2)." });
+    expect(wire("s>a").classList.contains("is-passed")).toBe(true);
+    expect(wire("a>b").classList.contains("is-passed")).toBe(true);
+    await waitFor(() => expect(details()?.textContent).toContain("Command failed (exit code 2)."));
+    expect(within(details()!).getByLabelText("This run").textContent).toMatch(/Failed after \d+s/);
+  });
+
+  it("leaves the details alone when you picked another node during a run", async () => {
+    await open();
+    fireEvent.pointerDown(document.querySelector('[data-aw-node="b"] .aw-node-card')!, { button: 0 });
+    fireEvent.pointerUp(document.querySelector('[data-aw-node="b"] .aw-node-card')!, { button: 0 });
+    await waitFor(() => expect(details()?.textContent).toContain("Continue"));
+    const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "r2", ...event } as never); });
+    push({ type: "workflow_run", state: "started" });
+    push({ type: "workflow_step", node: "a", state: "running", from: "s", label: "Pause" });
+    expect(details()?.textContent).toContain("Continue");
+    expect(within(details()!).queryByLabelText("This run")).toBeNull();
+  });
+
   it("shows terminal output on the running node and in its details before completion", async () => {
     await open();
     const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "terminal-run", ...event } as never); });
