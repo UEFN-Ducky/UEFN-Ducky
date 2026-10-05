@@ -290,3 +290,51 @@ def test_workflow_code_api_hands_over_types_docs_and_tool_args():
     assert _call(panel.workflow_code_api)["tools_dts"] == ""
     assert PanelApiAutomationsMixin().workflow_code_api(["get_workflow"])["tools_dts"] == out["tools_dts"].replace(
         "    // no_such_tool: no such tool here\n", "")
+
+
+def test_an_agents_run_never_counts_as_a_person_pressing_run(monkeypatch):
+    """An MCP client can't approve code or spending by sending the app's own run fields."""
+    seen: dict = {}
+    monkeypatch.setattr(runner, "run_workflow", lambda wid, **kw: seen.update(kw) or {"ok": False, "error": "x"})
+    asyncio.run(panel.run_workflow("w", payload={"_person_started": True, "_spend_approved": True, "topic": "ducks"}))
+    assert seen["payload"] == {"topic": "ducks"}
+
+
+def test_agent_converts_a_terminal_step_and_it_waits_for_a_person_end_to_end(monkeypatch):
+    """Real runner, V8, approvals and tools: only the terminal itself is a stand-in."""
+    from types import SimpleNamespace
+    from backend.server import mcp
+
+    ran: list[tuple[str, bool]] = []
+    real_get = mcp._tool_manager.get_tool
+
+    def terminal(**args):
+        ran.append((args["command"], runner.typed_command_approved(args["command"])))
+        return json.dumps({"ok": True, "exit_code": 0})
+
+    monkeypatch.setattr(mcp._tool_manager, "get_tool",
+                        lambda name: SimpleNamespace(fn=terminal) if name == "ducky_terminal_run" else real_get(name))
+    graph = {"nodes": [
+        {"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+        {"id": "t", "type": "tool.call", "x": 300, "y": 0, "config": {
+            "name": "ducky_terminal_run", "arguments": {"session_id": "s1", "command": "npm test"}}},
+    ], "edges": [{"source": "s", "target": "t", "kind": "main"}]}
+    wid = str(store.save_workflow({"name": "Build", "graph": graph})["id"])
+    generated = _call(panel.get_workflow_node_code, wid, "t")
+    assert generated["kind"] == "builtin" and '"npm test"' in generated["code"]
+
+    edited = _call(panel.edit_workflow_node_code, wid, "t", code=generated["code"])
+    assert edited["ok"], edited
+    assert _node(wid, "t")["type"] == "code.js" and _call(panel.get_workflow_node_code, wid, "t")["approved"] is False
+    refused = _call(panel.run_workflow, wid)
+    assert refused["ok"] is False and "Review this code" in refused["error"] and ran == []
+
+    assert PanelApiAutomationsMixin().run_workflow(wid)["ok"]  # a person presses Test
+    assert ran == [("npm test", True)]  # written in approved code: no pop-up
+    assert _call(panel.run_workflow, wid)["ok"]  # approved now, so an agent's run goes too
+
+    changed = _call(panel.edit_workflow_node_code, wid, "t", edits=[{"old": '"npm test"', "new": '"npm run build"'}])
+    assert changed["ok"], changed
+    again = _call(panel.run_workflow, wid)
+    assert again["ok"] is False and "Review this code" in again["error"]  # an agent's change needs a person again
+    assert ran == [("npm test", True), ("npm test", True)]

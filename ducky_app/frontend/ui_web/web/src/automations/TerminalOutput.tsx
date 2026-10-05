@@ -7,15 +7,15 @@ export function terminalText(output: string): string {
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-export function TerminalOutput({ snapshot, compact = false }: { snapshot: TerminalSnapshot; compact?: boolean }) {
+export function TerminalOutput({ snapshot, compact = false, title = "Terminal output" }: { snapshot: TerminalSnapshot; compact?: boolean; title?: string }) {
   const ref = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
   useEffect(() => {
     if (ref.current && follow.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [snapshot.output]);
-  return <section className={`aw-terminal-output${compact ? " is-compact" : ""}`} aria-label="Terminal output"
+  return <section className={`aw-terminal-output${compact ? " is-compact" : ""}`} aria-label={title}
     onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-    <strong>Terminal output</strong>
+    <strong>{title}</strong>
     <pre ref={ref} tabIndex={0} onScroll={(event) => {
       const el = event.currentTarget;
       follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;

@@ -259,6 +259,8 @@ const RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 type LiveState = "running" | "ok" | "error" | "stopped";
 export type LiveRun = {
   outputs: Record<string, TerminalSnapshot>;
+  /** What a Custom code step wrote with ducky.log, kept apart from its terminal output. */
+  logs: Record<string, string>;
   /** When each step started and ended (ms), for its details. */
   times: Record<string, { started: number; ended?: number }>;
   run: string;
@@ -272,10 +274,11 @@ export type LiveRun = {
 
 export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): LiveRun | null {
   const run = String(event.run || "");
-  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {}, times: {} };
+  const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {}, logs: {}, times: {} };
   const base = current && current.run === run ? current : fresh;
   if (event.type === "workflow_output") {
     if (!event.node || (current && current.run !== run)) return current;
+    if (event.source === "log") return { ...base, logs: { ...base.logs, [event.node]: event.output || "" } };
     return { ...base, outputs: { ...base.outputs, [event.node]: { output: event.output || "", sessionId: event.session_id || "" } } };
   }
   if (event.type === "workflow_run") {
@@ -626,6 +629,7 @@ export function AutomationsView() {
     for (const [id, state] of Object.entries(live.states)) nodes[id] = { state, ...live.times[id] };
     for (const line of live.lines) if (line.error && nodes[line.node]) nodes[line.node]!.error = line.error;
     for (const [id, output] of Object.entries(live.outputs)) nodes[id] = { ...(nodes[id] || { state: "running" }), output };
+    for (const [id, log] of Object.entries(live.logs)) nodes[id] = { ...(nodes[id] || { state: "running" }), log };
     return nodes;
   }, [live]);
 
@@ -1151,7 +1155,7 @@ export function AutomationsView() {
   // Typed pins: a card grows a row per pin; zoomed far out it is only its title bar.
   const pinsById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, nodePins(node, byType.get(node.type), rows)])), [graph.nodes, byType, rows]);
   const pinsOf = (node: AutomationGraphNodeDto): NodePins => pinsById.get(node.id) || nodePins(node, byType.get(node.type), rows);
-  const layoutOf = (node: AutomationGraphNodeDto, compact = overview): NodeLayout => nodeLayout(pinsOf(node), compact, cardExtra(node, pinsOf(node)) + (live?.outputs[node.id] ? 144 : 0));
+  const layoutOf = (node: AutomationGraphNodeDto, compact = overview): NodeLayout => nodeLayout(pinsOf(node), compact, cardExtra(node, pinsOf(node)) + (live && (live.outputs[node.id] || live.logs[node.id]) ? 144 : 0));
   const nodeSize = (node?: AutomationGraphNodeDto) => ({ width: NODE_WIDTH, height: node ? layoutOf(node).height : overview ? NODE_HEIGHT_COMPACT : NODE_HEIGHT });
   const lastOutputs = log?.node_outputs || {};
   const groups = graph.groups || [];
@@ -2228,7 +2232,8 @@ export function AutomationsView() {
                     ) : (
                       <div className="aw-node-body">{!overview && summary ? <span className="aw-node-sub">{summary}</span> : null}</div>
                     )}
-                    {!overview && live?.outputs[node.id] ? <TerminalOutput snapshot={live.outputs[node.id]} compact /> : null}
+                    {!overview && live?.outputs[node.id] ? <TerminalOutput snapshot={live.outputs[node.id]} compact />
+                      : !overview && live?.logs[node.id] ? <TerminalOutput snapshot={{ output: live.logs[node.id]!, sessionId: "" }} title="Log" compact /> : null}
                   </div>
                   {pins.inputs.map((pin) => <button key={`in-${pin.id}`} type="button" aria-label={`${label}: ${pin.label} (input)`} title={`${pin.label} · ${pin.type}`}
                     data-aw-pin="in" data-aw-pin-id={pin.id} data-aw-node={node.id}

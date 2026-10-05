@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import json
 import sys
 import threading
 import time
@@ -213,6 +214,10 @@ def _code_node(nid: str, code: str, *, inputs=(), outputs=(), step: bool = True,
     pins = {"exec": step,
             "inputs": [{"id": pin, "label": pin, "type": "any"} for pin in inputs],
             "outputs": [{"id": pin, "label": pin, "type": "any"} for pin in outputs]}
+    # Saving reads the pins from the code's declaration, so the code declares what the node has.
+    decl = {"kind": "step" if step else "value", "inputs": pins["inputs"], "outputs": pins["outputs"], "settings": [],
+            "tools": list(tools), "builtins": list(builtins)}
+    code = code.replace("export const node = {};", f"export const node = {json.dumps(decl)};", 1)
     cfg = {"code": code, "code_sha": _sha(code), "pins": pins, "settings_spec": [], "problems": [],
            "uses": {"tools": list(tools), "builtins": list(builtins)}, "settings": {}, "inputs": {}, "spend": False, **config}
     return {"id": nid, "type": "code.js", "label": nid, "x": 0, "y": 0, "config": cfg}
@@ -317,10 +322,10 @@ def test_run_node_as_a_person_approves(events, approvals):
 
 
 def test_code_with_problems_does_not_run(events, approvals):
-    node = _code_node("c", _module("  return {};"), problems=[{"line": 5, "col": 3, "message": "Unexpected token", "severity": "error"}])
-    wid = _save([node], [])
+    wid = _save([_code_node("c", _module("  return {;"))], [])
+    assert store.get_workflow(wid)["graph"]["nodes"][0]["config"]["problems"][0]["line"] == 5  # saving still keeps it
     out = runner.run_node(wid, "c", person=True)
-    assert out["ok"] is False and "Fix the code first: Line 5: Unexpected token" in out["error"]
+    assert out["ok"] is False and "Fix the code first: Line 5" in out["error"]
     assert approvals.gate_calls == []
 
 
@@ -398,7 +403,7 @@ def test_builtin_runs_listed_nodes_and_refuses_flow_nodes(events, approvals):
                    '  let flow = "";\n  try { await ducky.builtin("flow.end", {}); } catch (e) { flow = e.message; }\n'
                    '  let unlisted = "";\n  try { await ducky.builtin("list.count", { list: [1] }); } catch (e) { unlisted = e.message; }\n'
                    '  return { text: t.text, flow, unlisted, value: await ducky.expr("a * 2", { a: 21 }) };')
-    wid = _save([_code_node("c", code, outputs=["text", "flow", "unlisted", "value"], builtins=["text.template", "flow.end"])], [])
+    wid = _save([_code_node("c", code, outputs=["text", "flow", "unlisted", "value"], builtins=["text.template"])], [])
     out = runner.run_node(wid, "c", person=True)
     assert out["ok"], out
     assert out["node_outputs"]["c"] == {"text": "Hi duck", "flow": "flow.end steers the run, so code can't run it.",
@@ -438,29 +443,7 @@ def test_stop_during_a_host_call_ends_the_run(events, approvals, tools):
     assert result["ok"] is False and result["error"] == runner.STOPPED
 
 
-@pytest.fixture()
-def checker(monkeypatch):
-    """code_check as the save path has it: the declaration read in Python, plus syntax."""
-    import json
-    import re
-
-    fake = types.ModuleType("backend.automations.code_check")
-
-    def check(code):
-        match = re.search(r"export const node = (\{.*?\});\n", code, re.S)
-        decl = json.loads(match.group(1)) if match else {}
-        problems = jsrt.check_syntax(code)
-        pins = {"exec": decl.get("kind", "step") == "step", "inputs": decl.get("inputs", []), "outputs": decl.get("outputs", [])}
-        return {"ok": not problems, "problems": problems, "node": decl, "pins": pins, "settings_spec": decl.get("settings", []),
-                "uses": {"tools": decl.get("tools", []), "builtins": decl.get("builtins", [])}, "code_sha": _sha(code)}
-
-    fake.check = check
-    monkeypatch.setitem(sys.modules, "backend.automations.code_check", fake)
-    monkeypatch.setattr(automations_pkg, "code_check", fake, raising=False)
-    return fake
-
-
-def test_draft_dry_run_lists_calls_without_making_them(events, approvals, tools, checker):
+def test_draft_dry_run_lists_calls_without_making_them(events, approvals, tools):
     wid = _save([_code_node("c", _module("  return {};"))], [])
     decl = '{"kind": "step", "inputs": [{"id": "q", "type": "text"}], "outputs": [{"id": "r", "type": "any"}], ' \
            '"settings": [{"id": "who", "label": "Who", "type": "text", "default": "duck"}], "tools": ["ducky_terminal_run"], "builtins": ["text.template"]}'
@@ -480,7 +463,7 @@ def test_draft_dry_run_lists_calls_without_making_them(events, approvals, tools,
     assert out["error"] is None and isinstance(out["ms"], int)
 
 
-def test_draft_real_run_needs_review_and_reuses_last_inputs(events, approvals, checker):
+def test_draft_real_run_needs_review_and_reuses_last_inputs(events, approvals):
     node = _code_node("c", _module("  return { n: input.n };"), inputs=["n"], outputs=["n"])
     node["config"]["inputs"] = {"n": 3}
     wid = _save([node], [])

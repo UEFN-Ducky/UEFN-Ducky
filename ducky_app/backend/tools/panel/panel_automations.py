@@ -494,6 +494,7 @@ async def run_workflow(
     the files and the Return to user result. A reusable workflow takes its inputs
     in payload and gives its Return values back as outputs.
     """
+    from backend.automations.runner import public_payload
     from backend.automations.runner import run_workflow as _run
 
     # Agents inside the workflow call this MCP server themselves. Keep its
@@ -503,7 +504,8 @@ async def run_workflow(
         _run,
         workflow_id,
         trigger_id=trigger_id,
-        payload=payload or {},
+        # Only the app says a person pressed Run (approves code, allows spending).
+        payload=public_payload(payload),
         prompt=prompt,
         files=files,
         caller_conv_id=caller_conv_id,

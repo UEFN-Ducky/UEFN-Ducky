@@ -383,6 +383,9 @@ def test_every_catalog_type_generates_checked_code_with_its_exact_pins():
         ntype = node["type"]
         made = codegen.generate(node, specs)
         assert set(made) == {"code", "kind", "convertible", "reason"}
+        if ntype == "code.js":  # custom code already: its own code, nothing to convert
+            assert made["convertible"] is False and code_check.check(made["code"])["ok"] is True
+            continue
         if ntype in FLOW or made["kind"] == "flow":
             assert ntype in FLOW and made["convertible"] is False and made["reason"]
             assert all(line.startswith("//") or not line for line in made["code"].splitlines())

@@ -9,6 +9,8 @@ export type LiveNodeRun = {
   ended?: number;
   error?: string;
   output?: TerminalSnapshot;
+  /** A Custom code step's ducky.log lines. */
+  log?: string;
 };
 
 function clock(seconds: number): string {
@@ -35,5 +37,6 @@ export function LiveNodeStatus({ run }: { run: LiveNodeRun }) {
     <p className="aw-node-live-state" aria-live="polite">{run.state === "running" ? <Icons.Spinner /> : null}{status}</p>
     {run.error ? <p className="aw-node-live-error">{run.error}</p> : null}
     {run.output ? <TerminalOutput snapshot={run.output} /> : null}
+    {run.log ? <TerminalOutput snapshot={{ output: run.log, sessionId: "" }} title="Log" /> : null}
   </section>;
 }

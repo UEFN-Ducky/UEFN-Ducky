@@ -1451,6 +1451,21 @@ describe("several workflows, live runs, outline and team sync", () => {
     expect(within(details()!).getByLabelText("This run").textContent).toMatch(/Failed after \d+s/);
   });
 
+  it("keeps a code step's log apart from its terminal output", async () => {
+    await open();
+    const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "logs", ...event } as never); });
+    push({ type: "workflow_run", state: "started" });
+    push({ type: "workflow_step", node: "a", state: "running", from: "s", label: "Pause" });
+    push({ type: "workflow_output", node: "a", session_id: "t1", output: "Compiling plugin..." });
+    push({ type: "workflow_output", node: "a", source: "log", session_id: "", output: "doubling 21" });
+    push({ type: "workflow_output", node: "a", session_id: "t1", output: "Compiling plugin... done" });
+    const card = document.querySelector('[data-aw-node="a"]')!;
+    expect(card.textContent).toContain("Compiling plugin... done");
+    await waitFor(() => expect(details()?.textContent).toContain("doubling 21"));
+    expect(within(details()!).getByLabelText("Log").textContent).toContain("doubling 21");
+    expect(within(details()!).getByLabelText("Terminal output").textContent).toContain("Compiling plugin... done");
+  });
+
   it("leaves the details alone when you picked another node during a run", async () => {
     await open();
     fireEvent.pointerDown(document.querySelector('[data-aw-node="b"] .aw-node-card')!, { button: 0 });
