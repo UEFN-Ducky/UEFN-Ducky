@@ -159,7 +159,13 @@ async def list_mcp_tools(*, apply_filters: bool = True) -> list[Tool]:
         plugin_tools = await get_plugin_pool().list_all_plugin_tools()
     except Exception:
         plugin_tools = []
-    out = list(core) + plugin_tools
+    # A nested server's tools can already be in the app's own registry: list each name once.
+    out: list[Tool] = []
+    seen: set[str] = set()
+    for tool in list(core) + plugin_tools:
+        if tool.name not in seen:
+            seen.add(tool.name)
+            out.append(tool)
     if apply_filters:
         return apply_cloud_tool_deny(out)
     return out

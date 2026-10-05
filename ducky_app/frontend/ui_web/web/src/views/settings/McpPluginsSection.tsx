@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   AgentCatalogCreateModal,
@@ -109,7 +109,9 @@ function ListSection({ title, children }: { title: string; children: ReactNode }
 export function McpPluginsSection() {
   const { confirm } = useConfirmModal();
   const [plugins, setPlugins] = useState<McpPluginDto[]>([]);
-  const [catalog, setCatalog] = useState<McpCatalogDto | null>(null);
+  /** The open server's tools: only that server is asked (the full catalog connects every one). */
+  const [serverTools, setServerTools] = useState<{ id: string; catalog: McpCatalogDto | null; error: string }>({ id: "", catalog: null, error: "" });
+  const toolsAsk = useRef(0);
   const [loadError, setLoadError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [testResults, setTestResults] = useState<Record<string, McpPluginTestResultDto>>({});
@@ -174,15 +176,25 @@ export function McpPluginsSection() {
       .catch((err: unknown) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, []);
 
-  const refreshCatalog = useCallback(() => {
-    const api = getApi();
-    if (!api?.get_mcp_tools_catalog && !(api as { bridge_job_start?: unknown } | null)?.bridge_job_start) {
-      return;
-    }
+  const loadServerTools = useCallback((serverId: string) => {
+    if (!serverId) return;
+    const ask = ++toolsAsk.current;
+    setServerTools({ id: serverId, catalog: null, error: "" });
     void import("../../hooks/bridgeJobAsync")
-      .then(({ runBridgeJob }) => runBridgeJob<McpCatalogDto>("get_mcp_tools_catalog", [], 120_000))
-      .then(setCatalog)
-      .catch(() => setCatalog(null));
+      .then(({ runBridgeJob }) => runBridgeJob<McpCatalogDto & { ok?: boolean; error?: string }>("get_mcp_server_tools", [serverId], 120_000))
+      .then((res) => {
+        if (ask !== toolsAsk.current) return;
+        if (!res || res.ok === false || !Array.isArray(res.tools)) {
+          setServerTools({ id: serverId, catalog: null, error: res?.error || "Could not list this server's tools." });
+        } else {
+          setServerTools({ id: serverId, catalog: res, error: "" });
+        }
+      })
+      .catch((err: unknown) => {
+        if (ask === toolsAsk.current) {
+          setServerTools({ id: serverId, catalog: null, error: err instanceof Error ? err.message : String(err) });
+        }
+      });
   }, []);
 
   const loadConfigEditor = useCallback(async () => {
@@ -206,14 +218,15 @@ export function McpPluginsSection() {
     () =>
       onApiReady(() => {
         refreshPlugins();
-        refreshCatalog();
       }),
-    [refreshPlugins, refreshCatalog],
+    [refreshPlugins],
   );
 
+  const openServerId = selectedServer?.id ?? "";
+  const openServerOn = !!selectedServer?.enabled;
   useEffect(() => {
-    if (selectedServer && !catalog) refreshCatalog();
-  }, [selectedServer, catalog, refreshCatalog]);
+    if (openServerId && openServerOn) loadServerTools(openServerId);
+  }, [openServerId, openServerOn, loadServerTools]);
 
   const resetCreateForm = useCallback(() => {
     setCreateTransport("stdio");
@@ -253,7 +266,6 @@ export function McpPluginsSection() {
         setLoadError("");
       }
       refreshPlugins();
-      refreshCatalog();
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -269,7 +281,7 @@ export function McpPluginsSection() {
       const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
       const result = await runBridgeJob<McpPluginTestResultDto>("test_mcp_plugin", [server.id], 120_000);
       setTestResults((prev) => ({ ...prev, [server.id]: result }));
-      refreshCatalog();
+      if (result?.ok && server.enabled) loadServerTools(server.id);
     } catch (err: unknown) {
       setTestResults((prev) => ({
         ...prev,
@@ -302,7 +314,7 @@ export function McpPluginsSection() {
       }
       setShowConfig(false);
       refreshPlugins();
-      refreshCatalog();
+      if (openServerId && openServerOn) loadServerTools(openServerId);
     } catch (err: unknown) {
       setConfigError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -358,7 +370,6 @@ export function McpPluginsSection() {
       await api.delete_mcp_plugin(server.id);
       if (selectedKey === server.id) closeDetail();
       refreshPlugins();
-      refreshCatalog();
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -372,9 +383,12 @@ export function McpPluginsSection() {
   };
 
   const pluginCategories = useMemo(() => {
-    if (!selectedServer || !catalog) return [];
-    return mcpCatalogForPlugin(selectedServer, catalog);
-  }, [selectedServer, catalog]);
+    if (!selectedServer || !serverTools.catalog || serverTools.id !== selectedServer.id) return [];
+    return mcpCatalogForPlugin(selectedServer, serverTools.catalog);
+  }, [selectedServer, serverTools]);
+  const toolsError = selectedServer && serverTools.id === selectedServer.id ? serverTools.error : "";
+  const toolsLoading = !!selectedServer?.enabled && !toolsError
+    && (serverTools.id !== selectedServer.id || !serverTools.catalog);
 
   const filteredToolCategories = useMemo(
     () => filterMcpCategories(pluginCategories, toolQuery),
@@ -729,6 +743,7 @@ export function McpPluginsSection() {
                 onSaved={() => {
                   setTestResults((prev) => { const next = { ...prev }; delete next[selectedServer.id]; return next; });
                   refreshPlugins();
+                  if (selectedServer.enabled) loadServerTools(selectedServer.id);
                 }}
               />
             ) : null}
@@ -752,6 +767,13 @@ export function McpPluginsSection() {
               </div>
             ) : null}
 
+            {toolsError ? (
+              <p className="catalog-slide-detail-overview skills-mcp-load-error" role="status">
+                {toolsError}{" "}
+                <button type="button" className="catalog-slide-action" onClick={() => loadServerTools(selectedServer.id)}>Try again</button>
+              </p>
+            ) : null}
+
             <McpToolSplitView
               categories={filteredToolCategories}
               allCategories={pluginCategories}
@@ -760,10 +782,12 @@ export function McpPluginsSection() {
               selectedToolName={focusId}
               onSelectTool={setFocusId}
               totalCount={toolTotalCount}
-              loading={!catalog}
+              loading={toolsLoading}
               emptyMessage={
                 !selectedServer.enabled
                   ? "Enable this MCP to load its tools."
+                  : toolsError
+                    ? "Its tools didn't load."
                   : toolQuery.trim()
                     ? "No tools match your filter."
                     : "No tools available for this MCP."

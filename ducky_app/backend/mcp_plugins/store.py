@@ -679,10 +679,12 @@ def set_mcp_server_enabled(server_id: str, enabled: bool) -> dict[str, Any]:
     from backend.mcp_plugins.client_pool import get_plugin_pool
 
     pool = get_plugin_pool()
+    pool.invalidate_tools_cache()
     if not enabled:
-        pool.close_plugin(pid)
-    else:
-        pool.invalidate_tools_cache()
+        # Closing a stuck server can wait up to 30 s: the switch must not.
+        import threading
+
+        threading.Thread(target=pool.close_plugin, args=(pid,), name=f"mcp-close-{pid}", daemon=True).start()
     return {"ok": True, "plugin_id": pid, "server_id": pid, "enabled": enabled, "enabled_mcp_plugins": get_enabled_plugin_ids()}
 
 

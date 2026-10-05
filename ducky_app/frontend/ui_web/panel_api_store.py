@@ -595,6 +595,7 @@ class PanelApiStoreMixin:
             "get_context_usage",
             "compile_verse_project",
             "get_mcp_tools_catalog",
+            "get_mcp_server_tools",
             "get_workflow_tools_catalog",
             "run_workflow",  # a test run can take minutes; Stop must still get through
             "run_workflow_node",  # one image / 3D node can take minutes too
@@ -1273,13 +1274,25 @@ class PanelApiStoreMixin:
         s = _pa.PanelSettings.load()
         invalidate_all_conversation_caches(s.uefn_project_root or None)
         if result.get("ok"):
-            try:
-                from frontend.duckyos_account import publish_agent_catalog
+            # Re-publishing the tool catalog lists every server (~1 min): never on the switch.
+            import threading
 
-                publish_agent_catalog()
-            except Exception:
-                pass
+            def _publish() -> None:
+                try:
+                    from frontend.duckyos_account import publish_agent_catalog
+
+                    publish_agent_catalog()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_publish, name="publish-agent-catalog", daemon=True).start()
         return result
+
+    def get_mcp_server_tools(self, server_id: str) -> dict[str, Any]:
+        """One server's tools for its Settings page (run as a bridge job)."""
+        from frontend.ui_web.mcp_catalog import build_server_catalog
+
+        return build_server_catalog(str(server_id or ""))
 
     def test_mcp_plugin(self, plugin_id: str) -> dict[str, Any]:
         return self.test_mcp_server(plugin_id)

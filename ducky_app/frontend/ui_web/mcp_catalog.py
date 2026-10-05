@@ -72,7 +72,33 @@ def _schema_parameters(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def build_mcp_catalog(*, apply_filters: bool = True) -> dict[str, Any]:
-    tools = asyncio.run(list_mcp_tools(apply_filters=apply_filters))
+    return _catalog_from_tools(asyncio.run(list_mcp_tools(apply_filters=apply_filters)))
+
+
+def build_server_catalog(server_id: str) -> dict[str, Any]:
+    """One MCP server's tools for its Settings page. A nested server connects only itself
+    (the full catalog connects every one, ~1 min, and one dead server stalled the page);
+    the app's own tool groups list the app's tools with no nested connects."""
+    from backend.agent.builtin_toolsets import filter_builtin_tools, is_builtin_group
+    from backend.agent.tools import _ensure_mcp
+    from backend.uefn_plugins.host import filter_uefn_plugin_tools, is_uefn_agent_tool_plugin
+
+    sid = (server_id or "").strip()
+    if is_builtin_group(sid.lower()) or is_uefn_agent_tool_plugin(sid.lower()):
+        core = asyncio.run(_ensure_mcp().list_tools())
+        return {"ok": True, **_catalog_from_tools(filter_uefn_plugin_tools(filter_builtin_tools(core)))}
+    from backend.mcp_plugins.client_pool import get_plugin_pool
+
+    pool = get_plugin_pool()
+    try:
+        tools = pool.run_sync(pool.list_tools_for_plugin(sid))
+    except Exception as exc:  # noqa: BLE001 - the page shows why
+        detail = str(exc).strip() or type(exc).__name__
+        return {"ok": False, "error": f"Could not list this server's tools: {detail}", "total": 0, "categories": [], "tools": []}
+    return {"ok": True, **_catalog_from_tools(list(tools or []))}
+
+
+def _catalog_from_tools(tools: list[Any]) -> dict[str, Any]:
     by_cat = _tool_category_map()
     categories: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
