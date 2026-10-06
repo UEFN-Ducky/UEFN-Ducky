@@ -905,6 +905,24 @@ def test_missing_image_backend_does_not_charge_another_provider(tools):
     assert tools.calls == []
 
 
+def test_a_plugin_nodes_backend_field_lists_the_same_backends(tools, monkeypatch):
+    monkeypatch.setattr(media, "gateway_image_nodes", lambda: [])
+    nodes = [
+        {"id": "cards.picture", "plugin_id": "cards", "config_fields": [{"id": "backend", "label": "Picture backend", "type": "backend"},
+                                                                          {"id": "spend", "label": "Spend credits", "type": "boolean"}]},
+        {"id": "cards.statue", "plugin_id": "cards", "config_fields": [{"id": "maker", "type": "backend", "node_type": "mesh.generate"}]},
+        {"id": "cards.plain", "plugin_id": "cards", "config_fields": [{"id": "name", "type": "string"}]},
+    ]
+    monkeypatch.setattr(catalog, "_contributions", lambda: ({"automations_nodes": nodes}, {"cards"}))
+    listed = {row["type"]: row for row in catalog.list_nodes() if row.get("plugin_id") == "cards"}
+    picture = listed["cards.picture"]
+    assert picture["config_fields"][0] == {"id": "backend", "label": "Picture backend", "type": "backend", "node_type": "image.generate"}
+    assert picture["backends"] == media.backends_for("image.generate")
+    assert [row["id"] for row in picture["backends"]] == [row["id"] for row in IMAGE_GENERATORS]
+    assert [row["id"] for row in listed["cards.statue"]["backends"]] == [row["id"] for row in media.BACKENDS["mesh.generate"]]
+    assert "backends" not in listed["cards.plain"]
+
+
 def test_image_fields_never_use_the_generic_chat_model_picker(monkeypatch):
     from backend.uefn_plugins import host
     monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "test.image", "config_fields": [{"id": "model", "type": "model", "provider": "test"}]}]})

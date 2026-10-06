@@ -549,6 +549,9 @@ def list_nodes() -> list[dict[str, Any]]:
     for row in contrib.get("automations_nodes") or []:
         parsed = _plugin_node(row, enabled, role="action", default_group="")
         if parsed:
+            picker = next((f for f in parsed["config_fields"] if f["type"] == "backend"), None)
+            if picker is not None:  # a plugin node's Backend field: the same dropdown as that node's
+                parsed["backends"] = backends_for(picker["node_type"])
             out.append(parsed)
     # Read each plugin's own artwork once, even when it contributes many nodes.
     icons: dict[str, str] = {}
@@ -627,6 +630,9 @@ def _fields(raw: Any) -> list[dict[str, Any]]:
             row["provider"] = str(f.get("provider") or "")
         if f.get("accept"):
             row["accept"] = str(f.get("accept") or "")
+        if row["type"] == "backend":
+            # Whose backends it picks from (Text to Image by default): listed like that node's.
+            row["node_type"] = str(f.get("node_type") or "").strip() or "image.generate"
         opts = f.get("options")
         if isinstance(opts, list):
             clean: list[dict[str, str]] = []

@@ -538,6 +538,8 @@ export interface AutomationFieldDto {
   accept?: string;
   /** Custom code settings: the value used while none is set. */
   default?: unknown;
+  /** backend fields: whose backends it picks from (a plugin's picture step lists Text to Image's). */
+  node_type?: string;
 }
 
 export interface AutomationTemplateDto {

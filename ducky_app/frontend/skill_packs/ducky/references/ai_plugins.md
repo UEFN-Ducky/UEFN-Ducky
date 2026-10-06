@@ -38,8 +38,12 @@ across chats. Tools write the files; you never open those folders.
    calls the **same** functions as `@api.tool()`. Ship `automations.templates`
    with graph `start.chat` → `pipeline.agent` → your node → `pipeline.finish`.
    Every workflow has one palette (`systems` is ignored). Theme-only: one node that
-   applies/lists the profile. Handler `ctx = {config, payload, node, kind, files,
-   artifact_dir}` → `{ok, files?}` (`kind` is `"pipeline"` when run from a chat).
+   applies/lists the profile. Handler `ctx = {config, payload, node, inputs, kind,
+   files, artifact_dir}` → `{ok, files?}` (`kind` is `"pipeline"` when run from a chat;
+   `inputs` holds the node's declared input pins: what is wired in, else set in its
+   details). A config field `{"type": "backend", "node_type": "image.generate"}`
+   shows the same backend picker and gateway settings as that built-in node; read the
+   pick from `config[<field id>]` and its settings from `config.gateway_config`.
    Place graphs with `save_workflow` — each save opens the Workflows editor and
    refreshes the canvas. Delete with `delete_workflow`. Reusable starters:
    `save_workflow_template` / `delete_workflow_template`. Do not tell the user

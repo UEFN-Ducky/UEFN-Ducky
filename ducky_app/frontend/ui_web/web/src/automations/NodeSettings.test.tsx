@@ -155,6 +155,30 @@ describe("image and 3D nodes", () => {
     expect(current.config.gateway_config).toEqual({ openai_image: { model: "image-b", size: "1024x1536" } });
   });
 
+  it("a plugin node's Backend field picks from Text to Image's list with the same gateway settings", async () => {
+    const pluginMeta: AutomationNodeDto = {
+      type: "cards.picture", label: "Card picture", group: "Cards", plugin_id: "cards",
+      config_fields: [{ id: "picture_backend", label: "Picture backend", type: "backend", node_type: "image.generate" }, { id: "spend", label: "Spend credits", type: "boolean" }],
+      backends: [
+        { id: "google_imagen", label: "Imagen 4", plugin: "Google", credits: 0, cost: "Your own API key", available: false, reason: "Add your Google API key in Settings." },
+        { id: "meshy_text_to_image", label: "Meshy · Nano Banana", plugin: "Meshy", credits: 5, available: true },
+        { id: "ducky_image", label: "Ducky AI · Image", plugin: "Account", credits: 0, cost: "Ducky AI credit", available: true, config_fields: [
+          { id: "size", label: "Size", type: "select", options: [{ id: "1024x1024", label: "Square" }, { id: "1024x1536", label: "Tall" }] },
+        ] },
+      ],
+    };
+    render(<Editor config={{}} meta={pluginMeta} />);
+    expect(screen.getByText(/About 5 credits each run on Meshy · Nano Banana/)).toBeTruthy();  // first that can run
+    fireEvent.click(screen.getByRole("button", { name: "Picture backend" }));
+    expect(((await screen.findByRole("radio", { name: /Imagen 4/ })) as HTMLInputElement).disabled).toBe(true);  // listed, can't be picked
+    fireEvent.click(screen.getByRole("radio", { name: /Ducky AI · Image/ }));
+    expect(current.config.picture_backend).toBe("ducky_image");
+    expect(current.config.backend).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "Size" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Tall" }));
+    expect(current.config.gateway_config).toEqual({ ducky_image: { size: "1024x1536" } });
+  });
+
   it("a saved backend whose plugin is off says why", () => {
     render(<Editor config={{ backend: "tripo" }} meta={meta} />);
     expect(screen.getByRole("status").textContent).toContain("3D AI Studio plugin");

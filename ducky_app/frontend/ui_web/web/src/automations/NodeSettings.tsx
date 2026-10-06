@@ -54,44 +54,50 @@ export function NodeSettings({ node, meta, onChange, workflows = [], currentId, 
   return <div className="aw-insp-form">
     {node.type === "tool.call" ? <ToolSettings node={node} onChange={onChange} />
       : node.type === "workflow.call" ? <CallSettings node={node} workflows={workflows} currentId={currentId} onChange={onChange} onOpen={onOpen} />
-      : (meta?.config_fields || []).map((field) => <NodeField key={field.id} field={field} node={node} pluginId={meta?.plugin_id} backends={meta?.backends} onChange={onChange} />)}
+      : (meta?.config_fields || []).map((field) => <NodeField key={field.id} field={field} node={node} pluginId={meta?.plugin_id} backends={meta?.backends}
+        backendKey={meta?.config_fields?.find((row) => row.type === "backend")?.id} onChange={onChange} />)}
   </div>;
 }
 
-type Backends = { backends?: AutomationBackendDto[] };
+/** backendKey: the setting that holds the picked backend ("backend"; a plugin node may name its own). */
+type Backends = { backends?: AutomationBackendDto[]; backendKey?: string };
 
-function NodeField({ field, node, pluginId, backends, onChange }: { field: AutomationFieldDto; node: AutomationGraphNodeDto; pluginId?: string; onChange: (node: AutomationGraphNodeDto) => void } & Backends) {
+function NodeField({ field, node, pluginId, backends, backendKey, onChange }: { field: AutomationFieldDto; node: AutomationGraphNodeDto; pluginId?: string; onChange: (node: AutomationGraphNodeDto) => void } & Backends) {
   if (field.type === "params") return <NamedValueList node={node} field={field.id} valueKey="default" valueLabel="Default" valuePlaceholder="used by Test" addLabel="Add input" onChange={onChange} />;
   if (field.type === "returns") return <NamedValueList node={node} field={field.id} valueKey="value" valueLabel="Value" valuePlaceholder="same-name field, text or {{field}}" addLabel="Add return value" onChange={onChange} />;
-  if (field.type === "backend") return <BackendField node={node} backends={backends || []} onChange={onChange} />;
-  if (field.id === "spend" && backends?.length) return <SpendField node={node} backends={backends} onChange={onChange} />;
+  if (field.type === "backend") return <BackendField field={field} node={node} backends={backends || []} onChange={onChange} />;
+  if (field.id === "spend" && backends?.length) return <SpendField node={node} backends={backends} backendKey={backendKey} onChange={onChange} />;
   return <ConfigField field={field} node={node} pluginId={pluginId} onChange={onChange} />;
 }
 
 /** The backend picked for this run; none picked = the first that can run here (as the runner does). */
-function pickedBackend(node: AutomationGraphNodeDto, backends: AutomationBackendDto[]) {
-  return backends.find((row) => row.id === String(node.config.backend || "")) || backends.find((row) => row.available) || backends[0];
+function pickedBackend(node: AutomationGraphNodeDto, backends: AutomationBackendDto[], key = "backend") {
+  return backends.find((row) => row.id === String(node.config[key] || "")) || backends.find((row) => row.available) || backends[0];
 }
 
 function costOf(row: AutomationBackendDto) {
   return row.cost || `~${row.credits} credits`;
 }
 
-/** Image gateways expose their own image settings. Unavailable gateways explain setup. */
-function BackendField({ node, backends, onChange }: { node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; onChange: (node: AutomationGraphNodeDto) => void }) {
+/** Image gateways expose their own image settings. Unavailable gateways explain setup.
+ *  A plugin node's Backend field picks from another node's list (node_type, Text to Image by default). */
+function BackendField({ field, node, backends, onChange }: { field: AutomationFieldDto; node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; onChange: (node: AutomationGraphNodeDto) => void }) {
   const id = useId();
-  const picked = pickedBackend(node, backends);
-  const shown = node.type === "image.generate" ? backends : backends.filter((row) => row.available || row.id === picked?.id);
+  const key = field.id || "backend";
+  const label = field.label || "Backend";
+  const images = (field.node_type || node.type) === "image.generate";
+  const picked = pickedBackend(node, backends, key);
+  const shown = images ? backends : backends.filter((row) => row.available || row.id === picked?.id);
   const setConfig = (patch: Record<string, unknown>) => onChange({ ...node, config: { ...node.config, ...patch } });
   return <div className="aw-field">
-    <label className="aw-field-label" htmlFor={id}>Backend</label>
-    <ChoiceDropdown id={id} aria-label="Backend" size="compact" value={picked?.id || ""}
+    <label className="aw-field-label" htmlFor={id}>{label}</label>
+    <ChoiceDropdown id={id} aria-label={label} size="compact" value={picked?.id || ""}
       options={shown.map((row) => ({ value: row.id, label: row.label, disabled: !row.available,
         hint: row.available ? `${costOf(row)} · ${row.plugin}` : `${row.plugin} · ${row.reason || "not set up"}` }))}
-      onChange={(value) => setConfig({ backend: value })} />
+      onChange={(value) => setConfig({ [key]: value })} />
     {picked && !picked.available ? <small className="aw-field-error" role="status">{picked.reason || `Needs the ${picked.plugin} plugin.`}</small> : null}
-    {!picked && node.type === "image.generate" ? <small className="aw-field-error" role="status">Turn on an image-capable gateway or image plugin in the Store.</small> : null}
-    {node.type === "image.generate" && node.config.backend === "agent" ? <small className="aw-field-error" role="status">Choose a direct image backend to replace the saved agent backend.</small> : null}
+    {!picked && images ? <small className="aw-field-error" role="status">Turn on an image-capable gateway or image plugin in the Store.</small> : null}
+    {images && node.config[key] === "agent" ? <small className="aw-field-error" role="status">Choose a direct image backend to replace the saved agent backend.</small> : null}
     {picked?.config_fields?.map((field) => {
       const configs = (node.config.gateway_config || {}) as Record<string, Record<string, unknown>>;
       const config = configs[picked.id] || {};
@@ -103,9 +109,9 @@ function BackendField({ node, backends, onChange }: { node: AutomationGraphNodeD
 }
 
 /** Paid steps only spend credits with this on; it says about how many each run. */
-function SpendField({ node, backends, onChange }: { node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; onChange: (node: AutomationGraphNodeDto) => void }) {
+function SpendField({ node, backends, backendKey, onChange }: { node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; backendKey?: string; onChange: (node: AutomationGraphNodeDto) => void }) {
   const on = node.config.spend === true;
-  const picked = pickedBackend(node, backends);
+  const picked = pickedBackend(node, backends, backendKey);
   return <div className="aw-field aw-spend">
     <button type="button" role="switch" aria-checked={on} aria-label="Spend credits" className={`aw-spend-toggle${on ? " is-on" : ""}`}
       onClick={() => onChange({ ...node, config: { ...node.config, spend: on ? undefined : true } })}>
