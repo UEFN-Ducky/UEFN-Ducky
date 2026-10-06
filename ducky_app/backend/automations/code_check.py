@@ -28,7 +28,8 @@ _NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
 _NODE_DECL = re.compile(r"\bexport const node\s*=")
 _RUN_DECL = re.compile(r"\bexport default (?:async )?function run\s*\(")
 _EXPORT = re.compile(r"\bexport\b")
-# What the sandbox doesn't have, found in the code itself (strings and comments don't count).
+# What the sandbox doesn't have, found in the code itself (strings and comments don't
+# count, nor a property of the same name: input.process, x.fetch(), { import: 1 }).
 _BANNED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pattern), message)
     for pattern, message in (
@@ -53,7 +54,7 @@ DECLARATION_SCHEMA: dict[str, Any] = {
     "settings": {"type": "array", "items": {"id": "string", "type": list(FIELD_TYPES), "label": "string?", "default": "any?",
                                             "options": "for select: [\"a\", \"b\"] or [{id, label}]"}},
     "tools": {"type": "array", "items": "MCP tool name ducky.tool may call"},
-    "builtins": {"type": "array", "items": "built-in node type ducky.builtin may run (never a route node)"},
+    "builtins": {"type": "array", "items": "built-in node type ducky.builtin may run (never a route node, nor tool.call: use tools)"},
     "rules": [
         "node is a plain literal: objects, arrays, quoted strings, numbers, true/false/null, comments, trailing commas.",
         "No expressions, template literals, spreads or names in node; it is read without running the code.",
@@ -78,6 +79,16 @@ _FLOW_FALLBACK = frozenset({
     "flow.end", "flow.foreach", "flow.repeat", "flow.branch", "logic.if", "workflow.call", "fortnite.servers",
     "pipeline.finish", "util.preview", "code.js",
 })
+
+
+def not_builtins() -> dict[str, str]:
+    """Built-ins that aren't route nodes but still can't run through ducky.builtin, and why."""
+    try:
+        from backend.automations.code_api import NOT_BUILTINS
+
+        return dict(NOT_BUILTINS)
+    except ImportError:
+        return {"tool.call": "tool.call can't run through ducky.builtin: call tools with ducky.tool and list each one in node.tools."}
 
 
 def flow_types() -> frozenset[str]:
@@ -548,11 +559,13 @@ def _declaration(raw: _Obj, where: _Where) -> tuple[dict[str, Any], list[dict[st
     inputs, outputs = pins("inputs"), pins("outputs")
     settings = fields()
     tools, builtins = names("tools"), names("builtins")
-    flow = flow_types()
+    flow, refused = flow_types(), not_builtins()
     for n, name in enumerate(builtins):
+        index = at(raw.get("builtins"), n) if isinstance(raw.get("builtins"), _Arr) else at(raw, "builtins")
         if name in flow:
-            index = at(raw.get("builtins"), n) if isinstance(raw.get("builtins"), _Arr) else at(raw, "builtins")
             err(index, f"{name} chooses where a workflow goes (or starts or ends one), so code can't run it.")
+        elif name in refused:
+            err(index, refused[name])
     decl = {"kind": kind, "inputs": inputs, "outputs": outputs, "settings": settings, "tools": tools, "builtins": builtins}
     return decl, problems
 
@@ -581,6 +594,16 @@ def _syntax(code: str) -> list[dict[str, Any]]:
     return out
 
 
+def _is_property(masked: str, start: int) -> bool:
+    """A property named like a banned global: after a dot (x.fetch, x?.fetch, not
+    ...fetch) or an object key (import: 1)."""
+    before = masked[:start].rstrip()
+    if before.endswith(".") and not before.endswith("..."):
+        return True
+    word = _IDENT.match(masked, start)
+    return bool(word) and masked[word.end():].lstrip().startswith(":") and not before.endswith("?")
+
+
 def check(code: str) -> dict[str, Any]:
     """Everything wrong with one node's code, plus what its declaration says
     (pins, settings, the tools and built-ins it may use)."""
@@ -595,6 +618,8 @@ def check(code: str) -> dict[str, Any]:
         for found in pattern.finditer(masked):
             if pattern.pattern.startswith(r"\bFunction") and re.search(r"\bnew\s+$", masked[:found.start()]):
                 continue  # already reported as new Function
+            if _is_property(masked, found.start()):
+                continue
             problems.append(_problem(where, found.start(), message))
     decls = list(_NODE_DECL.finditer(masked))
     runs = list(_RUN_DECL.finditer(masked))

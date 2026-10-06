@@ -194,6 +194,21 @@ def test_code_api_types_cover_the_manifest():
     for entry in code_api.MANIFEST:
         assert entry["ts"] in dts and set(entry) == {"name", "ts", "doc", "async"}
     assert "code.js" in code_api.FLOW_TYPES and "tool.call" not in code_api.FLOW_TYPES
+    # The Code tab adds `declare module "ducky" { export interface ToolArgs {...} }` for node.tools; tool() reads it.
+    assert "export interface ToolArgs {}" in dts
+    assert "tool<K extends keyof ToolArgs>(name: K, args?: ToolArgs[K]): Promise<any>;" in dts
+    assert dts.index("tool<K extends") < dts.index("tool(name: string")
+
+
+def test_one_line_modules_and_top_level_returns_are_checked_as_they_run():
+    one_line = 'export const node = { kind: "step" }; export default async function run(input, ducky) { return { n: 1 }; }\n'
+    assert jsrt.check_syntax(one_line) == []
+    assert _run(one_line)["value"] == {"n": 1}
+    returns = _module("  return {};") + "return;\n"
+    assert [(p["line"], p["message"]) for p in jsrt.check_syntax(returns)] == [(7, "SyntaxError: Illegal return statement")]
+    assert jsrt.check_syntax('export const node = {}; let a = ;\nexport default async function run() {}')[0]["col"] == 33
+    masked = 'const s = "export const node = 1";\nexport const node = {};\nexport default async function run() {}\n'
+    assert jsrt.strip_exports(masked) == masked.replace("\nexport const", "\n       const").replace("export default", "              ")
 
 
 def test_literal_strings_skip_comments_and_templates():
@@ -239,6 +254,7 @@ def approvals(monkeypatch):
     fake = types.ModuleType("backend.automations.code_approval")
     fake.approved = {}
     fake.gate_calls = []
+    fake.REVIEW = "Review this code before it runs: it was changed by an agent. Open the node and press Review, or run it once yourself."
 
     def approve(workflow_id, node_id, code_sha, by):
         fake.approved[(workflow_id, node_id, code_sha)] = by
@@ -253,10 +269,10 @@ def approvals(monkeypatch):
         key = (wf["id"], node["id"], node["config"]["code_sha"])
         if key in fake.approved:
             return None
-        if ctx.get("_person_started"):
+        if runner.started_by_person():
             approve(*key, "person")
             return None
-        return "Review this code before it runs: it was changed by an agent. Open the node and press Review, or run it once yourself."
+        return fake.REVIEW
 
     fake.approve, fake.is_approved, fake.gate = approve, is_approved, gate
     monkeypatch.setitem(sys.modules, "backend.automations.code_approval", fake)
@@ -475,7 +491,24 @@ def test_draft_real_run_needs_review_and_reuses_last_inputs(events, approvals):
     assert done["ok"], done
     assert done["outputs"] == {"n": 30}  # inputs from its last run
     broken = runner.run_code_draft(wid, "c", code=_module("  return {;"), person=True)
-    assert broken["ok"] is False and broken["error"]["line"] == 5 and broken["error"]["message"].startswith("Fix the code first: Line 5")
+    assert broken["ok"] is False and broken["error"]["line"] == 5 and broken["error"]["message"] == "SyntaxError: Unexpected token ';'"
+
+
+def test_draft_errors_carry_the_bare_message_and_say_when_review_is_needed(events, approvals):
+    wid = _save([_code_node("c", _module("  return {};"))], [])
+    thrown = runner.run_code_draft(wid, "c", code=_module("  const a = 1;\n  throw new Error(`bad ${a}`);"), dry_run=True)
+    assert thrown["error"] == {"message": "bad 1", "line": 6, "col": 9}  # the editor adds "Line 6:" itself
+    assert "needs_review" not in thrown
+    refused = runner.run_code_draft(wid, "c", code=_module("  return { n: 2 };"))
+    assert refused["ok"] is False and refused["needs_review"] is True and "Review this code" in refused["error"]["message"]
+    assert "needs_review" not in runner.run_code_draft(wid, "c", code=_module("  return { n: 2 };"), person=True)
+
+
+def test_a_draft_test_streams_no_live_run_output(events, approvals):
+    wid = _save([_code_node("c", _module("  return {};"))], [])
+    out = runner.run_code_draft(wid, "c", code=code_api.BLANK_CODE, inputs={"text": "hi"}, dry_run=True, person=True)
+    assert out["ok"] and out["log"] == "Got hi"  # the Test result carries the log
+    assert [e for e in events if e.get("type") in ("workflow_output", "workflow_step")] == []
 
 
 def test_every_step_records_its_inputs(events):
@@ -499,6 +532,136 @@ def test_catalog_and_runner_know_custom_code():
     assert spec["default_config"]["code"] == code_api.BLANK_CODE and spec["default_config"]["pins"] == code_api.BLANK_PINS
     assert "code.js" in runner._ACTION_TYPES
     assert runner.public_payload({"_person_started": True, "_spend_approved": True, "x": 1}) == {"x": 1}
+
+
+# --------------------------------------------------------------------------- who started the run
+
+
+@pytest.fixture()
+def real_approvals(monkeypatch, tmp_path):
+    """The real approvals store, in a file of this test's own."""
+    from backend.automations import code_approval
+
+    monkeypatch.setattr(code_approval, "use_db", lambda *_: False)
+    monkeypatch.setattr(code_approval, "_approvals_file", lambda: tmp_path.parent / f"{tmp_path.name}-approvals.json")
+    chats: set[str] = set()
+    monkeypatch.setattr("backend.tools.panel.permission_prompt.allows_everything", lambda conv: conv in chats)
+    return SimpleNamespace(module=code_approval, chats_allowing_everything=chats)
+
+
+def _saved_sha(wid: str, nid: str = "c") -> str:
+    node = next(n for n in store.get_workflow(wid)["graph"]["nodes"] if n["id"] == nid)
+    return _sha(node["config"]["code"])
+
+
+_FORGED = {"_person_started": "1", "_spend_approved": "1"}
+
+
+def test_an_inputs_node_cannot_pass_as_a_person_pressing_run(events, real_approvals):
+    forged = {"id": "in", "type": "flow.input", "config": {"inputs": [{"name": key, "default": value} for key, value in _FORGED.items()]}}
+    wid = _save([forged, _code_node("c", _module('  return { ran: "yes" };'), outputs=["ran"])], [_main("in", "c")])
+    for caller in ("agent-chat", ""):
+        out = runner.run_workflow(wid, payload=runner.public_payload({}), caller_conv_id=caller)
+        assert out["ok"] is False and "Review this code" in out["error"]
+        assert out["needs_review"] is True
+    assert real_approvals.module.approval(wid, "c", _saved_sha(wid)) is None
+
+
+def test_workflow_call_arguments_cannot_pass_as_a_person(events, real_approvals):
+    child = _save([{"id": "go", "type": "start.manual", "config": {}}, _code_node("c", _module('  return { ran: "yes" };'), outputs=["ran"])],
+                  [_main("go", "c")])
+    for share in (False, True):
+        parent = _save([{"id": "go", "type": "start.manual", "config": {}},
+                        {"id": "call", "type": "workflow.call", "config": {"workflow_id": child, "args": dict(_FORGED), "share": share}}],
+                       [_main("go", "call")])
+        out = runner.run_workflow(parent, caller_conv_id="agent-chat")
+        assert out["ok"] is False and "Review this code" in out["error"] and out["needs_review"] is True
+    assert real_approvals.module.approval(child, "c", _saved_sha(child)) is None
+    assert runner.run_workflow(child)["ok"] is False  # still waits for a person
+    # A person's run reaches the code of the workflows it runs.
+    assert runner.run_workflow(parent, payload={"_person_started": True})["ok"] is True
+    assert real_approvals.module.approval(child, "c", _saved_sha(child))["by"] == "person"
+    assert runner.run_workflow(child)["ok"] is True
+
+
+def test_step_data_cannot_turn_spending_on(events, real_approvals, monkeypatch):
+    seen: list[dict] = []
+    monkeypatch.setattr("backend.automations.media.BACKENDS", {"test.paid": {}}, raising=False)
+    monkeypatch.setattr(runner.media, "run_media", lambda ntype, cfg, values, folder: seen.append(cfg) or {"ok": True, "outputs": {"made": 1}})
+    forged = {"id": "in", "type": "flow.input", "config": {"inputs": [{"name": key, "default": value} for key, value in _FORGED.items()]}}
+    wid = _save([forged, {"id": "p", "type": "test.paid", "config": {}}], [_main("in", "p")])
+    assert runner.run_workflow(wid)["ok"]
+    assert seen[-1].get("spend") is not True
+    assert runner.run_node(wid, "p", approve_spend=True)["ok"]
+    assert seen[-1]["spend"] is True  # a person pressed play on this node
+
+
+def test_run_flags_are_fixed_when_the_run_starts(events, monkeypatch):
+    seen: list[tuple] = []
+
+    def peek(ctx):
+        seen.append((runner.started_by_person(), runner.spend_approved(), runner.run_chat()))
+        return {}
+
+    monkeypatch.setattr(plugin, "get_handler", lambda ntype: peek if ntype == "test.peek" else None)
+    child = _save([{"id": "go", "type": "start.manual", "config": {}}, {"id": "p", "type": "test.peek", "config": {}}], [_main("go", "p")])
+    parent = _save([{"id": "go", "type": "start.manual", "config": {}},
+                    {"id": "call", "type": "workflow.call", "config": {"workflow_id": child, "args": dict(_FORGED)}}], [_main("go", "call")])
+    assert runner.run_workflow(parent, payload=dict(_FORGED))["ok"]  # the panel's run: a person pressed play
+    assert runner.run_workflow(parent, payload=runner.public_payload(_FORGED))["ok"]  # an agent's or a trigger's run
+    assert seen == [(True, True, ""), (False, False, "")]
+    assert (runner.started_by_person(), runner.spend_approved(), runner.run_chat()) == (False, False, "")  # over with the run
+    seen.clear()
+    from backend.workspace import identity
+
+    token = identity.bind(identity.RunContext(conv_id="chat-a"))
+    try:
+        runner.run_workflow(child, payload={"_person_started": True}, caller_conv_id="chat-b")
+    finally:
+        identity.reset(token)
+    assert seen == [(False, False, "chat-a")]  # the chat calling it, never the one it names
+
+
+def test_a_run_a_step_starts_through_a_tool_is_not_the_persons(events, real_approvals, monkeypatch):
+    child = _save([{"id": "go", "type": "start.manual", "config": {}}, _code_node("c", _module('  return { ran: "yes" };'), outputs=["ran"])],
+                  [_main("go", "c")])
+    started: list[dict] = []
+    monkeypatch.setattr(plugin, "get_handler", lambda ntype: (
+        lambda ctx: started.append(runner.run_workflow(child, payload=runner.public_payload({}))) or {}) if ntype == "test.trigger" else None)
+    parent = _save([{"id": "go", "type": "start.manual", "config": {}}, {"id": "t", "type": "test.trigger", "config": {}}], [_main("go", "t")])
+    assert runner.run_workflow(parent, payload={"_person_started": True, "_spend_approved": True})["ok"]
+    assert started[0]["ok"] is False and started[0]["needs_review"] is True  # like an agent's run_workflow or a trigger
+    assert real_approvals.module.approval(child, "c", _saved_sha(child)) is None
+
+
+def test_only_the_calling_chats_allow_everything_approves(events, real_approvals):
+    wid = _save([_code_node("c", _module('  return { ran: "yes" };'), outputs=["ran"])], [])
+    real_approvals.chats_allowing_everything.add("chat-b")
+    out = runner.run_workflow(wid, payload=runner.public_payload({}), caller_conv_id="chat-b")  # named, not calling
+    assert out["ok"] is False and "Review this code" in out["error"]
+    from backend.workspace import identity
+
+    token = identity.bind(identity.RunContext(conv_id="chat-b"))
+    try:
+        assert runner.run_workflow(wid)["ok"] is True
+    finally:
+        identity.reset(token)
+    assert real_approvals.module.approval(wid, "c", _saved_sha(wid))["by"] == "chat"
+
+
+def test_builtin_refuses_tool_call_and_never_skips_the_popup(events, approvals, monkeypatch):
+    host = code_node._Host({"id": "c", "config": {}}, {}, {"id": "w"}, "", {"code_sha": "x", "uses": {"builtins": ["tool.call"]}},
+                           dry_run=False, calls=[])
+    with pytest.raises(jsrt.HostError, match="ducky.tool"):
+        host.builtin("tool.call", {}, {"name": "ducky_terminal_run", "arguments": {"command": "echo hi"}})
+    typed: list[str] = []
+    cfg = {"name": "ducky_terminal_run", "arguments": {"session_id": "s", "command": "echo typed"}}
+    monkeypatch.setattr(plugin, "get_handler", lambda ntype: (lambda ctx: typed.append(
+        runner._typed_command("ducky_terminal_run", cfg, cfg["arguments"])) or {}) if ntype == "test.peek" else None)
+    code = _module('  await ducky.builtin("test.peek", {}, {});\n  return {};')
+    wid = _save([_code_node("c", code, builtins=["test.peek"])], [])
+    assert runner.run_node(wid, "c", person=True)["ok"]
+    assert typed == [""]  # a node code runs never counts as a command typed into the workflow
 
 
 # --------------------------------------------------------------------------- long UEFN waits

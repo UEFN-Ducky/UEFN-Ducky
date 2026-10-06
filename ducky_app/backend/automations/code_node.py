@@ -10,7 +10,7 @@ from typing import Any
 
 from backend.automations import catalog, jsrt, plugin
 from backend.automations import runner as _runner
-from backend.automations.code_api import BLANK_CODE, FLOW_TYPES
+from backend.automations.code_api import BLANK_CODE, FLOW_TYPES, NOT_BUILTINS
 from backend.automations.expr import ExprError, evaluate
 from backend.automations.pins import clean_pins
 from backend.automations.store import LOCAL, get_workflow
@@ -120,6 +120,14 @@ def _gate(wf: dict[str, Any], node: dict[str, Any], ctx: dict[str, Any]) -> str 
     return code_approval.gate(wf, node, ctx)
 
 
+def _review_text() -> str:
+    try:
+        from backend.automations.code_approval import REVIEW
+    except ImportError:
+        return ""
+    return REVIEW
+
+
 def _approved(workflow_id: str, node_id: str, sha: str) -> bool:
     try:
         from backend.automations import code_approval
@@ -197,6 +205,8 @@ class _Host:
         ntype = str(ntype or "").strip()
         if ntype in FLOW_TYPES:
             raise _HostError(f"{ntype} steers the run, so code can't run it.")
+        if ntype in NOT_BUILTINS:
+            raise _HostError(NOT_BUILTINS[ntype])
         if ntype not in self.builtins:
             raise _HostError(f"{ntype or 'That node'} isn't in node.builtins: add it there to run it.")
         values = {} if values is None else values
@@ -213,7 +223,11 @@ class _Host:
         if spec is None and plugin.get_handler(ntype) is None:
             raise _HostError(f"There is no {ntype} node on this PC.")
         synthetic = {"id": f"{self.nid}-{next(self.counter)}", "type": ntype, "label": str((spec or {}).get("label") or ntype), "config": config}
-        step = _runner._exec_node(synthetic, self.ctx, dict(values))
+        token = _runner._FROM_CODE.set(True)
+        try:
+            step = _runner._exec_node(synthetic, self.ctx, dict(values))
+        finally:
+            _runner._FROM_CODE.reset(token)
         if not step.get("ok", True):
             raise _HostError(f"{synthetic['label']}: {step.get('error') or 'failed'}")
         return _outputs_of(step, spec)
@@ -274,7 +288,8 @@ def run_step(
         checked = node if code is None else {**node, "type": CODE_TYPE, "config": {**cfg, "code": source, "code_sha": decl["code_sha"]}}
         refused = _gate(wf, checked, ctx)
     if refused:
-        return {"ok": False, "error": refused, "result": {}}
+        step = {"ok": False, "error": refused, "result": {}}
+        return {**step, "needs_review": True} if refused == _review_text() else step
     live = _runner._LIVE.get()
     host = _Host(node, ctx, wf, source, decl, dry_run=dry_run, calls=calls if calls is not None else [])
     out = jsrt.run(
@@ -325,9 +340,9 @@ def draft(
     dry_run: bool = False,
     person: bool = False,
 ) -> dict[str, Any]:
-    """runner.run_code_draft: run one node's (draft) code now, without saving or logging a run."""
+    """runner.run_code_draft: run one node's (draft) code now, without saving or logging a run.
+    Its log comes back with the result; nothing streams as a live run."""
     import time
-    import uuid
 
     started = time.monotonic()
 
@@ -354,11 +369,9 @@ def draft(
         "nodes": _runner._last_outputs(wf),
         "files": [],
     }
-    if person:
-        ctx["_person_started"] = True
+    flags = _runner._start_run(person, False)
     cancel = threading.Event()
-    tokens = (_runner._CANCEL.set(cancel), _runner._LIVE.set((wid, f"draft-{uuid.uuid4().hex[:8]}")),
-              _runner._CALL_STACK.set((*_runner._CALL_STACK.get(), wid)))
+    tokens = (_runner._CANCEL.set(cancel), _runner._LIVE.set(None), _runner._CALL_STACK.set((*_runner._CALL_STACK.get(), wid)))
     with _runner._ACTIVE_LOCK:
         _runner._ACTIVE.setdefault(wid, set()).add(cancel)
     calls: list[dict[str, Any]] = []
@@ -374,9 +387,12 @@ def draft(
         _runner._CALL_STACK.reset(tokens[2])
         _runner._LIVE.reset(tokens[1])
         _runner._CANCEL.reset(tokens[0])
+        _runner._end_run(flags)
     error = None
     if not step.get("ok"):
+        # The message alone: the editor puts "Line N:" in front from line and col.
         where = step.get("code_error") or {}
-        error = {"message": str(step.get("error") or "failed"), "line": where.get("line"), "col": where.get("col")}
-    return {"ok": bool(step.get("ok")), "outputs": step.get("outputs") or {}, "log": step.get("log") or "", "tool_calls": calls,
-            "error": error, "ms": int((time.monotonic() - started) * 1000)}
+        error = {"message": str(where.get("message") or step.get("error") or "failed"), "line": where.get("line"), "col": where.get("col")}
+    out = {"ok": bool(step.get("ok")), "outputs": step.get("outputs") or {}, "log": step.get("log") or "", "tool_calls": calls,
+           "error": error, "ms": int((time.monotonic() - started) * 1000)}
+    return {**out, "needs_review": True} if step.get("needs_review") else out

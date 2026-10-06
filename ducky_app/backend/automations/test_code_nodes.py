@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sys
@@ -10,7 +11,7 @@ import types
 
 import pytest
 
-from backend.automations import code_approval, code_check, codegen, store
+from backend.automations import code_approval, code_check, codegen, runner, store
 from backend.automations.pins import node_pins
 
 BLANK = """// @ts-check
@@ -179,6 +180,37 @@ def test_banned_words_in_strings_comments_and_regexes_are_fine():
     assert out["ok"] is True, out["problems"]
 
 
+@pytest.mark.parametrize("expr", ["input.process.length", "ducky.settings.import", "input.client.fetch(1)", "input.eval(2)",
+                                  "input?.fetch(1)", "input.data .require (1)", "new input.Function()", "({ import: 1, fetch: 2 })"])
+def test_property_names_are_not_banned(expr):
+    out = code_check.check(_code('{ kind: "step" }', f"  const x = () => {expr};\n  return {{}};"))
+    assert out["ok"] is True, out["problems"]
+
+
+@pytest.mark.parametrize("snippet, words", [
+    ("const a = [...fetch(1)];", "fetch()"),
+    ("const b = x ? eval(1) : 2;", "eval()"),
+    ("const c = { a: process.env };", "process"),
+])
+def test_globals_next_to_dots_and_colons_are_still_banned(snippet, words):
+    out = code_check.check(_code('{ kind: "step" }', f"  {snippet}\n  return {{}};"))
+    assert any(words in e[2] for e in _errors(out)), out["problems"]
+
+
+def test_tool_call_is_not_a_builtin_code_may_run():
+    out = code_check.check(_code('{ kind: "step", builtins: ["tool.call", "text.template"] }'))
+    hits = [e for e in _errors(out) if "tool.call" in e[2]]
+    assert out["ok"] is False and len(hits) == 1 and "ducky.tool" in hits[0][2] and "tools" in hits[0][2]
+    assert hits[0][:2] == (1, 48)
+
+
+def test_code_is_checked_the_way_it_runs():
+    out = code_check.check(_code('{ kind: "step" }') + "if (Math.random() > 2) return;\n")
+    assert out["ok"] is False and any("Illegal return" in e[2] and e[0] == 6 for e in _errors(out)), out["problems"]
+    one_line = 'export const node = { kind: "step", inputs: [], outputs: [] }; export default async function run(input, ducky) { return {}; }\n'
+    assert code_check.check(one_line)["problems"] == []
+
+
 def test_code_inside_template_substitutions_is_still_checked():
     out = code_check.check(_code('{ kind: "step" }', "  ducky.log(`x ${fetch(\"u\")} y`);\n  return {};"))
     assert any("fetch()" in e[2] for e in _errors(out))
@@ -289,10 +321,22 @@ def _local(cfg_code: str = BLANK, *, kind: str = "local") -> tuple[dict, dict]:
     return {"id": "wf1", "owner": {"kind": kind}, "graph": {"nodes": [node]}}, node
 
 
+@contextlib.contextmanager
+def _run_started(*, person: bool = False, chat: str = ""):
+    """What the runner fixes when a run starts: whether a person started it, the calling chat."""
+    tokens = (runner._PERSON.set(person), runner._RUN_CHAT.set(chat))
+    try:
+        yield
+    finally:
+        runner._RUN_CHAT.reset(tokens[1])
+        runner._PERSON.reset(tokens[0])
+
+
 def test_gate_refuses_team_and_unreviewed_agent_code(files, monkeypatch):
     monkeypatch.setattr("backend.tools.panel.permission_prompt.allows_everything", lambda conv: False)
     wf, node = _local(kind="team")
-    assert code_approval.gate(wf, node, {"_person_started": True}) == code_approval.TEAM_REFUSAL
+    with _run_started(person=True):
+        assert code_approval.gate(wf, node, {}) == code_approval.TEAM_REFUSAL
     wf, node = _local()
     assert code_approval.gate(wf, node, {"caller_conv_id": "chat-1"}) == code_approval.REVIEW
     assert "Review this code before it runs" in code_approval.REVIEW
@@ -300,19 +344,29 @@ def test_gate_refuses_team_and_unreviewed_agent_code(files, monkeypatch):
 
 def test_a_person_starting_the_run_approves_that_exact_code(files):
     wf, node = _local()
-    assert code_approval.gate(wf, node, {"_person_started": True}) is None
+    with _run_started(person=True):
+        assert code_approval.gate(wf, node, {}) is None
     assert code_approval.approval("wf1", "c", code_check.code_sha(BLANK))["by"] == "person"
     assert code_approval.gate(wf, node, {}) is None  # approved now: runs unattended
     node["config"]["code"] = BLANK.replace("Got", "Changed")
     assert code_approval.gate(wf, node, {}) == code_approval.REVIEW  # a new version asks again
 
 
+def test_run_fields_never_count_as_a_person_or_the_calling_chat(files, monkeypatch):
+    monkeypatch.setattr("backend.tools.panel.permission_prompt.allows_everything", lambda conv: conv == "trusted")
+    wf, node = _local()
+    assert code_approval.gate(wf, node, {"_person_started": True, "_spend_approved": True, "caller_conv_id": "trusted"}) == code_approval.REVIEW
+    assert code_approval.approval("wf1", "c", code_check.code_sha(BLANK)) is None
+
+
 def test_a_chat_that_allows_everything_approves(files, monkeypatch):
     asked = []
     monkeypatch.setattr("backend.tools.panel.permission_prompt.allows_everything", lambda conv: asked.append(conv) or conv == "trusted")
     wf, node = _local()
-    assert code_approval.gate(wf, node, {"caller_conv_id": "other"}) == code_approval.REVIEW
-    assert code_approval.gate(wf, node, {"caller_conv_id": "trusted"}) is None
+    with _run_started(chat="other"):
+        assert code_approval.gate(wf, node, {}) == code_approval.REVIEW
+    with _run_started(chat="trusted"):
+        assert code_approval.gate(wf, node, {}) is None
     assert asked == ["other", "trusted"]
     assert code_approval.approval("wf1", "c", code_check.code_sha(BLANK))["by"] == "chat"
 
@@ -386,8 +440,8 @@ def test_every_catalog_type_generates_checked_code_with_its_exact_pins():
         if ntype == "code.js":  # custom code already: its own code, nothing to convert
             assert made["convertible"] is False and code_check.check(made["code"])["ok"] is True
             continue
-        if ntype in FLOW or made["kind"] == "flow":
-            assert ntype in FLOW and made["convertible"] is False and made["reason"]
+        if ntype in FLOW or made["kind"] == "flow" or not made["convertible"]:
+            assert (ntype in FLOW or ntype == "tool.call") and made["convertible"] is False and made["reason"]
             assert all(line.startswith("//") or not line for line in made["code"].splitlines())
             continue
         checked = code_check.check(made["code"])
@@ -412,8 +466,9 @@ def test_real_js_only_where_it_is_exact():
     tool = codegen.generate({"id": "n", "type": "tool.call", "config": _SAMPLE_CONFIGS["tool.call"]}, specs)
     assert 'ducky.tool("ducky_terminal_run", args)' in tool["code"] and '"npm run build"' in tool["code"]
     assert code_check.check(tool["code"])["uses"]["tools"] == ["ducky_terminal_run"]
-    # A Call tool that reads its tool or arguments from the run keeps its built-in.
-    assert codegen.generate({"id": "n", "type": "tool.call", "config": {}}, specs)["kind"] == "host"
+    # A Call tool that reads its tool or arguments from the run stays a built-in: code names its tools.
+    unnamed = codegen.generate({"id": "n", "type": "tool.call", "config": {}}, specs)
+    assert unnamed["convertible"] is False and "ducky.tool" in unnamed["reason"] and "ducky.builtin" not in unnamed["code"]
     assert codegen.generate({"id": "n", "type": "input.json", "config": {"value": "{oops"}}, specs)["kind"] == "host"
 
 
@@ -474,7 +529,7 @@ def test_generated_code_compiles_in_v8():
 
     MiniRacer = _v8()
     specs = node_specs()
-    sources = [made["code"] for node in _all_nodes(specs) if (made := codegen.generate(node, specs))["kind"] != "flow"]
+    sources = [made["code"] for node in _all_nodes(specs) if (made := codegen.generate(node, specs))["convertible"]]
     sources += [example["code"] for example in codegen.EXAMPLES]
     for source in sources:
         ctx = MiniRacer()

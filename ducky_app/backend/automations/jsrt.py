@@ -31,8 +31,12 @@ _log = logging.getLogger("automations.jsrt")
 FILE_NAME = "ducky-node.js"
 _PREFIX = '"use strict";'
 _FLAGS = ("--single-threaded", "--disallow-code-generation-from-strings")
-_NODE_EXPORT = re.compile(r"^([ \t]*)(export)([ \t]+const[ \t]+node\b)", re.M)
-_RUN_EXPORT = re.compile(r"^([ \t]*)(export[ \t]+default)([ \t]+(?:async[ \t]+)?function[ \t]*run\b)", re.M)
+_NODE_EXPORT = re.compile(r"\b(export)\s+const\s+node\b")
+_RUN_EXPORT = re.compile(r"\b(export\s+default)\s+(?:async\s+)?function\s*run\b")
+# Syntax check: a script that throws this before it does anything, so V8 reports any
+# syntax error in all of it (as it would at run time) and runs none of it.
+_PARSED = "@@ducky-parsed@@"
+_GUARD = f'throw "{_PARSED}";'
 _FRAME = re.compile(re.escape(FILE_NAME) + r":(\d+):(\d+)")
 _WHERE = re.compile(r"^(?:[^\n:]*):(\d+): (.*)$")
 _PATHS = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|/(?:Users|home|tmp|var|opt|private)/)[^\s'\"<>|:*?]*")
@@ -79,9 +83,19 @@ def _load() -> Any:
 
 
 def strip_exports(code: str) -> str:
-    """Blank the two ``export`` keywords in place (same lines, same columns)."""
-    code = _NODE_EXPORT.sub(lambda m: m.group(1) + " " * len(m.group(2)) + m.group(3), code, count=1)
-    return _RUN_EXPORT.sub(lambda m: m.group(1) + re.sub(r"[^\n]", " ", m.group(2)) + m.group(3), code, count=1)
+    """Blank the two ``export`` keywords in place (same lines, same columns), wherever
+    they stand in the code (never inside its strings or comments)."""
+    from backend.automations.code_check import mask
+
+    masked = mask(code)
+    out = list(code)
+    for pattern in (_NODE_EXPORT, _RUN_EXPORT):
+        found = pattern.search(masked)
+        if found:
+            for k in range(found.start(1), found.end(1)):
+                if out[k] not in "\r\n":
+                    out[k] = " "
+    return "".join(out)
 
 
 def sanitize(message: Any, limit: int = 500) -> str:
@@ -133,18 +147,20 @@ def _check_syntax(code: str) -> list[Problem]:
         engine = _load()
     except EngineMissing as exc:
         return [{"line": 1, "col": 1, "message": str(exc), "severity": "error"}]
-    # Wrapped in a function that is never called: V8 parses all of it (inner functions
-    # too) and reports the first syntax error.
-    source = "(function(){" + _PREFIX + strip_exports(code) + "\n})"
+    # Compiled as the script it runs as (so a top-level return is an error here too), and
+    # stopped by the guard in front of it before any of it runs.
+    source = _PREFIX + _GUARD + strip_exports(code)
     try:
         with engine.MiniRacer() as mr:
             mr.eval(source, timeout_sec=5)
     except engine.JSTimeoutException:
         return [{"line": 1, "col": 1, "message": "Checking the code took too long.", "severity": "warning"}]
     except engine.JSEvalException as exc:
+        if _PARSED in str(exc) and not isinstance(exc, engine.JSParseException):
+            return []  # it compiled, and the guard stopped it
         line, col, message = _where(str(exc))
         if line is not None and col is not None and line == 1:
-            col = max(1, col - len("(function(){"))
+            col = max(1, col - len(_GUARD))
         return [{"line": line or 1, "col": col or 1, "message": sanitize(message, 300), "severity": "error"}]
     return []
 

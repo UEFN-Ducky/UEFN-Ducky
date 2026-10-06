@@ -32,13 +32,22 @@ _AGENT_WAIT_CAP_S = 900.0
 # workflow inherits from its caller besides the inputs it is given.
 _CALL_DEPTH_CAP = 8
 _CALL_STACK: ContextVar[tuple[str, ...]] = ContextVar("workflow_call_stack", default=())
-# "_person_started": a person pressed play on the run, so the workflows it runs count as run by them.
-_RUN_PLUMBING = ("caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id", "files", "_person_started")
-# Run fields only the app sets: what a person did (pressed play, approved spending).
+_RUN_PLUMBING = ("caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id", "files")
+# Payload keys the panel sets when a person pressed play (or approved spending). Read
+# once, when the outermost run starts; a run's fields never carry them further.
 _PERSON_KEYS = ("_person_started", "_spend_approved")
 _RETURN_KEY = "_returned"
 # Shared runs hand every field back except where this run reports and its own returns.
-_NOT_SHARED_BACK = frozenset({_RETURN_KEY, "caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id"})
+_NOT_SHARED_BACK = frozenset({_RETURN_KEY, "caller_conv_id", "artifact_dir", "pipeline_run_id", "group_id", "group_folder_id", *_PERSON_KEYS})
+# Who started the run, fixed when the outermost run starts and inherited by the
+# workflows it runs: a person pressed play (or Test), a person approved spending, and
+# the chat whose ducky called it. Nothing a step makes can change them.
+_PERSON: ContextVar[bool] = ContextVar("workflow_person_started", default=False)
+_SPEND: ContextVar[bool] = ContextVar("workflow_spend_approved", default=False)
+_RUN_CHAT: ContextVar[str] = ContextVar("workflow_run_chat", default="")
+# A node that Custom code runs through ducky.builtin: what it is given was made at run
+# time, so nothing in it counts as typed into the saved workflow.
+_FROM_CODE: ContextVar[bool] = ContextVar("workflow_node_from_code", default=False)
 _PLACEHOLDER = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 _END_TYPES = frozenset({"pipeline.finish", "flow.end", "flow.output"})
 # Stop: every run of a workflow (and the workflows it calls) shares one event; the
@@ -299,14 +308,11 @@ def run_node(
         if other != nid and other in nodes and other not in remake:
             flow.outputs[other] = values
     ctx: dict[str, Any] = {"caller_conv_id": _caller("")}
-    if approve_spend:
-        ctx["_spend_approved"] = True
-    if person:
-        ctx["_person_started"] = True
     _prepare_run_ctx(ctx, wf)
     ctx["nodes"] = dict(flow.outputs)
     wid = str(wf["id"])
     run_id = uuid.uuid4().hex[:12]
+    flags = _start_run(person, approve_spend)
     cancel = threading.Event()
     cancel_token, live_token = _CANCEL.set(cancel), _LIVE.set((wid, run_id))
     stack_token = _CALL_STACK.set((*_CALL_STACK.get(), wid))
@@ -337,6 +343,7 @@ def run_node(
         _CALL_STACK.reset(stack_token)
         _LIVE.reset(live_token)
         _CANCEL.reset(cancel_token)
+        _end_run(flags)
     _push({"type": "workflow_run", "id": wid, "run": run_id, "state": "stopped" if cancel.is_set() else "done" if ok else "error", **({"error": error} if error else {})})
     node_outputs = flow.summary()
     steps = list(flow.order)
@@ -344,7 +351,8 @@ def run_node(
     if kept_from and ok:
         record["kept"] = list(kept_from)
     append_run(wid, record)
-    return {"ok": ok, "error": error, "id": wid, "steps": steps, "node_outputs": node_outputs}
+    out = {"ok": ok, "error": error, "id": wid, "steps": steps, "node_outputs": node_outputs}
+    return {**out, "needs_review": True} if not ok and _needs_review(steps) else out
 
 
 def run_code_draft(
@@ -509,15 +517,16 @@ def run_workflow(
     if not starts and (trigger_id or not flow.data_nodes):
         return {"ok": False, "error": "No start found. Leave an input unconnected or choose a start node.", "steps": [], "id": wf["id"]}
     ctx: dict[str, Any] = dict(payload or {})
+    asked = {key: bool(ctx.pop(key, None)) for key in _PERSON_KEYS}  # the panel's payload says what a person did
     if prompt:
         ctx["prompt"] = prompt
     if files is not None:
         ctx["files"] = files
     ctx["caller_conv_id"] = _caller(caller_conv_id or str(ctx.get("caller_conv_id") or ""))
-    if ctx["caller_conv_id"] and not _CALL_STACK.get():
-        ctx.pop("_person_started", None)  # a chat's ducky started it, not a person in the editor
     ctx["workflow_name"] = str(wf.get("name") or "")
     _prepare_run_ctx(ctx, wf)
+    # A chat's ducky started it (not a person in the editor) when it reports to a chat.
+    flags = _start_run(asked["_person_started"] and not ctx["caller_conv_id"], asked["_spend_approved"], by_step=True)
     ident_token = _bind_hub_identity(ctx)
     stack_token = _CALL_STACK.set((*_CALL_STACK.get(), str(wf["id"])))
     cancel = _CANCEL.get() or threading.Event()
@@ -558,6 +567,7 @@ def run_workflow(
         _LIVE.reset(live_token)
         _CANCEL.reset(cancel_token)
         _CALL_STACK.reset(stack_token)
+        _end_run(flags)
         if ident_token is not None:
             from backend.workspace import identity
 
@@ -594,6 +604,7 @@ def run_workflow(
         "files": ctx.get("files") or [],
         "text": ctx.get("text") or ctx.get("assistant_text") or "",
         "outputs": dict(ctx.get(_RETURN_KEY) or {}),
+        **({"needs_review": True} if not ok and _needs_review(steps) else {}),
     }
 
 
@@ -643,6 +654,56 @@ def public_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     """A run payload from outside (an agent's tool call, a trigger) without the fields
     only the app sets for what a person did."""
     return {key: value for key, value in (payload or {}).items() if key not in _PERSON_KEYS}
+
+
+def started_by_person() -> bool:
+    """A person pressed play or Test on the run going now (or on the one that runs it)."""
+    return _PERSON.get()
+
+
+def spend_approved() -> bool:
+    """A person pressed play on the run going now and so approved its paid steps."""
+    return _SPEND.get()
+
+
+def run_chat() -> str:
+    """The chat whose ducky started the run going now ('' when none): who called, as the
+    app knows it, never a chat named in the call or the run's fields."""
+    return _RUN_CHAT.get()
+
+
+def _calling_chat() -> str:
+    try:
+        from backend.workspace.identity import current
+
+        bound = current()
+    except Exception:
+        bound = None
+    return str(bound.conv_id or "").strip() if bound else ""
+
+
+def _start_run(person: bool, spend: bool, *, by_step: bool = False) -> tuple[contextvars.Token, ...] | None:
+    """Fix who started the run, at the outermost run only: a nested run keeps its caller's.
+    by_step: a step started this run (a tool such as run_workflow or a trigger): it keeps
+    the chat it runs for, but no person pressed play on it."""
+    if _CALL_STACK.get():
+        return (_PERSON.set(False), _SPEND.set(False), _RUN_CHAT.set(_RUN_CHAT.get())) if by_step else None
+    return _PERSON.set(bool(person)), _SPEND.set(bool(spend)), _RUN_CHAT.set(_calling_chat())
+
+
+def _end_run(tokens: tuple[contextvars.Token, ...] | None) -> None:
+    if tokens:
+        _RUN_CHAT.reset(tokens[2])
+        _SPEND.reset(tokens[1])
+        _PERSON.reset(tokens[0])
+
+
+def _needs_review(steps: list[Any]) -> bool:
+    """A Custom code step (here or in a workflow this one ran) waits for a person's review."""
+    for step in steps or []:
+        if isinstance(step, dict) and (step.get("needs_review") or _needs_review(step.get("substeps") or [])):
+            return True
+    return False
 
 
 def emit_trigger(trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -827,7 +888,7 @@ def _walk(
             error = str(step.get("error") or "step failed")
             break
         if step.get("result") and isinstance(step["result"], dict):
-            ctx.update({k: v for k, v in step["result"].items() if k not in ("ok",)})
+            ctx.update({k: v for k, v in step["result"].items() if k != "ok" and k not in _PERSON_KEYS})
         if ntype in _END_TYPES or step.get("stop"):
             continue
         kind = "true" if step.get("branch") else "false" if "branch" in step else "main"
@@ -1052,7 +1113,7 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
     elif ntype == "start.chat" and label in ("Chat", ntype):
         label = "Chat input"
     try:
-        if payload.get("_spend_approved") and (ntype in media.BACKENDS):
+        if spend_approved() and (ntype in media.BACKENDS):
             cfg = {**cfg, "spend": True}  # a person pressed play on this run: that is the approval
         if ntype in media.BACKENDS:
             return {**media.run_media(ntype, cfg, values, _node_folder(node)), "id": node.get("id"), "type": ntype, "label": label}
@@ -2098,6 +2159,8 @@ def typed_command_approved(command: str) -> bool:
 
 def _typed_command(name: str, cfg: dict[str, Any], raw: dict[str, Any]) -> str:
     """The command typed into this Run terminal step of a Local workflow, else ''."""
+    if _FROM_CODE.get():
+        return ""
     if name != "ducky_terminal_run" or (cfg.get("arguments") is None and not cfg.get("arguments_json")):
         return ""
     command = raw.get("command")
@@ -2259,6 +2322,8 @@ def _call_workflow(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str
         ctx = {key: payload[key] for key in _RUN_PLUMBING if key in payload}
     ctx.update({str(key).strip(): _template(value, payload) for key, value in args.items() if str(key).strip()})
     ctx.update({str(key): value for key, value in (wired or {}).items()})  # wired pins win over typed values
+    for key in _PERSON_KEYS:
+        ctx.pop(key, None)  # who started the run comes with the run, never as a field
     _prepare_run_ctx(ctx, wf)
     new_hub = ctx.get("group_id") and ctx.get("group_id") != payload.get("group_id")
     ident_token = _bind_hub_identity(ctx) if new_hub else None

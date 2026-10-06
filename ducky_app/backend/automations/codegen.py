@@ -375,6 +375,11 @@ def generate(node: dict[str, Any], specs: dict[str, dict[str, Any]] | None = Non
         made = _input(ntype, cfg, pins, header)
     elif ntype in _REAL:
         made = _REAL[ntype](cfg, pins, header)
+    if made is None and ntype == "tool.call":
+        reason = ("Choose the tool and type its arguments first: custom code calls a tool it names (ducky.tool), "
+                  "never one the run picks.")
+        return {"code": _comment([f"{label}: the built-in {ntype} node.", reason]) + "\n", "kind": "host",
+                "convertible": False, "reason": reason}
     if made is None:
         notes = [n for n in notes if n != _TYPE_NOTES.get("tool.call")]
         header = [f"{label}: runs the built-in {ntype} step (Python) with the settings below.",

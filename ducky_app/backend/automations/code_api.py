@@ -36,6 +36,12 @@ FLOW_TYPES = frozenset(
     }
 )
 
+# Built-ins code can't run through ducky.builtin either, and what it uses instead: Call
+# tool would take any tool and any command built at run time past node.tools.
+NOT_BUILTINS: dict[str, str] = {
+    "tool.call": "tool.call can't run through ducky.builtin: call tools with ducky.tool and list each one in node.tools.",
+}
+
 BLANK_CODE = """// @ts-check
 export const node = {
   kind: "step",
@@ -79,7 +85,8 @@ MANIFEST: list[dict[str, Any]] = [
         "doc": (
             "Runs a built-in node type listed in node.builtins with these input values and settings and returns its "
             "outputs. Paid generators spend only when this node's Spend switch is on or a person pressed play; a "
-            "spend value passed here is ignored. Start, loop, branch and end nodes can't be run this way."
+            "spend value passed here is ignored. Start, loop, branch and end nodes can't be run this way, and neither "
+            "can Call tool (use ducky.tool)."
         ),
         "async": True,
     },
@@ -135,10 +142,13 @@ MANIFEST: list[dict[str, Any]] = [
 
 
 def dts() -> str:
-    """TypeScript declarations for ``import("ducky").Ducky`` (a module, so Monaco keeps it apart)."""
-    lines = ['declare module "ducky" {', "  export interface Ducky {"]
+    """TypeScript declarations for ``import("ducky").Ducky`` (a module, so Monaco keeps it apart).
+    ToolArgs is empty here; the Code tab adds each listed tool's arguments to it."""
+    lines = ['declare module "ducky" {', "  export interface ToolArgs {}", "  export interface Ducky {"]
     for entry in MANIFEST:
         lines.append(f"    /** {entry['doc']} */")
+        if entry["name"] == "tool":
+            lines.append("    tool<K extends keyof ToolArgs>(name: K, args?: ToolArgs[K]): Promise<any>;")
         lines.append(f"    {entry['ts']};")
     lines += ["  }", "}", ""]
     return "\n".join(lines)

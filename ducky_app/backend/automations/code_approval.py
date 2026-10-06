@@ -126,30 +126,36 @@ def node_sha(node: dict[str, Any]) -> str:
     return code_sha(code) if isinstance(code, str) else ""
 
 
-def _caller_allows_everything(ctx: dict[str, Any]) -> bool:
-    caller = str(ctx.get("caller_conv_id") or "").strip()
-    if not caller:
+def _calling_chat_allows_everything() -> bool:
+    from backend.automations.runner import run_chat
+
+    chat = run_chat()
+    if not chat:
         return False
     try:
         from backend.tools.panel.permission_prompt import allows_everything
 
-        return bool(allows_everything(caller))
+        return bool(allows_everything(chat))
     except Exception:
         return False
 
 
-def gate(wf: dict[str, Any], node: dict[str, Any], ctx: dict[str, Any]) -> str | None:
-    """None when this code node may run now, else why not (the step fails with it)."""
+def gate(wf: dict[str, Any], node: dict[str, Any], ctx: dict[str, Any] | None = None) -> str | None:
+    """None when this code node may run now, else why not (the step fails with it).
+    Who started the run comes from the runner, fixed when it started; the run's fields
+    (``ctx``) never count, since any step can write them."""
     if not is_local(wf):
         return TEAM_REFUSAL
+    from backend.automations.runner import started_by_person
+
     wid, nid = str(wf.get("id") or ""), str(node.get("id") or "")
     sha = node_sha(node)
     if is_approved(wid, nid, sha):
         return None
-    if ctx.get("_person_started"):
+    if started_by_person():
         approve(wid, nid, sha, "person")
         return None
-    if _caller_allows_everything(ctx):
+    if _calling_chat_allows_everything():
         approve(wid, nid, sha, "chat")
         return None
     return REVIEW
