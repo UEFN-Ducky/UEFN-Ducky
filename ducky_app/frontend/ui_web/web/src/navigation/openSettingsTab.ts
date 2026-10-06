@@ -107,6 +107,20 @@ export function registerOpenSettingsView(fn: () => void): () => void {
   };
 }
 
+let closeSettingsView: (() => void) | null = null;
+
+/** App-level: leave the full Settings page for the main view (a project keeps Settings as a tab). */
+export function registerCloseSettingsView(fn: () => void): () => void {
+  closeSettingsView = fn;
+  return () => {
+    if (closeSettingsView === fn) closeSettingsView = null;
+  };
+}
+
+export function requestCloseSettingsView(): void {
+  closeSettingsView?.();
+}
+
 /** ChatView: open/focus the Settings editor tab when a project is loaded. */
 export function registerOpenSettingsEditorTab(fn: () => void): () => void {
   openSettingsEditorTab = fn;

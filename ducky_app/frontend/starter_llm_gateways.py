@@ -15,11 +15,10 @@ STARTER_UEFN_PLUGIN_SLUGS: tuple[str, ...] = (
     "leveldesign",
     "materials",
     "vfx",
-    "light",
     "animation",
     "modeling",
     "scenegraph",
-    "physics",
+    "uefn-physics",
     "metahuman",
     "tester",
     "translation",
@@ -36,11 +35,10 @@ STARTER_PLUGIN_LABELS: dict[str, str] = {
     "leveldesign": "Level Design",
     "materials": "Materials",
     "vfx": "VFX",
-    "light": "Lighting",
     "animation": "Animation",
     "modeling": "Modeling",
     "scenegraph": "Scene Graph",
-    "physics": "Physics",
+    "uefn-physics": "Physics",
     "metahuman": "MetaHuman",
     "tester": "Tester",
     "translation": "Translation",
@@ -155,13 +153,29 @@ def starter_llm_onboard_pending() -> dict[str, Any]:
         return {"ok": True, "pending": True}
 
 
+def starter_plugins() -> list[dict[str, Any]]:
+    """The bundle the first-run setup installs, in install order, with what is on disk now."""
+    from backend.uefn_plugins.store import is_plugin_installed
+
+    return [
+        {
+            "slug": slug,
+            "label": STARTER_PLUGIN_LABELS.get(slug, slug),
+            "group": "gateway" if slug in STARTER_LLM_GATEWAY_SLUGS else "editor",
+            "installed": bool(is_plugin_installed(slug)),
+        }
+        for slug in POPULAR_PLUGIN_SLUGS
+    ]
+
+
 def starter_setup_status() -> dict[str, Any]:
-    """Whether the first-run explainer is pending, and which gateway plugins exist."""
+    """Whether the first-run setup is pending, which gateway plugins exist, and the bundle."""
     pending = starter_llm_onboard_pending()
     return {
         "ok": True,
         "pending_first_run": bool(pending.get("pending")),
         "gateway_ids": installed_gateway_ids(),
+        "plugins": starter_plugins(),
     }
 
 

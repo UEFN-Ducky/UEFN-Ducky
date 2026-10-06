@@ -50,7 +50,7 @@ import {
 import { UndoHistoryProvider, useUndoHistoryOptional } from "./navigation/UndoHistoryContext";
 import { useNavigationShortcuts } from "./navigation/useNavigationShortcuts";
 import { useUndoShortcuts } from "./navigation/useUndoShortcuts";
-import { registerOpenSettingsView, requestOpenSettings } from "./navigation/openSettingsTab";
+import { registerCloseSettingsView, registerOpenSettingsView, requestOpenSettings } from "./navigation/openSettingsTab";
 import { installDeepLinkListeners, peekStoreInstallRequest, requestOpenStore } from "./navigation/deepLinks";
 import { installOpenFromParent } from "./remote/openFromParent";
 import { nextChatLayoutMode, type ViewId } from "./types/panel";
@@ -180,6 +180,8 @@ export default function App() {
       setCurrentView((view) => (view === "settings" ? view : "settings"));
     });
   }, []);
+
+  useEffect(() => registerCloseSettingsView(() => setCurrentView("chat")), []);
 
   useEffect(() => {
     void loadAudioSettings();

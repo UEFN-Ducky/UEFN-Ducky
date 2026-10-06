@@ -8,7 +8,7 @@ import { useVerseOutlineDockPanel } from "./panels/VerseOutlineDockPanel";
 import { useVerseHistoryDockPanel } from "./panels/VerseHistoryDockPanel";
 import { useTesterDockPanel } from "./panels/TesterDockPanel";
 import { requestOpenDiscordTab, setDiscordTabOpen, useDiscordTabOpen } from "../navigation/openDiscordTab";
-import { OPEN_SIDEBAR_PANEL_EVENT } from "../navigation/openSidebarPanel";
+import { OPEN_DOCK_SIDE_EVENT, OPEN_SIDEBAR_PANEL_EVENT } from "../navigation/openSidebarPanel";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useNarrowLayout } from "../hooks/useNarrowLayout";
 import { useOverlayRailSession } from "../hooks/useOverlayRailSession";
@@ -420,13 +420,26 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
         setRightOpen(true);
       }
     };
+    const openDockSideRef = useRef<(side: "left" | "right") => void>(() => {});
+    openDockSideRef.current = (side) => {
+      if (side === "left" && leftRailAllowed && !leftOpen) setLeftOpen(true);
+      if (side === "right" && rightRailAllowed && !rightOpen) setRightOpen(true);
+    };
     useEffect(() => {
       const onOpen = (event: Event) => {
         const panel = (event as CustomEvent<{ panel?: string }>).detail?.panel;
         if (panel === "chats" || panel === "files") openSideForPanelRef.current(panel);
       };
+      const onOpenSide = (event: Event) => {
+        const side = (event as CustomEvent<{ side?: string }>).detail?.side;
+        if (side === "left" || side === "right") openDockSideRef.current(side);
+      };
       window.addEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
-      return () => window.removeEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+      window.addEventListener(OPEN_DOCK_SIDE_EVENT, onOpenSide);
+      return () => {
+        window.removeEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+        window.removeEventListener(OPEN_DOCK_SIDE_EVENT, onOpenSide);
+      };
     }, []);
     const swipe = useRailEdgeSwipe({
       enabled: overlay,

@@ -37,7 +37,15 @@ export async function peekStarterLlmOnboard(): Promise<{ pending: boolean }> {
   }
 }
 
-let popularInflight: Promise<void> | null = null;
+/** What the bundle job reports: installed, already there, and per-plugin errors. */
+export type StarterInstallResult = {
+  ok?: boolean;
+  installed?: string[];
+  skipped?: string[];
+  errors?: Array<{ slug: string; error: string; code?: string }>;
+};
+
+let popularInflight: Promise<StarterInstallResult> | null = null;
 
 async function whenPanelApiReady(): Promise<void> {
   const { getApi } = await import("../hooks/usePanelApi");
@@ -57,12 +65,12 @@ async function whenPanelApiReady(): Promise<void> {
 }
 
 /** One bundle job. A second call waits for the job already running. */
-export function ensurePopularPlugins(force = false): Promise<void> {
+export function ensurePopularPlugins(force = false): Promise<StarterInstallResult> {
   if (popularInflight) return popularInflight;
   popularInflight = (async () => {
     await whenPanelApiReady();
     const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
-    await runBridgeJob("ensure_starter_llm_gateways", [force], 1_200_000);
+    return runBridgeJob<StarterInstallResult>("ensure_starter_llm_gateways", [force], 1_200_000);
   })().finally(() => {
     popularInflight = null;
   });

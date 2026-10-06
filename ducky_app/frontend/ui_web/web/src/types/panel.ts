@@ -1759,6 +1759,14 @@ export interface UefnPluginDto {
 /** Coding-agent id: host ``ducky`` plus any Store gateway contribution id. */
 export type CodingAgentId = string;
 
+/** One plugin of the first-run bundle: an AI gateway or a UEFN editor tool. */
+export interface StarterPluginDto {
+  slug: string;
+  label: string;
+  group: "gateway" | "editor";
+  installed: boolean;
+}
+
 export interface CodingAgentDto {
   id: CodingAgentId | string;
   label: string;
@@ -2735,6 +2743,8 @@ export interface PanelApi {
     ok?: boolean;
     pending_first_run?: boolean;
     gateway_ids?: string[];
+    /** The first-run bundle, in install order, with what is on disk now. */
+    plugins?: StarterPluginDto[];
     error?: string;
   }>;
   ensure_starter_llm_gateways?(force?: boolean): Promise<{
