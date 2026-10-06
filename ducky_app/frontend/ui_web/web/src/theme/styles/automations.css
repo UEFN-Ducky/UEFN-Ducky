@@ -759,6 +759,16 @@
 .aw-insp-section > .aw-field > input:focus, .aw-insp-section > .aw-field > textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 .aw-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .aw-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+/* A backend that isn't set up: the button that goes where it's fixed, and its Show me. */
+.aw-backend-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.aw-backend-setup .is-primary {
+  display: inline-flex; align-items: center; min-height: 30px; padding: 4px 12px;
+  border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--fg-inverse);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.aw-backend-setup .is-primary:hover { background: var(--accent-hover, var(--accent)); }
+.aw-backend-setup .aw-link { font-size: 12px; }
+@media (pointer: coarse) { .aw-backend-setup .is-primary { min-height: 40px; } }
 .aw-swatch { width: 26px; height: 26px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--aw-tint, var(--aw-group-color, var(--aw-role-color))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wf-canvas) 30%, transparent); cursor: pointer; }
 .aw-swatch[aria-checked="true"] { border-color: var(--text); box-shadow: inset 0 0 0 2px var(--panel-header); }
 .aw-insp-members { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }

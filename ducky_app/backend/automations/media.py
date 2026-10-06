@@ -419,23 +419,47 @@ def plugin_label(row: dict[str, Any]) -> str:
     return _manifest_label(str(row.get("plugin_id") or "")) or row["plugin"]
 
 
-def why_not(row: dict[str, Any], label: str = "") -> str:
-    """What to do so this backend can run: install, turn on, or add the key."""
-    name = label or row["plugin"]
+def _missing(row: dict[str, Any]) -> str:
+    """What stops this backend: "install", "enable", "key", or "" when nothing known."""
     pid = str(row.get("plugin_id") or "")
     try:
         from backend.uefn_plugins.host import is_plugin_enabled
         from backend.uefn_plugins.store import is_plugin_installed
 
         if pid and not is_plugin_installed(pid):
-            return f"Install the {name} plugin from the Store."
+            return "install"
         if pid and not is_plugin_enabled(pid):
-            return f"Turn on the {name} plugin in Plugins."
+            return "enable"
     except Exception:
         pass
     if row.get("node") and not _has_key(str(row.get("key") or "")):
-        return f"Add your {name} API key in Settings."
-    return f"Turn on the {name} plugin in the Store and add its API key."
+        return "key"
+    return ""
+
+
+def why_not(row: dict[str, Any], label: str = "") -> str:
+    """What to do so this backend can run: install, turn on, or add the key."""
+    name = label or row["plugin"]
+    return {
+        "install": f"Install the {name} plugin from the Store.",
+        "enable": f"Turn on the {name} plugin in Plugins.",
+        "key": f"Add your {name} API key in Settings.",
+    }.get(_missing(row), f"Turn on the {name} plugin in the Store and add its API key.")
+
+
+def setup_for(row: dict[str, Any], label: str = "") -> dict[str, str] | None:
+    """Where to fix it, for the details' button and its Show me: the plugin's Store page
+    (install / turn on) or the gateway's API key in Settings > LLMs."""
+    name = label or row["plugin"]
+    pid = str(row.get("plugin_id") or "")
+    missing = _missing(row)
+    if missing in ("install", "enable") and pid:
+        verb = "Get" if missing == "install" else "Turn on"
+        return {"kind": missing, "route": "settings.store", "item": pid, "label": f"{verb} {name}"}
+    if missing == "key":
+        return {"kind": "key", "route": "settings.llms", "item": str(row.get("key") or pid),
+                "label": f"Add your {name} API key"}
+    return None
 
 
 def cost_text(row: dict[str, Any]) -> str:
@@ -452,9 +476,11 @@ def backends_for(ntype: str) -> list[dict[str, Any]]:
     for row in table(ntype):
         ready = is_ready(row)
         label = plugin_label(row)
+        setup = None if ready else setup_for(row, label)
         out.append({
             "id": row["id"], "label": row["label"], "plugin": label, "credits": row["credits"], "cost": cost_text(row),
             "available": ready, **({} if ready else {"reason": why_not(row, label)}),
+            **({"setup": setup} if setup else {}),
             **({"config_fields": row["config_fields"], "model": row["model"], "own_key": True} if row.get("node")
                else {"config_fields": row["config_fields"]} if row.get("config_fields") else {}),
             **({"paid": True} if row.get("paid") is True else {}),

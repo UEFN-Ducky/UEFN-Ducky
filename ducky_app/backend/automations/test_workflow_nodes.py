@@ -307,10 +307,31 @@ def test_backends_say_who_makes_them_and_what_is_missing(tools, gateway):
     assert rows["openai_image"]["available"] and rows["openai_image"]["cost"] == "Your own API key"
     google = rows["google_imagen"]
     assert google["available"] is False and "Google" in google["reason"]
+    assert "setup" not in rows["openai_image"]
     step = run("image.generate", {"backend": "google_imagen", "spend": True}, {"prompt": "a duck"})
     assert step["ok"] is False and "Google" in step["error"]
     # A gateway we don't know by name is still listed from its plugin's image node.
     assert rows["spacexai_image"]["label"] == "Spacexai image" and rows["spacexai_image"]["cost"] == "Your own API key"
+
+
+def test_setup_names_the_store_page_when_the_plugin_is_missing_or_off(monkeypatch):
+    import backend.uefn_plugins.host as host
+    import backend.uefn_plugins.store as store
+
+    row = {"id": "cards_art", "label": "Card art", "plugin": "Cards", "plugin_id": "cards", "tool": "cards_art", "credits": 1}
+    monkeypatch.setattr(store, "is_plugin_installed", lambda _pid: False)
+    assert media.setup_for(row) == {"kind": "install", "route": "settings.store", "item": "cards", "label": "Get Cards"}
+    monkeypatch.setattr(store, "is_plugin_installed", lambda _pid: True)
+    monkeypatch.setattr(host, "is_plugin_enabled", lambda _pid: False)
+    assert media.setup_for(row) == {"kind": "enable", "route": "settings.store", "item": "cards", "label": "Turn on Cards"}
+    assert media.why_not(row) == "Turn on the Cards plugin in Plugins."
+    monkeypatch.setattr(host, "is_plugin_enabled", lambda _pid: True)
+    assert media.setup_for(row) is None  # nothing known to fix (a tool row needs no key)
+    # A gateway that's installed and on but has no key: its key in Settings > LLMs.
+    monkeypatch.setattr(media, "_has_key", lambda _provider: False)
+    google = media._gateway("google", "google.image")
+    assert media.setup_for(google, "Google") == {"kind": "key", "route": "settings.llms", "item": "gemini", "label": "Add your Google API key"}
+    assert media.why_not(google, "Google") == "Add your Google API key in Settings."
 
 
 def test_only_installed_gateways_are_listed(tools, monkeypatch):

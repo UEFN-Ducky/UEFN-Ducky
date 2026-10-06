@@ -286,6 +286,16 @@ export interface FileRefDto {
 }
 
 /** One way an image / 3D node can run: a plugin tool, its cost, ready here or why not. */
+export interface AutomationBackendSetupDto {
+  /** install / enable the plugin (its Store page) or add the gateway's API key (Settings > LLMs). */
+  kind: "install" | "enable" | "key";
+  /** openPanelRoute route and item: settings.store + plugin slug, settings.llms + provider id. */
+  route: string;
+  item: string;
+  /** The button's words ("Add your Google API key"). */
+  label: string;
+}
+
 export interface AutomationBackendDto {
   id: string;
   label: string;
@@ -297,6 +307,8 @@ export interface AutomationBackendDto {
   available: boolean;
   /** Why it can't run here: install, turn on, or add the key. */
   reason?: string;
+  /** Where to fix it: a panel route (+ item) for the details' button and its Show me. */
+  setup?: AutomationBackendSetupDto;
   /** Controls declared by the direct image handler (its image models) or a plugin's image tool (size, quality). */
   config_fields?: AutomationFieldDto[];
   model?: string;
