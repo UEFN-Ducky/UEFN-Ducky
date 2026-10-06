@@ -55,7 +55,7 @@ async function setupMonacoOnce(): Promise<Monaco> {
   verseEditorLog("setup", "start");
   configureMonacoWorkers();
   // One round trip: the editor and its Verse language setup land together.
-  const [monaco, textMate, snippets, theme, formatter, askAi, contextMenu] = await Promise.all([
+  const [monaco, textMate, snippets, theme, formatter, askAi, contextMenu, configLanguages] = await Promise.all([
     import("monaco-editor"),
     import("./registerVerseTextMate"),
     import("./registerVerseSnippets"),
@@ -63,7 +63,9 @@ async function setupMonacoOnce(): Promise<Monaco> {
     import("../format/registerVerseFormatter"),
     import("./registerAskAiContextMenu"),
     import("./patchEditorContextMenu"),
+    import("./registerConfigLanguages"),
   ]);
+  configLanguages.registerConfigLanguages(monaco);
   await textMate.registerVerseTextMate(monaco);
   snippets.registerVerseSnippets(monaco);
   theme.registerVerseMonacoTheme(monaco);

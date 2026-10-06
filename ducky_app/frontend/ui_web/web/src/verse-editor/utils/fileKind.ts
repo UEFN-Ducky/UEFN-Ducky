@@ -245,11 +245,14 @@ export function isEditableTextFilePath(relativePath: string): boolean {
   return classifyFilePath(relativePath) === "text";
 }
 
-/** Monaco language id for a path (dotfiles → plaintext). */
+/** Monaco language id for dotfiles and extensionless names (dotenv/ignore are registered in setupMonaco). */
 export function monacoLanguageForFileKind(relativePath: string): string | null {
   const name = fileBasename(relativePath).toLowerCase();
-  if (name === ".gitignore" || name.endsWith(".gitignore")) return "plaintext";
-  if (name === "dockerfile" || name.startsWith("dockerfile.")) return "plaintext";
+  if (name === ".env" || name.startsWith(".env.") || name.endsWith(".env")) return "dotenv";
+  if (name.startsWith(".") && name.endsWith("ignore")) return "ignore";
+  if (name === ".gitattributes") return "ignore";
+  if (name === ".editorconfig" || name === ".npmrc") return "ini";
+  if (name === "dockerfile" || name.startsWith("dockerfile.")) return "dockerfile";
   if (name === "makefile" || name === "gnumakefile") return "plaintext";
   return null;
 }

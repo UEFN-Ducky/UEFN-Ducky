@@ -8,7 +8,7 @@ import {
   isKnownTextFilename,
   isVideoFilePath,
 } from "./fileKind";
-import { monacoLanguageForFence } from "./isVerseFile";
+import { monacoLanguageForFence, monacoLanguageForPath } from "./isVerseFile";
 
 describe("fileKind", () => {
   it("classifies common text / image / binary names", () => {
@@ -73,5 +73,25 @@ describe("monacoLanguageForFence", () => {
     expect(monacoLanguageForFence("ts")).toBe("typescript");
     expect(monacoLanguageForFence("", "using { /Fortnite.com/Devices }\n@editable X : int = 0")).toBe("verse");
     expect(monacoLanguageForFence("", "print('hello')")).toBe("plaintext");
+  });
+});
+
+describe("monacoLanguageForPath for config files", () => {
+  it("colours .env files with the dotenv language", () => {
+    for (const path of [".env", "C:/repo/.env", ".env.local", ".env.production", "deploy/prod.env", "app/.ENV"]) {
+      expect(monacoLanguageForPath(path)).toBe("dotenv");
+    }
+    expect(monacoLanguageForPath(".envrc")).not.toBe("dotenv");
+  });
+
+  it("gives other dotfiles a real language instead of plain text", () => {
+    expect(monacoLanguageForPath(".gitignore")).toBe("ignore");
+    expect(monacoLanguageForPath("web/.dockerignore")).toBe("ignore");
+    expect(monacoLanguageForPath(".gitattributes")).toBe("ignore");
+    expect(monacoLanguageForPath(".editorconfig")).toBe("ini");
+    expect(monacoLanguageForPath(".npmrc")).toBe("ini");
+    expect(monacoLanguageForPath("Dockerfile")).toBe("dockerfile");
+    expect(monacoLanguageForPath("docker/Dockerfile.dev")).toBe("dockerfile");
+    expect(monacoLanguageForPath("settings.ini")).toBe("ini");
   });
 });
