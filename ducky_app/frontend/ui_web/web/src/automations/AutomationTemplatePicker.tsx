@@ -7,10 +7,11 @@ import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { handleDeepLink } from "../navigation/deepLinks";
-import type { AutomationGraphDto, AutomationTemplateDto, WorkflowOwnerDto } from "../types/panel";
+import type { AutomationGraphDto, AutomationTemplateDto, WorkflowBundleDto, WorkflowOwnerDto } from "../types/panel";
 import { IconPicker } from "./IconPicker";
 import { WorkflowMiniature } from "./WorkflowHoverCard";
 import { ownerName } from "./WorkflowList";
+import { folderName, normalizeFolder, parentFolder } from "./workflowFolders";
 import { targetRef } from "../ui-targets/registry";
 
 const BLANK_ID = "__blank__";
@@ -20,6 +21,32 @@ export const TEMPLATE_CATEGORIES = ["Images", "3D", "Characters", "Text & AI", "
 
 export function templateCategory(template: AutomationTemplateDto): string {
   return template.category || (template.kind === "custom" ? "Yours" : template.kind === "plugin" ? "Plugins" : "UEFN");
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** A folder template's tree: its root folder, the folders inside, and every workflow where it goes. */
+export function BundleTree({ bundle, root }: { bundle: WorkflowBundleDto; root?: string }) {
+  const folders = new Set<string>();
+  const add = (path: string) => { for (let at = normalizeFolder(path); at; at = parentFolder(at)) folders.add(at); };
+  bundle.folders.forEach(add);
+  bundle.workflows.forEach((row) => add(row.folder));
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+  const level = (at: string, depth: number): JSX.Element[] => [
+    ...bundle.workflows.filter((row) => normalizeFolder(row.folder) === at).sort((a, b) => byName(a.name, b.name)).map((row) => (
+      <li key={`w:${row.key}`} className="vtm-tree-row vtm-tree-row--workflow" style={{ paddingLeft: depth * 14 }}>{row.name}</li>
+    )),
+    ...[...folders].filter((path) => parentFolder(path) === at).sort((a, b) => byName(folderName(a), folderName(b))).flatMap((path) => [
+      <li key={`f:${path}`} className="vtm-tree-row vtm-tree-row--folder" style={{ paddingLeft: depth * 14 }}><Icons.Folder />{folderName(path)}</li>,
+      ...level(path, depth + 1),
+    ]),
+  ];
+  return (
+    <ul className="vtm-tree" aria-label="What it makes">
+      <li className="vtm-tree-row vtm-tree-row--folder"><Icons.Folder />{root || bundle.root}</li>
+      {level("", 1)}
+    </ul>
+  );
 }
 
 function byShelf(a: string, b: string) {
@@ -38,6 +65,13 @@ interface AutomationTemplatePickerProps {
   owners?: WorkflowOwnerDto[];
   ownerId?: string;
   onOwnerChange?: (ownerId: string) => void;
+  /** Each owner's folders: where a folder template's folder can go. */
+  folders?: Record<string, string[]>;
+  /** The folder it goes in ("" = top level). */
+  folder?: string;
+  onFolderChange?: (folder: string) => void;
+  /** Open on Save folder as template for this folder (the Workflows list's folder menu). */
+  saveFolder?: { ownerId: string; path: string } | null;
 }
 
 const CloseIcon = () => (
@@ -64,6 +98,10 @@ export function AutomationTemplatePicker({
   owners = [],
   ownerId = "",
   onOwnerChange,
+  folders = {},
+  folder = "",
+  onFolderChange,
+  saveFolder = null,
 }: AutomationTemplatePickerProps) {
   const { confirm } = useConfirmModal();
   const [view, setView] = useState<"picker" | "creator">("picker");
@@ -80,6 +118,8 @@ export function AutomationTemplatePicker({
   const [formIcon, setFormIcon] = useState("⚡");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  // Save folder as template: the folder's tree as it will be kept.
+  const [folderBundle, setFolderBundle] = useState<WorkflowBundleDto | null>(null);
 
   const refresh = useCallback(async () => {
     const api = getApi();
@@ -113,11 +153,33 @@ export function AutomationTemplatePicker({
       setEditing(null);
       setCreating(false);
       setFormError("");
+      setFolderBundle(null);
       return;
     }
     void refresh();
     setSelectedId(BLANK_ID);
   }, [open, refresh]);
+
+  const saveOwner = saveFolder?.ownerId || "";
+  const savePath = saveFolder?.path || "";
+  useEffect(() => {
+    if (!open || !savePath) return;
+    let alive = true;
+    setEditing(null);
+    setFormName(folderName(savePath));
+    setFormDesc("");
+    setFormCategory("Yours");
+    setFormIcon("📁");
+    setFormError("");
+    setFolderBundle(null);
+    setView("creator");
+    void Promise.resolve(getApi()?.export_workflow_folder?.(saveOwner, savePath)).then((res) => {
+      if (!alive) return;
+      if (res?.bundle) setFolderBundle(res.bundle);
+      else setFormError(res?.error || "Could not read the folder");
+    }).catch(() => { if (alive) setFormError("Could not read the folder"); });
+    return () => { alive = false; };
+  }, [open, saveOwner, savePath]);
 
   const shelves = useMemo(() => [...new Set(templates.map(templateCategory))].sort(byShelf), [templates]);
 
@@ -208,6 +270,7 @@ export function AutomationTemplatePicker({
   );
 
   const savedGraph = editing?.graph || currentGraph || { nodes: [], edges: [] };
+  const savedBundle = savePath ? folderBundle : editing?.shape === "bundle" ? editing.bundle || null : null;
 
   const handleSaveCustom = useCallback(async () => {
     const name = formName.trim();
@@ -218,16 +281,24 @@ export function AutomationTemplatePicker({
     setSaving(true);
     setFormError("");
     try {
-      const res = await getApi()?.save_workflow_template?.(
-        name,
-        formDesc,
-        formIcon || "⚡",
-        JSON.stringify(savedGraph),
-        editing?.kind === "custom" ? editing.id : "",
-        formCategory,
-      );
+      const api = getApi();
+      const res = savePath
+        ? await api?.save_workflow_template?.(name, formDesc, formIcon || "📁", "", "", formCategory, saveOwner, savePath)
+        : await api?.save_workflow_template?.(
+          name,
+          formDesc,
+          formIcon || "⚡",
+          // A folder template keeps its tree when edited.
+          editing?.shape === "bundle" ? "" : JSON.stringify(savedGraph),
+          editing?.kind === "custom" ? editing.id : "",
+          formCategory,
+        );
       if (!res?.ok || !res.template) {
         setFormError(res?.error || "Could not save");
+        return;
+      }
+      if (savePath) {
+        onClose();
         return;
       }
       await refresh();
@@ -237,13 +308,26 @@ export function AutomationTemplatePicker({
     } finally {
       setSaving(false);
     }
-  }, [editing, formCategory, formDesc, formIcon, formName, refresh, savedGraph]);
+  }, [editing, formCategory, formDesc, formIcon, formName, onClose, refresh, saveOwner, savePath, savedGraph]);
 
   const handleClose = useCallback(() => {
     setView("picker");
     setEditing(null);
     onClose();
   }, [onClose]);
+
+  const backFromCreator = useCallback(() => {
+    if (savePath) { handleClose(); return; }
+    setView("picker");
+    setEditing(null);
+  }, [handleClose, savePath]);
+
+  const isBundle = selected?.shape === "bundle" && !!selected.bundle;
+  const folderOptions = useMemo(() => {
+    const paths = [...new Set([...(folders[ownerId] || []), ...(folder ? [folder] : [])].map(normalizeFolder).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return [{ value: "", label: "Top level" }, ...paths.map((path) => ({ value: path, label: path }))];
+  }, [folders, ownerId, folder]);
 
   const hasOpenGraph = (currentGraph?.nodes?.length || 0) > 0;
   const categoryOptions = [...new Set([...TEMPLATE_CATEGORIES.filter((c) => c !== "Plugins"), ...shelves.filter((c) => c !== "Plugins"), formCategory])]
@@ -255,6 +339,7 @@ export function AutomationTemplatePicker({
     const need = template.missing_plugins || [];
     const badge = isLocked ? `Needs ${need.join(", ")}` : template.kind === "plugin" ? `Plugin (${template.plugin_id || "store"})`
       : template.kind === "custom" ? "Yours" : template.requires_plugins?.length ? `Uses ${template.requires_plugins.join(", ")}` : "Built in";
+    const bundled = template.shape === "bundle";
     return (
       <button
         key={template.id}
@@ -278,6 +363,11 @@ export function AutomationTemplatePicker({
         <span className="vtm-card-body">
           <span className="vtm-card-name">{template.name}</span>
           {template.description ? <span className="vtm-card-desc">{template.description}</span> : null}
+          {bundled ? (
+            <span className="vtm-folder-count" title={`Makes folder “${template.root || template.name}”`}>
+              <Icons.Folder />{plural(template.workflow_count || template.bundle?.workflows.length || 0, "workflow")}
+            </span>
+          ) : null}
           <span className={`vtm-badge${template.kind === "plugin" ? " vtm-badge--system" : ""}${isLocked ? " vtm-badge--warn" : ""}`}>{badge}</span>
           {isLocked
             ? need.map((slug) => (
@@ -420,6 +510,17 @@ export function AutomationTemplatePicker({
               </button>
             </div>
           </div>
+          {isBundle && selected?.bundle ? (
+            <div className="vtm-bundle" aria-label="Folder template">
+              <BundleTree bundle={selected.bundle} root={selected.root} />
+              <div className="vtm-bundle-where">
+                <span className="vtm-label">Put the folder in</span>
+                <ChoiceDropdown aria-label="Put the folder in" size="compact" value={normalizeFolder(folder)} minWidth={200} options={folderOptions}
+                  onChange={(value) => onFolderChange?.(value)} disabled={!onFolderChange} />
+                <small>{`${ownerLabel} · ${plural(selected.workflow_count || selected.bundle.workflows.length, "workflow")}. Run workflow steps between them point at the new ones.`}</small>
+              </div>
+            </div>
+          ) : null}
           <div className="vtm-footer">
             {selected?.ready === false ? <span className="vtm-footer-note">Needs {missing.join(", ")}: Get it opens the Store.</span> : null}
             <button type="button" className="vtm-btn vtm-btn--ghost" onClick={handleClose}>Cancel</button>
@@ -429,7 +530,7 @@ export function AutomationTemplatePicker({
                   <span className="vtm-spin" aria-hidden><Icons.Spinner /></span>
                   Processing...
                 </>
-              ) : locked ? `Get ${missing[0] || "plugin"}` : "Create workflow"}
+              ) : locked ? `Get ${missing[0] || "plugin"}` : isBundle ? `Create ${plural(selected?.workflow_count || 0, "workflow")}` : "Create workflow"}
             </button>
           </div>
         </div>
@@ -438,19 +539,30 @@ export function AutomationTemplatePicker({
           <div className="vtm-view vtm-view--active vtm-creator">
             <div className="vtm-header">
               <div className="vtm-header-left">
-                <button type="button" className="vtm-icon-btn vtm-icon-btn--back" onClick={() => { setView("picker"); setEditing(null); }} title="Back to Templates" aria-label="Back">
+                <button type="button" className="vtm-icon-btn vtm-icon-btn--back" onClick={backFromCreator} title="Back to Templates" aria-label="Back">
                   <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="15 18 9 12 15 6" />
                   </svg>
                 </button>
-                <h2 className="vtm-title">{editing ? "Edit template" : "Save as template"}</h2>
+                <h2 className="vtm-title">{editing ? "Edit template" : savePath ? "Save folder as template" : "Save as template"}</h2>
               </div>
               <button type="button" className="vtm-icon-btn" onClick={handleClose} aria-label="Close"><CloseIcon /></button>
             </div>
             <div className="vtm-creator-body">
               <div className="vtm-creator-preview" aria-label="What gets saved">
-                {savedGraph.nodes.length ? <WorkflowMiniature graph={savedGraph} /> : <div className="aw-mini aw-mini--empty">Empty canvas</div>}
-                <small>{editing ? "The graph stays as saved." : hasOpenGraph ? `The open workflow: ${savedGraph.nodes.length} node${savedGraph.nodes.length === 1 ? "" : "s"}.` : "An empty graph: build it on the canvas, then save again."}</small>
+                {savePath || savedBundle ? (
+                  <>
+                    {savedBundle ? <BundleTree bundle={savedBundle} /> : <div className="aw-mini aw-mini--empty">Reading the folder…</div>}
+                    {savedBundle ? (
+                      <small>{editing ? "The folder stays as saved." : `The folder “${folderName(savePath)}”: ${plural(savedBundle.workflows.length, "workflow")}, ${plural(savedBundle.folders.length, "folder")} inside. Run workflow steps between them keep working in every copy.`}</small>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {savedGraph.nodes.length ? <WorkflowMiniature graph={savedGraph} /> : <div className="aw-mini aw-mini--empty">Empty canvas</div>}
+                    <small>{editing ? "The graph stays as saved." : hasOpenGraph ? `The open workflow: ${savedGraph.nodes.length} node${savedGraph.nodes.length === 1 ? "" : "s"}.` : "An empty graph: build it on the canvas, then save again."}</small>
+                  </>
+                )}
               </div>
               <div className="vtm-creator-fields">
                 <div className="vtm-creator-row">
@@ -475,8 +587,8 @@ export function AutomationTemplatePicker({
               </div>
             </div>
             <div className="vtm-footer">
-              <button type="button" className="vtm-btn vtm-btn--ghost" onClick={() => { setView("picker"); setEditing(null); }}>Back</button>
-              <button type="button" className="vtm-btn vtm-btn--primary" disabled={saving} onClick={() => void handleSaveCustom()}>
+              <button type="button" className="vtm-btn vtm-btn--ghost" onClick={backFromCreator}>{savePath ? "Cancel" : "Back"}</button>
+              <button type="button" className="vtm-btn vtm-btn--primary" disabled={saving || (!!savePath && !folderBundle)} onClick={() => void handleSaveCustom()}>
                 {saving ? "Saving…" : editing ? "Save changes" : "Save template"}
               </button>
             </div>

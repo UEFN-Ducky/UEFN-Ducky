@@ -54,3 +54,34 @@ describe("folder menu: copy or move a whole folder to another owner", () => {
     expect(items()).toEqual(["New workflow here"]);
   });
 });
+
+describe("folder menu: save folder as template", () => {
+  const show = (rows: AutomationSummaryDto[], extra: string[] = []) => {
+    const onSave = vi.fn();
+    render(
+      <WorkflowList listId="list" listRef={{ current: null }} owners={{ owners: [LOCAL, BETA] }} rows={rows} activeId=""
+        collapsed={false} nowMs={0} emptyFolders={{ local: extra }} onToggleCollapsed={() => {}} onOpen={() => {}} onCreate={() => {}}
+        onImportLocal={() => {}} onMoveFolder={() => {}} onSaveFolderTemplate={onSave} />,
+    );
+    return onSave;
+  };
+
+  it("keeps a folder with its nested workflows, a read-only team's too", () => {
+    const onSave = show([row("Main", "Kit"), row("Helper", "Kit/Lib"), row("Daily", "Ops", BETA)]);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Kit" }));
+    expect(items()).toContain("Save folder as template");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save folder as template" }));
+    expect(onSave).toHaveBeenCalledWith("local", "Kit");
+    cleanup();
+    const onTeam = show([row("Daily", "Ops", BETA)]);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Ops" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save folder as template" }));
+    expect(onTeam).toHaveBeenCalledWith("teamB", "Ops");
+  });
+
+  it("is not offered for a folder with no workflows in it", () => {
+    show([row("Loose", "")], ["Empty"]);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Empty" }));
+    expect(items()).not.toContain("Save folder as template");
+  });
+});

@@ -576,6 +576,8 @@ export function AutomationsView() {
   const [spawnFilter, setSpawnFilter] = useState("");
   const spawnSearchRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Save folder as template: the picker opens on its form for this folder.
+  const [saveFolder, setSaveFolder] = useState<{ ownerId: string; path: string } | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ start: { x: number; y: number }; origins: { id: string; x: number; y: number }[]; clickIds: string[]; clickKey: string; moved: boolean; blocked: string; warned?: boolean; grid: number } | null>(null);
   const holdRef = useRef<{ timer: number; x: number; y: number; pointerId: number } | null>(null);
@@ -1090,6 +1092,27 @@ export function AutomationsView() {
     },
     [persist, pickerOwner, pickerFolder],
   );
+
+  /** A folder template: its whole folder tree, made inside the chosen folder, then its main workflow opens. */
+  const createFromFolderTemplate = async (template: AutomationTemplateDto, at?: { owner: string; folder: string }) => {
+    const ownerId = at ? at.owner : pickerOwner;
+    const parent = at ? at.folder : pickerFolder;
+    const gen = ++loadGen.current;
+    await saveQueue.current;
+    const res = await getApi()?.use_workflow_template?.(template.id, ownerId, parent, "");
+    if (!res || res.ok === false) { setActionError(res?.error || "Could not create the workflows"); return; }
+    if (res.folder) showFolder(ownerId, res.folder);
+    if ((owners.owners || []).find((owner) => owner.id === ownerId)?.kind === "team") queueTeamSync();
+    await refreshList();
+    if (gen !== loadGen.current) return;
+    if (res.main) await loadOne(res.main);
+    const outside = res.outside?.length || 0;
+    setActionError(outside
+      ? `${outside} Run workflow step${outside === 1 ? "" : "s"} in “${folderName(res.folder || template.name)}” call${outside === 1 ? "s" : ""} workflows that are not in it.`
+      : "");
+  };
+  const createFrom = (template: AutomationTemplateDto | null, at?: { owner: string; folder: string }) =>
+    void (template?.shape === "bundle" ? createFromFolderTemplate(template, at) : createFromTemplate(template, at));
 
   /** Copy (new id) or move a workflow to Local or a team. */
   const sendTo = async (value: string) => {
@@ -2210,8 +2233,9 @@ export function AutomationsView() {
         onDeleteWorkflows={(ids) => void deleteWorkflows(ids)}
         onRemoveFolder={(ownerId, path) => void removeFolder(ownerId, path)}
         onCopyFolder={(fromId, path, toId, move, counts) => void copyFolder(fromId, path, toId, move, counts)}
+        onSaveFolderTemplate={(ownerId, path) => { setSaveFolder({ ownerId, path }); setPickerOpen(true); }}
         featured={rows.length ? [] : featured} showNew={!draft}
-        onCreateFrom={(template) => void createFromTemplate(template, { owner: (owners.owners || []).find((owner) => !owner.readOnly)?.id || LOCAL_OWNER.id, folder: "" })} />
+        onCreateFrom={(template) => createFrom(template, { owner: (owners.owners || []).find((owner) => !owner.readOnly)?.id || LOCAL_OWNER.id, folder: "" })} />
       {draft && !listCollapsed ? <PanelResizeHandle label="Resize workflow list" className="aw-resize--list" value={panelWidths.list} min={LIST_W.min} max={LIST_W.max} edge="right"
         onResize={(list) => setPanelWidths((current) => ({ ...current, list }))} onActive={setResizingPanel} /> : null}
       <div className="aw-main">
@@ -2714,13 +2738,17 @@ export function AutomationsView() {
       ) : null}
       <AutomationTemplatePicker
         open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(t) => void createFromTemplate(t)}
+        onClose={() => { setPickerOpen(false); setSaveFolder(null); }}
+        onSelect={(t) => createFrom(t)}
         currentGraph={draft?.graph || null}
         ownerLabel={ownerName((owners.owners || []).find((owner) => owner.id === pickerOwner) || LOCAL_OWNER)}
         owners={owners.owners || [LOCAL_OWNER]}
         ownerId={pickerOwner}
-        onOwnerChange={setPickerOwner}
+        onOwnerChange={(id) => { setPickerOwner(id); setPickerFolder(""); }}
+        folders={folderLists}
+        folder={pickerFolder}
+        onFolderChange={setPickerFolder}
+        saveFolder={saveFolder}
       />
       <UnsavedWorkflowPrompt />
     </div>

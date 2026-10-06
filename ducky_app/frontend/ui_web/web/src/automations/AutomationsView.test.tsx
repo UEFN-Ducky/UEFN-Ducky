@@ -6,15 +6,18 @@ import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { setUnsavedWorkflow } from "./unsavedWorkflow";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
-const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
+const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), use_workflow_template: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 vi.mock("./AutomationTemplatePicker", () => ({
-  AutomationTemplatePicker: ({ open, owners, ownerId, onOwnerChange, onSelect }: {
+  AutomationTemplatePicker: ({ open, owners, ownerId, onOwnerChange, onSelect, folder, onFolderChange, saveFolder }: {
     open: boolean;
     owners?: { id: string; kind: string; label: string; readOnly?: boolean }[];
     ownerId?: string;
     onOwnerChange?: (id: string) => void;
-    onSelect: (template: null) => void;
+    onSelect: (template: { id: string; name: string; shape?: string; graph: { nodes: never[]; edges: never[] } } | null) => void;
+    folder?: string;
+    onFolderChange?: (folder: string) => void;
+    saveFolder?: { ownerId: string; path: string } | null;
   }) => open ? (
     <>
       {(owners || []).map((owner) => (
@@ -22,6 +25,10 @@ vi.mock("./AutomationTemplatePicker", () => ({
           {`Save in ${owner.kind === "team" ? `Team · ${owner.label}` : "Local"}`}
         </button>
       ))}
+      {saveFolder ? <p>{`Keep ${saveFolder.ownerId}/${saveFolder.path} as a template`}</p> : null}
+      <p>{`Goes in “${folder || ""}”`}</p>
+      <button type="button" onClick={() => onFolderChange?.("Tests")}>Put it in Tests</button>
+      <button type="button" onClick={() => onSelect({ id: "custom:kit12345", name: "Kit", shape: "bundle", graph: { nodes: [], edges: [] } })}>Use folder template</button>
       <button type="button" onClick={() => onSelect(null)}>Create workflow</button>
     </>
   ) : null,
@@ -1774,7 +1781,7 @@ describe("folders in the Workflows list", () => {
     renderView();
     fireEvent.contextMenu(await screen.findByRole("button", { name: "Folder Ops" }));
     const items = [...screen.getByRole("menu").querySelectorAll('[role^="menuitem"]')].map((el) => el.textContent?.trim());
-    expect(items).toEqual(["Read-only", "Copy folder to Local"]);
+    expect(items).toEqual(["Read-only", "Copy folder to Local", "Save folder as template"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy folder to Local" }));
     expect(await screen.findByText("Copy “Ops” to Local?")).toBeTruthy();
     await confirmIt("Copy");
@@ -1795,6 +1802,36 @@ describe("folders in the Workflows list", () => {
     await waitFor(() => expect(api.set_workflow_folder).toHaveBeenCalledWith("p", "Tests"));
     await save();
     expect(api.save_workflow.mock.calls.at(-1)![0]).not.toHaveProperty("folder");  // saving a graph never refiles it
+  });
+});
+
+describe("folder templates in the Workflows list", () => {
+  beforeEach(() => {
+    api.list_workflows.mockImplementation(async () => ({ workflows: [
+      { id: "p", name: "Example", enabled: true, owner: LOCAL, folder: "Tests/Smoke", trigger: { kind: "chat", label: "Chat" } },
+    ] }));
+    api.use_workflow_template.mockResolvedValue({ ok: true, shape: "bundle", folder: "Tests/Kit", owner: "local", main: "p", outside: ["@gone"],
+      workflows: [{ key: "main", id: "p", name: "Example" }] });
+  });
+
+  it("opens Save folder as template for the folder right-clicked", async () => {
+    renderView();
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "Folder Tests" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save folder as template" }));
+    expect(await screen.findByText("Keep local/Tests as a template")).toBeTruthy();
+  });
+
+  it("makes a folder template's whole tree where it is asked to go, then opens its main workflow", async () => {
+    renderView();
+    await screen.findByText("Example");
+    fireEvent.click(screen.getByRole("button", { name: "New workflow in Smoke" }));
+    expect(screen.getByText("Goes in “Tests/Smoke”")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Put it in Tests" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use folder template" }));
+    await waitFor(() => expect(api.use_workflow_template).toHaveBeenCalledWith("custom:kit12345", "local", "Tests", ""));
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.get_workflow).toHaveBeenCalledWith("p"));
+    expect(await screen.findByText(/1 Run workflow step in “Kit” calls workflows that are not in it/)).toBeTruthy();
   });
 });
 
@@ -1850,7 +1887,7 @@ describe("right-click menus in the Workflows list", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Move out of folder" }));
     await waitFor(() => expect(api.set_workflow_folder).toHaveBeenCalledWith("p", "Tests"));
     fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Smoke" }));
-    expect(items()).toEqual(["New workflow here", "New folder inside", "Rename", "Copy folder to Team · Alpha Studio", "Move folder to Team · Alpha Studio", "Remove folder (keeps its workflows)"]);
+    expect(items()).toEqual(["New workflow here", "New folder inside", "Rename", "Copy folder to Team · Alpha Studio", "Move folder to Team · Alpha Studio", "Save folder as template", "Remove folder (keeps its workflows)"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect((screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement).value).toBe("Smoke");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Folder name" }), { key: "Escape" });

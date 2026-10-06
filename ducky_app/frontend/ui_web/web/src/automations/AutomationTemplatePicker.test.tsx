@@ -5,7 +5,7 @@ import { AutomationTemplatePicker } from "./AutomationTemplatePicker";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import type { AutomationTemplateDto } from "../types/panel";
 
-const api = vi.hoisted(() => ({ list_workflow_templates: vi.fn(), save_workflow_template: vi.fn(), delete_workflow_template: vi.fn() }));
+const api = vi.hoisted(() => ({ list_workflow_templates: vi.fn(), save_workflow_template: vi.fn(), delete_workflow_template: vi.fn(), export_workflow_folder: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 const deepLink = vi.hoisted(() => vi.fn());
 vi.mock("../navigation/deepLinks", () => ({ handleDeepLink: deepLink }));
@@ -80,5 +80,65 @@ describe("new workflow picker", () => {
     fireEvent.click(await screen.findByRole("radio", { name: "3D" }));
     fireEvent.click(screen.getByRole("button", { name: "Save template" }));
     await waitFor(() => expect(api.save_workflow_template).toHaveBeenCalledWith("Duck props", "Props from a prompt", "⚡", JSON.stringify(graph), "", "3D"));
+  });
+});
+
+describe("folder templates", () => {
+  const bundle = {
+    version: 1, root: "BrainRot TCG", folders: ["Functions"],
+    workflows: [
+      { key: "all", name: "Card art - all cards", folder: "", graph },
+      { key: "one", name: "Card art - one card", folder: "Functions", graph },
+    ],
+  };
+  const kit: AutomationTemplateDto = { id: "plugin:brainrot-tcg:card-art", name: "Card art", icon: "🃏", kind: "plugin", plugin_id: "brainrot-tcg",
+    category: "Images", shape: "bundle", workflow_count: 2, folder_count: 1, root: "BrainRot TCG", bundle, ready: true, graph: { nodes: [], edges: [] } };
+  const mine: AutomationTemplateDto = { ...kit, id: "custom:kit12345", name: "My kit", kind: "custom", category: "Yours" };
+
+  beforeEach(() => {
+    api.list_workflow_templates.mockResolvedValue({ ok: true, templates: [...templates, kit, mine] });
+  });
+
+  it("shows how many workflows, the tree it makes, and asks where the folder goes", async () => {
+    const onFolderChange = vi.fn();
+    const onSelect = show({ owners: [{ id: "local", kind: "local", label: "Local" }], ownerId: "local", folders: { local: ["Games", "Games/Cards"] },
+      folder: "", onFolderChange });
+    const card = (await screen.findByText("Card art")).closest("button") as HTMLElement;
+    expect(within(card).getByText("2 workflows")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "What it makes" })).toBeNull();
+    fireEvent.click(card);
+    const tree = screen.getByRole("list", { name: "What it makes" });
+    expect([...tree.querySelectorAll("li")].map((li) => [li.textContent, li.className.includes("--folder") ? "folder" : "workflow"])).toEqual([
+      ["BrainRot TCG", "folder"], ["Card art - all cards", "workflow"], ["Functions", "folder"], ["Card art - one card", "workflow"]]);
+    fireEvent.click(screen.getByRole("button", { name: "Put the folder in" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Games/Cards" }));
+    expect(onFolderChange).toHaveBeenCalledWith("Games/Cards");
+    fireEvent.click(screen.getByRole("button", { name: "Create 2 workflows" }));
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(kit));
+  });
+
+  it("keeps a folder from the Workflows list as a template, then closes", async () => {
+    const exported = { ...bundle, root: "Kit" };
+    api.export_workflow_folder.mockResolvedValue({ ok: true, bundle: exported });
+    api.save_workflow_template.mockResolvedValue({ ok: true, template: { ...mine, id: "custom:new12345" } });
+    const onClose = vi.fn();
+    show({ onClose, saveFolder: { ownerId: "teamA", path: "Games/Kit" } });
+    expect(await screen.findByText("Save folder as template")).toBeTruthy();
+    expect(api.export_workflow_folder).toHaveBeenCalledWith("teamA", "Games/Kit");
+    expect((screen.getByRole("textbox", { name: "Template name" }) as HTMLInputElement).value).toBe("Kit");
+    await screen.findByText(/The folder “Kit”: 2 workflows, 1 folder inside/);
+    expect(within(screen.getByRole("list", { name: "What it makes" })).getByText("Card art - one card")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(api.save_workflow_template).toHaveBeenCalledWith("Kit", "", "📁", "", "", "Yours", "teamA", "Games/Kit"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("editing a folder template keeps its tree", async () => {
+    show();
+    const card = (await screen.findByText("My kit")).closest("button") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "Edit My kit" }));
+    expect(screen.getByText("The folder stays as saved.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.save_workflow_template).toHaveBeenCalledWith("My kit", "", "🃏", "", "custom:kit12345", "Yours"));
   });
 });

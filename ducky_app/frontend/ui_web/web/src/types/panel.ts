@@ -583,7 +583,23 @@ export interface AutomationTemplateDto {
   ready?: boolean;
   /** Its shelf in the picker: Images, 3D, Characters, Text & AI, Documents, Play tests, UEFN, Yours… */
   category?: string;
+  /** "bundle": a folder template, several workflows in nested folders (``bundle``); its ``graph`` is empty. */
+  shape?: "workflow" | "bundle";
+  workflow_count?: number;
+  folder_count?: number;
+  /** A folder template's root folder name. */
+  root?: string;
+  bundle?: WorkflowBundleDto;
   graph: AutomationGraphDto;
+}
+
+/** What New workflow made from a template (use_workflow_template): one workflow, or a
+ *  folder template's tree (``main`` is its first top-level workflow). */
+export interface WorkflowTemplateUseDto extends WorkflowFolderCopyDto {
+  shape?: "workflow" | "bundle";
+  template?: string;
+  main?: string;
+  workflow?: AutomationDto;
 }
 
 export interface AutomationNodeDto {
@@ -2736,8 +2752,12 @@ export interface PanelApi {
     graph_json?: string,
     template_id?: string,
     category?: string,
+    /** With ``folder``: keep that folder of ``owner`` (nested folders, every workflow) as a folder template. */
+    owner?: string,
+    folder?: string,
   ): Promise<{ ok?: boolean; error?: string; template?: AutomationTemplateDto }>;
   delete_workflow_template?(template_id: string): Promise<{ ok?: boolean; error?: string }>;
+  use_workflow_template?(template_id: string, owner?: string, parent_path?: string, name?: string): Promise<WorkflowTemplateUseDto>;
   list_workflow_versions?(workflowId: string): Promise<{ ok?: boolean; versions?: { id: string; name: string; saved_at: number; node_count: number; note?: string }[]; error?: string }>;
   get_workflow_version?(workflowId: string, versionId: string): Promise<{ ok?: boolean; workflow?: AutomationDto; error?: string }>;
   list_workflows?(): Promise<{ ok?: boolean; workflows?: AutomationSummaryDto[] }>;
