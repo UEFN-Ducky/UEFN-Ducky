@@ -404,9 +404,22 @@ class PanelApiAutomationsMixin:
         graph_json: str = "",
         template_id: str = "",
         category: str = "",
+        owner: str = "",
+        folder: str = "",
     ) -> dict[str, Any]:
-        from backend.automations.templates import save_custom
+        """Save as template. With ``folder`` (of ``owner``): that whole folder, nested
+        folders and every workflow in it, as one folder template."""
+        from backend.automations.templates import save_custom, save_folder_template
 
+        if (folder or "").strip():
+            try:
+                row = save_folder_template(owner or "local", folder, name, description=description, icon=icon,
+                                           template_id=template_id, category=category)
+            except KeyError:
+                return {"ok": False, "error": "folder not found"}
+            except (PermissionError, ValueError) as exc:
+                return _refused(exc)
+            return {"ok": True, "template": row}
         graph: Any = {}
         raw = (graph_json or "").strip()
         if raw:
@@ -428,6 +441,19 @@ class PanelApiAutomationsMixin:
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "template": row}
+
+    def use_workflow_template(self, template_id: str, owner: str = "local", parent_path: str = "", name: str = "") -> dict[str, Any]:
+        """New workflow from a template inside ``owner``/``parent_path``. A folder template
+        makes its whole tree there (``name`` renames its root folder), new ids, Run
+        workflow steps pointed at the new workflows; ``main`` is the one to open."""
+        from backend.automations.templates import use_template
+
+        try:
+            return {"ok": True, **use_template(template_id, owner, parent_path, name)}
+        except LookupError:
+            return {"ok": False, "error": "template not found"}
+        except (PermissionError, ValueError) as exc:
+            return _refused(exc)
 
     def delete_workflow_template(self, template_id: str) -> dict[str, Any]:
         from backend.automations.templates import delete_custom

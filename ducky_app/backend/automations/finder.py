@@ -40,6 +40,15 @@ def _node_words(graph: Any) -> str:
     return " ".join(f"{n.get('type', '')} {n.get('label', '')}".replace(".", " ").replace("_", " ") for n in nodes or [] if isinstance(n, dict))
 
 
+def _template_words(row: dict[str, Any]) -> str:
+    """Node words of a template: its graph, or every workflow of a folder template (and their names)."""
+    bundle = row.get("bundle")
+    if isinstance(bundle, dict):
+        rows = [w for w in bundle.get("workflows") or [] if isinstance(w, dict)]
+        return " ".join(f"{w.get('name', '')} {_node_words(w.get('graph'))}" for w in rows)
+    return _node_words(row.get("graph"))
+
+
 def _score(task: list[str], fields: list[tuple[str, int]], rarity: dict[str, float]) -> tuple[float, list[str]]:
     """Field weight × how rare the word is among the candidates (a word every template
     has, like "test", says less than "income")."""
@@ -68,7 +77,7 @@ def find(task: str, workflows: list[dict[str, Any]], templates: list[dict[str, A
     wf_fields = [[(str(row.get("name") or ""), 3), (str(row.get("description") or ""), 1),
                   (str(row.get("folder") or ""), 2), (str((row.get("trigger") or {}).get("label") or ""), 1)] for row in workflows]
     tpl_fields = [[(str(row.get("name") or ""), 3), (str(row.get("description") or ""), 1),
-                   (str(row.get("category") or ""), 2), (_node_words(row.get("graph")), 1)] for row in templates]
+                   (str(row.get("category") or ""), 2), (_template_words(row), 1)] for row in templates]
     rarity = _rarity(want, [" ".join(text for text, _w in fields) for fields in wf_fields + tpl_fields])
     found_wf = []
     for row, fields in zip(workflows, wf_fields):
@@ -91,6 +100,7 @@ def find(task: str, workflows: list[dict[str, Any]], templates: list[dict[str, A
                        "folder": row.get("folder") or "", "owner": (row.get("owner") or {}).get("label") or "Local",
                        "enabled": row.get("enabled", True), "matched": hits} for _score_, hits, row in found_wf[:limit]],
         "templates": [{"id": row.get("id"), "name": row.get("name"), "category": row.get("category") or "",
+                       "shape": row.get("shape") or "workflow", "workflow_count": row.get("workflow_count") or 1,
                        "description": row.get("description") or "", "ready": row.get("ready", True),
                        "missing_plugins": row.get("missing_plugins") or [], "matched": hits} for _score_, hits, row in found_tpl[:limit]],
     }

@@ -215,7 +215,16 @@ Example: a pipeline with no start node: Prompt → picture → cut-out → 3D �
 Ready-made: `list_workflow_templates` (each has `category`, `requires_plugins`,
 `missing_plugins`). Shelves: Images, 3D, Characters (prompt / picture →
 character → rig → animations → UEFN), Text & AI, Documents, Play tests, UEFN.
-Start from one by copying its `graph` into `save_workflow`.
+Start from one with `create_workflow_from_template` (or copy its `graph` into `save_workflow`).
+
+Folder templates (`shape: "bundle"`, with `workflow_count` and `bundle`) hold several
+workflows in nested folders: `create_workflow_from_template(id, owner, folder=<parent>)`
+makes the whole tree (name renames its root folder) with Run workflow steps pointed at the
+new workflows. `save_workflow_template(owner=…, folder="BrainRot TCG")` keeps a folder as one.
+A plugin declares one under `contributes.automations.templates` as `{"id", "label",
+"kind": "bundle", "root", "folders": ["Functions"], "workflows": [{"key": "one", "name",
+"folder": "Functions", "graph"}]}`; a Run workflow step's `workflow_id: "@one"` names the
+workflow with that key.
 
 ### Locks
 
@@ -246,7 +255,8 @@ names them; ask the user, and only after they agree pass
 | `list_workflow_versions` / `restore_workflow_version` | History: saved versions, bring one back |
 | `clear_workflow_runs` | Clear log |
 | `emit_workflow_trigger` | fire a plugin trigger to test listeners |
-| `list_workflow_templates` / `save_workflow_template` (with `category`) / `delete_workflow_template` | New workflow picker |
+| `list_workflow_templates` / `save_workflow_template` (with `category`; `owner` + `folder` = a folder template) / `delete_workflow_template` | New workflow picker |
+| `create_workflow_from_template` | one workflow, or a folder template's whole tree (`folder` = where it goes) |
 | `get_workflow_node_code` / `edit_workflow_node_code` / `test_workflow_node` / `workflow_code_api` | a node's JavaScript (Custom code, below) |
 
 ### Code nodes (Custom code)

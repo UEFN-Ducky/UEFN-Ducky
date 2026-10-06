@@ -37,6 +37,9 @@ across chats. Tools write the files; you never open those folders.
    + `@api.register_pipeline_node` (alias of `register_automation_node`) that
    calls the **same** functions as `@api.tool()`. Ship `automations.templates`
    with graph `start.chat` → `pipeline.agent` → your node → `pipeline.finish`.
+   Workflows that call each other ship as one folder template (`"kind": "bundle"`,
+   `root`, `folders`, `workflows` with `key`s; a Run workflow step names one as
+   `"@key"`; see the workflows reference).
    Every workflow has one palette (`systems` is ignored). Theme-only: one node that
    applies/lists the profile. Handler `ctx = {config, payload, node, inputs, kind,
    files, artifact_dir}` → `{ok, files?}` (`kind` is `"pipeline"` when run from a chat;

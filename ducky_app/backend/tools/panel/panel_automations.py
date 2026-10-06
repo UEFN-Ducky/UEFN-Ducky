@@ -45,7 +45,10 @@ def list_workflow_nodes(pretty: bool = False) -> str:
 
 @mcp.tool()
 def list_workflow_templates(pretty: bool = False) -> str:
-    """Builtin, plugin and custom workflow templates (ready-made graphs)."""
+    """Builtin, plugin and custom workflow templates. shape "workflow" = one graph;
+    shape "bundle" = a folder template: several workflows in nested folders
+    (workflow_count, folder_count, root, bundle with each workflow's graph) whose Run
+    workflow steps point at each other once created."""
     from backend.automations.templates import list_templates
 
     return tool_json({"ok": True, "templates": list_templates()}, pretty=pretty)
@@ -572,25 +575,31 @@ def create_workflow_from_template(
 ) -> str:
     """Make a new workflow from a template (ids from find_workflows or list_workflow_templates)
     and open it in the editor. Paid image / 3D steps come with Spend credits off: ask the
-    user before turning spend on. Returns the new workflow (run it with run_workflow)."""
-    from backend.automations.store import save_workflow as _save
-    from backend.automations.templates import list_templates
+    user before turning spend on. Returns the new workflow (run it with run_workflow).
 
-    row = next((t for t in list_templates() if t.get("id") == (template_id or "").strip()), None)
-    if row is None:
-        return tool_json({"ok": False, "error": "template not found; list them with list_workflow_templates"}, pretty=pretty)
-    if row.get("ready") is False:
-        return tool_json({"ok": False, "error": f"{row.get('name')} needs the {', '.join(row.get('missing_plugins') or [])} plugin(s); install them from the Store first."}, pretty=pretty)
-    doc: dict[str, Any] = {"name": (name or row.get("name") or "Untitled").strip(), "description": str(row.get("description") or ""),
-                           "enabled": True, "graph": row.get("graph") or {"nodes": [], "edges": []}}
-    if folder:
-        doc["folder"] = folder
+    A folder template (shape "bundle") makes its whole folder tree inside folder (the
+    parent; "" = top level) of owner ("local" or a team id): every workflow with a new
+    id, Run workflow steps between them pointed at the new ones. name renames the root
+    folder. Returns bundle {folder, workflows [{key, id, name}], outside} and the main
+    workflow it opened."""
+    from backend.automations.store import get_workflow as _get
+    from backend.automations.templates import use_template
+
     try:
-        saved = _save(doc, owner=owner)
+        out = use_template(template_id, owner, folder, name)
+    except LookupError as exc:
+        return tool_json({"ok": False, "error": exc.args[0] if exc.args else "template not found"}, pretty=pretty)
     except (PermissionError, ValueError) as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    if out["shape"] == "bundle":
+        bundle = {k: out[k] for k in ("folder", "owner", "workflows", "outside")}
+        main = _get(out["main"]) if out["main"] else None
+        if main:
+            _reveal_graph(out["main"], "saved", nodes=[str(n.get("id")) for n in (main.get("graph") or {}).get("nodes") or []])
+        return tool_json({"ok": True, "bundle": bundle, "workflow": main, "from_template": out["template"]}, pretty=pretty)
+    saved = out["workflow"]
     _reveal_graph(str(saved.get("id") or ""), "saved", nodes=[str(n.get("id")) for n in (saved.get("graph") or {}).get("nodes") or []])
-    return tool_json({"ok": True, "workflow": saved, "from_template": row.get("id")}, pretty=pretty)
+    return tool_json({"ok": True, "workflow": saved, "from_template": out["template"]}, pretty=pretty)
 
 
 @mcp.tool()
@@ -669,12 +678,14 @@ def emit_workflow_trigger(
 
 @mcp.tool()
 def save_workflow_template(
-    name: str,
+    name: str = "",
     description: str = "",
     graph: dict[str, Any] | None = None,
     template_id: str = "",
-    icon: str = "⚡",
+    icon: str = "",
     category: str = "",
+    owner: str = "",
+    folder: str = "",
     pretty: bool = False,
 ) -> str:
     """Save a reusable custom workflow template (shown in the New workflow picker).
@@ -682,19 +693,30 @@ def save_workflow_template(
     Pass template_id (custom:…) to replace one. graph uses the same shape as save_workflow.
     category is the picker shelf (Images, 3D, Characters, Text & AI, Documents, Play
     tests, UEFN, or your own name); blank = Yours.
+
+    folder (with owner, "local" or a team id) keeps that whole folder instead: every
+    nested folder and workflow in it, as a folder template (blank name = the folder's
+    name). Its Run workflow steps between those workflows keep pointing at each other
+    in every copy made from it. Editing a folder template without folder keeps its tree.
     """
-    from backend.automations.templates import save_custom
+    from backend.automations.templates import save_custom, save_folder_template
 
     try:
-        row = save_custom(
-            name,
-            description=description,
-            icon=icon,
-            graph=graph,
-            template_id=template_id,
-            category=category,
-        )
-    except ValueError as exc:
+        if (folder or "").strip():
+            row = save_folder_template(owner or "local", folder, name, description=description, icon=icon or "📁",
+                                       template_id=template_id, category=category)
+        else:
+            row = save_custom(
+                name,
+                description=description,
+                icon=icon or "⚡",
+                graph=graph,
+                template_id=template_id,
+                category=category,
+            )
+    except KeyError:
+        return tool_json({"ok": False, "error": "folder not found"}, pretty=pretty)
+    except (PermissionError, ValueError) as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     return tool_json({"ok": True, "template": row}, pretty=pretty)
 

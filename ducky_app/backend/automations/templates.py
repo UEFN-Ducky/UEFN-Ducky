@@ -1,4 +1,10 @@
-"""Workflow templates: builtin, plugin (plugin.json), and custom (AppData JSON)."""
+"""Workflow templates: builtin, plugin (plugin.json), and custom (AppData JSON).
+
+A template is one workflow (``graph``) or a folder bundle: several workflows in nested
+folders (``bundles.py`` format, under ``bundle``, or ``"kind": "bundle"`` with the
+bundle's ``root`` / ``folders`` / ``workflows`` on the template itself). Using a bundle
+template makes the whole tree with new ids; Run workflow steps that name a workflow of
+the bundle by its key (``"@key"``) are pointed at the new workflows."""
 
 from __future__ import annotations
 
@@ -25,6 +31,46 @@ def _announce_templates_changed() -> None:
         pass
 
 
+_EMPTY_GRAPH: dict[str, Any] = {"nodes": [], "edges": []}
+
+
+def bundle_of(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The folder bundle a template row carries (checked and tidied), or None for a
+    one-workflow template. Raises ``BundleError`` for a bundle that can't be used."""
+    raw = row.get("bundle")
+    if not isinstance(raw, dict):
+        if row.get("kind") != "bundle" and not isinstance(row.get("workflows"), list):
+            return None
+        raw = row
+    from backend.automations.bundles import BundleError, clean_bundle
+
+    clean = clean_bundle({
+        "version": raw.get("version", 1),
+        "root": raw.get("root") or row.get("label") or row.get("name"),
+        "folders": raw.get("folders") or [],
+        "workflows": raw.get("workflows"),
+    })
+    if not clean["workflows"]:
+        raise BundleError("A folder template needs at least one workflow.")
+    return clean
+
+
+def _shaped(out: dict[str, Any], bundle: dict[str, Any] | None, graph: dict[str, Any]) -> dict[str, Any]:
+    """A listed template with its shape: one workflow, or a bundle and its tree."""
+    if bundle is None:
+        out.update({"shape": "workflow", "graph": graph, "workflow_count": 1})
+        return out
+    out.update({
+        "shape": "bundle",
+        "graph": dict(_EMPTY_GRAPH),
+        "bundle": bundle,
+        "root": bundle["root"],
+        "workflow_count": len(bundle["workflows"]),
+        "folder_count": len(bundle["folders"]),
+    })
+    return out
+
+
 def list_custom() -> list[dict[str, Any]]:
     folder = _dir()
     if not folder.is_dir():
@@ -45,17 +91,25 @@ def save_custom(
     graph: Any = None,
     template_id: str = "",
     category: str = "",
+    bundle: Any = None,
 ) -> dict[str, Any]:
+    """Save a custom template: one workflow (``graph``) or a folder ``bundle``. Editing
+    a bundle template without passing a bundle keeps the tree it has."""
     cleaned = (name or "").strip()
     if not cleaned:
         raise ValueError("Template name is required")
     tid = (template_id or "").strip()
+    kept: dict[str, Any] | None = None
     if tid:
         if not _ID_RE.match(tid):
             raise ValueError("Only custom:… templates can be edited")
+        before = _read(_dir() / f"{tid.split(':', 1)[-1]}.json")
+        kept = before.get("bundle") if before else None
     else:
         tid = f"{CUSTOM_PREFIX}{uuid.uuid4().hex[:12]}"
-    row = {
+    if bundle is not None:
+        kept = bundle_of({"bundle": bundle if isinstance(bundle, dict) else {"workflows": None}, "name": cleaned})
+    row: dict[str, Any] = {
         "id": tid,
         "name": cleaned[:64],
         "label": cleaned[:64],
@@ -63,12 +117,69 @@ def save_custom(
         "icon": (icon or "⚡").strip()[:16] or "⚡",
         "kind": "custom",
         "category": _category(category, "Yours"),
-        "graph": normalize_graph(graph),
     }
+    if kept is not None:
+        row["bundle"] = kept
+    else:
+        row["graph"] = normalize_graph(graph)
     dest = _dir(for_write=True) / f"{tid.split(':', 1)[-1]}.json"
     dest.write_text(json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8")
     _announce_templates_changed()
-    return row
+    return _shaped({k: v for k, v in row.items() if k not in ("graph", "bundle")}, kept, row.get("graph") or dict(_EMPTY_GRAPH))
+
+
+def save_folder_template(
+    owner: str,
+    path: str,
+    name: str = "",
+    *,
+    description: str = "",
+    icon: str = "📁",
+    template_id: str = "",
+    category: str = "",
+) -> dict[str, Any]:
+    """Keep folder ``path`` of ``owner`` (every nested folder and workflow in it) as a
+    custom bundle template. Raises ``KeyError`` for a folder the owner doesn't have."""
+    from backend.automations.bundles import export_folder
+
+    bundle = export_folder(owner, path)
+    if not bundle["workflows"]:
+        raise ValueError("That folder has no workflows to keep as a template")
+    return save_custom(name or bundle["root"], description=description, icon=icon or "📁",
+                       template_id=template_id, category=category, bundle=bundle)
+
+
+def find_template(template_id: str) -> dict[str, Any] | None:
+    tid = (template_id or "").strip()
+    return next((row for row in list_templates() if row.get("id") == tid), None) if tid else None
+
+
+def use_template(template_id: str, owner: str = "local", folder: str = "", name: str = "") -> dict[str, Any]:
+    """Make what a template holds under ``owner``/``folder``. One workflow: saved there
+    (``name`` renames it). A bundle: its whole folder tree made inside ``folder`` (``name``
+    renames the root folder; a taken one becomes "Name (2)"), every workflow under a new
+    id with its Run workflow steps pointed at the new ones. ``main`` is the bundle's
+    first top-level workflow. Raises ``LookupError`` for an unknown template."""
+    row = find_template(template_id)
+    if row is None:
+        raise LookupError("template not found; list them with list_workflow_templates")
+    if row.get("ready") is False:
+        raise ValueError(f"{row.get('name')} needs the {', '.join(row.get('missing_plugins') or [])} plugin(s); install them from the Store first.")
+    if row.get("shape") == "bundle":
+        from backend.automations.bundles import import_bundle
+
+        out = import_bundle(row["bundle"], owner, folder, name=(name or "").strip() or None)
+        rows = row["bundle"]["workflows"]
+        first = next((r for r in rows if not r["folder"]), rows[0] if rows else None)
+        main = next((w["id"] for w in out["workflows"] if first and w["key"] == first["key"]), "")
+        return {"shape": "bundle", "template": row["id"], "main": main, **out}
+    from backend.automations.store import save_workflow
+
+    doc: dict[str, Any] = {"name": (name or row.get("name") or "Untitled").strip(), "description": str(row.get("description") or ""),
+                           "enabled": True, "graph": row.get("graph") or dict(_EMPTY_GRAPH)}
+    if folder:
+        doc["folder"] = folder
+    return {"shape": "workflow", "template": row["id"], "workflow": save_workflow(doc, owner=owner)}
 
 
 def delete_custom(template_id: str) -> bool:
@@ -425,24 +536,29 @@ def list_templates() -> list[dict[str, Any]]:
         contrib, enabled = {}, None
     for row in [*PIPELINE_TEMPLATES, *BUILTIN_TEMPLATES]:
         name = str(row.get("label") or row.get("name") or row.get("id"))
+        try:
+            bundle = bundle_of(row)
+        except ValueError:
+            continue
         graph = normalize_graph(row.get("graph"))
-        required = _template_requires(row, graph)
+        required = _template_requires(row, *([w["graph"] for w in bundle["workflows"]] if bundle else [graph]))
         missing = [p for p in required if enabled is not None and p not in enabled]
-        out.append(
+        out.append(_shaped(
             {
                 "id": str(row["id"]),
                 "name": name,
                 "label": name,
                 "description": str(row.get("description") or ""),
-                "icon": str(row.get("icon") or "⚡"),
+                "icon": str(row.get("icon") or ("📁" if bundle else "⚡")),
                 "kind": "builtin",
                 "category": _category(row.get("category") or BUILTIN_CATEGORIES.get(str(row["id"])), "UEFN"),
-                "graph": graph,
                 "requires_plugins": required,
                 "missing_plugins": missing,
                 "ready": not missing,
-            }
-        )
+            },
+            bundle,
+            graph,
+        ))
     enabled = enabled or set()
     for row in contrib.get("automations_templates") or []:
         if not isinstance(row, dict):
@@ -454,25 +570,30 @@ def list_templates() -> list[dict[str, Any]]:
         if not tid:
             continue
         name = str(row.get("label") or row.get("name") or tid)
+        try:
+            bundle = bundle_of(row)
+        except ValueError:
+            continue
         graph = normalize_graph(row.get("graph"))
-        required = _template_requires(row, graph)
+        required = _template_requires(row, *([w["graph"] for w in bundle["workflows"]] if bundle else [graph]))
         missing = [p for p in required if p not in enabled]
-        out.append(
+        out.append(_shaped(
             {
                 "id": f"plugin:{pid}:{tid}" if pid else tid,
                 "name": name,
                 "label": name,
                 "description": str(row.get("description") or ""),
-                "icon": str(row.get("icon") or "⚡"),
+                "icon": str(row.get("icon") or ("📁" if bundle else "⚡")),
                 "kind": "plugin",
                 "plugin_id": pid,
                 "category": _category(row.get("category"), "Plugins"),
-                "graph": graph,
                 "requires_plugins": required,
                 "missing_plugins": missing,
                 "ready": not missing,
-            }
-        )
+            },
+            bundle,
+            graph,
+        ))
     out.extend(list_custom())
     return out
 
@@ -483,13 +604,13 @@ _NODE_PLUGIN = {
 }
 
 
-def _template_requires(row: dict[str, Any], graph: dict[str, Any]) -> list[str]:
+def _template_requires(row: dict[str, Any], *graphs: dict[str, Any]) -> list[str]:
     seen: list[str] = []
     for raw in row.get("requires_plugins") or []:
         pid = str(raw or "").strip()
         if pid and pid not in seen:
             seen.append(pid)
-    for node in graph.get("nodes") or []:
+    for node in (node for graph in graphs for node in graph.get("nodes") or []):
         if not isinstance(node, dict):
             continue
         ntype = str(node.get("type") or "")
@@ -551,13 +672,16 @@ def _read(path: Path) -> dict[str, Any] | None:
     name = str(data.get("name") or data.get("label") or "").strip()
     if not name:
         return None
-    return {
+    try:
+        bundle = bundle_of(data)
+    except ValueError:
+        return None
+    return _shaped({
         "id": tid,
         "name": name,
         "label": name,
         "description": str(data.get("description") or ""),
-        "icon": str(data.get("icon") or "⚡"),
+        "icon": str(data.get("icon") or ("📁" if bundle else "⚡")),
         "kind": "custom",
         "category": _category(data.get("category"), "Yours"),
-        "graph": normalize_graph(data.get("graph")),
-    }
+    }, bundle, normalize_graph(data.get("graph")))

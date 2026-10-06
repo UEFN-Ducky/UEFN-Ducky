@@ -1547,18 +1547,25 @@ def _automation_template_row(row: Any, pid: str) -> dict[str, Any] | None:
 
     name = str(row.get("label") or row.get("name") or tid).strip() or tid
     req = [str(x).strip() for x in (row.get("requires_plugins") or []) if str(x).strip()]
-    return {
+    # A folder bundle: several workflows in nested folders (templates.bundle_of checks it).
+    nested = row.get("bundle") if isinstance(row.get("bundle"), dict) else None
+    is_bundle = nested is not None or row.get("kind") == "bundle" or isinstance(row.get("workflows"), list)
+    out: dict[str, Any] = {
         "id": tid,
         "label": name,
         "name": name,
         "description": str(row.get("description") or ""),
-        "icon": str(row.get("icon") or "⚡"),
+        "icon": str(row.get("icon") or ("📁" if is_bundle else "⚡")),
         "category": str(row.get("category") or "").strip(),
         "graph": normalize_graph(row.get("graph")),
         "plugin_id": pid,
         "systems": row.get("systems"),
         "requires_plugins": req,
     }
+    if is_bundle:
+        src = nested or row
+        out["bundle"] = {"root": src.get("root") or name, "folders": src.get("folders") or [], "workflows": src.get("workflows") or []}
+    return out
 
 
 def _image_generator_row(row: Any, pid: str) -> dict[str, Any] | None:
