@@ -8,7 +8,7 @@ import { contextMenuSeparator } from "../utils/sidebarContextMenuItems";
 import { targetRef } from "../ui-targets/registry";
 import { beginWorkflowListDrag, endWorkflowListDrag, WORKFLOW_LIST_DRAG_MIME } from "../utils/editorTabDrag";
 import { WorkflowHoverCard } from "./WorkflowHoverCard";
-import { buildFolderTree, folderName, isInside, joinFolder, normalizeFolder, parentFolder, type FolderNode } from "./workflowFolders";
+import { buildFolderTree, folderName, folderPaths, isInside, joinFolder, normalizeFolder, parentFolder, type FolderNode } from "./workflowFolders";
 
 export const LOCAL_OWNER: WorkflowOwnerDto = { id: "local", kind: "local", label: "Local" };
 
@@ -94,6 +94,8 @@ type Props = {
   onDeleteWorkflows?: (ids: string[]) => void;
   /** Remove a folder and keep its workflows (asks first). */
   onRemoveFolder?: (ownerId: string, path: string) => void;
+  /** Copy or move a whole folder (nested folders and workflows) to another owner (asks first). */
+  onCopyFolder?: (fromOwnerId: string, path: string, toOwnerId: string, move: boolean, counts: { workflows: number; folders: number }) => void;
   /** No workflows yet: a few ready-made pipelines to start from in one click. */
   featured?: AutomationTemplateDto[];
   onCreateFrom?: (template: AutomationTemplateDto) => void;
@@ -104,7 +106,7 @@ type Props = {
 /** Workflows sidebar: one section per owner (Local, then each team), with folders
  *  inside. Drag a workflow or a folder onto a folder, or onto the owner, to file it;
  *  right-click anything for what you can do with it. */
-export function WorkflowList({ listId, listRef, owners, rows, activeId, collapsed, nowMs, emptyFolders = {}, onToggleCollapsed, onOpen, onCreate, onImportLocal, onAddFolder, onMoveWorkflow, onMoveFolder, onRenameWorkflow, onDuplicateWorkflow, onSetEnabled, onDeleteWorkflow, onDeleteWorkflows, onRemoveFolder, featured = [], onCreateFrom, showNew }: Props) {
+export function WorkflowList({ listId, listRef, owners, rows, activeId, collapsed, nowMs, emptyFolders = {}, onToggleCollapsed, onOpen, onCreate, onImportLocal, onAddFolder, onMoveWorkflow, onMoveFolder, onRenameWorkflow, onDuplicateWorkflow, onSetEnabled, onDeleteWorkflow, onDeleteWorkflows, onRemoveFolder, onCopyFolder, featured = [], onCreateFrom, showNew }: Props) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Editing | null>(null);
   const [renamingId, setRenamingId] = useState("");
@@ -247,12 +249,21 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
     }
     if (target.kind === "folder") {
       const { folder } = target;
-      if (!editable) return [{ id: "none", label: "Read-only", disabled: true }];
+      // Another owner's copy of the whole tree: Local from a team, a team from Local or another team.
+      const others = onCopyFolder ? sections.filter((to) => to.id !== owner.id && !to.readOnly) : [];
+      const counts = { workflows: folder.count, folders: folderPaths(folder).length };
+      const send: ContextMenuItem[] = others.length ? [
+        contextMenuSeparator("sep-send"),
+        ...others.map((to) => ({ id: `copy-${to.id}`, label: `Copy folder to ${ownerName(to)}`, onClick: () => onCopyFolder?.(owner.id, folder.path, to.id, false, counts) })),
+        ...(editable ? others.map((to) => ({ id: `move-${to.id}`, label: `Move folder to ${ownerName(to)}`, onClick: () => onCopyFolder?.(owner.id, folder.path, to.id, true, counts) })) : []),
+      ] : [];
+      if (!editable) return [{ id: "none", label: "Read-only", disabled: true }, ...send];
       return [
         { id: "new", label: "New workflow here", onClick: () => onCreate(owner.id, folder.path) },
         ...(onAddFolder ? [{ id: "new-folder", label: "New folder inside", onClick: () => newFolderIn(owner, folder.path) }] : []),
+        ...(onMoveFolder ? [{ id: "rename", label: "Rename", onClick: () => setEditing({ owner: owner.id, path: folder.path, mode: "rename" }) }] : []),
+        ...send,
         ...(onMoveFolder ? [
-          { id: "rename", label: "Rename", onClick: () => setEditing({ owner: owner.id, path: folder.path, mode: "rename" }) },
           contextMenuSeparator("sep-remove"),
           { id: "remove", label: "Remove folder (keeps its workflows)", danger: true, onClick: () => onRemoveFolder ? onRemoveFolder(owner.id, folder.path) : onMoveFolder(owner.id, folder.path, parentFolder(folder.path)) },
         ] : []),

@@ -475,6 +475,30 @@ export interface WorkflowOwnerDto {
   };
   /** Team's web slug (team folders), for "Open on the web". */
   slug?: string;
+  /** Every folder of this owner, empty ones too (a team's sync to every member). */
+  folders?: string[];
+}
+
+/** A folder with everything in it, as one value (export_workflow_folder). Paths are
+ *  relative to ``root``; a workflow's ``key`` is the id it had, which Run workflow
+ *  steps inside the bundle use to name it. */
+export interface WorkflowBundleDto {
+  version: number;
+  root: string;
+  folders: string[];
+  workflows: { key: string; name: string; description?: string; enabled?: boolean; folder: string; graph: AutomationGraphDto }[];
+}
+
+/** What copying, moving or importing a folder made. ``outside``: workflows its Run
+ *  workflow steps call that were not part of it. */
+export interface WorkflowFolderCopyDto {
+  ok?: boolean;
+  error?: string;
+  folder?: string;
+  owner?: string;
+  moved?: number;
+  outside?: string[];
+  workflows?: { key: string; id: string; name: string }[];
 }
 
 export interface WorkflowOwnersDto {
@@ -2734,6 +2758,12 @@ export interface PanelApi {
   set_workflow_folder?(workflow_id: string, folder: string): Promise<{ ok?: boolean; error?: string; workflow?: AutomationDto }>;
   /** Rename or move a folder; its parent as new_path deletes it and keeps the workflows. */
   move_workflow_folder?(owner: string, path: string, new_path: string): Promise<{ ok?: boolean; error?: string; moved?: number }>;
+  /** Make a folder that holds nothing yet; returns the owner's folders. */
+  add_workflow_folder?(owner: string, path: string): Promise<{ ok?: boolean; error?: string; folders?: string[] }>;
+  export_workflow_folder?(owner: string, path: string): Promise<{ ok?: boolean; error?: string; bundle?: WorkflowBundleDto }>;
+  import_workflow_bundle?(bundle: WorkflowBundleDto, owner?: string, parent_path?: string, name?: string): Promise<WorkflowFolderCopyDto>;
+  /** Copy (new ids, calls re-pointed) or move (same ids) a whole folder tree to Local or a team. */
+  copy_workflow_folder?(owner_from: string, path: string, owner_to: string, parent_path?: string, move?: boolean): Promise<WorkflowFolderCopyDto>;
   delete_workflow?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
   /** Stop button: ends every run of this workflow on this PC now. */
   stop_workflow?(workflow_id: string): Promise<{ ok?: boolean; stopped?: boolean }>;

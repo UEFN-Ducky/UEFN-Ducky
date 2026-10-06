@@ -20,6 +20,7 @@ import type {
   PanelPushEvent,
   PinDto,
   PinType,
+  WorkflowOwnerDto,
   WorkflowOwnersDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
@@ -47,7 +48,7 @@ import type { LiveNodeRun } from "./LiveNodeStatus";
 
 import { basedOnNode, GroupIcon, isEndNode, nodeLabel, nodeRole, nodeSummary, NodeIcon, useNodeFaces } from "./NodeVisuals";
 import { cleanGroups, deleteNodes, groupBounds, groupDepth, groupLocked, groupMembers, groupNodes, intersects, nodeLocked, removeGroup, selectionRect, ungroupNodes, type GraphRect } from "./workflowGroups";
-import { buildFolderTree, folderName, folderPaths, loadEmptyFolders, movedPath, normalizeFolder, parentFolder, saveEmptyFolders } from "./workflowFolders";
+import { buildFolderTree, folderName, folderPaths, isInside, loadEmptyFolders, movedPath, normalizeFolder, parentFolder, saveEmptyFolders } from "./workflowFolders";
 import { describeSignature } from "./FunctionSettings";
 import { planGroupExtraction } from "./extractGroup";
 import { accepts, cleanType, firstFit, nodeLayout, nodePins, pinPoint, shortValue, type NodeLayout, type NodePins } from "./pins";
@@ -95,6 +96,17 @@ const PREVIEW_EXTRA = 120;
 const THUMB_EXTRA = 120;
 const MADE_EXTRA = 210;
 const PICTURE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i;
+
+/** Empty folders that older builds kept in this browser only: hand them to the host once
+ *  (a read-only team's wait until it can take them). */
+async function keepOldEmptyFolders(owners: WorkflowOwnerDto[]): Promise<void> {
+  const left = loadEmptyFolders();
+  if (!getApi()?.add_workflow_folder || !Object.keys(left).length) return;
+  const handed = Object.entries(left).filter(([id]) => owners.some((owner) => owner.id === id && !owner.readOnly));
+  if (!handed.length) return;
+  saveEmptyFolders(Object.fromEntries(Object.entries(left).filter(([id]) => !handed.some(([done]) => done === id))));
+  for (const [id, paths] of handed) for (const path of paths) await getApi()?.add_workflow_folder?.(id, path);
+}
 
 /** A node that makes pictures (Text to Image, Edit image, a render…), not an Input. */
 function makesPictures(node: AutomationGraphNodeDto, pins: NodePins): boolean {
@@ -428,8 +440,15 @@ export function AutomationsView() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [pickerOwner, setPickerOwner] = useState(LOCAL_OWNER.id);
   const [pickerFolder, setPickerFolder] = useState("");
-  const [emptyFolders, setEmptyFolders] = useState<Record<string, string[]>>(loadEmptyFolders);
-  useEffect(() => saveEmptyFolders(emptyFolders), [emptyFolders]);
+  // Folders the host keeps per owner (empty ones too; a team's sync), plus ones made or
+  // left here that the next list refresh has not brought back yet.
+  const [emptyFolders, setEmptyFolders] = useState<Record<string, string[]>>({});
+  const folderLists = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const owner of owners.owners || []) out[owner.id] = [...(owner.folders || [])];
+    for (const [id, paths] of Object.entries(emptyFolders)) out[id] = [...new Set([...(out[id] || []), ...paths])];
+    return out;
+  }, [owners, emptyFolders]);
   const [actionError, setActionError] = useState("");
   const listRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -541,7 +560,11 @@ export function AutomationsView() {
     const api = getApi();
     const [listed, folders] = await Promise.all([api?.list_workflows?.(), api?.workflow_owners?.()]);
     setRows(listed?.workflows || []);
-    if (folders?.owners?.length) setOwners(folders);
+    if (folders?.owners?.length) {
+      setOwners(folders);
+      if (folders.owners.some((owner) => Array.isArray(owner.folders))) setEmptyFolders({});
+      void keepOldEmptyFolders(folders.owners);
+    }
     setNowMs(Date.now());
   }, []);
 
@@ -801,9 +824,23 @@ export function AutomationsView() {
     setPickerOpen(true);
   };
 
-  const rememberFolder = (ownerId: string, path: string) => {
+  /** Show a folder now; the host has it (or is making it) for the next refresh. */
+  const showFolder = (ownerId: string, path: string) => {
     const clean = normalizeFolder(path);
     if (clean) setEmptyFolders((current) => (current[ownerId] || []).includes(clean) ? current : { ...current, [ownerId]: [...(current[ownerId] || []), clean] });
+  };
+
+  /** New folder: kept by the host, so it stays empty and a team's reaches every member. */
+  const rememberFolder = async (ownerId: string, path: string) => {
+    showFolder(ownerId, path);
+    const res = await getApi()?.add_workflow_folder?.(ownerId, normalizeFolder(path));
+    if (res?.ok === false) {
+      setActionError(res.error || "Could not make folder");
+      setEmptyFolders((current) => ({ ...current, [ownerId]: (current[ownerId] || []).filter((item) => item !== normalizeFolder(path)) }));
+      return;
+    }
+    if (ownerId !== LOCAL_OWNER.id) queueTeamSync();
+    if (res) await refreshList();
   };
 
   /** Drag in the list (or Move to folder): file one workflow. Its old folder stays put. */
@@ -814,7 +851,7 @@ export function AutomationsView() {
     if (!res?.workflow) { setActionError(res?.error || "Could not move workflow"); return; }
     if (ownerId !== LOCAL_OWNER.id) queueTeamSync();
     setActionError("");
-    rememberFolder(ownerId, from);
+    showFolder(ownerId, from);  // the folder it left stays
     acknowledgeDraft((current) => current && current.id === id ? { ...current, folder: res.workflow?.folder ?? folder } : current);
     await refreshList();
   };
@@ -902,6 +939,36 @@ export function AutomationsView() {
     await refreshList();
   };
   const deleteWorkflow = (id: string) => deleteWorkflows([id]);
+
+  /** Copy or move a whole folder tree to another owner: asks first, saying what goes. */
+  const copyFolder = async (fromId: string, path: string, toId: string, move: boolean, counts: { workflows: number; folders: number }) => {
+    const all = owners.owners || [LOCAL_OWNER];
+    const from = all.find((owner) => owner.id === fromId) || LOCAL_OWNER;
+    const to = all.find((owner) => owner.id === toId) || LOCAL_OWNER;
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    const what = [plural(counts.workflows, "workflow"), ...(counts.folders ? [plural(counts.folders, "folder")] : [])].join(" and ");
+    const lines = [
+      `${what} go${counts.workflows + counts.folders === 1 ? "es" : ""} along, nested as they are. Run workflow steps between them keep working.`,
+      ...(to.kind === "team" ? [`Every member of ${to.label} gets ${move ? "them" : "the copy"}.`] : []),
+      ...(move && from.kind === "team" ? [`Members of ${from.label} lose them.`] : []),
+    ];
+    const ok = await confirm({ title: `${move ? "Move" : "Copy"} “${folderName(path)}” to ${ownerName(to)}?`, message: lines.join(" "), confirmLabel: move ? "Move" : "Copy" });
+    if (ok !== true) return;
+    await saveQueue.current;
+    const res = await getApi()?.copy_workflow_folder?.(fromId, path, toId, "", move);
+    if (!res || res.ok === false) { setActionError(res?.error || `Could not ${move ? "move" : "copy"} folder`); return; }
+    if (from.kind === "team" || to.kind === "team") queueTeamSync();
+    const outside = res.outside?.length || 0;
+    setActionError(outside && to.kind === "team"
+      ? `${plural(outside, "Run workflow step")} in “${folderName(path)}” call${outside === 1 ? "s" : ""} workflows outside it, which members of ${to.label} may not have.`
+      : "");
+    if (move) {
+      setEmptyFolders((current) => ({ ...current, [fromId]: (current[fromId] || []).filter((item) => !isInside(item, path)) }));
+      // Same ids after a move: the open workflow now belongs to its new owner.
+      if (draft?.id && res.workflows?.some((row) => row.id === draft.id)) await loadOne(draft.id);
+    }
+    await refreshList();
+  };
 
   /** Remove a folder: asks, then its workflows move up a level. */
   const removeFolder = async (ownerId: string, path: string) => {
@@ -1987,7 +2054,7 @@ export function AutomationsView() {
         collapsed={listCollapsed} nowMs={nowMs} onToggleCollapsed={() => setListCollapsed((collapsed) => !collapsed)}
         onOpen={(id) => { void loadOne(id); const width = rootRef.current?.clientWidth || 0; if (width > 0 && width <= PHONE_EDITOR_W) setListCollapsed(true); }} onCreate={createNew}
         onImportLocal={() => void getApi()?.import_local_workflows?.().then(() => refreshList())}
-        emptyFolders={emptyFolders} onAddFolder={rememberFolder}
+        emptyFolders={folderLists} onAddFolder={(ownerId, path) => void rememberFolder(ownerId, path)}
         onMoveWorkflow={(id, ownerId, folder) => void moveWorkflow(id, ownerId, folder)}
         onMoveFolder={(ownerId, path, newPath) => void moveFolder(ownerId, path, newPath)}
         onRenameWorkflow={(id, name) => void updateWorkflow(id, { name })}
@@ -1996,6 +2063,7 @@ export function AutomationsView() {
         onDeleteWorkflow={(id) => void deleteWorkflow(id)}
         onDeleteWorkflows={(ids) => void deleteWorkflows(ids)}
         onRemoveFolder={(ownerId, path) => void removeFolder(ownerId, path)}
+        onCopyFolder={(fromId, path, toId, move, counts) => void copyFolder(fromId, path, toId, move, counts)}
         featured={rows.length ? [] : featured} showNew={!draft}
         onCreateFrom={(template) => void createFromTemplate(template, { owner: (owners.owners || []).find((owner) => !owner.readOnly)?.id || LOCAL_OWNER.id, folder: "" })} />
       {draft && !listCollapsed ? <PanelResizeHandle label="Resize workflow list" className="aw-resize--list" value={panelWidths.list} min={LIST_W.min} max={LIST_W.max} edge="right"
@@ -2040,7 +2108,7 @@ export function AutomationsView() {
               <ChoiceDropdown aria-label="Move or copy" trigger={<Icons.Share />} hideChevron minWidth={240} value=""
                 header={<strong>Move or copy</strong>} footer={<small>Moving keeps its history on this PC. A copy gets a new id.</small>}
                 options={[
-                  ...(readOnly ? [] : ["", ...folderPaths(buildFolderTree(rows.filter((row) => (row.owner?.id || LOCAL_OWNER.id) === (draft.owner?.id || LOCAL_OWNER.id)), emptyFolders[draft.owner?.id || LOCAL_OWNER.id] || []))]
+                  ...(readOnly ? [] : ["", ...folderPaths(buildFolderTree(rows.filter((row) => (row.owner?.id || LOCAL_OWNER.id) === (draft.owner?.id || LOCAL_OWNER.id)), folderLists[draft.owner?.id || LOCAL_OWNER.id] || []))]
                     .filter((path) => path !== normalizeFolder(rows.find((row) => row.id === draft.id)?.folder ?? draft.folder)).map((path) => ({ value: "fold:" + path, label: path ? "Move to " + path : "Move out of folders", group: "Folder" }))),
                   ...(owners.owners || [LOCAL_OWNER]).filter((owner) => owner.id !== (draft.owner?.id || LOCAL_OWNER.id) && !owner.readOnly).flatMap((owner) => [
                     { value: "copy:" + owner.id, label: "Copy to " + ownerName(owner), group: ownerName(owner) },

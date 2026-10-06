@@ -5,7 +5,7 @@ import { AutomationsView } from "./AutomationsView";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
-const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
+const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 vi.mock("./AutomationTemplatePicker", () => ({
   AutomationTemplatePicker: ({ open, owners, ownerId, onOwnerChange, onSelect }: {
@@ -1668,6 +1668,8 @@ describe("folders in the Workflows list", () => {
     ] }));
     api.set_workflow_folder.mockImplementation(async (id: string, folder: string) => ({ ok: true, workflow: { ...structuredClone(saved), id, folder } }));
     api.move_workflow_folder.mockResolvedValue({ ok: true, moved: 1 });
+    api.add_workflow_folder.mockImplementation(async (_owner: string, path: string) => ({ ok: true, folders: [path] }));
+    api.copy_workflow_folder.mockResolvedValue({ ok: true, folder: "Tests", moved: 0, outside: [], workflows: [{ key: "p", id: "p2", name: "Example" }] });
   });
   const transfer = () => ({ setData: vi.fn(), getData: vi.fn(), effectAllowed: "", dropEffect: "", types: ["text/plain"] });
   const folderRow = (name: string) => screen.getByRole("button", { name: `Folder ${name}` }).closest(".aw-tree-folder")!;
@@ -1682,7 +1684,7 @@ describe("folders in the Workflows list", () => {
     expect(screen.getByText("Example").closest("[hidden]")).toBeTruthy();
   });
 
-  it("makes an empty folder, keeps it on this PC, and files a workflow by dragging", async () => {
+  it("makes an empty folder the host keeps, and files a workflow by dragging", async () => {
     renderView();
     await screen.findByText("Example");
     fireEvent.click(screen.getByRole("button", { name: "New folder in Local" }));
@@ -1691,7 +1693,8 @@ describe("folders in the Workflows list", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByRole("button", { name: "Folder QA" })).toBeTruthy();
     expect(screen.getByText("Empty. Drag workflows here.")).toBeTruthy();
-    expect(JSON.parse(window.localStorage.getItem("ducky.workflows.emptyFolders.v1") || "{}")).toEqual({ local: ["QA"] });
+    await waitFor(() => expect(api.add_workflow_folder).toHaveBeenCalledWith("local", "QA"));
+    expect(window.localStorage.getItem("ducky.workflows.emptyFolders.v1")).toBeNull();  // the host keeps it, not this browser
     const dataTransfer = transfer();
     fireEvent.dragStart(screen.getByText("Example").closest("button")!, { dataTransfer });
     expect(dataTransfer.setData).toHaveBeenCalledWith("application/x-ducky-workflow-list", "workflow");
@@ -1700,7 +1703,7 @@ describe("folders in the Workflows list", () => {
     fireEvent.drop(folderRow("QA"), { dataTransfer });
     await waitFor(() => expect(api.set_workflow_folder).toHaveBeenCalledWith("p", "QA"));
     // Its old folder stays until removed; a team folder never takes a Local workflow.
-    expect(JSON.parse(window.localStorage.getItem("ducky.workflows.emptyFolders.v1") || "{}").local).toEqual(["QA", "Tests/Smoke"]);
+    expect(await screen.findByRole("button", { name: "Folder Smoke" })).toBeTruthy();
     fireEvent.dragStart(screen.getByText("Example").closest("button")!, { dataTransfer });
     fireEvent.dragOver(screen.getByRole("button", { name: "Team · Alpha Studio" }).parentElement!, { dataTransfer });
     fireEvent.drop(screen.getByRole("button", { name: "Team · Alpha Studio" }).parentElement!, { dataTransfer });
@@ -1723,6 +1726,58 @@ describe("folders in the Workflows list", () => {
     fireEvent.dragOver(screen.getByRole("button", { name: "Local" }).parentElement!, { dataTransfer });
     fireEvent.drop(screen.getByRole("button", { name: "Local" }).parentElement!, { dataTransfer });
     await waitFor(() => expect(api.move_workflow_folder).toHaveBeenLastCalledWith("local", "Tests/Smoke", "Smoke"));
+  });
+
+  it("shows every folder the host keeps, empty ones and a team's too", async () => {
+    owners = { ...owners, owners: [{ ...LOCAL, folders: ["Tests", "Tests/Smoke", "Later"] }, { ...TEAM, folders: ["Shared/Empty"] }] };
+    renderView();
+    expect(await screen.findByRole("button", { name: "Folder Later" })).toBeTruthy();
+    const team = screen.getByRole("region", { name: "Team · Alpha Studio" });
+    expect(within(team).getByRole("button", { name: "Folder Shared" })).toBeTruthy();
+    expect(within(team).getByRole("button", { name: "Folder Empty" })).toBeTruthy();
+  });
+
+  it("hands empty folders an older build kept in this browser to the host once", async () => {
+    window.localStorage.setItem("ducky.workflows.emptyFolders.v1", JSON.stringify({ local: ["Old/Empty"], teamGone: ["Elsewhere"] }));
+    renderView();
+    await waitFor(() => expect(api.add_workflow_folder).toHaveBeenCalledWith("local", "Old/Empty"));
+    expect(api.add_workflow_folder).not.toHaveBeenCalledWith("teamGone", "Elsewhere");
+    expect(JSON.parse(window.localStorage.getItem("ducky.workflows.emptyFolders.v1") || "{}")).toEqual({ teamGone: ["Elsewhere"] });
+  });
+
+  it("copies a whole folder to a team after saying what goes, and moves one back", async () => {
+    renderView();
+    await screen.findByText("Example");
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Tests" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy folder to Team · Alpha Studio" }));
+    expect(await screen.findByText("Copy “Tests” to Team · Alpha Studio?")).toBeTruthy();
+    expect(screen.getByText(/1 workflow and 1 folder go along, nested as they are\..*Every member of Alpha Studio gets the copy\./)).toBeTruthy();
+    expect(api.copy_workflow_folder).not.toHaveBeenCalled();
+    await confirmIt("Copy");
+    await waitFor(() => expect(api.copy_workflow_folder).toHaveBeenCalledWith("local", "Tests", "teamT", "", false));
+
+    api.copy_workflow_folder.mockResolvedValueOnce({ ok: true, folder: "Tests", moved: 1, outside: ["elsewhere"], workflows: [{ key: "p", id: "p", name: "Example" }] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Smoke" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move folder to Team · Alpha Studio" }));
+    expect(await screen.findByText("Move “Smoke” to Team · Alpha Studio?")).toBeTruthy();
+    await confirmIt("Move");
+    await waitFor(() => expect(api.copy_workflow_folder).toHaveBeenLastCalledWith("local", "Tests/Smoke", "teamT", "", true));
+    expect(await screen.findByText(/1 Run workflow step in “Smoke” calls workflows outside it/)).toBeTruthy();
+  });
+
+  it("offers only a copy out of a team this member can't change", async () => {
+    owners = { ...owners, owners: [LOCAL, { ...TEAM, readOnly: true, reason: "Only members with Manage automations can change team workflows." }] };
+    api.list_workflows.mockImplementation(async () => ({ workflows: [
+      { id: "d", name: "Daily check", enabled: true, owner: { ...TEAM, readOnly: true }, folder: "Ops", trigger: { kind: "schedule", label: "Every 5m" } },
+    ] }));
+    renderView();
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "Folder Ops" }));
+    const items = [...screen.getByRole("menu").querySelectorAll('[role^="menuitem"]')].map((el) => el.textContent?.trim());
+    expect(items).toEqual(["Read-only", "Copy folder to Local"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy folder to Local" }));
+    expect(await screen.findByText("Copy “Ops” to Local?")).toBeTruthy();
+    await confirmIt("Copy");
+    await waitFor(() => expect(api.copy_workflow_folder).toHaveBeenCalledWith("teamT", "Ops", "local", "", false));
   });
 
   it("creates a workflow in a folder and moves the open one from the toolbar", async () => {
@@ -1794,7 +1849,7 @@ describe("right-click menus in the Workflows list", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Move out of folder" }));
     await waitFor(() => expect(api.set_workflow_folder).toHaveBeenCalledWith("p", "Tests"));
     fireEvent.contextMenu(screen.getByRole("button", { name: "Folder Smoke" }));
-    expect(items()).toEqual(["New workflow here", "New folder inside", "Rename", "Remove folder (keeps its workflows)"]);
+    expect(items()).toEqual(["New workflow here", "New folder inside", "Rename", "Copy folder to Team · Alpha Studio", "Move folder to Team · Alpha Studio", "Remove folder (keeps its workflows)"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect((screen.getByRole("textbox", { name: "Folder name" }) as HTMLInputElement).value).toBe("Smoke");
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Folder name" }), { key: "Escape" });
