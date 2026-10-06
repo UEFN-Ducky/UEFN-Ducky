@@ -268,20 +268,36 @@ def plugin_image_generators() -> list[dict[str, Any]]:
 
 
 def _declared(row: dict[str, Any]) -> dict[str, Any]:
-    """A plugin's own Text to Image tool: the prompt goes in its prompt_arg, next to its fixed args."""
+    """A plugin's own Text to Image tool: the prompt goes in its prompt_arg, next to its fixed
+    args and the values of its own settings (size, quality…) set in the node's details."""
     prompt_arg = str(row.get("prompt_arg") or "prompt")
     fixed = dict(row.get("args") or {})
     pid = str(row.get("plugin_id") or "")
-    return {"id": row["id"], "label": row["label"], "plugin": _manifest_label(pid) or pid, "plugin_id": pid,
-            "tool": row["tool"], "credits": int(row.get("credits") or 0),
-            "args": lambda inputs, _cfg: {**fixed, prompt_arg: _need_text(inputs, "prompt", "Prompt")}}
+    fields = [dict(field) for field in row.get("config_fields") or [] if isinstance(field, dict) and field.get("id")]
+    allowed = {str(field["id"]) for field in fields}
+
+    def args(inputs: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+        settings = ((cfg.get("gateway_config") or {}).get(row["id"]) or {}) if isinstance(cfg.get("gateway_config"), dict) else {}
+        chosen = {key: value for key, value in settings.items() if key in allowed and value not in (None, "")} if isinstance(settings, dict) else {}
+        return {**fixed, **chosen, prompt_arg: _need_text(inputs, "prompt", "Prompt")}
+
+    out = {"id": row["id"], "label": row["label"], "plugin": _manifest_label(pid) or pid, "plugin_id": pid,
+           "tool": row["tool"], "credits": int(row.get("credits") or 0), "args": args}
+    if row.get("cost"):
+        out["cost"] = str(row["cost"])
+    if row.get("paid") is True:
+        out["paid"] = True
+    if fields:
+        out["config_fields"] = fields
+    return out
 
 
 def table(ntype: str) -> list[dict[str, Any]]:
     """The node's backends. Text to Image: every image tool a plugin turned on here
-    declares, plus the image node of every AI gateway plugin installed here."""
+    declares (the account plugin's first, so its gateway is the default pick), plus the
+    image node of every AI gateway plugin installed here."""
     if ntype == "image.generate":
-        rows = [_declared(row) for row in plugin_image_generators()]
+        rows = sorted((_declared(row) for row in plugin_image_generators()), key=lambda row: row["plugin_id"] != "account")
         rows.extend(_gateway(pid, node) for node, pid in gateway_image_nodes())
         return rows
     return list(BACKENDS.get(ntype) or [])
@@ -423,6 +439,8 @@ def why_not(row: dict[str, Any], label: str = "") -> str:
 
 
 def cost_text(row: dict[str, Any]) -> str:
+    if row.get("cost"):
+        return str(row["cost"])  # the plugin's own words ("Ducky AI credit")
     return "Your own API key" if row.get("node") else f"~{row['credits']} credits"
 
 
@@ -437,7 +455,9 @@ def backends_for(ntype: str) -> list[dict[str, Any]]:
         out.append({
             "id": row["id"], "label": row["label"], "plugin": label, "credits": row["credits"], "cost": cost_text(row),
             "available": ready, **({} if ready else {"reason": why_not(row, label)}),
-            **({"config_fields": row["config_fields"], "model": row["model"]} if row.get("node") else {}),
+            **({"config_fields": row["config_fields"], "model": row["model"], "own_key": True} if row.get("node")
+               else {"config_fields": row["config_fields"]} if row.get("config_fields") else {}),
+            **({"paid": True} if row.get("paid") is True else {}),
         })
     return out
 
@@ -579,8 +599,10 @@ def _run_once(ntype: str, backend: dict[str, Any], cfg: dict[str, Any], inputs: 
         if cfg.get("spend") is not True:
             return {"ok": False, "gate": True, "error": f"{backend['label']} is billed to your {backend['plugin']} API key. Turn on Spend credits in this node's details to let it run."}
         return _run_gateway(ntype, backend, cfg, inputs, folder)
-    if credits > 0 and cfg.get("spend") is not True:
-        return {"ok": False, "gate": True, "error": f"{backend['label']} costs about {credits * credits_for} credits a run. Turn on Spend credits in this node's details to let it run."}
+    paid = credits > 0 or backend.get("paid") is True
+    if paid and cfg.get("spend") is not True:
+        price = backend.get("cost") or f"about {credits * credits_for} credits"
+        return {"ok": False, "gate": True, "error": f"{backend['label']} costs {price} a run. Turn on Spend credits in this node's details to let it run."}
     fn = tool_fn(backend["tool"])
     if fn is None:
         return {"ok": False, "error": f"{backend['label']} needs the {backend['plugin']} plugin: turn it on in the Store and add its API key."}
@@ -588,7 +610,7 @@ def _run_once(ntype: str, backend: dict[str, Any], cfg: dict[str, Any], inputs: 
         args = backend["args"](inputs, cfg)
     except (ValueError, OSError) as exc:
         return {"ok": False, "gate": True, "error": str(exc)}
-    args.update({"wait": True, "output_dir": str(folder), **({"confirm_spend": True} if credits > 0 else {})})
+    args.update({"wait": True, "output_dir": str(folder), **({"confirm_spend": True} if paid else {})})
     try:
         data = _parse(fn(**args))
     except RuntimeError as exc:
@@ -614,7 +636,8 @@ def _run_once(ntype: str, backend: dict[str, Any], cfg: dict[str, Any], inputs: 
     return {
         "ok": True,
         "outputs": {pin: with_url(ref), "files": files},
-        "result": {"backend": backend["label"], "credits": credits, "files": [f["path"] for f in files]},
+        "result": {"backend": backend["label"], "credits": credits, **({"cost": backend["cost"]} if backend.get("cost") else {}),
+                   "files": [f["path"] for f in files]},
     }
 
 

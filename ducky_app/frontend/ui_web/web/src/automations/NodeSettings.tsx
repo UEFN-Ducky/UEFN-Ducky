@@ -108,6 +108,13 @@ function BackendField({ field, node, backends, onChange }: { field: AutomationFi
   </div>;
 }
 
+/** What one run costs: the person's own API key (a gateway), the plugin's own words, or about N credits. */
+function spendHint(row: AutomationBackendDto) {
+  if (row.own_key) return `${row.label} is billed to your ${row.plugin} API key each run.`;
+  if (row.cost && row.cost !== `~${row.credits} credits`) return `${row.label} costs ${row.cost} each run (${row.plugin}).`;
+  return `About ${row.credits} credits each run on ${row.label} (${row.plugin}).`;
+}
+
 /** Paid steps only spend credits with this on; it says about how many each run. */
 function SpendField({ node, backends, backendKey, onChange }: { node: AutomationGraphNodeDto; backends: AutomationBackendDto[]; backendKey?: string; onChange: (node: AutomationGraphNodeDto) => void }) {
   const on = node.config.spend === true;
@@ -117,7 +124,7 @@ function SpendField({ node, backends, backendKey, onChange }: { node: Automation
       onClick={() => onChange({ ...node, config: { ...node.config, spend: on ? undefined : true } })}>
       <span>Spend credits</span><span className="aw-switch" aria-hidden="true"><span /></span>
     </button>
-    <small className="aw-field-hint">{picked ? (picked.cost && !picked.credits ? `${picked.label} is billed to your ${picked.plugin} API key each run.` : `About ${picked.credits} credits each run on ${picked.label} (${picked.plugin}).`) : ""} {on ? "It runs when the workflow does." : "Off: the run stops here and says so, nothing is spent."}</small>
+    <small className="aw-field-hint">{picked ? spendHint(picked) : ""} {on ? "It runs when the workflow does." : "Off: the run stops here and says so, nothing is spent."}</small>
   </div>;
 }
 

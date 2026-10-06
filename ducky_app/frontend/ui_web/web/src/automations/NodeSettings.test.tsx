@@ -160,9 +160,9 @@ describe("image and 3D nodes", () => {
       type: "cards.picture", label: "Card picture", group: "Cards", plugin_id: "cards",
       config_fields: [{ id: "picture_backend", label: "Picture backend", type: "backend", node_type: "image.generate" }, { id: "spend", label: "Spend credits", type: "boolean" }],
       backends: [
-        { id: "google_imagen", label: "Imagen 4", plugin: "Google", credits: 0, cost: "Your own API key", available: false, reason: "Add your Google API key in Settings." },
-        { id: "meshy_text_to_image", label: "Meshy · Nano Banana", plugin: "Meshy", credits: 5, available: true },
-        { id: "ducky_image", label: "Ducky AI · Image", plugin: "Account", credits: 0, cost: "Ducky AI credit", available: true, config_fields: [
+        { id: "google_imagen", label: "Imagen 4", plugin: "Google", credits: 0, cost: "Your own API key", own_key: true, available: false, reason: "Add your Google API key in Settings." },
+        { id: "meshy_text_to_image", label: "Meshy · Nano Banana", plugin: "Meshy", credits: 5, cost: "~5 credits", available: true },
+        { id: "ducky_image", label: "Ducky AI · Image", plugin: "Account", credits: 0, cost: "Ducky AI credit", paid: true, available: true, config_fields: [
           { id: "size", label: "Size", type: "select", options: [{ id: "1024x1024", label: "Square" }, { id: "1024x1536", label: "Tall" }] },
         ] },
       ],
@@ -177,6 +177,10 @@ describe("image and 3D nodes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Size" }));
     fireEvent.click(await screen.findByRole("radio", { name: "Tall" }));
     expect(current.config.gateway_config).toEqual({ ducky_image: { size: "1024x1536" } });
+    expect(screen.getByText(/Ducky AI · Image costs Ducky AI credit each run \(Account\)/)).toBeTruthy();  // the plugin's words, not "~0 credits"
+    cleanup();
+    render(<Editor config={{ picture_backend: "google_imagen" }} meta={pluginMeta} />);
+    expect(screen.getByText(/Imagen 4 is billed to your Google API key each run/)).toBeTruthy();
   });
 
   it("a saved backend whose plugin is off says why", () => {

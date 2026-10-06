@@ -355,6 +355,44 @@ def test_a_plugin_declares_its_image_generators(monkeypatch):
     assert [row["plugin_id"] for row in host.image_generators()] == ["x"]  # a plugin turned off lists nothing
 
 
+def test_an_account_image_generator_says_its_cost_gates_spend_and_passes_its_settings(tools, monkeypatch, image_generators):
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(media, "gateway_image_nodes", lambda: [])
+    sizes = [{"id": "1024x1024", "label": "Square"}, {"id": "1024x1536", "label": "Tall"}]
+    parsed = host._image_generator_row({
+        "id": "ducky_ai_image", "label": "Ducky AI · Image", "tool": "ducky_ai_image", "credits": 0, "cost": "Ducky AI credit", "paid": True,
+        "args": {"model": "gpt-image-1"},
+        "config_fields": [{"id": "size", "label": "Size", "type": "select", "options": sizes},
+                          {"id": "quality", "label": "Quality", "type": "select", "options": ["low", "medium", "high"]},
+                          {"id": "prompt", "label": "Prompt", "type": "textarea"}],
+    }, "account")
+    assert parsed["cost"] == "Ducky AI credit" and parsed["paid"] is True
+    assert [field["id"] for field in parsed["config_fields"]] == ["size", "quality"]  # the prompt comes from the node's pin
+    image_generators.append(parsed)
+    rows = media.backends_for("image.generate")
+    assert rows[0]["id"] == "ducky_ai_image"  # the account gateway is listed first: the default pick
+    assert rows[0]["cost"] == "Ducky AI credit" and rows[0]["paid"] is True
+    assert [field["id"] for field in rows[0]["config_fields"]] == ["size", "quality"]
+    meshy = next(row for row in rows if row["id"] == "meshy_text_to_image")
+    assert meshy["cost"] == "~5 credits" and "paid" not in meshy and "config_fields" not in meshy
+    assert media.pick_backend("image.generate", "")["id"] == "ducky_ai_image"
+
+    gated = run("image.generate", {}, {"prompt": "a duck"})
+    assert gated["ok"] is False and "costs Ducky AI credit a run" in gated["error"] and tools.calls == []
+    picked = {"ducky_ai_image": {"size": "1024x1536", "quality": "", "model": "dall-e-2", "prompt": "wrong"}, "meshy_text_to_image": {"size": "x"}}
+    step = run("image.generate", {"spend": True, "gateway_config": picked}, {"prompt": "a duck"})
+    assert step["ok"], step
+    name, args = tools.calls[0]
+    assert name == "ducky_ai_image"
+    assert {key: args[key] for key in ("model", "size", "prompt", "confirm_spend")} == {"model": "gpt-image-1", "size": "1024x1536", "prompt": "a duck", "confirm_spend": True}
+    assert "quality" not in args  # left blank: the tool's own default
+    assert step["result"]["cost"] == "Ducky AI credit" and step["result"]["credits"] == 0
+    # Meshy keeps its credits gate and never gets another backend's settings.
+    step = run("image.generate", {"backend": "meshy_text_to_image", "spend": True, "gateway_config": picked}, {"prompt": "a duck"})
+    assert step["ok"] and tools.calls[1][0] == "meshy_text_to_image" and "size" not in tools.calls[1][1] and tools.calls[1][1]["confirm_spend"] is True
+
+
 def test_ask_a_model_on_a_coding_agent_gateway_uses_its_one_shot(monkeypatch):
     from backend.automations import llm_complete
     from backend.uefn_plugins import host

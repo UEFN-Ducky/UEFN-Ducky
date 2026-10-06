@@ -292,14 +292,18 @@ export interface AutomationBackendDto {
   /** The installed plugin's own name for itself. */
   plugin: string;
   credits: number;
-  /** "~5 credits", or "Your own API key" on an AI gateway. */
+  /** "~5 credits", "Your own API key" on an AI gateway, or the plugin's own words ("Ducky AI credit"). */
   cost?: string;
   available: boolean;
   /** Why it can't run here: install, turn on, or add the key. */
   reason?: string;
-  /** Controls declared by the direct image handler, including its image models. */
+  /** Controls declared by the direct image handler (its image models) or a plugin's image tool (size, quality). */
   config_fields?: AutomationFieldDto[];
   model?: string;
+  /** An AI gateway billed to the person's own API key. */
+  own_key?: boolean;
+  /** Spends even at 0 credits (billed to an account), so it needs the Spend credits switch. */
+  paid?: boolean;
 }
 
 export interface AutomationGraphGroupDto {

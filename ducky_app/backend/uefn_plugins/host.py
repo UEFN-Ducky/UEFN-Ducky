@@ -1574,15 +1574,33 @@ def _image_generator_row(row: Any, pid: str) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         credits = 0
     args = row.get("args") if isinstance(row.get("args"), dict) else {}
-    return {
+    prompt_arg = str(row.get("prompt_arg") or "prompt").strip() or "prompt"
+    out: dict[str, Any] = {
         "id": gid,
         "label": str(row.get("label") or gid).strip() or gid,
         "tool": tool,
         "credits": credits,
         "args": dict(args),
-        "prompt_arg": str(row.get("prompt_arg") or "prompt").strip() or "prompt",
+        "prompt_arg": prompt_arg,
         "plugin_id": pid,
     }
+    # Optional: what it costs in words (shown instead of "~N credits"), whether it spends
+    # even at 0 credits (Spend switch + confirm_spend), and its own settings (size, quality…)
+    # whose values the node passes into the tool's arguments.
+    cost = str(row.get("cost") or "").strip()
+    if cost:
+        out["cost"] = cost
+    if row.get("paid") is True:
+        out["paid"] = True
+    try:
+        from backend.automations.catalog import _fields
+
+        fields = [f for f in _fields(row.get("config_fields")) if f["id"] != prompt_arg]
+    except Exception:
+        fields = []
+    if fields:
+        out["config_fields"] = fields
+    return out
 
 
 def _strip_contributions_for(pid: str) -> None:
