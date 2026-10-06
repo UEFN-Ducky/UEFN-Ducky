@@ -24,6 +24,9 @@ Usage:
   py release/publish_app.py --set-version 1.1.0   # minor/major (patch bump cannot cross)
   py release/publish_app.py --require-sign   # refuse unsigned (Chrome/SmartScreen)
   py release/publish_app.py --no-bump --exe dist/UEFN-Ducky-Setup-1.0.450.exe
+  py release/publish_app.py --phase test      # the same release in steps (a workflow):
+  py release/publish_app.py --phase build     #   each refuses unless the step before
+  py release/publish_app.py --phase upload    #   passed on this same commit
 """
 
 from __future__ import annotations
@@ -593,6 +596,43 @@ def _self_check() -> None:
     print("publish_app self-check ok")
 
 
+# --phase: a release in steps (a workflow shows each one). Every step records the
+# commit it ran on, and the next refuses unless the step before passed on that commit.
+_PHASES = ROOT / "dist" / "release-phases.json"
+
+
+def _head() -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(ROOT), capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _phase_state() -> dict:
+    try:
+        state = json.loads(_PHASES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _record_phase(name: str, **fields: str) -> None:
+    # A new test run starts a new release: what an earlier build recorded no longer counts.
+    state = {} if name == "tested" else _phase_state()
+    state[name] = {"sha": _head(), **fields}
+    _PHASES.parent.mkdir(parents=True, exist_ok=True)
+    _PHASES.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
+def _require_phase(name: str, before: str) -> dict:
+    done = _phase_state().get(name)
+    head = _head()
+    if not isinstance(done, dict) or done.get("sha") != head:
+        raise SystemExit(
+            f"Refusing: --phase {before} has not passed on this commit ({head[:9]}). Run it first."
+        )
+    return done
+
+
 def run_security_gate() -> None:
     """Refuse to bump or upload when secrets or known dependency CVEs exist.
 
@@ -671,6 +711,13 @@ def main() -> None:
         action="store_true",
         help="Bump/build Setup.exe and stop (CI Azure sign, then --no-bump --exe)",
     )
+    parser.add_argument(
+        "--phase",
+        choices=("test", "build", "upload"),
+        default="",
+        help="The default release in steps: test, then build (bump + Setup), then upload. "
+        "Each refuses unless the step before passed on the same commit.",
+    )
     args = parser.parse_args()
 
     if args.self_check:
@@ -684,8 +731,24 @@ def main() -> None:
         args.notes = notes_from_git()
         print(f"notes: {args.notes or '(no commits since the last release)'}")
 
-    run_security_gate()
-    run_regression_tests()
+    phase = args.phase
+    if phase and (args.no_bump or args.exe is not None or (args.set_version or "").strip() or args.build_only):
+        raise SystemExit("--phase is the default release (bump, build, upload) in steps; "
+                         "it does not pair with --no-bump, --exe, --set-version or --build-only.")
+    built: dict = {}
+    if phase == "test":
+        run_security_gate()
+        run_regression_tests()
+        _record_phase("tested")
+        print(f"TESTED={_head()}")
+        return
+    if phase == "build":
+        _require_phase("tested", "test")
+    elif phase == "upload":
+        built = _require_phase("built", "build")
+    else:
+        run_security_gate()
+        run_regression_tests()
 
     _load_dotenv()
     base, key = ensure_store_env()
@@ -712,7 +775,12 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(f"--set-version: {exc}") from exc
 
-    if args.no_bump:
+    if phase == "upload":
+        version = read_version()
+        if version != built.get("version"):
+            raise SystemExit(f"Refusing: the build step made {built.get('version')}, but the version here is {version}.")
+        print(f"=== Upload {version} to Store ===")
+    elif args.no_bump:
         version = (args.version or "").strip() or read_version()
         print(f"=== Publish without bump (version {version}) ===")
     elif set_version:
@@ -736,6 +804,12 @@ def main() -> None:
         before = read_version()
         version = build_setup(require_sign=args.require_sign)
         print(f"  bumped {before} → {version}")
+
+    if phase == "build":
+        exe_path = find_setup_exe(version, None)
+        _record_phase("built", version=version, exe=str(exe_path))
+        print(f"BUILT={version} {exe_path}")
+        return
 
     if args.build_only:
         if args.exe is not None:
