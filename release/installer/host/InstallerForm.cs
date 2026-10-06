@@ -17,7 +17,6 @@ namespace DuckySetup
         readonly string _version;
         ProcessHandle? _running;
         System.Windows.Forms.Timer? _poll;
-        DateTime? _stubExitedAt;
         string _installDir = Engine.UserDir;
 
         sealed class ProcessHandle
@@ -178,17 +177,18 @@ namespace DuckySetup
             var desktop = Truthy(msg, "desktopIcon");
             var isUpgrade = Truthy(msg, "isUpgrade");
             Engine.ClearProgress();
-            _stubExitedAt = null;
             var args = Engine.InteractiveArgs(
                 isUpgrade ? "" : dir,
                 allUsers,
                 desktop,
                 nolaunch: true,
                 setTasks: !isUpgrade);
-            var path = Engine.ExtractEngine();
+            System.Diagnostics.Process proc;
+            string path;
             try
             {
-                var proc = Engine.Start(path, args);
+                path = Engine.ExtractEngine();
+                proc = Engine.Start(path, args);
                 _running = new ProcessHandle { Proc = proc };
             }
             catch (Exception ex)
@@ -197,27 +197,29 @@ namespace DuckySetup
                 return;
             }
             _poll = new System.Windows.Forms.Timer { Interval = 250 };
-            _poll.Tick += (_, __) => TickInstall(path);
+            _poll.Tick += (_, __) => PostProgress();
             _poll.Start();
+            // Same wait as the silent path: it follows the elevated engine after
+            // UAC Yes, so "Done" never shows while files are still being copied.
+            Task.Run(() => Engine.Wait(proc, path)).ContinueWith(t =>
+            {
+                var code = t.IsFaulted ? 1 : t.Result;
+                try { BeginInvoke((Action)(() => FinishInstall(code))); }
+                catch (InvalidOperationException) { /* window already closed */ }
+            });
         }
 
-        void TickInstall(string enginePath)
+        void PostProgress()
         {
             var progress = Engine.ReadProgress();
             if (progress != null)
                 Post(new { type = "progress", percent = progress.Value.percent, status = progress.Value.status });
-            var proc = _running?.Proc;
-            if (proc == null) return;
-            if (!proc.HasExited)
-                return;
-            if (Engine.EngineRunning(enginePath))
-                return;
-            if (_stubExitedAt == null)
-                _stubExitedAt = DateTime.UtcNow;
-            if (DateTime.UtcNow - _stubExitedAt.Value < TimeSpan.FromSeconds(2))
-                return;
+        }
+
+        void FinishInstall(int code)
+        {
             _poll?.Stop();
-            var code = proc.ExitCode;
+            PostProgress();
             _running = null;
             if (code == 0)
                 Post(new { type = "installDone", ok = true });

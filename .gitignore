@@ -26,6 +26,8 @@ dist/
 release/installer/host/bin/
 release/installer/host/obj/
 release/installer/host/wv2/
+release/installer/host.tests/bin/
+release/installer/host.tests/obj/
 build/__pycache__/
 build/unified-work/
 build/pyinstaller-dist/

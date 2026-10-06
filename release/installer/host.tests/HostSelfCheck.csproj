@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Console self-check for the Setup host's pure logic (HostArgs.cs).
+       Run: dotnet run with this folder as the project.
+       Never starts an installer: it only links HostArgs.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DuckySetup.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SelfCheck.cs" />
+    <Compile Include="..\host\HostArgs.cs" Link="HostArgs.cs" />
+  </ItemGroup>
+</Project>

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -180,6 +182,60 @@ def sweep_installer_cache(*, keep_newer_than: str | None = None) -> int:
             continue
         if _unlink_quiet(path):
             removed += 1
+    sweep_setup_host_leftovers()
+    return removed
+
+
+# What the Ducky Setup host and its engine leave in %LOCALAPPDATA%/UEFN-Ducky.
+# setup-engine/ holds a ~180 MB copy of the installer that nothing else removes.
+_SETUP_HOST_LEFTOVERS = ("setup-engine", "setup-ui", "setup-progress.txt")
+_SETUP_HOST_LEFTOVER_GLOBS = ("setup-webview-*",)
+
+
+def _setup_host_active(names: set[str] | None) -> bool:
+    """True while any installer is running (or when we cannot tell)."""
+    if names is None:
+        return sys.platform == "win32"
+    for name in names:
+        if name == SETUP_ENGINE_EXE.lower() or name.startswith("uefn-ducky-setup"):
+            return True
+        if name.startswith("setup-") and name.endswith(".exe") and parse_version_tuple(name[6:-4]):
+            return True
+    return False
+
+
+def sweep_setup_host_leftovers(app_root: Path | None = None) -> int:
+    """Remove the Setup host's extracted engine, UI and progress file.
+
+    Skipped while any Setup is running, so an install in progress never loses
+    its engine. Returns how many top-level entries were removed.
+    """
+    if app_root is None:
+        from frontend.app_paths import resolve_app_data_dir
+
+        app_root = resolve_app_data_dir()
+    if not app_root.is_dir():
+        return 0
+    targets = [app_root / name for name in _SETUP_HOST_LEFTOVERS]
+    for pattern in _SETUP_HOST_LEFTOVER_GLOBS:
+        targets.extend(app_root.glob(pattern))
+    targets = [path for path in targets if path.exists()]
+    # Listing processes costs a tasklist run: only pay it when there is something to remove.
+    if not targets or _setup_host_active(_running_image_names()):
+        return 0
+    removed = 0
+    for path in targets:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.is_file():
+                path.unlink()
+            else:
+                continue
+        except OSError:
+            continue
+        if not path.exists():
+            removed += 1
     return removed
 
 
@@ -195,25 +251,73 @@ def _cached_installer_usable(dest: Path, expected_sha256: str | None) -> bool:
     return _verify_sha256(dest, expected_sha256) is None
 
 
-def _installer_process_running(dest: Path) -> bool:
-    """True if a process with ``dest``'s image name is alive (elevated child too)."""
+# The signed Ducky Setup host runs the Inno installer as this file, extracted to
+# %LOCALAPPDATA%/UEFN-Ducky/setup-engine/. On an all-users update the engine asks
+# for UAC, starts an elevated copy of itself and exits. The host waits for that
+# elevated copy and returns its exit code; a host that is gone early (killed, or
+# a build that did not wait) still leaves Setup-engine.exe installing, so both
+# image names count as "Setup is running".
+SETUP_ENGINE_EXE = "Setup-engine.exe"
+
+# The host creates this named event once UAC was accepted and the elevated
+# engine runs (release/installer/host/Engine.cs HandoffEventName). It lets a
+# machine-scope update close the panel then, as it does when the plain Inno
+# Setup stub exits after UAC, instead of waiting for Restart Manager to close it.
+_HANDOFF_EVENT = "Local\\UEFN-Ducky-Setup-Handoff-{pid}"
+_HANDOFF_POLL_S = 0.2
+_SYNCHRONIZE = 0x00100000
+
+
+def _host_handoff_signalled(pid: int) -> bool:
+    """True once the Setup host with this PID reports the elevated install started."""
+    if sys.platform != "win32" or not pid:
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenEventW.restype = ctypes.c_void_p
+        kernel32.OpenEventW.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p)
+        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        handle = kernel32.OpenEventW(_SYNCHRONIZE, 0, _HANDOFF_EVENT.format(pid=int(pid)))
+    except (OSError, AttributeError, ValueError):
+        return False
+    if not handle:
+        return False
+    kernel32.CloseHandle(handle)
+    return True
+
+
+def _running_image_names() -> set[str] | None:
+    """Lower-cased image names of every process (``None`` when tasklist fails)."""
     if sys.platform != "win32":
-        return False
-    name = dest.name
-    if not name:
-        return False
+        return None
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         completed = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {name}", "/NH"],
+            ["tasklist", "/FO", "CSV", "/NH"],
             capture_output=True,
             text=True,
             creationflags=flags,
             timeout=10.0,
         )
     except (OSError, subprocess.TimeoutExpired):
+        return None
+    names: set[str] = set()
+    for row in csv.reader((completed.stdout or "").splitlines()):
+        if row:
+            names.add(row[0].strip().lower())
+    return names
+
+
+def _installer_process_running(dest: Path) -> bool:
+    """True while Setup (``dest``'s image) or the host's Inno engine is alive."""
+    if not dest.name:
         return False
-    return name.lower() in (completed.stdout or "").lower()
+    names = _running_image_names()
+    if not names:
+        return False
+    return dest.name.lower() in names or SETUP_ENGINE_EXE.lower() in names
 
 
 def _setup_still_running_after_wait(dest: Path) -> bool:
@@ -292,9 +396,23 @@ def _popen_setup(dest: Path, args: list[str]) -> subprocess.Popen[Any]:
     return subprocess.Popen(cmd, close_fds=True)
 
 
-def _wait_setup_exit(proc: subprocess.Popen[Any]) -> int:
+def _wait_setup_exit(proc: subprocess.Popen[Any]) -> int | None:
+    """Setup's exit code, or ``None`` as soon as the host reports the UAC hand-off.
+
+    The Ducky Setup host stays until the elevated engine finishes, so without
+    the hand-off signal a machine-scope update would sit here until Restart
+    Manager closes the panel. The plain Inno stub never signals; it is handled
+    by its exit plus ``_setup_still_running_after_wait`` as before.
+    """
+    pid = int(getattr(proc, "pid", 0) or 0)
     try:
-        return int(proc.wait())
+        while True:
+            code = proc.poll()
+            if code is not None:
+                return int(code)
+            if _host_handoff_signalled(pid):
+                return None
+            time.sleep(_HANDOFF_POLL_S)
     except OSError:
         return 1
 
@@ -306,7 +424,8 @@ def _launch_setup_until_handoff(
 
     Per-user installs: do not wait() for Setup to finish — FORCECLOSE would kill
     this panel and (without breakaway) the installer with it. Machine installs
-    wait for the unelevated stub to hand off to the elevated child.
+    wait for the unelevated stub to hand off to the elevated child: the plain
+    Inno stub exits, the Ducky Setup host signals ``_HANDOFF_EVENT``.
     """
     last_code = 1
     for attempt in range(2):
@@ -322,7 +441,10 @@ def _launch_setup_until_handoff(
                 return 0, True
             last_code = int(proc.poll() if proc.poll() is not None else 1)
             continue
-        last_code = _wait_setup_exit(proc)
+        code = _wait_setup_exit(proc)
+        if code is None:
+            return 0, True
+        last_code = code
         if _setup_still_running_after_wait(dest):
             return last_code, True
         if last_code == 0:

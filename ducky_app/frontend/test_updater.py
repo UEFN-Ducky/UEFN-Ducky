@@ -343,7 +343,9 @@ def test_launch_setup_retries_once_when_first_stub_dies() -> None:
     launches = {"n": 0}
 
     class FakeProc:
-        def wait(self) -> int:
+        pid = 0
+
+        def poll(self) -> int:
             return 1 if launches["n"] == 1 else 0
 
     def fake_popen(_dest: Path, _args: list[str]) -> FakeProc:
@@ -374,7 +376,9 @@ def test_launch_setup_retries_once_then_keeps_decline() -> None:
     launches = {"n": 0}
 
     class FakeProc:
-        def wait(self) -> int:
+        pid = 0
+
+        def poll(self) -> int:
             return 1
 
     def fake_popen(_dest: Path, _args: list[str]) -> FakeProc:

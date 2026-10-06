@@ -10,14 +10,21 @@ namespace DuckySetup
         [STAThread]
         static int Main(string[] args)
         {
+            // In-app updates run Setup with /VERYSILENT and wait on this process.
+            // That path must never show a window or a message box (nobody is
+            // there to click it) and never load WebView2.
+            if (HostArgs.IsSilent(args))
+                return Silent(args);
+
             // Extract WebView2 next to Setup-engine BEFORE Go() is JIT-compiled
             // (Go references InstallerForm, which loads Microsoft.Web.WebView2.WinForms).
             AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbedded;
             try
             {
                 Engine.ExtractEngine();
+                Engine.ExtractWebView();
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException)
             {
                 MessageBox.Show(ex.Message, "UEFN Ducky Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
@@ -25,11 +32,22 @@ namespace DuckySetup
             return Go(args);
         }
 
+        static int Silent(string[] args)
+        {
+            try
+            {
+                return Engine.Run(args);
+            }
+            catch (Exception ex)
+            {
+                // Exit code 1 = "Setup failed to initialize", same as Inno.
+                Engine.LogHostError(ex);
+                return 1;
+            }
+        }
+
         static int Go(string[] args)
         {
-            if (Engine.IsSilent(args))
-                return Engine.Run(args);
-
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new InstallerForm(VersionString()));
