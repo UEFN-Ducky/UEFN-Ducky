@@ -1187,7 +1187,7 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
             if ntype.startswith("start.") or ntype not in _ACTION_TYPES:
                 return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": dict(payload)}
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": f"no handler for {ntype}"}
-        result = handler(_plugin_ctx(cfg, payload, node))
+        result = handler(_plugin_ctx(cfg, payload, node, values))
         if isinstance(result, dict) and result.get("ok") is False:
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": result.get("error") or "plugin node failed", "result": result}
         return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": result}
@@ -1799,11 +1799,15 @@ def _ensure_pipeline_group(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
             save_conversation(hub)
 
 
-def _plugin_ctx(cfg: dict[str, Any], payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+def _plugin_ctx(
+    cfg: dict[str, Any], payload: dict[str, Any], node: dict[str, Any], inputs: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "config": cfg,
         "payload": payload,
         "node": node,
+        # The node's input pins: what its wires carried, else what is set in its details.
+        "inputs": dict(inputs or {}),
         # Plugin API field from before workflows: "pipeline" = run from a chat.
         "kind": "pipeline" if payload.get("caller_conv_id") else "automation",
         "files": payload.get("files") or [],

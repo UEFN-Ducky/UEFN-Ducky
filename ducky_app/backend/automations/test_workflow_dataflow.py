@@ -152,3 +152,36 @@ def test_input_nodes_hand_on_files_as_file_refs():
     got = out["node_outputs"]["p"]["value"]
     assert {key: got[key] for key in ("kind", "path", "name")} == {"kind": "image", "path": "C:/art/duck.png", "name": "duck.png"}
     assert got["url"].startswith("http://127.0.0.1:4199/workflow-media/") and got["url"].endswith("/duck.png")  # the editor's thumbnail link
+
+
+def test_wired_values_reach_a_plugin_node(monkeypatch):
+    from backend.automations import catalog, plugin
+
+    seen = []
+
+    def handler(ctx):
+        seen.append(ctx)
+        return {"ok": True, "name": ctx["inputs"]["card"]["name"]}
+
+    specs = catalog.node_specs()
+    spec = {"type": "test.card_step", "label": "Card step", "role": "action", "plugin_id": "testplug",
+            "inputs": [{"id": "card", "label": "Card", "type": "json"}, {"id": "note", "label": "Note", "type": "text"}],
+            "outputs": [{"id": "name", "label": "Name", "type": "text"}]}
+    monkeypatch.setattr(catalog, "node_specs", lambda: {**specs, "test.card_step": spec})
+    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_enabled", lambda pid: pid == "testplug")
+    plugin.register_node("testplug", "test.card_step", handler)
+    try:
+        wid = save(
+            [node("s", "start.manual"), node("card", "input.json", value='{"name": "Duck Knight"}'),
+             node("step", "test.card_step", mode="x", inputs={"note": "hello {{who}}"}), node("p", "util.preview")],
+            [{"source": "s", "target": "step", "kind": "main"}, wire("card", "value", "step", "card"), wire("step", "name", "p", "value")],
+        )
+        out = runner.run_workflow(wid, payload={"who": "duck"})
+    finally:
+        plugin.clear_for_plugin("testplug")
+    assert out["ok"] is True, out
+    ctx = seen[0]
+    assert ctx["inputs"] == {"card": {"name": "Duck Knight"}, "note": "hello duck"}
+    assert ctx["config"]["mode"] == "x" and ctx["node"]["id"] == "step" and ctx["kind"] == "automation"
+    assert {"payload", "files", "artifact_dir"} <= set(ctx)
+    assert out["node_outputs"]["p"] == {"value": "Duck Knight"}
