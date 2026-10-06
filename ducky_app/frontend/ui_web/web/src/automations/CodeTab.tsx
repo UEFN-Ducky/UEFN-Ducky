@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { runBridgeJob } from "../hooks/bridgeJobAsync";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
 import type {
@@ -24,6 +25,10 @@ import { cleanType, nodePins, PIN_TYPE_LABELS, type NodePins } from "./pins";
 
 /** How long typing rests before the code reaches the draft and is checked. */
 const EDIT_DELAY_MS = 300;
+/** How long the end of a typing session waits for the check of its last keystrokes. */
+const END_WAIT_MS = 3000;
+/** A test may wait on tools (UEFN, duckies) as long as a run does. */
+const TEST_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 export type CodeTabProps = {
   workflowId: string;
@@ -43,6 +48,8 @@ export type CodeTabProps = {
   lastStep?: AutomationRunStepDto;
   /** Show this line (a failed step clicked in the run log). */
   reveal?: { line: number; nonce: number } | null;
+  /** When the workflow was last saved: a save can approve code, so the server is asked again. */
+  savedAt?: number;
   wide: boolean;
   onWide: (wide: boolean) => void;
   /** Code typed in: into the draft, one undo step per focus. */
@@ -103,7 +110,7 @@ function ConfirmBox({ label, text, wires, confirmLabel, onConfirm, onCancel }: {
   return <div ref={ref} className="aw-code-confirm" role="dialog" aria-label={label} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onCancel(); } }}>
     <p>{text}</p>
     {wires.length ? <>
-      <p className="aw-code-confirm-warn">{wires.length === 1 ? "This data wire will be disconnected:" : `These ${wires.length} data wires will be disconnected:`}</p>
+      <p className="aw-code-confirm-warn">{wires.length === 1 ? "This wire will be disconnected:" : `These ${wires.length} wires will be disconnected:`}</p>
       <ul className="aw-code-wires">{wires.map((wire) => <li key={wire}>{wire}</li>)}</ul>
     </> : null}
     <div className="aw-code-confirm-actions">
@@ -121,15 +128,20 @@ export function CodeTab(props: CodeTabProps) {
   const [infoState, setInfoState] = useState<"loading" | "ready" | "failed">("loading");
   const [infoError, setInfoError] = useState("");
   const custom = isCodeNode(node);
-  // A built-in's code follows its settings; a custom node's server view changes when it is saved.
-  const fetchKey = custom ? `${node.id}|code|${String(node.config.code_sha || "")}` : `${node.id}|${node.type}|${JSON.stringify(node.config)}`;
+  // Asked again on purpose: after a Review, or when a test was refused for want of one.
+  const [asked, setAsked] = useState(0);
+  const reload = () => setAsked((value) => value + 1);
+  // A built-in's code follows its (unsaved) settings; a custom node's server view changes when
+  // it is saved (a save may approve it even when its code stays the same).
+  const fetchKey = custom ? `${node.id}|code|${String(node.config.code_sha || "")}|${props.savedAt ?? ""}|${asked}` : `${node.id}|${node.type}|${JSON.stringify(node.config)}|${asked}`;
   useEffect(() => {
     if (!workflowId) { setInfo(null); setInfoState("failed"); setInfoError("Save the workflow first to see its code."); return; }
     let cancelled = false;
     let timer = 0;
     setInfoState((state) => (custom && state === "ready" ? state : "loading"));
     const load = (tries: number) => {
-      void Promise.resolve(getApi()?.get_workflow_node_code?.(workflowId, node.id)).then((res) => {
+      // The node as it is in the editor, so the code shown is that of its settings now.
+      void Promise.resolve(getApi()?.get_workflow_node_code?.(workflowId, node.id, node)).then((res) => {
         if (cancelled) return;
         if (!res || res.ok === false) { setInfoState("failed"); setInfoError(res?.error || "Its code isn't available here."); return; }
         setInfo(res);
@@ -146,7 +158,8 @@ export function CodeTab(props: CodeTabProps) {
   const builtinCode = useRef("");
   if (!custom && info?.kind === "builtin") builtinCode.current = info.code;
   return custom
-    ? <CustomCode {...props} info={info?.kind === "custom" ? info : null} builtinCode={builtinCode.current} onApproved={() => setInfo((current) => current ? { ...current, approved: true } : current)} />
+    ? <CustomCode {...props} info={info?.kind === "custom" ? info : null} builtinCode={builtinCode.current} onReload={reload}
+      onApproved={() => { setInfo((current) => current ? { ...current, approved: true } : current); reload(); }} />
     : <BuiltinCode {...props} info={info} state={infoState} error={infoError} />;
 }
 
@@ -184,7 +197,7 @@ function BuiltinCode({ node, graph, byType, readOnly, locked, team, info, state,
   </div>;
 }
 
-type CustomProps = CodeTabProps & { info: WorkflowNodeCodeDto | null; builtinCode: string; onApproved: () => void };
+type CustomProps = CodeTabProps & { info: WorkflowNodeCodeDto | null; builtinCode: string; onApproved: () => void; onReload: () => void };
 
 function CustomCode(props: CustomProps) {
   const { workflowId, node, graph, byType, workflows, pins, readOnly, locked, lastStep, info, onNodeChange, onCodeSession } = props;
@@ -209,17 +222,22 @@ function CustomCode(props: CustomProps) {
   useEffect(() => { if (props.reveal) setReveal(props.reveal); }, [props.reveal?.nonce]);
   const show = (line: number) => setReveal((current) => ({ line, nonce: (current?.nonce || 0) + 1 }));
 
-  const runCheck = (text: string) => {
+  // The check on its way, if any (the end of a typing session waits for it).
+  const checking = useRef<Promise<void> | null>(null);
+  /** Check `text`; `apply` puts what it declares on the canvas (code typed here, not code that
+   *  came from outside: that node already has its own pins). */
+  const runCheck = (text: string, apply = true) => {
     const seq = ++checkSeq.current;
-    void Promise.resolve(getApi()?.check_workflow_node_code?.(text)).then((res) => {
+    const done: Promise<void> = Promise.resolve(getApi()?.check_workflow_node_code?.(text)).then((res) => {
       if (!res || seq !== checkSeq.current) return;
       setCheck(res);
       const current = nodeRef.current;
-      if (codeOf(current) !== text) return;
+      if (!apply || codeOf(current) !== text) return;
       const next = withCheck(current, res);
       // Pins, settings and tools change on the canvas only after a check passes.
       if (declarationKey(next) !== declarationKey(current)) onNodeChange(next, "Edit code");
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => { if (checking.current === done) checking.current = null; });
+    checking.current = done;
   };
 
   const flush = () => {
@@ -246,7 +264,8 @@ function CustomCode(props: CustomProps) {
     timer.current = window.setTimeout(() => flushRef.current(), EDIT_DELAY_MS);
   };
 
-  // A change from outside (undo, a save, an agent): the editor follows unless it is the text sent from here.
+  // A change from outside (undo, a save, an agent): the editor follows unless it is the text sent
+  // from here, and its problems are those of the new code (the node's own until checked again).
   const incoming = codeOf(node);
   useEffect(() => {
     if (incoming === pushed.current) return;
@@ -254,27 +273,45 @@ function CustomCode(props: CustomProps) {
     pending.current = null;
     pushed.current = incoming;
     setCode(incoming);
+    setCheck(null);
+    runCheck(incoming, false);
   }, [incoming]);
 
   // Check the code once when it opens (problems and the pins preview).
   useEffect(() => { runCheck(codeOf(node)); }, [node.id]);
 
+  // An end still waiting for the last check; focus coming back first carries the session on.
+  const ending = useRef<object | null>(null);
   const begin = () => {
     if (session.current) return;
     session.current = true;
+    if (ending.current) { ending.current = null; return; }
     onCodeSession("begin", node.id);
   };
+  const sessionRef = useRef(onCodeSession);
+  sessionRef.current = onCodeSession;
   const end = () => {
     flushRef.current();
     if (!session.current) return;
     session.current = false;
-    onCodeSession("end", node.id);
+    const id = node.id;
+    const waiting = checking.current;
+    if (!waiting) { onCodeSession("end", id); return; }
+    // The pins the last keystrokes declare land in the same undo step, before the session ends.
+    const token = {};
+    ending.current = token;
+    void Promise.race([waiting, new Promise((resolve) => window.setTimeout(resolve, END_WAIT_MS))]).then(() => {
+      if (ending.current !== token) return;
+      ending.current = null;
+      sessionRef.current("end", id);
+    });
   };
   const endRef = useRef(end);
   endRef.current = end;
   useEffect(() => () => endRef.current(), []);
 
-  // The last run's error is drawn until the code changes here.
+  // The last run's error is drawn until the code changes here; a new run shows its own again.
+  useEffect(() => { setEdited(false); }, [lastStep]);
   const runError = !edited && lastStep?.code_error ? lastStep.code_error : null;
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<CodeTestResultDto | null>(null);
@@ -311,19 +348,22 @@ function CustomCode(props: CustomProps) {
   const revertDrops = reverted ? wiresDropped(graph, node.id, nodePins(reverted, byType.get(reverted.type), workflows)) : [];
 
   const [reviewError, setReviewError] = useState("");
-  const needsReview = !!info && info.approved === false && info.code === code;
+  // A test refused for want of a Review asks the server again; until it answers, ask for one.
+  const [reviewAsked, setReviewAsked] = useState(false);
+  useEffect(() => { setReviewAsked(false); }, [info]);
+  const needsReview = !!info && (info.approved === false || reviewAsked) && info.code === code;
   const approve = async () => {
     if (!info) return;
     setReviewError("");
     const res = await Promise.resolve(getApi()?.approve_workflow_node_code?.(workflowId, node.id, info.code_sha)).catch(() => null);
-    if (res && res.ok !== false) props.onApproved();
+    if (res && res.ok !== false) { setReviewAsked(false); props.onApproved(); }
     else setReviewError(res?.error || "Could not mark it reviewed.");
   };
 
-  // Test: the code in the editor (saved or not), with inputs from its last run.
+  // Test: the code in the editor (saved or not), with inputs from the newest run it knows.
   const [testInputs, setTestInputs] = useState<Record<string, unknown> | null>(null);
   const [dryRun, setDryRun] = useState(true);
-  const inputs = testInputs ?? info?.last_inputs ?? lastStep?.inputs ?? {};
+  const inputs = testInputs ?? lastStep?.inputs ?? info?.last_inputs ?? {};
   const runTest = async () => {
     flush();
     setTesting(true);
@@ -331,8 +371,17 @@ function CustomCode(props: CustomProps) {
     try {
       const sent = Object.fromEntries(pins.inputs.filter((pin) => inputs[pin.id] !== undefined).map((pin) => [pin.id, inputs[pin.id]]));
       const settings = node.config.settings && typeof node.config.settings === "object" ? node.config.settings as Record<string, unknown> : {};
-      const res = await getApi()?.test_workflow_node?.(workflowId, node.id, code, sent, settings, dryRun);
+      // In the background like Run: a test that waits on tools never holds up the app.
+      const res = await runBridgeJob<CodeTestResultDto | null>("test_workflow_node", [workflowId, node.id, code, sent, settings, dryRun], TEST_TIMEOUT_MS);
       if (!res) { setTestError("Testing isn't available here."); return; }
+      if (res.needs_review) {
+        setResult(null);
+        setReviewAsked(true);
+        props.onReload();
+        // The Review prompt covers the saved code; edits here are saved first.
+        if (!info || info.code !== code) setTestError("An agent changed the saved code: save, then press Review before testing with tools.");
+        return;
+      }
       setResult(res);
       if (res.error?.line) show(res.error.line);
     } catch (error) {

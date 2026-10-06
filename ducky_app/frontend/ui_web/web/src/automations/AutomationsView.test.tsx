@@ -889,6 +889,14 @@ describe("details panel", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(saved.graph.nodes[1].label).toBe("Wait for UEFN");
   });
+  it("says why a save was refused (too much code) instead of only asking to retry", async () => {
+    await open();
+    api.save_workflow.mockResolvedValueOnce({ ok: false, error: "This workflow holds 302 KB of code; the most is 256 KB." });
+    editNode();
+    editText({ name: "Wait for UEFN" });
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not save changes. This workflow holds 302 KB of code; the most is 256 KB.");
+  });
 });
 
 describe("workflow multi-selection and groups", () => {
@@ -1497,6 +1505,18 @@ describe("several workflows, live runs, outline and team sync", () => {
     expect(card.textContent).not.toContain("stale output");
   });
 
+  it("output and steps of a run it never saw start (a Code-tab Test) leave the toolbar on Test", async () => {
+    await open();
+    const push = (event: Record<string, unknown>) => act(() => { window.__uefnPanelPush?.({ id: "p", run: "draft-1a2b3c4d", ...event } as never); });
+    push({ type: "workflow_output", node: "a", source: "log", session_id: "", output: "Got hi" });
+    push({ type: "workflow_step", node: "a", state: "running", label: "Pause" });
+    expect(screen.getByRole("button", { name: "Test" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    const card = document.querySelector('[data-aw-node="a"]')!;
+    expect(card.classList.contains("is-run-running")).toBe(false);
+    expect(card.textContent).not.toContain("Got hi");
+  });
+
   it("lists every group and node in the outline and brings the picked one into view", async () => {
     saved.graph.groups = [{ id: "g", name: "Setup", node_ids: ["s", "a"] }];
     await open();
@@ -2064,6 +2084,27 @@ describe("custom code nodes", () => {
     await waitFor(() => expect(saved.graph.nodes.find((item) => item.id === "c")?.config.code).toBe(CODE));
   });
 
+  it("code that becomes a value node loses its white wires, so nothing after it is skipped silently", async () => {
+    withCodeNode();
+    saved.graph.edges.push({ source: "a", target: "c", kind: "main" }, { source: "c", target: "b", kind: "main" });
+    const VALUE = CODE.replace("kind: \"step\"", "kind: \"value\"");
+    api.check_workflow_node_code.mockImplementation(async (code: string) => ({ ok: true, problems: [], settings_spec: [], uses: { tools: [], builtins: [] }, code_sha: "s",
+      pins: { exec: !code.includes("\"value\""), inputs: [], outputs: [] } }));
+    await open();
+    editNode("c");
+    fireEvent.click(codeTab());
+    const box = within(details()!).getByRole("textbox", { name: "Code" }) as HTMLTextAreaElement;
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: VALUE } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(document.querySelector('[data-aw-wire="a>c:main"]')).toBeNull());
+    expect(document.querySelector('[data-aw-wire="c>b:main"]')).toBeNull();
+    await save();
+    expect(saved.graph.nodes.find((item) => item.id === "c")?.config.code).toBe(VALUE);
+    expect(saved.graph.edges.filter((edge) => edge.source === "c" || edge.target === "c")).toEqual([]);
+    expect(saved.graph.edges).toEqual([{ source: "s", target: "a", kind: "main" }]);
+  });
+
   it("a failed code step in the run log opens its Code tab at the line", async () => {
     withCodeNode();
     saved.runs = [{ ok: false, error: "My code: Line 2: boom", steps: [{ id: "c", type: "code.js", label: "My code", ok: false, error: "Line 2: boom", code_error: { line: 2, col: 3, message: "boom" } }] }];
@@ -2081,7 +2122,8 @@ describe("custom code nodes", () => {
     fireEvent.click(codeTab());
     const box = await within(details()!).findByRole("textbox", { name: /Code of Wait/ }) as HTMLTextAreaElement;
     expect(box.value).toBe("// generated");
-    expect(api.get_workflow_node_code).toHaveBeenCalledWith("p", "a");
+    // The node as it is on the canvas goes along, so unsaved settings show in its code.
+    expect(api.get_workflow_node_code).toHaveBeenCalledWith("p", "a", expect.objectContaining({ id: "a", type: "flow.wait" }));
     // Settings stays the default view for everyone else.
     fireEvent.click(within(details()!).getByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("spinbutton", { name: "Seconds" })).toBeTruthy();

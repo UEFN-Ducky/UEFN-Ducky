@@ -421,6 +421,8 @@ export interface CodeTestResultDto {
   tool_calls?: Array<{ name: string; args?: unknown; dry_run?: boolean }>;
   error?: CodeErrorDto | null;
   ms?: number;
+  /** It did not run: an agent changed the saved code and nobody reviewed it yet. */
+  needs_review?: boolean;
 }
 
 /** workflow_code_api: the `ducky` object's types and docs, for the code editor. */
@@ -2743,8 +2745,9 @@ export interface PanelApi {
   keep_workflow_preview?(workflowId: string, nodeId: string): Promise<AutomationRunDto>;
   /** '' when an If / Expression condition parses, else what is wrong. */
   check_workflow_expression?(expression: string): Promise<{ ok?: boolean; error?: string }>;
-  /** Custom code: the JavaScript a node runs (a built-in's generated from its saved settings). */
-  get_workflow_node_code?(workflowId: string, nodeId: string): Promise<WorkflowNodeCodeDto>;
+  /** Custom code: the JavaScript a node runs (a built-in's generated from the settings of `node`,
+   *  the editor's draft of it, else its saved ones). */
+  get_workflow_node_code?(workflowId: string, nodeId: string, node?: AutomationGraphNodeDto | null): Promise<WorkflowNodeCodeDto>;
   /** Custom code: parse the declaration and check the code without saving it. */
   check_workflow_node_code?(code: string): Promise<CodeCheckDto>;
   /** Custom code: run one node's code (the unsaved draft when `code` is given) without saving;

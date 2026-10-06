@@ -50,8 +50,9 @@ export function blankCodeConfig(): Record<string, unknown> {
   return { code: BLANK_CODE, pins: structuredClone(BLANK_PINS), settings_spec: [], uses: { tools: [], builtins: [] }, settings: {}, inputs: {}, spend: false };
 }
 
+/** The node's code as written; cleared code stays empty (only missing code is the template). */
 export function codeOf(node: AutomationGraphNodeDto): string {
-  return typeof node.config.code === "string" && node.config.code ? node.config.code : BLANK_CODE;
+  return typeof node.config.code === "string" ? node.config.code : BLANK_CODE;
 }
 
 /** The built-in a custom code node was made from, if any. */
@@ -117,19 +118,22 @@ export function declarationKey(node: AutomationGraphNodeDto): string {
   return stableJson([node.config.pins ?? null, node.config.settings_spec ?? [], uses.tools ?? [], uses.builtins ?? []]);
 }
 
-/** The data wires on `nodeId` whose pins `pins` no longer has. */
+/** The wires on `nodeId` that `pins` can't take: data wires whose pin is gone, and every
+ *  white wire when it is a value node (no white pins). */
 export function wiresDropped(graph: AutomationGraphDto, nodeId: string, pins: NodePins): AutomationGraphEdgeDto[] {
-  return graph.edges.filter((edge) => edge.kind === "data" && (
-    (edge.target === nodeId && !pins.inputs.some((pin) => pin.id === edge.target_pin))
-    || (edge.source === nodeId && !pins.outputs.some((pin) => pin.id === edge.source_pin))));
+  return graph.edges.filter((edge) => edge.kind === "data"
+    ? (edge.target === nodeId && !pins.inputs.some((pin) => pin.id === edge.target_pin))
+      || (edge.source === nodeId && !pins.outputs.some((pin) => pin.id === edge.source_pin))
+    : !pins.exec && (edge.source === nodeId || edge.target === nodeId));
 }
 
 export function dropWires(graph: AutomationGraphDto, dropped: AutomationGraphEdgeDto[]): AutomationGraphDto {
   return dropped.length ? { ...graph, edges: graph.edges.filter((edge) => !dropped.includes(edge)) } : graph;
 }
 
-/** "Prompt.text → Text to Image.prompt", with each node's name. */
+/** "Prompt.text → Text to Image.prompt" (a white wire: "Prompt → Text to Image"), with each node's name. */
 export function wireText(edge: AutomationGraphEdgeDto, nameOf: (id: string) => string): string {
+  if (edge.kind !== "data") return `${nameOf(edge.source)} → ${nameOf(edge.target)}`;
   return `${nameOf(edge.source)}.${edge.source_pin || ""} → ${nameOf(edge.target)}.${edge.target_pin || ""}`;
 }
 

@@ -254,6 +254,8 @@ function groupCatalog(catalog: PaletteTile[], query: string) {
 const TEAM_SYNC_DELAY_MS = 4000;
 /** A test run may take long (UEFN, duckies); Stop ends it any time. */
 const RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+/** The server turned a save down and said why (too much code, say): retrying won't help. */
+class SaveRefused extends Error {}
 
 /** A run as it happens: the step running now, the wire it came along, how each step went. */
 type LiveState = "running" | "ok" | "error" | "stopped";
@@ -276,8 +278,10 @@ export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): 
   const run = String(event.run || "");
   const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {}, logs: {}, times: {} };
   const base = current && current.run === run ? current : fresh;
+  // Output and steps belong to a run seen starting; others (a Code-tab Test, an older run) are not this one.
+  if ((event.type === "workflow_output" || event.type === "workflow_step") && (!current || current.run !== run)) return current;
   if (event.type === "workflow_output") {
-    if (!event.node || (current && current.run !== run)) return current;
+    if (!event.node) return current;
     if (event.source === "log") return { ...base, logs: { ...base.logs, [event.node]: event.output || "" } };
     return { ...base, outputs: { ...base.outputs, [event.node]: { output: event.output || "", sessionId: event.session_id || "" } } };
   }
@@ -728,7 +732,9 @@ export function AutomationsView() {
    *  nothing here is unsaved, and play never sends an old copy over it. */
   const synced = useRef<AutomationDto | null>(null);
   const savesPending = useRef(0);
-  const [textSaveError, setTextSaveError] = useState(false);
+  const [textSaveError, setTextSaveError] = useState("");
+  /** The banner under the toolbar: the server's reason when it turned the save down. */
+  const saveFailed = (error: unknown) => setTextSaveError(error instanceof SaveRefused ? `Could not save changes. ${error.message}` : "Could not save changes. Use Save to retry.");
   const readOnly = !!draft?.owner?.readOnly;
   const persist = useCallback((next: AutomationDto, owner = "") => {
     const api = getApi();
@@ -753,7 +759,7 @@ export function AutomationsView() {
       await refreshList();
       return row;
     }
-    throw new Error(res?.error || "Could not save workflow");
+    throw res?.error ? new SaveRefused(res.error) : new Error("Could not save workflow");
     }).finally(() => { savesPending.current -= 1; });
     saveQueue.current = operation.catch(() => undefined);
     return operation;
@@ -974,8 +980,8 @@ export function AutomationsView() {
     if (!draft || readOnly || nodeLocked(draft.graph, id)) return;
     const next = { ...draft, graph: { ...draft.graph, nodes: draft.graph.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) } };
     setDraft(next);
-    setTextSaveError(false);
-    void persist(next).catch(() => setTextSaveError(true));
+    setTextSaveError("");
+    void persist(next).catch(saveFailed);
   };
 
   const nameOf = (id: string) => { const node = nodesById.get(id); return node ? nodeLabel(node, byType.get(node.type)) : "It"; };
@@ -1064,12 +1070,12 @@ export function AutomationsView() {
     if (!draft) return;
     const teamId = draft.owner?.kind === "team" ? draft.owner.id : "";
     void persist(draft).then(async () => {
-      setTextSaveError(false);
+      setTextSaveError("");
       if (!teamId) return;
       window.clearTimeout(syncTimer.current);
       syncTimer.current = 0;
       await getApi()?.workflow_sync?.(true, teamId, true);
-    }).catch(() => setTextSaveError(true));
+    }).catch(saveFailed);
   };
 
   const [stopping, setStopping] = useState(false);
@@ -1221,8 +1227,8 @@ export function AutomationsView() {
     if (nextGraph === draft.graph) return;
     const next = { ...draft, graph: nextGraph };
     setDraft(next, label);
-    setTextSaveError(false);
-    void persist(next).catch(() => setTextSaveError(true));
+    setTextSaveError("");
+    void persist(next).catch(saveFailed);
   };
 
   const goToEdit = (index: number) => {
@@ -1230,7 +1236,7 @@ export function AutomationsView() {
     const next = history.go(index);
     if (!next) return;
     setSelectedNodeIds([]); setSelectedEdge(null); setSpawn(null);
-    void persist(next).then(() => setTextSaveError(false)).catch(() => setTextSaveError(true));
+    void persist(next).then(() => setTextSaveError("")).catch(saveFailed);
   };
 
   const loadVersions = async () => {
@@ -1258,8 +1264,8 @@ export function AutomationsView() {
       const next = { ...history.current.current!, ...editableWorkflow(result.workflow) };
       endEdit(); setDraft(next, "Restore saved version");
       setSelectedNodeIds([]); setSelectedEdge(null);
-      await persist(next); setTextSaveError(false); setHistoryStatus("");
-    } catch { if (gen === loadGen.current) { setTextSaveError(true); setHistoryStatus("Could not restore version."); } }
+      await persist(next); setTextSaveError(""); setHistoryStatus("");
+    } catch (error) { if (gen === loadGen.current) { saveFailed(error); setHistoryStatus("Could not restore version."); } }
   };
 
   /** A node's settings or code changed in its details: into the draft. A data wire whose pin
@@ -2260,7 +2266,7 @@ export function AutomationsView() {
             {marquee ? <div className="aw-selection-box" aria-hidden="true" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} /> : null}
           </div>
         </div>
-        {textSaveError ? <p className="aw-text-save-error" role="alert">Could not save changes. Use Save to retry.</p> : null}
+        {textSaveError ? <p className="aw-text-save-error" role="alert">{textSaveError}</p> : null}
         {actionError ? <p className="aw-text-save-error" role="alert">{actionError}</p> : null}
         {draft && readOnly ? <p className="aw-readonly-note" role="note"><Icons.Lock /> {draft.owner?.reason || "Read-only here."} Duplicate it to change a Local copy.</p> : null}
         {panelBadge ? createPortal(<div className="aw-panel-zoom" aria-live="polite" style={{ left: panelBadge.left, top: panelBadge.top }}>{Math.round(panelBadge.value * 100)}%</div>, document.body) : null}
@@ -2325,6 +2331,7 @@ export function AutomationsView() {
           codeWide={codeWide}
           onCodeWide={setCodeWide}
           codeFocus={codeFocus}
+          savedAt={draft.updated}
           lastSteps={lastSteps}
           pinsOf={pinsOf}
           nodeOutputs={lastOutputs}

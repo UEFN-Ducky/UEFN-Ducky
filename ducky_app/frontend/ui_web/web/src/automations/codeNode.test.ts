@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AutomationGraphDto, AutomationGraphNodeDto, AutomationNodeDto, CodeCheckDto, WorkflowNodeCodeDto } from "../types/panel";
 import {
-  BLANK_CODE, BLANK_PINS, blankCodeConfig, convertNode, dropWires, pinDiff, pinDiffEmpty, pinDiffText, revertNode, wiresDropped, wireText, withCheck,
+  BLANK_CODE, BLANK_PINS, blankCodeConfig, codeOf, convertNode, dropWires, pinDiff, pinDiffEmpty, pinDiffText, revertNode, wiresDropped, wireText, withCheck,
 } from "./codeNode";
 import { nodePins } from "./pins";
 
@@ -75,6 +75,24 @@ describe("custom code nodes", () => {
     expect(back).toEqual(expect.objectContaining({ id: "a", type: "llm.ask", label: "Ask", config: askNode().config }));
     expect(wiresDropped(graph, "a", nodePins(back, ask))).toEqual([graph.edges[4]]);
     expect(revertNode({ id: "b", type: "code.js", x: 0, y: 0, config: blankCodeConfig() })).toBeNull();  // a blank one has no built-in
+  });
+
+  it("read cleared code as empty, and only missing code as the blank template", () => {
+    const node = (code: unknown): AutomationGraphNodeDto => ({ id: "c", type: "code.js", x: 0, y: 0, config: { ...blankCodeConfig(), code } });
+    expect(codeOf(node(""))).toBe("");
+    expect(codeOf(node(undefined))).toBe(BLANK_CODE);
+    expect(codeOf(node("x"))).toBe("x");
+  });
+
+  it("drop the white wires too when the code becomes a value node", () => {
+    const node: AutomationGraphNodeDto = { id: "a", type: "code.js", label: "Ask", x: 0, y: 0, config: blankCodeConfig() };
+    const graph = graphWith(node);
+    graph.edges.push({ source: "a", target: "p", kind: "main" }, { source: "a", target: "p", kind: "true" }, { source: "q", target: "p", kind: "main" });
+    const value = { exec: false, inputs: ask.inputs!, outputs: ask.outputs! };
+    // Its data wires still fit; every white wire into or out of it goes, and others' stay.
+    expect(wiresDropped(graph, "a", value)).toEqual([graph.edges[0], graph.edges[4], graph.edges[5]]);
+    expect(wiresDropped(graph, "a", { ...value, exec: true })).toEqual([]);
+    expect(wireText(graph.edges[4], (id) => ({ a: "Ask", p: "Preview" })[id] || id)).toBe("Ask → Preview");
   });
 
   it("keep the last good pins when a check fails", () => {

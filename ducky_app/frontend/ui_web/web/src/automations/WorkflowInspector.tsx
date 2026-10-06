@@ -91,6 +91,8 @@ type Props = InspectorActions & {
   codeWide?: boolean;
   /** Open this node's Code tab at a line (a failed code step clicked in the run log). */
   codeFocus?: { nodeId: string; line: number; nonce: number } | null;
+  /** When the workflow was last saved: the Code tab asks the server again after each save. */
+  savedAt?: number;
 };
 
 export type DetailsTab = "settings" | "code";
@@ -385,7 +387,7 @@ function SettingsFold({ children }: { children: ReactNode }) {
   </details>;
 }
 
-function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, liveNodes, lastSteps, team, detailsTab = "settings", codeWide = false, codeFocus, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
+function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentId, editing, onEditing, pinsOf, nodeOutputs, liveNodes, lastSteps, team, detailsTab = "settings", codeWide = false, codeFocus, savedAt, ...on }: Props & EditProps & { node: AutomationGraphNodeDto }) {
   const meta = byType.get(node.type);
   const basedMeta = byType.get(basedOnNode(node)?.type || "");
   const label = nodeLabel(node, meta);
@@ -423,7 +425,7 @@ function NodeDetails({ node, graph, byType, faces, readOnly, workflows, currentI
     <div className="aw-insp-subpanel" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
       {tab === "code" ? <CodeTab workflowId={currentId || ""} node={node} graph={graph} byType={byType} workflows={workflows}
         pins={pinsOf ? pinsOf(node) : { exec: true, inputs: [], outputs: [] }} readOnly={readOnly} locked={locked} team={!!team}
-        lastStep={lastSteps?.[node.id]} reveal={reveal} wide={codeWide} onWide={(wide) => on.onCodeWide?.(wide)}
+        lastStep={lastSteps?.[node.id]} reveal={reveal} savedAt={savedAt} wide={codeWide} onWide={(wide) => on.onCodeWide?.(wide)}
         onNodeChange={on.onNodeChange} onNodeReplace={(next, label) => on.onNodeReplace?.(next, label)}
         onCodeSession={(phase, id) => on.onCodeSession?.(phase, id)} onRunNode={on.onRunNode} runningNode={on.runningNode} /> : <>
         {pinsOf ? <PinsSection node={node} pins={pinsOf(node)} graph={graph} outputs={nodeOutputs?.[node.id]} frozen={frozen}
