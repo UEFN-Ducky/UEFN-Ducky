@@ -62,7 +62,16 @@ if ($DoEngine) {
     }
     $Iscc = $IsccCandidates[0]
 
-    & $Iscc "/DMyAppVersion=$Version" "/DMyAppDir=$AppDir" (Join-Path $PSScriptRoot "UEFN-Ducky.iss")
+    $IsccArgs = @("/DMyAppVersion=$Version", "/DMyAppDir=$AppDir")
+    # Signing on (publish_app.py passes its Python only then): ISCC signs the
+    # uninstaller it packs and Setup-engine.exe through sign_windows.py. $q and
+    # $f are ISCC's quote and file-name placeholders, so they stay single-quoted.
+    if ($env:DUCKY_SIGN_PYTHON) {
+        $SignScript = Join-Path $Root "release\sign_windows.py"
+        $IsccArgs += '/Sducky=$q' + $env:DUCKY_SIGN_PYTHON + '$q $q' + $SignScript + '$q --require $f'
+        $IsccArgs += "/DDuckySign"
+    }
+    & $Iscc @IsccArgs (Join-Path $PSScriptRoot "UEFN-Ducky.iss")
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ISCC failed with exit code $LASTEXITCODE"
     }
@@ -75,7 +84,11 @@ if ($DoEngine) {
 # Unsigned custom host embeds Setup-engine.exe and extracts it at runtime —
 # Defender ML treats that as a dropper (Wacatac). Default: copy the Inno stub
 # as the published Setup. Pass -HostOnly (or set a signing cert) for the Ducky UI.
-if ($DoHost -and -not $HostOnly -and -not $env:DUCKY_WINDOWS_PFX -and -not $env:DUCKY_SIGNTOOL_EXTRA) {
+$Provider = "$env:DUCKY_SIGN_PROVIDER".Trim().ToLower()
+$SigningOn = [bool]$env:DUCKY_SIGN_PYTHON -or (
+    ($Provider -notin @("none", "off", "unsigned")) -and
+    [bool]($Provider -or $env:DUCKY_WINDOWS_PFX -or $env:DUCKY_SIGNTOOL_EXTRA))
+if ($DoHost -and -not $HostOnly -and -not $SigningOn) {
     Copy-Item $EngineExe $SetupExe -Force
     Write-Host "Created $SetupExe (Inno stub). Custom host skipped: unsigned extract-and-run trips Defender."
     $DoHost = $false
@@ -91,9 +104,9 @@ if ($DoHost) {
             (Join-Path ${env:ProgramFiles} "dotnet\dotnet.exe")
         ) | Where-Object { $_ -and (Test-Path $_) }
         Get-Command "dotnet" -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }
-    ) | Select-Object -First 1
+    ) | Where-Object { & $_ --list-sdks 2>$null } | Select-Object -First 1
     if (-not $Dotnet) {
-        Write-Error "dotnet SDK not found. Install .NET SDK 8 (https://dot.net) to build the Setup host."
+        Write-Error "No .NET SDK found (a dotnet runtime alone cannot build). Install the .NET 8 SDK: winget install -e --id Microsoft.DotNet.SDK.8"
     }
     $Icon = Join-Path $Root "build\app_icon.ico"
     $HostDir = Join-Path $PSScriptRoot "host"

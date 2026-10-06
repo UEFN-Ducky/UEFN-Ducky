@@ -68,7 +68,7 @@ def test_publish_reads_the_same_files_without_duckyos(tmp_path, monkeypatch):
     import sign_windows as sign
 
     seen: list[list[Path]] = []
-    monkeypatch.setattr(sign, "load_dotenv", lambda paths: seen.append(list(paths)))
+    monkeypatch.setattr(sign, "load_dotenv", lambda paths, keys=None: seen.append(list(paths)))
     pub._load_dotenv()
     assert seen and seen[0][0] == pub.ROOT / ".env"
     assert all(p.parent.name != "DuckyOS" for p in seen[0])

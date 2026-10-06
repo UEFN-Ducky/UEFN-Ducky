@@ -11,6 +11,11 @@
 #ifndef MyAppDir
   #error Pass /DMyAppDir=<absolute path to dist\UEFN-Ducky-x.y.z>
 #endif
+; Installed copies (1.2.342 and older) carry an uninstall log written by Inno
+; Setup 6.7; an older compiler would add a second uninstaller (unins001) beside it.
+#if Ver < EncodeVer(6, 7, 0)
+  #error Build with Inno Setup 6.7 or newer (winget install -e --id JRSoftware.InnoSetup)
+#endif
 
 #define MyAppName "UEFN Ducky"
 #define MyAppPublisher "UEFN Ducky"
@@ -67,6 +72,12 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 #if FileExists("..\..\build\app_icon.ico")
 SetupIconFile=..\..\build\app_icon.ico
+#endif
+; Signed releases: make_release_installer.ps1 defines DuckySign and the "ducky"
+; sign tool (sign_windows.py) only when a certificate is configured, so the
+; uninstaller installed beside the app is signed too. Unsigned builds skip this.
+#ifdef DuckySign
+SignTool=ducky
 #endif
 
 [Tasks]

@@ -5,7 +5,9 @@ Default flow (always bumps):
   0. Sync __version__ up to the live Store version if Store is ahead
   1. Build release EXE (build_exes.py bumps patch once) + Inno Setup
      (custom Ducky host only when Authenticode is configured — unsigned host
-     embeds+extracts an EXE and Defender treats it as a dropper)
+     embeds+extracts an EXE and Defender treats it as a dropper). Signing
+     (release/sign_windows.py, DUCKY_SIGN_PROVIDER in the .env) covers the app
+     EXEs, the Inno engine + its uninstaller and the Ducky Setup host.
   2. Direct-to-S3: ticket → PUT Setup.exe → complete → poll job
      (falls back to multipart POST /api/files/app-release if ticket API missing)
   3. MCP uds_app_release on that same site   (latest-only version + url + sha256)
@@ -27,6 +29,9 @@ Usage:
   py release/publish_app.py --phase test      # the same release in steps (a workflow):
   py release/publish_app.py --phase build     #   each refuses unless the step before
   py release/publish_app.py --phase upload    #   passed on this same commit
+
+A release (the app's "UEFN Ducky Release" workflow, and the GitHub Actions
+store-publish.yml) runs exactly RELEASE_STEPS below, signing included.
 """
 
 from __future__ import annotations
@@ -48,6 +53,10 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE = "https://uefnducky.org"
+# The one release command line, step by step. Local releases and
+# .github/workflows/store-publish.yml both run these (CI may add --set-version
+# to the build step and --notes to the upload step).
+RELEASE_STEPS = ("--phase test", "--phase build", "--phase upload --notes-from-git")
 INIT_PY = ROOT / "ducky_app" / "frontend" / "__init__.py"
 _VERSION_RE = re.compile(r"(?m)^(__version__\s*=\s*[\"'])([^\"']+)([\"'])")
 
@@ -121,9 +130,42 @@ def _bearer_from_mcp_json() -> str:
 def _load_dotenv() -> None:
     # Same files as sign_windows.py, minus DuckyOS/.env (its DUCKYOS_* keys
     # belong to other sites, not the Store this uploads to).
-    from sign_windows import dotenv_paths, load_dotenv
+    from sign_windows import SIGNING_KEYS, dotenv_paths, load_dotenv
 
     load_dotenv(dotenv_paths(ROOT, duckyos=False))
+    # The signing keys come from every file sign_windows.py reads, so the
+    # custom-host choice below matches what actually gets signed.
+    load_dotenv(dotenv_paths(ROOT), keys=SIGNING_KEYS)
+
+
+def _signing_on() -> bool:
+    from sign_windows import signing_configured
+
+    return signing_configured()
+
+
+def preflight_signing(*, require: bool) -> None:
+    """Before the tests and the version bump: a signing setup that would fail
+    (or is missing under --require-sign) should not cost a whole build to find out."""
+    _load_dotenv()
+    if not _signing_on():
+        if require:
+            raise SystemExit(
+                "--require-sign: no code-signing certificate configured. Set DUCKY_SIGN_PROVIDER=azure "
+                "and the AZURE_TRUSTED_SIGNING_* keys (or DUCKY_WINDOWS_PFX) in the main checkout's .env."
+            )
+        print("=== signing: off (unsigned release ships the plain Inno Setup) ===")
+        return
+    from sign_windows import check
+
+    print("=== Code signing check ===")
+    missing = check()
+    if missing:
+        raise SystemExit(
+            "Refusing to release: signing is turned on but not ready:\n  - "
+            + "\n  - ".join(missing)
+            + "\nFix these (py release/sign_windows.py --check), or turn signing off."
+        )
 
 
 def ensure_store_env() -> tuple[str, str]:
@@ -272,24 +314,26 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
         cmd.append("--no-bump")
     subprocess.run(cmd, check=True, cwd=str(ROOT))
     version = read_version()
-    # Sign payload before Inno packs it into Setup (embedded EXE stays signed).
-    payload = ROOT / "dist" / f"UEFN-Ducky-{version}.exe"
-    if not payload.is_file():
-        pending = ROOT / "dist" / f"UEFN-Ducky-{version}.pending.exe"
-        payload = pending if pending.is_file() else payload
-    if payload.is_file():
-        cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
-        if require_sign:
-            cmd.append("--require")
-        cmd.append(str(payload))
-        print("=== Authenticode sign (payload) ===")
-        subprocess.run(cmd, check=True, cwd=str(ROOT))
+    # Sign the app EXEs before Inno packs them, so the installed copies are signed.
+    cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
+    if require_sign:
+        cmd.append("--require")
+    cmd.extend(str(p) for p in payload_exes(version))
+    print("=== Authenticode sign (payload) ===")
+    subprocess.run(cmd, check=True, cwd=str(ROOT))
     print("=== Inno Setup engine ===")
     ps1 = ROOT / "release" / "installer" / "make_release_installer.ps1"
+    # With signing on, ISCC also signs the uninstaller it packs (unins000.exe)
+    # by running sign_windows.py with this same Python.
+    env = dict(os.environ)
+    env.pop("DUCKY_SIGN_PYTHON", None)
+    if _signing_on():
+        env["DUCKY_SIGN_PYTHON"] = sys.executable
     subprocess.run(
         ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly"],
         check=True,
         cwd=str(ROOT),
+        env=env,
     )
     engine = ROOT / "dist" / "Setup-engine.exe"
     if engine.is_file():
@@ -302,12 +346,8 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     setup = ROOT / "dist" / f"UEFN-Ducky-Setup-{version}.exe"
     # Unsigned custom host = extract embedded EXE + Load DLLs from memory.
     # Defender flags that as Trojan:Win32/Wacatac (dropper). Ship the Inno stub
-    # until DUCKY_WINDOWS_PFX / DUCKY_SIGNTOOL_EXTRA is set.
-    signing_on = bool(
-        (os.environ.get("DUCKY_WINDOWS_PFX") or "").strip()
-        or (os.environ.get("DUCKY_SIGNTOOL_EXTRA") or "").strip()
-    )
-    if signing_on:
+    # until signing is configured (DUCKY_SIGN_PROVIDER / DUCKY_WINDOWS_PFX).
+    if _signing_on():
         print("=== Ducky Setup host ===")
         subprocess.run(
             ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly"],
@@ -329,6 +369,15 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     print("=== Authenticode sign (Setup) ===")
     subprocess.run(cmd, check=True, cwd=str(ROOT))
     return version
+
+
+def payload_exes(version: str) -> list[Path]:
+    """The EXEs of the one-dir build: dist/UEFN-Ducky-<v>/UEFN-Ducky.exe and the bridge."""
+    folder = ROOT / "dist" / f"UEFN-Ducky-{version}"
+    exes = sorted(folder.glob("*.exe"))
+    if not any(p.name == "UEFN-Ducky.exe" for p in exes):
+        raise SystemExit(f"Build output missing: {folder / 'UEFN-Ducky.exe'}")
+    return exes
 
 
 def sha256_file(path: Path) -> str:
@@ -720,14 +769,19 @@ def main() -> None:
         print(read_version())
         return
 
+    if args.phase != "upload":
+        preflight_signing(require=args.require_sign)
+
     if args.notes_from_git and not args.notes.strip():
         args.notes = notes_from_git()
         print(f"notes: {args.notes or '(no commits since the last release)'}")
 
     phase = args.phase
-    if phase and (args.no_bump or args.exe is not None or (args.set_version or "").strip() or args.build_only):
+    if phase and (args.no_bump or args.exe is not None or args.build_only):
         raise SystemExit("--phase is the default release (bump, build, upload) in steps; "
-                         "it does not pair with --no-bump, --exe, --set-version or --build-only.")
+                         "it does not pair with --no-bump, --exe or --build-only.")
+    if phase and phase != "build" and (args.set_version or "").strip():
+        raise SystemExit("--set-version goes with --phase build (the step that writes the version).")
     built: dict = {}
     if phase == "test":
         run_security_gate()

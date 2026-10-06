@@ -5,13 +5,19 @@
 # Officers may Run this workflow from main. They cannot merge edits to this file
 # (CODEOWNERS @UEFN-Ducky/admins + required code-owner review). Secrets inject
 # only after officers approval, and only for the main branch.
+#
+# Same release as a local one: the three release/publish_app.py steps
+# (RELEASE_STEPS in that file) test, build + sign (app EXEs, Inno engine and its
+# uninstaller, Ducky Setup host) and upload. Signing runs inside publish_app
+# through release/sign_windows.py, with Azure Artifact Signing when the Azure
+# secrets are set; without them the release is unsigned (plain Inno Setup).
 name: Ducky Plugin Library Publish
 
 on:
   workflow_dispatch:
     inputs:
       notes:
-        description: "Store release notes (in-app toast)"
+        description: "Store release notes (in-app toast); blank = from the commits"
         required: false
         default: ""
         type: string
@@ -31,9 +37,9 @@ permissions:
 
 jobs:
   publish:
-    name: build and publish Setup
+    name: build, sign and publish Setup
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     environment: store-publish
     env:
       DUCKYOS_API_KEY: ${{ secrets.DUCKYOS_API_KEY }}
@@ -55,20 +61,18 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Builds the Ducky Setup host; the Artifact Signing dlib runs on its runtime.
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      - name: Stop if secrets or known dependency CVEs exist
-        shell: bash
-        run: python scripts/check_security.py --app-only
-
-      - name: Python venv + Inno Setup
+      - name: Python venv, panel packages and Inno Setup 6
         shell: bash
         run: |
           python -m venv .venv
           .venv/Scripts/python -m pip install --upgrade pip
           .venv/Scripts/python -m pip install -r requirements.txt pyinstaller
+          (cd ducky_app/frontend/ui_web/web && npm ci --no-audit --no-fund)
           choco install innosetup --no-progress -y
 
       - name: Require Store API key
@@ -82,72 +86,67 @@ jobs:
             echo "DUCKYOS_BASE_URL=https://uefnducky.org" >> "$GITHUB_ENV"
           fi
 
-      - name: Publish unsigned (no Azure)
-        if: env.AZURE_CLIENT_ID == ''
+      - name: Sign with Artifact Signing when its secrets are set
         shell: bash
         run: |
-          extra=()
-          if [ -n "${{ inputs.set_version }}" ]; then
-            extra+=(--set-version "${{ inputs.set_version }}")
+          if [ -n "${AZURE_CLIENT_ID}" ] && [ -n "${AZURE_TENANT_ID}" ] \
+            && [ -n "${AZURE_TRUSTED_SIGNING_ENDPOINT}" ] && [ -n "${AZURE_TRUSTED_SIGNING_ACCOUNT}" ] \
+            && [ -n "${AZURE_CERT_PROFILE_NAME}" ]; then
+            echo "DUCKY_SIGN_PROVIDER=azure" >> "$GITHUB_ENV"
+            echo "DUCKY_AZURE_AUTH=cli" >> "$GITHUB_ENV"
+            echo "Signing with Azure Artifact Signing."
+          else
+            echo "DUCKY_SIGN_PROVIDER=none" >> "$GITHUB_ENV"
+            echo "Azure Artifact Signing secrets are not set: this release ships unsigned (plain Inno Setup)."
           fi
-          .venv/Scripts/python release/publish_app.py --notes "${{ inputs.notes }}" "${extra[@]}"
 
-      - name: Build Setup (Azure sign next)
-        if: env.AZURE_CLIENT_ID != ''
-        shell: bash
-        run: |
-          extra=()
-          if [ -n "${{ inputs.set_version }}" ]; then
-            extra+=(--set-version "${{ inputs.set_version }}")
-          fi
-          .venv/Scripts/python release/publish_app.py --build-only --notes "${{ inputs.notes }}" "${extra[@]}"
-
+      # OIDC sign-in of the Azure CLI; the dlib signs as that identity (DUCKY_AZURE_AUTH=cli).
       - name: Azure login
-        if: env.AZURE_CLIENT_ID != ''
+        if: env.DUCKY_SIGN_PROVIDER == 'azure'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
 
-      - name: Azure Artifact Signing
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/trusted-signing-action@v0
-        with:
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          files-folder: ${{ github.workspace }}\dist
-          files-folder-filter: exe
-          exclude-environment-credential: true
-          exclude-managed-identity-credential: true
-          exclude-workload-identity-credential: true
-          exclude-shared-token-cache-credential: true
-          exclude-visual-studio-credential: true
-          exclude-visual-studio-code-credential: true
-          exclude-azure-cli-credential: false
-          exclude-azure-powershell-credential: true
-          exclude-azure-developer-cli-credential: true
-          exclude-interactive-browser-credential: true
+      - uses: nuget/setup-nuget@v2
+        if: env.DUCKY_SIGN_PROVIDER == 'azure'
 
-      - name: Upload signed Setup
-        if: env.AZURE_CLIENT_ID != ''
-        shell: bash
+      - name: Artifact Signing client tools (dlib + signtool)
+        if: env.DUCKY_SIGN_PROVIDER == 'azure'
+        shell: pwsh
         run: |
-          ver=$(.venv/Scripts/python release/publish_app.py --print-version)
-          exe="dist/UEFN-Ducky-Setup-${ver}.exe"
-          .venv/Scripts/python release/publish_app.py --no-bump --exe "${exe}" --notes "${{ inputs.notes }}"
+          $tools = Join-Path $env:RUNNER_TEMP "artifact-signing"
+          nuget install Microsoft.ArtifactSigning.Client -x -OutputDirectory $tools -NonInteractive
+          nuget install Microsoft.Windows.SDK.BuildTools -x -OutputDirectory $tools -NonInteractive
+          $dlib = Get-ChildItem $tools -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          $signtool = Get-ChildItem (Join-Path $tools "Microsoft.Windows.SDK.BuildTools") -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dlib -or -not $signtool) { throw "Artifact Signing client tools did not install" }
+          "DUCKY_AZURE_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          "DUCKY_SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
 
-      - name: Commit version bump
+      # The same three steps a local release runs (publish_app.RELEASE_STEPS).
+      - name: Test
         shell: bash
+        run: .venv/Scripts/python -u release/publish_app.py --phase test
+
+      - name: Build and sign Setup
+        shell: bash
+        env:
+          SET_VERSION: ${{ inputs.set_version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ducky_app/frontend/__init__.py
-          if git diff --cached --quiet; then
-            echo "no version bump to commit"
-            exit 0
-          fi
-          ver=$(.venv/Scripts/python release/publish_app.py --print-version)
-          git commit -m "Bump app version to ${ver} (Store publish)"
-          git push
+          extra=()
+          if [ -n "${SET_VERSION}" ]; then extra+=(--set-version "${SET_VERSION}"); fi
+          .venv/Scripts/python -u release/publish_app.py --phase build "${extra[@]}"
+
+      - name: Upload to the Store
+        shell: bash
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          extra=()
+          if [ -n "${NOTES}" ]; then extra+=(--notes "${NOTES}"); fi
+          .venv/Scripts/python -u release/publish_app.py --phase upload --notes-from-git "${extra[@]}"
