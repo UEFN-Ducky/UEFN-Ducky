@@ -589,4 +589,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
         storage_path=storage_path,
+        # pywebview defaults to private mode: WebView2 runs InPrivate, so local
+        # storage only lives in memory, and closing the window deletes the whole
+        # storage_path folder. Every setting the panel keeps in local storage
+        # (menu switches, Appearance, layouts, settings tabs) was gone on each start.
+        private_mode=False,
     )

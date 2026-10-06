@@ -62,6 +62,7 @@ function HeaderToggleList({
             key={row.id}
             id={`appearance-header-${row.id}`}
             label={row.label}
+            description={row.description}
             checked={isVisible(row.id)}
             onChange={(on) => setVisible(row.id, on)}
           />
