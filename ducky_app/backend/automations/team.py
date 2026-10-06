@@ -31,7 +31,7 @@ def _announce() -> None:
 def owners() -> dict[str, Any]:
     """Folders for the list: Local, then each team, with its sync line."""
     if not store.use_db("automations"):
-        return {"ok": True, "owners": [{**store._LOCAL_OWNER, "folders": store.folders_of(store.LOCAL)}],
+        return {"ok": True, "owners": [{**store._LOCAL_OWNER, "folders": store.folders_of(store.LOCAL, [])}],
                 "signedIn": False, "teamsEnabled": False, "localImport": 0}
     from backend.automations import owned
     from backend.store.repos import plugin_data as data
@@ -40,12 +40,12 @@ def owners() -> dict[str, Any]:
     from backend.uefn_plugins.team_sync import teams_enabled
 
     aid = owned.account()
-    rows = store.all_workflows()
     out = []
     for scope in owned.owner_scopes(aid):
         view = owned.owner_view(scope)
-        # Every folder, empty ones included: a team's list syncs with its workflows.
-        view["folders"] = store.folders_of(view["id"], rows)
+        # The owner's folder list (empty folders too; a team's syncs with its workflows).
+        # The list adds the folders its workflows are filed in.
+        view["folders"] = store.folders_of(view["id"], [])
         if scope["kind"] == "team":
             st = data.sync_get(aid, scope["id"])
             view["sync"] = {

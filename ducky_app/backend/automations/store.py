@@ -378,7 +378,7 @@ def move_folder(owner: str, path: str, new_path: str) -> int:
             doc = {"id": wf["id"], "folder": folder}
             _files_save(doc, archive=False) if not use_db("automations") else _db_save(doc, key, archive=False)
             moved += 1
-        listed = _stored_folders(key)
+        listed = listed_folders(key)
         relisted = [f if (to := moved_path(f, src, dst)) is None else to for f in listed]
         changed = relisted != listed and _put_folders(key, relisted)
     if moved or changed:
@@ -394,7 +394,7 @@ def folders_of(owner: str = LOCAL, workflows: list[dict[str, Any]] | None = None
     workflow is filed in, with the folders around them, sorted. ``workflows``: rows
     already read (any owner's), so a caller listing every owner reads them once."""
     key = (owner or LOCAL).strip() or LOCAL
-    paths = set(_stored_folders(key))
+    paths = set(listed_folders(key))
     rows = all_workflows() if workflows is None else workflows
     paths.update(normalize_folder(wf.get("folder")) for wf in rows if owner_key(wf) == key)
     out: set[str] = set()
@@ -423,18 +423,20 @@ def drop_folders(owner: str, path: str) -> bool:
     workflows are not touched). False when nothing was listed there."""
     src = normalize_folder(path)
     key = (owner or LOCAL).strip() or LOCAL
-    listed = _stored_folders(key)
+    listed = listed_folders(key)
     kept = [f for f in listed if moved_path(f, src, src) is None] if src else []
     return kept != listed and _put_folders(key, kept)
 
 
 def _remember_folders(owner: str, paths: list[str]) -> bool:
-    listed = _stored_folders(owner)
+    listed = listed_folders(owner)
     new = [p for p in (normalize_folder(p) for p in paths) if p and p not in listed]
     return _put_folders(owner, listed + new) if new else False
 
 
-def _stored_folders(owner: str) -> list[str]:
+def listed_folders(owner: str) -> list[str]:
+    """The owner's folder list as kept (synced for a team), without the folders its
+    workflows imply; :func:`folders_of` has both."""
     if not use_db("automations"):
         if owner != LOCAL:
             return []
@@ -456,7 +458,7 @@ def _stored_folders(owner: str) -> list[str]:
 def _put_folders(owner: str, paths: list[str]) -> bool:
     """Store an owner's folder list; False when it already was that."""
     clean = list(dict.fromkeys(p for p in (normalize_folder(p) for p in paths) if p))
-    if clean == _stored_folders(owner):
+    if clean == listed_folders(owner):
         return False
     if not use_db("automations"):
         if owner != LOCAL:

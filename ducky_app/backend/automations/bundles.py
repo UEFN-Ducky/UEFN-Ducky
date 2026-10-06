@@ -269,7 +269,7 @@ def import_bundle(bundle: Any, owner: str, parent_path: str = "", *, name: str |
     made: list[dict[str, Any]] = []
     with store._SAVE_LOCK:
         root = free_folder(key, parent, name or clean["root"])
-        before = store._stored_folders(key)
+        before = store.listed_folders(key)
         store._remember_folders(key, [root] + [_join(root, f) for f in clean["folders"]])  # read-only owner: raises here
         try:
             for row in rows:
@@ -335,7 +335,7 @@ def _move_tree(bundle: dict[str, Any], src_key: str, src_path: str, dst_key: str
     written: list[str] = []
     with store._SAVE_LOCK:
         root = free_folder(dst_key, parent, bundle["root"])
-        before = store._stored_folders(dst_key)
+        before = store.listed_folders(dst_key)
         store._remember_folders(dst_key, [root] + [_join(root, f) for f in bundle["folders"]])
         try:
             for row in rows:

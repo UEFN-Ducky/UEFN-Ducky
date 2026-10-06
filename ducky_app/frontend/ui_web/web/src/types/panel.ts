@@ -475,7 +475,7 @@ export interface WorkflowOwnerDto {
   };
   /** Team's web slug (team folders), for "Open on the web". */
   slug?: string;
-  /** Every folder of this owner, empty ones too (a team's sync to every member). */
+  /** The owner's kept folders, empty ones too (a team's sync to every member); the list adds the folders its rows are filed in. */
   folders?: string[];
 }
 
