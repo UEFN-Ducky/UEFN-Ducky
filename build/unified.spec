@@ -326,6 +326,21 @@ a = Analysis(
     noarchive=False,
 )
 
+# ffmpeg.exe and ffprobe.exe load their DLLs from their own folder, tools/ffmpeg.
+# PyInstaller's dependency scan of those EXEs also put the same DLLs at the top of
+# _internal: a second byte-identical copy (~130 MB, ~40 MB of the download) that
+# nothing loads. build_exes.py fails the build if one comes back.
+_ffmpeg_dlls = {p.name.lower() for p in _ffmpeg_bundle.iterdir() if p.suffix.lower() == ".dll"}
+
+
+def _top_level_ffmpeg_dll(entry) -> bool:
+    dest = str(entry[0]).replace("\\", "/")
+    return "/" not in dest and dest.lower() in _ffmpeg_dlls
+
+
+a.binaries = [entry for entry in a.binaries if not _top_level_ffmpeg_dll(entry)]
+a.datas = [entry for entry in a.datas if not _top_level_ffmpeg_dll(entry)]
+
 # Fail the freeze if Store plugin host modules were tree-shaken out (empty LLMs).
 # TOC entries are (name, path, typecode).
 _pure_names = set()

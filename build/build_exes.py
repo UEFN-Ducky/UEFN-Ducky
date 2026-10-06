@@ -243,6 +243,19 @@ def _run_runtime_smoke(exe: Path) -> int:
     return 0
 
 
+def duplicate_ffmpeg_dlls(app_dir: Path) -> list[str]:
+    """ffmpeg DLLs shipped both in _internal/tools/ffmpeg and at the top of _internal.
+
+    The top copy is PyInstaller's dependency scan of ffmpeg.exe; nothing loads it, and it
+    added ~40 MB to the download (unified.spec filters it out).
+    """
+    internal = app_dir / "_internal"
+    tools = internal / "tools" / "ffmpeg"
+    if not tools.is_dir():
+        return []
+    return sorted(dll.name for dll in tools.glob("*.dll") if (internal / dll.name).is_file())
+
+
 def main() -> int:
     args = _parse_args()
     dev_build = bool(args.dev)
@@ -439,6 +452,11 @@ def main() -> int:
         print(f"ERROR: packaged panel is incomplete: {exc}", file=sys.stderr)
         return 1
     print(f"Verified packaged panel: {packaged_panel}")
+
+    doubled = duplicate_ffmpeg_dlls(wrote)
+    if doubled:
+        print(f"ERROR: ffmpeg DLLs shipped twice (tools/ffmpeg and _internal): {', '.join(doubled)}", file=sys.stderr)
+        return 1
 
     smoke_exe = wrote / f"{exe_stem}.exe"
     if _run_runtime_smoke(smoke_exe) != 0:
