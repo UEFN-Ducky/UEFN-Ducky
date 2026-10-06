@@ -702,6 +702,58 @@ def test_foreach_runs_body_per_item():
     assert sum(1 for s in empty_waits if s.get("id") == "d") == 1
 
 
+def test_foreach_keeps_going_past_a_failed_item_when_asked(monkeypatch):
+    from backend.automations import plugin, runner
+    from backend.automations.store import save_workflow
+
+    done: list[str] = []
+
+    def handler(ctx):
+        card = ctx["payload"].get("card_id")
+        if card == "b":
+            return {"ok": False, "error": "card b refused"}
+        done.append(card)
+        return {"ok": True}
+
+    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_enabled", lambda pid: pid == "testplug")
+    plugin.register_node("testplug", "test.one_card", handler)
+
+    def graph(keep_going):
+        return save_workflow({
+            "name": "Each card",
+            "graph": {
+                "nodes": [
+                    {"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+                    {"id": "f", "type": "flow.foreach", "x": 40, "y": 0, "config": {"field": "cards", "continue_on_error": keep_going}},
+                    {"id": "one", "type": "test.one_card", "x": 80, "y": 0, "config": {}},
+                    {"id": "d", "type": "flow.wait", "x": 120, "y": 0, "config": {"seconds": 0}},
+                ],
+                "edges": [
+                    {"source": "s", "target": "f", "kind": "main"},
+                    {"source": "f", "target": "one", "kind": "each"},
+                    {"source": "f", "target": "d", "kind": "done"},
+                ],
+            },
+        })["id"]
+
+    cards = {"cards": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}
+    try:
+        stops = runner.run_workflow(graph(False), payload=cards)  # default: the first failure ends the run
+        assert stops["ok"] is False and "card b refused" in stops["error"] and done == ["a"]
+        assert not any(s.get("id") == "d" for s in stops["steps"])
+        done.clear()
+        out = runner.run_workflow(graph(True), payload=cards)
+    finally:
+        plugin.clear_for_plugin("testplug")
+    assert out["ok"] is True, out
+    assert done == ["a", "c"]
+    each = next(s for s in out["steps"] if s.get("id") == "f")
+    assert each["result"]["count"] == 3
+    assert each["result"]["failed"] == [{"index": 1, "error": "card b refused"}]
+    assert out["node_outputs"]["f"] == {"count": 3, "failed": [{"index": 1, "error": "card b refused"}]}
+    assert sum(1 for s in out["steps"] if s.get("id") == "d") == 1
+
+
 def test_pipeline_finish_attaches_png(tmp_path, monkeypatch):
     from backend.automations import runner
     from backend.automations.store import save_workflow

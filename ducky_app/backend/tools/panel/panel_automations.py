@@ -132,6 +132,8 @@ def save_workflow(
     graph = {nodes:[{id,type,x,y,config,label,description,color?,icon?,locked?}],
     edges:[{source,target,kind,source_pin?,target_pin?}], groups:[{id,name,node_ids,parent_id?,color?,icon?,locked?}]}.
     White wires: kind main | true | false (after If / Branch) | each | done (after For each).
+    For each stops the run at the first failed item unless config continue_on_error=true:
+    then each failed item is listed in its failed output ([{index, error}]) and the next runs.
     Data wires: kind "data" with source_pin (an output) and target_pin (an input) from the
     node's pins in list_workflow_nodes (inputs/outputs with types); one wire per input; a
     wire whose types don't fit is refused with the reason. Nodes with exec:false (Inputs,

@@ -314,8 +314,15 @@ BUILTIN_NODES: list[dict[str, Any]] = [
         "label": "For each",
         "group": "Logic",
         "role": "action",
-        "description": "Run the each-wire once per item in a payload list, then follow done.",
-        "config_fields": [{"id": "field", "label": "List field", "type": "string"}],
+        "description": (
+            "Run the each-wire once per item in a payload list, then follow done. "
+            "Keep going when an item fails: a failed item is listed under Failed and the next one runs."
+        ),
+        "outputs": [{"id": "count", "label": "Count", "type": "number"}, {"id": "failed", "label": "Failed", "type": "json"}],
+        "config_fields": [
+            {"id": "field", "label": "List field", "type": "string"},
+            {"id": "continue_on_error", "label": "Keep going when an item fails", "type": "boolean"},
+        ],
     },
     {
         "type": "flow.repeat",

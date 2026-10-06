@@ -846,17 +846,29 @@ def _walk(
                     "result": {"count": len(items), "field": field},
                 }
             )
+            each_step = steps[-1]
             if flow is not None:
-                flow.order.append(steps[-1])
+                flow.order.append(each_step)
             each_ids = _next_ids(nid, edges, "each")
-            for item in items:
+            # Keep going when an item fails: note it and walk the next one (Stop still ends the run).
+            keep_going = truthy(cfg.get("continue_on_error"))
+            failed: list[dict[str, Any]] = []
+            for index, item in enumerate(items):
                 _apply_foreach_item(ctx, item)
                 nested, n_ok, n_err, seen = _walk(
                     nodes, edges, ctx, each_ids, stop_at=nid, seen=seen, origin=nid, flow=flow
                 )
                 steps.extend(nested)
                 if not n_ok:
+                    if keep_going and n_err not in (STOPPED, "step budget exceeded") and not _cancelled():
+                        failed.append({"index": index, "error": n_err})
+                        continue
                     return steps, False, n_err, seen
+            if keep_going:
+                each_step["result"]["failed"] = failed
+            each_step["outputs"] = {"count": len(items), "failed": failed}
+            if flow is not None:
+                flow.record(nid, each_step, ctx)
             for target in _next_ids(nid, edges, "done"):
                 came_from.setdefault(target, nid)
                 queue.append(target)

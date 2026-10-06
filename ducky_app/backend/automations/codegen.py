@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from backend.automations.code_check import flow_types
+from backend.automations.expr import truthy
 
 _BARE_KEY = re.compile(r"^[A-Za-z_$][\w$]*$")
 _RUN_DOC = '/** @param {Record<string, any>} input @param {import("ducky").Ducky} ducky */'
@@ -331,7 +332,9 @@ def _flow(node: dict[str, Any], spec: dict[str, Any] | None, label: str, reason:
                             else f"run.{cfg.get('field') or '…'} {cfg.get('op') or 'equals'} {cfg.get('equals') or cfg.get('contains') or ''}".rstrip()) + ")",
                   '  follow the "true" wire', 'else follow the "false" wire']
     elif ntype == "flow.foreach":
-        lines += [f"for (const item of run.{cfg.get('field') or 'cards'}) follow the \"each\" wire", 'then follow the "done" wire']
+        lines += [f"for (const item of run.{cfg.get('field') or 'cards'}) follow the \"each\" wire",
+                  *(["  (an item that fails is added to failed and the next one runs)"] if truthy(cfg.get("continue_on_error")) else []),
+                  'then follow the "done" wire']
     elif ntype == "flow.repeat":
         lines += [f"for (let attempt = 1; attempt <= {cfg.get('max') or 3}; attempt++) {{", '  follow the "each" wire',
                   f"  if ({cfg.get('expression') or 'until'}) break", "}", 'then follow the "done" wire with passed and attempt']
