@@ -438,3 +438,66 @@ def test_check_says_when_azure_mfa_is_still_pending(sw, monkeypatch, tmp_path):
     assert len(missing) == 1
     assert "multi-factor sign-in (MFA) is not finished" in missing[0]
     assert "az login --tenant 3b436341-9726-4c5b-aed7-ef84359d8b6e --scope https://codesigning.azure.net/.default" in missing[0]
+
+
+def _azure_lookup(sw, monkeypatch, tmp_path, *, location="eastus", profile=None, holders=()):
+    """Fake az: signed in, one account, the given profile (None = not found) and role holders."""
+    _touch(tmp_path / "local" / "Microsoft" / "MicrosoftArtifactSigningClientTools" / "Azure.CodeSigning.Dlib.dll")
+    monkeypatch.setenv("DUCKY_SIGN_PROVIDER", "azure")
+    monkeypatch.setenv("DUCKY_AZURE_AUTH", "cli")
+    monkeypatch.setenv("AZURE_TRUSTED_SIGNING_ENDPOINT", "https://eus.codesigning.azure.net")
+    monkeypatch.setenv("AZURE_TRUSTED_SIGNING_ACCOUNT", "uefnducky")
+    monkeypatch.setenv("AZURE_CERT_PROFILE_NAME", "UEFNDuckyRelease")
+    _ready_tools(sw, monkeypatch, tmp_path, az="az.cmd")
+    acc_id = "/subscriptions/s/resourceGroups/DuckyOS/providers/Microsoft.CodeSigning/codeSigningAccounts/uefnducky"
+
+    class Proc:
+        def __init__(self, code, out="", err=""):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    def run_quiet(cmd, timeout=60):
+        if "show" in cmd:
+            return Proc(0, out="owner@example.com\n3b436341-9726-4c5b-aed7-ef84359d8b6e\n")
+        if "get-access-token" in cmd:
+            return Proc(0, out="2026-10-06 06:00:00\n")
+        if "resource" in cmd:
+            return Proc(0, out=json.dumps([{"id": acc_id, "name": "UEFNDucky", "location": location}]))
+        if "rest" in cmd:
+            url = cmd[cmd.index("--url") + 1]
+            assert url.startswith("https://management.azure.com" + acc_id + "/certificateProfiles/UEFNDuckyRelease?")
+            if profile is None:
+                return Proc(1, err="ERROR: Not Found({\"error\":{\"code\":\"ResourceNotFound\"}})")
+            return Proc(0, out=json.dumps(profile))
+        if "role" in cmd:
+            assert cmd[cmd.index("--scope") + 1] == acc_id
+            return Proc(0, out=json.dumps(list(holders)))
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(sw, "_run_quiet", run_quiet)
+
+
+def test_check_finds_a_missing_certificate_profile_in_azure(sw, monkeypatch, tmp_path, capsys):
+    _azure_lookup(sw, monkeypatch, tmp_path, holders=["owner_example.com#EXT#@owner.onmicrosoft.com"])
+    missing = sw.check()
+    assert len(missing) == 1
+    assert "has no certificate profile named UEFNDuckyRelease" in missing[0]
+    assert "Certificate profiles > Create > Public Trust" in missing[0]
+    out = capsys.readouterr().out
+    assert 'owner@example.com has the role "Artifact Signing Certificate Profile Signer"' in out
+    assert "the signing identity needs the role" not in out
+
+
+def test_check_is_ready_when_the_profile_is_active_and_the_role_is_held(sw, monkeypatch, tmp_path):
+    _azure_lookup(
+        sw, monkeypatch, tmp_path,
+        profile={"type": "PublicTrust", "status": "Active"}, holders=["owner@example.com"],
+    )
+    assert sw.check() == []
+
+
+def test_check_catches_the_wrong_region_a_disabled_profile_and_no_signer(sw, monkeypatch, tmp_path):
+    _azure_lookup(sw, monkeypatch, tmp_path, location="westus2", profile={"type": "PublicTrust", "status": "Disabled"})
+    text = "\n".join(sw.check())
+    assert "must be https://wus2.codesigning.azure.net" in text
+    assert "is Disabled, not Active" in text
+    assert 'nobody has the role "Artifact Signing Certificate Profile Signer"' in text

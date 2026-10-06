@@ -118,6 +118,27 @@ AZURE_ENDPOINT_RE = re.compile(
 )
 # The dlib needs signtool from Windows SDK 10.0.22621.755 or newer (20348 does not work).
 AZURE_MIN_SIGNTOOL = (10, 0, 22621, 755)
+# Azure location of an account -> the region code in its endpoint.
+AZURE_REGION_CODES = {
+    "brazilsouth": "brs",
+    "centralus": "cus",
+    "eastus": "eus",
+    "japaneast": "jpe",
+    "koreacentral": "krc",
+    "northcentralus": "ncus",
+    "northeurope": "neu",
+    "polandcentral": "plc",
+    "southcentralus": "scus",
+    "switzerlandnorth": "swn",
+    "westcentralus": "wcus",
+    "westeurope": "weu",
+    "westus": "wus",
+    "westus2": "wus2",
+    "westus3": "wus3",
+}
+AZURE_SIGNER_ROLE = "Artifact Signing Certificate Profile Signer"
+_ARM = "https://management.azure.com"
+_CODESIGNING_API = "2024-09-30-preview"
 
 
 def _env(key: str) -> str:
@@ -559,31 +580,35 @@ def _check_azure(r: _Report, signtool: Path | None) -> None:
             r.miss(f"DUCKY_AZURE_AUTH=environment signs in with an app registration; set {', '.join(need)}")
         else:
             r.ok("Azure sign-in: app registration (AZURE_CLIENT_ID / AZURE_TENANT_ID / secret)")
-    else:
+    role_checked = False
+    if auth in _AZURE_AUTH and auth != "environment":
         az = shutil.which("az")
         if not az:
             r.miss("Azure CLI is not installed (it signs you in): winget install -e --id Microsoft.AzureCLI, then az login")
         else:
-            _check_az_token(r, az)
+            who = _check_az_token(r, az)
+            if who:
+                role_checked = _check_az_account(r, az, who)
             if not auth:
                 r.note("DUCKY_AZURE_AUTH is blank, so Azure tries every sign-in kind; cli is faster and never pops a browser")
-    r.note(
-        "the signing identity needs the role \"Artifact Signing Certificate Profile Signer\" on the account "
-        "(Azure portal > Artifact Signing Accounts > your account > Access control)"
-    )
-
+    if not role_checked:
+        r.note(
+            f'the signing identity needs the role "{AZURE_SIGNER_ROLE}" on the account '
+            "(Azure portal > Artifact Signing Accounts > your account > Access control)"
+        )
 
 AZURE_SIGNING_SCOPE = "https://codesigning.azure.net/.default"
 
 
-def _check_az_token(r: _Report, az: str) -> None:
-    """Signed in, and able to get the token signing needs (MFA can still be pending)."""
+def _check_az_token(r: _Report, az: str) -> str:
+    """Signed in, and able to get the token signing needs (MFA can still be pending).
+    Returns who is signed in when the token works, else ""."""
     proc = _run_quiet([az, "account", "show", "--query", "[user.name, tenantId]", "-o", "tsv"], timeout=90)
     lines = ((proc.stdout or "").split() if proc and proc.returncode == 0 else [])
     who, tenant = (lines + ["", ""])[:2]
     if not who:
         r.miss("Azure CLI is not signed in: run az login (once on this PC)")
-        return
+        return ""
     # --query expiresOn: only the expiry is printed, never the token.
     token = _run_quiet(
         [az, "account", "get-access-token", "--scope", AZURE_SIGNING_SCOPE, "--query", "expiresOn", "-o", "tsv"],
@@ -591,7 +616,7 @@ def _check_az_token(r: _Report, az: str) -> None:
     )
     if token is not None and token.returncode == 0 and (token.stdout or "").strip():
         r.ok(f"Azure CLI signed in as {who} (tenant {tenant}) and can get a code-signing token")
-        return
+        return who
     err = ((token.stderr if token else "") or "").strip()
     first = next((ln.strip() for ln in err.splitlines() if ln.strip()), "no answer from az")
     login = f"az login --tenant {tenant} --scope {AZURE_SIGNING_SCOPE}" if tenant else f"az login --scope {AZURE_SIGNING_SCOPE}"
@@ -601,6 +626,97 @@ def _check_az_token(r: _Report, az: str) -> None:
         f"Azure CLI is signed in as {who} but cannot get a code-signing token for tenant {tenant or '?'}: {why}. "
         f"Run: {login}   (az said: {first[:240]})"
     )
+    return ""
+
+
+def _az_json(az: str, args: list[str]) -> tuple[object, str]:
+    """Run a read-only az command; (parsed JSON, "") or (None, what az said)."""
+    proc = _run_quiet([az, *args, "-o", "json"], timeout=120)
+    if proc is None:
+        return None, "no answer from az"
+    if proc.returncode != 0:
+        return None, (proc.stderr or proc.stdout or "").strip()
+    try:
+        return json.loads(proc.stdout or "null"), ""
+    except ValueError:
+        return None, "az gave an answer that is not JSON"
+
+
+def _check_az_account(r: _Report, az: str, who: str) -> bool:
+    """Look the account, its certificate profile and the signer role up in Azure
+    (read-only), so a missing profile shows here instead of failing the build's
+    first signature. Returns True when the role was checked."""
+    account, profile = _env("AZURE_TRUSTED_SIGNING_ACCOUNT"), _env("AZURE_CERT_PROFILE_NAME")
+    if not (account and profile):
+        return False
+    found, err = _az_json(
+        az,
+        ["resource", "list", "--resource-type", "Microsoft.CodeSigning/codeSigningAccounts",
+         "--query", "[].{id:id, name:name, location:location}"],
+    )
+    if not isinstance(found, list):
+        r.note(f"could not look the Artifact Signing account up in Azure ({(err or 'no answer')[:200]})")
+        return False
+    match = [a for a in found if isinstance(a, dict) and str(a.get("name") or "").lower() == account.lower()]
+    if not match:
+        names = ", ".join(sorted(str(a.get("name")) for a in found if isinstance(a, dict))) or "none"
+        r.miss(
+            f"no Artifact Signing account named {account} in the subscription az is using (accounts there: {names}). "
+            "Fix AZURE_TRUSTED_SIGNING_ACCOUNT, or switch subscription: az account set -s <subscription>"
+        )
+        return False
+    acc = match[0]
+    acc_id, location = str(acc.get("id") or ""), str(acc.get("location") or "")
+    code = AZURE_REGION_CODES.get(location.lower().replace(" ", ""))
+    endpoint = _env("AZURE_TRUSTED_SIGNING_ENDPOINT").rstrip("/").lower()
+    if code and endpoint and endpoint != f"https://{code}.codesigning.azure.net":
+        r.miss(
+            f"AZURE_TRUSTED_SIGNING_ENDPOINT must be https://{code}.codesigning.azure.net: the account {account} "
+            f"is in {location}, and the wrong region fails with 403"
+        )
+    prof, err = _az_json(
+        az,
+        ["rest", "--method", "get",
+         "--url", f"{_ARM}{acc_id}/certificateProfiles/{profile}?api-version={_CODESIGNING_API}",
+         "--query", "{type:properties.profileType, status:properties.status}"],
+    )
+    if isinstance(prof, dict):
+        status = str(prof.get("status") or "")
+        if status and status.lower() != "active":
+            r.miss(f"certificate profile {profile} is {status}, not Active, so it cannot sign yet")
+        else:
+            r.ok(f"certificate profile {profile} ({prof.get('type') or 'profile'}) is in account {account} ({location})")
+    elif "notfound" in err.lower().replace(" ", "") or "404" in err:
+        r.miss(
+            f"the account {account} has no certificate profile named {profile}. Create it: Azure portal > "
+            f"Artifact Signing Accounts > {account} > Certificate profiles > Create > Public Trust, name it {profile} "
+            "and pick your identity validation under Verified CN and O (or put an existing profile's name in "
+            "AZURE_CERT_PROFILE_NAME)"
+        )
+    else:
+        r.note(f"could not look the certificate profile up in Azure ({(err or 'no answer')[:200]})")
+    holders, err = _az_json(
+        az,
+        ["role", "assignment", "list", "--scope", acc_id, "--include-inherited",
+         "--query", f"[?roleDefinitionName=='{AZURE_SIGNER_ROLE}'].principalName"],
+    )
+    if not isinstance(holders, list):
+        return False
+    me = who.lower()
+    guest = me.replace("@", "_") + "#ext#"
+    if any(str(p).lower() == me or str(p).lower().startswith(guest) for p in holders):
+        r.ok(f'{who} has the role "{AZURE_SIGNER_ROLE}" on {account}')
+    elif holders:
+        r.note(
+            f'the role "{AZURE_SIGNER_ROLE}" on {account} is held by {", ".join(map(str, holders))[:200]}; '
+            f"signing works if that includes {who} (a group counts)"
+        )
+    else:
+        r.miss(
+            f'nobody has the role "{AZURE_SIGNER_ROLE}" on {account}: Azure portal > Artifact Signing Accounts > '
+            f"{account} > Access control (IAM) > Add role assignment > {AZURE_SIGNER_ROLE} > add yourself"
+        )
+    return True
 
 
 def _check_pfx(r: _Report) -> None:
