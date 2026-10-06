@@ -103,8 +103,8 @@ def test_reading_a_step_that_has_not_run_gives_nothing_and_a_note():
 def test_ask_a_model_uses_the_picked_model(monkeypatch):
     seen = {}
 
-    def fake(provider, prompt, model=""):
-        seen.update(provider=provider, prompt=prompt, model=model)
+    def fake(provider, prompt, model="", *, system="", images=None):
+        seen.update(provider=provider, prompt=prompt, model=model, system=system)
         return {"ok": True, "text": "A rubber duck."}
 
     monkeypatch.setattr("backend.automations.llm_complete.complete_prompt", fake)
@@ -117,7 +117,8 @@ def test_ask_a_model_uses_the_picked_model(monkeypatch):
     out = runner.run_workflow(wid)
     assert out["ok"] is True, out
     assert out["node_outputs"]["p"] == {"value": "A rubber duck."}
-    assert seen == {"provider": "anthropic", "prompt": "Answer briefly.\n\nWhat floats?", "model": "claude-x"}
+    # Instructions are the system prompt, never mixed into the wired text.
+    assert seen == {"provider": "anthropic", "prompt": "What floats?", "model": "claude-x", "system": "Answer briefly."}
 
 
 @pytest.mark.parametrize("op, a, b, expected", [

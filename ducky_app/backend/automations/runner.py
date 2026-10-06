@@ -1334,9 +1334,10 @@ def _ask_node(cfg: dict[str, Any], inputs: dict[str, Any], _payload: dict[str, A
     prompt = _as_text(inputs.get("prompt")).strip()
     if not prompt:
         return {"ok": False, "error": "Nothing in Prompt: wire text in or type it in the details."}
-    parts = [str(cfg.get("system") or "").strip(), _as_text(inputs.get("context")).strip(), prompt]
+    # Instructions go as the system prompt, apart from the wired text they work on.
+    parts = [_as_text(inputs.get("context")).strip(), prompt]
     provider, model = _model_choice(cfg)
-    out = complete_prompt(provider, "\n\n".join(part for part in parts if part), model)
+    out = complete_prompt(provider, "\n\n".join(part for part in parts if part), model, system=str(cfg.get("system") or "").strip())
     if not out.get("ok"):
         return {"ok": False, "error": str(out.get("error") or "The model didn't answer.")}
     text = str(out.get("text") or "")
@@ -1390,12 +1391,11 @@ def _extract_node(cfg: dict[str, Any], inputs: dict[str, Any], _payload: dict[st
     fields = [str(name).strip() for name in cfg.get("names") or [] if str(name).strip()]
     if not fields:
         return {"ok": False, "error": "Name the fields to fill in this node's details."}
-    hint = str(cfg.get("system") or "").strip()
     ask = (f"Read the text below and fill these fields: {', '.join(fields)}. "
            "Answer with only one JSON object with exactly those keys; use null when the text doesn't say."
-           + (f"\n{hint}" if hint else "") + f"\n\nText:\n{text}")
+           f"\n\nText:\n{text}")
     provider, model = _model_choice(cfg)
-    out = complete_prompt(provider, ask, model)
+    out = complete_prompt(provider, ask, model, system=str(cfg.get("system") or "").strip())
     if not out.get("ok"):
         return {"ok": False, "error": str(out.get("error") or "The model didn't answer.")}
     data = _json_in(str(out.get("text") or ""))

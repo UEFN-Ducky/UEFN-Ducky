@@ -727,6 +727,18 @@ def test_extract_data_fills_each_field(model):
     assert "wasn't JSON" in run("llm.extract", {"names": ["a"]}, {"text": "x"})["error"]
 
 
+def test_instructions_and_hints_are_the_system_prompt(model):
+    step = run("llm.ask", {"system": "Only kind words."}, {"prompt": "Describe the duck.", "context": "WIKI: rude text"})
+    assert step["ok"], step
+    assert model["seen"][0]["system"] == "Only kind words."
+    assert model["seen"][0]["prompt"] == "WIKI: rude text\n\nDescribe the duck." and "kind words" not in model["seen"][0]["prompt"]
+    model["answers"].append('{"safe": true}')
+    step = run("llm.extract", {"names": ["safe"], "system": "Be strict."}, {"text": "a happy duck"})
+    assert step["ok"] and step["outputs"]["safe"] is True
+    assert model["seen"][1]["system"] == "Be strict."
+    assert "Be strict" not in model["seen"][1]["prompt"] and model["seen"][1]["prompt"].endswith("Text:\na happy duck")
+
+
 def test_translate(model):
     step = run("llm.translate", {"language": "German"}, {"text": "Hello"})
     assert step["ok"] and "into German" in model["seen"][0]["prompt"]
