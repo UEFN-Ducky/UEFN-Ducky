@@ -4,113 +4,146 @@
   <meta charset="utf-8" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>UEFN Ducky Setup</title>
+  <!-- Same faces as the app; Segoe UI takes over offline. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app">
-    <header class="titlebar">
-      <div class="titlebar-drag" id="drag">
-        <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true">
-          <rect width="64" height="64" rx="13" fill="#12161f"/>
-          <ellipse cx="32" cy="42" rx="26" ry="15" fill="#ffc72c"/>
-          <circle cx="45" cy="21" r="14" fill="#ffc72c"/>
-          <polygon points="54,18 63,21 54,26" fill="#ff8a00"/>
-          <circle cx="46" cy="18" r="2.7" fill="#18181c"/>
-        </svg>
-        <span class="title" id="window-title">UEFN Ducky Setup</span>
+  <div id="app" class="app">
+    <div class="glow" aria-hidden="true"></div>
+
+    <div class="win-btns">
+      <button class="win-btn" id="btn-min" type="button" title="Minimize" aria-label="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+      </button>
+      <button class="win-btn win-btn--close" id="btn-close" type="button" title="Close" aria-label="Close">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+      </button>
+    </div>
+
+    <section class="screen" data-screen="welcome">
+      <div class="brand">
+        <img class="logo" src="logo.png" alt="" draggable="false" />
+        <h1>UEFN Ducky</h1>
+        <p class="tagline">The AI toolkit for Unreal Editor for Fortnite</p>
+        <span class="pill" id="welcome-version"></span>
       </div>
-      <div class="win-btns">
-        <button class="win-btn" id="btn-min" title="Minimize">&#x2013;</button>
-        <button class="win-btn close" id="btn-close" title="Close">&#x2715;</button>
+      <div class="summary">
+        <dl class="summary-list">
+          <div class="summary-row"><dt>Install to</dt><dd class="summary-path" id="sum-dir"></dd></div>
+          <div class="summary-row"><dt>For</dt><dd id="sum-scope"></dd></div>
+        </dl>
+        <button class="link-btn" id="change" type="button">Change</button>
       </div>
-    </header>
+      <div class="actions">
+        <button class="btn btn-primary btn-lg" id="install" type="button">Install</button>
+        <p class="fine">By installing, you agree to the <button class="link-btn" id="read-license" type="button">license</button>.</p>
+      </div>
+    </section>
 
-    <main>
-      <div class="dots" id="dots"></div>
-
-      <section class="step" data-step="welcome">
-        <div class="hero">
-          <svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true">
-            <rect width="64" height="64" rx="13" fill="#12161f"/>
-            <ellipse cx="32" cy="42" rx="26" ry="15" fill="#ffc72c"/>
-            <ellipse cx="30" cy="43" rx="11" ry="8" fill="none" stroke="#e8a812" stroke-width="2"/>
-            <circle cx="45" cy="21" r="14" fill="#ffc72c"/>
-            <polygon points="54,18 63,21 54,26" fill="#ff8a00"/>
-            <circle cx="46" cy="18" r="2.7" fill="#18181c"/>
-            <circle cx="45" cy="17" r="0.9" fill="#fff"/>
-          </svg>
-          <div class="hero-copy">
-            <h1 id="welcome-title">UEFN Ducky</h1>
-            <p class="lead" id="welcome-lead">The control panel for Unreal Editor for Fortnite. Install once; updates arrive in-app.</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="step" data-step="license">
-        <h1>License</h1>
-        <p class="lead">Please read and accept the Ducky Source-Available License to continue.</p>
-        <pre class="license" id="license-text"></pre>
-        <label class="check">
-          <input type="checkbox" id="accept" />
-          <span>I accept the agreement</span>
-        </label>
-      </section>
-
-      <section class="step" data-step="location">
-        <h1>Install location</h1>
-        <p class="lead">Choose a folder. You can change this later by uninstalling and running Setup again.</p>
+    <section class="screen screen--form" data-screen="options">
+      <header class="screen-head">
+        <button class="back-btn" type="button" data-back aria-label="Back">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        <h2>Install options</h2>
+      </header>
+      <div class="form">
+        <label class="field-label" for="dir">Install location</label>
         <div class="path-row">
-          <input id="dir" spellcheck="false" />
-          <button class="btn" id="browse" type="button">Browse</button>
+          <input id="dir" spellcheck="false" autocomplete="off" />
+          <button class="btn btn-secondary" id="browse" type="button">Browse</button>
         </div>
-        <p class="space" id="space"></p>
-        <div class="choices">
-          <button type="button" class="choice selected" id="scope-user" data-scope="user">
-            <strong>Only me</strong>
-            <span>Installs under your Windows profile. No administrator prompt.</span>
+        <p class="hint" id="space"></p>
+        <span class="field-label">Who can use it</span>
+        <div class="choices" role="radiogroup" aria-label="Who can use it">
+          <button class="choice" id="scope-user" type="button" role="radio">
+            <span class="radio" aria-hidden="true"></span>
+            <span class="choice-copy"><strong>Only me</strong><small>No administrator prompt.</small></span>
           </button>
-          <button type="button" class="choice" id="scope-machine" data-scope="machine">
-            <strong>All users</strong>
-            <span>Installs for everyone on this PC. Windows will ask for permission.</span>
+          <button class="choice" id="scope-machine" type="button" role="radio">
+            <span class="radio" aria-hidden="true"></span>
+            <span class="choice-copy"><strong>Everyone on this PC</strong><small>Windows asks for permission.</small></span>
           </button>
         </div>
-      </section>
-
-      <section class="step" data-step="options">
-        <h1>Shortcuts</h1>
-        <p class="lead">A Start menu shortcut is always created.</p>
-        <label class="check option-card">
+        <label class="toggle">
           <input type="checkbox" id="desktop" checked />
-          <span>Create a desktop shortcut</span>
+          <span class="switch" aria-hidden="true"></span>
+          <span>Desktop shortcut</span>
         </label>
-      </section>
+      </div>
+      <div class="actions actions--row">
+        <button class="btn btn-secondary" type="button" data-back>Back</button>
+        <button class="btn btn-primary" id="options-install" type="button">Install</button>
+      </div>
+    </section>
 
-      <section class="step" data-step="progress">
-        <h1 id="progress-title">Installing</h1>
-        <p class="lead" id="progress-lead">Copying files and creating shortcuts.</p>
-        <div class="progress-wrap">
-          <div class="bar"><i id="bar"></i></div>
-          <p class="status" id="status">Starting…</p>
-          <p class="error hidden" id="error"></p>
-        </div>
-      </section>
+    <section class="screen screen--form" data-screen="license">
+      <header class="screen-head">
+        <button class="back-btn" type="button" data-back aria-label="Back">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        <h2>License</h2>
+      </header>
+      <div class="license" id="license-text" tabindex="0"></div>
+      <div class="actions actions--row">
+        <button class="btn btn-secondary" type="button" data-back id="license-back">Back</button>
+      </div>
+    </section>
 
-      <section class="step" data-step="done">
-        <div class="done-mark">✓</div>
-        <h1 id="done-title">UEFN Ducky is installed</h1>
-        <p class="lead">You are ready to open the panel and connect UEFN.</p>
-        <label class="check">
-          <input type="checkbox" id="launch" checked />
-          <span>Launch UEFN Ducky</span>
-        </label>
-      </section>
-    </main>
+    <section class="screen" data-screen="progress">
+      <div class="parade" aria-hidden="true">
+        <span class="parade-track">
+          <img class="duck duck--leader" src="duckies/Artist.png" alt="" draggable="false" />
+          <img class="duck duck--mom" src="duckies/cowboy.png" alt="" draggable="false" />
+          <img class="duck duck--boy" src="duckies/hacker.png" alt="" draggable="false" />
+          <img class="duck duck--girl" src="duckies/wizard.png" alt="" draggable="false" />
+        </span>
+      </div>
+      <h2 id="progress-title">Installing UEFN Ducky</h2>
+      <p class="sub" id="progress-versions"></p>
+      <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill" id="bar"></div>
+        <div class="progress-sweep" aria-hidden="true"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="status">Getting ready…</span>
+        <span class="progress-pct" id="percent"></span>
+      </div>
+      <div class="actions">
+        <button class="link-btn link-btn--muted" id="cancel" type="button">Cancel</button>
+      </div>
+    </section>
 
-    <footer>
-      <button class="btn-ghost hidden" id="back" type="button">Back</button>
-      <button class="btn hidden" id="cancel" type="button">Cancel</button>
-      <button class="btn-accent" id="next" type="button">Next</button>
-    </footer>
+    <section class="screen" data-screen="done">
+      <div class="badge-wrap">
+        <img class="logo" src="logo.png" alt="" draggable="false" />
+        <span class="badge badge--ok" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 7.4l2.6 2.6L11 4.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </span>
+      </div>
+      <h2 id="done-title">UEFN Ducky is ready</h2>
+      <p class="sub" id="done-sub"></p>
+      <div class="actions">
+        <button class="btn btn-primary btn-lg" id="open" type="button">Open UEFN Ducky</button>
+        <button class="link-btn link-btn--muted" id="close-done" type="button">Close</button>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="error">
+      <div class="badge-wrap">
+        <img class="logo logo--dim" src="logo.png" alt="" draggable="false" />
+        <span class="badge badge--err" aria-hidden="true">!</span>
+      </div>
+      <h2 id="error-title">Setup didn't finish</h2>
+      <p class="sub sub--error" id="error"></p>
+      <div class="actions actions--row">
+        <button class="btn btn-secondary" id="close-error" type="button">Close</button>
+        <button class="btn btn-primary" id="retry" type="button">Try again</button>
+      </div>
+    </section>
   </div>
   <script src="app.js"></script>
 </body>

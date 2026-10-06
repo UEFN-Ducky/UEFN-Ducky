@@ -25,6 +25,7 @@
     <AssemblyTitle>UEFN Ducky Setup</AssemblyTitle>
     <EngineExe Condition="'$(EngineExe)' == ''"></EngineExe>
     <UiDir Condition="'$(UiDir)' == ''">..\ui</UiDir>
+    <PublicDir Condition="'$(PublicDir)' == ''">..\..\..\ducky_app\frontend\ui_web\web\public</PublicDir>
     <LicenseFile Condition="'$(LicenseFile)' == ''">..\..\..\LICENSE</LicenseFile>
     <SetupOutput Condition="'$(SetupOutput)' == ''"></SetupOutput>
     <AppIcon Condition="'$(AppIcon)' == ''"></AppIcon>
@@ -45,6 +46,12 @@
     <EmbeddedResource Include="$(UiDir)\index.html" LogicalName="ui/index.html" />
     <EmbeddedResource Include="$(UiDir)\styles.css" LogicalName="ui/styles.css" />
     <EmbeddedResource Include="$(UiDir)\app.js" LogicalName="ui/app.js" />
+    <!-- The app's own logo and loading-parade ducks, straight from the panel. -->
+    <EmbeddedResource Include="$(PublicDir)\OnlineMCPIcon.png" LogicalName="ui/logo.png" />
+    <EmbeddedResource Include="$(PublicDir)\duckies\Artist.png" LogicalName="ui/duckies/Artist.png" />
+    <EmbeddedResource Include="$(PublicDir)\duckies\cowboy.png" LogicalName="ui/duckies/cowboy.png" />
+    <EmbeddedResource Include="$(PublicDir)\duckies\hacker.png" LogicalName="ui/duckies/hacker.png" />
+    <EmbeddedResource Include="$(PublicDir)\duckies\wizard.png" LogicalName="ui/duckies/wizard.png" />
     <EmbeddedResource Include="$(LicenseFile)" Condition="Exists('$(LicenseFile)')" LogicalName="LICENSE" />
     <EmbeddedResource Include="wv2\WebView2Loader.dll" LogicalName="WebView2Loader.dll" />
     <EmbeddedResource Include="wv2\Microsoft.Web.WebView2.Core.dll" LogicalName="Microsoft.Web.WebView2.Core.dll" />

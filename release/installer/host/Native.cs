@@ -21,6 +21,15 @@ namespace DuckySetup
         public const uint Infinite = 0xFFFFFFFF;
         public const int ErrorAccessDenied = 5;
 
+        // Windows 11 window corners and the 1px accent border DWM draws around windows.
+        public const int DwmwaWindowCornerPreference = 33;
+        public const int DwmwcpRound = 2;
+        public const int DwmwaBorderColor = 34;
+        public const int DwmwaColorNone = unchecked((int)0xFFFFFFFE);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
         [DllImport("user32.dll")]
         public static extern bool ReleaseCapture();
 
