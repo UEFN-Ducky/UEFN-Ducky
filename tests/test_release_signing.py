@@ -402,3 +402,39 @@ def test_github_release_runs_the_same_publish_app_steps_as_a_local_release():
     assert "DUCKY_SIGN_PROVIDER=none" in yml  # no Azure secrets: unsigned, as before
     assert yml.index("azure/login@") < yml.index("--phase test")
     assert "Microsoft.ArtifactSigning.Client" in yml
+
+
+def test_dlib_sitting_directly_in_the_client_tools_folder_is_found(sw, tmp_path):
+    # winget's Artifact Signing client tools 2.x put the dlib at the folder's top.
+    tools = tmp_path / "local" / "Microsoft" / "MicrosoftArtifactSigningClientTools"
+    dlib = _touch(tools / "Azure.CodeSigning.Dlib.dll")
+    assert sw.find_azure_dlib() == dlib
+    old = _touch(tmp_path / "local" / "Microsoft" / "MicrosoftTrustedSigningClientTools" / "x64" / "Azure.CodeSigning.Dlib.dll")
+    (dlib).unlink()
+    assert sw.find_azure_dlib() == old
+
+
+def test_check_says_when_azure_mfa_is_still_pending(sw, monkeypatch, tmp_path):
+    _touch(tmp_path / "local" / "Microsoft" / "MicrosoftArtifactSigningClientTools" / "Azure.CodeSigning.Dlib.dll")
+    monkeypatch.setenv("DUCKY_SIGN_PROVIDER", "azure")
+    monkeypatch.setenv("DUCKY_AZURE_AUTH", "cli")
+    monkeypatch.setenv("AZURE_TRUSTED_SIGNING_ENDPOINT", "https://eus.codesigning.azure.net")
+    monkeypatch.setenv("AZURE_TRUSTED_SIGNING_ACCOUNT", "uefnducky")
+    monkeypatch.setenv("AZURE_CERT_PROFILE_NAME", "UEFNDuckyRelease")
+    _ready_tools(sw, monkeypatch, tmp_path, az="az.cmd")
+
+    class Proc:
+        def __init__(self, code, out="", err=""):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    def run_quiet(cmd, timeout=60):
+        if "get-access-token" in cmd:
+            assert "https://codesigning.azure.net/.default" in cmd and "expiresOn" in cmd
+            return Proc(1, err="ERROR: AADSTS50076: you must use multi-factor authentication to access this resource.")
+        return Proc(0, out="owner@example.com\n3b436341-9726-4c5b-aed7-ef84359d8b6e\n")
+
+    monkeypatch.setattr(sw, "_run_quiet", run_quiet)
+    missing = sw.check()
+    assert len(missing) == 1
+    assert "multi-factor sign-in (MFA) is not finished" in missing[0]
+    assert "az login --tenant 3b436341-9726-4c5b-aed7-ef84359d8b6e --scope https://codesigning.azure.net/.default" in missing[0]

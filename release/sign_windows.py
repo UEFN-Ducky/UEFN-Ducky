@@ -458,10 +458,14 @@ def _run_quiet(cmd: list[str], timeout: float = 60) -> subprocess.CompletedProce
 
 
 def _file_version(path: Path) -> tuple[int, ...]:
-    proc = _run_quiet(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"(Get-Item -LiteralPath '{path}').VersionInfo.FileVersion"]
+    # The numeric parts: signtool's FileVersion *string* is "4.00 (WinBuild...)"
+    # while its real version is 10.0.26100.x.
+    script = (
+        f"$v = (Get-Item -LiteralPath '{path}').VersionInfo; "
+        "'{0}.{1}.{2}.{3}' -f $v.FileMajorPart, $v.FileMinorPart, $v.FileBuildPart, $v.FilePrivatePart"
     )
-    text = ((proc.stdout if proc else "") or "").strip().split(" ")[0]
+    proc = _run_quiet(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
+    text = ((proc.stdout if proc else "") or "").strip()
     try:
         return tuple(int(n) for n in text.split("."))
     except ValueError:
@@ -560,17 +564,42 @@ def _check_azure(r: _Report, signtool: Path | None) -> None:
         if not az:
             r.miss("Azure CLI is not installed (it signs you in): winget install -e --id Microsoft.AzureCLI, then az login")
         else:
-            proc = _run_quiet([az, "account", "show", "--query", "user.name", "-o", "tsv"], timeout=90)
-            who = (proc.stdout or "").strip() if proc and proc.returncode == 0 else ""
-            if who:
-                r.ok(f"Azure CLI signed in as {who}")
-            else:
-                r.miss("Azure CLI is not signed in: run az login (once on this PC)")
+            _check_az_token(r, az)
             if not auth:
                 r.note("DUCKY_AZURE_AUTH is blank, so Azure tries every sign-in kind; cli is faster and never pops a browser")
     r.note(
         "the signing identity needs the role \"Artifact Signing Certificate Profile Signer\" on the account "
         "(Azure portal > Artifact Signing Accounts > your account > Access control)"
+    )
+
+
+AZURE_SIGNING_SCOPE = "https://codesigning.azure.net/.default"
+
+
+def _check_az_token(r: _Report, az: str) -> None:
+    """Signed in, and able to get the token signing needs (MFA can still be pending)."""
+    proc = _run_quiet([az, "account", "show", "--query", "[user.name, tenantId]", "-o", "tsv"], timeout=90)
+    lines = ((proc.stdout or "").split() if proc and proc.returncode == 0 else [])
+    who, tenant = (lines + ["", ""])[:2]
+    if not who:
+        r.miss("Azure CLI is not signed in: run az login (once on this PC)")
+        return
+    # --query expiresOn: only the expiry is printed, never the token.
+    token = _run_quiet(
+        [az, "account", "get-access-token", "--scope", AZURE_SIGNING_SCOPE, "--query", "expiresOn", "-o", "tsv"],
+        timeout=120,
+    )
+    if token is not None and token.returncode == 0 and (token.stdout or "").strip():
+        r.ok(f"Azure CLI signed in as {who} (tenant {tenant}) and can get a code-signing token")
+        return
+    err = ((token.stderr if token else "") or "").strip()
+    first = next((ln.strip() for ln in err.splitlines() if ln.strip()), "no answer from az")
+    login = f"az login --tenant {tenant} --scope {AZURE_SIGNING_SCOPE}" if tenant else f"az login --scope {AZURE_SIGNING_SCOPE}"
+    mfa = any(code in err for code in ("AADSTS50076", "AADSTS50079", "AADSTS50158")) or "multi-factor" in err.lower()
+    why = "its multi-factor sign-in (MFA) is not finished" if mfa else "the sign-in is incomplete or expired"
+    r.miss(
+        f"Azure CLI is signed in as {who} but cannot get a code-signing token for tenant {tenant or '?'}: {why}. "
+        f"Run: {login}   (az said: {first[:240]})"
     )
 
 

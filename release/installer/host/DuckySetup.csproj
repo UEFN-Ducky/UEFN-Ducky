@@ -19,6 +19,10 @@
     <AppVersion Condition="'$(AppVersion)' == ''">0.0.0</AppVersion>
     <Version>$(AppVersion)</Version>
     <InformationalVersion>$(AppVersion)</InformationalVersion>
+    <!-- The .NET 8 SDK appends "+<git commit>" to InformationalVersion, which the
+         Setup window shows as the version ("Updating UEFN Ducky to v1.2.343+3939df5..."). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <AssemblyTitle>UEFN Ducky Setup</AssemblyTitle>
     <EngineExe Condition="'$(EngineExe)' == ''"></EngineExe>
     <UiDir Condition="'$(UiDir)' == ''">..\ui</UiDir>
     <LicenseFile Condition="'$(LicenseFile)' == ''">..\..\..\LICENSE</LicenseFile>
