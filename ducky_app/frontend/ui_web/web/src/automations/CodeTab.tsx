@@ -22,6 +22,7 @@ import {
 import { nodeLabel } from "./NodeVisuals";
 import { PinValueEditor } from "./PinFields";
 import { cleanType, nodePins, PIN_TYPE_LABELS, type NodePins } from "./pins";
+import { onFlushWorkflowEdits } from "./unsavedWorkflow";
 
 /** How long typing rests before the code reaches the draft and is checked. */
 const EDIT_DELAY_MS = 300;
@@ -254,6 +255,8 @@ function CustomCode(props: CustomProps) {
   };
   const flushRef = useRef(flush);
   flushRef.current = flush;
+  // Ctrl+S right after typing saves those last keystrokes too.
+  useEffect(() => onFlushWorkflowEdits(() => flushRef.current()), []);
 
   const edit = (text: string) => {
     if (frozen) return;

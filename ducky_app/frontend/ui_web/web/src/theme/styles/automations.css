@@ -217,6 +217,25 @@
 .aw-toolbar .aw-toolbar-actions > button[aria-pressed="true"] { color: var(--accent); }
 .aw-toolbar .aw-toolbar-actions svg { width: 17px; height: 17px; }
 .aw-spin { display: inline-grid; animation: spin-slow 0.8s linear infinite; }
+/* Save: orange with a dot while edits are unsaved, a spinner while saving, a check just
+   after, red when the save failed. The phone menu button carries the same dot. */
+.aw-toolbar .aw-toolbar-actions > .aw-save, .aw-toolbar .aw-more-toggle { position: relative; }
+.aw-toolbar .aw-toolbar-actions > .aw-save.is-dirty { background: var(--warn-dim); color: var(--warn); }
+.aw-toolbar .aw-toolbar-actions > .aw-save.is-dirty:hover:not(:disabled) { background: color-mix(in srgb, var(--warn) 24%, transparent); color: var(--warn); }
+.aw-toolbar .aw-toolbar-actions > .aw-save.is-saved { color: var(--green); }
+.aw-toolbar .aw-toolbar-actions > .aw-save.is-error,
+.aw-toolbar .aw-toolbar-actions > .aw-save.is-error:hover:not(:disabled) { color: var(--danger); }
+.aw-save-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--panel-header);
+  pointer-events: none;
+}
 /* Canvas: an Unreal-style graph. Every color and size here is a --wf-* variable from
    Settings → Appearance → Workflows. The grid moves and scales with the nodes (--aw-grid,
    --aw-pan-x/y come from the view); the minor lines drop out when far away. */
@@ -1372,6 +1391,7 @@
   .aw-canvas-controls.is-open > .aw-zoom::after { content: "Zoom and grid"; }
   .aw-canvas-controls.is-open .aw-controls-sep { flex: 0 0 1px; align-self: stretch; margin: 4px 6px; }
   .aw-canvas-controls.is-open .aw-log-badge { position: static; order: 2; margin-left: auto; transform: none; }
+  .aw-toolbar .aw-toolbar-actions.is-open > .aw-save .aw-save-dot { position: static; order: 2; margin-left: auto; box-shadow: none; }
 
   .aw-canvas-fab {
     position: absolute;

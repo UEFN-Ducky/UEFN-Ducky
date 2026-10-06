@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AutomationsView } from "./AutomationsView";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
+import { setUnsavedWorkflow } from "./unsavedWorkflow";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
 const api = vi.hoisted(() => ({ list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
@@ -2212,5 +2213,151 @@ describe("phone layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select tool" }));
     expect(controls.classList.contains("is-open")).toBe(false);
     expect(screen.getByRole("button", { name: "Select tool" }).getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("unsaved changes and Save", () => {
+  const saveButton = () => screen.getByRole("button", { name: "Save", exact: true });
+  const nameBox = () => screen.getByRole("textbox", { name: "Workflow name" }) as HTMLInputElement;
+  const canvas = () => document.querySelector(".aw-board") as HTMLElement;
+  /** Ctrl+S (or Cmd+S) pressed on `target`: false when the page's own save was held back. */
+  const ctrlS = (target: Element, mac = false) => fireEvent.keyDown(target, { key: "s", ...(mac ? { metaKey: true } : { ctrlKey: true }) });
+  const moveNode = (id: string) => {
+    fireEvent.pointerDown(document.querySelector(`[data-aw-node="${id}"] .aw-node-card`)!, { button: 0, pointerId: 3, clientX: 600, clientY: 200 });
+    fireEvent.pointerMove(canvas(), { pointerId: 3, clientX: 680, clientY: 260 });
+    fireEvent.pointerUp(canvas(), { pointerId: 3, clientX: 680, clientY: 260 });
+  };
+  const prompt = () => screen.findByRole("dialog");
+
+  it("turns Save orange after an edit and back after saving, with a short Saved check", async () => {
+    await open();
+    expect(saveButton().classList.contains("is-dirty")).toBe(false);
+    expect(saveButton().title).toBe("Save (Ctrl+S)");
+    fireEvent.change(nameBox(), { target: { value: "Renamed" } });
+    expect(saveButton().classList.contains("is-dirty")).toBe(true);
+    expect(saveButton().title).toBe("Unsaved changes - Save (Ctrl+S)");
+    expect(saveButton().querySelector(".aw-save-dot")).toBeTruthy();
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(saveButton().title).toBe("Saved"));
+    expect(saved.name).toBe("Renamed");
+    expect(saveButton().classList.contains("is-dirty")).toBe(false);
+    expect(saveButton().querySelector(".aw-save-dot")).toBeNull();
+  });
+
+  it("shows why a save failed on the Save button", async () => {
+    await open();
+    moveNode("b");
+    api.save_workflow.mockResolvedValueOnce({ error: "Too much code in one node." });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(saveButton().classList.contains("is-error")).toBe(true));
+    expect(saveButton().title).toContain("Too much code in one node.");
+    expect(screen.getByRole("alert").textContent).toContain("Too much code in one node.");
+  });
+
+  it("Ctrl+S on the canvas saves a moved node and keeps the WebView's own save dialog away", async () => {
+    await open();
+    moveNode("b");
+    expect(saveButton().classList.contains("is-dirty")).toBe(true);
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    expect(ctrlS(canvas())).toBe(false);
+    await waitFor(() => expect(saved.graph.nodes.find((node) => node.id === "b")?.x).toBe(640));
+    await waitFor(() => expect(saveButton().classList.contains("is-dirty")).toBe(false));
+  });
+
+  it("Ctrl+S or Cmd+S in a text field saves what was typed", async () => {
+    await open();
+    fireEvent.change(nameBox(), { target: { value: "Typed name" } });
+    expect(ctrlS(nameBox(), true)).toBe(false);
+    await waitFor(() => expect(saved.name).toBe("Typed name"));
+    fireEvent.change(nameBox(), { target: { value: "Typed again" } });
+    ctrlS(nameBox());
+    await waitFor(() => expect(saved.name).toBe("Typed again"));
+  });
+
+  it("Ctrl+S in the code editor saves the keystrokes just typed", async () => {
+    const CODE = "export const node = { kind: \"step\", inputs: [], outputs: [] };\nexport default async function run() {\n  return {};\n}\n";
+    api.list_workflow_nodes.mockResolvedValue({ nodes: [{ type: "start.chat", label: "Chat", role: "starter", group: "Starting" }, { type: "code.js", label: "Custom code", role: "action", group: "Code" }] });
+    api.check_workflow_node_code.mockResolvedValue({ ok: true, problems: [], pins: { exec: true, inputs: [], outputs: [] }, settings_spec: [], uses: { tools: [], builtins: [] }, code_sha: "s" });
+    api.workflow_code_api.mockResolvedValue({ ok: true, dts: "" });
+    api.get_workflow_node_code.mockResolvedValue({ ok: true, kind: "custom", code: CODE, code_sha: "sha1", pins: { exec: true, inputs: [], outputs: [] }, settings_spec: [], uses: { tools: [], builtins: [] }, problems: [], convertible: true, reason: "", approved: true });
+    saved.graph.nodes.push({ id: "c", type: "code.js", label: "My code", x: 840, y: 0, config: { code: CODE, code_sha: "sha1", pins: { exec: true, inputs: [], outputs: [] }, settings: {}, inputs: {} } });
+    await open();
+    editNode("c");
+    fireEvent.click(within(details()!).getByRole("tab", { name: /Code/ }));
+    const box = within(details()!).getByRole("textbox", { name: "Code" });
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: `${CODE}// typed\n` } });
+    expect(ctrlS(box)).toBe(false);
+    await waitFor(() => expect(saved.graph.nodes.find((node) => node.id === "c")?.config.code).toBe(`${CODE}// typed\n`));
+  });
+
+  it("never saves a read-only workflow with Ctrl+S and says why", async () => {
+    daily.owner = { ...TEAM, readOnly: true, reason: "Only Alpha Studio's editors can change it." };
+    await open("Daily check");
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(ctrlS(canvas())).toBe(false);
+    expect(document.querySelector(".aw-toast")?.textContent).toContain("Only Alpha Studio's editors can change it.");
+    expect(api.save_workflow).not.toHaveBeenCalled();
+  });
+
+  it("asks before switching workflows: Save saves, then switches", async () => {
+    await open();
+    fireEvent.change(nameBox(), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByText("Daily check"));
+    const dialog = await prompt();
+    expect(dialog.textContent).toContain("Renamed");
+    expect(dialog.textContent).toContain("unsaved changes");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await screen.findByDisplayValue("Daily check");
+    expect(saved.name).toBe("Renamed");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("asks before switching workflows: Don't save switches without saving", async () => {
+    await open();
+    moveNode("b");
+    fireEvent.click(screen.getByText("Daily check"));
+    fireEvent.click(within(await prompt()).getByRole("button", { name: "Don't save" }));
+    await screen.findByDisplayValue("Daily check");
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    expect(saveButton().classList.contains("is-dirty")).toBe(false);
+    fireEvent.click(screen.getByText("Example"));
+    await screen.findByDisplayValue("Example");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect((document.querySelector('[data-aw-node="b"]') as HTMLElement).style.left).toBe("560px");
+  });
+
+  it("asks before switching workflows: Cancel stays with the edits", async () => {
+    await open();
+    fireEvent.change(nameBox(), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByText("Daily check"));
+    fireEvent.click(within(await prompt()).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(nameBox().value).toBe("Renamed");
+    expect(saveButton().classList.contains("is-dirty")).toBe(true);
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    expect(api.get_workflow).not.toHaveBeenCalledWith("d");
+  });
+
+  it("asks before starting a new workflow", async () => {
+    await open();
+    moveNode("b");
+    fireEvent.click(screen.getAllByRole("button", { name: /New workflow/ })[0]);
+    fireEvent.click(within(await prompt()).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Create workflow" })).toBeNull();
+  });
+
+  it("keeps unsaved edits when the editor closes and brings them back, one Undo from the saved copy", async () => {
+    await open();
+    fireEvent.change(nameBox(), { target: { value: "Not saved yet" } });
+    cleanup();
+    renderView();
+    await waitFor(() => expect(nameBox().value).toBe("Not saved yet"));
+    expect(saveButton().classList.contains("is-dirty")).toBe(true);
+    expect(api.save_workflow).not.toHaveBeenCalled();
+    fireEvent.keyDown(canvas(), { key: "z", ctrlKey: true });
+    await waitFor(() => expect(nameBox().value).toBe("Example"));
   });
 });

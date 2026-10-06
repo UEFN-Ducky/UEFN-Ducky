@@ -19,6 +19,7 @@ import { LiveNodeStatus, type LiveNodeRun } from "./LiveNodeStatus";
 import type { NodePins } from "./pins";
 import { GROUP_COLORS, groupLocked, groupMembers, nodeLocked } from "./workflowGroups";
 import { targetRef } from "../ui-targets/registry";
+import { onFlushWorkflowEdits } from "./unsavedWorkflow";
 
 export type InspectorTab =
   | { key: string; kind: "node"; node: AutomationGraphNodeDto }
@@ -161,6 +162,10 @@ function DetailsHead({ icon, kind, name, nameLabel, description, fallback, edita
     setError("");
     if (patch.name !== undefined || patch.description !== undefined) onSave?.(patch);
   };
+  // A save of the whole workflow (Ctrl+S) keeps what is typed here too.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => editing ? onFlushWorkflowEdits(() => saveRef.current()) : undefined, [editing]);
   const keys = (multiline: boolean) => (event: React.KeyboardEvent) => {
     event.stopPropagation();
     if (event.nativeEvent.isComposing) return;

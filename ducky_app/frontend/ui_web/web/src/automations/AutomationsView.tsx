@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWorkflowHistory, editableWorkflow } from "./useWorkflowHistory";
+import { flushUnsavedWorkflow, flushWorkflowEdits, guardUnsavedWorkflow, registerWorkflowEditor, reloadUnsavedWorkflow, setUnsavedWorkflow, unsavedWorkflow, UnsavedWorkflowPrompt } from "./unsavedWorkflow";
 import { AutomationTemplatePicker } from "./AutomationTemplatePicker";
 import { readDetailsTab, WorkflowInspector, writeDetailsTab, type DetailsTab, type InspectorTab } from "./WorkflowInspector";
 import { blankCodeConfig, CODE_TYPE, dropWires, isCodeNode, wiresDropped } from "./codeNode";
@@ -268,6 +269,22 @@ const TEAM_SYNC_DELAY_MS = 4000;
 const RUN_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 /** The server turned a save down and said why (too much code, say): retrying won't help. */
 class SaveRefused extends Error {}
+/** How long the Save button shows its check after a save. */
+const SAVED_MS = 1600;
+type SaveState = { kind: "idle" | "saving" | "saved" } | { kind: "error"; error: string };
+
+/** What a save would change: name, description, on/off and the graph (not the camera or
+ *  what is selected). */
+function unsavedEdits(doc: AutomationDto | null | undefined, saved: AutomationDto | null | undefined): boolean {
+  return !!doc && !!saved && doc.id === saved.id && !doc.owner?.readOnly
+    && JSON.stringify(editableWorkflow(doc)) !== JSON.stringify(editableWorkflow(saved));
+}
+
+/** Kept edits of this workflow (not saved before the editor closed or the app restarted). */
+function keptEditsOf(row: AutomationDto): AutomationDto | null {
+  const kept = reloadUnsavedWorkflow();
+  return kept && !row.owner?.readOnly && kept.id === row.id && (kept.owner?.id || "local") === (row.owner?.id || "local") ? kept : null;
+}
 
 /** A run as it happens: the step running now, the wire it came along, how each step went. */
 type LiveState = "running" | "ok" | "error" | "stopped";
@@ -456,6 +473,24 @@ export function AutomationsView() {
   const [selectedId, setSelectedId] = useState("");
   const history = useWorkflowHistory();
   const { draft, setDraft, replace: acknowledgeDraft, reset: resetDraft, begin: beginEdit, end: endEdit } = history;
+  /** The draft as the server last had it (opened or saved) and saves not answered yet: a
+   *  change made outside this canvas (an AI's save, another window) loads in only when
+   *  nothing here is unsaved, and play never sends an old copy over it. */
+  const synced = useRef<AutomationDto | null>(null);
+  const [savedDoc, setSavedDoc] = useState<AutomationDto | null>(null);
+  const markSynced = useCallback((row: AutomationDto) => { synced.current = row; setSavedDoc(row); }, []);
+  /** The newest draft sent to be saved, until the server answers. */
+  const sendingRef = useRef<AutomationDto | null>(null);
+  const [sending, setSending] = useState<AutomationDto | null>(null);
+  /** Edits on the canvas a save would send (the orange Save button); a draft on its way to
+   *  the server isn't, unless that save fails. */
+  const dirty = useMemo(() => draft !== sending && unsavedEdits(draft, savedDoc), [draft, savedDoc, sending]);
+  /** The newest draft (a ref: handlers read it between renders). */
+  const liveDraft = history.current;
+  const unsavedNow = useCallback(() => liveDraft.current !== sendingRef.current && unsavedEdits(liveDraft.current, synced.current), [liveDraft]);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const savedTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(savedTimer.current), []);
   const [versions, setVersions] = useState<{ id: string; name: string; saved_at: number; node_count: number; note?: string }[]>([]);
   const [historyStatus, setHistoryStatus] = useState("");
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -678,7 +713,12 @@ export function AutomationsView() {
     const row = res?.workflow;
     if (row) {
       resetDraft(row);
-      synced.current = row;
+      markSynced(row);
+      // Edits not saved before the editor closed come back, one Undo away from the saved copy.
+      const kept = keptEditsOf(row);
+      if (kept) setDraft({ ...row, ...editableWorkflow(kept) }, "Unsaved changes");
+      window.clearTimeout(savedTimer.current);
+      setSaveState({ kind: "idle" });
       setVersions([]);
       setHistoryStatus("");
       setActionError("");
@@ -696,7 +736,37 @@ export function AutomationsView() {
         setZoom(clampZoom(camera.zoom));
       }
     }
-  }, [resetDraft]);
+  }, [resetDraft, setDraft, markSynced]);
+
+  // Unsaved edits are kept outside the editor too: switching tabs, a pop-out window or a
+  // restart brings them back, and closing the Workflows tab asks about them first.
+  const hadDraft = useRef(false);
+  useEffect(() => {
+    if (draft) { hadDraft.current = true; setUnsavedWorkflow(dirty ? draft : null); }
+    else if (hadDraft.current) setUnsavedWorkflow(null);  // deleted
+  }, [draft, dirty]);
+  useEffect(() => () => flushUnsavedWorkflow(), []);
+
+  /** Edits that would be lost leaving for `nextId` (another workflow, "" for a new one).
+   *  Edits kept for `nextId` itself come back when it opens. */
+  const leaveNeedsAsking = useCallback((nextId = "") => {
+    const open = liveDraft.current;
+    if (open) setUnsavedWorkflow(unsavedNow() ? open : null);
+    const kept = unsavedWorkflow();
+    return !!kept && kept.id !== nextId;
+  }, [liveDraft, unsavedNow]);
+  /** Before leaving the open workflow: unsaved edits ask Save, Don't save or Cancel. */
+  const confirmLeave = useCallback((nextId = "") => leaveNeedsAsking(nextId) ? guardUnsavedWorkflow() : Promise.resolve(true), [leaveNeedsAsking]);
+
+  /** Open a workflow from the list, a Run workflow node, an agent or a tour. The open one with
+   *  unsaved edits stays as it is. */
+  const openWorkflow = useCallback(async (id: string) => {
+    if (!id) return false;
+    if (id === liveDraft.current?.id && unsavedNow()) return true;
+    if (!(await confirmLeave(id))) return false;
+    await loadOne(id);
+    return true;
+  }, [confirmLeave, liveDraft, loadOne, unsavedNow]);
 
   // Each workflow keeps its own camera.
   const cameraId = draft?.id || "";
@@ -718,14 +788,14 @@ export function AutomationsView() {
     const open = (focus: GraphFocus) => {
       if (!focus.id) return;
       void refreshList();
-      void loadOne(focus.id);
+      void openWorkflow(focus.id);
       if (focus.nodes?.length || focus.note) setPendingShow(focus);
       else setLogOpen(true);
     };
     const pending = takePendingGraphFocusTarget();
     let stopWaiting = () => {};
     if (pending) open(pending);
-    else if (readView().open) stopWaiting = onApiReady(() => void loadOne(readView().open!));
+    else if (readView().open) stopWaiting = onApiReady(() => void openWorkflow(readView().open!));
     const onFocus = (ev: Event) => {
       const detail = (ev as CustomEvent<GraphFocus>).detail;
       if (!detail?.id) return;
@@ -747,22 +817,21 @@ export function AutomationsView() {
       window.removeEventListener("ducky:focus-graph", onFocus);
       window.removeEventListener("ducky:graph-deleted", onDeleted);
     };
-  }, [loadOne, refreshList, setDraft]);
+  }, [openWorkflow, refreshList, setDraft]);
 
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  /** The draft as the server last had it (opened or saved) and saves not answered yet: a
-   *  change made outside this canvas (an AI's save, another window) loads in only when
-   *  nothing here is unsaved, and play never sends an old copy over it. */
-  const synced = useRef<AutomationDto | null>(null);
   const savesPending = useRef(0);
   const [textSaveError, setTextSaveError] = useState("");
+  const saveError = (error: unknown) => error instanceof SaveRefused ? `Could not save changes. ${error.message}` : "Could not save changes. Use Save to retry.";
   /** The banner under the toolbar: the server's reason when it turned the save down. */
-  const saveFailed = (error: unknown) => setTextSaveError(error instanceof SaveRefused ? `Could not save changes. ${error.message}` : "Could not save changes. Use Save to retry.");
+  const saveFailed = (error: unknown) => setTextSaveError(saveError(error));
   const readOnly = !!draft?.owner?.readOnly;
   const persist = useCallback((next: AutomationDto, owner = "") => {
     const api = getApi();
     const gen = loadGen.current;
     savesPending.current += 1;
+    sendingRef.current = next;
+    setSending(next);
     const operation = saveQueue.current.then(async () => {
     if (next.id && next.owner?.readOnly) return next;  // someone else's team workflow: never pushed from here
     // The list files workflows (set_workflow_folder); an open canvas must not undo that.
@@ -773,8 +842,12 @@ export function AutomationsView() {
       if (row.owner?.kind === "team") queueTeamSync();
       if (gen === loadGen.current) {
         acknowledgeDraft((current) => {
-          if (next.id && current !== next) return current;
-          synced.current = row;
+          if (next.id && current !== next) {
+            // Edited again meanwhile: those edits stay on the canvas, unsaved.
+            if (current?.id === row.id) markSynced(row);
+            return current;
+          }
+          markSynced(row);
           return row;
         });
         setSelectedId(row.id);
@@ -783,10 +856,13 @@ export function AutomationsView() {
       return row;
     }
     throw res?.error ? new SaveRefused(res.error) : new Error("Could not save workflow");
-    }).finally(() => { savesPending.current -= 1; });
+    }).finally(() => {
+      savesPending.current -= 1;
+      if (sendingRef.current === next) { sendingRef.current = null; setSending(null); }
+    });
     saveQueue.current = operation.catch(() => undefined);
     return operation;
-  }, [refreshList, acknowledgeDraft]);
+  }, [refreshList, acknowledgeDraft, markSynced]);
   /** Before a run: save what is only on this canvas, else just wait for saves on their way. */
   const saveBeforeRun = (doc: AutomationDto) => history.current.current === synced.current ? saveQueue.current : persist(doc);
   const listedUpdated = rows.find((row) => row.id === draft?.id)?.updated || 0;
@@ -799,11 +875,11 @@ export function AutomationsView() {
       if (!row || gen !== loadGen.current || savesPending.current) return;
       acknowledgeDraft((current) => {
         if (current !== seen) return current;  // edited here meanwhile: that edit's save wins
-        synced.current = row;
+        markSynced(row);
         return row;
       });
     }).catch(() => undefined);
-  }, [listedUpdated, acknowledgeDraft]);
+  }, [listedUpdated, acknowledgeDraft, markSynced]);
 
   // No workflows yet: a few ready-made pipelines to start from in one click.
   const [featured, setFeatured] = useState<AutomationTemplateDto[]>([]);
@@ -819,9 +895,13 @@ export function AutomationsView() {
   }, [noWorkflows, featured.length]);
 
   const createNew = (ownerId: string, folder = "") => {
-    setPickerOwner(ownerId);
-    setPickerFolder(folder);
-    setPickerOpen(true);
+    const pick = () => {
+      setPickerOwner(ownerId);
+      setPickerFolder(folder);
+      setPickerOpen(true);
+    };
+    if (!leaveNeedsAsking()) pick();
+    else void guardUnsavedWorkflow().then((ok) => { if (ok) pick(); });
   };
 
   /** Show a folder now; the host has it (or is making it) for the next refresh. */
@@ -1022,6 +1102,8 @@ export function AutomationsView() {
       const ok = await confirm({ title: `Move out of ${from.label}?`, message: `Members of ${from.label} will lose this workflow. It moves to ${ownerName(to)}.`, confirmLabel: "Move" });
       if (ok !== true) return;
     }
+    // The copy is made from the saved workflow and opens in its place.
+    if (!(await confirmLeave())) return;
     await saveQueue.current;
     const res = await getApi()?.copy_workflow?.(draft.id, target, action === "move");
     if (!res?.workflow) { setActionError(res?.error || "Could not copy workflow"); return; }
@@ -1044,8 +1126,9 @@ export function AutomationsView() {
   };
 
   const updateNodeText = (id: string, patch: { label?: string; description?: string }) => {
-    if (!draft || readOnly || nodeLocked(draft.graph, id)) return;
-    const next = { ...draft, graph: { ...draft.graph, nodes: draft.graph.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) } };
+    const current = history.current.current;  // code typed a moment ago may be in it already
+    if (!current || readOnly || nodeLocked(current.graph, id)) return;
+    const next = { ...current, graph: { ...current.graph, nodes: current.graph.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) } };
     setDraft(next);
     setTextSaveError("");
     void persist(next).catch(saveFailed);
@@ -1133,17 +1216,76 @@ export function AutomationsView() {
     setSpawnFilter("");
   };
 
-  const saveDraft = () => {
-    if (!draft) return;
-    const teamId = draft.owner?.kind === "team" ? draft.owner.id : "";
-    void persist(draft).then(async () => {
-      setTextSaveError("");
-      if (!teamId) return;
-      window.clearTimeout(syncTimer.current);
-      syncTimer.current = 0;
-      await getApi()?.workflow_sync?.(true, teamId, true);
-    }).catch(saveFailed);
+  /** Save, Ctrl+S, leaving the name field and Save in the Save changes? dialog: the newest
+   *  draft (typing held back a moment goes in first), shown on the Save button. Throws with
+   *  the reason when the save fails. */
+  const saveNow = async () => {
+    flushWorkflowEdits();
+    const doc = history.current.current;
+    if (!doc || doc.owner?.readOnly) return;
+    const teamId = doc.owner?.kind === "team" ? doc.owner.id : "";
+    window.clearTimeout(savedTimer.current);
+    setSaveState({ kind: "saving" });
+    try {
+      await persist(doc);
+    } catch (error) {
+      const reason = saveError(error);
+      setTextSaveError(reason);
+      setSaveState({ kind: "error", error: reason });
+      throw new Error(reason);
+    }
+    setTextSaveError("");
+    setSaveState({ kind: "saved" });
+    savedTimer.current = window.setTimeout(() => setSaveState({ kind: "idle" }), SAVED_MS);
+    if (!teamId) return;
+    window.clearTimeout(syncTimer.current);
+    syncTimer.current = 0;
+    await getApi()?.workflow_sync?.(true, teamId, true);
   };
+  const saveDraft = () => { void saveNow().catch(() => undefined); };
+
+  /** Ctrl+S (Cmd+S) anywhere in the editor, the code editor too. */
+  const saveShortcut = () => {
+    const doc = history.current.current;
+    if (!doc) return;
+    if (doc.owner?.readOnly) { notify(`Can't save: ${doc.owner.reason || "this workflow is read-only here."} Duplicate it to change a Local copy.`); return; }
+    saveDraft();
+  };
+
+  /** Don't save in the Save changes? dialog: back to the saved workflow. */
+  const discardEdits = () => {
+    const saved = synced.current;
+    setUnsavedWorkflow(null);
+    if (!saved || saved.id !== history.current.current?.id) return;
+    resetDraft(saved);
+    setSelectedNodeIds([]);
+    setSelectedEdge(null);
+    setTextSaveError("");
+    window.clearTimeout(savedTimer.current);
+    setSaveState({ kind: "idle" });
+  };
+
+  const editorHandle = useRef({ saveNow, discardEdits, saveShortcut });
+  editorHandle.current = { saveNow, discardEdits, saveShortcut };
+  useEffect(() => registerWorkflowEditor({
+    id: () => liveDraft.current?.id || "",
+    save: () => editorHandle.current.saveNow(),
+    discard: () => editorHandle.current.discardEdits(),
+  }), [liveDraft]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "s") return;
+      const root = rootRef.current;
+      const target = event.target;
+      // In this view, or nowhere in particular (the page itself has focus).
+      if (!root || !(target instanceof Node && (root.contains(target) || target === document.body || target === document.documentElement))) return;
+      event.preventDefault();  // never the WebView's own Save page dialog
+      event.stopPropagation();
+      if (!event.repeat) editorHandle.current.saveShortcut();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const [stopping, setStopping] = useState(false);
   const runTest = async () => {
@@ -1954,8 +2096,8 @@ export function AutomationsView() {
   };
 
   // Show me and tours: get the editor ready (open, select, menus) and find what only it can.
-  const tourApi = useRef({ loadOne, fitView, openAddMenu, createNew, groups, setSpawn, setSpawnFilter, setPickerOpen, setLogOpen, setSelectedNodeIds, setInspectorKey, setSelectedEdge, draftId: draft?.id || "", owners });
-  tourApi.current = { loadOne, fitView, openAddMenu, createNew, groups, setSpawn, setSpawnFilter, setPickerOpen, setLogOpen, setSelectedNodeIds, setInspectorKey, setSelectedEdge, draftId: draft?.id || "", owners };
+  const tourApi = useRef({ openWorkflow, fitView, openAddMenu, createNew, groups, setSpawn, setSpawnFilter, setPickerOpen, setLogOpen, setSelectedNodeIds, setInspectorKey, setSelectedEdge, draftId: draft?.id || "", owners });
+  tourApi.current = { openWorkflow, fitView, openAddMenu, createNew, groups, setSpawn, setSpawnFilter, setPickerOpen, setLogOpen, setSelectedNodeIds, setInspectorKey, setSelectedEdge, draftId: draft?.id || "", owners };
   useEffect(() => {
     const api = () => tourApi.current;
     const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
@@ -1963,7 +2105,7 @@ export function AutomationsView() {
     const open = async (id: string) => {
       if (!id) return;
       requestOpenWorkflowsTab();
-      if (api().draftId !== id) void api().loadOne(id);
+      if (api().draftId !== id) void api().openWorkflow(id);
       await waitOpen(id);
     };
     const css = cssEscape;
@@ -2036,6 +2178,10 @@ export function AutomationsView() {
   }, [spawn]);
 
   const logCount = log?.steps?.length || (runLogHasContent(log) ? 1 : 0);
+  /** The Save button: saving, failed (until those edits are saved after all), orange with
+   *  unsaved edits, a check just after a save. */
+  const failedSave = saveState.kind === "error" && dirty ? saveState.error : "";
+  const saveLook = saveState.kind === "saving" ? "saving" : failedSave ? "error" : dirty ? "dirty" : saveState.kind === "saved" ? "saved" : "idle";
   const activeTab = inspectorTabs.find((tab) => tab.key === inspectorKey) || inspectorTabs[0];
   const codeWideOn = codeWide && detailsTab === "code" && activeTab?.kind === "node";
   const clearLog = async () => {
@@ -2052,7 +2198,7 @@ export function AutomationsView() {
       onBlurCapture={(event) => { if (event.target.matches("input, textarea") && !event.target.closest(".aw-code-editor")) endEdit(); }}>
       <WorkflowList listId={sectionId + "-list"} listRef={listRef} owners={owners} rows={rows} activeId={draft ? selectedId : ""}
         collapsed={listCollapsed} nowMs={nowMs} onToggleCollapsed={() => setListCollapsed((collapsed) => !collapsed)}
-        onOpen={(id) => { void loadOne(id); const width = rootRef.current?.clientWidth || 0; if (width > 0 && width <= PHONE_EDITOR_W) setListCollapsed(true); }} onCreate={createNew}
+        onOpen={(id) => { void openWorkflow(id); const width = rootRef.current?.clientWidth || 0; if (width > 0 && width <= PHONE_EDITOR_W) setListCollapsed(true); }} onCreate={createNew}
         onImportLocal={() => void getApi()?.import_local_workflows?.().then(() => refreshList())}
         emptyFolders={folderLists} onAddFolder={(ownerId, path) => void rememberFolder(ownerId, path)}
         onMoveWorkflow={(id, ownerId, folder) => void moveWorkflow(id, ownerId, folder)}
@@ -2080,13 +2226,14 @@ export function AutomationsView() {
                 value={draft.name}
                 readOnly={readOnly}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                onBlur={saveDraft}
+                onBlur={() => { if (unsavedNow()) saveDraft(); }}
               />
 
               </div>
-              <button type="button" className="aw-more-toggle" aria-label="Workflow actions" title="Workflow actions" aria-expanded={phoneMenu === "actions"}
+              <button type="button" className={`aw-more-toggle${dirty ? " is-dirty" : ""}`} aria-label="Workflow actions" title={dirty ? "Workflow actions · unsaved changes" : "Workflow actions"} aria-expanded={phoneMenu === "actions"}
                 onClick={() => setPhoneMenu((open) => (open === "actions" ? "" : "actions"))}>
                 <Icons.MoreHorizontal />
+                {dirty ? <span className="aw-save-dot" aria-hidden="true" /> : null}
               </button>
               <div className={`aw-toolbar-actions${phoneMenu === "actions" ? " is-open" : ""}`} onClick={closePhoneMenuAfterPick}>
               <button
@@ -2131,7 +2278,17 @@ export function AutomationsView() {
                   const copy = { ...draft, id: "", name: `${draft.name} copy`, owner: undefined };
                   await persist(copy, ownerId).catch((error: Error) => setActionError(error.message));
                 }} />
-              <button type="button" ref={targetRef("workflows.toolbar.save", { route: "workflows", label: "Save" })} title={draft.owner?.kind === "team" ? "Save and update online" : "Save"} aria-label="Save" disabled={readOnly} onClick={saveDraft}><Icons.Save /></button>
+              <button type="button" ref={targetRef("workflows.toolbar.save", { route: "workflows", label: "Save" })} aria-label="Save" disabled={readOnly} onClick={saveDraft}
+                className={`aw-save is-${saveLook}`} data-save-state={saveLook}
+                title={readOnly ? `Read-only: ${draft.owner?.reason || "it can't be saved here."}`
+                  : saveLook === "saving" ? "Saving…"
+                  : saveLook === "error" ? failedSave
+                  : saveLook === "dirty" ? `Unsaved changes - ${draft.owner?.kind === "team" ? "Save and update online" : "Save"} (Ctrl+S)`
+                  : saveLook === "saved" ? "Saved"
+                  : `${draft.owner?.kind === "team" ? "Save and update online" : "Save"} (Ctrl+S)`}>
+                {saveLook === "saving" ? <span className="aw-spin"><Icons.Spinner /></span> : saveLook === "saved" ? <Icons.Check /> : saveLook === "error" ? <Icons.AlertTriangle /> : <Icons.Save />}
+                {saveLook === "dirty" ? <span className="aw-save-dot" aria-hidden="true" /> : null}
+              </button>
               {draft.owner?.kind === "team" && ["start.cron", ...catalog.filter((n) => n.role === "starter" && n.plugin_id).map((n) => n.type)].some((type) => draft.graph.nodes.some((node) => node.type === type)) ? (
                 <button type="button" aria-label="Run on this PC" aria-pressed={!!draft.run_here}
                   title={draft.run_here ? "This PC runs its schedule and triggers. Click to stop." : "Its schedule and triggers run on other members' PCs only. Click to run them here too."}
@@ -2274,7 +2431,7 @@ export function AutomationsView() {
                     onPointerCancel={endPointer}
                   >{EXEC_PIN}</button> : null}
                   <div className="aw-node-card" onPointerDown={(e) => startNodeDrag(e, node)} title={calls ? `${label} — double-click to open the workflow it runs` : label}
-                    onDoubleClick={() => { if (calls) void loadOne(calls); }}>
+                    onDoubleClick={() => { if (calls) void openWorkflow(calls); }}>
                     <div className="aw-node-title"><strong>{label}</strong>
                       {isCodeNode(node) ? <span className="aw-code-badge" role="img" aria-label="Custom code" title="Custom code: open its details, then Code">&lt;/&gt;</span> : null}
                       {locked ? <span className="aw-lock-badge" role="img" aria-label="Locked" title="Locked: unlock it in its details to move or change it"><Icons.Lock /></span> : null}</div>
@@ -2389,7 +2546,7 @@ export function AutomationsView() {
           currentId={draft.id}
           onActivate={setInspectorKey}
           onClose={() => { setSelectedNodeIds([]); setSelectedEdge(null); }}
-          onOpenWorkflow={(id) => void loadOne(id)}
+          onOpenWorkflow={(id) => void openWorkflow(id)}
           onNodeChange={changeNode}
           onNodeReplace={replaceNode}
           onCodeSession={codeTyping}
@@ -2565,6 +2722,7 @@ export function AutomationsView() {
         ownerId={pickerOwner}
         onOwnerChange={setPickerOwner}
       />
+      <UnsavedWorkflowPrompt />
     </div>
   );
 }

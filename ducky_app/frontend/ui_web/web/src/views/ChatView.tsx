@@ -14,6 +14,7 @@ import { registerOpenDuckyProfileTab } from "../navigation/openDuckyProfileTab";
 import { registerOpenChatReference, registerOpenProjectFile } from "../navigation/openChatReference";
 import { SplitEditorLayout } from "../components/SplitEditorLayout";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
+import { guardUnsavedWorkflow, UnsavedWorkflowPrompt } from "../automations/unsavedWorkflow";
 import { useChatFolders } from "../hooks/useChatFolders";
 import { ARCHIVE_FOLDER_ID } from "../utils/archiveFolder";
 import { getApi } from "../hooks/usePanelApi";
@@ -693,6 +694,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       if (tab?.kind === "settings") {
         if (!(await guardUnsavedChanges())) return;
       }
+      if (tab?.kind === "workflows" && !(await guardUnsavedWorkflow())) return;
       if (tab?.kind === "terminal") {
         // Closing the editor tab only hides it — shell keeps running in the header list.
         parkTerminalTab(tab);
@@ -1821,6 +1823,7 @@ function ChatViewEditorChrome({
           onCancel={() => setUnsavedPrompt(null)}
         />
       ) : null}
+      <UnsavedWorkflowPrompt />
     </>
   );
 }
