@@ -344,17 +344,20 @@ class TerminalSession:
             return
         ring = self._output_ring
         if ring and len(ring[-1]) + len(text) <= _OUTPUT_CHUNK_CHARS:
-            ring[-1] += text
+            # A progress code split across two reads is whole again once merged.
+            before = len(ring[-1])
+            ring[-1] = _PROGRESS_SEQ_RE.sub("", ring[-1] + text)
+            self._output_chars += len(ring[-1]) - before
         else:
             ring.append(text)
-        self._output_chars += len(text)
+            self._output_chars += len(text)
         while self._output_chars > _OUTPUT_RING_CHARS and len(ring) > 1:
             self._output_chars -= len(ring.popleft())
 
     def read_output_tail(self, max_chars: int = 8000) -> str:
         with self._output_cond:
             text = "".join(self._output_ring)
-        text = _QUERY_SEQ_RE.sub("", text)
+        text = _PROGRESS_SEQ_RE.sub("", _QUERY_SEQ_RE.sub("", text))
         if len(text) > max_chars:
             return text[-max_chars:]
         return text

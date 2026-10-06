@@ -152,3 +152,31 @@ def test_a_tab_shown_again_keeps_its_history_through_a_stream_of_progress_codes(
     history = session.read_output_tail(512 * 1024)
     assert history.startswith("=== security gate ===") and "npm-audit: ok" in history
     assert "\x1b]9;4" not in history and history.count(".") == 5000
+
+
+def test_progress_codes_split_across_reads_stay_out_of_the_history() -> None:
+    """The terminal often hands over half a progress code per read."""
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    session = TerminalSession(shell="bash", cwd="C:/repo")
+    chunks = [b"HEADER\r\n"]
+    for n in range(500):
+        chunks += [b"\x1b]9;4;2;", b"%d\x1b" % (n % 100), b"\."]
+
+    class _Pty:
+        exitstatus = 0
+
+        def isalive(self) -> bool:
+            return True
+
+        def read(self, _n: int) -> bytes:
+            if chunks:
+                return chunks.pop(0)
+            session._stop.set()
+            return b""
+
+    session._pty = _Pty()
+    session._read_loop()
+    kept = "".join(session._output_ring)
+    assert "\x1b]9;4" not in kept and kept == "HEADER\r\n" + "." * 500
+    assert session._output_chars == len(kept)
