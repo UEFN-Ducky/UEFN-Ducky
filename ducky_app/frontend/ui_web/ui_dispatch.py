@@ -85,8 +85,9 @@ class _Channel:
                 del payload
                 self.queue.task_done()
 
-    def _run_js(self, payload: tuple[Any, str, float, int]) -> None:
-        window, js, enqueued_at, depth = payload
+    def _run_js(self, payload: tuple[Any, ...]) -> None:
+        window, js, enqueued_at, depth, *rest = payload
+        source = str(rest[0]) if rest and rest[0] else ""
         if window is None:
             return
         t0 = time.perf_counter()
@@ -110,6 +111,7 @@ class _Channel:
                     queue_depth=int(depth or 0),
                     queue_wait_ms=round(wait_ms, 3),
                     window=self.label,
+                    source=source or None,
                 )
             except Exception:
                 pass
@@ -211,14 +213,16 @@ def ensure_started() -> None:
     _ensure_watchdog()
 
 
-def schedule_evaluate_js(window: Any, js: str) -> None:
+def schedule_evaluate_js(window: Any, js: str, *, source: str = "") -> None:
+    """``source`` names what the script carries (the panel API method a bridge
+    reply answers), so the perf log says which call sends the big payloads."""
     if window is None or not js:
         return
     ch = _channel_for(window)
     if ch is None:
         return
     depth = ch.queue.qsize()
-    ch.submit("js", (window, js, time.perf_counter(), depth))
+    ch.submit("js", (window, js, time.perf_counter(), depth, source))
 
 
 def schedule_call(fn: Callable[[], None]) -> None:

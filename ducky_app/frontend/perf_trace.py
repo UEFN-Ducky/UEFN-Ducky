@@ -268,8 +268,9 @@ def _hints(kinds: dict[str, Any], slowest: list[dict[str, Any]]) -> list[str]:
         out.append("ui_js p95 is high — WebView2 evaluate_js is stalling (UI thread busy or huge payloads).")
     for e in slowest[:5]:
         if int(e.get("js_bytes") or e.get("payload_bytes") or e.get("result_bytes") or 0) >= PAYLOAD_BYTES_NOTABLE:
+            source = f" ({e.get('source')})" if e.get("source") else ""
             out.append(
-                f"Large payload on {e.get('kind')}/{e.get('name')}: "
+                f"Large payload on {e.get('kind')}/{e.get('name')}{source}: "
                 f"{e.get('js_bytes') or e.get('payload_bytes') or e.get('result_bytes')} bytes."
             )
             break

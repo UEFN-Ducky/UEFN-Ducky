@@ -1055,10 +1055,11 @@ def install_sync_drag_bridge() -> None:
             instead: one thread waits, the rest finish, and the ui_js_stall
             watchdog records every thread stack for the post-mortem."""
 
-            __slots__ = ("_w",)
+            __slots__ = ("_w", "_api")
 
-            def __init__(self, w: object) -> None:
+            def __init__(self, w: object, api: str = "") -> None:
                 self._w = w
+                self._api = api
 
             def __getattr__(self, name: str):
                 return getattr(self._w, name)
@@ -1066,7 +1067,7 @@ def install_sync_drag_bridge() -> None:
             def evaluate_js(self, script: str, *_args, **_kwargs) -> None:
                 from frontend.ui_web.ui_dispatch import schedule_evaluate_js
 
-                schedule_evaluate_js(self._w, script)
+                schedule_evaluate_js(self._w, script, source=self._api)
 
         def patched(window: object, func_name: str, param: object, value_id: str) -> None:
             if func_name == "uefnNativeWindowMenu":
@@ -1087,7 +1088,7 @@ def install_sync_drag_bridge() -> None:
                         window, param[0], double_click=len(param) > 1 and param[1] is True,
                     )
                 return
-            original(_QueuedReturn(window), func_name, param, value_id)
+            original(_QueuedReturn(window, str(func_name or "")), func_name, param, value_id)
 
         webview_util.js_bridge_call = patched
         # EdgeChrome imports the function by value before this hook is installed.

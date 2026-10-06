@@ -8,6 +8,12 @@ top of the app and look the same.
 Do **not** Reload on Gpu / Utility / Sandbox exits — those fire during tab
 switches and compositor recycle. Reloading remounts React (Checking… forever,
 every click stutters).
+
+A busy page is not a dead one either: WebView2 raises RenderProcessUnresponsive
+every few seconds while a long script runs or the PC is busy (UEFN compiling,
+Fortnite running) and the page usually answers again on its own. Reloading on
+the first one threw the whole UI away mid-work — "it freezes, then reloads
+everything". Only a page that stays unresponsive for a full minute is reloaded.
 """
 
 from __future__ import annotations
@@ -24,10 +30,17 @@ _RECOVER_KIND_NAMES = frozenset(
     {
         "browserprocessexited",
         "renderprocessexited",
-        "renderprocessunresponsive",
     }
 )
-_RECOVER_KIND_INTS = frozenset({0, 1, 2})
+_RECOVER_KIND_INTS = frozenset({0, 1})
+_UNRESPONSIVE_KIND = "renderprocessunresponsive"
+_UNRESPONSIVE_KIND_INT = 2
+# Reload a page only after it has stayed unresponsive this long.
+_HUNG_RELOAD_AFTER_S = 60.0
+# A pause this long between unresponsive events means the page answered in between.
+_UNRESPONSIVE_GAP_S = 15.0
+# Per WebView: (first, latest) unresponsive event of the current episode.
+_unresponsive: dict[int, tuple[float, float]] = {}
 
 
 def process_fail_kind(event: Any) -> str:
@@ -41,19 +54,53 @@ def process_fail_kind(event: Any) -> str:
     return str(name).split(".")[-1].strip().lower()
 
 
-def should_recover_process_fail(kind: str | int | None) -> bool:
-    """True only when the document process is gone (not GPU/utility recycle)."""
+def _kind_key(kind: str | int | None) -> str | int | None:
     if kind is None or kind is False:
-        return False
+        return None
     try:
-        if int(kind) in _RECOVER_KIND_INTS:
-            return True
+        return int(kind)
     except (TypeError, ValueError):
         pass
     k = str(kind).split(".")[-1].strip().lower()
-    if k.isdigit():
-        return int(k) in _RECOVER_KIND_INTS
+    return int(k) if k.isdigit() else k
+
+
+def should_recover_process_fail(kind: str | int | None) -> bool:
+    """True only when the document process is gone (not GPU/utility recycle,
+    not a page that is merely busy)."""
+    k = _kind_key(kind)
+    if isinstance(k, int):
+        return k in _RECOVER_KIND_INTS
     return k in _RECOVER_KIND_NAMES
+
+
+def is_unresponsive_kind(kind: str | int | None) -> bool:
+    k = _kind_key(kind)
+    return k == _UNRESPONSIVE_KIND_INT or k == _UNRESPONSIVE_KIND
+
+
+def hung_long_enough(key: int, now: float, *, label: str = "") -> bool:
+    """One more RenderProcessUnresponsive for ``key``: True once the page has
+    stayed unresponsive for _HUNG_RELOAD_AFTER_S without answering in between."""
+    first, last = _unresponsive.get(key, (0.0, 0.0))
+    if not first or now - last > _UNRESPONSIVE_GAP_S:
+        first = now
+        try:
+            # Activity, not error: errors drop a repeat of the last line, and how
+            # often the page goes busy is the thing worth seeing.
+            from frontend.error_log import record_activity
+
+            record_activity(
+                "webview",
+                f"WebView2 page busy ({label or 'unknown'}); waiting for it instead of reloading",
+            )
+        except Exception:
+            pass
+    _unresponsive[key] = (first, now)
+    if now - first < _HUNG_RELOAD_AFTER_S:
+        return False
+    _unresponsive.pop(key, None)
+    return True
 
 
 def recover_core_webview(core: Any, *, reason: str = "") -> dict[str, Any]:
@@ -100,8 +147,12 @@ def attach_process_failed(
 
     def _on_fail(_sender: Any, event: Any) -> None:
         kind = process_fail_kind(event)
-        if not should_recover_process_fail(kind):
+        if is_unresponsive_kind(kind):
+            if not hung_long_enough(key, time.monotonic(), label=label):
+                return
+        elif not should_recover_process_fail(kind):
             return
+        _unresponsive.pop(key, None)
         reason = f"{label}:{kind}" if kind else label
         # Overlay panes: hide first so a dead control cannot cover the app.
         if on_fail is not None:

@@ -132,8 +132,10 @@ def test_bridge_return_value_never_blocks_the_api_call_thread(monkeypatch):
 
     from frontend.ui_web import ui_dispatch
 
-    queued: list[tuple[object, str]] = []
-    monkeypatch.setattr(ui_dispatch, "schedule_evaluate_js", lambda w, js: queued.append((w, js)))
+    queued: list[tuple[object, str, str]] = []
+    monkeypatch.setattr(
+        ui_dispatch, "schedule_evaluate_js", lambda w, js, source="": queued.append((w, js, source))
+    )
     monkeypatch.setattr(chrome.sys, "platform", "win32")
     monkeypatch.setattr(chrome.install_sync_drag_bridge, "_installed", False, raising=False)
     import webview.util
@@ -158,6 +160,7 @@ def test_bridge_return_value_never_blocks_the_api_call_thread(monkeypatch):
     assert queued and queued[0][0] is win
     assert '_returnValuesCallbacks["get_version"]["v1"]' in queued[0][1]
     assert "1.2.3" in queued[0][1]
+    assert queued[0][2] == "get_version", "the perf log names the API call a reply answers"
     assert threading.active_count() <= before, "pywebview's per-call thread must exit, not wait on the UI thread"
 
 
