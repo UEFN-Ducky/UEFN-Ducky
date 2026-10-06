@@ -16,7 +16,7 @@ Env:
 
 If DUCKYOS_API_KEY is unset, the key is read from ~/.cursor/mcp.json
 (mcpServers.uefn-duckyos-site Authorization Bearer) or a .env file
-(./.env or ~/.duckyos/.env).
+(./.env, the main checkout's .env when run from a worktree, or ~/.duckyos/.env).
 
 Usage:
   py release/publish_app.py
@@ -119,18 +119,11 @@ def _bearer_from_mcp_json() -> str:
 
 
 def _load_dotenv() -> None:
-    candidates = [ROOT / ".env", Path.home() / ".duckyos" / ".env"]
-    for path in candidates:
-        if not path.is_file():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = val
+    # Same files as sign_windows.py, minus DuckyOS/.env (its DUCKYOS_* keys
+    # belong to other sites, not the Store this uploads to).
+    from sign_windows import dotenv_paths, load_dotenv
+
+    load_dotenv(dotenv_paths(ROOT, duckyos=False))
 
 
 def ensure_store_env() -> tuple[str, str]:

@@ -44,22 +44,54 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMESTAMP = "http://timestamp.digicert.com"
 
 
-def _load_dotenv() -> None:
-    for path in (
-        ROOT / ".env",
-        ROOT.parent / "DuckyOS" / ".env",
-        Path.home() / ".duckyos" / ".env",
-    ):
+def main_checkout(root: Path = ROOT) -> Path | None:
+    """The main checkout when ``root`` is a linked worktree (its .git is a file)."""
+    marker = root / ".git"
+    if not marker.is_file():
+        return None
+    text = marker.read_text(encoding="utf-8-sig").strip()
+    if not text.startswith("gitdir:"):
+        return None
+    gitdir = Path(text.partition(":")[2].strip())
+    if not gitdir.is_absolute():
+        gitdir = (root / gitdir).resolve()
+    # <main>/.git/worktrees/<name>
+    if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
+        return None
+    return gitdir.parent.parent.parent
+
+
+def dotenv_paths(root: Path = ROOT, *, duckyos: bool = True) -> list[Path]:
+    """The .env files a release reads, first match wins. A release run from a
+    worktree (ducky-rel) also reads the main checkout's .env."""
+    paths = [root / ".env"]
+    main = main_checkout(root)
+    if main is not None:
+        paths.append(main / ".env")
+    if duckyos:
+        paths.append(root.parent / "DuckyOS" / ".env")
+    paths.append(Path.home() / ".duckyos" / ".env")
+    return paths
+
+
+def load_dotenv(paths: list[Path]) -> None:
+    """Fill unset env vars from ``paths``. A blank value (KEY=) counts as unset,
+    so an empty line in one file never hides a value in a later one."""
+    for path in paths:
         if not path.is_file():
             continue
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, val = line.partition("=")
             key, val = key.strip(), val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            if key and val and not (os.environ.get(key) or "").strip():
                 os.environ[key] = val
+
+
+def _load_dotenv() -> None:
+    load_dotenv(dotenv_paths())
 
 
 def find_signtool() -> Path | None:
