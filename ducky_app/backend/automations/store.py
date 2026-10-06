@@ -288,7 +288,8 @@ def delete_workflow(workflow_id: str) -> bool:
 
 
 def copy_workflow(workflow_id: str, owner: str, *, move: bool = False) -> dict[str, Any]:
-    """Copy (new id) or move (same id) a workflow to Local or a team."""
+    """Copy (new id) or move (same id) a workflow to Local or a team. A copy's Custom code
+    may run on its own only where the original's could."""
     if not use_db("automations"):
         raise ValueError("Sharing with a team needs the database store")
     from backend.automations import owned
@@ -313,8 +314,11 @@ def copy_workflow(workflow_id: str, owner: str, *, move: bool = False) -> dict[s
             owned.remove(src, str(doc["id"]))
         if dst["kind"] == "team":
             owned.set_run_here(dst["account"], str(out["id"]), True)
+    copied = get_workflow(str(out["id"])) or {}
+    if not move:
+        carry_approvals(copied, [doc["id"]])
     _announce_graphs_changed()
-    return get_workflow(str(out["id"])) or {}
+    return copied
 
 
 def set_folder(workflow_id: str, folder: str) -> dict[str, Any] | None:
@@ -610,11 +614,36 @@ def _with_code(graph: dict[str, Any], before: Any, *, team: bool) -> dict[str, A
             if not isinstance(cfg.get(key), dict):
                 cfg[key] = {}
         cfg["spend"] = cfg.get("spend") is True
+        cfg.pop("code_lines", None)  # get_workflow's read-only line count
         if "based_on" in cfg and not (isinstance(cfg["based_on"], dict) and cfg["based_on"].get("type")):
             cfg.pop("based_on")
     if total > code_check.MAX_WORKFLOW_BYTES:
         raise ValueError(f"This workflow holds {total // 1024} KB of code; the most is {code_check.MAX_WORKFLOW_BYTES // 1024} KB.")
+    # A value node has no white pins: a white wire on one would stop the run there.
+    values = {str(n["id"]) for n in nodes if n["config"]["pins"].get("exec", True) is False}
+    if values:
+        graph["edges"] = [e for e in graph.get("edges") or []
+                          if e.get("kind") == "data" or not {str(e.get("source")), str(e.get("target"))} & values]
     return graph
+
+
+def carry_approvals(wf: dict[str, Any], sources: Any) -> None:
+    """A copy's Custom code may run on its own where that same node's same code already
+    could in one of ``sources`` (workflow ids); anything else waits for a person."""
+    from backend.automations.code_approval import approval, approve, is_local, node_sha
+
+    if not wf or not is_local(wf):
+        return
+    wid = str(wf.get("id") or "")
+    for node in (wf.get("graph") or {}).get("nodes") or []:
+        if not isinstance(node, dict) or node.get("type") != CODE_TYPE:
+            continue
+        nid, sha = str(node.get("id") or ""), node_sha(node)
+        for source in sources:
+            row = approval(str(source), nid, sha) if str(source) != wid else None
+            if row:
+                approve(wid, nid, sha, str(row.get("by") or ""))
+                break
 
 
 # --------------------------------------------------------------------------- files mode (Local only)

@@ -93,6 +93,27 @@ def without_code(wf: dict[str, Any]) -> dict[str, Any]:
     return {**wf, "graph": {**graph, "nodes": nodes}}
 
 
+def with_saved_code(graph: Any, before: Any) -> Any:
+    """A graph as without_code gave it, with each Custom code node's stored code put back
+    (while its code_sha still matches) and code_lines dropped, so wire and lock checks
+    compare it with what is saved."""
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return graph
+    stored = {str(n.get("id")): n.get("config") for n in (before or {}).get("nodes") or []
+              if isinstance(n, dict) and n.get("type") == "code.js" and isinstance(n.get("config"), dict)}
+    nodes = []
+    for node in graph["nodes"]:
+        cfg = node.get("config") if isinstance(node, dict) and isinstance(node.get("config"), dict) else None
+        if cfg is not None and node.get("type") == "code.js":
+            cfg = {k: v for k, v in cfg.items() if k != "code_lines"}
+            was, sha = stored.get(str(node.get("id"))) or {}, cfg.get("code_sha")
+            if not isinstance(cfg.get("code"), str) and sha and sha == was.get("code_sha") and isinstance(was.get("code"), str):
+                cfg["code"] = was["code"]
+            node = {**node, "config": cfg}
+        nodes.append(node)
+    return {**graph, "nodes": nodes}
+
+
 @mcp.tool()
 def save_workflow(
     graph: dict[str, Any] | None = None,
@@ -147,7 +168,7 @@ def save_workflow(
 
     wid = (workflow_id or "").strip()
     before = (_get(wid) if wid else None) or {}
-    new_graph = graph if graph is not None else before.get("graph") or {"nodes": [], "edges": []}
+    new_graph = with_saved_code(graph, before.get("graph")) if graph is not None else before.get("graph") or {"nodes": [], "edges": []}
     from backend.automations.catalog import node_specs
     from backend.automations.pins import check_wires
     from backend.automations.runner import _signature
@@ -378,6 +399,30 @@ def copy_workflow(workflow_id: str, owner: str, move: bool = False, pretty: bool
     return tool_json({"ok": True, "workflow": out}, pretty=pretty)
 
 
+def _review_hint(out: dict[str, Any], workflow_id: str, node_ids: tuple[str, ...] = ()) -> dict[str, Any]:
+    """A run refused because Custom code waits for a person's Review: say so to the agent
+    (needs_review, and a hint naming the nodes) next to the person-facing error."""
+    from backend.automations.code_approval import REVIEW
+
+    def text(value: Any) -> str:
+        return str(value.get("message") or "") if isinstance(value, dict) else str(value or "")
+
+    if not out.get("needs_review") and REVIEW not in text(out.get("error")):
+        return out
+    out["needs_review"] = True
+    if out.get("hint"):
+        return out
+    from backend.automations.store import get_workflow as _get
+
+    labels = {str(n.get("id")): str(n.get("label") or n.get("id"))
+              for n in ((_get(workflow_id) or {}).get("graph") or {}).get("nodes") or [] if isinstance(n, dict)}
+    held = [s for s in out.get("steps") or [] if isinstance(s, dict) and REVIEW in text(s.get("error"))]
+    names = [labels.get(str(s.get("id"))) or str(s.get("label") or s.get("id") or "") for s in held]
+    names = [n for n in dict.fromkeys(names or [labels.get(i, i) for i in node_ids]) if n] or ["the Custom code node"]
+    out["hint"] = f"Ask the user to press Review on {', '.join(names)} (or run it once); a dry run works now."
+    return out
+
+
 def _chat_allows_everything() -> bool:
     """The chat running this tool said "Allow everything": its yes is already given."""
     try:
@@ -512,7 +557,7 @@ async def run_workflow(
     )
     if out.get("ok"):
         _reveal_graph(workflow_id, "saved")
-    return tool_json(out, pretty=pretty)
+    return tool_json(_review_hint(out, workflow_id), pretty=pretty)
 
 
 @mcp.tool()
@@ -527,7 +572,7 @@ async def run_workflow_node(workflow_id: str, node_id: str, pretty: bool = False
     out = await asyncio.to_thread(run_node, workflow_id, node_id)
     if out.get("ok"):
         _reveal_graph(workflow_id, "saved", nodes=[node_id], select=False)
-    return tool_json(out, pretty=pretty)
+    return tool_json(_review_hint(out, workflow_id, (str(node_id),)), pretty=pretty)
 
 
 @mcp.tool()
@@ -623,9 +668,11 @@ def _last_inputs(wf: dict[str, Any], node_id: str) -> dict[str, Any]:
     return {}
 
 
-def node_code(workflow_id: str, node_id: str) -> dict[str, Any]:
+def node_code(workflow_id: str, node_id: str, *, draft: dict[str, Any] | None = None, missing: str = "") -> dict[str, Any]:
     """The JavaScript one node runs (a built-in's as generated code), with its pins,
-    problems, what it was made from and whether it may run on its own here."""
+    problems, what it was made from and whether it may run on its own here. ``draft``:
+    the editor's unsaved node; a built-in's code and pins come from its settings.
+    ``missing``: the error for a node the saved workflow doesn't have."""
     from backend.automations import code_check, codegen
     from backend.automations.catalog import node_specs
     from backend.automations.code_approval import is_approved
@@ -635,8 +682,10 @@ def node_code(workflow_id: str, node_id: str) -> dict[str, Any]:
     if wf is None:
         return {"ok": False, "error": "workflow not found"}
     node = _node_of(wf, node_id)
+    if draft is not None and str(draft.get("type") or "") not in ("", "code.js"):
+        node = {**draft, "id": str(node_id), "config": dict(draft["config"]) if isinstance(draft.get("config"), dict) else {}}
     if node is None:
-        return {"ok": False, "error": f"node not found: {node_id}"}
+        return {"ok": False, "error": missing or f"node not found: {node_id}"}
     wid, nid = str(wf["id"]), str(node["id"])
     cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
     specs = node_specs()
@@ -731,13 +780,13 @@ def edit_node_code(
 ) -> dict[str, Any]:
     """Write a node's code (a built-in becomes Custom code in this workflow only), or
     revert it to the built-in it was made from, through the normal save. ``person``: a
-    person saved it in the editor, which approves the code; an agent's save approves
-    only when its chat allows everything."""
+    person saved it in the editor, which approves this node's code; an agent's save
+    approves it only when its chat allows everything."""
     from copy import deepcopy
 
     from backend.automations import code_check, codegen
     from backend.automations.catalog import node_specs
-    from backend.automations.code_approval import approve_workflow
+    from backend.automations.code_approval import approve, is_local, node_sha
     from backend.automations.locks import locked_changes
     from backend.automations.pins import check_wires, node_pins
     from backend.automations.runner import _signature
@@ -815,11 +864,11 @@ def edit_node_code(
         saved = _save({"id": str(wf["id"]), "graph": graph})
     except (PermissionError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
-    if person or _chat_allows_everything():
-        approve_workflow(saved, "person" if person else "chat")
     after = _node_of(saved, nid) or {}
     after_cfg = after.get("config") if isinstance(after.get("config"), dict) else {}
     custom = after.get("type") == "code.js"
+    if custom and is_local(saved) and (person or _chat_allows_everything()):
+        approve(str(saved.get("id") or ""), nid, node_sha(after), "person" if person else "chat")
     return {
         "ok": True,
         "code_sha": after_cfg.get("code_sha") if custom else None,
@@ -889,13 +938,15 @@ async def test_workflow_node(
 
     inputs default to what it ran with last (get_workflow_node_code last_inputs); settings
     override its settings. dry_run (default) records each ducky.tool / ducky.builtin call
-    instead of making it, so nothing outside changes; run dry first, then dry_run=false.
+    instead of making it, so nothing outside changes. A real run (dry_run=false) of code you
+    changed is refused with needs_review=true until the user reviews or runs it (or this
+    chat allows everything): tell the user, the hint names the node.
     Returns {ok, outputs, log, tool_calls, error: {message, line, col}, ms}."""
     from backend.automations.runner import run_code_draft
 
     out = await asyncio.to_thread(run_code_draft, workflow_id, node_id, code=code, inputs=inputs, settings=settings,
                                   dry_run=bool(dry_run), person=False)
-    return tool_json(out, pretty=pretty)
+    return tool_json(_review_hint(out, workflow_id, (str(node_id),)), pretty=pretty)
 
 
 def code_api_reference(tools: list[str] | None = None) -> dict[str, Any]:

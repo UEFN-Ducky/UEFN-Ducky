@@ -9,6 +9,32 @@ def _refused(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": str(exc) or "Not allowed"}
 
 
+def _approve_typed_code(before: dict[str, Any] | None, saved: dict[str, Any]) -> None:
+    """The editor sends the whole workflow on any save (On/off, a rename, a moved card),
+    so only code this save changed was typed by the person: a new Custom code node, or
+    one whose code differs from what was stored. Code an agent saved stays unreviewed.
+    A new workflow (Duplicate, Make reusable) keeps only approvals its code already had."""
+    from backend.automations.code_approval import approve, is_local, node_sha
+    from backend.automations.store import CODE_TYPE, all_workflows, carry_approvals
+
+    def code_nodes(wf: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        nodes = ((wf or {}).get("graph") or {}).get("nodes") or []
+        return {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("type") == CODE_TYPE}
+
+    after = code_nodes(saved)
+    if not after or not is_local(saved):
+        return
+    wid = str(saved.get("id") or "")
+    if before is None:
+        carry_approvals(saved, [w["id"] for w in all_workflows() if code_nodes(w).keys() & after.keys()])
+        return
+    stored = {nid: node_sha(node) for nid, node in code_nodes(before).items()}
+    for nid, node in after.items():
+        sha = node_sha(node)
+        if sha and stored.get(nid) != sha:
+            approve(wid, nid, sha, "person")
+
+
 class PanelApiAutomationsMixin:
     def list_workflow_nodes(self) -> dict[str, Any]:
         from backend.automations.catalog import list_nodes
@@ -83,27 +109,24 @@ class PanelApiAutomationsMixin:
         return {"ok": True, "workflow": doc} if doc else {"ok": False, "error": "Version not found"}
 
     def save_workflow(self, doc: dict[str, Any] | None = None, owner: str = "", **extra: Any) -> dict[str, Any]:
-        from backend.automations.store import save_workflow
-
-        from backend.automations.code_approval import approve_workflow
+        from backend.automations.store import get_workflow, save_workflow
 
         payload = dict(doc or {})
         payload.update(extra)
+        wid = str(payload.get("id") or "").strip()
+        before = get_workflow(wid) if wid else None
         try:
             saved = save_workflow(payload, owner=owner)
         except (PermissionError, ValueError) as exc:
             return _refused(exc)
-        approve_workflow(saved, "person")  # a person saved this code in the editor
+        _approve_typed_code(before, saved)
         return {"ok": True, "workflow": saved}
 
     def copy_workflow(self, workflow_id: str, owner: str, move: bool = False) -> dict[str, Any]:
-        from backend.automations.code_approval import approve_workflow
         from backend.automations.store import copy_workflow
 
         try:
-            copied = copy_workflow(workflow_id, owner, move=bool(move))
-            approve_workflow(copied, "person")
-            return {"ok": True, "workflow": copied}
+            return {"ok": True, "workflow": copy_workflow(workflow_id, owner, move=bool(move))}
         except KeyError:
             return {"ok": False, "error": "workflow not found"}
         except (PermissionError, ValueError) as exc:
@@ -179,11 +202,13 @@ class PanelApiAutomationsMixin:
 
         return run_node(workflow_id, node_id, approve_spend=bool(approve_spend), person=True)
 
-    def get_workflow_node_code(self, workflow_id: str, node_id: str) -> dict[str, Any]:
-        """Code tab: the JavaScript a node runs (a built-in's as generated code)."""
+    def get_workflow_node_code(self, workflow_id: str, node_id: str, node: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Code tab: the JavaScript a node runs (a built-in's as generated code). ``node``:
+        the editor's unsaved node, so a built-in's code shows the settings on screen."""
         from backend.tools.panel.panel_automations import node_code
 
-        return node_code(workflow_id, node_id)
+        return node_code(workflow_id, node_id, draft=node if isinstance(node, dict) else None,
+                         missing="Save the workflow first to see its code.")
 
     def edit_workflow_node_code(
         self,

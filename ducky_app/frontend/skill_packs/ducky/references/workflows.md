@@ -262,13 +262,17 @@ running their own step; editing a node's code turns it into a **Custom code** no
   its result never lands in the run's own fields.
 - **Order**: `get_workflow_node_code` → `edit_workflow_node_code` with `edits`
   (`[{old, new}]`, each matching once) and `expected_sha` = the `code_sha` you read →
-  `test_workflow_node` (dry run first: tool calls are listed, not made) → then
-  `dry_run=false`. `revert=true` brings back the built-in it came from. Wires to pins
-  that are gone are dropped and listed in `wires_dropped`.
-- Locked nodes are refused like `save_workflow`. Code you save doesn't run on its
-  own until the user runs or reviews it (or the chat allows everything): tell them.
+  `test_workflow_node` (dry run: tool calls are listed, not made) → tell the user the
+  node needs their Review before it runs for real. `revert=true` brings back the
+  built-in it came from. Wires to pins that are gone are dropped and listed in
+  `wires_dropped`; a value node (`kind: "value"`) loses its white wires.
+- Code you save doesn't run for real (`dry_run=false`, `run_workflow_node`,
+  `run_workflow`, a schedule) until the user presses Review on the node or runs it
+  once, unless this chat allows everything. Until then those calls come back with
+  `needs_review: true` and a `hint` naming the node: pass it on to the user and stop
+  retrying. Locked nodes are refused like `save_workflow`.
 - `get_workflow` leaves code out (`code_sha`, `code_lines`); saving that graph back
-  keeps each node's code.
+  keeps each node's code while its `code_sha` matches.
 
 ### Showing the user (they watch it happen)
 

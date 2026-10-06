@@ -338,3 +338,161 @@ def test_agent_converts_a_terminal_step_and_it_waits_for_a_person_end_to_end(mon
     again = _call(panel.run_workflow, wid)
     assert again["ok"] is False and "Review this code" in again["error"]  # an agent's change needs a person again
     assert ran == [("npm test", True), ("npm test", True)]
+
+
+# --------------------------------------------------------------------------- what a person's save approves
+
+
+def test_panel_saves_approve_only_code_the_person_changed():
+    """On/off, renaming or moving a node sends the whole workflow; agent code in it stays unreviewed."""
+    wid = _workflow()
+    _call(panel.edit_workflow_node_code, wid, "t", code=BLANK)
+    sha = code_check.code_sha(BLANK)
+    api = PanelApiAutomationsMixin()
+    doc = store.get_workflow(wid)
+    assert api.save_workflow({**doc, "enabled": not doc.get("enabled", True)})["ok"]
+    assert api.save_workflow({"id": wid, "name": "Renamed"})["ok"]
+    graph = store.get_workflow(wid)["graph"]
+    next(n for n in graph["nodes"] if n["id"] == "a")["x"] += 40
+    assert api.save_workflow({"id": wid, "graph": graph})["ok"]
+    assert not code_approval.is_approved(wid, "t", sha)
+    graph["nodes"].append({"id": "c2", "type": "code.js", "x": 900, "y": 0, "config": {"code": ""}})
+    assert api.save_workflow({"id": wid, "graph": graph})["ok"]
+    assert code_approval.approval(wid, "c2", sha)["by"] == "person"  # a node the person added
+    assert not code_approval.is_approved(wid, "t", sha)
+
+
+def test_a_persons_code_edit_approves_only_that_node():
+    wid = _workflow()
+    agent = BLANK.replace("Got", "Agent")
+    graph = store.get_workflow(wid)["graph"]
+    graph["nodes"].append({"id": "c2", "type": "code.js", "x": 900, "y": 0, "config": {"code": agent}})
+    store.save_workflow({"id": wid, "graph": graph})
+    assert PanelApiAutomationsMixin().edit_workflow_node_code(wid, "t", code=BLANK)["ok"]
+    assert code_approval.is_approved(wid, "t", code_check.code_sha(BLANK))
+    assert not code_approval.is_approved(wid, "c2", code_check.code_sha(agent))
+
+
+def test_a_duplicate_keeps_only_the_approvals_its_code_had():
+    wid = _workflow()
+    agent = BLANK.replace("Got", "Agent")
+    api = PanelApiAutomationsMixin()
+    assert api.edit_workflow_node_code(wid, "t", code=BLANK)["ok"]
+    graph = store.get_workflow(wid)["graph"]
+    graph["nodes"].append({"id": "c2", "type": "code.js", "x": 900, "y": 0, "config": {"code": agent}})
+    store.save_workflow({"id": wid, "graph": graph})  # an agent's node, not reviewed
+    doc = store.get_workflow(wid)
+    copy = api.save_workflow({**doc, "id": "", "name": "Greet copy", "owner": None})["workflow"]
+    assert copy["id"] != wid
+    assert code_approval.approval(copy["id"], "t", code_check.code_sha(BLANK))["by"] == "person"
+    assert not code_approval.is_approved(copy["id"], "c2", code_check.code_sha(agent))
+
+
+def test_copying_carries_over_only_approved_code(monkeypatch):
+    from backend.store import switch
+
+    monkeypatch.setattr(store, "use_db", switch.use_db)
+    agent = BLANK.replace("Got", "Agent")
+    graph = {"nodes": [{"id": "ok", "type": "code.js", "x": 0, "y": 0, "config": {"code": BLANK}},
+                       {"id": "new", "type": "code.js", "x": 300, "y": 0, "config": {"code": agent}}], "edges": []}
+    src = store.save_workflow({"name": "Two", "graph": graph})
+    code_approval.approve(src["id"], "ok", code_check.code_sha(BLANK), "person")
+    out = PanelApiAutomationsMixin().copy_workflow(src["id"], "local")
+    assert out["ok"], out
+    copied = out["workflow"]["id"]
+    assert copied != src["id"]
+    assert code_approval.approval(copied, "ok", code_check.code_sha(BLANK))["by"] == "person"
+    assert not code_approval.is_approved(copied, "new", code_check.code_sha(agent))
+    mcp = _call(panel.copy_workflow, src["id"], "local")
+    assert code_approval.is_approved(mcp["workflow"]["id"], "ok", code_check.code_sha(BLANK))
+    assert not code_approval.is_approved(mcp["workflow"]["id"], "new", code_check.code_sha(agent))
+
+
+# --------------------------------------------------------------------------- the Code tab reads the draft
+
+
+def test_panel_code_tab_shows_the_draft_settings_and_asks_to_save_new_nodes():
+    wid = _workflow()
+    store.append_run(wid, {"started": 1, "steps": [{"id": "t", "ok": True, "inputs": {"name": "old"}}]})
+    api = PanelApiAutomationsMixin()
+    draft = {**_node(wid, "t"), "config": {"template": "Bye {{who}}", "names": ["who"]}}
+    out = api.get_workflow_node_code(wid, "t", node=draft)
+    assert out["ok"] and out["kind"] == "builtin" and '"Bye {{who}}"' in out["code"]
+    assert [p["id"] for p in out["pins"]["inputs"]] == ["who"] and out["last_inputs"] == {"name": "old"}
+    assert out["code_sha"] == code_check.code_sha(out["code"])
+    assert '"Hello {{name}}"' in api.get_workflow_node_code(wid, "t")["code"]  # no draft: the saved settings
+    added = {"id": "n9", "type": "text.template", "config": {"template": "New {{x}}", "names": ["x"]}}
+    fresh = api.get_workflow_node_code(wid, "n9", node=added)
+    assert fresh["ok"] and '"New {{x}}"' in fresh["code"] and fresh["last_inputs"] == {}
+    assert api.get_workflow_node_code(wid, "n9") == {"ok": False, "error": "Save the workflow first to see its code."}
+    assert _call(panel.get_workflow_node_code, wid, "n9") == {"ok": False, "error": "node not found: n9"}
+
+
+# --------------------------------------------------------------------------- an agent's get_workflow -> save_workflow
+
+
+def test_round_trip_without_code_passes_the_lock_check_and_drops_code_lines():
+    wid = _workflow()
+    _call(panel.edit_workflow_node_code, wid, "t", code=BLANK)
+    graph = store.get_workflow(wid)["graph"]
+    next(n for n in graph["nodes"] if n["id"] == "t")["locked"] = True
+    store.save_workflow({"id": wid, "graph": graph})
+    light = _call(panel.get_workflow, wid)["workflow"]
+    moved = next(n for n in light["graph"]["nodes"] if n["id"] == "a")
+    moved["x"] += 40  # only an unlocked node moves
+    out = _call(panel.save_workflow, graph=light["graph"], workflow_id=wid)
+    assert out["ok"], out
+    cfg = _node(wid, "t")["config"]
+    assert cfg["code"] == BLANK and "code_lines" not in cfg
+    assert _node(wid, "a")["x"] == moved["x"]
+
+
+def test_the_store_never_keeps_code_lines():
+    wid = store.save_workflow({"name": "C", "graph": {"nodes": [
+        {"id": "c", "type": "code.js", "x": 0, "y": 0, "config": {"code": BLANK, "code_lines": 3}}], "edges": []}})["id"]
+    assert "code_lines" not in _node(wid, "c")["config"]
+
+
+def test_white_wires_on_a_value_code_node_are_dropped_on_save():
+    value = BLANK.replace('kind: "step"', 'kind: "value"')
+    wid = store.save_workflow({"name": "Chain", "graph": {
+        "nodes": [{"id": "go", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+                  {"id": "c", "type": "code.js", "x": 300, "y": 0, "config": {"code": value}},
+                  {"id": "d", "type": "code.js", "x": 600, "y": 0, "config": {"code": BLANK}}],
+        "edges": [{"source": "go", "target": "c", "kind": "main"}, {"source": "c", "target": "d", "kind": "main"},
+                  {"source": "c", "target": "d", "kind": "data", "source_pin": "text", "target_pin": "text"},
+                  {"source": "go", "target": "d", "kind": "main"}]}})["id"]
+    edges = {(e["source"], e["target"], e["kind"]) for e in store.get_workflow(wid)["graph"]["edges"]}
+    assert edges == {("c", "d", "data"), ("go", "d", "main")}
+
+
+# --------------------------------------------------------------------------- refused for review: what the agent hears
+
+
+def test_an_agents_real_test_after_an_edit_says_it_needs_the_users_review():
+    wid = _workflow()
+    _call(panel.edit_workflow_node_code, wid, "t", code=BLANK)
+    dry = _call(panel.test_workflow_node, wid, "t", inputs={"text": "duck"})
+    assert dry["ok"] is True and "needs_review" not in dry
+    real = _call(panel.test_workflow_node, wid, "t", inputs={"text": "duck"}, dry_run=False)
+    assert real["ok"] is False and real["needs_review"] is True
+    assert real["hint"] == "Ask the user to press Review on Greeting (or run it once); a dry run works now."
+    assert code_approval.REVIEW in real["error"]["message"]  # the person-facing text stays
+    node = _call(panel.run_workflow_node, wid, "t")
+    assert node["ok"] is False and node["needs_review"] is True and "Greeting" in node["hint"]
+    graph = store.get_workflow(wid)["graph"]
+    graph["edges"].append({"source": "s", "target": "t", "kind": "main"})
+    store.save_workflow({"id": wid, "graph": graph})
+    whole = _call(panel.run_workflow, wid)
+    assert whole["ok"] is False and whole["needs_review"] is True and "Greeting" in whole["hint"]
+
+
+def test_a_review_refusal_the_runner_already_marked_is_not_marked_twice(monkeypatch):
+    wid = _workflow()
+    marked = {"ok": False, "needs_review": True, "hint": "Ask the user.", "outputs": {}, "log": "", "tool_calls": [],
+              "error": {"message": code_approval.REVIEW, "line": None, "col": None}, "ms": 1}
+    monkeypatch.setattr(runner, "run_code_draft", lambda *a, **k: dict(marked), raising=False)
+    out = _call(panel.test_workflow_node, wid, "t", dry_run=False)
+    assert out["needs_review"] is True and out["hint"] == "Ask the user."
+    monkeypatch.setattr(runner, "run_code_draft", lambda *a, **k: {**marked, "hint": ""}, raising=False)
+    assert _call(panel.test_workflow_node, wid, "t", dry_run=False)["hint"].count("Review on Greeting") == 1
