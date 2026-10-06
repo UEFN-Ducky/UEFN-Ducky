@@ -616,6 +616,14 @@ def run_regression_tests() -> None:
     froze without running the suite. That module dropped out of the PYZ and
     every install crashed on boot.
     """
+    # The build installs requirements.txt too, but only after this: a new
+    # dependency would fail the suite here first.
+    print("=== dependencies (requirements.txt) ===")
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements.txt")],
+        check=True,
+        cwd=str(ROOT),
+    )
     print("=== pytest (required before Store publish) ===")
     subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--tb=short"],
