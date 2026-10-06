@@ -28,6 +28,7 @@ _BUILTIN_STARTERS = {"start.manual", "start.chat", "start.cron", "flow.input"}
 CODE_TYPE = "code.js"
 _FOLDER_NAME_MAX = 64
 _FOLDER_PATH_MAX = 512
+_FOLDERS_FILE = "_folders.json"  # files mode: Local's folder list (no "id", so never read as a workflow)
 # Named colors a node or a group box can take (the editor maps them to theme colors).
 _COLORS = {"red", "amber", "green", "blue", "purple"}
 # A picked icon is one emoji (or a very short symbol); emoji sequences run up to ~8 code points.
@@ -261,9 +262,14 @@ def save_workflow(doc: dict[str, Any], *, owner: str = "") -> dict[str, Any]:
     existing one stays with its owner (:func:`copy_workflow` moves it). Raises
     ``PermissionError`` when that owner is read-only here."""
     with _SAVE_LOCK:
-        out = _files_save(doc) if not use_db("automations") else _db_save(doc, owner)
+        out = save_quietly(doc, owner)
     _announce_graphs_changed()
     return out
+
+
+def save_quietly(doc: dict[str, Any], owner: str = "") -> dict[str, Any]:
+    """:func:`save_workflow` without telling the editor (a caller saving many tells it once)."""
+    return _files_save(doc) if not use_db("automations") else _db_save(doc, owner)
 
 
 def delete_workflow(workflow_id: str) -> bool:
@@ -322,7 +328,8 @@ def copy_workflow(workflow_id: str, owner: str, *, move: bool = False) -> dict[s
 
 
 def set_folder(workflow_id: str, folder: str) -> dict[str, Any] | None:
-    """File one workflow in a folder of its owner (no saved version, keeps its place)."""
+    """File one workflow in a folder of its owner (no saved version, keeps its place).
+    The folder it leaves stays in the owner's folder list."""
     wid = (workflow_id or "").strip()
     wf = get_workflow(wid)
     if wf is None:
@@ -330,8 +337,22 @@ def set_folder(workflow_id: str, folder: str) -> dict[str, Any] | None:
     doc = {"id": wid, "folder": normalize_folder(folder)}
     with _SAVE_LOCK:
         out = _files_save(doc, archive=False) if not use_db("automations") else _db_save(doc, LOCAL, archive=False)
+        old = normalize_folder(wf.get("folder"))
+        if old and old != out["folder"]:
+            _remember_folders(owner_key(wf), [old])
     _announce_graphs_changed()
     return out
+
+
+def owner_key(wf: dict[str, Any]) -> str:
+    return str((wf.get("owner") or {}).get("id") or LOCAL)
+
+
+def moved_path(folder: str, src: str, dst: str) -> str | None:
+    """Where ``folder`` lands when folder ``src`` moves to ``dst`` (None = not inside it)."""
+    if folder != src and not folder.startswith(src + "/"):
+        return None
+    return normalize_folder(dst + folder[len(src):] if dst else folder[len(src):])
 
 
 def move_folder(owner: str, path: str, new_path: str) -> int:
@@ -348,18 +369,107 @@ def move_folder(owner: str, path: str, new_path: str) -> int:
     moved = 0
     with _SAVE_LOCK:
         for wf in all_workflows():
-            if ((wf.get("owner") or {}).get("id") or LOCAL) != key:
+            if owner_key(wf) != key:
                 continue
-            folder = normalize_folder(wf.get("folder"))
-            if folder != src and not folder.startswith(src + "/"):
+            folder = moved_path(normalize_folder(wf.get("folder")), src, dst)
+            if folder is None:
                 continue
-            doc = {"id": wf["id"], "folder": dst + folder[len(src):] if dst else folder[len(src):].lstrip("/")}
             # A folder is filing, not an edit: no saved version for it.
+            doc = {"id": wf["id"], "folder": folder}
             _files_save(doc, archive=False) if not use_db("automations") else _db_save(doc, key, archive=False)
             moved += 1
-    if moved:
+        listed = _stored_folders(key)
+        relisted = [f if (to := moved_path(f, src, dst)) is None else to for f in listed]
+        changed = relisted != listed and _put_folders(key, relisted)
+    if moved or changed:
         _announce_graphs_changed()
     return moved
+
+
+# --------------------------------------------------------------------------- folder lists
+
+
+def folders_of(owner: str = LOCAL, workflows: list[dict[str, Any]] | None = None) -> list[str]:
+    """Every folder of an owner: its folder list (empty folders too) and each folder a
+    workflow is filed in, with the folders around them, sorted. ``workflows``: rows
+    already read (any owner's), so a caller listing every owner reads them once."""
+    key = (owner or LOCAL).strip() or LOCAL
+    paths = set(_stored_folders(key))
+    rows = all_workflows() if workflows is None else workflows
+    paths.update(normalize_folder(wf.get("folder")) for wf in rows if owner_key(wf) == key)
+    out: set[str] = set()
+    for path in paths:
+        parts = path.split("/") if path else []
+        out.update("/".join(parts[: i + 1]) for i in range(len(parts)))
+    return sorted(out, key=lambda p: [part.casefold() for part in p.split("/")])
+
+
+def add_folder(owner: str, path: str) -> list[str]:
+    """Make a folder (it may hold nothing yet); a team's folders sync with its workflows.
+    Returns the owner's folders."""
+    clean = normalize_folder(path)
+    if not clean:
+        raise ValueError("Name the folder")
+    key = (owner or LOCAL).strip() or LOCAL
+    with _SAVE_LOCK:
+        changed = _remember_folders(key, [clean])
+    if changed:
+        _announce_graphs_changed()
+    return folders_of(key)
+
+
+def drop_folders(owner: str, path: str) -> bool:
+    """Forget a folder and everything under it in the owner's folder list (its
+    workflows are not touched). False when nothing was listed there."""
+    src = normalize_folder(path)
+    key = (owner or LOCAL).strip() or LOCAL
+    listed = _stored_folders(key)
+    kept = [f for f in listed if moved_path(f, src, src) is None] if src else []
+    return kept != listed and _put_folders(key, kept)
+
+
+def _remember_folders(owner: str, paths: list[str]) -> bool:
+    listed = _stored_folders(owner)
+    new = [p for p in (normalize_folder(p) for p in paths) if p and p not in listed]
+    return _put_folders(owner, listed + new) if new else False
+
+
+def _stored_folders(owner: str) -> list[str]:
+    if not use_db("automations"):
+        if owner != LOCAL:
+            return []
+        try:
+            raw = json.loads((_files_dir() / _FOLDERS_FILE).read_text(encoding="utf-8")).get("folders")
+        except (OSError, ValueError, AttributeError):
+            return []
+    else:
+        from backend.automations import owned
+
+        try:
+            raw = owned.folders(owned.scope_for(owner))
+        except ValueError:
+            return []
+    paths = [normalize_folder(p) for p in raw if isinstance(p, str)] if isinstance(raw, list) else []
+    return list(dict.fromkeys(p for p in paths if p))
+
+
+def _put_folders(owner: str, paths: list[str]) -> bool:
+    """Store an owner's folder list; False when it already was that."""
+    clean = list(dict.fromkeys(p for p in (normalize_folder(p) for p in paths) if p))
+    if clean == _stored_folders(owner):
+        return False
+    if not use_db("automations"):
+        if owner != LOCAL:
+            raise ValueError(f"unknown workflow owner: {owner}")
+        path = _files_dir() / _FOLDERS_FILE
+        temporary = path.with_suffix(f".{uuid.uuid4()}.tmp")
+        temporary.write_text(json.dumps({"folders": clean}, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        return True
+    from backend.automations import owned
+
+    owned.write_folders(owned.writable(owned.scope_for(owner)), clean)
+    return True
 
 
 def set_run_here(workflow_id: str, on: bool) -> dict[str, Any] | None:
@@ -506,7 +616,7 @@ def _db_save(doc: dict[str, Any], owner: str, *, archive: bool = True) -> dict[s
         scope, existing = found
     else:
         scope, existing = owned.scope_for(owner or LOCAL), None
-        if wid and not valid_doc_key(wid):
+        if wid and (not valid_doc_key(wid) or wid == owned.FOLDERS_KEY):
             raise ValueError("Workflow ids use lowercase letters, digits, '.', '_' and '-'.")
     owned.writable(scope)
     out = deepcopy(existing) if existing else empty_workflow(name=str(doc.get("name") or "Untitled"))
@@ -657,7 +767,7 @@ def _files_save(doc: dict[str, Any], *, archive: bool = True) -> dict[str, Any]:
     from backend.automations.versions import archive_file, directory
 
     wid = str(doc.get("id") or "").strip()
-    if wid and not _safe_file_id(wid):
+    if wid and (not _safe_file_id(wid) or f"{wid}.json" == _FOLDERS_FILE):
         raise ValueError("invalid workflow id")
     existing = _read_file(_files_dir() / f"{wid}.json") if wid else None
     out = deepcopy(existing) if existing else {**empty_workflow(name=str(doc.get("name") or "Untitled")),

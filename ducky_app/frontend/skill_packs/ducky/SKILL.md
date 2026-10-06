@@ -222,6 +222,7 @@ Load `skill_read_subskill("ducky", "ai_plugins")` then follow it. Legal I/O is
    walkthrough. `save_workflow` opens the Workflows editor and refreshes the
    canvas (`owner` = `local` or a team id from `list_workflows`);
    `copy_workflow`, `delete_workflow`, `set_workflow_folder` (list folders),
+   `copy_workflow_folder` (a whole folder tree to Local or a team),
    `save_workflow_template` / `delete_workflow_template` match the panel.
    Repeated steps belong in a reusable workflow (`flow.input` → … →
    `flow.output`) that others run with a `workflow.call` node; see

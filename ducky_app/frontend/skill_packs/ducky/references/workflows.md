@@ -239,6 +239,9 @@ names them; ask the user, and only after they agree pass
 | `stop_workflow` | stop every run of it on this PC right away |
 | `set_workflow_folder` / `move_workflow_folder` | file a workflow / rename, move or remove a folder |
 | `copy_workflow` | copy or move to Local or a team |
+| `add_workflow_folder` | make a folder that holds nothing yet (a team's syncs to members) |
+| `copy_workflow_folder` | copy or move a whole folder tree to Local or a team; Run workflow steps inside it keep working |
+| `export_workflow_folder` / `import_workflow_bundle` | a folder tree as one bundle / make a copy of a bundle anywhere (new ids, calls re-pointed) |
 | `delete_workflow` | delete (for everyone, if it is a team's) |
 | `list_workflow_versions` / `restore_workflow_version` | History: saved versions, bring one back |
 | `clear_workflow_runs` | Clear log |
@@ -341,4 +344,6 @@ running their own step; editing a node's code turns it into a **Custom code** no
   UEFN, Save file), wired by pins; read `node_outputs` in the run result to check
   each pin. Ask before turning on `spend` for paid nodes.
 - **Organize:** `set_workflow_folder(id, "Play tests/Tycoon")`; groups, colors
-  and icons on nodes make big graphs readable.
+  and icons on nodes make big graphs readable. A set of workflows that call each other
+  lives in one folder; share it with `copy_workflow_folder` (not one
+  `copy_workflow` per workflow), so the tree and its calls arrive whole.

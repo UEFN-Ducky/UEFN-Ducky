@@ -331,6 +331,75 @@ def move_workflow_folder(owner: str, path: str, new_path: str = "", pretty: bool
 
 
 @mcp.tool()
+def add_workflow_folder(owner: str, path: str, pretty: bool = False) -> str:
+    """Make a folder in the Workflows list that may hold nothing yet. owner is "local"
+    or a team id; path is "Play tests/Tycoon" (missing parents are made too). A team's
+    folders, empty ones included, sync to every member."""
+    from backend.automations.store import add_folder
+
+    try:
+        return tool_json({"ok": True, "folders": add_folder(owner, path)}, pretty=pretty)
+    except (PermissionError, ValueError) as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+
+
+@mcp.tool()
+def export_workflow_folder(owner: str, path: str, pretty: bool = False) -> str:
+    """A folder of the Workflows list with everything in it as one bundle:
+    {version, root, folders (relative, empty ones too), workflows: [{key (its id), name,
+    description, enabled, folder (relative), graph}]}. path "" = the whole owner.
+    import_workflow_bundle makes a copy of it anywhere."""
+    from backend.automations.bundles import export_folder
+
+    try:
+        return tool_json({"ok": True, "bundle": export_folder(owner, path)}, pretty=pretty)
+    except KeyError:
+        return tool_json({"ok": False, "error": "folder not found"}, pretty=pretty)
+    except (PermissionError, ValueError) as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+
+
+@mcp.tool()
+def import_workflow_bundle(bundle: dict[str, Any] | str, owner: str = "local", parent_path: str = "", name: str = "",
+                           pretty: bool = False) -> str:
+    """Make a folder bundle (export_workflow_folder's shape) under owner/parent_path:
+    the whole nested tree, every workflow with a new id, and each Run workflow step
+    that names a workflow of the bundle by its key (or "@key") pointed at the new one.
+    name renames the root folder; a taken name becomes "Name (2)". All or nothing.
+    Returns folder, workflows [{key, id, name}] and outside (calls to workflows that
+    are not in the bundle)."""
+    import json
+
+    from backend.automations.bundles import import_bundle
+
+    try:
+        raw = json.loads(bundle) if isinstance(bundle, str) else bundle
+        out = import_bundle(raw, owner, parent_path, name=name or None)
+    except (PermissionError, ValueError) as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    return tool_json({"ok": True, **out}, pretty=pretty)
+
+
+@mcp.tool()
+def copy_workflow_folder(owner_from: str, path: str, owner_to: str, parent_path: str = "", move: bool = False,
+                         pretty: bool = False) -> str:
+    """Copy a whole folder (nested folders, empty ones, every workflow) from one owner
+    ("local" or a team id) into owner_to/parent_path. A copy gets new ids with its Run
+    workflow steps pointed at the copies; move=True keeps the ids and removes the
+    source once everything is in place (moving out of a team removes it for every
+    member). Inside one owner a move is move_workflow_folder."""
+    from backend.automations.bundles import copy_folder
+
+    try:
+        out = copy_folder(owner_from, path, owner_to, parent_path, move=move)
+    except KeyError:
+        return tool_json({"ok": False, "error": "folder not found"}, pretty=pretty)
+    except (PermissionError, ValueError) as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    return tool_json({"ok": True, **out}, pretty=pretty)
+
+
+@mcp.tool()
 def clear_workflow_runs(workflow_id: str, pretty: bool = False) -> str:
     """Run log → Clear log: forget this PC's past runs of one workflow."""
     from backend.automations.store import clear_runs

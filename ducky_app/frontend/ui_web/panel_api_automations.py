@@ -151,6 +151,48 @@ class PanelApiAutomationsMixin:
         except (PermissionError, ValueError) as exc:
             return _refused(exc)
 
+    def add_workflow_folder(self, owner: str, path: str) -> dict[str, Any]:
+        """Make a folder that may hold nothing yet (a team's syncs to every member)."""
+        from backend.automations.store import add_folder
+
+        try:
+            return {"ok": True, "folders": add_folder(owner, path)}
+        except (PermissionError, ValueError) as exc:
+            return _refused(exc)
+
+    def export_workflow_folder(self, owner: str, path: str) -> dict[str, Any]:
+        """A folder with everything in it (nested folders, empty ones too) as one bundle."""
+        from backend.automations.bundles import export_folder
+
+        try:
+            return {"ok": True, "bundle": export_folder(owner, path)}
+        except KeyError:
+            return {"ok": False, "error": "folder not found"}
+        except (PermissionError, ValueError) as exc:
+            return _refused(exc)
+
+    def import_workflow_bundle(self, bundle: dict[str, Any] | None = None, owner: str = "local", parent_path: str = "",
+                               name: str = "") -> dict[str, Any]:
+        """Make a bundle's folder tree under ``owner``/``parent_path`` with new ids."""
+        from backend.automations.bundles import import_bundle
+
+        try:
+            return {"ok": True, **import_bundle(bundle, owner, parent_path, name=name or None)}
+        except (PermissionError, ValueError) as exc:
+            return _refused(exc)
+
+    def copy_workflow_folder(self, owner_from: str, path: str, owner_to: str, parent_path: str = "",
+                             move: bool = False) -> dict[str, Any]:
+        """Copy or move a whole folder tree to Local or a team, Run workflow steps intact."""
+        from backend.automations.bundles import copy_folder
+
+        try:
+            return {"ok": True, **copy_folder(owner_from, path, owner_to, parent_path, move=bool(move))}
+        except KeyError:
+            return {"ok": False, "error": "folder not found"}
+        except (PermissionError, ValueError) as exc:
+            return _refused(exc)
+
     def set_workflow_run_here(self, workflow_id: str, on: bool) -> dict[str, Any]:
         from backend.automations.store import set_run_here
 

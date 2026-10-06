@@ -9,6 +9,11 @@ every call: the list shows Local and every team at once, whatever project is ope
 
 Per-PC state never syncs: the run log, last run and "Run on this PC" live in
 ``workflow_runtime``; saved versions in ``workflow_versions`` (sealed too).
+
+Folders: each workflow carries its own ``folder`` path. The owner's folder list
+(empty folders included) is one more doc of the same scope under the reserved key
+``_folders``, ``{"folders": ["Play tests", "Play tests/Tycoon"]}``, so a team's
+tree syncs with its workflows and the website can read it.
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ RUN_CAP = 20
 BEFORE_SYNC_NOTE = "Your copy before sync"
 NO_PERMISSION = "Only members with Manage automations can change team workflows."
 _DOC_FIELDS = ("id", "name", "description", "enabled", "folder", "graph", "updated")
+FOLDERS_KEY = "_folders"  # never a workflow id (save refuses it)
+FOLDERS_MAX = 2000
 
 _CLAIMED: set[tuple[str, str]] = set()  # (database file, account) checked this process
 _CLAIM_LOCK = threading.Lock()
@@ -141,6 +148,8 @@ def docs(scope: dict[str, Any]) -> list[dict[str, Any]]:
     aid = scope["account"]
     out = []
     for row in data.rows(aid, scope["id"], DOC_PLUGIN, "doc"):
+        if row["key"] == FOLDERS_KEY:
+            continue
         doc = _doc_of(row, aid)
         if doc is not None:
             out.append(doc)
@@ -150,7 +159,7 @@ def docs(scope: dict[str, Any]) -> list[dict[str, Any]]:
 def find(workflow_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """``(scope, doc)`` of a workflow this account can see."""
     wid = (workflow_id or "").strip()
-    if not scopes.valid_doc_key(wid):
+    if not scopes.valid_doc_key(wid) or wid == FOLDERS_KEY:
         return None
     for scope in owner_scopes():
         doc = _doc_of(data.get(scope["account"], scope["id"], DOC_PLUGIN, "doc", wid), scope["account"])
@@ -183,6 +192,32 @@ def write(scope: dict[str, Any], doc: dict[str, Any], *, versions: tuple[dict[st
         if sealed is not None:
             data.upsert(conn, aid, scope["id"], DOC_PLUGIN, "doc", wid, value=sealed, size=len(raw), sha256=sha,
                         dirty=scope["kind"] == "team")
+
+
+def folders(scope: dict[str, Any]) -> list[str]:
+    """The owner's folder list as stored (paths, empty folders included)."""
+    aid = scope["account"]
+    doc = _doc_of(data.get(aid, scope["id"], DOC_PLUGIN, "doc", FOLDERS_KEY), aid) or {}
+    raw = doc.get("folders")
+    return [str(path) for path in raw if isinstance(path, str)] if isinstance(raw, list) else []
+
+
+def write_folders(scope: dict[str, Any], paths: list[str]) -> None:
+    """Replace the owner's folder list (a team's is queued to push like a workflow)."""
+    from backend.store import db
+    from backend.uefn_plugins.data_crypto import seal_text
+
+    raw = scopes.encode_doc({"folders": list(paths)[:FOLDERS_MAX]})
+    aid = scope["account"]
+    sha = hashlib.sha256(raw).hexdigest()
+    old = data.get(aid, scope["id"], DOC_PLUGIN, "doc", FOLDERS_KEY)
+    if old and not old["deleted"] and old["sha256"] == sha:
+        return
+    sealed = seal_text(raw.decode("utf-8"), aid)
+    conn = db.connect()
+    with db.write_txn(conn):
+        data.upsert(conn, aid, scope["id"], DOC_PLUGIN, "doc", FOLDERS_KEY, value=sealed, size=len(raw), sha256=sha,
+                    dirty=scope["kind"] == "team")
 
 
 def remove(scope: dict[str, Any], workflow_id: str) -> bool:
@@ -261,6 +296,8 @@ def archive_before_adopt(scope: dict[str, Any], workflow_id: str) -> None:
     keep the local one as a saved version so History can bring it back."""
     from backend.store import db
 
+    if workflow_id == FOLDERS_KEY:
+        return  # the folder list has no History: the server's list wins
     aid = scope["account"]
     doc = _doc_of(data.get(aid, scope["id"], DOC_PLUGIN, "doc", workflow_id), aid)
     if doc is None:
@@ -321,7 +358,7 @@ def local_import_count(aid: str) -> int:
     """Workflows made while signed out on this PC, offered to the signed-in account."""
     if aid == scopes.LOCAL:
         return 0
-    return len(data.rows(scopes.LOCAL, scopes.PERSONAL, DOC_PLUGIN, "doc"))
+    return len([r for r in data.rows(scopes.LOCAL, scopes.PERSONAL, DOC_PLUGIN, "doc") if r["key"] != FOLDERS_KEY])
 
 
 def import_local(aid: str) -> int:
@@ -342,6 +379,10 @@ def import_local(aid: str) -> int:
         remove(signed_out, wid)
         forget(scopes.LOCAL, [wid])
         moved += 1
+    left = folders(signed_out)
+    if left:
+        write_folders(mine, list(dict.fromkeys(folders(mine) + left)))
+        remove(signed_out, FOLDERS_KEY)
     return moved
 
 
