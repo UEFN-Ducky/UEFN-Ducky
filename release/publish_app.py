@@ -9,7 +9,7 @@ Default flow (always bumps):
      (release/sign_windows.py, DUCKY_SIGN_PROVIDER in the .env) covers the app
      EXEs, the Inno engine + its uninstaller and the Ducky Setup host.
   2. Direct-to-S3: ticket → PUT Setup.exe → complete → poll job
-     (falls back to multipart POST /api/files/app-release if ticket API missing)
+     (falls back to multipart POST /api/v1/files/app-release if ticket API missing)
   3. MCP uds_app_release on that same site   (latest-only version + url + sha256)
 
 Env:
@@ -475,7 +475,7 @@ def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
         base,
         api_key,
         "POST",
-        "/api/files/app-release/ticket",
+        "/api/v1/files/app-release/ticket",
         {"filename": filename, "size": size, "sha256": digest},
     )
     upload_url = str(ticket_resp.get("uploadUrl") or "").strip()
@@ -491,7 +491,7 @@ def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
         base,
         api_key,
         "POST",
-        "/api/files/app-release/complete",
+        "/api/v1/files/app-release/complete",
         {"ticket": ticket},
     )
     job_id = str(complete.get("jobId") or "").strip()
@@ -504,7 +504,7 @@ def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
             base,
             api_key,
             "GET",
-            f"/api/files/app-release/status/{job_id}",
+            f"/api/v1/files/app-release/status/{job_id}",
             timeout=60,
         )
         state = str(status.get("status") or "").lower()
@@ -514,10 +514,10 @@ def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
             return {
                 "ok": True,
                 "fileId": status.get("fileId") or "",
-                "url": status.get("url") or f"/api/files/{status.get('fileId')}/content",
+                "url": status.get("url") or f"/api/v1/files/{status.get('fileId')}/content",
                 "sha256": status.get("sha256") or digest,
                 "size": status.get("size") or size,
-                "latestUrl": "/api/files/app-release/latest",
+                "latestUrl": "/api/v1/files/app-release/latest",
             }
         if state in ("failed", "fail", "error"):
             raise SystemExit(f"process failed: {status.get('error') or status}")
@@ -541,7 +541,7 @@ def _upload_app_release_multipart(base: str, api_key: str, exe_path: Path) -> di
             f"--{boundary}--\r\n".encode(),
         ]
     )
-    url = base.rstrip("/") + "/api/files/app-release"
+    url = base.rstrip("/") + "/api/v1/files/app-release"
     req = urllib.request.Request(
         url,
         data=body,
@@ -902,7 +902,7 @@ def main() -> None:
     if remote_sha and remote_sha != digest:
         raise SystemExit(f"Server sha256 mismatch: local={digest} remote={remote_sha}")
     # Relative only — uds_app_release rejects absolute off-site URLs.
-    installer_url = f"/api/files/{file_id}/content" if file_id else "/api/files/app-release/latest"
+    installer_url = f"/api/v1/files/{file_id}/content" if file_id else "/api/v1/files/app-release/latest"
     print(f"  uploaded fileId={file_id}")
     print(f"  installerUrl={installer_url}")
 

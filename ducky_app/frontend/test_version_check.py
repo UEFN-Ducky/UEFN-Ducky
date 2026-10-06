@@ -41,7 +41,7 @@ def test_unwrap_collect_payload_nested() -> None:
             "handled": True,
             "payload": {
                 "currentVersion": "1.0.500",
-                "installerUrl": "/api/files/x/content",
+                "installerUrl": "/api/v1/files/x/content",
                 "installerSha256": "abc",
                 "releaseNotes": "notes",
             },
@@ -62,8 +62,8 @@ def test_unwrap_flat_legacy() -> None:
 
 def test_absolute_installer_url() -> None:
     base = "https://uefnducky.org"
-    assert absolute_installer_url("/api/files/abc/content", base_url=base) == (
-        "https://uefnducky.org/api/files/abc/content"
+    assert absolute_installer_url("/api/v1/files/abc/content", base_url=base) == (
+        "https://uefnducky.org/api/v1/files/abc/content"
     )
     assert (
         absolute_installer_url("https://cdn.example/setup.exe", base_url=base)

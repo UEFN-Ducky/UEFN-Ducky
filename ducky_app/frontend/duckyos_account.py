@@ -373,7 +373,7 @@ def mint_device_key(blob: dict[str, Any] | None = None) -> dict[str, Any]:
     body = {"name": _device_key_name(), "permissions": [DEVICE_SCOPE], "expiresInDays": 90}
     status, cookies, payload, raw = _request(
         "POST",
-        f"{base}/api/auth/api-keys",
+        f"{base}/api/v1/auth/api-keys",
         body=body,
         cookie_header=_session_cookie_header(blob),
         csrf_token=str(blob.get("csrf_value") or ""),
@@ -403,7 +403,7 @@ def _revoke_device_key(blob: dict[str, Any]) -> None:
         try:
             _request(
                 "DELETE",
-                f"{base}/api/auth/api-keys/{key_id}",
+                f"{base}/api/v1/auth/api-keys/{key_id}",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=12.0,
@@ -430,7 +430,7 @@ def fetch_me(blob: dict[str, Any] | None = None) -> dict[str, Any]:
         raise DuckyOSAccountError("Not logged in", code="not_logged_in")
     status, cookies, payload, _raw = _request(
         "GET",
-        f"{base}/api/auth/me",
+        f"{base}/api/v1/auth/me",
         cookie_header=_session_cookie_header(blob),
     )
     _apply_session_cookies(blob, cookies)
@@ -454,7 +454,7 @@ def fetch_permissions(blob: dict[str, Any] | None = None) -> dict[str, Any]:
         return blob
     status, cookies, payload, _raw = _request(
         "GET",
-        f"{base}/api/acl/self",
+        f"{base}/api/v1/acl/self",
         cookie_header=_session_cookie_header(blob),
     )
     _apply_session_cookies(blob, cookies)
@@ -653,7 +653,7 @@ def logout() -> dict[str, Any]:
         try:
             _request(
                 "POST",
-                f"{base}/api/auth/logout",
+                f"{base}/api/v1/auth/logout",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=10.0,
@@ -707,7 +707,7 @@ def revoke_account_pc(key_id: str = "") -> dict[str, Any]:
         try:
             _request(
                 "DELETE",
-                f"{base}/api/auth/api-keys/{key_id}",
+                f"{base}/api/v1/auth/api-keys/{key_id}",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=12.0,
