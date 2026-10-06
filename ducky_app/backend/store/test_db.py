@@ -165,10 +165,11 @@ def test_integrity_ok_and_snapshot_keeps_newest_three(tmp_path: Path) -> None:
 
 
 def _remove_sidecars(path: Path) -> None:
-    """WAL can stay locked for a moment after close when the machine is busy."""
+    """WAL can stay locked for a moment after close when the machine is busy
+    (a background store task from an earlier test still finishing): wait up to 10 s."""
     for side in db.SIDECAR_NAMES:
         sidecar = path.parent / side
-        for _ in range(40):
+        for _ in range(200):
             try:
                 sidecar.unlink(missing_ok=True)
                 break
