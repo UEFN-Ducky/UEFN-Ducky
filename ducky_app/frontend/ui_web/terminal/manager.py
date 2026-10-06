@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from frontend.settings import PanelSettings
 from frontend.ui_web.terminal.bridge import TerminalBridge
-from frontend.ui_web.terminal.session import PendingCommand, TerminalSession
+from frontend.ui_web.terminal.session import _OUTPUT_RING_CHARS, PendingCommand, TerminalSession
 from frontend.ui_web.terminal.shells import shell_label
 
 _APPROVAL_TIMEOUT_S = 120.0
@@ -72,7 +72,8 @@ class TerminalManager:
             bridge = TerminalBridge(
                 on_input=lambda data, s=session: self._user_write(s.id, data),
                 on_resize=lambda c, r, s=session: s.resize(c, r),
-                get_replay=lambda s=session: s.read_output_tail(16000),
+                # A tab shown again gets its whole kept history back, not just the last screen.
+                get_replay=lambda s=session: s.read_output_tail(_OUTPUT_RING_CHARS),
                 get_status=lambda s=session: self._session_status(s),
             )
             bridge.start()

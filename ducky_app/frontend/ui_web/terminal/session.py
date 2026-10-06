@@ -21,7 +21,12 @@ def pty_argv(shell: str, spawn_argv: list[str] | None) -> list[str]:
     return argv
 
 
-_OUTPUT_RING_MAX = 400
+# Output kept to redraw a terminal shown again: the last ~512 KB, in chunks merged up to 8 KB so a
+# stream of tiny writes (pytest prints a progress code per test) can't push the history out.
+_OUTPUT_RING_CHARS = 512 * 1024
+_OUTPUT_CHUNK_CHARS = 8 * 1024
+# Taskbar progress codes (OSC 9;4) never show anything; they stay out of the kept history.
+_PROGRESS_SEQ_RE = re.compile(r"\x1b\]9;4;[0-9;]*(?:\x07|\x1b\\)")
 _DONE_RE = re.compile(r"__DUCKY_DONE__(\d+)__")
 # Escape sequences that ask the terminal to REPLY (device attributes ESC[c,
 # status reports ESC[5n/6n, window/cell size reports ESC[14t…21t). Replaying
@@ -169,7 +174,8 @@ class TerminalSession:
         self._read_thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._write_lock = threading.Lock()
-        self._output_ring: deque[str] = deque(maxlen=_OUTPUT_RING_MAX)
+        self._output_ring: deque[str] = deque()
+        self._output_chars = 0
         self._output_cond = threading.Condition()
         self._cols = 120
         self._rows = 30
@@ -233,7 +239,7 @@ class TerminalSession:
             if not text:
                 continue
             with self._output_cond:
-                self._output_ring.append(text)
+                self._keep_output(_PROGRESS_SEQ_RE.sub("", text))
                 self._output_cond.notify_all()
             if self._on_output:
                 try:
@@ -331,6 +337,19 @@ class TerminalSession:
     def set_busy(self, busy: bool) -> None:
         with self._busy_lock:
             self._busy = busy
+
+    def _keep_output(self, text: str) -> None:
+        """Add to the kept history (caller holds _output_cond); the oldest chunks go past the cap."""
+        if not text:
+            return
+        ring = self._output_ring
+        if ring and len(ring[-1]) + len(text) <= _OUTPUT_CHUNK_CHARS:
+            ring[-1] += text
+        else:
+            ring.append(text)
+        self._output_chars += len(text)
+        while self._output_chars > _OUTPUT_RING_CHARS and len(ring) > 1:
+            self._output_chars -= len(ring.popleft())
 
     def read_output_tail(self, max_chars: int = 8000) -> str:
         with self._output_cond:

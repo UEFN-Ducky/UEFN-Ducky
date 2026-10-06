@@ -125,3 +125,30 @@ def test_the_done_marker_is_found_when_split_across_two_reads() -> None:
     session._pending_done = threading.Event()
     session._read_loop()
     assert session._pending_done.is_set() and session._pending_exit_code == 0
+
+
+def test_a_tab_shown_again_keeps_its_history_through_a_stream_of_progress_codes() -> None:
+    """pytest prints a taskbar progress code per test; 400 tiny chunks used to push the history out."""
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    session = TerminalSession(shell="bash", cwd="C:/repo")
+    chunks = [b"=== security gate ===\r\n", b"npm-audit: ok\r\n"]
+    chunks += [b"\x1b]9;4;2;%d\x1b\." % (n % 100) for n in range(5000)]
+
+    class _Pty:
+        exitstatus = 0
+
+        def isalive(self) -> bool:
+            return True
+
+        def read(self, _n: int) -> bytes:
+            if chunks:
+                return chunks.pop(0)
+            session._stop.set()
+            return b""
+
+    session._pty = _Pty()
+    session._read_loop()
+    history = session.read_output_tail(512 * 1024)
+    assert history.startswith("=== security gate ===") and "npm-audit: ok" in history
+    assert "\x1b]9;4" not in history and history.count(".") == 5000
