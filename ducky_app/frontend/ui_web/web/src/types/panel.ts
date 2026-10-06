@@ -4,8 +4,10 @@ export type ViewId = "chat" | "settings";
 
 export type ChatLayoutMode = "full" | "sidebarHidden";
 
-export function nextChatLayoutMode(mode: ChatLayoutMode): ChatLayoutMode {
-  return mode === "full" ? "sidebarHidden" : "full";
+/** The header's left button toggles what is on screen: the pane shows only when the layout
+ *  mode and the dock both say open, and a fresh install starts it closed with the mode "full". */
+export function nextChatLayoutMode(mode: ChatLayoutMode, leftRailOpen: boolean): ChatLayoutMode {
+  return mode !== "sidebarHidden" && leftRailOpen ? "sidebarHidden" : "full";
 }
 
 export interface InstallInfo {

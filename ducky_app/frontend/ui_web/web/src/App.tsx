@@ -163,10 +163,10 @@ export default function App() {
   const hasProject = !!project.path?.trim();
 
   const cycleLayoutMode = useCallback(() => {
-    const next = nextChatLayoutMode(layoutMode);
-    setLayoutMode(next);
     const snapshot = readDockSnapshot(WINDOW_ID);
-    persistDockSnapshot({ ...snapshot, leftRailOpen: next !== "sidebarHidden" }, WINDOW_ID);
+    const next = nextChatLayoutMode(layoutMode, snapshot.leftRailOpen);
+    setLayoutMode(next);
+    persistDockSnapshot({ ...snapshot, leftRailOpen: next === "full" }, WINDOW_ID);
   }, [layoutMode, setLayoutMode]);
 
   useEffect(() => {

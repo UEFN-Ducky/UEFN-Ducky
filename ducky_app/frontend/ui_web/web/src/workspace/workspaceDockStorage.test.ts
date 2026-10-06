@@ -20,6 +20,7 @@ import {
   saveRailSwitch,
   RAIL_SWITCHES_WINDOW,
 } from "./workspaceDockStorage";
+import { nextChatLayoutMode } from "../types/panel";
 
 const mem = new Map<string, string>();
 
@@ -80,9 +81,25 @@ describe("workspace dock sidebar snapshot", () => {
   });
 
   it("disables a rail without collapsing it", () => {
-    const snap = withRailEnabled(defaultDockSnapshot(), "left", false);
+    const snap = withRailEnabled({ ...defaultDockSnapshot(), leftRailOpen: true }, "left", false);
     expect(snap.leftRailEnabled).toBe(false);
     expect(snap.leftRailOpen).toBe(true);
+  });
+
+  it("the header's left button opens a pane that starts closed on the first click", () => {
+    // Fresh install: the layout mode is "full" but the dock has the pane closed.
+    expect(nextChatLayoutMode("full", false)).toBe("full");
+    expect(nextChatLayoutMode("full", true)).toBe("sidebarHidden");
+    expect(nextChatLayoutMode("sidebarHidden", true)).toBe("full");
+    expect(nextChatLayoutMode("sidebarHidden", false)).toBe("full");
+  });
+
+  it("a fresh install opens with both side panes closed", () => {
+    const snap = defaultDockSnapshot();
+    expect(snap.leftRailOpen).toBe(false);
+    expect(snap.rightRailOpen).toBe(false);
+    expect(snap.leftRailEnabled).toBe(true);
+    expect(snap.rightRailEnabled).toBe(true);
   });
 
   it("keeps disabled rails through normalize and boot hydrate", () => {

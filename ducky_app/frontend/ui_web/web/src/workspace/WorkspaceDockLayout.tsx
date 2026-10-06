@@ -8,6 +8,7 @@ import { useVerseOutlineDockPanel } from "./panels/VerseOutlineDockPanel";
 import { useVerseHistoryDockPanel } from "./panels/VerseHistoryDockPanel";
 import { useTesterDockPanel } from "./panels/TesterDockPanel";
 import { requestOpenDiscordTab, setDiscordTabOpen, useDiscordTabOpen } from "../navigation/openDiscordTab";
+import { OPEN_SIDEBAR_PANEL_EVENT } from "../navigation/openSidebarPanel";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useNarrowLayout } from "../hooks/useNarrowLayout";
 import { useOverlayRailSession } from "../hooks/useOverlayRailSession";
@@ -194,6 +195,8 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
     const { setMode: setLayoutMode } = useChatLayoutMode();
     const leftSidebarRef = useRef<ChatSidebarHandle>(null);
     const rightSidebarRef = useRef<ChatSidebarHandle>(null);
+    // Opens the side that holds Duckies or Content (set below, once the sides are known).
+    const openSideForPanelRef = useRef<(panel: "chats" | "files") => void>(() => {});
     const [dragOverlay, setDragOverlayState] = useState<DockDropTarget>(null);
     const [isDockPanelDragging, setIsDockPanelDragging] = useState(false);
 
@@ -223,6 +226,7 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
           await (leftSidebarRef.current?.createDucky() ?? rightSidebarRef.current?.createDucky());
         },
         revealFileInSidebar: (path: string) => {
+          openSideForPanelRef.current("files");
           leftSidebarRef.current?.revealFileInSidebar(path);
           rightSidebarRef.current?.revealFileInSidebar(path);
         },
@@ -407,6 +411,23 @@ export const WorkspaceDockLayout = forwardRef<ChatSidebarHandle, WorkspaceDockLa
       },
       [dock, overlay],
     );
+    // Asking for Duckies or Content (Show me, quick open, reveal, navigation) opens the side
+    // that holds it: both sides start closed on a fresh install.
+    openSideForPanelRef.current = (panel) => {
+      if (leftPanelIds.includes(panel)) {
+        if (leftRailAllowed && !leftOpen) setLeftOpen(true);
+      } else if (rightPanelIds.includes(panel) && rightRailAllowed && !rightOpen) {
+        setRightOpen(true);
+      }
+    };
+    useEffect(() => {
+      const onOpen = (event: Event) => {
+        const panel = (event as CustomEvent<{ panel?: string }>).detail?.panel;
+        if (panel === "chats" || panel === "files") openSideForPanelRef.current(panel);
+      };
+      window.addEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+      return () => window.removeEventListener(OPEN_SIDEBAR_PANEL_EVENT, onOpen);
+    }, []);
     const swipe = useRailEdgeSwipe({
       enabled: overlay,
       leftOpen,
