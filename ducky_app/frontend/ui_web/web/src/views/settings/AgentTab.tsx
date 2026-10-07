@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { savePermissionSettings } from "../../hooks/permissionSettings";
 import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
 import { ChoiceDropdown } from "../../components/ChoiceDropdown";
@@ -315,6 +316,8 @@ const WEB_ACCESS_OPTIONS = [
 export function WebAccessSection() {
   const [loaded, setLoaded] = useState(false);
   const [access, setAccess] = useState("ask");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     return onApiReady((api) => {
@@ -322,7 +325,7 @@ export function WebAccessSection() {
         const mode = (settings.web_access || "ask").trim();
         setAccess(mode === "on" || mode === "off" ? mode : "ask");
         setLoaded(true);
-      });
+      }).catch(() => setStatus("Could not load web permission."));
     });
   }, []);
 
@@ -341,16 +344,21 @@ export function WebAccessSection() {
           aria-label="Web search"
           mode="radio"
           value={access}
-          disabled={!loaded}
+          disabled={!loaded || saving}
           options={WEB_ACCESS_OPTIONS}
           onChange={(next) => {
             const mode = next === "on" || next === "off" ? next : "ask";
             setAccess(mode);
-            const api = getApi();
-            if (api) void api.save_agent_settings({ web_access: mode });
+            setSaving(true);
+            setStatus("Saving…");
+            void savePermissionSettings({ web_access: mode }).then(() => setStatus("Saved.")).catch((error: unknown) => {
+              setAccess(access);
+              setStatus(error instanceof Error ? error.message : "Could not save web permission.");
+            }).finally(() => setSaving(false));
           }}
         />
       </div>
+      <p role="status">{status}</p>
     </div>
   );
 }

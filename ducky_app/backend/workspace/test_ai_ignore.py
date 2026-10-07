@@ -17,7 +17,8 @@ def protected(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setenv("UEFN_DUCKY_PROJECT_ROOT", str(root))
     monkeypatch.delenv("UEFN_VSCODE_WORKSPACE_FOLDERS", raising=False)
-    s = PanelSettings(uefn_project_root=str(root), ai_ignore_patterns=["secrets/", "config/private.json", "*.key"])
+    s = PanelSettings(uefn_project_root=str(root), ai_ignore_patterns=["secrets/", "config/private.json", "*.key"],
+                      ai_ignore_strict=True)
     s.save()
     (root / ".env").write_text("SYNTHETIC_SECRET")
     (root / ".env.production").write_text("SYNTHETIC_SECRET")
@@ -203,6 +204,67 @@ def test_settings_persist_across_loads(protected):
         guard.require_ai_access(str(protected / ".env"))
 
 
+@pytest.mark.parametrize("backend", ["files", "db"])
+def test_strict_protection_is_opt_in(monkeypatch, backend):
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
+    assert PanelSettings().ai_ignore_strict is False
+    assert PanelSettings.load(fail_closed=True).ai_ignore_strict is False
+    assert guard.current_policy().strict is False
+    guard.require_safe_tool("unreal__call_tool")
+
+
+@pytest.mark.parametrize("backend", ["files", "db"])
+@pytest.mark.parametrize("stored_strict", [None, False, True])
+def test_legacy_protection_choice_survives_upgrade(monkeypatch, backend, stored_strict):
+    from frontend.settings import default_app_data_dir
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
+    data = {"ai_ignore_patterns": ["secrets/"]}
+    if stored_strict is not None:
+        data["ai_ignore_strict"] = stored_strict
+    settings_dir = default_app_data_dir()
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    (settings_dir / "panel_settings.json").write_text(json.dumps(data))
+    settings = PanelSettings.load(fail_closed=True)
+    assert settings.ai_ignore_strict is (stored_strict is True)
+    assert settings.ai_ignore_patterns == ["secrets/"]
+    settings.save()
+    assert PanelSettings.load(fail_closed=True).ai_ignore_strict is (stored_strict is True)
+    with pytest.raises(ValueError, match="AI_FILE_IGNORED"):
+        guard.require_ai_access(str(settings_dir / ".env"))
+    with pytest.raises(ValueError, match="AI_FILE_IGNORED"):
+        guard.require_ai_access(str(settings_dir / "secrets" / "hidden.txt"))
+
+
+@pytest.mark.parametrize("backend", ["files", "db"])
+def test_strict_protection_persists_as_only_override(monkeypatch, backend):
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
+    PanelSettings(ai_ignore_strict=True).save()
+    assert PanelSettings.load(fail_closed=True).ai_ignore_strict is True
+    with pytest.raises(ValueError, match="AI_FILE_PROTECTION"):
+        guard.require_safe_tool("unreal__call_tool")
+
+
+def test_external_agent_can_run_without_strict_protection(monkeypatch):
+    from types import SimpleNamespace
+    from backend.agent.coding_agents import runner
+    from frontend.ui_web.live_agent_runs import get_live_run_ids
+    result = {"ok": True, "reply": "completed"}
+    seen = []
+
+    def fake_run(*args, **kwargs):
+        seen.append(kwargs["run_id"])
+        assert kwargs["run_id"] in get_live_run_ids()
+        return result
+
+    monkeypatch.setattr(runner, "_run_coding_agent_message", fake_run)
+    assert runner.run_coding_agent_message(
+        SimpleNamespace(id="test", coding_agent="codex"), "hello", model="",
+        push=lambda _: None, run_id="default-agent",
+    ) == result
+    assert seen == ["default-agent"]
+    assert "default-agent" not in get_live_run_ids()
+
+
 def test_policy_errors_fail_closed(protected, monkeypatch):
     monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(OSError("broken"))))
     with pytest.raises(ValueError, match="AI_FILE_POLICY_UNAVAILABLE"):
@@ -277,12 +339,37 @@ def test_external_agent_never_reaches_adapter(protected, monkeypatch):
     from backend.agent.coding_agents import runner
     monkeypatch.setattr(runner, "get_adapter", lambda _: pytest.fail("adapter must not be touched"))
     events = []
+    from frontend.ui_web.live_agent_runs import add_live_run_id
+    add_live_run_id("blocked")  # The panel registers a run before starting its worker.
     result = runner.run_coding_agent_message(
         SimpleNamespace(id="test", coding_agent="codex"), "hello", model="",
-        push=events.append,
+        push=events.append, run_id="blocked",
     )
     assert not result["ok"] and "AI_FILE_PROTECTION" in result["error"]
+    assert "Settings > General > Permissions and rules" in result["error"]
+    assert "Turn off Strict protection" in result["error"]
     assert events[0]["type"] == "error"
+    assert events[1]["type"] == "agent_stopped"
+    assert events[1]["run_id"] == result["run_id"]
+    from frontend.ui_web.live_agent_runs import get_live_run_ids
+    assert result["run_id"] not in get_live_run_ids()
+    assert guard.save_user_policy({"ai_ignore_strict": False}).startswith("Saved")
+
+
+def test_human_can_disable_strict_during_a_live_run_without_removing_file_rules(protected):
+    from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
+    add_live_run_id("other-agent")
+    try:
+        assert guard.save_user_policy({"ai_ignore_strict": False}).startswith("Saved")
+        assert guard.current_policy().strict is False
+        with pytest.raises(ValueError, match="AI_FILE_IGNORED"):
+            guard.require_ai_access(str(protected / ".env"))
+        with pytest.raises(ValueError, match="AI_FILE_IGNORED"):
+            guard.require_ai_access(str(protected / "secrets" / "hidden.txt"))
+        with pytest.raises(ValueError, match="Stop active agents"):
+            guard.save_user_policy({"ai_ignore_strict": True})
+    finally:
+        discard_live_run_id("other-agent")
 
 
 def test_strict_tools_are_available_but_plugins_are_not_discovered(protected, monkeypatch):

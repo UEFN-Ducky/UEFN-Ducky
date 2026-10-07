@@ -71,8 +71,8 @@ class PanelSettings:
     ai_ignore_patterns: list[str] = field(default_factory=list)
     """User-owned AI file deny patterns. .env and .env.* are always denied."""
 
-    ai_ignore_strict: bool = True
-    """Refuse unsandboxed AI execution. Only the user may change this setting."""
+    ai_ignore_strict: bool = False
+    """Opt-in refusal of unsandboxed AI execution. Only the user may change this setting."""
 
     verse_editor_enabled: bool = True
     """When false, file tabs use read-only preview (legacy behavior)."""
@@ -457,7 +457,7 @@ class PanelSettings:
             or not self.editor_tracking_enabled
             or self.editor_tracking_mode != "full"
             or self.ai_ignore_patterns
-            or not self.ai_ignore_strict
+            or self.ai_ignore_strict
             or self.show_hidden_project_files
             or not self.terminals_enabled
             or self.default_disabled_packs
@@ -598,7 +598,7 @@ class PanelSettings:
     def _validate_ai_fields(data: dict[str, Any]) -> None:
         from backend.workspace.ai_ignore import normalize_rules
         normalize_rules(data.get("ai_ignore_patterns", []))
-        if not isinstance(data.get("ai_ignore_strict", True), bool):
+        if not isinstance(data.get("ai_ignore_strict", False), bool):
             raise ValueError("Invalid AI file protection mode")
 
     @classmethod

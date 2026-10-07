@@ -1,10 +1,12 @@
 # AI file protection
 
-Settings → General → Permissions and rules (immediately after App Data) stores
+Settings → Permissions and rules → AI ignore list stores
 `ai_ignore_patterns` and `ai_ignore_strict` in
 PanelSettings. Only the human settings API may change them. Agent settings tools
-mark both fields non-settable. New and existing installations default to strict
-protection. `.env` and `.env.*` are always protected in guarded workspace tools,
+mark both fields non-settable. Strict protection defaults to off so external
+coding agents and editor/plugin tools remain usable. File input filtering stays
+active in both modes. Explicitly saved choices are preserved. `.env` and `.env.*`
+are always protected in guarded workspace tools,
 including when the user explicitly chooses weaker protection.
 
 Rules accept filename globs, project-relative paths, folders and absolute paths.
@@ -23,8 +25,10 @@ operations, through both embedded tool dispatch and MCP protocol dispatch.
 Unknown tools, plugin wrappers, scripts, Git history/helpers and desktop/browser
 access are refused. External coding agents are refused before adapter detection
 or launch because their native tools and shells share the user's filesystem
-permissions. Protection changes are refused while an agent is running; external
-startup and policy saves share a lock. Workspace mutations cannot change the
+permissions. Enabling Strict protection or editing file rules is refused while
+an agent is running; external startup and policy saves share a lock. A human may turn Strict protection off
+immediately, including while agents are running; the file input rules remain
+active. Workspace mutations cannot change the
 installed app or its AppData, which contains enforcement settings and extensions.
 Invalid or unavailable policy storage fails closed.
 

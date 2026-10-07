@@ -7401,3 +7401,15 @@
   display: flex;
   gap: 8px;
 }
+.settings-permissions-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.settings-permissions-table th,
+.settings-permissions-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}

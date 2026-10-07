@@ -6,6 +6,7 @@ import { ChatListPanel, SingleChatPanel } from "./ChatListPanel";
 import { LinkedAgentCard } from "./LinkedAgentCard";
 import { ToolFileEditDiff } from "./ToolFileEditDiff";
 import { DefaultBody } from "./tool-cards/bodies/DefaultBody";
+import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { walkthroughStepsFromTool } from "./tool-cards/bodies/WalkthroughBody";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
 import { resolveToolCategory } from "./tool-cards/toolCategories";
@@ -445,6 +446,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
                   onOpenFile={onOpenFile}
                 />
               ) : null}
+              {!isSuccess && !isRunning && resultText.includes("AI_FILE_PROTECTION:") ? <FileProtectionRecovery /> : null}
             </div>
           </div>
           ) : null}

@@ -577,10 +577,16 @@ def run_coding_agent_message(
     rid = run_id or str(uuid.uuid4())
     with protection_lock:
         if current_policy().strict:
-            error = ("AI_FILE_PROTECTION: external coding agents have direct filesystem access "
-                     "and are blocked in strict protection mode. Use an embedded Ducky model.")
-            push({"type": "error", "text": error, "conv_id": conv.id})
-            return {"ok": False, "error": error}
+            error = ("AI_FILE_PROTECTION: Strict protection blocks external coding agents "
+                     "because they have direct filesystem access. To use this agent, "
+                     "use Turn off Strict protection below, or open Settings > General > Permissions and rules "
+                     "> AI ignore list and turn off Strict protection (saved immediately). "
+                     "External agents can bypass file rules with this off. "
+                     "To keep Strict protection, use an embedded Ducky model.")
+            discard_live_run_id(rid)
+            push({"type": "error", "text": error, "conv_id": conv.id, "run_id": rid})
+            push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
+            return {"ok": False, "error": error, "run_id": rid}
         add_live_run_id(rid)
     try:
         return _run_coding_agent_message(

@@ -207,7 +207,7 @@ def _join_host_workers(timeout: float = 5.0) -> None:
 def unrestricted_tools(_appdata_per_test):
     """Tests of tool routing opt out of strict mode in their isolated settings.
 
-    Protection tests keep the production default and exercise both modes.
+    Protection tests enable strict mode explicitly and exercise both modes.
     """
     from frontend.settings import PanelSettings
 

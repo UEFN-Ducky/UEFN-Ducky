@@ -7,6 +7,7 @@ import { ttsEngine, type TtsProgress } from "../voice/ttsEngine";
 import { ModelSelector } from "./ModelSelector";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { FileProtectionRecovery } from "./FileProtectionRecovery";
 
 interface MessageBubbleProps {
   role: string;
@@ -122,6 +123,7 @@ export const MessageBubble = memo(function MessageBubble({
             <span className="message-bubble-interrupted-msg">
               {error ? `Interrupted: ${error}` : "Interrupted before finishing"}
             </span>
+            {error?.includes("AI_FILE_PROTECTION:") ? <FileProtectionRecovery /> : null}
             {onContinue ? (
               <div className="message-bubble-interrupted-actions">
                 {setSelectedModel ? (

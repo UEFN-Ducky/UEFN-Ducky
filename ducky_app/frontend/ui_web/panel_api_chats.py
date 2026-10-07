@@ -1146,6 +1146,42 @@ class PanelApiChatsMixin:
         set_allow_everything(str(conv_id or ""), bool(on))
         return {"ok": True, **allow_state(str(conv_id or ""))}
 
+    def list_saved_agent_permissions(self) -> list[dict[str, str]]:
+        """All remembered chat approvals, including individual command/file rules."""
+        from backend.tools.panel import permission_prompt as permissions
+
+        if permissions._rules_in_db():
+            from backend.store.repos import chats, kv
+
+            docs = kv.list_docs("workspace_state", "agent_allow:")
+            entries = []
+            for key, rules in docs.items():
+                conv_id = key.removeprefix("agent_allow:")
+                conv = chats.conv_get(conv_id, with_messages=False)
+                if conv and isinstance(rules, list):
+                    entries.append((conv_id, str(conv.get("title") or "Chat"), rules))
+        else:
+            entries = [
+                (conv.id, conv.title or "Chat", list(getattr(conv, "agent_allow_rules", None) or []))
+                for _, conv in _pa.iter_conversations_by_project()
+            ]
+        return [
+            {"conv_id": conv_id, "title": title, "rule": rule,
+             "label": "Allow everything in this chat" if rule == "*" else rule}
+            for conv_id, title, rules in entries for rule in rules if isinstance(rule, str) and rule
+        ]
+
+    def revoke_saved_agent_permission(self, conv_id: str, rule: str) -> dict[str, bool]:
+        """Human Settings action: remove one existing approval, never grant access."""
+        from backend.tools.panel import permission_prompt as permissions
+
+        rules = permissions._rules(conv_id)
+        remaining = [saved for saved in rules if saved != rule]
+        permissions._store_rules(conv_id, remaining)
+        if permissions._rules(conv_id) != remaining:
+            raise ValueError("Could not save the permission change.")
+        return {"ok": True}
+
     def rename_conversation(self, conv_id: str, title: str) -> None:
         conv = _pa.load_conversation(conv_id)
         if conv:

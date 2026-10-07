@@ -38,6 +38,13 @@ export interface AppUpdateStatus {
   error: string | null;
 }
 
+export interface SavedAgentPermissionDto {
+  conv_id: string;
+  title: string;
+  rule: string;
+  label: string;
+}
+
 export interface UpdaterResult {
   ok: boolean;
   error: string | null;
@@ -2972,6 +2979,8 @@ export interface PanelApi {
   delete_custom_verse_template(template_id: string): Promise<{ ok: boolean }>;
   rename_conversation(conv_id: string, title: string): Promise<void>;
   set_agent_allow_everything?(conv_id: string, on: boolean): Promise<{ ok: boolean; on: boolean; own: boolean; from_title?: string }>;
+  list_saved_agent_permissions(): Promise<SavedAgentPermissionDto[]>;
+  revoke_saved_agent_permission(conv_id: string, rule: string): Promise<{ ok: boolean }>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;
   move_chats_to_project?(
     conv_ids: string[],

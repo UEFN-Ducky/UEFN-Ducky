@@ -257,6 +257,8 @@ _PUBLIC_METHODS = frozenset({
     'check_workflow_node_code',
     'approve_workflow_node_code',
     'set_agent_allow_everything',
+    'list_saved_agent_permissions',
+    'revoke_saved_agent_permission',
     'set_workflow_editor_prefs',
     'save_workflow',
     'save_workflow_template',

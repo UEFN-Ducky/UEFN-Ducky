@@ -19,11 +19,16 @@ protection_lock = threading.RLock()
 
 
 def save_user_policy(patch: dict) -> str:
-    """UI-only save; do not activate a changed policy over a running agent."""
+    """UI-only save; enabling/changing denials requires agents to be stopped.
+
+    The human may disable the extra execution restriction immediately. This
+    does not remove built-in or user-owned file input rules.
+    """
     from frontend.settings import PanelSettings
     from frontend.ui_web.live_agent_runs import get_live_run_ids
     with protection_lock:
-        if get_live_run_ids():
+        disabling_strict = patch == {"ai_ignore_strict": False}
+        if get_live_run_ids() and not disabling_strict:
             raise ValueError("Stop active agents before changing AI file protection.")
         settings = PanelSettings.load()
         if "ai_ignore_patterns" in patch:

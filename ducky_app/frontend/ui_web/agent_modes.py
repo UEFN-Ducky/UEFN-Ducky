@@ -440,10 +440,14 @@ class AgentSession:
         if self.run_id != run_id:
             self.prepare_run(run_id)
         self._thread = threading.Thread(target=target, daemon=True, name=f"agent-{run_id[:8]}")
-        self._thread.start()
-        from frontend.ui_web.live_agent_runs import add_live_run_id
+        from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
 
         add_live_run_id(run_id)
+        try:
+            self._thread.start()
+        except Exception:
+            discard_live_run_id(run_id)
+            raise
         # #region agent log
         _dbg_thread_state("agent thread started", runId=run_id, threadName=self._thread.name)
         # #endregion
@@ -1776,6 +1780,9 @@ def run_message(
                 _push_agent_stopped(push, conv_id, run_id, "error")
             # #region agent log
             finally:
+                from frontend.ui_web.live_agent_runs import discard_live_run_id
+
+                discard_live_run_id(run_id)
                 close_changeset_run(run_id, "done")
                 _dbg_thread_state("external agent thread finished", runId=run_id, convId=conv_id)
             # #endregion
