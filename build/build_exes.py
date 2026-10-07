@@ -300,10 +300,14 @@ def main() -> int:
     # Freeze the panel before PyInstaller. npm rebuilds during Analysis replace
     # hashed assets, and PyInstaller then skips the missing files.
     panel_live = root / "ducky_app" / "frontend" / "ui_web" / "web" / "dist"
-    panel_snap = Path(tempfile.gettempdir()) / "uefn-ducky-panel-dist"
-    if panel_snap.exists():
-        shutil.rmtree(panel_snap)
+    panel_stage = tempfile.TemporaryDirectory(prefix="uefn-ducky-panel-build-")
+    panel_snap = Path(panel_stage.name) / "dist"
     shutil.copytree(panel_live, panel_snap)
+    from frontend.ui_web.panel_assets import create_panel_archive
+
+    panel_archive = Path(panel_stage.name) / "panel-dist.zip"
+    create_panel_archive(panel_snap, panel_archive)
+    os.environ["UEFN_DUCKY_PANEL_ARCHIVE"] = str(panel_archive)
     os.environ["UEFN_DUCKY_PANEL_DIST"] = str(panel_snap)
     print(f"Froze panel dist -> {panel_snap}")
 
@@ -445,10 +449,10 @@ def main() -> int:
 
     packaged_panel = wrote / "_internal" / "frontend" / "ui_web" / "web" / "dist"
     try:
-        from frontend.ui_web.panel_httpd import verify_panel_dist
+        from frontend.ui_web.panel_assets import verify_bundled_panel
 
-        verify_panel_dist(packaged_panel)
-    except FileNotFoundError as exc:
+        verify_bundled_panel(packaged_panel, packaged_panel.parent.parent / "panel-dist.zip")
+    except (OSError, ValueError) as exc:
         print(f"ERROR: packaged panel is incomplete: {exc}", file=sys.stderr)
         return 1
     print(f"Verified packaged panel: {packaged_panel}")

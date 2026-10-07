@@ -42,8 +42,9 @@ def _web_root() -> Path:
         base = packaged_data_root()
         if base:
             candidate = base / "frontend" / "ui_web" / "web" / "dist"
-            if (candidate / "index.html").is_file():
-                return candidate
+            from frontend.ui_web.panel_assets import ensure_panel_dist
+
+            return ensure_panel_dist(candidate)
     return Path(__file__).resolve().parent / "web" / "dist"
 
 

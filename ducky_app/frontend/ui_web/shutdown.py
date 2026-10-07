@@ -158,7 +158,15 @@ def _format_fatal_message(exc: BaseException | str) -> str:
     if not msg:
         msg = repr(exc)
     text = str(exc)
-    if "Panel build incomplete" in text or "React build not found" in text:
+    if "Panel build incomplete" in text or "React build not found" in text or "Panel dist missing" in text:
+        from frontend.bundle_root import is_packaged_runtime
+
+        if is_packaged_runtime():
+            return (
+                "Some installed UEFN Ducky files are missing or damaged.\n\n"
+                "Run the latest UEFN Ducky Setup from https://uefnducky.org again "
+                "to repair the installation. Your chats and settings are kept."
+            )
         return (
             f"{msg}\n\n"
             "Rebuild the panel UI (cd ducky_app/frontend/ui_web/web && npm run build), "

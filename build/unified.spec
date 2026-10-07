@@ -163,6 +163,11 @@ if _appearance_builtin_profiles.is_file():
 _bundled_agent_profiles = FRONTEND / "bundled_agent_profiles.json"
 if _bundled_agent_profiles.is_file():
     _datas.append((str(_bundled_agent_profiles), "frontend"))
+_panel_archive = os.environ.get("UEFN_DUCKY_PANEL_ARCHIVE", "").strip()
+if not _panel_archive or not Path(_panel_archive).is_file():
+    raise RuntimeError("unified.spec: panel recovery archive missing; run build_exes.py")
+_datas.append((_panel_archive, "frontend/ui_web"))
+
 # Snapshot from build_exes. A later npm rebuild rewrites hashed filenames in the
 # live dist; packaging that moving tree ships index.html without its JS.
 _panel_snap = os.environ.get("UEFN_DUCKY_PANEL_DIST", "").strip()

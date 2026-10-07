@@ -89,6 +89,27 @@ async def _check_mcp() -> dict:
         cp.stdio_client, cp.ClientSession, cp.resolve_server_block = original_stdio, original_session, original_resolve
 
 
+def check_panel_recovery(output: str) -> int:
+    """Exercise the GUI's root selection without starting windows or services."""
+    report = {"ok": False}
+    try:
+        from frontend.bundle_root import packaged_data_root
+        from frontend.ui_web.panel_assets import verify_bundled_panel
+        from frontend.ui_web.webview_app import _web_root
+
+        data_root = packaged_data_root()
+        if data_root is None:
+            raise ValueError("Recovery smoke requires a packaged runtime")
+        panel = data_root / "frontend" / "ui_web"
+        selected = _web_root()
+        verify_bundled_panel(selected, panel / "panel-dist.zip")
+        report.update(ok=True, recovered=selected != panel / "web" / "dist")
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+    Path(output).write_text(json.dumps(report), encoding="utf-8")
+    return 0 if report["ok"] else 1
+
+
 def run(output: str) -> int:
     report: dict = {"ok": False, "python": platform.python_version()}
     try:
@@ -108,6 +129,15 @@ def _run(output: str, report: dict) -> int:
     import backend.store.db  # noqa: F401
     from backend.workspace.diff_workers import DiffWorkers
     from backend.workspace.paths import line_delta
+
+    from frontend.bundle_root import packaged_data_root
+    from frontend.ui_web.panel_assets import verify_bundled_panel
+
+    data_root = packaged_data_root()
+    if data_root is not None:
+        panel = data_root / "frontend" / "ui_web"
+        verify_bundled_panel(panel / "web" / "dist", panel / "panel-dist.zip")
+        report["panel"] = {"all_assets_verified": True}
 
     report["versions"] = {
         name: importlib.metadata.version(name) for name in ("mcp", "anyio", "httpx")
