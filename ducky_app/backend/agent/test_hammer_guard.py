@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
+
 import json
 import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 import backend.agent.hammer_guard as hg
 import backend.agent.tools as tools
+
+pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
 
 @pytest.fixture(autouse=True)

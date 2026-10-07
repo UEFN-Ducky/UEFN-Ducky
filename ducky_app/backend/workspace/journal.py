@@ -1851,6 +1851,11 @@ class FileChangeJournal:
         base = run["seen"].get(record.path, {}).get("hash")
         if base is not None and base != record.before_hash:
             return {"kind": CONFLICT_STALE_BASE, "expected_hash": base, "found_hash": record.before_hash, **other}
+        # A resumed turn has a new run ID but still belongs to the same Ducky.
+        # Keep stale-read checks above; only another chat is a concurrent writer.
+        conv_id = str(run.get("conv_id") or "")
+        if conv_id and conv_id == other["other_conv_id"]:
+            return None
         if prev_run:
             other_run = self._load_run(storage, prev_run)
             if other_run is not None and other_run.get("status") in _OPEN_STATUSES:

@@ -152,6 +152,46 @@ def test_concurrent_writer_conflict_only_while_other_run_is_open(env) -> None:
     assert res2.changeset["conflict"] is None
 
 
+@pytest.mark.parametrize("conv_a,conv_b,expected", [
+    ("same-chat", "same-chat", None),
+    ("chat-a", "chat-b", "concurrent_writer"),
+    ("", "", "concurrent_writer"),
+])
+def test_conflicts_use_chat_ids_across_resumes_and_duplicate_names(env, conv_a, conv_b, expected):
+    _, _, _, writer, _ = env
+    for run_id, conv_id in (("old-turn", conv_a), ("new-turn", conv_b)):
+        token = identity.bind(RunContext(run_id=run_id, conv_id=conv_id, ducky_name="New ducky2"))
+        try:
+            result = writer.write_text("Content/Verse/shared.verse", run_id + "\n")
+        finally:
+            identity.reset(token)
+    conflict = result.changeset["conflict"]
+    assert (conflict["kind"] if conflict else None) == expected
+    if expected is None:
+        assert not result.warning
+
+
+def test_same_chat_resume_still_detects_stale_reads(env):
+    root, _, _, writer, _ = env
+    (root / "Content/Verse/shared.verse").write_text("base\n", encoding="utf-8")
+    token = identity.bind(RunContext(run_id="reading", conv_id="same-chat"))
+    try:
+        writer.note_read("Content/Verse/shared.verse", "base\n")
+    finally:
+        identity.reset(token)
+    token = identity.bind(RunContext(run_id="resumed", conv_id="same-chat"))
+    try:
+        writer.write_text("Content/Verse/shared.verse", "changed\n")
+    finally:
+        identity.reset(token)
+    token = identity.bind(RunContext(run_id="reading", conv_id="same-chat"))
+    try:
+        result = writer.write_text("Content/Verse/shared.verse", "stale\n")
+    finally:
+        identity.reset(token)
+    assert result.changeset["conflict"]["kind"] == "stale_base"
+
+
 def test_revert_run_restores_files_newest_first(env) -> None:
     root, storage, journal, writer, _ = env
     seen: list[dict] = []

@@ -46,7 +46,11 @@ def _copy_prep_siblings(src: Path, dest: Path) -> bool:
     Best-effort: they are only a cache; the send path re-extracts when they are missing.
     Returns True when the transcript is still being produced (the sender must not start a second one)."""
     from backend.agent.video import prep
+    from backend.workspace.ai_ignore import current_policy
 
+    policy = current_policy()
+    policy.require(str(src))
+    policy.require(str(dest))
     st = prep.prep_status(src.name)
     if not st.get("sendable") and st["state"] not in ("ready", "error"):
         return False  # frames still being written: the send path extracts for itself
@@ -58,8 +62,11 @@ def _copy_prep_siblings(src: Path, dest: Path) -> bool:
         suffix = sib.name[len(src.name):]
         if not suffix or suffix.endswith((".audio.mp3", ".part.jpg", ".part")):
             continue
+        target = dest.with_name(dest.name + suffix)
+        if policy.denied(str(sib)) or policy.denied(str(target)):
+            continue
         try:
-            shutil.copyfile(sib, dest.with_name(dest.name + suffix))
+            shutil.copyfile(sib, target)
         except OSError:
             pass
     return st["state"] == "transcribing"
@@ -78,14 +85,21 @@ def persist_message_attachments(
         return []
     conv_path = conversation_dir(conv_id, None, conversations_dir)
     att_dir = conversation_attachments_dir(conv_id, None, conversations_dir)
+    from backend.workspace.ai_ignore import DENIED, current_policy
+
+    policy = current_policy()
+    policy.require(str(att_dir))
     att_dir.mkdir(parents=True, exist_ok=True)
     out: list[dict[str, Any]] = []
     ts_tag = int(message_ts * 1000)
     for i, att in enumerate(attachments):
+        if policy.denied_hint(att.name):
+            raise ValueError(DENIED)
         safe = _safe_attachment_filename(att.name)
         filename = f"{ts_tag}_{i}_{safe}"
         rel = f"attachments/{filename}"
         full = conv_path / rel
+        policy.require(str(full))
         if att.kind == "image" and att.data_base64:
             try:
                 full.write_bytes(base64.b64decode(att.data_base64, validate=True))
@@ -100,6 +114,8 @@ def persist_message_attachments(
                 filename += ext
                 rel = f"attachments/{filename}"
                 full = conv_path / rel
+            policy.require(att.file_path)
+            policy.require(str(full))
             try:
                 shutil.copyfile(att.file_path, full)
             except OSError as exc:
@@ -144,6 +160,11 @@ def hydrate_attachment_dict(
     if not path:
         return raw
     full = conversation_dir(conv_id, None, conversations_dir) / path
+    from backend.workspace.ai_ignore import current_policy
+
+    policy = current_policy()
+    if policy.denied(str(full)) or policy.denied_hint(str(raw.get("name") or full.name)):
+        return {"kind": "ignored", "name": str(raw.get("name") or "")}
     if not full.is_file():
         return raw
     if kind == "image":
@@ -158,6 +179,8 @@ def hydrate_attachment_dict(
             if not isinstance(fr, dict) or not fr.get("path"):
                 continue
             fp = conv_path / str(fr["path"])
+            if policy.denied(str(fp)):
+                continue
             frames.append(
                 {
                     **fr,

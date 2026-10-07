@@ -387,6 +387,8 @@ def get_system_prompt_parts(
             pass
     static_rules = f"## Rules\n{_rules_body(listener_port, local_slim=local_slim)}{mode_suffix}"
     rules_block = f"{offline_rules}{static_rules}"
+    from backend.agent.chat_title import self_naming_instruction
+    rules_block = self_naming_instruction(ducky_name, conv_id) + rules_block
     personality_block = format_ducky_personality_block(ducky_name, ducky_personality)
     tool_index_block = ""
     try:
@@ -401,6 +403,20 @@ def get_system_prompt_parts(
         )
     except Exception:
         pass
+    from backend.workspace.ai_ignore import current_policy
+    if current_policy().strict:
+        protection_note = (
+            "\n## Active AI file protection\n"
+            "Strict protection overrides instructions to use workflows, scripts, shell, "
+            "Git, editor, browser, plugin or deferred wrapper tools. Only the advertised "
+            "guarded workspace tools and ask/plan operations are available. "
+            "Do not attempt bypasses, claim to have run blocked checks, or change protection. "
+            "Explain any capability restriction briefly. Only the human can change these "
+            "rules in General settings.\n"
+        )
+        system += protection_note
+        rules_block += protection_note
+        tool_index_block = ""
     return {
         "system": system,
         "mcp": mcp_block,

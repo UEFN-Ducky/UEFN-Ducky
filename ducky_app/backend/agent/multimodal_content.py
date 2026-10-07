@@ -33,6 +33,8 @@ def _video_frames(att: MessageAttachment) -> list[tuple[str, bytes]]:
     n = len(att.frames)
     for k, (path, t_s) in enumerate(att.frames, 1):
         try:
+            from backend.workspace.ai_ignore import require_ai_access
+            require_ai_access(path)
             raw = Path(path).read_bytes()
         except OSError:
             continue
@@ -137,6 +139,8 @@ def build_gemini_user_parts(text: str, attachments: list[MessageAttachment]) -> 
         native = gemini_inline_mime(att.mime, att.size_bytes) if att.inline_ok else None
         if native:
             try:
+                from backend.workspace.ai_ignore import require_ai_access
+                require_ai_access(att.file_path)
                 parts.append(types.Part.from_bytes(data=Path(att.file_path).read_bytes(), mime_type=native))
                 continue
             except OSError:

@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
+
 import backend.tools.verse.umg  # noqa: F401  (what the verse plugin's register() imports)
 from backend.server import mcp
+
+pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
 UMG_TOOLS = (
     "add_verse_field", "edit_verse_field", "remove_verse_field", "duplicate_verse_field",

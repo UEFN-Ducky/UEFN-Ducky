@@ -317,14 +317,14 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
           releaseAllTabs();
           if (api) await api.close_this_window("last terminal tab hidden", WINDOW_ID);
         } else if (api) {
-          await api.close_focus_window(tabId, "terminal tab hidden");
+          await api.close_focus_window(tabId, "terminal tab hidden", WINDOW_ID);
         }
         return;
       }
 
       // Anything except terminals returns to main (or primary focus group).
       if (closing && closing.kind !== "terminal") {
-        const returned = await api?.return_tab_to_main(tabId, closing.name);
+        const returned = await api?.return_tab_to_main(tabId, closing.name, WINDOW_ID);
         if (returned) return;
       }
 
@@ -336,7 +336,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
         if (api) await api.close_this_window("last tab closed", WINDOW_ID);
         return;
       }
-      if (api) await api.close_focus_window(tabId, "tab closed");
+      if (api) await api.close_focus_window(tabId, "tab closed", WINDOW_ID);
     },
     [parkTerminalTab, guardUnsavedChanges],
   );
@@ -428,7 +428,7 @@ export function useFocusWindowTabs(initialFocusId: string, initialTitle: string)
         // Keep Python group.tabs in sync — otherwise the next Focus short-circuits to
         // Activate on a ghost id and the window stays empty ("No tabs open.").
         // close_focus_window destroys the OS window when this was the last tab.
-        void getApi()?.close_focus_window(tabId, `tab claimed by ${by}`);
+        void getApi()?.close_focus_window(tabId, `tab claimed by ${by}`, WINDOW_ID);
         if (remaining.length === 0) {
           releaseAllTabs();
         }

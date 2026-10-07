@@ -7,9 +7,20 @@ from typing import Any, Callable
 
 from backend.agent.video.ffmpeg_install import binaries
 from backend.agent.video.audio import transcribe_video
-from backend.agent.video.frames import VideoError, extract_frames
+from backend.agent.video.frames import VideoError, extract_frames, require_media_access
 from backend.agent.video.limits import media_limits_for
 from backend.agent.video.routing import needs_frames
+
+
+def _require_video_row(row: dict[str, Any], conv_dir: Path) -> None:
+    from backend.workspace.ai_ignore import DENIED, current_policy
+
+    try:
+        if current_policy().denied_hint(str(row.get("name") or "video")):
+            raise VideoError(DENIED)
+        require_media_access(conv_dir / str(row["path"]))
+    except ValueError as exc:
+        raise VideoError(str(exc)) from exc
 
 
 def prepare_video_frames(
@@ -24,6 +35,8 @@ def prepare_video_frames(
     videos = [r for r in stored if r.get("kind") == "video" and r.get("path")]
     if not videos:
         return
+    for row in videos:
+        _require_video_row(row, conv_dir)
     limits = media_limits_for(provider, model)
     todo = [
         r
@@ -55,6 +68,7 @@ def _ensure_transcript(
     row: dict[str, Any], conv_dir: Path, push_status: Callable[[str], None] | None
 ) -> bool:
     """Best-effort: fill transcript/transcript_note once per row. True when the row changed."""
+    _require_video_row(row, conv_dir)
     if "transcript_note" in row:
         return False
     name = row.get("name") or "video"
@@ -69,6 +83,7 @@ def _ensure_transcript(
 
 
 def external_video_hint(row: dict[str, Any], conv_dir: Path) -> str:
+    _require_video_row(row, conv_dir)
     hint = f"Video file: {conv_dir / str(row['path'])}"
     transcript = str(row.get("transcript") or "")
     if transcript:
@@ -77,6 +92,7 @@ def external_video_hint(row: dict[str, Any], conv_dir: Path) -> str:
 
 
 def runtime_video_dict(row: dict[str, Any], conv_dir: Path) -> dict[str, Any]:
+    _require_video_row(row, conv_dir)
     return {
         "kind": "video",
         "name": row.get("name") or "video",
@@ -113,6 +129,10 @@ def backfill_history_frames(
             continue
         for row in m.get("attachments") or []:
             if not isinstance(row, dict) or row.get("kind") != "video" or not row.get("path"):
+                continue
+            try:
+                _require_video_row(row, conv_dir)
+            except VideoError:
                 continue
             if not needs_frames(
                 str(row.get("mime") or ""), int(row.get("size_bytes") or 0), provider=provider, external=external,

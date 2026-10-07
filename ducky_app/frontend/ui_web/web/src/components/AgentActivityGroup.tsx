@@ -8,7 +8,6 @@ import {
 import { ToolExecutionCard } from "./ToolExecutionCard";
 import type { ActivityItem } from "../utils/chatMessageGroups";
 import type { ChatTab, LinkedAgent, MessageAuthorDto } from "../types/panel";
-import { InlineStopButton } from "./InlineStopButton";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
 import type { ShowMeRequest } from "../showme/ShowMeService";
@@ -20,7 +19,6 @@ interface AgentActivityGroupProps {
   captureAskKeys?: boolean;
   onOpenChat?: (chat: ChatTab) => void;
   onStopLinked?: (childConvId: string) => void;
-  onStop?: () => void;
   onOpenFile?: (path: string, name: string, options?: { line?: number }) => void;
   allChats?: ChatTab[];
   liveLinkedAgents?: LinkedAgent[];
@@ -29,9 +27,8 @@ interface AgentActivityGroupProps {
 
 function toolRunning(item: Extract<ActivityItem, { kind: "tool" }>): boolean {
   const status = item.result?.tool?.status ?? item.intent.tool?.status;
-  if (status === "cancelled") return false;
-  if (!item.result) return true;
-  return status === "pending";
+  if (status) return status === "pending" || status === "running";
+  return !item.result;
 }
 
 function activityGroupLabel(items: ActivityItem[], live: boolean): string {
@@ -95,7 +92,6 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
   captureAskKeys = false,
   onOpenChat,
   onStopLinked,
-  onStop,
   onOpenFile,
   allChats = [],
   liveLinkedAgents = [],
@@ -149,7 +145,6 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
           ) : null}
           {live ? <span className="agent-activity-group-pulse" aria-hidden="true" /> : null}
         </button>
-        {live && onStop ? <InlineStopButton onClick={onStop} /> : null}
       </div>
       {shows.length ? (
         <div className="agent-activity-group-showme" role="group" aria-label="Show me">

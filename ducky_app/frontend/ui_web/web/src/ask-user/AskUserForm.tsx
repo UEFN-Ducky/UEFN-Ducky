@@ -156,6 +156,7 @@ export const AskUserForm = memo(function AskUserForm({
   };
 
   const handleClose = () => {
+    if (questions.some((q, i) => q.required && !committed[i])) return;
     const answers: Record<string, AskUserAnswer> = { ...answersSoFar };
     for (let i = 0; i < questions.length; i++) {
       if (!answers[questions[i].id]) {
@@ -235,7 +236,7 @@ export const AskUserForm = memo(function AskUserForm({
           </span>
         ) : null}
         <span className="ask-user-pause-hint">Agent paused until Submit</span>
-        {showDismiss ? (
+        {showDismiss && questions.every((q) => !q.required) ? (
           <button
             type="button"
             className="ask-user-dismiss"

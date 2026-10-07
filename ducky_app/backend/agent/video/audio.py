@@ -33,6 +33,7 @@ def transcript_paths(video: Path) -> tuple[Path, Path]:
 
 
 def has_audio(ffprobe: Path, video: Path, timeout_s: float = 15) -> bool:
+    frames.require_media_access(video)
     args = [
         str(ffprobe), "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
         "-of", "csv=p=0", str(video),
@@ -47,6 +48,7 @@ def has_audio(ffprobe: Path, video: Path, timeout_s: float = 15) -> bool:
 
 
 def extract_mp3(ffmpeg: Path, video: Path, out: Path, timeout_s: float = 120) -> Path:
+    frames.require_media_access(video, out)
     args = [
         str(ffmpeg), "-nostdin", "-v", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000",
         "-b:a", "48k", "-f", "mp3", "-y", str(out),
@@ -64,6 +66,7 @@ def extract_mp3(ffmpeg: Path, video: Path, out: Path, timeout_s: float = 120) ->
 
 
 def _read(path: Path) -> str | None:
+    frames.require_media_access(path)
     try:
         return path.read_text(encoding="utf-8")
     except OSError:
@@ -72,6 +75,7 @@ def _read(path: Path) -> str | None:
 
 def _write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".part")
+    frames.require_media_access(path, tmp)
     try:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
@@ -84,6 +88,14 @@ def transcribe_video(video: Path, on_extracted: Callable[[], None] | None = None
 
     ``on_extracted`` runs once the local ffmpeg work is done, before the network call."""
     text_p, note_p = transcript_paths(video)
+    mp3 = video.with_name(f"{video.name}.audio.mp3")
+    try:
+        # Include temporary outputs so denial cannot reach cleanup or a subprocess.
+        frames.require_media_access(video, text_p, note_p, mp3,
+                                    text_p.with_name(text_p.name + ".part"),
+                                    note_p.with_name(note_p.name + ".part"))
+    except frames.VideoError as exc:
+        return TranscriptResult("", str(exc))
     cached = _read(text_p)
     if cached:
         return TranscriptResult(cached, "")
@@ -94,7 +106,6 @@ def transcribe_video(video: Path, on_extracted: Callable[[], None] | None = None
 
     if not openai_transcription_available():
         return TranscriptResult("", NOTE_NO_KEY)  # not cached: the user may add a key later
-    mp3 = video.with_name(f"{video.name}.audio.mp3")
     try:
         try:
             ffmpeg, ffprobe = ensure_installed()

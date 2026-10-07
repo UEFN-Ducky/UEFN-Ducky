@@ -1158,6 +1158,10 @@ class AgentRunner:
                         content=llm_content,
                     )
                 )
+                if effective_tool_name(rec.name, rec.arguments) == "ducky_ask_user" and not result.ok:
+                    # No answer: stop this run instead of asking the model to guess.
+                    yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
+                    return
                 # Capture tools: attach PNG for vision on the next model turn
                 # (providers only send images on role=user).
                 if result.ok:

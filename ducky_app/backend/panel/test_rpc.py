@@ -29,3 +29,21 @@ def test_connection_refused_is_panel_not_open(monkeypatch):
     monkeypatch.setattr(rpc_mod, "_http", fake_http)
     out = rpc_mod.panel_rpc("ask_user", {}, timeout=float("inf"))
     assert out.get("error") == "panel not open"
+
+
+def test_question_gate_retries_until_answer_and_fails_closed(monkeypatch):
+    import pytest
+
+    responses = iter([{"blocked": True}, {"blocked": True}, {"blocked": False}])
+    calls = []
+    def gate(method, params, *, timeout):
+        calls.append((method, params, timeout))
+        return next(responses)
+    monkeypatch.setattr(rpc_mod, "panel_rpc", gate)
+    rpc_mod.wait_for_question_answers("chat")
+    assert len(calls) == 3
+    assert all(method == "question_gate" and params == {"conv_id": "chat"} for method, params, _ in calls)
+    assert all(timeout == float("inf") for _, _, timeout in calls)
+    monkeypatch.setattr(rpc_mod, "panel_rpc", lambda *args, **kwargs: {"error": "panel not open"})
+    with pytest.raises(RuntimeError, match="remain blocked"):
+        rpc_mod.wait_for_question_answers("chat")

@@ -150,7 +150,7 @@ export interface ChangesViewProps {
 }
 
 function runDuckyKey(run: ChangesetRunDto): string {
-  return (run.profile_id || run.ducky_name || run.conv_id || "").trim();
+  return (run.conv_id || run.profile_id || run.run_id || "").trim();
 }
 
 function runMatchesProfile(
@@ -160,14 +160,10 @@ function runMatchesProfile(
   chats?: ChatTab[],
 ): boolean {
   const pid = profileId.trim();
-  const name = profileName.trim().toLowerCase();
-  if (!pid && !name) return true;
-  if (pid && (run.profile_id || "").trim() === pid) return true;
-  const chat = runChat(run, chats);
-  if (pid && (chat?.profileId || "").trim() === pid) return true;
-  if (name && (run.ducky_name || "").trim().toLowerCase() === name) return true;
-  const chatName = (chat?.duckyName || "").trim().toLowerCase();
-  return Boolean(name && chatName && chatName === name);
+  if (!pid) return !profileName.trim();
+  const runProfile = (run.profile_id || "").trim();
+  if (runProfile) return runProfile === pid;
+  return (runChat(run, chats)?.profileId || "").trim() === pid;
 }
 
 function runChat(run: ChangesetRunDto, chats?: ChatTab[]): ChatTab | undefined {

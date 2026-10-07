@@ -1319,6 +1319,12 @@ export interface PanelSettingsDto {
   antigravity_config_path: string;
   verse_diagnostics_cache_enabled?: boolean;
   verse_diagnostics_auto_check?: boolean;
+  ai_ignore_patterns?: string[];
+  ai_ignore_strict?: boolean;
+  allow_settings_write?: boolean;
+  allow_agent_clicks?: boolean;
+  allow_see_uefn?: boolean;
+  allow_see_other_programs?: boolean;
   show_hidden_project_files?: boolean;
   terminals_enabled?: boolean;
   prompt_caching_enabled?: boolean;
@@ -2608,8 +2614,8 @@ export interface PanelApi {
   }>;
   notify_focus_tab_active(focus_id: string, title: string): Promise<void>;
   report_focus_window_layout(birth_tab_id: string, layout: EditorLayoutState): Promise<void>;
-  return_tab_to_main(focus_id: string, title: string): Promise<boolean>;
-  close_focus_window(focus_id: string, reason?: string): Promise<void>;
+  return_tab_to_main(focus_id: string, title: string, wid?: string): Promise<boolean>;
+  close_focus_window(focus_id: string, reason?: string, wid?: string): Promise<void>;
   close_all_focus_windows(): Promise<void>;
   get_editor_workspace(slug?: string): Promise<EditorWorkspaceSnapshot>;
   save_editor_workspace(payload: EditorWorkspaceSnapshot): Promise<void>;
@@ -3090,6 +3096,7 @@ export interface PanelApi {
   report_open_tabs(window_id: string, tab_ids: string[]): Promise<void>;
   focus_tab(tab_id: string, requesting_window: string): Promise<{ ok: boolean; window_id: string }>;
   claim_tab(tab_id: string, window_id: string): Promise<void>;
+  get_tab_owner(tab_id: string): Promise<string>;
   get_verse_lsp_status(client_id?: string): Promise<VerseLspStatusDto>;
   start_verse_lsp(project_root?: string, client_id?: string): Promise<VerseLspStatusDto>;
   stop_verse_lsp(client_id?: string): Promise<void>;
@@ -3553,6 +3560,7 @@ export interface PanelApi {
   wait_for_agent_idle?(conv_id: string, timeout?: number): Promise<boolean>;
   report_ui_perf(entries: Array<Record<string, unknown>>): Promise<boolean>;
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
+  ui_rpc_pending_questions?(): Promise<AgentEvent[]>;
   /** This window took a Show me / tour request meant for it. */
   ui_rpc_ack?(request_id: string): Promise<boolean>;
   /** A request sent to every window: true for the first window to claim it. */

@@ -19,6 +19,17 @@ class VideoError(ValueError):
     """User-facing video failure (shown in the chat as an error)."""
 
 
+def require_media_access(*paths: Path) -> None:
+    """Refuse ignored inputs and cache outputs before any media operation."""
+    from backend.workspace.ai_ignore import require_ai_access
+
+    try:
+        for path in paths:
+            require_ai_access(str(path))
+    except ValueError as exc:
+        raise VideoError(str(exc)) from exc
+
+
 @dataclass(frozen=True)
 class Frame:
     path: Path
@@ -62,6 +73,7 @@ def frame_paths(video: Path, n: int) -> list[Path]:
 
 
 def probe_duration(ffprobe: Path, video: Path, timeout_s: float = 15) -> float:
+    require_media_access(video)
     args = [
         str(ffprobe), "-v", "error", "-show_entries", "format=duration:stream=duration",
         "-of", "default=nw=1:nk=1", str(video),
@@ -86,6 +98,10 @@ def probe_duration(ffprobe: Path, video: Path, timeout_s: float = 15) -> float:
 def extract_frames(
     video: Path, n: int, *, max_width: int = 1280, timeout_s: float = 60.0
 ) -> list[Frame]:
+    require_media_access(video)
+    # Preflight every possible output before probing or extracting anything.
+    for path in frame_paths(video, n):
+        require_media_access(path, path.with_name(path.name + ".part.jpg"))
     try:
         ffmpeg, ffprobe = ensure_installed()
     except FfmpegInstallError as exc:

@@ -69,6 +69,35 @@ def test_model_change_does_not_ask_main_to_open_the_chat(monkeypatch):
     assert calls and calls[0].get("open_tab") is False
 
 
+def test_late_close_and_return_cannot_destroy_a_reopened_chat_window(monkeypatch):
+    old, reopened = object(), object()
+    old_group = focus_windows._FocusGroup(window=old, tabs={"chat:c": "Same name"}, wid="focus-old")
+    new_group = focus_windows._FocusGroup(window=reopened, tabs={"chat:c": "Same name"}, wid="focus-new")
+    monkeypatch.setattr(focus_windows, "_focus_groups", [new_group])
+    destroyed, returned = [], []
+    monkeypatch.setattr(focus_windows, "_destroy_window", destroyed.append)
+    monkeypatch.setattr(focus_windows, "_notify_main_window", lambda *args: returned.append(args))
+    monkeypatch.setattr(focus_windows, "_drop_registry_window", lambda _wid: None)
+    monkeypatch.setattr(focus_windows, "_log_close", lambda *_a: None)
+    focus_windows.close_focus_window("chat:c", window_id=old_group.wid)
+    assert not focus_windows.return_tab_to_main("chat:c", "Same name", window_id=old_group.wid)
+    assert not destroyed and not returned
+    assert focus_windows.list_focus_window_ids() == ["chat:c"]
+    focus_windows.close_focus_window("chat:c", window_id=new_group.wid)
+    assert destroyed == [reopened]
+
+
+def test_destroy_stops_bridge_dispatch_before_disposing_native_window(monkeypatch):
+    from types import SimpleNamespace
+    from frontend.ui_web import ui_dispatch
+    calls = []
+    monkeypatch.setattr(ui_dispatch, "drop_window", lambda _w: calls.append("drop"))
+    monkeypatch.setattr(ui_dispatch, "schedule_call", lambda op: op())
+    window = SimpleNamespace(destroy=lambda: calls.append("destroy"))
+    focus_windows._destroy_window(window)
+    assert calls[:2] == ["drop", "destroy"]
+
+
 def test_header_close_hands_the_tabs_back_and_other_closes_do_not(monkeypatch):
     """The focus window's own close button must not lose its tabs (an OS close never did)."""
     from frontend.ui_web.panel_api_window import PanelApiWindowMixin

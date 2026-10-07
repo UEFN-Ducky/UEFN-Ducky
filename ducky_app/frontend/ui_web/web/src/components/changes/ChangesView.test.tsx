@@ -158,6 +158,27 @@ describe("ChangesView", () => {
     expect(screen.queryByLabelText("Filter by ducky")).toBeNull();
   });
 
+  it("does not match another profile just because its display name is identical", async () => {
+    const own = { ...run, run_id: "own", conv_id: "chat-a", profile_id: "hacker", ducky_name: "Same name" };
+    const other = { ...own, run_id: "other", conv_id: "chat-b", profile_id: "artist" };
+    listChangesets.mockResolvedValue([own, other]);
+    const { container } = render(<ChangesView profileId="hacker" profileName="Same name" />);
+    await waitFor(() => expect(container.querySelectorAll(".changes-run-head")).toHaveLength(1));
+  });
+
+  it("gives same-name chats separate IDs in the ducky filter", async () => {
+    listChangesets.mockResolvedValue([
+      { ...run, run_id: "a", conv_id: "chat-a", profile_id: "", ducky_name: "Same name" },
+      { ...run, run_id: "b", conv_id: "chat-b", profile_id: "", ducky_name: "Same name" },
+    ]);
+    const { container } = render(<ChangesView />);
+    await waitFor(() => expect(container.querySelectorAll(".changes-run-head")).toHaveLength(2));
+    fireEvent.click(screen.getByLabelText("Filter by ducky"));
+    expect(screen.getAllByRole("radio", { name: "Same name" })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("radio", { name: "Same name" })[0]);
+    expect(container.querySelectorAll(".changes-run-head")).toHaveLength(1);
+  });
+
   it("opens a change dialog inside the tab, not over the app", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

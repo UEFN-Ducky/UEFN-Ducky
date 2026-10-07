@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import backend.agent.tools as tools
+
+pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
 
 def test_host_vs_editor_classification(monkeypatch) -> None:

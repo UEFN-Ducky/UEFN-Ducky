@@ -42,3 +42,14 @@ describe("Show me in a folded thought group", () => {
     expect(screen.queryByRole("group", { name: "Show me" })).toBeNull();
   });
 });
+
+
+it("uses terminal intent status even without a separate result and omits tool Stop controls", () => {
+  const item = tool("terminal", "Read", {});
+  if (item.kind !== "tool") throw new Error("expected tool");
+  item.result = null;
+  item.intent.tool!.status = "cancelled";
+  render(<AgentActivityGroup items={[item]} />);
+  expect(screen.queryByText(/Running tools/)).toBeNull();
+  expect(screen.queryByRole("button", { name: /Stop/ })).toBeNull();
+});

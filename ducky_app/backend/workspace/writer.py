@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
@@ -267,6 +267,10 @@ class ProjectWriter:
         writer_meta = dict(writer) if writer is not None else identity.current_writer(tool=tool)
         request = WriteRequest(op=op, paths=(canonical,), tool=tool, ctx=ctx)
         with self._lock_for(canonical):
+            if tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT):
+                from backend.workspace.ai_ignore import require_ai_mutation
+                require_ai_mutation(os.path.join(root, normalize_rel(rel)))
+                require_ai_mutation(full)
             decision = self._decide(request)
             before, existed = self._read_text(full)
             if op == "create" and existed:
@@ -277,7 +281,10 @@ class ProjectWriter:
             added, removed = line_delta(before, content)
             # A cancelled/failed comparison must not leave an already-written
             # file without its change record.
-            self._atomic_write(full, content)
+            self._atomic_write(
+                full, content,
+                ai=tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT),
+            )
             record = WriteRecord(
                 op=op,
                 path=canonical,
@@ -365,6 +372,12 @@ class ProjectWriter:
         writer_meta = dict(writer) if writer is not None else identity.current_writer(tool=tool)
         request = WriteRequest(op=op, paths=policy_paths, tool=tool, ctx=ctx)
         with self._lock_many(lock_paths):
+            if tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT):
+                from backend.workspace.ai_ignore import require_ai_mutation, require_ai_path_operation
+                require_ai_mutation(os.path.join(root, normalize_rel(path)))
+                if source:
+                    require_ai_mutation(os.path.join(root, normalize_rel(source)))
+                require_ai_path_operation(_src_full if source else dst_full, dst_full if source else None)
             decision = self._decide(request)
             existed = os.path.exists(dst_full)
             before = ""
@@ -435,8 +448,16 @@ class ProjectWriter:
         rel = normalize_rel(rel_in)
         if not rel:
             raise ValueError("Path must not be empty.")
-        full = self._path_resolver(rel)
+        from backend.workspace.ai_ignore import require_ai_access
+
         root = self._root_resolver()
+        ctx = identity.resolve_context()
+        guarded = ctx is not None and ctx.source == identity.SOURCE_AGENT
+        if guarded:
+            require_ai_access(os.path.join(root, rel))
+        full = self._path_resolver(rel)
+        if guarded:
+            require_ai_access(full)
         return rel_from_root(full, root) or rel, full, root
 
     def _decide(self, request: WriteRequest) -> Decision:
@@ -492,15 +513,15 @@ class ProjectWriter:
             return f.read(), True
 
     @staticmethod
-    def _atomic_write(full: str, content: str) -> None:
+    def _atomic_write(full: str, content: str, *, ai: bool = False) -> None:
         parent = os.path.dirname(full)
+        tmp_name = os.path.join(parent, f".{os.path.basename(full)}.{uuid.uuid4().hex}.tmp")
+        if ai:
+            from backend.workspace.ai_ignore import require_ai_mutation
+            require_ai_mutation(tmp_name)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            dir=parent or None,
-            prefix=f".{os.path.basename(full)}.",
-            suffix=".tmp",
-        )
+        fd = os.open(tmp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(content)

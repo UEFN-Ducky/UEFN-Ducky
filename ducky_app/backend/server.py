@@ -5,7 +5,32 @@ from mcp.server.fastmcp import FastMCP
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 from backend.agent.hard_rules import AGENT_HARD_RULES
 
-mcp = FastMCP(
+
+class ProtectedFastMCP(FastMCP):
+    async def list_tools(self):
+        from backend.workspace.ai_ignore import current_policy, SAFE_TOOLS
+
+        available = await super().list_tools()
+        return [t for t in available if t.name in SAFE_TOOLS] if current_policy().strict else available
+
+    async def call_tool(self, name, arguments):
+        from backend.workspace.ai_ignore import require_safe_tool
+
+        require_safe_tool(name)
+        import asyncio
+        from backend.workspace.identity import resolve_context
+        from backend.agent.chat_title import require_self_name
+        from backend.panel.rpc import wait_for_question_answers
+
+        ctx = resolve_context()
+        if ctx is not None and ctx.conv_id:
+            await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
+            effective = (arguments or {}).get("name", name) if name == "ducky_call_tool" else name
+            require_self_name(effective, ctx.conv_id)
+        return await super().call_tool(name, arguments)
+
+
+mcp = ProtectedFastMCP(
     "uefn-ducky",
     instructions=(
         "UEFN Ducky — MCP server for UEFN (Unreal Editor for Fortnite) plus Store desktop "

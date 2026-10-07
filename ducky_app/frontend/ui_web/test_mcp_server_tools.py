@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
+
 import threading
 import time
 
 from mcp.types import Tool
 
 from frontend.ui_web import mcp_catalog
+
+pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
 
 def _tool(name: str) -> Tool:

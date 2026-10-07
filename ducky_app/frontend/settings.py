@@ -68,6 +68,12 @@ class PanelSettings:
     uefn_project_root: str = ""
     """UEFN project folder for workspace file tools."""
 
+    ai_ignore_patterns: list[str] = field(default_factory=list)
+    """User-owned AI file deny patterns. .env and .env.* are always denied."""
+
+    ai_ignore_strict: bool = True
+    """Refuse unsandboxed AI execution. Only the user may change this setting."""
+
     verse_editor_enabled: bool = True
     """When false, file tabs use read-only preview (legacy behavior)."""
 
@@ -323,6 +329,11 @@ class PanelSettings:
     """Agent-opened files land in a tab group beside the chat."""
 
     def validate(self) -> None:
+        from backend.workspace.ai_ignore import normalize_rules
+
+        self.ai_ignore_patterns = normalize_rules(self.ai_ignore_patterns)
+        if not isinstance(self.ai_ignore_strict, bool):
+            raise ValueError("ai_ignore_strict must be a boolean")
         if self.port < 1 or self.port > 65535:
             raise ValueError("port must be 1-65535")
         # Builtins + contributed gateway ids (UEFN Ducky, Cursor's API sibling, …).
@@ -445,6 +456,8 @@ class PanelSettings:
             or self.write_lanes_mode != "shadow"
             or not self.editor_tracking_enabled
             or self.editor_tracking_mode != "full"
+            or self.ai_ignore_patterns
+            or not self.ai_ignore_strict
             or self.show_hidden_project_files
             or not self.terminals_enabled
             or self.default_disabled_packs
@@ -581,36 +594,55 @@ class PanelSettings:
             follow_code_off_migrated=True,
         )
 
+    @staticmethod
+    def _validate_ai_fields(data: dict[str, Any]) -> None:
+        from backend.workspace.ai_ignore import normalize_rules
+        normalize_rules(data.get("ai_ignore_patterns", []))
+        if not isinstance(data.get("ai_ignore_strict", True), bool):
+            raise ValueError("Invalid AI file protection mode")
+
     @classmethod
-    def _load_from_file(cls) -> PanelSettings:
+    def _load_from_file(cls, *, fail_closed: bool = False) -> PanelSettings:
         path = default_app_data_dir() / "panel_settings.json"
         if not path.is_file():
             return cls()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
-                return cls()
+                raise ValueError("Settings must be an object")
             from backend.agent.secrets import reject_api_key_fields
 
+            if fail_closed:
+                cls._validate_ai_fields(data)
             return cls._finish_load(reject_api_key_fields(data))
         except (json.JSONDecodeError, TypeError, ValueError):
+            if fail_closed:
+                raise
             return cls()
 
     @classmethod
-    def load(cls) -> PanelSettings:
+    def load(cls, *, fail_closed: bool = False) -> PanelSettings:
         """Read settings. ADR 0003: rows in ducky.db, cached per process and
         revalidated with PRAGMA data_version; the legacy file is the rollback
         path (``DUCKY_STORE_BACKEND=files``)."""
         if not _settings_use_db():
-            return cls._load_from_file()
+            return cls._load_from_file(fail_closed=fail_closed)
         try:
             from backend.store.importers import phase1
             from backend.store.repos import settings as repo
 
+            if fail_closed:
+                from backend.store.repos import kv
+                if kv.meta_get("imported:settings") is None:
+                    cls._load_from_file(fail_closed=True)
             phase1.ensure("settings")
             rows, version = repo.load_fields_versioned()
+            if fail_closed:
+                cls._validate_ai_fields(rows)
             return replace(cls._finish_load(rows), _origin_version=version)
         except _StoreUnavailable:
+            if fail_closed:
+                raise
             return cls._load_from_file()
 
 

@@ -192,8 +192,15 @@ export function installTabRegistryListener(
         log("claim by other window IGNORED (recent own claim)", { tabId: ev.tab_id, by: ev.window_id });
         return;
       }
-      log("closing local copy — claimed by other window", { tabId: ev.tab_id, by: ev.window_id });
-      closeLocal(ev.tab_id, ev.window_id ?? "");
+      const tabId = ev.tab_id;
+      const claimedBy = ev.window_id ?? "";
+      // Events can arrive after a close/reopen or a newer ownership transfer.
+      // Only the current backend owner may remove this window's tab.
+      void getApi()?.get_tab_owner(tabId).then((owner) => {
+        if (owner !== claimedBy || owner === WINDOW_ID || !hasTab(tabId)) return;
+        log("closing local copy — claimed by other window", { tabId, by: owner });
+        closeLocal(tabId, owner);
+      }).catch(() => undefined);
     } else if (event.type === "tab_focus_request" && ev.window_id === WINDOW_ID) {
       log("focus request — activating", ev.tab_id);
       activateLocal(ev.tab_id);

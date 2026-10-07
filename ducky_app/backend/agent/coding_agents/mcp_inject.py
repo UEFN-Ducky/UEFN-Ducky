@@ -12,6 +12,7 @@ from typing import Any
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 from backend.agent.hard_rules import AGENT_HARD_RULES
 from backend.agent.prompt import CHAT_REPORT_RULE
+from backend.agent.chat_title import self_naming_instruction
 from backend.workspace.identity import RunContext
 from frontend.mcp_block import build_uefn_server_block
 from frontend.settings import PanelSettings, default_app_data_dir
@@ -284,6 +285,7 @@ def bootstrap_system_prompt(
         f"UEFN listener: {online}\n"
         f"Your agent/chat id: {conv_id}\n"
         f"{persona}"
+        f"{self_naming_instruction(ducky_name, conv_id)}"
         f"{skills_block}"
         f"{AGENT_HARD_RULES}"
         "Use the `uefn` MCP server tools to drive Unreal Editor for Fortnite.\n"
@@ -328,7 +330,9 @@ def bootstrap_system_prompt(
         "`ducky_ask_user(questions=[{id, prompt, options:[{id,label,description}]}])`. "
         "NEVER end a turn with prose options in chat — an inline questionnaire docks "
         "above the composer until answered. Floor tool (always available). "
-        "Batch up to 8 questions per call.\n"
+        "Batch up to 8 questions per call. Wait indefinitely for the actual answer. "
+        "A timeout, disconnect or cancellation is not an answer: never continue "
+        "work or infer permission from it. Stop the run if the wait fails.\n"
         "\n## Chat Plans\n"
         "HARD: multi-step work uses `ducky_create_plan` — never a prose Fix plan in chat. "
         "Fields: `overview` = short summary ONLY; `body_markdown` = description; "

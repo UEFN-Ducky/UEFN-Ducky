@@ -827,6 +827,23 @@ def ducky_group_add_member(
 
 
 @mcp.tool()
+def ducky_rename_self(title: str, pretty: bool = False) -> str:
+    """First tool call in an unnamed chat: choose your task-based Ducky name."""
+    from backend.tools.panel.panel_ui import _resolve_ask_user_conv_id
+    from backend.agent.chat_title import sanitize_role_title
+    from frontend.ui_web.agent_modes import notify_chats_changed
+
+    conv_id = _resolve_ask_user_conv_id()
+    cleaned = sanitize_role_title(title)
+    if not conv_id or not cleaned:
+        raise ValueError("A bound conversation and a nonempty task name are required.")
+    root = _project_root()
+    rename_conversation(conv_id, cleaned, project_root=root)
+    notify_chats_changed(conv_id=conv_id, title=cleaned, open_tab=False)
+    return tool_json({"id": conv_id, "title": cleaned}, pretty=pretty)
+
+
+@mcp.tool()
 def ducky_rename_chat(conv_id: str, title: str, pretty: bool = False) -> str:
     """Rename any chat by conversation id."""
     root = _project_root()

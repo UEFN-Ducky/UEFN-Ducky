@@ -357,3 +357,21 @@ describe("reconcileTurns", () => {
     expect(next[1]).toBe(prev[1]);
   });
 });
+
+
+describe("historical tool state", () => {
+  const user = (id: string): ChatMessage => ({ id, role: "user", text: "go" });
+  const pending = (id: string): ChatMessage => ({ id, role: "tool", text: "", tool: { name: "Read", arguments: {}, status: "pending" } });
+  it("settles old gaps while retaining only the latest live turn", () => {
+    const committed = [user("u1"), pending("old"), user("u2")];
+    const rows = buildCommittedChatRows(committed, [pending("live")], true);
+    const items = rows.flatMap((row) => row.kind === "activity" ? row.items : row.kind === "tool" ? [row] : []);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ intent: { tool: { status: "cancelled" } } });
+    expect(items[1]).toMatchObject({ intent: { tool: { status: "pending" } } });
+    const stopped = buildCommittedChatRows([...committed, pending("live")], [], false);
+    const ended = stopped.flatMap((row) => row.kind === "activity" ? row.items : row.kind === "tool" ? [row] : []);
+    expect(ended.every((item) => item.kind === "tool" && item.intent.tool?.status === "cancelled")).toBe(true);
+    expect(committed[1].tool?.status).toBe("pending");
+  });
+});

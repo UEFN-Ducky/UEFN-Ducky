@@ -408,7 +408,7 @@ class _TurnCheckpoint:
             self.blocks.append(
                 {
                     "type": "tool_call",
-                    "id": str(tool.get("id") or tool.get("name") or "tool") + f":{len(self.blocks)}",
+                    "id": str(tool.get("id") or f"{tool.get('name') or 'tool'}:{len(self.blocks)}"),
                     "name": str(tool.get("name") or "tool"),
                     "arguments": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
                     "status": "pending",
@@ -419,6 +419,7 @@ class _TurnCheckpoint:
         elif t == "tool_done":
             tool = ev.get("tool") if isinstance(ev.get("tool"), dict) else {}
             name = str(tool.get("name") or "")
+            call_id = str(tool.get("id") or "")
             status = str(tool.get("status") or ("error" if ev.get("success") is False else "success"))
             result_text = tool.get("result") if isinstance(tool.get("result"), str) else ""
             found = False
@@ -426,12 +427,12 @@ class _TurnCheckpoint:
                 if (
                     b.get("type") == "tool_call"
                     and b.get("status") == "pending"
-                    and (not name or b.get("name") == name)
+                    and (b.get("id") == call_id if call_id else not name or b.get("name") == name)
                 ):
                     b["status"] = status
                     b["duration_ms"] = int(tool.get("durationMs") or 0)
                     b["result"] = {
-                        "ok": status != "error",
+                        "ok": status in ("success", "done"),
                         "data": result_text,
                         "hint": str(tool.get("hint") or ""),
                     }
@@ -443,13 +444,13 @@ class _TurnCheckpoint:
                 self.blocks.append(
                     {
                         "type": "tool_call",
-                        "id": name or f"tool:{len(self.blocks)}",
+                        "id": call_id or name or f"tool:{len(self.blocks)}",
                         "name": name or "tool",
                         "arguments": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
                         "status": status,
                         "duration_ms": int(tool.get("durationMs") or 0),
                         "result": {
-                            "ok": status != "error",
+                            "ok": status in ("success", "done"),
                             "data": result_text,
                             "hint": str(tool.get("hint") or ""),
                         },
@@ -502,7 +503,13 @@ def _emit_assistant(
     # so the turn's tool steps survive a panel reload (load_messages rebuilds
     # the rows from these, exactly like embedded-ducky turns).
     if blocks:
-        msg["blocks"] = list(blocks)
+        msg["blocks"] = [
+            {**block, "status": "cancelled",
+             "result": {"ok": False, "data": "", "hint": "Run ended before this tool returned."}}
+            if block.get("type") == "tool_call" and block.get("status") in ("pending", "running")
+            else dict(block)
+            for block in blocks
+        ]
     if not ok:
         msg["incomplete"] = True
         if error:
@@ -556,6 +563,35 @@ def _emit_assistant(
 
 
 def run_coding_agent_message(
+    conv: Conversation,
+    user_text: str,
+    *,
+    model: str,
+    push: PushFn,
+    run_id: str = "",
+    timeout_s: float = 0.0,
+    cancel: threading.Event | None = None,
+) -> dict[str, Any]:
+    from backend.workspace.ai_ignore import current_policy, protection_lock
+    from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
+    rid = run_id or str(uuid.uuid4())
+    with protection_lock:
+        if current_policy().strict:
+            error = ("AI_FILE_PROTECTION: external coding agents have direct filesystem access "
+                     "and are blocked in strict protection mode. Use an embedded Ducky model.")
+            push({"type": "error", "text": error, "conv_id": conv.id})
+            return {"ok": False, "error": error}
+        add_live_run_id(rid)
+    try:
+        return _run_coding_agent_message(
+            conv, user_text, model=model, push=push, run_id=rid,
+            timeout_s=timeout_s, cancel=cancel,
+        )
+    finally:
+        discard_live_run_id(rid)
+
+
+def _run_coding_agent_message(
     conv: Conversation,
     user_text: str,
     *,

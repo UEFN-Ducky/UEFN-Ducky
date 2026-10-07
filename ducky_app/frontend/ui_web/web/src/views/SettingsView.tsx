@@ -26,6 +26,7 @@ import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { useAppearance } from "../theme/AppearanceContext";
 import { AddToUefnTab } from "./settings/AddToUefnTab";
 import { AppDataTab } from "./settings/AppDataTab";
+import { PermissionsTab } from "./settings/PermissionsTab";
 import { AgentTab } from "./settings/AgentTab";
 import { LanguagesTab } from "./settings/LanguagesTab";
 import { DuckiesTab } from "./settings/DuckiesTab";
@@ -76,7 +77,7 @@ export type SettingsTab = string;
 export type LlmsSectionTab = "llms" | "skills" | "mcps" | "memory";
 
 /** Header sections under Settings → General. */
-export type GeneralSectionTab = "general" | "app_data" | "log_errors";
+export type GeneralSectionTab = "general" | "app_data" | "permissions" | "log_errors";
 
 /** Monochrome line icons for the Settings rail. */
 const CORE_TAB_ICONS: Record<(typeof CORE_TABS)[number], () => JSX.Element> = {
@@ -110,6 +111,7 @@ const LLMS_SECTION_TABS: { id: LlmsSectionTab; label: string }[] = [
 const GENERAL_SECTION_TABS: { id: GeneralSectionTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "app_data", label: "App Data" },
+  { id: "permissions", label: "Permissions and rules" },
   { id: "log_errors", label: "Log & Errors" },
 ];
 
@@ -147,6 +149,7 @@ function readInitialGeneralSection(): GeneralSectionTab {
   const s = readLastSettingsSections();
   if (s.general === "log_errors") return "log_errors";
   if (s.general === "app_data") return "app_data";
+  if (s.general === "permissions") return "permissions";
   // Migrated from former sidebar "Log & Errors" tab (raw key before normalize).
   try {
     const raw = (localStorage.getItem("uefn-panel-settings-active-tab") || "").trim();
@@ -193,7 +196,7 @@ function applyGeneralLeafSection(
   setGeneral: (v: GeneralSectionTab) => void,
   setLogErrors: (v: LogErrorsSectionTab) => void,
 ): boolean {
-  if (section === "general" || section === "app_data" || section === "log_errors") {
+  if (section === "general" || section === "app_data" || section === "permissions" || section === "log_errors") {
     setGeneral(section);
     return true;
   }
@@ -638,6 +641,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
         </div>
         {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
         {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
+        {activeTab === "General" && generalSection === "permissions" && <PermissionsTab />}
         {activeTab === "General" && generalSection === "log_errors" && (
           <LogErrorsTab sectionTab={logErrorsSection} />
         )}

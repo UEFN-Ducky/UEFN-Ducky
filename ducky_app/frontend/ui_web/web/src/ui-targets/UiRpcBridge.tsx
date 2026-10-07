@@ -15,6 +15,7 @@ import { useEffect } from "react";
 import type { AgentEvent, MessageAuthorDto } from "../types/panel";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { getApi } from "../hooks/usePanelApi";
+import { onApiReady } from "../hooks/onApiReady";
 import { openPanelRoute } from "../navigation/openPanelRoute";
 import { parseShowMeRequest, playShowMe, whenShowMeClosed } from "../showme/ShowMeService";
 import { listTargets } from "./registry";
@@ -114,9 +115,11 @@ async function dispatch(method: string, params: Record<string, unknown>, request
 export function UiRpcBridge() {
   useEffect(() => {
     installAgentEventBus();
+    const seen = new Set<string>();
     const handler = async (event: AgentEvent) => {
       // Answered in another window or on the phone: close it here too.
       if (event.type === "ui_rpc_settled") {
+        seen.add(String(event.request_id ?? ""));
         dropAnsweredAskUser(String(event.request_id ?? ""));
         return;
       }
@@ -125,6 +128,10 @@ export function UiRpcBridge() {
       if (!requestId) return;
       const method = event.method ?? "";
       const params = (event.params ?? {}) as Record<string, unknown>;
+      if (method === "ask_user") {
+        if (seen.has(requestId)) return;
+        seen.add(requestId);
+      }
       if (WINDOW_METHODS.has(method)) {
         const forClient = String(params._for_client ?? "");
         if (forClient && forClient !== UI_CLIENT_ID) return;  // meant for the window in use
@@ -140,7 +147,13 @@ export function UiRpcBridge() {
         void getApi()?.ui_rpc_respond(requestId, result);
       });
     };
-    return subscribeAgentEvents((event) => void handler(event));
+    const unsubscribe = subscribeAgentEvents((event) => void handler(event));
+    const stopReady = onApiReady((api) => {
+      void api.ui_rpc_pending_questions?.().then((events) => {
+        for (const event of events) void handler(event);
+      }).catch(() => {});
+    });
+    return () => { unsubscribe(); stopReady(); };
   }, []);
 
   // Lines of code can be shown too (editor.line.<path>:<n>).

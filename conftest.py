@@ -84,6 +84,12 @@ def _tree_signature(root: Path) -> dict[str, tuple[int, int]]:
 def pytest_configure(config: pytest.Config) -> None:
     if _OPT_OUT:
         return
+    # A suite launched by a coding agent must not inherit that live chat's
+    # identity, question gate or journal attribution. Tests bind their own IDs.
+    from backend.workspace.identity import RunContext
+
+    for key in RunContext().to_env():
+        os.environ.pop(key, None)
     root = Path(tempfile.mkdtemp(prefix="ducky-tests-appdata-"))
     (root / "Roaming").mkdir()
     os.environ["LOCALAPPDATA"] = str(root)
@@ -195,6 +201,19 @@ def _join_host_workers(timeout: float = 5.0) -> None:
             if t.ident is None:
                 continue
             t.join(timeout)
+
+
+@pytest.fixture
+def unrestricted_tools(_appdata_per_test):
+    """Tests of tool routing opt out of strict mode in their isolated settings.
+
+    Protection tests keep the production default and exercise both modes.
+    """
+    from frontend.settings import PanelSettings
+
+    settings = PanelSettings.load()
+    settings.ai_ignore_strict = False
+    settings.save()
 
 
 @pytest.fixture

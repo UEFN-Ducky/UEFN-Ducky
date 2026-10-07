@@ -54,6 +54,32 @@ def test_one_connection_per_thread_same_path() -> None:
     assert seen and seen[0] is not a
 
 
+def test_concurrent_first_connections_share_wal_setup() -> None:
+    barrier = threading.Barrier(8)
+    errors = []
+    versions = []
+
+    def worker():
+        try:
+            barrier.wait(timeout=5)
+            conn = db.connect()
+            versions.append(db.user_version(conn))
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close_thread_connections()
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert versions == [db.head_version()] * 8
+
+
 def test_repointing_localappdata_gives_a_fresh_database(tmp_path: Path, monkeypatch) -> None:
     conn_a = db.connect()
     with db.write_txn(conn_a):

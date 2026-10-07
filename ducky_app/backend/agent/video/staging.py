@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from backend.agent.video.frames import VideoError
+from backend.agent.video.frames import VideoError, require_media_access
 from backend.agent.video.limits import video_limits
 from frontend.app_paths import resolve_app_data_dir
 
@@ -36,13 +36,19 @@ def normalize_video_mime(mime: str, name: str) -> str | None:
 def staging_dir(create: bool = False) -> Path:
     path = resolve_app_data_dir(for_write=create) / "video_staging"
     if create:
+        require_media_access(path)
         path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _sweep(root: Path) -> None:
+    from backend.workspace.ai_ignore import current_policy
+
+    policy = current_policy()
     cutoff = time.time() - _MAX_AGE_S
     for p in root.glob("*"):
+        if policy.denied(str(p)):
+            continue
         try:
             if p.is_file() and p.stat().st_mtime < cutoff:
                 p.unlink()
@@ -51,6 +57,10 @@ def _sweep(root: Path) -> None:
 
 
 def stage_video(name: str, mime: str, data_base64: str) -> dict[str, Any]:
+    from backend.workspace.ai_ignore import DENIED, current_policy
+
+    if current_policy().denied_hint(name):
+        raise VideoError(DENIED)
     norm = normalize_video_mime(mime, name)
     if norm is None:
         raise VideoError(f"Unsupported video format for {name!r} — use MP4, WebM, MOV or MKV.")
@@ -64,6 +74,7 @@ def stage_video(name: str, mime: str, data_base64: str) -> dict[str, Any]:
     root = staging_dir(create=True)
     _sweep(root)
     staged_id = uuid.uuid4().hex + VIDEO_MIME_EXT[norm]
+    require_media_access(root / staged_id)
     (root / staged_id).write_bytes(raw)
     return {"staged_id": staged_id, "size_bytes": len(raw), "mime": norm}
 
@@ -71,6 +82,7 @@ def stage_video(name: str, mime: str, data_base64: str) -> dict[str, Any]:
 def resolve_staged(staged_id: str) -> Path:
     sid = (staged_id or "").strip()
     path = staging_dir() / sid
+    require_media_access(path)
     if not _STAGED_RE.fullmatch(sid) or not path.is_file():
         raise VideoError("The video upload expired — attach the video again.")
     try:
@@ -84,11 +96,13 @@ def safe_media_path(path: str | Path, *, suffixes: set[str] | frozenset[str]) ->
     """Resolve a client-supplied media path, or None unless it is a regular file with an
     allowed suffix that sits directly in video_staging/ or in a chat's attachments/ folder."""
     try:
+        require_media_access(Path(path))
         target = Path(path).resolve()
         app = resolve_app_data_dir().resolve()
         rel_parts = target.relative_to(app).parts
     except (OSError, ValueError):
         return None
+    require_media_access(target)
     if target.suffix.lower() not in suffixes or not target.is_file():
         return None
     in_staging = len(rel_parts) == 2 and rel_parts[0] == "video_staging"

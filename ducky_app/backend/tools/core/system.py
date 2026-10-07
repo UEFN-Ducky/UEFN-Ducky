@@ -239,7 +239,12 @@ def workspace_list_dir(relative_path: str = ".", path: str = "", pretty: bool = 
     dir_path = resolve_workspace_path(rel)
     if not os.path.isdir(dir_path):
         raise ValueError(f"Not a directory: {dir_path}")
-    names = sorted(n for n in os.listdir(dir_path) if _workspace_entry_allowed(n))
+    from backend.workspace.ai_ignore import current_policy
+
+    policy = current_policy()
+    policy.require(dir_path)
+    names = sorted(n for n in os.listdir(dir_path) if _workspace_entry_allowed(n)
+                   and not policy.denied(os.path.join(dir_path, n)))
     hint = ""
     base = os.path.basename(dir_path.rstrip("\\/"))
     if base and base not in ("Verse", "Content") and "Verse" not in names:
@@ -274,6 +279,10 @@ def workspace_read_file(
         raise ValueError("relative_path is required (path= also accepted)")
     relative_path = rel_in
     file_path = resolve_workspace_path(relative_path)
+    from backend.workspace.ai_ignore import current_policy
+
+    policy = current_policy()
+    policy.require(file_path)
     if not os.path.isfile(file_path):
         # A weak model that guesses a wrong path otherwise re-flails on the same
         # dead read for turns. Hand it the real directory contents so it can
@@ -282,7 +291,8 @@ def workspace_read_file(
         hint = "Do not retry this path — use workspace_list_dir to find the real name."
         if os.path.isdir(parent):
             try:
-                names = sorted(os.listdir(parent))
+                names = sorted(n for n in os.listdir(parent)
+                               if not policy.denied(os.path.join(parent, n)))
                 shown = names[:25]
                 more = "" if len(names) <= 25 else f" (+{len(names) - 25} more)"
                 hint = (

@@ -236,6 +236,22 @@ def test_maximized_grips_state_targets_own_window(native, monkeypatch):
     assert schedule.call_args_list[1].args == (focus, 'document.documentElement.classList.toggle("window-maximized", true);')
 
 
+def test_native_destroy_keeps_original_chain_until_message_returns(native, monkeypatch):
+    _, sc = native
+    callback = object()
+    monkeypatch.setattr(chrome, "_native_subclass", {101: callback})
+    chrome._window_min_track[101] = (360, 280)
+    def original(*args):
+        assert chrome._native_subclass[101] is callback
+        assert chrome._native_subclass_orig[101] == 901
+        return 27
+    sc.CallWindowProcW.side_effect = original
+    assert chrome._chrome_subclass_proc(101, 0x0082, 0, 0) == 27
+    assert 101 not in chrome._native_subclass
+    assert 101 not in chrome._native_subclass_orig
+    assert 101 not in chrome._window_min_track
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="real Win32 frame smoke test")
 def test_real_hidden_hwnd_has_no_top_gap_and_retains_native_resize_frame():
     """Exercise actual non-client calculations without opening or moving the app."""
@@ -267,5 +283,7 @@ def test_real_hidden_hwnd_has_no_top_gap_and_retains_native_resize_frame():
         assert origin.x + client.right < outer.right
         assert origin.y + client.bottom < outer.bottom
     finally:
-        chrome.release_native_chrome_subclass(hwnd)
         os_api.DestroyWindow(hwnd)
+    assert hwnd not in chrome._native_subclass
+    assert hwnd not in chrome._native_subclass_orig
+    assert hwnd not in chrome._window_min_track

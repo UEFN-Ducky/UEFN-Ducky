@@ -46,6 +46,7 @@ CORE_TOOLS = frozenset(
         "ducky_call_tool",
         "ducky_find_tools",  # alias — keep registered in tools[] during transition
         "ducky_ask_user",
+        "ducky_rename_self",
         "web_search",
         "web_fetch",
     }
@@ -111,6 +112,7 @@ PLAN_TOOLS = frozenset(
         "ducky_call_tool",
         "ducky_find_tools",
         "ducky_ask_user",
+        "ducky_rename_self",
         "web_search",
         "web_fetch",
         "ducky_create_plan",

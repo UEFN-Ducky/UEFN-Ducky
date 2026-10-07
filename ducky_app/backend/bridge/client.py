@@ -720,6 +720,19 @@ def _is_under_root(candidate: str, root: str) -> bool:
 
 
 def resolve_workspace_path(relative_or_absolute: str) -> str:
+    from backend.workspace.ai_ignore import require_ai_access
+
+    # Check the supplied spelling too: realpath alone loses a denied symlink name.
+    roots = workspace_roots()
+    supplied = relative_or_absolute or ""
+    lexical = supplied if os.path.isabs(supplied) else os.path.join(roots[0] if roots else ".", supplied)
+    require_ai_access(lexical)
+    full = _resolve_workspace_path_unchecked(relative_or_absolute)
+    require_ai_access(full)
+    return full
+
+
+def _resolve_workspace_path_unchecked(relative_or_absolute: str) -> str:
     """Map user path to an absolute path confined to workspace roots."""
     roots = workspace_roots()
     if not roots:
