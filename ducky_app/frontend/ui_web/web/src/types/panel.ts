@@ -2112,6 +2112,8 @@ export interface PanelPushEvent {
   note?: string;
   /** workflow_run / workflow_step: which run, the step (node id) and the step it came from. */
   run?: string;
+  /** Per-run event order, including snapshots from another process. */
+  workflow_sequence?: number;
   /** workflow_output: bounded terminal snapshot for this node. */
   output?: string;
   session_id?: string;
@@ -2823,7 +2825,8 @@ export interface PanelApi {
   copy_workflow_folder?(owner_from: string, path: string, owner_to: string, parent_path?: string, move?: boolean): Promise<WorkflowFolderCopyDto>;
   delete_workflow?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
   /** Stop button: ends every run of this workflow on this PC now. */
-  stop_workflow?(workflow_id: string): Promise<{ ok?: boolean; stopped?: boolean }>;
+  stop_workflow?(workflow_id: string, run_id?: string): Promise<{ ok?: boolean; stopped?: boolean; error?: string }>;
+  workflow_run_snapshot?(): Promise<{ ok?: boolean; events?: PanelPushEvent[] }>;
   /** The Workflows editor's grid, snap, tool, panel sizes and zoom, kept on disk. */
   workflow_editor_prefs?(): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;
   set_workflow_editor_prefs?(prefs: Record<string, unknown>): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;

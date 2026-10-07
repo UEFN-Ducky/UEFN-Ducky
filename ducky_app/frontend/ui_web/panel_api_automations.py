@@ -380,11 +380,16 @@ class PanelApiAutomationsMixin:
         except ValueError as exc:
             return _refused(exc)
 
-    def stop_workflow(self, workflow_id: str) -> dict[str, Any]:
-        """Stop button: end every run of this workflow on this PC now."""
+    def stop_workflow(self, workflow_id: str, run_id: str = "") -> dict[str, Any]:
+        """Stop one run, or all runs of the workflow, in whichever process owns it."""
         from backend.automations.runner import stop_workflow
 
-        return {"ok": True, "stopped": stop_workflow(workflow_id)}
+        return {"ok": True, "stopped": stop_workflow(workflow_id, run_id)}
+
+    def workflow_run_snapshot(self) -> dict[str, Any]:
+        from backend.automations.live_runs import snapshot
+
+        return {"ok": True, "events": snapshot()}
 
     def emit_workflow_trigger(self, trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         from backend.automations.runner import emit_trigger

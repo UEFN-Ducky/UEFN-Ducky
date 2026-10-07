@@ -10,12 +10,12 @@ import {
 } from "../hooks/backgroundActivity";
 import {
   applyBackgroundJobPush,
-  GRAPH_JOB_PREFIX,
   requestFocusGraph,
   syncReadyGraphJobs,
   workflowIdFromJobId,
 } from "../hooks/graphActivity";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
+import { getApi } from "../hooks/usePanelApi";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
 import { DropdownPanel } from "./DropdownPanel";
 
@@ -37,6 +37,20 @@ export function BackgroundActivityDropdown() {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const [open, setOpen] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const cancel = async (job: BackgroundJob) => {
+    const wid = workflowIdFromJobId(job.id);
+    if (!wid) { requestBackgroundJobCancel(job.id); return; }
+    setActionError("");
+    try {
+      const run = job.id.startsWith("graph-run:") ? job.id.slice(job.id.lastIndexOf(":") + 1) : "";
+      const result = await getApi()?.stop_workflow?.(wid, run);
+      if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
+      if (!result.stopped) throw new Error("This run has already ended. Refreshing its status…");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not stop the workflow");
+    }
+  };
   const anchorRef = useRef<HTMLButtonElement>(null);
   const working = countWorkingBackgroundJobs(jobs);
   const nowCount = working;
@@ -83,6 +97,7 @@ export function BackgroundActivityDropdown() {
         placement="bottom"
       >
         <div className="connection-status-menu bg-activity-menu" role="dialog" aria-label="Background activity">
+          {actionError ? <p role="alert">{actionError}</p> : null}
           <div className="connection-status-menu-head">Now</div>
           {live.length === 0 ? (
             <p className="bg-activity-empty">Nothing running. You can keep working.</p>
@@ -91,8 +106,8 @@ export function BackgroundActivityDropdown() {
               <div
                 key={job.id}
                 className={`connection-status-menu-row ${phaseClass(job.phase)}`}
-                role={job.id.startsWith(GRAPH_JOB_PREFIX) ? "button" : undefined}
-                onClick={job.id.startsWith(GRAPH_JOB_PREFIX) ? () => openGraphJob(job) : undefined}
+                role={!!workflowIdFromJobId(job.id) ? "button" : undefined}
+                onClick={!!workflowIdFromJobId(job.id) ? () => openGraphJob(job) : undefined}
               >
                 <span className="connection-status-menu-dot" aria-hidden />
                 <div className="connection-status-menu-text">
@@ -112,9 +127,9 @@ export function BackgroundActivityDropdown() {
                     <button
                       type="button"
                       className="bg-activity-link"
-                      onClick={() => requestBackgroundJobCancel(job.id)}
+                      onClick={(event) => { event.stopPropagation(); void cancel(job); }}
                     >
-                      Cancel
+                      {workflowIdFromJobId(job.id) ? "Stop" : "Cancel"}
                     </button>
                   ) : null}
                 </div>

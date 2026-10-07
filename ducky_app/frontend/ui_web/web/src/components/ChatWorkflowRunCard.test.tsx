@@ -20,6 +20,10 @@ import {
   resetWorkflowRunsForTests,
 } from "../hooks/workflowRunsByChat";
 import { ChatWorkflowRunCard } from "./ChatWorkflowRunCard";
+import { waitFor } from "@testing-library/react";
+
+const api = vi.hoisted(() => ({ stop_workflow: vi.fn() }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 
 const plan = [
   { node: "s", label: "Start demo", type: "start.chat" },
@@ -145,6 +149,34 @@ describe("ChatWorkflowRunCard", () => {
     render(<ChatWorkflowRunCard chatId="chat-2" />);
     act(() => start("chat-1"));
     expect(screen.queryByTestId("chat-workflow-run")).toBeNull();
+  });
+
+  it("keeps concurrent runs separate and stops only the selected card", async () => {
+    api.stop_workflow.mockResolvedValue({ ok: true, stopped: true });
+    render(<ChatWorkflowRunCard chatId="chat-1" />);
+    act(() => { start("chat-1", "r1"); start("chat-1", "r2"); });
+    expect(screen.getAllByTestId("chat-workflow-run")).toHaveLength(2);
+    fireEvent.click(screen.getAllByLabelText("Stop the workflow")[0]);
+    await waitFor(() => expect(api.stop_workflow).toHaveBeenCalledWith("wf-1", "r1"));
+    act(() => {
+      applyWorkflowEvent({ type: "workflow_run", id: "wf-1", run: "r1", state: "stopped" });
+      step("build", "running", {}, "r1"); // late completion cannot resurrect a stopped run
+      step("launch", "running", {}, "r2");
+    });
+    expect(screen.getByText("Stopped")).toBeTruthy();
+    expect(screen.getAllByLabelText("Stop the workflow")).toHaveLength(1);
+    fireEvent.click(screen.getByTitle("Hide"));
+    expect(screen.getAllByTestId("chat-workflow-run")).toHaveLength(1);
+    expect(screen.getByText(/Launch session ·/)).toBeTruthy();
+  });
+
+  it("shows a failed Stop request and lets the user retry", async () => {
+    api.stop_workflow.mockRejectedValueOnce(new Error("Bridge disconnected"));
+    render(<ChatWorkflowRunCard chatId="chat-1" />);
+    act(() => start());
+    fireEvent.click(screen.getByLabelText("Stop the workflow"));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Bridge disconnected");
+    expect(screen.getByLabelText("Stop the workflow").hasAttribute("disabled")).toBe(false);
   });
 
   it("finishes and can be hidden", () => {

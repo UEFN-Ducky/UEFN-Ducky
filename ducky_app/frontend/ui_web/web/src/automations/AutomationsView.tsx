@@ -25,6 +25,7 @@ import type {
   WorkflowOwnersDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
+import { subscribeWorkflowEvents, useWorkflowRuns } from "../hooks/workflowRunsByChat";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { onApiReady } from "../hooks/onApiReady";
@@ -307,6 +308,7 @@ export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): 
   const run = String(event.run || "");
   const fresh: LiveRun = { run, active: "", from: "", states: {}, passed: [], finished: "", lines: [], outputs: {}, logs: {}, times: {} };
   const base = current && current.run === run ? current : fresh;
+  if (current?.finished && event.state !== "started") return current;
   // Output and steps belong to a run seen starting; others (a Code-tab Test, an older run) are not this one.
   if ((event.type === "workflow_output" || event.type === "workflow_step") && (!current || current.run !== run)) return current;
   if (event.type === "workflow_output") {
@@ -315,7 +317,7 @@ export function liveRunReducer(current: LiveRun | null, event: PanelPushEvent): 
     return { ...base, outputs: { ...base.outputs, [event.node]: { output: event.output || "", sessionId: event.session_id || "" } } };
   }
   if (event.type === "workflow_run") {
-    if (event.state === "started") return fresh;
+    if (event.state === "started") return current?.run === run ? current : fresh;
     const finished = event.state === "stopped" ? "stopped" : event.state === "error" ? "error" : "done";
     return { ...base, active: "", from: "", finished };
   }
@@ -571,7 +573,6 @@ export function AutomationsView() {
   const [logCopied, setLogCopied] = useState(false);
   const [logHeight, setLogHeight] = useState(LOG_H_DEFAULT);
   const logResizeRef = useRef<{ startY: number; startH: number } | null>(null);
-  const [busy, setBusy] = useState(false);
   const [spawn, setSpawn] = useState<SpawnAt | null>(null);
   const [spawnFilter, setSpawnFilter] = useState("");
   const spawnSearchRef = useRef<HTMLInputElement>(null);
@@ -638,7 +639,23 @@ export function AutomationsView() {
   const hasTeams = !!owners.owners?.some((owner) => owner.kind === "team");
   const draftIdRef = useRef("");
   draftIdRef.current = draft?.id || "";
-  const [live, setLive] = useState<LiveRun | null>(null);
+  const [liveByRun, setLiveByRun] = useState<Record<string, LiveRun>>({});
+  const [selectedRun, setSelectedRun] = useState("");
+  const workflowRuns = useWorkflowRuns(draft?.id || "");
+  const activeWorkflowRuns = workflowRuns.filter((run) => run.state === "running");
+  const busy = activeWorkflowRuns.length > 0;
+  const visibleRun = workflowRuns.find((run) => run.run === selectedRun)
+    || activeWorkflowRuns[activeWorkflowRuns.length - 1]
+    || workflowRuns[workflowRuns.length - 1];
+  const live = visibleRun ? liveByRun[visibleRun.run] ?? null : null;
+  useEffect(() => subscribeWorkflowEvents((event) => {
+    const run = String(event.run || "");
+    if (!run) return;
+    setLiveByRun((current) => {
+      const next = liveRunReducer(current[run] ?? null, event);
+      return next ? { ...current, [run]: next } : current;
+    });
+  }), []);
   useEffect(() => {
     let cancelled = false;
     const stopWaiting = onApiReady(() => void (async () => {
@@ -651,7 +668,7 @@ export function AutomationsView() {
       const workflowsSynced = event.type === "plugin_scope_changed" && !!event.plugins?.includes("ducky.automations");
       if (event.type === "graphs_changed" || event.type === "duckyos_account_changed" || workflowsSynced) void refreshList();
       // The open workflow running (Play, a schedule, a chat): light up where it is.
-      if ((event.type === "workflow_run" || event.type === "workflow_step" || event.type === "workflow_output") && event.id && event.id === draftIdRef.current) setLive((current) => liveRunReducer(current, event));
+      // Run events are tracked across both buses, including when another workflow is open.
     });
     return () => { cancelled = true; stopWaiting(); stop(); };
   }, [refreshList]);
@@ -669,7 +686,12 @@ export function AutomationsView() {
   // A finished run stays lit for a few seconds, then the canvas goes back to normal.
   useEffect(() => {
     if (!live?.finished) return;
-    const timer = window.setTimeout(() => setLive((current) => current === live ? null : current), 8000);
+    const timer = window.setTimeout(() => setLiveByRun((current) => {
+      if (current[live.run] !== live) return current;
+      const next = { ...current };
+      delete next[live.run];
+      return next;
+    }), 8000);
     return () => window.clearTimeout(timer);
   }, [live]);
   // The details follow the step running now, unless something else was picked meanwhile.
@@ -730,7 +752,7 @@ export function AutomationsView() {
       setSelectedEdge(null);
       setLog((row.runs || []).slice(-1)[0] || null);
       setMade(madeByNode(row.runs || []));
-      setLive(null);
+      setSelectedRun("");
       writeView({ open: id });
       const camera = readView().cameras?.[id];
       if (camera && [camera.x, camera.y, camera.zoom].every(Number.isFinite)) {
@@ -1314,7 +1336,6 @@ export function AutomationsView() {
   const runTest = async () => {
     if (!draft?.id) return;
     const gen = loadGen.current;
-    setBusy(true);
     setStopping(false);
     setLogOpen(true);
     try {
@@ -1324,7 +1345,6 @@ export function AutomationsView() {
     } catch (error) {
       if (gen === loadGen.current) setActionError(error instanceof Error ? error.message : "Could not run the workflow");
     } finally {
-      setBusy(false);
       setStopping(false);
     }
   };
@@ -1334,7 +1354,7 @@ export function AutomationsView() {
   const runNode = async (nodeId: string, how: "run" | "keep" = "run") => {
     // The newest draft: code typed a moment ago reaches it just before the click.
     const doc = history.current.current || draft;
-    if (!doc?.id || busy || runningNode) return;
+    if (!doc?.id || busy) return;
     const gen = loadGen.current;
     setRunningNode(nodeId);
     setLogOpen(true);
@@ -1354,9 +1374,17 @@ export function AutomationsView() {
     }
   };
   const stopRun = async () => {
-    if (!draft?.id) return;
+    if (!draft?.id || !visibleRun) return;
     setStopping(true);
-    await getApi()?.stop_workflow?.(draft.id);
+    try {
+      const result = await getApi()?.stop_workflow?.(draft.id, visibleRun.run);
+      if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
+      if (!result.stopped) throw new Error("This run has already ended. Refreshing its status…");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not stop the workflow");
+    } finally {
+      setStopping(false);
+    }
   };
 
   // Reusable workflows are nodes too: one tile per workflow with an Inputs node.
@@ -2325,13 +2353,17 @@ export function AutomationsView() {
                 onClick={() => { const next = { ...draft, enabled: !draft.enabled }; setDraft(next); void persist(next); }}>
                 <span className={`aw-light${draft.enabled ? " is-on" : ""}`} aria-hidden="true" />
               </button>
-              {busy || (live && !live.finished) ? (
-                <button type="button" ref={targetRef("workflows.toolbar.run", { route: "workflows", label: "Stop the run" })} className="aw-stop" title={stopping ? "Stopping…" : "Stop: end this run now"} aria-label="Stop" disabled={stopping} onClick={() => void stopRun()}>
+              {workflowRuns.length > 1 ? (
+                <select aria-label="Workflow run" value={visibleRun?.run || ""} onChange={(event) => setSelectedRun(event.target.value)}>
+                  {workflowRuns.map((run, index) => <option key={run.run} value={run.run}>Run {index + 1} · {run.state}</option>)}
+                </select>
+              ) : null}
+              {visibleRun?.state === "running" ? (
+                <button type="button" ref={targetRef("workflows.toolbar.stop", { route: "workflows", label: "Stop the run" })} className="aw-stop" title={stopping ? "Stopping…" : "Stop: end this run now"} aria-label="Stop" disabled={stopping} onClick={() => void stopRun()}>
                   {stopping ? <span className="aw-spin"><Icons.Spinner /></span> : <Icons.Stop />}
                 </button>
-              ) : (
-                <button type="button" ref={targetRef("workflows.toolbar.run", { route: "workflows", label: "Test run" })} title="Test" aria-label="Test" onClick={() => void runTest()} disabled={!draft.id}><Icons.Play /></button>
-              )}
+              ) : null}
+              <button type="button" ref={targetRef("workflows.toolbar.run", { route: "workflows", label: "Test run" })} title={activeWorkflowRuns.length ? "Start another run" : "Test"} aria-label="Test" onClick={() => void runTest()} disabled={!draft.id}><Icons.Play /></button>
               </div>
           </div>
         ) : null}

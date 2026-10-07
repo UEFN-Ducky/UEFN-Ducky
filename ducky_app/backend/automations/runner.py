@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from pathlib import Path
 
-from backend.automations import catalog, glbops, imageops, listops, media, notify, pdfops, plugin, servers
+from backend.automations import catalog, glbops, imageops, listops, live_runs, media, notify, pdfops, plugin, servers
 from backend.automations.expr import ExprError, as_number, as_text, evaluate, truthy
 from backend.automations.files import file_ref, is_file_ref, kind_of, run_folder, with_url
 from backend.automations.pins import DATA_KIND, node_pins
@@ -50,10 +50,12 @@ _RUN_CHAT: ContextVar[str] = ContextVar("workflow_run_chat", default="")
 _FROM_CODE: ContextVar[bool] = ContextVar("workflow_node_from_code", default=False)
 _PLACEHOLDER = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 _END_TYPES = frozenset({"pipeline.finish", "flow.end", "flow.output"})
-# Stop: every run of a workflow (and the workflows it calls) shares one event; the
-# walk checks it between steps and a step in progress is left to finish on its own.
+# Nested workflows share cancellation; process-shared requests reach the run owner.
+# Active terminal tools register cleanup so Stop also terminates their process trees.
 _CANCEL: ContextVar[threading.Event | None] = ContextVar("workflow_cancel", default=None)
-_ACTIVE: dict[str, set[threading.Event]] = {}
+_ACTIVE: dict[str, dict[str, threading.Event]] = {}
+_CANCEL_HOOKS: dict[threading.Event, set[Callable[[], None]]] = {}
+_REGISTRY_RUNS: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("workflow_registry_runs", default=())
 _ACTIVE_LOCK = threading.Lock()
 # Live view: the editor lights up the step running now and the wire it came along.
 _LIVE: ContextVar[tuple[str, str] | None] = ContextVar("workflow_live", default=None)
@@ -316,10 +318,14 @@ def run_node(
     cancel = threading.Event()
     cancel_token, live_token = _CANCEL.set(cancel), _LIVE.set((wid, run_id))
     stack_token = _CALL_STACK.set((*_CALL_STACK.get(), wid))
+    registry_token = _REGISTRY_RUNS.set((*_REGISTRY_RUNS.get(), (wid, run_id)))
+    live_runs.start(wid, run_id)
     with _ACTIVE_LOCK:
-        _ACTIVE.setdefault(wid, set()).add(cancel)
+        _ACTIVE.setdefault(wid, {})[run_id] = cancel
     started = time.time()
-    _push({"type": "workflow_run", "id": wid, "run": run_id, "state": "started"})
+    _push({"type": "workflow_run", "id": wid, "run": run_id, "state": "started",
+           "conv": str(ctx.get("caller_conv_id") or ""), "name": str(wf.get("name") or ""),
+           "plan": [{"node": nid, "label": flow._name(nid), "type": str(node.get("type") or "")}]})
     try:
         if flow.is_step(nid):
             _live_step(nid, "running", label=flow._name(nid))
@@ -336,22 +342,26 @@ def run_node(
         error = "" if ok else f"{flow._name(nid)}: {step.get('error') or 'failed'}"
     finally:
         with _ACTIVE_LOCK:
-            running = _ACTIVE.get(wid, set())
-            running.discard(cancel)
+            running = _ACTIVE.get(wid, {})
+            running.pop(run_id, None)
             if not running:
                 _ACTIVE.pop(wid, None)
         _CALL_STACK.reset(stack_token)
         _LIVE.reset(live_token)
         _CANCEL.reset(cancel_token)
+        if len(_REGISTRY_RUNS.get()) == 1:
+            with _ACTIVE_LOCK:
+                _CANCEL_HOOKS.pop(cancel, None)
+        _REGISTRY_RUNS.reset(registry_token)
         _end_run(flags)
     _push({"type": "workflow_run", "id": wid, "run": run_id, "state": "stopped" if cancel.is_set() else "done" if ok else "error", **({"error": error} if error else {})})
     node_outputs = flow.summary()
     steps = list(flow.order)
-    record: dict[str, Any] = {"started": started, "ended": time.time(), "ok": ok, "error": error, "trigger_id": f"node:{nid}", "steps": steps, "node_outputs": node_outputs}
+    record: dict[str, Any] = {"run": run_id, "started": started, "ended": time.time(), "ok": ok, "error": error, "trigger_id": f"node:{nid}", "steps": steps, "node_outputs": node_outputs}
     if kept_from and ok:
         record["kept"] = list(kept_from)
     append_run(wid, record)
-    out = {"ok": ok, "error": error, "id": wid, "steps": steps, "node_outputs": node_outputs}
+    out = {"ok": ok, "error": error, "id": wid, "run": run_id, "steps": steps, "node_outputs": node_outputs}
     return {**out, "needs_review": True} if not ok and _needs_review(steps) else out
 
 
@@ -374,26 +384,61 @@ def run_code_draft(
     return code_node.draft(workflow_id, node_id, code, inputs, settings, dry_run, person)
 
 
-def stop_workflow(workflow_id: str) -> bool:
-    """Stop every run of this workflow on this PC now. True when one was running."""
+def stop_workflow(workflow_id: str, run_id: str = "") -> bool:
+    """Stop one run, or all runs of the workflow, including MCP bridge processes."""
+    wid = str(workflow_id or "").strip()
+    requested = live_runs.stop(wid, run_id)
     with _ACTIVE_LOCK:
-        events = list(_ACTIVE.get(str(workflow_id or "").strip(), ()))
+        events = [event for rid, event in _ACTIVE.get(wid, {}).items()
+                  if not run_id or rid == run_id]
     for event in events:
         event.set()
-    return bool(events)
+    return requested or bool(events)
 
 
 def is_running(workflow_id: str) -> bool:
-    with _ACTIVE_LOCK:
-        return bool(_ACTIVE.get(str(workflow_id or "").strip()))
+    return live_runs.running(str(workflow_id or "").strip())
 
 
 def _cancelled() -> bool:
     event = _CANCEL.get()
-    return bool(event and event.is_set())
+    if event is None:
+        return False
+    if not event.is_set() and any(live_runs.cancelled(wid, rid) for wid, rid in _REGISTRY_RUNS.get()):
+        event.set()
+    if not event.is_set():
+        return False
+    with _ACTIVE_LOCK:
+        hooks = _CANCEL_HOOKS.pop(event, ())
+    for hook in hooks:
+        try:
+            hook()
+        except Exception:
+            _log.exception("Could not cancel workflow operation")
+    return True
+
+
+def _cancel_on_stop(cleanup: Callable[[], None]) -> Callable[[], None]:
+    event = _CANCEL.get()
+    if event is None:
+        return lambda: None
+    with _ACTIVE_LOCK:
+        if not event.is_set():
+            _CANCEL_HOOKS.setdefault(event, set()).add(cleanup)
+            def release() -> None:
+                with _ACTIVE_LOCK:
+                    hooks = _CANCEL_HOOKS.get(event)
+                    if hooks is not None:
+                        hooks.discard(cleanup)
+                        if not hooks:
+                            _CANCEL_HOOKS.pop(event, None)
+            return release
+    cleanup()
+    return lambda: None
 
 
 def _push(event: dict[str, Any]) -> None:
+    live_runs.record(event)
     try:
         from frontend.ui_web.agent_modes import push_ui_event
 
@@ -425,8 +470,9 @@ def _announce_run(wf: dict[str, Any], *, phase: str, detail: str = "", run_id: s
     title = str(wf.get("name") or wid)
     payload = {
         "type": "background_job",
-        "id": f"graph:{wid}",
+        "id": f"graph-run:{wid}:{run_id}" if run_id else f"graph:{wid}",
         "source": "workflow",
+        "cancelable": phase == "working",
         "title": title,
         "detail": detail,
         "phase": phase,
@@ -534,14 +580,16 @@ def run_workflow(
     wid = str(wf["id"])
     run_id = uuid.uuid4().hex[:12]
     live_token = _LIVE.set((wid, run_id))
+    registry_token = _REGISTRY_RUNS.set((*_REGISTRY_RUNS.get(), (wid, run_id)))
+    live_runs.start(wid, run_id)
     with _ACTIVE_LOCK:
-        _ACTIVE.setdefault(wid, set()).add(cancel)
+        _ACTIVE.setdefault(wid, {})[run_id] = cancel
     started = time.time()
     ok = False
     error = ""
     steps: list[Any] = []
     try:
-        _announce_run(wf, phase="working", detail="Running")
+        _announce_run(wf, phase="working", detail="Running", run_id=run_id)
         _push({
             "type": "workflow_run", "id": wid, "run": run_id, "state": "started",
             # The chat that started it shows a live card: its name, every step, which one is running.
@@ -558,14 +606,18 @@ def run_workflow(
             steps.append({"ok": True, "label": "Note", "result": {"warnings": flow.warnings}, "warning": " ".join(flow.warnings)})
     finally:
         with _ACTIVE_LOCK:
-            running = _ACTIVE.get(wid, set())
-            running.discard(cancel)
+            running = _ACTIVE.get(wid, {})
+            running.pop(run_id, None)
             if not running:
                 _ACTIVE.pop(wid, None)
         stopped = cancel.is_set()
         _push({"type": "workflow_run", "id": wid, "run": run_id, "state": "stopped" if stopped else "done" if ok else "error", **({"error": error} if error else {})})
         _LIVE.reset(live_token)
         _CANCEL.reset(cancel_token)
+        if len(_REGISTRY_RUNS.get()) == 1:
+            with _ACTIVE_LOCK:
+                _CANCEL_HOOKS.pop(cancel, None)
+        _REGISTRY_RUNS.reset(registry_token)
         _CALL_STACK.reset(stack_token)
         _end_run(flags)
         if ident_token is not None:
@@ -574,9 +626,9 @@ def run_workflow(
             identity.reset(ident_token)
         _announce_run(
             wf,
-            phase="done" if ok else "error",
-            detail=(error or "Finished") if ok else (error or "Failed"),
-            run_id=str(int(started)),
+            phase="done" if ok or stopped else "error",
+            detail=STOPPED if stopped else (error or "Finished") if ok else (error or "Failed"),
+            run_id=run_id,
         )
         # A run the person started (not a trigger, not a chat's tool call, not a
         # nested workflow.call, not stopped by them): tell their phone.
@@ -585,6 +637,7 @@ def run_workflow(
     ended = time.time()
     node_outputs = flow.summary()
     run = {
+        "run": run_id,
         "started": started,
         "ended": ended,
         "ok": ok,
@@ -598,6 +651,7 @@ def run_workflow(
         "ok": ok,
         "error": error,
         "id": wf["id"],
+        "run": run_id,
         "steps": steps,
         "node_outputs": node_outputs,
         "conv_id": ctx.get("conv_id"),
@@ -1038,8 +1092,7 @@ def _exec_stoppable(node: dict[str, Any], payload: dict[str, Any], inputs: dict[
 
 
 def _exec_stoppable_step(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Run one step on its own thread so Stop ends the run at once; a step that was
-    still working (a tool, UEFN, a ducky) finishes in the background, unused."""
+    """Run one step with cooperative cancellation and owned-operation cleanup."""
     cancel = _CANCEL.get()
     if cancel is None:
         return _exec_node(node, payload, inputs)
@@ -1057,8 +1110,10 @@ def _exec_stoppable_step(node: dict[str, Any], payload: dict[str, Any], inputs: 
 
     threading.Thread(target=work, name="workflow-step", daemon=True).start()
     while not done.wait(0.05):
-        if cancel.is_set():
+        if _cancelled():
             return {"ok": False, "stopped": True, "id": node.get("id"), "type": node.get("type"), "label": str(node.get("label") or node.get("type") or ""), "error": STOPPED}
+    if _cancelled():
+        return {"ok": False, "stopped": True, "id": node.get("id"), "type": node.get("type"), "error": STOPPED}
     return box["step"]
 
 
@@ -2220,10 +2275,20 @@ def _invoke_tool(name: str, arguments: dict[str, Any], node_id: str = "", typed:
     if fn is None:
         return {"ok": False, "error": f"tool has no fn: {name}"}
     stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
+    release_cancel = lambda: None
+    if name == "ducky_terminal_run" and _CANCEL.get() is not None:
+        from frontend.ui_web.terminal.manager import get_terminal_manager
+
+        manager = get_terminal_manager()
+        session_id = str(arguments.get("session_id") or "")
+        release_cancel = _cancel_on_stop(lambda: manager.kill(session_id, push_close=True))
     typed_token = _TYPED_COMMAND.set(typed)
     try:
+        if _cancelled():
+            return {"ok": False, "error": STOPPED}
         result = fn(**arguments)
     finally:
+        release_cancel()
         _TYPED_COMMAND.reset(typed_token)
         if stream:
             stream[0].set()
@@ -2245,6 +2310,13 @@ def _invoke_tool(name: str, arguments: dict[str, Any], node_id: str = "", typed:
         if isinstance(parsed, dict):
             out["data"] = parsed
     data = out.get("data")
+    if name == "ducky_terminal_open" and isinstance(data, dict) and data.get("ok") and _CANCEL.get() is not None:
+        from frontend.ui_web.terminal.manager import get_terminal_manager
+
+        manager = get_terminal_manager()
+        session_id = str(data.get("session_id") or "")
+        if session_id:
+            _cancel_on_stop(lambda: manager.kill(session_id, push_close=True))
     if isinstance(data, dict) and data.get("ok") is False:
         return {"ok": False, "error": str(data.get("error") or f"{name} failed"), "result": out}
     return {"ok": True, "result": out}

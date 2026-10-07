@@ -656,12 +656,12 @@ async def run_workflow_node(workflow_id: str, node_id: str, pretty: bool = False
 
 
 @mcp.tool()
-def stop_workflow(workflow_id: str, pretty: bool = False) -> str:
-    """Stop every run of a workflow on this PC right away (the editor's Stop button).
-    A step that was mid-way (a tool, UEFN, a ducky) finishes in the background, unused."""
+def stop_workflow(workflow_id: str, pretty: bool = False, run_id: str = "") -> str:
+    """Stop a specific run, or all runs of this workflow on this PC.
+    Cancels active owned terminal process trees and prevents subsequent steps."""
     from backend.automations.runner import stop_workflow as _stop
 
-    return tool_json({"ok": True, "stopped": _stop(workflow_id)}, pretty=pretty)
+    return tool_json({"ok": True, "stopped": _stop(workflow_id, run_id)}, pretty=pretty)
 
 
 @mcp.tool()
