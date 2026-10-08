@@ -147,16 +147,17 @@ assignments, loops or calls out. Example: `score >= 10 && name.includes("duck")`
 
 ### Images, 3D, characters (paid backends)
 
-Generators call a plugin tool; pick it with `config.backend` (ids and costs are
-in `list_workflow_nodes` → `backends`, with `available` and why not). **They only
+Generators call a plugin tool; pick it with `config.backend` (ids and what each
+costs are in `list_workflow_nodes` → `backends`, with `available` and why not).
+Each backend names its own cost: a price in words or a credit estimate. **They only
 spend with `config.spend: true`.** Never set `spend` yourself: first ask the user
-with `ducky_ask_user` (yes/no, naming each paid node and its ~credits). Without
-it the run stops at that node and says which switch to turn on. Templates ship
-with spend off.
+with `ducky_ask_user` (yes/no, naming each paid node and the cost its backend
+shows). Without it the run stops at that node and says which switch to turn on.
+Templates ship with spend off.
 
 | Node | Pins in → out | Backends (credits, first = default) |
 | --- | --- | --- |
-| `image.generate` Text to Image | `prompt` → `image`, `files` | `gemini25flash` (5), `gemini31flash` (7), `gemini3pro` (10), `seedream` (10), `meshy_text_to_image` (5) |
+| `image.generate` Text to Image | `prompt` → `image`, `files` | What the plugins turned on here declare (`contributes.automations.image_generators`), then each AI gateway's own image node (billed to that gateway's key). No backend set = the first that can run. |
 | `image.edit` | `image`, `prompt` → `image` | `meshy_image_to_image` (5) |
 | `image.remove_bg` / `image.upscale` | `image` → `image` | `studio3d` (5 / 20) |
 | `mesh.generate` Text to 3D | `prompt` → `mesh`, `files` | `meshy_text_to_3d` (25), `tripo` (60), `tencent_rapid` (35), `tencent_pro` (80), `tripo_p1` (100) |
@@ -201,7 +202,7 @@ Example: a pipeline with no start node: Prompt → picture → cut-out → 3D �
 ```json
 {"nodes": [
   {"id": "q", "type": "input.text", "x": 0, "y": 0, "config": {"value": "A wooden barrel, stylized, plain background"}},
-  {"id": "gen", "type": "image.generate", "x": 300, "y": 0, "config": {"backend": "gemini25flash"}},
+  {"id": "gen", "type": "image.generate", "x": 300, "y": 0, "config": {}},
   {"id": "cut", "type": "image.remove_bg", "x": 600, "y": 0, "config": {}},
   {"id": "m", "type": "mesh.from_image", "x": 900, "y": 0, "config": {"backend": "meshy_image_to_3d", "fallback": true}},
   {"id": "u", "type": "uefn.import", "x": 1200, "y": 0, "config": {"folder": "Ducky/Props"}}],
