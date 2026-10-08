@@ -35,8 +35,6 @@ _log = logging.getLogger("uefn_plugins.publishing")
 
 ProgressFn = Callable[[float, str], None]
 
-# Raw bytes per chunk; base64 keeps each collect body well under the wire cap.
-_CHUNK_BYTES = 48 * 1024
 # Source trees never ship repo internals or build junk (backend .py IS kept — it is
 # the private source a reviewer rebuilds).
 _SOURCE_SKIP_DIRS = frozenset({".git", ".github", ".pytest_cache", "__pycache__", "deploy", "node_modules"})
@@ -98,25 +96,8 @@ def zip_source(src: Path) -> bytes:
     return buf.getvalue()
 
 
-def _upload_chunked(upload_id: str, which: str, data: bytes, progress: ProgressFn | None, base: float, span: float) -> None:
-    total = len(data)
-    seq = 0
-    sent = 0
-    while sent < total:
-        piece = data[sent : sent + _CHUNK_BYTES]
-        _store(
-            "plugin-publish-chunk",
-            {
-                "uploadId": upload_id,
-                "which": which,
-                "seq": seq,
-                "b64": base64.b64encode(piece).decode("ascii"),
-            },
-        )
-        sent += len(piece)
-        seq += 1
-        if total:
-            _progress(progress, base + span * (sent / total), f"Uploading {which}…")
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
 
 
 def publish(
@@ -158,9 +139,9 @@ def publish(
         build_bytes = build_zip.read_bytes()
         _progress(progress, 0.52, "Packing source…")
         source_bytes = zip_source(src)
-
-        begin = _store(
-            "plugin-publish-begin",
+        _progress(progress, 0.6, "Uploading…")
+        done = _store(
+            "plugin-publish",
             {
                 "slug": pid,
                 "version": version,
@@ -169,18 +150,12 @@ def publish(
                 "notes": str(notes or "")[:2000],
                 "compiled": True,
                 "buildSha256": report.get("sha256") or _sha256(build_bytes),
-                "buildSize": len(build_bytes),
                 "sourceSha256": _sha256(source_bytes),
-                "sourceSize": len(source_bytes),
+                "buildB64": _b64(build_bytes),
+                "sourceB64": _b64(source_bytes),
             },
+            timeout=180.0,
         )
-        upload_id = str(begin.get("uploadId") or "").strip()
-        if not upload_id:
-            return {"ok": False, "error": str(begin.get("error") or "Store did not start the upload")}
-        _upload_chunked(upload_id, "build", build_bytes, progress, 0.55, 0.2)
-        _upload_chunked(upload_id, "source", source_bytes, progress, 0.75, 0.2)
-        _progress(progress, 0.97, "Finishing…")
-        done = _store("plugin-publish-finish", {"uploadId": upload_id}, timeout=120.0)
 
     _progress(progress, 1.0, "Published" if done.get("ok") else "Done")
     status = str(done.get("status") or ("live" if target == "team" else "pending"))
@@ -306,21 +281,18 @@ def review_approve(slug: str, version: str, notes: str = "", progress: ProgressF
         except engine.CompileError as exc:
             return {"ok": False, "error": f"Rebuild failed: {exc}"}
         build_bytes = build_zip.read_bytes()
-        begin = _store(
-            "review-approve-begin",
+        _progress(progress, 0.75, "Uploading approved build…")
+        done = _store(
+            "review-approve",
             {
                 "slug": slug,
                 "version": version,
                 "notes": str(notes or "")[:2000],
                 "buildSha256": report.get("sha256") or _sha256(build_bytes),
-                "buildSize": len(build_bytes),
+                "buildB64": _b64(build_bytes),
             },
+            timeout=180.0,
         )
-        upload_id = str(begin.get("uploadId") or "").strip()
-        if not upload_id:
-            return {"ok": False, "error": str(begin.get("error") or "Store did not start the upload")}
-        _upload_chunked(upload_id, "build", build_bytes, progress, 0.72, 0.23)
-        done = _store("review-approve-finish", {"uploadId": upload_id}, timeout=120.0)
     _progress(progress, 1.0, "Approved")
     return {"ok": bool(done.get("ok", True)), "id": slug, "version": version, "error": done.get("error") or ""}
 
