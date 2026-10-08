@@ -997,7 +997,10 @@ def publish_agent_catalog() -> None:
 
 
 def refresh_status() -> dict[str, Any]:
-    """Refresh identity when a session cookie exists; device-key-only stays as-is."""
+    """Refresh identity when a session cookie exists; device-key-only stays as-is.
+    Ducky AI access is asked again too, so a role granted since sign-in shows."""
+    with _AI_LOCK:
+        _AI.update(at=float("-inf"), refused=False)
     blob = _load_blob()
     if blob.get("session_value"):
         try:
@@ -1026,15 +1029,20 @@ def refresh_status() -> dict[str, Any]:
 
 # Ducky AI is the account plugin's hosted `uefn_ducky` gateway: its model choice,
 # usage meter and chats. Without the Ducky AI permission it does not exist here.
-# The site answers brain-status only for an account holding that permission and
-# refuses everyone else, so a 2xx answer is the grant. Signed out, refused,
-# offline or any error: hidden.
+# A website sign-in carries the account's permission list (/acl/self), so nothing
+# is asked. A PC paired by device key can only reach the desktop plugin, whose
+# brain-status answers only an account holding the permission, so a 2xx answer is
+# the grant: asked once per sign-in or app start, never on a timer. Signed out,
+# refused, offline or any error: hidden.
 DUCKY_AI_PROVIDER = "uefn_ducky"
+DUCKY_AI_PERMISSION = "uefn-ducky.brain"
 _BRAIN_STATUS = "/api/v1/plugins/uefn-ducky/collect/brain-status"
-# ponytail: a revoked permission hides within a minute; a site push on role change would be instant.
-_AI_TTL_S = 60.0
+# ponytail: a refusal stands until sign-in, app start or Account → Refresh; a grant is
+# re-read every half hour. A site push on role change would make both instant.
+_AI_RECHECK_S = 1800.0
+_AI_RETRY_S = 300.0  # no answer (offline, site error): ask again after this
 _AI_LOCK = threading.Lock()
-_AI: dict[str, Any] = {"who": "", "at": float("-inf"), "ok": False, "busy": False}
+_AI: dict[str, Any] = {"who": "", "at": float("-inf"), "ok": False, "refused": False, "busy": False}
 
 
 def ducky_ai_hidden(provider_id: Any) -> bool:
@@ -1048,16 +1056,23 @@ def ducky_ai_hidden(provider_id: Any) -> bool:
 
 
 def ducky_ai_allowed() -> bool:
-    """The site's last answer for this account; never waits on the network. A
-    missing or minute-old answer is asked again in the background."""
-    who = account_key()
+    """Whether this account may see Ducky AI; never waits on the network. With a
+    website sign-in it is the account's permission list. Otherwise the site's last
+    answer: an unasked account is asked once in the background, a refusal is not
+    asked again, a grant is re-read after half an hour, no answer after five minutes."""
+    blob = _load_blob()
+    who = account_key(blob)
     if not who:
         return False
+    perms = blob.get("permissions")
+    if isinstance(perms, list):
+        return DUCKY_AI_PERMISSION in perms
     with _AI_LOCK:
         if _AI["who"] != who:
-            _AI.update(who=who, at=float("-inf"), ok=False)
+            _AI.update(who=who, at=float("-inf"), ok=False, refused=False)
         ok = bool(_AI["ok"])
-        if _AI["busy"] or time.monotonic() - _AI["at"] < _AI_TTL_S:
+        wait = _AI_RECHECK_S if ok else _AI_RETRY_S
+        if _AI["busy"] or _AI["refused"] or time.monotonic() - _AI["at"] < wait:
             return ok
         _AI["busy"] = True
     threading.Thread(target=_check_ducky_ai, args=(who,), daemon=True, name="ducky-ai-check").start()
@@ -1077,9 +1092,10 @@ def _check_ducky_ai(who: str) -> None:
 def _note_ducky_ai(who: str, status: int, parsed: Any, raw: str = "") -> None:
     """Every brain-status answer lands here, the account plugin's own polls included."""
     ok = bool(who) and 200 <= status < 300 and isinstance(parsed, dict) and parsed.get("ok") is not False
+    refused = 400 <= status < 500 and status != 429
     with _AI_LOCK:
         before = bool(_AI["ok"]) and _AI["who"] == who
-        _AI.update(who=who, at=time.monotonic(), ok=ok)
+        _AI.update(who=who, at=time.monotonic(), ok=ok, refused=refused)
     dropped = 400 <= status < 500 and "permission denied" in raw.lower() and _drop_ducky_ai_default()
     if dropped or ok != before:
         _ducky_ai_changed()

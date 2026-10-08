@@ -715,7 +715,7 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
         with (
             patch.object(acc, "_load_blob", return_value=dict(blob)),
             patch.object(acc, "_ducky_ai_changed", changed),
-            patch.dict(acc._AI, {"who": "", "at": float("-inf"), "ok": False, "busy": False}),
+            patch.dict(acc._AI, {"who": "", "at": float("-inf"), "ok": False, "refused": False, "busy": False}),
             patch.dict(host._CONTRIBUTIONS, {"llm_providers": [gateway, other]}),
             patch.dict(host._LLM_PROVIDER_FACTORIES, {"uefn_ducky": reg}),
             patch("frontend.agent_models.provider_label", return_value="UEFN Ducky"),
@@ -728,6 +728,8 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
             s = PanelSettings.load()
             assert (s.default_model, s.agent_provider, s.agent_model) == ("", "", "")
             assert changed.call_count == 1
+            # A refusal stands: the site is not asked again (no polling).
+            assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is False
             # Granted (a 2xx answer): every surface shows.
             with patch("urllib.request.urlopen", return_value=_Granted(b'{"ok":true,"payload":{"subscribed":true}}')):
                 acc._check_ducky_ai(who)
@@ -736,6 +738,8 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
             with patch("urllib.request.urlopen", side_effect=OSError("offline")):
                 acc._check_ducky_ai(who)
             assert surfaces() == hidden and changed.call_count == 3
+            # No answer is asked again only after the retry wait, not on every look.
+            assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is False
             # Another account on this PC starts hidden and is asked about at once.
             with patch("urllib.request.urlopen", return_value=_Granted(b'{"ok":true}')):
                 acc._check_ducky_ai(who)
@@ -743,6 +747,12 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
             acc._load_blob.return_value = {**blob, "email": "b@b.co"}
             with patch.object(acc, "_check_ducky_ai"):
                 assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is True
+            # A website sign-in carries the permission list: the site is never asked.
+            with patch("urllib.request.urlopen", side_effect=AssertionError("no request")):
+                acc._load_blob.return_value = {**blob, "session_value": "s", "permissions": ["uefn-ducky.brain"]}
+                assert acc.ducky_ai_allowed() is True
+                acc._load_blob.return_value = {**blob, "session_value": "s", "permissions": ["uefn-ducky.app"]}
+                assert acc.ducky_ai_allowed() is False
             # Signed out: hidden, and no request goes out.
             acc._load_blob.return_value = {}
             with patch("urllib.request.urlopen", side_effect=AssertionError("no request")):
