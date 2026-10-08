@@ -2352,9 +2352,11 @@ export function AutomationsView() {
                 <span className={`aw-light${draft.enabled ? " is-on" : ""}`} aria-hidden="true" />
               </button>
               {workflowRuns.length > 1 ? (
-                <select aria-label="Workflow run" value={visibleRun?.run || ""} onChange={(event) => setSelectedRun(event.target.value)}>
-                  {workflowRuns.map((run, index) => <option key={run.run} value={run.run}>Run {index + 1} · {run.state}</option>)}
-                </select>
+                <ChoiceDropdown aria-label="Workflow run" className="aw-run-picker" mode="radio" size="compact" placement="bottom"
+                  trigger={<><Icons.Play /><Icons.ChevronDown /></>}
+                  header={<strong>Workflow runs</strong>}
+                  value={visibleRun?.run || ""} onChange={setSelectedRun}
+                  options={workflowRuns.map((run, index) => ({ value: run.run, label: `Run ${index + 1} · ${run.state}` }))} />
               ) : null}
               {visibleRun?.state === "running" ? (
                 <button type="button" ref={targetRef("workflows.toolbar.stop", { route: "workflows", label: "Stop the run" })} className="aw-stop" title={stopping ? "Stopping…" : "Stop: end this run now"} aria-label="Stop" disabled={stopping} onClick={() => void stopRun()}>

@@ -216,6 +216,8 @@
 .aw-toolbar .aw-toolbar-actions .choice-dropdown .choice-dropdown-trigger.is-open { background: var(--bg-hover); color: var(--text); }
 .aw-toolbar .aw-toolbar-actions > button[aria-pressed="true"] { color: var(--accent); }
 .aw-toolbar .aw-toolbar-actions svg { width: 17px; height: 17px; }
+.aw-toolbar .aw-toolbar-actions .aw-run-picker .choice-dropdown-trigger { display: flex; gap: 1px; }
+.aw-toolbar .aw-toolbar-actions .aw-run-picker .choice-dropdown-trigger > svg:last-child { width: 10px; height: 10px; }
 .aw-spin { display: inline-grid; animation: spin-slow 0.8s linear infinite; }
 /* Save: orange with a dot while edits are unsaved, a spinner while saving, a check just
    after, red when the save failed. The phone menu button carries the same dot. */
