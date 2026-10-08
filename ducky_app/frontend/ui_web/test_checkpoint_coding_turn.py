@@ -87,6 +87,22 @@ def test_turn_checkpoint_flushes_on_tool_done():
         assert [e["type"] for e in events] == ["tool", "tool_done"]
 
 
+def test_same_named_tools_complete_by_call_id(tmp_path):
+    root = str(tmp_path)
+    conv = create_conversation(PanelSettings.load(), "", title="Tools", project_root=root)
+    ckpt = _TurnCheckpoint(conv, "cursor", "ordered", project_root=root)
+    push = ckpt.wrap(lambda _ev: None)
+    for call_id in ("first", "second"):
+        push({"type": "tool", "tool": {"id": call_id, "name": "Read", "status": "pending"}})
+    push({"type": "tool_done", "tool": {"id": "first", "name": "Read", "status": "success", "result": "a"}})
+    tools = {b["id"]: b for b in ckpt.blocks if b["type"] == "tool_call"}
+    assert tools["first"]["status"] == "success"
+    assert tools["second"]["status"] == "pending"
+    push({"type": "tool_done", "tool": {"id": "second", "name": "Read", "status": "cancelled"}})
+    assert tools["second"]["status"] == "cancelled"
+    assert tools["second"]["result"]["ok"] is False
+
+
 def test_turn_checkpoint_does_not_flush_on_text_delta():
     with tempfile.TemporaryDirectory() as tmp:
         root = str(Path(tmp))

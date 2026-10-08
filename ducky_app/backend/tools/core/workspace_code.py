@@ -20,6 +20,7 @@ from typing import Any, Optional
 from backend.bridge import resolve_workspace_path
 from backend.server import mcp
 from backend.util.json_util import tool_json
+from backend.workspace.ai_ignore import ai_access_allowed, current_policy, require_ai_access
 
 # Never walked into: VCS internals, dependencies, build output, UEFN's heavy dirs.
 # A path given explicitly inside one of these is still read or searched.
@@ -71,13 +72,17 @@ def _match_base(start: str, root: str) -> str:
 
 def _walk_files(start: str):
     """Every file under ``start`` (or ``start`` itself), skipping heavy dirs and binaries."""
+    policy = current_policy()
+    policy.require(start)
     if os.path.isfile(start):
         yield start
         return
     for dirpath, dirnames, filenames in os.walk(start):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS
+                             and ai_access_allowed(os.path.join(dirpath, d), policy=policy))
         for name in sorted(filenames):
-            if not name.lower().endswith(_BINARY_SUFFIXES):
+            if (not name.lower().endswith(_BINARY_SUFFIXES)
+                    and ai_access_allowed(os.path.join(dirpath, name), policy=policy)):
                 yield os.path.join(dirpath, name)
 
 
@@ -104,6 +109,7 @@ def _path_matches(rel: str, pattern: str) -> bool:
 
 def _read_text(full: str) -> Optional[str]:
     """A text file's contents (None for binary or over 2 MB)."""
+    require_ai_access(full)
     try:
         if os.path.getsize(full) > _MAX_FILE_BYTES:
             return None
@@ -118,6 +124,7 @@ def _read_text(full: str) -> Optional[str]:
 
 def _require_file(path: str) -> str:
     full = resolve_workspace_path(path)
+    require_ai_access(full)
     if not os.path.isfile(full):
         raise ValueError(f"Not a file: {path}. Find it with workspace_find.")
     return full
@@ -126,6 +133,7 @@ def _require_file(path: str) -> str:
 def read_lines(full: str, start_line: int = 0, end_line: int = 0, line_numbers: bool = False) -> dict[str, Any]:
     """Lines ``start_line``..``end_line`` (1-based, inclusive) of a text file. Without a
     range, the first READ_LINE_CAP lines, and a note of where the rest starts."""
+    require_ai_access(full)
     with open(full, encoding="utf-8", errors="replace") as fh:
         text = fh.read()
     lines = text.splitlines()
@@ -282,6 +290,7 @@ def workspace_tree(path: str = ".", depth: int = 3, max_entries: int = 400, pret
         raise ValueError(f"Not a folder: {path}")
     depth = max(1, min(int(depth or 3), 8))
     limit = max(10, min(int(max_entries or 400), 3000))
+    policy = current_policy()
     rows: list[str] = []
     truncated = False
 
@@ -296,13 +305,16 @@ def workspace_tree(path: str = ".", depth: int = 3, max_entries: int = 400, pret
                 truncated = True
                 return
             full = os.path.join(folder, name)
+            if not ai_access_allowed(full, policy=policy):
+                continue
             pad = "  " * level
             if os.path.isdir(full):
                 if name in _SKIP_DIRS:
                     continue
                 if level + 1 >= depth:
                     try:
-                        count = len(os.listdir(full))
+                        count = sum(ai_access_allowed(os.path.join(full, n), policy=policy)
+                                    for n in os.listdir(full))
                     except OSError:
                         count = 0
                     rows.append(f"{pad}{name}/ ({count} entries)")
@@ -564,10 +576,14 @@ def workspace_move_file(source: str, destination: str, pretty: bool = False) -> 
     dst = destination.strip().replace("\\", "/").strip("/")
     if not src or not dst:
         raise ValueError("source and destination are required")
+    from backend.workspace.ai_ignore import require_ai_path_operation
+    require_ai_path_operation(resolve_workspace_path(src), resolve_workspace_path(dst))
     src_parent, _, src_name = src.rpartition("/")
     dst_parent, _, dst_name = dst.rpartition("/")
     path = src
     if dst_parent != src_parent:
+        intermediate = "/".join(p for p in (dst_parent, src_name) if p)
+        require_ai_path_operation(resolve_workspace_path(src), resolve_workspace_path(intermediate))
         path = project_files.move_project_entry(src, dst_parent)["path"]
     if dst_name != src_name:
         path = project_files.rename_project_entry(path, dst_name)["path"]
@@ -581,6 +597,8 @@ def workspace_delete_file(relative_path: str, pretty: bool = False) -> str:
     """
     from frontend.ui_web import project_files
 
+    from backend.workspace.ai_ignore import require_ai_path_operation
+    require_ai_path_operation(resolve_workspace_path(relative_path))
     out = project_files.delete_project_entry(relative_path)
     return tool_json({"path": out.get("path"), "deleted": True, "restorable": True}, pretty=pretty)
 
@@ -634,6 +652,10 @@ def workspace_git(command: str, args: Optional[list[str]] = None, path: str = ".
     or command="diff", args=["HEAD", "--", "src/app.py"]. Commits, pushes and other changes
     stay in the shell, where they ask first.
     """
+    # Git objects/history and external diff helpers bypass path denials. Never
+    # run git on behalf of AI in strict mode; use guarded workspace tools.
+    if current_policy().strict:
+        raise ValueError("AI_FILE_PROTECTION: git is blocked in strict protection mode.")
     cmd = (command or "").strip().lower()
     if cmd not in _GIT_READ_COMMANDS:
         raise ValueError(

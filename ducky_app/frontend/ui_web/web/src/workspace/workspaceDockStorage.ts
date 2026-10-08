@@ -120,8 +120,9 @@ export function defaultDockSnapshot(): WorkspaceDockSnapshot {
     },
     left: defaultRailStack(["chats", "files", "groupchat"], "chats", 0.5),
     right: defaultRailStack(["outline", "history", "tester"], "outline", 0.55),
-    leftRailOpen: true,
-    rightRailOpen: true,
+    // A fresh install opens with both side panes closed; the header buttons open them.
+    leftRailOpen: false,
+    rightRailOpen: false,
     leftRailEnabled: true,
     rightRailEnabled: true,
     // Discord dock is opt-in (legacy plugin prefs defaulted both sides off).

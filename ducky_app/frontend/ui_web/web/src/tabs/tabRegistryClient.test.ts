@@ -2,21 +2,38 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 const focusTab = vi.fn();
+const getTabOwner = vi.fn();
+let onEvent: (event: { type: string; tab_id: string; window_id: string }) => void;
 vi.mock("../hooks/usePanelApi", () => ({
   getApi: () => ({
     focus_tab: focusTab,
+    get_tab_owner: getTabOwner,
     claim_tab: vi.fn(),
     report_open_tabs: vi.fn(),
   }),
 }));
-vi.mock("../hooks/useAgentEventBus", () => ({ subscribeAgentEvents: () => () => {} }));
+vi.mock("../hooks/useAgentEventBus", () => ({
+  subscribeAgentEvents: (fn: typeof onEvent) => { onEvent = fn; return () => {}; },
+}));
 vi.mock("../utils/visibleInterval", () => ({ setVisibleInterval: () => () => {} }));
 
-const { openOrFocusTab, reportOpenTabs, reportOpenTabsNow } = await import("./tabRegistryClient");
+const { openOrFocusTab, reportOpenTabs, reportOpenTabsNow, installTabRegistryListener } = await import("./tabRegistryClient");
 
 beforeEach(() => {
   focusTab.mockReset();
+  getTabOwner.mockReset();
   reportOpenTabsNow([]);
+});
+
+it("ignores delayed claims from a closed focus window and honors current transfers", async () => {
+  const close = vi.fn();
+  installTabRegistryListener(() => true, close, vi.fn());
+  getTabOwner.mockResolvedValue("focus-new");
+  onEvent({ type: "tab_claimed", tab_id: "chat:reopened", window_id: "focus-old" });
+  await vi.waitFor(() => expect(getTabOwner).toHaveBeenCalled());
+  expect(close).not.toHaveBeenCalled();
+  onEvent({ type: "tab_claimed", tab_id: "chat:reopened", window_id: "focus-new" });
+  await vi.waitFor(() => expect(close).toHaveBeenCalledWith("chat:reopened", "focus-new"));
 });
 
 it("activates a tab that is already open here synchronously, without asking the registry", () => {

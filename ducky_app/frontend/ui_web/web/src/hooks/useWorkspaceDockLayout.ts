@@ -25,6 +25,7 @@ import {
 } from "../workspace/workspaceDockStorage";
 import { resizeStackedPanelSplit, type StackedPanelResizeSnapshot } from "../utils/stackedPanelFlex";
 import { onApiReady } from "./onApiReady";
+import { getApi } from "./usePanelApi";
 
 export type { DockPanelId, DockPanelMode, DockSide, WorkspaceDockSnapshot };
 
@@ -35,12 +36,19 @@ export function useWorkspaceDockLayout(windowId: string) {
   const liveResizeRef = useRef(false);
   // Live drag writes snapshotRef without setState; don't clobber it on unrelated renders.
   if (!liveResizeRef.current) snapshotRef.current = snapshot;
-  const hydratingRef = useRef(false);
+  // Nothing is saved until the AppData layout has loaded. Children's effects run before
+  // this hook's, and ChatSidebar focusing its panel on mount saved this first copy (the
+  // defaults when local storage was empty) over the saved layout on every start.
+  const [willHydrate] = useState(() => getApi() !== null || !!window.pywebview);
+  const hydratingRef = useRef(willHydrate);
 
   // Prefer AppData over localStorage once the bridge is up.
   useEffect(() => {
     return onApiReady((api) => {
-      if (!api.get_workspace_dock) return;
+      if (!api.get_workspace_dock) {
+        hydratingRef.current = false;
+        return;
+      }
       const hydrateStartedAt = Date.now();
       hydratingRef.current = true;
       void Promise.all([
@@ -64,6 +72,9 @@ export function useWorkspaceDockLayout(windowId: string) {
             syncLocalDockSnapshot(next, windowId);
             return;
           }
+          // A failed read (the HTTP bridge answers undefined on a network blip) says nothing
+          // about the saved layout: seeding here would overwrite it with this copy.
+          if (!raw || typeof raw !== "object") return;
           // First run after upgrade: seed disk from whatever localStorage had.
           const seeded = withSavedRailSwitches(snapshotRef.current, rails);
           if (seeded !== snapshotRef.current) {

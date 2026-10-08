@@ -68,7 +68,9 @@ def render_codex_block(uefn_block: dict[str, Any]) -> str:
         f"args = [{', '.join(_toml_quote(a) for a in args)}]",
         "enabled = true",
         "startup_timeout_sec = 60.0",
-        "tool_timeout_sec = 180.0",
+        # Codex requires a finite Duration; Ducky questions have no deadline.
+        # Outstanding answers also gate all subsequent Ducky tool execution.
+        "tool_timeout_sec = 1000000000000.0",
         _MCP_APPROVE_TOML,
     ]
     if env:
@@ -136,6 +138,9 @@ def codex_block_matches(config_path: Path, expected_block: dict[str, Any]) -> tu
     actual = _uefn_table(text)
     if actual is None:
         return False, "uefn MCP server not configured"
+    timeout = actual.get("tool_timeout_sec")
+    if not isinstance(timeout, (int, float)) or timeout < 1_000_000_000_000:
+        return False, "Out of date — question waits need the updated bridge configuration"
     if str(actual.get("command") or "") != str(expected_block.get("command") or ""):
         return False, "Out of date — click Apply"
     if _stable_args(actual.get("args")) != [str(a) for a in (expected_block.get("args") or [])]:

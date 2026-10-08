@@ -429,8 +429,17 @@ class PanelApiWindowMixin:
         return {"ok": True, "window_id": owner}
 
     def claim_tab(self, tab_id: str, window_id: str = "") -> None:
-        """Broadcast ownership; every other window holding tab_id closes its copy."""
-        self._push({"type": "tab_claimed", "tab_id": tab_id, "window_id": window_id or "main"})
+        """Commit ownership, then tell other windows to close their copy."""
+        from frontend.ui_web import tab_registry
+
+        wid = window_id or "main"
+        tab_registry.claim_tab(tab_id, wid)
+        self._push({"type": "tab_claimed", "tab_id": tab_id, "window_id": wid})
+
+    def get_tab_owner(self, tab_id: str) -> str:
+        from frontend.ui_web import tab_registry
+
+        return tab_registry.find_tab_owner(tab_id)
 
     def notify_focus_tab_active(self, focus_id: str, title: str) -> None:
         from frontend.ui_web import focus_windows
@@ -442,15 +451,15 @@ class PanelApiWindowMixin:
 
         focus_windows.report_focus_window_layout(birth_tab_id, layout if isinstance(layout, dict) else {})
 
-    def return_tab_to_main(self, focus_id: str, title: str) -> bool:
+    def return_tab_to_main(self, focus_id: str, title: str, wid: str = "") -> bool:
         from frontend.ui_web import focus_windows
 
-        return bool(focus_windows.return_tab_to_main(focus_id, title))
+        return bool(focus_windows.return_tab_to_main(focus_id, title, window_id=str(wid or "")))
 
-    def close_focus_window(self, focus_id: str, reason: str = "") -> None:
+    def close_focus_window(self, focus_id: str, reason: str = "", wid: str = "") -> None:
         from frontend.ui_web import focus_windows
 
-        focus_windows.close_focus_window(focus_id, reason=str(reason or ""))
+        focus_windows.close_focus_window(focus_id, reason=str(reason or ""), window_id=str(wid or ""))
 
     def close_all_focus_windows(self) -> None:
         from frontend.ui_web import focus_windows

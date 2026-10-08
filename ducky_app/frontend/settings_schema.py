@@ -60,6 +60,14 @@ FIELD_META: dict[str, FieldMeta] = {
         "UEFN project root", "General", settable=True,
         description="Prefer ducky_set_project, which also updates recents + deploy.",
     ),
+    "ai_ignore_patterns": FieldMeta(
+        "AI ignore list", "General", settable=False,
+        description="User-owned file deny patterns. AI tools cannot modify these rules.",
+    ),
+    "ai_ignore_strict": FieldMeta(
+        "Strict AI file protection", "General", settable=False,
+        description="Block unsandboxed agents and tools. User-only setting.",
+    ),
     "verse_editor_enabled": FieldMeta("Verse editor enabled", "General", settable=True),
     "verse_diagnostics_cache_enabled": FieldMeta("Cache Verse diagnostics", "General", settable=True),
     "verse_diagnostics_auto_check": FieldMeta("Auto-check Verse on edit", "General", settable=True),

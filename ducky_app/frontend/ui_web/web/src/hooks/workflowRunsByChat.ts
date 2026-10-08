@@ -3,6 +3,9 @@ import { useSyncExternalStore } from "react";
 import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { subscribeAgentEvents } from "./useAgentEventBus";
 import { subscribePanelPush } from "./usePanelPushBus";
+import { getApi } from "./usePanelApi";
+import { getBackgroundJobs, upsertBackgroundJob } from "./backgroundActivity";
+import { workflowIdFromJobId } from "./graphActivity";
 
 /**
  * The workflow a chat's ducky is running, step by step, for the card above the plan.
@@ -42,26 +45,19 @@ export interface ChatWorkflowRun {
   endedAt?: number;
 }
 
-type WorkflowEvent = Pick<
-  PanelPushEvent,
-  | "type"
-  | "id"
-  | "run"
-  | "node"
-  | "state"
-  | "error"
-  | "conv"
-  | "name"
-  | "plan"
-  | "label"
->;
+type WorkflowEvent = PanelPushEvent;
 
-const byChat = new Map<string, ChatWorkflowRun>();
+const byRun = new Map<string, ChatWorkflowRun>();
+const eventListeners = new Set<(event: PanelPushEvent) => void>();
+const latestEvents = new Map<string, PanelPushEvent>();
+const snapshots = new Map<string, ChatWorkflowRun[]>();
+const EMPTY: ChatWorkflowRun[] = [];
 const runToChat = new Map<string, string>();
 const listeners = new Set<() => void>();
 let installed = false;
 
 function emit(): void {
+  snapshots.clear();
   for (const listener of listeners) listener();
 }
 
@@ -72,11 +68,18 @@ function stepState(raw: string | undefined): WorkflowStepState {
 export function applyWorkflowEvent(event: WorkflowEvent): void {
   const run = String(event.run || "");
   if (!run) return;
+  const eventKey = [event.id, run, event.type, event.node, event.source, event.type === "workflow_run" ? event.state : ""].join(":");
+  const previous = latestEvents.get(eventKey);
+  const replayFinish = event.type === "workflow_run" && event.state !== "started" && byRun.get(run)?.state === "running";
+  if (!replayFinish && previous?.workflow_sequence && event.workflow_sequence && event.workflow_sequence <= previous.workflow_sequence) return;
+  if (!replayFinish && JSON.stringify(previous) === JSON.stringify(event)) return;
+  latestEvents.set(eventKey, event);
+  for (const listener of eventListeners) listener(event);
   if (event.type === "workflow_run" && event.state === "started") {
     const chat = String(event.conv || "");
-    if (!chat || byChat.get(chat)?.run === run) return;
+    if (byRun.has(run)) return;
     runToChat.set(run, chat);
-    byChat.set(chat, {
+    byRun.set(run, {
       workflowId: String(event.id || ""),
       run,
       name: String(event.name || "Workflow"),
@@ -90,12 +93,16 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
       current: "",
       startedAt: Date.now(),
     });
+    upsertBackgroundJob({ id: `graph-run:${event.id}:${run}`, source: "workflow", title: event.name || "Workflow", phase: "working", cancelable: true });
     emit();
+    // The two push buses can deliver the finish before the start.
+    const finished = [...latestEvents.values()].find((saved) =>
+      saved.id === event.id && saved.run === run && saved.type === "workflow_run" && saved.state !== "started");
+    if (finished) applyWorkflowEvent(finished);
     return;
   }
-  const chat = runToChat.get(run);
-  const current = chat ? byChat.get(chat) : undefined;
-  if (!chat || !current || current.run !== run) return;
+  const current = byRun.get(run);
+  if (!current) return;
 
   if (event.type === "workflow_run") {
     if (current.state !== "running") return;
@@ -115,7 +122,7 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
           } as ChatWorkflowStep)
         : s,
     );
-    byChat.set(chat, {
+    byRun.set(run, {
       ...current,
       state,
       error: event.error || undefined,
@@ -123,10 +130,11 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
       current: "",
       endedAt: now,
     });
+    upsertBackgroundJob({ id: `graph-run:${current.workflowId}:${run}`, source: "workflow", title: current.name, phase: state === "error" ? "error" : "done", detail: state === "stopped" ? "Stopped" : event.error || "Finished", cancelable: false });
     emit();
     return;
   }
-  if (event.type !== "workflow_step") return;
+  if (event.type !== "workflow_step" || current.state !== "running") return;
   const node = String(event.node || "");
   if (!node) return;
   const state = stepState(event.state);
@@ -158,7 +166,7 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
     index >= 0
       ? current.steps.map((s, i) => (i === index ? next : s))
       : [...current.steps, next];
-  byChat.set(chat, {
+  byRun.set(run, {
     ...current,
     steps,
     current:
@@ -173,8 +181,59 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
 
 function onEvent(event: AgentEvent | PanelPushEvent): void {
   const type = String(event.type || "");
-  if (type === "workflow_run" || type === "workflow_step")
+  if (type === "workflow_run" || type === "workflow_step" || type === "workflow_output")
     applyWorkflowEvent(event as WorkflowEvent);
+}
+
+let refreshPending: Promise<boolean> | undefined;
+
+/** Reconcile saved activity with the authoritative process-shared run snapshot. */
+export function refreshWorkflowRuns(): Promise<boolean> {
+  if (refreshPending) return refreshPending;
+  const pending = reconcileWorkflowRuns();
+  refreshPending = pending;
+  void pending.finally(() => { if (refreshPending === pending) refreshPending = undefined; });
+  return pending;
+}
+
+async function reconcileWorkflowRuns(): Promise<boolean> {
+  const jobsBefore = getBackgroundJobs().filter((job) => job.phase === "working" && workflowIdFromJobId(job.id));
+  const runsBefore = [...byRun.values()].filter((run) => run.state === "running");
+  try {
+    const result = await getApi()?.workflow_run_snapshot?.();
+    if (!result?.ok || !Array.isArray(result.events)) return false;
+    const states = new Map<string, PanelPushEvent>();
+    for (const event of result.events) {
+      if (event.type === "workflow_run") states.set(`${event.id}:${event.run}`, event);
+      onEvent(event);
+    }
+    for (const run of runsBefore) {
+      if (byRun.get(run.run) !== run || states.has(`${run.workflowId}:${run.run}`)) continue;
+      applyWorkflowEvent({ type: "workflow_run", id: run.workflowId, run: run.run, state: "stopped", error: "No longer running" });
+    }
+    for (const job of jobsBefore) {
+      // A push during the request is newer than this snapshot.
+      if (getBackgroundJobs().find((current) => current.id === job.id) !== job) continue;
+      const wid = workflowIdFromJobId(job.id);
+      const event = job.id.startsWith("graph-run:")
+        ? states.get(job.id.slice("graph-run:".length))
+        : [...states.values()].find((event) => event.id === wid && event.state === "started");
+      if (event?.state === "started") continue;
+      upsertBackgroundJob({
+        id: job.id, phase: event?.state === "error" ? "error" : "done", cancelable: false,
+        detail: event?.error || (event?.state === "stopped" ? "Stopped" : event ? "Finished" : "No longer running"),
+      });
+    }
+    return true;
+  } catch { return false; /* Keep live controls when the bridge is unavailable. */ }
+}
+
+/** A run that already ended is a successful reconciliation, not a Stop error. */
+export async function stopWorkflowRun(workflowId: string, runId = ""): Promise<void> {
+  const result = await getApi()?.stop_workflow?.(workflowId, runId);
+  if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
+  const refreshed = await refreshWorkflowRuns();
+  if (!result.stopped && !refreshed) throw new Error("Could not refresh the workflow status");
 }
 
 function install(): void {
@@ -182,6 +241,12 @@ function install(): void {
   installed = true;
   subscribePanelPush(onEvent);
   subscribeAgentEvents(onEvent);
+  const hydrate = async () => {
+    if (!listeners.size && !eventListeners.size) return;
+    await refreshWorkflowRuns();
+  };
+  void hydrate();
+  window.setInterval(() => void hydrate(), 1000);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -190,20 +255,54 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Hide a finished run's card. */
-export function dismissWorkflowRun(chatId: string): void {
-  if (byChat.delete(chatId)) emit();
+/** Hide a finished run without removing another concurrent run's controls. */
+export function dismissWorkflowRun(chatId: string, runId?: string): void {
+  for (const [run, chat] of runToChat) {
+    if (chat === chatId && (!runId || run === runId) && byRun.get(run)?.state !== "running") {
+      byRun.delete(run);
+      runToChat.delete(run);
+    }
+  }
+  emit();
+}
+
+function snapshot(key: string, matches: (run: ChatWorkflowRun) => boolean): ChatWorkflowRun[] {
+  let value = snapshots.get(key);
+  if (!value) {
+    value = [...byRun.values()].filter(matches);
+    snapshots.set(key, value.length ? value : EMPTY);
+  }
+  return snapshots.get(key)!;
+}
+
+export function useChatWorkflowRuns(chatId: string): ChatWorkflowRun[] {
+  return useSyncExternalStore(subscribe,
+    () => snapshot("chat:" + chatId, (run) => runToChat.get(run.run) === chatId),
+    () => EMPTY);
+}
+
+export function useWorkflowRuns(workflowId: string): ChatWorkflowRun[] {
+  return useSyncExternalStore(subscribe,
+    () => snapshot("workflow:" + workflowId, (run) => run.workflowId === workflowId),
+    () => EMPTY);
 }
 
 export function useChatWorkflowRun(chatId: string): ChatWorkflowRun | null {
-  return useSyncExternalStore(
-    subscribe,
-    () => byChat.get(chatId) ?? null,
-    () => null,
-  );
+  const runs = useChatWorkflowRuns(chatId);
+  return runs[runs.length - 1] ?? null;
+}
+
+/** Replay saved events when an editor opens, then follow every run independently. */
+export function subscribeWorkflowEvents(listener: (event: PanelPushEvent) => void): () => void {
+  install();
+  eventListeners.add(listener);
+  for (const event of latestEvents.values()) listener(event);
+  return () => { eventListeners.delete(listener); };
 }
 
 export function resetWorkflowRunsForTests(): void {
-  byChat.clear();
+  byRun.clear();
   runToChat.clear();
+  latestEvents.clear();
+  emit();
 }

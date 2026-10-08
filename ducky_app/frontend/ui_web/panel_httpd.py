@@ -778,6 +778,12 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     from frontend.ui_web import ui_rpc
                     from frontend.ui_web.agent_modes import get_panel_push
 
+                    if method == "question_gate":
+                        conv_id = str(params.get("conv_id") or "").strip()
+                        self._send_json(200, {"result": {
+                            "blocked": ui_rpc.question_gate(conv_id, _RPC_HANDLER_WAIT_S)
+                        }})
+                        return
                     push = get_panel_push()
                     if push is None:
                         # No React panel in this process to answer the request.

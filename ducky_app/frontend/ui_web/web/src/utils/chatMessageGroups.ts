@@ -261,7 +261,24 @@ export function buildCommittedChatRows(
   inFlight: boolean,
 ): ChatRow[] {
   const combined = inFlight ? [...committed, ...turnMessages] : committed;
-  return coalesceActivityRows(groupChatMessages(combined));
+  const grouped = groupChatMessages(combined);
+  // Only tools in the latest live turn may still run. Historical gaps are
+  // interrupted calls, never proof that a process is still executing.
+  let lastUser = -1;
+  for (let i = grouped.length - 1; i >= 0; i--) {
+    const row = grouped[i];
+    if (row.kind === "bubble" && row.role === "user") { lastUser = i; break; }
+  }
+  const settled = grouped.map((row, i) => {
+    if (row.kind !== "tool" || (inFlight && i > lastUser)) return row;
+    const status = row.result?.tool?.status ?? row.intent.tool?.status;
+    if (row.result || (status && status !== "pending" && status !== "running")) return row;
+    return { ...row, intent: { ...row.intent, tool: {
+      name: row.intent.tool?.name ?? "tool", arguments: row.intent.tool?.arguments ?? {},
+      ...row.intent.tool, status: "cancelled",
+    } } };
+  });
+  return coalesceActivityRows(settled);
 }
 
 /** Build virtuoso rows: committed history + live turn tools/stream, including live reasoning. */

@@ -315,6 +315,9 @@ def window_for_focus_id(focus_id: str) -> Any | None:
 def _destroy_window(window: Any) -> None:
     from frontend.ui_web.ui_dispatch import drop_window, schedule_call
 
+    # Stop accepting bridge replies before the native WebView is disposed.
+    drop_window(window)
+
     def op() -> None:
         try:
             window.destroy()
@@ -393,7 +396,14 @@ def _wire_group_window(group: _FocusGroup) -> None:
 def _create_group_with_tab(focus_id: str, title: str) -> _FocusGroup:
     display_title = f"{(title or focus_id).strip()} — UEFN Ducky"
     wid = f"focus-{uuid.uuid4().hex[:12]}"
-    window = _create_focus_window(focus_id, title, display_title, wid)
+    from frontend.ui_web import tab_registry
+
+    tab_registry.claim_tab(focus_id, wid)
+    try:
+        window = _create_focus_window(focus_id, title, display_title, wid)
+    except Exception:
+        tab_registry.drop_window(wid)
+        raise
     group = _FocusGroup(window=window, tabs={focus_id: title}, wid=wid)
     _wire_group_window(group)
     with _lock:
@@ -406,24 +416,18 @@ def _add_tab_to_group(group: _FocusGroup, focus_id: str, title: str) -> None:
         _bring_to_front(group.window)
         _push_focus_event(group.window, "__uefnFocusTabActivate", focus_id, title)
         return
+    from frontend.ui_web import tab_registry
+
     group.tabs[focus_id] = title
+    tab_registry.claim_tab(focus_id, group.wid)
     _push_focus_event(group.window, "__uefnFocusTabOpen", focus_id, title)
     _bring_to_front(group.window)
 
 
 def _destroy_group(group: _FocusGroup) -> None:
     _mark_closing(group.window)
-    try:
-        from frontend.ui_web.win_frameless import (
-            _hwnd_from_pywebview,
-            release_native_chrome_subclass,
-        )
-
-        hwnd = _hwnd_from_pywebview(group.window)
-        if hwnd:
-            release_native_chrome_subclass(hwnd)
-    except Exception:
-        pass
+    # The native subclass owns its lifetime through WM_NCDESTROY on the UI
+    # thread. Never detach its callback from a bridge worker before destruction.
     with _lock:
         if group in _focus_groups:
             _focus_groups.remove(group)
@@ -670,7 +674,7 @@ def dock_focus_window_beside_main() -> None:
         y += h + gap
 
 
-def return_tab_to_main(focus_id: str, title: str) -> bool:
+def return_tab_to_main(focus_id: str, title: str, window_id: str = "") -> bool:
     """Close a file/chat tab in a focus window and reopen it in the main window.
 
     Returns False only when the tab can't be handed off (terminals are window-
@@ -681,21 +685,21 @@ def return_tab_to_main(focus_id: str, title: str) -> bool:
         return False
     with _lock:
         group = _find_group_for_tab(focus_id)
-        if group is None:
+        if group is None or (window_id and group.wid != window_id):
             return False
     _notify_main_window("__uefnFocusTabReturn", focus_id, title)
-    close_focus_window(focus_id, reason="last tab returned to main")
+    close_focus_window(focus_id, reason="last tab returned to main", window_id=group.wid)
     return True
 
 
-def close_focus_window(focus_id: str, *, reason: str = "") -> None:
+def close_focus_window(focus_id: str, *, reason: str = "", window_id: str = "") -> None:
     focus_id = (focus_id or "").strip()
     if not focus_id:
         return
 
     with _lock:
         group = _find_group_for_tab(focus_id)
-        if group is None:
+        if group is None or (window_id and group.wid != window_id):
             return
         title = group.tabs.pop(focus_id, "")
         remaining = len(group.tabs)

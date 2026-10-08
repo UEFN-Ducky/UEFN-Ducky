@@ -41,6 +41,7 @@ _ROUTES = (
     "settings.languages",
     "settings.log_errors",
     "settings.app_data",
+    "settings.permissions",
     "settings.tab",
     "chat",
     "changes",

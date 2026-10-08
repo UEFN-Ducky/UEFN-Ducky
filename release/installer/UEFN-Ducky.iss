@@ -302,12 +302,21 @@ end;
 // relaunch path (frontend/updater.py must not start the panel on failure).
 // /NOLAUNCH is the custom host's Finish checkbox (silent updates omit it).
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  PanelCheckCode: Integer;
 begin
   if CurStep = ssInstall then
     WriteProgress(5, 'Copying files...');
   if CurStep = ssPostInstall then
   begin
-    WriteProgress(95, 'Creating shortcuts...');
+    WriteProgress(95, 'Verifying installed panel...');
+    if not Exec(ExpandConstant('{app}\{#MyAppExeName}'),
+      '--verify-panel "' + ExpandConstant('{tmp}\ducky-panel-check.json') + '"',
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, PanelCheckCode) then
+      RaiseException('Could not verify the installed panel. Please run Setup again.');
+    if PanelCheckCode <> 0 then
+      RaiseException('The installed panel is incomplete. Please run Setup again.');
+    WriteProgress(98, 'Creating shortcuts...');
     AddDuckyToUserPath();
   end;
   if CurStep = ssDone then

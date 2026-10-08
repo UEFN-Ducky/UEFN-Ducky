@@ -68,7 +68,7 @@ describe("ask-user types", () => {
 describe("ask-user sessions", () => {
   it("runs concurrent asks in different chats", async () => {
     const a = runAskUser([{ id: "1", prompt: "One" }], "A", "chat-a");
-    const b = runAskUser([{ id: "2", prompt: "Two" }], "B", "chat-b");
+    const b = runAskUser([{ id: "2", prompt: "Two", required: false }], "B", "chat-b");
     expect(getAskUserSessionForConv("chat-a")?.title).toBe("A");
     expect(getAskUserSessionForConv("chat-b")?.title).toBe("B");
     expect(listAskUserSessions()).toHaveLength(2);
@@ -102,7 +102,7 @@ describe("ask-user sessions", () => {
 
   it("queues orphan asks (no conv) one at a time", async () => {
     const first = runAskUser([{ id: "1", prompt: "One" }], "A");
-    const second = runAskUser([{ id: "2", prompt: "Two" }], "B");
+    const second = runAskUser([{ id: "2", prompt: "Two", required: false }], "B");
     expect(getAskUserSession()?.title).toBe("A");
     expect(getAskUserSession()?.queueAhead).toBe(1);
 
@@ -147,7 +147,7 @@ describe("ask-user sessions", () => {
       groupIds: ["group-1"],
       author: authorA,
     });
-    const b = runAskUser([{ id: "2", prompt: "Two" }], "B", "m-b", {
+    const b = runAskUser([{ id: "2", prompt: "Two", required: false }], "B", "m-b", {
       groupIds: ["group-1"],
       author: authorB,
     });
@@ -184,4 +184,23 @@ describe("ask-user sessions", () => {
     await expect(b).resolves.toMatchObject({ skipped_all: true });
     expect(getAskUserSessionForConv("group-1")).toBeNull();
   });
+});
+
+
+it("keeps a required question pending through an invalid dismissal and a later ask", async () => {
+  const first = runAskUser([{ id: "first", prompt: "Choose" }], "First", "same-chat");
+  let answered = false;
+  void first.then(() => { answered = true; });
+  const session = getAskUserSessionForConv("same-chat")!;
+  settleAskUser({ ok: true, answers: { first: { selected: [], text: "", skipped: true } }, skipped_all: true }, session.id);
+  const second = runAskUser([{ id: "second", prompt: "Next" }], "Second", "same-chat");
+  expect(countAskUserSessionsForConv("same-chat")).toBe(2);
+  expect(getAskUserSessionForConv("same-chat")?.id).toBe(session.id);
+  await Promise.resolve();
+  expect(answered).toBe(false);
+  settleAskUser({ ok: true, answers: { first: { selected: [], text: "yes", skipped: false } }, skipped_all: false }, session.id);
+  await expect(first).resolves.toMatchObject({ ok: true });
+  const next = getAskUserSessionForConv("same-chat")!;
+  settleAskUser({ ok: true, answers: { second: { selected: [], text: "yes", skipped: false } }, skipped_all: false }, next.id);
+  await expect(second).resolves.toMatchObject({ ok: true });
 });

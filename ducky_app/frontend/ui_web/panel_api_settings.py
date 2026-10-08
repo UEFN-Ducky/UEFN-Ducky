@@ -20,6 +20,12 @@ class PanelApiSettingsMixin:
             "antigravity_config_path": s.antigravity_config_path,
             "verse_diagnostics_cache_enabled": s.verse_diagnostics_cache_enabled,
             "verse_diagnostics_auto_check": s.verse_diagnostics_auto_check,
+            "ai_ignore_patterns": s.ai_ignore_patterns,
+            "ai_ignore_strict": s.ai_ignore_strict,
+            "allow_settings_write": bool(s.allow_settings_write),
+            "allow_agent_clicks": bool(s.allow_agent_clicks),
+            "allow_see_uefn": bool(s.allow_see_uefn),
+            "allow_see_other_programs": bool(s.allow_see_other_programs),
             "show_hidden_project_files": s.show_hidden_project_files,
             "terminals_enabled": s.terminals_enabled,
             "prompt_caching_enabled": s.prompt_caching_enabled,
@@ -459,9 +465,18 @@ class PanelApiSettingsMixin:
         return self._discord_plugin_call("list_members", bot_id=str(bot_id or ""))
 
     def save_agent_settings(self, patch: dict[str, Any]) -> str:
+        protection_keys = {"ai_ignore_patterns", "ai_ignore_strict"}
+        if protection_keys.intersection(patch):
+            if set(patch) - protection_keys:
+                raise ValueError("Save AI file protection separately from other settings.")
+            from backend.workspace.ai_ignore import save_user_policy
+            return save_user_policy(patch)
         from backend.agent.secrets import set_key
 
         s = _pa.PanelSettings.load()
+        for key in ("allow_settings_write", "allow_agent_clicks", "allow_see_uefn", "allow_see_other_programs"):
+            if key in patch:
+                setattr(s, key, bool(patch[key]))
         if patch.get("agent_provider"):
             s.agent_provider = str(patch["agent_provider"])
         if patch.get("agent_model"):

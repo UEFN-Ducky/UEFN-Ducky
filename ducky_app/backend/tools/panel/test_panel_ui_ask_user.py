@@ -76,7 +76,7 @@ def test_ui_rpc_active_poll_survives_sweep():
     ui_rpc._pending[rid].created -= ui_rpc._MAX_TTL_S * 2
     assert ui_rpc.wait(rid, 0.0) is None  # still pending, not "unknown"
     rid2, _ = ui_rpc.submit("noop", {})  # triggers the sweep
-    assert ui_rpc.respond(rid, {"ok": True}) is True  # slot survived
+    assert ui_rpc.respond(rid, {"ok": True, "answers": {"choice": {"text": "yes"}}}) is True  # slot survived
     ui_rpc.cancel(rid)
     ui_rpc.cancel(rid2)
 
@@ -87,7 +87,7 @@ def test_ui_rpc_has_pending_for_conv():
     rid, _ = ui_rpc.submit("ask_user", {"conv_id": "member-1"})
     assert ui_rpc.has_pending_for_conv("member-1") is True
     assert ui_rpc.has_pending_for_conv("other") is False
-    ui_rpc.respond(rid, {"ok": True})
+    ui_rpc.respond(rid, {"ok": True, "answers": {"choice": {"text": "yes"}}})
     ui_rpc.wait(rid, 0.0)
     assert ui_rpc.has_pending_for_conv("member-1") is False
 

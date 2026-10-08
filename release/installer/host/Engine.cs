@@ -97,9 +97,13 @@ namespace DuckySetup
         public static void ExtractUi()
         {
             Directory.CreateDirectory(UiDir);
-            Embed.ExtractTo("ui/index.html", Path.Combine(UiDir, "index.html"));
-            Embed.ExtractTo("ui/styles.css", Path.Combine(UiDir, "styles.css"));
-            Embed.ExtractTo("ui/app.js", Path.Combine(UiDir, "app.js"));
+            foreach (var name in Embed.Asm.GetManifestResourceNames())
+            {
+                if (!name.StartsWith("ui/", StringComparison.Ordinal))
+                    continue;
+                var rel = name.Substring(3).Replace('/', Path.DirectorySeparatorChar);
+                Embed.ExtractTo(name, Path.Combine(UiDir, rel));
+            }
         }
 
         public static bool IsSilent(IReadOnlyList<string> args) => HostArgs.IsSilent(args);
@@ -232,6 +236,30 @@ namespace DuckySetup
                 }
             }
             return (false, false, null);
+        }
+
+        // The installed copy's version ("" when none), shown as "v1.2.342 → v1.2.343".
+        public static string InstalledVersion()
+        {
+            foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
+            {
+                foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+                {
+                    try
+                    {
+                        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+                        using var key = baseKey.OpenSubKey(UninstallKey);
+                        var version = (key?.GetValue("DisplayVersion") as string ?? "").Trim();
+                        if (version.Length > 0)
+                            return version;
+                    }
+                    catch (Exception)
+                    {
+                        // missing key / bitness
+                    }
+                }
+            }
+            return "";
         }
 
         public static (ulong free, ulong total)? DiskFree(string path)

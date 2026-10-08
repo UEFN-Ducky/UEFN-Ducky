@@ -16,6 +16,7 @@ import { isCompleted, registerTour, startAppShellIfNeeded, unregisterTour } from
 import { WalkthroughOverlay } from "./WalkthroughOverlay";
 import { openCodingAgentLoginUi } from "./openCodingAgentLogin";
 import { newlyEnabledForWalkthrough, rememberEnabledPlugin } from "./firstEnable";
+import { whenFirstRunSetupDone } from "./firstRunSetup";
 
 const registeredPluginTourIds = new Set<string>();
 
@@ -75,6 +76,9 @@ export function WalkthroughHost() {
     let cancelled = false;
     void (async () => {
       await whenWalkthroughHydrated();
+      if (cancelled) return;
+      // A new install sets up plugins and AI first; the tour of the app comes after.
+      await whenFirstRunSetupDone();
       if (cancelled) return;
       // Small delay so shell targets (header/docks) finish mounting.
       await new Promise((r) => window.setTimeout(r, 400));

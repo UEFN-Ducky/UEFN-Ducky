@@ -127,3 +127,15 @@ def test_setup_status_detects_gateway_contrib(isolated_appdata) -> None:
     hit = starter_setup_status()
     assert hit["gateway_ids"] == ["openai"]
     assert hit["pending_first_run"] is False
+
+
+def test_setup_status_lists_the_bundle_with_what_is_installed(isolated_appdata) -> None:
+    _write_plugin(isolated_appdata, "openai")
+    _write_plugin(isolated_appdata, "verse")
+    plugins = starter_setup_status()["plugins"]
+    assert [p["slug"] for p in plugins] == list(POPULAR_PLUGIN_SLUGS)
+    by_slug = {p["slug"]: p for p in plugins}
+    assert by_slug["openai"] == {"slug": "openai", "label": "OpenAI", "group": "gateway", "installed": True}
+    assert by_slug["anthropic"]["installed"] is False
+    assert by_slug["verse"]["group"] == "editor" and by_slug["verse"]["installed"] is True
+    assert by_slug["leveldesign"]["label"] == "Level Design"

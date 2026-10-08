@@ -1028,6 +1028,12 @@ class PanelApi(
                 pass
         return answered
 
+    def ui_rpc_pending_questions(self) -> list[dict[str, Any]]:
+        """Restore questions after a panel reload without synthesizing an answer."""
+        from frontend.ui_web import ui_rpc
+
+        return ui_rpc.pending_questions()
+
     def ui_rpc_ack(self, request_id: str) -> bool:
         """The window the request was for took it (Show me, a tour); it answers when done."""
         from frontend.ui_web import ui_rpc

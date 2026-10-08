@@ -24,15 +24,38 @@ namespace DuckySetup
             public System.Diagnostics.Process Proc = null!;
         }
 
+        // Logical size; scaled to the monitor's DPI so the page never gets cramped.
+        static readonly Size BaseSize = new Size(720, 500);
+
         public InstallerForm(string version)
         {
             _version = version;
             Text = "UEFN Ducky Setup";
             FormBorderStyle = FormBorderStyle.None;
+            MaximizeBox = false; // the page drags the window; a double-click must not maximize it
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(740, 560);
+            ClientSize = BaseSize;
             BackColor = Color.FromArgb(10, 10, 10);
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch (Exception) { /* keep the default taskbar icon */ }
             Controls.Add(_web);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            // No title bar, no border: round the corners and drop DWM's 1px
+            // outline (Windows 11; both calls are no-ops on Windows 10).
+            var round = Native.DwmwcpRound;
+            Native.DwmSetWindowAttribute(Handle, Native.DwmwaWindowCornerPreference, ref round, sizeof(int));
+            var none = Native.DwmwaColorNone;
+            Native.DwmSetWindowAttribute(Handle, Native.DwmwaBorderColor, ref none, sizeof(int));
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            Bounds = e.SuggestedRectangle;
         }
 
         protected override CreateParams CreateParams
@@ -48,6 +71,12 @@ namespace DuckySetup
         protected override async void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            var scale = DeviceDpi / 96f;
+            if (scale > 1.01f)
+            {
+                ClientSize = new Size((int)Math.Round(BaseSize.Width * scale), (int)Math.Round(BaseSize.Height * scale));
+                CenterToScreen();
+            }
             try
             {
                 await InitWeb();
@@ -131,6 +160,7 @@ namespace DuckySetup
             {
                 type = "init",
                 version = _version,
+                previousVersion = detect.installed ? Engine.InstalledVersion() : "",
                 license = Embed.ReadText("LICENSE"),
                 isUpgrade = detect.installed,
                 allUsers = detect.allUsers,

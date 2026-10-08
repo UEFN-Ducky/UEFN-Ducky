@@ -26,16 +26,16 @@ def packaged_data_root() -> Path | None:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         base = Path(meipass)
-        if (base / "bundle" / "uefn_listener").is_dir():
-            return base
+        # The bootloader owns this path. A missing listener folder must not
+        # prevent recovery of the independently bundled panel.
+        return base
     try:
         import __main__
 
         mf = getattr(__main__, "__file__", None)
         if mf and getattr(__main__, "__compiled__", None):
             base = Path(mf).resolve().parent
-            if (base / "bundle" / "uefn_listener").is_dir():
-                return base
+            return base
     except Exception:
         pass
     return None

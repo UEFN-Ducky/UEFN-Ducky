@@ -1,7 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { getApi } from "../hooks/usePanelApi";
-import type { AutomationBackendDto, AutomationFieldDto, AutomationGraphNodeDto, AutomationNodeDto, AutomationSummaryDto } from "../types/panel";
+import type { AutomationBackendDto, AutomationBackendSetupDto, AutomationFieldDto, AutomationGraphNodeDto, AutomationNodeDto, AutomationSummaryDto } from "../types/panel";
+import { openPanelRoute } from "../navigation/openPanelRoute";
+import { playShowMe, type ShowMeRequest } from "../showme/ShowMeService";
 import { AgentField } from "./AgentField";
 import { CallSettings, NamedValueList } from "./FunctionSettings";
 import { ProjectField } from "./ProjectField";
@@ -96,6 +98,7 @@ function BackendField({ field, node, backends, onChange }: { field: AutomationFi
         hint: row.available ? `${costOf(row)} · ${row.plugin}` : `${row.plugin} · ${row.reason || "not set up"}` }))}
       onChange={(value) => setConfig({ [key]: value })} />
     {picked && !picked.available ? <small className="aw-field-error" role="status">{picked.reason || `Needs the ${picked.plugin} plugin.`}</small> : null}
+    {picked && !picked.available && picked.setup ? <BackendSetup setup={picked.setup} plugin={picked.plugin} /> : null}
     {!picked && images ? <small className="aw-field-error" role="status">Turn on an image-capable gateway or image plugin in the Store.</small> : null}
     {images && node.config[key] === "agent" ? <small className="aw-field-error" role="status">Choose a direct image backend to replace the saved agent backend.</small> : null}
     {picked?.config_fields?.map((field) => {
@@ -105,6 +108,36 @@ function BackendField({ field, node, backends, onChange }: { field: AutomationFi
         node={{ ...node, config: { model: picked.model, ...config } }}
         onChange={(edited) => setConfig({ gateway_config: { ...configs, [picked.id]: edited.config } })} />;
     })}
+  </div>;
+}
+
+/** The Show me for a backend that isn't set up: the key field (and Save) for a gateway,
+ *  the Store page's install / turn-on buttons for a plugin. */
+export function backendSetupTour(setup: AutomationBackendSetupDto, plugin: string): ShowMeRequest {
+  if (setup.kind === "key") {
+    const first = {
+      navigate: setup.route, item_id: setup.item, target: "settings.llms.provider.key",
+      title: `Add your ${plugin} API key`,
+      body: `Paste your ${plugin} API key here. Pictures made with ${plugin} are billed to your own ${plugin} account — never Ducky credits or a wallet.`,
+    };
+    return { ...first, steps: [first, {
+      target: "settings.llms.provider.save", title: "Save it",
+      body: `Save the key. Back in your workflow, ${plugin} is ready to pick in Text to Image.`,
+    }] };
+  }
+  const verb = setup.kind === "install" ? "Install" : "Turn on";
+  return {
+    navigate: setup.route, item_id: setup.item, target: "settings.store.detail.actions",
+    title: `${verb} ${plugin}`,
+    body: `${verb} ${plugin} here. Then it shows up as a backend in Text to Image.`,
+  };
+}
+
+/** A backend that can't run yet: a button that goes where it's fixed, and a Show me that explains it. */
+function BackendSetup({ setup, plugin }: { setup: AutomationBackendSetupDto; plugin: string }) {
+  return <div className="aw-backend-setup">
+    <button type="button" className="is-primary" onClick={() => openPanelRoute(setup.route, setup.item)}>{setup.label}</button>
+    <button type="button" className="aw-link" onClick={() => void playShowMe(backendSetupTour(setup, plugin))}>Show me</button>
   </div>;
 }
 

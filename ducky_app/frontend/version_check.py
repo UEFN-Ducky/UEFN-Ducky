@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import re
 import ssl
 import time
@@ -183,13 +184,19 @@ def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-    except (OSError, urllib.error.URLError, ValueError) as exc:
-        if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
-            return None, clock_skew_message(base) or str(exc)
-        return None, str(exc)
+    from frontend.update_network import ATTEMPTS, retryable, retry_delay
+
+    for attempt in range(ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            break
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+                return None, clock_skew_message(base) or str(exc)
+            if attempt + 1 == ATTEMPTS or not retryable(exc):
+                return None, str(exc)
+            time.sleep(retry_delay(attempt))
 
     try:
         envelope = json.loads(body)

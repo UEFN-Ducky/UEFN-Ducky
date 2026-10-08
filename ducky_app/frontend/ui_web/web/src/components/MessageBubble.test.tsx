@@ -43,4 +43,10 @@ describe("MessageBubble interrupted continue", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
     expect(screen.getByTestId("interrupted-model-picker").textContent).toBe("claude-sonnet-5");
   });
+
+  it("shows the Strict protection recovery action on a file-protection interruption", () => {
+    render(<MessageBubble role="assistant" text="" incomplete error="AI_FILE_PROTECTION: external agents blocked" />);
+    expect(screen.getByRole("button", { name: "Turn off Strict protection" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Permissions and rules" })).toBeTruthy();
+  });
 });

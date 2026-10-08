@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { requestFocusGraph } from "../hooks/graphActivity";
-import { getApi } from "../hooks/usePanelApi";
 import {
   dismissWorkflowRun,
-  useChatWorkflowRun,
+  stopWorkflowRun,
+  useChatWorkflowRuns,
   type ChatWorkflowRun,
   type ChatWorkflowStep,
 } from "../hooks/workflowRunsByChat";
@@ -102,8 +102,25 @@ function StateMark({ state }: { state: ChatWorkflowStep["state"] }) {
 
 /** The workflow this chat's ducky is running: name, every step, the one running now. */
 export function ChatWorkflowRunCard({ chatId }: { chatId: string }) {
-  const run = useChatWorkflowRun(chatId);
+  const runs = useChatWorkflowRuns(chatId);
+  return <>{runs.map((run) => <WorkflowRunCard key={run.run} chatId={chatId} run={run} />)}</>;
+}
+
+function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun }) {
   const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState("");
+  const stop = async () => {
+    setStopping(true);
+    setStopError("");
+    try {
+      await stopWorkflowRun(run.workflowId, run.run);
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : "Could not stop the workflow");
+    } finally {
+      setStopping(false);
+    }
+  };
   const running = run?.state === "running";
   const now = useTick(running);
   const currentRef = useRef<HTMLLIElement | null>(null);
@@ -206,7 +223,8 @@ export function ChatWorkflowRunCard({ chatId }: { chatId: string }) {
             <button
               type="button"
               className="chat-plan-popup-bar-stop"
-              onClick={() => void getApi()?.stop_workflow?.(run.workflowId)}
+              onClick={() => void stop()}
+              disabled={stopping}
               title="Stop the workflow"
               aria-label="Stop the workflow"
             >
@@ -224,7 +242,7 @@ export function ChatWorkflowRunCard({ chatId }: { chatId: string }) {
             <button
               type="button"
               className="chat-plan-popup-bar-stop"
-              onClick={() => dismissWorkflowRun(chatId)}
+              onClick={() => dismissWorkflowRun(chatId, run.run)}
               title="Hide"
               aria-label="Hide workflow card"
             >
@@ -245,6 +263,7 @@ export function ChatWorkflowRunCard({ chatId }: { chatId: string }) {
             <span style={{ width: `${percent}%` }} />
           </span>
         </div>
+        {stopError ? <div role="alert" className="chat-workflow-run-error">{stopError}</div> : null}
         {open ? (
           <ol className="chat-workflow-run-steps">
             {steps.map((s) => (

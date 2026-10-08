@@ -38,9 +38,12 @@ def test_detect_all_returns_before_cli_probe(monkeypatch):
     t0 = time.perf_counter()
     payload = base.detect_all()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    assert elapsed_ms < 200.0, f"detect_all blocked: {elapsed_ms:.0f}ms"
+    # The probe blocks for 2 s until released, so returning well before that
+    # proves detect_all did not wait for it; a tighter bound only measured how
+    # fast a busy PC starts the worker thread (it failed a release at 100% CPU).
+    assert elapsed_ms < 1500.0, f"detect_all blocked on the CLI probe: {elapsed_ms:.0f}ms"
     assert payload.get("checking") is True
-    assert started.wait(timeout=1.0)
+    assert started.wait(timeout=5.0)
     release.set()
 
 

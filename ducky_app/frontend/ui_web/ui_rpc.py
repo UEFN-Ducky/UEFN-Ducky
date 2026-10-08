@@ -28,15 +28,14 @@ one to ``ui_rpc_claim`` it runs it; the others drop it, so nothing plays twice.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
 from typing import Any
 
-# A slot is swept only after nobody has polled it for this long, so a caller
-# that vanished (process killed mid-request) cannot leak slots forever.
-# Actively-polled waits (e.g. ducky_ask_user, which never times out) refresh
-# the timestamp on every poll and live until answered.
+# Ordinary UI requests expire when their caller vanishes. Questions are never
+# swept: a transport disconnect must not remove the question or release its gate.
 _MAX_TTL_S = 15 * 60.0
 
 
@@ -45,19 +44,48 @@ WINDOW_METHODS = frozenset({"show", "walkthrough_run", "tour_workflow", "navigat
 
 
 class _Pending:
-    __slots__ = ("event", "acked", "result", "created", "conv_id")
+    __slots__ = ("event", "acked", "result", "created", "conv_id", "method", "params")
 
-    def __init__(self, conv_id: str = "") -> None:
+    def __init__(self, conv_id: str = "", method: str = "", params: dict | None = None) -> None:
         self.event = threading.Event()
         self.acked = threading.Event()
         self.result: dict[str, Any] | None = None
         self.created = time.monotonic()
         self.conv_id = conv_id
+        self.method = method
+        self.params = dict(params or {})
 
 
 _pending: dict[str, _Pending] = {}
 _lock = threading.Lock()
 _active_client = ""
+_restored_store = ""
+
+
+def _restore_questions_locked() -> None:
+    """Load unanswered questions once per database; failures keep callers blocked."""
+    global _restored_store
+    from backend.store import db
+    from backend.store.repos import kv
+
+    key = str(db.db_path())
+    if key == _restored_store:
+        return
+    saved = json.loads(kv.meta_get("ui_rpc:questions") or "{}")
+    restored = {}
+    for rid, params in saved.items():
+        restored[rid] = _Pending(str(params.get("conv_id") or ""), "ask_user", params)
+    _pending.clear()
+    _pending.update(restored)
+    _restored_store = key
+
+
+def _save_questions_locked(exclude: str = "") -> None:
+    from backend.store.repos import kv
+
+    saved = {rid: slot.params for rid, slot in _pending.items()
+             if rid != exclude and slot.method == "ask_user" and not slot.event.is_set()}
+    kv.meta_set("ui_rpc:questions", json.dumps(saved, ensure_ascii=False))
 
 
 def mark_active(client_id: str, active: bool = True) -> None:
@@ -113,7 +141,7 @@ def wait_ack(request_id: str, timeout: float) -> bool:
 
 def _sweep_locked() -> None:
     cutoff = time.monotonic() - _MAX_TTL_S
-    stale = [rid for rid, slot in _pending.items() if slot.created < cutoff]
+    stale = [rid for rid, slot in _pending.items() if slot.created < cutoff and slot.method != "ask_user"]
     for rid in stale:
         _pending.pop(rid, None)
 
@@ -127,8 +155,11 @@ def submit(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     request_id = uuid.uuid4().hex
     conv_id = str((params or {}).get("conv_id") or "").strip()
     with _lock:
+        _restore_questions_locked()
         _sweep_locked()
-        _pending[request_id] = _Pending(conv_id)
+        _pending[request_id] = _Pending(conv_id, method, params)
+        if method == "ask_user":
+            _save_questions_locked()
     payload = {
         "type": "ui_rpc_request",
         "request_id": request_id,
@@ -160,18 +191,52 @@ def wait(request_id: str, timeout: float) -> dict[str, Any] | None:
 def respond(request_id: str, payload: dict[str, Any]) -> bool:
     """Deliver the panel's answer. Returns ``False`` if the id is unknown/expired."""
     with _lock:
+        _restore_questions_locked()
         slot = _pending.get(request_id)
         if slot is None or slot.event.is_set():
             return False  # first answer wins: another window's late close can't overwrite it
+        if slot.method == "ask_user":
+            answers = (payload or {}).get("answers")
+            # Window shutdowns, transport errors and empty responses are not answers.
+            if not (payload or {}).get("ok") or not isinstance(answers, dict) or not answers:
+                return False
+            for question in slot.params.get("questions") or []:
+                answer = answers.get(question.get("id"))
+                if not isinstance(answer, dict):
+                    return False
+                if question.get("required", True) and (
+                    answer.get("skipped") or not (answer.get("selected") or str(answer.get("text") or "").strip())
+                ):
+                    return False
+        if slot.method == "ask_user":
+            # Commit before waking the caller; a failed save never grants approval.
+            _save_questions_locked(exclude=request_id)
         slot.result = dict(payload or {})
         slot.event.set()
     return True
 
 
 def cancel(request_id: str) -> None:
-    """Drop a pending slot (e.g. no panel available to answer it)."""
+    """Drop ordinary requests; unanswered questions survive caller cancellation."""
     with _lock:
+        slot = _pending.get(request_id)
+        if slot is not None and slot.method == "ask_user" and not slot.event.is_set():
+            return
         _pending.pop(request_id, None)
+
+
+def wait_for_answers(conv_id: str, cancel_event: Any | None = None) -> None:
+    """Suspend continuation until every question in this chat has a real answer."""
+    while True:
+        with _lock:
+            _restore_questions_locked()
+            slots = [slot for slot in _pending.values()
+                     if slot.conv_id == conv_id and slot.method == "ask_user" and not slot.event.is_set()]
+        if not slots:
+            return
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Stopped while waiting for the user's answer.")
+        slots[0].event.wait(0.2)
 
 
 def has_pending_for_conv(conv_id: str) -> bool:
@@ -180,4 +245,30 @@ def has_pending_for_conv(conv_id: str) -> bool:
     if not cid:
         return False
     with _lock:
-        return any(slot.conv_id == cid for slot in _pending.values())
+        _restore_questions_locked()
+        return any(slot.conv_id == cid and not slot.event.is_set() for slot in _pending.values())
+
+
+
+def question_gate(conv_id: str, timeout: float) -> bool:
+    """Wait one bounded HTTP round; True means this chat still needs an answer."""
+    with _lock:
+        _restore_questions_locked()
+        waiting = [slot for slot in _pending.values()
+                   if slot.conv_id == conv_id and slot.method == "ask_user" and not slot.event.is_set()]
+    if waiting:
+        waiting[0].event.wait(timeout)
+    with _lock:
+        return any(slot.conv_id == conv_id and slot.method == "ask_user" and not slot.event.is_set()
+                   for slot in _pending.values())
+
+
+def pending_questions() -> list[dict[str, Any]]:
+    """Replay unanswered questions when a panel reconnects or reloads."""
+    with _lock:
+        _restore_questions_locked()
+        return [
+            {"type": "ui_rpc_request", "request_id": rid, "method": slot.method, "params": dict(slot.params)}
+            for rid, slot in _pending.items()
+            if slot.method == "ask_user" and not slot.event.is_set()
+        ]

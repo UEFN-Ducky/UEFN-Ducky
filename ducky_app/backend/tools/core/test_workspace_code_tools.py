@@ -281,6 +281,10 @@ def test_git_refuses_anything_that_changes_or_escapes(project, command, args) ->
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_git_reads_status_log_and_branches(project) -> None:
+    from frontend.settings import PanelSettings
+    settings = PanelSettings.load()
+    settings.ai_ignore_strict = False
+    settings.save()
     root, _ = project
     for argv in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
                  ["add", "src/app.py"], ["commit", "-q", "-m", "first"]):

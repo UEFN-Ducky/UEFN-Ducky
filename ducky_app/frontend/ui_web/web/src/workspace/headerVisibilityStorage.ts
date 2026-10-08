@@ -10,12 +10,25 @@ export type HeaderCatalogEntry = {
   id: string;
   label: string;
   group: HeaderButtonGroup;
+  description?: string;
 };
 
+// The sidebar rows only hide the header button; Appearance → Sidebar has the switch
+// that turns a sidebar itself off, so the two must not read the same.
 export const BUILTIN_HEADER_BUTTONS: HeaderCatalogEntry[] = [
   { id: "nav", label: "Back and forward", group: "builtin" },
-  { id: "leftSidebar", label: "Left sidebar", group: "builtin" },
-  { id: "rightSidebar", label: "Right sidebar", group: "builtin" },
+  {
+    id: "leftSidebar",
+    label: "Left sidebar button",
+    group: "builtin",
+    description: "Only the header button. To turn the left sidebar itself off, use Sidebar below.",
+  },
+  {
+    id: "rightSidebar",
+    label: "Right sidebar button",
+    group: "builtin",
+    description: "Only the header button. To turn the right sidebar itself off, use Sidebar below.",
+  },
   { id: "search", label: "Search", group: "builtin" },
 ];
 

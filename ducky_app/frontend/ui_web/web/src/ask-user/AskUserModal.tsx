@@ -19,6 +19,7 @@ export function AskUserModal({ open, questions, title, queueAhead, onComplete }:
     <Modal
       open={open && questions.length > 0}
       onClose={() => {
+        if (questions.some((q) => q.required)) return;
         const answers: AskUserResult["answers"] = {};
         for (const q of questions) {
           answers[q.id] = { selected: [], text: "", skipped: true };
@@ -32,6 +33,7 @@ export function AskUserModal({ open, questions, title, queueAhead, onComplete }:
       title={headerTitle}
       width={520}
       hideHeader
+      hideClose={questions.some((q) => q.required)}
       floatingClose
       zIndex={100100}
     >

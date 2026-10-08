@@ -57,3 +57,18 @@ def test_unmarked_duplicate_table_is_dropped(tmp_path):
     assert text.count("[mcp_servers.uefn]") == 1
     assert "old.exe" not in text
     assert "mcp_servers.keep" in text
+
+
+def test_old_question_timeout_requires_config_refresh(tmp_path):
+    cfg = tmp_path / "config.toml"
+    merge_codex_config(cfg, _block())
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace(
+            "tool_timeout_sec = 1000000000000.0", "tool_timeout_sec = 180.0"
+        ),
+        encoding="utf-8",
+    )
+    ok, detail = codex_block_matches(cfg, _block())
+    assert not ok and "question waits" in detail
+    assert merge_codex_config(cfg, _block())
+    assert codex_block_matches(cfg, _block())[0]

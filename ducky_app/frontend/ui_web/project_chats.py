@@ -765,6 +765,12 @@ def sync_skill_snapshot(
 
 def save_conversation(conv: Conversation, project_root: str | None = None, *, touch_updated: bool = True) -> None:
     with _conversation_lock(conv.id):
+        # A self-rename is made through the bridge while this runner owns an older
+        # conversation object. Never save its placeholder over the chosen name.
+        if is_placeholder_title(conv.title):
+            stored = load_conversation(conv.id, project_root)
+            if stored is not None and not is_placeholder_title(stored.title):
+                conv.title = stored.title
         if touch_updated:
             conv.updated = time.time()
         if _use_db():

@@ -598,7 +598,7 @@ class AgentRunner:
         hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
         from backend.agent import verify_evidence
 
-        verify_token = verify_evidence.bind_conversation(self.config.conv_id)
+        verify_token = verify_evidence.bind_conversation(self.config.conv_id, self.config.run_id)
         identity_token = run_identity.bind(self.config.run_context())
         from backend.tools.core.web_lookup import begin_web_turn, end_web_turn
 
@@ -1158,6 +1158,10 @@ class AgentRunner:
                         content=llm_content,
                     )
                 )
+                if effective_tool_name(rec.name, rec.arguments) == "ducky_ask_user" and not result.ok:
+                    # No answer: stop this run instead of asking the model to guess.
+                    yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
+                    return
                 # Capture tools: attach PNG for vision on the next model turn
                 # (providers only send images on role=user).
                 if result.ok:

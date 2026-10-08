@@ -66,6 +66,10 @@ function getServerSnapshot(): Snapshot {
   return { jobs: [] };
 }
 
+export function getBackgroundJobs(): BackgroundJob[] {
+  return snapshot.jobs;
+}
+
 export function useBackgroundActivity(): Snapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

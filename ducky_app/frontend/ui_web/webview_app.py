@@ -42,8 +42,9 @@ def _web_root() -> Path:
         base = packaged_data_root()
         if base:
             candidate = base / "frontend" / "ui_web" / "web" / "dist"
-            if (candidate / "index.html").is_file():
-                return candidate
+            from frontend.ui_web.panel_assets import ensure_panel_dist
+
+            return ensure_panel_dist(candidate)
     return Path(__file__).resolve().parent / "web" / "dist"
 
 
@@ -589,4 +590,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
         storage_path=storage_path,
+        # pywebview defaults to private mode: WebView2 runs InPrivate, so local
+        # storage only lives in memory, and closing the window deletes the whole
+        # storage_path folder. Every setting the panel keeps in local storage
+        # (menu switches, Appearance, layouts, settings tabs) was gone on each start.
+        private_mode=False,
     )

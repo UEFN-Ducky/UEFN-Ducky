@@ -89,3 +89,13 @@ def panel_rpc(method: str, params: dict[str, Any] | None = None, *, timeout: flo
 
     result = resp.get("result")
     return result if isinstance(result, dict) else resp
+
+
+def wait_for_question_answers(conv_id: str) -> None:
+    """Check the owning panel, including when this bridge is a separate process."""
+    while True:
+        response = panel_rpc("question_gate", {"conv_id": conv_id}, timeout=float("inf"))
+        if "error" in response or "blocked" not in response:
+            raise RuntimeError("Cannot verify the user's answers: panel unavailable. Task tools remain blocked.")
+        if response["blocked"] is False:
+            return

@@ -821,8 +821,8 @@ def test_run_announces_header_jobs(monkeypatch):
     phases = [e.get("phase") for e in jobs]
     assert "working" in phases
     assert "done" in phases
-    assert any(e.get("id") == f"graph:{wf['id']}" and e.get("phase") == "working" for e in jobs)
-    assert not any(str(e.get("id") or "").startswith("graph-run:") for e in jobs)
+    assert any(e.get("id") == f"graph-run:{wf['id']}:{out['run']}" and e.get("phase") == "working" for e in jobs)
+    assert len({e["id"] for e in jobs}) == 1  # finish updates this exact run
     assert any(e.get("type") == "graphs_changed" for e in events)
 
 

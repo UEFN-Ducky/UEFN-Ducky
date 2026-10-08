@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { DuckyModelPicker } from "../components/ducky/DuckyModelPicker";
 import { Icons } from "../icons/Icons";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { GeneralSectionHeader } from "../views/settings/GeneralSectionHeader";
 import { SettingsToggleRow } from "../views/settings/SettingsToggleRow";
 import { SpeedDropdown } from "./SpeedDropdown";
@@ -113,7 +114,7 @@ export function VoiceSettingsSection() {
               mode="radio"
               value={voice}
               options={[
-                { value: "", label: "System default" },
+                { value: "", label: isRemote() ? "System speech (default)" : "Windows Speech (default)" },
                 ...voices.map((v) => ({ value: v.id, label: v.label })),
               ]}
               onChange={(next) => {
@@ -123,6 +124,12 @@ export function VoiceSettingsSection() {
               }}
             />
           </div>
+          {!isRemote() ? (
+            <button type="button" className="voice-notice-action"
+              onClick={() => void getApi()?.voice_open_windows_settings?.("voice_download")}>
+              Download Windows voices
+            </button>
+          ) : null}
           <div className="voice-settings-row">
             <label className="voice-settings-label" htmlFor="voice-default-speed">
               Talking speed

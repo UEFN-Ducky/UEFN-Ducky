@@ -194,8 +194,10 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
     if os.environ.get("DUCKY_DB_TRACE"):
         _install_trace(conn, path)
     try:
-        _configure(conn)
         with _guard:
+            # Initial WAL setup and migrations share the lock: opening another
+            # connection during schema creation cannot race the journal switch.
+            _configure(conn)
             if key not in _migrated:
                 migrate(conn)
                 _migrated.add(key)

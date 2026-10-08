@@ -31,6 +31,7 @@ export const SETTINGS_TAB: Record<string, string> = {
   "settings.languages": "Languages",
   "settings.log_errors": "General",
   "settings.app_data": "General",
+  "settings.permissions": "General",
   plans: "Plans",
 };
 
@@ -46,6 +47,7 @@ export const SETTINGS_SECTION: Record<string, string> = {
   "settings.memory": "entries",
   "settings.log_errors": "errors",
   "settings.app_data": "app_data",
+  "settings.permissions": "permissions",
 };
 
 export type RouteResult = { ok: boolean; route: string; tab?: string; item_id?: string; dispatched?: boolean; error?: string };

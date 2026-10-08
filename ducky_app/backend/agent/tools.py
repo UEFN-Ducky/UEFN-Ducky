@@ -151,6 +151,10 @@ async def list_mcp_tools(*, apply_filters: bool = True) -> list[Tool]:
 
     mcp = _ensure_mcp()
     core = await mcp.list_tools()
+    from backend.workspace.ai_ignore import current_policy, SAFE_TOOLS
+    if current_policy().strict:
+        # No unaudited plugin discovery or wrappers in protected sessions.
+        return apply_cloud_tool_deny([t for t in core if t.name in SAFE_TOOLS])
     if apply_filters:
         core = filter_uefn_plugin_tools(filter_builtin_tools(core))
     try:
@@ -779,6 +783,19 @@ async def execute_tool(
     """Dispatch a tool call; failures feed verse_stats and the hammer guard."""
     from backend.agent import hammer_guard
 
+    from backend.workspace.identity import current
+    from frontend.ui_web.ui_rpc import wait_for_answers
+    ctx = current()
+    if ctx and ctx.conv_id:
+        try:
+            await asyncio.to_thread(wait_for_answers, ctx.conv_id, cancel_event)
+        except InterruptedError:
+            return ToolCallResult(ok=False, tool=name, error="Cancelled")
+        from backend.agent.chat_title import require_self_name
+        try:
+            require_self_name(_guard_key_name(name, arguments or {}), ctx.conv_id)
+        except ValueError as exc:
+            return ToolCallResult(ok=False, tool=name, error=str(exc))
     result = await _execute_tool_inner(name, arguments, cancel_event=cancel_event)
     key_name = _guard_key_name(name, arguments or {})
     if result.ok:
@@ -786,7 +803,7 @@ async def execute_tool(
         try:
             from backend.agent import verify_evidence
 
-            verify_evidence.record_ok(key_name, arguments or {})
+            verify_evidence.record_result(name, arguments or {}, result.data)
         except Exception:
             pass
         return result
@@ -879,6 +896,13 @@ async def _execute_tool_inner(
             )
 
     try:
+        from backend.workspace.ai_ignore import require_safe_tool
+
+        require_safe_tool(name)
+    except ValueError as exc:
+        return ToolCallResult(ok=False, tool=name, error=str(exc))
+
+    try:
         from frontend.duckyos_account import tool_blocked_by_caps
 
         cap_block = tool_blocked_by_caps(name)
@@ -950,7 +974,7 @@ async def _execute_tool_inner(
             text = await _await_cancellable(
                 get_plugin_pool().call_tool(name, args),
                 cancel_event=cancel_event,
-                timeout=tool_timeout(name),
+                timeout=tool_timeout(_guard_key_name(name, args)),
             )
             ms = int((time.time() - t0) * 1000)
             if _looks_like_tool_failure(name, text):
@@ -991,7 +1015,7 @@ async def _execute_tool_inner(
         raw = await _await_cancellable(
             mcp.call_tool(name, args),
             cancel_event=cancel_event,
-            timeout=tool_timeout(name),
+            timeout=tool_timeout(_guard_key_name(name, args)),
         )
         if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
             ms = int((time.time() - t0) * 1000)

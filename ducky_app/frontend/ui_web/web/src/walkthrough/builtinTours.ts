@@ -1,5 +1,6 @@
 import { requestShowChatComposer } from "../navigation/openChatComposer";
-import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { requestOpenDockSide } from "../navigation/openSidebarPanel";
+import { requestCloseSettingsView, requestOpenSettings } from "../navigation/openSettingsTab";
 import { getTargetElement, settingsTabTargetId } from "../ui-targets/registry";
 import { listEnabledGatewayTours } from "./pluginWalkthroughs";
 import {
@@ -404,6 +405,12 @@ function settingsChromeTabSteps(
   ];
 }
 
+/** The docks start closed on a fresh install: open the one this step points at. */
+function openDock(side: "left" | "right"): Promise<void> {
+  requestOpenDockSide(side);
+  return wait(250);
+}
+
 function openDuckiesMenu(): Promise<void> {
   window.dispatchEvent(new Event("ducky:open-duckies-menu"));
   return wait(120);
@@ -422,6 +429,11 @@ export const APP_SHELL_TOUR: WalkthroughDef = {
       body: "This is the desktop app for your Fortnite islands. The top bar picks an island, shows whether UEFN is connected, and opens Settings.",
       advance: "next",
       mode: "rect",
+      // The tour shows the main window: leave a full Settings page (setup's "Show me how" opens one).
+      onEnter: () => {
+        requestCloseSettingsView();
+        return wait(250);
+      },
     },
     {
       target: "shell.left",
@@ -429,6 +441,7 @@ export const APP_SHELL_TOUR: WalkthroughDef = {
       body: "The left side holds Duckies (your chats), the island's files, and any panels a plugin pins here.",
       advance: "next",
       mode: "rect",
+      onEnter: () => openDock("left"),
     },
     {
       target: "shell.chat_history",
@@ -465,11 +478,12 @@ export const APP_SHELL_TOUR: WalkthroughDef = {
       body: "The right side holds outline, file history, the tester, and plugin panels you pin there.",
       advance: "next",
       mode: "rect",
+      onEnter: () => openDock("right"),
     },
     {
       target: "header.settings",
       title: "Plugins and Settings",
-      body: "A plugin adds something to the app. Skills tell a ducky how to do a job. Custom tools are actions it can run. MCP connections let it talk to other apps. Plugins can also add themes, dock panels, and automations. Gateways are the plugins that connect a model: OpenAI, Cursor, Anthropic, and Ollama. Press Settings. Next, open the Plugin Store and install from there.",
+      body: "A plugin adds something to the app. Skills tell a ducky how to do a job. Custom tools are actions it can run. MCP connections let it talk to other apps. Plugins can also add themes, dock panels, and automations. Gateways are the plugins that connect a model: OpenAI, Cursor, Anthropic, and Ollama. Press Settings — the Plugin Store in there has more.",
       advance: "require_click",
       mode: "circle",
     },

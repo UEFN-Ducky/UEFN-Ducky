@@ -25,6 +25,15 @@ def parse_attachment_dict(raw: dict[str, Any], *, current: bool = False) -> Mess
     kind = str(raw.get("kind") or "").strip().lower()
     name = str(raw.get("name") or "attachment").strip() or "attachment"
     mime = str(raw.get("mime") or "").strip()
+    from backend.workspace.ai_ignore import current_policy
+
+    policy = current_policy()
+    protected = any(policy.denied_hint(str(raw.get(key) or name))
+                    for key in ("name", "path", "project_path", "abs_path"))
+    if protected:
+        if current:
+            raise ValueError("AI_FILE_IGNORED: this attachment is protected.")
+        return None
     if kind == "image":
         data_b64 = _strip_data_url_prefix(str(raw.get("data_base64") or ""))
         if not data_b64:
@@ -70,6 +79,9 @@ def _parse_video(raw: dict[str, Any], name: str, mime: str, *, current: bool = F
             if current:
                 raise gone
             return None
+    from backend.workspace.ai_ignore import require_ai_access
+
+    require_ai_access(str(path))
     size = path.stat().st_size
     limit = video_limits().max_bytes
     if current and size > limit:

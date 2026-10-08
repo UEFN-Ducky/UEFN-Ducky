@@ -9,6 +9,9 @@ import type { AutomationGraphNodeDto, AutomationNodeDto } from "../types/panel";
 // No bridge_job_start on this stub → runBridgeJob calls the method directly.
 const api = vi.hoisted(() => ({ get_workflow_tools_catalog: vi.fn(), get_mcp_tools_catalog: vi.fn(), pick_workflow_folder: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
+const nav = vi.hoisted(() => ({ openPanelRoute: vi.fn(), playShowMe: vi.fn(async () => ({ ok: true })) }));
+vi.mock("../navigation/openPanelRoute", () => ({ openPanelRoute: nav.openPanelRoute }));
+vi.mock("../showme/ShowMeService", () => ({ playShowMe: nav.playShowMe }));
 let current: AutomationGraphNodeDto;
 function Editor({ config, meta }: { config: Record<string, unknown>; meta?: AutomationNodeDto }) {
   const [node, setNode] = useState<AutomationGraphNodeDto>({ id: "tool", type: meta?.type || "tool.call", x: 0, y: 0, config });
@@ -181,6 +184,32 @@ describe("image and 3D nodes", () => {
     cleanup();
     render(<Editor config={{ picture_backend: "google_imagen" }} meta={pluginMeta} />);
     expect(screen.getByText(/Imagen 4 is billed to your Google API key each run/)).toBeTruthy();
+  });
+
+  it("a backend that isn't set up has a button to where it's fixed and a Show me that walks there", () => {
+    const keyMeta: AutomationNodeDto = { ...meta, type: "image.generate", backends: [
+      { id: "google_imagen", label: "Google image", plugin: "Google", credits: 0, cost: "Your own API key", own_key: true, available: false,
+        reason: "Add your Google API key in Settings.", setup: { kind: "key", route: "settings.llms", item: "gemini", label: "Add your Google API key" } },
+      { id: "meshy_text_to_image", label: "Nano Banana", plugin: "Meshy", credits: 5, available: true },
+    ] };
+    render(<Editor config={{ backend: "google_imagen" }} meta={keyMeta} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add your Google API key" }));
+    expect(nav.openPanelRoute).toHaveBeenCalledWith("settings.llms", "gemini");
+    fireEvent.click(screen.getByRole("button", { name: "Show me" }));
+    const tour = nav.playShowMe.mock.calls[0][0] as { steps: Array<{ target: string; navigate?: string; item_id?: string }> };
+    expect(tour.steps.map((step) => step.target)).toEqual(["settings.llms.provider.key", "settings.llms.provider.save"]);
+    expect(tour.steps[0]).toMatchObject({ navigate: "settings.llms", item_id: "gemini" });
+    cleanup();
+    // A plugin that's off: its Store page and the install / turn-on buttons there.
+    const offMeta: AutomationNodeDto = { ...keyMeta, backends: [{ ...keyMeta.backends![0],
+      reason: "Turn on the Google plugin in Plugins.", setup: { kind: "enable", route: "settings.store", item: "google", label: "Turn on Google" } }] };
+    render(<Editor config={{ backend: "google_imagen" }} meta={offMeta} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show me" }));
+    expect(nav.playShowMe.mock.calls[1][0]).toMatchObject({ navigate: "settings.store", item_id: "google", target: "settings.store.detail.actions" });
+    // A backend that can run shows no setup.
+    cleanup();
+    render(<Editor config={{ backend: "meshy_text_to_image" }} meta={keyMeta} />);
+    expect(screen.queryByRole("button", { name: "Show me" })).toBeNull();
   });
 
   it("a saved backend whose plugin is off says why", () => {

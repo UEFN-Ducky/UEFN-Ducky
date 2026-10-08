@@ -395,8 +395,12 @@ class TerminalManager:
             entry = self._sessions.pop(session_id, None)
         if entry is None:
             return None
-        entry.bridge.stop()
+        with self._lock:
+            pending_ids = [rid for rid, pending in self._pending.items() if pending.session_id == session_id]
+        for rid in pending_ids:
+            self.reject_command(rid, reason="terminal closed")
         entry.session.kill()
+        entry.bridge.stop()
         return entry
 
 

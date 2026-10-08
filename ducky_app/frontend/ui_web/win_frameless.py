@@ -751,6 +751,15 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
     resize frame, so thin top/corner grips hand off to this same native resize loop.
     """
     orig = _native_subclass_orig.get(hwnd, 0)
+    if msg == 0x0082:  # WM_NCDESTROY: the owning UI thread ends this HWND lifetime.
+        try:
+            if orig:
+                return _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, lparam)
+            return _user32_sc.DefWindowProcW(hwnd, msg, wparam, lparam)
+        finally:
+            _native_subclass.pop(hwnd, None)
+            _native_subclass_orig.pop(hwnd, None)
+            _window_min_track.pop(hwnd, None)
     try:
         if msg == _WM_NCCALCSIZE:
             # Both message forms start with the proposed RECT; wParam=0 has no
@@ -794,6 +803,11 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
     return _user32_sc.DefWindowProcW(hwnd, msg, wparam, lparam)
 
 
+# One process-lifetime callback: disposing a focus window must never free a
+# ctypes function pointer while Windows is still executing it (including reentry).
+_native_chrome_callback = _WNDPROC(_chrome_subclass_proc) if sys.platform == "win32" else None
+
+
 def _install_native_chrome_subclass(hwnd: int) -> bool:
     """Replace the window proc with ours (chaining to the original). Idempotent per hwnd."""
     if sys.platform != "win32" or not hwnd:
@@ -801,8 +815,11 @@ def _install_native_chrome_subclass(hwnd: int) -> bool:
     if hwnd in _native_subclass:
         return True
     try:
-        cb = _WNDPROC(_chrome_subclass_proc)
+        cb = _native_chrome_callback
+        ctypes.set_last_error(0)
         orig = _SetWindowLongPtr(hwnd, _GWLP_WNDPROC, ctypes.cast(cb, ctypes.c_void_p))
+        if not orig and ctypes.get_last_error():
+            return False
         _native_subclass[hwnd] = cb  # keep the callback alive (GC would crash the proc)
         _native_subclass_orig[hwnd] = int(orig) if orig else 0
         _force_frame_changed(hwnd)  # trigger a fresh WM_NCCALCSIZE through our proc now
@@ -812,17 +829,22 @@ def _install_native_chrome_subclass(hwnd: int) -> bool:
 
 
 def release_native_chrome_subclass(hwnd: int) -> None:
-    """Restore the original WNDPROC and drop kept-alive callback refs for a closed HWND."""
+    """Detach on the HWND owner thread; normal closes clean up in WM_NCDESTROY."""
     if sys.platform != "win32" or not hwnd:
         return
-    cb = _native_subclass.pop(hwnd, None)
-    orig = _native_subclass_orig.pop(hwnd, None)
-    _window_min_track.pop(hwnd, None)
+    cb = _native_subclass.get(hwnd)
+    orig = _native_subclass_orig.get(hwnd)
     if orig and cb is not None:
         try:
-            _SetWindowLongPtr(hwnd, _GWLP_WNDPROC, orig)
+            ctypes.set_last_error(0)
+            previous = _SetWindowLongPtr(hwnd, _GWLP_WNDPROC, orig)
+            if not previous and ctypes.get_last_error():
+                return  # Keep the original chain while Windows still uses our proc.
         except Exception:
-            pass
+            return
+    _native_subclass.pop(hwnd, None)
+    _native_subclass_orig.pop(hwnd, None)
+    _window_min_track.pop(hwnd, None)
 
 
 def _make_chrome_browser_form():
@@ -1055,10 +1077,11 @@ def install_sync_drag_bridge() -> None:
             instead: one thread waits, the rest finish, and the ui_js_stall
             watchdog records every thread stack for the post-mortem."""
 
-            __slots__ = ("_w",)
+            __slots__ = ("_w", "_api")
 
-            def __init__(self, w: object) -> None:
+            def __init__(self, w: object, api: str = "") -> None:
                 self._w = w
+                self._api = api
 
             def __getattr__(self, name: str):
                 return getattr(self._w, name)
@@ -1066,7 +1089,7 @@ def install_sync_drag_bridge() -> None:
             def evaluate_js(self, script: str, *_args, **_kwargs) -> None:
                 from frontend.ui_web.ui_dispatch import schedule_evaluate_js
 
-                schedule_evaluate_js(self._w, script)
+                schedule_evaluate_js(self._w, script, source=self._api)
 
         def patched(window: object, func_name: str, param: object, value_id: str) -> None:
             if func_name == "uefnNativeWindowMenu":
@@ -1087,7 +1110,7 @@ def install_sync_drag_bridge() -> None:
                         window, param[0], double_click=len(param) > 1 and param[1] is True,
                     )
                 return
-            original(_QueuedReturn(window), func_name, param, value_id)
+            original(_QueuedReturn(window, str(func_name or "")), func_name, param, value_id)
 
         webview_util.js_bridge_call = patched
         # EdgeChrome imports the function by value before this hook is installed.

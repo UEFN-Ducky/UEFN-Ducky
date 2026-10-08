@@ -4,8 +4,10 @@ export type ViewId = "chat" | "settings";
 
 export type ChatLayoutMode = "full" | "sidebarHidden";
 
-export function nextChatLayoutMode(mode: ChatLayoutMode): ChatLayoutMode {
-  return mode === "full" ? "sidebarHidden" : "full";
+/** The header's left button toggles what is on screen: the pane shows only when the layout
+ *  mode and the dock both say open, and a fresh install starts it closed with the mode "full". */
+export function nextChatLayoutMode(mode: ChatLayoutMode, leftRailOpen: boolean): ChatLayoutMode {
+  return mode !== "sidebarHidden" && leftRailOpen ? "sidebarHidden" : "full";
 }
 
 export interface InstallInfo {
@@ -34,6 +36,13 @@ export interface AppUpdateStatus {
   /** none | no_release | up_to_date | update_available | paused | error */
   feed_status?: string;
   error: string | null;
+}
+
+export interface SavedAgentPermissionDto {
+  conv_id: string;
+  title: string;
+  rule: string;
+  label: string;
 }
 
 export interface UpdaterResult {
@@ -286,6 +295,16 @@ export interface FileRefDto {
 }
 
 /** One way an image / 3D node can run: a plugin tool, its cost, ready here or why not. */
+export interface AutomationBackendSetupDto {
+  /** install / enable the plugin (its Store page) or add the gateway's API key (Settings > LLMs). */
+  kind: "install" | "enable" | "key";
+  /** openPanelRoute route and item: settings.store + plugin slug, settings.llms + provider id. */
+  route: string;
+  item: string;
+  /** The button's words ("Add your Google API key"). */
+  label: string;
+}
+
 export interface AutomationBackendDto {
   id: string;
   label: string;
@@ -297,6 +316,8 @@ export interface AutomationBackendDto {
   available: boolean;
   /** Why it can't run here: install, turn on, or add the key. */
   reason?: string;
+  /** Where to fix it: a panel route (+ item) for the details' button and its Show me. */
+  setup?: AutomationBackendSetupDto;
   /** Controls declared by the direct image handler (its image models) or a plugin's image tool (size, quality). */
   config_fields?: AutomationFieldDto[];
   model?: string;
@@ -1305,6 +1326,12 @@ export interface PanelSettingsDto {
   antigravity_config_path: string;
   verse_diagnostics_cache_enabled?: boolean;
   verse_diagnostics_auto_check?: boolean;
+  ai_ignore_patterns?: string[];
+  ai_ignore_strict?: boolean;
+  allow_settings_write?: boolean;
+  allow_agent_clicks?: boolean;
+  allow_see_uefn?: boolean;
+  allow_see_other_programs?: boolean;
   show_hidden_project_files?: boolean;
   terminals_enabled?: boolean;
   prompt_caching_enabled?: boolean;
@@ -1745,6 +1772,14 @@ export interface UefnPluginDto {
 /** Coding-agent id: host ``ducky`` plus any Store gateway contribution id. */
 export type CodingAgentId = string;
 
+/** One plugin of the first-run bundle: an AI gateway or a UEFN editor tool. */
+export interface StarterPluginDto {
+  slug: string;
+  label: string;
+  group: "gateway" | "editor";
+  installed: boolean;
+}
+
 export interface CodingAgentDto {
   id: CodingAgentId | string;
   label: string;
@@ -2077,6 +2112,8 @@ export interface PanelPushEvent {
   note?: string;
   /** workflow_run / workflow_step: which run, the step (node id) and the step it came from. */
   run?: string;
+  /** Per-run event order, including snapshots from another process. */
+  workflow_sequence?: number;
   /** workflow_output: bounded terminal snapshot for this node. */
   output?: string;
   session_id?: string;
@@ -2586,8 +2623,8 @@ export interface PanelApi {
   }>;
   notify_focus_tab_active(focus_id: string, title: string): Promise<void>;
   report_focus_window_layout(birth_tab_id: string, layout: EditorLayoutState): Promise<void>;
-  return_tab_to_main(focus_id: string, title: string): Promise<boolean>;
-  close_focus_window(focus_id: string, reason?: string): Promise<void>;
+  return_tab_to_main(focus_id: string, title: string, wid?: string): Promise<boolean>;
+  close_focus_window(focus_id: string, reason?: string, wid?: string): Promise<void>;
   close_all_focus_windows(): Promise<void>;
   get_editor_workspace(slug?: string): Promise<EditorWorkspaceSnapshot>;
   save_editor_workspace(payload: EditorWorkspaceSnapshot): Promise<void>;
@@ -2721,6 +2758,8 @@ export interface PanelApi {
     ok?: boolean;
     pending_first_run?: boolean;
     gateway_ids?: string[];
+    /** The first-run bundle, in install order, with what is on disk now. */
+    plugins?: StarterPluginDto[];
     error?: string;
   }>;
   ensure_starter_llm_gateways?(force?: boolean): Promise<{
@@ -2786,7 +2825,8 @@ export interface PanelApi {
   copy_workflow_folder?(owner_from: string, path: string, owner_to: string, parent_path?: string, move?: boolean): Promise<WorkflowFolderCopyDto>;
   delete_workflow?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
   /** Stop button: ends every run of this workflow on this PC now. */
-  stop_workflow?(workflow_id: string): Promise<{ ok?: boolean; stopped?: boolean }>;
+  stop_workflow?(workflow_id: string, run_id?: string): Promise<{ ok?: boolean; stopped?: boolean; error?: string }>;
+  workflow_run_snapshot?(): Promise<{ ok?: boolean; events?: PanelPushEvent[] }>;
   /** The Workflows editor's grid, snap, tool, panel sizes and zoom, kept on disk. */
   workflow_editor_prefs?(): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;
   set_workflow_editor_prefs?(prefs: Record<string, unknown>): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;
@@ -2942,6 +2982,8 @@ export interface PanelApi {
   delete_custom_verse_template(template_id: string): Promise<{ ok: boolean }>;
   rename_conversation(conv_id: string, title: string): Promise<void>;
   set_agent_allow_everything?(conv_id: string, on: boolean): Promise<{ ok: boolean; on: boolean; own: boolean; from_title?: string }>;
+  list_saved_agent_permissions(): Promise<SavedAgentPermissionDto[]>;
+  revoke_saved_agent_permission(conv_id: string, rule: string): Promise<{ ok: boolean }>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;
   move_chats_to_project?(
     conv_ids: string[],
@@ -3066,6 +3108,7 @@ export interface PanelApi {
   report_open_tabs(window_id: string, tab_ids: string[]): Promise<void>;
   focus_tab(tab_id: string, requesting_window: string): Promise<{ ok: boolean; window_id: string }>;
   claim_tab(tab_id: string, window_id: string): Promise<void>;
+  get_tab_owner(tab_id: string): Promise<string>;
   get_verse_lsp_status(client_id?: string): Promise<VerseLspStatusDto>;
   start_verse_lsp(project_root?: string, client_id?: string): Promise<VerseLspStatusDto>;
   stop_verse_lsp(client_id?: string): Promise<void>;
@@ -3529,6 +3572,7 @@ export interface PanelApi {
   wait_for_agent_idle?(conv_id: string, timeout?: number): Promise<boolean>;
   report_ui_perf(entries: Array<Record<string, unknown>>): Promise<boolean>;
   ui_rpc_respond(request_id: string, payload: Record<string, unknown>): Promise<boolean>;
+  ui_rpc_pending_questions?(): Promise<AgentEvent[]>;
   /** This window took a Show me / tour request meant for it. */
   ui_rpc_ack?(request_id: string): Promise<boolean>;
   /** A request sent to every window: true for the first window to claim it. */
@@ -3637,6 +3681,14 @@ export interface PanelApi {
     assistant_text: string,
     model?: string,
   ): Promise<{ ok: boolean; text?: string; error?: string; verbatim?: boolean }>;
+  /** Offline Windows Speech (desktop only). Jobs keep the bridge responsive. */
+  voice_win_tts_start?(text: string, voice_id?: string): Promise<{ ok: boolean; job_id?: string; error?: string }>;
+  voice_win_tts_voices_start?(): Promise<{ ok: boolean; job_id?: string; error?: string }>;
+  voice_win_tts_poll?(job_id: string): Promise<{
+    ok: boolean; pending?: boolean; error?: string; code?: string;
+    audio_base64?: string; mime?: string;
+    voices?: { id: string; label: string; lang?: string }[];
+  }>;
   /** Windows dictation (desktop only — denied for remote). */
   voice_win_stt_prewarm?(): Promise<{ ok: boolean; error?: string; code?: string }>;
   voice_win_stt_start?(

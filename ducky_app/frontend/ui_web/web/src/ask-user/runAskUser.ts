@@ -142,6 +142,10 @@ export function settleAskUser(
   if (!id) return;
   const current = sessions.get(id);
   if (!current) return;
+  if ("ok" in result && current.questions.some((q) => {
+    const answer = result.answers[q.id];
+    return q.required && (!answer || answer.skipped || (!answer.selected.length && !answer.text.trim()));
+  })) return;
   sessions.delete(id);
   if (orphanActiveId === id) {
     orphanActiveId = null;
@@ -195,13 +199,7 @@ export function runAskUser(
       resolve,
     };
     if (cid) {
-      // One open ask per chat — settle any prior if the agent re-asks.
-      for (const [id, p] of sessions) {
-        if (p.convId === cid) {
-          sessions.delete(id);
-          p.resolve({ error: "superseded by a newer ask in this chat" });
-        }
-      }
+      // Keep every unanswered ask. A concurrent request cannot cancel an earlier question.
       sessions.set(pending.id, pending);
       notify();
       return;

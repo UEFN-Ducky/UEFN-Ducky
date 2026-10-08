@@ -6,6 +6,7 @@ import { ChatListPanel, SingleChatPanel } from "./ChatListPanel";
 import { LinkedAgentCard } from "./LinkedAgentCard";
 import { ToolFileEditDiff } from "./ToolFileEditDiff";
 import { DefaultBody } from "./tool-cards/bodies/DefaultBody";
+import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { walkthroughStepsFromTool } from "./tool-cards/bodies/WalkthroughBody";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
 import { resolveToolCategory } from "./tool-cards/toolCategories";
@@ -24,7 +25,6 @@ import {
 import { formatToolDuration, humanToolLabel } from "../utils/agentActivity";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
-import { InlineStopButton } from "./InlineStopButton";
 
 interface ToolExecutionCardProps {
   intent: ChatMessage;
@@ -35,8 +35,6 @@ interface ToolExecutionCardProps {
   captureKeys?: boolean;
   onOpenChat?: (chat: ChatTab) => void;
   onStopLinked?: (childConvId: string) => void;
-  /** Stop the parent chat run (shown on collapsed live tool headers). */
-  onStop?: () => void;
   onOpenFile?: (path: string, name: string, options?: { line?: number }) => void;
   allChats?: ChatTab[];
   liveLinkedAgents?: LinkedAgent[];
@@ -95,7 +93,6 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   captureKeys: _captureKeys = false,
   onOpenChat,
   onStopLinked,
-  onStop,
   onOpenFile,
   allChats = [],
   liveLinkedAgents = [],
@@ -104,7 +101,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
 }: ToolExecutionCardProps) {
   const meta = toolMeta(intent, result);
   const isCancelled = meta.status === "cancelled";
-  const isRunning = !isCancelled && (!result || meta.status === "pending");
+  const isRunning = meta.status === "pending" || meta.status === "running";
   const isSuccess = meta.status === "success" || result?.role === "success";
   const isChatTool = isChatToolName(meta.name);
   const category = useMemo(() => resolveToolCategory(meta.name), [meta.name]);
@@ -318,15 +315,6 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
               <Icons.Refresh />
             </span>
           ) : null}
-          {isRunning && onStop ? (
-            <span
-              className="tool-execution-card-stop-slot"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              <InlineStopButton onClick={onStop} />
-            </span>
-          ) : null}
           <span
             className={`tool-execution-card-toggle-chevron${expanded ? " tool-execution-card-toggle-chevron--expanded" : ""}`}
           >
@@ -458,6 +446,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
                   onOpenFile={onOpenFile}
                 />
               ) : null}
+              {!isSuccess && !isRunning && resultText.includes("AI_FILE_PROTECTION:") ? <FileProtectionRecovery /> : null}
             </div>
           </div>
           ) : null}

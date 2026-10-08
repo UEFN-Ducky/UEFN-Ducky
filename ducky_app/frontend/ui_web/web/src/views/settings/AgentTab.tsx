@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { savePermissionSettings } from "../../hooks/permissionSettings";
 import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
 import { ChoiceDropdown } from "../../components/ChoiceDropdown";
@@ -275,7 +276,6 @@ function DefaultModelSection() {
 function ChatTitleSection() {
   const [loaded, setLoaded] = useState(false);
   const [autoTitle, setAutoTitle] = useState(true);
-  const [titleModel, setTitleModel] = useState("");
 
   useEffect(() => {
     return onApiReady((api) => {
@@ -283,7 +283,6 @@ function ChatTitleSection() {
         if (typeof settings.chat_auto_title === "boolean") {
           setAutoTitle(settings.chat_auto_title);
         }
-        setTitleModel((settings.chat_title_model || "").trim());
         setLoaded(true);
       });
     });
@@ -302,21 +301,7 @@ function ChatTitleSection() {
           if (api) void api.save_agent_settings({ chat_auto_title: value });
         }}
       />
-      <div className="llms-default-model-picker">
-        <DuckyModelPicker
-          model={titleModel}
-          onChange={(model) => {
-            setTitleModel(model);
-            const api = getApi();
-            if (api) void api.save_agent_settings({ chat_title_model: model });
-          }}
-          label="Chat title model"
-          placeholder="Off — keyword names only"
-          hint="Refines the role name after the first message. Leave empty to keep the instant keyword guess."
-          allowClear
-          requireTools={false}
-        />
-      </div>
+      <p className="general-tab-toggle-desc">The working AI chooses a task name as its first tool call. No separate naming model is used.</p>
     </div>
   );
 }
@@ -328,9 +313,11 @@ const WEB_ACCESS_OPTIONS = [
   { value: "off", label: "Off" },
 ];
 
-function WebAccessSection() {
+export function WebAccessSection() {
   const [loaded, setLoaded] = useState(false);
   const [access, setAccess] = useState("ask");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     return onApiReady((api) => {
@@ -338,7 +325,7 @@ function WebAccessSection() {
         const mode = (settings.web_access || "ask").trim();
         setAccess(mode === "on" || mode === "off" ? mode : "ask");
         setLoaded(true);
-      });
+      }).catch(() => setStatus("Could not load web permission."));
     });
   }, []);
 
@@ -357,16 +344,21 @@ function WebAccessSection() {
           aria-label="Web search"
           mode="radio"
           value={access}
-          disabled={!loaded}
+          disabled={!loaded || saving}
           options={WEB_ACCESS_OPTIONS}
           onChange={(next) => {
             const mode = next === "on" || next === "off" ? next : "ask";
             setAccess(mode);
-            const api = getApi();
-            if (api) void api.save_agent_settings({ web_access: mode });
+            setSaving(true);
+            setStatus("Saving…");
+            void savePermissionSettings({ web_access: mode }).then(() => setStatus("Saved.")).catch((error: unknown) => {
+              setAccess(access);
+              setStatus(error instanceof Error ? error.message : "Could not save web permission.");
+            }).finally(() => setSaving(false));
           }}
         />
       </div>
+      <p role="status">{status}</p>
     </div>
   );
 }
@@ -829,11 +821,6 @@ export function AgentTab() {
                   </div>
                 ) : null}
               </div>
-            </section>
-
-            <section className="general-tab-section">
-              <GeneralSectionHeader icon={<Icons.Globe />} title="Web search" />
-              <WebAccessSection />
             </section>
 
             <section className="general-tab-section">

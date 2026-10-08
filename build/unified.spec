@@ -163,6 +163,11 @@ if _appearance_builtin_profiles.is_file():
 _bundled_agent_profiles = FRONTEND / "bundled_agent_profiles.json"
 if _bundled_agent_profiles.is_file():
     _datas.append((str(_bundled_agent_profiles), "frontend"))
+_panel_archive = os.environ.get("UEFN_DUCKY_PANEL_ARCHIVE", "").strip()
+if not _panel_archive or not Path(_panel_archive).is_file():
+    raise RuntimeError("unified.spec: panel recovery archive missing; run build_exes.py")
+_datas.append((_panel_archive, "frontend/ui_web"))
+
 # Snapshot from build_exes. A later npm rebuild rewrites hashed filenames in the
 # live dist; packaging that moving tree ships index.html without its JS.
 _panel_snap = os.environ.get("UEFN_DUCKY_PANEL_DIST", "").strip()
@@ -325,6 +330,21 @@ a = Analysis(
     excludes=_HEAVY_EXCLUDES,
     noarchive=False,
 )
+
+# ffmpeg.exe and ffprobe.exe load their DLLs from their own folder, tools/ffmpeg.
+# PyInstaller's dependency scan of those EXEs also put the same DLLs at the top of
+# _internal: a second byte-identical copy (~130 MB, ~40 MB of the download) that
+# nothing loads. build_exes.py fails the build if one comes back.
+_ffmpeg_dlls = {p.name.lower() for p in _ffmpeg_bundle.iterdir() if p.suffix.lower() == ".dll"}
+
+
+def _top_level_ffmpeg_dll(entry) -> bool:
+    dest = str(entry[0]).replace("\\", "/")
+    return "/" not in dest and dest.lower() in _ffmpeg_dlls
+
+
+a.binaries = [entry for entry in a.binaries if not _top_level_ffmpeg_dll(entry)]
+a.datas = [entry for entry in a.datas if not _top_level_ffmpeg_dll(entry)]
 
 # Fail the freeze if Store plugin host modules were tree-shaken out (empty LLMs).
 # TOC entries are (name, path, typecode).
