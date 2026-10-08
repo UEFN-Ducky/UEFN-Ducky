@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import type { AgentEvent, PanelPushEvent } from "../types/panel";
+import type { AgentEvent, AutomationRunDto, PanelPushEvent } from "../types/panel";
 import { subscribeAgentEvents } from "./useAgentEventBus";
 import { subscribePanelPush } from "./usePanelPushBus";
 import { getApi } from "./usePanelApi";
@@ -43,11 +43,14 @@ export interface ChatWorkflowRun {
   current: string;
   startedAt: number;
   endedAt?: number;
+  /** Saved steps and output values for this execution. */
+  result?: AutomationRunDto;
 }
 
 type WorkflowEvent = PanelPushEvent;
 
 const byRun = new Map<string, ChatWorkflowRun>();
+const clearedRuns = new Set<string>();
 const eventListeners = new Set<(event: PanelPushEvent) => void>();
 const latestEvents = new Map<string, PanelPushEvent>();
 const snapshots = new Map<string, ChatWorkflowRun[]>();
@@ -67,7 +70,7 @@ function stepState(raw: string | undefined): WorkflowStepState {
 
 export function applyWorkflowEvent(event: WorkflowEvent): void {
   const run = String(event.run || "");
-  if (!run) return;
+  if (!run || clearedRuns.has(run)) return;
   const eventKey = [event.id, run, event.type, event.node, event.source, event.type === "workflow_run" ? event.state : ""].join(":");
   const previous = latestEvents.get(eventKey);
   const replayFinish = event.type === "workflow_run" && event.state !== "started" && byRun.get(run)?.state === "running";
@@ -255,6 +258,48 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Merge saved history without resetting another execution's live controls. */
+export function hydrateWorkflowRunHistory(workflowId: string, name: string, results: AutomationRunDto[]): void {
+  let changed = false;
+  results.forEach((result, index) => {
+    const run = result.run || `saved:${workflowId}:${result.started || 0}:${index}`;
+    if (clearedRuns.has(run)) return;
+    const previous = byRun.get(run);
+    if (previous?.state === "running" || JSON.stringify(previous?.result) === JSON.stringify(result)) return;
+    const state = previous?.state || (result.error === "Stopped" ? "stopped" : result.ok === false ? "error" : "done");
+    byRun.set(run, {
+      workflowId, run, name, state,
+      error: result.error || previous?.error,
+      steps: previous?.steps || (result.steps || []).map((step, i) => ({
+        node: step.id || String(i), label: step.label || step.type || "Step", type: step.type || "",
+        state: step.ok === false ? "error" : "ok", error: step.error,
+      })),
+      current: "",
+      startedAt: result.started ? result.started * 1000 : previous?.startedAt || Date.now(),
+      endedAt: result.ended ? result.ended * 1000 : previous?.endedAt,
+      result,
+    });
+    if (!runToChat.has(run)) runToChat.set(run, result.conv_id || "");
+    changed = true;
+  });
+  if (changed) emit();
+}
+
+/** Clear completed history while active runs and their Stop controls stay available. */
+export function clearWorkflowRunHistory(workflowId: string, runIds?: ReadonlySet<string>): string[] {
+  const removed: string[] = [];
+  for (const [run, item] of byRun) {
+    if (item.workflowId !== workflowId || item.state === "running" || (runIds && !runIds.has(run))) continue;
+    clearedRuns.add(run);
+    byRun.delete(run);
+    runToChat.delete(run);
+    removed.push(run);
+  }
+  for (const [key, event] of latestEvents) if (clearedRuns.has(String(event.run || ""))) latestEvents.delete(key);
+  if (removed.length) emit();
+  return removed;
+}
+
 /** Hide a finished run without removing another concurrent run's controls. */
 export function dismissWorkflowRun(chatId: string, runId?: string): void {
   for (const [run, chat] of runToChat) {
@@ -269,7 +314,7 @@ export function dismissWorkflowRun(chatId: string, runId?: string): void {
 function snapshot(key: string, matches: (run: ChatWorkflowRun) => boolean): ChatWorkflowRun[] {
   let value = snapshots.get(key);
   if (!value) {
-    value = [...byRun.values()].filter(matches);
+    value = [...byRun.values()].filter(matches).sort((a, b) => a.startedAt - b.startedAt);
     snapshots.set(key, value.length ? value : EMPTY);
   }
   return snapshots.get(key)!;
@@ -302,6 +347,7 @@ export function subscribeWorkflowEvents(listener: (event: PanelPushEvent) => voi
 
 export function resetWorkflowRunsForTests(): void {
   byRun.clear();
+  clearedRuns.clear();
   runToChat.clear();
   latestEvents.clear();
   emit();

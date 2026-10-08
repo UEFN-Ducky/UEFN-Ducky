@@ -25,7 +25,7 @@ import type {
   WorkflowOwnersDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
-import { stopWorkflowRun, subscribeWorkflowEvents, useWorkflowRuns } from "../hooks/workflowRunsByChat";
+import { clearWorkflowRunHistory, hydrateWorkflowRunHistory, stopWorkflowRun, subscribeWorkflowEvents, useWorkflowRuns } from "../hooks/workflowRunsByChat";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { onApiReady } from "../hooks/onApiReady";
@@ -161,12 +161,12 @@ function Thumbs({ pictures, empty }: { pictures: FileRefDto[]; empty: string }) 
 }
 /** Under a picture on a card: make another from the same prompt, or keep this one (run
  *  the steps that take it, like Save to card). */
-function PictureActions({ nodeId, running, busy, onRun }: { nodeId: string; running: string; busy: boolean; onRun: (id: string, how?: "run" | "keep") => void }) {
+function PictureActions({ nodeId, running, busy, canKeep = true, onRun }: { nodeId: string; running: string; busy: boolean; canKeep?: boolean; onRun: (id: string, how?: "run" | "keep") => void }) {
   return <div className="aw-preview-actions" onPointerDown={(event) => event.stopPropagation()}>
     <button type="button" disabled={!!running || busy} title="Make a new one from the same prompt" onClick={() => onRun(nodeId)}>
       {running === nodeId ? <Icons.Spinner /> : <Icons.Refresh />} Try again
     </button>
-    <button type="button" className="is-primary" disabled={!!running || busy} title="Keep this one: run the steps that take it (like Save to card)" onClick={() => onRun(nodeId, "keep")}>
+    <button type="button" className="is-primary" disabled={!!running || busy || !canKeep} title={canKeep ? "Keep this one: run the steps that take it (like Save to card)" : "Select the latest run to keep its output"} onClick={() => onRun(nodeId, "keep")}>
       <Icons.Check /> Use this
     </button>
   </div>;
@@ -543,9 +543,9 @@ export function AutomationsView() {
     toX: number;
     toY: number;
   } | null>(null);
-  const [log, setLog] = useState<AutomationRunDto | null>(null);
+  const [latestLog, setLog] = useState<AutomationRunDto | null>(null);
   const [made, setMade] = useState<Record<string, Record<string, unknown>>>({});
-  useEffect(() => { if (log?.node_outputs) setMade((before) => ({ ...before, ...madeByNode([log]) })); }, [log]);
+  useEffect(() => { if (latestLog?.node_outputs) setMade((before) => ({ ...before, ...madeByNode([latestLog]) })); }, [latestLog]);
   // Phones (narrow editor): the toolbar actions and the canvas tools each fold into one
   // button that opens them as a labeled list. Wide, both are always shown (CSS).
   const [phoneMenu, setPhoneMenu] = useState<"" | "actions" | "canvas">("");
@@ -648,6 +648,37 @@ export function AutomationsView() {
     || activeWorkflowRuns[activeWorkflowRuns.length - 1]
     || workflowRuns[workflowRuns.length - 1];
   const live = visibleRun ? liveByRun[visibleRun.run] ?? null : null;
+  const log: AutomationRunDto | null = visibleRun
+    ? visibleRun.result || (latestLog?.run === visibleRun.run ? latestLog : {
+        run: visibleRun.run, ok: visibleRun.state !== "error", error: visibleRun.error,
+        steps: visibleRun.steps.filter((step) => step.state !== "pending").map((step) => ({
+          id: step.node, label: step.label, type: step.type, ok: step.state !== "error", error: step.error,
+        })),
+      })
+    : latestLog;
+  const pendingHistoryIds = workflowRuns.filter((run) => run.state !== "running" && !run.result).map((run) => run.run).join(",");
+  // A scheduled/chat run saves its full output just after the finish event.
+  useEffect(() => {
+    if (!draft?.id || !pendingHistoryIds) return;
+    let cancelled = false;
+    let timer: number;
+    const wanted = pendingHistoryIds.split(",");
+    const refresh = async (attempt: number) => {
+      try {
+        const response = await getApi()?.get_workflow?.(draft.id);
+        if (cancelled) return;
+        if (response?.workflow) {
+          const results = response.workflow.runs || [];
+          hydrateWorkflowRunHistory(draft.id, draft.name, results);
+          if (wanted.every((run) => results.some((result) => result.run === run))) return;
+        }
+      } catch { /* Retry if saving or the bridge has not finished yet. */ }
+      if (!cancelled && attempt < 3) timer = window.setTimeout(() => void refresh(attempt + 1), 1000);
+    };
+    timer = window.setTimeout(() => void refresh(0), 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [draft?.id, draft?.name, pendingHistoryIds]);
+  const pickRun = (run: string) => { setSelectedRun(run); setLogOpen(true); };
   useEffect(() => subscribeWorkflowEvents((event) => {
     const run = String(event.run || "");
     if (!run) return;
@@ -683,17 +714,6 @@ export function AutomationsView() {
   };
   // Leaving with a save still queued: send it now.
   useEffect(() => () => { if (syncTimer.current) { window.clearTimeout(syncTimer.current); void getApi()?.workflow_sync?.(true); } }, []);
-  // A finished run stays lit for a few seconds, then the canvas goes back to normal.
-  useEffect(() => {
-    if (!live?.finished) return;
-    const timer = window.setTimeout(() => setLiveByRun((current) => {
-      if (current[live.run] !== live) return current;
-      const next = { ...current };
-      delete next[live.run];
-      return next;
-    }), 8000);
-    return () => window.clearTimeout(timer);
-  }, [live]);
   // The details follow the step running now, unless something else was picked meanwhile.
   const selectionRef = useRef({ nodes: selectedNodeIds, edge: selectedEdge });
   selectionRef.current = { nodes: selectedNodeIds, edge: selectedEdge };
@@ -750,6 +770,7 @@ export function AutomationsView() {
       setSpawn(null);
       setSelectedNodeIds([]);
       setSelectedEdge(null);
+      hydrateWorkflowRunHistory(id, row.name, row.runs || []);
       setLog((row.runs || []).slice(-1)[0] || null);
       setMade(madeByNode(row.runs || []));
       setSelectedRun("");
@@ -1337,11 +1358,18 @@ export function AutomationsView() {
     if (!draft?.id) return;
     const gen = loadGen.current;
     setStopping(false);
+    setSelectedRun("");
     setLogOpen(true);
     try {
       await saveBeforeRun(draft);
       const res = await runBridgeJob<AutomationRunDto>("run_workflow", [draft.id], RUN_TIMEOUT_MS);
-      if (res && gen === loadGen.current) setLog(res);
+      if (res && gen === loadGen.current) {
+        if (res.run) {
+          hydrateWorkflowRunHistory(draft.id, draft.name, [res]);
+          setSelectedRun((picked) => picked || res.run!);
+        }
+        setLog(res);
+      }
     } catch (error) {
       if (gen === loadGen.current) setActionError(error instanceof Error ? error.message : "Could not run the workflow");
     } finally {
@@ -1357,6 +1385,7 @@ export function AutomationsView() {
     if (!doc?.id || busy) return;
     const gen = loadGen.current;
     setRunningNode(nodeId);
+    setSelectedRun("");
     setLogOpen(true);
     try {
       await saveBeforeRun(doc);
@@ -1364,6 +1393,10 @@ export function AutomationsView() {
         ? await runBridgeJob<AutomationRunDto>("keep_workflow_preview", [doc.id, nodeId], RUN_TIMEOUT_MS)
         : await runBridgeJob<AutomationRunDto>("run_workflow_node", [doc.id, nodeId, true], RUN_TIMEOUT_MS);
       if (res && gen === loadGen.current) {
+        if (res.run) {
+          hydrateWorkflowRunHistory(doc.id, doc.name, [res]);
+          setSelectedRun((picked) => picked || res.run!);
+        }
         setLog(res);
         if (res.ok === false && res.error) setActionError(res.error);
       }
@@ -2233,11 +2266,26 @@ export function AutomationsView() {
   const saveLook = saveState.kind === "saving" ? "saving" : failedSave ? "error" : dirty ? "dirty" : saveState.kind === "saved" ? "saved" : "idle";
   const activeTab = inspectorTabs.find((tab) => tab.key === inspectorKey) || inspectorTabs[0];
   const codeWideOn = codeWide && detailsTab === "code" && activeTab?.kind === "node";
+  const [clearingRuns, setClearingRuns] = useState(false);
+  const canClearRuns = workflowRuns.some((run) => run.state !== "running") || runLogHasContent(latestLog);
   const clearLog = async () => {
     const id = draft?.id;
-    setLog(null);
-    setMade({});
-    if (id) await getApi()?.clear_workflow_runs?.(id);
+    if (!id || clearingRuns) return;
+    const gen = loadGen.current;
+    const finished = new Set(workflowRuns.filter((run) => run.state !== "running").map((run) => run.run));
+    setClearingRuns(true);
+    try {
+      const response = await getApi()?.clear_workflow_runs?.(id);
+      if (!response?.ok) throw new Error(response?.error || "Could not clear run history");
+      const removed = new Set(clearWorkflowRunHistory(id, finished));
+      setLiveByRun((current) => Object.fromEntries(Object.entries(current).filter(([run]) => !removed.has(run))));
+      if (gen !== loadGen.current) return;
+      setSelectedRun("");
+      setLog(null);
+      setMade({});
+    } catch (error) {
+      if (gen === loadGen.current) setActionError(error instanceof Error ? error.message : "Could not clear run history");
+    } finally { setClearingRuns(false); }
   };
 
   return (
@@ -2351,11 +2399,13 @@ export function AutomationsView() {
                 onClick={() => { const next = { ...draft, enabled: !draft.enabled }; setDraft(next); void persist(next); }}>
                 <span className={`aw-light${draft.enabled ? " is-on" : ""}`} aria-hidden="true" />
               </button>
-              {workflowRuns.length > 1 ? (
+              {workflowRuns.length ? (
                 <ChoiceDropdown aria-label="Workflow run" className="aw-run-picker" mode="radio" size="compact" placement="bottom"
                   trigger={<><Icons.Play /><Icons.ChevronDown /></>}
                   header={<strong>Workflow runs</strong>}
-                  value={visibleRun?.run || ""} onChange={setSelectedRun}
+                  value={visibleRun?.run || ""} onChange={pickRun} onOpen={() => setLogOpen(true)}
+                  footer={<button type="button" className="icon-btn" aria-label="Clear finished runs" title="Clear finished run history"
+                    disabled={!canClearRuns || clearingRuns} onClick={() => void clearLog()}><Icons.Trash /></button>}
                   options={workflowRuns.map((run, index) => ({ value: run.run, label: `Run ${index + 1} · ${run.state}` }))} />
               ) : null}
               {visibleRun?.state === "running" ? (
@@ -2462,7 +2512,7 @@ export function AutomationsView() {
               const locked = nodeLocked(graph, node.id);
               const pins = pinsOf(node);
               const layout = layoutOf(node);
-              const shown = lastOutputs[node.id] || made[node.id] || {};
+              const shown = lastOutputs[node.id] || (selectedRun ? undefined : made[node.id]) || {};
               const setHere = (node.config.inputs && typeof node.config.inputs === "object" ? node.config.inputs : {}) as Record<string, unknown>;
               const rowCount = overview ? 0 : layout.rows;
               return (
@@ -2507,12 +2557,12 @@ export function AutomationsView() {
                         {node.type === "util.preview"
                           ? picturesIn(shown.value).length ? <>
                             <Thumbs pictures={picturesIn(shown.value)} empty="" />
-                            {readOnly || !draft?.id ? null : <PictureActions nodeId={node.id} running={runningNode} busy={busy} onRun={runNode} />}
+                            {readOnly || !draft?.id ? null : <PictureActions nodeId={node.id} running={runningNode} busy={busy} canKeep={!selectedRun || visibleRun === workflowRuns[workflowRuns.length - 1]} onRun={runNode} />}
                           </> : <div className="aw-node-preview">{previewText(shown.value)}</div>
                           : makesPictures(node, pins) ? <>
                             <Thumbs pictures={cardPictures(node, pins, shown)} empty={runningNode === node.id ? "Making it…" : "Press play to make one"} />
                             {readOnly || !draft?.id || !cardPictures(node, pins, shown).length ? null
-                              : <PictureActions nodeId={node.id} running={runningNode} busy={busy} onRun={runNode} />}
+                              : <PictureActions nodeId={node.id} running={runningNode} busy={busy} canKeep={!selectedRun || visibleRun === workflowRuns[workflowRuns.length - 1]} onRun={runNode} />}
                           </>
                           : cardExtra(node, pins) ? <Thumbs pictures={cardPictures(node, pins, shown)} empty="Pick a picture in the details" /> : null}
                       </div>
@@ -2670,7 +2720,7 @@ export function AutomationsView() {
               onPointerCancel={onLogResizeUp}
             />
             <div className="aw-log-dock-head">
-              <strong>Run log</strong>
+              <strong>{visibleRun ? `Run ${workflowRuns.indexOf(visibleRun) + 1} · ${visibleRun.state}` : "Run log"}</strong>
               <button
                 type="button"
                 className="aw-log-copy"
@@ -2680,7 +2730,7 @@ export function AutomationsView() {
               >
                 {logCopied ? "Copied" : "Copy log"}
               </button>
-              <button type="button" className="aw-log-copy aw-log-clear" title="Clear this PC's run log for this workflow" disabled={!runLogHasContent(log)} onClick={() => void clearLog()}>
+              <button type="button" className="aw-log-copy aw-log-clear" title="Clear this PC's run log for this workflow" disabled={!canClearRuns || clearingRuns} onClick={() => void clearLog()}>
                 Clear log
               </button>
               <button type="button" className="icon-btn" title="Hide" aria-label="Hide run log" onClick={() => setLogOpen(false)}>
@@ -2689,7 +2739,7 @@ export function AutomationsView() {
             </div>
             <div className="aw-log-dock-body selectable-text">
               {/* Live while anything runs: a test, one node, Try again or Use this. */}
-              {busy || runningNode ? (
+              {visibleRun?.state === "running" || (!visibleRun && (busy || runningNode)) || (live && !visibleRun?.result) ? (
                 <ol className="aw-live-steps" aria-live="polite">
                   {live?.lines.length ? live.lines.map((line, index) => <li key={index} className={`aw-live-line is-${line.state}${line.state === "error" ? " is-err" : ""}`}>
                     {line.state === "running" ? <span className="aw-live-spin" aria-hidden="true"><Icons.Spinner /></span> : null}

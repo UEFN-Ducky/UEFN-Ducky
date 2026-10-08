@@ -135,6 +135,83 @@ it("restores concurrent run controls on opening and stops only the chosen run", 
   await waitFor(() => expect(api.run_workflow).toHaveBeenCalledWith("p"));
 });
 
+describe("saved run history", () => {
+  beforeEach(() => {
+    saved.runs = [
+      { run: "first", started: 1, ended: 2, ok: true, steps: [{ id: "a", label: "First attempt", ok: true }] },
+      { run: "second", started: 3, ended: 4, ok: false, error: "Second attempt failed", steps: [] },
+    ];
+  });
+  it("opens each saved run's own details while another run is active", async () => {
+    act(() => applyWorkflowEvent({ type: "workflow_run", id: "p", run: "live", state: "started", name: "Example" }));
+    await open();
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 1 · done" }));
+    expect(document.querySelector(".aw-log-dock")?.classList.contains("is-open")).toBe(true);
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("First attempt ok");
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).not.toContain("Starting…");
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 2 · error" }));
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("Second attempt failed");
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).not.toContain("First attempt");
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 3 · running" }));
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("Starting…");
+    expect(screen.getByRole("button", { name: "Stop", exact: true })).toBeTruthy();
+  });
+  it("follows a new test run after viewing an earlier result", async () => {
+    api.run_workflow.mockResolvedValue({ run: "new-test", ok: true, steps: [{ label: "New test", ok: true }] });
+    await open();
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 1 · done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test", exact: true }));
+    await waitFor(() => expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("New test ok"));
+    dropdown("Workflow run");
+    expect((screen.getByRole("radio", { name: "Run 3 · done" }) as HTMLInputElement).checked).toBe(true);
+  });
+  it("clears persisted finished history but leaves the concurrent run selectable", async () => {
+    api.clear_workflow_runs.mockImplementation(async () => { saved.runs = []; return { ok: true }; });
+    act(() => applyWorkflowEvent({ type: "workflow_run", id: "p", run: "live", state: "started", name: "Example" }));
+    const view = await open();
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("button", { name: "Clear finished runs" }));
+    await waitFor(() => expect(screen.queryByRole("radio", { name: "Run 1 · done" })).toBeNull());
+    expect(api.clear_workflow_runs).toHaveBeenCalledWith("p");
+    expect(screen.getByRole("radio", { name: "Run 1 · running" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear finished runs" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Stop", exact: true })).toBeTruthy();
+    view.unmount();
+    await open();
+    dropdown("Workflow run");
+    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    expect(screen.getByRole("radio", { name: "Run 1 · running" })).toBeTruthy();
+  });
+  it("opens a single run and picks up saved details after its finish event", async () => {
+    saved.runs = [];
+    act(() => applyWorkflowEvent({ type: "workflow_run", id: "p", run: "remote", state: "started", name: "Example" }));
+    await open();
+    dropdown("Workflow run");
+    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("radio", { name: "Run 1 · running" }));
+    expect(document.querySelector(".aw-log-dock")?.classList.contains("is-open")).toBe(true);
+    act(() => applyWorkflowEvent({ type: "workflow_run", id: "p", run: "remote", state: "done" }));
+    // The first history refresh can arrive before the runner has saved the result.
+    const reads = api.get_workflow.mock.calls.length;
+    await waitFor(() => expect(api.get_workflow.mock.calls.length).toBeGreaterThan(reads));
+    saved.runs = [{ run: "remote", ok: true, steps: [{ label: "Saved remote details", ok: true }] }];
+    await waitFor(() => expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("Saved remote details ok"), { timeout: 2500 });
+  });
+  it("keeps history visible and reports an error when clearing fails", async () => {
+    api.clear_workflow_runs.mockResolvedValue({ ok: false, error: "History could not be saved" });
+    await open();
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("button", { name: "Clear finished runs" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("History could not be saved");
+    expect(screen.getByRole("radio", { name: "Run 1 · done" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Run 2 · error" })).toBeTruthy();
+  });
+});
+
 function renderView() {
   return render(<ConfirmModalProvider><AutomationsView /></ConfirmModalProvider>);
 }
@@ -2019,6 +2096,32 @@ describe("image nodes", () => {
     expect(document.querySelector('[data-aw-node="show"] .aw-node-thumb img')?.getAttribute("src")).toBe(url);
     const height = parseFloat((document.querySelector('[data-aw-node="gen"]') as HTMLElement).style.height);
     expect(height).toBeGreaterThan(150);  // room for the picture under the pin rows
+  });
+
+  it("shows each saved run's own picture and clears another run's preview on selection", async () => {
+    const firstUrl = url.replace("duck", "first");
+    saved.runs = [
+      { run: "picture-1", started: 1, ended: 2, ok: true, steps: [{ label: "First picture", ok: true }], node_outputs: {
+        show: { value: { kind: "image", path: "C:/runs/first.png", name: "first.png", url: firstUrl } },
+      } },
+      { run: "picture-2", started: 3, ended: 4, ok: true, steps: [{ label: "Second picture", ok: true }], node_outputs: {
+        show: { value: { kind: "image", path: "C:/runs/duck.png", name: "duck.png", url } },
+      } },
+      { run: "picture-3", started: 5, ended: 6, ok: false, error: "No image returned", steps: [], node_outputs: {} },
+    ];
+    await openPipe();
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 1 · done" }));
+    expect(document.querySelector('[data-aw-node="show"] .aw-node-thumb img')?.getAttribute("src")).toBe(firstUrl);
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("First picture ok");
+    expect(within(document.querySelector('[data-aw-node="show"]') as HTMLElement).getByRole("button", { name: /Use this/ }).hasAttribute("disabled")).toBe(true);
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 2 · done" }));
+    expect(document.querySelector('[data-aw-node="show"] .aw-node-thumb img')?.getAttribute("src")).toBe(url);
+    dropdown("Workflow run");
+    fireEvent.click(screen.getByRole("radio", { name: "Run 3 · error" }));
+    expect(document.querySelector('[data-aw-node="show"] .aw-node-thumb img')).toBeNull();
+    expect(document.querySelector(".aw-log-dock-body")?.textContent).toContain("No image returned");
   });
 
   it("runs one node from its details and shows what it made", async () => {

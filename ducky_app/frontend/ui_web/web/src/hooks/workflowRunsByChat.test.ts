@@ -1,12 +1,65 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { getBackgroundJobs, _resetBackgroundActivityForTests, upsertBackgroundJob } from "./backgroundActivity";
-import { applyWorkflowEvent, refreshWorkflowRuns, resetWorkflowRunsForTests } from "./workflowRunsByChat";
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { applyWorkflowEvent, clearWorkflowRunHistory, hydrateWorkflowRunHistory, refreshWorkflowRuns, resetWorkflowRunsForTests, subscribeWorkflowEvents, useWorkflowRuns } from "./workflowRunsByChat";
 import type { PanelPushEvent } from "../types/panel";
 
 const api = vi.hoisted(() => ({ workflow_run_snapshot: vi.fn() }));
 vi.mock("./usePanelApi", () => ({ getApi: () => api }));
-afterEach(() => { resetWorkflowRunsForTests(); _resetBackgroundActivityForTests(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); resetWorkflowRunsForTests(); _resetBackgroundActivityForTests(); vi.resetAllMocks(); });
+
+it("restores saved runs in chronological order without replacing a concurrent live run", () => {
+  applyWorkflowEvent(start("live"));
+  const { result } = renderHook(() => useWorkflowRuns("wf"));
+  act(() => hydrateWorkflowRunHistory("wf", "Example", [
+    { run: "old", started: 1, ended: 2, ok: true, steps: [{ id: "a", label: "First", ok: true }], node_outputs: { a: { value: "first output" } } },
+    { run: "failed", started: 3, ended: 4, ok: false, error: "No key", steps: [] },
+    { run: "live", started: 5, ok: true, steps: [] },
+  ]));
+  expect(result.current.map(run => run.run)).toEqual(["old", "failed", "live"]);
+  expect(result.current[0].result?.node_outputs?.a.value).toBe("first output");
+  expect(result.current[1]).toMatchObject({ state: "error", error: "No key" });
+  expect(result.current[2].state).toBe("running");
+  expect(result.current[2].result).toBeUndefined();
+  act(() => hydrateWorkflowRunHistory("wf", "Example", [{ run: "old", started: 1, ended: 2, ok: true, steps: [] }]));
+  expect(result.current).toHaveLength(3);
+});
+
+it("clears only finished runs for this workflow and prevents replay from restoring them", async () => {
+  applyWorkflowEvent(start("done"));
+  applyWorkflowEvent({ type: "workflow_run", id: "wf", run: "done", state: "done" });
+  applyWorkflowEvent(start("live"));
+  applyWorkflowEvent({ type: "workflow_run", id: "other", run: "other-done", state: "started" });
+  applyWorkflowEvent({ type: "workflow_run", id: "other", run: "other-done", state: "done" });
+  const { result } = renderHook(() => ({ current: useWorkflowRuns("wf"), other: useWorkflowRuns("other") }));
+  act(() => expect(clearWorkflowRunHistory("wf")).toEqual(["done"]));
+  expect(result.current.current.map(run => run.run)).toEqual(["live"]);
+  expect(result.current.other).toHaveLength(1);
+  act(() => hydrateWorkflowRunHistory("wf", "Example", [{ run: "done", ok: true, steps: [] }]));
+  api.workflow_run_snapshot.mockResolvedValue({ ok: true, events: [
+    start("done"), { type: "workflow_run", id: "wf", run: "done", state: "done" }, start("live"),
+  ] });
+  await act(async () => { await refreshWorkflowRuns(); });
+  expect(result.current.current.map(run => run.run)).toEqual(["live"]);
+  const replayed: PanelPushEvent[] = [];
+  const unsubscribe = subscribeWorkflowEvents(event => replayed.push(event));
+  unsubscribe();
+  expect(replayed.some(event => event.run === "done")).toBe(false);
+});
+
+it("preserves a run that finishes while a clear request is in flight", () => {
+  applyWorkflowEvent(start("older"));
+  applyWorkflowEvent({ type: "workflow_run", id: "wf", run: "older", state: "done" });
+  applyWorkflowEvent(start("newer"));
+  const { result } = renderHook(() => useWorkflowRuns("wf"));
+  const finishedAtRequest = new Set(result.current.filter(run => run.state !== "running").map(run => run.run));
+  act(() => {
+    applyWorkflowEvent({ type: "workflow_run", id: "wf", run: "newer", state: "done" });
+    clearWorkflowRunHistory("wf", finishedAtRequest);
+  });
+  expect(result.current.map(run => run.run)).toEqual(["newer"]);
+});
 
 function start(run: string): PanelPushEvent {
   return { type: "workflow_run", id: "wf", run, name: run, state: "started", conv: "chat" };

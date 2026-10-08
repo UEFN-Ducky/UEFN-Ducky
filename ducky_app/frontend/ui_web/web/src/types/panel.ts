@@ -464,6 +464,8 @@ export interface WorkflowCodeApiDto {
 }
 
 export interface AutomationRunDto {
+  /** Unique execution id, separate from the workflow id. */
+  run?: string;
   ok?: boolean;
   error?: string;
   id?: string;
