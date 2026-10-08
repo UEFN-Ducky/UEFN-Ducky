@@ -803,7 +803,7 @@ async def execute_tool(
         try:
             from backend.agent import verify_evidence
 
-            verify_evidence.record_ok(key_name, arguments or {})
+            verify_evidence.record_result(name, arguments or {}, result.data)
         except Exception:
             pass
         return result

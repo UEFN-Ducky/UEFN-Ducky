@@ -1,15 +1,20 @@
-"""Per-conversation verify-evidence ledger (embedded agent only).
+"""Successful verification checks, isolated by conversation and agent run.
 
-ponytail: in-process dict keyed by conv_id, reset each runner turn. Ceiling is
-one process / one turn — persist on the changeset journal if verify must
-survive a restart.
+MCP requests may run in separate tasks, threads and bridge processes. A small
+atomic receipt shares evidence for the same run without depending on a caller
+ContextVar surviving between requests. Embedded turns reset their own scope.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import threading
+import uuid
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from backend.agent.toolsets import effective_tool_name
@@ -56,27 +61,52 @@ _HANDOFF_RE = re.compile(
     r")"
 )
 
-_conv_id: ContextVar[str] = ContextVar("ducky_verify_conv_id", default="")
+_scope: ContextVar[tuple[str, str]] = ContextVar("ducky_verify_scope", default=("", ""))
 _lock = threading.Lock()
-# conv_id -> check-tool names that returned ok this turn
-_evidence: dict[str, list[str]] = {}
+_evidence: dict[tuple[str, str], list[str]] = {}
 
 
-def bind_conversation(conv_id: str) -> object:
-    """Bind this turn and clear leftover evidence. Returns a reset token."""
-    cid = str(conv_id or "")
-    token = _conv_id.set(cid)
+def _current_scope() -> tuple[str, str]:
+    from backend.workspace.identity import resolve_context
+
+    ctx = resolve_context()
+    if ctx is not None:
+        if ctx.run_id:
+            return (ctx.conv_id, ctx.run_id)
+        # Only an explicitly bound embedded turn can use an empty run ID.
+        # Anonymous external requests must never inherit earlier checks.
+        embedded = _scope.get()
+        return embedded if embedded[0] == ctx.conv_id else ("", "")
+    return _scope.get()
+
+
+def _receipt_path(scope: tuple[str, str]) -> Path:
+    from frontend.app_paths import resolve_app_data_dir
+
+    key = hashlib.sha256("\0".join(scope).encode()).hexdigest()
+    return resolve_app_data_dir(for_write=True) / "verify-evidence" / (key + ".json")
+
+
+def bind_conversation(conv_id: str, run_id: str = "") -> object:
+    """Start an embedded turn; external MCP requests use their bound run identity."""
+    scope = (str(conv_id or ""), str(run_id or ""))
+    token = _scope.set(scope)
     with _lock:
-        _evidence[cid] = []
+        _evidence[scope] = []
+        if all(scope):
+            _receipt_path(scope).unlink(missing_ok=True)
     return token
 
 
 def reset_conversation(token: object) -> None:
-    _conv_id.reset(token)  # type: ignore[arg-type]
+    scope = _scope.get()
+    _scope.reset(token)  # type: ignore[arg-type]
+    with _lock:
+        _evidence.pop(scope, None)
 
 
 def current_conversation() -> str:
-    return _conv_id.get()
+    return _current_scope()[0]
 
 
 def is_check_tool(name: str, arguments: dict[str, Any] | None = None) -> bool:
@@ -102,20 +132,132 @@ def record_ok(name: str, arguments: dict[str, Any] | None = None) -> None:
         inner = str(args.get("tool_name") or "").strip()
         if inner:
             key = inner.rsplit(".", 1)[-1]
-    conv = _conv_id.get()
+    _record_key(key)
+
+
+def _record_key(key: str) -> None:
+    scope = _current_scope()
+    if not scope[0]:
+        return
     with _lock:
-        bucket = _evidence.setdefault(conv, [])
-        if key not in bucket:
-            bucket.append(key)
+        if _scope.get() == scope:
+            bucket = _evidence.setdefault(scope, [])
+            if key not in bucket:
+                bucket.append(key)
+        if all(scope):
+            path = _receipt_path(scope)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+            try:
+                temporary.write_text(json.dumps({
+                    "conv_id": scope[0], "run_id": scope[1], "tool": key,
+                }), encoding="utf-8")
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def evidence_names() -> list[str]:
+    scope = _current_scope()
+    if not scope[0]:
+        return []
     with _lock:
-        return list(_evidence.get(_conv_id.get(), []))
+        names = list(_evidence.get(scope, []))
+        if all(scope):
+            try:
+                receipt = json.loads(_receipt_path(scope).read_text(encoding="utf-8"))
+                if (receipt.get("conv_id"), receipt.get("run_id")) == scope:
+                    tool = receipt.get("tool")
+                    if (isinstance(tool, str) and tool not in names
+                            and (is_check_tool(tool) or tool in _RESULT_CHECKS)):
+                        names.append(tool)
+            except (OSError, ValueError, AttributeError):
+                pass
+        return names
 
 
-def has_evidence() -> bool:
+def has_evidence(chat_id: str = "") -> bool:
+    if chat_id and chat_id != current_conversation():
+        return False
     return bool(evidence_names())
+
+
+_RESULT_CHECKS = frozenset({"run_workflow", "ducky_terminal_run"})
+
+
+def _result_payloads(raw: Any) -> tuple[bool, list[dict[str, Any]]]:
+    """Read FastMCP content/structured tuples and protocol CallToolResult objects."""
+    from backend.agent.serialization import parse_tool_result_envelope
+
+    failed = False
+    payloads: list[dict[str, Any]] = []
+
+    def visit(value: Any) -> None:
+        nonlocal failed
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(by_alias=True, exclude_none=True)
+        if isinstance(value, (tuple, list)):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            if value.get("isError"):
+                failed = True
+            if "content" in value:
+                visit(value["content"])
+                visit(value.get("structuredContent"))
+            elif value.get("type") == "text":
+                visit(str(value.get("text") or ""))
+            elif set(value) == {"result"}:
+                # FastMCP wraps a string return in structuredContent.result.
+                visit(value["result"])
+            else:
+                payloads.append(value)
+        elif isinstance(value, str):
+            if value.lstrip().lower().startswith(("error", "interrupted", "cancelled")):
+                failed = True
+            parsed = parse_tool_result_envelope(value)
+            if parsed is not None:
+                payloads.append(parsed)
+
+    visit(raw)
+    return failed, payloads
+
+
+def _failed_payload(value: dict[str, Any]) -> bool:
+    return (value.get("ok") is False or value.get("success") is False
+            or bool(value.get("error")) or bool(value.get("stopped"))
+            or bool(value.get("cancelled"))
+            or value.get("exit_code") not in (None, 0))
+
+
+def record_result(name: str, arguments: dict[str, Any] | None, raw: Any) -> None:
+    """Record actual successful check results before tool output is compacted."""
+    key = effective_tool_name(name, arguments)
+    if not is_check_tool(name, arguments) and key not in _RESULT_CHECKS:
+        return
+    failed, payloads = _result_payloads(raw)
+    if failed or any(_failed_payload(p) for p in payloads):
+        return
+    if key in _RESULT_CHECKS:
+        # Starting background work or merely accepting a command is not proof.
+        if not payloads or not all(p.get("ok") is True for p in payloads):
+            return
+        if key == "ducky_terminal_run":
+            args = arguments or {}
+            if args.get("wait") is False or args.get("background"):
+                return
+            if not all(p.get("exit_code") == 0 for p in payloads):
+                return
+        else:
+            for payload in payloads:
+                steps = payload.get("steps")
+                if (not isinstance(steps, list) or not steps
+                        or any(not isinstance(s, dict) or s.get("ok") is not True
+                               or _failed_payload(s) for s in steps)):
+                    return
+        _record_key(key)
+    else:
+        record_ok(name, arguments)
 
 
 def _message_text(assistant_message: dict[str, Any]) -> str:

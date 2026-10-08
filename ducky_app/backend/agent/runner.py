@@ -598,7 +598,7 @@ class AgentRunner:
         hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
         from backend.agent import verify_evidence
 
-        verify_token = verify_evidence.bind_conversation(self.config.conv_id)
+        verify_token = verify_evidence.bind_conversation(self.config.conv_id, self.config.run_id)
         identity_token = run_identity.bind(self.config.run_context())
         from backend.tools.core.web_lookup import begin_web_turn, end_web_turn
 

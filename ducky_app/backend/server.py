@@ -27,7 +27,16 @@ class ProtectedFastMCP(FastMCP):
             await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
             effective = (arguments or {}).get("name", name) if name == "ducky_call_tool" else name
             require_self_name(effective, ctx.conv_id)
-        return await super().call_tool(name, arguments)
+        result = await super().call_tool(name, arguments)
+        from backend.agent import verify_evidence
+
+        try:
+            verify_evidence.record_result(name, arguments, result)
+        except OSError:
+            import logging
+
+            logging.getLogger(__name__).exception("Could not persist verification evidence")
+        return result
 
 
 mcp = ProtectedFastMCP(

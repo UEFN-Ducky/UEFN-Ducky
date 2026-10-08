@@ -358,7 +358,7 @@ def is_verify_leaf(node: dict[str, Any] | None) -> bool:
     return "verify" in blob or "verification" in blob
 
 
-def _apply_status_gate(node: dict[str, Any], status: str) -> str:
+def _apply_status_gate(node: dict[str, Any], status: str, chat_id: str = "") -> str:
     """Refuse completed unless descendants are done and Verify leaves have evidence."""
     st = _normalize_status(status)
     if st == "completed" and not _descendants_done(node):
@@ -366,7 +366,7 @@ def _apply_status_gate(node: dict[str, Any], status: str) -> str:
     if st == "completed" and is_verify_leaf(node):
         from backend.agent.verify_evidence import has_evidence
 
-        if not has_evidence():
+        if not has_evidence(chat_id):
             raise ValueError(
                 "cannot complete a Verify leaf until a check tool returned ok this turn"
             )
@@ -639,7 +639,7 @@ def update_plan(
                 tid = str(item["id"])
                 if tid in flat:
                     try:
-                        item["status"] = _apply_status_gate(flat[tid], item["status"])
+                        item["status"] = _apply_status_gate(flat[tid], item["status"], chat_id)
                     except ValueError:
                         item["status"] = str(flat[tid].get("status") or "pending")
                     flat[tid]["content"] = item["content"]
@@ -732,7 +732,7 @@ def update_node(
     if body_markdown is not None:
         node["body_markdown"] = (body_markdown or "").strip()
     if status is not None:
-        node["status"] = _apply_status_gate(node, status)
+        node["status"] = _apply_status_gate(node, status, chat_id)
     doc["nodes"] = roots
     return save(doc)
 
