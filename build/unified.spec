@@ -71,6 +71,11 @@ _HEAVY_EXCLUDES = [
     "cv2",
     "IPython",
     "notebook",
+    # Not app dependencies (not in requirements.txt): PyInstaller follows optional
+    # imports in third-party code into whatever the builder's Python has installed.
+    # numpy + its OpenBLAS added ~27 MB to 1.2.348-1.2.351; pycryptodome ~1.6 MB.
+    "numpy",
+    "Crypto",
 ]
 
 _listener = ROOT / "ducky_app" / "uefn_listener"  # plaintext listener source → bundle/uefn_listener

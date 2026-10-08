@@ -19,7 +19,10 @@ def create_panel_archive(dist: Path, archive: Path) -> None:
     from frontend.ui_web.panel_httpd import verify_panel_dist
 
     verify_panel_dist(dist)
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+    # Stored, not deflated: Setup's solid LZMA2 stream then finds these exact bytes
+    # next to the installed panel and the copy costs ~0 MB of download (deflated it
+    # cost ~5 MB). The copy still takes the panel's size on disk.
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as bundle:
         for path in sorted(dist.rglob("*")):
             if path.is_file():
                 bundle.write(path, path.relative_to(dist).as_posix())

@@ -16,6 +16,8 @@ import platform
 import re
 import secrets as secrets_mod
 import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 from http.cookiejar import CookieJar
@@ -117,6 +119,12 @@ def _note_login_change(before: dict[str, Any], after: dict[str, Any]) -> None:
         pass
     if account_key(before) == account_key(after):
         return
+    # Ducky AI goes with the old account; the new one stays hidden until the site answers.
+    with _AI_LOCK:
+        shown = bool(_AI["ok"])
+        _AI.update(who="", at=float("-inf"), ok=False)
+    if shown:
+        _ducky_ai_changed()
     try:
         from frontend.ui_web.agent_modes import push_ui_event
 
@@ -373,7 +381,7 @@ def mint_device_key(blob: dict[str, Any] | None = None) -> dict[str, Any]:
     body = {"name": _device_key_name(), "permissions": [DEVICE_SCOPE], "expiresInDays": 90}
     status, cookies, payload, raw = _request(
         "POST",
-        f"{base}/api/auth/api-keys",
+        f"{base}/api/v1/auth/api-keys",
         body=body,
         cookie_header=_session_cookie_header(blob),
         csrf_token=str(blob.get("csrf_value") or ""),
@@ -403,7 +411,7 @@ def _revoke_device_key(blob: dict[str, Any]) -> None:
         try:
             _request(
                 "DELETE",
-                f"{base}/api/auth/api-keys/{key_id}",
+                f"{base}/api/v1/auth/api-keys/{key_id}",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=12.0,
@@ -430,7 +438,7 @@ def fetch_me(blob: dict[str, Any] | None = None) -> dict[str, Any]:
         raise DuckyOSAccountError("Not logged in", code="not_logged_in")
     status, cookies, payload, _raw = _request(
         "GET",
-        f"{base}/api/auth/me",
+        f"{base}/api/v1/auth/me",
         cookie_header=_session_cookie_header(blob),
     )
     _apply_session_cookies(blob, cookies)
@@ -454,7 +462,7 @@ def fetch_permissions(blob: dict[str, Any] | None = None) -> dict[str, Any]:
         return blob
     status, cookies, payload, _raw = _request(
         "GET",
-        f"{base}/api/acl/self",
+        f"{base}/api/v1/acl/self",
         cookie_header=_session_cookie_header(blob),
     )
     _apply_session_cookies(blob, cookies)
@@ -653,7 +661,7 @@ def logout() -> dict[str, Any]:
         try:
             _request(
                 "POST",
-                f"{base}/api/auth/logout",
+                f"{base}/api/v1/auth/logout",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=10.0,
@@ -707,7 +715,7 @@ def revoke_account_pc(key_id: str = "") -> dict[str, Any]:
         try:
             _request(
                 "DELETE",
-                f"{base}/api/auth/api-keys/{key_id}",
+                f"{base}/api/v1/auth/api-keys/{key_id}",
                 cookie_header=_session_cookie_header(blob),
                 csrf_token=str(blob.get("csrf_value") or ""),
                 timeout=12.0,
@@ -989,7 +997,10 @@ def publish_agent_catalog() -> None:
 
 
 def refresh_status() -> dict[str, Any]:
-    """Refresh identity when a session cookie exists; device-key-only stays as-is."""
+    """Refresh identity when a session cookie exists; device-key-only stays as-is.
+    Ducky AI access is asked again too, so a role granted since sign-in shows."""
+    with _AI_LOCK:
+        _AI.update(at=float("-inf"), refused=False)
     blob = _load_blob()
     if blob.get("session_value"):
         try:
@@ -1014,6 +1025,123 @@ def refresh_status() -> dict[str, Any]:
             status["error"] = exc.message
             return status
     return get_status()
+
+
+# Ducky AI is the account plugin's hosted `uefn_ducky` gateway: its model choice,
+# usage meter and chats. Without the Ducky AI permission it does not exist here.
+# A website sign-in carries the account's permission list (/acl/self), so nothing
+# is asked. A PC paired by device key can only reach the desktop plugin, whose
+# brain-status answers only an account holding the permission, so a 2xx answer is
+# the grant: asked once per sign-in or app start, never on a timer. Signed out,
+# refused, offline or any error: hidden.
+DUCKY_AI_PROVIDER = "uefn_ducky"
+DUCKY_AI_PERMISSION = "uefn-ducky.brain"
+_BRAIN_STATUS = "/api/v1/plugins/uefn-ducky/collect/brain-status"
+# ponytail: a refusal stands until sign-in, app start or Account → Refresh; a grant is
+# re-read every half hour. A site push on role change would make both instant.
+_AI_RECHECK_S = 1800.0
+_AI_RETRY_S = 300.0  # no answer (offline, site error): ask again after this
+_AI_LOCK = threading.Lock()
+_AI: dict[str, Any] = {"who": "", "at": float("-inf"), "ok": False, "refused": False, "busy": False}
+
+
+def ducky_ai_hidden(provider_id: Any) -> bool:
+    """True for the Ducky AI gateway while this account may not see it."""
+    if str(provider_id or "").strip().lower() != DUCKY_AI_PROVIDER:
+        return False
+    try:
+        return not ducky_ai_allowed()
+    except Exception:
+        return True
+
+
+def ducky_ai_allowed() -> bool:
+    """Whether this account may see Ducky AI; never waits on the network. With a
+    website sign-in it is the account's permission list. Otherwise the site's last
+    answer: an unasked account is asked once in the background, a refusal is not
+    asked again, a grant is re-read after half an hour, no answer after five minutes."""
+    blob = _load_blob()
+    who = account_key(blob)
+    if not who:
+        return False
+    perms = blob.get("permissions")
+    if isinstance(perms, list):
+        return DUCKY_AI_PERMISSION in perms
+    with _AI_LOCK:
+        if _AI["who"] != who:
+            _AI.update(who=who, at=float("-inf"), ok=False, refused=False)
+        ok = bool(_AI["ok"])
+        wait = _AI_RECHECK_S if ok else _AI_RETRY_S
+        if _AI["busy"] or _AI["refused"] or time.monotonic() - _AI["at"] < wait:
+            return ok
+        _AI["busy"] = True
+    threading.Thread(target=_check_ducky_ai, args=(who,), daemon=True, name="ducky-ai-check").start()
+    return ok
+
+
+def _check_ducky_ai(who: str) -> None:
+    try:
+        api_request("POST", _BRAIN_STATUS, {}, timeout=10.0)  # api_request notes the answer
+    except Exception:
+        _note_ducky_ai(who, 0, None)
+    finally:
+        with _AI_LOCK:
+            _AI["busy"] = False
+
+
+def _note_ducky_ai(who: str, status: int, parsed: Any, raw: str = "") -> None:
+    """Every brain-status answer lands here, the account plugin's own polls included."""
+    ok = bool(who) and 200 <= status < 300 and isinstance(parsed, dict) and parsed.get("ok") is not False
+    refused = 400 <= status < 500 and status != 429
+    with _AI_LOCK:
+        before = bool(_AI["ok"]) and _AI["who"] == who
+        _AI.update(who=who, at=time.monotonic(), ok=ok, refused=refused)
+    dropped = 400 <= status < 500 and "permission denied" in raw.lower() and _drop_ducky_ai_default()
+    if dropped or ok != before:
+        _ducky_ai_changed()
+
+
+def _drop_ducky_ai_default() -> bool:
+    """The account plugin made Ducky AI the default model while this PC could use
+    it. Once the site refuses, the composer and Settings must not name it."""
+    try:
+        from backend.agent.model_pricing import infer_provider
+        from frontend.settings import PanelSettings
+
+        s = PanelSettings.load()
+        dirty = False
+        if infer_provider(s.default_model) == DUCKY_AI_PROVIDER:
+            s.default_model, dirty = "", True
+        if DUCKY_AI_PROVIDER in (str(s.agent_provider or "").strip().lower(), infer_provider(s.agent_model)):
+            s.agent_provider, s.agent_model, dirty = "", "", True
+        if dirty:
+            s.validate()
+            s.save()
+        return dirty
+    except Exception:
+        return False
+
+
+def _ducky_ai_changed() -> None:
+    """Show or hide Ducky AI at once: forget its cached models and meter, refetch, repaint."""
+    try:
+        from backend.agent.model_fetch import clear_model_cache
+
+        clear_model_cache(DUCKY_AI_PROVIDER)
+    except Exception:
+        pass
+    try:
+        from frontend.ui_web.panel_api import kick_model_refresh
+
+        kick_model_refresh()
+    except Exception:
+        pass
+    try:
+        from backend.uefn_plugins.host import _notify_uefn_plugins_changed
+
+        _notify_uefn_plugins_changed()
+    except Exception:
+        pass
 
 
 def api_request(
@@ -1085,6 +1213,8 @@ def api_request(
                         parsed = obj
                 except (TypeError, ValueError, json.JSONDecodeError):
                     parsed = None
+            if path == _BRAIN_STATUS:
+                _note_ducky_ai(account_key(blob), int(status), parsed, raw)
             return int(status), parsed, raw
     except urllib.error.HTTPError as exc:
         raw = ""
@@ -1122,6 +1252,8 @@ def api_request(
             raise DuckyOSAccountError(
                 "Session expired — log in again", code="session_expired"
             ) from exc
+        if path == _BRAIN_STATUS:
+            _note_ducky_ai(account_key(blob), int(exc.code), parsed, raw)
         return int(exc.code), parsed, raw
     except (OSError, urllib.error.URLError, ValueError) as exc:
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc

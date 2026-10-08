@@ -337,8 +337,10 @@ class PanelSettings:
         if self.port < 1 or self.port > 65535:
             raise ValueError("port must be 1-65535")
         # Builtins + contributed gateway ids (UEFN Ducky, Cursor's API sibling, …).
+        # uefn_ducky (Ducky AI) is listed only once the site grants it: a saved pick
+        # must not fail every settings save while that answer is pending or offline.
         if self.agent_provider:
-            allowed = {"anthropic", "gemini", "openai", "ollama"}
+            allowed = {"anthropic", "gemini", "openai", "ollama", "uefn_ducky"}
             try:
                 from frontend.favorite_models import api_backends
 
