@@ -18,21 +18,21 @@ another account on this PC can't read them. Team scopes sync through
 the PC. A plugin's cache and prefs rows (``plugin_kv``) follow the same scope but
 never sync: each team has its own on this PC.
 
-:func:`sandbox` points one plugin at a throwaway scope for a plugin test, so the
-test never touches the user's data.
+:func:`sandbox_begin` points one plugin at a throwaway scope for a plugin test
+(process-wide, every thread, that plugin only), so the test never touches the
+user's data.
 """
 
 from __future__ import annotations
 
 import contextlib
-import contextvars
-
 import base64
 import hashlib
 import json
 import os
 import re
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -43,11 +43,11 @@ DOC_MAX_BYTES = 1024 * 1024
 ASSET_MAX_BYTES = 100 * 1024 * 1024
 # A team copy whose access was lost stays locked on this PC this long, then goes.
 LOST_KEEP_S = 7 * 24 * 3600
-# The throwaway scope of a plugin test (:func:`sandbox`): never synced, removed after.
-SANDBOX_SCOPE = "_plugin_test"
-_SANDBOX: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
-    "plugin_data_sandbox", default=None
-)
+# Throwaway scopes of plugin tests (:func:`sandbox_begin`), one per plugin under test:
+# plugin id → scope. Process-wide, so threads the plugin starts itself land there too.
+SANDBOX_PREFIX = "_plugin_test_"
+_SANDBOXES: dict[str, dict[str, Any]] = {}
+_SANDBOX_LOCK = threading.Lock()
 
 _PLUGIN_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
 _DOC_RE = re.compile(r"^[a-z0-9._-]{1,128}$")
@@ -190,7 +190,7 @@ def active_scope(plugin: str) -> dict[str, Any]:
     """The scope ``plugin``'s data reads and writes right now."""
     from backend.store.repos import plugin_data as repo
 
-    boxed = (_SANDBOX.get() or {}).get(plugin)
+    boxed = _SANDBOXES.get(plugin)
     if boxed is not None:
         return dict(boxed)
     account = account_id()
@@ -204,27 +204,56 @@ def active_scope(plugin: str) -> dict[str, Any]:
     return personal_scope(account) if scope["state"] == "unavailable" else scope
 
 
-@contextlib.contextmanager
-def sandbox(plugin: str):
-    """While inside, ``plugin``'s docs, files, cache and prefs (in this thread) live in
-    a throwaway scope that starts empty and is deleted on the way out: a plugin test
-    calls its tools and nodes without touching the user's data."""
+def sandbox_begin(plugin: str) -> dict[str, Any]:
+    """From now until :func:`sandbox_end`, every read and write of ``plugin``'s docs,
+    files, cache and prefs (Local, team or ``sensitive``, from any thread, the plugin's
+    own included) goes to a throwaway scope that starts empty. Other plugins are not
+    affected. Raises ``ValueError`` while a test of the plugin is already running."""
     _need(valid_plugin_id(plugin), "plugin id")
     account = account_id()
-    scope = {"account": account, "id": SANDBOX_SCOPE, "kind": "sandbox", "label": "Plugin test", "teamId": "",
+    scope_id = SANDBOX_PREFIX + hashlib.sha256(plugin.encode("utf-8")).hexdigest()[:16]
+    scope = {"account": account, "id": scope_id, "kind": "sandbox", "label": "Plugin test", "teamId": "",
              "readOnly": False, "state": "ok"}
-    purge_team(account, SANDBOX_SCOPE)  # a test that died midway left its rows
-    token = _SANDBOX.set({**(_SANDBOX.get() or {}), plugin: scope})
+    with _SANDBOX_LOCK:
+        if plugin in _SANDBOXES:
+            raise ValueError(f"A test of {plugin} is already running")
+        _SANDBOXES[plugin] = scope
     try:
-        yield dict(scope)
+        purge_team(account, scope_id)  # a test that died midway left its rows
+    except BaseException:
+        sandbox_end(plugin)
+        raise
+    return dict(scope)
+
+
+def sandbox_end(plugin: str) -> None:
+    """``plugin``'s data is the user's again; the throwaway scope and its rows go."""
+    with _SANDBOX_LOCK:
+        scope = _SANDBOXES.pop(plugin, None)
+    if scope is not None:
+        purge_team(scope["account"], scope["id"])
+
+
+@contextlib.contextmanager
+def sandbox(plugin: str):
+    """:func:`sandbox_begin` … :func:`sandbox_end` around a block."""
+    scope = sandbox_begin(plugin)
+    try:
+        yield scope
     finally:
-        _SANDBOX.reset(token)
-        purge_team(account, SANDBOX_SCOPE)
+        sandbox_end(plugin)
 
 
 def sandboxed_plugins() -> frozenset[str]:
-    """Plugins inside :func:`sandbox` in this thread."""
-    return frozenset(_SANDBOX.get() or {})
+    """Plugins whose data is in a test's throwaway scope right now."""
+    with _SANDBOX_LOCK:
+        return frozenset(_SANDBOXES)
+
+
+def _personal_for(plugin: str) -> dict[str, Any]:
+    """The Local scope ``plugin`` writes ``sensitive`` docs to (its test scope while under test)."""
+    boxed = _SANDBOXES.get(plugin)
+    return dict(boxed) if boxed is not None else personal_scope()
 
 
 def scope_view(scope: dict[str, Any]) -> dict[str, Any]:
@@ -393,7 +422,7 @@ class PluginData:
 
     def _scope(self) -> dict[str, Any]:
         if self._personal:
-            return personal_scope()
+            return _personal_for(self.plugin_id)
         s = active_scope(self.plugin_id)
         if s["state"] == "waiting":
             # First use of a team scope on this PC: pull before the plugin sees it (bounded).
@@ -425,7 +454,7 @@ class PluginData:
         from backend.uefn_plugins.data_crypto import Locked, open_text
 
         _need(valid_doc_key(key), "doc key")
-        s = personal_scope() if sensitive else self._scope()
+        s = _personal_for(self.plugin_id) if sensitive else self._scope()
         if _closed(s):
             return default
         row = repo.get(s["account"], s["id"], self.plugin_id, "doc", key)
@@ -442,7 +471,7 @@ class PluginData:
         from backend.uefn_plugins.data_crypto import seal_text
 
         _need(valid_doc_key(key), "doc key")
-        s = self._writable(personal_scope() if sensitive else None)
+        s = self._writable(_personal_for(self.plugin_id) if sensitive else None)
         raw = encode_doc(value)
         if len(raw) > DOC_MAX_BYTES:
             raise ValueError(f"doc {key!r} is over 1 MB; split it into one doc per entity")

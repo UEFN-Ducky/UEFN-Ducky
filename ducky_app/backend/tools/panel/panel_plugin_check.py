@@ -4,11 +4,13 @@
   ``console.error`` inside its panels, exceptions from its MCP tools and errors from
   its workflow nodes; newest first.
 - ``ducky_plugin_test(id)``: installs the draft the usual way, then calls each of its
-  MCP tools with safe sample input (skipping the ones it marks destructive) and runs
-  each workflow node it registers with a minimal ctx, both inside a throwaway data
-  scope (:func:`scopes.sandbox`) so the user's data is never touched; opens each of
-  its panels and collects what went wrong there; checks its UI files. A pass / fail /
-  skip report per check.
+  MCP tools with safe sample input (skipping the ones it marks destructive), runs each
+  workflow node it registers with a minimal ctx, opens each of its panels and collects
+  what went wrong there, and checks its UI files. A pass / fail / skip report per
+  check. The whole test runs on a throwaway copy of that plugin's data
+  (:func:`scopes.sandbox_begin`: every thread, the plugin's own too; other plugins
+  untouched), so nothing it does reaches the user's data. An AI plugin the user
+  hasn't confirmed answers ``needs_trust`` like turning it on does; it never runs.
 
 The recorders (:func:`record_tool_error`, :func:`record_node_error`,
 :func:`record_panel_error`) are what the MCP server, the workflow runner and the
@@ -44,6 +46,8 @@ _MAX_AGE_S = 30 * 86400
 _FILE = "plugin_errors.jsonl"
 _PANEL_SETTLE_S = 4.0
 _TOOL_TIMEOUT_S = 30.0
+# How long a timed-out test call keeps the plugin's data on the test copy.
+_STRAGGLER_WAIT_S = 600.0
 
 
 # --------------------------------------------------------------------------- recording
@@ -217,9 +221,10 @@ def sample_args(parameters: Any) -> dict[str, Any]:
     return {name: _sample(props.get(name)) for name in parameters.get("required") or [] if name in props}
 
 
-def _call(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+def _call(stragglers: list[threading.Thread], fn: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Call a tool or node handler, sync or async, on a worker that carries this
-    context (its sandbox) and gives up after ``_TOOL_TIMEOUT_S``."""
+    context and gives up after ``_TOOL_TIMEOUT_S`` (the worker goes on ``stragglers``:
+    the plugin's sandbox stays until it ends)."""
     box: dict[str, Any] = {}
     ctx = contextvars.copy_context()
 
@@ -237,6 +242,7 @@ def _call(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
     worker.start()
     worker.join(_TOOL_TIMEOUT_S)
     if worker.is_alive():
+        stragglers.append(worker)
         raise TimeoutError(f"no answer in {_TOOL_TIMEOUT_S:.0f} s")
     if "error" in box:
         raise box["error"]
@@ -262,7 +268,7 @@ def _returned_error(result: Any) -> str:
     return ""
 
 
-def _check_tools(pid: str, checks: list[dict[str, Any]]) -> None:
+def _check_tools(pid: str, checks: list[dict[str, Any]], stragglers: list[threading.Thread]) -> None:
     from backend.uefn_plugins.host import get_contributions
 
     meta = (get_contributions().get("agent_tools") or {}).get(pid) or {}
@@ -283,7 +289,7 @@ def _check_tools(pid: str, checks: list[dict[str, Any]]) -> None:
             continue
         args = sample_args(getattr(tool, "parameters", None))
         try:
-            result = _call(tool.fn, **args)
+            result = _call(stragglers, tool.fn, **args)
         except Exception as exc:  # noqa: BLE001 — that is what the check reports
             checks.append({"check": label, "status": "fail", "input": args, "detail": f"{type(exc).__name__}: {exc}"})
             continue
@@ -294,7 +300,8 @@ def _check_tools(pid: str, checks: list[dict[str, Any]]) -> None:
         checks.append(row)
 
 
-def _check_nodes(pid: str, manifest: dict[str, Any], checks: list[dict[str, Any]]) -> None:
+def _check_nodes(pid: str, manifest: dict[str, Any], checks: list[dict[str, Any]],
+                 stragglers: list[threading.Thread]) -> None:
     from backend.automations.plugin import get_handler, node_types
 
     declared = {
@@ -319,7 +326,7 @@ def _check_nodes(pid: str, manifest: dict[str, Any], checks: list[dict[str, Any]
             ctx = {"config": config, "payload": {}, "node": {"id": "test", "type": ntype, "config": config},
                    "inputs": {}, "kind": "pipeline", "files": [], "artifact_dir": artifacts}
             try:
-                result = _call(handler, ctx)
+                result = _call(stragglers, handler, ctx)
             except Exception as exc:  # noqa: BLE001
                 checks.append({"check": label, "status": "fail", "detail": f"{type(exc).__name__}: {exc}"})
                 continue
@@ -385,32 +392,97 @@ def test_plugin(plugin_id: str) -> dict[str, Any]:
 
     ui = check_ui(root, manifest)
     checks.append({"check": "ui files", "status": "fail" if ui else "pass", **({"errors": ui} if ui else {})})
-    installed = install_ai_plugin(pid)
-    if not installed.get("ok"):
-        checks.append({"check": "install", "status": "fail",
-                       "errors": installed.get("errors") or [installed.get("error") or "install failed"]})
-        return _report(pid, started, checks)
-    checks.append({"check": "install", "status": "pass", "detail": "validated and installed"})
-    if not is_plugin_enabled(pid):
-        checks.append({"check": "run", "status": "skip", "detail": (
-            "The plugin is off, so its tools, nodes and panels can't run yet. Turn it on with "
-            "ducky_store_set_enabled (the user confirms an AI plugin once), then test again.")})
-        return _report(pid, started, checks)
-    wait_plugin_toggles(timeout=15.0)  # the reinstall registers the new backend in the background
+    # From here to the end the plugin's data, from any thread (its own too), is a throwaway
+    # copy: the reinstall's register(), its tools and nodes, its panels.
+    try:
+        scopes.sandbox_begin(pid)
+    except ValueError as exc:
+        return {"ok": False, "id": pid, "error": str(exc)}
+    stragglers: list[threading.Thread] = []
+    try:
+        installed = install_ai_plugin(pid)
+        if not installed.get("ok"):
+            checks.append({"check": "install", "status": "fail",
+                           "errors": installed.get("errors") or [installed.get("error") or "install failed"]})
+            return _report(pid, started, checks)
+        checks.append({"check": "install", "status": "pass", "detail": "validated and installed"})
+        if not is_plugin_enabled(pid):
+            turned_on = _turn_on(pid)
+            if turned_on.get("needs_trust"):
+                return {**_report(pid, started, checks), **turned_on}
+            if not turned_on.get("ok"):
+                checks.append({"check": "turn on", "status": "fail",
+                               "detail": str(turned_on.get("error") or "couldn't turn the plugin on")})
+                return _report(pid, started, checks)
+        wait_plugin_toggles(timeout=15.0)  # the reinstall registers the new backend in the background
 
-    def run() -> None:
-        # Every tool of this plugin, whatever this chat opted into; the user's data is never touched.
-        set_active_uefn_agent_plugin_ids(None)
-        with scopes.sandbox(pid):
-            _check_tools(pid, checks)
-            _check_nodes(pid, manifest, checks)
+        def run() -> None:
+            # Every tool of this plugin, whatever this chat opted into.
+            set_active_uefn_agent_plugin_ids(None)
+            _check_tools(pid, checks, stragglers)
+            _check_nodes(pid, manifest, checks, stragglers)
 
-    contextvars.copy_context().run(run)
-    _check_panels(pid, manifest, started, checks)
-    loads = [e for e in plugin_errors(pid, since=started, limit=50).get("errors") or [] if e["source"] == "load"]
-    checks.append({"check": "backend load", "status": "fail" if loads else "pass",
-                   **({"errors": loads} if loads else {})})
-    return _report(pid, started, checks)
+        contextvars.copy_context().run(run)
+        _check_panels(pid, manifest, started, checks)
+        loads = [e for e in plugin_errors(pid, since=started, limit=50).get("errors") or [] if e["source"] == "load"]
+        checks.append({"check": "backend load", "status": "fail" if loads else "pass",
+                       **({"errors": loads} if loads else {})})
+        report = _report(pid, started, checks)
+        if any(t.is_alive() for t in stragglers):
+            report["note"] = (
+                "A call that timed out is still running: the plugin's data stays the test copy until it "
+                f"ends (at most {_STRAGGLER_WAIT_S // 60:.0f} min)."
+            )
+        return report
+    finally:
+        _end_sandbox(pid, stragglers)
+
+
+def _turn_on(pid: str) -> dict[str, Any]:
+    """Turn the plugin on the way ``ducky_store_set_enabled`` does. An AI plugin the user
+    hasn't confirmed answers ``needs_trust`` (and Ducky asks the user), never runs."""
+    from backend.tools.panel.panel_store import ducky_store_set_enabled
+
+    try:
+        out = json.loads(ducky_store_set_enabled(pid, True))
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    if out.get("needs_trust"):
+        return {
+            **out,
+            "ok": False,
+            "error": (
+                "Confirm once to test this plugin: it's an unofficial plugin and runs with the app's "
+                "permissions. Ducky asked in Settings → Store; run ducky_plugin_test again after the user "
+                "confirms."
+            ),
+        }
+    return out
+
+
+def _end_sandbox(pid: str, stragglers: list[threading.Thread]) -> None:
+    """The plugin's data is the user's again once no test call of it is still running
+    (a hung one is waited for at most ``_STRAGGLER_WAIT_S``). Open panels re-read."""
+    from backend.uefn_plugins import scopes
+
+    alive = [t for t in stragglers if t.is_alive()]
+
+    def end() -> None:
+        deadline = time.monotonic() + _STRAGGLER_WAIT_S
+        for worker in alive:
+            worker.join(max(0.0, deadline - time.monotonic()))
+        scopes.sandbox_end(pid)
+        try:
+            from frontend.ui_web.agent_modes import push_ui_event
+
+            push_ui_event({"type": "plugin_scope_changed", "plugins": [pid]})
+        except Exception:
+            pass
+
+    if alive:
+        threading.Thread(target=end, name="plugin-test-sandbox", daemon=True).start()
+    else:
+        end()
 
 
 def _report(pid: str, started: float, checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -442,10 +514,12 @@ def ducky_plugin_errors(id: str, since: float = 0, limit: int = 50, pretty: bool
 def ducky_plugin_test(id: str, pretty: bool = False) -> str:
     """Test an AI plugin draft end to end: validate + install it (same path as
     ducky_plugin_install), call each of its MCP tools with safe sample input (tools in
-    agent.tools.destructive_tools are skipped) and run each workflow node it registers
-    with a minimal ctx (both in a throwaway data scope, so the user's data is never
-    touched), open each of its panels and collect the errors that showed up, and check
-    its UI files. The plugin must be on for the runtime checks. Returns a pass / fail /
-    skip row per check; fix the failures in the draft and run it again.
+    agent.tools.destructive_tools are skipped), run each workflow node it registers with
+    a minimal ctx, open each of its panels and collect the errors that showed up, and
+    check its UI files. The whole test works on a throwaway copy of the plugin's data,
+    so the user's data is never touched. A plugin that is off is turned on first; an AI
+    plugin the user hasn't confirmed returns needs_trust (stop: the user confirms once
+    in Settings → Store, then test again). Returns a pass / fail / skip row per check;
+    fix the failures in the draft and run it again.
     """
     return tool_json(test_plugin(id), pretty=pretty)

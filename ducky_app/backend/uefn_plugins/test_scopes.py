@@ -422,17 +422,35 @@ def test_paused_is_read_only_and_access_lost_locks_then_deletes_the_team_scope(w
 def test_a_plugin_test_runs_in_a_sandbox_that_never_touches_the_users_data(who: _Who) -> None:
     from frontend.ui_web import plugin_host_api as host_api
 
+    import threading
+
     who.be("ana@x.org")
     cards = PluginData("brainrot-tcg")
+    other = PluginData("other-plugin")
     cards.put("card.pip", {"v": 1})
+    cards.put("token", {"t": "real"}, sensitive=True)
     host_api.cache_set("brainrot-tcg", "deck", {"n": 1})
     with scopes.sandbox("brainrot-tcg") as box:
-        assert scopes.active_scope("brainrot-tcg")["id"] == box["id"] == scopes.SANDBOX_SCOPE
+        assert box["id"].startswith(scopes.SANDBOX_PREFIX)
+        assert scopes.active_scope("brainrot-tcg")["id"] == box["id"]
         assert cards.get("card.pip") is None and host_api.cache_get("brainrot-tcg", "deck") == {}
+        assert cards.get("token", sensitive=True) is None
         cards.put("card.junk", {"v": 0})
+        cards.put("token", {"t": "junk"}, sensitive=True)
         host_api.cache_set("brainrot-tcg", "deck", {"n": 0})
-    assert cards.keys() == ["card.pip"] and host_api.cache_get("brainrot-tcg", "deck") == {"n": 1}
-    assert repo.rows(scopes.account_id(), scopes.SANDBOX_SCOPE, "brainrot-tcg", "doc") == []
+        # A thread the plugin starts itself lands in the sandbox too; other plugins don't.
+        worker = threading.Thread(target=lambda: cards.put("card.thread", {"v": 0}))
+        worker.start()
+        worker.join()
+        other.put("note", {"v": 1})
+        assert scopes.active_scope("other-plugin")["id"] == scopes.PERSONAL
+        with pytest.raises(ValueError, match="already running"):
+            scopes.sandbox_begin("brainrot-tcg")
+    assert cards.keys() == ["card.pip"]  # sensitive docs are never listed
+    assert cards.get("card.pip") == {"v": 1} and cards.get("card.thread") is None
+    assert cards.get("token", sensitive=True) == {"t": "real"}
+    assert host_api.cache_get("brainrot-tcg", "deck") == {"n": 1} and other.get("note") == {"v": 1}
+    assert repo.rows(scopes.account_id(), box["id"], "brainrot-tcg", "doc") == []
 
 
 def test_team_data_leaves_the_pc_encrypted_with_its_teams_own_key(who: _Who, store: FakeStore) -> None:

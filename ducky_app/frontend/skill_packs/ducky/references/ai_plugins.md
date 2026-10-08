@@ -80,7 +80,8 @@ across chats. Tools write the files; you never open those folders.
 6. `ducky_store_set_enabled(id, true)` — if `needs_trust`, **stop** (user confirms
    once). Reinstall reloads; do not send them hunting Store for updates.
 7. `ducky_plugin_test(id)` — reinstalls, calls each tool with sample input, runs
-   each node (in a throwaway data scope), opens each panel, checks the UI files.
+   each node, opens each panel and checks the UI files, all on a throwaway copy of
+   the plugin's data. `needs_trust` → **stop** until the user confirms once.
    `ducky_plugin_errors(id, since)` lists load errors, panel errors and crashes,
    tool exceptions and node errors.
 8. Iterate: edit the **draft** → validate → test again
