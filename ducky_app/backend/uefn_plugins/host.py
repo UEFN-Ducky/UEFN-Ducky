@@ -3284,6 +3284,18 @@ class _PluginApi:
 
         return emit_trigger(trigger_id, payload or {})
 
+    def emit_hook(self, hook_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fire one of this plugin's ``contributes.hooks``: the sound the user put on it plays."""
+        from backend.uefn_plugins.plugin_app_events import emit_hook
+
+        return emit_hook(self.plugin_id, hook_id, payload)
+
+    def set_appearance_profile(self, profile_id: str) -> dict[str, Any]:
+        """Switch Appearance to one of this plugin's own ``appearance.profiles`` (by its id)."""
+        from backend.uefn_plugins.plugin_app_events import set_appearance_profile
+
+        return set_appearance_profile(self.plugin_id, profile_id)
+
     def spotlight(
         self,
         *,
