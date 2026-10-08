@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { requestFocusGraph } from "../hooks/graphActivity";
-import { getApi } from "../hooks/usePanelApi";
 import {
   dismissWorkflowRun,
+  stopWorkflowRun,
   useChatWorkflowRuns,
   type ChatWorkflowRun,
   type ChatWorkflowStep,
@@ -114,9 +114,7 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
     setStopping(true);
     setStopError("");
     try {
-      const result = await getApi()?.stop_workflow?.(run.workflowId, run.run);
-      if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
-      if (!result.stopped) throw new Error("This run has already ended. Refreshing its status…");
+      await stopWorkflowRun(run.workflowId, run.run);
     } catch (error) {
       setStopError(error instanceof Error ? error.message : "Could not stop the workflow");
     } finally {

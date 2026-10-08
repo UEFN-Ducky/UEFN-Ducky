@@ -25,7 +25,7 @@ import type {
   WorkflowOwnersDto,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
-import { subscribeWorkflowEvents, useWorkflowRuns } from "../hooks/workflowRunsByChat";
+import { stopWorkflowRun, subscribeWorkflowEvents, useWorkflowRuns } from "../hooks/workflowRunsByChat";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { onApiReady } from "../hooks/onApiReady";
@@ -1377,9 +1377,7 @@ export function AutomationsView() {
     if (!draft?.id || !visibleRun) return;
     setStopping(true);
     try {
-      const result = await getApi()?.stop_workflow?.(draft.id, visibleRun.run);
-      if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
-      if (!result.stopped) throw new Error("This run has already ended. Refreshing its status…");
+      await stopWorkflowRun(draft.id, visibleRun.run);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Could not stop the workflow");
     } finally {

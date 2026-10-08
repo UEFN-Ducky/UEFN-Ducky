@@ -4,7 +4,8 @@ import type { AgentEvent, PanelPushEvent } from "../types/panel";
 import { subscribeAgentEvents } from "./useAgentEventBus";
 import { subscribePanelPush } from "./usePanelPushBus";
 import { getApi } from "./usePanelApi";
-import { upsertBackgroundJob } from "./backgroundActivity";
+import { getBackgroundJobs, upsertBackgroundJob } from "./backgroundActivity";
+import { workflowIdFromJobId } from "./graphActivity";
 
 /**
  * The workflow a chat's ducky is running, step by step, for the card above the plan.
@@ -179,6 +180,57 @@ function onEvent(event: AgentEvent | PanelPushEvent): void {
     applyWorkflowEvent(event as WorkflowEvent);
 }
 
+let refreshPending: Promise<boolean> | undefined;
+
+/** Reconcile saved activity with the authoritative process-shared run snapshot. */
+export function refreshWorkflowRuns(): Promise<boolean> {
+  if (refreshPending) return refreshPending;
+  const pending = reconcileWorkflowRuns();
+  refreshPending = pending;
+  void pending.finally(() => { if (refreshPending === pending) refreshPending = undefined; });
+  return pending;
+}
+
+async function reconcileWorkflowRuns(): Promise<boolean> {
+  const jobsBefore = getBackgroundJobs().filter((job) => job.phase === "working" && workflowIdFromJobId(job.id));
+  const runsBefore = [...byRun.values()].filter((run) => run.state === "running");
+  try {
+    const result = await getApi()?.workflow_run_snapshot?.();
+    if (!result?.ok || !Array.isArray(result.events)) return false;
+    const states = new Map<string, PanelPushEvent>();
+    for (const event of result.events) {
+      if (event.type === "workflow_run") states.set(`${event.id}:${event.run}`, event);
+      onEvent(event);
+    }
+    for (const run of runsBefore) {
+      if (byRun.get(run.run) !== run || states.has(`${run.workflowId}:${run.run}`)) continue;
+      applyWorkflowEvent({ type: "workflow_run", id: run.workflowId, run: run.run, state: "stopped", error: "No longer running" });
+    }
+    for (const job of jobsBefore) {
+      // A push during the request is newer than this snapshot.
+      if (getBackgroundJobs().find((current) => current.id === job.id) !== job) continue;
+      const wid = workflowIdFromJobId(job.id);
+      const event = job.id.startsWith("graph-run:")
+        ? states.get(job.id.slice("graph-run:".length))
+        : [...states.values()].find((event) => event.id === wid && event.state === "started");
+      if (event?.state === "started") continue;
+      upsertBackgroundJob({
+        id: job.id, phase: event?.state === "error" ? "error" : "done", cancelable: false,
+        detail: event?.error || (event?.state === "stopped" ? "Stopped" : event ? "Finished" : "No longer running"),
+      });
+    }
+    return true;
+  } catch { return false; /* Keep live controls when the bridge is unavailable. */ }
+}
+
+/** A run that already ended is a successful reconciliation, not a Stop error. */
+export async function stopWorkflowRun(workflowId: string, runId = ""): Promise<void> {
+  const result = await getApi()?.stop_workflow?.(workflowId, runId);
+  if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
+  const refreshed = await refreshWorkflowRuns();
+  if (!result.stopped && !refreshed) throw new Error("Could not refresh the workflow status");
+}
+
 function install(): void {
   if (installed) return;
   installed = true;
@@ -186,10 +238,7 @@ function install(): void {
   subscribeAgentEvents(onEvent);
   const hydrate = async () => {
     if (!listeners.size && !eventListeners.size) return;
-    try {
-      const result = await getApi()?.workflow_run_snapshot?.();
-      for (const event of result?.events || []) onEvent(event);
-    } catch { /* A disconnected bridge retries at the next poll. */ }
+    await refreshWorkflowRuns();
   };
   void hydrate();
   window.setInterval(() => void hydrate(), 1000);

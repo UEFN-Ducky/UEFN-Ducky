@@ -15,7 +15,7 @@ import {
   workflowIdFromJobId,
 } from "../hooks/graphActivity";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
-import { getApi } from "../hooks/usePanelApi";
+import { refreshWorkflowRuns, stopWorkflowRun, subscribeWorkflowEvents } from "../hooks/workflowRunsByChat";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
 import { DropdownPanel } from "./DropdownPanel";
 
@@ -44,9 +44,7 @@ export function BackgroundActivityDropdown() {
     setActionError("");
     try {
       const run = job.id.startsWith("graph-run:") ? job.id.slice(job.id.lastIndexOf(":") + 1) : "";
-      const result = await getApi()?.stop_workflow?.(wid, run);
-      if (!result?.ok) throw new Error(result?.error || "Could not stop the workflow");
-      if (!result.stopped) throw new Error("This run has already ended. Refreshing its status…");
+      await stopWorkflowRun(wid, run);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Could not stop the workflow");
     }
@@ -60,14 +58,18 @@ export function BackgroundActivityDropdown() {
   useEffect(() => {
     const wipeIdle = () => syncReadyGraphJobs([], jobsRef.current);
     wipeIdle();
-    return subscribePanelPush((event) => {
+    // Keep snapshot polling alive even when no chat or workflow editor is mounted.
+    const stopRuns = subscribeWorkflowEvents(() => {});
+    void refreshWorkflowRuns();
+    const stopPush = subscribePanelPush((event) => {
       if (event.type === "background_job") applyBackgroundJobPush(event);
-      if (event.type === "graphs_changed") wipeIdle();
+      if (event.type === "graphs_changed") { wipeIdle(); void refreshWorkflowRuns(); }
     });
+    return () => { stopRuns(); stopPush(); };
   }, []);
 
   useEffect(() => {
-    if (open) syncReadyGraphJobs([], jobsRef.current);
+    if (open) { syncReadyGraphJobs([], jobsRef.current); void refreshWorkflowRuns(); }
   }, [open]);
 
   const title = working
