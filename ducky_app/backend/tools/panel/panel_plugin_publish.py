@@ -164,16 +164,41 @@ def ducky_plugin_data_scope(id: str, scope: str = "", pretty: bool = False) -> s
     label = "Local" if scope_id == scopes.PERSONAL else f"team {want}"
     if not _confirm(f"Switch '{pid}' data to {label}? Nothing is copied.", title="Switch data"):
         return tool_json({"ok": False, "error": "Cancelled — data scope unchanged."}, pretty=pretty)
+    # Same steps as the scope bar's switch (PanelApi.plugin_scope_set): relink, tell the
+    # panels, sync, then restart the plugin on the new copy and reload its open panels.
+    import threading
+
+    from backend.uefn_plugins.team_sync import link_scope, sync_active
+    from frontend.ui_web.agent_modes import push_ui_event
+
     try:
-        result = scopes.link_plugin(pid, scope_id)
+        before = scopes.active_scope(pid)["id"]
+        result = link_scope(pid, scope_id)
     except (ValueError, PermissionError) as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    push_ui_event({"type": "plugin_scope_changed", "plugins": [pid]})
     try:
-        from backend.uefn_plugins.host import reload_single_plugin
-
-        reload_single_plugin(pid)
+        sync_active(
+            pid,
+            force=True,
+            on_done=lambda r: push_ui_event(
+                {"type": "plugin_scope_changed", "plugins": list(r.get("changed") or []), "synced": True}
+            ),
+        )
     except Exception:
         pass
+    if before != scope_id:
+
+        def _restart() -> None:
+            try:
+                from backend.uefn_plugins.host import reload_single_plugin
+
+                reload_single_plugin(pid)
+            except Exception:
+                pass
+            push_ui_event({"type": "plugin_scope_changed", "plugins": [pid], "switched": True})
+
+        threading.Thread(target=_restart, name="plugin-scope-restart", daemon=True).start()
     return tool_json({"ok": True, "scope": result}, pretty=pretty)
 
 
