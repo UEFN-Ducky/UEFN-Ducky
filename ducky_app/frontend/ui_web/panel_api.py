@@ -151,8 +151,11 @@ def _notify_models_updated() -> None:
 def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any]]:
     """JS-facing model rows from an in-memory cache. Never hits provider APIs."""
     from frontend.agent_models import provider_label
+    from frontend.duckyos_account import ducky_ai_hidden
 
     prov = (provider or "").strip().lower()
+    if ducky_ai_hidden(prov):  # last session's disk cache must not list it either
+        return []
     label = provider_label(prov) or PROVIDER_LABELS.get(prov, prov.title())
     rows: list[dict[str, Any]] = []
     from backend.agent.thinking_effort import ensure_thinking_menu

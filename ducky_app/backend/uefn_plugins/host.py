@@ -271,7 +271,7 @@ def get_ui_contributions() -> dict[str, Any]:
     enabled = list(get_enabled_plugin_ids())
     enabled_set = set(enabled)
     with _LOCK:
-        return {
+        out = {
             "settings_tabs": _dedupe_contrib_rows(_CONTRIBUTIONS["settings_tabs"]),
             "settings_sections": _dedupe_contrib_rows(_CONTRIBUTIONS["settings_sections"]),
             "dock_panels": _dedupe_contrib_rows(_CONTRIBUTIONS["dock_panels"]),
@@ -348,6 +348,15 @@ def get_ui_contributions() -> dict[str, Any]:
             "walkthroughs": list(_CONTRIBUTIONS.get("walkthroughs") or []),
             "enabled_ids": enabled,
         }
+    # Every gateway list reads this: Ducky AI exists only for an account holding its permission.
+    out["llm_providers"] = [row for row in out["llm_providers"] if not _ducky_ai_hidden(row.get("id"))]
+    return out
+
+
+def _ducky_ai_hidden(provider_id: Any) -> bool:
+    from frontend.duckyos_account import ducky_ai_hidden
+
+    return ducky_ai_hidden(provider_id)
 
 
 def get_contributions() -> dict[str, Any]:
@@ -690,9 +699,11 @@ def register_coding_agent_factory(
 
 
 def get_llm_provider_registration(provider_id: str) -> dict[str, Any] | None:
-    """Return registration for a provider id (may be disabled — caller gates)."""
+    """Return registration for a provider id (may be disabled — caller gates).
+
+    None for Ducky AI without its permission, so its models and meter never load."""
     provid = str(provider_id or "").strip().lower()
-    if not provid:
+    if not provid or _ducky_ai_hidden(provid):
         return None
     with _LOCK:
         row = _LLM_PROVIDER_FACTORIES.get(provid)
