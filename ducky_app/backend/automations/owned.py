@@ -60,7 +60,9 @@ def _can_automate(scope: dict[str, Any]) -> bool:
 
 
 def owner_scopes(aid: str | None = None) -> list[dict[str, Any]]:
-    """Local first, then every team this account belongs to."""
+    """Local first, then every team this account belongs to. A team whose access was
+    lost is left out: its workflows stay locked on this PC (not listed, never run)
+    until access comes back or the copy expires."""
     aid = aid or account()
     out = [scopes.personal_scope(aid)]
     if aid == scopes.LOCAL:
@@ -68,7 +70,7 @@ def owner_scopes(aid: str | None = None) -> list[dict[str, Any]]:
     for team in runtime.synced_teams(aid):
         if scopes.valid_team_id(team):
             scope = scopes.team_scope(aid, team)
-            if scope["state"] != "unavailable":
+            if scope["state"] not in ("unavailable", "lost"):
                 out.append(scope)
     return out
 

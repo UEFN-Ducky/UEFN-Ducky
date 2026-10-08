@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storageLine, switchConfirm, syncText } from "./scopeBarText";
+import { lostText, storageLine, switchConfirm, syncText } from "./scopeBarText";
 
 const GB = 1024 ** 3;
 
@@ -26,5 +26,13 @@ describe("scope bar text", () => {
       title: "Switch BrainRot TCG to Local data?",
       message: "Nothing is copied. BrainRot TCG restarts with its Local data.",
     });
+  });
+
+  it("says a lost team's copy is locked and when it leaves this PC", () => {
+    const at = new Date(2026, 9, 15, 12).getTime() / 1000;
+    expect(lostText("Alpha Studio", at, "en-US")).toBe(
+      "You no longer have access to Alpha Studio. Its data here is locked and leaves this PC on October 15 unless access comes back.",
+    );
+    expect(lostText("Alpha Studio")).toBe("You no longer have access to Alpha Studio. Its data here is locked until access comes back.");
   });
 });

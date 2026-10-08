@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,8 @@ LOCAL = "_local"
 PERSONAL = "personal"
 DOC_MAX_BYTES = 1024 * 1024
 ASSET_MAX_BYTES = 100 * 1024 * 1024
+# A team copy whose access was lost stays locked on this PC this long, then goes.
+LOST_KEEP_S = 7 * 24 * 3600
 
 _PLUGIN_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
 _DOC_RE = re.compile(r"^[a-z0-9._-]{1,128}$")
@@ -118,17 +121,57 @@ def personal_scope(account: str | None = None) -> dict[str, Any]:
 def team_scope(account: str, team: str) -> dict[str, Any]:
     """A team scope. ``waiting``: never pulled on this PC for this account, so it is
     read-only until the first pull lands — a plugin must not seed its empty-state
-    defaults over the team's data. ``locked``: the account's data key is missing."""
+    defaults over the team's data. ``locked``: the account's data key is missing.
+    ``lost``: the account lost access to the team; its copy here is unreadable and
+    read-only until access comes back, and goes after :data:`LOST_KEEP_S`."""
     from backend.store.repos import plugin_data as repo
 
     sync = repo.sync_get(account, team)
     state = sync["state"]
-    if state != "unavailable" and _locked(account):
+    if state == "lost":
+        if lost_expired(account, team):
+            # A week without access: the copy on this PC goes (the server's stays).
+            purge_team(account, team)
+            state = "unavailable"
+    elif state != "unavailable" and _locked(account):
         state = "locked"
     elif not sync["synced_at"] and state not in ("paused", "unavailable"):
         state = "waiting"
     return {"account": account, "id": team, "kind": "team", "label": sync["label"] or "Team", "teamId": team,
-            "readOnly": state in ("paused", "waiting", "locked"), "state": state}
+            "readOnly": state in ("paused", "waiting", "locked", "lost"), "state": state}
+
+
+def _lost_key(account: str, team: str) -> str:
+    return f"team_access_lost.{account}.{team}"
+
+
+def lost_since(account: str, team: str) -> float:
+    """When this PC learned the account lost access to ``team`` (0: it hasn't)."""
+    from backend.store.repos import kv
+
+    try:
+        return float(kv.meta_get(_lost_key(account, team)) or 0)
+    except ValueError:
+        return 0.0
+
+
+def mark_lost(account: str, team: str, since: float | None = None) -> None:
+    """Access to ``team`` is gone: keep the first time this PC saw it (the clock of the purge)."""
+    from backend.store.repos import kv
+
+    if not lost_since(account, team):
+        kv.meta_set(_lost_key(account, team), repr(time.time() if since is None else since))
+
+
+def clear_lost(account: str, team: str) -> None:
+    from backend.store.repos import kv
+
+    kv.meta_set(_lost_key(account, team), "")
+
+
+def lost_expired(account: str, team: str) -> bool:
+    since = lost_since(account, team)
+    return bool(since) and time.time() - since >= LOST_KEEP_S
 
 
 def active_scope(plugin: str) -> dict[str, Any]:
@@ -234,7 +277,8 @@ def plugin_dir(scope: dict[str, Any], plugin: str) -> Path:
 
 
 def purge_team(account: str, team: str) -> None:
-    """Access lost (removed from the team): the team's local copy goes, rows and files."""
+    """The team's local copy goes, rows and files: a week after access was lost (or
+    at once when this PC held nothing of it). Never the server's copy."""
     from backend.store.repos import plugin_data as repo
     from backend.store.repos import plugin_kv
 
@@ -247,6 +291,8 @@ def purge_team(account: str, team: str) -> None:
     repo.delete_scope(account, team)
     plugin_kv.delete_scope(account, team)
     shutil.rmtree(scopes_root(account) / team, ignore_errors=True)
+    if lost_since(account, team):
+        clear_lost(account, team)
 
 
 def erase_plugin(plugin: str) -> None:
@@ -283,6 +329,11 @@ def write_asset_bytes(target: Path, data: bytes) -> None:
     tmp = target.with_name(target.name + f".{os.getpid()}.tmp")
     tmp.write_bytes(data)
     tmp.replace(target)
+
+
+def _closed(scope: dict[str, Any]) -> bool:
+    """Access to the team is lost: its copy here reads as empty until access comes back."""
+    return scope["state"] == "lost"
 
 
 class PluginData:
@@ -323,6 +374,8 @@ class PluginData:
             raise ReadOnlyScope("Waiting for this account's data key. Plugin data opens once you're online.")
         if s["state"] == "waiting":
             raise ReadOnlyScope(f"Waiting for team data from {s['label']}. Read-only until it arrives.")
+        if s["state"] == "lost":
+            raise ReadOnlyScope(f"You no longer have access to {s['label']}. Its data on this PC is locked.")
         if s["readOnly"]:
             raise ReadOnlyScope(f"Team Private is paused for {s['label']}. Read-only.")
         return s
@@ -335,6 +388,8 @@ class PluginData:
 
         _need(valid_doc_key(key), "doc key")
         s = personal_scope() if sensitive else self._scope()
+        if _closed(s):
+            return default
         row = repo.get(s["account"], s["id"], self.plugin_id, "doc", key)
         if not row or row["deleted"] or row["value"] is None:
             return default
@@ -365,6 +420,8 @@ class PluginData:
         from backend.store.repos import plugin_data as repo
 
         s = self._scope()
+        if _closed(s):
+            return []
         return [r["key"] for r in repo.rows(s["account"], s["id"], self.plugin_id, "doc", prefix) if not r["sensitive"]]
 
     def items(self, prefix: str = "") -> dict[str, Any]:
@@ -375,6 +432,8 @@ class PluginData:
 
         s = self._scope()
         out: dict[str, Any] = {}
+        if _closed(s):
+            return out
         try:
             for r in repo.rows(s["account"], s["id"], self.plugin_id, "doc", prefix):
                 if not r["sensitive"] and r["value"] is not None:
@@ -417,6 +476,8 @@ class PluginData:
         from backend.store.repos import plugin_data as repo
 
         s = self._scope()
+        if _closed(s):
+            return False
         row = repo.get(s["account"], s["id"], self.plugin_id, "asset", path)
         return bool(row and not row["deleted"] and asset_file(s, self.plugin_id, path).is_file())
 
@@ -436,6 +497,8 @@ class PluginData:
         from backend.store.repos import plugin_data as repo
 
         s = self._scope()
+        if _closed(s):
+            return []
         return [{"path": r["key"], "size": r["size"], "sha256": r["sha256"]}
                 for r in repo.rows(s["account"], s["id"], self.plugin_id, "asset", prefix)]
 

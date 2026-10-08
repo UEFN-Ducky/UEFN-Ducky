@@ -2173,7 +2173,7 @@ export interface PluginScopeStatus {
   email?: string;
   canChange?: boolean;
   members?: number;
-  /** ok | paused | offline | error | unavailable */
+  /** ok | paused | offline | error | unavailable | waiting | locked | lost (access to the team lost) */
   state?: string;
   error?: string;
   syncedAt?: number | null;
@@ -2184,6 +2184,8 @@ export interface PluginScopeStatus {
   current?: PluginDataTotals;
   /** The team's web slug, for "View on the web" (team copy only). */
   teamSlug?: string;
+  /** Lost access: when (epoch seconds) the locked copy leaves this PC unless access comes back. */
+  deleteAt?: number;
 }
 
 export interface PluginDataTotals {

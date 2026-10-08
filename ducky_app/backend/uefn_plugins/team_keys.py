@@ -6,8 +6,11 @@
   account data key in :mod:`data_crypto`). A login change drops the file and every
   other account's keys; losing access to a team drops that team's key.
 - An object is ``UDT1`` + key version (1 byte) + 12-byte nonce + AES-256-GCM
-  ciphertext||tag, with the 5-byte header as associated data. The website opens
-  the same bytes with WebCrypto.
+  ciphertext||tag. The associated data is the 5-byte header +
+  ``"{team}\\n{kind}\\n{plugin}\\n{key}"`` (UTF-8), so an object opens only as the
+  item it was written for. The website opens the same bytes with WebCrypto.
+- Requests that sync or read team content declare :data:`FORMAT` as ``enc``: once
+  a team holds encrypted items the Store refuses clients that don't.
 - The nonce is derived from the item and its plaintext (HMAC under a key derived
   from the team key), so the same item and bytes always encrypt to the same
   object: a push names the uploaded bytes' size and sha256, and the upload that
@@ -27,6 +30,7 @@ import time
 from typing import Any, Callable
 
 MAGIC = b"UDT1"
+FORMAT = 1  # the newest object format this app opens
 HEADER_LEN = 5
 NONCE_LEN = 12
 TAG_LEN = 16
@@ -177,24 +181,32 @@ def _nonce(key: bytes, item: tuple[str, str, str], data: bytes) -> bytes:
     return hmac.new(sub, msg, hashlib.sha256).digest()[:NONCE_LEN]
 
 
-def seal(entry: tuple[int, bytes], item: tuple[str, str, str], data: bytes) -> bytes:
-    """``data`` of ``item`` (kind, plugin id, key) as the object to upload."""
+def associated_data(header: bytes, team: str, item: tuple[str, str, str]) -> bytes:
+    """The header, then the team and item the object belongs to: an object moved to
+    another item or team fails to open."""
+    return header + "\n".join((team, *item)).encode("utf-8")
+
+
+def seal(entry: tuple[int, bytes], team: str, item: tuple[str, str, str], data: bytes) -> bytes:
+    """``data`` of ``item`` (kind, plugin id, key) in ``team`` as the object to upload."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     version, key = entry
     header = MAGIC + bytes([version])
     nonce = _nonce(key, item, data)
-    return header + nonce + AESGCM(key).encrypt(nonce, data, header)
+    return header + nonce + AESGCM(key).encrypt(nonce, data, associated_data(header, team, item))
 
 
 def is_sealed(raw: bytes) -> bool:
     return len(raw) >= OVERHEAD and raw[:4] == MAGIC
 
 
-def open_object(entry: tuple[int, bytes], raw: bytes, enc: int | None = None) -> bytes:
-    """Plaintext of a downloaded object. ``enc`` is the key version the server
-    recorded (0 = plaintext from before team keys); ``None`` when it didn't say,
-    then the header decides. Raises ``ValueError`` when it can't be opened."""
+def open_object(entry: tuple[int, bytes], team: str, item: tuple[str, str, str], raw: bytes,
+                enc: int | None = None) -> bytes:
+    """Plaintext of a downloaded object of ``item`` in ``team``. ``enc`` is the key
+    version the server recorded (0 = plaintext from before team keys); ``None`` when
+    it didn't say, then the header decides. Raises ``ValueError`` when it can't be
+    opened."""
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -205,8 +217,8 @@ def open_object(entry: tuple[int, bytes], raw: bytes, enc: int | None = None) ->
         raise ValueError("object is not encrypted")
     if raw[4] != version:
         raise ValueError(f"object needs team key version {raw[4]}")
-    header = raw[:HEADER_LEN]
+    aad = associated_data(raw[:HEADER_LEN], team, item)
     try:
-        return AESGCM(key).decrypt(raw[HEADER_LEN:HEADER_LEN + NONCE_LEN], raw[HEADER_LEN + NONCE_LEN:], header)
+        return AESGCM(key).decrypt(raw[HEADER_LEN:HEADER_LEN + NONCE_LEN], raw[HEADER_LEN + NONCE_LEN:], aad)
     except InvalidTag as exc:
         raise ValueError("object failed its integrity check") from exc

@@ -5,13 +5,15 @@ member and never another team; without Manage automations a member can run but
 not change it (and the Store refuses a forced push); "Run on this PC" gates team
 schedules so one fires once, not once per member; old shared rows are claimed
 once with their versions; signed-out workflows can be brought into the account;
-a stale push keeps this PC's edit in History; leaving a team drops its folder.
+a stale push keeps this PC's edit in History; leaving a team locks its folder and
+a week later drops it.
 """
 
 from __future__ import annotations
 
 import sys
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -296,14 +298,27 @@ def test_copy_and_move_between_local_and_a_team(who: _Who, fake_store: FakeStore
         store.copy_workflow(mine["id"], "teamNope")
 
 
-def test_leaving_a_team_drops_its_folder_and_state(who: _Who, fake_store: FakeStore) -> None:
+def test_leaving_a_team_locks_its_folder_and_a_week_later_drops_it(who: _Who, fake_store: FakeStore) -> None:
     ana = join(fake_store, who, "ana@x.org")
     wf = store.save_workflow({"name": "Team", "graph": CRON}, owner="teamT")
     sync(fake_store, ana)
     fake_store.members["teamT"].discard(ana)
-    assert sync(fake_store, ana)["state"] == "removed"
+    # Access lost: the team's workflows lock (not listed, never run) but stay on this PC.
+    assert sync(fake_store, ana)["state"] == "lost"
     assert store.get_workflow(wf["id"]) is None
     assert [o["id"] for o in team.owners()["owners"]] == ["local"]
+    assert repo.rows(ana, "teamT", team_sync.WORKFLOW_DOCS, "doc")
+    # Back on the team: they unlock as they were.
+    fake_store.members["teamT"].add(ana)
+    assert sync(fake_store, ana)["state"] == "ok"
+    assert store.get_workflow(wf["id"]) is not None
+    # A week without access: the copy on this PC goes, per-PC state too.
+    fake_store.members["teamT"].discard(ana)
+    assert sync(fake_store, ana)["state"] == "lost"
+    scopes.clear_lost(ana, "teamT")
+    scopes.mark_lost(ana, "teamT", since=time.time() - scopes.LOST_KEEP_S - 60)
+    assert sync(fake_store, ana)["state"] == "removed"
+    assert repo.rows(ana, "teamT", team_sync.WORKFLOW_DOCS, "doc") == []
     assert runtime.runtime_get(ana, wf["id"])["run_here"] is False
 
 

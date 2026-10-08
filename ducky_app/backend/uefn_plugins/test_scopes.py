@@ -4,8 +4,9 @@ sync against a fake Store.
 Plan P3: two accounts never see each other's rows or folders; switching project
 switches data; signed-out ``_local`` is separate; ``sensitive`` docs never reach a
 sync request; BrainrotTCG cards sync between two members and never to a third
-team; paused = read-only; access lost deletes the team scope; the inclusive
-cursor is deduped; a stale push adopts the server copy.
+team; paused = read-only; access lost locks the team scope, access back unlocks
+it, a week later it goes; the inclusive cursor is deduped; a stale push adopts the
+server copy.
 §13: another account can't read the DB or files; the owner reads them again after
 signing back in; old plaintext is sealed once; an offline restart works; no key
 yet = read-only, never plaintext.
@@ -17,6 +18,7 @@ import base64
 import hashlib
 import itertools
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -97,6 +99,8 @@ class _Transport:
             return {"key": base64.b64encode(team_key(team)).decode(), "version": 1}
         if team in s.paused:
             raise team_sync.SyncError("plan_paused: Team Private isn't active for this team.")
+        if not body.get("enc") and any(r.get("enc") for k, r in s.rows.items() if k[0] == team):
+            raise team_sync.SyncError("Update UEFN Ducky to use this team's data.")
         if event == "team-data-commit":
             results = []
             for c in body["commits"]:
@@ -354,7 +358,9 @@ def test_inclusive_cursor_is_deduped_and_stale_push_adopts_server(who: _Who, sto
     assert cards.get("card.pip") == {"v": 2} and repo.count_dirty(ana, "teamT") == 0
 
 
-def test_paused_is_read_only_and_access_lost_deletes_the_team_scope(who: _Who, store: FakeStore) -> None:
+def test_paused_is_read_only_and_access_lost_locks_then_deletes_the_team_scope(who: _Who, store: FakeStore) -> None:
+    from backend.uefn_plugins import team_keys
+
     cards = PluginData("brainrot-tcg")
     ana = _join(store, who, "ana@x.org", "teamT", "Alpha Studio")
     cards.put("card.pip", {"v": 1})
@@ -371,14 +377,32 @@ def test_paused_is_read_only_and_access_lost_deletes_the_team_scope(who: _Who, s
     store.paused.clear()
     assert _sync(store)["state"] == "ok" and not scopes.active_scope("brainrot-tcg")["readOnly"]
 
+    # Access lost: the key goes and the copy here locks (unreadable, read-only), kept as it is.
     store.members["teamT"].discard(ana)
-    assert _sync(store)["state"] == "removed"
-    assert not team_dir.exists() and repo.rows(ana, "teamT", "brainrot-tcg", "doc") == []
-    assert scopes.active_scope("brainrot-tcg")["kind"] == "personal"  # the plugin's link went with it
-    assert repo.links(ana) == {}
-    from backend.uefn_plugins import team_keys
+    assert _sync(store)["state"] == "lost"
+    assert (ana, "teamT") not in team_keys._KEYS
+    scope = scopes.active_scope("brainrot-tcg")
+    assert (scope["kind"], scope["state"], scope["readOnly"]) == ("team", "lost", True)
+    assert cards.get("card.pip") is None and cards.keys() == [] and cards.get_file("assets/pip.png") is None
+    with pytest.raises(scopes.ReadOnlyScope, match="no longer have access"):
+        cards.put("card.pip", {"v": 3})
+    assert team_dir.is_dir() and repo.rows(ana, "teamT", "brainrot-tcg", "doc")
+    assert team_sync.scope_status("brainrot-tcg")["deleteAt"] > 0
 
-    assert (ana, "teamT") not in team_keys._KEYS  # the team's key went too
+    # Access back: the key is fetched again, the data unlocks and sync resumes.
+    store.members["teamT"].add(ana)
+    assert _sync(store)["state"] == "ok" and cards.get("card.pip") == {"v": 1}
+    assert not scopes.lost_since(ana, "teamT")
+
+    # A week without access: the copy on this PC goes (the server's stays).
+    store.members["teamT"].discard(ana)
+    _sync(store)
+    scopes.clear_lost(ana, "teamT")
+    scopes.mark_lost(ana, "teamT", since=time.time() - scopes.LOST_KEEP_S - 60)
+    assert scopes.active_scope("brainrot-tcg")["kind"] == "personal"  # the plugin's link went with it
+    assert not team_dir.exists() and repo.rows(ana, "teamT", "brainrot-tcg", "doc") == []
+    assert repo.links(ana) == {}
+    assert ("teamT", "doc", "brainrot-tcg", "card.pip") in store.rows
 
 
 def test_team_data_leaves_the_pc_encrypted_with_its_teams_own_key(who: _Who, store: FakeStore) -> None:
@@ -397,14 +421,21 @@ def test_team_data_leaves_the_pc_encrypted_with_its_teams_own_key(who: _Who, sto
     local = repo.get(ana, "teamT", "brainrot-tcg", "doc", "card.pip")
     assert doc["sha256"] == hashlib.sha256(doc["blob"]).hexdigest() != local["sha256"]
     assert local["sha256"] == hashlib.sha256(scopes.encode_doc({"name": "Pip"})).hexdigest()
-    # Only that team's key opens it.
-    assert team_keys.open_object((1, team_key("teamT")), doc["blob"]) == scopes.encode_doc({"name": "Pip"})
-    with pytest.raises(ValueError):
-        team_keys.open_object((1, team_key("teamU")), doc["blob"])
-    # The same item and bytes always encrypt to the same object (a push names it before the upload).
+    # Only that team's key opens it, and only as the item and team it was written for.
     item = ("doc", "brainrot-tcg", "card.pip")
-    assert team_keys.seal((1, team_key("teamT")), item, b"x") == team_keys.seal((1, team_key("teamT")), item, b"x")
-    assert team_keys.seal((1, team_key("teamT")), item, b"x")[5:17] != team_keys.seal((1, team_key("teamT")), item, b"y")[5:17]
+    tk = (1, team_key("teamT"))
+    assert team_keys.open_object(tk, "teamT", item, doc["blob"]) == scopes.encode_doc({"name": "Pip"})
+    with pytest.raises(ValueError):
+        team_keys.open_object((1, team_key("teamU")), "teamT", item, doc["blob"])
+    with pytest.raises(ValueError):
+        team_keys.open_object(tk, "teamT", ("doc", "brainrot-tcg", "card.mo"), doc["blob"])
+    with pytest.raises(ValueError):
+        team_keys.open_object(tk, "teamU", item, doc["blob"])
+    # The same item and bytes always encrypt to the same object (a push names it before the upload).
+    assert team_keys.seal(tk, "teamT", item, b"x") == team_keys.seal(tk, "teamT", item, b"x")
+    assert team_keys.seal(tk, "teamT", item, b"x")[5:17] != team_keys.seal(tk, "teamT", item, b"y")[5:17]
+    # Sync and commit requests say this app opens encrypted items.
+    assert all(r.get("enc") == team_keys.FORMAT for r in store.requests if r["event"] != "team-data-key")
     # The key is asked of the Store once, then kept.
     calls = store.key_calls
     _sync(store)

@@ -12,6 +12,10 @@ plaintext. Objects from before team keys still read, and any item the server
 still holds in plaintext is pushed again, encrypted (the first round with a key
 pulls the whole team once to find them).
 
+Losing access to a team locks its copy here (unreadable and read-only) instead of
+deleting it; it unlocks when the key can be fetched again, and leaves this PC after
+a week without access. The team's copy on the server is never touched.
+
 Load (the 2026-09-16 outage was a desktop poller holding every plugin slot): a
 round runs only while a team-scoped plugin panel is open (the host scope bar asks
 on open, on focus and each minute), at most once a minute per team, and never
@@ -143,16 +147,19 @@ def _sealed(scope: dict[str, Any], row: dict[str, Any], tk: tuple[int, bytes]) -
         return None
     if data is None or hashlib.sha256(data).hexdigest() != row["sha256"]:
         return None
-    return team_keys.seal(tk, (row["kind"], row["plugin_id"], row["key"]), data)
+    return team_keys.seal(tk, scope["id"], (row["kind"], row["plugin_id"], row["key"]), data)
 
 
-def _download(t: Transport, item: dict[str, Any], tk: tuple[int, bytes]) -> bytes:
-    """An item's plaintext: the stored object (sha256 checked), opened with the team key."""
+def _download(t: Transport, scope: dict[str, Any], it: tuple[str, str, str], item: dict[str, Any],
+              tk: tuple[int, bytes]) -> bytes:
+    """Item ``it``'s plaintext: the stored object (sha256 checked), opened with the
+    team key as that item of that team."""
     data = t.get(str(item.get("getUrl") or ""))
     if hashlib.sha256(data).hexdigest() != str(item.get("sha256") or ""):
         raise SyncError("downloaded file failed its sha256 check")
     try:
-        return team_keys.open_object(tk, data, int(item["enc"]) if item.get("enc") is not None else None)
+        enc = int(item["enc"]) if item.get("enc") is not None else None
+        return team_keys.open_object(tk, scope["id"], it, data, enc)
     except (ValueError, TypeError) as exc:
         raise SyncError(f"downloaded file could not be opened: {exc}") from exc
 
@@ -324,7 +331,7 @@ def _apply_change(scope: dict[str, Any], t: Transport, ch: dict[str, Any], chang
         return
     if not ch.get("getUrl"):
         return
-    _store(scope, kind, pid, key, _download(t, ch, tk), rev)
+    _store(scope, kind, pid, key, _download(t, scope, it, ch, tk), rev)
     changed.add(pid)
     if _plaintext_on_server(ch):
         _reseal(scope, it, automate)
@@ -349,7 +356,7 @@ def _adopt(scope: dict[str, Any], t: Transport, it: tuple[str, str, str], server
         _drop_local(scope, kind, pid, key)
         return None
     if server.get("getUrl"):
-        _store(scope, kind, pid, key, _download(t, server, tk), int(server.get("rev") or 0))
+        _store(scope, kind, pid, key, _download(t, scope, it, server, tk), int(server.get("rev") or 0))
         if _plaintext_on_server(server):
             _reseal(scope, it, automate)
         return None
@@ -471,7 +478,8 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
             del sealed
         pushes.append(push)
     try:
-        resp = t.collect("team-data-sync", {"teamId": team, "cursorRev": cursor, "pushes": pushes})
+        resp = t.collect("team-data-sync", {"teamId": team, "cursorRev": cursor, "pushes": pushes,
+                                            "enc": team_keys.FORMAT})
         commits = []
         for a in resp.get("accepted") or []:
             it = _item(a)
@@ -509,10 +517,10 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
             pages += 1
             if not resp.get("more") or pages >= MAX_PAGES:
                 break
-            resp = t.collect("team-data-sync", {"teamId": team, "cursorRev": cursor})
+            resp = t.collect("team-data-sync", {"teamId": team, "cursorRev": cursor, "enc": team_keys.FORMAT})
             usage = resp.get("usage") or usage
         if commits:
-            res = t.collect("team-data-commit", {"teamId": team, "commits": commits})
+            res = t.collect("team-data-commit", {"teamId": team, "commits": commits, "enc": team_keys.FORMAT})
             usage = res.get("usage") or usage
             for r in res.get("results") or []:
                 it = _item(r)
@@ -537,6 +545,9 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
                   synced_at=now())
     if kv.meta_get(sealed_mark) is None:
         kv.meta_set(sealed_mark, "1")
+    if scopes.lost_since(account, team):
+        # Access is back: the copy here unlocks as it was, and sync carries on.
+        scopes.clear_lost(account, team)
     return {"state": "ok", "changed": sorted(changed), "error": "; ".join(errors)}
 
 
@@ -552,14 +563,27 @@ def _team_key(account: str, team: str, t: Transport) -> tuple[int, bytes]:
     return got
 
 
+def _lost(account: str, team: str, changed: set[str]) -> dict[str, Any]:
+    """Access to the team is gone (removed, or the team was deleted). Its key goes and
+    its copy here locks: unreadable and read-only for plugins, kept as it is so it
+    unlocks if access comes back (the next round that gets the key). After
+    ``scopes.LOST_KEEP_S`` without access the copy on this PC is deleted; the team's
+    copy on the server is never touched. A team this PC holds nothing of just goes."""
+    team_keys.forget(account, team)
+    held = bool(repo.plugin_ids(account, team)) or repo.count_dirty(account, team) > 0
+    if not held or scopes.lost_expired(account, team):
+        scopes.purge_team(account, team)
+        return {"state": "removed", "changed": sorted(changed), "error": ""}
+    scopes.mark_lost(account, team)
+    repo.sync_put(account, team, state="lost", error="")
+    return {"state": "lost", "changed": sorted(changed), "error": ""}
+
+
 def _failed(account: str, team: str, exc: SyncError, changed: set[str]) -> dict[str, Any]:
     msg = str(exc)
     low = msg.lower()
     if "team not found" in low:
-        # Removed from the team (or it is gone): its key and local copy go too (plan §7).
-        team_keys.forget(account, team)
-        scopes.purge_team(account, team)
-        return {"state": "removed", "changed": sorted(changed), "error": ""}
+        return _lost(account, team, changed)
     if low.startswith("plan_paused"):
         state = "paused"
     elif "storage isn't available" in low or low.startswith("permission denied"):
@@ -621,6 +645,10 @@ def scope_status(plugin: str) -> dict[str, Any]:
             pending=repo.count_dirty(account, scope["id"]),
             usage=st["usage"] or {},
         )
+        lost = scopes.lost_since(account, scope["id"]) if scope["state"] == "lost" else 0.0
+        if lost:
+            # When the locked copy leaves this PC unless access comes back.
+            out["deleteAt"] = lost + scopes.LOST_KEEP_S
     return out
 
 
@@ -663,6 +691,11 @@ def _memberships(*, private_only: bool) -> dict[str, Any]:
         members = len(team.get("members") or [])
         label = str(team.get("name") or "Team")
         repo.sync_put(account, team_id, label=label, members=members)
+        if repo.sync_get(account, team_id)["state"] == "lost":
+            # The hub lists the team again: get its key back and unlock now, not at
+            # the next round a panel happens to ask for.
+            threading.Thread(target=sync_team, args=(account, team_id), kwargs={"force": True},
+                             name="team-data-unlock", daemon=True).start()
         choices.append({"id": team_id, "kind": "team", "label": label, "members": members, "slug": slug})
     return {"ok": True, "choices": choices}
 

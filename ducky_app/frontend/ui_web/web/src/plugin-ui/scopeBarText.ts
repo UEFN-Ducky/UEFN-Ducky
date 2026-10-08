@@ -44,6 +44,16 @@ export function syncText(status: PluginScopeStatus, nowMs: number): string {
   return waiting ? `${synced} · ${waiting}` : synced;
 }
 
+/** A team copy whose access was lost: locked here, and when it leaves this PC. */
+export function lostText(team: string, deleteAt?: number | null, locale?: string): string {
+  const when = deleteAt
+    ? new Date(deleteAt * 1000).toLocaleDateString(locale, { month: "long", day: "numeric" })
+    : "";
+  return when
+    ? `You no longer have access to ${team}. Its data here is locked and leaves this PC on ${when} unless access comes back.`
+    : `You no longer have access to ${team}. Its data here is locked until access comes back.`;
+}
+
 /** The question before a plugin's data switches: nothing is copied, and the plugin
  * restarts on the other copy. */
 export function switchConfirm(plugin: string, to: { kind: string; label: string }): { title: string; message: string } {
