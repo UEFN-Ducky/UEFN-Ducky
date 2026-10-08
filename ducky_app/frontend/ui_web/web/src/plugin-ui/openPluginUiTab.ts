@@ -14,6 +14,11 @@ export function registerOpenPluginUiTab(
   };
 }
 
+/** This window can open plugin tabs (the main window registers the opener). */
+export function hasPluginUiTabOpener(): boolean {
+  return opener !== null;
+}
+
 export function requestOpenPluginUiTab(
   pluginId: string,
   panelId: string,

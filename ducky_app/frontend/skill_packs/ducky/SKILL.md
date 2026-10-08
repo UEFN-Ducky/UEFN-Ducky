@@ -212,10 +212,11 @@ Load `skill_read_subskill("ducky", "ai_plugins")` then follow it. Legal I/O is
    delete). Tab? `ui.panels` + `header.buttons` whose `plugin.call` RPCs share
    those same functions. A tab with no MCP tools is incomplete.
 4. `ducky_plugin_validate` → `ducky_plugin_install` → `ducky_store_set_enabled`.
-   If `needs_trust`, stop. Iterate on the draft, then reinstall.
+   If `needs_trust`, stop. Then `ducky_plugin_test(id)` (tools, nodes, panels,
+   UI files) and `ducky_plugin_errors(id)`; fix the draft, test again.
 5. **Tabs: Appearance CSS vars only** (`var(--bg)` / `--fg` / `--accent` / …).
-   Never hardcode colors unless they specified a design — then mention the
-   default.
+   Link the UI kit (`<script src="../../_kit/ducky.js"></script>`). Never
+   hardcode colors unless they specified a design — then mention the default.
 6. **Always** workflow nodes + a template wrapping the same
    functions (themes too), bundled `skills/<id>/SKILL.md`, and changeset on
    mutators. Tab toggles use `settings.sections`; first-enable gets a

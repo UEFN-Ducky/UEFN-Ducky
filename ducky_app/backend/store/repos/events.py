@@ -47,6 +47,20 @@ def newest(kind: str, *, limit: int, since: float | None = None) -> list[dict[st
             "SELECT ts, source, message, payload FROM events WHERE kind=? AND ts>=? ORDER BY ts DESC, id DESC LIMIT ?",
             (kind, since, limit),
         ).fetchall()
+    return _rows(rows)
+
+
+def newest_from(kind: str, source: str, *, limit: int, since: float | None = None) -> list[dict[str, Any]]:
+    """:func:`newest`, only rows of one ``source`` (a plugin id for the plugin error kinds)."""
+    rows = db.connect().execute(
+        "SELECT ts, source, message, payload FROM events WHERE kind=? AND source=? AND ts>=? "
+        "ORDER BY ts DESC, id DESC LIMIT ?",
+        (kind, source, 0.0 if since is None else since, limit),
+    ).fetchall()
+    return _rows(rows)
+
+
+def _rows(rows: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in rows:
         row: dict[str, Any] = {"ts": float(r["ts"]), "source": str(r["source"]), "message": str(r["message"])}

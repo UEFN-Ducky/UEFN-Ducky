@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts",
-    "prebuild": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts && node scripts/check-shipped-ui.mjs",
+    "predev": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts && npx tsx scripts/generate-appearance-vars.ts",
+    "prebuild": "node scripts/ensure-verse-assets.mjs && node scripts/generate-bundled-duckies.mjs && node scripts/generate-bundled-agent-profiles.mjs && npx tsx scripts/generate-critical-css.ts && npx tsx scripts/generate-appearance-vars.ts && node scripts/check-shipped-ui.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/check-shipped-dist.mjs",
     "lint": "eslint src && node scripts/check-no-inline-styles.mjs && node scripts/check-automations-css.mjs && node scripts/check-shipped-ui.mjs",

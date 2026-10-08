@@ -14,8 +14,9 @@
 import { useEffect } from "react";
 import type { AgentEvent, MessageAuthorDto } from "../types/panel";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
-import { getApi } from "../hooks/usePanelApi";
+import { getApi, isRemote } from "../hooks/usePanelApi";
 import { onApiReady } from "../hooks/onApiReady";
+import { hasPluginUiTabOpener, requestOpenPluginUiTab } from "../plugin-ui/openPluginUiTab";
 import { openPanelRoute } from "../navigation/openPanelRoute";
 import { parseShowMeRequest, playShowMe, whenShowMeClosed } from "../showme/ShowMeService";
 import { listTargets } from "./registry";
@@ -91,6 +92,14 @@ async function dispatch(method: string, params: Record<string, unknown>, request
     if (method === "walkthrough_run") {
       return await asGuidedUi(() => runAgentWalkthrough(params.steps));
     }
+    if (method === "open_plugin_panel") {
+      // ducky_plugin_test opens each panel of the plugin it tests.
+      const pluginId = String(params.plugin_id ?? "");
+      const panelId = String(params.panel_id ?? "");
+      if (!pluginId || !panelId) return { error: "plugin_id and panel_id required" };
+      requestOpenPluginUiTab(pluginId, panelId, String(params.title ?? "") || undefined);
+      return { ok: true, tab: `plugin:${pluginId}:${panelId}` };
+    }
     if (method === "ask_user") {
       const rawIds = params.group_ids;
       const groupIds = Array.isArray(rawIds) ? rawIds.map((id) => String(id)) : [];
@@ -132,6 +141,8 @@ export function UiRpcBridge() {
         if (seen.has(requestId)) return;
         seen.add(requestId);
       }
+      // Only the desktop window that opens plugin tabs answers (not popped-out windows or the phone).
+      if (method === "open_plugin_panel" && (!hasPluginUiTabOpener() || isRemote())) return;
       if (WINDOW_METHODS.has(method)) {
         const forClient = String(params._for_client ?? "");
         if (forClient && forClient !== UI_CLIENT_ID) return;  // meant for the window in use

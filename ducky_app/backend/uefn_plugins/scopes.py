@@ -15,10 +15,17 @@ files go through :class:`PluginData`, which writes the active scope only. Rows
 and folders are keyed by account and sealed for it (:mod:`data_crypto`), so
 another account on this PC can't read them. Team scopes sync through
 :mod:`backend.uefn_plugins.team_sync`; Personal and ``sensitive`` data never leave
-the PC.
+the PC. A plugin's cache and prefs rows (``plugin_kv``) follow the same scope but
+never sync: each team has its own on this PC.
+
+:func:`sandbox` points one plugin at a throwaway scope for a plugin test, so the
+test never touches the user's data.
 """
 
 from __future__ import annotations
+
+import contextlib
+import contextvars
 
 import base64
 import hashlib
@@ -36,6 +43,11 @@ DOC_MAX_BYTES = 1024 * 1024
 ASSET_MAX_BYTES = 100 * 1024 * 1024
 # A team copy whose access was lost stays locked on this PC this long, then goes.
 LOST_KEEP_S = 7 * 24 * 3600
+# The throwaway scope of a plugin test (:func:`sandbox`): never synced, removed after.
+SANDBOX_SCOPE = "_plugin_test"
+_SANDBOX: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
+    "plugin_data_sandbox", default=None
+)
 
 _PLUGIN_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
 _DOC_RE = re.compile(r"^[a-z0-9._-]{1,128}$")
@@ -178,6 +190,9 @@ def active_scope(plugin: str) -> dict[str, Any]:
     """The scope ``plugin``'s data reads and writes right now."""
     from backend.store.repos import plugin_data as repo
 
+    boxed = (_SANDBOX.get() or {}).get(plugin)
+    if boxed is not None:
+        return dict(boxed)
     account = account_id()
     if account == LOCAL:
         return personal_scope(account)
@@ -187,6 +202,29 @@ def active_scope(plugin: str) -> dict[str, Any]:
     scope = team_scope(account, team)
     # Teams beta or team storage gone for this account: Local only, no teaser.
     return personal_scope(account) if scope["state"] == "unavailable" else scope
+
+
+@contextlib.contextmanager
+def sandbox(plugin: str):
+    """While inside, ``plugin``'s docs, files, cache and prefs (in this thread) live in
+    a throwaway scope that starts empty and is deleted on the way out: a plugin test
+    calls its tools and nodes without touching the user's data."""
+    _need(valid_plugin_id(plugin), "plugin id")
+    account = account_id()
+    scope = {"account": account, "id": SANDBOX_SCOPE, "kind": "sandbox", "label": "Plugin test", "teamId": "",
+             "readOnly": False, "state": "ok"}
+    purge_team(account, SANDBOX_SCOPE)  # a test that died midway left its rows
+    token = _SANDBOX.set({**(_SANDBOX.get() or {}), plugin: scope})
+    try:
+        yield dict(scope)
+    finally:
+        _SANDBOX.reset(token)
+        purge_team(account, SANDBOX_SCOPE)
+
+
+def sandboxed_plugins() -> frozenset[str]:
+    """Plugins inside :func:`sandbox` in this thread."""
+    return frozenset(_SANDBOX.get() or {})
 
 
 def scope_view(scope: dict[str, Any]) -> dict[str, Any]:
