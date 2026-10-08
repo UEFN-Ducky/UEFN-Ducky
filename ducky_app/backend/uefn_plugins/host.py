@@ -813,11 +813,39 @@ def registered_ide_hookup_kinds() -> tuple[str, ...]:
         return tuple(sorted(_IDE_HOOKUPS.keys()))
 
 
+def _unregister_plugin_mcp_tools(tool_names: set[str]) -> None:
+    """Remove a plugin's tools from the shared FastMCP server (best-effort).
+
+    Without this, a reload leaves the old ``api.tool`` wrapper registered, and a
+    reinstalled plugin keeps serving its previous tool code. Must hold ``_LOCK``.
+    """
+    if not tool_names:
+        return
+    try:
+        from backend.server import mcp
+
+        manager = getattr(mcp, "_tool_manager", None)
+        if manager is None:
+            return
+        remove = getattr(manager, "remove_tool", None)
+        for name in tool_names:
+            try:
+                if callable(remove):
+                    remove(name)
+                else:
+                    getattr(manager, "_tools", {}).pop(name, None)
+            except Exception:
+                getattr(manager, "_tools", {}).pop(name, None)
+    except Exception:
+        _log.debug("could not unregister plugin MCP tools", exc_info=True)
+
+
 def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) -> None:
     """Drop register()-side runtime for a plugin so the next load re-runs register().
 
     Call before Store install/update replaces AppData files. Keeps TTS/LLM factories
-    from pointing at stale module objects after a zip overwrite.
+    from pointing at stale module objects after a zip overwrite, and removes the
+    plugin's MCP tools so a reinstall never keeps serving the old tool code.
 
     ``unload()`` runs on a helper thread and is joined with ``unload_timeout`` so a
     misbehaving plugin can never hang the Store bridge / uninstall path.
@@ -872,9 +900,18 @@ def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) ->
         _PANEL_RPC.pop(pid, None)
         _CONNECTION_PROBES.pop(pid, None)
         _CONNECTION_CACHE.pop(pid, None)
-        _API_TOOL_REGISTRY.pop(pid, None)
+        # Drop the plugin's MCP tools from the shared FastMCP server too, or a reinstall
+        # keeps serving the old wrapper (which still calls the dropped module's code).
+        tool_names = set(_API_TOOL_REGISTRY.pop(pid, set()) or set())
+        tool_names.update(n for n, owner in _PLUGIN_TOOL_OWNER.items() if owner == pid)
+        _unregister_plugin_mcp_tools(tool_names)
         _API_INTENT_PATTERNS.pop(pid, None)
-        for name in [n for n, owner in _PLUGIN_TOOL_OWNER.items() if owner == pid]:
+        _PLUGIN_TOOL_NAMES.difference_update(tool_names)
+        _PLUGIN_HOST_ONLY_TOOLS.difference_update(tool_names)
+        _PLUGIN_PLAN_TOOLS.difference_update(tool_names)
+        _PLUGIN_DESTRUCTIVE_TOOLS.difference_update(tool_names)
+        _PLUGIN_INTENT_ROWS[:] = [row for row in _PLUGIN_INTENT_ROWS if row[0] != pid]
+        for name in list(tool_names):
             _PLUGIN_TOOL_OWNER.pop(name, None)
         for key in list(sys.modules):
             if key == mod_name or key.startswith(mod_name + "."):
@@ -2047,6 +2084,12 @@ def _run_first_plugin_load() -> None:
     with _LOCK:
         _UI_READY = True
         _LOADED = True
+    # Pause any team plugin whose team access is currently lost (plain-source items;
+    # compiled ones also self-pause through their baked gate).
+    try:
+        reevaluate_team_plugins()
+    except Exception:
+        _log.debug("team-plugin reevaluation at boot failed", exc_info=True)
     _log.info(
         "UEFN plugins ready: register phase %.0fms%s",
         (time.perf_counter() - t_register) * 1000.0,
@@ -2817,6 +2860,81 @@ def sweep_compiled_quarantine() -> None:
                 pdir.rmdir()
         except OSError:
             pass
+
+
+# plugin_id -> team_id it is paused for (access lost). Cleared when access returns.
+_PAUSED_TEAM_PLUGINS: dict[str, str] = {}
+
+
+def _plugin_team_visibility(manifest: dict[str, Any]) -> tuple[str, str]:
+    """(visibility, team_id) recorded for an installed plugin ('', '' when not a team item)."""
+    vis = str(manifest.get("visibility") or "").strip()
+    team = str(manifest.get("team_id") or "").strip()
+    if vis != "team" or not team:
+        return "", ""
+    return "team", team
+
+
+def _team_access_state(team_id: str) -> tuple[bool, str]:
+    """(has_access, label) for a team: has the key and not lost → True."""
+    try:
+        from backend.uefn_plugins.scopes import account_id, team_scope
+
+        scope = team_scope(account_id(), team_id)
+        label = str(scope.get("label") or team_id)
+        return scope.get("state") in ("ok", "paused"), label
+    except Exception:
+        return True, team_id  # never pause on an evaluation error
+
+
+def reevaluate_team_plugins(account: str | None = None) -> dict[str, Any]:
+    """Pause team plugins whose team access was lost; resume them when it returns.
+
+    Called at boot and on enable, and meant to be called by the team-data sync when a
+    team flips to ``lost`` or unlocks (one line where ``plugin_scope_changed`` is
+    pushed). A paused plugin is unloaded and shows "Paused, no access to <team>"; when
+    access returns it is loaded again. Compiled team plugins also enforce this at load
+    through the baked license gate; this handles the live transition and plain-source
+    team plugins.
+    """
+    from backend.uefn_plugins.store import load_plugin_manifest
+
+    paused: list[str] = []
+    resumed: list[str] = []
+    for pid in list(get_enabled_plugin_ids()):
+        manifest = load_plugin_manifest(pid)
+        if not manifest:
+            continue
+        vis, team = _plugin_team_visibility(manifest)
+        if not vis:
+            continue
+        has_access, label = _team_access_state(team)
+        if not has_access:
+            if pid in _REGISTERED or pid not in _PAUSED_TEAM_PLUGINS:
+                try:
+                    invalidate_plugin_runtime(pid)
+                    with _LOCK:
+                        _strip_contributions_for(pid)
+                    _record_plugin_load_error(pid, RuntimeError(f"Paused: no access to {label}"))
+                except Exception:
+                    _log.exception("pausing team plugin %s failed", pid)
+                _PAUSED_TEAM_PLUGINS[pid] = team
+                paused.append(pid)
+        elif pid in _PAUSED_TEAM_PLUGINS:
+            _PAUSED_TEAM_PLUGINS.pop(pid, None)
+            try:
+                reload_single_plugin(pid)
+            except Exception:
+                _log.exception("resuming team plugin %s failed", pid)
+            resumed.append(pid)
+    if paused or resumed:
+        _notify_uefn_plugins_changed()
+    return {"paused": paused, "resumed": resumed}
+
+
+def is_team_plugin_paused(plugin_id: str) -> bool:
+    """True when a team plugin is currently paused for lost access (Settings badge)."""
+    return plugin_id in _PAUSED_TEAM_PLUGINS
 
 
 class _ChangesetApi:
