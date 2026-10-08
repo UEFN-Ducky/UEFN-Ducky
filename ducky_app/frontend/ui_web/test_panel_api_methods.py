@@ -245,6 +245,7 @@ _PUBLIC_METHODS = frozenset({
     'run_workflow',
     'stop_workflow',
     'workflow_run_snapshot',
+    'dismiss_workflow_run',
     'workflow_editor_prefs',
     'check_workflow_expression',
     'pick_workflow_files',

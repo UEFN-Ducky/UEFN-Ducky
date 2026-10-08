@@ -408,6 +408,28 @@ describe("chat scroll intent during layout changes", () => {
     expect(changedCounts(before, snapshotCounts(), [])).toEqual([]);
     expect(view.scroller.scrollTop).toBe(100000);
   });
+  it("keeps the reader's window through hidden layout and background updates", () => {
+    const view = setup();
+    fireEvent.wheel(view.scroller, { deltaY: -1000 });
+    view.scroll(100000);
+    view.frame();
+    const windowBefore = view.scroller.dataset.chatWindow;
+    const chunksBefore = [...document.querySelectorAll(".virtual-chat-chunk")];
+    Object.defineProperty(view.scroller, "clientHeight", { value: 0, configurable: true });
+    view.resize();
+    fireEvent.scroll(view.scroller);
+    const rows = [...view.props.rows, { kind: "bubble" as const, id: "background-user", role: "user" as const, text: "next task" }];
+    view.rendered.rerender(<VirtualChatMessageList ref={view.ref} {...view.props} rows={rows} />);
+    view.frame();
+    expect(view.scroller.dataset.chatWindow).toBe(windowBefore);
+    expect([...document.querySelectorAll(".virtual-chat-chunk")]).toEqual(chunksBefore);
+    Object.defineProperty(view.scroller, "clientHeight", { value: 600, configurable: true });
+    view.resize();
+    expect(view.scroller.scrollTop).toBe(100000);
+    expect(view.scrollTo).not.toHaveBeenCalled();
+    expect(view.scroller.dataset.chatWindow).toBe(windowBefore);
+  });
+
   it("keeps following content growth until the user scrolls away", () => {
     const view = setup();
     view.resize(245000);

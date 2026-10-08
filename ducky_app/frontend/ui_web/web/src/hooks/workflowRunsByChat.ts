@@ -51,6 +51,8 @@ type WorkflowEvent = PanelPushEvent;
 
 const byRun = new Map<string, ChatWorkflowRun>();
 const clearedRuns = new Set<string>();
+const dismissedCards = new Set<string>();
+const cardKey = (chat: string, run: string) => JSON.stringify([chat, run]);
 const eventListeners = new Set<(event: PanelPushEvent) => void>();
 const latestEvents = new Map<string, PanelPushEvent>();
 const snapshots = new Map<string, ChatWorkflowRun[]>();
@@ -205,6 +207,9 @@ async function reconcileWorkflowRuns(): Promise<boolean> {
   try {
     const result = await getApi()?.workflow_run_snapshot?.();
     if (!result?.ok || !Array.isArray(result.events)) return false;
+    const dismissedBefore = dismissedCards.size;
+    for (const card of result.dismissed || []) dismissedCards.add(cardKey(card.chat_id, card.run_id));
+    if (dismissedCards.size !== dismissedBefore) emit();
     const states = new Map<string, PanelPushEvent>();
     for (const event of result.events) {
       if (event.type === "workflow_run") states.set(`${event.id}:${event.run}`, event);
@@ -300,14 +305,12 @@ export function clearWorkflowRunHistory(workflowId: string, runIds?: ReadonlySet
   return removed;
 }
 
-/** Hide a finished run without removing another concurrent run's controls. */
-export function dismissWorkflowRun(chatId: string, runId?: string): void {
-  for (const [run, chat] of runToChat) {
-    if (chat === chatId && (!runId || run === runId) && byRun.get(run)?.state !== "running") {
-      byRun.delete(run);
-      runToChat.delete(run);
-    }
-  }
+/** Hide a finished card durably while keeping its execution available in history. */
+export async function dismissWorkflowRun(chatId: string, runId: string): Promise<void> {
+  if (runToChat.get(runId) !== chatId || byRun.get(runId)?.state === "running") return;
+  const result = await getApi()?.dismiss_workflow_run?.(chatId, runId);
+  if (!result?.ok) throw new Error(result?.error || "Could not save the hidden workflow card");
+  dismissedCards.add(cardKey(chatId, runId));
   emit();
 }
 
@@ -322,7 +325,8 @@ function snapshot(key: string, matches: (run: ChatWorkflowRun) => boolean): Chat
 
 export function useChatWorkflowRuns(chatId: string): ChatWorkflowRun[] {
   return useSyncExternalStore(subscribe,
-    () => snapshot("chat:" + chatId, (run) => runToChat.get(run.run) === chatId),
+    () => snapshot("chat:" + chatId, (run) => runToChat.get(run.run) === chatId &&
+      (run.state === "running" || !dismissedCards.has(cardKey(chatId, run.run)))),
     () => EMPTY);
 }
 
@@ -348,6 +352,7 @@ export function subscribeWorkflowEvents(listener: (event: PanelPushEvent) => voi
 export function resetWorkflowRunsForTests(): void {
   byRun.clear();
   clearedRuns.clear();
+  dismissedCards.clear();
   runToChat.clear();
   latestEvents.clear();
   emit();

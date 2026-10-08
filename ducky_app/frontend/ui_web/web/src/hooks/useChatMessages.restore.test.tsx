@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentEvent, ChatMessage } from "../types/panel";
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const api = {
   load_messages: vi.fn<(chatId: string) => Promise<ChatMessage[]>>(),
@@ -137,6 +139,44 @@ describe("a chat tab that goes to the background mid-run", () => {
     const again = renderHook(() => useChatMessages("chat-end", true, false));
     expect(again.result.current.agentRunning).toBe(false); // already idle on the first frame
     await waitFor(() => expect(again.result.current.messages).toEqual(final));
+  });
+});
+
+describe("open chat visibility", () => {
+  beforeEach(() => { api.load_messages.mockReset(); api.list_running_agents.mockReset(); });
+
+  it("reuses loaded messages on rapid switches and refreshes an older snapshot in the background", async () => {
+    let now = 100000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    api.load_messages.mockResolvedValue(finalRows);
+    const view = renderHook(({ visible }) => useChatMessages("kept-open", visible, false), { initialProps: { visible: true } });
+    await waitFor(() => expect(view.result.current.hydrated).toBe(true));
+    const messages = view.result.current.messages;
+    for (let n = 0; n < 4; n++) {
+      view.rerender({ visible: false });
+      view.rerender({ visible: true });
+    }
+    expect(api.load_messages).toHaveBeenCalledTimes(1);
+    expect(view.result.current.messages).toBe(messages);
+    now += 61000;
+    view.rerender({ visible: false });
+    view.rerender({ visible: true });
+    expect(view.result.current.hydrated).toBe(true);
+    await waitFor(() => expect(api.load_messages).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not refresh a scrolled-up reader merely because the pane reappears", async () => {
+    let now = 100000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    api.load_messages.mockResolvedValue(finalRows);
+    const view = renderHook(({ visible }) => useChatMessages("reading-open", visible, false), { initialProps: { visible: true } });
+    await waitFor(() => expect(view.result.current.hydrated).toBe(true));
+    act(() => view.result.current.onAtBottomChange(false));
+    view.rerender({ visible: false });
+    now += 61000;
+    view.rerender({ visible: true });
+    expect(api.load_messages).toHaveBeenCalledTimes(1);
+    expect(view.result.current.isAtBottom).toBe(false);
   });
 });
 

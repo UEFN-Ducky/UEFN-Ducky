@@ -1745,6 +1745,18 @@ html.window-maximized .window-resize-grip {
   flex-direction: column;
 }
 
+.editor-chat-tab {
+  display: flex;
+  flex: 1 1 0%;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.editor-chat-tab[hidden] {
+  display: none;
+}
+
 .editor-group-empty {
   flex: 1;
   display: flex;

@@ -2828,7 +2828,8 @@ export interface PanelApi {
   delete_workflow?(workflow_id: string): Promise<{ ok?: boolean; error?: string }>;
   /** Stop button: ends every run of this workflow on this PC now. */
   stop_workflow?(workflow_id: string, run_id?: string): Promise<{ ok?: boolean; stopped?: boolean; error?: string }>;
-  workflow_run_snapshot?(): Promise<{ ok?: boolean; events?: PanelPushEvent[] }>;
+  dismiss_workflow_run?(chat_id: string, run_id: string): Promise<{ ok?: boolean; error?: string }>;
+  workflow_run_snapshot?(): Promise<{ ok?: boolean; events?: PanelPushEvent[]; dismissed?: { chat_id: string; run_id: string }[] }>;
   /** The Workflows editor's grid, snap, tool, panel sizes and zoom, kept on disk. */
   workflow_editor_prefs?(): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;
   set_workflow_editor_prefs?(prefs: Record<string, unknown>): Promise<{ ok?: boolean; prefs?: Record<string, unknown> }>;

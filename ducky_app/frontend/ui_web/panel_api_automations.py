@@ -386,10 +386,20 @@ class PanelApiAutomationsMixin:
 
         return {"ok": True, "stopped": stop_workflow(workflow_id, run_id)}
 
+    def dismiss_workflow_run(self, chat_id: str, run_id: str) -> dict[str, Any]:
+        from backend.automations.chat_cards import dismiss
+
+        try:
+            dismiss(chat_id, run_id)
+            return {"ok": True}
+        except (OSError, ValueError) as exc:
+            return _refused(exc)
+
     def workflow_run_snapshot(self) -> dict[str, Any]:
+        from backend.automations.chat_cards import dismissed
         from backend.automations.live_runs import snapshot
 
-        return {"ok": True, "events": snapshot()}
+        return {"ok": True, "events": snapshot(), "dismissed": dismissed()}
 
     def emit_workflow_trigger(self, trigger_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         from backend.automations.runner import emit_trigger

@@ -2,10 +2,10 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { getBackgroundJobs, _resetBackgroundActivityForTests, upsertBackgroundJob } from "./backgroundActivity";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { applyWorkflowEvent, clearWorkflowRunHistory, hydrateWorkflowRunHistory, refreshWorkflowRuns, resetWorkflowRunsForTests, subscribeWorkflowEvents, useWorkflowRuns } from "./workflowRunsByChat";
+import { applyWorkflowEvent, clearWorkflowRunHistory, hydrateWorkflowRunHistory, refreshWorkflowRuns, resetWorkflowRunsForTests, subscribeWorkflowEvents, useWorkflowRuns, useChatWorkflowRuns, dismissWorkflowRun } from "./workflowRunsByChat";
 import type { PanelPushEvent } from "../types/panel";
 
-const api = vi.hoisted(() => ({ workflow_run_snapshot: vi.fn() }));
+const api = vi.hoisted(() => ({ workflow_run_snapshot: vi.fn(), dismiss_workflow_run: vi.fn() }));
 vi.mock("./usePanelApi", () => ({ getApi: () => api }));
 afterEach(() => { cleanup(); resetWorkflowRunsForTests(); _resetBackgroundActivityForTests(); vi.resetAllMocks(); });
 
@@ -59,6 +59,42 @@ it("preserves a run that finishes while a clear request is in flight", () => {
     clearWorkflowRunHistory("wf", finishedAtRequest);
   });
   expect(result.current.map(run => run.run)).toEqual(["newer"]);
+});
+
+it("keeps a closed card hidden after restart and replay without deleting history", async () => {
+  const events: PanelPushEvent[] = [
+    start("closed"), { type: "workflow_run", id: "wf", run: "closed", state: "done" },
+    start("live"),
+    { ...start("other"), conv: "other-chat" },
+    { type: "workflow_run", id: "wf", run: "other", state: "done" },
+  ];
+  events.forEach(applyWorkflowEvent);
+  api.dismiss_workflow_run.mockResolvedValue({ ok: true });
+  const { result } = renderHook(() => ({
+    cards: useChatWorkflowRuns("chat"), history: useWorkflowRuns("wf"), other: useChatWorkflowRuns("other-chat"),
+  }));
+  await act(async () => { await dismissWorkflowRun("chat", "closed"); });
+  expect(result.current.cards.map(run => run.run)).toEqual(["live"]);
+  expect(result.current.history).toHaveLength(3);
+  act(() => resetWorkflowRunsForTests()); // A fresh UI has no in-memory dismissals.
+  api.workflow_run_snapshot.mockResolvedValue({
+    ok: true, events, dismissed: [{ chat_id: "chat", run_id: "closed" }],
+  });
+  await act(async () => { await refreshWorkflowRuns(); });
+  expect(result.current.cards.map(run => run.run)).toEqual(["live"]);
+  expect(result.current.history).toHaveLength(3);
+  expect(result.current.other.map(run => run.run)).toEqual(["other"]);
+  await act(async () => { await refreshWorkflowRuns(); });
+  expect(result.current.cards.map(run => run.run)).toEqual(["live"]);
+});
+
+it("never hides an active run or a card belonging to another chat", async () => {
+  applyWorkflowEvent(start("live"));
+  const { result } = renderHook(() => useChatWorkflowRuns("chat"));
+  await dismissWorkflowRun("chat", "live");
+  await dismissWorkflowRun("other-chat", "live");
+  expect(api.dismiss_workflow_run).not.toHaveBeenCalled();
+  expect(result.current).toHaveLength(1);
 });
 
 function start(run: string): PanelPushEvent {

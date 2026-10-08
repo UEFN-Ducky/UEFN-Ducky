@@ -232,7 +232,19 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     [dropZone, group.id, onDropTab, disarmExternalDrop, dropOverlayIdle],
   );
 
-  const renderContent = () => {
+  // Keep only visited, still-open chats alive. Restored tabs load on first use,
+  // and closing a tab releases its pane, observers, and rendered history.
+  const [visitedChatTabs, setVisitedChatTabs] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setVisitedChatTabs((previous) => {
+      const next = new Set(groupTabs
+        .filter((tab) => tab.kind === "chat" && (tab.id === group.activeTabId || previous.has(tab.id)))
+        .map((tab) => tab.id));
+      return next.size === previous.size && [...next].every((id) => previous.has(id)) ? previous : next;
+    });
+  }, [groupTabs, group.activeTabId]);
+
+  const renderContent = (activeTab: EditorTab | undefined, visible = true) => {
     if (!activeTab) {
       return <div className="editor-group-empty">Drop a tab here</div>;
     }
@@ -254,6 +266,7 @@ export const EditorGroupPane = memo(function EditorGroupPane({
           <DucktactoeChatShell
             key={chat.id}
             chat={chat}
+            visible={visible}
             allChats={allChats}
             folders={folders}
             contextFilePath={contextFilePath}
@@ -270,7 +283,7 @@ export const EditorGroupPane = memo(function EditorGroupPane({
         <ChatPane
           key={chat.id}
           chat={chat}
-          visible
+          visible={visible}
           variant={paneVariant}
           allChats={allChats}
           folders={folders}
@@ -424,7 +437,12 @@ export const EditorGroupPane = memo(function EditorGroupPane({
             Open file
           </div>
         ) : null}
-        {renderContent()}
+        {groupTabs.filter((tab) => tab.kind === "chat" && (tab.id === group.activeTabId || visitedChatTabs.has(tab.id))).map((tab) => (
+          <div className="editor-chat-tab" key={tab.id} hidden={tab.id !== group.activeTabId}>
+            {renderContent(tab, tab.id === group.activeTabId)}
+          </div>
+        ))}
+        {activeTab?.kind !== "chat" ? renderContent(activeTab) : null}
       </div>
     </div>
   );

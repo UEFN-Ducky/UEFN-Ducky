@@ -195,11 +195,11 @@
 /* The workflow the ducky is running: docks above the plan in the plan bar's shape,
    blue where the plan is amber, live pulse + progress along the bar's bottom edge. */
 .chat-pane-workflow-dock {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   min-width: 0;
 }
 
-.chat-workflow-run {
+.chat-pane-workflow-dock .chat-workflow-run {
   --wf-color: var(--accent, #4f8cff);
   margin-bottom: 0;
 }

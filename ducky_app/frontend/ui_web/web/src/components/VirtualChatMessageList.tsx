@@ -496,6 +496,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
      */
     const followingRef = useRef(true);
     const heightsRef = useRef<number[]>([]);
+    const hadViewportRef = useRef(false);
     const applyWindowRef = useRef<() => void>(() => {});
     const [win, setWin] = useState<{ start: number; end: number }>(() =>
       tailWindow(Math.ceil(groupChatRowsIntoTurns(rows).length / CHUNK_TURNS)),
@@ -611,6 +612,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       };
       const onPointerUp = () => { draggingScrollbar = false; };
       const onScroll = () => {
+        if (scroller.clientHeight <= 0) return;
         const top = scroller.scrollTop;
         const previous = scrollPositionRef.current;
         if (draggingScrollbar && top !== previous.top) intent(Math.sign(top - previous.top));
@@ -624,6 +626,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         if (frame) return;
         frame = window.requestAnimationFrame(() => {
           frame = 0;
+          if (scroller.clientHeight <= 0) return;
           const height = scroller.scrollHeight;
           if (!followingRef.current && inputDirectionRef.current > 0 && height === inputHeightRef.current && height - scroller.scrollTop - scroller.clientHeight <= AT_BOTTOM_THRESHOLD_PX) setFollowing(true);
           scrollPositionRef.current = { top: scroller.scrollTop, height, viewport: scroller.clientHeight };
@@ -663,7 +666,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       const content = contentElRef.current;
       if (!scroller || !content || typeof ResizeObserver === "undefined") return;
       const observer = new ResizeObserver(() => {
-        if (dockLayoutBusy()) return;
+        if (dockLayoutBusy() || scroller.clientHeight <= 0) return;
         if (followingRef.current) scrollToBottom();
         else {
           inputDirectionRef.current = 0;
@@ -722,14 +725,17 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
         return;
       }
       const el = scrollerElRef.current;
-      // jsdom and WebView2's first flex layout report clientHeight 0. Treating
-      // that as "show everything" mounts every markdown/tool chunk and freezes
-      // open-chat. Stay on the tail until a real viewport exists.
+      // A hidden tab has no viewport. Preserve its measured window and reader
+      // position instead of replacing it with the tail. First mount is already
+      // initialized to a small tail window, so this never mounts all history.
       if (!el || el.clientHeight <= 0) {
-        const next = tailWindow(n);
-        setWin((prev) => (sameWindow(prev, next) ? prev : next));
+        if (!hadViewportRef.current) {
+          const next = tailWindow(n);
+          setWin((prev) => (sameWindow(prev, next) ? prev : next));
+        }
         return;
       }
+      hadViewportRef.current = true;
       let next = chatListWindowRange(el.scrollTop, el.clientHeight, heights, OVERSCAN_CHUNKS);
       if (followingRef.current) {
         const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -755,6 +761,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
 
     useEffect(() => {
       const flush = () => {
+        if (!scrollerElRef.current?.clientHeight) return;
         const root = contentElRef.current;
         if (root) {
           root.querySelectorAll<HTMLElement>("[data-chat-chunk]").forEach((node) => {
@@ -776,6 +783,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
 
     useLayoutEffect(() => {
       heightsRef.current = [];
+      hadViewportRef.current = false;
       ensureHeights(chunks.length);
       setWin(tailWindow(chunks.length));
     }, [convId]);  

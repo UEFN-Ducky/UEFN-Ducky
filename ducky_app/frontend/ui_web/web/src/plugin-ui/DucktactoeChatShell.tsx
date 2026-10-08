@@ -34,6 +34,7 @@ function persistBoardWidth(width: number): void {
 
 export type DucktactoeChatShellProps = {
   chat: ChatTab;
+  visible?: boolean;
   allChats: ChatTab[];
   folders?: FolderItem[];
   contextFilePath?: string | null;
@@ -50,6 +51,7 @@ export type DucktactoeChatShellProps = {
  */
 export function DucktactoeChatShell({
   chat,
+  visible = true,
   allChats,
   folders,
   contextFilePath,
@@ -125,7 +127,7 @@ export function DucktactoeChatShell({
           <ChatPane
             key={chat.id}
             chat={chat}
-            visible
+            visible={visible}
             variant={variant}
             allChats={allChats}
             folders={folders}

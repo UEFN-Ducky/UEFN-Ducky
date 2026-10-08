@@ -242,7 +242,11 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
             <button
               type="button"
               className="chat-plan-popup-bar-stop"
-              onClick={() => dismissWorkflowRun(chatId, run.run)}
+              onClick={() => {
+                setStopError("");
+                void dismissWorkflowRun(chatId, run.run).catch((error) =>
+                  setStopError(error instanceof Error ? error.message : "Could not hide the workflow card"));
+              }}
               title="Hide"
               aria-label="Hide workflow card"
             >

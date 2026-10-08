@@ -22,7 +22,7 @@ import {
 import { ChatWorkflowRunCard } from "./ChatWorkflowRunCard";
 import { waitFor } from "@testing-library/react";
 
-const api = vi.hoisted(() => ({ stop_workflow: vi.fn() }));
+const api = vi.hoisted(() => ({ stop_workflow: vi.fn(), dismiss_workflow_run: vi.fn(async () => ({ ok: true })) }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 
 const plan = [
@@ -166,7 +166,7 @@ describe("ChatWorkflowRunCard", () => {
     expect(screen.getByText("Stopped")).toBeTruthy();
     expect(screen.getAllByLabelText("Stop the workflow")).toHaveLength(1);
     fireEvent.click(screen.getByTitle("Hide"));
-    expect(screen.getAllByTestId("chat-workflow-run")).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByTestId("chat-workflow-run")).toHaveLength(1));
     expect(screen.getByText(/Launch session ·/)).toBeTruthy();
   });
 
@@ -179,7 +179,7 @@ describe("ChatWorkflowRunCard", () => {
     expect(screen.getByLabelText("Stop the workflow").hasAttribute("disabled")).toBe(false);
   });
 
-  it("finishes and can be hidden", () => {
+  it("finishes and can be hidden", async () => {
     render(<ChatWorkflowRunCard chatId="chat-1" />);
     act(() => {
       start();
@@ -193,6 +193,19 @@ describe("ChatWorkflowRunCard", () => {
     });
     expect(screen.getByText(/^Finished · \d+:\d{2}$/)).toBeTruthy();
     fireEvent.click(screen.getByTitle("Hide"));
-    expect(screen.queryByTestId("chat-workflow-run")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("chat-workflow-run")).toBeNull());
+    expect(api.dismiss_workflow_run).toHaveBeenCalledWith("chat-1", "r1");
+  });
+
+  it("keeps the card visible with an error when dismissal could not be saved", async () => {
+    api.dismiss_workflow_run.mockRejectedValueOnce(new Error("Disk unavailable"));
+    render(<ChatWorkflowRunCard chatId="chat-1" />);
+    act(() => {
+      start();
+      applyWorkflowEvent({ type: "workflow_run", id: "wf-1", run: "r1", state: "done" });
+    });
+    fireEvent.click(screen.getByTitle("Hide"));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Disk unavailable");
+    expect(screen.getByTestId("chat-workflow-run")).toBeTruthy();
   });
 });

@@ -68,6 +68,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   stateRef.current = state;
 
   const loadSeqRef = useRef(0);
+  const lastLoadedAtRef = useRef(0);
 
   // While this pane is mounted it applies the chat's events itself; once it is
   // gone backgroundRuns keeps the cached run state current (see backgroundRuns.ts).
@@ -88,6 +89,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     try {
       const rows = await api.load_messages(chatId);
       if (seq !== loadSeqRef.current) return; // a newer load superseded this one
+      lastLoadedAtRef.current = Date.now();
       dispatch({ type: "loaded", rows });
     } catch {
       // Keep the cached conversation on transient bridge failures; a later reload retries.
@@ -112,8 +114,8 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   // Fetch the conversation once on mount (even while hidden, so a background pane
   // is ready). A run in flight keeps its optimistic tail; loaded() merges.
   //
-  // A pane restored from the cache as "running" was unmounted (closed, or another
-  // tab in front — EditorGroupPane only mounts the active tab), so it never heard
+  // A pane restored from the cache as "running" was unmounted (closed or moved
+  // between editor groups; inactive open tabs stay mounted), so it may not know
   // how the run ended. Ask the backend first: a run that finished while the tab
   // was away goes idle at once and reconcile's reload pulls the final copy,
   // instead of showing the stale "Running tools…" until the 15 s reconcile grace.
@@ -142,13 +144,14 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
 
   // Safety-net refresh when the pane (re)appears while idle and pinned to the
   // bottom — catches anything missed while hidden without yanking a scrolled-up
-  // reader. Fires only on the false→true visibility edge.
+  // reader. Mounted hidden panes still receive live events, so rapid switching
+  // needs no disk/bridge round trip. Refresh only after a minute without a load.
   const wasVisibleRef = useRef(visible);
   useEffect(() => {
     const becameVisible = visible && !wasVisibleRef.current;
     wasVisibleRef.current = visible;
     const s = stateRef.current;
-    if (becameVisible && s.status === "idle" && s.atBottom && !s.stopped) {
+    if (becameVisible && Date.now() - lastLoadedAtRef.current >= 60_000 && s.status === "idle" && s.atBottom && !s.stopped) {
       void load();
     }
   }, [visible, load]);
