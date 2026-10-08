@@ -172,26 +172,36 @@ def _register_stub(plugin_id: str) -> str:
         "\n"
         "Data goes through api.data (never a folder you pick): one JSON doc per record,\n"
         "files via api.data.put_file. The host keeps it per account and scope.\n"
+        "Tools that don't talk to the UEFN editor pass listener=False, so they work while\n"
+        "UEFN is closed. Panel RPCs get the panel's params as keyword arguments.\n"
         '"""\n'
         "\n"
         "from __future__ import annotations\n"
+        "\n"
+        "import re\n"
         "\n"
         "\n"
         "def register(api) -> None:\n"
         "    data = api.data\n"
         "\n"
-        f'    @api.tool(intent=r"\\b{plugin_id}\\b")\n'
+        f'    @api.tool(intent=r"\\b{plugin_id}\\b", listener=False)\n'
         f"    def {fn}_list(kind: str = \"\") -> dict:\n"
         '        """List records this plugin manages (one doc per record: key "item.<id>")."""\n'
         "        items = data.items(\"item.\")\n"
         "        rows = [v for v in items.values() if not kind or v.get(\"kind\") == kind]\n"
         "        return {\"ok\": True, \"items\": rows}\n"
         "\n"
-        f'    @api.tool(intent=r"\\b{plugin_id}\\b")\n'
-        f"    def {fn}_upsert(item_id: str, fields: dict) -> dict:\n"
+        f'    @api.tool(intent=r"\\b{plugin_id}\\b", listener=False)\n'
+        f"    def {fn}_upsert(item_id: str, fields: dict | None = None) -> dict:\n"
         '        """Create or update one record. Add get/delete for the domain."""\n'
-        "        doc = {**(data.get(f\"item.{item_id}\") or {}), **(fields or {}), \"id\": item_id}\n"
-        "        data.put(f\"item.{item_id}\", doc)\n"
+        "        key = re.sub(r\"[^a-z0-9_-]+\", \"-\", str(item_id or \"\").strip().lower()).strip(\"-\")\n"
+        "        if not key:\n"
+        "            return {\"ok\": False, \"error\": \"Give item_id (letters, numbers, - or _).\"}\n"
+        "        doc = {**(data.get(f\"item.{key}\") or {}), **(fields or {}), \"id\": key}\n"
+        "        try:\n"
+        "            data.put(f\"item.{key}\", doc)\n"
+        "        except PermissionError as exc:  # a read-only or locked team copy\n"
+        "            return {\"ok\": False, \"error\": str(exc)}\n"
         "        return {\"ok\": True, \"item\": doc}\n"
         "\n"
         f'    @api.register_pipeline_node("{plugin_id}.run")\n'
@@ -200,8 +210,9 @@ def _register_stub(plugin_id: str) -> str:
         "        cfg = ctx.get(\"config\") or {}\n"
         f"        return {fn}_list(str(cfg.get(\"kind\") or \"\"))\n"
         "\n"
-        f'    api.register_panel_rpc("list", '
-        f"lambda params=None: {fn}_list(str((params or {{}}).get(\"kind\") or \"\")))\n"
+        "    # The host calls fn(**params) with what the panel sent: name each param.\n"
+        f'    api.register_panel_rpc("list", lambda kind="": {fn}_list(str(kind or "")))\n'
+        f'    api.register_panel_rpc("upsert", lambda item_id="", fields=None: {fn}_upsert(item_id, fields))\n'
         f'    api.log("{plugin_id} tools registered")\n'
     )
 
@@ -519,8 +530,10 @@ def ducky_plugin_scaffold(
 ) -> str:
     """Create a shared AI plugin draft under AppData/ai_plugins/<id>/.
 
-    Writes minimal plugin.json + backend/register stub. Any duckie can edit it.
-    Does not install — use ducky_plugin_validate then ducky_plugin_install.
+    Writes plugin.json (MCP tools, one workflow node, a template), backend/__init__.py
+    (tools with listener=False, panel RPCs that take the panel's params as keyword
+    arguments) and skills/<id>/SKILL.md. Any duckie can edit it. Does not install — use
+    ducky_plugin_validate, ducky_plugin_install, then ducky_plugin_test.
     """
     return tool_json(scaffold_ai_plugin(id, label=label, description=description), pretty=pretty)
 

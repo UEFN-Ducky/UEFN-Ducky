@@ -26,6 +26,9 @@ const PANEL_PUSH_TYPES = new Set<string>([
   // left on the agent bus they reached no one (main window or floating).
   "plugin_scope_changed",
   "duckyos_account_changed",
+  // A plugin's api.emit_hook / api.set_appearance_profile; the main window acts on them.
+  "plugin_hook",
+  "appearance_profile_requested",
 ]);
 
 type AgentEventListener = (event: AgentEvent) => void;

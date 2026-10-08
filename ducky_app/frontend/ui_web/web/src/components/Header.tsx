@@ -24,13 +24,13 @@ import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useHeaderVisibility } from "../hooks/useHeaderVisibility";
 import { useStoreUpdateBadge } from "../hooks/useStoreUpdateBadge";
-import { pluginHeaderButtonId } from "../workspace/headerVisibilityStorage";
+import { pluginHeaderButtonId, pluginHeaderTargetId } from "../workspace/headerVisibilityStorage";
 import {
   resolvePluginHeaderAction,
   resolvePluginHeaderIcon,
   sortPluginHeaderButtons,
 } from "../hooks/pluginHeaderActions";
-import { useUiTarget } from "../ui-targets/registry";
+import { targetRef, useUiTarget } from "../ui-targets/registry";
 import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { setHeaderTabsSlot } from "./MobileTabSwitcher";
@@ -96,10 +96,13 @@ function PluginHeaderItem({
   }
   const onClick = resolvePluginHeaderAction(btn.action, btn.plugin_id);
   if (!onClick) return null;
+  // Show me and plugin tours point at it as header.button.<plugin>.<button>.
+  const tourRef = targetRef(pluginHeaderTargetId(pluginId, btn.id), { kind: "button", label: title, route: "chat" });
   if (layout === "row") {
     return (
       <PluginSurfaceBoundary key={key} pluginId={pluginId} surface="header-button" compact>
         <button
+          ref={tourRef}
           type="button"
           className="plugin-header-menu-item"
           onClick={() => {
@@ -116,6 +119,7 @@ function PluginHeaderItem({
   return (
     <PluginSurfaceBoundary key={key} pluginId={pluginId} surface="header-button" compact>
       <button
+        ref={tourRef}
         type="button"
         className="icon-btn no-drag plugin-header-btn"
         title={title}

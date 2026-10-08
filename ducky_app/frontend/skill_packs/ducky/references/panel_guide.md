@@ -31,5 +31,6 @@ globally or per chat in Settings → MCP plugins.
 compile), terminals, and multi-chat sidebar with folders.
 
 **AI-made plugins:** `skill_read_subskill("ducky", "ai_plugins")` then
-`ducky_plugin_*` only — `ducky_plugin_list` is the census; do not inventory
-AppData. Every plugin registers MCP tools for itself.
+`ducky_plugin_*` only (`ducky_plugin_list` is the census; never inventory
+AppData). It routes to the look, data, publishing, testing, known-problems and
+example references.

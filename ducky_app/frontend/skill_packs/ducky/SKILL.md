@@ -54,9 +54,7 @@ Read; call `skill_read_subskill` instead.
   as a standard skill folder.
 - **Skills studio, MCP plugins, per-chat toggles:** see the `panel_guide`
   reference.
-- **Build your own desktop plugins** (themes, panels, tools, any contribution):
-  `skill_read_subskill("ducky", "ai_plugins")` then **only** `ducky_plugin_*`.
-  Never glob/shell AppData. Every plugin `@api.tool()`s its actions.
+- **Build your own desktop plugins:** see **Plugins** below.
 - **Custom Verse templates** (single file or multi-file system packs in AppData):
   `skill_read_subskill("ducky", "verse_templates")` then `ducky_verse_template_*`.
   Never edit Store `verse_template_*` packs.
@@ -88,78 +86,14 @@ If UEFN was already open with an old in-memory listener, call `reload_listener` 
 
 User skill edits that **bump the pack version above** the bundled version are kept.
 
-## Delegating to another ducky
+## Other duckies, lanes and messages
 
-Each ducky is a saved profile (skills, tools, model, personality) with a
-`when_to_use` hint.
-
-**Reuse first, spawn second, recycle when bloated:**
-
-1. `ducky_list_duckies` → pick the specialist by `when_to_use`.
-2. `ducky_agent_list` → check `my_subagents`. If you already have that specialist
-   for the same area of work, follow up with
-   `ducky_send_chat_message(conv_id="…", message="…")` — do **not** spawn a
-   duplicate.
-3. Only when no relevant child exists:
-   `ducky_spawn_chat(ducky="<id or name>", message="…")` (blocks; returns the
-   reply by default).
-4. If a child is still the right specialist but its context is too long or
-   confused: `ducky_recycle_subagent(conv_id="…", continue_message="…")` — it
-   writes a full handoff, archives, and a fresh twin continues from that
-   handoff. Prefer this over opening a second parallel copy.
-
-Delegate when a task clearly fits another ducky's specialty — not for every
-small step. Omit `ducky` for a plain default sub-agent.
-
-A ducky can also run on an external coding agent: `ducky_spawn_chat(...,
-coding_agent="claude_code" | "codex" | "cursor")`, or automatically when the
-profile's favorite model slot names one. The sub-agent keeps one upstream CLI
-session per chat, so follow-ups remember everything.
-
-## Write lanes & changesets (parallel duckies)
-
-Every project write goes through one pipeline: it is attributed to the chat and
-run that made it, ledgered per run, and checked against the writer's lane.
-
-- **Lanes** (group members). The leader partitions the work into disjoint write
-  lanes BEFORE spawning parallel members:
-  `ducky_spawn_chat(ducky=…, group_id=…, write_allowed=["Content/Verse/Shop/**"])`
-  or `ducky_group_set_lane(group_id, member_conv_id, write_allowed=[…])`.
-  Globs are gitignore-style (`**` spans folders; a bare folder means
-  `folder/**`); `[]` = read-only. Overlapping lanes are refused.
-  `ducky_group_get_lanes(group_id)` shows the map. Keep shared files such as
-  `module_declarations.verse` in the leader's own lane.
-- **Members cannot change their own lane.** An out-of-lane write is refused
-  (flagged only while the `write_lanes_mode` setting is `shadow`) — never retry
-  the path; ask the leader in the group chat or stay inside the lane.
-- **Changesets.** `changeset_list(group_id=…)` shows what every member wrote
-  (including archived runs: `archived=true`, `revert_locked=true`). Summaries
-  include `source` (agent / user / revert) and `programs` (`file`, `uefn`,
-  `blender`, …). The ledger covers UEFN listener + Epic `unreal__*` mutations,
-  Store plugin edits, and human file edits (`source=user`, `run_id` like
-  `human:YYYY-MM-DD`, `tool=external` for Explorer / VS Code / UEFN). Review it
-  before `workspace_compile_verse`. `changeset_export` / `changeset_contents`
-  still work on archived runs. `changeset_revert` only works on live agent runs;
-  agents cannot revert human runs. `changeset_archive(run_id)` locks revert
-  without deleting the log.
-
-## Agent-to-agent messaging
-
-If a spawn times out it is NOT dead: the result arrives later in your chat as a
-`[ducky:agent-message]` turn (correlated by `response_id`) — never re-spawn.
-
-- `ducky_agent_list` — live agents (chats) you can message: id, backend, running.
-- `ducky_agent_send(to=…, message=…, expect_reply=true)` — fire-and-forget; you
-  get a `response_id`, then FINISH your turn. The reply (or an inactivity notice
-  like `turn-ended` / `errored` / `awaiting-input`) arrives as a new
-  `[ducky:agent-message]` turn. To answer someone, echo their `response_id` with
-  `expect_reply=false`.
-- `ducky_agent_inbox` — re-read your recent inter-agent messages in full.
-- `ducky_agent_transcript(conv_id)` — read a peer chat's history.
-- `ducky_agent_stop(conv_id, cascade=…)` — stop a runaway agent (+its children).
-
-External coding agents must pass their own chat id as `sender=`/`conv_id=` (it is
-in their system prompt); embedded duckies may omit it.
+Delegating, group swarms (no separate subagents), write lanes, changesets and
+agent-to-agent messages: load `skill_read_subskill("ducky", "groups_and_lanes")`.
+In short: reuse a seated member (`ducky_group_members` → `ducky_send_chat_message`)
+before adding one (`ducky_spawn_chat(…, group_id=…)`), recycle a bloated member with
+`ducky_recycle_member`, split parallel writes into lanes first, and never re-spawn
+after a timeout: the reply arrives as a `[ducky:agent-message]` turn.
 
 ## Ask the user (inline questionnaire)
 
@@ -199,38 +133,34 @@ caption).
 Image, 3D and character pipelines (prompt to picture to 3D to rig to animations
 to UEFN) are workflow nodes too; their paid steps need the user's OK first.
 
-## AI-made plugins (extend the app yourself)
+## Plugins (extend the app yourself)
 
-Load `skill_read_subskill("ducky", "ai_plugins")` then follow it. Legal I/O is
-**only** `ducky_plugin_*` (tools write the draft; you never open AppData).
+Any new tab, panel, dock, tool, workflow node, theme or other app feature is a
+desktop plugin built with `ducky_plugin_*` only. **Always load
+`skill_read_subskill("ducky", "ai_plugins")` first**: it has the path, the hard
+rules and a complete plugin, and says which of these to load next:
 
-1. `ducky_plugin_list` — census of `drafts` + `installed`. Empty → scaffold.
-   Never Glob / shell / Read AppData `ai_plugins` or `uefn_plugins`.
-2. `ducky_plugin_scaffold` → `ducky_plugin_write_file` only.
-3. **Required:** `plugin.json` with `contributes.agent.tools`; `register(api)`
-   with `@api.tool()` for **every** user-facing action (list/get/create/update/
-   delete). Tab? `ui.panels` + `header.buttons` whose `plugin.call` RPCs share
-   those same functions. A tab with no MCP tools is incomplete.
-4. `ducky_plugin_validate` → `ducky_plugin_install` → `ducky_store_set_enabled`.
-   If `needs_trust`, stop. Then `ducky_plugin_test(id)` (tools, nodes, panels,
-   UI files) and `ducky_plugin_errors(id)`; fix the draft, test again.
-5. **Tabs: Appearance CSS vars only** (`var(--bg)` / `--fg` / `--accent` / …).
-   Link the UI kit (`<script src="../../_kit/ducky.js"></script>`). Never
-   hardcode colors unless they specified a design — then mention the default.
-6. **Always** workflow nodes + a template wrapping the same
-   functions (themes too), bundled `skills/<id>/SKILL.md`, and changeset on
-   mutators. Tab toggles use `settings.sections`; first-enable gets a
-   walkthrough. `save_workflow` opens the Workflows editor and refreshes the
-   canvas (`owner` = `local` or a team id from `list_workflows`);
-   `copy_workflow`, `delete_workflow`, `set_workflow_folder` (list folders),
-   `copy_workflow_folder` (a whole folder tree to Local or a team),
-   `save_workflow_template` / `delete_workflow_template` match the panel.
-   Repeated steps belong in a reusable workflow (`flow.input` → … →
-   `flow.output`) that others run with a `workflow.call` node; see
-   `save_workflow`. Do not tell the user to open the tab.
+| Reference | When |
+|---|---|
+| `plugin_look` | Any panel, dock, editor or theme: the UI kit, every Appearance variable, panel states |
+| `plugin_data` | The plugin stores anything; Local or one team; `sensitive` |
+| `plugin_publishing` | Sharing through the Store, team or public, licenses, what compiles |
+| `plugin_testing` | After every change: validate, test, errors |
+| `plugin_known_problems` | Before you say it's done |
+| `plugin_examples_ui` | Dashboard tab, dock, file editor, theme |
+| `plugin_examples_tools` | Tools only, workflow nodes and templates, settings and secrets, connection checks, team data |
+| `plugin_examples_uefn` | Verse templates, UEFN listener tools, Blender and Meshy pipelines |
+| `plugin_examples_app` | Image generators, AI providers, sounds and hooks, walkthroughs |
 
-Never git-clone a Store plugin, never edit the EXE, never `ducky_skills_create_pack`
-unless they asked for a skill pack.
+The rules every plugin follows: `ducky_plugin_list` first and never glob or shell
+AppData; search `ducky_find_tools` and reuse tools with `api.call_tool`; an
+`@api.tool()` and a workflow node for every user action; the UI kit and Appearance
+variables only (never color literals); data only through `api.data`; validate, test
+and read errors after every change; share only through the Store
+(`ducky_plugin_publish` to a team or public; `ducky_plugin_build` checks the build
+first). Never git-clone a Store plugin,
+never edit the EXE, never `ducky_skills_create_pack` unless they asked for a skill
+pack.
 
 For driving UEFN itself (devices, Verse, wiring), follow the **UEFN MCP** skill —
 this pack is only about the app.

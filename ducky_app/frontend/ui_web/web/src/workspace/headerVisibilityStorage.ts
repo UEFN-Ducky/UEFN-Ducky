@@ -40,6 +40,12 @@ export function pluginHeaderButtonId(pluginId: string, buttonId: string): string
   return `plugin:${(pluginId || buttonId).trim().toLowerCase()}:${buttonId}`;
 }
 
+/** Show me / tour target id of a plugin's header button: `header.button.<plugin>.<button>`
+ *  (a plugin's own walkthrough may write just `header.button.<button>`). */
+export function pluginHeaderTargetId(pluginId: string, buttonId: string): string {
+  return `header.button.${(pluginId || buttonId).trim().toLowerCase()}.${buttonId}`;
+}
+
 export function discordHeaderButtonId(): string {
   return pluginHeaderButtonId("discord", "discord");
 }

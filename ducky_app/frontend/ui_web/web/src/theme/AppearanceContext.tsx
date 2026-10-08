@@ -30,7 +30,7 @@ import {
 import { parseGoogleFontInput } from "./googleFont";
 import { getApi } from "../hooks/usePanelApi";
 import { onApiReady } from "../hooks/onApiReady";
-import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
+import { installPanelPushBus, isMainWindow, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import {
@@ -880,6 +880,20 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     state.profilePatches,
     state.sounds,
   ]);
+
+  // A theme plugin's api.set_appearance_profile: the main window loads it as if picked in
+  // Settings, then the saved appearance reaches every window. Old pushes are a reload catching up.
+  const loadProfileRef = useRef(loadProfile);
+  loadProfileRef.current = loadProfile;
+  useEffect(() => {
+    if (!isMainWindow()) return;
+    installPanelPushBus();
+    return subscribePanelPush((event) => {
+      if (event.type !== "appearance_profile_requested" || !event.id) return;
+      if (event.at && Date.now() / 1000 - event.at > 30) return;
+      void loadProfileRef.current(event.id);
+    });
+  }, []);
 
   const renameProfile = useCallback(async (id: string, name: string) => {
     if (!isStoredUserProfile(id)) return;
