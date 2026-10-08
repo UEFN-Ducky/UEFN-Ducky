@@ -264,12 +264,13 @@ In a UEFN project `workspace_write_file` writes only under `Content/` and `.duck
 
 ## 4. Theme
 
-A theme is data in `plugin.json` (colors are allowed there). The user picks it in
-Settings → Appearance; the plugin lists its themes and shows where to pick them.
+A theme is data in `plugin.json` (colors are allowed there). It shows in Settings →
+Appearance, and the plugin's tool switches to it with `api.set_appearance_profile`.
 
 ```json
 "contributes": {
-  "agent.tools": { "category": "neon_themes", "intent_pattern": "\\b(neon theme|neon themes)\\b" },
+  "agent.tools": { "category": "neon_themes", "intent_pattern": "\\b(neon theme|neon themes)\\b",
+                   "plan_tools": ["neon_themes_list"] },
   "appearance.profiles": [{
     "id": "neon-night",
     "name": "Neon Night",
@@ -277,12 +278,13 @@ Settings → Appearance; the plugin lists its themes and shows where to pick the
     "overrides": { "green": "#3dffb5", "red": "#ff5470" }
   }],
   "automations": {
-    "nodes": [{ "id": "neon_themes.list", "label": "Neon themes", "group": "Neon Themes",
-                "outputs": [{ "id": "themes", "label": "Themes", "type": "json" }] }],
-    "templates": [{ "id": "neon-themes-list", "label": "Show neon themes", "graph": { "nodes": [
+    "nodes": [{ "id": "neon_themes.apply", "label": "Use a neon theme", "group": "Neon Themes",
+                "config_fields": [{ "id": "theme", "label": "Theme", "type": "select", "options": [{ "id": "neon-night", "label": "Neon Night" }] }],
+                "outputs": [{ "id": "profile", "label": "Theme", "type": "text" }] }],
+    "templates": [{ "id": "neon-themes-apply", "label": "Switch to Neon Night", "graph": { "nodes": [
       { "id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {} },
       { "id": "a", "type": "pipeline.agent", "x": 200, "y": 0, "config": {} },
-      { "id": "n", "type": "neon_themes.list", "x": 400, "y": 0, "config": {} },
+      { "id": "n", "type": "neon_themes.apply", "x": 400, "y": 0, "config": { "theme": "neon-night" } },
       { "id": "f", "type": "pipeline.finish", "x": 600, "y": 0, "config": {} }],
       "edges": [{ "source": "s", "target": "a", "kind": "main" }, { "source": "a", "target": "n", "kind": "main" },
                 { "source": "n", "target": "f", "kind": "main" }] } }]
@@ -294,28 +296,34 @@ Settings → Appearance; the plugin lists its themes and shows where to pick the
 Appearance variable names without `--` (`plugin_look`).
 
 ```python
-THEMES = [{"id": "neon-night", "name": "Neon Night"}]
+THEMES = {"neon-night": "Neon Night"}
 
 
 def register(api) -> None:
-    def list_themes(show: bool = False) -> dict:
-        if show:
-            try:
-                api.call_tool("ducky_ui_show", {"target": "settings.tab.appearance", "navigate": "settings.appearance",
-                                                "title": "Pick a theme", "body": "Neon Night is in the theme list."})
-            except ValueError:
-                pass
-        return {"ok": True, "themes": THEMES}
+    def apply(theme: str = "") -> dict:
+        if theme not in THEMES:
+            return {"ok": False, "error": f"Pick one of: {', '.join(THEMES)}."}
+        out = api.set_appearance_profile(theme)
+        return {**out, "profile": THEMES[theme]} if out.get("ok") else out
 
     @api.tool(listener=False)
-    def neon_themes_list(show: bool = False) -> dict:
-        """List this plugin's Appearance themes; show=true opens Settings → Appearance to pick one."""
-        return list_themes(show)
+    def neon_themes_list() -> dict:
+        """List this plugin's Appearance themes (id and name)."""
+        return {"ok": True, "themes": [{"id": k, "name": v} for k, v in THEMES.items()]}
 
-    @api.register_pipeline_node("neon_themes.list")
-    def node_list(ctx: dict) -> dict:
-        return list_themes(False)
+    @api.tool(listener=False)
+    def neon_themes_apply(theme: str = "") -> dict:
+        """Switch Ducky's Appearance to one of this plugin's themes (an id from neon_themes_list)."""
+        return apply(theme)
+
+    @api.register_pipeline_node("neon_themes.apply")
+    def node_apply(ctx: dict) -> dict:
+        return apply(str((ctx.get("config") or {}).get("theme") or ""))
 ```
+
+No default theme on purpose: `ducky_plugin_test` calls tools and nodes with empty
+input, and a test must never switch the user's theme. Tell the user when you switch
+it; they can switch back in Settings → Appearance.
 
 `appearance.css` (`[{"entry": "theme/extra.css"}]`) adds CSS to the app shell; use
 variables in it and keep it small. Effects and skins (`appearance.effects`,

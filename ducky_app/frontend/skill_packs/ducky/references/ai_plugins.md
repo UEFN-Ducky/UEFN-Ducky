@@ -11,10 +11,12 @@ metadata:
 
 You build plugins **for this install** with `ducky_plugin_*` only. Drafts are
 shared across chats; the tools write the files and you never open those folders.
-A draft runs only on its author's PC. Other people get a plugin only through the
-UEFN Ducky Store: `ducky_plugin_build` → `ducky_plugin_publish` to one team (members
-only; it pauses for anyone who loses access) or public (anyone; the owner reviews
-and rebuilds it). Every Store download carries a license, free ones too. See
+A draft runs only on its author's PC and needs no license. Other people get a plugin
+only through the UEFN Ducky Store: `ducky_plugin_publish(id, target="team"|"public",
+team_id, notes)` builds it compiled and uploads it (`ducky_plugin_build` checks the
+build first). Team: live for that team's members at once, and it pauses for anyone who
+loses access. Public: anyone, after Store staff review and rebuild it. Every Store
+download carries a license, baked in at build time, free ones too. See
 `plugin_publishing`.
 
 ### Load the reference you need
@@ -42,11 +44,12 @@ and rebuilds it). Every Store download carries a license, free ones too. See
 3. **Blend with Ducky's tools.** Before writing a feature, search for it:
    `ducky_find_tools(query)` (and `ducky_store_search` for whole plugins). When a
    tool exists (Meshy, Blender, UEFN import, workspace files, workflows, Store…),
-   call it from your backend with `api.call_tool(name, args)` instead of rebuilding
+   call it from your backend with `api.call_tool(name, arguments)` instead of rebuilding
    it. It runs under the same approval rules the agent has.
 4. **Every user action is an MCP tool and a workflow node.** `@api.tool()` for each
-   action (list / get / create / update / delete, not a lone ping); a tool that
-   doesn't touch the UEFN editor is `@api.tool(listener=False)`. Panel buttons call
+   action (list / get / create / update / delete, not a lone ping). Pass
+   `listener=False` unless the tool talks to the UEFN editor (`api.listener` or a UEFN
+   tool): Ducky refuses `listener=True` tools while UEFN is closed. Panel buttons call
    `plugin.call` RPCs that run the **same** functions. Each action also has a workflow
    node (`contributes.automations.nodes` + `@api.register_pipeline_node`) and a
    template that uses it (`start.chat` → `pipeline.agent` → your node →
@@ -56,8 +59,11 @@ and rebuilds it). Every Store download carries a license, free ones too. See
    variables (`var(--bg)`, `var(--fg)`, `var(--card)`, `var(--border)`,
    `var(--accent)`, `var(--font-ui)`, …). Never `#hex`, `rgb()`, `hsl()` or named
    colors, never a made-up `var(--x)`: `ducky_plugin_validate` rejects them.
-   Theme keys from `theme.get` / `appearance_theme` come **without** `--`. Full list
-   and rules: `plugin_look`.
+   Theme keys from `theme.get` / `appearance_theme` come **without** `--`. If the
+   user specified colors, ship them as an Appearance theme (`appearance.profiles` /
+   `appearance.css`) and keep the panel on the variables. Always tell the user the
+   panel follows their Appearance theme when you start the UI or depart from it.
+   Full list and rules: `plugin_look`.
 6. **Bundled skill** `skills/<id>/SKILL.md` (the scaffold writes a stub): name each
    tool and when to use it, so later chats know them. Not a `ducky_skills_*` pack.
 7. **Mutators record a changeset** (`api.changeset.record(…)` with an `inverse`, slot
@@ -84,13 +90,15 @@ and rebuilds it). Every Store download carries a license, free ones too. See
 1. `ducky_plugin_list`: reuse an existing draft or id, or
 2. `ducky_plugin_scaffold(id, label, description)`: writes `plugin.json` (tools,
    one node, a template graph), `backend/__init__.py` and `skills/<id>/SKILL.md`.
-3. `ducky_plugin_write_file` until every file below is right. Fix the scaffold's
-   panel RPC lambdas and add `listener=False` (see `plugin_known_problems`).
+3. `ducky_plugin_write_file` until every file below is right.
 4. `ducky_plugin_validate(id)`: every error says how to fix it.
 5. `ducky_plugin_install(id)`, then `ducky_store_set_enabled(id, true)`. If it answers
    `needs_trust`, **stop**: the user confirms the plugin once.
 6. `ducky_plugin_test(id)`: reinstalls, calls each tool with sample input, runs each
-   node in a throwaway data scope, opens each panel, checks the UI files.
+   node, opens each panel and checks the UI files, all on a throwaway copy of the
+   plugin's data (docs, files, sensitive docs, cache and prefs). If it answers
+   `needs_trust` ("confirm once to test this plugin"), **stop** until the user
+   confirms once, then test again.
 7. `ducky_plugin_errors(id)`: load errors, panel errors, tool and node exceptions.
 8. Iterate on the **draft** → validate → test again. Reinstall reloads it; never send
    the user to the Store for updates.
@@ -121,7 +129,7 @@ settings), `contributes`, `"backend": {"entry": "backend", "register": "register
 | `contributes` key | What | Example in |
 |---|---|---|
 | `agent.tools` | `{category, intent_pattern, plan_tools?, destructive_tools?}`: when chats get your tools, which read-only ones Plan mode may call, which ones ask the user first (tests skip those) | here |
-| `ui.panels` + `header.buttons` | A tab and the header button that opens it (`"action": "panel:<id>"`) | here |
+| `ui.panels` + `header.buttons` | A tab and the header button that opens it (`"action": "panel:<id>"`). The button's Show me / tour target is `header.button.<plugin id>.<button id>` (just `header.button.<button id>` in the plugin's own walkthrough) | here |
 | `dock.panels` | A side dock (`defaultSide`, `"ui": "panel:<id>"`) | `plugin_examples_ui` |
 | `editor.kinds` | Opens files by suffix in your panel | `plugin_examples_ui` |
 | `automations.nodes` / `.templates` / `.triggers` / `.image_generators` | Workflow nodes, starters, triggers, Text to Image backends | `plugin_examples_tools`, `plugin_examples_app` |
@@ -140,12 +148,14 @@ settings), `contributes`, `"backend": {"entry": "backend", "register": "register
 | `@api.tool(name=None, intent=None, listener=True)` | MCP tool. Docstring = description. `listener=False` unless it calls the UEFN editor. Return a dict. |
 | `@api.register_pipeline_node("<id>.<node>")` | Workflow node handler `fn(ctx) -> dict` (alias `register_automation_node`). |
 | `api.register_panel_rpc(name, fn)` | Panel `plugin.call` target. `fn` is called with **keyword** arguments: `fn(**params)`. |
-| `api.call_tool(name, args)` | Call any Ducky MCP tool in-process; returns the parsed result, raises `ValueError` on failure. |
-| `api.data` | Docs and files in the plugin's data scope (`plugin_data`). |
+| `api.call_tool(name, arguments=None)` | Call any Ducky MCP tool in-process, with the same approvals as the agent; returns the parsed result, raises `ValueError` on failure. |
+| `api.data` | Docs and files in the plugin's data scope (`plugin_data`). Tools of a plugin that uses it get `scope` (`local` / `team <name>`) added to their dict results. |
 | `api.changeset.record(command=, kind=, ident=, facet=, before=, inverse=, slot=)` | Changes ledger entry; never raises. |
 | `api.listener(command, params, timeout=None)` | One command to the live UEFN listener. |
 | `api.http_json(method, url, …)`, `api.poll(…)` | HTTP JSON and polling helpers. |
 | `api.emit_automation(trigger_id, payload)` | Run this PC's workflows that start on your trigger. |
+| `api.emit_hook(hook_id, payload=None)` | Fire one of your `contributes.hooks`: the sound the user put on it plays. |
+| `api.set_appearance_profile(profile_id)` | Switch Appearance to one of your own `appearance.profiles` (its `id`), as if picked in Settings. |
 | `api.connection(fn, label=, program=)` | Header Connections row; `fn()` is cheap and returns `{online, detail}`. |
 | `api.register_secret_test(secret_key, fn)` | Settings → Test for a key: `fn(api_key) -> {ok, detail}`. |
 | `api.spotlight(window=, box=, title=, body=, steps=, click=, wait=)` | Highlight a control in UEFN, Blender or any window (same as `ducky_ui_show`). |

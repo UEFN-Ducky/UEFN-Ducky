@@ -39,6 +39,13 @@ export function subscribePanelPush(listener: PanelPushListener): () => void {
   return () => listeners.delete(listener);
 }
 
+/** The app's main window: a push every window gets is acted on here only. Focus windows
+ *  carry `wid` / `focus` in their URL (the same params tabRegistryClient's WINDOW_ID reads). */
+export function isMainWindow(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return !params.get("wid") && !params.get("focus");
+}
+
 export function usePanelPushBus() {
   useEffect(() => {
     installPanelPushBus();

@@ -198,55 +198,63 @@ that streams and handles `tools` (`StreamEventKind.TOOL_CALLS`). Say so to the u
 
 ## 3. Sounds and hooks
 
-`sounds` adds sound files the user can put on app moments in Settings → Appearance →
-Sounds. The moments the app fires are `tab.changed`, `settings.opened`,
-`llms.settings`, `model.picker`, `store.opened`, `agent.selected`, `agent.done`,
-`agent.error`, `verse.errors`.
+`sounds` adds sound files; `hooks` adds named moments. In Settings → Appearance →
+Sounds the user puts a sound on any moment: the app's own (`tab.changed`,
+`settings.opened`, `llms.settings`, `model.picker`, `store.opened`,
+`agent.selected`, `agent.done`, `agent.error`, `verse.errors`) and the plugins'.
+A plugin fires its own hooks with `api.emit_hook(hook_id, payload)`; the main window
+plays the mapped sound once (nothing plays until the user maps one). Prefix hook ids
+with the plugin id.
 
 ```json
 "contributes": {
   "sounds": [
-    { "id": "quack", "label": "Quack", "file": "assets/sounds/quack.mp3" },
-    { "id": "splash", "label": "Splash", "file": "assets/sounds/splash.mp3" }
+    { "id": "cha_ching", "label": "Cha-ching", "file": "assets/sounds/cha_ching.mp3" }
+  ],
+  "hooks": [
+    { "id": "card_shop.sold", "label": "Card sold" }
   ]
 }
 ```
 
 ```python
-SOUNDS = [{"id": "quack", "label": "Quack"}, {"id": "splash", "label": "Splash"}]
-
-
 def register(api) -> None:
-    def list_sounds(show: bool = False) -> dict:
-        if show:
-            try:
-                api.call_tool("ducky_ui_show", {"target": "settings.tab.appearance", "navigate": "settings.appearance",
-                                                "title": "Sounds", "body": "Open Sounds and pick Quack or Splash for a moment."})
-            except ValueError:
-                pass
-        return {"ok": True, "sounds": SOUNDS}
+    data = api.data
+
+    def sell(card_id: str = "") -> dict:
+        card = data.get(f"card.{card_id}") if card_id else None
+        if not card:
+            return {"ok": False, "error": f"No card {card_id!r}."}
+        try:
+            data.put(f"card.{card_id}", {**card, "sold": True})
+        except PermissionError as exc:
+            return {"ok": False, "error": str(exc)}
+        api.emit_hook("card_shop.sold", {"card": card_id})  # plays the sound the user put on "Card sold"
+        return {"ok": True, "card": card_id}
 
     @api.tool(listener=False)
-    def duck_sounds_list(show: bool = False) -> dict:
-        """List this plugin's sounds; show=true opens Settings → Appearance where they are mapped."""
-        return list_sounds(show)
+    def card_shop_sell(card_id: str = "") -> dict:
+        """Mark a card sold (plays the Card sold sound if the user set one)."""
+        return sell(card_id)
 
-    @api.register_pipeline_node("duck_sounds.list")
-    def node_list(ctx: dict) -> dict:
-        return list_sounds(False)
+    @api.register_pipeline_node("card_shop.sell")
+    def node_sell(ctx: dict) -> dict:
+        return sell(str((ctx.get("config") or {}).get("card_id") or ""))
 ```
 
-`hooks` (`[{"id": "card_shop.sold", "label": "Card sold"}]`) only add names to that
-list; nothing fires them unless a `shell.boot` script (a script in the app window,
-only when asked) runs
-`window.dispatchEvent(new CustomEvent("ducky:hook", { detail: { id: "card_shop.sold" } }))`.
-Sounds are not workflow steps.
+- `api.emit_hook` only fires hooks this plugin declares; it returns
+  `{"ok": False, "error": …}` for any other id.
+- To show the user where to map sounds: `ducky_ui_show` with
+  `navigate: "settings.appearance"`, target `settings.tab.appearance`.
+- Sounds are not workflow steps: a node that does something fires the hook.
 
 ## 4. Walkthroughs (first-run tour)
 
 A tour that starts the first time the plugin is turned on. Each step points at a
-**registered target id** (`ducky_ui_list_targets(route, query)`); a plugin's header
-button has none, so point at the top bar and name the button.
+**registered target id** (`ducky_ui_list_targets(route, query)` lists them). The
+plugin's own header button is `header.button.<button id>` in its walkthrough
+(everywhere else, e.g. `ducky_ui_show`, it is `header.button.<plugin id>.<button id>`);
+its Settings tab is `settings.tab.<tab id>`.
 
 ```json
 "walkthrough": {
@@ -254,8 +262,8 @@ button has none, so point at the top bar and name the button.
   "title": "Card Shop",
   "auto_start": "first_enable",
   "steps": [
-    { "target": "shell.header", "title": "Card Shop is on",
-      "body": "Open it with the Card Shop button in the top bar.", "advance": "next" },
+    { "target": "header.button.main", "title": "Card Shop is on",
+      "body": "Open your shop's cards here.", "advance": "require_click" },
     { "target": "header.automations", "title": "Workflows",
       "body": "Card Shop's nodes and the List shop cards template are in Workflows.", "advance": "next" }
   ]
@@ -264,6 +272,9 @@ button has none, so point at the top bar and name the button.
 
 - `advance`: `next` (a Next button) or `require_click` (waits for the user to click
   the highlighted control).
+- On a narrow window the header buttons fold into a menu, so a header-button step
+  shows only once that menu is open; a first step on `shell.header` (the top bar)
+  always shows.
 - `auto_start`: `first_enable` or `never`.
 - To show something once in a chat instead, use `ducky_ui_show` with `steps`, or
   `ducky_walkthrough_run(steps)`.

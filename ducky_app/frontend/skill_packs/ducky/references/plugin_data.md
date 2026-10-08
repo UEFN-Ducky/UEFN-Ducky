@@ -41,9 +41,10 @@ encrypted on disk, and syncs team copies.
 - The **user** picks, per plugin, whether its data is **Local** (this account on this
   PC) or shared with **one** team: Plugins → the plugin → Data. A plugin never
   decides, never mixes the two, and needs no code for either.
-- `ducky_plugin_data_scope(id)` tells you which copy a plugin uses. Switch it only
-  when the user asks: the switch asks them first, nothing is copied, the plugin's
-  backend restarts and its open panels reload on the other copy.
+- `ducky_plugin_data_scope(id, scope="")`: empty `scope` tells you which copy a plugin
+  uses; `"local"` or a team id switches it. Switch only when the user asks: it asks
+  them first, nothing is copied, open panels are told, the new copy syncs, and the
+  plugin restarts on it with its open panels reloaded.
 - Panels get `plugin_scope_changed` when the scope switches or a sync brings new data:
   re-read your docs. The backend reads the scope fresh on every call.
 - `prefs.*` and `cache.*` follow the scope too: a team copy has its own prefs and cache
@@ -61,8 +62,9 @@ encrypted on disk, and syncs team copies.
   writes fail until access returns, then everything unlocks as it was. After a week
   without access the copy on this PC is deleted (never the server's). A plugin
   published to that team pauses too, and resumes when access returns.
-- Show the user whose data they are looking at: the panel's scope bar does it; in
-  tool results, name the scope when it matters (`scope()["label"]`).
+- Whose data the user is looking at: the panel's scope bar shows it, and the host adds
+  `scope` (`local` or `team <name>`) to every dict a tool of a data-using plugin
+  returns. Say it in your reply when it matters.
 
 ## Sensitive data
 

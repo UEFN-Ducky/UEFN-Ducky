@@ -2084,9 +2084,16 @@ export interface PanelPushEvent {
     | "workflow_step"
     | "workflow_output"
     | "templates_changed"
-    | "starter_plugins_progress";
+    | "starter_plugins_progress"
+    | "plugin_hook"
+    | "appearance_profile_requested";
   provider?: string;
+  /** plugin_hook: the hook id; appearance_profile_requested: the plugin profile id. */
   id?: string;
+  /** plugin_hook / appearance_profile_requested: when the plugin asked (epoch seconds). */
+  at?: number;
+  /** plugin_hook: what the plugin passed along with it. */
+  payload?: Record<string, unknown>;
   phase?: "working" | "ready" | "done" | "error";
   percent?: number | null;
   cancelable?: boolean;

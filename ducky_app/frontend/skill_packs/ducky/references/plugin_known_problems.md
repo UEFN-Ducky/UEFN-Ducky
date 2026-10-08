@@ -1,5 +1,5 @@
 ---
-description: "Known plugin problems and their fixes: scaffold bugs, listener gate, sandbox limits, theme keys, compiled backends, walkthrough targets, hooks"
+description: "Known plugin problems and their fixes: the listener gate, sandbox limits, theme keys, compiled backends, global names, test side effects, tour targets"
 metadata:
   order: 4
   label: "Plugins: known problems"
@@ -15,10 +15,11 @@ Check these before you tell the user a plugin works.
 
 | Problem | Do this |
 |---|---|
-| The scaffold registers panel RPCs as `lambda params=None: …`, but the host calls RPCs with **keyword arguments** (`fn(**params)`), so any call with params fails. | Name the parameters: `api.register_panel_rpc("list", lambda kind="": list_items(kind))`. |
-| Tools without `listener=False` are refused with "UEFN listener offline" whenever the UEFN editor is closed (the scaffold's tools too). | `@api.tool(listener=False)` on every tool that doesn't call `api.listener` or a UEFN tool. |
+| A tool left at the default `listener=True` is refused with "UEFN listener offline" whenever the UEFN editor is closed. | `@api.tool(listener=False)` on every tool that doesn't call `api.listener` or a UEFN tool. |
+| A panel RPC written as `lambda params=None: …` fails: the host calls RPCs with the panel's params as **keyword arguments** (`fn(**params)`). | Name the parameters: `api.register_panel_rpc("list", lambda kind="": list_items(kind))`. |
 | A tool or node that raises on empty input fails `ducky_plugin_test`. | Return `{"ok": False, "error": "…"}` for missing or bad input. |
-| Tool names are global: a name another plugin already uses is refused. | Prefix every tool with the plugin id (`card_shop_list`); hyphens become underscores. |
+| `ducky_plugin_test` calls every tool and node with empty input, and its throwaway copy covers only the plugin's own data: a default that switches the theme, fires a hook, writes project files or calls UEFN really does it. | No acting defaults (`theme: str = ""`), or list the tool in `agent.tools.destructive_tools`. |
+| Tool names, listener command names, hook ids and Verse template ids are global: a name another plugin already uses is refused or collides. | Prefix every one with the plugin id (`card_shop_list`, `card_shop.sold`); hyphens become underscores in Python names. |
 | `from backend import x` / `import backend.x` loads the **app's** package. | Import your own modules relatively: `from . import x`. |
 | Reading your own `.py` (`__file__`, `inspect.getsource`) or loading `.py` by path breaks once the plugin is published (compiled). Validate rejects it. | Keep data in `.json` / `.txt` beside the module or in `assets/`; import modules. |
 | `scripts/`, `deploy/`, `tests/`, `test_*.py`, `*.zip`, `*.bin` never ship. | Keep runtime files elsewhere. |
@@ -29,12 +30,13 @@ Check these before you tell the user a plugin works.
 | Push events reach every panel subscribed to that type. | Prefix event types with your plugin id (`card_shop_changed`). |
 | Workflow nodes pass on only the returned keys that match an output pin id. | Return `{"ok": True, "<pin id>": value, …}` for every declared output. |
 | A secret read with `get_key` is empty until the user saves it. | Return a clear error naming the Settings tab; register `api.register_secret_test`. |
+| Settings `select` options are `{value, label}`, workflow `config_fields` options `{id, label}`; a settings `default` is only what Settings shows until the user changes it. | Use the right shape for each; give every settings read the same fallback. |
 
 ## Panels
 
 | Problem | Do this |
 |---|---|
-| Theme snippets that check `key.startsWith("--")` never apply anything: `theme.get` / `appearance_theme` keys come **without** `--`. | Link the UI kit, or `setProperty("--" + key, value)`. |
+| Theme keys from `theme.get` / `appearance_theme` come **without** `--`; code that checks `key.startsWith("--")` never applies anything. | Link the UI kit, or `setProperty("--" + key, value)`. |
 | `var(--font-family)`, `var(--primary)`, `var(--text-color)` don't exist: validate rejects them. | `var(--font-ui)`, `var(--accent)`, `var(--fg)`; the full list is in `plugin_look`. |
 | The kit tag with an absolute path or the wrong depth leaves the panel unstyled. | `../../_kit/ducky.js` from `ui/<page>.html`, one more `../` per folder. |
 | The iframe is sandboxed without same-origin or modals: `alert`, `confirm`, `prompt`, `localStorage`, cookies and `window.top` navigation fail; POSTs to `/__panel_*` are rejected. | Show messages in the page (`dk-error`, a confirm row); keep state with `prefs.*` / `data.*`; talk to the host with the bridge. |
@@ -48,9 +50,10 @@ Check these before you tell the user a plugin works.
 
 | Problem | Do this |
 |---|---|
-| Walkthrough steps only resolve **registered** target ids; a plugin's header button has none, so a step pointing at it never shows. | Use ids from `ducky_ui_list_targets` (`settings.tab.<Tab>` for your Settings tab, `header.automations`, `header.settings`, `shell.header`) and name the button in the step text. |
-| A plugin can't switch the active Appearance theme, skin or effect (`ducky_settings_set` refuses those keys). | List the themes in a tool and show the user where to pick (`ducky_ui_show`, `settings.tab.appearance`). |
-| Plugin `hooks` only add names to Settings → Sounds; nothing fires them except a `shell.boot` script. | Map `sounds` to the built-in hooks (`tab.changed`, `settings.opened`, `llms.settings`, `model.picker`, `store.opened`, `agent.selected`, `agent.done`, `agent.error`, `verse.errors`), or fire your own from `shell.boot` (only if asked). |
+| Tour and Show me steps only resolve **registered** target ids. | Use ids from `ducky_ui_list_targets`; a plugin header button is `header.button.<plugin id>.<button id>` (`header.button.<button id>` in its own walkthrough), its Settings tab `settings.tab.<tab id>`. |
+| On a narrow window the header buttons fold into a menu, so a step on a plugin header button can't show until that menu is open. | Start the tour on `shell.header` (the top bar) and name the button. |
+| `api.set_appearance_profile` switches only to the plugin's **own** `appearance.profiles`, and replaces whatever the user had picked. | Tell the user you switched it and that Settings → Appearance switches back. |
+| `api.emit_hook` fires only hooks the plugin declares, and plays nothing until the user puts a sound on that hook. | Declare the hook in `contributes.hooks`; show the user Settings → Appearance → Sounds. |
 | `listener/` handlers load only for enabled plugins and only in a running UEFN. | Enable the plugin with UEFN open (Ducky reloads the listener), then call `api.listener`. |
 | A Text to Image backend tool must take `wait` and `output_dir` (and `confirm_spend` when paid) and return `downloaded: [paths]`. | Follow `plugin_examples_app` § Image generators. |
 | The first `ducky_plugin_test` of a new AI plugin stops with `needs_trust`. | Stop and let the user confirm once; then test again. |

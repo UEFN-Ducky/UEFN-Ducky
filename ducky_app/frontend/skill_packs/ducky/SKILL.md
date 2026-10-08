@@ -157,7 +157,8 @@ AppData; search `ducky_find_tools` and reuse tools with `api.call_tool`; an
 `@api.tool()` and a workflow node for every user action; the UI kit and Appearance
 variables only (never color literals); data only through `api.data`; validate, test
 and read errors after every change; share only through the Store
-(`ducky_plugin_build` → `ducky_plugin_publish`). Never git-clone a Store plugin,
+(`ducky_plugin_publish` to a team or public; `ducky_plugin_build` checks the build
+first). Never git-clone a Store plugin,
 never edit the EXE, never `ducky_skills_create_pack` unless they asked for a skill
 pack.
 

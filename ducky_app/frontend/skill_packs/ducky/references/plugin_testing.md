@@ -48,14 +48,18 @@ empty. Don't tell the user it works before that.
 - Opens **each panel**, waits a few seconds and fails it on any panel error. If the app
   window isn't up the panel check is skipped: open Ducky and test again.
 - Fails on backend load errors.
-- Everything runs on a **throwaway copy** of the plugin's data; the user's data is
-  never touched. A call that takes over 30 seconds fails as timed out.
+- Everything runs on a **throwaway copy** of the plugin's data (docs, files, sensitive
+  docs, cache and prefs); the user's data is never touched. A call that takes over
+  30 seconds fails as timed out.
 
 So write tools and nodes that:
 
 - **Never raise on empty or bad input.** Return
   `{"ok": False, "error": "<what to give>"}` instead.
-- Give optional arguments defaults (`kind: str = ""`).
+- Give optional arguments defaults (`kind: str = ""`), but **no default that acts
+  outside the plugin's data**: the throwaway copy covers only the plugin's own data, so
+  a tool that switches the theme, fires a hook, writes project files or calls UEFN must
+  do nothing until it is given a real target (`theme: str = ""` → "Pick a theme").
 - List tools that delete, overwrite many things, spend money or post outside the PC in
   `agent.tools.destructive_tools` (the agent then asks the user first, and tests skip
   them).

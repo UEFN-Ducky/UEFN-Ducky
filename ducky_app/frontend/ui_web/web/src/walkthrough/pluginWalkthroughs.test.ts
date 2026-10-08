@@ -72,6 +72,23 @@ describe("pluginManifestToTour", () => {
     expect(tour?.steps[2]?.advance).toBe("require_click");
     expect(tour?.steps.every((s) => typeof s.onEnter === "function")).toBe(true);
   });
+
+  it("points header.button.<button> at the plugin's own header button", () => {
+    const tour = pluginManifestToTour({
+      id: "card_shop",
+      plugin_id: "card_shop",
+      steps: [
+        { target: "header.button.main", title: "Open Card Shop", body: "" },
+        { target: "header.button.other_plugin.main", title: "Someone else's", body: "" },
+        { target: "header.automations", title: "Workflows", body: "" },
+      ],
+    });
+    expect(tour?.steps.map((s) => s.target)).toEqual([
+      "header.button.card_shop.main",
+      "header.button.other_plugin.main",
+      "header.automations",
+    ]);
+  });
 });
 
 describe("expandGatewayManifest", () => {

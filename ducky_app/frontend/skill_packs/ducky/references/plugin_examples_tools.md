@@ -309,6 +309,7 @@ several people writing at once:
 - One doc per entity, ids that never collide (time-based or random), no shared
   counters or one-big-list docs.
 - `sensitive=True` for anything personal: it stays on this PC and never syncs.
-- Say whose copy changed (`data.scope()["label"]`) in results when it matters.
+- Tool results get `scope` (`local` / `team <name>`) added by the host; `data.scope()`
+  gives the label when a node or panel needs it.
 - Read-only and lost-access copies raise `PermissionError` on writes: return the
   message. Panels re-read on `plugin_scope_changed`.

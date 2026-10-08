@@ -23,7 +23,9 @@ there are no separate subagents.
    `my_group_members`). If that specialist is already seated for this work, follow up
    with `ducky_send_chat_message(conv_id, message)`; don't add a duplicate.
 4. **Add:** `ducky_spawn_chat(ducky=…, message=…, group_id=…)` seats the ducky and sends
-   the first message (it waits for the reply by default), or
+   the first message (it waits for the reply by default). `group_id` is optional:
+   without it the member joins your own group (the one you are in, else one named
+   after this chat). Or
    `ducky_group_invite(group_id, ducky)` to seat without a message.
 5. **Recycle** a member whose context is too long or confused:
    `ducky_recycle_member(conv_id, continue_message=…)` writes a full handoff, removes

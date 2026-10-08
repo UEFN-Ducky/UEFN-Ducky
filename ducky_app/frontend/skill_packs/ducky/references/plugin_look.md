@@ -208,8 +208,9 @@ window.addEventListener("message", (ev) => {
 | `appearance.effects` | `[{ "id", "label", "entry" }]`: an optional visual effect the user turns on. |
 | `appearance.skin` | `[{ "id", "label", "entry", "css"? }]`: a skin layered on the app. |
 
-The user picks the active theme, skin and effect in Settings → Appearance; a plugin
-can't switch them. A theme plugin still ships an `@api.tool()` that lists its themes
-and shows the user where to pick one (`ducky_ui_show`, target
-`settings.tab.appearance`), a workflow node and a bundled skill. See
-`plugin_examples_ui` § Theme.
+A theme plugin switches Appearance to one of its own profiles with
+`api.set_appearance_profile(<profile id>)`, the same as the user picking it in
+Settings → Appearance (that also turns on the plugin's skin and effect, if it has
+them). It can't pick another plugin's theme or the user's own. It still ships an
+`@api.tool()` that lists and applies its themes, a workflow node and a bundled skill.
+See `plugin_examples_ui` § Theme.

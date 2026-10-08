@@ -1,4 +1,5 @@
 import { requestOpenSettings } from "../navigation/openSettingsTab";
+import { pluginHeaderTargetId } from "../workspace/headerVisibilityStorage";
 import { getTour, listTourIds } from "./WalkthroughService";
 import type { PluginWalkthroughManifest, WalkthroughDef } from "./types";
 
@@ -244,17 +245,26 @@ export function listEnabledGatewayTours(): WalkthroughDef[] {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** A plugin tour's `header.button.<button>` is its own header button (`header.button.<plugin>.<button>`). */
+function ownHeaderButtonTarget(target: string, pluginId: string): string {
+  const prefix = "header.button.";
+  const rest = target.slice(prefix.length);
+  if (!pluginId || !target.startsWith(prefix) || !rest || rest.includes(".")) return target;
+  return pluginHeaderTargetId(pluginId, rest);
+}
+
 /** Normalize a contributes.walkthrough row into a host WalkthroughDef. */
 export function pluginManifestToTour(raw: PluginWalkthroughManifest): WalkthroughDef | null {
   const id = String(raw.id || raw.plugin_id || "").trim().toLowerCase();
   if (!id || !Array.isArray(raw.steps) || raw.steps.length === 0) return null;
   const tourId = id.startsWith("plugin.") ? id : `plugin.${id}`;
+  const pluginId = String(raw.plugin_id || id.replace(/^plugin\./, "")).trim().toLowerCase();
   const settingsTab = (raw.settings_tab || "").trim();
   const providerId = inferLlmsWalkthroughProviderId(raw);
   const steps = raw.steps
     .filter((s) => s && typeof s.target === "string" && s.target.trim())
     .map((s, i) => {
-      const target = s.target.trim();
+      const target = ownHeaderButtonTarget(s.target.trim(), pluginId);
       const llmsStep = target.startsWith("settings.llms") || settingsTab === "LLMs";
       return {
         target,
