@@ -899,6 +899,16 @@ class PanelApiStoreMixin:
         sync_active(pid, force=True, on_done=self._scope_synced)
         return out
 
+    def plugin_panel_error(
+        self, plugin_id: str, panel_id: str = "", kind: str = "", message: str = "", stack: str = ""
+    ) -> dict[str, Any]:
+        """An error inside a plugin panel (bridge ``panel.error``): ducky_plugin_errors shows it."""
+        from backend.tools.panel.panel_plugin_check import record_panel_error
+
+        record_panel_error(str(plugin_id or ""), str(panel_id or ""), str(kind or ""), str(message or ""),
+                           str(stack or ""))
+        return {"ok": True}
+
     def plugin_data_open_web(self, plugin_id: str) -> dict[str, Any]:
         """The team's copy of this plugin's data on the website (team → Plugins)."""
         from urllib.parse import quote

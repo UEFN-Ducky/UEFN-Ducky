@@ -27,7 +27,14 @@ class ProtectedFastMCP(FastMCP):
             await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
             effective = (arguments or {}).get("name", name) if name == "ducky_call_tool" else name
             require_self_name(effective, ctx.conv_id)
-        result = await super().call_tool(name, arguments)
+        try:
+            result = await super().call_tool(name, arguments)
+        except Exception as exc:
+            # A desktop plugin's tool failing lands in ducky_plugin_errors (core tools are skipped).
+            from backend.tools.panel.panel_plugin_check import record_tool_error
+
+            record_tool_error(name, exc)
+            raise
         from backend.agent import verify_evidence
 
         try:

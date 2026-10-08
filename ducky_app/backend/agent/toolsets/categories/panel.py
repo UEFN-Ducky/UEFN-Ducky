@@ -98,6 +98,7 @@ EXTENDED_TOOLS = frozenset(
         "ducky_plugin_list",
         "ducky_plugin_read_file",
         "ducky_plugin_reference",
+        "ducky_plugin_errors",
         "ducky_verse_template_list",
         "ducky_verse_template_get",
     }

@@ -344,6 +344,7 @@ _PUBLIC_METHODS = frozenset({
     'plugin_llm_complete',
     'plugin_llm_poll',
     'plugin_llm_start',
+    'plugin_panel_error',
     'plugin_prefs_get_all',
     'plugin_prefs_set',
     'plugin_prefs_set_all',

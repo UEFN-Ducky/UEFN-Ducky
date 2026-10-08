@@ -359,12 +359,19 @@ def test_inclusive_cursor_is_deduped_and_stale_push_adopts_server(who: _Who, sto
 
 
 def test_paused_is_read_only_and_access_lost_locks_then_deletes_the_team_scope(who: _Who, store: FakeStore) -> None:
+    from backend.store.repos import plugin_kv
     from backend.uefn_plugins import team_keys
+    from frontend.ui_web import plugin_host_api as host_api
 
     cards = PluginData("brainrot-tcg")
     ana = _join(store, who, "ana@x.org", "teamT", "Alpha Studio")
     cards.put("card.pip", {"v": 1})
     cards.put_file("assets/pip.png", b"pip")
+    # Cache and prefs follow the team copy too (kept on this PC, never synced).
+    host_api.cache_set("brainrot-tcg", "deck", {"n": 1})
+    host_api.prefs_plugin_set("brainrot-tcg", {"sort": "name"})
+    assert plugin_kv.keys("brainrot-tcg", account=ana, scope="teamT") == ["deck"]
+    assert plugin_kv.keys("brainrot-tcg", account=ana, scope=scopes.PERSONAL) == []
     _sync(store)
     team_dir = scopes.scopes_root(ana) / "teamT"
     assert team_dir.is_dir()
@@ -386,12 +393,17 @@ def test_paused_is_read_only_and_access_lost_locks_then_deletes_the_team_scope(w
     assert cards.get("card.pip") is None and cards.keys() == [] and cards.get_file("assets/pip.png") is None
     with pytest.raises(scopes.ReadOnlyScope, match="no longer have access"):
         cards.put("card.pip", {"v": 3})
+    assert host_api.cache_get("brainrot-tcg", "deck") == {} and host_api.prefs_plugin_get("brainrot-tcg") == {}
+    with pytest.raises(scopes.ReadOnlyScope):
+        host_api.cache_set("brainrot-tcg", "deck", {"n": 2})
     assert team_dir.is_dir() and repo.rows(ana, "teamT", "brainrot-tcg", "doc")
     assert team_sync.scope_status("brainrot-tcg")["deleteAt"] > 0
 
     # Access back: the key is fetched again, the data unlocks and sync resumes.
     store.members["teamT"].add(ana)
     assert _sync(store)["state"] == "ok" and cards.get("card.pip") == {"v": 1}
+    assert host_api.cache_get("brainrot-tcg", "deck") == {"n": 1}
+    assert host_api.prefs_plugin_get("brainrot-tcg") == {"sort": "name"}
     assert not scopes.lost_since(ana, "teamT")
 
     # A week without access: the copy on this PC goes (the server's stays).
@@ -401,8 +413,44 @@ def test_paused_is_read_only_and_access_lost_locks_then_deletes_the_team_scope(w
     scopes.mark_lost(ana, "teamT", since=time.time() - scopes.LOST_KEEP_S - 60)
     assert scopes.active_scope("brainrot-tcg")["kind"] == "personal"  # the plugin's link went with it
     assert not team_dir.exists() and repo.rows(ana, "teamT", "brainrot-tcg", "doc") == []
+    assert plugin_kv.keys("brainrot-tcg", account=ana, scope="teamT") == []
+    assert plugin_kv.all_prefs(account=ana, scope="teamT") == {}
     assert repo.links(ana) == {}
     assert ("teamT", "doc", "brainrot-tcg", "card.pip") in store.rows
+
+
+def test_a_plugin_test_runs_in_a_sandbox_that_never_touches_the_users_data(who: _Who) -> None:
+    from frontend.ui_web import plugin_host_api as host_api
+
+    import threading
+
+    who.be("ana@x.org")
+    cards = PluginData("brainrot-tcg")
+    other = PluginData("other-plugin")
+    cards.put("card.pip", {"v": 1})
+    cards.put("token", {"t": "real"}, sensitive=True)
+    host_api.cache_set("brainrot-tcg", "deck", {"n": 1})
+    with scopes.sandbox("brainrot-tcg") as box:
+        assert box["id"].startswith(scopes.SANDBOX_PREFIX)
+        assert scopes.active_scope("brainrot-tcg")["id"] == box["id"]
+        assert cards.get("card.pip") is None and host_api.cache_get("brainrot-tcg", "deck") == {}
+        assert cards.get("token", sensitive=True) is None
+        cards.put("card.junk", {"v": 0})
+        cards.put("token", {"t": "junk"}, sensitive=True)
+        host_api.cache_set("brainrot-tcg", "deck", {"n": 0})
+        # A thread the plugin starts itself lands in the sandbox too; other plugins don't.
+        worker = threading.Thread(target=lambda: cards.put("card.thread", {"v": 0}))
+        worker.start()
+        worker.join()
+        other.put("note", {"v": 1})
+        assert scopes.active_scope("other-plugin")["id"] == scopes.PERSONAL
+        with pytest.raises(ValueError, match="already running"):
+            scopes.sandbox_begin("brainrot-tcg")
+    assert cards.keys() == ["card.pip"]  # sensitive docs are never listed
+    assert cards.get("card.pip") == {"v": 1} and cards.get("card.thread") is None
+    assert cards.get("token", sensitive=True) == {"t": "real"}
+    assert host_api.cache_get("brainrot-tcg", "deck") == {"n": 1} and other.get("note") == {"v": 1}
+    assert repo.rows(scopes.account_id(), box["id"], "brainrot-tcg", "doc") == []
 
 
 def test_team_data_leaves_the_pc_encrypted_with_its_teams_own_key(who: _Who, store: FakeStore) -> None:

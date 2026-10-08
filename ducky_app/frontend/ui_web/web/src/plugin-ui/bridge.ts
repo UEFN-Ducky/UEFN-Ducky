@@ -360,6 +360,19 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
   }),
   /** Appearance CSS custom properties (no leading --). Live updates: appearance_theme push. */
   "theme.get": () => ({ vars: getPluginThemeVars() }),
+  /** Sent by the error reporter the host puts in every panel page: uncaught errors,
+   * rejected promises and console.error, kept per plugin for ducky_plugin_errors. */
+  "panel.error": async (ctx, params) => {
+    const text = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+    await getApi()?.plugin_panel_error?.(
+      ctx.pluginId,
+      ctx.panelId,
+      text(params.kind, 16),
+      text(params.message, 1000),
+      text(params.stack, 4000),
+    );
+    return { ok: true };
+  },
   // Native WebView2 browser pane (backend browser_overlay). Real Chromium pinned
   // over the panel's reported rect — no X-Frame-Options limits, and no pywebview
   // JS bridge is injected into the visited page.

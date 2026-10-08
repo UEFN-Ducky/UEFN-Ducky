@@ -125,13 +125,44 @@ def _minimal_manifest(pid: str, label: str, description: str) -> dict[str, Any]:
                         "id": f"{pid}-run",
                         "label": f"Run {clean_label}",
                         "description": f"Chat start → Agent → {clean_label} → Finish.",
-                        "graph": {"nodes": [], "edges": []},
+                        "graph": {
+                            "nodes": [
+                                {"id": "s", "type": "start.chat", "x": 0, "y": 0, "config": {}},
+                                {"id": "a", "type": "pipeline.agent", "x": 160, "y": 0, "config": {}},
+                                {"id": "n", "type": f"{pid}.run", "x": 320, "y": 0, "config": {}},
+                                {"id": "f", "type": "pipeline.finish", "x": 480, "y": 0, "config": {}},
+                            ],
+                            "edges": [
+                                {"source": "s", "target": "a", "kind": "main"},
+                                {"source": "a", "target": "n", "kind": "main"},
+                                {"source": "n", "target": "f", "kind": "main"},
+                            ],
+                        },
                     }
                 ],
             },
         },
         "backend": {"entry": "backend", "register": "register"},
     }
+
+
+def _skill_stub(pid: str, label: str) -> str:
+    fn = pid.replace("-", "_")
+    safe = label.replace('"', "'")
+    return (
+        "---\n"
+        f"name: {pid}\n"
+        f'description: "{safe}: list and update its records with the {fn}_* tools."\n'
+        "---\n"
+        "\n"
+        f"# {label}\n"
+        "\n"
+        f"- `{fn}_list(kind?)` lists the records.\n"
+        f"- `{fn}_upsert(item_id, fields)` creates or updates one.\n"
+        f"- Workflow node `{pid}.run` does what `{fn}_list` does.\n"
+        "\n"
+        "Describe each tool here as you add it, and when a chat should use it.\n"
+    )
 
 
 def _register_stub(plugin_id: str) -> str:
@@ -210,6 +241,9 @@ def scaffold_ai_plugin(plugin_id: str, label: str = "", description: str = "") -
     backend = root / "backend"
     backend.mkdir(exist_ok=True)
     (backend / "__init__.py").write_text(_register_stub(pid), encoding="utf-8")
+    skill = root / "skills" / pid
+    skill.mkdir(parents=True, exist_ok=True)
+    (skill / "SKILL.md").write_text(_skill_stub(pid, str(manifest["label"])), encoding="utf-8")
     return {"ok": True, "id": pid, "path": str(root), "manifest": manifest}
 
 
@@ -386,6 +420,10 @@ def validate_ai_plugin(plugin_id: str) -> dict[str, Any]:
     except ValueError as exc:
         errors.append(str(exc))
         skill_ids = []
+    from backend.uefn_plugins.plugin_lint import lint_draft
+
+    # The ai_plugins reference rules, each with how to fix it.
+    errors.extend(lint_draft(root, manifest, pid))
     if errors:
         return {"ok": False, "id": pid, "errors": errors}
     return {
@@ -429,10 +467,31 @@ def install_ai_plugin(plugin_id: str) -> dict[str, Any]:
         raw = _zip_draft(root)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    dropped = _drop_mcp_tools(pid)
     result = import_plugin_from_bytes(raw, source="ai", replace=True)
     if result.get("ok"):
         _notify_plugins()
+    elif dropped:
+        # Nothing was replaced: the plugin that is still installed gets its tools back.
+        from backend.uefn_plugins.host import is_plugin_enabled, reload_single_plugin
+
+        if is_plugin_enabled(pid):
+            reload_single_plugin(pid)
     return result
+
+
+def _drop_mcp_tools(pid: str) -> list[str]:
+    """Take ``pid``'s tools off the MCP server before a reinstall. ``api.tool`` keeps a
+    name that is already on the server across a reload (and with it the old code), so
+    without this a reinstalled draft would go on running its previous tools."""
+    from backend.uefn_plugins.host import get_contributions, plugin_for_tool
+
+    tools = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+    if not isinstance(tools, dict):
+        return []
+    names = ((get_contributions().get("agent_tools") or {}).get(pid) or {}).get("tools") or []
+    dropped = [n for n in names if plugin_for_tool(n) == pid and tools.pop(n, None) is not None]
+    return dropped
 
 
 def delete_ai_plugin_draft(plugin_id: str, *, confirm: bool = False) -> dict[str, Any]:
@@ -500,7 +559,11 @@ def ducky_plugin_read_file(id: str, path: str, pretty: bool = False) -> str:
 
 @mcp.tool()
 def ducky_plugin_validate(id: str, pretty: bool = False) -> str:
-    """Validate an AI plugin draft (plugin.json, py_compile backend, bundled skills)."""
+    """Validate an AI plugin draft: plugin.json, py_compile backend, bundled skills, and
+    the reference rules (an MCP tool per panel RPC, a handled workflow node + template,
+    skills/<id>/SKILL.md, Appearance variables only and no color literals in UI files,
+    :focus-visible styles for panels, no reading .py files by path). Each error says
+    how to fix it; then ducky_plugin_install, and ducky_plugin_test to run it."""
     return tool_json(validate_ai_plugin(id), pretty=pretty)
 
 

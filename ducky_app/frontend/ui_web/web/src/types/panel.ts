@@ -3825,6 +3825,8 @@ export interface PanelApi {
   /** Calls the Store hub — only when a picker opens. */
   plugin_scope_choices?(): Promise<{ ok?: boolean; choices?: PluginScopeChoice[]; error?: string }>;
   plugin_scope_set?(plugin_id: string, scope_id: string): Promise<PluginScopeStatus>;
+  /** An error inside a plugin panel (bridge `panel.error`), for ducky_plugin_errors. */
+  plugin_panel_error?(plugin_id: string, panel_id: string, kind: string, message: string, stack: string): Promise<{ ok?: boolean }>;
   plugin_scope_sync?(plugin_id: string, force?: boolean): Promise<{ ok?: boolean; started?: boolean; error?: string }>;
   /** One way, on request: the plugin's Local data into one team's copy (the team's items are kept). */
   plugin_data_copy_to_team?(plugin_id: string, team_id: string): Promise<{ ok?: boolean; copied?: number; kept?: number; error?: string }>;

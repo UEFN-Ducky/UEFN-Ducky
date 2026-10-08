@@ -25,14 +25,19 @@ across chats. Tools write the files; you never open those folders.
    Install-from-file, never `cp` into AppData, never edit `ducky_app/` / the EXE
    to add a tab. That Store-repo path is for humans shipping a git plugin — not
    chat. Never `ducky_skills_create_pack` unless they asked for a **skill pack**.
-5. **Tabs: Appearance CSS vars only.** Style with `var(--bg)`, `var(--fg)`,
-   `var(--fg-dim)`, `var(--muted)`, `var(--border)`, `var(--card)`,
-   `var(--accent)`, `var(--accent-hover)`, `var(--btn-bg)`, `var(--red)`,
-   `var(--green)`, `var(--font-family)`, … — apply the host snapshot on load
-   (`theme.get`) and on `appearance_theme`. **Never** hardcode `#hex`, `rgb()`,
-   or named theme colors. Exception: they specified a design/colors — use those
-   tokens only, keep Ducky vars for the rest. **Always mention** the Appearance
-   default when you start the UI or when you depart from it.
+5. **Tabs: the Ducky UI kit + Appearance CSS vars only.** One tag in each panel
+   page, `<script src="../../_kit/ducky.js"></script>` (one more `../` per folder
+   deeper than `ui/`): it links `ducky.css` (`dk-btn`, `dk-btn--primary`,
+   `dk-input`, `dk-tabs`, `dk-card`, `dk-table`, `dk-badge`, `dk-empty`,
+   `dk-loading`, `dk-error`, focus ring) and applies the user's theme live. Your
+   own CSS uses `var(--bg)`, `var(--fg)`, `var(--fg-dim)`, `var(--muted)`,
+   `var(--border)`, `var(--card)`, `var(--accent)`, `var(--accent-hover)`,
+   `var(--btn-bg)`, `var(--red)`, `var(--green)`, `var(--font-ui)`, … — only
+   variables the app sets (or ones you define). **Never** `#hex`, `rgb()`,
+   `hsl()` or named colors: `ducky_plugin_validate` rejects them. If they specified
+   colors, ship those as an Appearance theme (`appearance.css` /
+   `appearance.profiles`) and keep the panel on the variables. **Always mention**
+   the Appearance default when you start the UI or when you depart from it.
 6. **Always a workflow node** (themes too). `contributes.automations.nodes`
    + `@api.register_pipeline_node` (alias of `register_automation_node`) that
    calls the **same** functions as `@api.tool()`. Ship `automations.templates`
@@ -56,21 +61,30 @@ across chats. Tools write the files; you never open those folders.
 8. **Mutators record changeset** (`_ducky` or `api.changeset.record`, slot
    `{plugin_id}://{kind}/{id}/{facet}`).
 9. **Tab UX (if they asked for a tab):** #5 plus `prefs.get` / `prefs.set`;
-   empty + error states; `button:focus-visible { outline: 2px solid
-   var(--border-focus) }`. Any toggle → `settings.tabs` + `settings.sections`
-   (native Ducky settings, not a custom form). First-enable →
-   `contributes.walkthrough`.
+   empty + loading + error states (`dk-empty`, `dk-loading`, `dk-error`); a
+   visible focus (the kit's, or `button:focus-visible { outline: 2px solid
+   var(--border-focus) }`). Pause heavy work while hidden (`panel.visibility`).
+   Any toggle → `settings.tabs` + `settings.sections` (native Ducky settings, not
+   a custom form). First-enable → `contributes.walkthrough`.
+10. **Never read `.py` files** (your own source, `inspect.getsource`, `open(…
+   ".py")`, `runpy` / `spec_from_file_location`): installed plugins can be
+   compiled and the files are gone. Import modules; keep data in `.json`.
 
 ### Path (no forks)
 
 1. `ducky_plugin_list` — reuse an existing draft/id, or scaffold a new one
 2. `ducky_plugin_scaffold(id, label, description)` if needed
 3. `ducky_plugin_write_file` until the files below exist
-4. `ducky_plugin_validate(id)`
+4. `ducky_plugin_validate(id)` — every error says how to fix it
 5. `ducky_plugin_install(id)`
 6. `ducky_store_set_enabled(id, true)` — if `needs_trust`, **stop** (user confirms
    once). Reinstall reloads; do not send them hunting Store for updates.
-7. Iterate: edit the **draft** → validate → install again
+7. `ducky_plugin_test(id)` — reinstalls, calls each tool with sample input, runs
+   each node, opens each panel and checks the UI files, all on a throwaway copy of
+   the plugin's data. `needs_trust` → **stop** until the user confirms once.
+   `ducky_plugin_errors(id, since)` lists load errors, panel errors and crashes,
+   tool exceptions and node errors.
+8. Iterate: edit the **draft** → validate → test again
 
 Uninstall: `ducky_store_remove(id, confirm=true)`.
 Delete draft only: `ducky_plugin_delete_draft(id, confirm=true)`.
@@ -256,35 +270,61 @@ def register(api) -> None:
 
 Rename `my_game_*` / intents to the domain. Add get if records are large.
 
-**`ui/index.html`** (only if they asked for a tab) — Appearance vars + prefs + RPC:
+**`ui/index.html`** (only if they asked for a tab) — the UI kit + prefs + RPC:
 
 ```html
-<style>
-  body { margin: 0; color: var(--fg); background: var(--bg); font-family: var(--font-family); }
-  button { background: var(--btn-bg); color: var(--fg); border: 1px solid var(--border); }
-  button.primary { background: var(--accent); color: var(--fg-inverse); }
-  button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
-  .card { background: var(--card); border: 1px solid var(--border); }
-  .muted { color: var(--muted); }
-  .error { color: var(--red); border: 1px solid var(--red); }
-</style>
-<script>
-function theme(vars) {
-  for (const [k, v] of Object.entries(vars || {})) {
-    if (k.startsWith("--") && typeof v === "string")
-      document.documentElement.style.setProperty(k, v);
-  }
-}
-window.addEventListener("message", (e) => {
-  if (e.data?.event?.type === "appearance_theme") theme(e.data.event.vars);
-});
-parent.postMessage({ channel: "uefn-plugin-ui", id: "theme", method: "theme.get" }, "*");
-parent.postMessage({ channel: "uefn-plugin-ui", id: "prefs", method: "prefs.get" }, "*");
-parent.postMessage({ channel: "uefn-plugin-ui", id, method: "plugin.call",
-  params: { method: "list", params: { kind: "" } } }, "*");
-// empty: show .muted "No items yet."  error: show .error from plugin.call
-</script>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <!-- The Ducky UI kit: ducky.css + the user's theme, live. -->
+  <script src="../../_kit/ducky.js"></script>
+  <style>
+    .list { display: grid; gap: 8px; }
+  </style>
+</head>
+<body class="dk-page">
+  <div class="dk-row">
+    <button class="dk-btn dk-btn--primary" id="add">Add</button>
+    <button class="dk-btn dk-btn--ghost" id="refresh">Refresh</button>
+  </div>
+  <div id="view" class="list"><div class="dk-loading">Loading…</div></div>
+  <script>
+    const CHANNEL = "uefn-plugin-ui";
+    function call(method, params = {}) {
+      const id = crypto.randomUUID();
+      return new Promise((resolve, reject) => {
+        function onMsg(ev) {
+          const d = ev.data;
+          if (!d || d.channel !== CHANNEL || d.id !== id) return;
+          window.removeEventListener("message", onMsg);
+          d.ok ? resolve(d.result) : reject(new Error(d.error || "bridge error"));
+        }
+        window.addEventListener("message", onMsg);
+        parent.postMessage({ channel: CHANNEL, id, method, params }, "*");
+      });
+    }
+    async function load() {
+      const view = document.getElementById("view");
+      try {
+        const out = await call("plugin.call", { method: "list", params: { kind: "" } });
+        view.innerHTML = out.items?.length
+          ? out.items.map((i) => `<div class="dk-card">${i.id}</div>`).join("")
+          : '<div class="dk-empty"><div class="dk-empty__title">No items yet</div></div>';
+      } catch (err) {
+        view.innerHTML = `<div class="dk-error">${err.message}</div>`;
+      }
+    }
+    document.getElementById("refresh").onclick = load;
+    load();
+  </script>
+</body>
+</html>
 ```
+
+Theme vars by hand instead of the kit: `theme.get` / `appearance_theme` give
+`{ vars }` with keys **without** `--`; set each with
+`document.documentElement.style.setProperty("--" + key, value)`.
 
 **`skills/<id>/SKILL.md`** — required inside this plugin so later chats know the
 new tools. Not a separate `ducky_skills_*` pack.

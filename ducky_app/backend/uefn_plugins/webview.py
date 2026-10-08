@@ -22,6 +22,9 @@ PLUGIN_UI_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Route: /plugin-ui/_kit/<file>: the Ducky plugin UI kit (ui_kit.py), shared by every plugin.
+PLUGIN_UI_KIT_ROUTE_RE = re.compile(r"^plugin-ui/_kit/([a-z0-9._-]+)$", re.IGNORECASE)
+
 # Route: /user-sounds/<filename>
 USER_SOUNDS_ROUTE_RE = re.compile(
     r"^user-sounds/([^/\\]+)$",
@@ -158,8 +161,44 @@ def send_plugin_ui_error(handler: Any, code: int) -> None:
     handler.end_headers()
 
 
+_HTML_HEAD_RE = re.compile(rb"<head\b[^>]*>|<html\b[^>]*>|<!doctype\b[^>]*>", re.IGNORECASE)
+
+
+def with_panel_error_script(html: bytes) -> bytes:
+    """``html`` with the panel error reporter (``ui_kit.PANEL_ERROR_SCRIPT``) first:
+    right after ``<head>`` (else ``<html>``, else the doctype, so the page never drops
+    into quirks mode), before any of the plugin's own scripts run."""
+    from backend.uefn_plugins.ui_kit import PANEL_ERROR_SCRIPT
+
+    found: dict[bytes, re.Match[bytes]] = {}
+    for m in _HTML_HEAD_RE.finditer(html[:8192]):
+        found.setdefault(m.group(0)[:5].lower(), m)
+    at = next((found[tag] for tag in (b"<head", b"<html", b"<!doc") if tag in found), None)
+    cut = at.end() if at is not None else 0
+    return html[:cut] + PANEL_ERROR_SCRIPT.encode("utf-8") + html[cut:]
+
+
+def try_serve_plugin_ui_kit(handler: Any, rel_path: str) -> bool:
+    """Serve ``/plugin-ui/_kit/<file>`` (ducky.css, ducky.js). Returns True when handled."""
+    match = PLUGIN_UI_KIT_ROUTE_RE.match(rel_path)
+    if not match:
+        return False
+    from backend.uefn_plugins.ui_kit import FILES
+
+    found = FILES.get(match.group(1).lower())
+    if found is None:
+        send_plugin_ui_error(handler, 404)
+        return True
+    text, mime = found
+    _send_plugin_ui_bytes(handler, text.encode("utf-8"), mime)
+    return True
+
+
 def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
-    """Serve ``/plugin-ui/<id>/...`` if ``rel_path`` matches. Returns True when handled."""
+    """Serve ``/plugin-ui/<id>/...`` (or the shared UI kit) if ``rel_path`` matches.
+    Returns True when handled. HTML pages get the panel error reporter first."""
+    if try_serve_plugin_ui_kit(handler, rel_path):
+        return True
     match = PLUGIN_UI_ROUTE_RE.match(rel_path)
     if not match:
         return False
@@ -176,6 +215,13 @@ def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
         return True
 
     mime = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+    if mime.split(";", 1)[0].strip().lower() == "text/html":
+        data = with_panel_error_script(data)
+    _send_plugin_ui_bytes(handler, data, mime)
+    return True
+
+
+def _send_plugin_ui_bytes(handler: Any, data: bytes, mime: str) -> None:
     # Opaque-origin iframes need CORS to load sibling assets if they ever use fetch;
     # for classic <script src> / <link> same-document loads this is unused but harmless.
     handler.send_response(200)
@@ -191,7 +237,6 @@ def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.end_headers()
     handler.wfile.write(data)
-    return True
 
 
 def try_serve_user_sound(handler: Any, rel_path: str) -> bool:
