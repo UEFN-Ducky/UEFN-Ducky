@@ -84,13 +84,38 @@ path: read them with `files.get`.
   two people editing different cards must not overwrite each other.
 - Doc keys `[a-z0-9._-]` ≤ 128; file paths `[a-z0-9._/-]` ≤ 256, no `..`, no
   leading dots.
-- A shared scope can be read-only; writes then fail with a clear error.
+- A shared scope can be read-only; writes then fail with a clear error. When the
+  user loses access to the team, its copy is locked: reads come back empty and
+  writes fail until access returns (a week later the copy leaves the PC).
 - When the scope changes or a sync brings new data, the host pushes
   `{ channel, event: { type: "plugin_scope_changed", scope } }`: re-read your docs.
+- Switching the plugin between Local and a team restarts its backend and reloads
+  its open panels on the new copy; nothing of the old copy is carried over.
 
 The host also pushes `{ channel, event: { type: "appearance_theme", vars } }` on iframe
 load and whenever Appearance changes. Prefer `var(--bg)`, `var(--fg)`, `var(--accent)`,
 `var(--card)`, … — never hardcode theme colors in plugin HTML.
+
+### Visibility
+
+A plugin tab stays mounted (hidden) after you switch to another tab, so the panel
+keeps its state instead of restarting; it is released when the tab closes or moves
+to another window. The host pushes
+`{ channel, event: { type: "panel.visibility", visible } }` on every show and hide,
+and on each load. Pause heavy work (animation loops, polling, audio, video) while
+`visible` is false; the iframe's own `document.visibilityState` does not change when
+its tab is hidden.
+
+```js
+window.addEventListener("message", (ev) => {
+  const e = ev.data?.channel === "uefn-plugin-ui" ? ev.data.event : null;
+  if (e?.type === "panel.visibility") e.visible ? resume() : pause();
+});
+```
+
+Floating (torn-off) windows are separate pages: theme changes, `plugin_scope_changed`
+and plugin changes reach panels there too, and a tab moved between windows keeps
+one live copy (the window it left releases its panel).
 
 To add a method: one entry in `bridge.ts` → `BRIDGE_HANDLERS`.
 

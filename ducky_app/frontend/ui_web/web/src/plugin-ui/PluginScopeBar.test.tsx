@@ -34,7 +34,7 @@ describe("plugin scope bar", () => {
 
   it("shows whose data it is, syncs the team, and confirms before switching", async () => {
     api.plugin_scope_status.mockResolvedValue({
-      ok: true, visible: true, email: "ana@x.org", canChange: true, members: 4, state: "ok", pending: 0,
+      ok: true, visible: true, pluginLabel: "BrainRot TCG", email: "ana@x.org", canChange: true, members: 4, state: "ok", pending: 0,
       syncedAt: Date.now() / 1000 - 5, usage: { usedBytes: 34 * 1024 ** 2, limitBytes: 5 * 1024 ** 3 },
       scope: { kind: "team", label: "Alpha Studio", teamId: "t1", readOnly: false },
     });
@@ -44,7 +44,7 @@ describe("plugin scope bar", () => {
     ] });
     api.plugin_scope_set.mockResolvedValue({ ok: true });
     bar();
-    expect(await screen.findByText("TEAM · Alpha Studio")).toBeTruthy();
+    expect((await screen.findByText("Alpha Studio")).className).toContain("plugin-scope-bar__badge--team");
     expect(screen.getByText("shared with 4 members")).toBeTruthy();
     expect(screen.getByText("34 MB of 5 GB")).toBeTruthy();
     await waitFor(() => expect(api.plugin_scope_sync).toHaveBeenCalledWith("brainrot-tcg", false));
@@ -52,7 +52,8 @@ describe("plugin scope bar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change ▾" }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Local" }));
-    expect(await screen.findByText("You'll see your Local copy. Alpha Studio's copy stays separate.")).toBeTruthy();
+    expect(await screen.findByText("Switch BrainRot TCG to Local data?")).toBeTruthy();
+    expect(screen.getByText("Nothing is copied. BrainRot TCG restarts with its Local data.")).toBeTruthy();
     expect(api.plugin_scope_set).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /^Switch/ }));
     await waitFor(() => expect(api.plugin_scope_set).toHaveBeenCalledWith("brainrot-tcg", "personal"));

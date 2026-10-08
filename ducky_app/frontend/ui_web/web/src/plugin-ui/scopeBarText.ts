@@ -44,8 +44,22 @@ export function syncText(status: PluginScopeStatus, nowMs: number): string {
   return waiting ? `${synced} · ${waiting}` : synced;
 }
 
-export function switchMessage(fromLabel: string, to: { kind: string; label: string }): string {
-  return to.kind === "team"
-    ? `You'll see ${to.label}'s copy. Your ${fromLabel} copy stays separate.`
-    : `You'll see your Local copy. ${fromLabel}'s copy stays separate.`;
+/** A team copy whose access was lost: locked here, and when it leaves this PC. */
+export function lostText(team: string, deleteAt?: number | null, locale?: string): string {
+  const when = deleteAt
+    ? new Date(deleteAt * 1000).toLocaleDateString(locale, { month: "long", day: "numeric" })
+    : "";
+  return when
+    ? `You no longer have access to ${team}. Its data here is locked and leaves this PC on ${when} unless access comes back.`
+    : `You no longer have access to ${team}. Its data here is locked until access comes back.`;
+}
+
+/** The question before a plugin's data switches: nothing is copied, and the plugin
+ * restarts on the other copy. */
+export function switchConfirm(plugin: string, to: { kind: string; label: string }): { title: string; message: string } {
+  const team = to.kind === "team";
+  return {
+    title: `Switch ${plugin} to ${team ? to.label : "Local"} data?`,
+    message: `Nothing is copied. ${plugin} restarts with ${team ? `${to.label}'s` : "its Local"} data.`,
+  };
 }

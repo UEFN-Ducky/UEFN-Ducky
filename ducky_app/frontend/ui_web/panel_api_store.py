@@ -844,16 +844,36 @@ class PanelApiStoreMixin:
             return {"ok": False, "choices": [], "error": str(exc)}
 
     def plugin_scope_set(self, plugin_id: str, scope_id: str) -> dict[str, Any]:
-        """Keep a plugin's data in Local or one team. Nothing moves; the plugin shows that copy."""
+        """Keep a plugin's data in Local or one team. Nothing moves: the plugin restarts
+        on that scope's own copy, then its open panels reload (``switched``)."""
+        import threading
+
+        from backend.uefn_plugins.scopes import active_scope
         from backend.uefn_plugins.team_sync import link_scope, sync_active
 
         pid = str(plugin_id or "")
         try:
+            before = active_scope(pid)["id"]
             out = link_scope(pid, str(scope_id or ""))
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
         self._push_panel({"type": "plugin_scope_changed", "plugins": [pid]})
         sync_active(pid, force=True, on_done=self._scope_synced)
+        if out.get("scope", {}).get("teamId", "") == ("" if before == "personal" else before):
+            return out  # same copy as before: nothing to restart
+
+        def _restart() -> None:
+            # Backend state (caches, threads, loaded docs) belongs to the old copy:
+            # unload and register again, never a full plugin reload.
+            try:
+                from backend.uefn_plugins.host import reload_single_plugin
+
+                reload_single_plugin(pid)
+            except Exception:
+                pass
+            self._push_panel({"type": "plugin_scope_changed", "plugins": [pid], "switched": True})
+
+        threading.Thread(target=_restart, name="plugin-scope-restart", daemon=True).start()
         return out
 
     def plugin_scope_sync(self, plugin_id: str, force: bool = False) -> dict[str, Any]:

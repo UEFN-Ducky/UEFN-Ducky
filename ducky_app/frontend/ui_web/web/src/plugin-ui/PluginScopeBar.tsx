@@ -4,7 +4,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import type { PluginScopeChoice, PluginScopeStatus } from "../types/panel";
 import { setVisibleInterval } from "../utils/visibleInterval";
-import { storageLine, switchMessage, syncText } from "./scopeBarText";
+import { lostText, storageLine, switchConfirm, syncText } from "./scopeBarText";
 
 /** Team pulls: on open, on focus, and each minute while a team-scoped panel is open.
  * The host also caps it at one call per team per minute. */
@@ -17,6 +17,8 @@ type Props = {
   pluginId: string;
   /** The plugin's data or scope changed: the pane tells the iframe to re-read. */
   onScopeChanged: (status: PluginScopeStatus) => void;
+  /** False while the tab is kept but hidden: no minute sync for a panel nobody sees. */
+  active?: boolean;
 };
 
 /** Whose data: account + scope. Any change means the plugin must re-read. */
@@ -28,7 +30,7 @@ const scopeKey = (s: PluginScopeStatus | null) =>
  * plugin can't hide or restyle it. Renders nothing for accounts without the Teams
  * beta (rule 13: normal members see no change).
  */
-export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
+export function PluginScopeBar({ pluginId, onScopeChanged, active = true }: Props) {
   const { confirm } = useConfirmModal();
   const [status, setStatus] = useState<PluginScopeStatus | null>(null);
   const [menu, setMenu] = useState<PluginScopeChoice[] | null>(null);
@@ -70,7 +72,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
 
   const teamId = status?.visible && status.scope?.kind === "team" ? status.scope.teamId : "";
   useEffect(() => {
-    if (!teamId) return;
+    if (!teamId || !active) return;
     const sync = () => void getApi()?.plugin_scope_sync?.(pluginId, false);
     sync();
     window.addEventListener("focus", sync);
@@ -82,7 +84,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
       window.removeEventListener("focus", sync);
       stop();
     };
-  }, [teamId, pluginId]);
+  }, [teamId, pluginId, active]);
 
   if (!status?.visible || !status.scope) return null;
   const scope = status.scope;
@@ -105,11 +107,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
   const choose = async (choice: PluginScopeChoice) => {
     setMenuOpen(false);
     if (choice.id === current) return;
-    const ok = await confirm({
-      title: `Show ${choice.kind === "team" ? choice.label : "Local"} data?`,
-      message: switchMessage(scope.label, choice),
-      confirmLabel: "Switch",
-    });
+    const ok = await confirm({ ...switchConfirm(status.pluginLabel || pluginId, choice), confirmLabel: "Switch" });
     if (ok !== true) return;
     const next = await getApi()?.plugin_scope_set?.(pluginId, choice.id);
     if (next?.ok === false && next.error) {
@@ -121,6 +119,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
 
   const waiting = team && status.state === "waiting";
   const locked = status.state === "locked";
+  const lost = team && status.state === "lost";
   const variant = team ? (scope.readOnly && !waiting && !locked ? "paused" : "team") : "personal";
   return (
     <div
@@ -129,13 +128,20 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
       aria-label={team ? `Plugin data: team ${scope.label}` : "Plugin data: local"}
       title={DATA_AT_REST}
     >
-      <span className="plugin-scope-bar__pill">{team ? `TEAM · ${scope.label}` : "LOCAL"}</span>
+      <span
+        className={`plugin-scope-bar__badge plugin-scope-bar__badge--${team ? "team" : "local"}`}
+        title={team ? `Team data: ${scope.label}` : "Local data: only on this PC"}
+      >
+        {team ? scope.label : "Local"}
+      </span>
       {locked ? (
         <span className="plugin-scope-bar__text">
           Waiting for your account&apos;s data key. Read-only until you&apos;re back online.
         </span>
       ) : waiting ? (
         <span className="plugin-scope-bar__text">Waiting for team data. Read-only until it arrives.</span>
+      ) : lost ? (
+        <span className="plugin-scope-bar__text">{lostText(scope.label, status.deleteAt)}</span>
       ) : team && scope.readOnly ? (
         <>
           <span className="plugin-scope-bar__text">Team Private paused. Read-only.</span>

@@ -1745,7 +1745,8 @@ html.window-maximized .window-resize-grip {
   flex-direction: column;
 }
 
-.editor-chat-tab {
+.editor-chat-tab,
+.editor-plugin-tab {
   display: flex;
   flex: 1 1 0%;
   min-height: 0;
@@ -1753,7 +1754,8 @@ html.window-maximized .window-resize-grip {
   flex-direction: column;
 }
 
-.editor-chat-tab[hidden] {
+.editor-chat-tab[hidden],
+.editor-plugin-tab[hidden] {
   display: none;
 }
 

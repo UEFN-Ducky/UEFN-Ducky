@@ -38,7 +38,14 @@ type Props = {
   tabId: string;
   /** Host chat overlay (Duck-Tac-Toe board). */
   chatOverlay?: PluginChatOverlayProps;
+  /** False while the tab is kept mounted but hidden (another tab of its group is active). */
+  visible?: boolean;
 };
+
+/** Bridge event `panel.visibility`: the panel's tab was shown or hidden. */
+function postVisibility(iframe: HTMLIFrameElement | null, visible: boolean): void {
+  iframe?.contentWindow?.postMessage({ channel: BRIDGE_CHANNEL, event: { type: "panel.visibility", visible } }, "*");
+}
 
 function findPanel(
   panels: PluginUiPanel[],
@@ -49,7 +56,7 @@ function findPanel(
 }
 
 /** Sandboxed iframe hosting a plugin's contributes.ui.panels entry. */
-export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
+export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const contrib = usePluginContributions();
   const parsed = useMemo(() => parsePluginUiTabId(tabId), [tabId]);
@@ -72,6 +79,37 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
     isDucktactoeBoardTab(parsed.pluginId, parsed.panelId);
 
   usePluginThemePush(iframeRef, src);
+
+  // Data switched between Local and a team: the plugin restarted on the other copy,
+  // so the panel loads again too (nothing of the old copy stays on screen). Setting
+  // src again reloads the same iframe, so its theme and bridge listeners stay bound.
+  const pluginId = parsed?.pluginId ?? "";
+  useEffect(() => {
+    if (!pluginId) return;
+    installPanelPushBus();
+    return subscribePanelPush((event) => {
+      if (event.type !== "plugin_scope_changed" || !event.switched || !event.plugins?.includes(pluginId)) return;
+      const iframe = iframeRef.current;
+      const current = iframe?.getAttribute("src");
+      if (iframe && current) iframe.setAttribute("src", current);
+    });
+  }, [pluginId]);
+
+  // A hidden tab stays mounted, so the panel is told when it is shown or hidden
+  // (bridge event `panel.visibility`) and can pause heavy work: on every change,
+  // and on each load (a reload starts the plugin over).
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !src) return;
+    const post = () => postVisibility(iframe, visibleRef.current);
+    iframe.addEventListener("load", post);
+    return () => iframe.removeEventListener("load", post);
+  }, [src]);
+  useEffect(() => {
+    postVisibility(iframeRef.current, visible);
+  }, [visible]);
 
   useEffect(() => {
     if (!parsed) return;
@@ -124,8 +162,9 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
   // pushBrowserPaneBounds) — window resizes / sidebar toggles / split drags track
   // smoothly without waiting on the plugin's own (bridge round-trip) reports.
   // Native WebView2 panes are desktop-only (REMOTE_DENY); skip the rAF on stream.
+  // A hidden tab has no rect to pin to: no rAF until it shows again.
   useEffect(() => {
-    if (isRemote()) return;
+    if (isRemote() || !visible) return;
     let raf = 0;
     const tick = () => {
       pushBrowserPaneBounds(tabId, iframeRef.current);
@@ -133,17 +172,19 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [tabId]);
+  }, [tabId, visible]);
 
   useEffect(() => {
+    if (!visible) return;
     beginBrowserPaneMount(tabId);
     return () => {
-      // Tab switch: hide the native pane but KEEP its inset. A remount bumps
-      // mount gen so a late hide cannot leave the pane stuck blank/brown.
+      // Tab switch (hidden or unmounted): hide the native pane but KEEP its inset,
+      // so it never floats over another tab. A remount bumps mount gen so a late
+      // hide cannot leave the pane stuck blank/brown.
       // Full cleanup happens on tab close (ChatView → browser_pane_close).
       hideBrowserPaneOnUnmount(tabId);
     };
-  }, [tabId]);
+  }, [tabId, visible]);
 
   if (!parsed) {
     return <div className="plugin-ui-pane plugin-ui-pane--empty">Invalid plugin tab.</div>;
@@ -170,6 +211,7 @@ export function PluginWebviewPane({ tabId, chatOverlay }: Props) {
       <div className="plugin-ui-pane">
         <PluginScopeBar
           pluginId={parsed.pluginId}
+          active={visible}
           onScopeChanged={(status) =>
             iframeRef.current?.contentWindow?.postMessage(
               { channel: BRIDGE_CHANNEL, event: { type: "plugin_scope_changed", scope: status.scope } },

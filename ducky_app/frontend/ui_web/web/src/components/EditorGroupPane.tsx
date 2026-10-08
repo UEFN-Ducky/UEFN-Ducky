@@ -33,6 +33,10 @@ const AutomationsView = lazy(() =>
   import("../automations/AutomationsView").then((m) => ({ default: m.AutomationsView })),
 );
 
+/** Tabs kept mounted (hidden) once visited: a chat keeps its history and scroll, a
+ * plugin panel keeps running instead of restarting on every tab switch. */
+const keepsAlive = (tab: EditorTab) => tab.kind === "chat" || tab.kind === "plugin";
+
 interface EditorGroupPaneProps {
   group: EditorGroup;
   openTabs: EditorTab[];
@@ -232,13 +236,14 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     [dropZone, group.id, onDropTab, disarmExternalDrop, dropOverlayIdle],
   );
 
-  // Keep only visited, still-open chats alive. Restored tabs load on first use,
-  // and closing a tab releases its pane, observers, and rendered history.
-  const [visitedChatTabs, setVisitedChatTabs] = useState<ReadonlySet<string>>(() => new Set());
+  // Keep only visited, still-open chats and plugin panels alive. Restored tabs load
+  // on first use, and closing a tab (or moving it to another window) releases its
+  // pane, observers, rendered history, or plugin iframe.
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
-    setVisitedChatTabs((previous) => {
+    setVisitedTabs((previous) => {
       const next = new Set(groupTabs
-        .filter((tab) => tab.kind === "chat" && (tab.id === group.activeTabId || previous.has(tab.id)))
+        .filter((tab) => keepsAlive(tab) && (tab.id === group.activeTabId || previous.has(tab.id)))
         .map((tab) => tab.id));
       return next.size === previous.size && [...next].every((id) => previous.has(id)) ? previous : next;
     });
@@ -348,7 +353,9 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     if (activeTab.kind === "plugin") {
       return (
         <PluginWebviewPane
+          key={activeTab.id}
           tabId={activeTab.id}
+          visible={visible}
           chatOverlay={{
             allChats,
             runningChatIds,
@@ -437,12 +444,16 @@ export const EditorGroupPane = memo(function EditorGroupPane({
             Open file
           </div>
         ) : null}
-        {groupTabs.filter((tab) => tab.kind === "chat" && (tab.id === group.activeTabId || visitedChatTabs.has(tab.id))).map((tab) => (
-          <div className="editor-chat-tab" key={tab.id} hidden={tab.id !== group.activeTabId}>
+        {groupTabs.filter((tab) => keepsAlive(tab) && (tab.id === group.activeTabId || visitedTabs.has(tab.id))).map((tab) => (
+          <div
+            className={tab.kind === "chat" ? "editor-chat-tab" : "editor-plugin-tab"}
+            key={tab.id}
+            hidden={tab.id !== group.activeTabId}
+          >
             {renderContent(tab, tab.id === group.activeTabId)}
           </div>
         ))}
-        {activeTab?.kind !== "chat" ? renderContent(activeTab) : null}
+        {!activeTab || !keepsAlive(activeTab) ? renderContent(activeTab) : null}
       </div>
     </div>
   );

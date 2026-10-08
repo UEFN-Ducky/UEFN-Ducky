@@ -22,6 +22,10 @@ const PANEL_PUSH_TYPES = new Set<string>([
   "graphs_changed",
   "graph_focus",
   "templates_changed",
+  // Every window's plugin panels and scope bars listen for these on the panel bus;
+  // left on the agent bus they reached no one (main window or floating).
+  "plugin_scope_changed",
+  "duckyos_account_changed",
 ]);
 
 type AgentEventListener = (event: AgentEvent) => void;
