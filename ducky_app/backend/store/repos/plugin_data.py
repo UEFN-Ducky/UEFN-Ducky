@@ -163,6 +163,17 @@ def mark_plugin_dirty(account: str, scope: str, plugin: str) -> None:
         )
 
 
+def mark_dirty(account: str, scope: str, plugin: str, kind: str, key: str) -> None:
+    """Queue one live item to push again as it is (the server's copy needs replacing)."""
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute(
+            "UPDATE plugin_data SET dirty=1 WHERE account_id=? AND scope_id=? AND plugin_id=? AND kind=? AND key=? "
+            "AND deleted=0",
+            (account, scope, plugin, kind, key),
+        )
+
+
 def clear_dirty(account: str, scope: str, plugin: str, kind: str, key: str) -> None:
     conn = db.connect()
     with db.write_txn(conn):

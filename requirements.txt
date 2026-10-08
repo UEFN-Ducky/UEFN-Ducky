@@ -12,6 +12,8 @@ truststore>=0.10
 # Control panel: hide to notification area (tray) on close (Windows).
 pystray>=0.19.5
 pywebview>=5.0
+# Team plugin data is AES-256-GCM encrypted with each team's key (already shipped via pywebview/PyJWT).
+cryptography==49.0.0
 Pillow>=10.0.0
 # Workflow document nodes (PDF text and images); pure Python.
 pypdf>=5.0

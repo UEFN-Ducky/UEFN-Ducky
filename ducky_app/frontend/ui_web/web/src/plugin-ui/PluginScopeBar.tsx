@@ -4,7 +4,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import type { PluginScopeChoice, PluginScopeStatus } from "../types/panel";
 import { setVisibleInterval } from "../utils/visibleInterval";
-import { storageLine, switchMessage, syncText } from "./scopeBarText";
+import { storageLine, switchConfirm, syncText } from "./scopeBarText";
 
 /** Team pulls: on open, on focus, and each minute while a team-scoped panel is open.
  * The host also caps it at one call per team per minute. */
@@ -105,11 +105,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
   const choose = async (choice: PluginScopeChoice) => {
     setMenuOpen(false);
     if (choice.id === current) return;
-    const ok = await confirm({
-      title: `Show ${choice.kind === "team" ? choice.label : "Local"} data?`,
-      message: switchMessage(scope.label, choice),
-      confirmLabel: "Switch",
-    });
+    const ok = await confirm({ ...switchConfirm(status.pluginLabel || pluginId, choice), confirmLabel: "Switch" });
     if (ok !== true) return;
     const next = await getApi()?.plugin_scope_set?.(pluginId, choice.id);
     if (next?.ok === false && next.error) {
@@ -129,7 +125,12 @@ export function PluginScopeBar({ pluginId, onScopeChanged }: Props) {
       aria-label={team ? `Plugin data: team ${scope.label}` : "Plugin data: local"}
       title={DATA_AT_REST}
     >
-      <span className="plugin-scope-bar__pill">{team ? `TEAM · ${scope.label}` : "LOCAL"}</span>
+      <span
+        className={`plugin-scope-bar__badge plugin-scope-bar__badge--${team ? "team" : "local"}`}
+        title={team ? `Team data: ${scope.label}` : "Local data: only on this PC"}
+      >
+        {team ? scope.label : "Local"}
+      </span>
       {locked ? (
         <span className="plugin-scope-bar__text">
           Waiting for your account&apos;s data key. Read-only until you&apos;re back online.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storageLine, switchMessage, syncText } from "./scopeBarText";
+import { storageLine, switchConfirm, syncText } from "./scopeBarText";
 
 const GB = 1024 ** 3;
 
@@ -18,8 +18,13 @@ describe("scope bar text", () => {
   it("says when it synced, what is queued, and the switch warning", () => {
     expect(syncText({ syncedAt: 100, pending: 0, state: "ok" }, 105_000)).toBe("Synced 5 s ago");
     expect(syncText({ syncedAt: 100, pending: 3, state: "offline" }, 105_000)).toBe("Offline · 3 changes waiting");
-    expect(switchMessage("Local", { kind: "team", label: "Alpha Studio" })).toBe(
-      "You'll see Alpha Studio's copy. Your Local copy stays separate.",
-    );
+    expect(switchConfirm("BrainRot TCG", { kind: "team", label: "Alpha Studio" })).toEqual({
+      title: "Switch BrainRot TCG to Alpha Studio data?",
+      message: "Nothing is copied. BrainRot TCG restarts with Alpha Studio's data.",
+    });
+    expect(switchConfirm("BrainRot TCG", { kind: "personal", label: "Local" })).toEqual({
+      title: "Switch BrainRot TCG to Local data?",
+      message: "Nothing is copied. BrainRot TCG restarts with its Local data.",
+    });
   });
 });

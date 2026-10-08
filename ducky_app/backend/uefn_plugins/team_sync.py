@@ -5,6 +5,13 @@ presigned PUT URLs, commits them, and pulls everything since the cursor from
 presigned GET URLs (sha256 checked). Last write wins in server order: a stale
 push adopts the server's copy.
 
+Everything uploaded is encrypted with the team's own key (:mod:`team_keys`), so the
+size and sha256 the server gets describe ciphertext; local rows keep the
+plaintext's for change detection. No key, no round: nothing leaves the PC in
+plaintext. Objects from before team keys still read, and any item the server
+still holds in plaintext is pushed again, encrypted (the first round with a key
+pulls the whole team once to find them).
+
 Load (the 2026-09-16 outage was a desktop poller holding every plugin slot): a
 round runs only while a team-scoped plugin panel is open (the host scope bar asks
 on open, on focus and each minute), at most once a minute per team, and never
@@ -22,7 +29,7 @@ import urllib.request
 from typing import Any, Callable
 
 from backend.store.repos import plugin_data as repo
-from backend.uefn_plugins import scopes
+from backend.uefn_plugins import scopes, team_keys
 
 MIN_INTERVAL_S = 60.0
 WORKFLOW_DOCS = "ducky.automations"
@@ -95,7 +102,7 @@ def _item(d: dict[str, Any]) -> tuple[str, str, str] | None:
 
 
 def _local_bytes(scope: dict[str, Any], row: dict[str, Any]) -> bytes | None:
-    """The plaintext the server gets (sealed on this PC only, plan §13)."""
+    """The row's plaintext (sealed on this PC only, plan §13)."""
     from backend.uefn_plugins.data_crypto import open_bytes, open_text
 
     if row["kind"] == "doc":
@@ -124,11 +131,44 @@ def _store(scope: dict[str, Any], kind: str, pid: str, key: str, data: bytes, re
     _land_own(scope, kind, pid, key, data)
 
 
-def _download(t: Transport, item: dict[str, Any]) -> bytes:
+def _sealed(scope: dict[str, Any], row: dict[str, Any], tk: tuple[int, bytes]) -> bytes | None:
+    """What a push of ``row`` uploads: its plaintext as it is now, encrypted with the
+    team key. ``None`` when the local copy is gone, unreadable, or changed since
+    ``row`` was read."""
+    from backend.uefn_plugins.data_crypto import Locked
+
+    try:
+        data = _local_bytes(scope, row)
+    except (Locked, OSError, ValueError):
+        return None
+    if data is None or hashlib.sha256(data).hexdigest() != row["sha256"]:
+        return None
+    return team_keys.seal(tk, (row["kind"], row["plugin_id"], row["key"]), data)
+
+
+def _download(t: Transport, item: dict[str, Any], tk: tuple[int, bytes]) -> bytes:
+    """An item's plaintext: the stored object (sha256 checked), opened with the team key."""
     data = t.get(str(item.get("getUrl") or ""))
     if hashlib.sha256(data).hexdigest() != str(item.get("sha256") or ""):
         raise SyncError("downloaded file failed its sha256 check")
-    return data
+    try:
+        return team_keys.open_object(tk, data, int(item["enc"]) if item.get("enc") is not None else None)
+    except (ValueError, TypeError) as exc:
+        raise SyncError(f"downloaded file could not be opened: {exc}") from exc
+
+
+def _plaintext_on_server(item: dict[str, Any]) -> bool:
+    """The server still stores this live item unencrypted (from before team keys)."""
+    return item.get("enc") is not None and not item.get("deleted") and str(item.get("enc")) == "0"
+
+
+def _reseal(scope: dict[str, Any], it: tuple[str, str, str], may_automate: bool) -> None:
+    """Queue an item the server holds in plaintext: the next push uploads it encrypted,
+    and the server drops its plaintext versions. Team workflows only for members who
+    may change them."""
+    if it[1].startswith("ducky.") and not may_automate:
+        return
+    repo.mark_dirty(scope["account"], scope["id"], it[1], it[0], it[2])
 
 
 def share_plugin_id(account: str, plugin: str) -> str | None:
@@ -264,7 +304,8 @@ def _land_own(scope: dict[str, Any], kind: str, pid: str, key: str, data: bytes)
     _store(personal, kind, plugin, key, data, 0)
 
 
-def _apply_change(scope: dict[str, Any], t: Transport, ch: dict[str, Any], changed: set[str]) -> None:
+def _apply_change(scope: dict[str, Any], t: Transport, ch: dict[str, Any], changed: set[str],
+                  tk: tuple[int, bytes], automate: bool) -> None:
     it = _item(ch)
     if it is None:
         return
@@ -273,6 +314,8 @@ def _apply_change(scope: dict[str, Any], t: Transport, ch: dict[str, Any], chang
     local = repo.get(scope["account"], scope["id"], pid, kind, key)
     # The cursor is inclusive: rows we already hold at this rev come back; skip them.
     if local and (local["dirty"] or (local["rev"] == rev and not local["deleted"])):
+        if not local["dirty"] and _plaintext_on_server(ch):
+            _reseal(scope, it, automate)
         return  # a queued local change is settled by its push (stale → adopt)
     if ch.get("deleted"):
         if local:
@@ -281,11 +324,14 @@ def _apply_change(scope: dict[str, Any], t: Transport, ch: dict[str, Any], chang
         return
     if not ch.get("getUrl"):
         return
-    _store(scope, kind, pid, key, _download(t, ch), rev)
+    _store(scope, kind, pid, key, _download(t, ch, tk), rev)
     changed.add(pid)
+    if _plaintext_on_server(ch):
+        _reseal(scope, it, automate)
 
 
-def _adopt(scope: dict[str, Any], t: Transport, it: tuple[str, str, str], server: Any, changed: set[str]) -> int | None:
+def _adopt(scope: dict[str, Any], t: Transport, it: tuple[str, str, str], server: Any, changed: set[str],
+           tk: tuple[int, bytes], automate: bool) -> int | None:
     """Stale push: the server's copy wins. Returns a rev to rewind the cursor to when
     the server row came without content (the next inclusive pull brings it)."""
     kind, pid, key = it
@@ -303,7 +349,9 @@ def _adopt(scope: dict[str, Any], t: Transport, it: tuple[str, str, str], server
         _drop_local(scope, kind, pid, key)
         return None
     if server.get("getUrl"):
-        _store(scope, kind, pid, key, _download(t, server), int(server.get("rev") or 0))
+        _store(scope, kind, pid, key, _download(t, server, tk), int(server.get("rev") or 0))
+        if _plaintext_on_server(server):
+            _reseal(scope, it, automate)
         return None
     _drop_local(scope, kind, pid, key)
     return int(server.get("rev") or 0)
@@ -387,11 +435,24 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
         # Without the account's data key nothing can be sealed or opened: wait, touch nothing.
         return {"state": "locked", "changed": [], "error": ""}
     scope = {"account": account, "id": team, "kind": "team"}
+    try:
+        tk = _team_key(account, team, t)
+    except SyncError as exc:
+        return _failed(account, team, exc, set())
+    from backend.store.repos import kv, workflows
+
+    automate = workflows.perms_get(account, team)
+    sealed_mark = f"team_data_sealed.{account}.{team}"
+    if kv.meta_get(sealed_mark) is None:
+        # First round with the team's key on this PC: pull the whole team once, so
+        # every item the server still holds in plaintext is found and pushed again.
+        cursor = 0
     queue_personal(account, team)
     changed: set[str] = set()
     errors: list[str] = []
     pushes: list[dict[str, Any]] = []
-    # Pushes carry metadata only; bytes are read one item at a time at upload.
+    # Pushes carry metadata only: each item is encrypted here to name its size and
+    # sha256, then read and encrypted again (to the same bytes) at upload.
     sent: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in repo.dirty(account, team, MAX_PUSHES):
         it = (row["kind"], row["plugin_id"], row["key"])
@@ -402,8 +463,12 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
         if row["deleted"]:
             push.update(size=0, sha256="", delete=True)
         else:
-            push.update(size=int(row["size"]), sha256=row["sha256"])
-            sent[it] = row
+            sealed = _sealed(scope, row, tk)
+            if sealed is None:
+                continue  # gone or changed while reading: the next round pushes what is there then
+            push.update(size=len(sealed), sha256=hashlib.sha256(sealed).hexdigest(), enc=tk[0])
+            sent[it] = {"row": row, "sha256": push["sha256"]}
+            del sealed
         pushes.append(push)
     try:
         resp = t.collect("team-data-sync", {"teamId": team, "cursorRev": cursor, "pushes": pushes})
@@ -412,11 +477,12 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
             it = _item(a)
             if it is None or it not in sent:
                 continue
-            data = _local_bytes(scope, sent[it])
+            data = _sealed(scope, sent[it]["row"], tk)
             if data is None or hashlib.sha256(data).hexdigest() != sent[it]["sha256"]:
                 continue  # changed or gone since: its upload expires, the next round pushes the new copy
             t.put(str(a.get("putUrl") or ""), data)
-            commits.append({"kind": it[0], "pluginId": it[1], "key": it[2], "rev": int(a.get("rev") or 0)})
+            commits.append({"kind": it[0], "pluginId": it[1], "key": it[2], "rev": int(a.get("rev") or 0),
+                            "enc": tk[0]})
         for d in resp.get("deleted") or []:
             it = _item(d)
             if it:
@@ -425,7 +491,7 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
         for s in resp.get("stale") or []:
             it = _item(s)
             if it:
-                back = _adopt(scope, t, it, s.get("server"), changed)
+                back = _adopt(scope, t, it, s.get("server"), changed, tk, automate)
                 if back is not None:
                     rewind.append(back)
         for r in resp.get("refused") or []:
@@ -438,7 +504,7 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
         pages = 0
         while True:
             for ch in resp.get("changes") or []:
-                _apply_change(scope, t, ch, changed)
+                _apply_change(scope, t, ch, changed, tk, automate)
             cursor = int(resp.get("cursorRev") or cursor)
             pages += 1
             if not resp.get("more") or pages >= MAX_PAGES:
@@ -454,10 +520,11 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
                     continue
                 status = r.get("status")
                 if status in ("committed", "unchanged"):
-                    repo.mark_pushed(account, team, it[1], it[0], it[2], rev=int(r.get("rev") or 0),
-                                     sha256=str((sent.get(it) or {}).get("sha256") or ""))
+                    # The local row's own (plaintext) sha: an edit made meanwhile stays queued.
+                    plain_sha = str(((sent.get(it) or {}).get("row") or {}).get("sha256") or "")
+                    repo.mark_pushed(account, team, it[1], it[0], it[2], rev=int(r.get("rev") or 0), sha256=plain_sha)
                 elif status == "stale":
-                    back = _adopt(scope, t, it, r.get("server"), changed)
+                    back = _adopt(scope, t, it, r.get("server"), changed, tk, automate)
                     if back is not None:
                         rewind.append(back)
                 else:
@@ -468,14 +535,29 @@ def _round(account: str, team: str, cursor: int, t: Transport, now: Callable[[],
         return _failed(account, team, exc, changed)
     repo.sync_put(account, team, cursor_rev=cursor, state="ok", error="; ".join(errors)[:500], usage=usage,
                   synced_at=now())
+    if kv.meta_get(sealed_mark) is None:
+        kv.meta_set(sealed_mark, "1")
     return {"state": "ok", "changed": sorted(changed), "error": "; ".join(errors)}
+
+
+def _team_key(account: str, team: str, t: Transport) -> tuple[int, bytes]:
+    """``(version, key)`` of the team's data key: kept on this PC, asked of the Store
+    at most once a minute. Without it the round waits (nothing goes up in plaintext)."""
+    try:
+        got = team_keys.get(account, team, lambda: t.collect("team-data-key", {"teamId": team}))
+    except ValueError as exc:
+        raise SyncError(f"team data key: {exc}") from exc
+    if got is None:
+        raise SyncError("Waiting for this team's data key.", offline=True)
+    return got
 
 
 def _failed(account: str, team: str, exc: SyncError, changed: set[str]) -> dict[str, Any]:
     msg = str(exc)
     low = msg.lower()
     if "team not found" in low:
-        # Removed from the team (or it is gone): its local copy goes too (plan §7).
+        # Removed from the team (or it is gone): its key and local copy go too (plan §7).
+        team_keys.forget(account, team)
         scopes.purge_team(account, team)
         return {"state": "removed", "changed": sorted(changed), "error": ""}
     if low.startswith("plan_paused"):
@@ -520,6 +602,7 @@ def scope_status(plugin: str) -> dict[str, Any]:
         "ok": True,
         "visible": scope["kind"] == "team" or teams_enabled(),
         "scope": scopes.scope_view(scope),
+        "pluginLabel": plugin_label(plugin) or plugin,
         "email": str(get_status().get("email") or ""),
         "canChange": account != scopes.LOCAL,
         "state": scope["state"],

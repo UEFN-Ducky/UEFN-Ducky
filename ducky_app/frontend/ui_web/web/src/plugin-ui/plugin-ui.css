@@ -309,7 +309,7 @@
 }
 
 /* Host scope bar (team plans §8): whose data the panel shows. Team = accent,
-   Personal = neutral, paused = warning; the pill text always says which. */
+   Local = neutral, paused = warning; the badge names the team, or says Local. */
 .plugin-scope-bar {
   flex: 0 0 auto;
   display: flex;
@@ -322,24 +322,43 @@
   background: var(--card, #252525);
   border-bottom: 1px solid var(--border, #3a3a3a);
 }
-.plugin-scope-bar__pill {
-  padding: 2px 8px;
+.plugin-scope-bar__badge {
+  display: inline-block;
+  max-width: 28ch;
+  padding: 2px 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
   border-radius: 999px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--fg, #e6e6e6);
-  background: color-mix(in srgb, var(--fg, #e6e6e6) 12%, transparent);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  background: var(--bg-elevated);
 }
-.plugin-scope-bar--team .plugin-scope-bar__pill {
-  color: var(--accent, #d4a017);
-  background: color-mix(in srgb, var(--accent, #d4a017) 16%, transparent);
+.plugin-scope-bar__badge--team {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* A dot marks shared data, so the team reads as a team at a glance. */
+.plugin-scope-bar__badge--team::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--accent);
 }
 .plugin-scope-bar--paused {
   background: color-mix(in srgb, var(--warning, #d97706) 14%, var(--card, #252525));
 }
-.plugin-scope-bar--paused .plugin-scope-bar__pill {
-  color: var(--warning, #d97706);
-  background: color-mix(in srgb, var(--warning, #d97706) 18%, transparent);
+.plugin-scope-bar--paused .plugin-scope-bar__badge {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.plugin-scope-bar--paused .plugin-scope-bar__badge--team::before {
+  background: var(--warn);
 }
 .plugin-scope-bar__text--error {
   color: var(--danger, #e55);

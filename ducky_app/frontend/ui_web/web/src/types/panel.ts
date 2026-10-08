@@ -2100,6 +2100,8 @@ export interface PanelPushEvent {
   plugins?: string[];
   /** plugin_scope_changed from a sync round (status refresh even when nothing changed). */
   synced?: boolean;
+  /** plugin_scope_changed after a switch: the plugin restarted on the other copy; its panels reload. */
+  switched?: boolean;
   /** duckyos_account_changed — the new account key ("" signed out). */
   account?: string;
   source?: string;
@@ -2166,6 +2168,8 @@ export interface PluginScopeStatus {
   /** False for accounts without the Teams beta: no bar at all. */
   visible?: boolean;
   scope?: PluginScopeView;
+  /** The plugin's display name (its id when the manifest has none). */
+  pluginLabel?: string;
   email?: string;
   canChange?: boolean;
   members?: number;
