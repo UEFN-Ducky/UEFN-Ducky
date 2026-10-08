@@ -75,6 +75,17 @@ describe("liveSpeakService", () => {
     _resetLiveSpeakService();
   });
 
+  it("keeps reconnect and mic failures visible during tool narration", async () => {
+    const { startLiveChat } = await import("./liveSpeakService");
+    const { patchLiveVoiceState, getLiveVoiceState } = await import("./liveChats");
+    startLiveChat("chat-a", { voiceId: "v", speed: 1 });
+    for (const status of ["connecting", "error"] as const) {
+      patchLiveVoiceState("chat-a", { status, error: "Mic is unavailable." });
+      eventHandler?.({ type: "tool", conv_id: "chat-a", tool: { name: "workspace_read_file", arguments: {} } });
+      expect(getLiveVoiceState("chat-a")).toMatchObject({ status, error: "Mic is unavailable." });
+    }
+  });
+
   it("enqueues a tool line with no mounted component", async () => {
     const { startLiveChat } = await import("./liveSpeakService");
     startLiveChat("chat-a", { voiceId: "v", speed: 1 });

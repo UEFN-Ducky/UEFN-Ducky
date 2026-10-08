@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChoiceDropdown, type ChoiceOption } from "../components/ChoiceDropdown";
 import { clampSpeed, formatSpeed, snapSpeed, SPEED_OPTIONS } from "./voiceSettings";
 
@@ -10,6 +11,7 @@ export type SpeedDropdownProps = {
   size?: "default" | "compact";
   placement?: "bottom" | "top";
   minWidth?: number;
+  icon?: ReactNode;
   /** Prepended options (e.g. Default speed = 0 for per-ducky override). */
   extraOptions?: ChoiceOption[];
 };
@@ -26,6 +28,7 @@ export function SpeedDropdown({
   placement = "bottom",
   minWidth = 160,
   extraOptions,
+  icon,
   ...rest
 }: SpeedDropdownProps) {
   const ariaLabel = rest["aria-label"] || "Talking speed";
@@ -35,6 +38,7 @@ export function SpeedDropdown({
   return (
     <ChoiceDropdown
       id={id}
+      icon={icon}
       aria-label={ariaLabel}
       mode="radio"
       size={size}

@@ -1433,6 +1433,21 @@ class PanelApiChatsMixin:
 
         return create_realtime_token()
 
+    def voice_win_tts_start(self, text: str, voice_id: str = "") -> dict[str, Any]:
+        from backend.voice.windows_tts import start
+
+        return start(str(text or ""), str(voice_id or ""))
+
+    def voice_win_tts_voices_start(self) -> dict[str, Any]:
+        from backend.voice.windows_tts import voices_start
+
+        return voices_start()
+
+    def voice_win_tts_poll(self, job_id: str) -> dict[str, Any]:
+        from backend.voice.windows_tts import poll
+
+        return poll(str(job_id or ""))
+
     def voice_win_stt_prewarm(self) -> dict[str, Any]:
         """Spawn the Windows speech helper early so the first mic press starts fast."""
         from backend.voice.windows_speech import prewarm

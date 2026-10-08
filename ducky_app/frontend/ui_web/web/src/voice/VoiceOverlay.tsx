@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Icons } from "../icons/Icons";
+import { getApi } from "../hooks/usePanelApi";
 import {
   getLiveVoiceState,
   subscribeLiveVoiceChats,
@@ -147,6 +148,20 @@ export function VoiceOverlay({
               </div>
               {heard ? <div className="voice-overlay-heard">“{heard}”</div> : null}
               {state.nextSpeaker ? <div className="voice-overlay-next">{state.nextSpeaker}</div> : null}
+              {loadingVoice && tts.loadingMessage ? (
+                <div className="voice-overlay-next" role="status">{tts.loadingMessage}</div>
+              ) : null}
+              {tts.error ? (
+                <div className="voice-overlay-next" role="alert">
+                  {tts.error}
+                  {tts.errorCode === "voice_missing" ? (
+                    <button type="button" className="voice-btn" title="Download a Windows voice" aria-label="Download a Windows voice"
+                      onClick={() => void getApi()?.voice_open_windows_settings?.("voice_download")}>
+                      <Icons.Download />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {state.status !== "error" && state.notice ? (
                 <div className="voice-overlay-next">{state.notice}</div>
               ) : null}
@@ -166,8 +181,13 @@ export function VoiceOverlay({
               type="button"
               className="voice-btn voice-btn--tiny"
               title={paused ? "Resume" : speaking ? "Pause" : "Play"}
-              disabled={!talking}
-              onClick={() => (paused ? ttsEngine.resume() : ttsEngine.pause())}
+              disabled={!talking && !hasPrev && !hasNext}
+              onClick={() => {
+                if (paused) ttsEngine.resume();
+                else if (talking) ttsEngine.pause();
+                else if (hasPrev) onBack();
+                else onForward();
+              }}
             >
               {paused || !speaking ? <Icons.Play /> : <Icons.Pause />}
             </button>

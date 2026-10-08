@@ -78,6 +78,7 @@ export function useLiveVoiceMode(opts: {
   const turnTimerRef = useRef<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
   const retriesRef = useRef(0);
+  const micReadyRef = useRef(false);
   const onInterimRef = useRef(opts.onInterim);
   const onTranscriptRef = useRef(opts.onTranscript);
   const onTurnEndRef = useRef(opts.onTurnEnd);
@@ -121,6 +122,7 @@ export function useLiveVoiceMode(opts: {
   const dropSession = () => {
     const running = sessionRef.current;
     sessionRef.current = null;
+    micReadyRef.current = false;
     running?.abort();
   };
 
@@ -174,7 +176,7 @@ export function useLiveVoiceMode(opts: {
       }
       setError(message);
       setStatus("error");
-      publish({ status: "error", error: message, errorAction: action, userInterim: "" });
+      publish({ status: "error", error: message, errorAction: action, userInterim: "", notice: "" });
     };
 
     setStatus("connecting");
@@ -232,8 +234,9 @@ export function useLiveVoiceMode(opts: {
           if (!mine()) return;
           if (s === "listening") {
             if (mutedRef.current) return;
+            micReadyRef.current = true;
             setStatus("listening");
-            publish({ status: "listening", muted: false, error: "", errorAction: undefined });
+            publish({ status: "listening", muted: false, error: "", errorAction: undefined, notice: "" });
           }
           if (s === "connecting") {
             setStatus("connecting");
@@ -250,11 +253,12 @@ export function useLiveVoiceMode(opts: {
         dropSession();
         releaseMic(chatIdRef.current);
         setStatus("muted");
-        publish({ status: "muted", muted: true });
+        publish({ notice: "", status: "muted", muted: true });
         return;
       }
+      micReadyRef.current = true;
       setStatus("listening");
-      publish({ status: "listening", muted: false, error: "", errorAction: undefined });
+      publish({ status: "listening", muted: false, error: "", errorAction: undefined, notice: "" });
     } catch (err) {
       const e = toSpeechError(err);
       fail(e.message, e.action);
@@ -281,7 +285,7 @@ export function useLiveVoiceMode(opts: {
     if (opts.muted) {
       stopMic();
       setStatus("muted");
-      publish({ status: "muted", muted: true, userInterim: "", error: "", errorAction: undefined });
+      publish({ notice: "", status: "muted", muted: true, userInterim: "", error: "", errorAction: undefined });
       return;
     }
     retriesRef.current = 0;
@@ -294,7 +298,7 @@ export function useLiveVoiceMode(opts: {
 
   useEffect(() => {
     if (!opts.enabled) return;
-    if (opts.agentRunning && !ttsEngine.isSpeaking()) {
+    if (opts.agentRunning && !ttsEngine.isSpeaking() && micReadyRef.current) {
       setStatus("thinking");
       publish({ status: "thinking", error: "" });
       setError("");
@@ -304,22 +308,23 @@ export function useLiveVoiceMode(opts: {
   useEffect(() => {
     return ttsEngine.onStateChange((s) => {
       if (!opts.enabled) return;
+      if (!micReadyRef.current && !mutedRef.current) return;
       if (s === "speaking") {
         setStatus("speaking");
         return;
       }
-      if (s === "idle" && opts.agentRunning && liveSpeakQueueLength() === 0) {
+      if (s === "idle" && opts.agentRunning && micReadyRef.current && liveSpeakQueueLength() === 0) {
         setStatus("thinking");
         return;
       }
       if (s === "idle" && !opts.agentRunning) {
         if (mutedRef.current) {
           setStatus("muted");
-          publish({ status: "muted", muted: true });
+          publish({ notice: "", status: "muted", muted: true });
           return;
         }
         if (
-          shouldReturnToListeningAfterAnswer({
+          micReadyRef.current && shouldReturnToListeningAfterAnswer({
             speakingAfterAnswer: true,
             moreUtterancesQueued: liveSpeakQueueLength() > 0,
           })

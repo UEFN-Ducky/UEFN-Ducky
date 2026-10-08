@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useUiTarget } from "../ui-targets/registry";
 
 import { Icons } from "../icons/Icons";
+import { getApi } from "../hooks/usePanelApi";
 import { beginDraft, joinWords, renderDraft, type DictationDraft } from "./composerDraft";
 import { getLiveVoiceChatIds } from "./liveChats";
 import { interruptLiveSpeak, startLiveChat, stopLiveChat } from "./liveSpeakService";
@@ -540,21 +541,34 @@ export function SpeakMessageButton({
   const loading = active && progress.loading && !paused;
 
   if (!active) {
+    const error = progress.sourceText === text.trim() ? progress.error : "";
     return (
-      <button
-        type="button"
-        className="voice-btn voice-btn--tiny voice-speak-msg"
-        title="Read this reply aloud"
-        // Defer so this click cannot land on the Pause control that replaces this button.
-        onClick={() => {
-          const voice = resolveVoiceId(voiceId);
-          const rate = resolveSpeed(speed);
-          window.setTimeout(() => ttsEngine.speak(text, voice, rate), 0);
-        }}
-        aria-label="Read reply aloud"
-      >
-        <Icons.Speaker />
-      </button>
+      <>
+        <button
+          type="button"
+          className="voice-btn voice-btn--tiny voice-speak-msg"
+          title={error || "Read this reply aloud"}
+          onClick={() => {
+            const voice = resolveVoiceId(voiceId);
+            const rate = resolveSpeed(speed);
+            ttsEngine.speak(text, voice, rate);
+          }}
+          aria-label="Read reply aloud"
+        >
+          <Icons.Speaker />
+        </button>
+        {error ? (
+          <span className="voice-notice voice-notice--error voice-notice--inline" role="alert">
+            <span className="voice-notice-text">{error}</span>
+            {progress.errorCode === "voice_missing" ? (
+              <button type="button" className="voice-notice-action" title="Download a Windows voice" aria-label="Download a Windows voice"
+                onClick={() => void getApi()?.voice_open_windows_settings?.("voice_download")}>
+                <Icons.Download />
+              </button>
+            ) : null}
+          </span>
+        ) : null}
+      </>
     );
   }
 
@@ -565,7 +579,7 @@ export function SpeakMessageButton({
         className={`voice-btn voice-btn--tiny voice-speak-msg${paused ? " voice-btn--paused" : " voice-btn--speaking"}${
           loading ? " voice-btn--busy" : ""
         }`}
-        title={paused ? "Resume" : loading ? "Loading voice… (click to pause)" : "Pause"}
+        title={paused ? "Resume" : loading ? `${progress.loadingMessage || "Preparing voice…"} (click to pause)` : "Pause"}
         onClick={() => (paused ? ttsEngine.resume() : ttsEngine.pause())}
         aria-label={paused ? "Resume" : "Pause"}
       >

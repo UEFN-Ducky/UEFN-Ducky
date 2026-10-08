@@ -3681,6 +3681,14 @@ export interface PanelApi {
     assistant_text: string,
     model?: string,
   ): Promise<{ ok: boolean; text?: string; error?: string; verbatim?: boolean }>;
+  /** Offline Windows Speech (desktop only). Jobs keep the bridge responsive. */
+  voice_win_tts_start?(text: string, voice_id?: string): Promise<{ ok: boolean; job_id?: string; error?: string }>;
+  voice_win_tts_voices_start?(): Promise<{ ok: boolean; job_id?: string; error?: string }>;
+  voice_win_tts_poll?(job_id: string): Promise<{
+    ok: boolean; pending?: boolean; error?: string; code?: string;
+    audio_base64?: string; mime?: string;
+    voices?: { id: string; label: string; lang?: string }[];
+  }>;
   /** Windows dictation (desktop only — denied for remote). */
   voice_win_stt_prewarm?(): Promise<{ ok: boolean; error?: string; code?: string }>;
   voice_win_stt_start?(

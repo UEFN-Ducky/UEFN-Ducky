@@ -812,8 +812,16 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+}
+
+.live-voice-pickers .choice-dropdown--icon,
+.live-voice-pickers .choice-dropdown--icon .choice-dropdown-trigger {
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  padding: 0;
 }
 
 .live-voice-model {
@@ -851,6 +859,11 @@
   border-radius: 8px;
   background: #202024;
   overflow: hidden;
+}
+
+.live-voice-combo .choice-dropdown--icon,
+.live-voice-combo .choice-dropdown--icon .choice-dropdown-trigger {
+  height: 26px;
 }
 
 .live-voice-combo .choice-dropdown {

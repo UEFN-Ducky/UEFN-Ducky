@@ -151,6 +151,7 @@ export function LiveVoicePickers({
       ) : null}
       <ChoiceDropdown
         id="live-voice-listen"
+        icon={<Icons.Headphones />}
         aria-label="Listen backend"
         mode="radio"
         size="compact"
@@ -167,6 +168,7 @@ export function LiveVoicePickers({
       <div className="live-voice-combo">
         <ChoiceDropdown
           id="live-voice-picker"
+          icon={<Icons.Speaker />}
           aria-label="Voice"
           mode="radio"
           size="compact"
@@ -174,7 +176,7 @@ export function LiveVoicePickers({
           minWidth={180}
           value={voiceId}
           options={[
-            { value: "", label: "AI Voice default" },
+            { value: "", label: isRemote() ? "System speech (default)" : "Windows Speech (default)" },
             ...voices.map((v) => ({ value: v.id, label: v.label })),
           ]}
           onChange={setVoiceId}
@@ -182,6 +184,7 @@ export function LiveVoicePickers({
         <span className="live-voice-combo-split" aria-hidden />
         <SpeedDropdown
           id="live-voice-speed"
+          icon={<Icons.Clock />}
           aria-label="Talking speed"
           size="compact"
           placement="top"
@@ -211,6 +214,7 @@ export function LiveVoicePickers({
       ) : null}
       <ChoiceDropdown
         id="live-voice-mic"
+        icon={<Icons.Mic />}
         aria-label="Microphone"
         mode="radio"
         size="compact"
@@ -225,6 +229,7 @@ export function LiveVoicePickers({
       />
       <ChoiceDropdown
         id="live-voice-output"
+        icon={<Icons.Headphones />}
         aria-label="Speakers"
         mode="radio"
         size="compact"

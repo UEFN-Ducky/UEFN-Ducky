@@ -183,7 +183,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
         aria-expanded={open}
         aria-controls={open ? listId + "-dialog" : undefined}
         aria-label={ariaLabel}
-        title={ariaLabel || selectedLabel}
+        title={icon && ariaLabel ? `${ariaLabel}: ${selectedLabel}` : ariaLabel || selectedLabel}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" && !open) { event.preventDefault(); openMenu(); }
           if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); closeMenu(); }

@@ -73,6 +73,15 @@ function tearDownBusIfIdle() {
 }
 
 function publish(session: LiveSession, patch: Parameters<typeof patchLiveVoiceState>[1]) {
+  const state = getLiveVoiceState(session.chatId);
+  // Narration must not cover a disconnected mic or erase its actionable error.
+  if ((state.status === "connecting" || state.status === "error") && patch.status && patch.status !== "error") {
+    const rest = { ...patch };
+    delete rest.status;
+    delete rest.error;
+    patchLiveVoiceState(session.chatId, rest);
+    return;
+  }
   patchLiveVoiceState(session.chatId, patch);
 }
 

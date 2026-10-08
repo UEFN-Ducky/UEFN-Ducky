@@ -417,6 +417,7 @@ _SETTINGS_PAGES = {
     "speech_privacy": "ms-settings:privacy-speech",
     "mic_privacy": "ms-settings:privacy-microphone",
     "sound_input": "ms-settings:sound",
+    "voice_download": "ms-settings:speech",
 }
 
 

@@ -23,6 +23,9 @@ export type TtsProgress = {
    * on first use, e.g. Piper). UI should show a clear "loading voice" state.
    */
   loading: boolean;
+  loadingMessage?: string;
+  error?: string;
+  errorCode?: string;
 };
 
 export type TtsVoiceInfo = {
@@ -44,6 +47,7 @@ let utterQueue: string[] = [];
 let utterOffsets: number[] = [];
 let playing = false;
 let audioEl: HTMLAudioElement | null = null;
+let finishPlayback: (() => void) | null = null;
 const listeners = new Set<Listener>();
 const progressListeners = new Set<ProgressListener>();
 let lastSpokenText = "";
@@ -57,6 +61,10 @@ let pauseResolve: (() => void) | null = null;
 let sessionGen = 0;
 /** Plugin synth in flight (download + generate). */
 let loadingVoice = false;
+let loadingMessage = "";
+let playbackError = "";
+let playbackErrorCode = "";
+let windowsVoices: TtsVoiceInfo[] = [];
 /** True only after the user (or UI) calls pause() — browser auto-pauses must still resume. */
 let userPaused = false;
 let synthWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -100,13 +108,18 @@ function emitProgress() {
     spokenText: activeSpokenText,
     charIndex: highlightIndex,
     loading: loadingVoice,
+    loadingMessage,
+    error: playbackError,
+    errorCode: playbackErrorCode,
   };
   for (const fn of progressListeners) fn(progress);
 }
 
-function setLoadingVoice(on: boolean) {
-  if (loadingVoice === on) return;
+function setLoadingVoice(on: boolean, message = "Preparing voice… First use may download voice files.") {
+  const nextMessage = on ? message : "";
+  if (loadingVoice === on && loadingMessage === nextMessage) return;
   loadingVoice = on;
+  loadingMessage = nextMessage;
   emitProgress();
 }
 
@@ -200,10 +213,17 @@ type Synth = { url: string; revoke: () => void } | null;
 
 async function synthesizePlugin(pluginId: string, voiceId: string, text: string, gen: number): Promise<Synth> {
   const api = getApi();
-  if (!api?.plugin_tts_start || !api?.plugin_tts_poll) return null;
+  const failed = (message: string) => {
+    if (gen === sessionGen) {
+      playbackError = `${message} Using the default system voice.`;
+      emitProgress();
+    }
+    return null;
+  };
+  if (!api?.plugin_tts_start || !api?.plugin_tts_poll) return failed("The selected voice is unavailable.");
   try {
     const started = await api.plugin_tts_start(pluginId, text, voiceId);
-    if (!started?.ok || !started.job_id) return null;
+    if (!started?.ok || !started.job_id) return failed(started?.error || "The selected voice could not start.");
     // Piper first-use can download tens of MB; keep polling longer than a normal synth.
     const deadline = Date.now() + 300_000;
     while (Date.now() < deadline) {
@@ -211,10 +231,10 @@ async function synthesizePlugin(pluginId: string, voiceId: string, text: string,
       await sleep(100);
       const polled = await api.plugin_tts_poll(String(started.job_id));
       if (polled?.pending) continue;
-      if (!polled?.ok) return null;
+      if (!polled?.ok) return failed(polled?.error || "The selected voice could not be prepared.");
       const b64 = String((polled as { audio_base64?: string }).audio_base64 || "");
       const mime = String((polled as { mime?: string }).mime || "audio/mpeg");
-      if (!b64) return null;
+      if (!b64) return failed("The selected voice returned no audio.");
       const binary = atob(b64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
@@ -222,10 +242,57 @@ async function synthesizePlugin(pluginId: string, voiceId: string, text: string,
       const url = URL.createObjectURL(blob);
       return { url, revoke: () => URL.revokeObjectURL(url) };
     }
-    return null;
-  } catch {
-    return null;
+    return failed("The voice download or preparation took too long.");
+  } catch (err) {
+    return failed(err instanceof Error ? err.message : "The selected voice failed.");
   }
+}
+
+
+/** Native synthesis produces WAV on a worker; the browser owns playback and devices. */
+async function waitWindowsJob(jobId: string, gen?: number) {
+  const api = getApi();
+  const deadline = Date.now() + 65_000;
+  while (Date.now() < deadline) {
+    if (gen != null && gen !== sessionGen) return null;
+    const result = await api?.voice_win_tts_poll?.(jobId);
+    if (gen != null && gen !== sessionGen) return null;
+    if (result?.pending) { await sleep(100); continue; }
+    if (!result?.ok) {
+      if (gen != null) playbackErrorCode = result?.code || "";
+      throw new Error(result?.error || "Windows Speech is unavailable.");
+    }
+    return result;
+  }
+  throw new Error("Windows Speech took too long to prepare.");
+}
+
+function audioFromBase64(b64: string, mime: string): NonNullable<Synth> {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  return { url, revoke: () => URL.revokeObjectURL(url) };
+}
+
+async function playWindows(text: string, voiceName: string, offset: number, gen: number) {
+  let synth: Synth = null;
+  setLoadingVoice(true, "Preparing Windows Speech…");
+  try {
+    const started = await getApi()?.voice_win_tts_start?.(text, voiceName);
+    if (gen !== sessionGen) return;
+    if (!started?.ok || !started.job_id) throw new Error(started?.error || "Windows Speech is unavailable.");
+    const result = await waitWindowsJob(started.job_id, gen);
+    if (!result || gen !== sessionGen) return;
+    if (!result.audio_base64) throw new Error("Windows Speech returned no audio.");
+    synth = audioFromBase64(result.audio_base64, result.mime || "audio/wav");
+  } finally {
+    if (gen === sessionGen) setLoadingVoice(false);
+  }
+  try {
+    if (gen === sessionGen) await waitIfPaused();
+    if (gen === sessionGen && synth) await playUrl(synth.url, text, offset, gen);
+  } finally { synth?.revoke(); }
 }
 
 /** Next sentence's plugin audio, synthesized while the current one plays. */
@@ -294,9 +361,14 @@ export function chunkOffsets(chunks: string[]): number[] {
   return offsets;
 }
 
-function playBuiltin(text: string, voiceName: string, offset: number, gen: number): Promise<void> {
+async function playBuiltin(text: string, voiceName: string, offset: number, gen: number): Promise<void> {
+  if (typeof window !== "undefined" && window.pywebview && getApi()?.voice_win_tts_start) {
+    await playWindows(text, voiceName, offset, gen);
+    return;
+  }
   return new Promise((resolve) => {
     if (typeof speechSynthesis === "undefined") {
+      playbackError = "Speech playback is unavailable on this device.";
       resolve();
       return;
     }
@@ -320,6 +392,7 @@ function playBuiltin(text: string, voiceName: string, offset: number, gen: numbe
     const done = () => {
       if (settled) return;
       settled = true;
+      if (finishPlayback === done) finishPlayback = null;
       stopSynthWatchdog();
       if (gen === sessionGen) {
         highlightIndex = offset + text.length;
@@ -327,6 +400,7 @@ function playBuiltin(text: string, voiceName: string, offset: number, gen: numbe
       }
       resolve();
     };
+    finishPlayback = done;
     u.onboundary = (ev) => {
       if (gen !== sessionGen) return;
       if (typeof ev.charIndex === "number") {
@@ -351,7 +425,12 @@ function playBuiltin(text: string, voiceName: string, offset: number, gen: numbe
       }
     };
     u.onend = done;
-    u.onerror = done;
+    u.onerror = (ev) => {
+      if (gen === sessionGen && ev.error !== "canceled" && ev.error !== "interrupted") {
+        playbackError = `Speech playback failed (${ev.error}). Try another voice.`;
+      }
+      done();
+    };
     clearSynthPausedLatch();
     startSynthWatchdog(gen);
     speechSynthesis.speak(u);
@@ -388,6 +467,7 @@ function playUrl(url: string, text: string, offset: number, gen: number): Promis
     el.playbackRate = clampRate(currentRate);
     el.preservesPitch = true;
     const done = () => {
+      if (finishPlayback === done) finishPlayback = null;
       if (gen === sessionGen) {
         highlightIndex = offset + text.length;
         emitProgress();
@@ -395,6 +475,7 @@ function playUrl(url: string, text: string, offset: number, gen: number): Promis
       if (audioEl === el) audioEl = null;
       resolve();
     };
+    finishPlayback = done;
     el.ontimeupdate = () => {
       if (gen !== sessionGen || !el.duration) return;
       const t = Math.max(0, Math.min(1, el.currentTime / el.duration));
@@ -402,10 +483,20 @@ function playUrl(url: string, text: string, offset: number, gen: number): Promis
       emitProgress();
     };
     el.onended = done;
-    el.onerror = done;
+    el.onerror = () => {
+      if (gen === sessionGen) playbackError = "Audio playback failed. Check the selected speakers.";
+      done();
+    };
     void applyOutputDevice(el)
-      .then(() => el.play())
-      .catch(() => done());
+      .then(async () => {
+        if (gen === sessionGen) await waitIfPaused();
+        if (gen !== sessionGen) { done(); return; }
+        await el.play();
+      })
+      .catch((err: unknown) => {
+        if (gen === sessionGen) playbackError = err instanceof Error ? err.message : "Audio playback failed.";
+        done();
+      });
   });
 }
 
@@ -441,12 +532,18 @@ async function drain(): Promise<void> {
           continue;
         }
       }
-      await playBuiltin(text, parsed.name, offset, gen);
+      await playBuiltin(text, parsed.kind === "builtin" ? parsed.name : "", offset, gen);
+    }
+  } catch (err) {
+    if (gen === sessionGen) {
+      playbackError = err instanceof Error ? err.message : "Speech playback failed.";
+      utterQueue = [];
+      utterOffsets = [];
     }
   } finally {
-    playing = false;
-    if (gen === sessionGen && !utterQueue.length && playbackState === "speaking") {
-      activeSourceText = "";
+    if (gen === sessionGen) playing = false;
+    if (gen === sessionGen && !utterQueue.length) {
+      if (!playbackError) activeSourceText = "";
       activeSpokenText = "";
       highlightIndex = 0;
       emit("idle");
@@ -499,7 +596,10 @@ export const ttsEngine = {
       c.sourceText === activeSourceText &&
       c.spokenText === activeSpokenText &&
       c.charIndex === highlightIndex &&
-      c.loading === loadingVoice
+      c.loading === loadingVoice &&
+      c.loadingMessage === loadingMessage &&
+      c.error === playbackError &&
+      c.errorCode === playbackErrorCode
     ) {
       return c;
     }
@@ -509,6 +609,9 @@ export const ttsEngine = {
       spokenText: activeSpokenText,
       charIndex: highlightIndex,
       loading: loadingVoice,
+    loadingMessage,
+    error: playbackError,
+    errorCode: playbackErrorCode,
     };
     return cachedProgress;
   },
@@ -529,6 +632,7 @@ export const ttsEngine = {
   },
 
   listBuiltinVoices(): TtsVoiceInfo[] {
+    if (windowsVoices.length) return windowsVoices;
     if (typeof speechSynthesis === "undefined") return [];
     return speechSynthesis.getVoices().map((v) => ({
       id: `builtin:${v.name}`,
@@ -538,7 +642,19 @@ export const ttsEngine = {
   },
 
   /** Ensure voices are loaded (Chrome populates async). */
-  whenVoicesReady(): Promise<TtsVoiceInfo[]> {
+  async whenVoicesReady(): Promise<TtsVoiceInfo[]> {
+    const api = typeof window !== "undefined" && window.pywebview ? getApi() : null;
+    if (api?.voice_win_tts_voices_start && api.voice_win_tts_poll) {
+      try {
+        const started = await api.voice_win_tts_voices_start();
+        if (!started.ok || !started.job_id) return [];
+        const result = await waitWindowsJob(started.job_id);
+        windowsVoices = (result?.voices || []).map((v) => ({
+          id: `builtin:${v.id}`, label: `${v.label}${v.lang ? ` (${v.lang})` : ""}`, kind: "builtin",
+        }));
+        return windowsVoices;
+      } catch { return []; }
+    }
     return new Promise((resolve) => {
       const list = () => resolve(this.listBuiltinVoices());
       if (typeof speechSynthesis === "undefined") {
@@ -701,9 +817,14 @@ export const ttsEngine = {
 
   /** Internal: speak without clearing the multi-speaker utterance queue. */
   _speakOne(text: string, voiceId?: string, rate?: number) {
+    playbackError = "";
+    playbackErrorCode = "";
+    loadingVoice = false;
+    loadingMessage = "";
     if (voiceId != null) this.setVoice(voiceId);
     if (rate != null) this.setRate(rate);
     sessionGen += 1;
+    finishPlayback?.();
     userPaused = false;
     stopSynthWatchdog();
     dropPrefetch();
@@ -799,6 +920,7 @@ export const ttsEngine = {
 
   cancel() {
     sessionGen += 1;
+    finishPlayback?.();
     userPaused = false;
     stopSynthWatchdog();
     dropPrefetch();
@@ -813,6 +935,9 @@ export const ttsEngine = {
     activeSpokenText = "";
     highlightIndex = 0;
     loadingVoice = false;
+    loadingMessage = "";
+    playbackError = "";
+    playbackErrorCode = "";
     if (typeof speechSynthesis !== "undefined") {
       try {
         speechSynthesis.cancel();
