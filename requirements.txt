@@ -17,6 +17,8 @@ cryptography==49.0.0
 Pillow>=10.0.0
 # Workflow document nodes (PDF text and images); pure Python.
 pypdf>=5.0
+# Workflow runs across processes (backend/automations/live_runs.py): which owners are still alive.
+psutil>=7.0
 # Optional: enables the AI tools (ai_scene_command, ai_generate_python).
 # Safe to omit — those tools no-op with a message when anthropic / the API key is absent.
 anthropic>=0.40.0
