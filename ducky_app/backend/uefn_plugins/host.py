@@ -145,6 +145,23 @@ _ACTIVE_UEFN_AGENT_IDS: ContextVar[tuple[str, ...] | None] = ContextVar(
     "uefn_ducky_active_uefn_agent_plugins", default=None
 )
 
+# ABI of this interpreter. A compiled plugin built for another ABI is not imported.
+PY_ABI = f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64"
+# Where a compiled .pyd lands while its old copy is still mapped in-process (Windows
+# never unloads an extension, so the file stays locked until Ducky exits). Moving the
+# old file here lets the Store overwrite the plugin folder; swept on next launch.
+_COMPILED_QUARANTINE = ".compiled_quarantine"
+
+
+def backend_module_name(plugin_id: str) -> str:
+    """Python module name for a plugin backend: ``uefn_plugin_<id>``.
+
+    Hyphens in the plugin id become underscores so the name is a valid identifier —
+    a compiled extension's init symbol (``PyInit_uefn_plugin_<id>``) must be one, and
+    source and compiled plugins then share one sys.modules key.
+    """
+    return "uefn_plugin_" + str(plugin_id or "").replace("-", "_")
+
 
 def _read_manifest(path: Path) -> dict[str, Any] | None:
     try:
@@ -811,7 +828,7 @@ def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) ->
         pid = normalize_plugin_id(plugin_id)
     except ValueError:
         return
-    mod_name = f"uefn_plugin_{pid}"
+    mod_name = backend_module_name(pid)
     # Let the plugin stop background threads before modules are dropped.
     mod = sys.modules.get(mod_name)
     if mod is not None:
@@ -1911,7 +1928,10 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
     backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend.get("entry") or "backend").strip() or "backend"
     try:
-        _import_backend(pid, root, entry)
+        if _manifest_is_compiled(manifest):
+            _import_compiled_backend(pid, root, manifest)
+        else:
+            _import_backend(pid, root, entry)
     except Exception:  # noqa: BLE001 — register path records the real failure
         _log.debug("UEFN plugin %s pre-import failed", pid, exc_info=True)
 
@@ -1976,6 +1996,11 @@ def _run_first_plugin_load() -> None:
     (Blender addon deploy, Discord presence, gateway factories, …) finishes.
     """
     global _LOADED, _UI_READY
+    # Drop compiled .pyd files a previous run parked while they were still mapped.
+    try:
+        sweep_compiled_quarantine()
+    except Exception:
+        _log.debug("compiled quarantine sweep failed", exc_info=True)
     enabled = set(get_enabled_plugin_ids())
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
@@ -2594,7 +2619,10 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
     backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend.get("entry") or "backend").strip() or "backend"
     register_name = str(backend.get("register") or "register").strip() or "register"
-    mod = _import_backend(pid, root, entry)
+    if _manifest_is_compiled(manifest):
+        mod = _import_compiled_backend(pid, root, manifest)
+    else:
+        mod = _import_backend(pid, root, entry)
     if mod is None:
         return
     register_fn = getattr(mod, register_name, None)
@@ -2603,10 +2631,77 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
     _REGISTERED.add(pid)
 
 
+def _manifest_is_compiled(manifest: dict[str, Any]) -> bool:
+    """True when plugin.json ships a compiled backend instead of .py source."""
+    if bool(manifest.get("compiled")):
+        return True
+    if str(manifest.get("python_abi") or "").strip():
+        return True
+    backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
+    return bool(str(backend.get("compiled") or "").strip())
+
+
+def _compiled_backend_pyd(root: Path, manifest: dict[str, Any], mod_name: str) -> Path | None:
+    """Locate the compiled backend .pyd at the plugin root.
+
+    Prefers the exact ``backend.compiled`` path from plugin.json; falls back to the
+    newest ``<mod_name>*.pyd`` for this ABI so a rename or missing field still loads.
+    """
+    backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
+    rel = str(backend.get("compiled") or "").strip()
+    if rel:
+        p = root / rel
+        if p.is_file():
+            return p
+    matches = sorted(
+        (p for p in root.glob(f"{mod_name}*.pyd") if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+    )
+    return matches[-1] if matches else None
+
+
+def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> Any:
+    """Load a plugin's Nuitka-compiled backend extension module.
+
+    The .pyd is loaded under ``uefn_plugin_<id>`` from the plugin root, so its
+    ``__file__``-relative data paths resolve to the plugin folder exactly as the
+    source package did. An ABI it was not built for is refused with a plain message.
+    """
+    from backend.uefn_plugins.store import plugin_dir
+
+    module_name = backend_module_name(pid)
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+
+    abi = str(manifest.get("python_abi") or "").strip()
+    if abi and abi != PY_ABI:
+        raise RuntimeError(
+            f"Update this plugin: it was built for {abi}, this Ducky runs {PY_ABI}."
+        )
+
+    # A newer version's .pyd may still be waiting in quarantine after a disable/update
+    # while the old copy was mapped — restore it so the enabled plugin can load.
+    _restore_compiled_from_quarantine(pid, plugin_dir(pid))
+    pyd = _compiled_backend_pyd(root, manifest, module_name)
+    if pyd is None:
+        raise RuntimeError(f"compiled backend .pyd not found for {pid}")
+
+    from importlib.machinery import ExtensionFileLoader
+
+    loader = ExtensionFileLoader(module_name, str(pyd))
+    spec = importlib.util.spec_from_file_location(module_name, str(pyd), loader=loader)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load compiled backend for {pid}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _import_backend(pid: str, root: Path, entry: str) -> Any:
     """Import plugin backend package from AppData (or plain module file)."""
     entry_path = root / entry
-    module_name = f"uefn_plugin_{pid}"
+    module_name = backend_module_name(pid)
     if module_name in sys.modules:
         return sys.modules[module_name]
 
@@ -2638,6 +2733,90 @@ def _import_backend(pid: str, root: Path, entry: str) -> Any:
     sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def _compiled_quarantine_dir() -> Path:
+    return appdata_uefn_plugins_dir() / _COMPILED_QUARANTINE
+
+
+def release_locked_compiled_backends(plugin_id: str) -> None:
+    """Move a plugin's compiled .pyd(s) out of its folder so the Store can overwrite it.
+
+    A loaded extension stays mapped in-process and Windows locks the file, so the
+    folder cannot be deleted in place. Renaming the file still works, so the old .pyd
+    is moved into a quarantine folder; the next version installs under a new name and
+    loads fresh, and the quarantined file is swept once Ducky restarts and unlocks it.
+    Best-effort — never raises into the Store install path.
+    """
+    import uuid
+
+    from backend.uefn_plugins.store import normalize_plugin_id, plugin_dir
+
+    try:
+        pid = normalize_plugin_id(plugin_id)
+    except ValueError:
+        return
+    root = plugin_dir(pid)
+    if not root.is_dir():
+        return
+    mod_name = backend_module_name(pid)
+    quarantine = _compiled_quarantine_dir() / pid
+    for pyd in list(root.glob(f"{mod_name}*.pyd")):
+        try:
+            quarantine.mkdir(parents=True, exist_ok=True)
+            # Prefix keeps the original name recoverable for restore; .bin so a swept
+            # leftover is never mistaken for an installed module.
+            dest = quarantine / f"{uuid.uuid4().hex}__{pyd.name}.bin"
+            pyd.replace(dest)
+        except OSError:
+            _log.debug("Could not quarantine compiled backend %s", pyd, exc_info=True)
+
+
+def _restore_compiled_from_quarantine(pid: str, root: Path) -> None:
+    """Recover a quarantined .pyd when the plugin folder has none. Best-effort.
+
+    An install parks the mapped old .pyd in quarantine before overwriting the folder.
+    If that overwrite was interrupted and no new .pyd was written, this brings the old
+    one back so the plugin still loads. A completed install already wrote a new .pyd at
+    the root, so this is a no-op then.
+    """
+    try:
+        mod_name = backend_module_name(pid)
+        if any(root.glob(f"{mod_name}*.pyd")):
+            return
+        quarantine = _compiled_quarantine_dir() / pid
+        if not quarantine.is_dir():
+            return
+        parked = sorted(
+            (p for p in quarantine.glob(f"*__{mod_name}*.pyd.bin") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        if not parked:
+            return
+        newest = parked[-1]
+        # Recover the original file name (strip the "<uuid>__" prefix and ".bin").
+        original = newest.name.split("__", 1)[1][: -len(".bin")]
+        newest.replace(root / original)
+    except OSError:
+        _log.debug("Could not restore quarantined backend for %s", pid, exc_info=True)
+
+
+def sweep_compiled_quarantine() -> None:
+    """Delete quarantined .pyd files that have unlocked (previous run exited). Best-effort."""
+    root = _compiled_quarantine_dir()
+    if not root.is_dir():
+        return
+    for child in list(root.glob("*/*.pyd.bin")):
+        try:
+            child.unlink()
+        except OSError:
+            pass  # still mapped by a live process — try again next launch
+    for pdir in list(root.glob("*")):
+        try:
+            if pdir.is_dir() and not any(pdir.iterdir()):
+                pdir.rmdir()
+        except OSError:
+            pass
 
 
 class _ChangesetApi:

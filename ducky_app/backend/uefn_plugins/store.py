@@ -862,6 +862,15 @@ def import_plugin_from_bytes(
         invalidate_plugin_runtime(pid)
     except Exception:
         pass
+    # A compiled backend keeps its .pyd mapped in-process (Windows locks the file),
+    # which would block the folder overwrite below. Move any locked .pyd aside; the
+    # new version installs under its own name and loads fresh.
+    try:
+        from backend.uefn_plugins.host import release_locked_compiled_backends
+
+        release_locked_compiled_backends(pid)
+    except Exception:
+        pass
 
     # Only wipe the old install after the new zip fully validated in memory.
     # Hold the tree lock so a sibling Update All / skill-sync cannot keep
