@@ -2904,6 +2904,60 @@ class _PluginApi:
             timeout=REQUEST_TIMEOUT if timeout is None else float(timeout),
         )
 
+    def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        """Call any Ducky MCP tool in-process, under the same approval rules the agent gets.
+
+        Routes through the shared dispatcher (``execute_tool``), so a destructive or
+        outward tool still shows its Allow/Deny card and a plan-mode mutator is still
+        refused. Returns the tool's parsed result (dict/list when it is JSON, else the
+        raw string) and raises ``ValueError`` on failure. Safe from a plugin's sync code.
+        """
+        import asyncio
+
+        from backend.agent.tools import execute_tool
+
+        tool_name = (name or "").strip()
+        if not tool_name:
+            raise ValueError("call_tool requires a tool name")
+        args = arguments if isinstance(arguments, dict) else {}
+
+        async def _run() -> Any:
+            return await execute_tool(tool_name, args)
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            result = asyncio.run(_run())
+        else:
+            # A loop is already running on this thread — run on a helper thread so we
+            # never nest event loops.
+            box: dict[str, Any] = {}
+
+            def _worker() -> None:
+                try:
+                    box["result"] = asyncio.run(_run())
+                except BaseException as exc:  # noqa: BLE001 — surfaced below
+                    box["error"] = exc
+
+            t = threading.Thread(target=_worker, name=f"plugin-call-tool-{self.plugin_id}", daemon=True)
+            t.start()
+            t.join()
+            if "error" in box:
+                raise box["error"]
+            result = box.get("result")
+
+        if getattr(result, "ok", False):
+            data = getattr(result, "data", None)
+            if isinstance(data, str):
+                text = data.strip()
+                if text.startswith(("{", "[")):
+                    try:
+                        return json.loads(text)
+                    except ValueError:
+                        return data
+            return data
+        raise ValueError(getattr(result, "error", None) or f"tool failed: {tool_name}")
+
     @property
     def changeset(self) -> "_ChangesetApi":
         """Record a mutation in the Changes ledger so Revert can unwind it."""

@@ -766,11 +766,16 @@ def import_plugin_from_bytes(
     *,
     source: str = "store",
     replace: bool = True,
+    signed_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Install a plugin zip into AppData. Secrets never live in the zip.
 
     Corrupt / Bad-CRC zips are refused **before** any AppData write. A failed
     install never leaves a half-installed plugin folder.
+
+    ``signed_record`` is the Store's signed version record ({…fields, signature}).
+    When present it is verified against the zip before any write and kept next to the
+    installed plugin for the load-time license check; a tampered record is refused.
     """
     if len(data) > MAX_PLUGIN_ZIP_BYTES:
         return {"ok": False, "error": f"zip exceeds max size ({MAX_PLUGIN_ZIP_BYTES} bytes)"}
@@ -782,6 +787,18 @@ def import_plugin_from_bytes(
         pid = normalize_plugin_id(str(manifest.get("id") or ""))
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+
+    # Refuse a Store zip whose signature does not match it (tamper check before write).
+    try:
+        import hashlib
+
+        from backend.uefn_plugins import signing
+
+        ok, reason = signing.verify_download(signed_record, hashlib.sha256(data).hexdigest())
+        if not ok:
+            return {"ok": False, "error": reason}
+    except Exception:
+        pass
 
     dest = plugin_dir(pid)
     existing = _read_json(dest / PLUGIN_MANIFEST) if dest.is_dir() else None
@@ -898,7 +915,24 @@ def import_plugin_from_bytes(
             written["id"] = pid
             written["kind"] = str(written.get("kind") or "plugin")
             written["source"] = source
+            # Record which team a team-visibility item belongs to, so it can be paused
+            # when access to that team is lost (and resumed when it returns).
+            if isinstance(signed_record, dict):
+                vis = str(signed_record.get("visibility") or "").strip()
+                team = str(signed_record.get("team_id") or "").strip()
+                if vis:
+                    written["visibility"] = vis
+                if vis == "team" and team:
+                    written["team_id"] = team
             _write_json(dest / PLUGIN_MANIFEST, written)
+            # Keep the signed record beside the plugin for the load-time license check.
+            if isinstance(signed_record, dict) and signed_record.get("signature"):
+                try:
+                    from backend.uefn_plugins import signing
+
+                    signing.write_installed_record(dest, signed_record)
+                except Exception:
+                    pass
             skill_ids = validate_plugin_skills(dest, pid)
     except OSError as exc:
         with _PLUGIN_TREE_LOCK:

@@ -2740,9 +2740,15 @@ def _store_download_and_install_unlocked(
         raise DuckyOSAccountError(f"Invalid zip: {exc}", code="store_bad_zip") from exc
 
     if is_plugin:
+        from backend.uefn_plugins.signing import record_from_download
         from backend.uefn_plugins.store import import_plugin_from_bytes
 
-        result = import_plugin_from_bytes(raw, source="store", replace=bool(replace))
+        # The server signs each version once; pass the signed record so the install can
+        # verify it and keep it next to the plugin for the load-time license check.
+        signed_record = record_from_download(payload)
+        result = import_plugin_from_bytes(
+            raw, source="store", replace=bool(replace), signed_record=signed_record
+        )
     else:
         from backend.skills.store import import_skill_pack_from_bytes
 
