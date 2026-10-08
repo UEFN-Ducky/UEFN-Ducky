@@ -186,6 +186,14 @@ def fatal_error_and_exit(
     if isinstance(exc, SystemExit):
         hard_exit(api=api)
         return
+    try:
+        from frontend.error_log import record_error
+
+        detail = (exc if isinstance(exc, str)
+                  else "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        record_error("startup", detail)
+    except Exception:
+        pass
     message = _format_fatal_message(exc) if not isinstance(exc, str) else exc
     try:
         import tkinter as tk

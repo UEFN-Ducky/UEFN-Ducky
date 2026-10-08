@@ -67,6 +67,19 @@ def verify(extractor: Path, engine: Path) -> None:
                 print(f"PASS: {label} rejected by installer and recovered by app", flush=True)
             finally:
                 damaged.write_bytes(original)
+        # A listener install failure must not disable the separate panel recovery.
+        listener = root / "app" / "_internal" / "bundle" / "uefn_listener"
+        held_listener = listener.with_name("uefn_listener-proof-held")
+        listener.rename(held_listener)
+        original = entry.read_bytes()
+        try:
+            entry.unlink()
+            run_check(exe, "--panel-recovery-smoke", output,
+                      succeeds=True, recovered=True)
+            print("PASS: panel HTTP startup recovers with listener payload absent", flush=True)
+        finally:
+            entry.write_bytes(original)
+            held_listener.rename(listener)
         run_check(exe, "--verify-panel", output, succeeds=True)
         print("PASS: restored installer payload", flush=True)
 

@@ -103,6 +103,28 @@ def check_panel_recovery(output: str) -> int:
         panel = data_root / "frontend" / "ui_web"
         selected = _web_root()
         verify_bundled_panel(selected, panel / "panel-dist.zip")
+        # Exercise the same HTTP startup used by the GUI, on a private port.
+        import urllib.request
+        from frontend.ui_web import panel_httpd
+
+        panel_httpd.PANEL_UI_HTTP_PORT = 0
+        panel_httpd.start_panel_ui_server(selected)
+        server = panel_httpd._server
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}"
+            with urllib.request.urlopen(url + "/index.html", timeout=10) as response:
+                if response.read() != (selected / "index.html").read_bytes():
+                    raise ValueError("Panel server returned the wrong index")
+            entry = next((selected / "assets").glob("*.js"))
+            with urllib.request.urlopen(url + "/" + entry.relative_to(selected).as_posix(),
+                                        timeout=10) as response:
+                if response.read() != entry.read_bytes():
+                    raise ValueError("Panel server returned the wrong JavaScript")
+        finally:
+            server.shutdown()
+            server.server_close()
+            panel_httpd._server = None
+            panel_httpd._root = None
         report.update(ok=True, recovered=selected != panel / "web" / "dist")
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
