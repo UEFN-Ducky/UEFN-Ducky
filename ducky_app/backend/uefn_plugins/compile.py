@@ -37,8 +37,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend.uefn_plugins.host import backend_module_name
-from backend.uefn_plugins.plugin_version import format_plugin_version, plugin_version_rank
-from backend.uefn_plugins.signing import STORE_SIGNING_PUBKEY
+from backend.uefn_plugins.plugin_version import plugin_version_rank
+from backend.uefn_plugins.signing import STORE_SIGNING_PUBKEY, release_key_problem
 from backend.uefn_plugins.store import PLUGIN_MANIFEST, normalize_plugin_id
 
 # ABI of the running interpreter — the compiled module must target the app's ABI.
@@ -85,6 +85,17 @@ def _progress(fn: ProgressFn | None, frac: float, msg: str) -> None:
             fn(max(0.0, min(1.0, frac)), msg)
         except Exception:
             pass
+
+
+def store_version(raw: object) -> str:
+    """The version string exactly as the Store keys and signs it: a number as written,
+    a string trimmed (``-beta`` / ``+build`` kept). The baked license gate and the
+    publish request must use this, or the signed record would not match the build."""
+    if isinstance(raw, bool) or raw is None:
+        return ""
+    if isinstance(raw, int):
+        return str(raw)
+    return str(raw).strip()
 
 
 # --------------------------------------------------------------------------- kit
@@ -439,13 +450,23 @@ def build_plugin(
     *,
     visibility: str = "public",
     team_id: str = "",
+    smoke_test: bool = True,
+    release: bool = False,
     progress: ProgressFn | None = None,
 ) -> dict[str, Any]:
     """Compile a plugin into a Store-ready zip with no readable Python. Returns a report.
 
     ``visibility`` (public|team) and ``team_id`` are baked into the license gate so a
     team build only loads where that team's key is held. They do not change what ships.
+    ``smoke_test=False`` skips importing the built module — a reviewer rebuilding
+    someone else's submission never runs its code. ``release=True`` (Store publish and
+    review builds) refuses while the Store signing key is not pinned: the key is baked
+    into the binary, so a build made without it would never be license-checked.
     """
+    if release:
+        problem = release_key_problem()
+        if problem:
+            raise CompileError(problem)
     src = Path(src_dir).resolve()
     out_zip = Path(out_zip)
     visibility = "team" if str(visibility).strip().lower() == "team" else "public"
@@ -459,7 +480,7 @@ def build_plugin(
     pid = normalize_plugin_id(str(manifest.get("id") or ""))
     mod_name = backend_module_name(pid)
     version = manifest.get("version")
-    version_str = format_plugin_version(version)
+    version_str = store_version(version)
     verrank = plugin_version_rank(version)
     backend_cfg = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend_cfg.get("entry") or "backend").strip() or "backend"
@@ -489,7 +510,7 @@ def build_plugin(
         pyd, nuitka_warn = _run_nuitka(kpy, work, mod_name)
         warnings.extend(nuitka_warn)
 
-        smoke = _smoke_import(pyd, mod_name, register_name)
+        smoke = _smoke_import(pyd, mod_name, register_name) if smoke_test else ""
         if smoke:
             warnings.append(f"compiled module did not import in a test process: {smoke}")
 
@@ -591,11 +612,15 @@ def abi_matches(manifest: dict[str, Any]) -> bool:
 
 
 def assert_release_abi(zip_path: str | Path) -> None:
-    """Refuse to package a compiled plugin built for another ABI (installer guard).
+    """Refuse to package a compiled plugin into a release (installer guard).
 
-    Reads plugin.json from the zip and raises CompileError on a python_abi mismatch,
-    so a bundled compiled plugin can never ship against the wrong interpreter.
+    Raises CompileError while the Store signing key is not pinned (the release would
+    install Store plugins unverified), and on a python_abi mismatch, so a bundled
+    compiled plugin can never ship against the wrong interpreter.
     """
+    problem = release_key_problem()
+    if problem:
+        raise CompileError(problem)
     zp = Path(zip_path)
     try:
         with zipfile.ZipFile(zp) as zf:
@@ -621,6 +646,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--visibility", default="public", choices=["public", "team"],
                         help="bake the license gate for a public or team release")
     parser.add_argument("--team-id", default="", help="team id when --visibility team")
+    parser.add_argument("--release", action="store_true",
+                        help="a build that will ship: refuse while the Store signing key is not pinned")
     parser.add_argument("--quiet", action="store_true", help="only print the JSON report")
     args = parser.parse_args(argv)
 
@@ -631,7 +658,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = build_plugin(
             args.plugin_dir, args.out_zip,
-            visibility=args.visibility, team_id=args.team_id, progress=_prog,
+            visibility=args.visibility, team_id=args.team_id,
+            release=args.release, progress=_prog,
         )
     except CompileError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stdout)

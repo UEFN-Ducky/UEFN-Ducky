@@ -11,6 +11,20 @@ param(
 $ErrorActionPreference = "Stop"
 # Repo root is two levels up (this script lives in release/installer/).
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
+# A release ships only with the Store's version-signing public key pinned in the app;
+# without it every Store plugin install would go unverified. Dev builds don't run this.
+$SigningPy = Join-Path $Root "ducky_app\backend\uefn_plugins\signing.py"
+$KeyMatch = [regex]::Match((Get-Content $SigningPy -Raw), '(?m)^STORE_SIGNING_PUBKEY\s*=\s*["'']([^"'']*)["'']')
+$PinnedKey = if ($KeyMatch.Success) { $KeyMatch.Groups[1].Value.Trim() } else { "" }
+$KeyBytes = 0
+if ($PinnedKey) { try { $KeyBytes = [Convert]::FromBase64String($PinnedKey).Length } catch { $KeyBytes = 0 } }
+if ($KeyBytes -ne 32) {
+    Write-Error ("Refusing to build the installer: Store signing is off. Run the Store's version-signing-pubkey " +
+        "setup (Store admin) and paste the public_key it returns into STORE_SIGNING_PUBKEY in " +
+        "ducky_app\backend\uefn_plugins\signing.py, then build again.")
+}
+
 $DoEngine = $EngineOnly -or -not $HostOnly
 $DoHost = $HostOnly -or -not $EngineOnly
 

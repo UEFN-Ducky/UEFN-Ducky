@@ -144,6 +144,23 @@ def _signing_on() -> bool:
     return signing_configured()
 
 
+def preflight_store_signing_key() -> None:
+    """Before the tests and the version bump: a release ships only with the Store's
+    version-signing public key pinned, or every Store install would go unverified."""
+    import importlib.util
+
+    path = ROOT / "ducky_app" / "backend" / "uefn_plugins" / "signing.py"
+    spec = importlib.util.spec_from_file_location("_ducky_store_signing", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"Refusing to release: cannot read {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    problem = mod.release_key_problem()
+    if problem:
+        raise SystemExit("Refusing to release: " + problem)
+    print("=== Store signing key: pinned ===")
+
+
 def preflight_signing(*, require: bool) -> None:
     """Before the tests and the version bump: a signing setup that would fail
     (or is missing under --require-sign) should not cost a whole build to find out."""
@@ -770,6 +787,7 @@ def main() -> None:
         return
 
     if args.phase != "upload":
+        preflight_store_signing_key()
         preflight_signing(require=args.require_sign)
 
     if args.notes_from_git and not args.notes.strip():

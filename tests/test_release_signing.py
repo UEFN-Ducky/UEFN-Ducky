@@ -343,10 +343,51 @@ def _no_tests(pub, monkeypatch) -> list[str]:
     import sign_windows
 
     monkeypatch.setattr(sign_windows, "load_dotenv", lambda paths, keys=None: None)
+    # These tests are about code signing; the Store key guard has its own below.
+    monkeypatch.setattr(pub, "preflight_store_signing_key", lambda: None)
     ran: list[str] = []
     monkeypatch.setattr(pub, "run_security_gate", lambda: ran.append("gate"))
     monkeypatch.setattr(pub, "run_regression_tests", lambda: ran.append("tests"))
     return ran
+
+
+def _signing_py_with_key(pub, tmp_path, monkeypatch, key: str) -> None:
+    """Point the release at a copy of signing.py whose pinned key is ``key``."""
+    real = (REPO / "ducky_app" / "backend" / "uefn_plugins" / "signing.py").read_text(encoding="utf-8")
+    text = re.sub(r'(?m)^STORE_SIGNING_PUBKEY\s*=\s*["\'][^"\']*["\']', f'STORE_SIGNING_PUBKEY = "{key}"', real)
+    target = tmp_path / "ducky_app" / "backend" / "uefn_plugins" / "signing.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(pub, "ROOT", tmp_path)
+
+
+def test_release_refuses_without_a_pinned_store_signing_key(pub, tmp_path, monkeypatch):
+    import sign_windows
+
+    monkeypatch.setattr(sign_windows, "load_dotenv", lambda paths, keys=None: None)
+    ran: list[str] = []
+    monkeypatch.setattr(pub, "run_security_gate", lambda: ran.append("gate"))
+    monkeypatch.setattr(pub, "run_regression_tests", lambda: ran.append("tests"))
+    _signing_py_with_key(pub, tmp_path, monkeypatch, "")
+    monkeypatch.setattr(pub.sys, "argv", ["publish_app.py", "--phase", "test"])
+    with pytest.raises(SystemExit) as exc:
+        pub.main()
+    assert "version-signing-pubkey" in str(exc.value)
+    assert ran == []
+
+
+def test_release_refuses_a_malformed_store_signing_key(pub, tmp_path, monkeypatch):
+    _signing_py_with_key(pub, tmp_path, monkeypatch, "not-a-key")
+    with pytest.raises(SystemExit) as exc:
+        pub.preflight_store_signing_key()
+    assert "32-byte" in str(exc.value)
+
+
+def test_release_passes_with_a_pinned_store_signing_key(pub, tmp_path, monkeypatch):
+    import base64
+
+    _signing_py_with_key(pub, tmp_path, monkeypatch, base64.b64encode(bytes(range(32))).decode())
+    pub.preflight_store_signing_key()  # no SystemExit
 
 
 def test_require_sign_without_a_certificate_stops_before_tests(pub, monkeypatch):

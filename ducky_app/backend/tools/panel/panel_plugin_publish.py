@@ -88,8 +88,10 @@ def ducky_plugin_publish(
 ) -> str:
     """Publish a plugin to the Store. Asks first. ``target`` is 'team' or 'public'.
 
-    Team → live for the team at once; public → review inside Ducky. The backend ships
-    compiled; the private source is uploaded only for the team / reviewers.
+    Team → live for the team at once; public → review inside Ducky. ``team_id`` is the
+    team that owns the plugin (needed for a new plugin either way; a new version keeps
+    its owner). The backend ships compiled; the private source is uploaded only for the
+    team's managers and Store reviewers.
     """
     from backend.uefn_plugins.publishing import publish
 
@@ -177,7 +179,10 @@ def ducky_plugin_data_scope(id: str, scope: str = "", pretty: bool = False) -> s
 
 @mcp.tool()
 def ducky_store_review_queue(pretty: bool = False) -> str:
-    """Public plugin submissions awaiting review (reviewer tooling inside Ducky)."""
+    """Public plugin submissions awaiting review. Store staff only.
+
+    Each row: slug, name, version, team, submitted_by, changelog, compiled, has_source.
+    """
     from backend.uefn_plugins.publishing import review_queue
 
     return tool_json(review_queue(), pretty=pretty)
@@ -191,19 +196,22 @@ def ducky_store_review(
     note: str = "",
     pretty: bool = False,
 ) -> str:
-    """Approve or reject a public submission. Asks first.
+    """Approve or reject a public submission. Store staff only. Asks first.
 
-    Approve rebuilds the submission's private source locally, uploads that build, and
-    publishes it. Reject needs a note sent back to the author.
+    Approve downloads the submission's private source, rebuilds it on this PC with the
+    build engine (the submitted code is never run), uploads that build, and publishes it
+    signed — what ships is your build, not the uploader's. Reject needs a note sent back
+    to the author. ``version`` empty = the version waiting for review.
     """
     from backend.uefn_plugins.publishing import review_approve, review_reject
 
+    label = f"'{slug}' {version}".strip()
     if approve:
-        if not _confirm(f"Approve and publish '{slug}' {version}? It will be rebuilt locally.", title="Approve"):
+        if not _confirm(f"Rebuild and publish {label} to the public Store?", title="Approve"):
             return tool_json({"ok": False, "error": "Cancelled — not approved."}, pretty=pretty)
         return tool_json(review_approve(slug, version, notes=note), pretty=pretty)
     if not (note or "").strip():
         return tool_json({"ok": False, "error": "A rejection note is required."}, pretty=pretty)
-    if not _confirm(f"Reject '{slug}' {version}?", title="Reject"):
+    if not _confirm(f"Reject {label}? The author sees your note.", title="Reject"):
         return tool_json({"ok": False, "error": "Cancelled — not rejected."}, pretty=pretty)
     return tool_json(review_reject(slug, version, note), pretty=pretty)

@@ -93,6 +93,33 @@ def signing_configured() -> bool:
     return bool(STORE_SIGNING_PUBKEY.strip())
 
 
+_PIN_STEPS = (
+    "Store signing is off, so this release would install Store plugins unverified. "
+    "Run the Store's version-signing-pubkey setup (Store admin, uefn-ducky-store.manage) "
+    "and paste the public_key it returns into STORE_SIGNING_PUBKEY in "
+    "ducky_app/backend/uefn_plugins/signing.py, then build the release again. "
+    "Dev runs and dev builds are not affected."
+)
+
+
+def release_key_problem() -> str:
+    """Why a release must not ship yet: '' when a valid public key is pinned.
+
+    Release builds (the installer, the portable zip, Store plugin builds) call this;
+    dev runs keep working with no key.
+    """
+    key = STORE_SIGNING_PUBKEY.strip()
+    if not key:
+        return _PIN_STEPS
+    try:
+        raw = base64.b64decode(key, validate=True)
+    except Exception:  # noqa: BLE001
+        raw = b""
+    if len(raw) != 32:
+        return "STORE_SIGNING_PUBKEY is not a base64 32-byte Ed25519 public key. " + _PIN_STEPS
+    return ""
+
+
 def record_from_download(meta: Any) -> dict[str, Any] | None:
     """Pull the signed record ({…fields, signature}) out of a download response."""
     if not isinstance(meta, dict):
