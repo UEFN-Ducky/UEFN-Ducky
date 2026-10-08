@@ -19,7 +19,7 @@ const api = {
   ui_rpc_pending_questions: vi.fn(async (): Promise<AgentEvent[]> => []),
   get_settings: vi.fn(async () => ({})),
 };
-vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 vi.mock("../hooks/onApiReady", () => ({
   onApiReady: (fn: (ready: typeof api) => void) => { fn(api); return () => {}; },
 }));

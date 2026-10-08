@@ -93,8 +93,47 @@ path: read them with `files.get`.
   its open panels on the new copy; nothing of the old copy is carried over.
 
 The host also pushes `{ channel, event: { type: "appearance_theme", vars } }` on iframe
-load and whenever Appearance changes. Prefer `var(--bg)`, `var(--fg)`, `var(--accent)`,
-`var(--card)`, … — never hardcode theme colors in plugin HTML.
+load and whenever Appearance changes (keys without `--`). Use `var(--bg)`, `var(--fg)`,
+`var(--accent)`, `var(--card)`, … — never hardcode colors in plugin HTML, CSS or JS.
+
+### The Ducky UI kit
+
+One tag in a panel page gives it the app's look and the user's theme, live:
+
+```html
+<script src="../../_kit/ducky.js"></script>
+```
+
+The path is relative to the page (`/plugin-ui/<id>/ui/index.html` → `/plugin-ui/_kit/`;
+one more `../` per folder deeper), so it also works where the panel is served from a
+subfolder. `ducky.js` links `ducky.css` beside it, applies the Appearance variables
+(`theme.get` on load, `appearance_theme` after) and sets `html[data-dk-hidden]` while
+the tab is hidden, which pauses the kit's animations. Link `ducky.css` alone if you
+apply the theme yourself. Element defaults (`body`, `button`, `input`, `select`, …)
+use `:where()`, so your own rules always win.
+
+| Class | What |
+|-------|------|
+| `dk-btn` + `dk-btn--primary` / `--secondary` / `--ghost` / `--danger` / `--icon` | Buttons |
+| `dk-input`, `dk-select`, `dk-field` (+ `__label`, `__hint`) | Inputs and selects |
+| `dk-check` (a label around a checkbox or radio) | Checkboxes |
+| `dk-tabs` > `dk-tab[aria-selected="true"]` | Tabs |
+| `dk-card` (+ `--interactive`, `__title`) | Cards |
+| `dk-table` | Tables |
+| `dk-badge` + `--accent` / `--success` / `--warn` / `--danger` / `--info` | Badges |
+| `dk-empty` (+ `__title`), `dk-loading`, `dk-error` (+ `__title`) | Empty, loading and error states |
+| `dk-page`, `dk-stack`, `dk-row`, `dk-muted`, `dk-dim` | Layout and text |
+
+Every control gets a visible `:focus-visible` ring (`var(--border-focus)`). The kit
+uses only Appearance variables; `ducky_plugin_validate` holds AI plugins to the same
+rule (no color literals, no `var(--x)` the app doesn't set unless the plugin defines it).
+
+### Panel errors
+
+The host puts a small reporter at the top of every panel page: uncaught errors,
+rejected promises and `console.error` go over the bridge (`panel.error`) and show up in
+`ducky_plugin_errors(id)` with the panel's id, next to backend load errors, panel
+crashes, tool exceptions and workflow node errors. At most 20 reports per page load.
 
 ### Visibility
 

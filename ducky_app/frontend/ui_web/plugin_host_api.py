@@ -1,7 +1,10 @@
 """Generic plugin host helpers: LLM complete + JSON cache (not feature-specific).
 
-Cache and prefs belong to the signed-in account (Personal, never synced). Data a
-team shares goes through the host data service (``backend.uefn_plugins.scopes``).
+Cache and prefs belong to the signed-in account and live in the scope the plugin's
+data lives in (Local, or its team): never synced, so each team has its own on this
+PC. A team whose access was lost hides them (read-only) until access comes back,
+and they go with its copy a week later. Data a team shares goes through the host
+data service (``backend.uefn_plugins.scopes``).
 """
 
 from __future__ import annotations
@@ -71,6 +74,25 @@ def _mine() -> dict[str, str]:
     return {"account": account, "scope": PERSONAL}
 
 
+def _where(plugin_id: str) -> tuple[dict[str, str], bool]:
+    """``plugin_id``'s cache + prefs rows: the account's, in the scope its data lives in
+    now (Local, its team, or a plugin test's sandbox). ``closed`` when access to that
+    team was lost: the rows are hidden and read-only until access comes back."""
+    from backend.uefn_plugins.scopes import active_scope, valid_plugin_id
+
+    mine = _mine()
+    if not valid_plugin_id(plugin_id):
+        return mine, False
+    scope = active_scope(plugin_id)
+    return {"account": mine["account"], "scope": scope["id"]}, scope["state"] == "lost"
+
+
+def _closed_error(plugin_id: str) -> Exception:
+    from backend.uefn_plugins.scopes import ReadOnlyScope
+
+    return ReadOnlyScope(f"{plugin_id}: access to this team was lost. Its data on this PC is locked.")
+
+
 def _seal(data: dict[str, Any], account: str) -> str:
     """Every row is sealed for the account (plan §13). Raises ``Locked`` without its key:
     never write plaintext."""
@@ -112,7 +134,9 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
     data: dict[str, Any] = {}
     if _use_db():
         try:
-            mine = _mine()
+            mine, closed = _where(pid)
+            if closed:
+                return {}
             value, encrypted = _repo().get(pid, k, **mine)
             data = _unseal(value, encrypted, mine["account"])
             with _CACHE_LOCK:
@@ -142,7 +166,9 @@ def cache_set(plugin_id: str, key: str, data: dict[str, Any], *, sensitive: bool
     payload = data if isinstance(data, dict) else {}
     mem_key = f"{pid}:{k}"
     if _use_db():
-        mine = _mine()
+        mine, closed = _where(pid)
+        if closed:
+            raise _closed_error(pid)
         _repo().set(pid, k, None, encrypted_b64=_seal(payload, mine["account"]), **mine)
         with _CACHE_LOCK:
             _CACHE[mem_key] = dict(payload)
@@ -174,7 +200,9 @@ def cache_clear(plugin_id: str, key: str = "") -> dict[str, Any]:
     if _use_db():
         try:
             repo = _repo()
-            mine = _mine()
+            mine, closed = _where(pid)
+            if closed:
+                return {"ok": False, "error": str(_closed_error(pid)), "cleared": []}
             with _CACHE_LOCK:
                 if not raw:
                     cleared = repo.delete_prefix(pid, "", **mine)
@@ -239,13 +267,37 @@ def prefs_all_path() -> Path:
     return prefs_dir() / "all.json"
 
 
+def _scoped_prefs(mine: dict[str, str]) -> dict[str, tuple[str, bool]]:
+    """Every plugin's stored prefs row, each from the scope its data lives in: Local
+    rows, with plugins kept in a team (or a test sandbox) read from there instead,
+    and none for a team whose access was lost."""
+    from backend.store.repos import plugin_data
+    from backend.uefn_plugins.scopes import sandboxed_plugins
+
+    repo = _repo()
+    rows = repo.all_prefs(**mine)
+    by_scope: dict[str, dict[str, tuple[str, bool]]] = {}
+    for pid in set(plugin_data.links(mine["account"])) | sandboxed_plugins():
+        where, closed = _where(pid)
+        if where["scope"] == mine["scope"]:
+            continue  # the team isn't available here: its data is Local again
+        rows.pop(pid, None)
+        if closed:
+            continue
+        if where["scope"] not in by_scope:
+            by_scope[where["scope"]] = repo.all_prefs(**where)
+        if pid in by_scope[where["scope"]]:
+            rows[pid] = by_scope[where["scope"]][pid]
+    return rows
+
+
 def prefs_all_get() -> dict[str, Any]:
     """All plugin UI prefs (same shape as localStorage uefn-plugin-ui-prefs)."""
     if _use_db():
         try:
             out: dict[str, Any] = {}
             mine = _mine()
-            for pid, (value, encrypted) in _repo().all_prefs(**mine).items():
+            for pid, (value, encrypted) in _scoped_prefs(mine).items():
                 stored: Any = value
                 if not encrypted:
                     try:
@@ -304,15 +356,18 @@ def prefs_all_set(all_prefs: dict[str, Any]) -> dict[str, Any]:
             }
         if _use_db():
             repo = _repo()
-            mine = _mine()
             for clean in src:
                 if isinstance(clean, str) and clean in bag:
                     try:
                         pid = _safe_plugin_id(clean)
                     except ValueError:
                         continue
+                    where, closed = _where(pid)
+                    if closed:
+                        bag.pop(pid, None)  # a lost team's prefs stay locked as they were
+                        continue
                     # Sealed for the account; raises while its data key is missing (never plaintext).
-                    repo.set_prefs(pid, _seal(bag[pid], mine["account"]), **mine)
+                    repo.set_prefs(pid, _seal(bag[pid], where["account"]), **where)
             return {"ok": True, "prefs": bag}
         root = prefs_dir()
         root.mkdir(parents=True, exist_ok=True)

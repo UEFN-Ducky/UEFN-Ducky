@@ -416,6 +416,8 @@ _PANEL_UI_TOOLS = frozenset(
         "ducky_plugin_install",
         "ducky_plugin_delete_draft",
         "ducky_plugin_reference",
+        "ducky_plugin_errors",
+        "ducky_plugin_test",
         # Custom Verse templates (AppData) — never Store plugin verse.templates.
         "ducky_verse_template_list",
         "ducky_verse_template_get",

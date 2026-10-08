@@ -1254,8 +1254,13 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
             if ntype.startswith("start.") or ntype not in _ACTION_TYPES:
                 return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": dict(payload)}
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": f"no handler for {ntype}"}
-        result = handler(_plugin_ctx(cfg, payload, node, values))
+        try:
+            result = handler(_plugin_ctx(cfg, payload, node, values))
+        except Exception as exc:
+            _plugin_node_error(ntype, exc)
+            raise
         if isinstance(result, dict) and result.get("ok") is False:
+            _plugin_node_error(ntype, result.get("error") or "plugin node failed")
             return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": result.get("error") or "plugin node failed", "result": result}
         return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": result}
     except (ExprError, ValueError) as exc:  # what the user wrote or wired: say what is wrong, no traceback
@@ -1263,6 +1268,16 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
     except Exception as exc:
         _log.exception("automation node %s failed", ntype)
         return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": str(exc)}
+
+
+def _plugin_node_error(node_type: str, error: Any) -> None:
+    """A plugin's node failed: its owner sees it in ducky_plugin_errors."""
+    try:
+        from backend.tools.panel.panel_plugin_check import record_node_error
+
+        record_node_error(node_type, error)
+    except Exception:
+        pass
 
 
 def _file_refs(raw: Any, kind: str) -> list[dict[str, Any]]:
