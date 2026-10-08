@@ -12,6 +12,15 @@ function start(run: string): PanelPushEvent {
   return { type: "workflow_run", id: "wf", run, name: run, state: "started", conv: "chat" };
 }
 
+it("keeps a run ended when its finish arrives before its start", async () => {
+  applyWorkflowEvent({ type: "workflow_run", id: "wf", run: "done", state: "done" });
+  applyWorkflowEvent(start("done"));
+  expect(getBackgroundJobs()[0]).toMatchObject({ phase: "done", cancelable: false });
+  api.workflow_run_snapshot.mockResolvedValue({ ok: true, events: [start("done"), { type: "workflow_run", id: "wf", run: "done", state: "done" }] });
+  await refreshWorkflowRuns();
+  expect(getBackgroundJobs()[0].phase).toBe("done");
+});
+
 it("recovers a missed finish while leaving another concurrent run active", async () => {
   applyWorkflowEvent(start("done"));
   applyWorkflowEvent(start("live"));

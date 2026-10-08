@@ -70,8 +70,9 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
   if (!run) return;
   const eventKey = [event.id, run, event.type, event.node, event.source, event.type === "workflow_run" ? event.state : ""].join(":");
   const previous = latestEvents.get(eventKey);
-  if (previous?.workflow_sequence && event.workflow_sequence && event.workflow_sequence <= previous.workflow_sequence) return;
-  if (JSON.stringify(previous) === JSON.stringify(event)) return;
+  const replayFinish = event.type === "workflow_run" && event.state !== "started" && byRun.get(run)?.state === "running";
+  if (!replayFinish && previous?.workflow_sequence && event.workflow_sequence && event.workflow_sequence <= previous.workflow_sequence) return;
+  if (!replayFinish && JSON.stringify(previous) === JSON.stringify(event)) return;
   latestEvents.set(eventKey, event);
   for (const listener of eventListeners) listener(event);
   if (event.type === "workflow_run" && event.state === "started") {
@@ -94,6 +95,10 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
     });
     upsertBackgroundJob({ id: `graph-run:${event.id}:${run}`, source: "workflow", title: event.name || "Workflow", phase: "working", cancelable: true });
     emit();
+    // The two push buses can deliver the finish before the start.
+    const finished = [...latestEvents.values()].find((saved) =>
+      saved.id === event.id && saved.run === run && saved.type === "workflow_run" && saved.state !== "started");
+    if (finished) applyWorkflowEvent(finished);
     return;
   }
   const current = byRun.get(run);
