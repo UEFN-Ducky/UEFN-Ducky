@@ -898,6 +898,9 @@ def ducky_send_chat_message(
             text,
             mode_norm,
             timeout_sec=max(5.0, min(float(timeout_sec), 600.0)),
+            # The wait ends; the agent does not. A coordinator checking on a builder
+            # must never kill a long task just because it outlasted the wait.
+            cancel_on_timeout=False,
         )
         return tool_json(outcome, pretty=pretty)
 
