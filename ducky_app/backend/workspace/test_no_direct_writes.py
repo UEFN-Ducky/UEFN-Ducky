@@ -37,6 +37,7 @@ ALLOWLIST: dict[str, str] = {
     "backend/tools/panel/panel_ai_plugins.py::delete_ai_plugin_draft": "plugin draft under AppData",
     "backend/tools/panel/panel_ai_plugins.py::_self_check": "self-check temp dir",
     "backend/tools/panel/panel_verse_templates.py::_self_check": "self-check temp dir",
+    "backend/tools/panel/panel_plugin_check.py::record": "plugin error log under AppData when the events DB is off",
     "backend/tools/verse/verse_stats.py::_append": "stats ledger under AppData",
     "backend/tools/core/uefn_windows.py::_save_clicks": "Copy/OK click cache under AppData",
     "backend/tools/core/uefn_popups.py::mark_verse_skip": "uefn_verse_skip.json marker under AppData",

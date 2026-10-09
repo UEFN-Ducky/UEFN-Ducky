@@ -164,7 +164,8 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
   // Native WebView2 panes are desktop-only (REMOTE_DENY); skip the rAF on stream.
   // A hidden tab has no rect to pin to: no rAF until it shows again.
   useEffect(() => {
-    if (isRemote() || !visible) return;
+    if (isRemote()) return;
+    if (!visible) return;
     let raf = 0;
     const tick = () => {
       pushBrowserPaneBounds(tabId, iframeRef.current);
