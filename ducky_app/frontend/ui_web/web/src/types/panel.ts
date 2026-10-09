@@ -1782,6 +1782,19 @@ export interface UefnPluginDto {
 export type CodingAgentId = string;
 
 /** One plugin of the first-run bundle: an AI gateway or a UEFN editor tool. */
+/** One crash report kept on this PC; `text` is exactly what was (or would be) sent. */
+export interface CrashReportDto {
+  id: string;
+  sent: boolean;
+  at: number;
+  message: string;
+  text: string;
+}
+
+export interface CrashReportsState {
+  reports: CrashReportDto[];
+}
+
 export interface StarterPluginDto {
   slug: string;
   label: string;
@@ -2685,6 +2698,10 @@ export interface PanelApi {
   open_devtools?(): Promise<{ ok: boolean; error?: string }>;
   /** One line in Settings → Errors from the page (scrubbed like every log). */
   report_ui_error?(source: string, message: string): Promise<{ ok: boolean }>;
+  /** Crash reports kept on this PC, newest first, with the exact text each one sends. */
+  crash_reports?(): Promise<CrashReportsState>;
+  crash_report_send?(reportId: string): Promise<{ ok: boolean; error?: string }>;
+  crash_report_delete?(reportId: string): Promise<{ ok: boolean }>;
   /** Download a Google font once into AppData; `href` is its stylesheet on the local panel server. */
   cache_font?(family: string): Promise<{ ok: boolean; href?: string; error?: string }>;
   /** Persist ErrorBoundary crash details to AppData/ui_crashes.jsonl. */

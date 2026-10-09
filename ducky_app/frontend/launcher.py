@@ -380,6 +380,15 @@ def main() -> None:
         # Wall clock from process entry — webview_app boot traces use this for total_ms.
         os.environ["UEFN_DUCKY_BOOT_T0"] = str(_time.perf_counter())
         _ensure_repo_on_path()
+        # Before anything that could crash: send the last launch's crash report, if any,
+        # and start recording this one.
+        try:
+            from frontend import __version__ as _version
+            from frontend import boot_report
+
+            boot_report.begin(str(_version))
+        except Exception:
+            pass
         try:
             from frontend.app_logging import configure as configure_logging
 

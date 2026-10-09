@@ -135,6 +135,28 @@ def set_open_files_handler(handler) -> None:
     _open_handler = handler
 
 
+def panel_can_take_handoff() -> bool:
+    """False while this panel is shutting down or has no window left.
+
+    A second launch hands off to us and quits; if our window is already gone (a process
+    stuck on its way out), that launch would open nothing. Refusing makes it close this
+    process instead and start fresh.
+    """
+    try:
+        from frontend.ui_web import shutdown
+
+        if shutdown._exit_started:
+            return False
+    except Exception:
+        pass
+    try:
+        import webview
+
+        return bool(getattr(webview, "windows", None))
+    except Exception:
+        return True
+
+
 def dispatch_open_files(paths: list[str]) -> bool:
     """Accept paths in this panel process.
 

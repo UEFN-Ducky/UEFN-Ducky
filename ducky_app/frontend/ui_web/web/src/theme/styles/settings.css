@@ -2096,6 +2096,76 @@
   color: var(--red);
 }
 
+.crash-reports {
+  display: flex;
+  flex-direction: column;
+}
+
+.crash-reports-empty {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.crash-report-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.crash-report-row:last-of-type {
+  border-bottom: none;
+}
+
+.crash-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.crash-report-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crash-report-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.crash-report-when {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.crash-report-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.crash-report-text {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 8px);
+  background: color-mix(in srgb, var(--card) 80%, var(--bg));
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .appearance-layout-toggle {
   max-width: 320px;
 }

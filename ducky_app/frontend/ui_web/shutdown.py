@@ -139,6 +139,12 @@ def hard_exit(*, api: Any = None) -> None:
             return
         _exit_started = True
 
+    try:
+        from frontend import boot_report
+
+        boot_report.mark("closed")
+    except Exception:
+        pass
     _stop_all_agents()
     _stop_cpu_workers()
     _stop_all_terminals()
@@ -192,6 +198,13 @@ def fatal_error_and_exit(
         detail = (exc if isinstance(exc, str)
                   else "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
         record_error("startup", detail)
+    except Exception:
+        pass
+    try:
+        from frontend import boot_report
+
+        boot_report.mark("fatal", error=exc if isinstance(exc, str) else "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)))
     except Exception:
         pass
     message = _format_fatal_message(exc) if not isinstance(exc, str) else exc

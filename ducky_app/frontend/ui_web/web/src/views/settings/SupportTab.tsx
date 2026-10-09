@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Icons } from "../../icons/Icons";
 import { getApi } from "../../hooks/usePanelApi";
+import { CrashReportsSection } from "./CrashReportsSection";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 
@@ -155,6 +156,7 @@ export function SupportTab() {
           </div>
         </form>
       </section>
+      <CrashReportsSection />
     </div>
   );
 }

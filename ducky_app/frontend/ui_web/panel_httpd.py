@@ -746,8 +746,15 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         raw_links = payload.get("links") or []
                         if isinstance(raw_links, list):
                             links = [str(link) for link in raw_links if str(link).strip()]
-                    from frontend.open_files import dispatch_deep_links, dispatch_open_files
+                    from frontend.open_files import (
+                        dispatch_deep_links,
+                        dispatch_open_files,
+                        panel_can_take_handoff,
+                    )
 
+                    if not panel_can_take_handoff():
+                        self._send_json(503, {"ok": False, "error": "closing"})
+                        return
                     ok_links = dispatch_deep_links(links) if links else False
                     # Focus-only handoff (no paths, no links) still goes through
                     # dispatch_open_files so the window is shown.

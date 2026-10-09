@@ -100,6 +100,12 @@ def _poll_listener(api: object) -> None:
 def _boot_trace(name: str, t0: float, **meta: object) -> None:
     """Record one cold-start phase; never raises."""
     try:
+        from frontend import boot_report
+
+        boot_report.stage(name)
+    except Exception:
+        pass
+    try:
         from frontend.perf_trace import ensure_started, trace
 
         ensure_started()
@@ -143,6 +149,12 @@ def run() -> None:
         # cold start for tens of seconds on connect timeouts.
         if try_handoff_to_running(open_paths, links=deep_links):
             _boot_trace("handoff_exit", t_handoff)
+            try:
+                from frontend import boot_report
+
+                boot_report.mark("handoff")
+            except Exception:
+                pass
             try:
                 from frontend.early_splash import dismiss as dismiss_early_splash
 
@@ -514,6 +526,13 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     def _on_shown() -> None:
         threading.Thread(target=_apply_window_icon, daemon=True, name="window-icon").start()
+        try:
+            from frontend import boot_report
+
+            boot_report.stage("window_shown")
+            boot_report.mark("ok")
+        except Exception:
+            pass
 
     window.events.shown += _on_shown
 

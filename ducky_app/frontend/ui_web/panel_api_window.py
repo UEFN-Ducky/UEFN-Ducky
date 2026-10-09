@@ -614,6 +614,23 @@ class PanelApiWindowMixin:
             _pa.record_error(src, text)
         return {"ok": bool(text)}
 
+    def crash_reports(self) -> dict[str, Any]:
+        """Crash reports kept on this PC, newest first, with the exact text each one sends."""
+        from frontend import boot_report
+
+        return {"reports": boot_report.list_reports()}
+
+    def crash_report_send(self, report_id: str = "") -> dict[str, Any]:
+        from frontend import boot_report
+
+        ok = boot_report.send_report(str(report_id or ""), str(_pa.__version__))
+        return {"ok": ok, **({} if ok else {"error": "Couldn't send the report. Check your connection and try again."})}
+
+    def crash_report_delete(self, report_id: str = "") -> dict[str, Any]:
+        from frontend import boot_report
+
+        return {"ok": boot_report.delete_report(str(report_id or ""))}
+
     def cache_font(self, family: str = "") -> dict[str, Any]:
         """Download a Google font picked in Appearance once into AppData; the page then loads
         it from the local panel server (``href``) instead of the internet."""
