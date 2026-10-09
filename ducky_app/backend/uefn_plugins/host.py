@@ -2677,6 +2677,13 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         if pid in _REGISTERED:
             return
         version = str(manifest.get("version") or "")
+        from backend.uefn_plugins.store import app_too_old_for
+
+        too_old = app_too_old_for(manifest)
+        if too_old:
+            # Copied in by hand or installed before this check: never load what this Ducky can't run.
+            _record_plugin_load_error(pid, RuntimeError(too_old))
+            return
         if plugin_crashed_ducky(pid, version):
             label = str(manifest.get("label") or pid)
             _record_plugin_load_error(

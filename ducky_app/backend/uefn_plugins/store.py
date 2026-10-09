@@ -52,6 +52,25 @@ def appdata_uefn_plugins_dir() -> Path:
     return appdata_dir() / UEFN_PLUGINS_DIR
 
 
+def app_too_old_for(manifest: dict[str, Any]) -> str:
+    """Why this Ducky can't run the plugin (its min_app_version is newer), or ''."""
+    from backend.uefn_plugins.plugin_version import parse_plugin_version
+
+    need = str(manifest.get("min_app_version") or "").strip()
+    if not need or parse_plugin_version(need) == (0, 0, 0):
+        return ""
+    try:
+        from frontend import __version__ as have
+    except Exception:
+        return ""
+    if parse_plugin_version(have) == (0, 0, 0) or parse_plugin_version(have) >= parse_plugin_version(need):
+        return ""
+    label = str(manifest.get("label") or manifest.get("id") or "This plugin")
+    version = str(manifest.get("version") or "").strip()
+    name = f"{label} {version}".strip()
+    return f"{name} needs UEFN Ducky {need} or newer (you have {have}). Update UEFN Ducky, then install it."
+
+
 def appdata_ai_plugins_dir() -> Path:
     """Shared per-install draft workspace for AI-authored plugins (not loaded directly)."""
     return appdata_dir() / AI_PLUGINS_DIR
@@ -796,6 +815,10 @@ def import_plugin_from_bytes(
         pid = normalize_plugin_id(str(manifest.get("id") or ""))
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    too_old = app_too_old_for(manifest)
+    if too_old:
+        # Nothing is written: the installed version (if any) keeps working.
+        return {"ok": False, "code": "needs_newer_app", "error": too_old}
 
     # Refuse a Store zip whose signature does not match it (tamper check before write).
     try:

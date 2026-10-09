@@ -1100,3 +1100,45 @@ def test_a_normal_load_leaves_no_marker(monkeypatch, tmp_path) -> None:
         assert not list(host._markers_dir().glob("guarded.*.json"))
     finally:
         host._REGISTERED.discard("guarded")
+
+
+def _with_manifest(data: bytes, **fields) -> bytes:
+    import io
+    import zipfile
+
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as dst:
+        for item in src.infolist():
+            body = src.read(item.filename)
+            if item.filename.endswith("plugin.json"):
+                manifest = json.loads(body)
+                manifest.update(fields)
+                body = json.dumps(manifest).encode()
+            dst.writestr(item, body)
+    return out.getvalue()
+
+
+def test_a_plugin_that_needs_a_newer_ducky_is_never_installed_or_loaded(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    import frontend
+    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import app_too_old_for, import_plugin_from_bytes, plugin_dir
+
+    monkeypatch.setattr(frontend, "__version__", "1.2.300")
+    assert app_too_old_for({"min_app_version": "1.2.200"}) == ""
+    assert app_too_old_for({}) == ""
+
+    assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
+    result = import_plugin_from_bytes(_with_manifest(_zip_plugin("demo", 2), min_app_version="1.2.357"), source="local", replace=True)
+    assert result["ok"] is False and result["code"] == "needs_newer_app"
+    assert "Demo 2 needs UEFN Ducky 1.2.357 or newer (you have 1.2.300)" in result["error"]
+    assert json.loads((plugin_dir("demo") / "plugin.json").read_text(encoding="utf-8"))["version"] == 1
+
+    errors: list[str] = []
+    monkeypatch.setattr(host, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
+    imported: list[str] = []
+    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: imported.append(pid))
+    host._REGISTERED.discard("newer")
+    host._load_one("newer", tmp_path, {"id": "newer", "label": "Newer", "version": "3", "min_app_version": "9.0.0"})
+    assert imported == [] and errors and "needs UEFN Ducky 9.0.0 or newer" in errors[0]
