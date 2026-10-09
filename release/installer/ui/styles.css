@@ -1,6 +1,11 @@
 /* Tokens and controls match the UEFN Ducky app (theme/styles/critical.css,
    update-toast-btn-primary, settings-btn, ducky-parade.css) so Setup looks
    like the app it installs. */
+/* Same face as the app, shipped inside Setup (nothing loads from the internet). */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap; src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/inter-latin-700-normal.woff2") format("woff2"); }
 :root {
   color-scheme: dark;
   --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;

@@ -26,6 +26,7 @@
     <EngineExe Condition="'$(EngineExe)' == ''"></EngineExe>
     <UiDir Condition="'$(UiDir)' == ''">..\ui</UiDir>
     <PublicDir Condition="'$(PublicDir)' == ''">..\..\..\ducky_app\frontend\ui_web\web\public</PublicDir>
+    <FontDir Condition="'$(FontDir)' == ''">..\..\..\ducky_app\frontend\ui_web\web\node_modules\@fontsource\inter\files</FontDir>
     <LicenseFile Condition="'$(LicenseFile)' == ''">..\..\..\LICENSE</LicenseFile>
     <SetupOutput Condition="'$(SetupOutput)' == ''"></SetupOutput>
     <AppIcon Condition="'$(AppIcon)' == ''"></AppIcon>
@@ -46,6 +47,11 @@
     <EmbeddedResource Include="$(UiDir)\index.html" LogicalName="ui/index.html" />
     <EmbeddedResource Include="$(UiDir)\styles.css" LogicalName="ui/styles.css" />
     <EmbeddedResource Include="$(UiDir)\app.js" LogicalName="ui/app.js" />
+    <!-- Inter from the panel's @fontsource package, so Setup never fetches fonts. -->
+    <EmbeddedResource Include="$(FontDir)\inter-latin-400-normal.woff2" LogicalName="ui/fonts/inter-latin-400-normal.woff2" />
+    <EmbeddedResource Include="$(FontDir)\inter-latin-500-normal.woff2" LogicalName="ui/fonts/inter-latin-500-normal.woff2" />
+    <EmbeddedResource Include="$(FontDir)\inter-latin-600-normal.woff2" LogicalName="ui/fonts/inter-latin-600-normal.woff2" />
+    <EmbeddedResource Include="$(FontDir)\inter-latin-700-normal.woff2" LogicalName="ui/fonts/inter-latin-700-normal.woff2" />
     <!-- The app's own logo and loading-parade ducks, straight from the panel. -->
     <EmbeddedResource Include="$(PublicDir)\OnlineMCPIcon.png" LogicalName="ui/logo.png" />
     <EmbeddedResource Include="$(PublicDir)\duckies\Artist.png" LogicalName="ui/duckies/Artist.png" />
