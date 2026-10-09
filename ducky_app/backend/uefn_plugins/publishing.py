@@ -2,23 +2,27 @@
 
 The account plugin calls this module. A publish compiles the plugin with the build
 engine (no readable Python ships), zips the private source separately, and uploads
-both to the Store over a chunked collect protocol. A team release goes live for the
-team at once (after the server's Manage-plugins check); a public release goes to
-review, which happens inside Ducky: a reviewer downloads the private source, rebuilds
-it locally, and the server signs and publishes the reviewer's build.
+both straight to the Store's storage: an upload ticket is a presigned PUT, and the
+publish names the tickets by id. Compiled zips are far too big for a collect request
+(64 KB) or the Store plugin's 1 MiB message limit, so no zip bytes ride a request. A
+team release goes live for the team at once (after the server's Manage-plugins check);
+a public release goes to review, which happens inside Ducky: a reviewer downloads the
+private source, rebuilds it locally, and the server signs and publishes that build.
 
 Private source is never served by the normal download path — only ``item-source``
-(members with Manage plugins) and ``review-source`` (reviewers) return it.
+(members with Manage plugins) and ``review-source`` (reviewers) return it, inline when
+small and as a short-lived link when big.
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import io
 import json
 import logging
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any, Callable
@@ -75,16 +79,64 @@ def _staff_binding() -> str:
     return binding
 
 
-def _admin(action: str, data: dict[str, Any], *, zip_b64: str = "", timeout: float = 60.0) -> dict[str, Any]:
+def _admin(action: str, data: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
     """Call a staff action on the Store's admin event (the existing staff gate)."""
     body: dict[str, Any] = {"binding": _staff_binding(), "action": action, "data": data}
-    if zip_b64:
-        body["zip_b64"] = zip_b64
     return _store("admin", body, timeout=timeout)
 
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+# A big zip over a home connection: give the PUT time.
+_PUT_TIMEOUT_S = 600.0
+
+
+def _put_to_ticket(ticket: dict[str, Any], data: bytes) -> None:
+    """PUT ``data`` to an upload ticket's presigned URL (straight into the Store's storage)."""
+    from frontend.duckyos_account import _USER_AGENT
+
+    url = str(ticket.get("putUrl") or "")
+    if not url.lower().startswith(("https://", "http://")):
+        raise RuntimeError("The Store gave no upload link.")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="PUT",
+        # The size is signed into the link; it must match exactly.
+        headers={"Content-Length": str(len(data)), "User-Agent": _USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_PUT_TIMEOUT_S) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Upload to the Store failed (HTTP {exc.code}).") from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise RuntimeError(f"Upload to the Store failed: {exc}") from exc
+
+
+def _upload(data: bytes, *, purpose: str, slug: str, team_id: str = "", staff: bool = False) -> tuple[str, str]:
+    """Upload a zip with a ticket; returns (uploadId, sha256) for the publish call.
+
+    A publisher's ticket needs the manage permission on the item's team (or ``team_id``
+    for a new item); a reviewer's comes from the staff admin event.
+    """
+    sha = _sha256(data)
+    body = {"size": len(data), "sha256": sha, "purpose": purpose, "slug": slug, "teamId": team_id}
+    ticket = _admin("upload-ticket", body) if staff else _store("upload-ticket", body)
+    upload_id = str(ticket.get("uploadId") or "").strip()
+    if not upload_id:
+        raise RuntimeError(str(ticket.get("error") or "The Store did not issue an upload ticket."))
+    _put_to_ticket(ticket, data)
+    return upload_id, sha
+
+
+def _zip_from(payload: dict[str, Any]) -> bytes:
+    """Verified zip bytes from a Store response (inline when small, by link when big)."""
+    from frontend.duckyos_account import store_zip_bytes
+
+    return store_zip_bytes(payload)
 
 
 def plugin_source_dir(plugin_id: str) -> Path | None:
@@ -124,10 +176,6 @@ def zip_source(src: Path) -> bytes:
     return buf.getvalue()
 
 
-def _b64(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")
-
-
 def publish(
     plugin_id: str,
     target: str,
@@ -160,7 +208,7 @@ def publish(
         build_zip = Path(td) / f"{pid}-build.zip"
         _progress(progress, 0.05, "Compiling plugin…")
         try:
-            report = engine.build_plugin(
+            engine.build_plugin(
                 src, build_zip, visibility=target, team_id=team_id, release=True,
                 progress=lambda f, m: _progress(progress, 0.05 + 0.45 * f, m),
             )
@@ -169,8 +217,12 @@ def publish(
         build_bytes = build_zip.read_bytes()
         _progress(progress, 0.52, "Packing source…")
         source_bytes = zip_source(src)
-        _progress(progress, 0.6, "Uploading…")
         try:
+            _progress(progress, 0.6, "Uploading the build…")
+            build_id, build_sha = _upload(build_bytes, purpose="build", slug=pid, team_id=team_id)
+            _progress(progress, 0.8, "Uploading the source…")
+            source_id, source_sha = _upload(source_bytes, purpose="source", slug=pid, team_id=team_id)
+            _progress(progress, 0.95, "Publishing…")
             done = _store(
                 "plugin-publish",
                 {
@@ -180,10 +232,10 @@ def publish(
                     "teamId": team_id,
                     "notes": str(notes or "")[:2000],
                     "compiled": True,
-                    "buildSha256": report.get("sha256") or _sha256(build_bytes),
-                    "sourceSha256": _sha256(source_bytes),
-                    "buildB64": _b64(build_bytes),
-                    "sourceB64": _b64(source_bytes),
+                    "buildUploadId": build_id,
+                    "buildSha256": build_sha,
+                    "sourceUploadId": source_id,
+                    "sourceSha256": source_sha,
                 },
                 timeout=180.0,
             )
@@ -212,13 +264,10 @@ def open_for_edit(plugin_id: str, team_id: str = "") -> dict[str, Any]:
         payload = _store("item-source", {"slug": pid, "teamId": team_id}, timeout=120.0)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "id": pid, "error": _error_text(exc)}
-    zip_b64 = str(payload.get("zipB64") or "")
-    if not zip_b64:
-        return {"ok": False, "error": str(payload.get("error") or "No source returned (need Manage plugins?)")}
     try:
-        raw = base64.b64decode(zip_b64)
+        raw = _zip_from(payload)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"Invalid source zip: {exc}"}
+        return {"ok": False, "id": pid, "error": _error_text(exc)}
     draft = appdata_ai_plugins_dir() / pid
     files = _extract_source(raw, draft)
     opened = _open_in_editor(draft)
@@ -318,13 +367,10 @@ def review_approve(slug: str, version: str = "", notes: str = "", progress: Prog
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "id": slug, "error": _error_text(exc)}
     version = str(payload.get("version") or version)
-    zip_b64 = str(payload.get("zipB64") or "")
-    if not zip_b64:
-        return {"ok": False, "id": slug, "error": "No source to review"}
     try:
-        raw = base64.b64decode(zip_b64)
+        raw = _zip_from(payload)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "id": slug, "error": f"Invalid source zip: {exc}"}
+        return {"ok": False, "id": slug, "error": _error_text(exc)}
     from backend.uefn_plugins import compile as engine
 
     with tempfile.TemporaryDirectory(prefix="ducky-review-") as td:
@@ -338,7 +384,7 @@ def review_approve(slug: str, version: str = "", notes: str = "", progress: Prog
         _progress(progress, 0.2, "Rebuilding…")
         try:
             # smoke_test=False: never import a submitted plugin's code on a reviewer's PC.
-            report = engine.build_plugin(
+            engine.build_plugin(
                 src, build_zip, visibility="public", team_id="", smoke_test=False, release=True,
                 progress=lambda f, m: _progress(progress, 0.2 + 0.5 * f, m),
             )
@@ -347,15 +393,16 @@ def review_approve(slug: str, version: str = "", notes: str = "", progress: Prog
         build_bytes = build_zip.read_bytes()
         _progress(progress, 0.75, "Uploading approved build…")
         try:
+            upload_id, build_sha = _upload(build_bytes, purpose="review", slug=slug, staff=True)
             done = _admin(
                 "review-approve",
                 {
                     "slug": slug,
                     "version": version,
                     "notes": str(notes or "")[:2000],
-                    "buildSha256": report.get("sha256") or _sha256(build_bytes),
+                    "uploadId": upload_id,
+                    "buildSha256": build_sha,
                 },
-                zip_b64=_b64(build_bytes),
                 timeout=180.0,
             )
         except Exception as exc:  # noqa: BLE001

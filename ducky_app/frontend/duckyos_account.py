@@ -2698,6 +2698,74 @@ def store_download_and_install(
         )
 
 
+# Matches backend.uefn_plugins.store.MAX_PLUGIN_ZIP_BYTES: nothing bigger installs anyway.
+_STORE_ZIP_MAX_BYTES = 100 * 1024 * 1024
+
+
+def _fetch_store_zip_url(url: str, size: int, *, timeout: float = 120.0) -> bytes:
+    """Fetch a big Store zip from the short-lived link the Store answered with.
+
+    Sent with the app's own User-Agent (the site's CDN refuses urllib's default),
+    streamed, and capped at the announced size so a wrong link can't fill the disk.
+    """
+    from urllib.parse import urlparse
+
+    if urlparse(url).scheme not in ("https", "http"):
+        raise DuckyOSAccountError("Store download link is not a web address", code="store_bad_url")
+    cap = size if 0 < size <= _STORE_ZIP_MAX_BYTES else _STORE_ZIP_MAX_BYTES
+    req = urllib.request.Request(
+        url, headers={"User-Agent": _USER_AGENT, "Accept": "application/zip, application/octet-stream, */*"}
+    )
+    buf = bytearray()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                if len(buf) > cap:
+                    raise DuckyOSAccountError("Store download is bigger than announced", code="store_too_big")
+    except urllib.error.HTTPError as exc:
+        raise DuckyOSAccountError(f"Store download failed (HTTP {exc.code})", code="store_download") from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise DuckyOSAccountError(f"Store download failed: {exc}", code="network") from exc
+    return bytes(buf)
+
+
+def store_zip_bytes(payload: dict[str, Any]) -> bytes:
+    """The zip a Store response carries — inline ``zipB64`` (small) or a short-lived
+    ``url`` (big, e.g. compiled plugins) — checked against the response's sha256 and size
+    before anything uses it."""
+    import base64
+    import hashlib
+
+    zip_b64 = str(payload.get("zipB64") or "")
+    url = str(payload.get("url") or "").strip()
+    try:
+        size = int(payload.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    expected = str(payload.get("sha256") or "").strip().lower()
+    if not zip_b64 and not url:
+        raise DuckyOSAccountError("Store download returned no zip", code="store_empty")
+    if not expected:
+        # Neither inline bytes nor a link are trusted without the hash that comes with them.
+        raise DuckyOSAccountError("Store download missing sha256", code="store_hash_missing")
+    if zip_b64:
+        try:
+            raw = base64.b64decode(zip_b64)
+        except Exception as exc:
+            raise DuckyOSAccountError(f"Invalid zip data: {exc}", code="store_bad_zip") from exc
+    else:
+        raw = _fetch_store_zip_url(url, size)
+    if size and len(raw) != size:
+        raise DuckyOSAccountError("Downloaded zip has the wrong size", code="store_hash_mismatch")
+    if hashlib.sha256(raw).hexdigest() != expected:
+        raise DuckyOSAccountError("Downloaded zip failed hash check", code="store_hash_mismatch")
+    return raw
+
+
 def _store_download_and_install_unlocked(
     slug: str,
     *,
@@ -2705,8 +2773,6 @@ def _store_download_and_install_unlocked(
     replace: bool = True,
     is_update: bool = False,
 ) -> dict[str, Any]:
-    import base64
-    import hashlib
     import io
     import zipfile
 
@@ -2718,19 +2784,9 @@ def _store_download_and_install_unlocked(
         body["version"] = str(version).strip()
     # Signed in → sent as the account (api_request attaches it); signed out → anonymous.
     payload = _store_collect("download", body, allow_anonymous=True, timeout=120.0)
-    zip_b64 = str(payload.get("zipB64") or "")
-    if not zip_b64:
-        raise DuckyOSAccountError("Store download returned no zip", code="store_empty")
-    try:
-        raw = base64.b64decode(zip_b64)
-    except Exception as exc:
-        raise DuckyOSAccountError(f"Invalid zip data: {exc}", code="store_bad_zip") from exc
-    expected = str(payload.get("sha256") or "").strip().lower()
-    if not expected:
-        raise DuckyOSAccountError("Store download missing sha256", code="store_hash_missing")
-    got = hashlib.sha256(raw).hexdigest()
-    if got != expected:
-        raise DuckyOSAccountError("Downloaded zip failed hash check", code="store_hash_mismatch")
+    # Small zips inline, big ones by link — verified (sha256 + size) before the install
+    # and signature checks below ever see the bytes.
+    raw = store_zip_bytes(payload)
 
     is_plugin = False
     try:
