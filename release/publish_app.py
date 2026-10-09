@@ -144,9 +144,8 @@ def _signing_on() -> bool:
     return signing_configured()
 
 
-def preflight_store_signing_key() -> None:
-    """Before the tests and the version bump: a release ships only with the Store's
-    version-signing public key pinned, or every Store install would go unverified."""
+def _load_signing():
+    """The app's signing module, loaded by path (it imports only the standard library)."""
     import importlib.util
 
     path = ROOT / "ducky_app" / "backend" / "uefn_plugins" / "signing.py"
@@ -155,10 +154,23 @@ def preflight_store_signing_key() -> None:
         raise SystemExit(f"Refusing to release: cannot read {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    problem = mod.release_key_problem()
-    if problem:
-        raise SystemExit("Refusing to release: " + problem)
-    print("=== Store signing key: pinned ===")
+    return mod
+
+
+def preflight_store_signing_key() -> str:
+    """Before the tests and the version bump: fetch the Store's version-signing public key
+    and build it into this release (unified.spec ships it). No Store, no key → no release:
+    an app without it would install Store plugins unverified."""
+    _load_dotenv()
+    base = assert_uefn_ducky_store_base(os.environ.get("DUCKYOS_BASE_URL") or DEFAULT_BASE)
+    mod = _load_signing()
+    try:
+        key = mod.fetch_store_public_key(base, user_agent=f"UEFN-Ducky/{read_version()}")
+        path = mod.write_built_in_key(key, source=base)
+    except mod.SigningKeyError as exc:
+        raise SystemExit(f"Refusing to release: {exc}") from exc
+    print(f"=== Store signing key: {key[:10]}… from {base} → {path.relative_to(ROOT).as_posix()} ===")
+    return key
 
 
 def preflight_signing(*, require: bool) -> None:
@@ -761,6 +773,11 @@ def main() -> None:
     parser.add_argument("--self-check", action="store_true", help="Run version helper asserts and exit")
     parser.add_argument("--print-version", action="store_true", help="Print __version__ and exit")
     parser.add_argument(
+        "--fetch-signing-key",
+        action="store_true",
+        help="Fetch the Store's signing public key into the app build and exit (build_all.ps1's first step)",
+    )
+    parser.add_argument(
         "--require-sign",
         action="store_true",
         help="Fail if Authenticode signing is not configured",
@@ -784,6 +801,9 @@ def main() -> None:
         return
     if args.print_version:
         print(read_version())
+        return
+    if args.fetch_signing_key:
+        preflight_store_signing_key()
         return
 
     if args.phase != "upload":

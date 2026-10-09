@@ -27,6 +27,9 @@ function Invoke-Step([string]$Label, [scriptblock]$Action) {
     }
 }
 
+# The Store's signing public key is built into every release; no Store, no release.
+Invoke-Step "Store signing key" { py (Join-Path $PSScriptRoot "publish_app.py") --fetch-signing-key }
+
 Invoke-Step "App EXE (build_exes.py)" { py (Join-Path $Root "build\build_exes.py") }
 
 Invoke-Step "Installer (Inno Setup)" {

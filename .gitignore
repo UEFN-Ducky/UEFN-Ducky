@@ -38,6 +38,8 @@ build/ffmpeg-bundle.zip.part
 build/.editor-pyc-work/
 build/editor-pyc/
 build/editor_bundle.zip
+# The Store's signing public key, fetched by each release and built into the app.
+ducky_app/backend/uefn_plugins/store_signing_key.json
 
 # --- Web build output ---
 ducky_app/frontend/ui_web/web/dist/

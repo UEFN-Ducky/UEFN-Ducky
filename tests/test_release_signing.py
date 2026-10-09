@@ -351,43 +351,110 @@ def _no_tests(pub, monkeypatch) -> list[str]:
     return ran
 
 
-def _signing_py_with_key(pub, tmp_path, monkeypatch, key: str) -> None:
-    """Point the release at a copy of signing.py whose pinned key is ``key``."""
-    real = (REPO / "ducky_app" / "backend" / "uefn_plugins" / "signing.py").read_text(encoding="utf-8")
-    text = re.sub(r'(?m)^STORE_SIGNING_PUBKEY\s*=\s*["\'][^"\']*["\']', f'STORE_SIGNING_PUBKEY = "{key}"', real)
+_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="  # base64 of 32 bytes
+
+
+def _signing_copy(pub, tmp_path, monkeypatch):
+    """A copy of the app's signing.py under tmp_path, so writing the built-in key never
+    touches the checkout; returns it loaded the way the release loads it."""
+    src = REPO / "ducky_app" / "backend" / "uefn_plugins" / "signing.py"
     target = tmp_path / "ducky_app" / "backend" / "uefn_plugins" / "signing.py"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    target.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    init_py = tmp_path / "ducky_app" / "frontend" / "__init__.py"
+    init_py.parent.mkdir(parents=True, exist_ok=True)
+    init_py.write_text('__version__ = "9.9.9"\n', encoding="utf-8")
     monkeypatch.setattr(pub, "ROOT", tmp_path)
+    monkeypatch.setattr(pub, "INIT_PY", init_py)
+    return pub._load_signing()
 
 
-def test_release_refuses_without_a_pinned_store_signing_key(pub, tmp_path, monkeypatch):
+class _Resp:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def test_store_key_fetch_uses_the_app_user_agent_and_reads_the_wrapped_payload(pub, tmp_path, monkeypatch):
+    mod = _signing_copy(pub, tmp_path, monkeypatch)
+    seen = {}
+
+    def fake_urlopen(req, timeout=0):
+        seen["url"] = req.full_url
+        seen["headers"] = {k.lower(): v for k, v in req.header_items()}
+        envelope = {"handled": True, "payload": {"payload": {"public_key": _STORE_KEY, "version": 1}}}
+        return _Resp(json.dumps(envelope).encode())
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    assert mod.fetch_store_public_key("https://uefnducky.org") == _STORE_KEY
+    assert seen["url"] == "https://uefnducky.org/api/v1/plugins/uefn-ducky-store/collect/signing-pubkey"
+    # Cloudflare bans urllib's default agent; the app's own one goes out instead.
+    assert seen["headers"]["user-agent"].startswith("UEFN-Ducky/")
+    assert seen["headers"]["origin"] == "https://uefnducky.org"
+
+
+def test_store_key_fetch_fails_plainly_without_a_key(pub, tmp_path, monkeypatch):
+    mod = _signing_copy(pub, tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.urllib.request, "urlopen", lambda req, timeout=0: _Resp(b'{"payload": {}}'))
+    with pytest.raises(mod.SigningKeyError) as exc:
+        mod.fetch_store_public_key("https://uefnducky.org")
+    assert "returned no signing key" in str(exc.value)
+
+    def offline(req, timeout=0):
+        raise OSError("no route")
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", offline)
+    with pytest.raises(mod.SigningKeyError) as exc:
+        mod.fetch_store_public_key("https://uefnducky.org")
+    assert "Couldn't reach the Store" in str(exc.value)
+
+
+def test_release_builds_the_fetched_key_into_the_app(pub, tmp_path, monkeypatch):
+    mod = _signing_copy(pub, tmp_path, monkeypatch)
+    monkeypatch.setattr(pub, "_load_dotenv", lambda: None)
+    monkeypatch.delenv("DUCKYOS_BASE_URL", raising=False)
+    calls = []
+
+    def fake_fetch(base, user_agent=""):
+        calls.append((base, user_agent))
+        return _STORE_KEY
+
+    monkeypatch.setattr(mod, "fetch_store_public_key", fake_fetch)
+    monkeypatch.setattr(pub, "_load_signing", lambda: mod)
+    assert mod.release_key_problem()  # nothing built in yet
+    assert pub.preflight_store_signing_key() == _STORE_KEY
+    assert calls == [(pub.DEFAULT_BASE, "UEFN-Ducky/9.9.9")]
+    assert mod.built_in_public_key() == _STORE_KEY
+    assert mod.release_key_problem() == ""
+
+
+def test_release_stops_before_tests_when_the_store_has_no_key(pub, tmp_path, monkeypatch):
     import sign_windows
 
+    mod = _signing_copy(pub, tmp_path, monkeypatch)
     monkeypatch.setattr(sign_windows, "load_dotenv", lambda paths, keys=None: None)
     ran: list[str] = []
     monkeypatch.setattr(pub, "run_security_gate", lambda: ran.append("gate"))
     monkeypatch.setattr(pub, "run_regression_tests", lambda: ran.append("tests"))
-    _signing_py_with_key(pub, tmp_path, monkeypatch, "")
+
+    def no_key(base, user_agent=""):
+        raise mod.SigningKeyError(f"The Store at {base} returned no signing key, so the release stops here.")
+
+    monkeypatch.setattr(mod, "fetch_store_public_key", no_key)
+    monkeypatch.setattr(pub, "_load_signing", lambda: mod)
     monkeypatch.setattr(pub.sys, "argv", ["publish_app.py", "--phase", "test"])
     with pytest.raises(SystemExit) as exc:
         pub.main()
-    assert "version-signing-pubkey" in str(exc.value)
+    assert "returned no signing key" in str(exc.value)
     assert ran == []
-
-
-def test_release_refuses_a_malformed_store_signing_key(pub, tmp_path, monkeypatch):
-    _signing_py_with_key(pub, tmp_path, monkeypatch, "not-a-key")
-    with pytest.raises(SystemExit) as exc:
-        pub.preflight_store_signing_key()
-    assert "32-byte" in str(exc.value)
-
-
-def test_release_passes_with_a_pinned_store_signing_key(pub, tmp_path, monkeypatch):
-    import base64
-
-    _signing_py_with_key(pub, tmp_path, monkeypatch, base64.b64encode(bytes(range(32))).decode())
-    pub.preflight_store_signing_key()  # no SystemExit
 
 
 def test_require_sign_without_a_certificate_stops_before_tests(pub, monkeypatch):

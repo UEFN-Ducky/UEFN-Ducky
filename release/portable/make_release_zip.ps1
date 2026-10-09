@@ -3,17 +3,21 @@ $ErrorActionPreference = "Stop"
 # Repo root is two levels up (this script lives in release/portable/).
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-# A release ships only with the Store's version-signing public key pinned in the app;
-# without it every Store plugin install would go unverified. Dev builds don't run this.
-$SigningPy = Join-Path $Root "ducky_app\backend\uefn_plugins\signing.py"
-$KeyMatch = [regex]::Match((Get-Content $SigningPy -Raw), '(?m)^STORE_SIGNING_PUBKEY\s*=\s*["'']([^"'']*)["'']')
-$PinnedKey = if ($KeyMatch.Success) { $KeyMatch.Groups[1].Value.Trim() } else { "" }
-$KeyBytes = 0
-if ($PinnedKey) { try { $KeyBytes = [Convert]::FromBase64String($PinnedKey).Length } catch { $KeyBytes = 0 } }
-if ($KeyBytes -ne 32) {
-    Write-Error ("Refusing to release: Store signing is off. Run the Store's version-signing-pubkey setup " +
-        "(Store admin) and paste the public_key it returns into STORE_SIGNING_PUBKEY in " +
-        "ducky_app\backend\uefn_plugins\signing.py, then build again.")
+# A release carries the Store's signing public key, fetched from the Store before the app
+# is built (release\publish_app.py, release\build_all.ps1); without it every Store plugin
+# install would go unverified. Dev builds don't run this.
+$KeyFile = Join-Path $Root "ducky_app\backend\uefn_plugins\store_signing_key.json"
+$KeyOk = $false
+if (Test-Path $KeyFile) {
+    try {
+        $Key = [string]((Get-Content $KeyFile -Raw | ConvertFrom-Json).public_key)
+        $KeyOk = [Convert]::FromBase64String($Key.Trim()).Length -eq 32
+    } catch { $KeyOk = $false }
+}
+if (-not $KeyOk) {
+    Write-Error ("Refusing to release: this build doesn't carry the Store's signing key. Release builds " +
+        "fetch it from the Store before building the app; build the release with release\build_all.ps1 -Zip " +
+        "(it stops if the Store can't be reached).")
 }
 
 # build_exes.py bumps __version__ and writes dist\UEFN-Ducky-<version>.exe (it sweeps
