@@ -328,3 +328,11 @@ def test_delivery_never_interrupts_a_busy_receiver(broker, monkeypatch):
     broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="hi", expect_reply=False)
     _wait_sent(broker.modes, 1)
     assert seen and seen[0].get("queue_if_busy") is True
+
+
+def test_the_team_is_found_in_its_own_project_when_another_project_is_open(broker):
+    _team(broker)
+    team = list(broker.chats.convs.values())
+    broker.chats.list_all_conversation_metadata = lambda project_root=None: []  # the open project has none of them
+    broker.chats.iter_conversations_by_project = lambda: [("ExampleProject1", c) for c in team]
+    assert broker.mod.leads_receiver("coord", "builder")

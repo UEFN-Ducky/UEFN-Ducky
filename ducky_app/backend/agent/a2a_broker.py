@@ -210,10 +210,17 @@ def leads_receiver(sender_conv_id: str, receiver_conv_id: str) -> bool:
     if not sender_conv_id or not receiver_conv_id or sender_conv_id == receiver_conv_id:
         return False
     try:
-        from frontend.ui_web.group_orchestrator import group_members
-        from frontend.ui_web.project_chats import list_all_conversation_metadata
+        import importlib
 
-        groups = [c for c in list_all_conversation_metadata() if getattr(c, "is_group", False)]
+        from frontend.ui_web.group_orchestrator import group_members
+
+        chats = importlib.import_module("frontend.ui_web.project_chats")
+        # Every project: the team's chats stay in their project when the user opens another.
+        if hasattr(chats, "iter_conversations_by_project"):
+            convs = [conv for _, conv in chats.iter_conversations_by_project()]
+        else:
+            convs = list(chats.list_all_conversation_metadata())
+        groups = [c for c in convs if getattr(c, "is_group", False)]
     except Exception:
         return False
     containing: dict[str, list[Any]] = {}
