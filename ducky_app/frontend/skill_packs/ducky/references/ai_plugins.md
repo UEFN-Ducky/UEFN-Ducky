@@ -84,13 +84,23 @@ download carries a license, baked in at build time, free ones too. See
 11. **Never** git-clone `uefn-plugin-*`, run `publish_plugin.sh`, Install-from-file,
     `cp` into AppData, upload zips, or edit `ducky_app/` / the EXE to add a tab.
     Never `ducky_skills_create_pack` unless they asked for a skill pack.
+12. **Nothing from the internet at runtime.** Every library, stylesheet and font the
+    panel uses ships inside the plugin: `ducky_plugin_vendor(id, package, version,
+    files)` downloads an exact npm version (never `latest` or a range) into
+    `ui/vendor/<package>@<version>/` with its license, and returns the `<script>` /
+    `<link>` tag. Panels block CDN scripts, outside stylesheets and `import` from URLs,
+    and `ducky_plugin_validate` rejects them. Live data from a service goes through the
+    backend (`api.http_json`), never a panel `fetch`.
+13. **No personal data in logs or errors.** Never log or return the user's chat text,
+    keys, emails or files in errors; keys live in `secret_keys`.
 
 ### Path (no forks)
 
 1. `ducky_plugin_list`: reuse an existing draft or id, or
 2. `ducky_plugin_scaffold(id, label, description)`: writes `plugin.json` (tools,
    one node, a template graph), `backend/__init__.py` and `skills/<id>/SKILL.md`.
-3. `ducky_plugin_write_file` until every file below is right.
+3. `ducky_plugin_write_file` until every file below is right; `ducky_plugin_vendor`
+   for any library the panel needs (rule 12).
 4. `ducky_plugin_validate(id)`: every error says how to fix it.
 5. `ducky_plugin_install(id)`, then `ducky_store_set_enabled(id, true)`. If it answers
    `needs_trust`, **stop**: the user confirms the plugin once.
@@ -160,6 +170,10 @@ settings), `contributes`, `"backend": {"entry": "backend", "register": "register
 | `api.register_secret_test(secret_key, fn)` | Settings → Test for a key: `fn(api_key) -> {ok, detail}`. |
 | `api.spotlight(window=, box=, title=, body=, steps=, click=, wait=)` | Highlight a control in UEFN, Blender or any window (same as `ducky_ui_show`). |
 | `api.log(msg)`, `api.is_enabled()`, `api.plugin_id` | Logging, enabled check, your id. |
+
+That table is the everyday set. `ducky_plugin_reference` ends with the live list of every
+`api.*` call, read from the app itself (voices, coding agents, IDE hookups, image helpers,
+`@` / `/` chat references, …): check it before guessing a call that isn't above.
 
 Secrets: `from backend.agent.secrets import get_key` then `get_key("<secret id>")`.
 Non-secret settings values: `from frontend.ui_web.plugin_host_api import

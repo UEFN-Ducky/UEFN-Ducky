@@ -296,6 +296,26 @@ def _stage_backend_package(pkg_src: Path, staged: Path) -> tuple[list[tuple[Path
     return data_files, foreign_files
 
 
+# First app that loads compiled plugins one at a time (an overlapping load aborted the app).
+COMPILED_MIN_APP = "1.2.357"
+
+
+def _at_least(version: str, floor: str) -> str:
+    """``version`` unless it is older than ``floor`` (or missing / unreadable)."""
+
+    def key(v: str) -> tuple[int, ...] | None:
+        parts = v.strip().split("-", 1)[0].split("+", 1)[0].split(".")
+        try:
+            return tuple(int(p) for p in parts if p != "")
+        except ValueError:
+            return None
+
+    have, need = key(version), key(floor)
+    if have is None or need is None or have < need:
+        return floor
+    return version.strip()
+
+
 _LICENSE_MODULE = "_ducky_license"
 
 
@@ -528,6 +548,9 @@ def build_plugin(
         out_manifest = dict(manifest)
         out_manifest["compiled"] = True
         out_manifest["python_abi"] = PY_ABI
+        # The Store keeps a version away from apps older than this, and older apps can't
+        # load compiled plugins safely, so a compiled build never asks for less.
+        out_manifest["min_app_version"] = _at_least(str(manifest.get("min_app_version") or ""), COMPILED_MIN_APP)
         out_manifest["visibility"] = visibility
         if visibility == "team" and team_id:
             out_manifest["team_id"] = team_id

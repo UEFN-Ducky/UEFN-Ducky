@@ -22,6 +22,8 @@ Check these before you tell the user a plugin works.
 | Tool names, listener command names, hook ids and Verse template ids are global: a name another plugin already uses is refused or collides. | Prefix every one with the plugin id (`card_shop_list`, `card_shop.sold`); hyphens become underscores in Python names. |
 | `from backend import x` / `import backend.x` loads the **app's** package. | Import your own modules relatively: `from . import x`. |
 | Reading your own `.py` (`__file__`, `inspect.getsource`) or loading `.py` by path breaks once the plugin is published (compiled). Validate rejects it. | Keep data in `.json` / `.txt` beside the module or in `assets/`; import modules. |
+| `importlib.reload()` of your own modules raises `SystemError` in the compiled build, so whatever calls it (often a save) breaks. Validate rejects it. | Reload only when running from source (skip it when `'__compiled__' in globals()`), or don't reload. |
+| Logs, tool errors and node results end up in Settings → Errors and in Support feedback. `api.log` scrubs folders, emails and keys, but not what you put in a result. | Never put the user's chat text, keys or files in logs or errors; secrets go in `secret_keys`. |
 | `scripts/`, `deploy/`, `tests/`, `test_*.py`, `*.zip`, `*.bin` never ship. | Keep runtime files elsewhere. |
 | `api.data.put` over 1 MB raises. | One doc per record; big blobs go in `put_file`. |
 | Writes raise `PermissionError` when the team copy is read-only or access was lost. | Catch it in tools and return the message as `{"ok": False, "error": …}`. |
@@ -43,7 +45,8 @@ Check these before you tell the user a plugin works.
 | Hidden tabs keep running (timers, polling, video) and `document.visibilityState` stays `visible`. | Pause on `panel.visibility` with `visible: false`. |
 | Moving a tab to a floating window reloads the page. | Restore from `prefs` / `data` on load. |
 | Scope switches and syncs change the data under an open panel. | Re-read on `plugin_scope_changed`. |
-| Loading your own scripts with `fetch` + `eval`. | `<script src>` / `<link href>` for your files; outside scripts only from unpkg, jsDelivr, cdnjs or esm.sh. |
+| Loading your own scripts with `fetch` + `eval`. | `<script src>` / `<link href>` for your files. |
+| Anything from the internet (CDN scripts like unpkg or Tailwind's, outside stylesheets or fonts, `import` from a URL) is blocked, so the panel loads broken or unstyled. Validate rejects it. | `ducky_plugin_vendor` the exact npm version into `ui/vendor/` and load it from there; for styling use the UI kit and Appearance variables. |
 | `prefs.set` keeps only booleans, strings, numbers and `null`. | Store objects with `data.put`. |
 
 ## App surfaces
@@ -59,3 +62,4 @@ Check these before you tell the user a plugin works.
 | The first `ducky_plugin_test` of a new AI plugin stops with `needs_trust`. | Stop and let the user confirm once; then test again. |
 | `ducky_plugin_test` skips the panel checks when the app window isn't open. | Ask the user to open Ducky, test again. |
 | Store installs don't update when `version` stays the same. | Raise `version` before every publish. |
+| A compiled build needs UEFN Ducky 1.2.357 or newer; the Store hides it from older apps. | The build sets `min_app_version` to at least 1.2.357; never lower it by hand. |

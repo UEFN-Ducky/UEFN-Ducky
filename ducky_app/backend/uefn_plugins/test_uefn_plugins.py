@@ -438,7 +438,9 @@ def main() -> None:
         html_csp = plugin_ui_csp("text/html")
         assert html_csp
         assert "static.cloudflareinsights.com" not in html_csp
-        assert "unpkg.com" in html_csp
+        # No outside code: plugins ship every library inside their package.
+        for cdn in ("unpkg.com", "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "esm.sh"):
+            assert cdn not in html_csp, cdn
         assert plugin_ui_csp("application/javascript") is None
         assert plugin_ui_csp("text/css") is None
 

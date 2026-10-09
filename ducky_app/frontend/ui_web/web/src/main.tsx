@@ -1,5 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+// The app's fonts ship inside it (nothing is fetched from the internet at runtime).
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
 import "./theme/styles/index.css";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";

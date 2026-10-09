@@ -2685,6 +2685,8 @@ export interface PanelApi {
   open_devtools?(): Promise<{ ok: boolean; error?: string }>;
   /** One line in Settings → Errors from the page (scrubbed like every log). */
   report_ui_error?(source: string, message: string): Promise<{ ok: boolean }>;
+  /** Download a Google font once into AppData; `href` is its stylesheet on the local panel server. */
+  cache_font?(family: string): Promise<{ ok: boolean; href?: string; error?: string }>;
   /** Persist ErrorBoundary crash details to AppData/ui_crashes.jsonl. */
   report_ui_crash?(payload: {
     label?: string;

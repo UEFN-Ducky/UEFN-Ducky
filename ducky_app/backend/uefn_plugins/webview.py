@@ -129,14 +129,14 @@ def resolve_plugin_ui_file(plugin_id: str, rel_path: str) -> Path | None:
 
 # Opaque plugin iframes (Origin null) cannot CORS-post CF RUM. Do not allow
 # static.cloudflareinsights.com — that stops the injected beacon from running.
+# No outside code: a plugin ships every library it uses inside its package (ui/vendor/),
+# so a panel works offline and never runs code that changed after it was published.
 PLUGIN_UI_HTML_CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com "
-    "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob: https:; "
-    "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net "
-    "https://cdnjs.cloudflare.com https://esm.sh data: blob:; "
+    "connect-src 'self' data: blob:; "
     # https media like https images: team data players (short presigned storage links).
     "font-src 'self' data:; media-src 'self' data: blob: https:; "
     "object-src 'none'; base-uri 'self'"

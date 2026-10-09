@@ -60,6 +60,8 @@ _root: Path | None = None
 _event_cv = threading.Condition()
 _event_seq = 0
 _event_backlog: deque[tuple[int, dict[str, object]]] = deque(maxlen=4000)
+# Appearance fonts downloaded once into AppData (frontend.ui_web.font_cache).
+_FONT_RE = re.compile(r"^__fonts/([a-z0-9][a-z0-9-]{0,63})/(font\.css|\d{1,3}\.woff2)$")
 _CUSTOM_DUCKY_RE = re.compile(r"^duckies/custom/([a-z0-9][a-z0-9_-]{0,63})\.png$", re.IGNORECASE)
 _TOOL_CAPTURE_RE = re.compile(r"^tool-captures/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
 # Workflow files (thumbnails, Last run): /workflow-media/<sig>/<token>/<name>, signed in
@@ -889,6 +891,23 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 raw_rel = parsed.path.lstrip("/") or "index.html"
                 req_path = unquote(parsed.path)
                 rel = "index.html" if req_path in ("", "/") else req_path.lstrip("/")
+
+                font_match = _FONT_RE.match(rel)
+                if font_match:
+                    from frontend.ui_web.font_cache import font_file
+
+                    file_path = font_file(font_match.group(1), font_match.group(2))
+                    if file_path is None:
+                        self.send_error(404)
+                        return
+                    data = file_path.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/css" if file_path.suffix == ".css" else "font/woff2")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "max-age=31536000, immutable")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
 
                 custom_match = _CUSTOM_DUCKY_RE.match(rel)
                 if custom_match:

@@ -3032,6 +3032,7 @@ class _PluginApi:
         self.plugin_id = plugin_id
 
     def log(self, message: str) -> None:
+        """One line in Settings → Logs under this plugin (personal data is scrubbed out)."""
         _log.info("[%s] %s", self.plugin_id, message)
         try:
             from frontend.error_log import record_activity

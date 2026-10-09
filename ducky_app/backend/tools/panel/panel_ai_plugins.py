@@ -41,14 +41,42 @@ def _strip_skill_frontmatter(text: str) -> str:
     return parts[2].strip()
 
 
+def plugin_api_markdown() -> str:
+    """Every ``api.*`` a plugin's ``register(api)`` gets, read from the code so it never
+    falls behind: signature and the first paragraph of each docstring."""
+    import inspect
+
+    from backend.uefn_plugins.host import _PluginApi
+
+    rows = ["## The `api` object (live list of everything `register(api)` gets)", ""]
+    for name in sorted(n for n in dir(_PluginApi) if not n.startswith("_")):
+        member = getattr(_PluginApi, name)
+        if isinstance(inspect.getattr_static(_PluginApi, name), property):
+            head = f"`api.{name}`"
+        else:
+            try:
+                sig = str(inspect.signature(member, eval_str=True))
+            except Exception:  # noqa: BLE001 — an annotation that won't resolve: keep it as text
+                sig = str(inspect.signature(member))
+            sig = sig.replace("typing.", "").replace("(self, ", "(").replace("(self)", "()")
+            head = f"`api.{name}{sig}`"
+        doc = (inspect.getdoc(member) or "").split("\n\n", 1)[0].replace("\n", " ").strip()
+        rows.append(f"- {head}: {doc}" if doc else f"- {head}")
+    return "\n".join(rows)
+
+
 def _load_plugin_reference() -> str:
-    """Same recipe as skill_read_subskill('ducky', 'ai_plugins') — one file."""
+    """Same recipe as skill_read_subskill('ducky', 'ai_plugins'), plus the live ``api`` list."""
     try:
         body = _strip_skill_frontmatter(_AI_PLUGINS_SKILL.read_text(encoding="utf-8"))
     except OSError:
         body = ""
+    try:
+        api = plugin_api_markdown()
+    except Exception:  # noqa: BLE001 — the recipe still helps without it
+        api = ""
     if body:
-        return body
+        return f"{body.rstrip()}\n\n{api}\n" if api else body
     return (
         "`ducky_plugin_list` is the census (drafts + installed). "
         "Never glob/shell AppData. Scaffold → write_file → every `@api.tool()` "
@@ -562,6 +590,35 @@ def ducky_plugin_write_file(
     Cannot touch core app files. Refuses .dat/.env/.pem/.key.
     """
     return tool_json(write_ai_plugin_file(id, path, content), pretty=pretty)
+
+
+@mcp.tool()
+def ducky_plugin_vendor(
+    id: str,
+    package: str,
+    version: str,
+    files: list[str] | None = None,
+    pretty: bool = False,
+) -> str:
+    """Download an exact npm package version into the plugin's ui/vendor/ folder.
+
+    Plugin panels never load code from the internet (CDN scripts, styles and imports are
+    blocked), so every library ships inside the plugin. Give the exact version (0.160.0,
+    never latest or a range). Leave ``files`` empty to list the package's files, then call
+    again with the built file(s) the panel loads (e.g. ["build/three.min.js"]). The
+    package's license is copied alongside; the download is checked against npm's hash.
+    Returns the <script>/<link> tags to put in the page.
+    """
+    from backend.uefn_plugins.store import normalize_plugin_id
+    from backend.uefn_plugins.vendor import vendor_npm
+
+    try:
+        root = _draft_root(normalize_plugin_id(id))
+    except ValueError as exc:
+        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
+    if not root.is_dir():
+        return tool_json({"ok": False, "error": f"draft not found: {id} — call ducky_plugin_scaffold first"}, pretty=pretty)
+    return tool_json(vendor_npm(root, package, version, files), pretty=pretty)
 
 
 @mcp.tool()

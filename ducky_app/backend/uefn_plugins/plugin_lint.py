@@ -97,10 +97,34 @@ def _literals(value: str, *, named: bool) -> list[str]:
     return found
 
 
+_EXTERNAL_TAG = re.compile(r"<(script|link)\b([^>]*)>", re.IGNORECASE)
+_EXTERNAL_URL = re.compile(r"""\b(?:src|href)\s*=\s*["'](https?://([^"'/?#]+)[^"']*)""", re.IGNORECASE)
+_REMOTE_IMPORT = re.compile(
+    r"""(?:\bimport\s*\(\s*|\bimport\b[^;"'`]*?\bfrom\s*|\bimport\s+)["'`](https?://[^"'`\s]+)""", re.IGNORECASE
+)
+_VENDOR_HINT = (
+    "Plugins never load code from the internet: download the package (its built .js/.css "
+    "from npm or the project's release) into the plugin's ui/vendor/ folder and load it from there "
+    "(<script src=\"vendor/lib.min.js\">), so the panel works offline and can't change after publishing."
+)
+
+
+def _allowed_script_hosts() -> set[str]:
+    """Hosts the plugin panel's Content-Security-Policy lets scripts load from."""
+    from backend.uefn_plugins.webview import PLUGIN_UI_HTML_CSP
+
+    for part in PLUGIN_UI_HTML_CSP.split(";"):
+        words = part.split()
+        if words and words[0] == "script-src":
+            return {w.split("://", 1)[1].lower() for w in words[1:] if "://" in w}
+    return set()
+
+
 class _Scan:
     """Issues and custom properties gathered across a plugin's UI files."""
 
     def __init__(self) -> None:
+        self.blocked: list[str] = []
         self.literals: list[str] = []
         self.uses: list[tuple[str, str, int]] = []  # (var name, file, line)
         self.defined: set[str] = set()
@@ -157,7 +181,30 @@ class _Scan:
         for m in _COLOR_FN.finditer(text):
             self.literal(rel, base_line + _line(text, m.start()) - 1, [m.group(0).split("(")[0] + "()"], "script")
 
+    def external(self, rel: str, text: str) -> None:
+        """Code or styles loaded from the internet: plugin panels block all of it."""
+        allowed = _allowed_script_hosts()  # empty today: no outside code at all
+        for tag in _EXTERNAL_TAG.finditer(text):
+            kind, attrs = tag.group(1).lower(), tag.group(2)
+            url = _EXTERNAL_URL.search(attrs)
+            if not url:
+                continue
+            host = url.group(2).lower()
+            line = _line(text, tag.start())
+            if kind == "script" and host not in allowed:
+                self.blocked.append(f"{rel}:{line}: <script src> from {host}. {_VENDOR_HINT}")
+            elif kind == "link" and "stylesheet" in attrs.lower():
+                self.blocked.append(f"{rel}:{line}: stylesheet from {host}. {_VENDOR_HINT}")
+        self.remote_imports(rel, text)
+
+    def remote_imports(self, rel: str, text: str, base_line: int = 1) -> None:
+        """``import … from "https://…"`` / ``import("https://…")`` in scripts."""
+        for m in _REMOTE_IMPORT.finditer(text):
+            line = base_line + _line(text, m.start()) - 1
+            self.blocked.append(f"{rel}:{line}: imports code from {m.group(1)}. {_VENDOR_HINT}")
+
     def html(self, rel: str, text: str) -> None:
+        self.external(rel, text)
         self.kit = self.kit or bool(_KIT_LINK.search(text))
         for m in _STYLE_TAG.finditer(text):
             self.css(rel, m.group(1), _line(text, m.start(1)))
@@ -234,7 +281,8 @@ def check_ui(root: Path, manifest: dict[str, Any]) -> list[str]:
             scan.css(rel, text)
         else:
             scan.js(rel, text)
-    issues = list(scan.literals)
+            scan.remote_imports(rel, text)
+    issues = list(scan.blocked) + list(scan.literals)
     for name, rel, line in scan.uses:
         if name in NAMES or name in scan.defined:
             continue
@@ -324,6 +372,13 @@ class _Backend:
 
     def _source_read(self, rel: str, call: ast.Call, name: str) -> None:
         line = getattr(call, "lineno", 0)
+        if name == "reload":
+            self.source_reads.append(
+                f"{rel}:{line}: importlib.reload() fails in the compiled build the Store ships (SystemError), "
+                "and the call that does it breaks with it. Reload only when running from source "
+                "(skip it when '__compiled__' in globals()), or don't reload at all."
+            )
+            return
         if name in ("spec_from_file_location", "run_path", "SourceFileLoader", "load_source"):
             self.source_reads.append(
                 f"{rel}:{line}: loads a .py file by path ({name}). Installed plugins can be compiled and "

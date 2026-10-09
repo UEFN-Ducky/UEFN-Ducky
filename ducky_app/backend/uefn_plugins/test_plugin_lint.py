@@ -100,3 +100,38 @@ def test_the_scaffold_shape_passes(tmp_path: Path) -> None:
     _write(tmp_path, "backend/__init__.py", _register_stub("demo"))
     _write(tmp_path, "skills/demo/SKILL.md", _skill_stub("demo", "Demo"))
     assert lint_draft(tmp_path, manifest, "demo") == []
+
+
+def test_code_and_styles_from_the_internet_are_rejected_vendored_files_pass(tmp_path: Path) -> None:
+    _write(tmp_path, "ui/index.html", (
+        '<!doctype html><script src="https://cdn.tailwindcss.com"></script>\n'
+        '<script src="https://unpkg.com/lucide@0.460.0"></script>\n'
+        '<link rel="stylesheet" href="https://fonts.example.com/inter.css">\n'
+        '<link rel="preconnect" href="https://fonts.example.com">\n'
+        '<script src="vendor/three.min.js"></script><script src="app.js"></script>\n'
+        "<style>button:focus-visible { outline: 2px solid var(--border-focus); }</style>"
+    ))
+    _write(tmp_path, "ui/app.js", (
+        'import { a } from "./local.js";\n'
+        'import * as _ from "https://esm.sh/lodash";\n'
+        'const lib = await import("https://cdn.jsdelivr.net/npm/x");\n'
+        'const api = "https://api.example.com/data";\n'
+    ))
+    text = "\n".join(check_ui(tmp_path, PANEL))
+    assert "ui/index.html:1: <script src> from cdn.tailwindcss.com." in text
+    assert "ui/index.html:2: <script src> from unpkg.com." in text
+    assert "ui/index.html:3: stylesheet from fonts.example.com." in text
+    assert "ui/app.js:2: imports code from https://esm.sh/lodash." in text
+    assert "ui/app.js:3: imports code from https://cdn.jsdelivr.net/npm/x." in text
+    assert "ui/vendor/" in text  # the fix is named
+    for fine in (":4:", ":5:", "local.js", "api.example.com"):
+        assert fine not in text.replace("ui/app.js:4", ""), fine
+
+
+def test_reloading_modules_is_rejected_because_compiled_builds_cannot(tmp_path: Path) -> None:
+    _write(tmp_path, "backend/__init__.py", (
+        "import importlib\nfrom . import defaults\n\n"
+        "def register(api):\n    importlib.reload(defaults)\n"
+    ))
+    text = "\n".join(check_backend(tmp_path, {}, "demo"))
+    assert "backend/__init__.py:5: importlib.reload() fails in the compiled build" in text

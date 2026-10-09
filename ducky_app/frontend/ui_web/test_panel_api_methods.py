@@ -47,6 +47,7 @@ _PUBLIC_METHODS = frozenset({
     'browser_site_security',
     'build_task_handoff',
     'burst_desktop_confetti',
+    'cache_font',
     'cancel_agent',
     'cancel_update',
     'claim_tab',

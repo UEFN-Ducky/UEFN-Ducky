@@ -1,3 +1,5 @@
+import { onApiReady } from "../hooks/onApiReady";
+import { isDirectMode } from "../remote/directTransport";
 import { parseFirstFontFamily } from "../verse-editor/monaco/resolveMonacoFontFamily";
 import { DEFAULT_CSS_VARS } from "./defaultTokens";
 import type { FontEntry } from "./fontLibrary";
@@ -63,32 +65,82 @@ function fontLinkSlug(family: string): string {
   return family.replace(/\s+/g, "-").toLowerCase();
 }
 
-function ensureGoogleFontLink(id: string, href: string): void {
-  if (typeof document === "undefined") return;
-  const existing = document.getElementById(id) as HTMLLinkElement | null;
-  if (existing) {
-    if (existing.href !== href) existing.href = href;
-    return;
+// Google fonts are never loaded from the internet: the app downloads a picked font once
+// into AppData (cache_font) and the page loads it from the local panel server.
+const RETRY_FAILED_FONT_MS = 60_000;
+const localFontHrefs = new Map<string, Promise<string | null>>();
+const failedFontAt = new Map<string, number>();
+const wantedFontLinks = new Map<string, string>();
+
+export function localFontHref(family: string): Promise<string | null> {
+  const key = family.trim().toLowerCase();
+  const failed = failedFontAt.get(key);
+  if (failed !== undefined && Date.now() - failed < RETRY_FAILED_FONT_MS) return Promise.resolve(null);
+  let pending = localFontHrefs.get(key);
+  if (!pending) {
+    pending = (async () => {
+      // The phone panel isn't served by this PC, so it has no local copy: system font.
+      if (isDirectMode()) return null;
+      try {
+        const api = await new Promise<Parameters<Parameters<typeof onApiReady>[0]>[0]>((resolve) => {
+          onApiReady(resolve);
+        });
+        const res = await api.cache_font?.(family);
+        return res?.ok && res.href ? res.href : null;
+      } catch {
+        return null;
+      }
+    })();
+    localFontHrefs.set(key, pending);
+    void pending.then((href) => {
+      if (href) return;
+      localFontHrefs.delete(key);
+      failedFontAt.set(key, Date.now());
+    });
   }
-  const link = document.createElement("link");
-  link.id = id;
-  link.rel = "stylesheet";
-  link.href = href;
-  document.head.appendChild(link);
+  return pending;
+}
+
+function removeFontLink(id: string): void {
+  wantedFontLinks.delete(id);
+  document.getElementById(id)?.remove();
+}
+
+function ensureGoogleFontLink(id: string, family: string): void {
+  if (typeof document === "undefined") return;
+  if (wantedFontLinks.get(id) === family) return;
+  wantedFontLinks.set(id, family);
+  void localFontHref(family).then((href) => {
+    if (wantedFontLinks.get(id) !== family) return;
+    const existing = document.getElementById(id) as HTMLLinkElement | null;
+    if (!href) {
+      // Not downloadable right now: fall back to the next font in the stack, try again later.
+      existing?.remove();
+      wantedFontLinks.delete(id);
+      return;
+    }
+    if (existing) {
+      if (existing.getAttribute("href") !== href) existing.setAttribute("href", href);
+      return;
+    }
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.setAttribute("href", href);
+    document.head.appendChild(link);
+  });
 }
 
 function syncPrimaryFontLink(linkId: string, fontStack: string, isBuiltin: (family: string) => boolean): void {
   if (typeof document === "undefined") return;
 
   const family = parseFirstFontFamily(fontStack);
-  const existing = document.getElementById(linkId) as HTMLLinkElement | null;
-
   if (isBuiltin(family)) {
-    existing?.remove();
+    removeFontLink(linkId);
     return;
   }
 
-  ensureGoogleFontLink(linkId, googleFontHref(family));
+  ensureGoogleFontLink(linkId, family);
 }
 
 export function syncGoogleUIFontLink(fontStack: string): void {
@@ -110,10 +162,13 @@ export function syncAllGoogleFontLinks(entries: FontEntry[]): void {
     if (isBuiltin) continue;
     const id = `${GOOGLE_FONT_LIBRARY_PREFIX}${fontLinkSlug(family)}`;
     wantedIds.add(id);
-    ensureGoogleFontLink(id, entry.href || googleFontHref(family));
+    ensureGoogleFontLink(id, family);
   }
 
+  for (const id of [...wantedFontLinks.keys()]) {
+    if (id.startsWith(GOOGLE_FONT_LIBRARY_PREFIX) && !wantedIds.has(id)) removeFontLink(id);
+  }
   for (const el of document.querySelectorAll(`link[id^="${GOOGLE_FONT_LIBRARY_PREFIX}"]`)) {
-    if (!wantedIds.has(el.id)) el.remove();
+    if (!wantedIds.has(el.id)) removeFontLink(el.id);
   }
 }

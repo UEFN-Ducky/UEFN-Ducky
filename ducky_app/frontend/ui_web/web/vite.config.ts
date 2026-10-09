@@ -41,6 +41,7 @@ export default defineConfig(({ mode }) => ({
       "/tool-captures": "http://127.0.0.1:4199",
       "/chat-attachments": "http://127.0.0.1:4199",
       "/duckies/custom": "http://127.0.0.1:4199",
+      "/__fonts": "http://127.0.0.1:4199",
       "/__panel_event": "http://127.0.0.1:4199",
       "/__panel_run": "http://127.0.0.1:4199",
       // Remote View from :5173 (dev viewer): RPC + WebRTC signaling socket.

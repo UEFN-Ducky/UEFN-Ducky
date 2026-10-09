@@ -614,6 +614,13 @@ class PanelApiWindowMixin:
             _pa.record_error(src, text)
         return {"ok": bool(text)}
 
+    def cache_font(self, family: str = "") -> dict[str, Any]:
+        """Download a Google font picked in Appearance once into AppData; the page then loads
+        it from the local panel server (``href``) instead of the internet."""
+        from frontend.ui_web.font_cache import cache_google_font
+
+        return cache_google_font(str(family or ""))
+
     def report_ui_crash(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Append a UI ErrorBoundary crash to AppData for support / debugging."""
 
