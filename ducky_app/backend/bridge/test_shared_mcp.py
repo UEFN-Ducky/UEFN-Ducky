@@ -406,3 +406,41 @@ def test_a_sync_tool_waiting_on_another_agent_does_not_deadlock(monkeypatch, tmp
     finally:
         shared_mcp.request_stop()
         thread.join(timeout=6)
+
+
+def test_tools_keep_their_arguments_over_the_shared_bridge() -> None:
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("t")
+    mcp._ducky_skip_plugin_wait = True
+
+    @mcp.tool()
+    def make_plan(title: str, body: str = "") -> str:
+        """Make a plan."""
+        return title
+
+    (row,) = shared_mcp.list_tools_for_handshake(mcp)
+    schema = row["inputSchema"]
+    assert set(schema["properties"]) == {"title", "body"}
+    assert schema["required"] == ["title"]
+
+
+def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.4)
+    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        first = _hello("run-1")
+        shared_mcp.write_frame(first, {"op": "bye"})
+        shared_mcp.close_handle(first)
+        time.sleep(0.15)  # first client gone, idle timer running
+        second = _hello("run-2")
+        time.sleep(0.8)  # the old timer fires while run-2 is connected
+        assert shared_mcp.serving()
+        assert [t["name"] for t in _rpc(second, "tools/list")["tools"]] == ["ping", "workspace_write_file"]
+        shared_mcp.write_frame(second, {"op": "bye"})
+        shared_mcp.close_handle(second)
+        thread.join(timeout=5)  # really idle now: it stops on its own
+        assert not thread.is_alive()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)

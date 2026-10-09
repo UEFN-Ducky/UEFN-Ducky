@@ -21,7 +21,10 @@ from typing import Any
 _ENV = "UEFN_DUCKY_SHARED_MCP"
 _STATE_NAME = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
-_IDLE_EXIT_S = 3.0
+# Ducky starts a new agent process every turn. A 3 s idle exit made almost every turn
+# start this server again (5-9 s: backend import + 1,000+ tool registrations), and
+# agents that wait only ~1 s for MCP servers came up with no Ducky tools.
+_IDLE_EXIT_S = 900.0
 _STARTUP_GRACE_S = 60.0
 # Handshake must finish while another tool call is still running. A cold
 # plugin load may wait this long; a ready load does not wait at all.
@@ -29,6 +32,8 @@ _LIST_WAIT_S = 3.0
 
 _loop: asyncio.AbstractEventLoop | None = None
 _clients = 0
+# Bumped on every connect: an idle timer started before a reconnect must not stop us.
+_idle_gen = 0
 _clients_lock = threading.Lock()
 _stop = threading.Event()
 _ready = threading.Event()
@@ -275,7 +280,27 @@ def connect_and_hello(
 
 # --- MCP helpers --------------------------------------------------------------
 
+def _dump(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(by_alias=True, exclude_none=True)
+    return value
+
+
 def _tool_row(tool: Any) -> dict[str, Any]:
+    if hasattr(tool, "parameters") and not hasattr(tool, "inputSchema"):
+        # FastMCP's own tool record (the tool-manager snapshot): its arguments are
+        # ``parameters``. Reading only inputSchema sent every tool with no arguments.
+        params = tool.parameters if isinstance(tool.parameters, dict) else None
+        row: dict[str, Any] = {
+            "name": getattr(tool, "name", "") or "",
+            "description": getattr(tool, "description", "") or "",
+            "inputSchema": params or {"type": "object"},
+        }
+        for key, attr in (("title", "title"), ("outputSchema", "output_schema"), ("annotations", "annotations")):
+            value = _dump(getattr(tool, attr, None))
+            if value:
+                row[key] = value
+        return row
     if hasattr(tool, "model_dump"):
         dumped = tool.model_dump(by_alias=True, exclude_none=True)
         schema = dumped.get("inputSchema") or dumped.get("input_schema") or {"type": "object"}
@@ -334,6 +359,20 @@ def _snapshot_tools(mcp: Any) -> list[Any]:
     return []
 
 
+def _policy_filtered(tools: list[Any]) -> list[Any]:
+    """The filter ProtectedFastMCP.list_tools applies; the snapshot never calls it."""
+    if not tools:
+        return tools
+    try:
+        from backend.workspace.ai_ignore import SAFE_TOOLS, current_policy
+
+        if current_policy().strict:
+            return [t for t in tools if getattr(t, "name", "") in SAFE_TOOLS]
+    except Exception:
+        pass
+    return tools
+
+
 def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
     """tools/list body. Caller thread — never queued behind a tool call."""
     if not getattr(mcp, "_ducky_skip_plugin_wait", False) and not _plugins_ready():
@@ -349,7 +388,7 @@ def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
             wait_until_nested_proxies_synced(_LIST_WAIT_S)
         except Exception:
             pass
-    tools = _snapshot_tools(mcp)
+    tools = _policy_filtered(_snapshot_tools(mcp))
     if not tools:
         tools = _run(_async_list_tools(mcp))
     return [_tool_row(t) for t in tools]
@@ -515,9 +554,17 @@ def _acquire_single_instance() -> Any | None:
     return fh
 
 
+def _idle_expired(gen: int) -> None:
+    """Stop only if nobody has connected since this idle timer started."""
+    with _clients_lock:
+        if _clients > 0 or gen != _idle_gen:
+            return
+    request_stop()
+
+
 def serve_daemon(mcp: Any) -> None:
     """Block until idle after the last adapter disconnects."""
-    global _shared_serving, _clients, _listen_sock
+    global _shared_serving, _clients, _idle_gen, _listen_sock
     lock = _acquire_single_instance()
     if lock is None:
         return  # a daemon is already serving; the adapter will find it via state
@@ -557,6 +604,7 @@ def serve_daemon(mcp: Any) -> None:
             conn_seq += 1
             with _clients_lock:
                 _clients += 1
+                _idle_gen += 1
             cid = conn_seq
 
             def _run_client(h: socket.socket = conn, n: int = cid) -> None:
@@ -567,7 +615,7 @@ def serve_daemon(mcp: Any) -> None:
                     with _clients_lock:
                         _clients -= 1
                         if _clients <= 0 and not _stop.is_set():
-                            idle = threading.Timer(_IDLE_EXIT_S, request_stop)
+                            idle = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(_idle_gen,))
                             idle.daemon = True
                             idle.start()
 
@@ -598,11 +646,12 @@ def serving() -> bool:
 
 
 def reset_for_tests() -> None:
-    global _clients, _shared_serving, _listen_sock
+    global _clients, _idle_gen, _shared_serving, _listen_sock
     _stop.clear()
     _ready.clear()
     _ready_info.clear()
     _clients = 0
+    _idle_gen = 0
     _shared_serving = False
     _inflight.clear()
     if _listen_sock is not None:
