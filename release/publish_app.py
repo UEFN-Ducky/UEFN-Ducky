@@ -529,13 +529,22 @@ def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
 
     deadline = time.time() + 600
     while time.time() < deadline:
-        status = _api_json(
-            base,
-            api_key,
-            "GET",
-            f"/api/v1/files/app-release/status/{job_id}",
-            timeout=60,
-        )
+        try:
+            status = _api_json(
+                base,
+                api_key,
+                "GET",
+                f"/api/v1/files/app-release/status/{job_id}",
+                timeout=60,
+            )
+        except SystemExit as exc:
+            # A busy server answers 5xx now and then while the job runs; the upload
+            # is already stored, so keep polling instead of dropping the release.
+            if " HTTP 5" not in str(exc):
+                raise
+            print(f"  status check: {exc} — retrying")
+            time.sleep(5)
+            continue
         state = str(status.get("status") or "").lower()
         if state in ("complete", "completed", "succeeded", "ok"):
             if not status.get("ok", True) and status.get("error"):
