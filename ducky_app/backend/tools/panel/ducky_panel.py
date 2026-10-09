@@ -112,6 +112,32 @@ def _truncate_desc(text: str, limit: int = _DESC_TRUNC) -> str:
     return truncate_desc(text, limit)
 
 
+def _discovery_miss_context() -> dict[str, Any]:
+    """Report existing connection evidence without inferring tool availability."""
+    context: dict[str, Any] = {
+        "hint": (
+            "No match in the current catalog is not proof that a tool does not exist. "
+            "Check ducky_get_status and the provider's catalog/connection state, "
+            "including registration and policy filtering. Report the observed "
+            "missing/offline capability and any unknown cause accurately. "
+            "Connection evidence below may be cached, is not a complete provider "
+            "inventory, and does not establish which provider owns this query. "
+            "Epic online is a TCP probe, not MCP session or tool readiness."
+        ),
+    }
+    try:
+        status = json.loads(ducky_get_status())
+        context["connection_status"] = {
+            key: status[key]
+            for key in ("epic_mcp_online", "epic_mcp_reason", "plugin_connections")
+            if key in status
+        }
+    except Exception:
+        context["connection_status"] = None
+        context["hint"] += " Connection status could not be read; availability is unknown."
+    return context
+
+
 @mcp.tool()
 async def ducky_get_tools(
     name: str = "",
@@ -180,16 +206,9 @@ async def ducky_get_tools(
             return tool_json(
                 {
                     "ok": False,
-                    "error": f"unknown tool: {n}",
+                    "error": f"tool not found in current catalog: {n}",
                     "close_matches": close,
-                    "hint": (
-                        "This registry spans core + desktop plugins + nested MCP "
-                        "({prefix}__*); nested names appear only while that MCP's "
-                        "session is connected. Pick one close_matches name (or one "
-                        "ducky_get_tools(pattern=…) search) — two misses means the "
-                        "tool does not exist: use the closest match, never retry "
-                        "name variants."
-                    ),
+                    **_discovery_miss_context(),
                 },
                 pretty=pretty,
             )
@@ -223,20 +242,15 @@ async def ducky_get_tools(
             )
         scored.sort(key=lambda item: (-item[0], item[1]["name"]))
         matches = [row for _, row in scored[:lim]]
-        hint = "Fetch one schema with ducky_get_tools(name=…) then ducky_call_tool."
+        guidance = {"hint": "Fetch one schema with ducky_get_tools(name=…) then ducky_call_tool."}
         if not matches:
-            hint = (
-                "No matches. Registry spans core + desktop plugins + nested MCP "
-                "({prefix}__*, connected sessions only). Try ONE broader single-word "
-                "pattern — two misses means the tool does not exist: use the closest "
-                "known tool instead of retrying variants."
-            )
+            guidance = _discovery_miss_context()
         return tool_json(
             {
                 "pattern": p,
                 "matches": matches,
                 "count": len(matches),
-                "hint": hint,
+                **guidance,
             },
             pretty=pretty,
         )
