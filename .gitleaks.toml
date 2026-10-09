@@ -5,9 +5,11 @@ title = "UEFN-Ducky"
 useDefault = true
 
 # LLM plugins pass a model id as test_key_model= — not a credential.
+# The release-signing tests pin a made-up Ed25519 PUBLIC key (bytes 0..31) as _STORE_KEY.
 [allowlist]
-description = "LLM test_key_model is a model id"
+description = "LLM test_key_model is a model id; _STORE_KEY is a fake public key in tests"
 regexTarget = "line"
 regexes = [
   '''test_key_model\s*=''',
+  '''^_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="''',
 ]
