@@ -2659,19 +2659,42 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
 
     if not register or pid in _REGISTERED:
         return
-    backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
-    entry = str(backend.get("entry") or "backend").strip() or "backend"
-    register_name = str(backend.get("register") or "register").strip() or "register"
-    if _manifest_is_compiled(manifest):
-        mod = _import_compiled_backend(pid, root, manifest)
-    else:
-        mod = _import_backend(pid, root, entry)
-    if mod is None:
+    # One import + register() per plugin at a time. The Store's enable worker and the
+    # repair pass can reach here together; a compiled backend initialised twice at once
+    # aborts the whole app (Python source only ran twice). The second loader waits, then
+    # finds the plugin registered.
+    lock = _backend_load_lock(pid)
+    if not lock.acquire(timeout=_BACKEND_LOAD_WAIT_S):
+        _log.warning("Plugin %s: still loading elsewhere after %ss; skipped", pid, _BACKEND_LOAD_WAIT_S)
         return
-    register_fn = getattr(mod, register_name, None)
-    if callable(register_fn):
-        register_fn(_PluginApi(pid))
-    _REGISTERED.add(pid)
+    try:
+        if pid in _REGISTERED:
+            return
+        backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
+        entry = str(backend.get("entry") or "backend").strip() or "backend"
+        register_name = str(backend.get("register") or "register").strip() or "register"
+        if _manifest_is_compiled(manifest):
+            mod = _import_compiled_backend(pid, root, manifest)
+        else:
+            mod = _import_backend(pid, root, entry)
+        if mod is None:
+            return
+        register_fn = getattr(mod, register_name, None)
+        if callable(register_fn):
+            register_fn(_PluginApi(pid))
+        _REGISTERED.add(pid)
+    finally:
+        lock.release()
+
+
+_BACKEND_LOAD_LOCKS: dict[str, threading.RLock] = {}
+_BACKEND_LOAD_LOCKS_GUARD = threading.Lock()
+_BACKEND_LOAD_WAIT_S = 120.0
+
+
+def _backend_load_lock(pid: str) -> threading.RLock:
+    with _BACKEND_LOAD_LOCKS_GUARD:
+        return _BACKEND_LOAD_LOCKS.setdefault(pid, threading.RLock())
 
 
 def _manifest_is_compiled(manifest: dict[str, Any]) -> bool:

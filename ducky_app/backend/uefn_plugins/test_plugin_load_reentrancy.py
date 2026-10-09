@@ -75,3 +75,43 @@ def test_ensure_plugins_loaded_returns_immediately_inside_load_thread() -> None:
 
     assert not thread.is_alive(), "ensure_plugins_loaded blocked inside the load thread"
     assert seen == [True, False]
+
+
+def test_two_loaders_of_one_plugin_register_it_once() -> None:
+    """The Store's enable worker and the repair pass can load a plugin together.
+
+    A compiled backend initialised twice at once aborts the whole app, so the second
+    loader has to wait for the first and then find the plugin registered.
+    """
+    import sys
+
+    import backend.uefn_plugins.host as host
+
+    src = (
+        "import time\n"
+        "CALLS = []\n"
+        "def register(api):\n"
+        "    CALLS.append(1)\n"
+        "    time.sleep(0.3)\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_plugin(root, "twice", src)
+        manifest = json.loads((root / "twice" / "plugin.json").read_text(encoding="utf-8"))
+        manifest["backend"] = {"entry": "backend", "register": "register"}
+        start = threading.Barrier(2)
+
+        def load() -> None:
+            start.wait()
+            host._load_one("twice", root / "twice", manifest)
+
+        with patch.object(host, "_REGISTERED", set()):
+            sys.modules.pop("uefn_plugin_twice", None)
+            threads = [threading.Thread(target=load) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+            assert "twice" in host._REGISTERED
+            assert sys.modules["uefn_plugin_twice"].CALLS == [1]
+        sys.modules.pop("uefn_plugin_twice", None)
