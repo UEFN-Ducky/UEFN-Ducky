@@ -142,26 +142,6 @@ _forward_started = False
 _forward_lock = threading.Lock()
 
 
-# #region agent log
-def _dbg_vis(hyp: str, location: str, message: str, data: dict[str, Any]) -> None:
-    """Debug-session instrumentation for spawned-chat visibility flow (bridge<->panel)."""
-    try:
-        import json as _j
-        import time as _t
-        _line = _j.dumps({
-            "sessionId": "77e3f2",
-            "hypothesisId": hyp,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(_t.time() * 1000),
-        })
-        with open(r"C:\Users\tas13\Documents\GitHub\UEFN-Ducky\debug-77e3f2.log", "a", encoding="utf-8") as _f:
-            _f.write(_line + "\n")
-            _f.flush()
-    except Exception:
-        pass
-# #endregion
 
 
 def _panel_event_url() -> str:
@@ -183,17 +163,8 @@ def _forward_sender() -> None:
                 url, data=data, headers={"Content-Type": "application/json"}, method="POST"
             )
             _urlreq.urlopen(req, timeout=2.0).close()
-            # #region agent log
-            _dbg_vis("V-A", "agent_modes.py:_forward_sender", "forward POST ok",
-                     {"url": url, "batch_len": len(batch),
-                      "types": [str(e.get("type")) for e in batch[:8] if isinstance(e, dict)]})
-            # #endregion
         except Exception as _exc:
             # Panel closed / not yet listening — drop this batch silently.
-            # #region agent log
-            _dbg_vis("V-A", "agent_modes.py:_forward_sender", "forward POST FAILED",
-                     {"url": url, "batch_len": len(batch), "err": repr(_exc)[:200]})
-            # #endregion
             pass
 
 
@@ -263,22 +234,10 @@ def _post_panel_run(payload: dict[str, Any], *, http_timeout: float | None) -> d
         )
         with _urlreq.urlopen(req, timeout=http_timeout) as resp:
             body = resp.read().decode("utf-8")
-        # #region agent log
-        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation OK (panel ran it)",
-                 {"url": url, "conv_id": payload.get("conv_id")})
-        # #endregion
         return json.loads(body) if body else {}
     except (TimeoutError, socket.timeout):
-        # #region agent log
-        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation TIMEOUT (panel still running)",
-                 {"url": url, "conv_id": payload.get("conv_id")})
-        # #endregion
         return {"_delegation_timeout": True}
     except Exception as _exc:
-        # #region agent log
-        _dbg_vis("V-A", "agent_modes.py:_post_panel_run", "delegation UNREACHABLE -> local fallback",
-                 {"url": url, "conv_id": payload.get("conv_id"), "err": repr(_exc)[:200]})
-        # #endregion
         return None
 
 
@@ -298,11 +257,6 @@ def notify_chats_changed(
         event["folder_id"] = folder_id
     if not open_tab:
         event["open"] = False
-    # #region agent log
-    _dbg_vis("V-B", "agent_modes.py:notify_chats_changed", "notify fired",
-             {"conv_id": conv_id, "in_bridge": _in_bridge_process(),
-              "route": ("explicit" if push is not None else ("panel" if _panel_push is not None else "forward"))})
-    # #endregion
     _resolve_push(push)(event)
 
 
@@ -412,21 +366,8 @@ class AgentSession:
     def prepare_run(self, run_id: str) -> None:
         self.cancel()
         old = self._thread
-        # #region agent log
-        join_started = time.perf_counter()
-        old_alive = bool(old is not None and old.is_alive())
-        # #endregion
         if old is not None and old.is_alive():
             old.join(SESSION_JOIN_TIMEOUT)
-        # #region agent log
-        _dbg_thread_state(
-            "agent session prepared",
-            runId=run_id,
-            oldAlive=old_alive,
-            oldStillAlive=bool(old is not None and old.is_alive()),
-            joinMs=round((time.perf_counter() - join_started) * 1000.0, 1),
-        )
-        # #endregion
         self._cancel = threading.Event()
         old_rid = self.run_id
         self.run_id = run_id
@@ -448,9 +389,6 @@ class AgentSession:
         except Exception:
             discard_live_run_id(run_id)
             raise
-        # #region agent log
-        _dbg_thread_state("agent thread started", runId=run_id, threadName=self._thread.name)
-        # #endregion
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -469,31 +407,6 @@ _quiet_runs: set[str] = set()
 PHONE_PUSH_MIN_SECONDS = 20.0
 _run_started: dict[str, float] = {}
 
-# #region agent log
-def _dbg_thread_state(message: str, **data: Any) -> None:
-    try:
-        threads = threading.enumerate()
-        with open(r"C:\Users\tas13\Documents\GitHub\UEFN-Ducky\debug-77e3f2.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "sessionId": "77e3f2", "runId": "thread-repro", "hypothesisId": "T-A,T-B,T-D",
-                "location": "frontend/ui_web/agent_modes.py:AgentSession",
-                "message": message,
-                "data": {
-                    **data,
-                    "threadCount": len(threads),
-                    "agentThreads": [t.name for t in threads if t.name.startswith("agent-")],
-                    "httpThreads": sum("process_request_thread" in t.name for t in threads),
-                    "sessionCount": len(_sessions),
-                    "liveSessions": sum(
-                        1 for session in _sessions.values()
-                        if session._thread is not None and session._thread.is_alive()
-                    ),
-                },
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-# #endregion
 
 
 def is_agent_running(conv_id: str) -> bool:
@@ -1733,12 +1646,6 @@ def run_message(
         _linked_parents[conv_id] = parent_conv_id
         _quiet_runs.add(run_id)
     child_title = conv.title or "Chat"
-    # #region agent log
-    _dbg_vis("N-A", "agent_modes.py:run_message", "parent link resolved",
-             {"child": conv_id, "explicit_parent": (parent or ""), "active": get_active_conv_id(),
-              "resolved_parent": parent_conv_id or "", "in_bridge": _in_bridge_process(),
-              "local": _local, "external": external})
-    # #endregion
 
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
@@ -1779,14 +1686,11 @@ def run_message(
             except Exception as e:
                 push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
                 _push_agent_stopped(push, conv_id, run_id, "error")
-            # #region agent log
             finally:
                 from frontend.ui_web.live_agent_runs import discard_live_run_id
 
                 discard_live_run_id(run_id)
                 close_changeset_run(run_id, "done")
-                _dbg_thread_state("external agent thread finished", runId=run_id, convId=conv_id)
-            # #endregion
 
         session.start(work_external, run_id)
         return run_id

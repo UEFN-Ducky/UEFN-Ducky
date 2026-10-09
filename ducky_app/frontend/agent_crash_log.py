@@ -50,20 +50,23 @@ def record_crash(
     elapsed_s: float,
     first_token_s: float | None,
 ) -> None:
-    """Append one crash record with the full streamed transcript and timing."""
+    """Append one crash record: the error, timing and how much had streamed.
+
+    The transcript itself is the user's chat and never goes in a log, only its length.
+    """
+    from backend.util.privacy import scrub
+
     path = crashes_path()
     entry: dict[str, Any] = {
         "ts": time.time(),
         "conv_id": conv_id,
         "provider": provider,
         "model": model,
-        "error": (error or "").strip()[:2000],
+        "error": scrub((error or "").strip())[:2000],
         "elapsed_s": round(float(elapsed_s), 2),
         "first_token_s": (round(float(first_token_s), 2) if first_token_s is not None else None),
         "thinking_chars": len(thinking or ""),
         "answer_chars": len(answer or ""),
-        "thinking": thinking or "",
-        "answer": answer or "",
     }
     if _use_db():
         try:

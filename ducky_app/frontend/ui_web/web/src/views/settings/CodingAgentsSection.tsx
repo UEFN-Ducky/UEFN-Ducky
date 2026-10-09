@@ -5,7 +5,7 @@ import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPus
 import { Icons } from "../../icons/Icons";
 import { TruncatedText } from "../../components/TruncatedText";
 import { Modal, ModalActions } from "../../components/Modal";
-import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
+import { refreshModelsCatalog, rereadModelsCatalog } from "../../hooks/modelsCatalogCache";
 import { usePluginContributions } from "../../hooks/usePluginContributions";
 import type { CodingAgentDto } from "../../types/panel";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
@@ -60,7 +60,7 @@ function useCodingAgentsState() {
     installPanelPushBus();
     return subscribePanelPush((event) => {
       if (event.type !== "uefn_plugins_changed" && event.type !== "coding_agents_updated") return;
-      if (event.type === "uefn_plugins_changed") void refreshModelsCatalog();
+      if (event.type === "uefn_plugins_changed") void rereadModelsCatalog();
       void refresh();
     });
   }, [refresh]);

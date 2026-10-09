@@ -1243,10 +1243,19 @@ class PanelApiChatsMixin:
         before ``before_id``). Without arguments the whole conversation comes
         back, as before.
         """
-        conv = _pa.load_conversation(conv_id)
-        if not conv:
-            return []
-        rows = _pa._messages_to_ui(conv, live=conv_id in self.list_running_agents())
+        started = _pa.time.monotonic()
+        try:
+            conv = _pa.load_conversation(conv_id)
+            if not conv:
+                return []
+            rows = _pa._messages_to_ui(conv, live=conv_id in self.list_running_agents())
+        except Exception as exc:
+            # A chat that can't be read must leave a trace, not just a spinner.
+            _pa.record_error("chat", f"Chat {str(conv_id)[:8]} couldn't be loaded: {type(exc).__name__}: {exc}")
+            raise
+        took = _pa.time.monotonic() - started
+        if took > 5.0:
+            _pa.record_activity("chat", f"Chat {str(conv_id)[:8]} took {took:.1f}s to load ({len(rows)} rows)")
         if limit is None and before_id is None:
             return rows
         if before_id is not None:

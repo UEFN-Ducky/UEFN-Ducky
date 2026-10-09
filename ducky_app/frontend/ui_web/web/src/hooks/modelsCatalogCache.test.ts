@@ -92,3 +92,29 @@ describe("modelsCatalogCache", () => {
     expect(getCachedModels()?.[0]?.thinkingMenu?.levels[0].id).toBe("off");
   });
 });
+
+describe("models_updated push", () => {
+  it("re-reads the catalog without asking the gateways again (that looped forever)", async () => {
+    const { subscribePanelPush } = await import("./usePanelPushBus");
+    let onPush: ((event: { type: string }) => void) | null = null;
+    vi.mocked(subscribePanelPush).mockImplementation(((fn: (event: { type: string }) => void) => {
+      onPush = fn;
+      return () => {};
+    }) as never);
+    vi.resetModules();
+    const fresh = await import("./modelsCatalogCache");
+    const catalog = vi.fn(async (_refresh?: boolean) => ({ models: [], default_model: "", agent_model: "" }));
+    vi.mocked(getApi).mockReturnValue({ get_models_catalog: catalog } as never);
+
+    fresh.installModelsCatalogAutoRefresh();
+    expect(onPush).not.toBeNull();
+    onPush!({ type: "models_updated" });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(catalog).toHaveBeenCalledTimes(1);
+    expect(catalog).toHaveBeenLastCalledWith(false);
+
+    onPush!({ type: "key_test_done", ok: true } as never);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(catalog).toHaveBeenLastCalledWith(true);
+  });
+});

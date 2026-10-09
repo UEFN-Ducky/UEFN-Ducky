@@ -97,3 +97,30 @@ def test_submit_maps_http_error() -> None:
         out = submit_feedback(message="hi")
     assert out["ok"] is False
     assert "blocked" in out["error"]
+
+
+def test_build_payload_carries_the_app_log_scrubbed() -> None:
+    body = build_payload(
+        message="slow chat",
+        app_log="[2026-10-09 10:00:00] (panel) signed in as someone@example.com from 203.0.113.7",
+        app_version="1.2.358",
+    )
+    assert "app_log" in body and "error_log" not in body
+    assert "someone@example.com" not in body["app_log"] and "203.0.113.7" not in body["app_log"]
+    assert "[email]" in body["app_log"] and "[ip]" in body["app_log"]
+
+
+def test_submit_feedback_sends_the_logs_that_were_asked_for() -> None:
+    sent: dict = {}
+
+    def fake_post(method, url, *, headers, json_body, timeout):
+        sent.update(json_body)
+        return {}
+
+    with (
+        patch("frontend.feedback_submit.http_json", side_effect=fake_post),
+        patch("frontend.feedback_submit._current_error_log", return_value="[t] (agent) boom"),
+        patch("frontend.feedback_submit._current_app_log", return_value="[t] (panel) started"),
+    ):
+        assert submit_feedback(message="hi", include_log=True)["ok"] is True
+    assert sent.get("app_log") == "[t] (panel) started" and "error_log" not in sent

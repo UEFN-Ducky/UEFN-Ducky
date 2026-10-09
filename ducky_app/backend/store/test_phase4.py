@@ -199,7 +199,9 @@ def test_agent_crash_and_verse_stats_rows(backend: str) -> None:
     agent_crash_log.record_crash(conv_id="c", provider="openai", model="m", error="timeout", thinking="t", answer="a",
                                  elapsed_s=1.5, first_token_s=None)
     crashes = agent_crash_log.read_crashes()
-    assert crashes[0]["error"] == "timeout" and crashes[0]["thinking"] == "t"
+    assert crashes[0]["error"] == "timeout" and crashes[0]["thinking_chars"] == 1
+    # The chat itself never goes in the crash log, only its length.
+    assert "thinking" not in crashes[0] and "answer" not in crashes[0]
     verse_stats.record_compile({"3512": 2}, ["Content/Verse/a.verse"])
     verse_stats.record_tool_failure("wire_verse_device_ref", "stale")
     summary = verse_stats.summarize(days=30)

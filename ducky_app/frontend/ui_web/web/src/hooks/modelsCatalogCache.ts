@@ -68,18 +68,31 @@ export function clearModelsCatalog(): void {
   emit();
 }
 
-/** Drop cache and fetch again (gateway install / key save). */
+/** Drop cache and fetch again, asking the gateways for fresh lists (key save / Refresh). */
 export async function refreshModelsCatalog(): Promise<CatalogModelRow[]> {
   invalidateModelsCatalog();
   return loadModelsCatalog({ force: true });
 }
 
-/** Coalesce bursty Store install/enable pushes into one catalog reload. */
-function scheduleModelsCatalogRefresh(): void {
+/** Re-read the Python cache only. A `models_updated` push means that cache just changed,
+ *  so asking the gateways again would only announce another update: that loop read the
+ *  catalog ~3.5 times a second through the WebView bridge and starved chat loads. */
+export async function rereadModelsCatalog(): Promise<CatalogModelRow[]> {
+  invalidateModelsCatalog();
+  return loadModelsCatalog({ force: true, kick: false });
+}
+
+let pendingKick = false;
+
+/** Coalesce bursty pushes into one catalog reload (a kick wins over a plain re-read). */
+function scheduleModelsCatalogRefresh(kick: boolean): void {
+  pendingKick = pendingKick || kick;
   if (refreshTimer != null) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     refreshTimer = null;
-    void refreshModelsCatalog();
+    const withKick = pendingKick;
+    pendingKick = false;
+    void (withKick ? refreshModelsCatalog() : rereadModelsCatalog());
   }, 80);
 }
 
@@ -93,16 +106,17 @@ export function installModelsCatalogAutoRefresh(): void {
   installPanelPushBus();
   subscribePanelPush((event) => {
     if (event.type === "models_updated") {
-      scheduleModelsCatalogRefresh();
+      scheduleModelsCatalogRefresh(false);
       return;
     }
     if (event.type === "uefn_plugins_changed") {
-      // Re-read the Python cache (prune already ran). Do not wait on provider APIs.
-      scheduleModelsCatalogRefresh();
+      // Re-read the Python cache (prune already ran; enabling a gateway kicks its own
+      // fetch on the Python side). Do not wait on provider APIs.
+      scheduleModelsCatalogRefresh(false);
       return;
     }
     if (event.type === "key_test_done" && event.ok) {
-      scheduleModelsCatalogRefresh();
+      scheduleModelsCatalogRefresh(true);
     }
   });
 }
@@ -152,14 +166,14 @@ function mapApiRow(row: ApiModelRow, fallbackKey: string): CatalogModelRow {
   };
 }
 
-async function fetchCatalogFromApi(force: boolean): Promise<CatalogModelRow[]> {
+async function fetchCatalogFromApi(force: boolean, kick: boolean): Promise<CatalogModelRow[]> {
   const api = getApi();
   if (!api) return cachedModels ?? [];
 
-  // One cache-only RPC. Provider fetches run on a Python worker and push
-  // models_updated when they land — never runBridgeJob / never wait 120s.
+  // One cache-only RPC. `kick` asks for a provider fetch on a Python worker, which
+  // pushes models_updated only if the lists changed — never runBridgeJob / never wait 120s.
   if (api.get_models_catalog) {
-    const res = await api.get_models_catalog(force);
+    const res = await api.get_models_catalog(kick);
     applyDefaultFromSettings(res.default_model || "", res.agent_model || "");
     return (res.models || []).map((row) => mapApiRow(row, row.provider_key || ""));
   }
@@ -178,7 +192,9 @@ async function fetchCatalogFromApi(force: boolean): Promise<CatalogModelRow[]> {
   return batches.flat();
 }
 
-export async function loadModelsCatalog(options?: { force?: boolean }): Promise<CatalogModelRow[]> {
+/** `force` re-reads the Python cache instead of the copy here; `kick` (default: same as
+ *  force) also asks the gateways for fresh lists. */
+export async function loadModelsCatalog(options?: { force?: boolean; kick?: boolean }): Promise<CatalogModelRow[]> {
   installModelsCatalogAutoRefresh();
 
   // Sticky empty [] used to hide newly installed gateways until restart —
@@ -187,8 +203,10 @@ export async function loadModelsCatalog(options?: { force?: boolean }): Promise<
   if (loadPromise) return loadPromise;
 
   const epoch = catalogEpoch;
+  const force = !!options?.force;
+  const kick = options?.kick ?? force;
   loadPromise = (async () => {
-    const rows = await fetchCatalogFromApi(!!options?.force);
+    const rows = await fetchCatalogFromApi(force, kick);
     if (epoch !== catalogEpoch) return cachedModels ?? rows;
     cachedModels = rows;
     emit();

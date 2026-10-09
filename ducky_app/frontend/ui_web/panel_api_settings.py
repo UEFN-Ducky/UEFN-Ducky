@@ -1845,6 +1845,7 @@ class PanelApiSettingsMixin:
             message=str(data.get("message") or ""),
             email=str(data.get("email") or ""),
             include_errors=bool(data.get("include_errors")),
+            include_log=bool(data.get("include_log")),
         )
 
     def copy_text(self, text: str) -> bool:

@@ -1699,6 +1699,10 @@ def _strip_contributions_for(pid: str) -> None:
 
 def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
     """Persist last register failure so Settings can explain 'Backend not loaded'."""
+    from backend.util.privacy import scrub
+
+    # Shown in Settings and kept for 30 days, so no folders, emails or keys in it.
+    message = scrub(f"{type(exc).__name__}: {exc}")
     try:
         from backend.store.switch import use_db
 
@@ -1707,8 +1711,8 @@ def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
 
             from backend.store.repos import events as _ev
 
-            _ev.insert("plugin_load_error", ts=_t.time(), source=pid, message=f"{type(exc).__name__}: {exc}",
-                       payload={"plugin_id": pid, "error": f"{type(exc).__name__}: {exc}"})
+            _ev.insert("plugin_load_error", ts=_t.time(), source=pid, message=message,
+                       payload={"plugin_id": pid, "error": message})
             _ev.trim("plugin_load_error", older_than=_t.time() - 30 * 86400, keep=_LOAD_ERROR_LOG_KEEP)
             return
     except Exception:
@@ -1722,7 +1726,7 @@ def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
         import time
 
         line = json.dumps(
-            {"ts": time.time(), "plugin_id": pid, "error": f"{type(exc).__name__}: {exc}"},
+            {"ts": time.time(), "plugin_id": pid, "error": message},
             ensure_ascii=False,
         )
         # Repair retries append the same failure every ensure_plugins_loaded() —

@@ -148,6 +148,11 @@ def _notify_models_updated() -> None:
         pass
 
 
+def _models_fingerprint() -> str:
+    """What the picker would show, cheaply: provider → model reprs (all fields)."""
+    return repr(sorted((prov, [repr(m) for m in models]) for prov, models in list(_model_cache.items())))
+
+
 def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any]]:
     """JS-facing model rows from an in-memory cache. Never hits provider APIs."""
     from frontend.agent_models import provider_label
@@ -213,11 +218,16 @@ def kick_model_refresh() -> None:
         global _models_refresh_inflight, _models_refresh_again
         try:
             while True:
+                before = _models_fingerprint()
                 try:
                     _warm_model_cache()
                 except Exception:
                     pass
-                _notify_models_updated()
+                # Only a real change is news. The picker re-reads on models_updated, and an
+                # unchanged warm announcing itself looped forever (~3.5 catalog reads a
+                # second, 105 KB each, through the WebView bridge).
+                if _models_fingerprint() != before:
+                    _notify_models_updated()
                 with _models_refresh_lock:
                     if not _models_refresh_again:
                         _models_refresh_inflight = False

@@ -2035,144 +2035,65 @@
 }
 
 .support-tab {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.support-tab-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
 }
 
-.support-tab-title {
-  font-size: 20px;
-  margin: 0 0 8px 0;
-  font-weight: 500;
-}
-
-.support-tab-lead {
-  color: var(--fg);
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.support-tab-card {
-  background-color: var(--card);
-  border-radius: var(--radius);
-  border: 1px solid color-mix(in srgb, var(--red) 30%, var(--border));
-  padding: 28px;
+.support-tab-fields {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 560px;
-  box-shadow: 0 0 24px color-mix(in srgb, var(--red) 8%, transparent);
-}
-
-.support-tab-body {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--fg);
-}
-
-.support-tab-body--muted {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.support-tab-card--feedback {
-  border-color: var(--border);
-  box-shadow: none;
-}
-
-.support-tab-feedback-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.support-tab-feedback {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .support-tab-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.support-tab-field-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
 }
 
-.support-tab-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 400;
-}
-
-.support-tab-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-.support-tab-input--area {
-  min-height: 120px;
-  resize: vertical;
-  line-height: 1.5;
+/* A message, not code: the shared textarea defaults to the code font. */
+.support-tab-field .settings-textarea {
   font-family: inherit;
+  resize: vertical;
 }
 
-.support-tab-check {
+.support-tab-footer {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg);
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  text-align: center;
 }
 
-.support-tab-check input {
-  margin-top: 2px;
-}
-
-.support-tab-check.is-disabled {
+.support-tab-privacy,
+.support-tab-status {
+  margin: 0;
+  font-size: 12px;
   color: var(--muted);
 }
 
-.support-tab-feedback-status {
-  margin: 0;
-  font-size: 13px;
+.support-tab-status.is-ok {
+  color: var(--green);
 }
 
-.support-tab-feedback-status.is-ok {
-  color: var(--green, #3dcc7a);
-}
-
-.support-tab-feedback-status.is-err {
+.support-tab-status.is-err {
   color: var(--red);
-}
-
-.support-tab-send {
-  align-self: flex-start;
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: none;
-  background: var(--accent);
-  color: var(--fg-inverse);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.support-tab-send:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 .appearance-layout-toggle {

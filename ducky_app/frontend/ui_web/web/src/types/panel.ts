@@ -2683,6 +2683,8 @@ export interface PanelApi {
   open_external_url(url: string): Promise<void>;
   /** Open WebView2 DevTools / Inspector (production-safe). */
   open_devtools?(): Promise<{ ok: boolean; error?: string }>;
+  /** One line in Settings → Errors from the page (scrubbed like every log). */
+  report_ui_error?(source: string, message: string): Promise<{ ok: boolean }>;
   /** Persist ErrorBoundary crash details to AppData/ui_crashes.jsonl. */
   report_ui_crash?(payload: {
     label?: string;
@@ -3641,6 +3643,7 @@ export interface PanelApi {
     message: string;
     email?: string;
     include_errors?: boolean;
+    include_log?: boolean;
   }): Promise<{ ok: boolean; error?: string }>;
   copy_text(text: string): Promise<boolean>;
   pull_editor_log(): Promise<void>;

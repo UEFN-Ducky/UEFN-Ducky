@@ -33,10 +33,10 @@ def test_scrub_home_keeps_tail() -> None:
     home = str(Path.home()).rstrip("\\/")
     win_tail = "AppData\\Roaming\\Claude\\claude_desktop_config.json"
     posix_tail = "AppData/Roaming/Claude/claude_desktop_config.json"
-    assert error_log._scrub_home(home + "\\" + win_tail) == "~\\" + win_tail
-    assert error_log._scrub_home(home.replace("\\", "/") + "/" + posix_tail) == "~/" + posix_tail
+    assert error_log._scrub(home + "\\" + win_tail) == "~\\" + win_tail
+    assert error_log._scrub(home.replace("\\", "/") + "/" + posix_tail) == "~/" + posix_tail
     doubled = home.replace("\\", "\\\\") + "\\\\" + win_tail.replace("\\", "\\\\")
-    scrubbed = error_log._scrub_home(doubled)
+    scrubbed = error_log._scrub(doubled)
     assert "~" in scrubbed
     assert home not in scrubbed
     assert "claude_desktop_config.json" in scrubbed

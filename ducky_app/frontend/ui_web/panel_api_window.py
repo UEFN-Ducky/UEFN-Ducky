@@ -603,11 +603,23 @@ class PanelApiWindowMixin:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 
+    def report_ui_error(self, source: str = "ui", message: str = "") -> dict[str, Any]:
+        """One line in Settings → Errors from the page (e.g. a chat that never loaded), so
+        problems the UI only times out on still leave a trace. Scrubbed like every log."""
+        import re
+
+        src = re.sub(r"[^a-z0-9_-]", "", str(source or "ui").lower())[:32] or "ui"
+        text = str(message or "").strip()[:1000]
+        if text:
+            _pa.record_error(src, text)
+        return {"ok": bool(text)}
+
     def report_ui_crash(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Append a UI ErrorBoundary crash to AppData for support / debugging."""
 
         data = payload if isinstance(payload, dict) else {}
         try:
+            from backend.util.privacy import scrub
             from frontend.app_paths import resolve_app_data_dir
 
             path = resolve_app_data_dir(for_write=True) / "ui_crashes.jsonl"
@@ -615,9 +627,9 @@ class PanelApiWindowMixin:
                 "ts": _pa.time.time(),
                 "version": _pa.__version__,
                 "label": str(data.get("label") or ""),
-                "message": str(data.get("message") or "")[:2000],
-                "stack": str(data.get("stack") or "")[:8000],
-                "componentStack": str(data.get("componentStack") or "")[:8000],
+                "message": scrub(str(data.get("message") or ""))[:2000],
+                "stack": scrub(str(data.get("stack") or ""))[:8000],
+                "componentStack": scrub(str(data.get("componentStack") or ""))[:8000],
                 "appVersion": str(data.get("appVersion") or _pa.__version__),
                 "pluginId": str(data.get("pluginId") or "")[:128],
                 "surface": str(data.get("surface") or "")[:128],

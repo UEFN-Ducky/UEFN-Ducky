@@ -314,6 +314,7 @@ export function ChatPane({
   const {
     messages,
     hydrated,
+    loadError,
     streamBuffer,
     streamThinking,
     streamStatus,
@@ -1331,6 +1332,13 @@ export function ChatPane({
             >
               {!hydrated ? (
                 <DuckyParadeOverlay label="Loading" />
+              ) : loadError && messages.length === 0 ? (
+                <div className="chat-pane-load-error" role="alert">
+                  <p>{loadError}</p>
+                  <button type="button" className="settings-btn general-tab-btn-primary" onClick={() => void reloadMessages()}>
+                    Retry
+                  </button>
+                </div>
               ) : isEmpty && !(askSession && visible) ? (
                 <ChatPaneEmptyState
                   hasApiKey={externalAgent || hasApiKey}

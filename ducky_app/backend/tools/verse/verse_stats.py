@@ -63,6 +63,12 @@ def _append(entry: dict) -> None:
         pass
 
 
+def _scrub(text: str) -> str:
+    from backend.util.privacy import scrub
+
+    return scrub(text)
+
+
 def record_compile(codes: dict[str, int], files: list[str]) -> None:
     """One compile that produced errors: ``codes`` = {"3512": 2, ...}, ``files`` = paths named."""
     _append(
@@ -70,7 +76,7 @@ def record_compile(codes: dict[str, int], files: list[str]) -> None:
             "ts": time.time(),
             "kind": "compile",
             "codes": {str(k): int(v) for k, v in (codes or {}).items()},
-            "files": [str(f) for f in (files or [])][:MAX_FILES_PER_ENTRY],
+            "files": [_scrub(str(f)) for f in (files or [])][:MAX_FILES_PER_ENTRY],
         }
     )
 
@@ -81,7 +87,7 @@ def record_tool_failure(tool: str, message: str) -> None:
             "ts": time.time(),
             "kind": "tool_failure",
             "tool": str(tool),
-            "message": (message or "")[:500],
+            "message": _scrub(message or "")[:500],
         }
     )
 

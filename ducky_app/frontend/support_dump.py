@@ -171,4 +171,6 @@ def _agent_lines() -> list[str]:
 
 
 def _redact(text: str) -> str:
-    return _SECRET_RE.sub("[redacted]", text)
+    from backend.util.privacy import scrub
+
+    return scrub(_SECRET_RE.sub("[redacted]", text))

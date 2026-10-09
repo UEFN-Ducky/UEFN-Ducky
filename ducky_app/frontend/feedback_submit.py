@@ -18,6 +18,7 @@ def build_payload(
     message: str,
     email: str = "",
     error_log: str = "",
+    app_log: str = "",
     app_version: str = "",
 ) -> dict[str, str]:
     """Public collect body. Extra keys are dropped by the form allowlist."""
@@ -34,6 +35,9 @@ def build_payload(
     clipped = _clip_error_log(error_log)
     if clipped:
         body["error_log"] = clipped
+    clipped = _clip_error_log(app_log)
+    if clipped:
+        body["app_log"] = clipped
     return body
 
 
@@ -42,20 +46,21 @@ def submit_feedback(
     message: str,
     email: str = "",
     include_errors: bool = False,
+    include_log: bool = False,
 ) -> dict[str, Any]:
     """POST to the official form. Never uses the user's tenant URL."""
     text = (message or "").strip()
     if not text:
         return {"ok": False, "error": "Write a short message first."}
-    error_log = ""
-    if include_errors:
-        error_log = _current_error_log()
+    error_log = _current_error_log() if include_errors else ""
+    app_log = _current_app_log() if include_log else ""
     from frontend import __version__
 
     body = build_payload(
         message=text,
         email=email or "",
         error_log=error_log,
+        app_log=app_log,
         app_version=str(__version__),
     )
     headers = {
@@ -75,6 +80,13 @@ def _current_error_log() -> str:
     trim()
     lines = format_entries(read_errors())
     return "\n".join(lines)
+
+
+def _current_app_log() -> str:
+    from frontend.error_log import format_entries, read_activity, trim
+
+    trim()
+    return "\n".join(format_entries(read_activity()))
 
 
 def _clip_error_log(raw: str) -> str:

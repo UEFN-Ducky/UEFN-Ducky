@@ -384,6 +384,7 @@ _PUBLIC_METHODS = frozenset({
     'report_focus_window_layout',
     'report_open_tabs',
     'report_ui_crash',
+    'report_ui_error',
     'report_ui_perf',
     'resend_last_user_message',
     'reset_context',

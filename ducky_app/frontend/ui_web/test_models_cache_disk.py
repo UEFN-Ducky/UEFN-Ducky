@@ -246,3 +246,34 @@ def test_custom_test_key_kicks_refresh(monkeypatch):
     assert result["ok"] is True
     assert kicks == ["models"]
     assert detects == ["detect"]
+
+
+def _wait_refresh_done(timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with pa._models_refresh_lock:
+            if not pa._models_refresh_inflight:
+                return
+        time.sleep(0.01)
+    raise AssertionError("model refresh never finished")
+
+
+def test_refresh_only_announces_a_real_change(monkeypatch):
+    """An unchanged warm used to push models_updated anyway; the picker re-read on it and
+    asked again, ~3.5 times a second forever."""
+    announced: list[int] = []
+    monkeypatch.setattr(pa, "_models_updated_hook", lambda: announced.append(1))
+    monkeypatch.setattr(pa, "_model_cache", {"openai": [ModelInfo(id="gpt-a")]})
+
+    monkeypatch.setattr(pa, "_warm_model_cache", lambda: None)
+    pa.kick_model_refresh()
+    _wait_refresh_done()
+    assert announced == []
+
+    def _new_model() -> None:
+        pa._model_cache["openai"] = [ModelInfo(id="gpt-a"), ModelInfo(id="gpt-b")]
+
+    monkeypatch.setattr(pa, "_warm_model_cache", _new_model)
+    pa.kick_model_refresh()
+    _wait_refresh_done()
+    assert announced == [1]

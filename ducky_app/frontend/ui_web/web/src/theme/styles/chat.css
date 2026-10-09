@@ -165,6 +165,20 @@
   box-sizing: border-box;
 }
 
+.chat-pane-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: auto;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chat-pane-load-error p {
+  margin: 0;
+}
+
 .chat-pane-input-area {
   padding: 0 var(--chat-column-pad-right) 24px var(--chat-column-pad-left);
   display: flex;

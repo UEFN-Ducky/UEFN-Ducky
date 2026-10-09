@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { AgentEvent, MessageAttachmentDto } from "../types/panel";
 
 import { getCachedChatMessages, setCachedChatMessages } from "./chatMessagesCache";
+import { CHAT_LOAD_TIMEOUT_MS, ChatLoadTimeout, fetchChatRows, withTimeout } from "./chatRowsFetch";
 import { getApi } from "./usePanelApi";
 import { useAgentEventSubscription } from "./useAgentEventBus";
 import {
@@ -36,6 +37,9 @@ import { prefixSpeaker } from "../utils/agentActivity";
  *  useRunningAgents poll interval so a live-but-quiet run is confirmed first. */
 const RECONCILE_GRACE_MS = 15000;
 
+/** A chat load slower than this is written to Settings → Errors. */
+const SLOW_CHAT_LOAD_MS = 10_000;
+
 /** Seed reducer state from the in-memory cache so a tab switch restores instantly.
  *  ChatPane is keyed by chat.id, so chatId is constant for the hook's lifetime and
  *  this runs exactly once per mount. */
@@ -61,6 +65,8 @@ function initFromCache(arg: { chatId: string; externalRunning: boolean }): RunSt
 export function useChatMessages(chatId: string, visible: boolean, isAgentRunning: boolean) {
   const [state, dispatch] = useReducer(chatRunReducer, { chatId, externalRunning: isAgentRunning }, initFromCache);
   const [hydrated, setHydrated] = useState(() => !!getCachedChatMessages(chatId));
+  // Set when a load failed or timed out, so the pane offers Retry instead of spinning.
+  const [loadError, setLoadError] = useState("");
 
   // A ref mirror so visibility/mount effects can read the latest run state without
   // re-subscribing on every keystroke of the stream.
@@ -86,13 +92,33 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       return;
     }
     const seq = ++loadSeqRef.current;
+    const startedAt = performance.now();
+    // Settings → Errors gets a line for loads that fail or crawl, so a chat stuck on
+    // Loading always leaves a trace (the chat's short id and timing, never its text).
+    const report = (text: string) => {
+      void Promise.resolve(api.report_ui_error?.("chat", text)).catch(() => undefined);
+    };
     try {
-      const rows = await api.load_messages(chatId);
+      const rows = await fetchChatRows(chatId);
+      const tookMs = performance.now() - startedAt;
+      if (tookMs > SLOW_CHAT_LOAD_MS) {
+        report(`Chat ${chatId.slice(0, 8)} took ${(tookMs / 1000).toFixed(1)}s to load (${rows.length} messages).`);
+      }
       if (seq !== loadSeqRef.current) return; // a newer load superseded this one
       lastLoadedAtRef.current = Date.now();
+      setLoadError("");
       dispatch({ type: "loaded", rows });
-    } catch {
-      // Keep the cached conversation on transient bridge failures; a later reload retries.
+    } catch (err) {
+      const timedOut = err instanceof ChatLoadTimeout;
+      report(
+        `Chat ${chatId.slice(0, 8)} didn't load: ${
+          timedOut ? `no reply after ${Math.round(CHAT_LOAD_TIMEOUT_MS / 1000)}s` : err instanceof Error ? err.message : String(err)
+        }.`,
+      );
+      // Keep the cached conversation on transient failures; a later reload retries.
+      if (seq === loadSeqRef.current) {
+        setLoadError(timedOut ? "This chat is taking too long to load." : "This chat couldn't be loaded.");
+      }
     } finally {
       if (seq === loadSeqRef.current) setHydrated(true);
     }
@@ -126,7 +152,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       const api = getApi();
       if (restoredRunning && api?.list_running_agents) {
         try {
-          const live = (await api.list_running_agents()).includes(chatId);
+          const live = (await withTimeout(api.list_running_agents(), 5_000)).includes(chatId);
           if (cancelled) return;
           dispatch({ type: "reconcile", running: live });
           if (!live) return; // reconcile bumped reloadToken: that reload replaces the tail
@@ -256,6 +282,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     streamThinking: state.thinking,
     streamStatus: prefixSpeaker(state.statusAuthor, state.statusText),
     hydrated,
+    loadError,
     agentRunning: isRunActive(state),
     optimisticRunning: state.status !== "idle",
     hasNewBelow: state.hasNewBelow,

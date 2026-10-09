@@ -59,9 +59,11 @@ def record(kind: str, plugin_id: str, message: str, **detail: Any) -> None:
     pid = str(plugin_id or "").strip().lower()
     if not pid or kind not in SOURCES:
         return
+    from backend.util.privacy import scrub
+
     now = time.time()
-    row = {"ts": now, "plugin_id": pid, "message": str(message or "")[:2000],
-           **{k: v for k, v in detail.items() if v not in (None, "")}}
+    row = {"ts": now, "plugin_id": pid, "message": scrub(str(message or ""))[:2000],
+           **{k: (scrub(v) if isinstance(v, str) else v) for k, v in detail.items() if v not in (None, "")}}
     try:
         from backend.store.switch import use_db
 
