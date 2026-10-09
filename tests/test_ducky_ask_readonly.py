@@ -7,7 +7,7 @@ import pytest
 from backend.agent import runner, run_context, tools
 from backend.agent.providers.base import StreamEvent as E, StreamEventKind as K, ToolCallRequest as Call
 from frontend.ui_web import agent_modes as am
-from test_ducky_mode_dispatch import dispatch, QUALIFIED_MUTATORS, qualified_call
+from test_ducky_mode_dispatch import dispatch, QUALIFIED_CALLS, ASK_REFUSAL, qualified_call
 
 
 def tool(name, annotations=None):
@@ -211,8 +211,7 @@ def test_duplicate_provider_ids_do_not_replace_denial(public, monkeypatch):
     assert "blocked in Ask mode" in str(public.seen[1]["messages"])
 
 
-@pytest.mark.parametrize("name,args", QUALIFIED_MUTATORS)
-@pytest.mark.parametrize("route", ["direct", "alias", "nested"])
+@pytest.mark.parametrize("name,args,route", QUALIFIED_CALLS)
 def test_public_qualified_mutator_refusal_followup(public, dispatch, monkeypatch, name, args, route):
     import json
     dispatch.catalog[name] = tool(name, {"readOnlyHint": True, "destructiveHint": False})
@@ -226,7 +225,22 @@ def test_public_qualified_mutator_refusal_followup(public, dispatch, monkeypatch
     public.run(*qualified_call(name, args, route))
     assert dispatch.reached == []
     assert len(public.seen) == 2
-    assert "blocked in Ask mode" in str(public.seen[1]["messages"])
+    assert ASK_REFUSAL in str(public.seen[1]["messages"])
     assert public.conv.messages[-1]["content"] == "Evidence answer"
     assert not any(e["type"] == "approval_needed" for e in public.events)
     json.dumps(public.conv.messages, allow_nan=False)
+
+
+@pytest.mark.parametrize("name", ["docs__read_page", "mcp__uefn__workspace_read_file"])
+@pytest.mark.parametrize("route", ["direct", "nested"])
+def test_public_literal_qualified_read_transport_followup(public, dispatch, monkeypatch, name, route):
+    dispatch.catalog[name] = tool(name, {"readOnlyHint": True, "destructiveHint": False})
+    async def listing():
+        return list(dispatch.catalog.values())
+    monkeypatch.setattr(runner, "list_mcp_tools", listing)
+    monkeypatch.setattr(runner, "execute_tool", tools.execute_tool)
+    public.run(*qualified_call(name, {"path": "mock"}, route))
+    assert dispatch.reached == [(name, {"path": "mock"})]
+    assert len(public.seen) == 2
+    assert "evidence" in str(public.seen[1]["messages"])
+    assert public.conv.messages[-1]["content"] == "Evidence answer"

@@ -25,6 +25,13 @@ QUALIFIED_MUTATORS = [
     ("external__ducky_plan_move_node", {}),
     ("docs__get_page_and_edit", {}),
 ]
+# These names are literal catalog entries, not invented aliases to bare locals.
+QUALIFIED_MUTATORS += [("mcp__uefn__" + name.rsplit("__", 1)[-1], args)
+                       for name, args in QUALIFIED_MUTATORS[:]]
+QUALIFIED_CALLS = [(name, args, route) for name, args in QUALIFIED_MUTATORS
+                   for route in ("direct", "alias", "nested", "nested_alias")
+                   if "alias" not in route or not name.startswith("mcp__")]
+ASK_REFUSAL = "blocked in Ask mode: tool is not a verified read operation"
 
 
 def qualified_call(name, args, route):
@@ -32,6 +39,8 @@ def qualified_call(name, args, route):
         return "mcp__" + name, args
     if route == "nested":
         return "ducky_call_tool", {"name": name, "arguments": args}
+    if route == "nested_alias":
+        return "ducky_call_tool", {"name": "mcp__" + name, "arguments": args}
     return name, args
 
 
@@ -80,8 +89,7 @@ def invoke(name, args, mode="ask", inner=False):
         run_context.reset_mode(token)
 
 
-@pytest.mark.parametrize("name,args", QUALIFIED_MUTATORS)
-@pytest.mark.parametrize("route", ["direct", "alias", "nested"])
+@pytest.mark.parametrize("name,args,route", QUALIFIED_CALLS)
 def test_qualified_mutators_deny_before_side_effects(dispatch, monkeypatch, name, args, route):
     dispatch.catalog[name] = NS(name=name, inputSchema={"type": "object", "properties": {}},
                                 annotations={"readOnlyHint": True, "destructiveHint": False})
@@ -90,8 +98,21 @@ def test_qualified_mutators_deny_before_side_effects(dispatch, monkeypatch, name
     monkeypatch.setattr("backend.agent.hammer_guard.note_failure", dispatch.forbidden)
     monkeypatch.setattr(tools, "_record_tool_failure", dispatch.forbidden)
     result = invoke(*qualified_call(name, args, route))
-    assert not result.ok and "blocked in Ask mode" in result.error
+    assert not result.ok and result.error == ASK_REFUSAL
     assert dispatch.reached == []
+
+
+@pytest.mark.parametrize("name", ["docs__read_page", "mcp__uefn__workspace_read_file"])
+@pytest.mark.parametrize("route", ["direct", "nested"])
+@pytest.mark.parametrize("annotated", [False, True])
+def test_literal_registered_qualified_read_requires_annotations(dispatch, name, route, annotated):
+    dispatch.catalog[name] = NS(name=name, inputSchema={"type": "object", "properties": {}},
+                                annotations={"readOnlyHint": True, "destructiveHint": False} if annotated else None)
+    result = invoke(*qualified_call(name, {"path": "mock"}, route))
+    assert result.ok is annotated
+    assert dispatch.reached == ([(name, {"path": "mock"})] if annotated else [])
+    if not annotated:
+        assert result.error == ASK_REFUSAL
 
 
 @pytest.mark.parametrize("inner", [False, True])
