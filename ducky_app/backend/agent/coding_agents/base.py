@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import shutil
 import threading
 import time
@@ -130,6 +131,41 @@ class CodingAgentCapabilities:
     """
 
 
+    supported_modes: tuple[str, ...] = ("agent",)
+    """Modes enforced on every launch, including resumes.
+
+    Ask/Plan require an explicit ``mode`` launch keyword and a reported
+    ``effective_mode``. Legacy adapters remain Agent-only.
+    """
+
+
+def normalize_coding_mode(mode: str | None = "agent") -> str:
+    if mode is None or mode == "":
+        return "agent"
+    if isinstance(mode, str) and mode.strip().lower() in ("ask", "plan", "agent"):
+        return mode.strip().lower()
+    raise ValueError(f"Invalid coding-agent mode: {mode!r}; expected ask, plan or agent")
+
+
+def coding_mode_launch_kwargs(adapter: Any, mode: str) -> dict[str, str]:
+    """Validate before launch; **kwargs alone does not opt into mode support."""
+    mode = normalize_coding_mode(mode)
+    supported = getattr(adapter.capabilities, "supported_modes", ("agent",))
+    if mode not in supported:
+        raise ValueError(f"{adapter.label} does not support {mode} mode; run was not started")
+    try:
+        param = inspect.signature(adapter.launch).parameters.get("mode")
+    except (TypeError, ValueError):
+        param = None
+    if param is not None and param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
+    ):
+        return {"mode": mode}
+    if mode != "agent":
+        raise ValueError(f"{adapter.label} has no mode-aware launch interface; run was not started")
+    return {}
+
+
 @dataclass
 class CodingAgentInfo:
     id: str
@@ -183,6 +219,7 @@ class CodingAgentInfo:
                 "mcp_inject": self.capabilities.mcp_inject,
                 "needs_api_key": self.capabilities.needs_api_key,
                 "needs_cli": self.capabilities.needs_cli,
+                "supported_modes": list(getattr(self.capabilities, "supported_modes", ("agent",))),
             },
             "models": list(self.models),
         }
@@ -205,6 +242,13 @@ class CodingAgentLaunchResult:
     blocks: list[dict[str, Any]] = field(default_factory=list)
     """Ordered thinking/text/tool_call blocks (embedded-agent format) so the
     turn's steps survive a panel reload, not just the final reply text."""
+    requested_mode: str = ""
+    effective_mode: str = ""
+    """Adapter-reported mode; empty means no confirmed effective mode.
+
+    Mode-aware adapters report the canonical mode after configuring it.
+    Core supplies requested_mode and handles Agent-only legacy adapters.
+    """
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -217,6 +261,8 @@ class CodingAgentLaunchResult:
             "status": self.status,
             "usage": dict(self.usage),
             "blocks": list(self.blocks),
+            "requested_mode": self.requested_mode,
+            "effective_mode": self.effective_mode,
         }
 
 
@@ -245,6 +291,7 @@ class CodingAgentAdapter(Protocol):
         cancel: Any = None,
         timeout_s: float = 0.0,
         image_paths: list[str] | None = None,
+        mode: str = "agent",
     ) -> CodingAgentLaunchResult: ...
 
 

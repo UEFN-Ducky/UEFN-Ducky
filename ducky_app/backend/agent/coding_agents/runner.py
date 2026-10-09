@@ -13,7 +13,12 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.agent.coding_agents.base import get_adapter, normalize_coding_agent
+from backend.agent.coding_agents.base import (
+    coding_mode_launch_kwargs,
+    get_adapter,
+    normalize_coding_agent,
+    normalize_coding_mode,
+)
 from backend.agent.coding_agents.mcp_inject import (
     bootstrap_system_prompt,
     launch_env,
@@ -477,9 +482,14 @@ def _emit_assistant(
     status: str = "done",
     streamed: bool = False,
     blocks: list[dict[str, Any]] | None = None,
+    requested_mode: str = "",
+    effective_mode: str = "",
 ) -> dict[str, Any]:
     from frontend.ui_web.project_chats import save_conversation, upsert_in_flight_assistant
 
+    mode_metadata = {"requested_mode": requested_mode, "effective_mode": effective_mode}
+    original_push = push
+    push = lambda event: original_push({**event, **mode_metadata})
     text = (reply or "").strip()
     if not text and not blocks:
         text = (
@@ -498,6 +508,7 @@ def _emit_assistant(
         "coding_agent": agent_id,
         "run_id": run_id,
         "terminal_session_id": terminal_session_id or "",
+        **mode_metadata,
     }
     # Interleaved thinking/text/tool_call steps in the embedded agent's format,
     # so the turn's tool steps survive a panel reload (load_messages rebuilds
@@ -559,6 +570,7 @@ def _emit_assistant(
         "terminal_session_id": terminal_session_id,
         "error": error,
         "status": status,
+        **mode_metadata,
     }
 
 
@@ -571,10 +583,21 @@ def run_coding_agent_message(
     run_id: str = "",
     timeout_s: float = 0.0,
     cancel: threading.Event | None = None,
+    mode: str = "agent",
 ) -> dict[str, Any]:
     from backend.workspace.ai_ignore import current_policy, protection_lock
     from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
     rid = run_id or str(uuid.uuid4())
+    try:
+        mode = normalize_coding_mode(mode)
+    except ValueError as exc:
+        error = str(exc)
+        metadata = {"requested_mode": str(mode), "effective_mode": "", "run_id": rid}
+        push({"type": "error", "text": error, "conv_id": conv.id, **metadata})
+        push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, **metadata})
+        return {"ok": False, "error": error, **metadata}
+    original_push = push
+    push = lambda event: original_push({"requested_mode": mode, "effective_mode": "", **event})
     with protection_lock:
         if current_policy().strict:
             error = ("AI_FILE_PROTECTION: Strict protection blocks external coding agents "
@@ -586,13 +609,15 @@ def run_coding_agent_message(
             discard_live_run_id(rid)
             push({"type": "error", "text": error, "conv_id": conv.id, "run_id": rid})
             push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
-            return {"ok": False, "error": error, "run_id": rid}
+            return {"ok": False, "error": error, "run_id": rid,
+                    "requested_mode": mode, "effective_mode": ""}
         add_live_run_id(rid)
     try:
-        return _run_coding_agent_message(
+        outcome = _run_coding_agent_message(
             conv, user_text, model=model, push=push, run_id=rid,
-            timeout_s=timeout_s, cancel=cancel,
+            timeout_s=timeout_s, cancel=cancel, mode=mode,
         )
+        return {"requested_mode": mode, "effective_mode": "", **outcome}
     finally:
         discard_live_run_id(rid)
 
@@ -606,6 +631,7 @@ def _run_coding_agent_message(
     run_id: str = "",
     timeout_s: float = 0.0,
     cancel: threading.Event | None = None,
+    mode: str = "agent",
 ) -> dict[str, Any]:
     """Execute one external coding-agent turn; persist assistant reply on conv.
 
@@ -619,6 +645,14 @@ def _run_coding_agent_message(
     adapter = get_adapter(agent_id)
     if adapter is None:
         return {"ok": False, "error": f"unknown coding agent: {agent_id}"}
+
+    try:
+        mode_kwargs = coding_mode_launch_kwargs(adapter, mode)
+    except ValueError as exc:
+        error = str(exc)
+        push({"type": "error", "text": error, "conv_id": conv.id, "run_id": run_id})
+        push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": run_id})
+        return {"ok": False, "error": error, "run_id": run_id}
 
     settings = PanelSettings.load()
     apply_workspace_env(settings.uefn_project_root)
@@ -732,7 +766,8 @@ def _run_coding_agent_message(
         system_prompt=system_prompt,
         conv_id=conv.id,
         project_root=project_root,
-        extra=_thinking_env(agent_id, getattr(conv, "thinking_effort", "")),
+        extra={**_thinking_env(agent_id, getattr(conv, "thinking_effort", "")),
+               "DUCKY_REQUESTED_MODE": mode},
         identity=run_ctx,
     )
 
@@ -765,7 +800,20 @@ def _run_coding_agent_message(
             cancel=cancel,
             timeout_s=float(timeout_s),
             image_paths=image_paths,
+            **mode_kwargs,
         )
+        result.requested_mode = mode
+        # Legacy launch signatures predate mode support and are Agent-only.
+        if not mode_kwargs:
+            result.effective_mode = "agent"
+        effective_mode = getattr(result, "effective_mode", "")
+        if effective_mode != mode and (result.ok or effective_mode):
+            result.ok = False
+            result.status = "error"
+            result.error = (
+                f"{adapter.label} did not confirm requested {mode} mode "
+                f"(effective mode: {effective_mode or 'unknown'})"
+            )
     except Exception as exc:
         ckpt.flush(error=str(exc), force=True)
         record_coding_agent_usage(conv, agent_id, model, None, push=push)
@@ -827,4 +875,6 @@ def _run_coding_agent_message(
         status=result.status or ("done" if result.ok else "error"),
         streamed=result.streamed,
         blocks=result.blocks,
+        requested_mode=mode,
+        effective_mode=effective_mode,
     )

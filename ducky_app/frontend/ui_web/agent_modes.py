@@ -1716,6 +1716,7 @@ def run_message(
                     push=push,
                     run_id=run_id,
                     cancel=cancel_event,
+                    mode=m,
                 )
             except Exception as e:
                 push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
