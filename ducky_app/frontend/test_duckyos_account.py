@@ -787,3 +787,17 @@ if __name__ == "__main__":
     test_unpair_this_pc_keeps_session()
     test_revoke_device_key_also_collects()
     print("ok")
+
+
+def test_a_refused_download_shows_the_stores_reason() -> None:
+    import pytest
+
+    from frontend.duckyos_account import DuckyOSAccountError, store_zip_bytes
+
+    reason = "Ducky Account 1.0.50 needs UEFN Ducky 1.2.354 or newer. Update UEFN Ducky, then install it."
+    with pytest.raises(DuckyOSAccountError) as refused:
+        store_zip_bytes({"error": reason})
+    assert refused.value.message == reason and refused.value.code == "store_refused"
+    with pytest.raises(DuckyOSAccountError) as empty:
+        store_zip_bytes({})
+    assert empty.value.code == "store_empty"

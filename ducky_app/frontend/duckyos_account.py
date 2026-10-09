@@ -2748,6 +2748,10 @@ def store_zip_bytes(payload: dict[str, Any]) -> bytes:
         size = 0
     expected = str(payload.get("sha256") or "").strip().lower()
     if not zip_b64 and not url:
+        # The Store says why it held the zip back (e.g. "… needs UEFN Ducky 1.2.357").
+        refused = str(payload.get("error") or "").strip()
+        if refused:
+            raise DuckyOSAccountError(refused, code="store_refused")
         raise DuckyOSAccountError("Store download returned no zip", code="store_empty")
     if not expected:
         # Neither inline bytes nor a link are trusted without the hash that comes with them.
