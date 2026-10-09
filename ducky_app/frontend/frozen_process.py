@@ -142,6 +142,38 @@ def reclaim_stale_panel_process() -> bool:
     return reclaimed
 
 
+def reclaim_panel_port(port: int) -> bool:
+    """Close a stuck Ducky still listening on the panel port (not the one in ``panel.pid``).
+
+    Runs after the hand-off to a living panel failed, so whatever still holds the port is
+    not answering; left alone it would make this launch fail to start its server. Only
+    ``UEFN-Ducky*`` processes are touched (never Setup, never a dev server).
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import psutil
+
+        listeners = [
+            c.pid
+            for c in psutil.net_connections(kind="tcp")
+            if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == int(port) and c.pid
+        ]
+    except Exception:
+        return False
+    closed = False
+    for pid in listeners:
+        if pid == os.getpid():
+            continue
+        try:
+            name = psutil.Process(pid).name().lower()
+        except Exception:
+            continue
+        if name.startswith("uefn-ducky") and "setup" not in name:
+            closed = _kill_pid_tree(pid) or closed
+    return closed
+
+
 def claim_panel_process() -> None:
     """Record this panel PID so the next launch can reclaim a zombie."""
     if sys.platform != "win32":

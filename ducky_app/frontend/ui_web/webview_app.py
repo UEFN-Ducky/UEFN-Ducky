@@ -168,6 +168,13 @@ def run() -> None:
     if is_packaged_runtime():
         t_reclaim = time.perf_counter()
         reclaim_stale_panel_process()
+        try:
+            from frontend.frozen_process import reclaim_panel_port
+            from frontend.ui_web.panel_httpd import PANEL_UI_HTTP_PORT
+
+            reclaim_panel_port(PANEL_UI_HTTP_PORT)
+        except Exception:
+            pass
         claim_panel_process()
         _boot_trace("reclaim_claim", t_reclaim)
         # Registry writes are not needed to paint the window — off the critical path.

@@ -297,6 +297,39 @@ begin
   WriteProgress(Pct, 'Installing...');
 end;
 
+// Close every Ducky process before files change: the app, background MCP bridges (an
+// IDE or agent may have started them, and they have no window for the Restart Manager)
+// and stuck copies. One left running keeps its files locked, and a half-replaced install
+// is what then fails to open. Exact image names only (never /T): the in-app updater
+// starts this Setup from Ducky, so killing Ducky's process tree would kill Setup too.
+procedure CloseDuckyProcesses();
+var
+  ResultCode: Integer;
+  I: Integer;
+begin
+  for I := 1 to 5 do
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM UEFN-Ducky.exe /IM UEFN-Ducky-Bridge.exe',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // taskkill returns 128 when nothing with those names is running.
+    if ResultCode = 128 then
+      Exit;
+    Sleep(500);
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  CloseDuckyProcesses();
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  CloseDuckyProcesses();
+  Result := True;
+end;
+
 // ssDone is SUCCESS ONLY (never after UAC No / abort). Launch when the
 // checkbox is ticked, or always for silent in-app updates — that is the only
 // relaunch path (frontend/updater.py must not start the panel on failure).
