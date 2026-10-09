@@ -1,5 +1,6 @@
 """Mode propagation without launching a CLI or contacting the live app."""
 
+from asyncio import CancelledError
 from types import SimpleNamespace
 
 import pytest
@@ -179,7 +180,8 @@ def test_launch_result_serializes_mode_metadata():
 
 @pytest.mark.parametrize("mode", ["ask", "plan", "agent"])
 @pytest.mark.parametrize("resume", [False, True])
-def test_ui_forwards_mode_to_external_runner(harness, monkeypatch, mode, resume):
+@pytest.mark.parametrize("failure", [False, True])
+def test_ui_forwards_mode_to_external_runner(harness, monkeypatch, mode, resume, failure):
     from frontend.ui_web import agent_modes as am
 
     calls = []
@@ -196,8 +198,126 @@ def test_ui_forwards_mode_to_external_runner(harness, monkeypatch, mode, resume)
     session = am.AgentSession()
     monkeypatch.setattr(am, "_session", lambda _: session)
     monkeypatch.setattr(session, "start", lambda target, _: target())
-    monkeypatch.setattr(runner, "run_coding_agent_message", lambda *a, **kw: calls.append(kw))
+    def run(*a, **kw):
+        calls.append(kw)
+        if failure:
+            raise RuntimeError("synthetic UI failure")
+    monkeypatch.setattr(runner, "run_coding_agent_message", run)
     rid = am.run_message(harness.conv.id, "Inspect", mode, "test-model", push=harness.events.append, resume=resume, _local=True)
     assert rid
     assert len(calls) == 1, harness.events
     assert calls[0]["mode"] == mode
+    if failure:
+        assert harness.conv.messages[-1]["requested_mode"] == mode
+        assert harness.conv.messages[-1]["effective_mode"] == ""
+        for event in harness.events:
+            if event["type"] in ("error", "agent_stopped"):
+                assert event["requested_mode"] == mode
+                assert event["effective_mode"] == ""
+
+
+def saved_assistant(harness):
+    from frontend.ui_web.project_chats import load_conversation
+    return load_conversation(harness.conv.id, project_root=str(harness.root)).messages[-1]
+
+
+@pytest.mark.parametrize("mode", ["agent", "ask", "plan"])
+@pytest.mark.parametrize("session", ["", "test_adapter:existing"])
+@pytest.mark.parametrize("reported", ["", "invalid"])
+def test_agent_only_empty_mode_compatibility(harness, mode, session, reported):
+    harness.conv.upstream_session_id = session
+    harness.adapter.reported_mode = reported
+    result = harness.run(mode=mode)
+    expected_ok = mode == "agent" and reported == ""
+    effective = "agent" if expected_ok else reported
+    assert result["ok"] is expected_ok
+    assert len(harness.adapter.calls) == 1
+    for obj in (result, saved_assistant(harness), harness.events[-1]):
+        assert obj["requested_mode"] == mode
+        assert obj["effective_mode"] == effective
+    assert harness.events[-1]["reason"] == ("done" if expected_ok else "error")
+
+
+@pytest.mark.parametrize("hook", ["before_launch", "on_needs_login"])
+@pytest.mark.parametrize("spoof", ["", "agent"])
+def test_hook_metadata_bound_to_core(harness, monkeypatch, hook, spoof):
+    from backend.uefn_plugins import host
+    def emit(**kw):
+        return kw["emit_assistant"](kw["conv"], agent_id=kw["agent_id"],
+            reply="Login required", push=kw["push"], run_id=kw["run_id"],
+            ok=False, status="needs_login", requested_mode=spoof, effective_mode="agent")
+    monkeypatch.setattr(host, "get_coding_agent_registration", lambda _: {hook: emit})
+    if hook == "on_needs_login":
+        def launch(*, mode="agent", **kw):
+            return base.CodingAgentLaunchResult(ok=False, status="needs_login")
+        monkeypatch.setattr(harness.adapter, "launch", launch)
+    result = harness.run(mode="plan")
+    for obj in (result, saved_assistant(harness), *harness.events):
+        assert obj["requested_mode"] == "plan"
+        assert obj["effective_mode"] == ""
+
+
+def test_stream_cannot_spoof_modes(harness, monkeypatch):
+    def launch(*, mode="agent", **kw):
+        kw["push"]({"type": "tool", "requested_mode": "agent", "effective_mode": "agent"})
+        assert saved_assistant(harness)["requested_mode"] == "plan"
+        assert saved_assistant(harness)["effective_mode"] == ""
+        return base.CodingAgentLaunchResult(ok=True, reply_text="Done", requested_mode="agent", effective_mode=mode)
+    monkeypatch.setattr(harness.adapter, "launch", launch)
+    result = harness.run(mode="plan")
+    assert result["requested_mode"] == "plan"
+    assert all(e["requested_mode"] == "plan" for e in harness.events)
+    assert next(e for e in harness.events if e["type"] == "tool")["effective_mode"] == ""
+
+
+def test_outer_outcome_cannot_spoof_request(harness, monkeypatch):
+    monkeypatch.setattr(runner, "_run_coding_agent_message", lambda *a, **kw:
+                        {"ok": False, "requested_mode": "agent"})
+    assert harness.run(mode="plan")["requested_mode"] == "plan"
+
+
+@pytest.mark.parametrize("shape", [None, {}, SimpleNamespace(ok=True, effective_mode="plan")])
+def test_malformed_result_is_structured_failure(harness, monkeypatch, shape):
+    calls = []
+    def launch(*, mode="agent", **kw):
+        calls.append(mode)
+        return shape
+    monkeypatch.setattr(harness.adapter, "launch", launch)
+    result = harness.run(mode="plan")
+    assert not result["ok"] and calls == ["plan"]
+    for obj in (result, saved_assistant(harness), harness.events[-1]):
+        assert obj["requested_mode"] == "plan" and obj["effective_mode"] == ""
+    assert harness.events[-1]["type"] == "agent_stopped"
+    assert not (harness.root / "mcp.json").exists()
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt, SystemExit, CancelledError])
+def test_exception_and_interruption_checkpoint(harness, monkeypatch, error_type):
+    def launch(*, mode="agent", **kw):
+        kw["push"]({"type": "text_delta", "text": "Partial"})
+        raise error_type("synthetic failure")
+    monkeypatch.setattr(harness.adapter, "launch", launch)
+    if error_type is RuntimeError:
+        result = harness.run(mode="plan")
+        assert not result["ok"] and result["requested_mode"] == "plan"
+    else:
+        with pytest.raises(error_type):
+            harness.run(mode="plan")
+    msg = saved_assistant(harness)
+    assert msg["requested_mode"] == "plan" and msg["effective_mode"] == ""
+    assert msg["incomplete"]
+    assert any(b.get("text") == "Partial" for b in msg["blocks"])
+    assert not (harness.root / "mcp.json").exists()
+
+
+@pytest.mark.parametrize("status", ["error", "cancelled", "timeout"])
+@pytest.mark.parametrize("effective", ["", "plan"])
+def test_failed_result_preserves_reported_metadata(harness, monkeypatch, status, effective):
+    def launch(*, mode="agent", **kw):
+        return base.CodingAgentLaunchResult(ok=False, status=status, error="synthetic",
+                                           effective_mode=effective)
+    monkeypatch.setattr(harness.adapter, "launch", launch)
+    result = harness.run(mode="plan")
+    for obj in (result, saved_assistant(harness), harness.events[-1]):
+        assert obj["requested_mode"] == "plan" and obj["effective_mode"] == effective
+    assert harness.events[-1]["reason"] == status

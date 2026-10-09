@@ -260,7 +260,7 @@ def test_external_agent_can_run_without_strict_protection(monkeypatch):
     assert runner.run_coding_agent_message(
         SimpleNamespace(id="test", coding_agent="codex"), "hello", model="",
         push=lambda _: None, run_id="default-agent",
-    ) == result
+    ) == {**result, "requested_mode": "agent", "effective_mode": ""}
     assert seen == ["default-agent"]
     assert "default-agent" not in get_live_run_ids()
 

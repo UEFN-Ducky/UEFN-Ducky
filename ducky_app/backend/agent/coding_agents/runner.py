@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend.agent.coding_agents.base import (
+    CodingAgentLaunchResult,
     coding_mode_launch_kwargs,
     get_adapter,
     normalize_coding_agent,
@@ -322,6 +323,8 @@ def checkpoint_coding_turn(
     reply: str = "",
     error: str = "",
     project_root: str | None = None,
+    requested_mode: str = "",
+    effective_mode: str = "",
 ) -> None:
     """Write the in-flight assistant to disk. Survives taskkill /F (no shutdown hooks)."""
     try:
@@ -336,6 +339,8 @@ def checkpoint_coding_turn(
             "coding_agent": agent_id,
             "run_id": run_id,
             "incomplete": True,
+            "requested_mode": requested_mode,
+            "effective_mode": effective_mode,
         }
         if blocks:
             msg["blocks"] = [dict(b) if isinstance(b, dict) else b for b in blocks]
@@ -356,11 +361,15 @@ class _TurnCheckpoint:
         run_id: str,
         *,
         project_root: str | None = None,
+        requested_mode: str = "",
+        effective_mode: str = "",
     ) -> None:
         self.conv = conv
         self.agent_id = agent_id
         self.run_id = run_id
         self.project_root = project_root
+        self.requested_mode = requested_mode
+        self.effective_mode = effective_mode
         self.blocks: list[dict[str, Any]] = []
         self._last = 0.0
 
@@ -377,6 +386,8 @@ class _TurnCheckpoint:
             agent_id=self.agent_id,
             run_id=self.run_id,
             blocks=[],
+            requested_mode=self.requested_mode,
+            effective_mode=self.effective_mode,
             project_root=self.project_root,
         )
 
@@ -390,6 +401,8 @@ class _TurnCheckpoint:
             agent_id=self.agent_id,
             run_id=self.run_id,
             blocks=self.blocks,
+            requested_mode=self.requested_mode,
+            effective_mode=self.effective_mode,
             error=error,
             project_root=self.project_root,
         )
@@ -597,7 +610,7 @@ def run_coding_agent_message(
         push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, **metadata})
         return {"ok": False, "error": error, **metadata}
     original_push = push
-    push = lambda event: original_push({"requested_mode": mode, "effective_mode": "", **event})
+    push = lambda event: original_push({"effective_mode": "", **event, "requested_mode": mode})
     with protection_lock:
         if current_policy().strict:
             error = ("AI_FILE_PROTECTION: Strict protection blocks external coding agents "
@@ -617,7 +630,7 @@ def run_coding_agent_message(
             conv, user_text, model=model, push=push, run_id=rid,
             timeout_s=timeout_s, cancel=cancel, mode=mode,
         )
-        return {"requested_mode": mode, "effective_mode": "", **outcome}
+        return {"effective_mode": "", **outcome, "requested_mode": mode}
     finally:
         discard_live_run_id(rid)
 
@@ -668,8 +681,17 @@ def _run_coding_agent_message(
 
     rid = run_id or str(uuid.uuid4())
     project_root = (settings.uefn_project_root or "").strip()
-    ckpt = _TurnCheckpoint(conv, agent_id, rid, project_root=project_root or None)
+    effective_mode = ""
+    original_push = push
+    push = lambda event: original_push({**event, "requested_mode": mode, "effective_mode": effective_mode})
+    ckpt = _TurnCheckpoint(conv, agent_id, rid, project_root=project_root or None,
+                           requested_mode=mode)
     push = ckpt.wrap(push)
+
+    def emit_assistant(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        # Hooks cannot supply their own identity for this core-owned request.
+        return _emit_assistant(*args, **{**kwargs, "requested_mode": mode,
+                                       "effective_mode": effective_mode})
     push({"type": "status", "text": f"Starting {adapter.label}…", "conv_id": conv.id, "run_id": rid})
 
     from backend.bridge import set_port_override
@@ -700,7 +722,7 @@ def _run_coding_agent_message(
             push=push,
             run_id=rid,
             agent_id=agent_id,
-            emit_assistant=_emit_assistant,
+            emit_assistant=emit_assistant,
         )
         if isinstance(auth_result, dict) and "__run_prompt__" in auth_result:
             prompt_text = str(auth_result["__run_prompt__"] or user_text)
@@ -713,7 +735,7 @@ def _run_coding_agent_message(
                 }
             )
         elif auth_result is not None:
-            return auth_result
+            return {**auth_result, "requested_mode": mode, "effective_mode": effective_mode}
 
     session_id = (
         drop_dead_claude_session(conv, agent_id, project_root)
@@ -802,9 +824,12 @@ def _run_coding_agent_message(
             image_paths=image_paths,
             **mode_kwargs,
         )
+        if not isinstance(result, CodingAgentLaunchResult):
+            raise ValueError("Coding agent returned an invalid launch result")
         result.requested_mode = mode
-        # Legacy launch signatures predate mode support and are Agent-only.
-        if not mode_kwargs:
+        # Compatibility inference only, not proof of enforced permissions.
+        # Restricted requests and nonempty mismatches never receive a fallback.
+        if mode == "agent" and result.ok and result.effective_mode == "":
             result.effective_mode = "agent"
         effective_mode = getattr(result, "effective_mode", "")
         if effective_mode != mode and (result.ok or effective_mode):
@@ -814,12 +839,18 @@ def _run_coding_agent_message(
                 f"{adapter.label} did not confirm requested {mode} mode "
                 f"(effective mode: {effective_mode or 'unknown'})"
             )
+        ckpt.effective_mode = effective_mode
     except Exception as exc:
         ckpt.flush(error=str(exc), force=True)
         record_coding_agent_usage(conv, agent_id, model, None, push=push)
         push({"type": "error", "text": str(exc), "conv_id": conv.id, "run_id": rid})
         push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
         return {"ok": False, "error": str(exc), "run_id": rid}
+    except BaseException:
+        # Persist partial work without converting cancellation/control flow
+        # into an ordinary adapter failure.
+        ckpt.flush(error="Interrupted", force=True)
+        raise
     finally:
         for path in (mcp_path, prompt_path):
             try:
@@ -850,7 +881,7 @@ def _run_coding_agent_message(
 
     on_needs_login = reg.get("on_needs_login")
     if callable(on_needs_login) and not result.ok and result.status == "needs_login":
-        return on_needs_login(
+        outcome = on_needs_login(
             conv=conv,
             user_text=prompt_text,
             cli_path=cli_path,
@@ -860,8 +891,9 @@ def _run_coding_agent_message(
             agent_id=agent_id,
             reply=reply,
             result=result,
-            emit_assistant=_emit_assistant,
+            emit_assistant=emit_assistant,
         )
+        return {**outcome, "requested_mode": mode, "effective_mode": effective_mode}
 
     return _emit_assistant(
         conv,

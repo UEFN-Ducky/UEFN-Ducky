@@ -1700,6 +1700,7 @@ def run_message(
         cancel_event = session._cancel
 
         def work_external() -> None:
+            fresh = conv
             try:
                 from backend.agent.coding_agents.runner import run_coding_agent_message
 
@@ -1719,8 +1720,18 @@ def run_message(
                     mode=m,
                 )
             except Exception as e:
-                push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
-                _push_agent_stopped(push, conv_id, run_id, "error")
+                from backend.agent.coding_agents.runner import checkpoint_coding_turn
+
+                partial = next((msg for msg in reversed(fresh.messages)
+                                if msg.get("role") == "assistant" and msg.get("run_id") == run_id), {})
+                checkpoint_coding_turn(
+                    fresh, agent_id=coding_agent, run_id=run_id,
+                    blocks=partial.get("blocks"), reply=partial.get("text", ""),
+                    error=str(e), requested_mode=m, effective_mode="",
+                )
+                error_push = lambda event: push({**event, "requested_mode": m, "effective_mode": ""})
+                error_push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
+                _push_agent_stopped(error_push, conv_id, run_id, "error")
             finally:
                 from frontend.ui_web.live_agent_runs import discard_live_run_id
 
