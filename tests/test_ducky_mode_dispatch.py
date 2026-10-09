@@ -10,6 +10,31 @@ from backend.agent.toolsets import plan_safe
 from backend.tools.panel import ducky_panel
 
 
+# Independently reported escapes, plus bookkeeping/delegation and end-of-name edits.
+QUALIFIED_MUTATORS = [
+    ("external__workspace_git", {"args": ["reset", "--hard"]}),
+    ("external__ducky_call_tool", {"name": "workspace_write_file", "arguments": {"path": "mock", "content": "mock"}}),
+    ("external__ducky_create_plan", {"title": "mock"}),
+    ("external__ducky_plan_delete_node", {"node_id": "mock"}),
+    ("docs__read_and_delete_page", {}),
+    ("assets__asset_save", {}),
+    ("world__actor_spawn", {}),
+    ("docs__batch_edit", {}),
+    ("external__ducky_rename_self", {}),
+    ("external__ducky_agent_send", {}),
+    ("external__ducky_plan_move_node", {}),
+    ("docs__get_page_and_edit", {}),
+]
+
+
+def qualified_call(name, args, route):
+    if route == "alias":
+        return "mcp__" + name, args
+    if route == "nested":
+        return "ducky_call_tool", {"name": name, "arguments": args}
+    return name, args
+
+
 @pytest.fixture
 def dispatch(monkeypatch, unrestricted_tools):
     from backend.agent.test_hammer_guard import _patch_dispatch
@@ -53,6 +78,20 @@ def invoke(name, args, mode="ask", inner=False):
         return asyncio.run((tools._execute_tool_inner if inner else tools.execute_tool)(name, args))
     finally:
         run_context.reset_mode(token)
+
+
+@pytest.mark.parametrize("name,args", QUALIFIED_MUTATORS)
+@pytest.mark.parametrize("route", ["direct", "alias", "nested"])
+def test_qualified_mutators_deny_before_side_effects(dispatch, monkeypatch, name, args, route):
+    dispatch.catalog[name] = NS(name=name, inputSchema={"type": "object", "properties": {}},
+                                annotations={"readOnlyHint": True, "destructiveHint": False})
+    monkeypatch.setattr("backend.agent.coding_agents.plans.plan_mutator_block_reason", dispatch.forbidden)
+    monkeypatch.setattr("backend.agent.chat_title.require_self_name", dispatch.forbidden)
+    monkeypatch.setattr("backend.agent.hammer_guard.note_failure", dispatch.forbidden)
+    monkeypatch.setattr(tools, "_record_tool_failure", dispatch.forbidden)
+    result = invoke(*qualified_call(name, args, route))
+    assert not result.ok and "blocked in Ask mode" in result.error
+    assert dispatch.reached == []
 
 
 @pytest.mark.parametrize("inner", [False, True])

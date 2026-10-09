@@ -73,10 +73,16 @@ def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any],
         return reason
     tool = catalog[canonical]
     leaf = canonical.rsplit("__", 1)[-1].lower()
-    # An annotation cannot turn a known mutator or generic executor into a read.
+    # Check the canonical leaf before trusting annotations. A qualified dispatcher
+    # is opaque: only our bare dispatcher above has inspected local semantics.
+    # Pad token boundaries so compound mutations also match at the end of a name.
+    # These Ask exclusions deliberately do not change Plan's read-prefix rules.
     if (leaf in _BLOCK_EXACT or leaf.startswith(_BLOCK_PREFIXES)
+            or any(stem in f"_{leaf}_" for stem in _BLOCK_SUBSTRINGS)
+            or any(word in leaf.split("_") for word in ("edit", "move", "replace", "delegate"))
+            or leaf.startswith("ducky_plan_")
             or any(word in leaf for word in ("execute", "python", "script", "command", "shell"))
-            or leaf in {"exec", "call_tool"}):
+            or leaf in {"exec", "call_tool", "ducky_call_tool", "workspace_git", "ducky_ask_user"}):
         return reason
     schema = getattr(tool, "inputSchema", {}) or {}
     properties = schema.get("properties", {}) if isinstance(schema, dict) else {}

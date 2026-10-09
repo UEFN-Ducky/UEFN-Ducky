@@ -7,6 +7,24 @@ import pytest
 
 from backend.agent import run_context, tools
 from backend.tools.panel import ducky_panel
+from test_ducky_mode_dispatch import QUALIFIED_MUTATORS
+
+
+@pytest.mark.parametrize("name,args", QUALIFIED_MUTATORS)
+def test_qualified_mutator_schema_has_refusal(monkeypatch, name, args):
+    async def listing():
+        return [NS(name=name, description="sample", inputSchema={"type": "object", "properties": {}},
+                   annotations={"readOnlyHint": True, "destructiveHint": False})]
+    monkeypatch.setattr(tools, "list_mcp_tools", listing)
+    token = run_context.set_mode("ask")
+    try:
+        row = json.loads(asyncio.run(ducky_panel.ducky_get_tools(name=name)))
+        assert row["name"] == name and "inputSchema" in row
+        assert row["allowed"] is False
+        assert "blocked in Ask mode" in row["hint"]
+        assert "Call with" not in row["hint"]
+    finally:
+        run_context.reset_mode(token)
 
 
 @pytest.mark.parametrize("mode", ["ask", "agent", "plan"])
