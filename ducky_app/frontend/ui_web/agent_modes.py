@@ -16,9 +16,6 @@ from frontend.ui_web.project_chats import append_message, load_conversation, sav
 from frontend.ui_web.token_usage import record_api_call, token_usage_report
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
 from backend.agent.attachments import attachments_from_message_dict, parse_attachment_dicts
-from backend.agent.multimodal_content import media_attachments
-from backend.agent.providers import make_provider
-from backend.agent.providers.base import ProviderMessage, StreamEventKind
 from backend.agent.runner import AgentRunner, RunConfig
 from backend.agent.secrets import get_key
 from backend.agent.delegation_guard import append_delegation_warning, fake_delegation_warning
@@ -37,7 +34,7 @@ from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 
 PushFn = Callable[[dict[str, Any]], None]
 
-_ASK_SUFFIX = "\n\n[Mode: Ask] Answer in plain language only. Do not call tools or propose tool use."
+_ASK_SUFFIX = "\n\n[Mode: Ask] Read, search and discover evidence, then answer. Do not modify projects, plans, settings or assets, rename chats, delegate, or execute code."
 
 _PLAN_SUFFIX = (
     "\n\n[Mode: Plan] Discovery and planning only. Prefer read-only inspection tools. "
@@ -286,54 +283,6 @@ def _push_token_usage(conv, push: PushFn, *, call_input: int = 0, call_output: i
             "step": step,
             "calls": report["calls"],
         }
-    )
-
-
-def _build_prompt_cache(
-    conv,
-    settings: PanelSettings,
-    *,
-    skill: str,
-    listener_online: bool,
-    listener_wedged: bool,
-    project_root: str,
-    omit: frozenset[str],
-    mode_suffix: str = "",
-) -> Any:
-    from backend.agent.prompt import get_system_prompt_parts
-    from backend.agent.prompt_cache import build_cache_payload, enrich_parts
-
-    parts = get_system_prompt_parts(
-        listener_online=listener_online,
-        listener_port=PANEL_LISTENER_PORT,
-        project_root=project_root,
-        skill_text=skill or "",
-        mode_suffix=mode_suffix,
-        listener_wedged=listener_wedged,
-        ducky_name=(conv.ducky_name or conv.title or "").strip(),
-        ducky_personality=conv.ducky_personality or "",
-        conv_id=str(getattr(conv, "id", "") or ""),
-    )
-    parts = enrich_parts(parts, listener_port=PANEL_LISTENER_PORT, mode_suffix=mode_suffix)
-    provider = settings.agent_provider or ""
-    from backend.agent.providers.cache_utils import (
-        anthropic_extended_cache_ttl_enabled,
-        provider_cache_markers_enabled,
-    )
-
-    enable = provider_cache_markers_enabled(
-        provider, fallback=bool(settings.prompt_caching_enabled)
-    )
-    return build_cache_payload(
-        conv,
-        parts,
-        omit=omit,
-        enable_cache=enable,
-        freeze_enabled=bool(settings.freeze_prompt_prefix),
-        prompt_cache_key=conv.id,
-        anthropic_extended_ttl=anthropic_extended_cache_ttl_enabled(
-            fallback=bool(settings.anthropic_extended_cache_ttl)
-        ),
     )
 
 
@@ -724,204 +673,6 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
         pass
 
 
-async def _run_ask_async(
-    conv,
-    user_text: str,
-    history: list[dict[str, Any]],
-    *,
-    provider_name: str,
-    model: str,
-    listener_online: bool,
-    project_root: str,
-    skill: str | None,
-    push: PushFn,
-    cancel: threading.Event,
-    session: AgentSession,
-    run_id: str,
-    user_attachments: list[dict[str, Any]] | None = None,
-    context_omit: frozenset[str] | None = None,
-    resume: bool = False,
-) -> str:
-    stop_reason = "error"
-    from frontend.ui_web.provider_usage_log import bind_usage_context, reset_usage_context
-
-    usage_ctx = bind_usage_context(
-        agent=str(getattr(conv, "coding_agent", "") or "ducky"),
-        conv_id=str(getattr(conv, "id", "") or ""),
-        ducky_label=str(getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or ""),
-    )
-    try:
-        try:
-            from backend.uefn_plugins.host import resolve_gateway_credential
-
-            api_key = resolve_gateway_credential(provider_name)
-        except Exception:
-            api_key = get_key(provider_name) or ""
-        if not api_key:
-            push({"type": "error", "text": f"No API key for {provider_name}", "conv_id": conv.id})
-            return stop_reason
-        provider = make_provider(
-            provider_name,
-            api_key,
-            model,
-            thinking_effort=str(getattr(conv, "thinking_effort", "") or "off"),
-        )
-        settings = PanelSettings.load()
-        omit_set = context_omit or frozenset()
-        prompt_cache = _build_prompt_cache(
-            conv,
-            settings,
-            skill=skill or "",
-            listener_online=listener_online,
-            listener_wedged=False,
-            project_root=project_root,
-            omit=omit_set,
-        )
-        save_conversation(conv, project_root)
-        from backend.agent.prompt_cache import LIVE_CONTEXT_PREFIX, markers_only_payload
-
-        system = prompt_cache.frozen_system + _ASK_SUFFIX
-        volatile_tail = (prompt_cache.dynamic_system or "").strip()
-        messages = []
-        for m in history:
-            role = "user" if m.get("role") == "user" else "assistant"
-            if role == "user":
-                messages.append(
-                    ProviderMessage(
-                        role="user",
-                        content=str(m.get("content", "")),
-                        attachments=media_attachments(
-                            attachments_from_message_dict(m, conv_id=conv.id, project_root=project_root)
-                        ),
-                    )
-                )
-            else:
-                messages.append(ProviderMessage(role="assistant", content=str(m.get("content", ""))))
-        if resume:
-            if messages and messages[-1].role == "assistant":
-                messages.append(ProviderMessage(role="user", content="Continue."))
-        else:
-            current_images = media_attachments(parse_attachment_dicts(user_attachments))
-            messages.append(ProviderMessage(role="user", content=user_text, attachments=current_images))
-        from backend.agent.video.budget import apply_media_budget
-
-        apply_media_budget(
-            [pm.attachments for pm in messages if pm.role == "user" and pm.attachments],
-            provider=provider_name or "",
-            model=model or "",
-        )
-        if volatile_tail:
-            messages.append(
-                ProviderMessage(
-                    role="user",
-                    content=f"{LIVE_CONTEXT_PREFIX}\n{volatile_tail}",
-                )
-            )
-        text = ""
-        thinking = ""
-        usage: dict[str, int] = {}
-        t_start = time.monotonic()
-        t_first: float | None = None
-        async for event in provider.stream_turn(
-            system=system,
-            messages=messages,
-            tools=[],
-            cancel_event=cancel,
-            cache=markers_only_payload(prompt_cache) if prompt_cache.enable_cache else None,
-        ):
-            if cancel.is_set():
-                stop_reason = "cancelled"
-                if text.strip() or thinking.strip():
-                    partial = {
-                        "role": "assistant",
-                        "content": text,
-                        "blocks": [],
-                        "ts": time.time(),
-                        "usage": usage,
-                        "incomplete": True,
-                        "error": "Stopped",
-                    }
-                    if thinking.strip():
-                        partial["thinking"] = thinking
-                    append_message(conv, partial)
-                    save_conversation(conv)
-                return stop_reason
-            if event.kind == StreamEventKind.TEXT_DELTA:
-                if t_first is None:
-                    t_first = time.monotonic()
-                text += event.text
-                push({"type": "text_delta", "text": event.text, "conv_id": conv.id})
-            elif event.kind == StreamEventKind.THINKING:
-                if t_first is None:
-                    t_first = time.monotonic()
-                thinking += event.text
-                push({"type": "thinking", "text": event.text, "conv_id": conv.id})
-            elif event.kind == StreamEventKind.DONE:
-                usage = dict(event.usage or {})
-            elif event.kind == StreamEventKind.ERROR:
-                err = event.error or "LLM error"
-                kept = bool(text.strip() or thinking.strip())
-                if kept:
-                    partial = {
-                        "role": "assistant",
-                        "content": text,
-                        "blocks": [],
-                        "ts": time.time(),
-                        "usage": usage,
-                        "incomplete": True,
-                        "error": err,
-                    }
-                    if thinking.strip():
-                        partial["thinking"] = thinking
-                    append_message(conv, partial)
-                    save_conversation(conv)
-                _log_agent_crash(
-                    conv,
-                    provider=provider_name,
-                    model=model,
-                    error=err,
-                    thinking=thinking,
-                    answer=text,
-                    elapsed_s=time.monotonic() - t_start,
-                    first_token_s=(t_first - t_start) if t_first is not None else None,
-                )
-                push({"type": "error", "text": err, "conv_id": conv.id, "kept_partial": kept})
-                return stop_reason
-        if cancel.is_set():
-            stop_reason = "cancelled"
-            return stop_reason
-        msg = {"role": "assistant", "content": text, "blocks": [], "ts": time.time(), "usage": usage}
-        if thinking.strip():
-            msg["thinking"] = thinking
-        append_message(conv, msg)
-        if usage:
-            record_api_call(
-                conv,
-                input_tokens=int(usage.get("input_tokens") or 0),
-                output_tokens=int(usage.get("output_tokens") or 0),
-                cache_read_tokens=int(usage.get("cache_read_tokens") or 0),
-                cache_write_tokens=int(usage.get("cache_write_tokens") or 0),
-                step=1,
-                provider=provider_name,
-                model=model,
-            )
-            save_conversation(conv)
-        _push_token_usage(
-            conv,
-            push,
-            call_input=int(usage.get("input_tokens") or 0),
-            call_output=int(usage.get("output_tokens") or 0),
-            step=1,
-            usage=usage,
-        )
-        push({"type": "assistant_done", "conv_id": conv.id})
-        stop_reason = "done"
-        return stop_reason
-    finally:
-        reset_usage_context(usage_ctx)
-        _push_agent_stopped(push, conv.id, run_id, stop_reason)
-
-
 async def _run_agent_loop(
     conv,
     user_text: str,
@@ -952,17 +703,20 @@ async def _run_agent_loop(
     ckpt = _TurnCheckpoint(conv, "ducky", run_id)
     push = ckpt.wrap(push)
     ckpt.seed()
+    turn = runner.run_turn(
+        user_text, history, user_attachments=user_attachments,
+        thread_cancel=cancel, resume=resume,
+    )
     try:
-        async for event in runner.run_turn(
-            user_text,
-            history,
-            user_attachments=user_attachments,
-            thread_cancel=cancel,
-            resume=resume,
-        ):
+        async for event in turn:
             if cancel.is_set():
                 runner.cancel()
                 stop_reason = "cancelled"
+                partial = event.partial_message
+                if partial:
+                    upsert_in_flight_assistant(conv, partial, run_id=run_id)
+                else:
+                    ckpt.flush(error="Stopped")
                 return stop_reason
             if t_first is None and event.kind in ("text_delta", "thinking"):
                 t_first = time.monotonic()
@@ -1106,6 +860,9 @@ async def _run_agent_loop(
                 return stop_reason
         return stop_reason
     finally:
+        # Close in the consuming task, before asyncio shutdown creates another
+        # task/context to finalize the generator's ContextVar tokens.
+        await turn.aclose()
         session.clear_runner(run_id=run_id)
         if get_active_conv_id() == conv.id:
             _set_active_conv_id(None)
@@ -1837,7 +1594,7 @@ def run_message(
             listener_online = bool(listener_status.get("online"))
             listener_wedged = bool(listener_status.get("wedged"))
 
-            mode_suffix = _PLAN_SUFFIX if plan_filter else _AGENT_SUFFIX
+            mode_suffix = _ASK_SUFFIX if m == "ask" else (_PLAN_SUFFIX if plan_filter else _AGENT_SUFFIX)
             skill_override = skill + mode_suffix
             keep_last = max(1, min(100, int(getattr(settings, "memory_keep_last_messages", 20) or 20)))
             config = RunConfig(
@@ -1854,6 +1611,7 @@ def run_message(
                 keep_last_messages=keep_last,
                 skill_override=skill_override,
                 plan_only=plan_filter,
+                mode=m,
                 context_omit=omit,
                 ducky_name=(conv.ducky_name or conv.title or "").strip(),
                 ducky_personality=conv.ducky_personality or "",
@@ -1870,41 +1628,20 @@ def run_message(
                 coding_agent=run_ctx.coding_agent,
             )
 
-            if m == "ask":
-                asyncio.run(
-                    _run_ask_async(
-                        conv,
-                        content,
-                        history,
-                        provider_name=provider_name,
-                        model=turn_model,
-                        listener_online=listener_online,
-                        project_root=settings.uefn_project_root,
-                        skill=skill,
-                        push=push,
-                        cancel=session._cancel,
-                        session=session,
-                        run_id=run_id,
-                        user_attachments=current_user_attachments,
-                        context_omit=omit,
-                        resume=resume,
-                    )
+            asyncio.run(
+                _run_agent_loop(
+                    conv,
+                    content,
+                    history,
+                    config=config,
+                    push=push,
+                    session=session,
+                    run_id=run_id,
+                    plan_filter=plan_filter,
+                    user_attachments=current_user_attachments,
+                    resume=resume,
                 )
-            else:
-                asyncio.run(
-                    _run_agent_loop(
-                        conv,
-                        content,
-                        history,
-                        config=config,
-                        push=push,
-                        session=session,
-                        run_id=run_id,
-                        plan_filter=plan_filter,
-                        user_attachments=current_user_attachments,
-                        resume=resume,
-                    )
-                )
+            )
         except Exception as e:
             push({"type": "error", "text": str(e), "conv_id": conv_id})
             _push_agent_stopped(push, conv_id, run_id, "error")

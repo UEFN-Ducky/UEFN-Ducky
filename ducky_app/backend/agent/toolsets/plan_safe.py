@@ -3,8 +3,100 @@
 from __future__ import annotations
 
 import re
+import json
+from typing import Any, Mapping
 
 from backend.agent.toolsets.categories import PLAN_TOOLS
+
+# Deliberately separate from Plan's bookkeeping and name-based selection rules.
+# These operations have fixed read/search semantics; registry membership is also
+# required. Multi-operation executors (including workspace_git) are not reads.
+ASK_READ_TOOLS = frozenset({
+    "workspace_read_file", "workspace_read_files", "workspace_list_dir",
+    "workspace_tree", "workspace_search", "workspace_find", "workspace_file_outline",
+    "workspace_list_verse_errors", "workspace_editor_get_state",
+    "web_search", "web_fetch", "ducky_get_tools", "ducky_find_tools",
+    "ducky_get_plan", "ducky_list_plans", "ducky_get_plan_template",
+    "ducky_list_plan_templates",
+    "code_list_errors", "ducky_get_errors",
+})
+_OPAQUE_PARAMETERS = frozenset({"code", "script", "python", "command", "commands", "operation", "operations"})
+
+
+def canonical_tool_name(name: str, catalog: Mapping[str, Any]) -> str:
+    """Resolve only the existing, unambiguous registry alias convention."""
+    if not isinstance(name, str):
+        return ""
+    if name in catalog:
+        return name
+    from backend.agent.tools import resolve_invented_tool_name
+
+    return resolve_invented_tool_name(name, set(catalog)) or ""
+
+
+def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any], *, discovery: bool = False) -> str:
+    """Pure Ask decision over a catalog snapshot and the actual call arguments.
+
+    Qualified server reads require explicit registry annotations; their spelling
+    and Plan declarations confer no permission. Opaque executors stay blocked.
+    Discovery may describe a dispatcher, but execution must inspect its target.
+    """
+    reason = "blocked in Ask mode: tool is not a verified read operation"
+    try:
+        json.dumps(arguments, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return "blocked in Ask mode: arguments must be finite JSON"
+    seen: set[int] = set()
+    for depth in range(9):
+        canonical = canonical_tool_name(name, catalog)
+        if not canonical:
+            return "blocked in Ask mode: unknown tool"
+        if not isinstance(arguments, dict):
+            return "blocked in Ask mode: arguments must be an object"
+        if canonical != "ducky_call_tool":
+            break
+        if discovery:
+            return ""
+        if depth or id(arguments) in seen:
+            # Retain the dispatcher prohibition on dispatching meta dispatchers.
+            return "blocked in Ask mode: recursive dispatcher"
+        seen.add(id(arguments))
+        name = arguments.get("name")
+        arguments = arguments.get("arguments")
+        if name in ("ducky_get_tools", "ducky_find_tools", "ducky_call_tool"):
+            return "blocked in Ask mode: recursive meta-tool dispatch"
+    else:
+        return "blocked in Ask mode: dispatcher depth exceeded"
+    if canonical in ASK_READ_TOOLS:
+        return ""
+    if "__" not in canonical:
+        return reason
+    tool = catalog[canonical]
+    leaf = canonical.rsplit("__", 1)[-1].lower()
+    # An annotation cannot turn a known mutator or generic executor into a read.
+    if (leaf in _BLOCK_EXACT or leaf.startswith(_BLOCK_PREFIXES)
+            or any(word in leaf for word in ("execute", "python", "script", "command", "shell"))
+            or leaf in {"exec", "call_tool"}):
+        return reason
+    schema = getattr(tool, "inputSchema", {}) or {}
+    properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    if any(token in str(key).lower() for key in (*properties, *arguments) for token in _OPAQUE_PARAMETERS):
+        return reason
+    annotations = getattr(tool, "annotations", None)
+    def hint(key: str) -> Any:
+        return annotations.get(key) if isinstance(annotations, dict) else getattr(annotations, key, None)
+    if hint("readOnlyHint") is True and hint("destructiveHint") is False:
+        return ""
+    return reason
+
+
+def mode_tool_block_reason(mode: str, name: str, arguments: Any, catalog: Mapping[str, Any], *, discovery: bool = False) -> str:
+    """Ask execution policy; Agent and existing Plan permissions are unchanged."""
+    if mode == "ask":
+        return ask_tool_block_reason(name, arguments, catalog, discovery=discovery)
+    if mode not in ("agent", "plan"):
+        return "blocked: invalid agent mode"
+    return ""
 
 # Leaf-name stems that look like read/discover (after nested ``prefix__``).
 _ALLOW_SUBSTRINGS: tuple[str, ...] = (

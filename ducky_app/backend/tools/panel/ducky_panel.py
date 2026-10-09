@@ -108,6 +108,21 @@ _DISPATCHER_BLOCKLIST = frozenset(
 )
 
 
+def _mode_discovery(name: str, catalog: dict[str, Any]) -> dict[str, Any]:
+    from backend.agent.run_context import current_mode
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+
+    if current_mode() != "ask":
+        return {}
+    reason = mode_tool_block_reason("ask", name, {}, catalog, discovery=True)
+    return {
+        "allowed": not bool(reason),
+        "mode": "ask",
+        "mode_reason": reason or "Allowed in Ask mode; dispatcher targets are checked at execution.",
+        "hint": reason or "Call with ducky_call_tool(name, arguments) for a verified read target.",
+    }
+
+
 def _truncate_desc(text: str, limit: int = _DESC_TRUNC) -> str:
     from backend.agent.toolsets.tool_index import truncate_desc
 
@@ -198,7 +213,7 @@ async def ducky_get_tools(
                 "count": count,
                 "hint": (
                     "Pass name= or pattern= — empty catalog dumps stall the IDE. "
-                    "Then ducky_call_tool(name, arguments)."
+                    "Then invoke an allowed tool with ducky_call_tool(name, arguments)."
                 ),
             },
             pretty=pretty,
@@ -247,6 +262,7 @@ async def ducky_get_tools(
                 "description": _slim_description(t.description or "") or t.name,
                 "inputSchema": _slim_tool_schema(t),
                 "hint": "Call with ducky_call_tool(name, arguments). Always pass arguments.",
+                **_mode_discovery(t.name, by_name),
             },
             pretty=pretty,
         )
@@ -266,12 +282,13 @@ async def ducky_get_tools(
                     {
                         "name": tname,
                         "description": _truncate_desc(desc),
+                        **_mode_discovery(tname, by_name),
                     },
                 )
             )
         scored.sort(key=lambda item: (-item[0], item[1]["name"]))
         matches = [row for _, row in scored[:lim]]
-        guidance = {"hint": "Fetch one schema with ducky_get_tools(name=…) then ducky_call_tool."}
+        guidance = {"hint": "Fetch one schema with ducky_get_tools(name=…) then invoke it only if allowed in the current mode."}
         if not matches:
             guidance = _discovery_miss_context()
         return tool_json(
@@ -304,11 +321,21 @@ async def ducky_call_tool(
     Desktop plugins (blender_*) and nested MCP ({prefix}__*) use the same bridge —
     no server id. Discover schemas with ducky_get_tools first. Always pass arguments.
     """
-    from backend.agent.run_context import is_plan_only
-    from backend.agent.tools import execute_tool
+    from backend.agent.run_context import current_mode, is_plan_only
+    from backend.agent.tools import execute_tool, list_mcp_tools
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
     from backend.agent.toolsets.plan_safe import is_plan_safe_tool
 
+    if current_mode() == "ask":
+        from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+
+        try:
+            catalog = {t.name: t for t in await list_mcp_tools()}
+        except Exception:
+            catalog = {}
+        reason = mode_tool_block_reason("ask", "ducky_call_tool", {"name": name, "arguments": arguments}, catalog)
+        if reason:
+            return tool_json({"ok": False, "tool": str(name), "error": reason}, pretty=pretty)
     tool_name = (name or "").strip()
     if not tool_name:
         raise ValueError("name must not be empty")

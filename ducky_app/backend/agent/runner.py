@@ -28,7 +28,8 @@ from backend.agent.prompt_cache import (
 from backend.agent.providers import make_provider
 from backend.agent.providers.base import ProviderMessage, StreamEvent, StreamEventKind, ToolCallRequest
 from backend.agent.secrets import get_key
-from backend.agent.run_context import reset_plan_only, set_plan_only
+from backend.agent.run_context import current_mode, reset_mode, set_mode, validate_mode
+from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 from backend.agent import hammer_guard
 from backend.workspace import identity as run_identity
 from backend.workspace.identity import RunContext
@@ -37,6 +38,7 @@ from backend.agent.toolsets.destructive import allow_destructive_execution
 from backend.agent.toolsets import effective_tool_name
 from backend.agent.tools import (
     ToolCallRecord,
+    ToolCallResult,
     execute_tool,
     list_mcp_tools,
     mcp_tool_to_anthropic,
@@ -248,7 +250,8 @@ class RunConfig:
     conv_id: str = ""
     keep_last_messages: int = 20
     skill_override: str | None = None
-    plan_only: bool = False
+    plan_only: bool | None = None
+    mode: str | None = None
     context_omit: frozenset[str] = field(default_factory=frozenset)
     ducky_name: str = ""
     ducky_personality: str = ""
@@ -265,6 +268,15 @@ class RunConfig:
     group_id: str = ""
     leader_conv_id: str = ""
     coding_agent: str = "ducky"
+
+    def __post_init__(self) -> None:
+        if self.mode is None:
+            self.mode = "plan" if self.plan_only else "agent"
+        else:
+            validate_mode(self.mode)
+            if self.plan_only is not None and self.plan_only != (self.mode == "plan"):
+                raise ValueError("Conflicting mode and plan_only settings")
+        self.plan_only = self.mode == "plan"
 
     def run_context(self) -> RunContext:
         return RunContext(
@@ -594,31 +606,25 @@ class AgentRunner:
         self._cancel = asyncio.Event()
         bridge = _CancelBridge(self._cancel, thread_cancel)
         set_tool_result_format(self.config.tool_result_format)
-        plan_token = set_plan_only(bool(self.config.plan_only))
-        hammer_token = hammer_guard.bind_conversation(self.config.conv_id)
+        from contextlib import ExitStack, aclosing
         from backend.agent import verify_evidence
-
-        verify_token = verify_evidence.bind_conversation(self.config.conv_id, self.config.run_id)
-        identity_token = run_identity.bind(self.config.run_context())
         from backend.tools.core.web_lookup import begin_web_turn, end_web_turn
-
-        web_token = begin_web_turn()
-        try:
-            async for event in self._run_turn_inner(
+        with ExitStack() as scope:
+            scope.callback(reset_mode, set_mode(self.config.mode))
+            scope.callback(hammer_guard.reset_conversation, hammer_guard.bind_conversation(self.config.conv_id))
+            scope.callback(verify_evidence.reset_conversation, verify_evidence.bind_conversation(self.config.conv_id, self.config.run_id))
+            scope.callback(run_identity.reset, run_identity.bind(self.config.run_context()))
+            scope.callback(end_web_turn, begin_web_turn())
+            async with aclosing(self._run_turn_inner(
                 user_text,
                 history,
                 user_attachments=user_attachments,
                 thread_cancel=thread_cancel,
                 bridge=bridge,
                 resume=resume,
-            ):
-                yield event
-        finally:
-            end_web_turn(web_token)
-            run_identity.reset(identity_token)
-            hammer_guard.reset_conversation(hammer_token)
-            verify_evidence.reset_conversation(verify_token)
-            reset_plan_only(plan_token)
+            )) as turn:
+                async for event in turn:
+                    yield event
 
     async def _run_turn_inner(
         self,
@@ -709,6 +715,12 @@ class AgentRunner:
             self.config.provider,
             fallback=bool(self.config.prompt_caching_enabled),
         )
+        # Mode is part of the prompt contract, not cache drift. Rebuild a legacy
+        # or different-mode prefix so an Ask turn cannot inherit Agent rules.
+        conv = self.config.conv
+        snapshot = getattr(conv, "prompt_cache_snapshot", None)
+        if isinstance(snapshot, dict) and snapshot.get("agent_mode") != current_mode():
+            invalidate_conv_cache(conv)
         prompt_cache = build_cache_payload(
             self.config.conv,
             parts,
@@ -720,6 +732,8 @@ class AgentRunner:
                 fallback=bool(self.config.anthropic_extended_cache_ttl)
             ),
         )
+        if isinstance(getattr(conv, "prompt_cache_snapshot", None), dict):
+            conv.prompt_cache_snapshot["agent_mode"] = current_mode()
         if self.config.conv is not None:
             try:
                 from frontend.ui_web.project_chats import save_conversation
@@ -790,6 +804,11 @@ class AgentRunner:
                     names = sticky_frozen_tool_names(self.config.conv, names)
                 by_name = {t.name: t for t in all_tools}
                 selected = [by_name[n] for n in names if n in by_name]
+            if current_mode() == "ask":
+                catalog = {t.name: t for t in all_tools}
+                selected = [t for t in selected if not mode_tool_block_reason(
+                    current_mode(), t.name, {}, catalog, discovery=True
+                )]
             tool_schemas = self._provider_tools(self.config.provider, selected)
             selected_names = [t.name for t in selected]
 
@@ -911,51 +930,53 @@ class AgentRunner:
                     cache=stream_cache,
                     thread_cancel=thread_cancel,
                 )
-            async for event in provider_stream:
-                if bridge.is_set():
-                    yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
-                    return
-                if event.kind == StreamEventKind.ERROR:
-                    err = event.error or "LLM error"
-                    yield AgentEvent(
-                        kind="error",
-                        text=err,
-                        partial_message=_partial_assistant_message(
-                            content=assistant_text + turn_text,
-                            thinking=turn_thinking,
-                            blocks=assistant_blocks,
-                            usage=total_usage,
-                            error=err,
-                        ),
-                    )
-                    return
-                if event.kind == StreamEventKind.STATUS:
-                    yield AgentEvent(
-                        kind="status",
-                        text=event.text,
-                        percent=event.percent,
-                    )
-                    continue
-                if event.kind == StreamEventKind.TEXT_DELTA:
-                    turn_text += event.text
-                    yield AgentEvent(kind="text_delta", text=event.text)
-                elif event.kind == StreamEventKind.THINKING:
-                    assistant_thinking += event.text
-                    turn_thinking += event.text
-                    yield AgentEvent(kind="thinking", text=event.text)
-                elif event.kind == StreamEventKind.TOOL_CALLS:
-                    tool_calls = event.tool_calls
-                    if event.thinking_blocks:
-                        turn_thinking_blocks = list(event.thinking_blocks)
-                    if event.usage:
-                        step_usage = _accumulate_usage(event.usage)
-                elif event.kind == StreamEventKind.DONE:
-                    if event.text and not turn_text:
-                        turn_text = event.text
-                    if event.thinking_blocks:
-                        turn_thinking_blocks = list(event.thinking_blocks)
-                    if event.usage:
-                        step_usage = _accumulate_usage(event.usage)
+            from contextlib import aclosing
+            async with aclosing(provider_stream):
+                async for event in provider_stream:
+                    if bridge.is_set():
+                        yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
+                        return
+                    if event.kind == StreamEventKind.ERROR:
+                        err = event.error or "LLM error"
+                        yield AgentEvent(
+                            kind="error",
+                            text=err,
+                            partial_message=_partial_assistant_message(
+                                content=assistant_text + turn_text,
+                                thinking=turn_thinking,
+                                blocks=assistant_blocks,
+                                usage=total_usage,
+                                error=err,
+                            ),
+                        )
+                        return
+                    if event.kind == StreamEventKind.STATUS:
+                        yield AgentEvent(
+                            kind="status",
+                            text=event.text,
+                            percent=event.percent,
+                        )
+                        continue
+                    if event.kind == StreamEventKind.TEXT_DELTA:
+                        turn_text += event.text
+                        yield AgentEvent(kind="text_delta", text=event.text)
+                    elif event.kind == StreamEventKind.THINKING:
+                        assistant_thinking += event.text
+                        turn_thinking += event.text
+                        yield AgentEvent(kind="thinking", text=event.text)
+                    elif event.kind == StreamEventKind.TOOL_CALLS:
+                        tool_calls = event.tool_calls
+                        if event.thinking_blocks:
+                            turn_thinking_blocks = list(event.thinking_blocks)
+                        if event.usage:
+                            step_usage = _accumulate_usage(event.usage)
+                    elif event.kind == StreamEventKind.DONE:
+                        if event.text and not turn_text:
+                            turn_text = event.text
+                        if event.thinking_blocks:
+                            turn_thinking_blocks = list(event.thinking_blocks)
+                        if event.usage:
+                            step_usage = _accumulate_usage(event.usage)
 
             last_step_prompt_tokens = (
                 int(step_usage.get("input_tokens") or 0)
@@ -1003,15 +1024,31 @@ class AgentRunner:
                 rec = ToolCallRecord(
                     id=tc.id or str(uuid.uuid4()),
                     name=tc.name,
-                    arguments=dict(tc.arguments or {}),
+                    arguments=tc.arguments if current_mode() == "ask" else dict(tc.arguments or {}),
                 )
                 pending_records.append(rec)
 
+            blocked = {
+                id(r): mode_tool_block_reason(current_mode(), r.name, r.arguments,
+                                             {t.name: t for t in all_tools})
+                for r in pending_records
+            }
+            # Malformed/recursive provider arguments cannot be echoed into the
+            # next provider request or persisted checkpoint. Keep the refusal.
+            for rec, call in zip(pending_records, tool_calls):
+                if blocked[id(rec)]:
+                    try:
+                        if not isinstance(rec.arguments, dict):
+                            raise ValueError("not an object")
+                        json.dumps(rec.arguments, allow_nan=False)
+                    except (TypeError, ValueError, RecursionError):
+                        rec.arguments = {}
+                        call.arguments = {}
             approved_destructive = True
             destructive = [
                 r
                 for r in pending_records
-                if is_destructive(effective_tool_name(r.name, r.arguments))
+                if not blocked[id(r)] and is_destructive(effective_tool_name(r.name, r.arguments))
             ]
             if destructive:
                 if self._approval_callback is not None:
@@ -1044,6 +1081,18 @@ class AgentRunner:
                 if bridge.is_set():
                     yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                     return
+                if blocked[id(rec)]:
+                    result = ToolCallResult(ok=False, tool=rec.name, error=blocked[id(rec)])
+                    llm_content = format_tool_result_for_llm(
+                        rec.name, result.to_json_str(), fmt=self.config.tool_result_format
+                    )
+                    self._attach_llm_payload(rec, llm_content)
+                    rec.status = "error"
+                    rec.result = {"ok": False, "data": result.error, "hint": ""}
+                    assistant_blocks.append(self._record_to_block(rec))
+                    yield AgentEvent(kind="tool_end", tool=rec)
+                    provider_messages.append(ProviderMessage(role="tool", tool_call_id=rec.id, content=llm_content))
+                    continue
                 if rec.status == "rejected":
                     llm_content = format_rejected_tool_result(fmt=self.config.tool_result_format)  # type: ignore[arg-type]
                     self._attach_llm_payload(rec, llm_content)

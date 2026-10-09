@@ -49,6 +49,10 @@ def start_auto_title(
 
 def self_naming_instruction(title: str, conv_id: str = "") -> str:
     """Ask the working model to choose its name, preserving names chosen by humans."""
+    from backend.agent.run_context import current_mode
+
+    if current_mode() == "ask":
+        return ""
     from frontend.settings import PanelSettings
     from frontend.ui_web.project_chats import is_placeholder_title, load_conversation
 
@@ -69,6 +73,10 @@ def self_naming_instruction(title: str, conv_id: str = "") -> str:
 
 def require_self_name(name: str, conv_id: str) -> None:
     """Refuse task tools until the working agent has named its placeholder chat."""
+    from backend.agent.run_context import current_mode
+
+    if current_mode() == "ask":
+        return
     if not conv_id or name == "ducky_rename_self":
         return
     if self_naming_instruction("", conv_id):
