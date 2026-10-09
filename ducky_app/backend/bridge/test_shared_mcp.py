@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import socket
 import threading
 import time
 from pathlib import Path
@@ -444,3 +446,208 @@ def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_pa
     finally:
         shared_mcp.request_stop()
         thread.join(timeout=6)
+
+
+def test_an_adapter_never_stops_a_newer_daemon(monkeypatch) -> None:
+    """An agent still on the old exe killing a newer daemon cut every newer agent off."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.2.360")
+    assert ad._stale({"key": {"version": "1.2.361"}}) is False
+    assert ad._stale({"key": {"version": "1.2.99"}}) is True
+    assert ad._stale({"key": {"version": "1.2.360"}}) is False
+
+
+def test_the_app_starts_the_daemon_outside_any_agent(monkeypatch) -> None:
+    """The daemon is the app's child: stopping the agent that asked for it cannot kill it."""
+    import subprocess
+
+    monkeypatch.setenv("UEFN_DUCKY_SHARED_MCP", "1")
+    monkeypatch.setenv("DUCKY_RUN_ID", "run-of-some-agent")
+    monkeypatch.setenv("_PYI_ARCHIVE_FILE", "x")
+    monkeypatch.setattr(shared_mcp, "_spawned_at", 0.0)
+    monkeypatch.setattr(shared_mcp, "_daemon_answers", lambda: False)
+    started: list[tuple[list[str], dict]] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw["env"])))
+
+    assert shared_mcp.start_daemon_from_app() == {"ok": True, "started": True}
+    cmd, env = started[0]
+    assert cmd[-1] == "--shared-daemon" and "--adapter" not in cmd
+    assert not any(k.startswith(("DUCKY_", "_PYI_")) for k in env)
+    # A second agent asking while it boots does not start another one.
+    assert shared_mcp.start_daemon_from_app()["starting"] is True
+    assert len(started) == 1
+    monkeypatch.setattr(shared_mcp, "_daemon_answers", lambda: True)
+    monkeypatch.setattr(shared_mcp, "_spawned_at", 0.0)
+    assert shared_mcp.start_daemon_from_app() == {"ok": True, "started": False}
+    assert len(started) == 1
+
+
+def test_an_adapter_asks_the_app_before_starting_the_daemon_itself(monkeypatch) -> None:
+    from frontend import shared_mcp_adapter as ad
+
+    flags: list[int] = []
+
+    def _popen(cmd, **kw):
+        flags.append(kw["creationflags"])
+        if kw["creationflags"] & ad._CREATE_BREAKAWAY_FROM_JOB:
+            raise PermissionError("job refuses breakaway")
+
+    monkeypatch.setattr(ad.subprocess, "Popen", _popen)
+    monkeypatch.setattr(ad, "_ask_app_to_start", lambda: True)
+    ad._spawn_daemon(["--port", "4200"])
+    assert flags == []
+    monkeypatch.setattr(ad, "_ask_app_to_start", lambda: False)
+    ad._spawn_daemon(["--port", "4200"])
+    if os.name == "nt":
+        assert len(flags) == 2
+        assert flags[0] & ad._CREATE_BREAKAWAY_FROM_JOB
+        assert not flags[1] & ad._CREATE_BREAKAWAY_FROM_JOB
+    else:
+        assert len(flags) == 1
+
+
+class _FrameDaemon:
+    """A daemon that answers the first ``answer`` requests, then holds the rest."""
+
+    def __init__(self, state_dir: Path, name: str, answer: int) -> None:
+        self.name = name
+        self.answer = answer
+        self.conns: list[socket.socket] = []
+        self.listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen.bind(("127.0.0.1", 0))
+        self.listen.listen(4)
+        port = self.listen.getsockname()[1]
+        (state_dir / "shared_mcp.json").write_text(json.dumps({
+            "host": "127.0.0.1", "port": port, "token": "t",
+            "key": {"version": "1.0.0", "port": "4200", "project": ""}, "pid": 0,
+        }), encoding="utf-8")
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        try:
+            while True:
+                conn, _ = self.listen.accept()
+                self.conns.append(conn)
+                threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+        except OSError:
+            return
+
+    def _serve(self, conn: socket.socket) -> None:
+        try:
+            shared_mcp.read_frame(conn)
+            shared_mcp.write_frame(conn, {"op": "hello_ok"})
+            while True:
+                msg = shared_mcp.read_frame(conn)
+                if msg.get("op") != "mcp" or self.answer <= 0:
+                    continue
+                self.answer -= 1
+                shared_mcp.write_frame(conn, {"op": "mcp", "id": msg["id"], "result": {"from": self.name}})
+        except (OSError, EOFError, ValueError):
+            return
+
+    def kill(self) -> None:
+        self.listen.close()
+        for conn in self.conns:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            conn.close()
+
+
+def test_an_adapter_reconnects_when_the_daemon_dies(monkeypatch, tmp_path) -> None:
+    """Agents never restart an MCP server: the adapter must outlive its daemon."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
+    state_dir = tmp_path / "UEFN-Ducky"
+    state_dir.mkdir()
+    first = _FrameDaemon(state_dir, "first", answer=1)
+    replacements: list[_FrameDaemon] = []
+    monkeypatch.setattr(
+        ad, "_spawn_daemon", lambda args: replacements.append(_FrameDaemon(state_dir, "second", answer=9))
+    )
+    monkeypatch.setattr(ad.os, "_exit", lambda code: pytest.fail("adapter gave up"))
+
+    in_r, in_w = os.pipe()
+    out_r, out_w = os.pipe()
+    monkeypatch.setattr(ad.sys, "stdin", SimpleNamespace(buffer=os.fdopen(in_r, "rb", buffering=0)))
+    monkeypatch.setattr(ad.sys, "stdout", SimpleNamespace(buffer=os.fdopen(out_w, "wb", buffering=0)))
+    writer = os.fdopen(in_w, "wb", buffering=0)
+    reader = os.fdopen(out_r, "rb", buffering=0)
+    replies: list[dict] = []
+
+    def _read_replies() -> None:
+        buf = b""
+        while chunk := reader.read(65536):
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                replies.append(json.loads(line))
+
+    threading.Thread(target=_read_replies, daemon=True).start()
+    relay = threading.Thread(target=ad.run, args=(["--port", "4200"],), daemon=True)
+    relay.start()
+
+    def _send(msg: dict) -> None:
+        writer.write(json.dumps(msg).encode() + b"\n")
+
+    def _wait_for(n: int) -> dict:
+        deadline = time.time() + 8
+        while len(replies) < n and time.time() < deadline:
+            time.sleep(0.02)
+        return {r["id"]: r for r in replies}
+
+    try:
+        _send({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        _wait_for(1)
+        _send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "x", "arguments": {}}})
+        _send({"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}})
+        time.sleep(0.3)  # both held by the first daemon
+        first.kill()
+        by_id = _wait_for(3)
+        assert by_id[1]["result"] == {"from": "first"}
+        assert by_id[2]["result"]["isError"] is True
+        assert "restarted" in by_id[2]["result"]["content"][0]["text"]
+        assert by_id[3]["result"] == {"from": "second"}  # resent to the new daemon
+        _send({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "x", "arguments": {}}})
+        assert _wait_for(4)[4]["result"] == {"from": "second"}
+    finally:
+        writer.close()
+        relay.join(timeout=5)
+        for daemon in replacements:
+            daemon.kill()
+    assert not relay.is_alive()
+    assert len(replacements) == 1  # closing stdin did not start another daemon
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process tree")
+def test_stopping_an_agent_leaves_the_shared_daemon_running(monkeypatch, tmp_path) -> None:
+    import subprocess
+    import sys
+
+    import psutil
+
+    from backend.agent.coding_agents import proc_exec
+
+    marker = tmp_path / "daemon.pid"
+    code = (
+        "import subprocess, sys, time\n"
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(marker)!r}, 'w').write(str(p.pid))\n"
+        "time.sleep(60)\n"
+    )
+    agent = subprocess.Popen([sys.executable, "-c", code])
+    deadline = time.time() + 10
+    while not (marker.exists() and marker.read_text()) and time.time() < deadline:
+        time.sleep(0.05)
+    daemon_pid = int(marker.read_text())
+    monkeypatch.setattr(proc_exec, "_shared_daemon_pid", lambda: daemon_pid)
+    try:
+        proc_exec._kill_windows_tree(agent.pid)
+        agent.wait(timeout=5)
+        assert psutil.Process(daemon_pid).is_running()
+    finally:
+        subprocess.run(["taskkill", "/PID", str(daemon_pid), "/F"], capture_output=True)

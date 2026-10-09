@@ -22,6 +22,15 @@ _STDERR_TAIL_CHARS = 8000
 _STDOUT_TAIL_CHARS = 4000
 
 
+def _shared_daemon_pid() -> int:
+    try:
+        from backend.bridge.shared_mcp import read_state
+
+        return int((read_state() or {}).get("pid") or 0)
+    except Exception:
+        return 0
+
+
 def _kill_windows_tree(pid: int) -> None:
     """Terminate ``pid`` and its descendants.
 
@@ -77,7 +86,9 @@ def _kill_windows_tree(pid: int) -> None:
 
     order: list[int] = []
     stack = [int(pid)]
-    seen: set[int] = set()
+    # The shared MCP daemon serves every agent. One this agent's adapter started sits
+    # in its tree; killing it cut all the other agents off mid-run.
+    seen: set[int] = {_shared_daemon_pid()} - {0}
     while stack:
         cur = stack.pop()
         if cur in seen:

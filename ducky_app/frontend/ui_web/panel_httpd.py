@@ -38,7 +38,7 @@ _COOKIE_IDLE_S = 12 * 3600
 _LOGIN_TTL_S = 120
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 _LOCAL_BRIDGE_PATHS = frozenset(
-    {"/__panel_event", "/__panel_run", "/__panel_open_files", "/__panel_rpc"}
+    {"/__panel_event", "/__panel_run", "/__panel_open_files", "/__panel_rpc", "/__panel_shared_mcp"}
 )
 
 # Max seconds one /__panel_rpc leg blocks before replying {pending} so the
@@ -662,6 +662,18 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         pass
                     self.send_response(204)
                     self.end_headers()
+                    return
+
+                # An agent's MCP adapter found no shared daemon: start it from here so it
+                # is the app's child, not part of that agent's process tree.
+                if path == "/__panel_shared_mcp":
+                    try:
+                        from backend.bridge.shared_mcp import start_daemon_from_app
+
+                        outcome = start_daemon_from_app()
+                    except Exception as exc:
+                        outcome = {"ok": False, "error": str(exc)}
+                    self._send_json(200, outcome)
                     return
 
                 # Run delegation: the bridge asks THIS process to actually run a
