@@ -872,20 +872,31 @@ def import_plugin_from_bytes(
     if not planned:
         return {"ok": False, "error": "zip has no installable files"}
 
-    # Drop stale register() bindings / imported modules before overwrite.
-    try:
-        from backend.uefn_plugins.host import invalidate_plugin_runtime
-
-        invalidate_plugin_runtime(pid)
-    except Exception:
-        pass
     # A compiled backend keeps its .pyd mapped in-process (Windows locks the file),
     # which would block the folder overwrite below. Move any locked .pyd aside; the
     # new version installs under its own name and loads fresh.
     try:
         from backend.uefn_plugins.host import release_locked_compiled_backends
 
-        release_locked_compiled_backends(pid)
+        stuck = release_locked_compiled_backends(pid)
+    except Exception:
+        stuck = []
+    if stuck:
+        # Wiping the folder now would delete everything around the locked file and
+        # leave the plugin broken; stop before touching it, old version still running.
+        return {
+            "ok": False,
+            "error": (
+                f"{manifest.get('label') or pid} is in use and can't be updated right now. "
+                "Close and reopen Ducky to finish the update."
+            ),
+            "code": "plugin_in_use",
+        }
+    # Drop stale register() bindings / imported modules before overwrite.
+    try:
+        from backend.uefn_plugins.host import invalidate_plugin_runtime
+
+        invalidate_plugin_runtime(pid)
     except Exception:
         pass
 

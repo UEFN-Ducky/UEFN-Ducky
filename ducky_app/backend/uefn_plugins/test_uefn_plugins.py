@@ -917,3 +917,59 @@ def test_self_check(monkeypatch) -> None:
         for _k, _v in _snapshot.items():
             if _os.environ.get(_k) != _v:
                 monkeypatch.setenv(_k, _v)
+
+
+def _isolated_appdata(monkeypatch, tmp_path: Path) -> None:
+    for key in ("LOCALAPPDATA", "USERPROFILE", "HOME"):
+        monkeypatch.setenv(key, str(tmp_path))
+
+
+def _flaky_replace(monkeypatch, name: str, *, fail_times: int) -> dict[str, int]:
+    """Path.replace refuses ``name`` like Windows does while antivirus holds a fresh .pyd."""
+    real = Path.replace
+    calls = {"n": 0}
+
+    def replace(self: Path, target):  # type: ignore[no-untyped-def]
+        if self.name == name and calls["n"] < fail_times:
+            calls["n"] += 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    return calls
+
+
+def test_compiled_update_retries_a_briefly_locked_pyd(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir
+
+    assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
+    pyd = plugin_dir("demo") / "uefn_plugin_demo.v1.cp313-win_amd64.pyd"
+    pyd.write_bytes(b"MZ")
+    calls = _flaky_replace(monkeypatch, pyd.name, fail_times=2)
+    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+
+    assert host.release_locked_compiled_backends("demo") == []
+    assert calls["n"] == 2 and not pyd.exists()
+
+
+def test_compiled_update_keeps_the_old_install_when_the_pyd_stays_locked(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir
+
+    assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
+    root = plugin_dir("demo")
+    pyd = root / "uefn_plugin_demo.v1.cp313-win_amd64.pyd"
+    pyd.write_bytes(b"MZ")
+    _flaky_replace(monkeypatch, pyd.name, fail_times=10_000)
+    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+
+    result = import_plugin_from_bytes(_zip_plugin("demo", 2), source="local", replace=True)
+
+    assert result["ok"] is False and result["code"] == "plugin_in_use", result
+    assert "Close and reopen Ducky" in result["error"]
+    # Nothing was deleted: the running version is still installed, whole.
+    assert pyd.is_file()
+    assert json.loads((root / "plugin.json").read_text(encoding="utf-8"))["version"] == 1

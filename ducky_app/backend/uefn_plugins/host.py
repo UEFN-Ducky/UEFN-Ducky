@@ -2782,37 +2782,47 @@ def _compiled_quarantine_dir() -> Path:
     return appdata_uefn_plugins_dir() / _COMPILED_QUARANTINE
 
 
-def release_locked_compiled_backends(plugin_id: str) -> None:
+def release_locked_compiled_backends(plugin_id: str, *, attempts: int = 12) -> list[Path]:
     """Move a plugin's compiled .pyd(s) out of its folder so the Store can overwrite it.
 
     A loaded extension stays mapped in-process and Windows locks the file, so the
     folder cannot be deleted in place. Renaming the file still works, so the old .pyd
     is moved into a quarantine folder; the next version installs under a new name and
     loads fresh, and the quarantined file is swept once Ducky restarts and unlocks it.
-    Best-effort — never raises into the Store install path.
+    Antivirus often holds a freshly loaded .pyd open for a moment, so a refused move is
+    retried. Returns the .pyd files that still could not be moved (the caller must not
+    wipe the folder then). Never raises into the Store install path.
     """
     import uuid
 
-    from backend.uefn_plugins.store import normalize_plugin_id, plugin_dir
+    from backend.uefn_plugins.store import _is_win_lock_error, normalize_plugin_id, plugin_dir
 
     try:
         pid = normalize_plugin_id(plugin_id)
     except ValueError:
-        return
+        return []
     root = plugin_dir(pid)
     if not root.is_dir():
-        return
+        return []
     mod_name = backend_module_name(pid)
     quarantine = _compiled_quarantine_dir() / pid
+    stuck: list[Path] = []
     for pyd in list(root.glob(f"{mod_name}*.pyd")):
-        try:
-            quarantine.mkdir(parents=True, exist_ok=True)
-            # Prefix keeps the original name recoverable for restore; .bin so a swept
-            # leftover is never mistaken for an installed module.
-            dest = quarantine / f"{uuid.uuid4().hex}__{pyd.name}.bin"
-            pyd.replace(dest)
-        except OSError:
-            _log.debug("Could not quarantine compiled backend %s", pyd, exc_info=True)
+        for i in range(max(1, attempts)):
+            try:
+                quarantine.mkdir(parents=True, exist_ok=True)
+                # Prefix keeps the original name recoverable for restore; .bin so a swept
+                # leftover is never mistaken for an installed module.
+                dest = quarantine / f"{uuid.uuid4().hex}__{pyd.name}.bin"
+                pyd.replace(dest)
+                break
+            except OSError as exc:
+                if not _is_win_lock_error(exc) or i == attempts - 1:
+                    _log.warning("Could not move compiled backend %s aside: %s", pyd, exc)
+                    stuck.append(pyd)
+                    break
+                time.sleep(0.05 * (2 ** min(i, 5)))
+    return stuck
 
 
 def _restore_compiled_from_quarantine(pid: str, root: Path) -> None:
