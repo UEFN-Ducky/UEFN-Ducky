@@ -14,7 +14,6 @@ def test_registration_precedes_worker_start_even_if_worker_exits_immediately(mon
             self.target()
 
     monkeypatch.setattr(agent_modes.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(agent_modes, "_dbg_thread_state", lambda *args, **kwargs: None)
     session = agent_modes.AgentSession()
     session.run_id = "instant-run"
 
