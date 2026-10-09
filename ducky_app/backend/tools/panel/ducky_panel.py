@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
+from itertools import islice
 from typing import Any, Literal, Optional
 
 from frontend.agent_profiles import get_agent_profile, list_agent_profiles_available
@@ -112,28 +114,55 @@ def _truncate_desc(text: str, limit: int = _DESC_TRUNC) -> str:
     return truncate_desc(text, limit)
 
 
+def _discovery_cached_connections() -> dict[str, Any]:
+    """Read already-loaded caches only: no imports, probes, locks or maintenance.
+
+    These private caches have no public snapshot API. Treat unavailable or expired
+    entries as unknown; never forward arbitrary provider strings from them.
+    """
+    status: dict[str, Any] = {}
+    epic = sys.modules.get("backend.mcp_plugins.epic")
+    cache = getattr(epic, "_probe_cache", {})
+    observed = cache.get("result")
+    if isinstance(observed, dict) and 0 <= time.time() - cache.get("at", 0) < 5:
+        online = observed.get("epic_mcp_online")
+        if type(online) is bool:
+            status["epic_mcp_online"] = online
+            reason = observed.get("epic_mcp_reason")
+            status["epic_mcp_reason"] = reason if reason in ("", "disabled", "unreachable") else "unknown"
+    host = sys.modules.get("backend.uefn_plugins.host")
+    cache = getattr(host, "_CONNECTION_CACHE", {})
+    # Bound the snapshot and never wait for a provider lock. A concurrent cache
+    # change can invalidate iteration; the caller reports unknown in that case.
+    rows = []
+    for at, row in tuple(islice(cache.values(), 50)):
+        if 0 <= time.monotonic() - at < 30 and type(row.get("online")) is bool:
+            rows.append({"online": row["online"]})
+    if rows:
+        status["plugin_connections"] = rows
+    return status
+
+
 def _discovery_miss_context() -> dict[str, Any]:
     """Report existing connection evidence without inferring tool availability."""
     context: dict[str, Any] = {
         "hint": (
             "No match in the current catalog is not proof that a tool does not exist. "
-            "Check ducky_get_status and the provider's catalog/connection state, "
+            "Check the provider's catalog/connection state, "
             "including registration and policy filtering. Report the observed "
             "missing/offline capability and any unknown cause accurately. "
-            "Connection evidence below may be cached, is not a complete provider "
+            "Connection evidence below is cached, is not a complete provider "
             "inventory, and does not establish which provider owns this query. "
             "Epic online is a TCP probe, not MCP session or tool readiness."
+            " Plugin rows are anonymous cached observations; provider names and "
+            "details are omitted. No status probes or project maintenance run here."
         ),
     }
     try:
-        status = json.loads(ducky_get_status())
-        context["connection_status"] = {
-            key: status[key]
-            for key in ("epic_mcp_online", "epic_mcp_reason", "plugin_connections")
-            if key in status
-        }
+        context["connection_status"] = _discovery_cached_connections() or None
     except Exception:
         context["connection_status"] = None
+    if context["connection_status"] is None:
         context["hint"] += " Connection status could not be read; availability is unknown."
     return context
 
