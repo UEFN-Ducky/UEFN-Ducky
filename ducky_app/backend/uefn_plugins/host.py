@@ -2040,6 +2040,7 @@ def _run_first_plugin_load() -> None:
     # Drop compiled .pyd files a previous run parked while they were still mapped.
     try:
         sweep_compiled_quarantine()
+        sweep_orphan_compiled_folders()
     except Exception:
         _log.debug("compiled quarantine sweep failed", exc_info=True)
     enabled = set(get_enabled_plugin_ids())
@@ -2897,6 +2898,41 @@ def sweep_compiled_quarantine() -> None:
                 pdir.rmdir()
         except OSError:
             pass
+
+
+_ORPHAN_PYD_MIN_AGE_S = 600.0
+
+
+def sweep_orphan_compiled_folders() -> None:
+    """Delete plugin folders that hold nothing but an old compiled .pyd. Best-effort.
+
+    An uninstall before the quarantine move existed deleted everything except the
+    .pyd Windows still had locked, leaving a folder with no plugin.json that nothing
+    lists or cleans. Only folders made up entirely of ``uefn_plugin_*.pyd`` files at
+    least 10 minutes old go, so an install that is still unpacking is never touched.
+    """
+    root = appdata_uefn_plugins_dir()
+    if not root.is_dir():
+        return
+    now = time.time()
+    for pdir in list(root.iterdir()):
+        try:
+            if not pdir.is_dir() or pdir.name.startswith(".") or (pdir / "plugin.json").exists():
+                continue
+            files = list(pdir.iterdir())
+            if not files or not all(
+                f.is_file()
+                and f.name.startswith("uefn_plugin_")
+                and f.suffix == ".pyd"
+                and now - f.stat().st_mtime >= _ORPHAN_PYD_MIN_AGE_S
+                for f in files
+            ):
+                continue
+            for f in files:
+                f.unlink()
+            pdir.rmdir()
+        except OSError:
+            pass  # still mapped by a live process — try again next launch
 
 
 # plugin_id -> team_id it is paused for (access lost). Cleared when access returns.

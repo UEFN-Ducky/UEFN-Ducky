@@ -975,3 +975,61 @@ def test_compiled_update_keeps_the_old_install_when_the_pyd_stays_locked(monkeyp
     # Nothing was deleted: the running version is still installed, whole.
     assert pyd.is_file()
     assert json.loads((root / "plugin.json").read_text(encoding="utf-8"))["version"] == 1
+
+
+def test_uninstalling_a_loaded_compiled_plugin_leaves_no_pyd_behind(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    import os
+
+    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir, uninstall_uefn_plugin
+
+    assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
+    root = plugin_dir("demo")
+    pyd = root / "uefn_plugin_demo.v1.cp313-win_amd64.pyd"
+    pyd.write_bytes(b"MZ")
+    real_unlink = os.unlink
+
+    def unlink(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Windows: a mapped .pyd can be renamed but not deleted.
+        if Path(path).parent == root and str(path).endswith(".pyd"):
+            raise PermissionError(13, "The process cannot access the file")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+
+    uninstall_uefn_plugin("demo")
+
+    assert not root.exists()
+    parked = list((host.appdata_uefn_plugins_dir() / ".compiled_quarantine" / "demo").glob("*.pyd.bin"))
+    assert len(parked) == 1
+
+
+def test_startup_clears_folders_left_holding_only_an_old_pyd(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    import os
+    import time
+
+    from backend.uefn_plugins import host
+
+    plugins = host.appdata_uefn_plugins_dir()
+    old = time.time() - 3600
+
+    def folder(name: str, files: dict[str, bytes], *, mtime: float = old) -> Path:
+        d = plugins / name
+        d.mkdir(parents=True)
+        for fname, data in files.items():
+            (d / fname).write_bytes(data)
+            os.utime(d / fname, (mtime, mtime))
+        return d
+
+    orphan = folder("ghost", {"uefn_plugin_ghost.v1012042.cp313-win_amd64.pyd": b"MZ"})
+    installed = folder("kept", {"plugin.json": b"{}", "uefn_plugin_kept.v1.cp313-win_amd64.pyd": b"MZ"})
+    unpacking = folder("fresh", {"uefn_plugin_fresh.v1.cp313-win_amd64.pyd": b"MZ"}, mtime=time.time())
+    other = folder("mixed", {"uefn_plugin_mixed.v1.cp313-win_amd64.pyd": b"MZ", "notes.txt": b"x"})
+
+    host.sweep_orphan_compiled_folders()
+
+    assert not orphan.exists()
+    assert installed.is_dir() and unpacking.is_dir() and other.is_dir()

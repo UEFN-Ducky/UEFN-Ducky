@@ -672,12 +672,19 @@ def uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool = False) -> dict[s
     set_uefn_plugin_enabled(pid, False)
     # Drop imported modules (bounded unload) *before* rmtree — Windows locks .py files
     # while the module is still in sys.modules.
-    from backend.uefn_plugins.host import invalidate_plugin_runtime, reload_single_plugin
+    from backend.uefn_plugins.host import (
+        invalidate_plugin_runtime,
+        release_locked_compiled_backends,
+        reload_single_plugin,
+    )
 
     try:
         invalidate_plugin_runtime(pid)
     except Exception:
         pass
+    # A loaded compiled backend stays locked until Ducky exits: park it in quarantine (swept
+    # next launch) so the folder really goes instead of leaving the .pyd behind on its own.
+    release_locked_compiled_backends(pid)
     with _PLUGIN_TREE_LOCK:
         _rmtree_retry(dest, ignore_final=True)
         if dest.is_dir():
