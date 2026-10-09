@@ -901,8 +901,10 @@ def ducky_send_chat_message(
         )
         return tool_json(outcome, pretty=pretty)
 
-    run_message(conv_id, text, mode_norm, "")
-    return tool_json({"status": "running", "conv_id": conv_id}, pretty=pretty)
+    # An agent must not cancel the chat it messages: a busy one gets this when its turn ends.
+    started = run_message(conv_id, text, mode_norm, "", queue_if_busy=True)
+    status = "queued" if started == "queued" else "running"
+    return tool_json({"status": status, "conv_id": conv_id}, pretty=pretty)
 
 
 def _resolve_sender(sender: str) -> str:

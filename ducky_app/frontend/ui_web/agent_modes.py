@@ -623,6 +623,8 @@ def cancel_agent(conv_id: str | None = None) -> None:
             session.cancel()
         # Drop A2A inbox so cancel does not immediately kick a new run from
         # queued agent-to-agent messages (panel Stop must match ducky_agent_stop).
+        with _pending_lock:
+            _pending_agent_messages.pop(cid, None)
         try:
             from backend.agent.a2a_broker import on_agent_cancelled_by_user
 
@@ -1331,6 +1333,28 @@ def run_message_and_wait(
     return result
 
 
+# Agent messages that arrived mid-turn (queue_if_busy): started when that turn ends.
+# A person's Stop drops them, like the A2A inbox (cancel_agent).
+_pending_agent_messages: dict[str, list[str]] = {}
+_pending_lock = threading.Lock()
+
+
+def _deliver_pending_agent_messages(conv_id: str) -> None:
+    with _pending_lock:
+        if not _pending_agent_messages.get(conv_id):
+            return
+
+    def _worker() -> None:
+        wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT)
+        with _pending_lock:
+            texts = _pending_agent_messages.pop(conv_id, [])
+        if texts:
+            # Still busy (another turn started)? queue_if_busy holds them for its end.
+            run_message(conv_id, "\n\n".join(texts), "agent", "", queue_if_busy=True, _local=True)
+
+    threading.Thread(target=_worker, daemon=True, name=f"a2a-pending-{conv_id[:8]}").start()
+
+
 def _make_broker_tap(push: PushFn, conv_id: str) -> PushFn:
     """Feed turn-lifecycle events to the A2A broker (inbox drain + owed-reply notices)."""
 
@@ -1348,6 +1372,7 @@ def _make_broker_tap(push: PushFn, conv_id: str) -> PushFn:
             )
         except Exception:
             pass
+        _deliver_pending_agent_messages(conv_id)
 
     return tapped
 
@@ -1403,8 +1428,12 @@ def run_message(
     parent: str = "",
     resume: bool = False,
     started_by: str | None = None,
+    queue_if_busy: bool = False,
     _local: bool = False,
 ) -> str:
+    """Start a turn. ``queue_if_busy`` (agent-to-agent delivery): when the chat is mid-turn,
+    hold the text and start it when that turn ends (returns "queued") instead of the
+    Stop → follow-up a person gets, which cancelled the receiver and dropped its inbox."""
     if not _local and _in_bridge_process():
         resp = _post_panel_run(
             {
@@ -1414,6 +1443,7 @@ def run_message(
                 "model": model,
                 "wait": False,
                 "force": bool(force),
+                "queue_if_busy": bool(queue_if_busy),
                 "resume": bool(resume),
                 "attachments": attachments or None,
                 # Carry the spawning chat across the process hop so the delegated
@@ -1435,6 +1465,10 @@ def run_message(
     if not conv:
         push({"type": "error", "text": "Conversation not found", "conv_id": conv_id})
         return ""
+    if queue_if_busy and is_agent_running(conv_id) and not force:
+        with _pending_lock:
+            _pending_agent_messages.setdefault(conv_id, []).append(user_text)
+        return "queued"
     # Cursor-style Stop → follow-up: UI goes idle immediately while the old
     # thread is still unwinding. Cancel + join so the new turn can start with
     # full prior context (partial assistant reply already persisted on cancel).

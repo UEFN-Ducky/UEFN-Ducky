@@ -203,6 +203,38 @@ def send_notice(
     _kick_delivery(receiver_conv_id)
 
 
+def leads_receiver(sender_conv_id: str, receiver_conv_id: str) -> bool:
+    """True when the sender leads a group that holds the receiver, directly or through
+    nested groups (a coordinator over group hubs). Authority only flows down: a member
+    reporting to its leader is still fenced as data."""
+    if not sender_conv_id or not receiver_conv_id or sender_conv_id == receiver_conv_id:
+        return False
+    try:
+        from frontend.ui_web.group_orchestrator import group_members
+        from frontend.ui_web.project_chats import list_all_conversation_metadata
+
+        groups = [c for c in list_all_conversation_metadata() if getattr(c, "is_group", False)]
+    except Exception:
+        return False
+    containing: dict[str, list[Any]] = {}
+    for group in groups:
+        for member in group_members(group):
+            mid = str(member.get("member_conv_id") or "")
+            if mid:
+                containing.setdefault(mid, []).append(group)
+    seen: set[str] = set()
+    frontier = [receiver_conv_id]
+    while frontier:
+        for group in containing.get(frontier.pop(), []):
+            if group.id in seen:
+                continue
+            seen.add(group.id)
+            if (getattr(group, "leader_conv_id", "") or "") == sender_conv_id:
+                return True
+            frontier.append(group.id)  # this group may sit inside a parent group
+    return False
+
+
 def _format_envelope(envelope: Envelope) -> str:
     if envelope.is_notice:
         return envelope.body
@@ -213,6 +245,7 @@ def _format_envelope(envelope: Envelope) -> str:
         sender_coding_agent=agent,
         body=envelope.body,
         response_id=envelope.response_id,
+        from_leader=leads_receiver(envelope.sender_conv_id, envelope.receiver_conv_id),
     )
 
 
@@ -246,7 +279,9 @@ def _kick_delivery(conv_id: str) -> None:
             text = "\n\n".join(_format_envelope(e) for e in batch)
             started = ""
             try:
-                started = run_message(conv_id, text, "agent", "")
+                # Never interrupt: this check can't see turns running in another process
+                # (the MCP bridge vs the app), so a busy receiver holds the text instead.
+                started = run_message(conv_id, text, "agent", "", queue_if_busy=True)
             except Exception:
                 started = ""
             if not started:

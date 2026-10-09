@@ -718,6 +718,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                                 model,
                                 attachments=attachments,
                                 force=bool(payload.get("force")),
+                                queue_if_busy=bool(payload.get("queue_if_busy")),
                                 parent=str(payload.get("parent_conv_id") or ""),
                                 resume=resume,
                                 started_by=None if payload.get("started_by") is None else str(payload.get("started_by")),

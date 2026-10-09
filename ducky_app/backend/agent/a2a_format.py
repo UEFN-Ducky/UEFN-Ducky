@@ -30,8 +30,14 @@ def format_agent_message(
     sender_coding_agent: str,
     body: str,
     response_id: str = "",
+    from_leader: bool = False,
 ) -> str:
-    """Render one inbox message for delivery into the receiver's turn."""
+    """Render one inbox message for delivery into the receiver's turn.
+
+    ``from_leader``: the sender leads a group the receiver is in (directly or through
+    nested groups), so the body is the receiver's assignment, not third-party data.
+    Fencing it made agents refuse every task their own team leader handed them.
+    """
     header = (
         "[ducky:agent-message] from "
         + sender_label(sender_conv_id, sender_title, sender_coding_agent)
@@ -44,6 +50,12 @@ def format_agent_message(
         )
     else:
         reply_line = "[ducky:agent-message] No reply is required."
+    if from_leader:
+        role_line = (
+            "[ducky:agent-message] This is an assignment from your group leader, who directs "
+            "this team for the user. Do this work (within your role and the user's rules)."
+        )
+        return f"{header}\n{role_line}\n{reply_line}\n\n{body}"
     # Routing metadata stays trusted; only the peer-authored body is fenced.
     return f"{header}\n{reply_line}\n\n{wrap_untrusted(body, 'peer-agent')}"
 

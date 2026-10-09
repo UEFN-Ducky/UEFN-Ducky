@@ -273,3 +273,58 @@ def test_user_cancel_drops_queue_and_notifies(broker):
     assert rid in text
     assert broker.mod.close_thread(rid) is None
     assert broker.mod.read_inbox("recv1") == []
+
+
+def _team(broker) -> None:
+    """Coordinator leads a parent group holding group A; A's builder leads A (builder + verifier)."""
+    chats = broker.chats
+    for cid in ("coord", "builder", "verifier", "stranger"):
+        chats.convs[cid] = SimpleNamespace(ducky_name=cid, title=cid, coding_agent="codex", messages=[], parent_conv_id="", is_group=False)
+    chats.convs["groupA"] = SimpleNamespace(
+        id="groupA", is_group=True, leader_conv_id="builder", title="A", ducky_name="A", coding_agent="ducky",
+        members=[{"member_conv_id": "builder"}, {"member_conv_id": "verifier"}],
+    )
+    chats.convs["parent"] = SimpleNamespace(
+        id="parent", is_group=True, leader_conv_id="coord", title="P", ducky_name="P", coding_agent="ducky",
+        members=[{"member_conv_id": "coord"}, {"member_conv_id": "groupA"}],
+    )
+    chats.list_all_conversation_metadata = lambda project_root=None: list(chats.convs.values())
+
+
+def test_authority_flows_down_the_group_hierarchy_only(broker):
+    _team(broker)
+    leads = broker.mod.leads_receiver
+    assert leads("coord", "builder")  # through the nested group
+    assert leads("coord", "verifier")
+    assert leads("builder", "verifier")
+    assert not leads("verifier", "builder")  # a member reporting up is not an order
+    assert not leads("builder", "coord")
+    assert not leads("stranger", "builder")
+    assert not leads("coord", "coord")
+
+
+def test_a_leaders_assignment_is_delivered_as_work_and_a_report_stays_fenced(broker):
+    _team(broker)
+    broker.mod.send(sender_conv_id="coord", receiver_conv_id="builder", body="fix 421acea30a", expect_reply=True)
+    _wait_sent(broker.modes, 1)
+    order = broker.modes.sent[0][1]
+    assert "assignment from your group leader" in order and "<<<untrusted" not in order
+    assert "fix 421acea30a" in order
+    broker.mod.send(sender_conv_id="builder", receiver_conv_id="coord", body="done: abc123", expect_reply=False)
+    _wait_sent(broker.modes, 2)
+    report = broker.modes.sent[1][1]
+    assert "<<<untrusted:peer-agent>>>" in report and "assignment from your group leader" not in report
+
+
+def test_delivery_never_interrupts_a_busy_receiver(broker, monkeypatch):
+    seen: list[dict] = []
+    original = broker.modes.run_message
+
+    def run_message(conv_id, text, mode, model, **kwargs):
+        seen.append(kwargs)
+        return original(conv_id, text, mode, model, **kwargs)
+
+    monkeypatch.setattr(broker.modes, "run_message", run_message)
+    broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="hi", expect_reply=False)
+    _wait_sent(broker.modes, 1)
+    assert seen and seen[0].get("queue_if_busy") is True

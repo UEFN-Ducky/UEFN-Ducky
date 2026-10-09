@@ -110,3 +110,14 @@ def test_flatten_transcript_skips_non_text_and_truncates():
     long = flatten_transcript([{"role": "user", "content": "x" * 50000}], max_chars=100)
     assert "…(transcript truncated)" in long
     assert "<<<untrusted:peer-transcript>>>" in long
+
+
+def test_a_leaders_message_is_an_assignment_not_fenced_data():
+    from backend.agent.a2a_format import format_agent_message
+
+    text = format_agent_message(
+        sender_conv_id="c1", sender_title="Coordinator", sender_coding_agent="codex",
+        body="Implement node 421acea30a", response_id="r1", from_leader=True,
+    )
+    assert "Implement node 421acea30a" in text and "<<<untrusted" not in text
+    assert "assignment from your group leader" in text and 'response_id="r1"' in text
