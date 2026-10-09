@@ -241,7 +241,7 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
                 icon={<Icons.File />}
                 tone="amber"
                 title="File"
-                sub="Code, text or data, up to 256 KB"
+                sub="Code, text or data, as much as the model can read"
                 onClick={() => fileRef.current?.click()}
               />
               <div className="attach-menu-divider" role="separator" />

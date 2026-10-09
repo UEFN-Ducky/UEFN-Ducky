@@ -5,7 +5,6 @@ import { getApi } from "./usePanelApi";
 const DEFAULT_MAX_IMAGES = 40;
 const DEFAULT_VIDEO_MAX_MB = 100;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-const MAX_FILE_TEXT = 256 * 1024;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|mkv)$/i;
 const VIDEO_EXT_MIME: Record<string, string> = {
   mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", mkv: "video/x-matroska",
@@ -19,6 +18,17 @@ function videoMime(file: File): string {
 
 function isVideoFile(file: File): boolean {
   return file.type.startsWith("video/") || VIDEO_EXT_RE.test(file.name);
+}
+
+/** Lenient token guess (~4 characters per token); the send path counts exactly. */
+function approxTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function fileTooBigMessage(what: string, tokens: number, model: string, contextTokens: number, maxTokens: number): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  return `${what} about ${n(tokens)} tokens. ${model || "This model"} holds ${n(contextTokens)} tokens, `
+    + `so the files in one message can use about ${n(maxTokens)}. Pick a model with a bigger context window, or attach less.`;
 }
 
 function newId(): string {
@@ -81,7 +91,7 @@ export function composerAttachmentsFromDto(items: MessageAttachmentDto[]): Compo
 
 export function useComposerAttachments(
   initial: MessageAttachmentDto[] = [],
-  hookOpts: { convId?: string } = {},
+  hookOpts: { convId?: string; model?: string; modelLabel?: string; codingAgent?: string } = {},
 ) {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
     composerAttachmentsFromDto(initial),
@@ -90,18 +100,46 @@ export function useComposerAttachments(
   const convIdRef = useRef(hookOpts.convId ?? "");
   convIdRef.current = hookOpts.convId ?? "";
   const filesRef = useRef(new Map<string, File>());
-  const [limits, setLimits] = useState({ maxImages: DEFAULT_MAX_IMAGES, videoMaxMb: DEFAULT_VIDEO_MAX_MB });
+  // File text is sized by the picked model's context window (0 = the model never said; no cap).
+  const [limits, setLimits] = useState({
+    maxImages: DEFAULT_MAX_IMAGES, videoMaxMb: DEFAULT_VIDEO_MAX_MB, contextTokens: 0, fileMaxTokens: 0,
+  });
+  const modelLabel = hookOpts.modelLabel || hookOpts.model || "";
 
   useEffect(() => {
     let alive = true;
-    void getApi()?.get_video_settings?.(hookOpts.convId ?? "").then((s) => {
-      if (alive && s) setLimits({ maxImages: s.max_images_per_message || s.auto?.max_images_per_message || DEFAULT_MAX_IMAGES, videoMaxMb: s.video_max_mb });
+    void getApi()?.get_video_settings?.(hookOpts.convId ?? "", hookOpts.model ?? "", hookOpts.codingAgent ?? "").then((s) => {
+      if (alive && s) {
+        setLimits({
+          maxImages: s.max_images_per_message || s.auto?.max_images_per_message || DEFAULT_MAX_IMAGES,
+          videoMaxMb: s.video_max_mb,
+          contextTokens: s.auto?.context_tokens ?? 0,
+          fileMaxTokens: s.auto?.file_max_tokens ?? 0,
+        });
+      }
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [hookOpts.convId]);
+  }, [hookOpts.convId, hookOpts.model, hookOpts.codingAgent]);
 
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+
+  // A model switch re-checks files already attached: a smaller window shows before send,
+  // and a bigger one clears the earlier "too big" note.
+  const tooBigRef = useRef("");
+  useEffect(() => {
+    const files = attachmentsRef.current.filter((a) => a.kind === "file");
+    const tokens = files.reduce((sum, a) => sum + (a.kind === "file" ? approxTokens(a.text) : 0), 0);
+    if (limits.fileMaxTokens > 0 && tokens > limits.fileMaxTokens) {
+      const what = files.length === 1 ? `${files[0].name} is` : "These files are";
+      tooBigRef.current = fileTooBigMessage(what, tokens, modelLabel, limits.contextTokens, limits.fileMaxTokens);
+      setError(tooBigRef.current);
+      return;
+    }
+    const stale = tooBigRef.current;
+    if (stale) setError((prev) => (prev === stale ? "" : prev));
+    tooBigRef.current = "";
+  }, [limits, modelLabel]);
 
   const patchVideo = useCallback((id: string, patch: Partial<Extract<ComposerAttachment, { kind: "video" }>>) => {
     setAttachments((prev) => prev.map((a) => (a.id === id && a.kind === "video" ? { ...a, ...patch } : a)));
@@ -295,14 +333,16 @@ export function useComposerAttachments(
               ...(opts?.projectPath ? { projectPath: opts.projectPath } : {}),
             });
           } else {
-            if (file.size > MAX_FILE_TEXT) {
-              setError(`${file.name} exceeds 256KB text limit.`);
-              continue;
-            }
             const text = await readFileAsText(file);
-            if (text.length > MAX_FILE_TEXT) {
-              setError(`${file.name} exceeds 256KB text limit.`);
-              continue;
+            if (limits.fileMaxTokens > 0) {
+              const held = [...attachments, ...next]
+                .reduce((sum, a) => sum + (a.kind === "file" ? approxTokens(a.text) : 0), 0);
+              const tokens = approxTokens(text);
+              if (held + tokens > limits.fileMaxTokens) {
+                setError(fileTooBigMessage(`${file.name} is`, tokens, modelLabel, limits.contextTokens,
+                  Math.max(0, limits.fileMaxTokens - held)));
+                continue;
+              }
             }
             next.push({
               id: newId(),
@@ -321,7 +361,7 @@ export function useComposerAttachments(
         setError(e instanceof Error ? e.message : "Failed to read file");
       }
     },
-    [attachments, limits, stageVideo],
+    [attachments, limits, modelLabel, stageVideo],
   );
 
   const hasImages = attachments.some((a) => a.kind === "image");

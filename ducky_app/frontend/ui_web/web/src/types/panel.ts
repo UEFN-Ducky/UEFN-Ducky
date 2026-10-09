@@ -949,7 +949,14 @@ export interface VideoSettingsDto {
   video_frames_per_video: number;
   max_images_per_message: number;
   /** Values 0 (= Auto) resolves to for a provider-agnostic caller. */
-  auto?: { frames_per_video: number; max_images_per_message: number };
+  auto?: {
+    frames_per_video: number;
+    max_images_per_message: number;
+    /** The picked model's context window as its API reports it; 0 when unknown. */
+    context_tokens?: number;
+    /** Tokens of attached file text one message may carry (0 = no cap; the API decides). */
+    file_max_tokens?: number;
+  };
   ffmpeg: FfmpegStatusDto;
 }
 
@@ -2543,7 +2550,7 @@ export interface PanelApi {
   }>;
   get_video_prep_status?(stagedIds?: string[]): Promise<{ ok: boolean; prep: Record<string, VideoPrepStatusDto> }>;
   retry_video_prep?(stagedId: string): Promise<{ ok: boolean; prep: VideoPrepStatusDto }>;
-  get_video_settings?(convId?: string): Promise<VideoSettingsDto>;
+  get_video_settings?(convId?: string, model?: string, codingAgent?: string): Promise<VideoSettingsDto>;
   set_video_settings?(patch: Partial<Omit<VideoSettingsDto, "ffmpeg" | "ok">>): Promise<VideoSettingsDto>;
   get_ffmpeg_status?(): Promise<FfmpegStatusDto>;
   install_ffmpeg?(): Promise<FfmpegStatusDto>;

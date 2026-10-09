@@ -69,6 +69,60 @@ describe("restoring queued attachments", () => {
   });
 });
 
+describe("file size follows the model", () => {
+  const settingsFor = (windows: Record<string, number>) => vi.fn((_conv: string, model: string) => {
+    const ctx = windows[model] ?? 0;
+    return Promise.resolve({
+      video_max_mb: 100, video_frames_per_video: 20, max_images_per_message: 40,
+      auto: { frames_per_video: 20, max_images_per_message: 40, context_tokens: ctx, file_max_tokens: Math.floor(ctx * 0.75) },
+    });
+  });
+
+  it("takes a file far past the old 256 KB cap when the model's window holds it", async () => {
+    const settings = settingsFor({ "big-1": 1_000_000 });
+    vi.mocked(getApi).mockReturnValue({ get_video_settings: settings } as never);
+    const { result } = renderHook(() => useComposerAttachments([], { convId: "c1", model: "big-1" }));
+    await vi.waitFor(() => expect(settings).toHaveBeenCalledWith("c1", "big-1", ""));
+    await act(async () => {});
+    const html = new File(["x".repeat(1_200_000)], "Island Media Kit.html", { type: "text/html" });
+    await act(async () => { await result.current.addFiles([html]); });
+    expect(result.current.error).toBe("");
+    expect(result.current.attachments).toHaveLength(1);
+  });
+
+  it("refuses a file the model cannot hold and names the model's window", async () => {
+    const settings = settingsFor({ "small-1": 8_000 });
+    vi.mocked(getApi).mockReturnValue({ get_video_settings: settings } as never);
+    const { result } = renderHook(() => useComposerAttachments([], { convId: "c1", model: "small-1", modelLabel: "Small One" }));
+    await vi.waitFor(() => expect(settings).toHaveBeenCalled());
+    await act(async () => {});
+    const big = new File(["x".repeat(40_000)], "big.html", { type: "text/html" });
+    await act(async () => { await result.current.addFiles([big]); });
+    expect(result.current.attachments).toHaveLength(0);
+    expect(result.current.error).toBe(
+      "big.html is about 10,000 tokens. Small One holds 8,000 tokens, so the files in one message can use about 6,000. "
+      + "Pick a model with a bigger context window, or attach less.",
+    );
+  });
+
+  it("re-checks attached files when the model changes", async () => {
+    const settings = settingsFor({ "big-1": 1_000_000, "small-1": 8_000 });
+    vi.mocked(getApi).mockReturnValue({ get_video_settings: settings } as never);
+    const { result, rerender } = renderHook(
+      ({ model }) => useComposerAttachments([], { convId: "c1", model }),
+      { initialProps: { model: "big-1" } },
+    );
+    await vi.waitFor(() => expect(settings).toHaveBeenCalledWith("c1", "big-1", ""));
+    await act(async () => {});
+    await act(async () => { await result.current.addFiles([new File(["x".repeat(40_000)], "kit.html")]); });
+    expect(result.current.error).toBe("");
+    rerender({ model: "small-1" });
+    await vi.waitFor(() => expect(result.current.error).toMatch(/^kit\.html is about 10,000 tokens\. small-1 holds 8,000/));
+    rerender({ model: "big-1" });
+    await vi.waitFor(() => expect(result.current.error).toBe(""));
+  });
+});
+
 describe("video attachments", () => {
   afterEach(() => vi.useRealTimers());
 
@@ -274,6 +328,6 @@ describe("composerAttachmentsFromDto videos", () => {
     const settings = vi.fn().mockResolvedValue({ video_max_mb: 100, video_frames_per_video: 0, max_images_per_message: 0, auto: { frames_per_video: 20, max_images_per_message: 100 } });
     vi.mocked(getApi).mockReturnValue({ get_video_settings: settings } as never);
     renderHook(() => useComposerAttachments([], { convId: "c9" }));
-    await vi.waitFor(() => expect(settings).toHaveBeenCalledWith("c9"));
+    await vi.waitFor(() => expect(settings).toHaveBeenCalledWith("c9", "", ""));
   });
 });

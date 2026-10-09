@@ -289,7 +289,9 @@ export function ChatPane({
     restoreAttachments,
     replaceAttachments,
     toApiAttachments,
-  } = useComposerAttachments(initialComposer?.attachments ?? [], { convId: chat.id });
+  } = useComposerAttachments(initialComposer?.attachments ?? [], {
+    convId: chat.id, model: selectedModel, modelLabel: selectedModelDisplayName, codingAgent,
+  });
 
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const previewAttachment = useMemo((): MessageAttachmentDto | null => {

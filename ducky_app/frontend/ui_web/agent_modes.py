@@ -1626,6 +1626,7 @@ def run_message(
                 provider=provider_name or "",
                 model=turn_model,
                 external_agent=external,
+                coding_agent=coding_agent,
             )
         except ValueError as e:
             push({"type": "error", "text": str(e), "conv_id": conv_id})

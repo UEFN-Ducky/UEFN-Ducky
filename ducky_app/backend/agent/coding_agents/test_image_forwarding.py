@@ -67,6 +67,50 @@ def test_prepare_outgoing_adds_project_capture_path(monkeypatch, tmp_path):
     assert stored[0]["project_path"] == str(dest)
 
 
+def _model_windows(monkeypatch, windows: dict[str, int]) -> None:
+    from backend.agent.model_fetch import ModelInfo
+
+    monkeypatch.setattr(
+        "backend.agent.model_fetch.get_model_info",
+        lambda p, m: ModelInfo(id=m, context_limit=windows[m]) if m in windows else None,
+    )
+    monkeypatch.setattr("frontend.ui_web.context_tokens.count_tokens", lambda text, model="", provider="": len(text) // 4)
+
+
+def test_big_file_fits_a_big_model(monkeypatch):
+    _model_windows(monkeypatch, {"big-1": 1_000_000})
+    kit = "<html>" + "x" * 1_200_000 + "</html>"  # far past the old 256 KB cap
+    content, stored = prepare_outgoing_user_message(
+        "check this",
+        [{"kind": "file", "name": "Island Media Kit.html", "mime": "text/html", "text": kit}],
+        provider="openai", model="big-1", external_agent=True, coding_agent="codex",
+    )
+    assert kit in content
+    assert stored[0]["name"] == "Island Media Kit.html"
+
+
+def test_file_over_the_models_window_names_the_model(monkeypatch):
+    import pytest
+
+    _model_windows(monkeypatch, {"small-1": 8_000})
+    with pytest.raises(ValueError, match=r"big\.html is about 10,000 tokens\. small-1 holds 8,000 tokens"):
+        prepare_outgoing_user_message(
+            "check this",
+            [{"kind": "file", "name": "big.html", "mime": "text/html", "text": "x" * 40_000}],
+            provider="openai", model="small-1",
+        )
+
+
+def test_unknown_window_leaves_the_size_to_the_api(monkeypatch):
+    _model_windows(monkeypatch, {})
+    content, _ = prepare_outgoing_user_message(
+        "",
+        [{"kind": "file", "name": "huge.txt", "mime": "text/plain", "text": "y" * 2_000_000}],
+        provider="openai", model="mystery-model", external_agent=True, coding_agent="codex",
+    )
+    assert "Attached file: huge.txt" in content
+
+
 def test_collect_image_paths_resolves_persisted_file(tmp_path, monkeypatch):
     conv_id = "conv-img-1"
     att_dir = tmp_path / conv_id / "attachments"
