@@ -7,6 +7,7 @@ import functools
 import importlib.util
 import json
 import logging
+import os
 import re
 import sys
 import threading
@@ -2675,18 +2676,35 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
     try:
         if pid in _REGISTERED:
             return
+        version = str(manifest.get("version") or "")
+        if plugin_crashed_ducky(pid, version):
+            label = str(manifest.get("label") or pid)
+            _record_plugin_load_error(
+                pid,
+                RuntimeError(
+                    f"UEFN Ducky closed while loading {label} {version}, so it was skipped to let "
+                    "Ducky open. Update the plugin, or turn it off and on in Settings → Plugins to try again."
+                ),
+            )
+            return
         backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
         entry = str(backend.get("entry") or "backend").strip() or "backend"
         register_name = str(backend.get("register") or "register").strip() or "register"
-        if _manifest_is_compiled(manifest):
-            mod = _import_compiled_backend(pid, root, manifest)
-        else:
-            mod = _import_backend(pid, root, entry)
-        if mod is None:
-            return
-        register_fn = getattr(mod, register_name, None)
-        if callable(register_fn):
-            register_fn(_PluginApi(pid))
+        marker = _load_marker_begin(pid, version)
+        try:
+            if _manifest_is_compiled(manifest):
+                mod = _import_compiled_backend(pid, root, manifest)
+            else:
+                mod = _import_backend(pid, root, entry)
+            if mod is None:
+                return
+            register_fn = getattr(mod, register_name, None)
+            if callable(register_fn):
+                register_fn(_PluginApi(pid))
+        finally:
+            # A Python error still reaches here; only a crash of the whole process
+            # leaves the marker for the next launch to find.
+            _load_marker_end(marker)
         _REGISTERED.add(pid)
     finally:
         lock.release()
@@ -2700,6 +2718,122 @@ _BACKEND_LOAD_WAIT_S = 120.0
 def _backend_load_lock(pid: str) -> threading.RLock:
     with _BACKEND_LOAD_LOCKS_GUARD:
         return _BACKEND_LOAD_LOCKS.setdefault(pid, threading.RLock())
+
+
+# Crash guard: a plugin whose load takes the whole process down (a compiled backend
+# crashing in native code) would otherwise do it again on every launch, and Ducky
+# could never open. Each load leaves a marker named after this process; a marker
+# whose process is gone means that load crashed Ducky, and that plugin version is
+# skipped until it updates or the user turns it on again.
+_LOAD_MARKERS = ".loading"
+_CRASHED_FILE = "crashed.json"
+_crash_lock = threading.Lock()
+_crash_checked = False
+
+
+def _markers_dir() -> Path:
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
+
+    return appdata_uefn_plugins_dir() / _LOAD_MARKERS
+
+
+def _process_alive(os_pid: int) -> bool:
+    try:
+        from frontend.open_files import panel_process_alive
+
+        return panel_process_alive(os_pid)
+    except Exception:
+        return True  # unknown: never blame a plugin on a guess
+
+
+def _read_crashed() -> dict[str, str]:
+    try:
+        data = json.loads((_markers_dir() / _CRASHED_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _write_crashed(crashed: dict[str, str]) -> None:
+    path = _markers_dir() / _CRASHED_FILE
+    try:
+        if not crashed:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(crashed), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        _log.debug("could not save plugin crash record", exc_info=True)
+
+
+def _promote_dead_markers() -> dict[str, str]:
+    """Turn markers left by a process that died mid-load into crash records (once per process)."""
+    global _crash_checked
+    with _crash_lock:
+        crashed = _read_crashed()
+        if _crash_checked:
+            return crashed
+        _crash_checked = True
+        folder = _markers_dir()
+        if not folder.is_dir():
+            return crashed
+        changed = False
+        for marker in folder.glob("*.json"):
+            if marker.name == _CRASHED_FILE:
+                continue
+            try:
+                info = json.loads(marker.read_text(encoding="utf-8"))
+                owner = int(info.get("process") or 0)
+            except (OSError, ValueError, TypeError, AttributeError):
+                owner, info = 0, {}
+            if owner and owner != os.getpid() and _process_alive(owner):
+                continue  # another live Ducky process (the MCP bridge) is loading it now
+            plugin = str(info.get("plugin") or "")
+            if plugin:
+                crashed[plugin] = str(info.get("version") or "")
+                changed = True
+                _log.warning("Plugin %s %s was loading when Ducky closed; skipping it", plugin, crashed[plugin])
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+        if changed:
+            _write_crashed(crashed)
+        return crashed
+
+
+def plugin_crashed_ducky(pid: str, version: str) -> bool:
+    """True when this exact plugin version took Ducky down while loading last time."""
+    crashed = _promote_dead_markers()
+    return pid in crashed and crashed[pid] == version
+
+
+def clear_plugin_crash(pid: str) -> None:
+    """The user turned the plugin on again (or it updated): let it load next time."""
+    with _crash_lock:
+        crashed = _read_crashed()
+        if crashed.pop(pid, None) is not None:
+            _write_crashed(crashed)
+
+
+def _load_marker_begin(pid: str, version: str) -> Path | None:
+    path = _markers_dir() / f"{pid}.{os.getpid()}.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"plugin": pid, "version": version, "process": os.getpid()}), encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def _load_marker_end(path: Path | None) -> None:
+    if path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _manifest_is_compiled(manifest: dict[str, Any]) -> bool:

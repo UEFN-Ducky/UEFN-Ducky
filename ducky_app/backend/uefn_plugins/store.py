@@ -345,8 +345,10 @@ def set_uefn_plugin_enabled(plugin_id: str, enabled: bool, *, trust_local: bool 
     settings.save()
     # Single-plugin apply — never full reload_plugins() (that re-registers every
     # enabled plugin, e.g. Blender addon deploy, and makes Store toggles crawl).
-    from backend.uefn_plugins.host import apply_plugin_enabled_change
+    from backend.uefn_plugins.host import apply_plugin_enabled_change, clear_plugin_crash
 
+    if enabled:
+        clear_plugin_crash(pid)  # turning it on again means: try loading it again
     apply_plugin_enabled_change(pid, enabled=bool(enabled))
     # Drop in-memory skill prompt cache so enable gates flip immediately.
     # No IDE folder sync — pack files on disk don't change on toggle.

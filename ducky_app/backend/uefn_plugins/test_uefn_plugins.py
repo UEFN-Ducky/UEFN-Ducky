@@ -1033,3 +1033,70 @@ def test_startup_clears_folders_left_holding_only_an_old_pyd(monkeypatch, tmp_pa
 
     assert not orphan.exists()
     assert installed.is_dir() and unpacking.is_dir() and other.is_dir()
+
+
+def _crash_marker(host, plugin: str, version: str, process: int) -> Path:
+    folder = host._markers_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{plugin}.{process}.json"
+    path.write_text(json.dumps({"plugin": plugin, "version": version, "process": process}), encoding="utf-8")
+    return path
+
+
+def test_a_plugin_that_crashed_ducky_is_skipped_until_it_changes_or_is_turned_on(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    marker = _crash_marker(host, "demo", "3", 4242)
+
+    assert host.plugin_crashed_ducky("demo", "3")
+    assert not host.plugin_crashed_ducky("demo", "4")  # an update gets a fresh try
+    assert not marker.exists()
+
+    errors: list[str] = []
+    monkeypatch.setattr(host, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
+    imported: list[str] = []
+    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: imported.append(pid))
+    host._load_one("demo", tmp_path, {"id": "demo", "version": "3", "label": "Demo"})
+    assert imported == [] and "demo" not in host._REGISTERED
+    assert errors and "closed while loading Demo 3" in errors[0]
+
+    host.clear_plugin_crash("demo")
+    assert not host.plugin_crashed_ducky("demo", "3")
+
+
+def test_a_load_running_in_another_live_ducky_process_is_not_a_crash(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: True)
+    marker = _crash_marker(host, "demo", "3", 4242)
+
+    assert not host.plugin_crashed_ducky("demo", "3")
+    assert marker.exists()
+
+
+def test_a_normal_load_leaves_no_marker(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    seen: list[str] = []
+
+    def fake_import(pid, root, entry):
+        assert list(host._markers_dir().glob(f"{pid}.*.json")), "marker missing while loading"
+        return SimpleNamespace(register=lambda api: seen.append(pid))
+
+    monkeypatch.setattr(host, "_import_backend", fake_import)
+    host._REGISTERED.discard("guarded")
+    try:
+        host._load_one("guarded", tmp_path, {"id": "guarded", "version": "1"})
+        assert seen == ["guarded"] and "guarded" in host._REGISTERED
+        assert not list(host._markers_dir().glob("guarded.*.json"))
+    finally:
+        host._REGISTERED.discard("guarded")
