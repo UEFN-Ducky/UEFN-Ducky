@@ -631,6 +631,79 @@ def serve_daemon(mcp: Any) -> None:
             pass
 
 
+_spawn_lock = threading.Lock()
+_spawned_at = 0.0
+# A daemon the app just started needs this long to import and write its state.
+_SPAWN_HOLD_S = 45.0
+
+
+def _daemon_answers() -> bool:
+    state = read_state() or {}
+    if not state.get("token") or not state.get("port"):
+        return False
+    try:
+        sock = connect_and_hello(
+            token=str(state["token"]),
+            key=state.get("key") if isinstance(state.get("key"), dict) else {},
+            timeout_s=3.0,
+            host=str(state.get("host") or "127.0.0.1"),
+            port=int(state["port"]),
+        )
+    except (RuntimeError, OSError, ValueError):
+        return False
+    try:
+        write_frame(sock, {"op": "bye"})
+    except OSError:
+        pass
+    close_handle(sock)
+    return True
+
+
+def start_daemon_from_app() -> dict[str, Any]:
+    """Start the shared daemon as a child of the app, never of an agent.
+
+    An adapter that started the daemon itself left it inside that agent's process
+    tree (and Codex's job object). When that agent finished or was stopped, the
+    daemon died with it and every other agent lost its Ducky tools mid-run
+    ("Transport closed").
+    """
+    global _spawned_at
+    if not enabled():
+        return {"ok": False, "error": "shared MCP is off"}
+    with _spawn_lock:
+        if _daemon_answers():
+            return {"ok": True, "started": False}
+        if time.time() - _spawned_at < _SPAWN_HOLD_S:
+            return {"ok": True, "started": False, "starting": True}
+        import subprocess
+
+        from frontend.mcp_block import build_uefn_server_block
+        from frontend.settings import PanelSettings
+
+        block = build_uefn_server_block(PanelSettings.load())
+        args = [a for a in block["args"] if a != "--adapter"] + ["--shared-daemon"]
+        # No agent identity, and no PyInstaller boot vars (the child would reuse our extract dir).
+        env = {
+            k: v
+            for k, v in {**os.environ, **block["env"]}.items()
+            if not k.startswith(("DUCKY_", "_PYI_")) and k != "_MEIPASS2"
+        }
+        flags = 0
+        if os.name == "nt":
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(
+            [block["command"], *args],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            close_fds=True,
+        )
+        _spawned_at = time.time()
+        return {"ok": True, "started": True}
+
+
 def request_stop() -> None:
     _stop.set()
     sock = _listen_sock
