@@ -34,10 +34,11 @@ def put(key: str, version: str, versions: list[dict[str, Any]]) -> None:
 
         if not use_db("cache_docs"):
             return
-        kv.set_doc(
-            "cache_docs",
-            _doc_key(key),
-            {"version": str(version or ""), "versions": versions},
-        )
+        doc = {"version": str(version or ""), "versions": versions}
+        # The version check runs every 10 minutes per window and nearly always
+        # gets the same notes back; only changed notes are worth a write.
+        if kv.get_doc("cache_docs", _doc_key(key)) == doc:
+            return
+        kv.set_doc("cache_docs", _doc_key(key), doc)
     except Exception:
         pass

@@ -22,10 +22,13 @@ def _cache_store_catalog(result: dict[str, Any], account: str = "") -> dict[str,
 
         if not use_db("cache_docs"):
             return result
-        if result.get("ok") and result.get("items"):
-            kv.set_doc("cache_docs", "store_catalog", {"saved_at": _pa.time.time(), "catalog": result})
-            return result
         cached = kv.get_doc("cache_docs", "store_catalog")
+        if result.get("ok") and result.get("items"):
+            # Every window polls every 10 minutes and nearly always gets the same
+            # ~250 KB catalog back; only a changed one is worth a write.
+            if not (isinstance(cached, dict) and cached.get("catalog") == result):
+                kv.set_doc("cache_docs", "store_catalog", {"saved_at": _pa.time.time(), "catalog": result})
+            return result
         if isinstance(cached, dict) and isinstance(cached.get("catalog"), dict):
             if cached["catalog"].get("account") != account:
                 kv.delete_doc("cache_docs", "store_catalog")

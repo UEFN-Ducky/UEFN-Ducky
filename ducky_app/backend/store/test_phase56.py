@@ -141,6 +141,24 @@ def test_store_catalog_cache_never_serves_another_account() -> None:
     assert pas._cache_store_catalog(offline(), "site|ana")["items"] == []
 
 
+def test_unchanged_store_catalog_is_not_rewritten(monkeypatch) -> None:
+    """The Store tab polls every 10 minutes per window and got the same ~250 KB
+    catalog almost every time; each poll rewrote it into the database."""
+    import frontend.ui_web.panel_api  # noqa: F401 - panel_api_store is imported through it
+    from frontend.ui_web import panel_api_store as pas
+
+    writes: list[str] = []
+    real_set_doc = kv.set_doc
+    monkeypatch.setattr(kv, "set_doc", lambda t, key, v: (writes.append(key), real_set_doc(t, key, v)))
+    for _ in range(3):
+        pas._cache_store_catalog({"ok": True, "items": [{"slug": "anthropic", "version": "1.0.0"}]}, "site|ana")
+    assert writes == ["store_catalog"]
+    pas._cache_store_catalog({"ok": True, "items": [{"slug": "anthropic", "version": "1.0.1"}]}, "site|ana")
+    assert writes == ["store_catalog", "store_catalog"]
+    offline = pas._cache_store_catalog({"ok": False, "error": "offline", "items": []}, "site|ana")
+    assert offline["items"][0]["version"] == "1.0.1"
+
+
 def test_perf_rows_and_latest_report(monkeypatch) -> None:
     from frontend import perf_trace as pt
 
