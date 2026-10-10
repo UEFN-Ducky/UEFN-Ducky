@@ -38,6 +38,7 @@ from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
 _MAX_LSP_CLIENTS = 3
 _DEFAULT_LSP_CLIENT = "default"
 _VERSE_EDITOR: VerseEditorApi | None = None
+_VERSE_EDITOR_LOCK = threading.Lock()
 
 
 FOLDER_PROJECT_VERSE_OFF = "Verse tools are off for folder projects (no .uefnproject)."
@@ -72,12 +73,25 @@ def refresh_editor_lsp_after_build() -> None:
         inst.stop_lsp()
 
 
+def shared_verse_editor() -> VerseEditorApi:
+    """The process's one Verse editor, so every caller sees the same verse-lsp sessions.
+
+    Each PanelApi used to make its own and point the global at it. A verse-lsp started by
+    an HTTP request then belonged to an object dropped when the request ended: nothing
+    could stop that process, status and stop calls saw no session, and the restart after
+    a Verse build stopped an empty object instead of the editor's language server.
+    """
+    global _VERSE_EDITOR
+    with _VERSE_EDITOR_LOCK:
+        if _VERSE_EDITOR is None:
+            _VERSE_EDITOR = VerseEditorApi()
+        return _VERSE_EDITOR
+
+
 class VerseEditorApi:
     def __init__(self) -> None:
-        global _VERSE_EDITOR
         self._lsp_sessions: dict[str, LspBridge] = {}
         self._lsp_lock = threading.Lock()
-        _VERSE_EDITOR = self
 
     def _lsp_for(self, client_id: str | None) -> LspBridge:
         cid = (client_id or "").strip() or _DEFAULT_LSP_CLIENT

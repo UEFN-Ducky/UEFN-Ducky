@@ -126,7 +126,7 @@ from frontend.ui_web.project_switch import (
 )
 from frontend.ui_web.workspace_search import replace_workspace as _replace_workspace
 from frontend.ui_web.workspace_search import search_workspace as _search_workspace
-from frontend.ui_web.verse_editor.api import VerseEditorApi
+from frontend.ui_web.verse_editor.api import shared_verse_editor
 
 _MAX_LOG = 2500
 _log_history: list[str] = []
@@ -940,7 +940,7 @@ class PanelApi(
         # uefn_plugins_changed (etc.) can fire before WebView exists — flush on bind.
         self._pending_panel_pushes: list[dict[str, Any]] = []
         self._pending_panel_push_lock = threading.Lock()
-        self._verse_editor = VerseEditorApi()
+        self._verse_editor = shared_verse_editor()
         # Once per process: every HTTP, phone and website request used to build a PanelApi,
         # and each one re-read the 120 KB catalog and asked every gateway for its models.
         models_boot = _models_boot_once()

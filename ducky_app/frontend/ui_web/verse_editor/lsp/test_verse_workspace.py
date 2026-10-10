@@ -249,6 +249,47 @@ def test_refresh_editor_lsp_after_build_stops_sessions(monkeypatch):
     assert cleared["n"] == 1
 
 
+def test_every_panel_object_shares_one_verse_lsp_registry(monkeypatch):
+    # Oct 10 2026: each PanelApi made its own Verse editor and pointed the global at it. A
+    # verse-lsp started over HTTP belonged to a throwaway object (nothing could stop it), the
+    # next request saw no session, and the post-build restart stopped the wrong object.
+    from frontend.ui_web import panel_api
+    from frontend.ui_web.verse_editor import api as verse_api
+
+    stopped: list[str] = []
+
+    class FakeBridge:
+        def __init__(self) -> None:
+            self.root = ""
+
+        def start(self, root: str) -> dict[str, object]:
+            self.root = root
+            return self.get_status()
+
+        def get_status(self) -> dict[str, object]:
+            return {"running": bool(self.root), "project_root": ""}
+
+        def stop(self) -> None:
+            if self.root:
+                stopped.append(self.root)
+            self.root = ""
+
+    monkeypatch.setattr(verse_api, "LspBridge", FakeBridge)
+    monkeypatch.setattr(verse_api, "_VERSE_EDITOR", None)
+    monkeypatch.setattr(verse_api, "normalize_verse_lsp_project_root", lambda raw: raw)
+    monkeypatch.setattr(verse_api, "_is_folder_project", lambda _root: False)
+    monkeypatch.setattr(panel_api, "_models_booted", True)
+    monkeypatch.setattr(panel_api, "_models_updated_hook", None)
+    monkeypatch.setattr(panel_api.PanelApi, "_start_plugins_load_async", lambda self: None)
+    monkeypatch.setattr("frontend.ui_web.project_files.invalidate_workspace_folders_cache", lambda: None)
+
+    panel_api.PanelApi().start_verse_lsp("C:/Island", "w1")
+    for _ in range(10):
+        assert panel_api.PanelApi().get_verse_lsp_status("w1")["running"] is True
+    verse_api.refresh_editor_lsp_after_build()
+    assert stopped == ["C:/Island"]
+
+
 # --- shadow .vproject: island digests never written, FortniteGame has them -------------
 
 _BUILTIN_NAMES = ("Fortnite", "UnrealEngine", "Verse")
