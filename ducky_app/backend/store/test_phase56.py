@@ -4,6 +4,7 @@ catalog cache, perf rows, skill manifest cache, CLI, legacy retirement."""
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -201,6 +202,69 @@ def test_legacy_dir_is_retired_after_three_clean_boots(appdata: Path) -> None:
         assert result["db_checked"] == 1
         assert legacy.exists() == (boot < 2)
     assert result["legacy_removed"] == 1
+
+
+def _last_integrity_row() -> tuple:
+    return tuple(db.connect().execute("SELECT value, updated FROM meta WHERE key='last_integrity'").fetchone())
+
+
+def test_bridge_skips_the_store_check_the_panel_already_did_today(appdata: Path, monkeypatch) -> None:
+    """Every coding-agent turn starts a bridge, and each bridge ran PRAGMA
+    integrity_check over the whole database (1.4 s of CPU on a 247 MB store),
+    wrote meta and walked AppData, while the panel had checked it at boot."""
+    from frontend import appdata_maintenance as am
+
+    am.maintain_appdata(appdata)  # the panel boot
+    before = _last_integrity_row()
+    calls: list[str] = []
+    monkeypatch.setattr(db, "integrity_check", lambda conn: calls.append("check") or "ok")
+    monkeypatch.setattr(am, "prune_empty_project_dirs", lambda *a, **k: calls.append("walk") or 0)
+    for _ in range(5):
+        am.maintain_appdata(appdata, count_boot=False)
+    assert calls == []
+    assert _last_integrity_row() == before
+
+
+def test_bridge_still_checks_the_store_when_nothing_did_today(appdata: Path, monkeypatch) -> None:
+    from frontend import appdata_maintenance as am
+
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value, updated) VALUES ('last_integrity', ?, ?)",
+            (json.dumps({"result": "ok", "ts": time.time() - 2 * 86400}), time.time() - 2 * 86400),
+        )
+    calls: list[str] = []
+    real = db.integrity_check
+    monkeypatch.setattr(db, "integrity_check", lambda c: calls.append("check") or real(c))
+    assert am.maintain_appdata(appdata, count_boot=False)["db_checked"] == 1
+    assert calls == ["check"]
+
+
+def test_backups_age_out_in_database_mode(appdata: Path) -> None:
+    """In database mode nothing pruned backups/, so one-time migration copies
+    (a 172 MB ducky.db.bak and a 128 MB copied data tree) stayed forever."""
+    from frontend import appdata_maintenance as am
+
+    am.maintain_appdata(appdata)  # first boot: the one-time importers have run
+    backups = appdata / "backups"
+    old = time.time() - 31 * 86400
+    old_db = backups / "ducky.db.bak.20200101-000000"
+    old_tree = backups / "p3-host-data-x" / "chats"
+    old_tree.mkdir(parents=True)
+    old_db.write_bytes(b"x")
+    (old_tree / "a.json").write_text("{}")
+    for path in (old_db, old_tree / "a.json"):
+        os.utime(path, (old, old))
+    recent = backups / "workflow_editor.json.bak.20261010000000"
+    recent.write_text("{}")
+    recent_foreign = backups / "manual-copy" / "notes.txt"
+    recent_foreign.parent.mkdir()
+    recent_foreign.write_text("keep")
+    am.maintain_appdata(appdata)
+    assert not old_db.exists()
+    assert not (backups / "p3-host-data-x").exists()
+    assert recent.is_file() and recent_foreign.is_file()
 
 
 def test_more_logs_import(appdata: Path) -> None:

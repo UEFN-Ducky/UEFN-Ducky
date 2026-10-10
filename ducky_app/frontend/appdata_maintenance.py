@@ -5,14 +5,16 @@ Also the Settings → App Data inventory (sizes, clear, delete).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from frontend.atomic_json import BACKUPS_DIR_NAME, prune_all_backups
+from frontend.atomic_json import BACKUPS_DIR_NAME, MAX_BACKUP_AGE_SEC, prune_all_backups
 from frontend.settings import PanelSettings, default_app_data_dir
 from frontend.ui_web.project_chats import project_display_name, project_slug
 from frontend.ui_web.recent_projects import load_recent_projects
@@ -129,6 +131,32 @@ _SWEEP_SKIP_DIRS = frozenset(
         "uefn_plugins", "skill_packs", "ai_plugins", "mcp_plugins", "setup-engine", "exports", "imports",
     }
 )
+
+
+def _prune_backup_leftovers(app_root: Path) -> int:
+    """Age out files under backups/ that are not rotating ``.bak.`` copies.
+
+    One-time copies made around the move to ducky.db (a whole copied data tree)
+    match no backup group, so nothing ever removed them. They go after the same
+    30 days as any backup; the empty folders they leave are pruned afterwards.
+    """
+    backups_root = app_root / BACKUPS_DIR_NAME
+    if not backups_root.is_dir():
+        return 0
+    cutoff = time.time() - MAX_BACKUP_AGE_SEC
+    removed = 0
+    for dirpath, _dirnames, filenames in os.walk(backups_root):
+        for name in filenames:
+            if ".bak." in name:
+                continue
+            path = Path(dirpath) / name
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _walk_for_backups(app_root: Path):
@@ -396,6 +424,12 @@ def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -
     sweep, and a boot must count once toward legacy/ retirement, not twice."""
     if app_root is None:
         app_root = default_app_data_dir()
+    if not count_boot and _store_checked_recently(app_root):
+        # A bridge starts for every coding-agent turn, and the integrity check
+        # reads the whole database (seconds of CPU on a large store). The panel
+        # runs this sweep at every boot; a bridge runs it only when nothing has
+        # in the last day.
+        return {}
     db_result = _maintain_store(app_root, count_boot=count_boot)
     db_mode = False
     try:
@@ -404,12 +438,10 @@ def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -
         db_mode = use_db("settings")
     except Exception:
         pass
-    if db_mode:
-        moved = 0
-        pruned = 0
-    else:
-        moved = sweep_old_backups(app_root)
-        pruned = prune_all_backups(app_root)
+    # Scattered .bak files only come from the file stores; in database mode the
+    # few JSON files left back up into backups/ directly.
+    moved = 0 if db_mode else sweep_old_backups(app_root)
+    pruned = prune_all_backups(app_root) + _prune_backup_leftovers(app_root)
     removed_dirs = prune_empty_project_dirs(app_root)
     removed_dirs += prune_empty_leftover_dirs(app_root)
     removed_dirs += heal_plugin_runtime_homes(app_root)
@@ -434,14 +466,30 @@ def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -
 
 
 _SNAPSHOT_EVERY_S = 24 * 3600
+_CHECK_EVERY_S = 24 * 3600
+
+
+def _store_checked_recently(app_root: Path) -> bool:
+    """True when ducky.db passed its integrity check less than a day ago."""
+    try:
+        from backend.store import db as store_db
+        from backend.store.switch import use_db
+
+        if not use_db("settings"):
+            return False
+        row = store_db.connect(app_root).execute("SELECT value FROM meta WHERE key='last_integrity'").fetchone()
+        if row is None:
+            return False
+        last = json.loads(row[0])
+        return last.get("result") == "ok" and time.time() - float(last.get("ts") or 0) < _CHECK_EVERY_S
+    except Exception:
+        return False
 
 
 def _maintain_store(app_root: Path, *, count_boot: bool = True) -> dict[str, int]:
     """ADR 0003: integrity check (restores the newest snapshot on failure) and a
     daily ``VACUUM INTO`` snapshot. Never raises: maintenance must not take the
     panel down, and the store logs its own failures."""
-    import time
-
     out = {"db_checked": 0, "db_snapshot": 0}
     try:
         from backend.store import db as store_db
