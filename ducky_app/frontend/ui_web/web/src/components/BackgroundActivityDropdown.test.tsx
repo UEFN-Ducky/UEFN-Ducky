@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
 import { _resetBackgroundActivityForTests, upsertBackgroundJob } from "../hooks/backgroundActivity";
@@ -65,4 +66,38 @@ it("reports cancellation errors instead of silently ignoring Stop", async () => 
   fireEvent.click(screen.getByLabelText("Background activity"));
   fireEvent.click(screen.getByText("Stop"));
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Disconnected");
+});
+
+it("does not re-render every second while closed and idle", async () => {
+  vi.useFakeTimers();
+  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+  try {
+    let commits = 0;
+    render(<Profiler id="tray" onRender={() => { commits += 1; }}><BackgroundActivityDropdown /></Profiler>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const commitsBefore = commits;
+    for (let i = 0; i < 10; i++) await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(commits).toBe(commitsBefore);
+    expect(setIntervalSpy.mock.calls.filter(([, ms]) => ms === 1000)).toHaveLength(0);
+  } finally {
+    setIntervalSpy.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("ticks the elapsed time of a running job while the tray is open", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  try {
+    render(<BackgroundActivityDropdown />);
+    act(() => upsertBackgroundJob({
+      id: "job:render", source: "agent", title: "Render", detail: "Blender",
+      phase: "working", startedAt: Date.now() - 5000,
+    }));
+    fireEvent.click(screen.getByLabelText("Background activity"));
+    expect(screen.getByText(/Blender/).textContent).toContain("5.0s");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText(/Blender/).textContent).toContain("8.0s");
+  } finally {
+    vi.useRealTimers();
+  }
 });

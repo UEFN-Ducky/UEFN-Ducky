@@ -39,11 +39,7 @@ export function BackgroundActivityDropdown() {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const stop = subscribeAgentBackgroundActivity();
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => { stop(); clearInterval(timer); };
-  }, []);
+  useEffect(() => subscribeAgentBackgroundActivity(), []);
   const openJob = (job: BackgroundJob) => {
     setOpen(false);
     if (job.source === "agent") void openAgentBackgroundJob(job).catch((error) => setActionError(String(error)));
@@ -75,6 +71,16 @@ export function BackgroundActivityDropdown() {
   const nowCount = working;
   const live = jobs.filter((j) => j.phase === "working");
   const past = jobs.filter((j) => j.phase !== "working" && j.phase !== "ready");
+
+  // The elapsed times only show in the open tray's running rows. The header mounts this
+  // in every window, so a clock running all the time woke every window once a second.
+  const ticking = open && live.length > 0;
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
 
   useEffect(() => {
     const wipeIdle = () => syncReadyGraphJobs([], jobsRef.current);
