@@ -44,7 +44,7 @@ def _payload(text: str) -> dict:
 def test_write_tool_uses_pipeline_and_reports_changeset(project, monkeypatch) -> None:
     root, journal = project
     monkeypatch.setattr(system, "tool_json", lambda payload, pretty=False: json.dumps(payload))
-    out = _payload(system.workspace_write_file("Content/Verse/a.verse", "one\ntwo\n"))
+    out = _payload(system.workspace_write_file("Content/Verse/a.verse", content="one\ntwo\n"))
     assert (root / "Content" / "Verse" / "a.verse").read_text(encoding="utf-8") == "one\ntwo\n"
     assert out["relative_path"] == "Content/Verse/a.verse"
     assert out["lines_added"] == 2 and out["before_content"] == ""
@@ -57,9 +57,9 @@ def test_write_tool_refuses_guarded_paths(project, monkeypatch) -> None:
     root, _ = project
     monkeypatch.setattr(system, "tool_json", lambda payload, pretty=False: json.dumps(payload))
     with pytest.raises(ValueError):
-        system.workspace_write_file("Content/Verse/Fortnite.digest.verse", "x")
+        system.workspace_write_file("Content/Verse/Fortnite.digest.verse", content="x")
     with pytest.raises(ValueError):
-        system.workspace_write_file("Saved/x.txt", "x")
+        system.workspace_write_file("Saved/x.txt", content="x")
     assert not (root / "Saved").exists()
 
 
@@ -73,3 +73,10 @@ def test_read_tool_notes_the_base_for_conflicts(project, monkeypatch) -> None:
     from backend.workspace.paths import content_hash
 
     assert journal.reads == [("Content/Verse/a.verse", content_hash("base\n"))]
+
+
+def test_write_tool_takes_path_like_the_read_tool(project, monkeypatch) -> None:
+    root, _ = project
+    monkeypatch.setattr(system, "tool_json", lambda payload, pretty=False: json.dumps(payload))
+    _payload(system.workspace_write_file(path="Content/Verse/b.verse", content="x\n"))
+    assert (root / "Content" / "Verse" / "b.verse").read_text(encoding="utf-8") == "x\n"

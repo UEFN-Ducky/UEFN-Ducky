@@ -130,6 +130,17 @@ def _require_file(path: str) -> str:
     return full
 
 
+def path_arg(relative_path: str, path: str) -> str:
+    """The file a tool works on: relative_path, or path= (workspace_read_file takes both,
+    so agents send either one to the edit tools too)."""
+    rel, alias = (relative_path or "").strip(), (path or "").strip()
+    if rel and alias and rel.replace("\\", "/") != alias.replace("\\", "/"):
+        raise ValueError("relative_path and path name different files: pass only one of them")
+    if not rel and not alias:
+        raise ValueError("relative_path is required (path= also accepted)")
+    return rel or alias
+
+
 def read_lines(full: str, start_line: int = 0, end_line: int = 0, line_numbers: bool = False) -> dict[str, Any]:
     """Lines ``start_line``..``end_line`` (1-based, inclusive) of a text file. Without a
     range, the first READ_LINE_CAP lines, and a note of where the rest starts."""
@@ -489,7 +500,11 @@ def _uses_crlf(relative_path: str) -> bool:
 
 def _apply_edit(text: str, old_text: str, new_text: str, replace_all: bool, label: str = "") -> tuple[str, int]:
     if not old_text:
-        raise ValueError(f"{label}old_text is required: to create or overwrite a file use workspace_write_file")
+        lines = len(text.splitlines())
+        raise ValueError(
+            f"{label}old_text is required. To add text at the end, use workspace_replace_lines with "
+            f"start_line={lines + 1}, end_line={lines}; to create or overwrite a whole file use workspace_write_file."
+        )
     # The text is read with \n line breaks whatever the file uses on disk.
     old_text, new_text = old_text.replace("\r\n", "\n"), new_text.replace("\r\n", "\n")
     if old_text == new_text:
@@ -507,25 +522,31 @@ def _apply_edit(text: str, old_text: str, new_text: str, replace_all: bool, labe
 
 @mcp.tool()
 def workspace_edit_file(
-    relative_path: str,
+    relative_path: str = "",
+    *,
     old_text: str,
     new_text: str,
     replace_all: bool = False,
     pretty: bool = False,
+    path: str = "",
 ) -> str:
     """Replace exact text in a project file (an editor's find and replace). Use this instead of rewriting the whole file or editing through a shell.
 
     old_text must match the file exactly, spaces and line breaks included, and appear once
-    (add surrounding lines to make it unique, or pass replace_all=true). Same write rules,
-    history and change journal as workspace_write_file.
+    (add surrounding lines to make it unique, or pass replace_all=true). To add lines at the
+    end, use workspace_replace_lines instead. Same write rules, history and change journal
+    as workspace_write_file.
     """
+    relative_path = path_arg(relative_path, path)
     text = _current_text(relative_path)
     updated, count = _apply_edit(text, old_text, new_text, replace_all)
     return _write_edit(relative_path, text, updated, "workspace_edit_file", {"replacements": count}, pretty)
 
 
 @mcp.tool()
-def workspace_multi_edit(relative_path: str, edits: list[dict[str, Any]], pretty: bool = False) -> str:
+def workspace_multi_edit(
+    relative_path: str = "", *, edits: list[dict[str, Any]], pretty: bool = False, path: str = ""
+) -> str:
     """Several exact-text replacements in one file, applied in order and saved together (all or none).
 
     edits: [{"old_text": "...", "new_text": "...", "replace_all": false}, ...]. Each old_text
@@ -533,6 +554,7 @@ def workspace_multi_edit(relative_path: str, edits: list[dict[str, Any]], pretty
     """
     if not edits:
         raise ValueError("edits is required: a list of {old_text, new_text}")
+    relative_path = path_arg(relative_path, path)
     text = _current_text(relative_path)
     updated, total = text, 0
     for n, edit in enumerate(edits, start=1):
@@ -545,12 +567,16 @@ def workspace_multi_edit(relative_path: str, edits: list[dict[str, Any]], pretty
 
 
 @mcp.tool()
-def workspace_replace_lines(relative_path: str, start_line: int, end_line: int, new_text: str, pretty: bool = False) -> str:
+def workspace_replace_lines(
+    relative_path: str = "", *, start_line: int, end_line: int, new_text: str, pretty: bool = False, path: str = ""
+) -> str:
     """Replace lines start_line..end_line (1-based, inclusive) of a project file with new_text,
-    without repeating the old text. To insert before line N, pass start_line=N and end_line=N-1;
-    to delete lines, pass new_text="". Read the lines first (workspace_read_file with
-    line_numbers=true) so the numbers are current.
+    without repeating the old text. To insert before line N, pass start_line=N and end_line=N-1
+    (to add at the end of a file with L lines: start_line=L+1, end_line=L, so 1 and 0 for an
+    empty file); to delete lines, pass new_text="". Read the lines first (workspace_read_file
+    with line_numbers=true) so the numbers are current.
     """
+    relative_path = path_arg(relative_path, path)
     text = _current_text(relative_path)
     lines = text.splitlines(keepends=True)
     total = len(lines)
@@ -560,6 +586,8 @@ def workspace_replace_lines(relative_path: str, start_line: int, end_line: int, 
     block = new_text.replace("\r\n", "\n")
     if block and not block.endswith("\n") and (end < total or text.endswith("\n")):
         block += "\n"
+    if block and start == total + 1 and text and not text.endswith("\n"):
+        block = "\n" + block  # appended lines start a new line, not the end of the last one
     updated = "".join(lines[:start - 1]) + block + "".join(lines[end:])
     return _write_edit(relative_path, text, updated, "workspace_replace_lines",
                        {"replaced_lines": f"{start}-{end}" if end >= start else f"inserted before {start}"}, pretty)
@@ -597,11 +625,13 @@ def workspace_move_file(source: str, destination: str, pretty: bool = False) -> 
 
 
 @mcp.tool()
-def workspace_delete_file(relative_path: str, pretty: bool = False) -> str:
+def workspace_delete_file(relative_path: str = "", pretty: bool = False, path: str = "") -> str:
     """Delete a project file or folder. It goes to Ducky's undo trash (restorable from the
     Changes view), so prefer this to a shell rm / Remove-Item.
     """
     from frontend.ui_web import project_files
+
+    relative_path = path_arg(relative_path, path)
 
     from backend.workspace.ai_ignore import require_ai_path_operation
     require_ai_path_operation(resolve_workspace_path(relative_path))

@@ -324,7 +324,7 @@ def workspace_read_file(
 
 
 @mcp.tool()
-def workspace_write_file(relative_path: str, content: str, pretty: bool = False) -> str:
+def workspace_write_file(relative_path: str = "", *, content: str, pretty: bool = False, path: str = "") -> str:
     """Write a text file under the VS Code workspace on host disk.
 
     Goes through the shared write pipeline: atomic replace, history snapshot with
@@ -334,8 +334,10 @@ def workspace_write_file(relative_path: str, content: str, pretty: bool = False)
     .py/.pyc (Epic ContainsPythonData), or anything outside those two roots
     (Saved/, Intermediate/, project root). Python scratch → %LOCALAPPDATA%/UEFN-Ducky/.
     """
+    from backend.tools.core.workspace_code import path_arg
     from backend.workspace.runtime import get_writer
 
+    relative_path = path_arg(relative_path, path)
     result = get_writer().write_text(relative_path, content, tool="workspace_write_file")
     file_path = result.abs_path
     payload: dict[str, Any] = {

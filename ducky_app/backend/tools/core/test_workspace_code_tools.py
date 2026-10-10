@@ -146,7 +146,7 @@ def test_find_matches_names_paths_and_globs(project) -> None:
 
 def test_edit_file_replaces_exact_text_through_the_pipeline(project) -> None:
     root, journal = project
-    out = _call(wc.workspace_edit_file, "src/app.py", "return 2", "return 3")
+    out = _call(wc.workspace_edit_file, "src/app.py", old_text="return 2", new_text="return 3")
     assert "return 3" in (root / "src" / "app.py").read_text(encoding="utf-8")
     assert out["relative_path"] == "src/app.py" and out["replacements"] == 1
     assert journal.records[-1].tool == "workspace_edit_file"
@@ -156,12 +156,47 @@ def test_edit_file_refuses_missing_or_ambiguous_text(project) -> None:
     root, _ = project
     before = (root / "src" / "app.py").read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="not in the file"):
-        wc.workspace_edit_file("src/app.py", "return 99", "x")
+        wc.workspace_edit_file("src/app.py", old_text="return 99", new_text="x")
     with pytest.raises(ValueError, match="appears 2 times"):
-        wc.workspace_edit_file("src/app.py", "        return", "        yield")
+        wc.workspace_edit_file("src/app.py", old_text="        return", new_text="        yield")
     assert (root / "src" / "app.py").read_text(encoding="utf-8") == before
-    out = _call(wc.workspace_edit_file, "src/app.py", "        return", "        yield", replace_all=True)
+    out = _call(wc.workspace_edit_file, "src/app.py", old_text="        return", new_text="        yield", replace_all=True)
     assert out["replacements"] == 2
+
+
+
+def test_edit_tools_take_path_like_the_read_tool(project) -> None:
+    # Live team run: an agent sent path= to workspace_edit_file (workspace_read_file takes it)
+    # and failed validation before it could edit.
+    root, _ = project
+    _call(wc.workspace_edit_file, path="src/app.py", old_text="return 2", new_text="return 3")
+    assert "return 3" in (root / "src" / "app.py").read_text(encoding="utf-8")
+    _call(wc.workspace_replace_lines, path="README.md", start_line=1, end_line=1, new_text="# Renamed")
+    assert (root / "README.md").read_text(encoding="utf-8").startswith("# Renamed\n")
+    with pytest.raises(ValueError, match="different files"):
+        wc.workspace_edit_file("src/app.py", path="README.md", old_text="x", new_text="y")
+    with pytest.raises(ValueError, match="relative_path is required"):
+        wc.workspace_edit_file(old_text="x", new_text="y")
+
+
+def test_empty_old_text_says_how_to_append(project) -> None:
+    # The agent asked to add a line had no way to anchor it and left a blank first line.
+    root, _ = project
+    lines = len((root / "README.md").read_text(encoding="utf-8").splitlines())
+    with pytest.raises(ValueError, match=f"workspace_replace_lines with start_line={lines + 1}, end_line={lines}"):
+        wc.workspace_edit_file("README.md", old_text="", new_text="tail")
+
+
+def test_replace_lines_appends_on_a_new_line(project) -> None:
+    root, _ = project
+    path = root / "tail.txt"
+    path.write_text("A was here", encoding="utf-8")
+    _call(wc.workspace_replace_lines, "tail.txt", start_line=2, end_line=1, new_text="B got: maple")
+    assert path.read_text(encoding="utf-8") == "A was here\nB got: maple"
+    empty = root / "empty.txt"
+    empty.write_text("", encoding="utf-8")
+    _call(wc.workspace_replace_lines, "empty.txt", start_line=1, end_line=0, new_text="first\n")
+    assert empty.read_text(encoding="utf-8") == "first\n"
 
 
 def test_multi_edit_is_all_or_nothing(project) -> None:
@@ -169,9 +204,9 @@ def test_multi_edit_is_all_or_nothing(project) -> None:
     path = root / "src" / "pkg" / "util.ts"
     before = path.read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="edit 2"):
-        wc.workspace_multi_edit("src/pkg/util.ts", [{"old_text": "x + 1", "new_text": "x + 2"}, {"old_text": "nope", "new_text": "y"}])
+        wc.workspace_multi_edit("src/pkg/util.ts", edits=[{"old_text": "x + 1", "new_text": "x + 2"}, {"old_text": "nope", "new_text": "y"}])
     assert path.read_text(encoding="utf-8") == before and not journal.records
-    out = _call(wc.workspace_multi_edit, "src/pkg/util.ts", [
+    out = _call(wc.workspace_multi_edit, "src/pkg/util.ts", edits=[
         {"old_text": "x + 1", "new_text": "x + 2"},
         {"old_text": "x + 2", "new_text": "x + 3"},
         {"old_text": "a: number", "new_text": "a: string"},
@@ -184,21 +219,21 @@ def test_multi_edit_is_all_or_nothing(project) -> None:
 def test_replace_lines_replaces_inserts_and_deletes(project) -> None:
     root, _ = project
     path = root / "README.md"
-    _call(wc.workspace_replace_lines, "README.md", 3, 3, "Better intro")
+    _call(wc.workspace_replace_lines, "README.md", start_line=3, end_line=3, new_text="Better intro")
     assert path.read_text(encoding="utf-8") == "# Title\n\nBetter intro\n\n## Setup\n\nRun it.\n"
-    _call(wc.workspace_replace_lines, "README.md", 1, 0, "<!-- top -->")
+    _call(wc.workspace_replace_lines, "README.md", start_line=1, end_line=0, new_text="<!-- top -->")
     assert path.read_text(encoding="utf-8").startswith("<!-- top -->\n# Title\n")
-    _call(wc.workspace_replace_lines, "README.md", 2, 3, "")
+    _call(wc.workspace_replace_lines, "README.md", start_line=2, end_line=3, new_text="")
     assert path.read_text(encoding="utf-8").startswith("<!-- top -->\nBetter intro\n")
     with pytest.raises(ValueError, match="outside the file"):
-        wc.workspace_replace_lines("README.md", 40, 41, "x")
+        wc.workspace_replace_lines("README.md", start_line=40, end_line=41, new_text="x")
 
 
 def test_replace_lines_keeps_crlf(project) -> None:
     root, _ = project
     path = root / "win.txt"
     path.write_bytes(b"a\r\nb\r\nc\r\n")
-    _call(wc.workspace_replace_lines, "win.txt", 2, 2, "B")
+    _call(wc.workspace_replace_lines, "win.txt", start_line=2, end_line=2, new_text="B")
     assert path.read_bytes() == b"a\r\nB\r\nc\r\n"
 
 
@@ -206,17 +241,17 @@ def test_edit_matches_crlf_files_read_back_as_lf(project) -> None:
     root, _ = project
     path = root / "win.txt"
     path.write_bytes(b"one\r\ntwo\r\nthree\r\n")
-    _call(wc.workspace_edit_file, "win.txt", "one\ntwo", "uno\ndos")
+    _call(wc.workspace_edit_file, "win.txt", old_text="one\ntwo", new_text="uno\ndos")
     assert path.read_bytes() == b"uno\r\ndos\r\nthree\r\n"
 
 
 def _stale_test_edit(kind, path, replacement):
     if kind == "edit":
-        return wc.workspace_edit_file(path, "baseline", replacement)
+        return wc.workspace_edit_file(path, old_text="baseline", new_text=replacement)
     if kind == "multi_edit":
-        return wc.workspace_multi_edit(path, [{"old_text": "baseline", "new_text": replacement},
+        return wc.workspace_multi_edit(path, edits=[{"old_text": "baseline", "new_text": replacement},
                                                {"old_text": "tail", "new_text": "changed tail"}])
-    return wc.workspace_replace_lines(path, 1, 1, replacement)
+    return wc.workspace_replace_lines(path, start_line=1, end_line=1, new_text=replacement)
 
 
 @pytest.mark.parametrize("kind", ["edit", "multi_edit", "replace_lines"])

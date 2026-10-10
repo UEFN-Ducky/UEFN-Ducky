@@ -91,8 +91,8 @@ def test_write_delete_and_both_move_ends_are_guarded(protected, monkeypatch):
     runtime.reset_for_tests(ProjectWriter.for_root(str(protected)))
     try:
         for fn in (
-            lambda: system.workspace_write_file(".env", "overwrite"),
-            lambda: wc.workspace_edit_file(".env", "SYNTHETIC_SECRET", "overwrite"),
+            lambda: system.workspace_write_file(".env", content="overwrite"),
+            lambda: wc.workspace_edit_file(".env", old_text="SYNTHETIC_SECRET", new_text="overwrite"),
             lambda: wc.workspace_delete_file(".env"),
             lambda: wc.workspace_move_file(".env", "public-copy.txt"),
             lambda: wc.workspace_move_file("public.txt", ".env"),
