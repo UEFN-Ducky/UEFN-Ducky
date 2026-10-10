@@ -1413,8 +1413,12 @@ def heal_usage_orphaned_turn(
     conv: Conversation,
     *,
     project_root: str | None = None,
+    sent_before: float | None = None,
 ) -> bool:
-    """Usage was saved mid-run but the assistant row never landed (embedded Ducky/Ollama)."""
+    """Usage was saved mid-run but the assistant row never landed (embedded Ducky/Ollama).
+
+    *sent_before*: only a prompt sent before then can be an orphan (a turn sent since
+    Ducky started may still be running)."""
     last: dict[str, Any] | None = None
     for m in reversed(conv.messages or []):
         if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
@@ -1427,6 +1431,8 @@ def heal_usage_orphaned_turn(
     if not isinstance(calls, list) or not calls:
         return False
     user_ts = float(last.get("ts") or 0)
+    if sent_before is not None and user_ts >= sent_before:
+        return False
     if not any(isinstance(c, dict) and float(c.get("ts") or 0) > user_ts for c in calls):
         return False
     upsert_in_flight_assistant(
@@ -1445,9 +1451,13 @@ def heal_usage_orphaned_turn(
     return True
 
 
-def heal_usage_orphaned_turns_for_project(project_root: str | None = None) -> int:
-    """Boot: persist a killed-turn stub when token_usage outran the transcript."""
-    healed = 0
+def heal_usage_orphaned_turns_for_project(
+    project_root: str | None = None, *, sent_before: float | None = None
+) -> list[str]:
+    """Boot: persist a killed-turn stub when token_usage outran the transcript.
+
+    Returns the ids of the chats it healed."""
+    healed: list[str] = []
     for stub in list_conversations(project_root=project_root):
         usage = getattr(stub, "token_usage", None)
         calls = usage.get("calls") if isinstance(usage, dict) else None
@@ -1456,8 +1466,8 @@ def heal_usage_orphaned_turns_for_project(project_root: str | None = None) -> in
         conv = load_conversation(stub.id, project_root)
         if conv is None:
             continue
-        if heal_usage_orphaned_turn(conv, project_root=project_root):
-            healed += 1
+        if heal_usage_orphaned_turn(conv, project_root=project_root, sent_before=sent_before):
+            healed.append(conv.id)
     return healed
 
 

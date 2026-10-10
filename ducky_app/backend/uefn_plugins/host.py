@@ -1964,18 +1964,30 @@ def _boot_trace_plugins_load(duration_ms: float) -> None:
 
 
 def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None:
-    """Pre-import backend module (slow). Safe across threads — unique module names."""
-    if pid in _REGISTERED:
+    """Pre-import a source backend (slow). Safe across threads — unique module names.
+
+    Compiled backends are left to the guarded load: their native init runs one at a
+    time there, so a crash names the plugin and the next launch skips it. Pre-importing
+    them here crashed Ducky on every launch with nothing recorded.
+    """
+    if pid in _REGISTERED or _manifest_is_compiled(manifest):
+        return
+    version = str(manifest.get("version") or "")
+    if plugin_crashed_ducky(pid, version):
+        return
+    from backend.uefn_plugins.store import app_too_old_for
+
+    if app_too_old_for(manifest):
         return
     backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend.get("entry") or "backend").strip() or "backend"
+    marker = _load_marker_begin(pid, version)
     try:
-        if _manifest_is_compiled(manifest):
-            _import_compiled_backend(pid, root, manifest)
-        else:
-            _import_backend(pid, root, entry)
+        _import_backend(pid, root, entry)
     except Exception:  # noqa: BLE001 — register path records the real failure
         _log.debug("UEFN plugin %s pre-import failed", pid, exc_info=True)
+    finally:
+        _load_marker_end(marker)
 
 
 # A single plugin's register() must never keep the whole app in "plugins
@@ -2044,6 +2056,9 @@ def _run_first_plugin_load() -> None:
         sweep_orphan_compiled_folders()
     except Exception:
         _log.debug("compiled quarantine sweep failed", exc_info=True)
+    # Read last launch's crash markers before this process writes any: once loads run
+    # in parallel, a marker of this process is a load in flight, not a crash.
+    _promote_dead_markers()
     enabled = set(get_enabled_plugin_ids())
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
@@ -2075,7 +2090,8 @@ def _run_first_plugin_load() -> None:
     # notify after register() so LLM/coding-agent factories refresh).
     _notify_uefn_plugins_changed()
     _log.info("UEFN plugins: %d enabled (%s)", len(jobs), ", ".join(j[0] for j in jobs))
-    # Parallel pre-import: exec_module dominates boot; register stays serial after.
+    # Parallel pre-import of source backends: exec_module dominates boot; register
+    # (and every compiled backend's import) stays serial after.
     t_import = time.perf_counter()
     if len(jobs) > 1:
         from concurrent.futures import ThreadPoolExecutor

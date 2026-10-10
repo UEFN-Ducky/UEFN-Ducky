@@ -7,6 +7,9 @@ performs reverts as the user.
 
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from typing import Any
 
 from backend.workspace import identity
@@ -24,8 +27,8 @@ def _journal() -> FileChangeJournal | None:
     return journal if isinstance(journal, FileChangeJournal) else None
 
 
-def _close_orphans(journal: FileChangeJournal, root: str) -> None:
-    """Close dead 'running' rows before the list is returned.
+def _close_orphans(journal: FileChangeJournal, root: str) -> list[str]:
+    """Close dead 'running' rows before the list is returned; the chats it healed.
 
     Live ids come from ``live_agent_runs`` so this stays cheap on the UI thread
     (importing ``agent_modes`` here used to stall the panel).
@@ -36,31 +39,65 @@ def _close_orphans(journal: FileChangeJournal, root: str) -> None:
     try:
         closed = journal.close_orphan_runs(project_root=root, live_run_ids=get_live_run_ids())
     except Exception:  # noqa: BLE001 - listing must still return
-        return
+        return []
+    healed: list[str] = []
     for row in closed:
+        conv_id = str(row.get("conv_id") or "")
         try:
-            heal_killed_coding_turn(str(row.get("conv_id") or ""), str(row.get("run_id") or ""))
+            if heal_killed_coding_turn(conv_id, str(row.get("run_id") or "")):
+                healed.append(conv_id)
         except Exception:  # noqa: BLE001 - ledger close already landed
             pass
+    return healed
 
 
-def heal_orphans_on_panel_boot() -> None:
-    """Panel process just started — no agent threads exist. Unstick leftover RUNNING rows."""
+def heal_orphans_on_panel_boot(*, sent_before: float | None = None) -> list[str]:
+    """Panel process just started. Unstick leftover RUNNING rows; the chats it healed.
+
+    Runs on a background thread (it reads every chat with token usage, which took
+    a busy user's startup down with it). *sent_before* is the launch time: a prompt
+    sent since then belongs to a turn of this process, never an orphan.
+    """
     try:
         root = _project_root()
     except Exception:
-        return
+        return []
     if not root:
-        return
+        return []
+    healed: list[str] = []
     journal = _journal()
     if journal is not None:
-        _close_orphans(journal, root)
+        healed += _close_orphans(journal, root)
     try:
         from frontend.ui_web.project_chats import heal_usage_orphaned_turns_for_project
 
-        heal_usage_orphaned_turns_for_project(root)
+        healed += heal_usage_orphaned_turns_for_project(root, sent_before=sent_before)
     except Exception:
         pass
+    return healed
+
+
+def heal_orphans_in_background() -> None:
+    """Boot heal off the startup path; a chat already on screen reloads if it was healed."""
+    launched = time.time()
+
+    def run() -> None:
+        try:
+            healed = heal_orphans_on_panel_boot(sent_before=launched)
+        except Exception:
+            logging.getLogger(__name__).warning("boot orphan close failed", exc_info=True)
+            return
+        if not healed:
+            return
+        try:
+            from frontend.ui_web.agent_modes import notify_context_changed
+
+            for conv_id in dict.fromkeys(healed):
+                notify_context_changed(conv_id)
+        except Exception:
+            logging.getLogger(__name__).debug("healed-chat notify failed", exc_info=True)
+
+    threading.Thread(target=run, daemon=True, name="boot-orphan-heal").start()
 
 
 def list_changesets(*, conv_id: str = "", group_id: str = "", limit: int = 50, archived: bool = False) -> list[dict[str, Any]]:

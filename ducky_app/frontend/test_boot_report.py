@@ -146,3 +146,89 @@ def test_a_real_native_crash_is_reported_with_its_python_stack(crash, tmp_path: 
     assert "access violation" in body["error_log"].lower()
     assert "load_bad_plugin" in body["error_log"]
     assert "access violation" in boot_report.why_summary(body).lower()
+
+
+def _dump(current_at: int | None, threads: int = 30) -> str:
+    blocks = ["Windows fatal exception: access violation"]
+    for n in range(threads):
+        head = "Current thread" if n == current_at else "Thread"
+        frames = "\n".join(f'  File "backend\\worker_{n}.py", line {k} in step_{k}' for k in range(8))
+        blocks.append(f"{head} 0x{n:08x} (most recent call first):\n{frames}")
+    blocks.append('Thread 0x00000d50 (most recent call first):\n  File "launcher.py", line 408 in main')
+    return "\n\n".join(blocks) + "\n"
+
+
+def test_a_long_crash_dump_keeps_the_fault_line_and_the_crashing_thread() -> None:
+    text = boot_report.trim_native(_dump(current_at=2))
+    assert len(text) <= boot_report.NATIVE_MAX
+    assert text.startswith("Windows fatal exception: access violation")
+    assert "Current thread 0x00000002" in text and "worker_2.py" in text
+    assert text.rstrip().endswith('line 408 in main')
+    assert "more threads not shown" in text
+
+
+def test_a_crash_outside_python_threads_says_so() -> None:
+    text = boot_report.trim_native(_dump(current_at=None))
+    assert "runs no Python code" in text
+    assert text.splitlines()[0].startswith("(The crash was in a thread")
+
+
+def test_only_the_last_dump_of_a_launch_is_reported() -> None:
+    text = boot_report.trim_native(_dump(current_at=1, threads=2) + "\n" + _dump(current_at=0, threads=2))
+    assert "1 earlier exception in this launch not shown" in text
+    assert text.count("Windows fatal exception") == 1 and "Current thread 0x00000000" in text
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native crash path is Windows")
+def test_a_native_crash_in_a_worker_thread_is_named_even_with_many_threads(crash, tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(
+        f"""
+        import sys, ctypes, threading, time
+        sys.path.insert(0, {str(repo)!r})
+        from frontend import boot_report
+        boot_report.begin("1.2.361")
+        boot_report.stage("panel_api_init")
+        def a_busy_background_thread_with_a_long_name(depth):
+            if depth:
+                return a_busy_background_thread_with_a_long_name(depth - 1)
+            time.sleep(60)
+        for _ in range(24):
+            threading.Thread(target=a_busy_background_thread_with_a_long_name, args=(12,), daemon=True).start()
+        time.sleep(0.3)
+        def import_compiled_plugin_backend():
+            import faulthandler
+            faulthandler._read_null()  # a real crash: ctypes would turn an access violation into OSError
+        threading.Thread(target=import_compiled_plugin_backend).start()
+        time.sleep(30)
+        """
+    )
+    env = dict(os.environ, LOCALAPPDATA=str(tmp_path))
+    proc = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, timeout=90)
+    assert proc.returncode != 0
+    boot_report.begin("1.2.361")
+    body = crash["asked"][0]
+    log = body["error_log"]
+    assert len(log) <= boot_report.FIELD_MAX
+    assert "crashed while starting (last stage: panel_api_init)" in log
+    assert "Windows fatal exception: access violation" in log
+    assert "Current thread" in log and "import_compiled_plugin_backend" in log
+    assert "more threads not shown" in log
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="process check is Windows")
+def test_a_launch_that_is_still_starting_is_not_reported_as_a_crash(crash, tmp_path: Path) -> None:
+    slow = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        record = {"version": "1.2.361", "state": "starting", "pid": slow.pid, "started": 1.0, "stages": [["panel_api_init", 3.1]]}
+        folder = tmp_path / "UEFN-Ducky" / "crash"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "boot.json").write_text(json.dumps(record), encoding="utf-8")
+        boot_report.begin("1.2.361")  # opened again while the first one is still starting
+        assert crash["asked"] == []
+    finally:
+        slow.kill()
+        slow.wait()
+    (folder / "boot.json").write_text(json.dumps(record), encoding="utf-8")
+    boot_report.begin("1.2.361")  # that process is gone without finishing: now it is a crash
+    assert len(crash["asked"]) == 1

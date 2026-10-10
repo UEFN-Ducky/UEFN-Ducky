@@ -1102,6 +1102,73 @@ def test_a_normal_load_leaves_no_marker(monkeypatch, tmp_path) -> None:
         host._REGISTERED.discard("guarded")
 
 
+def test_pre_import_leaves_compiled_backends_to_the_guarded_load(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", True)
+    compiled: list[str] = []
+    monkeypatch.setattr(host, "_import_compiled_backend", lambda pid, root, manifest: compiled.append(pid))
+    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: None)
+
+    host._warm_plugin_backend("native", tmp_path, {"id": "native", "version": "1", "python_abi": host.PY_ABI})
+
+    assert compiled == []
+
+
+def test_pre_import_is_guarded_and_skips_a_plugin_that_crashed_ducky(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    _crash_marker(host, "broken", "3", 4242)
+    imported: list[str] = []
+
+    def fake_import(pid, root, entry):
+        assert list(host._markers_dir().glob(f"{pid}.*.json")), "marker missing while pre-importing"
+        imported.append(pid)
+
+    monkeypatch.setattr(host, "_import_backend", fake_import)
+
+    host._warm_plugin_backend("broken", tmp_path, {"id": "broken", "version": "3"})
+    host._warm_plugin_backend("fine", tmp_path, {"id": "fine", "version": "1"})
+
+    assert imported == ["fine"]
+    assert not list(host._markers_dir().glob("fine.*.json"))
+
+
+def test_first_load_reads_crash_markers_before_any_parallel_import(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
+
+    for pid in ("one", "two"):
+        folder = appdata_uefn_plugins_dir() / pid
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "plugin.json").write_text(json.dumps({"id": pid, "version": "1"}), encoding="utf-8")
+    monkeypatch.setattr(host, "get_enabled_plugin_ids", lambda: ["one", "two"])
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    monkeypatch.setattr(host, "_LOADED", False)
+    monkeypatch.setattr(host, "_UI_READY", False)
+    monkeypatch.setattr(host, "_load_one", lambda *a, **k: None)
+    monkeypatch.setattr(host, "_register_plugin_guarded", lambda *a: True)
+    monkeypatch.setattr(host, "_notify_uefn_plugins_changed", lambda: None)
+    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: None)
+    order: list[str] = []
+    real_promote = host._promote_dead_markers
+    monkeypatch.setattr(host, "_promote_dead_markers", lambda: (order.append("promote"), real_promote())[1])
+    real_begin = host._load_marker_begin
+    monkeypatch.setattr(host, "_load_marker_begin", lambda pid, version: (order.append(pid), real_begin(pid, version))[1])
+
+    host._run_first_plugin_load()
+
+    assert order and order[0] == "promote"
+    assert sorted(order[1:]).count("one") == 1 and "two" in order
+    assert not host.plugin_crashed_ducky("one", "1") and not host.plugin_crashed_ducky("two", "1")
+
+
 def _with_manifest(data: bytes, **fields) -> bytes:
     import io
     import zipfile

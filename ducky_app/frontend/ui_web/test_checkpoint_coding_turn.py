@@ -166,3 +166,17 @@ def test_heal_usage_orphaned_turn_when_calls_outran_transcript():
         assert last["incomplete"] is True
         assert last["error"] == KILLED_TURN_ERROR
         assert heal_usage_orphaned_turn(fresh, project_root=root) is False
+
+
+def test_boot_heal_leaves_a_turn_sent_since_launch_alone():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        conv = create_conversation(PanelSettings.load(), "", title="Live", project_root=root)
+        conv.messages = [{"role": "user", "text": "build it", "content": "build it", "ts": 110}]
+        conv.token_usage = {"calls": [{"ts": 120, "step": 1, "input_tokens": 100, "output_tokens": 8}]}
+        from frontend.ui_web.project_chats import heal_usage_orphaned_turns_for_project, save_conversation
+
+        save_conversation(conv, root)
+        assert heal_usage_orphaned_turns_for_project(root, sent_before=100) == []
+        assert load_conversation(conv.id, project_root=root).messages[-1]["role"] == "user"
+        assert heal_usage_orphaned_turns_for_project(root, sent_before=200) == [conv.id]

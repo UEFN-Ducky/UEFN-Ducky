@@ -19,6 +19,7 @@ import json
 import os
 import platform
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,50 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _still_running(pid: int) -> bool:
+    """True when *pid* is another Ducky process that is still running.
+
+    A launch still starting (slow, not crashed) leaves the same record as one that
+    crashed; opening Ducky again must not call it a crash."""
+    if pid <= 0 or pid == os.getpid():
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        kernel32.QueryFullProcessImageNameW.argtypes = (
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+        )
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:  # STILL_ACTIVE
+                return False
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return False
+            # A reused process id belongs to some other program.
+            return Path(buf.value).name.lower() == Path(sys.executable).name.lower()
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
 def _loading_plugins(process: int) -> list[str]:
     """Plugins the crashed process was loading (the crash guard's markers)."""
     folder = Path(_dir().parent) / "uefn_plugins" / ".loading"
@@ -93,6 +138,56 @@ def _loading_plugins(process: int) -> list[str]:
         if info.get("plugin"):
             out.append(f"{info.get('plugin')} {info.get('version') or ''}".strip())
     return out
+
+
+_FAULT_HEAD = re.compile(r"(?m)^(?:Windows fatal exception|Fatal Python error)")
+NATIVE_MAX = 5000
+_CRASHED_STACK_MAX = 2000  # the crashing thread: its top frames come first
+_OTHER_STACK_MAX = 1200
+
+
+def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
+    """The last crash dump in the native log, cut to about *limit* without losing what matters.
+
+    A dump is the fault line, then one stack per thread (newest thread first, the main
+    thread last). Cutting from the front dropped the fault line and the thread that
+    crashed, so the report could not say what crashed. Kept first: the fault line, the
+    crashing thread, the main thread; then other threads while they fit.
+    """
+    text = (native or "").strip()
+    starts = [m.start() for m in _FAULT_HEAD.finditer(text)]
+    earlier = max(0, len(starts) - 1)
+    if starts:
+        text = text[starts[-1]:]
+    note = f"({earlier} earlier exception{'s' if earlier != 1 else ''} in this launch not shown)" if earlier else ""
+    if starts and "\nCurrent thread " not in text:
+        # faulthandler marks the crashing thread "Current thread" when it runs Python.
+        note = (note + "\n" if note else "") + "(The crash was in a thread that runs no Python code: native code such as WebView2, .NET or a DLL.)"
+    if len(text) + len(note) <= limit:
+        return "\n\n".join(p for p in (note, text) if p)
+    blocks = [b.strip("\n") for b in text.split("\n\n") if b.strip()]
+
+    def cap(block: str, size: int) -> str:
+        return block if len(block) <= size else block[:size].rsplit("\n", 1)[0] + "\n  …"
+
+    crashed = {i for i, b in enumerate(blocks) if b.startswith("Current thread")}
+    kept: dict[int, str] = {0: cap(blocks[0], 400)}
+    for i in crashed:
+        kept[i] = cap(blocks[i], _CRASHED_STACK_MAX)
+    kept[len(blocks) - 1] = cap(blocks[-1], _OTHER_STACK_MAX)
+    budget = limit - len(note) - 40 - sum(len(b) + 2 for b in kept.values())
+    for i, block in enumerate(blocks):
+        if i in kept:
+            continue
+        piece = cap(block, _OTHER_STACK_MAX)
+        if len(piece) + 2 <= budget:
+            kept[i] = piece
+            budget -= len(piece) + 2
+    dropped = len(blocks) - len(kept)
+    out = [kept[i] for i in sorted(kept)]
+    if dropped:
+        out.insert(len(out) - 1, f"({dropped} more thread{'s' if dropped != 1 else ''} not shown)")
+    return "\n\n".join(([note] if note else []) + out)
 
 
 def build_report(previous: dict[str, Any], native: str) -> dict[str, str] | None:
@@ -123,7 +218,7 @@ def build_report(previous: dict[str, Any], native: str) -> dict[str, str] | None
     if previous.get("error"):
         lines += ["", "Error:", str(previous["error"])]
     if native:
-        lines += ["", "Crash traceback:", native[-5000:]]
+        lines += ["", "Crash traceback:", trim_native(native)]
     return {
         "formId": FORM_ID,
         "message": f"Crash report: {what}",
@@ -315,7 +410,8 @@ def begin(version: str) -> None:
         native = _native_path().read_text(encoding="utf-8", errors="replace")
     except OSError:
         native = ""
-    body = build_report(previous, native) if previous else None
+    alive = _still_running(int(previous.get("pid") or 0)) if previous else False
+    body = build_report(previous, native) if previous and not alive else None
     if body:
         # Clear the record first: if the pop-up itself fails, the next launch must not ask again.
         try:

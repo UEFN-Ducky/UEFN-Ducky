@@ -97,6 +97,30 @@ def test_close_orphan_runs_skips_live_and_closes_dead(env) -> None:
     assert journal.get_run("live", project_root=str(root))["status"] == "running"
 
 
+def test_close_orphan_runs_never_loads_finished_runs(env, monkeypatch) -> None:
+    from backend.workspace import journal as journal_mod
+
+    if not journal_mod._use_db():
+        pytest.skip("finished runs are only skipped cheaply in the database store")
+    root, storage, journal, writer, _ = env
+    for rid in ("old-1", "old-2", "dead"):
+        token = as_run(rid)
+        try:
+            writer.write_text(f"Content/Verse/{rid}.verse", f"{rid}\n")
+        finally:
+            identity.reset(token)
+    journal.end_run("old-1", "done", project_root=str(root))
+    journal.end_run("old-2", "done", project_root=str(root))
+    loaded: list[str] = []
+    real_load = journal._load_run
+    monkeypatch.setattr(journal, "_load_run", lambda st, rid: (loaded.append(rid), real_load(st, rid))[1])
+
+    closed = journal.close_orphan_runs(project_root=str(root), live_run_ids=set())
+
+    assert closed == [{"run_id": "dead", "conv_id": "conv-dead"}]
+    assert "old-1" not in loaded and "old-2" not in loaded
+
+
 def test_stale_base_conflict_is_flagged_not_denied(env) -> None:
     root, storage, journal, writer, _ = env
     seen: list[dict] = []

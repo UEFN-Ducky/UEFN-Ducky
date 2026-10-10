@@ -479,9 +479,17 @@ class FileChangeJournal:
         """
         closed: list[dict[str, Any]] = []
         live = set(live_run_ids)
-        for run in self.list_runs(project_root=project_root, limit=500):
+        if _use_db():
+            # Status is a column: no need to load (and parse) every run's entries.
+            storage = self._storage_for_root(project_root)
+            open_runs: list[dict[str, Any]] = _repo().runs_with_status(_pid(storage), tuple(sorted(_OPEN_STATUSES)))
+        else:
+            open_runs = [
+                run for run in self.list_runs(project_root=project_root, limit=500) if run.get("status") in _OPEN_STATUSES
+            ]
+        for run in open_runs:
             rid = str(run.get("run_id") or "")
-            if run.get("status") in _OPEN_STATUSES and rid and rid not in live:
+            if rid and rid not in live:
                 self.end_run(rid, STATUS_CANCELLED, project_root=project_root)
                 closed.append({"run_id": rid, "conv_id": str(run.get("conv_id") or "")})
         return closed

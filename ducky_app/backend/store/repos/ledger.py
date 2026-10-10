@@ -46,6 +46,18 @@ def run_get(project_id: str, run_id: str) -> dict[str, Any] | None:
     return None if row is None else _assemble(conn, row)
 
 
+def runs_with_status(project_id: str, statuses: tuple[str, ...]) -> list[dict[str, str]]:
+    """``{run_id, conv_id}`` of the runs in *statuses*, without loading their entries."""
+    if not statuses:
+        return []
+    marks = ",".join("?" * len(statuses))
+    rows = db.connect().execute(
+        f"SELECT run_id, conv_id FROM runs WHERE project_id=? AND status IN ({marks}) ORDER BY started DESC",  # noqa: S608 — placeholders only
+        (project_id, *statuses),
+    ).fetchall()
+    return [{"run_id": str(r["run_id"]), "conv_id": str(r["conv_id"])} for r in rows]
+
+
 def runs_docs(project_id: str) -> list[dict[str, Any]]:
     """Every run document in a project (the old ``glob('runs/*.json')``)."""
     conn = db.connect()
