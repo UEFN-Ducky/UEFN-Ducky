@@ -792,7 +792,14 @@ export function ChatPane({
     if (!visible || isPopup) return;
     const el = textareaRef.current;
     if (!el) return;
-    const measured = el.offsetHeight;
+    // The floor comes from the stylesheet, never from a height set here: re-measuring
+    // offsetHeight each time the tab showed again raised the floor to the current
+    // height, so after one expand the composer filled the pane and hid every message.
+    const inlineMin = el.style.minHeight;
+    el.style.minHeight = "";
+    const cssMin = parseFloat(getComputedStyle(el).minHeight);
+    el.style.minHeight = inlineMin;
+    const measured = cssMin > 0 ? cssMin : el.offsetHeight;
     if (measured > 0) {
       minTextareaHeight.current = measured;
       refreshMaxTextareaHeight();
