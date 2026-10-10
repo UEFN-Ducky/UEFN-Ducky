@@ -47,6 +47,7 @@ backend/store/
 | `secrets` | name PK, dpapi_blob | credentials.dat |
 | `conversations` | id, project_id, folder_id, title, sort_order, updated, profile_id, model, coding_agent, is_group, leader_conv_id, parent_conv_id, file_path, tool_call_count, file_count, state JSON | conversation.json minus messages |
 | `messages` | id, conv_id, seq, role, ts, run_id, text, blocks JSON, incomplete, error | conversation.json → messages[] |
+| `message_parts`, `message_part_refs` | hash PK, zlib data, size; (message_id, hash) | message fields of 8 KB or more (tool results, long replies), stored once; rows with `fmt` 1 point at them (0015) |
 | `message_fts` | FTS5(text, content=messages) | the title-only chat search |
 | `snapshots` | hash PK, kind, text | skill_snapshot, prompt_cache_snapshot, context_summary |
 | `folders`, `group_members`, `attachments` | | folders.json, roster, attachments/ |

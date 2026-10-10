@@ -20,6 +20,7 @@ TABLES: dict[str, tuple[str, str, str, bool]] = {
     "folders": ("Chat folders", "chats", "Sidebar folders per project.", False),
     "conversations": ("Conversations", "chats", "One row per chat; state JSON holds profile, model and context.", False),
     "messages": ("Messages", "chats", "Every turn, searchable by body text.", False),
+    "message_parts": ("Message payloads", "chats", "Large tool results and replies, stored once and compressed.", False),
     "snapshots": ("Prompt snapshots", "chats", "Deduplicated skill and context snapshots chats point at.", False),
     "settings": ("Settings", "settings", "One row per panel setting; absence means default.", False),
     "secrets": ("Secrets", "settings", "API keys and tokens, DPAPI-encrypted per row.", False),

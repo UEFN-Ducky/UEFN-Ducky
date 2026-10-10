@@ -150,6 +150,7 @@ def test_upgrade_from_previous_schema_does_not_deadlock(tmp_path: Path) -> None:
     )
     conn.execute("INSERT INTO plugin_kv VALUES ('demo', 'es', '{}', 0, 0)")
     conn.execute("ALTER TABLE projects DROP COLUMN kind")  # 0011 re-adds it
+    conn.execute("ALTER TABLE messages DROP COLUMN fmt")  # 0015 re-adds it
     conn.execute("PRAGMA user_version=8")
     db.reset_for_tests()
 

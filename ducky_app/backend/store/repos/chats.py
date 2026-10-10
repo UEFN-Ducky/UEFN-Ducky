@@ -4,16 +4,31 @@ The wire shape is unchanged: every function speaks the ``Conversation.to_dict()`
 document. Columns hold what lists and lookups need; ``state`` holds the rest as
 JSON; messages are one row each so an append or an in-flight checkpoint writes
 one row instead of the whole transcript.
+
+A message field of ``PART_MIN_CHARS`` or more (a tool result, tool arguments, a
+long reply) is stored once in ``message_parts``, compressed, and the row keeps
+a reference to it (``fmt`` 1). Reads put the fields back, so callers always see
+the message exactly as it was saved; rows written before that keep ``fmt`` 0.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
-from typing import Any
+import zlib
+from typing import Any, Callable
 
 from backend.store import db
+
+_log = logging.getLogger("uefn_ducky.store")
+
+# Message rows: the body is the message JSON, or an envelope whose large fields
+# live in message_parts.
+FMT_PLAIN = 0
+FMT_PARTS = 1
+PART_MIN_CHARS = 8 * 1024
 
 # Conversation.to_dict() keys that are real columns; everything else lives in ``state``.
 _COLUMNS = (
@@ -133,6 +148,129 @@ def _snapshot_text(conn, h: str) -> str:
     return str(row[0]) if row else ""
 
 
+# --------------------------------------------------------------------------- message parts
+
+
+def _split_parts(message: dict[str, Any]) -> tuple[dict[str, Any], list[list[Any]], dict[str, str]]:
+    """The message with its large fields set to None, where they were, and the fields.
+
+    Large means ``PART_MIN_CHARS`` or more of JSON: a top-level field, or one
+    field of a block (``blocks[i].result``), so a checkpoint that adds a tool
+    call stores only the new result and the earlier ones are shared.
+    """
+    refs: list[list[Any]] = []
+    parts: dict[str, str] = {}
+
+    def take(path: list[Any], value: Any) -> bool:
+        if value is None or isinstance(value, (bool, int, float)):
+            return False
+        # JSON turns every key into a string; only a field reached by string keys can be put back.
+        if not all(isinstance(step, str) for step in path[::2]):
+            return False
+        text = _dumps(value)
+        if len(text) < PART_MIN_CHARS:
+            return False
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        parts[digest] = text
+        refs.append([*path, digest])
+        return True
+
+    skeleton: dict[str, Any] = {}
+    for key, value in message.items():
+        if key == "blocks" and isinstance(value, list):
+            blocks: list[Any] = []
+            for i, block in enumerate(value):
+                if isinstance(block, dict):
+                    blocks.append({bk: (None if take(["blocks", i, bk], bv) else bv) for bk, bv in block.items()})
+                else:
+                    blocks.append(None if take(["blocks", i], block) else block)
+            skeleton[key] = blocks
+        else:
+            skeleton[key] = None if take([key], value) else value
+    return skeleton, refs, parts
+
+
+def _compact(message: Any, body: str) -> tuple[str, int, dict[str, str]]:
+    """(stored body, fmt, {part hash: part JSON}) for a message whose JSON is *body*.
+
+    The row hash stays the hash of the whole message JSON whichever way the
+    row is stored, so a later save compares rows of either kind the same way.
+    """
+    if not isinstance(message, dict) or len(body) < PART_MIN_CHARS:
+        return body, FMT_PLAIN, {}
+    skeleton, refs, parts = _split_parts(message)
+    if not refs:
+        return body, FMT_PLAIN, {}
+    return _dumps({"m": skeleton, "x": refs}), FMT_PARTS, parts
+
+
+def _decode_parts(envelope: Any, part_text: Callable[[str], str | None]) -> dict[str, Any]:
+    """Put the stored fields back into a ``fmt`` 1 body (see :func:`_split_parts`)."""
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("m"), dict):
+        raise ValueError("not a message envelope")
+    message = envelope["m"]
+    try:
+        for ref in envelope.get("x") or []:
+            *path, digest = ref
+            target: Any = message
+            for step in path[:-1]:
+                target = target[step]
+            text = part_text(str(digest))
+            if text is None:
+                # Never expected (a part goes only with its last ref); keep the rest of the message.
+                _log.warning("message part %s is missing; the field reads as empty", digest)
+                target[path[-1]] = None
+                continue
+            target[path[-1]] = json.loads(text)
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"bad message envelope: {exc}") from exc
+    return message
+
+
+def _write_parts(conn, message_id: int, parts: dict[str, str]) -> None:
+    """Point the row at exactly *parts*: store new ones, drop refs it no longer uses."""
+    old = {str(r[0]) for r in conn.execute("SELECT hash FROM message_part_refs WHERE message_id=?", (message_id,))}
+    for digest, text in parts.items():
+        if digest in old:
+            continue
+        if conn.execute("SELECT 1 FROM message_parts WHERE hash=?", (digest,)).fetchone() is None:
+            raw = text.encode("utf-8")
+            conn.execute(
+                "INSERT INTO message_parts(hash, data, size, created) VALUES (?, ?, ?, ?)",
+                (digest, zlib.compress(raw, 6), len(raw), time.time()),
+            )
+        conn.execute("INSERT INTO message_part_refs(message_id, hash) VALUES (?, ?)", (message_id, digest))
+    stale = old - parts.keys()
+    if stale:
+        conn.executemany(
+            "DELETE FROM message_part_refs WHERE message_id=? AND hash=?", [(message_id, d) for d in stale]
+        )
+
+
+def _conv_parts(conn, conv_id: str) -> Callable[[str], str | None]:
+    """Part JSON by hash for one chat, read in one query and inflated on first use."""
+    packed = {
+        str(h): bytes(data)
+        for h, data in conn.execute(
+            "SELECT hash, data FROM message_parts WHERE hash IN (SELECT r.hash FROM message_part_refs r "
+            "JOIN messages m ON m.id = r.message_id WHERE m.conv_id=?)",
+            (conv_id,),
+        )
+    }
+    inflated: dict[str, str] = {}
+
+    def part_text(digest: str) -> str | None:
+        text = inflated.get(digest)
+        if text is None and digest in packed:
+            try:
+                text = inflated[digest] = zlib.decompress(packed[digest]).decode("utf-8")
+            except (zlib.error, UnicodeDecodeError):
+                return None
+        return text
+
+    return part_text
+
+
 # --------------------------------------------------------------------------- conversations
 
 
@@ -250,14 +388,19 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
 
 
 def _sync_messages(conn, conv_id: str, messages: list[dict[str, Any]]) -> dict[str, int]:
-    existing = {int(r[0]): str(r[1]) for r in conn.execute("SELECT seq, hash FROM messages WHERE conv_id=?", (conv_id,))}
+    existing = {
+        int(r[0]): (str(r[1]), int(r[2]))
+        for r in conn.execute("SELECT seq, hash, id FROM messages WHERE conv_id=?", (conv_id,))
+    }
     inserted = updated = deleted = nbytes = 0
     for seq, message in enumerate(messages):
         body = _dumps(message)
         h = _hash(body)
-        if existing.get(seq) == h:
+        row = existing.get(seq)
+        if row is not None and row[0] == h:
             continue
         nbytes += len(body)
+        body, fmt, parts = _compact(message, body)
         params = (
             h,
             str(message.get("role") or "") if isinstance(message, dict) else "",
@@ -265,19 +408,25 @@ def _sync_messages(conn, conv_id: str, messages: list[dict[str, Any]]) -> dict[s
             str(message.get("run_id") or "") if isinstance(message, dict) else "",
             message_search_text(message) if isinstance(message, dict) else "",
             body,
+            fmt,
         )
-        if seq in existing:
+        if row is not None:
+            message_id = row[1]
             conn.execute(
-                "UPDATE messages SET hash=?, role=?, ts=?, run_id=?, text=?, body=? WHERE conv_id=? AND seq=?",
-                (*params, conv_id, seq),
+                "UPDATE messages SET hash=?, role=?, ts=?, run_id=?, text=?, body=?, fmt=? WHERE id=?",
+                (*params, message_id),
             )
             updated += 1
         else:
-            conn.execute(
-                "INSERT INTO messages(conv_id, seq, hash, role, ts, run_id, text, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            cur = conn.execute(
+                "INSERT INTO messages(conv_id, seq, hash, role, ts, run_id, text, body, fmt) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (conv_id, seq, *params),
             )
+            message_id = int(cur.lastrowid)
             inserted += 1
+        if parts or row is not None:
+            _write_parts(conn, message_id, parts)
     if len(existing) > len(messages):
         conn.execute("DELETE FROM messages WHERE conv_id=? AND seq>=?", (conv_id, len(messages)))
         deleted = len(existing) - len(messages)
@@ -285,11 +434,18 @@ def _sync_messages(conn, conv_id: str, messages: list[dict[str, Any]]) -> dict[s
 
 
 def messages_get(conv_id: str) -> list[dict[str, Any]]:
-    rows = db.connect().execute("SELECT body FROM messages WHERE conv_id=? ORDER BY seq", (conv_id,)).fetchall()
+    conn = db.connect()
+    rows = conn.execute("SELECT body, fmt FROM messages WHERE conv_id=? ORDER BY seq", (conv_id,)).fetchall()
+    part_text: Callable[[str], str | None] | None = None
     out: list[dict[str, Any]] = []
-    for (body,) in rows:
+    for body, fmt in rows:
         try:
-            out.append(json.loads(body))
+            if fmt == FMT_PARTS:
+                if part_text is None:
+                    part_text = _conv_parts(conn, conv_id)
+                out.append(_decode_parts(json.loads(body), part_text))
+            else:
+                out.append(json.loads(body))
         except ValueError:
             continue
     return out
