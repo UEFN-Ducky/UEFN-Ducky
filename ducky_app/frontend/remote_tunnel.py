@@ -31,6 +31,7 @@ _REGISTERED = "Registered tunnel connection"
 _STOP = threading.Event()
 _LOCK = threading.Lock()
 _THREAD: threading.Thread | None = None
+_PROC: subprocess.Popen[str] | None = None
 _STATUS: dict[str, Any] = {
     "running": False,
     "mode": "",
@@ -164,6 +165,7 @@ def _remove_tunnel() -> None:
 
 def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
     """Run until stop or exit. Returns last hostname seen on stderr."""
+    global _PROC
     hostname = ""
     tail: list[str] = []
     last_named_check = time.monotonic()
@@ -176,6 +178,8 @@ def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
         errors="replace",
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+    with _LOCK:
+        _PROC = proc
     try:
         assert proc.stdout is not None
         lines: queue.Queue[str | None] = queue.Queue()
@@ -232,6 +236,9 @@ def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
     finally:
         if proc.poll() is None:
             proc.kill()
+        with _LOCK:
+            if _PROC is proc:
+                _PROC = None
     if hostname:
         return hostname
     err = (tail[-1][:240] if tail else "tunnel exited")
@@ -359,6 +366,22 @@ def start_remote_tunnel() -> None:
         _STOP.clear()
         _THREAD = threading.Thread(target=_loop, daemon=True, name="ducky-remote-tunnel")
         _THREAD.start()
+
+
+def kill_cloudflared() -> None:
+    """App exit: end cloudflared now, without waiting for the tunnel thread.
+
+    Windows does not end a child with its parent, so an exit that skipped this
+    left cloudflared running and the site routing to a dead panel.
+    """
+    _STOP.set()
+    with _LOCK:
+        proc = _PROC
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 def stop_remote_tunnel(*, deprovision: bool = False) -> None:

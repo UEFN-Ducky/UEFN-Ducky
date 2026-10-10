@@ -56,6 +56,17 @@ def _stop_mcp_plugins() -> None:
         pass
 
 
+def _stop_remote_tunnel() -> None:
+    # Only a process that started the tunnel has the module loaded.
+    tunnel = sys.modules.get("frontend.remote_tunnel")
+    if tunnel is None:
+        return
+    try:
+        tunnel.kill_cloudflared()
+    except Exception:
+        pass
+
+
 def _stop_cpu_workers() -> None:
     from backend.workspace.diff_workers import shutdown
 
@@ -149,6 +160,7 @@ def hard_exit(*, api: Any = None) -> None:
     _stop_cpu_workers()
     _stop_all_terminals()
     _stop_mcp_plugins()
+    _stop_remote_tunnel()
     release_panel_process()
     if api is not None:
         _stop_tray(api)
