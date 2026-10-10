@@ -1,6 +1,5 @@
 import { useRef, type Dispatch, RefObject, SetStateAction } from "react";
 import { Icons } from "../../icons/Icons";
-import type { DropPosition } from "../../utils/sidebarTree";
 
 function splitFilename(name: string): { stem: string; ext: string } {
   const dot = name.lastIndexOf(".");
@@ -99,23 +98,6 @@ export function renameInputProps<T extends { value: string }>(
     className: "sidebar-rename-input",
   };
 }
-
-export function computeDropPosition(
-  clientY: number,
-  rect: DOMRect,
-  isBranch: boolean,
-): DropPosition {
-  const y = clientY - rect.top;
-  if (isBranch) {
-    if (y < rect.height * 0.25) return "before";
-    if (y > rect.height * 0.75) return "after";
-    return "inside";
-  }
-  return y < rect.height / 2 ? "before" : "after";
-}
-
-/** Keep rows planted while dragging — feedback is DragOverlay + drop lines/borders only. */
-export const SORTABLE_STATIC = { animateLayoutChanges: () => false } as const;
 
 export function SidebarHoverActions({
   onRename,

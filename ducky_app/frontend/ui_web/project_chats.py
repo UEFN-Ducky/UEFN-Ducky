@@ -1813,51 +1813,101 @@ def apply_sidebar_layout(
     folders: list[dict[str, Any]],
     chats: list[dict[str, Any]],
     project_root: str | None = None,
-) -> None:
-    """Persist folder tree order/nesting and chat positions."""
+) -> int:
+    """Persist one project's folder order/nesting and chat positions.
+
+    A window can show a stale tree: another window or an agent deleted a chat or a
+    group, or moved it to another island. Rows for ids this project no longer has are
+    skipped (never created), and a layout never moves a chat into or out of Archive —
+    that is move_conversation's job — so a stale save can't bring anything back.
+    Returns how many rows were skipped.
+    """
+    folder_updates = {
+        str(row.get("id", "")): row for row in folders if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    chat_updates = {
+        str(row.get("id", "")): row for row in chats if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    skipped = 0
+
     current_folders = load_folders(project_root)
     by_folder_id = _folder_by_id(current_folders)
-
-    folder_updates = {str(row.get("id", "")): row for row in folders if isinstance(row, dict) and row.get("id")}
+    changed: dict[str, tuple[str, float]] = {}
     for folder_id, row in folder_updates.items():
-        if folder_id not in by_folder_id:
-            raise ValueError(f"Unknown folder: {folder_id}")
-        if is_archive_folder_id(folder_id):
-            raise ValueError("Cannot reorder or reparent the Archive folder")
-
-    for folder in current_folders:
-        if is_archive_folder_id(folder.id):
-            continue
-        row = folder_updates.get(folder.id)
-        if not row:
+        folder = by_folder_id.get(folder_id)
+        if folder is None or is_archive_folder_id(folder_id):
+            skipped += 1
             continue
         parent_id = str(row.get("parent_id", "") or "")
-        if is_archive_folder_id(parent_id):
-            raise ValueError("Cannot nest folders under Archive")
-        if parent_id and parent_id not in by_folder_id:
-            raise ValueError(f"Unknown parent folder: {parent_id}")
+        if parent_id and (parent_id not in by_folder_id or is_archive_folder_id(parent_id)):
+            skipped += 1
+            continue
         if _would_create_cycle(current_folders, folder.id, parent_id):
-            raise ValueError(f"Cannot reparent {folder.id}: cycle detected")
+            skipped += 1
+            continue
+        try:
+            sort_order = float(row.get("sort_order", folder.sort_order))
+        except (TypeError, ValueError):
+            sort_order = folder.sort_order
+        if (folder.parent_id or "") == parent_id and folder.sort_order == sort_order:
+            continue
         folder.parent_id = parent_id
-        folder.sort_order = float(row.get("sort_order", folder.sort_order))
+        folder.sort_order = sort_order
+        changed[folder.id] = (parent_id, sort_order)
 
-    save_folders(current_folders, project_root)
+    if changed:
+        # Re-read right before writing: a folder deleted meanwhile stays deleted, and
+        # folders this layout did not touch keep whatever they have now.
+        latest = load_folders(project_root)
+        latest_ids = {folder.id for folder in latest}
+        for folder in latest:
+            update = changed.get(folder.id)
+            if update is None:
+                continue
+            parent_id, sort_order = update
+            if parent_id and parent_id not in latest_ids:
+                continue
+            if _would_create_cycle(latest, folder.id, parent_id):
+                continue
+            folder.parent_id = parent_id
+            folder.sort_order = sort_order
+        save_folders(latest, project_root)
+        by_folder_id = _folder_by_id(latest)
 
-    chat_updates = {str(row.get("id", "")): row for row in chats if isinstance(row, dict) and row.get("id")}
     if chat_updates:
         all_convs = _load_all_conversations(project_root, include_messages=not _use_db())
         by_conv_id = {c.id: c for c in all_convs}
+        here = _project_id(project_root)
         for conv_id, row in chat_updates.items():
             conv = by_conv_id.get(conv_id)
             if conv is None:
-                raise ValueError(f"Unknown conversation: {conv_id}")
-            folder_id = str(row.get("folder_id", conv.folder_id) or "")
+                skipped += 1
+                continue
+            current_folder = conv.folder_id or ""
+            folder_id = str(row.get("folder_id", current_folder) or "")
+            if is_archive_folder_id(current_folder) or is_archive_folder_id(folder_id):
+                if folder_id != current_folder:
+                    skipped += 1
+                continue
             if folder_id and folder_id not in by_folder_id:
-                raise ValueError(f"Unknown folder for chat: {folder_id}")
+                skipped += 1
+                continue
+            try:
+                sort_order = float(row.get("sort_order", conv.sort_order))
+            except (TypeError, ValueError):
+                sort_order = conv.sort_order
+            if current_folder == folder_id and conv.sort_order == sort_order:
+                continue
+            # Deleted (or moved to another island) since the list above: saving the
+            # copy we hold would bring it back.
+            if conversation_project_slug(conv_id, project_root) != here:
+                skipped += 1
+                continue
             conv.folder_id = folder_id
-            conv.sort_order = float(row.get("sort_order", conv.sort_order))
+            conv.sort_order = sort_order
             save_conversation(conv, project_root, touch_updated=False)
 
     from frontend.ui_web.group_orchestrator import reconcile_group_rosters_from_folders
 
     reconcile_group_rosters_from_folders(project_root)
+    return skipped

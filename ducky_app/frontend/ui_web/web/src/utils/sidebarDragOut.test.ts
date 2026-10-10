@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { classifySidebarDragOut, type SidebarDragPoint } from "./sidebarDragOut";
+import { classifySidebarDragOut, editorDropForTreeDrag, type SidebarDragPoint } from "./sidebarDragOut";
 
 /** classifySidebarDragOut reads `window`/`document` at call time, so the node
  * test env just needs these globals stubbed before each call. */
@@ -169,5 +169,36 @@ describe("classifySidebarDragOut", () => {
     stubWindow();
     stubDom({ leftRail: { left: 0, right: 240 }, editorGroup: defaultEditor });
     expect(classifySidebarDragOut(point({}))).toBeNull();
+  });
+});
+
+describe("tree drags over the editor", () => {
+  const treeRoot = {
+    getBoundingClientRect: () => ({ left: 0, right: 240, top: 0, bottom: 800, width: 240, height: 800 }),
+  } as unknown as Element;
+
+  it("shows no editor drop while the pointer is still inside the tree", () => {
+    stubWindow();
+    stubDom({ leftRail: null, editorGroup: { ...defaultEditor, left: 0 } });
+    expect(editorDropForTreeDrag(point({ clientX: 100, clientY: 400 }), treeRoot)).toBeNull();
+  });
+
+  it("shows no editor drop over a dock rail or over chrome away from the panes", () => {
+    stubWindow();
+    stubDom({ leftRail: { left: 0, right: 240 }, rightRail: { left: 960, right: 1200 }, editorGroup: defaultEditor });
+    expect(editorDropForTreeDrag(point({ clientX: 1000, clientY: 400 }), treeRoot)).toBeNull();
+    expect(editorDropForTreeDrag(point({ clientX: 600, clientY: 795 }), treeRoot)).toBeNull();
+  });
+
+  it("targets the editor pane only when the pointer is on it", () => {
+    stubWindow();
+    stubDom({ leftRail: { left: 0, right: 240 }, editorGroup: defaultEditor });
+    expect(editorDropForTreeDrag(point({ clientX: 580, clientY: 400 }), treeRoot)).toEqual({ groupId: "g1", zone: "center" });
+  });
+
+  it("a drop on chrome far from every editor pane is not an editor drop", () => {
+    stubWindow();
+    stubDom({ leftRail: { left: 0, right: 240 }, editorGroup: defaultEditor });
+    expect(classifySidebarDragOut(point({ clientX: 1100, clientY: 400 }))).toBeNull();
   });
 });

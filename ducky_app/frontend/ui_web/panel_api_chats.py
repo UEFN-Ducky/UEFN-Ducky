@@ -6,6 +6,9 @@ from typing import Any
 
 import frontend.ui_web.panel_api as _pa
 
+# Duckies made with no island open (the Global Agents folder).
+GLOBAL_SLUG = "_no_project"
+
 
 def _sync_composer_selection(conv_id: str, model: str, coding_agent: str = "") -> None:
     """Apply the composer's model + backend to the chat before a turn starts.
@@ -75,14 +78,21 @@ class PanelApiChatsMixin:
         _pa.ensure_group_folder_hubs()
         if not all_projects:
             rows = [self._folder_sidebar_row(f) for f in _pa.load_folders()]
-            # Duckies made with no island stay visible on every island.
+            # Duckies made with no island stay visible on every island, tagged so the
+            # tree shows them in the Global Agents folder.
             if self._on_outside_project():
                 return rows
             seen = {str(row.get("id") or "") for row in rows}
             for folder in _pa.load_folders(""):
                 if folder.id in seen:
                     continue
-                rows.append(self._folder_sidebar_row(folder))
+                rows.append(
+                    self._folder_sidebar_row(
+                        folder,
+                        project_slug=GLOBAL_SLUG,
+                        project_name=_pa.project_slug_display_name(GLOBAL_SLUG),
+                    )
+                )
             return rows
         rows: list[dict[str, str | float]] = []
         for slug, folders in _pa.iter_folders_by_project():
@@ -103,13 +113,22 @@ class PanelApiChatsMixin:
         """All project chats in one call (metadata only) for sidebar grouping."""
         if not all_projects:
             convs = list(_pa.list_all_conversation_metadata())
+            outside: list[Any] = []
             if not self._on_outside_project():
                 seen = {c.id for c in convs}
-                for conv in _pa.list_all_conversation_metadata(""):
-                    if conv.id not in seen:
-                        convs.append(conv)
-            group_ids = {c.id for c in convs if getattr(c, "is_group", False)}
-            return [self._conversation_sidebar_row(c, group_ids=group_ids) for c in convs]
+                outside = [conv for conv in _pa.list_all_conversation_metadata("") if conv.id not in seen]
+            group_ids = {c.id for c in [*convs, *outside] if getattr(c, "is_group", False)}
+            global_name = _pa.project_slug_display_name(GLOBAL_SLUG)
+            return [
+                *(self._conversation_sidebar_row(c, group_ids=group_ids) for c in convs),
+                # No-island duckies: the Global Agents folder on every island.
+                *(
+                    self._conversation_sidebar_row(
+                        c, group_ids=group_ids, project_slug=GLOBAL_SLUG, project_name=global_name
+                    )
+                    for c in outside
+                ),
+            ]
         tagged = list(_pa.iter_conversations_by_project())
         group_ids = {c.id for _, c in tagged if getattr(c, "is_group", False)}
         return [
@@ -213,6 +232,7 @@ class PanelApiChatsMixin:
         # Stop runners that are about to leave the active tree.
         scope = _pa.folder_subtree_ids(folder_id) if archive_members else [folder_id]
         hub_ids = _pa.group_hub_ids_in(scope)
+        archived: list[str] = []
         if hub_ids:
             from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
 
@@ -220,10 +240,18 @@ class PanelApiChatsMixin:
                 targets = [hub_id]
                 if archive_members:
                     targets.extend(_pa.conversation_descendant_ids(hub_id))
+                archived.extend(targets)
                 for target_id in targets:
                     if is_agent_running(target_id):
                         _pa.cancel_agent(target_id)
-        return _pa.delete_folder(folder_id, archive_members=bool(archive_members))
+        removed = _pa.delete_folder(folder_id, archive_members=bool(archive_members))
+        # Every open window drops the group (and what went with it) right away.
+        _pa.notify_chats_changed(
+            open_tab=False,
+            removed_conv_ids=[*removed, *archived],
+            removed_folder_ids=scope or [folder_id],
+        )
+        return removed
 
     def create_conversation(
         self,
@@ -369,31 +397,48 @@ class PanelApiChatsMixin:
         )
         return {"ok": True}
 
-    def group_create(self, name: str = "", folder_id: str = "", open_tab: bool = True) -> dict[str, Any]:
-        """Create a group as a folder: folder click opens the group hub chat."""
+    def group_create(
+        self,
+        name: str = "",
+        folder_id: str = "",
+        open_tab: bool = True,
+        project_slug: str = "",
+    ) -> dict[str, Any]:
+        """Create a group as a folder: folder click opens the group hub chat.
+
+        ``project_slug`` makes it on another island, or in Global Agents
+        (``_no_project``); empty keeps the open island.
+        """
         title = (name or "").strip() or "Group"
         settings = _pa.PanelSettings.load()
+        project_root: str | None = None
+        target_slug = (project_slug or "").strip()
+        if target_slug:
+            from frontend.ui_web.project_chats import create_project_root
+
+            project_root = create_project_root(target_slug, settings.uefn_project_root or "")
         # Parent folder_id here means "create the group-folder inside this folder".
         parent_folder = (folder_id or "").strip()
-        hub_folder = _pa.create_folder(title, parent_folder)
+        hub_folder = _pa.create_folder(title, parent_folder, project_root)
         conv = _pa.create_conversation(
             settings,
             hub_folder.id,
             title=title,
             ducky_style=_pa.default_bundled_style(),
             ducky_name="Group",
+            project_root=project_root,
         )
         conv.is_group = True
         conv.leader_conv_id = ""
         conv.group_members = []
-        _pa.save_conversation(conv)
+        _pa.save_conversation(conv, project_root)
         # Link folder → hub so the sidebar treats the folder as the group.
-        folders = _pa.load_folders()
+        folders = _pa.load_folders(project_root)
         for f in folders:
             if f.id == hub_folder.id:
                 f.group_hub_id = conv.id
                 break
-        _pa.save_folders(folders)
+        _pa.save_folders(folders, project_root)
         _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, open_tab=bool(open_tab))
         return {
             "ok": True,
@@ -1309,28 +1354,55 @@ class PanelApiChatsMixin:
         _pa.notify_chats_changed(open_tab=False)
 
     def move_conversation(self, conv_id: str, folder_id: str) -> None:
-        if _pa.is_archive_folder_id(folder_id):
+        archiving = _pa.is_archive_folder_id(folder_id)
+        leaving: list[str] = []
+        if archiving:
             from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
 
-            for target_id in [conv_id, *_pa.conversation_descendant_ids(conv_id)]:
+            leaving = [conv_id, *_pa.conversation_descendant_ids(conv_id)]
+            for target_id in leaving:
                 if is_agent_running(target_id):
                     _pa.cancel_agent(target_id)
         _pa.move_conversation(conv_id, folder_id or "")
+        # Archived chats leave every open window's tree at once; a restore reloads them.
+        _pa.notify_chats_changed(open_tab=False, removed_conv_ids=leaving)
 
     def delete_conversation(self, conv_id: str) -> None:
         from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
 
-        for target_id in [conv_id, *_pa.conversation_descendant_ids(conv_id)]:
+        doomed = [conv_id, *_pa.conversation_descendant_ids(conv_id)]
+        for target_id in doomed:
             if is_agent_running(target_id):
                 _pa.cancel_agent(target_id)
         _pa.delete_conversation(conv_id)
+        _pa.notify_chats_changed(open_tab=False, removed_conv_ids=doomed)
+
+    @staticmethod
+    def _layout_project_root(slug: str) -> str | None:
+        """Where a layout for this project is saved. None: the open island."""
+        from frontend.ui_web.project_chats import project_root_for_slug, project_slug
+
+        wanted = (slug or "").strip()
+        if not wanted:
+            return None
+        current = getattr(_pa.PanelSettings.load(), "uefn_project_root", "") or ""
+        if project_slug(current) == wanted:
+            return None
+        if wanted == GLOBAL_SLUG:
+            return ""
+        root = project_root_for_slug(wanted)
+        if root is None:
+            raise ValueError(f"Unknown project: {wanted}")
+        return root
 
     def apply_sidebar_layout(self, payload: dict[str, Any]) -> None:
         folders = payload.get("folders")
         chats = payload.get("chats")
         if not isinstance(folders, list) or not isinstance(chats, list):
             raise ValueError("layout payload must include folders and chats arrays")
-        _pa.apply_sidebar_layout(folders=folders, chats=chats)
+        project_root = self._layout_project_root(str(payload.get("project_slug") or ""))
+        # Unknown ids (deleted elsewhere) are skipped, never re-created.
+        _pa.apply_sidebar_layout(folders=folders, chats=chats, project_root=project_root)
         # Drag in/out of a group folder is a roster change — refresh IN THIS CHAT
         # after disk is saved (the optimistic tree is too early to fetch against).
         _pa.notify_chats_changed(open_tab=False)

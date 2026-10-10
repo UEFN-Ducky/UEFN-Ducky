@@ -49,7 +49,7 @@ import { SidebarPanelTabs } from "./sidebar/SidebarPanelTabs";
 import type { DockDropTarget } from "../utils/dockPanelDrag";
 import { insertIndexForTabDrop } from "../workspace/dockTabInsertIndex";
 import { DuckyArchiveDropdown } from "./sidebar/DuckyArchiveDropdown";
-import { openLibraryAgent } from "./sidebar/GlobalAgentsSection";
+import { openLibraryAgent } from "./sidebar/openLibraryAgent";
 import { ContextMenu, useContextMenuState } from "./ContextMenu";
 import { formatSelectionBadge } from "../utils/fileTreeSelection";
 import { numberedEntryName } from "../utils/numberedEntryName";
@@ -67,12 +67,16 @@ import {
   expandFoldersById,
   findChatAncestorFolderIds,
   findFolderById,
-  folderIdForCreate,
   foldersToAutoExpand,
   insertChatFolder,
+  isProjectFolderId,
   maxExpandedFolderDepth,
+  projectFolderId,
   toggleChatFolderLevels,
 } from "../utils/sidebarTree";
+import { duckiesCreateTarget, removeFromDuckies } from "../utils/duckiesTreeModel";
+import { duckiesLayoutHold } from "../utils/duckiesLayoutHold";
+import { keepTreeFocus } from "../tree-dnd/treeFocus";
 import {
   readDuckiesAllProjects,
   readDuckiesGlobalAgents,
@@ -260,7 +264,6 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     rootChats,
     setRootChats,
     archiveChats,
-    setArchiveChats,
     load,
     onChatSelect,
     onChatOpenPermanent,
@@ -353,9 +356,13 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       : legacyStackedLayout;
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
+  const rootChatsRef = useRef(rootChats);
+  rootChatsRef.current = rootChats;
   const groupCreateQueueRef = useRef<{ chain: Promise<void> }>({ chain: Promise.resolve() });
 
-  const createFolderId = folderIdForCreate(selectedChatFolderId ?? "", projectSlug, folders);
+  const createTarget = duckiesCreateTarget(selectedChatFolderId ?? "", projectSlug, folders);
+  const createFolderId = createTarget.projectSlug ? "" : createTarget.folderId;
+  const createProjectSlug = createTarget.projectSlug;
   const { createDucky } = useCreateDucky({
     folders,
     rootChats,
@@ -587,7 +594,11 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
 
   const createChatFlow = useCallback(async () => {
     if (onRequestCreateDucky) {
-      onRequestCreateDucky({ folderId: createFolderId });
+      onRequestCreateDucky(
+        createProjectSlug
+          ? { folderId: createTarget.folderId, projectSlug: createProjectSlug }
+          : { folderId: createFolderId },
+      );
       return;
     }
     const created = await createDucky();
@@ -595,28 +606,35 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       markNew("chat", created.id);
       setEditing({ kind: "chat", id: created.id, value: created.name });
     }
-  }, [createDucky, createFolderId, markNew, onRequestCreateDucky]);
+  }, [createDucky, createFolderId, createProjectSlug, createTarget.folderId, markNew, onRequestCreateDucky]);
 
   const createGroup = useCallback(
-    async (parentId: string) => {
+    async (parentId: string, targetSlug?: string) => {
       const api = getApi();
       if (!api?.group_create) return;
-      const siblings = chatFolderSiblingNames(foldersRef.current, parentId);
+      // A group in Global Agents or another island sits under that project row.
+      const slug = targetSlug || projectSlug;
+      const insertParent =
+        parentId || (findFolderById(foldersRef.current, projectFolderId(slug)) ? projectFolderId(slug) : "");
+      const siblings = chatFolderSiblingNames(foldersRef.current, insertParent);
       const name = numberedEntryName("Group", siblings);
-      const res = await api.group_create(name, parentId);
+      const res = targetSlug && targetSlug !== projectSlug
+        ? await api.group_create(name, parentId, true, targetSlug)
+        : await api.group_create(name, parentId);
       if (!res?.ok || !res.id) return;
       const folderId = String((res as { folder_id?: string }).folder_id || "").trim();
       const title = res.title || name;
       if (folderId) {
         // Show the row straight away — load() below only reconciles it, so the
         // group no longer waits on two extra bridge round-trips to appear.
-        const next = insertChatFolder(foldersRef.current, parentId, {
+        const next = insertChatFolder(foldersRef.current, insertParent, {
           id: folderId,
           name: title,
           expanded: true,
           chats: [],
           children: [],
           groupHubId: res.id,
+          ...(targetSlug ? { projectSlug: targetSlug } : {}),
         });
         foldersRef.current = next;
         setFolders(next);
@@ -641,20 +659,18 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       else setEditing({ kind: "chat", id: res.id, value: title });
       void load();
     },
-    [load, markNew, onChatSelect, setFolders],
+    [load, markNew, onChatSelect, projectSlug, setFolders],
   );
 
   const createGroupFlow = useCallback(
-    (folderId?: string) => {
-      const parentId = folderIdForCreate(
-        folderId ?? selectedChatFolderId ?? "",
-        projectSlug,
-        foldersRef.current,
-      );
+    (folderId?: string, targetSlug?: string) => {
+      const target = targetSlug
+        ? { folderId: folderId ?? "", projectSlug: targetSlug }
+        : duckiesCreateTarget(folderId ?? selectedChatFolderId ?? "", projectSlug, foldersRef.current);
       // Serialized: each create names itself from the tree the previous one left,
       // instead of every click in a fast burst racing to the same "Group1".
       const queue = groupCreateQueueRef.current;
-      queue.chain = queue.chain.then(() => createGroup(parentId)).catch(() => undefined);
+      queue.chain = queue.chain.then(() => createGroup(target.folderId, target.projectSlug)).catch(() => undefined);
       return queue.chain;
     },
     [createGroup, projectSlug, selectedChatFolderId],
@@ -874,21 +890,45 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isSidebarOpen, hotkeyPanel, renameDuckySelection]);
 
+  const renameDuckyRow = async (kind: "folder" | "chat", id: string, name: string) => {
+    const api = getApi();
+    if (!api) return;
+    if (kind === "folder") {
+      await api.rename_folder(id, name);
+    } else {
+      await api.rename_conversation(id, name);
+      onChatRenamed?.(id, name);
+    }
+    void load();
+  };
+
   const commitRename = async () => {
     if (!editing) return;
-    const api = getApi();
     const next = editing.value.trim();
     const target = editing;
     setEditing(null);
-    if (!api || !next) return;
+    if (!getApi() || !next) return;
+    const before =
+      target.kind === "folder"
+        ? findFolderById(foldersRef.current, target.id)?.name ?? ""
+        : chatNameById(foldersRef.current, rootChatsRef.current, target.id) ?? "";
+    await renameDuckyRow(target.kind, target.id, next);
+    keepTreeFocus("chats");
+    if (!before || before === next) return;
+    undoHistory?.push("chats", {
+      label: `Rename ${before}`,
+      undo: () => renameDuckyRow(target.kind, target.id, before),
+      redo: () => renameDuckyRow(target.kind, target.id, next),
+    });
+  };
 
-    if (target.kind === "folder") {
-      await api.rename_folder(target.id, next);
-    } else {
-      await api.rename_conversation(target.id, next);
-      onChatRenamed?.(target.id, next);
-    }
-    void load();
+  /** Rows leave the tree the moment they are deleted, before the host answers. */
+  const pruneDuckies = (removal: Parameters<typeof removeFromDuckies>[1]) => {
+    const next = removeFromDuckies({ folders: foldersRef.current, rootChats: rootChatsRef.current }, removal);
+    foldersRef.current = next.folders;
+    rootChatsRef.current = next.rootChats;
+    setFolders(next.folders);
+    setRootChats(next.rootChats);
   };
 
   const cancelRename = () => setEditing(null);
@@ -897,12 +937,20 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     const api = getApi();
     if (!api) return;
     // Remember where it lived so Ctrl+Z returns it there, not just to the root.
-    const ancestors = findChatAncestorFolderIds(foldersRef.current, rootChats, chatId);
-    const prevFolderId = ancestors.length ? ancestors[ancestors.length - 1] : "";
-    await api.move_conversation(chatId, ARCHIVE_FOLDER_ID);
+    const ancestors = findChatAncestorFolderIds(foldersRef.current, rootChatsRef.current, chatId);
+    const lastAncestor = ancestors.length ? ancestors[ancestors.length - 1] : "";
+    const prevFolderId = isProjectFolderId(lastAncestor) ? "" : lastAncestor;
+    const release = duckiesLayoutHold.hold();
+    pruneDuckies({ chatIds: [chatId] });
+    try {
+      await api.move_conversation(chatId, ARCHIVE_FOLDER_ID);
+    } finally {
+      release();
+    }
     onChatDeleted?.(chatId);
+    keepTreeFocus("chats");
     void load();
-    undoHistory?.push({
+    undoHistory?.push("chats", {
       label: `Archive ${chatName}`,
       undo: async () => {
         const a = getApi();
@@ -1001,8 +1049,16 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     }
     const api = getApi();
     if (!api) return;
-    const deletedHubIds = await api.delete_folder(folderId, archiveMembers);
-    for (const id of deletedHubIds ?? []) onChatDeleted?.(id);
+    const release = duckiesLayoutHold.hold();
+    pruneDuckies({ folderIds: [folderId], chatIds: hubId ? [hubId] : [], keepContents: !archiveMembers });
+    let deletedHubIds: string[] = [];
+    try {
+      deletedHubIds = (await api.delete_folder(folderId, archiveMembers)) ?? [];
+    } finally {
+      release();
+    }
+    for (const id of deletedHubIds) onChatDeleted?.(id);
+    keepTreeFocus("chats");
     void load();
   };
 
@@ -1036,26 +1092,38 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
     }
     const api = getApi();
     if (!api) return false;
-    for (const chat of chats) {
-      await api.move_conversation(chat.id, ARCHIVE_FOLDER_ID);
-      onChatDeleted?.(chat.id);
-    }
+    const release = duckiesLayoutHold.hold();
+    const foldersBefore = foldersRef.current;
+    pruneDuckies({
+      chatIds: chats.map((chat) => chat.id),
+      folderIds: groups.map((group) => group.id),
+      keepContents: !archiveMembers,
+    });
     const groupIds = new Set(groups.map((g) => g.id));
     const hasSelectedAncestor = (id: string) => {
-      let parentId = findFolderById(foldersRef.current, id)?.parentId || "";
+      let parentId = findFolderById(foldersBefore, id)?.parentId || "";
       while (parentId) {
         if (groupIds.has(parentId)) return true;
-        parentId = findFolderById(foldersRef.current, parentId)?.parentId || "";
+        parentId = findFolderById(foldersBefore, parentId)?.parentId || "";
       }
       return false;
     };
-    for (const group of groups) {
-      if (!findFolderById(foldersRef.current, group.id)) continue;
-      // "Group and duckies" removes the nested groups with their parent.
-      if (archiveMembers && hasSelectedAncestor(group.id)) continue;
-      const deletedHubIds = await api.delete_folder(group.id, archiveMembers);
-      for (const id of deletedHubIds ?? []) onChatDeleted?.(id);
+    try {
+      for (const chat of chats) {
+        await api.move_conversation(chat.id, ARCHIVE_FOLDER_ID);
+        onChatDeleted?.(chat.id);
+      }
+      for (const group of groups) {
+        if (!findFolderById(foldersBefore, group.id)) continue;
+        // "Group and duckies" removes the nested groups with their parent.
+        if (archiveMembers && hasSelectedAncestor(group.id)) continue;
+        const deletedHubIds = await api.delete_folder(group.id, archiveMembers);
+        for (const id of deletedHubIds ?? []) onChatDeleted?.(id);
+      }
+    } finally {
+      release();
     }
+    keepTreeFocus("chats");
     void load();
     return true;
   };
@@ -1192,7 +1260,6 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
             rootChats={rootChats}
             setRootChats={setRootChats}
             archiveChats={archiveChats}
-            setArchiveChats={setArchiveChats}
             load={load}
             activeChats={activeChats}
             runningChatIds={runningChatIds}
@@ -1216,10 +1283,10 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
             onSelectChatFolder={handleSelectChatFolder}
             onCreateDucky={createChatFlow}
             onCreateGroup={createGroupFlow}
-            onCreateInProject={(slug) => {
+            onCreateInProject={(slug, folderId) => {
               if (onRequestCreateDucky) {
                 onRequestCreateDucky({
-                  folderId: "",
+                  folderId: folderId ?? "",
                   projectSlug: slug && slug !== projectSlug ? slug : undefined,
                 });
                 return;
@@ -1614,7 +1681,6 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
             route: "chat",
           })}
           className={`sidebar-panel-content ${panelHidden("chats")}`}
-          data-undo-scope="chats"
         >
           <CtrlWheelZoomRoot className={bodyClassName} storageKey={sidebarPanelZoomKey("chats")}>
             {duckiesHeaderMenu ? (

@@ -4,7 +4,9 @@ import { getApi } from "./usePanelApi";
 import { onApiReady } from "./onApiReady";
 import { ARCHIVE_FOLDER_ID, isArchiveFolderId } from "../utils/archiveFolder";
 import { readDuckiesAllProjects } from "../utils/duckiesTreePrefs";
-import { buildFolderTree, wrapProjectsAsFolders } from "../utils/sidebarTree";
+import { buildFolderTree, GLOBAL_PROJECT_SLUG, wrapProjectsAsFolders } from "../utils/sidebarTree";
+import { duckiesLayoutHold } from "../utils/duckiesLayoutHold";
+import { removeFromDuckies } from "../utils/duckiesTreeModel";
 
 type ConvRow = Awaited<ReturnType<NonNullable<ReturnType<typeof getApi>>["list_all_conversations"]>>[number];
 
@@ -124,11 +126,19 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
   const [foldersLoaded, setFoldersLoaded] = useState(false);
   const foldersRef = useRef(folders);
   foldersRef.current = folders;
+  const rootChatsRef = useRef(rootChats);
+  rootChatsRef.current = rootChats;
+  // Only the newest load paints, and never while a move or delete is being saved:
+  // a slow, older answer must not put back a row that was just moved or deleted.
+  const loadSeqRef = useRef(0);
 
   const load = useCallback(async () => {
     const api = getApi();
     // A bridge still starting is not an empty library. onApiReady retries the load.
     if (!api) return;
+    const seq = ++loadSeqRef.current;
+    const epoch = duckiesLayoutHold.epoch();
+    const stale = () => seq !== loadSeqRef.current || duckiesLayoutHold.held() || duckiesLayoutHold.epoch() !== epoch;
     const allProjects = readDuckiesAllProjects();
     const [folderRows, allConvs] = await Promise.all([
       api.list_folders(allProjects).then((rows) => (Array.isArray(rows) ? rows : []).filter((f) => !isArchiveFolderId(f.id))),
@@ -148,11 +158,27 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
     const everyArchive = mapConversations(archivedRows);
 
     if (!allProjects) {
-      const one = assembleOneProject(folderRows, allConvs, expandedById);
+      if (stale()) return;
+      // Duckies with no island come tagged "_no_project": they are the Global Agents
+      // folder, a real folder shown on every island (with no island open it holds all).
+      const currentIsGlobal = currentProjectSlug === GLOBAL_PROJECT_SLUG;
+      const isGlobal = (slug: unknown) => currentIsGlobal || String(slug || "").trim() === GLOBAL_PROJECT_SLUG;
+      const ownFolders = folderRows.filter((row) => !isGlobal(row.project_slug));
+      const ownConvs = allConvs.filter((conv) => !isGlobal((conv as { project_slug?: string }).project_slug));
+      const globalFolderRows = folderRows.filter((row) => isGlobal(row.project_slug));
+      const globalConvs = allConvs.filter((conv) => isGlobal((conv as { project_slug?: string }).project_slug));
+      const one = assembleOneProject(ownFolders, ownConvs, expandedById);
+      // Always there (even empty) so duckies and groups can be dropped into it.
+      const global = assembleOneProject(globalFolderRows, globalConvs, expandedById);
+      const globalWrap = wrapProjectsAsFolders(
+        [{ slug: GLOBAL_PROJECT_SLUG, name: "No project", folders: global.folders, rootChats: global.rootChats }],
+        currentProjectSlug,
+        expandedById,
+      );
       setArchiveChats(everyArchive);
-      setHubChats(one.hubChats);
+      setHubChats([...one.hubChats, ...global.hubChats]);
       setRootChats(one.rootChats);
-      setFolders(one.folders);
+      setFolders([...one.folders, ...globalWrap]);
       setFoldersLoaded(true);
       return;
     }
@@ -189,6 +215,7 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
       ensure(slug, String(recent.name || "").trim());
     }
     if (currentProjectSlug) ensure(currentProjectSlug, "");
+    ensure(GLOBAL_PROJECT_SLUG, "No project");
 
     const projects: Array<{
       slug: string;
@@ -203,6 +230,7 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
       projects.push({ slug, name: group.name, ...one });
     }
 
+    if (stale()) return;
     setHubChats(projects.flatMap((p) => p.hubChats));
     setArchiveChats(everyArchive);
     setRootChats([]);
@@ -215,6 +243,24 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
     return onApiReady(() => { void load(); });
   }, [load, refreshToken]);
 
+  // A saved move or delete releases the hold: show what the host has now.
+  useEffect(() => duckiesLayoutHold.onReleased(() => { void load(); }), [load]);
+
+  /** Rows deleted here or in another window leave the tree at once (load() follows). */
+  const removeRows = useCallback((convIds: readonly string[], folderIds: readonly string[]) => {
+    if (!convIds.length && !folderIds.length) return;
+    loadSeqRef.current += 1; // an answer already on its way still has them
+    const next = removeFromDuckies(
+      { folders: foldersRef.current, rootChats: rootChatsRef.current },
+      { chatIds: convIds, folderIds },
+    );
+    foldersRef.current = next.folders;
+    rootChatsRef.current = next.rootChats;
+    setFolders(next.folders);
+    setRootChats(next.rootChats);
+    setHubChats((prev) => prev.filter((chat) => !convIds.includes(chat.id)));
+  }, []);
+
   return {
     folders,
     setFolders,
@@ -225,5 +271,6 @@ export function useChatFolders(refreshToken: number, currentProjectSlug = "") {
     setArchiveChats,
     load,
     foldersLoaded,
+    removeRows,
   };
 }
