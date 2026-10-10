@@ -411,7 +411,12 @@ def begin(version: str) -> None:
     except OSError:
         native = ""
     alive = _still_running(int(previous.get("pid") or 0)) if previous else False
-    body = build_report(previous, native) if previous and not alive else None
+    if alive:
+        # This launch will hand off: the running process owns both crash files.
+        # Leave this process unarmed so its later stage/mark calls are no-ops too.
+        _state.clear()
+        return
+    body = build_report(previous, native) if previous else None
     if body:
         # Clear the record first: if the pop-up itself fails, the next launch must not ask again.
         try:

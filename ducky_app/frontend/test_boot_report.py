@@ -232,3 +232,50 @@ def test_a_launch_that_is_still_starting_is_not_reported_as_a_crash(crash, tmp_p
     (folder / "boot.json").write_text(json.dumps(record), encoding="utf-8")
     boot_report.begin("1.2.361")  # that process is gone without finishing: now it is a crash
     assert len(crash["asked"]) == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native crash path is Windows")
+@pytest.mark.parametrize("state", ["starting", "ok"])
+def test_second_launch_preserves_running_launch_until_its_crash(crash, tmp_path, state):
+    repo = Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(f"""
+        import sys, faulthandler
+        sys.path.insert(0, {str(repo)!r})
+        from frontend import boot_report
+        boot_report.begin("launch-A")
+        boot_report.stage("A_panel_api")
+        boot_report.stage("A_window")
+        boot_report.mark({state!r})
+        boot_report._native_file.write("A native log before handoff\\n")
+        boot_report._native_file.flush()
+        print("ready", flush=True)
+        sys.stdin.readline()
+        faulthandler._read_null()
+    """)
+    proc = subprocess.Popen([sys.executable, "-c", script],
+        env=dict(os.environ, LOCALAPPDATA=str(tmp_path)), stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "ready"
+        boot_before = boot_report._boot_path().read_bytes()
+        native_before = boot_report._native_path().read_bytes()
+        boot_report.begin("launch-B")
+        boot_report.stage("B_handoff")
+        boot_report.mark("handoff")
+        boot_report.mark("closed")
+        assert crash["asked"] == []
+        assert boot_report._boot_path().read_bytes() == boot_before
+        assert boot_report._native_path().read_bytes() == native_before
+        proc.communicate("crash\n", timeout=30)
+        assert proc.returncode != 0
+        boot_report.begin("launch-C")
+        assert len(crash["asked"]) == 1
+        report = crash["asked"][0]
+        assert report["app_version"] == "launch-A"
+        assert "A_panel_api" in report["error_log"] and "A_window" in report["error_log"]
+        assert "B_handoff" not in report["error_log"]
+        assert "access violation" in report["error_log"].lower()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate(timeout=10)
