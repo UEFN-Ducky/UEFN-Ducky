@@ -13,6 +13,7 @@ import unreal
 
 from listener.logutil import log_msg
 from listener.runtime import start_listener, stop_listener
+from listener.source_stamp import LOADED_STAMP
 
 
 def _epic_mcp_tcp_up(host: str = "127.0.0.1", port: int = 8000, timeout: float = 0.2) -> bool:
@@ -21,6 +22,17 @@ def _epic_mcp_tcp_up(host: str = "127.0.0.1", port: int = 8000, timeout: float =
             return True
     except OSError:
         return False
+
+
+def _running_this_code() -> bool:
+    """True when a live listener was started from the source that is loaded now."""
+    thread = unreal._mcp_server_thread
+    return (
+        unreal._mcp_server is not None
+        and thread is not None
+        and thread.is_alive()
+        and getattr(unreal, "_mcp_loaded_stamp", None) == LOADED_STAMP
+    )
 
 
 def run(*, ensure_epic: bool | None = None) -> None:
@@ -35,30 +47,15 @@ def run(*, ensure_epic: bool | None = None) -> None:
     import listener.handlers  # noqa: F401 — register commands
 
     try:
-        if unreal._mcp_server is not None:
-            log_msg("Previous listener detected — replacing")
-            try:
-                # stop_listener() shuts down serve_forever, joins its thread and
-                # closes the socket, so both release before we bind a new one —
-                # otherwise they leak on every hot-reload.
-                stop_listener()
-            except Exception:
-                pass
-            unreal._mcp_server = None
-            unreal._mcp_server_thread = None
-            unreal._mcp_bound_port = 0
+        if _running_this_code():
+            # UEFN runs more than one copy of the boot file at launch (island,
+            # Documents, EditorToolset). Replacing a healthy server with the same
+            # code stalls the game thread ~0.4 s while shutdown() waits it out.
+            log_msg("Listener already running this code — keeping it")
+        else:
+            _start_fresh()
 
-        _old_tick = unreal._mcp_tick_handle
-        if _old_tick is not None:
-            unreal.unregister_slate_post_tick_callback(_old_tick)
-            unreal._mcp_tick_handle = None
-
-        # In-editor Tk popup off by default — use UEFN-Ducky panel for metrics. Set
-        # UEFN_DUCKY_STATUS_WINDOW=1 to restore the floating window (debug only).
-        _show = os.environ.get("UEFN_DUCKY_STATUS_WINDOW", "").strip().lower() in ("1", "true", "yes")
-        start_listener(show_status=_show)
-
-        env = (os.environ.get("UEFN_DUCKY_ENSURE_EPIC") or "").strip().lower()
+        env =(os.environ.get("UEFN_DUCKY_ENSURE_EPIC") or "").strip().lower()
         if ensure_epic is None:
             if env in ("0", "false", "no", "never"):
                 ensure_epic = False
@@ -77,6 +74,33 @@ def run(*, ensure_epic: bool | None = None) -> None:
     except Exception as e:
         unreal.log_error(f"[MCP] Failed to start listener: {e}")
         traceback.print_exc()
+
+
+def _start_fresh() -> None:
+    """Stop any previous listener, then start this one."""
+    if unreal._mcp_server is not None:
+        log_msg("Previous listener detected — replacing")
+        try:
+            # stop_listener() shuts down serve_forever, joins its thread and
+            # closes the socket, so both release before we bind a new one —
+            # otherwise they leak on every hot-reload.
+            stop_listener()
+        except Exception:
+            pass
+        unreal._mcp_server = None
+        unreal._mcp_server_thread = None
+        unreal._mcp_bound_port = 0
+
+    _old_tick = unreal._mcp_tick_handle
+    if _old_tick is not None:
+        unreal.unregister_slate_post_tick_callback(_old_tick)
+        unreal._mcp_tick_handle = None
+
+    # In-editor Tk popup off by default — use UEFN-Ducky panel for metrics. Set
+    # UEFN_DUCKY_STATUS_WINDOW=1 to restore the floating window (debug only).
+    _show = os.environ.get("UEFN_DUCKY_STATUS_WINDOW", "").strip().lower() in ("1", "true", "yes")
+    start_listener(show_status=_show)
+    unreal._mcp_loaded_stamp = LOADED_STAMP
 
 
 def _ensure_epic_mcp() -> None:
