@@ -1006,10 +1006,17 @@ class PanelApiWindowMixin:
             session_id.strip(), command, source=source, conv_id=conv_id,
         )
 
-    def terminal_approve_command(self, request_id: str) -> dict[str, Any]:
+    def terminal_approve_command(self, request_id: str, scope: str = "once") -> dict[str, Any]:
+        """scope: once, always (this command in the chat that asked) or all (everything in it)."""
         from frontend.ui_web.terminal import get_terminal_manager
 
-        return get_terminal_manager().approve_command(request_id.strip())
+        return get_terminal_manager().approve_command(str(request_id or "").strip(), scope=str(scope or "once"))
+
+    def terminal_pending_commands(self) -> list[dict[str, Any]]:
+        """Agent commands still waiting for an answer (a reloaded window shows their cards)."""
+        from frontend.ui_web.terminal import get_terminal_manager
+
+        return get_terminal_manager().list_pending()
 
     def terminal_reject_command(self, request_id: str, reason: str = "") -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager

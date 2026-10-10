@@ -297,6 +297,8 @@ class TerminalManager:
                 "hint": "Wait for the current command or open another terminal with ducky_terminal_open.",
             }
         request_id = uuid.uuid4().hex[:12]
+        cwd = str(getattr(session, "cwd", "") or "")
+        offers = _card_offers(cmd, cwd) if push_pending else {}
         pending = PendingCommand(
             request_id=request_id,
             session_id=session_id,
@@ -307,28 +309,32 @@ class TerminalManager:
             runner_waits=runner_waits and not background,
             timeout_s=float(timeout_s),
             asked=bool(push_pending),
+            rule_label=str(offers.get("rule_label") or ""),
+            local_only=bool(offers.get("local_only")),
+            shell=str(getattr(session, "shell", "") or ""),
+            cwd=cwd,
         )
         with self._lock:
             self._pending[request_id] = pending
         if push_pending:
-            self._emit(
-                {
-                    "type": "terminal_command_pending",
-                    "request_id": request_id,
-                    "session_id": session_id,
-                    "command": cmd,
-                    "shell": session.shell,
-                    "cwd": session.cwd,
-                    "conv_id": conv_id,
-                    "source": source or "ducky_terminal_run",
-                }
-            )
+            # A card in the chat that asked (conv_id); with no chat, an entry in the
+            # header's background activity list.
+            self._emit({"type": "terminal_command_pending", **_pending_dict(pending, source or "ducky_terminal_run")})
         return {"ok": True, "request_id": request_id, "status": "pending_approval"}
 
-    def approve_command(self, request_id: str) -> dict[str, Any]:
+    def list_pending(self) -> list[dict[str, Any]]:
+        """Unanswered command cards, oldest first (a window that reloads shows them again)."""
+        with self._lock:
+            rows = [p for p in self._pending.values() if p.asked and not p.decided.is_set()]
+        rows.sort(key=lambda p: p.created_at)
+        return [_pending_dict(p, p.source) for p in rows]
+
+    def approve_command(self, request_id: str, scope: str = "once") -> dict[str, Any]:
+        """scope: once, always (this command, in its chat) or all (everything, in its chat)."""
         pending = self._take_pending(request_id)
         if pending is None:
             return {"ok": False, "error": "request not found or already decided"}
+        saved = _remember_choice(pending, scope) if scope in ("always", "all") else "once"
         session = self.get_session(pending.session_id)
         if not session:
             pending.approved = False
@@ -338,7 +344,7 @@ class TerminalManager:
         pending.approved = True
         pending.decided.set()
         if pending.runner_waits:
-            return {"ok": True, "request_id": request_id, "run": {"ok": True, "status": "approved"}}
+            return {"ok": True, "request_id": request_id, "saved": saved, "run": {"ok": True, "status": "approved"}}
         if pending.background:
             result = session.run_command(pending.command, background=True)
         else:
@@ -351,7 +357,7 @@ class TerminalManager:
                 name=f"terminal-run-{request_id}",
             ).start()
             result = {"ok": True, "status": "running"}
-        return {"ok": True, "request_id": request_id, "run": result}
+        return {"ok": True, "request_id": request_id, "saved": saved, "run": result}
 
     def reject_command(self, request_id: str, reason: str = "rejected by user") -> dict[str, Any]:
         pending = self._take_pending(request_id)
@@ -389,11 +395,15 @@ class TerminalManager:
         command_timeout_s: float = 300.0,
         auto_approve: bool = False,
     ) -> dict[str, Any]:
-        """auto_approve: the chat said "Allow everything", so no Allow/Deny pop-up.
+        """auto_approve: the chat said "Allow everything", so no Allow/Deny card. A command
+        the chat said "Always allow" for runs without one too.
 
         wait (not background): the command runs on this thread and the result is its
         exit code; a command that fails is ok=False."""
         runs_here = wait and not background
+        if not auto_approve and conv_id:
+            known = self.get_session(session_id)
+            auto_approve = _chat_always_allows(conv_id, command, str(getattr(known, "cwd", "") or ""))
         req = self.request_command(
             session_id,
             command,
@@ -484,6 +494,50 @@ class TerminalManager:
         entry.session.kill()
         entry.bridge.stop()
         return entry
+
+
+def _card_offers(command: str, cwd: str) -> dict[str, Any]:
+    try:
+        from backend.tools.panel.terminal_approval import describe_command
+
+        return describe_command(command, cwd)
+    except Exception:
+        return {"rule_label": "", "local_only": False}
+
+
+def _chat_always_allows(conv_id: str, command: str, cwd: str) -> bool:
+    try:
+        from backend.tools.panel.terminal_approval import allows
+
+        return allows(conv_id, command, cwd)
+    except Exception:
+        return False
+
+
+def _remember_choice(pending: PendingCommand, scope: str) -> str:
+    if not pending.conv_id:
+        return "once"
+    try:
+        from backend.tools.panel.terminal_approval import remember
+
+        return remember(pending.conv_id, pending.command, scope, cwd=pending.cwd, local_only=pending.local_only)
+    except Exception:
+        return "once"
+
+
+def _pending_dict(pending: PendingCommand, source: str) -> dict[str, Any]:
+    return {
+        "request_id": pending.request_id,
+        "session_id": pending.session_id,
+        "command": pending.command,
+        "shell": pending.shell,
+        "cwd": pending.cwd,
+        "conv_id": pending.conv_id,
+        "source": source,
+        "rule_label": pending.rule_label,
+        "local_only": pending.local_only,
+        "created_at": pending.created_at,
+    }
 
 
 class _SessionEntry:

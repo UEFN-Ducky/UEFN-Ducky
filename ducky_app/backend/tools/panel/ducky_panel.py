@@ -1769,9 +1769,9 @@ def ducky_terminal_run(
     command_timeout_s: float = 300.0,
     pretty: bool = False,
 ) -> str:
-    """Run a shell command in a panel terminal after user approves it in the Allow/Deny popup
-    (no popup when this chat said "Allow everything", or when the command is typed into
-    the Local workflow running it)."""
+    """Run a shell command in a panel terminal after the user approves it on the Allow/Deny
+    card in this chat (no card when this chat said "Allow everything" or "Always allow" for
+    this command, or when the command is typed into the Local workflow running it)."""
     mgr = _terminal_manager()
     auto = False
     chat = _terminal_chat(conv_id)

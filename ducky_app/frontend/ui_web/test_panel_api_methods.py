@@ -470,6 +470,7 @@ _PUBLIC_METHODS = frozenset({
     'terminal_busy_many',
     'terminal_kill',
     'terminal_list',
+    'terminal_pending_commands',
     'terminal_read_output',
     'terminal_reject_command',
     'terminal_request_command',
