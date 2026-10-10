@@ -127,6 +127,49 @@ def test_expected_hash_matches_allows_write(project: Path) -> None:
     w.write_text("Content/Verse/a.verse", "two\n", expected_hash=first.after_hash)
 
 
+def test_reconstructed_writer_checks_current_bytes_not_persisted_history(project: Path, tmp_path: Path) -> None:
+    from backend.store import db
+    from backend.workspace.journal import FileChangeJournal
+    from backend.workspace.writer import content_hash
+
+    storage = tmp_path / "ledger" / "recovery-project"
+    journal = FileChangeJournal(lambda _root: storage)
+    original = ProjectWriter.for_root(str(project), journal=journal)
+    token = identity.bind(RunContext(run_id="recover-run", conv_id="recover-chat"))
+    try:
+        first = original.write_text("Content/Verse/a.verse", "recorded baseline\n")
+    finally:
+        identity.reset(token)
+    history = journal.get_run("recover-run", project_root=str(project))
+    del original, journal
+    db.close_thread_connections()
+
+    path = project / "Content" / "Verse" / "a.verse"
+    external = b"intervening human content\r\nkeep this line\r\n"
+    path.write_bytes(external)
+    recovered_journal = FileChangeJournal(lambda _root: storage)
+    observer = RecordingObserver()
+    recovered = ProjectWriter.for_root(str(project), journal=recovered_journal, observers=[observer])
+    assert recovered_journal.get_run("recover-run", project_root=str(project)) == history
+    assert recovered_journal.entry_contents("recover-run", 1, project_root=str(project))["after"] == "recorded baseline\n"
+    token = identity.bind(RunContext(run_id="recover-run", conv_id="recover-chat"))
+    try:
+        with pytest.raises(StaleWrite):
+            recovered.write_text("Content/Verse/a.verse", "stale overwrite\n", expected_hash=first.after_hash)
+        assert path.read_bytes() == external
+        assert recovered_journal.get_run("recover-run", project_root=str(project)) == history
+        assert observer.calls == []
+        assert [p.name for p in path.parent.iterdir()] == ["a.verse"]
+        # Recovery does not disable writes: an explicitly refreshed baseline works.
+        current = path.read_text(encoding="utf-8")
+        recovered.write_text("Content/Verse/a.verse", "fresh edit\n", expected_hash=content_hash(current))
+    finally:
+        identity.reset(token)
+    assert path.read_text(encoding="utf-8") == "fresh edit\n"
+    assert len(observer.calls) == 1
+    assert len(recovered_journal.get_run("recover-run", project_root=str(project))["entries"]) == 2
+
+
 @pytest.mark.parametrize(
     "rel",
     ["Saved/x.txt", "Proj.uproject", "Content/Python/x.py", "Content/Verse/Fortnite.digest.verse", "../escape.txt"],
