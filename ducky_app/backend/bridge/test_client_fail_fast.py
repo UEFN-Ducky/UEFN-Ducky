@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import time
+import urllib.request
 
 import pytest
 
@@ -84,3 +86,80 @@ def test_expected_offline_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None
     bridge._record_bridge_error("Listener not reachable for 'reload_listener' (discovery failed)")
     bridge._record_bridge_error("Command 'device_graph_snapshot' timed out after 2.0s")
     assert logged == ["Command 'device_graph_snapshot' timed out after 2.0s"]
+
+
+class _HeartbeatDone(BaseException):
+    pass
+
+
+class _TestThreadClock:
+    """Fake time for the test thread; the real heartbeat thread keeps real time."""
+
+    def __init__(self, stop_after: float) -> None:
+        self.now = 0.0
+        self.stop_after = stop_after
+        self.owner = threading.current_thread()
+
+    def time(self) -> float:
+        return self.now if threading.current_thread() is self.owner else time.time()
+
+    def sleep(self, seconds: float) -> None:
+        if threading.current_thread() is not self.owner:
+            time.sleep(seconds)
+            return
+        self.now += seconds
+        if self.now > self.stop_after:
+            raise _HeartbeatDone
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
+def test_offline_heartbeat_backs_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With UEFN closed every heartbeat was a full port scan (~70 connects), every
+    13 s, in every Ducky process, all day."""
+    test_thread = threading.current_thread()
+    scans: list[float] = []
+    clock = _TestThreadClock(stop_after=120.0)
+
+    def offline(port: int, *, timeout: float = 1.0) -> bool:
+        if threading.current_thread() is test_thread and port == bridge.DEFAULT_PORT:
+            scans.append(clock.now)
+        return False
+
+    monkeypatch.setattr(bridge, "DEFAULT_PORT", bridge.MAX_PORT - 60)  # tests move it out of range
+    monkeypatch.setattr(bridge, "_discovered_port", None)
+    monkeypatch.setattr(bridge, "_pinned_port", None)
+    monkeypatch.setattr(bridge, "_ping_port", offline)
+    monkeypatch.setattr(bridge, "time", clock)
+    with pytest.raises(_HeartbeatDone):
+        bridge._heartbeat_loop()
+    assert 1 <= len(scans) <= 4, f"{len(scans)} full scans in 2 minutes: {scans}"
+
+
+def test_online_heartbeat_is_one_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    test_thread = threading.current_thread()
+    pings: list[int] = []
+    gets: list[str] = []
+    real_urlopen = urllib.request.urlopen
+
+    def online(port: int, *, timeout: float = 1.0) -> bool:
+        if threading.current_thread() is test_thread:
+            pings.append(port)
+        return port == 4321
+
+    def counting_urlopen(req, *args, **kwargs):
+        if threading.current_thread() is test_thread:
+            gets.append(getattr(req, "full_url", str(req)))
+            raise OSError("no listener in tests")
+        return real_urlopen(req, *args, **kwargs)
+
+    monkeypatch.setattr(bridge, "_discovered_port", 4321)
+    monkeypatch.setattr(bridge, "_pinned_port", None)
+    monkeypatch.setattr(bridge, "_ping_port", online)
+    monkeypatch.setattr(urllib.request, "urlopen", counting_urlopen)
+    monkeypatch.setattr(bridge, "time", _TestThreadClock(stop_after=120.0))
+    with pytest.raises(_HeartbeatDone):
+        bridge._heartbeat_loop()
+    assert pings == [4321] * 12
+    assert gets == [], "a second GET per heartbeat"

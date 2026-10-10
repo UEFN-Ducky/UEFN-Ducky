@@ -607,19 +607,25 @@ def check_connection() -> str:
 # ---------------------------------------------------------------------------
 
 _HEARTBEAT_INTERVAL = 10.0
+# With UEFN closed every heartbeat is a full port scan, in every Ducky process.
+# After a few misses look once a minute; a tool call still finds the listener at once.
+_HEARTBEAT_OFFLINE_INTERVAL = 60.0
+_HEARTBEAT_MISSES_BEFORE_BACKOFF = 3
 
 
 def _heartbeat_loop() -> None:
     time.sleep(3.0)
+    misses = 0
     while True:
         try:
-            port = discover_port()
-            req = urllib.request.Request(f"http://127.0.0.1:{port}", method="GET")
-            with urllib.request.urlopen(req, timeout=2.0) as _resp:
-                _resp.read(64)
+            # discover_port's GET to the listener is the heartbeat; a second GET
+            # right after it told the listener nothing new.
+            discover_port()
+            misses = 0
         except Exception:
-            pass
-        time.sleep(_HEARTBEAT_INTERVAL)
+            misses += 1
+        offline = misses >= _HEARTBEAT_MISSES_BEFORE_BACKOFF
+        time.sleep(_HEARTBEAT_OFFLINE_INTERVAL if offline else _HEARTBEAT_INTERVAL)
 
 
 threading.Thread(target=_heartbeat_loop, daemon=True).start()
