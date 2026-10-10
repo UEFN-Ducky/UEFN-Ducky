@@ -6,6 +6,7 @@ import { ModeSelector } from "./ModeSelector";
 import { ModelSelector } from "./ModelSelector";
 import { InlineStopButton } from "./InlineStopButton";
 import { ChatRefText } from "./ChatRefText";
+import { PromptCopyButton } from "./PromptCopyButton";
 
 // The editor opens at ~3 lines and auto-grows to fit its content up to a cap.
 const MIN_EDIT_HEIGHT = 66;
@@ -338,9 +339,10 @@ export const EditableUserMessage = memo(function EditableUserMessage({
           }
           title={editable ? "Edit and resend" : expanded ? "Collapse" : "Expand"}
         >
-          {editable || onStop ? (
+          {editable || onStop || text ? (
             <div className="message-bubble-user-actions">
               {onStop ? <InlineStopButton onClick={onStop} /> : null}
+              {text ? <PromptCopyButton text={text} /> : null}
               {editable ? (
                 <button
                   type="button"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codingAgentName, parseAutomatedPrompt } from "./automatedPrompt";
+import { automatedPromptText, codingAgentName, parseAutomatedPrompt } from "./automatedPrompt";
 
 // Shapes written by backend/agent/a2a_format.py, team_plan_events.py and team_keeper.py.
 const COORD = "cd102686-6e20-446e-a1fd-d3531a655d02";
@@ -69,6 +69,14 @@ describe("parseAutomatedPrompt", () => {
       .toMatchObject({ kind: "plan", from: "Team plan", body: "Writer B completed step b1.\nDispatch the next open step at once." });
     expect(parseAutomatedPrompt("[Ducky keeper] Your team has had no agent running for 10 minutes")!.parts[0])
       .toMatchObject({ kind: "keeper", from: "Ducky", tag: "Team keeper" });
+  });
+
+  it("copies the readable message, one part as is and several under their senders", () => {
+    expect(automatedPromptText(parseAutomatedPrompt(assignment)!)).toBe("Do b1 then b2 in order.");
+    const batch = parseAutomatedPrompt(`Reports you have not acted on\n\n${peer("No reply is required.")}\n\n${assignment}`)!;
+    expect(automatedPromptText(batch)).toBe(
+      "Team test r8 - Writer A (Message):\nWriter A's word is maple.\n\nTeam test r8 - Coordinator (Assignment):\nDo b1 then b2 in order.",
+    );
   });
 
   it("names coding agents", () => {

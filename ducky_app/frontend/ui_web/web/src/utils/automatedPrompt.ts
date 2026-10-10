@@ -37,6 +37,12 @@ export function codingAgentName(id: string | undefined): string {
   return clean ? AGENT_LABELS[clean] ?? clean : "";
 }
 
+/** What Copy puts on the clipboard: the readable message without the protocol lines. */
+export function automatedPromptText(prompt: AutomatedPrompt): string {
+  if (prompt.parts.length === 1) return prompt.parts[0].body;
+  return prompt.parts.map((part) => `${part.from} (${part.tag}):\n${part.body}`.trim()).join("\n\n");
+}
+
 const REDELIVERY_HEADING = "Reports you have not acted on";
 const MESSAGE_PREFIX = "[ducky:agent-message]";
 const NOTICE_PREFIX = "[ducky:agent-notice]";

@@ -1,9 +1,16 @@
 import { memo, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Icons } from "../icons/Icons";
 import { requestOpenChatTab } from "../navigation/openChatReference";
-import { codingAgentName, type AutomatedPart, type AutomatedPartKind, type AutomatedPrompt } from "../utils/automatedPrompt";
+import {
+  automatedPromptText,
+  codingAgentName,
+  type AutomatedPart,
+  type AutomatedPartKind,
+  type AutomatedPrompt,
+} from "../utils/automatedPrompt";
 import { ChatRefText } from "./ChatRefText";
 import { InlineStopButton } from "./InlineStopButton";
+import { PromptCopyButton } from "./PromptCopyButton";
 
 const PART_ICON: Record<AutomatedPartKind, ComponentType> = {
   message: Icons.Users,
@@ -68,6 +75,7 @@ export const AutomatedPromptMessage = memo(function AutomatedPromptMessage({
 }) {
   const [expanded, setExpanded] = useState(false);
   const first = prompt.parts[0];
+  const copy = automatedPromptText(prompt);
   const toggle = () => setExpanded((v) => !v);
   return (
     <div className="message-bubble-user-wrap">
@@ -91,9 +99,10 @@ export const AutomatedPromptMessage = memo(function AutomatedPromptMessage({
             }
           }}
         >
-          {onStop ? (
+          {onStop || copy ? (
             <div className="message-bubble-user-actions">
-              <InlineStopButton onClick={onStop} />
+              {onStop ? <InlineStopButton onClick={onStop} /> : null}
+              {copy ? <PromptCopyButton text={copy} /> : null}
             </div>
           ) : null}
           {prompt.heading ? <div className="message-bubble-automated-heading">{prompt.heading}</div> : null}
