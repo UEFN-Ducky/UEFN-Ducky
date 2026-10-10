@@ -528,9 +528,13 @@ def _message_plain_text(msg: dict[str, Any]) -> str:
 
 
 # Messages that reach a member's chat from Ducky or other agents, never from a person:
-# agent mail, broker notices, the plan's completion notices (team_plan_events) and the
-# team keeper's wakes. Each was posted on the hub as "the user talked to me privately".
-_AGENT_TRAFFIC = ("[ducky:agent-message]", "[ducky:agent-notice]", "[Team plan]", "[Ducky keeper]")
+# agent mail, broker notices, re-delivered reports (a2a_broker), the plan's completion
+# notices (team_plan_events) and the team keeper's wakes. Each was posted on the hub as
+# "the user talked to me privately".
+_AGENT_TRAFFIC = (
+    "[ducky:agent-message]", "[ducky:agent-notice]", "Reports you have not acted on",
+    "[Team plan]", "[Ducky keeper]",
+)
 
 
 def _agent_running(conv_id: str) -> bool:

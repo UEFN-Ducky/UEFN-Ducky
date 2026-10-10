@@ -235,3 +235,41 @@ def test_saved_plan_hook_uses_real_actor_and_only_successful_save(monkeypatch, t
     monkeypatch.setattr(identity, 'resolve_context', lambda: SimpleNamespace(conv_id='member'))
     a2a_client.acknowledge_saved_plan(before, after)
     assert not calls
+
+
+def test_answering_a_redelivered_report_on_its_expired_thread_acknowledges_it(reports):
+    # Oct 10 2026: the report told the coordinator to answer with its response_id; that
+    # thread had closed, every answer failed "response_id is not open", and the report
+    # came back every half minute after the plan was already finished.
+    _deliver_reports(reports, 1)
+    b = reports.mod
+    rid = b.unanswered_reports('coord')[0]['response_id']
+    assert rid not in b._threads
+    out = b.send(sender_conv_id='coord', receiver_conv_id='member0', body='Got it, all done', expect_reply=False,
+                 response_id=rid)
+    assert out['closed_thread'] is False
+    _settle(b)
+    assert not b.unanswered_reports('coord')
+    with pytest.raises(ValueError, match='not open'):
+        b.send(sender_conv_id='coord', receiver_conv_id='member0', body='again', expect_reply=False, response_id=rid)
+    with pytest.raises(ValueError, match='not open'):
+        b.send(sender_conv_id='coord', receiver_conv_id='member9', body='x', expect_reply=False, response_id='nope')
+
+
+def test_reports_stop_coming_back_once_the_owner_is_told(reports):
+    f, b = reports, reports.mod
+    _deliver_reports(f, 1)
+    b.on_agent_stopped('coord', 'done', run_id='empty0')
+    for i in (1, 2, 3):
+        before = len(f.modes.sent)
+        f.timers[-1].fire()
+        _wait_sent(f.modes, before + 1)
+        _settle(b)
+        b.on_agent_stopped('coord', 'done', run_id=f'empty{i}')
+    assert len(f.notices) == 1
+    assert not b.unanswered_reports('coord')
+    sent = len(f.modes.sent)
+    for timer in list(f.timers):
+        timer.fire()
+    _settle(b)
+    assert len(f.modes.sent) == sent

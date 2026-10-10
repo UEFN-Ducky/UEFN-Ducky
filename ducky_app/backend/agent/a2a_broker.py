@@ -325,13 +325,20 @@ def send(
         closing: Thread | None = None
         if response_id:
             thread = _threads.get(response_id)
-            if thread is None:
+            report = _reports.get(sender_conv_id, {}).get(response_id)
+            if thread is None and report is not None and report.envelope.sender_conv_id == receiver_conv_id:
+                # The answer to a re-delivered report whose thread already expired. It is
+                # the answer that report asks for: deliver it plainly and count it, or
+                # the report comes back every half minute forever.
+                response_id = ""
+            elif thread is None:
                 raise ValueError("response_id is not open; reply was not delivered")
-            participants = (sender_conv_id, receiver_conv_id)
-            if participants == (thread.receiver_conv_id, thread.sender_conv_id):
-                closing = _threads.pop(response_id)
-            elif participants != (thread.sender_conv_id, thread.receiver_conv_id):
-                raise ValueError("response_id participants do not match; message was not delivered")
+            else:
+                participants = (sender_conv_id, receiver_conv_id)
+                if participants == (thread.receiver_conv_id, thread.sender_conv_id):
+                    closing = _threads.pop(response_id)
+                elif participants != (thread.sender_conv_id, thread.receiver_conv_id):
+                    raise ValueError("response_id participants do not match; message was not delivered")
 
         rid = open_thread(sender_conv_id, receiver_conv_id, "") if expect_reply else ""
         envelope = Envelope(
@@ -756,6 +763,15 @@ def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "", run_id: str
             with _lock:
                 for report in notices:
                     report.noticed = False
+        else:
+            # The owner knows now. Delivering it again every half minute only spends a
+            # coordinator turn (its whole thread re-read) each time, forever.
+            with _lock:
+                kept = _reports.get(conv_id, {})
+                for report in notices:
+                    kept.pop(report.envelope.response_id, None)
+                if not kept:
+                    _reports.pop(conv_id, None)
     _schedule_reports(conv_id)
     with _lock:
         has_queue = bool(_inbox.get(conv_id))

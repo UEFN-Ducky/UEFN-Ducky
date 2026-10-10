@@ -686,6 +686,7 @@ def test_agent_messages_are_not_announced_as_private_talk(monkeypatch):
         "[ducky:agent-notice] Reviewer ran into an error",
         "[Team plan] Writer B completed step Create b.txt (b1). Dispatch the next open step at once.",
         "[Ducky keeper] Your team has had no agent running for 4 minutes",
+        "Reports you have not acted on\n\n[ducky:agent-message] from Writer B: done",
     ):
         go, posted, briefed = _team(
             monkeypatch, [{"role": "user", "content": marker}, {"role": "assistant", "content": "done"}]
