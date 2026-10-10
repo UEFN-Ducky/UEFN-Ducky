@@ -45,6 +45,32 @@ export interface SavedAgentPermissionDto {
   label: string;
 }
 
+/** A chat's approval mode: ask before changes, accept edits (default), allow everything. */
+export type ChatPermissionModeId = "ask" | "edits" | "all";
+
+export interface ChatPermissionModeDto {
+  id: ChatPermissionModeId;
+  label: string;
+  description: string;
+  available: boolean;
+  /** Why it can't be picked here (empty when available). */
+  reason: string;
+}
+
+export interface ChatPermissionsDto {
+  mode: ChatPermissionModeId;
+  label: string;
+  /** False when Allow everything comes from the chat that started this run. */
+  own: boolean;
+  from_title: string;
+  agent: string;
+  agent_label: string;
+  /** False when the agent never asks for approval inside Ducky (its modes are all unavailable). */
+  asks: boolean;
+  modes: ChatPermissionModeDto[];
+  rules: { rule: string; label: string }[];
+}
+
 export interface UpdaterResult {
   ok: boolean;
   error: string | null;
@@ -2308,6 +2334,8 @@ export interface CodingAgentInfo {
   permission_mode?: string;
   /** "Allow everything in this chat" from an approval card: set here (own) or by the chat that started this run. */
   allow_everything?: { on: boolean; own: boolean; from_title?: string };
+  /** The chat's approval mode, in the words of its permissions button. */
+  approvals?: { mode: ChatPermissionModeId; label: string; asks: boolean };
   available?: boolean;
   status?: string;
   logged_in?: boolean;
@@ -3059,6 +3087,10 @@ export interface PanelApi {
   delete_custom_verse_template(template_id: string): Promise<{ ok: boolean }>;
   rename_conversation(conv_id: string, title: string): Promise<void>;
   set_agent_allow_everything?(conv_id: string, on: boolean): Promise<{ ok: boolean; on: boolean; own: boolean; from_title?: string }>;
+  get_agent_permissions?(conv_id: string, agent?: string): Promise<ChatPermissionsDto>;
+  set_agent_permission_mode?(conv_id: string, mode: ChatPermissionModeId, agent?: string): Promise<ChatPermissionsDto>;
+  remove_agent_permission_rule?(conv_id: string, rule: string, agent?: string): Promise<ChatPermissionsDto>;
+  clear_agent_permission_rules?(conv_id: string, agent?: string): Promise<ChatPermissionsDto>;
   list_saved_agent_permissions(): Promise<SavedAgentPermissionDto[]>;
   revoke_saved_agent_permission(conv_id: string, rule: string): Promise<{ ok: boolean }>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;

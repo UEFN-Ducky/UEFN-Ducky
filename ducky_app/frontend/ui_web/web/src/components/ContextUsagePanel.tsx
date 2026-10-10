@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { ChangesetPanel } from "./ChangesetPanel";
+import { announceChatPermissions, subscribeChatPermissions } from "./chatPermissionsSync";
 import { Modal } from "./Modal";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
@@ -507,11 +508,38 @@ export function ContextUsagePanel({
 
 function AgentInfoSection({ info, convId }: { info: CodingAgentInfo; convId: string }) {
   const [allowAll, setAllowAll] = useState(info.allow_everything);
+  const [approvals, setApprovals] = useState(info.approvals);
   useEffect(() => setAllowAll(info.allow_everything), [info.allow_everything]);
+  useEffect(() => setApprovals(info.approvals), [info.approvals]);
+  // The chat's permissions button changes the same state; follow it.
+  useEffect(
+    () =>
+      subscribeChatPermissions(convId, () => {
+        void Promise.resolve(getApi()?.get_agent_permissions?.(convId, info.coding_agent))
+          .then((s) => {
+            if (!s) return;
+            setApprovals({ mode: s.mode, label: s.label, asks: s.asks });
+            setAllowAll({ on: s.mode === "all", own: s.own, from_title: s.from_title });
+          })
+          .catch(() => undefined);
+      }),
+    [convId, info.coding_agent],
+  );
   const turnOffAllowAll = async () => {
     const res = await getApi()?.set_agent_allow_everything?.(convId, false);
-    if (res?.ok) setAllowAll({ on: res.on, own: res.own, from_title: res.from_title });
+    if (!res?.ok) return;
+    setAllowAll({ on: res.on, own: res.own, from_title: res.from_title });
+    announceChatPermissions(convId);
   };
+  const approvalsText = allowAll?.on
+    ? allowAll.own
+      ? "Allow everything (never asks)"
+      : `Allow everything, from ${allowAll.from_title || "the chat that started it"}`
+    : approvals
+      ? approvals.asks
+        ? approvals.label
+        : "Never asks"
+      : "";
   const loginState =
     info.logged_in === true
       ? { label: "Ready", cls: "is-ok" }
@@ -553,12 +581,12 @@ function AgentInfoSection({ info, convId }: { info: CodingAgentInfo; convId: str
             <span className="context-usage-panel-agent-row-value">{info.permission_mode}</span>
           </div>
         ) : null}
-        {allowAll?.on ? (
+        {approvalsText ? (
           <div className="context-usage-panel-agent-row">
             <span className="context-usage-panel-agent-row-label">Approvals</span>
             <span className="context-usage-panel-agent-row-value">
-              {allowAll.own ? "Allow everything (never asks)" : `Allow everything, from ${allowAll.from_title || "the chat that started it"}`}
-              {allowAll.own ? (
+              {approvalsText}
+              {allowAll?.on && allowAll.own ? (
                 <button type="button" className="context-usage-panel-agent-row-action" onClick={() => void turnOffAllowAll()}
                   title="Ask again before commands, edits outside the project, pushes and deletes">
                   Turn off

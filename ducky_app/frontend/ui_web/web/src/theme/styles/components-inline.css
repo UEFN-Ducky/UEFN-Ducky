@@ -3111,6 +3111,113 @@ html.window-maximized .window-resize-grip {
 .attach-menu-camera-btn.is-primary:hover { background: var(--accent-hover, var(--accent)); }
 .attach-menu-file { display: none; }
 
+/* ── ChatPermissionsButton (approval mode + allowed rules for one chat) ── */
+.chat-perm { flex-shrink: 0; }
+.chat-perm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chat-perm-btn.is-open { background: var(--tab-active); color: var(--fg); }
+.chat-perm-btn:not(.is-open):hover { background: var(--tab-hover); color: var(--fg); }
+.chat-perm-btn[data-mode="ask"] { color: var(--green); }
+.chat-perm-btn[data-mode="all"] { color: var(--amber); }
+.chat-perm-menu { display: flex; flex-direction: column; }
+.chat-perm-caption {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.chat-perm-note { padding: 0 10px 6px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.chat-perm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.chat-perm-item:hover:not(:disabled),
+.chat-perm-item:focus-visible { background: var(--bg-hover); outline: none; }
+.chat-perm-item.is-active { background: var(--btn-bg); }
+.chat-perm-item:disabled { opacity: 0.5; cursor: default; }
+.chat-perm-key {
+  display: inline-flex;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-perm-item-text { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.chat-perm-item-title { color: var(--fg); font-weight: 500; }
+.chat-perm-item-sub { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.chat-perm-check { display: inline-flex; flex: 0 0 14px; color: var(--blue); }
+.chat-perm-divider { height: 1px; margin: 6px; background: var(--border-subtle, var(--border)); }
+.chat-perm-empty { padding: 0 10px 6px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.chat-perm-rules { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 2px; list-style: none; }
+.chat-perm-rule { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; border-radius: 6px; font-size: 12px; }
+.chat-perm-rule:hover { background: var(--bg-hover); }
+.chat-perm-rule-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-dim, var(--fg));
+  font-family: var(--font-mono, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-perm-rule-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.chat-perm-rule-remove:hover { background: var(--tab-hover); color: var(--fg); }
+.chat-perm-clear {
+  align-self: flex-start;
+  margin: 4px 6px 2px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-perm-clear:hover { background: var(--bg-hover); }
+.chat-perm-error { padding: 6px 10px; color: var(--amber, var(--muted)); font-size: 12px; }
+
 /* ── ComposerAttachMenu ── */
 .composer-attach-menu {
   position: relative;

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
+import { ChatPermissionsButton } from "./ChatPermissionsButton";
 import { ModelSelector } from "./ModelSelector";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
@@ -1672,6 +1673,7 @@ export function ChatPane({
                   uiTarget="chat.composer.mode"
                 />
               ) : null}
+              {!chat.isGroup ? <ChatPermissionsButton convId={chat.id} codingAgent={codingAgent} /> : null}
               {!chat.isGroup ? (
                 <ContextMeter
                   usedTokens={contextUsage.used_tokens}
