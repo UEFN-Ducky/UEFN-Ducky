@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -254,6 +255,58 @@ def test_eviction_skips_in_flight_work(transport):
         await pool.shutdown_all()
 
     asyncio.run(run())
+
+
+def test_idle_sessions_close_without_any_caller(transport, monkeypatch):
+    """evict_idle had no caller, so every nested server a tool listing opened (a
+    uvx/node process for stdio servers) stayed up until the app exited."""
+    monkeypatch.setattr(cp, "_IDLE_EVICT_SEC", 0.2)
+    monkeypatch.setattr(cp, "_EVICT_EVERY_SEC", 0.05, raising=False)
+    pool = cp.PluginClientPool(own_loop=True)
+    try:
+        pool.run_sync(pool.list_tools_for_plugin("one"))
+        assert "one" in pool._connections
+        deadline = time.monotonic() + 3
+        while pool._connections and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert pool._connections == {}
+        assert_closed(transport)
+    finally:
+        pool.shutdown_sync()
+
+
+def test_listing_neither_keeps_nor_reopens_an_idle_server(transport, monkeypatch):
+    """Agent turns list nested tools every 30 s. Listing must not count as use,
+    and must not start an idle-closed server again just to read its tools."""
+    from backend.mcp_plugins import registry
+
+    monkeypatch.setattr(cp, "_IDLE_EVICT_SEC", 0.3)
+    monkeypatch.setattr(cp, "_EVICT_EVERY_SEC", 0.05, raising=False)
+    monkeypatch.setattr(cp, "effective_plugin_ids", lambda: ("one",))
+    monkeypatch.setattr(cp, "ensure_plugin_prefix_cache", lambda: None)
+    monkeypatch.setitem(registry._PREFIX_TO_PLUGIN, "one", "one")
+    pool = cp.PluginClientPool(own_loop=True)
+
+    def listed() -> list[str]:
+        pool._inventory_refresh = 0.0  # as on a turn after the 30 s inventory cache
+        return [t.name for t in pool.run_sync(pool.list_all_plugin_tools())]
+
+    try:
+        first = listed()
+        assert first and "one" in pool._connections
+        deadline = time.monotonic() + 3
+        while pool._connections and time.monotonic() < deadline:
+            assert listed() == first
+            time.sleep(0.05)
+        assert pool._connections == {}, "listing kept an idle server alive"
+        opened = len(transport.opened)
+        for _ in range(3):
+            assert listed() == first
+        assert len(transport.opened) == opened, "listing started an idle server again"
+        pool.run_sync(pool.call_tool(first[0], {}))
+        assert "one" in pool._connections and transport.calls == ["echo"]
+    finally:
+        pool.shutdown_sync()
 
 
 def test_sync_timeout_cancels_the_submitted_coroutine():

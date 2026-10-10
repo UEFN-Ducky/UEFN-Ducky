@@ -32,6 +32,8 @@ _HTTP_CONNECT_TIMEOUT_SEC = 2.0
 _HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
 _IDLE_EVICT_SEC = 15 * 60.0
+# How often a pool with its own loop closes sessions idle longer than _IDLE_EVICT_SEC.
+_EVICT_EVERY_SEC = 60.0
 _POOL_RUN_TIMEOUT_SEC = 180.0
 _TOGGLE_HINT = (
     "toggle this MCP (Settings → MCPs, or ducky_mcp_set_plugin) when the task is done."
@@ -98,6 +100,10 @@ class PluginClientPool:
         # Lets the change journal tell a nested read from a nested mutation.
         self._tool_annotations: dict[str, Any] = {}
         self._failed_until: dict[str, float] = {}
+        # Servers closed for being idle. Listing serves their saved inventory
+        # instead of starting them again; a tool call opens them as usual.
+        self._idle_closed: set[str] = set()
+        self._sweeper: asyncio.Task[None] | None = None
         self._own_loop = own_loop
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -118,6 +124,7 @@ class PluginClientPool:
             asyncio.set_event_loop(loop)
             self._loop = loop
             self._pool_lock = asyncio.Lock()
+            self._sweeper = loop.create_task(self._sweep_idle_forever())
             self._loop_ready.set()
             try:
                 loop.run_forever()
@@ -130,6 +137,16 @@ class PluginClientPool:
         self._thread.start()
         if not self._loop_ready.wait(timeout=5) or self._pool_lock is None:
             raise RuntimeError("plugin pool loop failed to start")
+
+    async def _sweep_idle_forever(self) -> None:
+        # Without this, every nested server a tool listing opened (a uvx/node
+        # process for stdio servers) stayed up until the app exited.
+        while not self._closing:
+            await asyncio.sleep(_EVICT_EVERY_SEC)
+            try:
+                await self.evict_idle(_IDLE_EVICT_SEC)
+            except Exception:
+                log.debug("idle nested MCP sweep failed", exc_info=True)
 
     def run_sync(self, coro: Coroutine[Any, Any, _T], timeout: float = _POOL_RUN_TIMEOUT_SEC) -> _T:
         """Run a pool coroutine from any thread. Never uses asyncio.run on a live loop."""
@@ -208,7 +225,8 @@ class PluginClientPool:
             if self._closing or conn.retired:
                 raise RuntimeError("plugin pool is shutting down")
             if conn.session is not None and conn.owner is not None and conn.owner.alive:
-                conn.last_used = time.time()
+                # Not "used" yet: tool listing reuses sessions every 30 s, and only
+                # tool calls (call_tool) may keep a server from going idle.
                 return conn.session
             await self._close_connection_unlocked(conn)
             skip_until = self._http_skip_until(conn.plugin_id)
@@ -265,6 +283,7 @@ class PluginClientPool:
                 await owner.start()
                 conn.session = OwnedSession(owner, list_timeout=_CONNECT_TIMEOUT_SEC, tool_timeout=_TOOL_TIMEOUT_SEC)
                 conn.last_used = time.time()
+                self._idle_closed.discard(conn.plugin_id)
                 self._clear_http_fail(conn.plugin_id)
                 return conn.session
             except BaseException as exc:
@@ -300,6 +319,7 @@ class PluginClientPool:
         if self._closed:
             return
         self.invalidate_tools_cache()
+        self._idle_closed.discard(plugin_id)  # its settings changed: list it afresh
 
         async def _do_close() -> None:
             conn = self._connections.pop(plugin_id, None)
@@ -350,6 +370,8 @@ class PluginClientPool:
     @_pool_loop_bound
     async def shutdown_all(self) -> None:
         self.invalidate_tools_cache()
+        if self._sweeper is not None:
+            self._sweeper.cancel()
         async with self._pool_lock:
             self._closing = True
             connections = list(self._connections.values())
@@ -373,14 +395,22 @@ class PluginClientPool:
                 if conn.session is not None and (now - conn.last_used) > max_idle_sec
                 and (conn.owner is None or not conn.owner.busy)
             ]
+        evicted = 0
         for pid in stale:
-            conn = self._connections.pop(pid, None)
-            if conn:
-                conn.retired = True
-                await self._close_connection(conn)
-        if stale:
+            conn = self._connections.get(pid)
+            # A tool call may have picked it up while earlier ones were closing.
+            if conn is None or time.time() - conn.last_used <= max_idle_sec or (
+                conn.owner is not None and conn.owner.busy
+            ):
+                continue
+            self._connections.pop(pid, None)
+            conn.retired = True
+            self._idle_closed.add(pid)
+            evicted += 1
+            await self._close_connection(conn)
+        if evicted:
             self.invalidate_tools_cache()
-        return len(stale)
+        return evicted
 
     @_pool_loop_bound
     async def list_tools_for_plugin(self, plugin_id: str) -> list[Tool]:
@@ -426,12 +456,16 @@ class PluginClientPool:
                 self._inventories.pop(pid, None)
                 self._inventory_retry.pop(pid, None)
                 self._inventory_failures.pop(pid, None)
+                self._idle_closed.discard(pid)
         if (self._tools_cache is not None and self._tools_cache_ids == ids
                 and now < self._inventory_refresh):
             return [tool.model_copy(deep=True) for tool in self._tools_cache]
         out: list[Tool] = []
         for pid in ids:
-            if now >= self._inventory_retry.get(pid, 0):
+            # Listing must not start an idle-closed server again just to re-read
+            # the tools it already gave us.
+            idle = pid in self._idle_closed and pid in self._inventories
+            if not idle and now >= self._inventory_retry.get(pid, 0):
                 try:
                     tools = await self.list_tools_for_plugin(pid)
                 except Exception:
@@ -474,6 +508,7 @@ class PluginClientPool:
         try:
             conn = await self._get_or_create(plugin_id)
             session = await self._ensure_session(conn)
+            conn.last_used = time.time()  # before any await, so the idle sweep cannot close it now
         except Exception as e:
             detail = str(e).strip() or type(e).__name__
             raise RuntimeError(
