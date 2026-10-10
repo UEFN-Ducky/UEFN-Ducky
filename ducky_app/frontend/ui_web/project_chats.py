@@ -714,6 +714,15 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
     return None
 
 
+def load_conversation_meta(conv_id: str, project_root: str | None = None) -> Conversation | None:
+    """The chat without its messages, for names and settings. A coordinator's chat can
+    hold hundreds of messages; parsing them all to read its title took tens of ms."""
+    if _use_db():
+        doc = _repo().conv_get(conv_id, with_messages=False)
+        return Conversation.from_dict(doc) if doc is not None else None
+    return load_conversation(conv_id, project_root)
+
+
 def conversation_title(conv_id: str, project_root: str | None = None) -> str:
     """The sidebar title only; never loads message bodies on the row store."""
     if _use_db():

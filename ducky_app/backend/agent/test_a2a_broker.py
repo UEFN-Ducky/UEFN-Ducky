@@ -37,8 +37,13 @@ class FakeProjectChats(ModuleType):
     def __init__(self) -> None:
         super().__init__("frontend.ui_web.project_chats")
         self.convs: dict[str, SimpleNamespace] = {}
+        self.full_loads: list[str] = []
 
     def load_conversation(self, conv_id: str, project_root: str | None = None):
+        self.full_loads.append(conv_id)
+        return self.convs.get(conv_id)
+
+    def load_conversation_meta(self, conv_id: str, project_root: str | None = None):
         return self.convs.get(conv_id)
 
 

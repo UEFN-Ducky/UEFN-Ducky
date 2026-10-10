@@ -72,6 +72,24 @@ def test_metadata_stub_never_blanks_messages(backend: str, project: str) -> None
     assert [m["role"] for m in pc.load_conversation(conv.id, project).messages] == ["user", "assistant"]
 
 
+def test_meta_load_keeps_names_and_account_without_reading_messages(backend: str, project: str, monkeypatch) -> None:
+    from frontend.ui_web import project_chats as pc
+
+    conv = pc.create_conversation(title="Coordinator", ducky_name="Lead", project_root=project,
+                                  skill_snapshot="x", provider="openai")
+    pc.append_message(conv, _msg("assistant", "a long report"), project)
+    full = pc.load_conversation(conv.id, project)
+    asked: list[bool] = []
+    real_get = repo.conv_get
+    monkeypatch.setattr(repo, "conv_get", lambda cid, **kw: asked.append(kw.get("with_messages", True)) or real_get(cid, **kw))
+    meta = pc.load_conversation_meta(conv.id, project)
+    fields = ("title", "ducky_name", "coding_agent", "provider", "parent_conv_id")
+    assert [getattr(meta, f) for f in fields] == [getattr(full, f) for f in fields]
+    assert (meta.title, meta.ducky_name, meta.provider) == ("Coordinator", "Lead", "openai")
+    assert True not in asked
+    assert pc.load_conversation_meta("missing-chat", project) is None
+
+
 def test_sidebar_counts_are_maintained(backend: str, project: str) -> None:
     from frontend.ui_web import project_chats as pc
 

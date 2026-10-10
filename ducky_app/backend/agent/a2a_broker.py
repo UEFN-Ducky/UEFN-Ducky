@@ -211,9 +211,9 @@ def _schedule_reports(conv_id: str) -> None:
 
 
 def _account_key(conv_id: str) -> str:
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.project_chats import load_conversation_meta
 
-    conv = load_conversation(conv_id)
+    conv = load_conversation_meta(conv_id)
     if conv is None:
         return "chat:" + conv_id
     agent = str(getattr(conv, "coding_agent", "") or "ducky")
@@ -226,6 +226,9 @@ def _account_key(conv_id: str) -> str:
 
 
 def cooldown_remaining(conv_id: str, *, now: float | None = None) -> float:
+    # The usual case: no account is cooling down, so no need to look the chat up.
+    if not _cooldowns:
+        return 0.0
     key = _account_key(conv_id)
     with _lock:
         return max(0.0, _cooldowns.get(key, 0.0) - (time.time() if now is None else now))
@@ -271,9 +274,9 @@ def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
 def _conv_meta(conv_id: str) -> tuple[str, str]:
     """(title-ish name, coding_agent) for labels; tolerant of missing chats."""
     try:
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.project_chats import load_conversation_meta
 
-        conv = load_conversation(conv_id)
+        conv = load_conversation_meta(conv_id)
     except Exception:
         conv = None
     if conv is None:

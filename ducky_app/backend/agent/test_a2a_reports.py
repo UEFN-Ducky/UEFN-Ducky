@@ -348,3 +348,22 @@ def test_oct10_a_members_answer_to_its_leader_still_waits_for_action(reports):
     _wait_sent(f.modes, 2)
     _settle(b)
     assert [r['from'] for r in b.unanswered_reports('coord')] == ['writerA']
+
+
+def test_deliveries_and_report_retries_read_no_whole_chat(reports):
+    # A sender's name and the account key need the chat's row only. Loading every
+    # message (a coordinator's chat is the biggest) ran on each delivery and retry.
+    from types import SimpleNamespace
+    f, b = reports, reports.mod
+    f.chats.convs['member0'] = SimpleNamespace(ducky_name='Builder', title='Builder', coding_agent='codex', messages=[])
+    _deliver_reports(f, 1)
+    b.on_agent_stopped('coord', 'done', run_id='empty0')
+    f.chats.full_loads.clear()
+    b.send(sender_conv_id='member0', receiver_conv_id='idle', body='status?', expect_reply=False)
+    _wait_sent(f.modes, 2)
+    f.timers[-1].fire()
+    _wait_sent(f.modes, 3)
+    _settle(b)
+    assert [cid for cid, _ in f.modes.sent[1:]] == ['idle', 'coord']
+    assert all('from Builder' in text for _, text in f.modes.sent[1:])
+    assert f.chats.full_loads == []
