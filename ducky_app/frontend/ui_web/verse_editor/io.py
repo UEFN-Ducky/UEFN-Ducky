@@ -8,6 +8,7 @@ the content cache the follow-code diff uses as its baseline.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from threading import Lock
 
 from frontend.ui_web import project_files as pf
@@ -15,25 +16,47 @@ from frontend.ui_web.verse_editor import file_history
 
 
 class ContentCache:
-    """Single source of truth for file content used in agent diff visualization."""
+    """Single source of truth for file content used in agent diff visualization.
+
+    Recently used files only: every file an agent or the editor touched used to stay
+    here at full text all session. A write seeds its baseline just before it runs,
+    and a file that fell out falls back to its history snapshot.
+    """
+
+    MAX_FILES = 256
+    MAX_CHARS = 32 * 1024 * 1024
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._by_path: dict[str, str] = {}
+        self._by_path: OrderedDict[str, str] = OrderedDict()
+        self._chars = 0
 
     def get(self, relative_path: str) -> str | None:
         norm = _norm_path(relative_path)
         with self._lock:
-            return self._by_path.get(norm)
+            content = self._by_path.get(norm)
+            if content is not None:
+                self._by_path.move_to_end(norm)
+            return content
 
     def set(self, relative_path: str, content: str) -> None:
         norm = _norm_path(relative_path)
         with self._lock:
+            old = self._by_path.pop(norm, None)
+            if old is not None:
+                self._chars -= len(old)
             self._by_path[norm] = content
+            self._chars += len(content)
+            while len(self._by_path) > 1 and (
+                len(self._by_path) > self.MAX_FILES or self._chars > self.MAX_CHARS
+            ):
+                _path, dropped = self._by_path.popitem(last=False)
+                self._chars -= len(dropped)
 
     def clear(self) -> None:
         with self._lock:
             self._by_path.clear()
+            self._chars = 0
 
 
 _cache = ContentCache()
