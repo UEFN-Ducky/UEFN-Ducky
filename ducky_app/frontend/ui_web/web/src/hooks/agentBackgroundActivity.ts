@@ -48,9 +48,48 @@ export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title
     endedAt: done ? now : 0, ts: now });
 }
 
+// A turn whose stop event never came (a group's side-chat note streams text with no turn
+// around it; a chat deleted mid-run sends nothing) would read "is working" forever.
+const SETTLE_MS = 10_000;
+
+function endAgentJobs(convId: string, detail: string, now = Date.now()): void {
+  for (const job of getBackgroundJobs()) {
+    if (job.source !== "agent" || job.convId !== convId || job.phase !== "working") continue;
+    upsertBackgroundJob({ id: job.id, phase: "done", detail: job.toolId ? "Ended with agent turn" : detail,
+      title: job.toolId ? job.title : job.title.replace(/ is working$/, detail === "Stopped" ? " stopped" : " finished"),
+      endedAt: now, ts: now });
+  }
+}
+
+/** Close working rows the backend no longer runs (`running` null skips that check), and drop
+ *  rows of chats that were deleted. */
+export function reconcileAgentJobs(running: string[] | null, existing: Set<string> | null, now = Date.now()): void {
+  for (const job of getBackgroundJobs()) {
+    if (job.source !== "agent" || !job.convId) continue;
+    if (existing && !existing.has(job.convId)) {
+      dismissBackgroundJob(job.id);
+      continue;
+    }
+    if (running && job.phase === "working" && !running.includes(job.convId) && now - job.ts > SETTLE_MS) {
+      endAgentJobs(job.convId, "Finished", now);
+    }
+  }
+}
+
+/** Stop button in the tray: stops that chat's turn (a group stops its whole run). */
+export async function stopAgentBackgroundJob(job: BackgroundJob): Promise<void> {
+  if (!job.convId) return;
+  const api = getApi();
+  if (!api?.cancel_agent) throw new Error("Ducky is not connected");
+  await api.cancel_agent(job.convId);
+  endAgentJobs(job.convId, "Stopped");
+}
+
 /** Mounted once by the header, independent of which chat panes are open. */
 export function subscribeAgentBackgroundActivity(): () => void {
   const titles = new Map<string, string>();
+  let existing: Set<string> | null = null;
+  let checking = false;
   let active = true;
   const touched = new Set<string>();
   const api = getApi();
@@ -58,8 +97,9 @@ export function subscribeAgentBackgroundActivity(): () => void {
   const refreshTitles = (): Promise<void> => {
     if (titleRefresh) return titleRefresh;
     titleRefresh = (async () => {
-      const chats = await api?.list_all_conversations?.(true).catch(() => []) || [];
-      if (!active) return;
+      const chats = await api?.list_all_conversations?.(true).catch(() => null);
+      if (!active || !chats) return;
+      existing = new Set(chats.map((chat) => chat.id));
       for (const chat of chats) titles.set(chat.id, chat.title);
       for (const job of getBackgroundJobs()) {
         const title = titles.get(job.convId || "");
@@ -72,7 +112,9 @@ export function subscribeAgentBackgroundActivity(): () => void {
     return titleRefresh;
   };
   const stop = subscribeAgentEvents((event) => {
-    if (event.type === "chats_changed" || (event.conv_id && !titles.has(event.conv_id) && !touched.has(event.conv_id))) void refreshTitles();
+    if (event.type === "chats_changed") {
+      void refreshTitles().then(() => { if (active && existing) reconcileAgentJobs(null, existing); });
+    } else if (event.conv_id && !titles.has(event.conv_id) && !touched.has(event.conv_id)) void refreshTitles();
     if (event.conv_id) touched.add(event.conv_id);
     applyAgentBackgroundEvent(event, titles.get(event.conv_id || "") || event.title || event.conv_id);
   });
@@ -105,6 +147,13 @@ export function subscribeAgentBackgroundActivity(): () => void {
     for (const job of getBackgroundJobs()) {
       if (job.source === "agent" && job.phase !== "working" && Date.now() - job.ts > 60_000) dismissBackgroundJob(job.id);
     }
+    const stale = getBackgroundJobs().some((j) => j.source === "agent" && j.phase === "working" && Date.now() - j.ts > SETTLE_MS);
+    if (!stale || checking) return;
+    checking = true;
+    void Promise.resolve(api?.list_running_agents?.())
+      .then((ids) => { if (active && Array.isArray(ids)) reconcileAgentJobs(ids, existing); })
+      .catch(() => {})
+      .finally(() => { checking = false; });
   }, 5000);
   return () => { active = false; stop(); clearInterval(timer); };
 }

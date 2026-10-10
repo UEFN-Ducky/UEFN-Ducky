@@ -3540,6 +3540,148 @@
   background: var(--border);
 }
 
+/* A turn another agent or Ducky started (agent mail, notices, plan updates). It holds the
+   same sticky slot as a person's prompt, so it must not read as one. The stuck/sticky
+   rules above reset border and background-color, so the accent is a bar + image layer. */
+.message-bubble-user-content.message-bubble-automated {
+  --automated-tone: var(--blue);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 10px 17px;
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--automated-tone) 8%, transparent),
+    color-mix(in srgb, var(--automated-tone) 8%, transparent)
+  );
+  transition: border-color 0.15s;
+}
+
+.message-bubble-user-content.message-bubble-automated::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--automated-tone);
+}
+
+.message-bubble-automated.is-notice {
+  --automated-tone: var(--amber);
+}
+
+.message-bubble-automated.is-plan,
+.message-bubble-automated.is-keeper {
+  --automated-tone: var(--green);
+}
+
+.message-bubble-user-content.message-bubble-automated:hover {
+  border-color: color-mix(in srgb, var(--automated-tone) 45%, var(--border));
+}
+
+.message-bubble-automated-heading {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.message-bubble-automated-part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.message-bubble-automated-part + .message-bubble-automated-part {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.message-bubble-automated-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 28px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.message-bubble-automated-icon {
+  display: inline-flex;
+  color: var(--automated-tone);
+}
+
+.message-bubble-automated-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.message-bubble-automated-label,
+.message-bubble-automated-agent {
+  color: var(--muted);
+}
+
+.message-bubble-automated-agent::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+.message-bubble-automated-from {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.message-bubble-automated-from:hover {
+  color: var(--automated-tone);
+  text-decoration: underline;
+}
+
+.message-bubble-automated-from.is-static,
+.message-bubble-automated-from.is-static:hover {
+  color: var(--fg);
+  text-decoration: none;
+  cursor: inherit;
+}
+
+.message-bubble-automated-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--automated-tone) 16%, transparent);
+  color: var(--automated-tone);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.message-bubble-automated-body {
+  min-width: 0;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-bubble-automated:not(.is-expanded) .message-bubble-automated-body {
+  max-height: calc(1.6em * 3);
+  overflow: hidden;
+}
+
+.message-bubble-automated:not(.is-expanded) .message-bubble-automated-body.is-faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 40%, transparent 100%);
+}
+
 .tool-execution-card-stop-slot {
   display: inline-flex;
   align-items: center;

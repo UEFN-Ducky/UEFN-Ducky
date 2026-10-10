@@ -1,4 +1,4 @@
-import { subscribeAgentBackgroundActivity, openAgentBackgroundJob } from "../hooks/agentBackgroundActivity";
+import { subscribeAgentBackgroundActivity, openAgentBackgroundJob, stopAgentBackgroundJob } from "../hooks/agentBackgroundActivity";
 import { formatElapsedMs } from "../hooks/chatTurnTimer";
 import { useEffect, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
@@ -52,9 +52,17 @@ export function BackgroundActivityDropdown() {
   const [open, setOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const cancel = async (job: BackgroundJob) => {
+    setActionError("");
+    if (job.source === "agent") {
+      try {
+        await stopAgentBackgroundJob(job);
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Could not stop that chat");
+      }
+      return;
+    }
     const wid = workflowIdFromJobId(job.id);
     if (!wid) { requestBackgroundJobCancel(job.id); return; }
-    setActionError("");
     try {
       const run = job.id.startsWith("graph-run:") ? job.id.slice(job.id.lastIndexOf(":") + 1) : "";
       await stopWorkflowRun(wid, run);
@@ -140,16 +148,28 @@ export function BackgroundActivityDropdown() {
                       value={Math.max(0, Math.min(100, job.percent))}
                     />
                   ) : null}
-                  {job.cancelable ? (
+                  {job.cancelable || (job.source === "agent" && job.convId) ? (
                     <button
                       type="button"
                       className="bg-activity-link"
+                      title={job.source === "agent" ? (job.toolId ? "Stops this chat's turn, and this command with it" : "Stops this chat's turn") : undefined}
                       onClick={(event) => { event.stopPropagation(); void cancel(job); }}
                     >
-                      {workflowIdFromJobId(job.id) ? "Stop" : "Cancel"}
+                      {job.source === "agent" || workflowIdFromJobId(job.id) ? "Stop" : "Cancel"}
                     </button>
                   ) : null}
                 </div>
+                {job.cancelable || (job.source === "agent" && job.convId) ? null : (
+                  <button
+                    type="button"
+                    className="bg-activity-dismiss"
+                    title="Hide from this list. It cannot be stopped from here and may still be running."
+                    aria-label="Hide"
+                    onClick={(event) => { event.stopPropagation(); dismissBackgroundJob(job.id); }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))
           )}

@@ -21,6 +21,8 @@ import { AgentActivityPanel } from "./AgentActivityPanel";
 import { MessageBubble } from "./MessageBubble";
 
 import { EditableUserMessage } from "./EditableUserMessage";
+import { AutomatedPromptMessage } from "./AutomatedPromptMessage";
+import { parseAutomatedPrompt } from "../utils/automatedPrompt";
 
 import { ToolExecutionCard } from "./ToolExecutionCard";
 
@@ -221,6 +223,17 @@ const ChatRowView = memo(function ChatRowView({
   const externalAgent = env.composerCodingAgent !== "ducky";
 
   if (row.kind === "bubble" && row.role === "user") {
+    // Turns another agent or Ducky started: show who sent them, and never offer to edit them.
+    const automated = parseAutomatedPrompt(row.text);
+    if (automated) {
+      return (
+        <ChatCollapseScopeProvider scope={scope}>
+          <div className="virtual-chat-message-list-query" data-chat-row-id={row.id}>
+            <AutomatedPromptMessage prompt={automated} onStop={editable ? env.onStop : undefined} />
+          </div>
+        </ChatCollapseScopeProvider>
+      );
+    }
     return (
       <ChatCollapseScopeProvider scope={scope}>
         <div className="virtual-chat-message-list-query" data-chat-row-id={row.id}>

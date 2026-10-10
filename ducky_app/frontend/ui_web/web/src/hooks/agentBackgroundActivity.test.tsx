@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AgentEvent } from "../types/panel";
 const mocks = vi.hoisted(() => ({ listener: null as null | ((event: AgentEvent) => void), open: vi.fn(), push: vi.fn(),
-  api: { list_all_conversations: vi.fn(), list_running_agents: vi.fn(), load_messages: vi.fn(), terminal_list: vi.fn() } }));
+  api: { list_all_conversations: vi.fn(), list_running_agents: vi.fn(), load_messages: vi.fn(), terminal_list: vi.fn(), cancel_agent: vi.fn() } }));
 vi.mock("./usePanelApi", () => ({ getApi: () => mocks.api }));
 vi.mock("./useAgentEventBus", () => ({
   subscribeAgentEvents: (fn: (event: AgentEvent) => void) => { mocks.listener = fn; return () => { mocks.listener = null; }; },
@@ -119,4 +119,47 @@ it("does not evict a running command when many other jobs arrive", () => {
   for (let i = 0; i < 80; i++) upsertBackgroundJob({ id: `history:${i}`, phase: "done" });
   expect(getBackgroundJobs().find((j) => j.toolId === "call-1")?.phase).toBe("working");
   expect(countWorkingBackgroundJobs(getBackgroundJobs())).toBe(2);
+});
+
+it("closes a row the backend no longer runs, keeps one it does, and drops rows of deleted chats", async () => {
+  mocks.api.list_all_conversations.mockResolvedValue([{ id: "other", title: "Coordinator" }, { id: "team", title: "Team test r8" }]);
+  render(<BackgroundActivityDropdown />);
+  await act(async () => {});
+  // A group's side-chat note streams text and never sends agent_stopped.
+  act(() => {
+    mocks.listener!({ type: "text_delta", conv_id: "team", text: "(Side chat) note" });
+    mocks.listener!(start());
+  });
+  expect(screen.getByText("3 running")).toBeTruthy();
+  mocks.api.list_running_agents.mockResolvedValue(["other"]);
+  await act(async () => { vi.advanceTimersByTime(15_000); });
+  await act(async () => {});
+  expect(getBackgroundJobs().find((j) => j.convId === "team")?.phase).toBe("done");
+  expect(screen.getByText("2 running")).toBeTruthy();
+  mocks.api.list_all_conversations.mockResolvedValue([{ id: "other", title: "Coordinator" }]);
+  await act(async () => { mocks.listener!({ type: "chats_changed" } as AgentEvent); });
+  await act(async () => {});
+  expect(getBackgroundJobs().some((j) => j.convId === "team")).toBe(false);
+  expect(getBackgroundJobs().filter((j) => j.convId === "other")).toHaveLength(2);
+});
+
+it("stops a chat's turn from the tray", async () => {
+  mocks.api.cancel_agent.mockResolvedValue(true);
+  render(<BackgroundActivityDropdown />);
+  await act(async () => {});
+  act(() => mocks.listener!(start()));
+  fireEvent.click(screen.getByLabelText("Background activity"));
+  await act(async () => { fireEvent.click(screen.getAllByText("Stop")[0]); });
+  expect(mocks.api.cancel_agent).toHaveBeenCalledWith("other");
+  expect(countWorkingBackgroundJobs(getBackgroundJobs())).toBe(0);
+  expect(screen.getByText("Coordinator stopped")).toBeTruthy();
+});
+
+it("offers Hide only for a row that cannot be stopped", async () => {
+  render(<BackgroundActivityDropdown />);
+  await act(async () => {});
+  act(() => { upsertBackgroundJob({ id: "plugin:job", title: "Plugin import", phase: "working" }); });
+  fireEvent.click(screen.getByLabelText("Background activity"));
+  fireEvent.click(screen.getByLabelText("Hide"));
+  expect(getBackgroundJobs()).toHaveLength(0);
 });
