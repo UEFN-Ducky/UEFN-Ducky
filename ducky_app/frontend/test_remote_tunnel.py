@@ -94,6 +94,66 @@ def test_app_exit_stops_cloudflared(monkeypatch):
         rt._set_status(running=False, mode="", hostname="", error="")
 
 
+def test_a_failing_tunnel_backs_off_and_sweeps_orphans_once(monkeypatch):
+    """cloudflared dying right after start was retried every 3 s forever, each time
+    with a PowerShell sweep for orphans, a site call and a new cloudflared."""
+    import io
+    from types import SimpleNamespace
+
+    from frontend.settings import PanelSettings
+
+    waits: list[float] = []
+
+    class FakeStop:
+        flag = False
+
+        def is_set(self) -> bool:
+            return self.flag
+
+        def set(self) -> None:
+            self.flag = True
+
+        def clear(self) -> None:
+            self.flag = False
+
+        def wait(self, timeout: float | None = None) -> bool:
+            waits.append(float(timeout or 0))
+            self.flag = len(waits) >= 8
+            return self.flag
+
+    class ExitsAtOnce:
+        def __init__(self, *args, **kwargs) -> None:
+            self.stdout = io.StringIO("")
+
+        def poll(self) -> int:
+            return 1
+
+        def kill(self) -> None:
+            pass
+
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 1
+
+    sweeps: list[int] = []
+    monkeypatch.setattr(rt, "_STOP", FakeStop())
+    monkeypatch.setattr(rt.subprocess, "Popen", ExitsAtOnce)
+    monkeypatch.setattr(rt, "ensure_cloudflared", lambda: Path("cloudflared.exe"))
+    monkeypatch.setattr(rt, "_kill_orphan_cloudflareds", lambda: sweeps.append(1))
+    monkeypatch.setattr(rt, "_fetch_tunnel_token", lambda: {"mode": "named", "token": "t", "hostname": "h.test"})
+    monkeypatch.setattr(rt, "_save_named_cache", lambda *args: None)
+    monkeypatch.setattr(rt, "_append_cloudflared_log", lambda text: None)
+    monkeypatch.setattr(PanelSettings, "load", lambda *args, **kwargs: SimpleNamespace(remote_access=True))
+    try:
+        rt._loop()
+    finally:
+        rt._set_status(running=False, mode="", hostname="", error="", named_reason="")
+    assert sweeps == [1]
+    assert waits == [3.0, 6.0, 12.0, 24.0, 48.0, 60.0, 60.0, 60.0]
+
+
 def test_named_reason_survives_quick_status():
     rt._set_status(named_reason="cloudflare 403: zone", mode="quick", running=True, error="")
     try:

@@ -41,6 +41,9 @@ _STATUS: dict[str, Any] = {
     "site_update_pending": False,
 }
 _LOG_MAX = 1_000_000
+_RETRY_S = 3.0
+_RETRY_MAX_S = 60.0
+_HEALTHY_RUN_S = 30.0
 
 
 def remote_tunnel_status() -> dict[str, Any]:
@@ -250,17 +253,24 @@ def _loop() -> None:
     from frontend.settings import PanelSettings
     from frontend.ui_web.panel_httpd import PANEL_UI_HTTP_PORT
 
+    # Orphans come only from an earlier Ducky that crashed or was force-closed:
+    # this thread always ends its own cloudflared before retrying. Sweeping before
+    # every retry ran a PowerShell process every few seconds while a tunnel failed.
+    _kill_orphan_cloudflareds()
+    failures = 0
     while not _STOP.is_set():
+        started = time.monotonic()
+        connected = False
         try:
             s = PanelSettings.load()
             if not bool(getattr(s, "remote_access", False)):
                 _set_status(running=False, mode="", error="", named_reason="")
+                failures = 0
                 _STOP.wait(2.0)
                 continue
             if not str(remote_tunnel_status().get("hostname") or "").strip():
                 _set_status(mode="starting", running=False, error="")
             exe = ensure_cloudflared()
-            _kill_orphan_cloudflareds()
             try:
                 row = _fetch_tunnel_token()
             except Exception as exc:
@@ -293,7 +303,7 @@ def _loop() -> None:
                 _save_named_cache(host, str(row["token"]))
                 # Host stays empty until cloudflared registers — iframe-ing early is 530/504.
                 _set_status(mode="named", hostname="", running=False, error="", named_reason="")
-                _run_cloudflared(
+                connected = bool(_run_cloudflared(
                     exe,
                     [
                         "tunnel",
@@ -306,10 +316,10 @@ def _loop() -> None:
                         str(row["token"]),
                     ],
                     named_host=host,
-                )
+                ))
             else:
                 _set_status(mode="quick", running=False)
-                _run_cloudflared(
+                connected = bool(_run_cloudflared(
                     exe,
                     [
                         "tunnel",
@@ -320,11 +330,17 @@ def _loop() -> None:
                         "--url",
                         url,
                     ],
-                )
+                ))
         except Exception as exc:
             _set_status(running=False, error=str(exc)[:240])
+        # A tunnel that connected or ran a while restarts at once; one that keeps
+        # dying at start (revoked token, site error) waits longer each time.
+        if connected or time.monotonic() - started >= _HEALTHY_RUN_S:
+            failures = 0
+        else:
+            failures += 1
         if not _STOP.is_set():
-            _STOP.wait(3.0)
+            _STOP.wait(min(_RETRY_S * 2 ** max(0, failures - 1), _RETRY_MAX_S))
     _set_status(running=False)
 
 
