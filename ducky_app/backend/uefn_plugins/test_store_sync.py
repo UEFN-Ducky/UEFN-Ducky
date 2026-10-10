@@ -354,6 +354,51 @@ def test_parallel_plugin_replaces_do_not_overlap_rmtree(monkeypatch) -> None:
         assert "".join(order) == "startendstartend", order
 
 
+def test_repair_thread_starts_only_when_a_repair_is_due(monkeypatch, tmp_path) -> None:
+    """Oct 10 2026: every get_contributions() (key status, model refresh, tool lists) started
+    an 'uefn-plugins-repair' thread with a new database connection even when every plugin
+    was registered, ~1.3 threads a second while Ducky sat idle."""
+    import types
+
+    import backend.uefn_plugins.host as host
+
+    clock = [1000.0]
+    fake_time = types.SimpleNamespace(**{n: getattr(time, n) for n in dir(time) if not n.startswith("_")})
+    fake_time.monotonic = lambda: clock[0]
+    runs: list[int] = []
+    real_worker = host._repair_missing_backends_worker
+
+    def _counting_worker() -> None:
+        runs.append(1)
+        real_worker()
+
+    monkeypatch.setattr(host, "time", fake_time)
+    monkeypatch.setattr(host, "_repair_missing_backends_worker", _counting_worker)
+    monkeypatch.setattr(host, "get_enabled_plugin_ids", lambda: ["alpha", "beta"])
+    monkeypatch.setattr(host, "appdata_uefn_plugins_dir", lambda: tmp_path)  # no plugin folders
+    monkeypatch.setattr(host, "_REGISTERED", {"alpha", "beta"})
+    monkeypatch.setattr(host, "_REPAIR_ATTEMPTS", {})
+    monkeypatch.setattr(host, "_REPAIR_THREAD", None)
+    monkeypatch.setattr(host, "_LOADED", True)
+
+    def _ensure(times: int) -> None:
+        for _ in range(times):
+            assert host.ensure_plugins_loaded() is True
+            thread = host._REPAIR_THREAD
+            if thread is not None:
+                thread.join(5)
+
+    _ensure(100)
+    assert runs == []
+
+    host._REGISTERED.discard("beta")  # its register() never finished
+    _ensure(100)
+    assert runs == [1]
+    clock[0] += host._REPAIR_BACKOFF_S
+    _ensure(100)
+    assert runs == [1, 1]
+
+
 if __name__ == "__main__":
     test_invalidate_plugin_runtime_bounds_hanging_unload()
     test_ensure_plugins_loaded_timeout_returns_false()

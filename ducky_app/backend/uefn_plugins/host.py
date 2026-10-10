@@ -1764,6 +1764,14 @@ def _repair_missing_backends_async() -> None:
     enable/disable/uninstall that needed the host lock.
     """
     global _REPAIR_THREAD
+    # Nearly every call finds nothing to repair. Asking first keeps get_contributions()
+    # (key status, model refresh, tool lists) from starting a thread and a fresh database
+    # connection on every call: ~1.3 a second while Ducky sat idle.
+    try:
+        if not _repair_due():
+            return
+    except Exception:  # noqa: BLE001 — the worker checks again
+        pass
     with _REPAIR_THREAD_LOCK:
         if _REPAIR_THREAD is not None and _REPAIR_THREAD.is_alive():
             return
@@ -1773,6 +1781,17 @@ def _repair_missing_backends_async() -> None:
             name="uefn-plugins-repair",
         )
         _REPAIR_THREAD.start()
+
+
+def _repair_due() -> bool:
+    """True when an enabled plugin has not finished register() and its retry backoff passed."""
+    now = time.monotonic()
+    for pid in get_enabled_plugin_ids():
+        if pid in _REGISTERED:
+            continue
+        if now - float(_REPAIR_ATTEMPTS.get(pid) or 0.0) >= _REPAIR_BACKOFF_S:
+            return True
+    return False
 
 
 def _repair_missing_backends_worker() -> None:
@@ -1813,8 +1832,6 @@ def _repair_missing_backends_once() -> None:
     """
     enabled = set(get_enabled_plugin_ids())
     root = appdata_uefn_plugins_dir()
-    if not root.is_dir():
-        return
     now = time.monotonic()
     for pid in sorted(enabled):
         if pid in _REGISTERED:
@@ -1823,14 +1840,16 @@ def _repair_missing_backends_once() -> None:
         last = float(_REPAIR_ATTEMPTS.get(pid) or 0.0)
         if now - last < _REPAIR_BACKOFF_S:
             continue
+        # Record *before* register so a hung call is not retried every poll, and before
+        # the folder checks so an enabled plugin with no folder or manifest is not "due"
+        # again on every call either.
+        _REPAIR_ATTEMPTS[pid] = now
         child = root / pid
         if not child.is_dir():
             continue
         manifest = _read_manifest(child)
         if not manifest:
             continue
-        # Record *before* register so a hung call is not retried every poll.
-        _REPAIR_ATTEMPTS[pid] = now
 
         def _repair_one(
             repair_pid: str = pid,
