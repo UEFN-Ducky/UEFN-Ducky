@@ -195,6 +195,27 @@ def record_coding_agent_usage(
     from frontend.ui_web.provider_usage_log import log_call
     from frontend.ui_web.token_usage import record_api_call, token_usage_report
 
+    previous_stats = getattr(conv, "coding_agent_stats", None) or {}
+    cursor = previous_stats.get("usage_cursor")
+    cumulative_thread = str(usage.get("cumulative_thread") or "")
+    if cumulative_thread:
+        totals = {"thread_id": cumulative_thread,
+                  "input": int(usage.get("input_tokens") or 0),
+                  "cached": int(usage.get("cache_read_tokens") or 0),
+                  "output": int(usage.get("output_tokens") or 0)}
+        keys = ("input", "cached", "output")
+        if not isinstance(cursor, dict) or cursor.get("thread_id") != cumulative_thread or any(
+            totals[k] < int(cursor.get(k) or 0) for k in keys
+        ):
+            cursor = {}
+        usage = {**usage,
+                 "input_tokens": totals["input"] - int(cursor.get("input") or 0),
+                 "cache_read_tokens": totals["cached"] - int(cursor.get("cached") or 0),
+                 "output_tokens": totals["output"] - int(cursor.get("output") or 0)}
+        cursor = totals
+        # Save even a zero delta, without changing historical token records.
+        conv.coding_agent_stats = {**previous_stats, "usage_cursor": cursor}
+
     model = str(usage.get("model") or selected_model or "").strip()
     cost = usage.get("cost_usd")
     cost_usd = float(cost) if isinstance(cost, (int, float)) else None
@@ -207,7 +228,7 @@ def record_coding_agent_usage(
         log_call(
             provider=agent_id,
             model=model,
-            input_tokens=inp if has_usage else 1,
+            input_tokens=inp if has_usage or cumulative_thread else 1,
             output_tokens=out,
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
@@ -243,6 +264,8 @@ def record_coding_agent_usage(
     limit = int(usage.get("context_limit") or 0)
     if limit > 0:
         stats["context_limit"] = limit
+    if isinstance(cursor, dict):
+        stats["usage_cursor"] = cursor
     conv.coding_agent_stats = stats
     if push is not None:
         report = token_usage_report(conv)
