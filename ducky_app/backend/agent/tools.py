@@ -778,17 +778,18 @@ def _record_plugin_sidecar(name: str, args: dict[str, Any], text: str, *, ok: bo
         pass
 
 
-async def _ask_denial(name: str, arguments: Any) -> ToolCallResult | None:
+async def _mode_denial(name: str, arguments: Any) -> ToolCallResult | None:
     from backend.agent.run_context import current_mode
     from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 
-    if current_mode() != "ask":
+    mode = current_mode()
+    if mode == "agent":
         return None
     try:
         catalog = {t.name: t for t in await list_mcp_tools()}
     except Exception:
-        return ToolCallResult(ok=False, tool=name, error="blocked in Ask mode: tool catalog unavailable")
-    reason = mode_tool_block_reason(current_mode(), name, arguments, catalog)
+        return ToolCallResult(ok=False, tool=name, error=f"blocked in {mode.title()} mode: tool catalog unavailable")
+    reason = mode_tool_block_reason(mode, name, arguments, catalog)
     return ToolCallResult(ok=False, tool=name, error=reason) if reason else None
 
 
@@ -799,7 +800,7 @@ async def execute_tool(
     cancel_event: Any | None = None,
 ) -> ToolCallResult:
     """Dispatch a tool call; failures feed verse_stats and the hammer guard."""
-    denial = await _ask_denial(name, {} if arguments is None else arguments)
+    denial = await _mode_denial(name, {} if arguments is None else arguments)
     if denial is not None:
         return denial
     from backend.agent import hammer_guard
@@ -890,7 +891,7 @@ async def _execute_tool_inner(
     cancel_event: Any | None = None,
     _alias_tried: bool = False,
 ) -> ToolCallResult:
-    denial = await _ask_denial(name, {} if arguments is None else arguments)
+    denial = await _mode_denial(name, {} if arguments is None else arguments)
     if denial is not None:
         return denial
     args = arguments or {}

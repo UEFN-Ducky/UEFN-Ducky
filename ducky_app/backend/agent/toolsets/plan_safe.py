@@ -21,6 +21,11 @@ ASK_READ_TOOLS = frozenset({
     "code_list_errors", "ducky_get_errors",
 })
 _OPAQUE_PARAMETERS = frozenset({"code", "script", "python", "command", "commands", "operation", "operations"})
+PLAN_BOOKKEEPING_TOOLS = frozenset({
+    "ducky_create_plan", "ducky_update_plan", "ducky_plan_add_node",
+    "ducky_plan_update_node", "ducky_plan_delete_node", "ducky_plan_move_node",
+    "ducky_ask_user", "ducky_rename_self",
+})
 
 
 def canonical_tool_name(name: str, catalog: Mapping[str, Any]) -> str:
@@ -34,7 +39,7 @@ def canonical_tool_name(name: str, catalog: Mapping[str, Any]) -> str:
     return resolve_invented_tool_name(name, set(catalog)) or ""
 
 
-def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any], *, discovery: bool = False) -> str:
+def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any], *, discovery: bool = False, _plan: bool = False) -> str:
     """Pure Ask decision over a catalog snapshot and the actual call arguments.
 
     Qualified server reads require explicit registry annotations; their spelling
@@ -67,7 +72,7 @@ def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any],
             return "blocked in Ask mode: recursive meta-tool dispatch"
     else:
         return "blocked in Ask mode: dispatcher depth exceeded"
-    if canonical in ASK_READ_TOOLS:
+    if canonical in ASK_READ_TOOLS or (_plan and canonical in PLAN_BOOKKEEPING_TOOLS):
         return ""
     if "__" not in canonical:
         return reason
@@ -99,9 +104,16 @@ def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any],
 
 
 def mode_tool_block_reason(mode: str, name: str, arguments: Any, catalog: Mapping[str, Any], *, discovery: bool = False) -> str:
-    """Ask execution policy; Agent and existing Plan permissions are unchanged."""
+    """Execution policy, separate from the broader discovery name heuristics.
+
+    Plan adds only local bookkeeping to the verified read surface. Shell/git
+    executors cannot be classified safely from command text and remain blocked.
+    Remote annotations describe a server contract, not proof of remote behavior.
+    """
     if mode == "ask":
         return ask_tool_block_reason(name, arguments, catalog, discovery=discovery)
+    if mode == "plan":
+        return ask_tool_block_reason(name, arguments, catalog, discovery=discovery, _plan=True).replace("Ask mode", "Plan mode")
     if mode not in ("agent", "plan"):
         return "blocked: invalid agent mode"
     return ""

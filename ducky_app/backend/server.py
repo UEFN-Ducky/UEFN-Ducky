@@ -14,6 +14,19 @@ class ProtectedFastMCP(FastMCP):
         return [t for t in available if t.name in SAFE_TOOLS] if current_policy().strict else available
 
     async def call_tool(self, name, arguments):
+        from backend.agent.run_context import current_mode
+        from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        # This context is bound by the host, never by tool arguments or DUCKY_*
+        # attribution hints. A separate process needs its own trusted binding;
+        # a local ContextVar does not authenticate a remote MCP client.
+        mode = current_mode()
+        if mode != "agent":
+            catalog = {tool.name: tool for tool in await super().list_tools()}
+            reason = mode_tool_block_reason(mode, name, arguments, catalog)
+            if reason:
+                raise ToolError(reason)
         from backend.workspace.ai_ignore import require_safe_tool
 
         require_safe_tool(name)
