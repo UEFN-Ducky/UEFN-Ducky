@@ -152,6 +152,88 @@ def test_perf_rows_and_latest_report(monkeypatch) -> None:
     assert events.count("perf") >= 1
 
 
+@pytest.fixture
+def quiet_perf(monkeypatch):
+    """perf_trace with its background report thread stopped and a fresh ring."""
+    from frontend import perf_trace as pt
+
+    stop = pt._stop_writer
+    stop.set()
+    if pt._writer_thread is not None:
+        pt._writer_thread.join(timeout=5)
+    monkeypatch.setattr(pt, "ensure_started", lambda: None)
+    monkeypatch.setattr(pt, "_session_id", "session-20261010-000000-1")
+    monkeypatch.setattr(pt, "_ring", [])
+    for name, value in (("_pending_rows", []), ("_ring_seq", 0), ("_reported_seq", 0), ("_last_trim", None)):
+        monkeypatch.setattr(pt, name, value, raising=False)
+    yield pt
+    stop.clear()
+
+
+class _Waits:
+    """Stands in for the report thread's stop event: *n* ticks, then stop."""
+
+    def __init__(self, n: int) -> None:
+        self.left = n
+
+    def wait(self, _timeout: float) -> bool:
+        self.left -= 1
+        return self.left < 0
+
+
+def test_perf_events_are_written_in_one_transaction_per_report(quiet_perf, monkeypatch) -> None:
+    """Every notable perf event was its own BEGIN IMMEDIATE/COMMIT; the UI
+    reports up to 200 samples per flush, and every ~100 KB evaluate_js push was
+    persisted for its size alone (36,565 rows at a 4 ms median)."""
+    from backend.store.repos import events
+
+    pt = quiet_perf
+    single: list[int] = []
+    batches: list[int] = []
+    monkeypatch.setattr(events, "insert", lambda *a, **k: single.append(1))
+    monkeypatch.setattr(events, "insert_many", lambda kind, rows: batches.append(len(rows)) or len(rows))
+    for _ in range(500):
+        pt.trace("ui_frame", "raf_gap", 300.0)
+    pt.trace("ui_js", "evaluate_js", 4.0, js_bytes=105_656)
+    assert single == [] and batches == []
+    pt.write_report()
+    assert single == []
+    assert batches == [500]
+
+
+def test_idle_report_loop_does_not_rewrite_reports_or_trim(quiet_perf, monkeypatch) -> None:
+    """The report thread rewrote two report docs and ran a 50,000-row trim
+    every 15 s even when nothing had been traced since the last report."""
+    from backend.store.repos import events
+
+    pt = quiet_perf
+    writes: list[str] = []
+    trims: list[str] = []
+    real_set_doc = kv.set_doc
+    monkeypatch.setattr(kv, "set_doc", lambda table, key, value: (writes.append(key), real_set_doc(table, key, value)))
+    monkeypatch.setattr(events, "trim", lambda kind, **k: trims.append(kind) or 0)
+    pt.trace("tool_push", "probe", 1.0, result_bytes=10)
+    monkeypatch.setattr(pt, "_stop_writer", _Waits(3))
+    pt._report_loop()
+    assert sorted(writes) == ["perf_report:session-20261010-000000-1", "perf_report_latest"]
+    assert trims == ["perf"]
+
+
+def test_old_perf_session_reports_are_pruned(quiet_perf, monkeypatch) -> None:
+    """One perf_report:session-* doc per process start (bridges included)
+    piled up forever in database mode: 1,490 docs, none ever removed."""
+    pt = quiet_perf
+    for i in range(15):
+        kv.set_doc("cache_docs", f"perf_report:session-20261001-{i:06d}-1", {"i": i})
+    kv.set_doc("cache_docs", "perf_report_latest", {"keep": True})
+    monkeypatch.setattr(pt, "_stop_writer", _Waits(0))
+    pt._report_loop()
+    left = sorted(kv.list_docs("cache_docs", "perf_report:session-"))
+    assert len(left) == pt.MAX_SESSIONS
+    assert left[0] == "perf_report:session-20261001-000005-1"  # the newest ones stay
+    assert kv.get_doc("cache_docs", "perf_report_latest") == {"keep": True}
+
+
 def test_skill_manifest_cache_hits_until_a_reference_changes(appdata: Path, monkeypatch) -> None:
     from backend.skills import store as skills
 

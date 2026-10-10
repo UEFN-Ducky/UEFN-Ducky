@@ -2,7 +2,7 @@
 
 Writes to ``%LOCALAPPDATA%/UEFN-Ducky/perf/``:
   - ``session-<YYYYMMDD-HHMMSS>-<pid>.jsonl`` — slow/notable events
-  - ``session-<...>-report.json`` — aggregated summary (rewritten ~every 15s)
+  - ``session-<...>-report.json`` — aggregated summary (rewritten within ~15s of a change)
   - ``latest-report.json`` — copy of the current session's report
 
 Exceptions are swallowed everywhere; a bad tracer must never break the app.
@@ -37,6 +37,13 @@ SLOW_MS = {
 }
 QUEUE_DEPTH_NOTABLE = 8
 PAYLOAD_BYTES_NOTABLE = 32_768
+# evaluate_js ships ~100 KB catalog pushes in a few ms all day; size alone made
+# tens of thousands of rows. It is persisted when slow, queued, or really large.
+PAYLOAD_BYTES_PERSIST = {"ui_js": 512 * 1024}
+# Rows a frozen app may never get to flush: written the moment they happen.
+WRITE_NOW_KINDS = frozenset({"ui_js_stall"})
+MAX_PENDING_ROWS = 5000
+TRIM_EVERY_SEC = 3600.0
 
 _lock = threading.Lock()
 _ring: list[dict[str, Any]] = []
@@ -47,6 +54,11 @@ _latest_report: Path | None = None
 _started = False
 _writer_thread: threading.Thread | None = None
 _stop_writer = threading.Event()
+# Notable events waiting for the report thread to insert them in one transaction.
+_pending_rows: list[dict[str, Any]] = []
+_ring_seq = 0  # bumped by every trace()
+_reported_seq = 0  # _ring_seq the last report was built from
+_last_trim: float | None = None  # monotonic time of the last events trim
 
 
 def _use_db() -> bool:
@@ -99,7 +111,8 @@ def _should_persist(kind: str, duration_ms: float, meta: dict[str, Any]) -> bool
         return True
     if int(meta.get("queue_depth") or 0) >= QUEUE_DEPTH_NOTABLE:
         return True
-    if int(meta.get("payload_bytes") or meta.get("js_bytes") or meta.get("result_bytes") or 0) >= PAYLOAD_BYTES_NOTABLE:
+    nbytes = int(meta.get("payload_bytes") or meta.get("js_bytes") or meta.get("result_bytes") or 0)
+    if nbytes >= PAYLOAD_BYTES_PERSIST.get(kind, PAYLOAD_BYTES_NOTABLE):
         return True
     if int(meta.get("event_count") or 0) >= 50:
         return True
@@ -128,7 +141,7 @@ def ensure_started() -> None:
         except Exception:
             _started = True  # don't retry forever on path failures
             return
-    atexit.register(_write_report_safe)
+    atexit.register(_report_if_changed)
     _stop_writer.clear()
     _writer_thread = threading.Thread(target=_report_loop, name="perf-report", daemon=True)
     _writer_thread.start()
@@ -151,20 +164,64 @@ def _prune_old_sessions(d: Path) -> None:
         pass
 
 
-def _report_loop() -> None:
-    while not _stop_writer.wait(REPORT_INTERVAL_SEC):
-        _write_report_safe()
-
-
-def _write_report_safe() -> None:
+def _prune_old_session_docs() -> None:
+    """Database mode keeps one report doc per process start (bridges included);
+    keep the newest MAX_SESSIONS like the file mode keeps its report files."""
+    if not _use_db():
+        return
     try:
-        write_report()
+        _kv().prune_docs("cache_docs", "perf_report:session-", keep=MAX_SESSIONS)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _report_loop() -> None:
+    _prune_old_session_docs()
+    while not _stop_writer.wait(REPORT_INTERVAL_SEC):
+        _report_if_changed()
+
+
+def _report_if_changed() -> None:
+    """Report-thread tick and exit hook: store pending rows, and rewrite the
+    report only when something was traced since the last one."""
+    try:
+        _flush_rows()
+        with _lock:
+            changed = _ring_seq != _reported_seq
+        if changed:
+            write_report()
     except Exception:
         pass
 
 
+def _flush_rows() -> None:
+    """Insert the pending notable events in one transaction; trim at most hourly."""
+    global _last_trim
+    with _lock:
+        rows = _pending_rows[:]
+        _pending_rows.clear()
+    if not rows:
+        return
+    try:
+        _events().insert_many("perf", rows)
+    except Exception:  # noqa: BLE001
+        return
+    now = time.monotonic()
+    with _lock:
+        due = _last_trim is None or now - _last_trim >= TRIM_EVERY_SEC
+        if due:
+            _last_trim = now
+    if due:
+        try:
+            # Per-session rows: keep the newest sessions only (was 10 jsonl files).
+            _events().trim("perf", older_than=time.time() - 7 * 86400, keep=50_000)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def trace(kind: str, name: str = "", duration_ms: float = 0.0, **meta: Any) -> None:
     """Record one event. Always rings; persists when notable."""
+    global _ring_seq
     try:
         ensure_started()
         entry: dict[str, Any] = {
@@ -178,23 +235,27 @@ def trace(kind: str, name: str = "", duration_ms: float = 0.0, **meta: Any) -> N
                 continue
             entry[k] = v
         persist = _should_persist(kind, float(duration_ms), meta)
+        use_db = persist and _use_db()
         with _lock:
             _ring.append(entry)
             if len(_ring) > RING_SIZE:
                 del _ring[: len(_ring) - RING_SIZE]
+            _ring_seq += 1
             path = _session_jsonl if persist else None
-        if path is not None:
-            if _use_db():
-                try:
-                    _events().insert("perf", ts=entry["ts"], source=_session_id, message=entry["name"], payload=entry)
-                except Exception:  # noqa: BLE001
-                    pass
-            else:
-                try:
-                    with path.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
-                except OSError:
-                    pass
+            if use_db:
+                # One transaction per report tick instead of one per event.
+                _pending_rows.append({"ts": entry["ts"], "source": _session_id, "message": entry["name"], "payload": entry})
+                if len(_pending_rows) > MAX_PENDING_ROWS:
+                    del _pending_rows[: len(_pending_rows) - MAX_PENDING_ROWS]
+        if use_db:
+            if kind in WRITE_NOW_KINDS:
+                _flush_rows()
+        elif path is not None:
+            try:
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            except OSError:
+                pass
     except Exception:
         pass
 
@@ -290,23 +351,26 @@ def _hints(kinds: dict[str, Any], slowest: list[dict[str, Any]]) -> list[str]:
 
 def write_report() -> dict[str, Any]:
     """Write session + latest report JSON to disk. Returns the summary."""
+    global _reported_seq
+    _flush_rows()
+    with _lock:
+        seq = _ring_seq
     report = summary()
     ensure_started()
     with _lock:
         session_path = _session_report
         latest_path = _latest_report
-    payload = json.dumps(report, ensure_ascii=False, indent=2, default=str)
+        _reported_seq = seq
     if _use_db():
         try:
             kv = _kv()
             kv.set_doc("cache_docs", "perf_report_latest", report)
             if _session_id:
                 kv.set_doc("cache_docs", f"perf_report:{_session_id}", report)
-            # Per-session rows: keep the newest sessions only (was 10 jsonl files).
-            _events().trim("perf", older_than=time.time() - 7 * 86400, keep=50_000)
         except Exception:  # noqa: BLE001
             pass
         return report
+    payload = json.dumps(report, ensure_ascii=False, indent=2, default=str)
     for path in (session_path, latest_path):
         if path is None:
             continue
