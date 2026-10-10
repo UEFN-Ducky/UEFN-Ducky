@@ -296,7 +296,8 @@ def _last_assistant_text(conv) -> str:
 
 
 class AgentSession:
-    def __init__(self) -> None:
+    def __init__(self, conv_id: str = "") -> None:
+        self.conv_id = conv_id
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
         self._runner: AgentRunner | None = None
@@ -354,6 +355,12 @@ class AgentSession:
                 discard_live_run_id(run_id)
                 if admission:
                     _release_admission(*admission)
+                # A finished chat keeps no session: one per chat ever run piled up all
+                # day, and Stop all walked every one of them. A follow-up already
+                # prepared on this session changed run_id and keeps it.
+                with _admission_lock:
+                    if self.conv_id and _sessions.get(self.conv_id) is self and self.run_id == run_id:
+                        _sessions.pop(self.conv_id, None)
         worker = threading.Thread(target=run, daemon=True, name=f"agent-{run_id[:8]}")
         from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
 
@@ -729,7 +736,7 @@ def cancel_agent(conv_id: str | None = None) -> None:
 
 def _session(conv_id: str) -> AgentSession:
     if conv_id not in _sessions:
-        _sessions[conv_id] = AgentSession()
+        _sessions[conv_id] = AgentSession(conv_id)
     return _sessions[conv_id]
 
 
@@ -1020,14 +1027,6 @@ async def _run_agent_loop(
             waiters = _child_waiters.get(conv.id)
             if waiters is not None and not waiters:
                 _child_waiters.pop(conv.id, None)
-            # Drop idle sessions so long-lived panels do not retain one entry per chat.
-            if (
-                _sessions.get(conv.id) is session
-                and session._thread is not None
-                and not session._thread.is_alive()
-                and not session._runner
-            ):
-                _sessions.pop(conv.id, None)
         from frontend.ui_web.live_agent_runs import discard_live_run_id
 
         discard_live_run_id(run_id)
@@ -1402,7 +1401,9 @@ def run_message(
     _note_run_starter(conv_id, parent, started_by)
 
     run_id = str(uuid.uuid4())
-    _run_started[run_id] = time.monotonic()
+    # Recorded once the turn really starts below: a send refused here (no model, no
+    # key, a bad attachment) never reaches agent_stopped to remove it again.
+    started_at = time.monotonic()
 
     settings = PanelSettings.load()
     apply_workspace_env(settings.uefn_project_root)
@@ -1603,6 +1604,7 @@ def run_message(
         _linked_parents[conv_id] = parent_conv_id
         _quiet_runs.add(run_id)
     child_title = conv.title or "Chat"
+    _run_started[run_id] = started_at
 
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
@@ -1659,6 +1661,10 @@ def run_message(
 
                 discard_live_run_id(run_id)
                 close_changeset_run(run_id, "done")
+                # The coding-agent runner reports its own agent_stopped, which never
+                # cleared these; every external turn left both behind.
+                _run_started.pop(run_id, None)
+                _quiet_runs.discard(run_id)
 
         session.start(work_external, run_id)
         return run_id
