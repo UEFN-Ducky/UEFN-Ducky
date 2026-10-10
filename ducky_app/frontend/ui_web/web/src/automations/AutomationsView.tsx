@@ -44,6 +44,7 @@ import { startFirstOpenTour } from "../walkthrough/firstOpen";
 import { WORKFLOWS_EDITOR_TOUR_ID, WORKFLOWS_FIRST_BUILD_TOUR_ID, WORKFLOWS_INTRO_TOUR_ID } from "./workflowsTours";
 import { Icons } from "../icons/Icons";
 import { copyText } from "../utils/copyText";
+import { subscribeAppIdle } from "../utils/appIdle";
 import { formatRunLog, runLogHasContent } from "./runLog";
 import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
 import type { LiveNodeRun } from "./LiveNodeStatus";
@@ -580,6 +581,13 @@ export function AutomationsView() {
   // Save folder as template: the picker opens on its form for this folder.
   const [saveFolder, setSaveFolder] = useState<{ ownerId: string; path: string } | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  // The pulses travelling the wires are SMIL, which stylesheets cannot pause: they hold
+  // still while the window sits in the background instead of repainting every frame.
+  const wiresRef = useRef<SVGSVGElement | null>(null);
+  useEffect(() => subscribeAppIdle((idle) => {
+    if (idle) wiresRef.current?.pauseAnimations?.();
+    else wiresRef.current?.unpauseAnimations?.();
+  }), []);
   const dragRef = useRef<{ start: { x: number; y: number }; origins: { id: string; x: number; y: number }[]; clickIds: string[]; clickKey: string; moved: boolean; blocked: string; warned?: boolean; grid: number } | null>(null);
   const holdRef = useRef<{ timer: number; x: number; y: number; pointerId: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; px: number; py: number; button: number; moved: boolean } | null>(null);
@@ -2453,7 +2461,7 @@ export function AutomationsView() {
                 <div className="aw-group-title" style={{ transform: `scale(${titleScale})` }}><span>{group.icon ? <GroupIcon icon={group.icon} /> : null}<span className="aw-group-name">{group.name}</span>{groupLocked(groups, group.id) ? <span className="aw-lock-badge" role="img" aria-label="Locked"><Icons.Lock /></span> : null}</span></div>
               </div>
             ) : null)}
-            <svg className="aw-wires" width={8000} height={8000}>
+            <svg ref={wiresRef} className="aw-wires" width={8000} height={8000}>
               {graph.edges.map((e, i) => {
                 const a = nodesById.get(e.source);
                 const b = nodesById.get(e.target);

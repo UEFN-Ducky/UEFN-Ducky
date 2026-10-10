@@ -1,5 +1,7 @@
 /** Built-in Matrix rain canvas effect for `#ducky-fx-root`. */
 
+import { isAppIdle, subscribeAppIdle } from "../utils/appIdle";
+
 const GLYPHS =
   "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789ABCDEF<>{}[]|/\\";
 
@@ -70,10 +72,21 @@ export function mountMatrixFx(root: HTMLElement): () => void {
   resize();
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-  raf = window.requestAnimationFrame(draw);
+  // A full-window redraw 30 times a second: the rain holds its last frame while the
+  // window sits in the background.
+  const stopIdle = subscribeAppIdle((idle) => {
+    if (idle) {
+      window.cancelAnimationFrame(raf);
+      raf = 0;
+    } else if (!raf) {
+      raf = window.requestAnimationFrame(draw);
+    }
+  });
+  if (!isAppIdle()) raf = window.requestAnimationFrame(draw);
   window.addEventListener("resize", resize);
 
   return () => {
+    stopIdle();
     window.cancelAnimationFrame(raf);
     window.removeEventListener("resize", resize);
     root.replaceChildren();

@@ -910,6 +910,12 @@ html.window-maximized .window-resize-grip {
   animation: sidebar-chat-completion-glow 2s ease-in-out infinite;
 }
 
+/* A window left in the background holds the glow on its current frame instead of
+   repainting it every frame (utils/appIdle). */
+:root.app-idle .chat-completion-alert {
+  animation-play-state: paused;
+}
+
 .editor-tab-actions {
   display: flex;
   opacity: 0;
@@ -5053,6 +5059,12 @@ html.window-maximized .window-resize-grip {
   background: var(--blue);
   box-shadow: 0 0 10px color-mix(in srgb, var(--blue) 80%, transparent);
   animation: pulse-glow 2.5s infinite;
+}
+
+/* Held on its current frame while the window is in the background (utils/appIdle). */
+:root.app-idle .update-toast-card,
+:root.app-idle .update-toast-dot {
+  animation-play-state: paused;
 }
 
 .update-toast-title {

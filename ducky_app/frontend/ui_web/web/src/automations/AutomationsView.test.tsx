@@ -5,6 +5,7 @@ import { AutomationsView } from "./AutomationsView";
 import { applyWorkflowEvent, resetWorkflowRunsForTests } from "../hooks/workflowRunsByChat";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { setUnsavedWorkflow } from "./unsavedWorkflow";
+import { installAppIdle } from "../utils/appIdle";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
 const api = vi.hoisted(() => ({ stop_workflow: vi.fn(), list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), use_workflow_template: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn() }));
@@ -479,6 +480,36 @@ describe("workflow editor interactions", () => {
     expect(container.querySelector(".aw-edge")?.classList.contains("aw-edge--from-starter")).toBe(true);  // colored by the node it leaves
     expect(container.querySelector('[data-aw-node="a"] .aw-port--in')?.classList.contains("is-linked")).toBe(true);
     expect(container.querySelector('[data-aw-node="a"] .aw-port--out')?.classList.contains("is-linked")).toBe(false);
+  });
+  it("holds the wire pulses still while the window is in the background", async () => {
+    // Every wire's pulse repainted each frame with nobody looking at the window.
+    const paused: Element[] = [];
+    const resumed: Element[] = [];
+    Object.assign(SVGSVGElement.prototype, {
+      pauseAnimations(this: Element) { paused.push(this); },
+      unpauseAnimations(this: Element) { resumed.push(this); },
+    });
+    let hidden = false;
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    installAppIdle()(); // start from a window in use, whatever earlier tests left
+    try {
+      const { container } = await open();
+      const wires = container.querySelector(".aw-wires")!;
+      hidden = true;
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      expect(paused).toEqual([wires]);
+      hidden = false;
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      expect(resumed).toEqual([wires]);
+    } finally {
+      installAppIdle()();
+      focused.mockRestore();
+      delete (document as { hidden?: boolean }).hidden;
+      const proto = SVGSVGElement.prototype as Partial<SVGSVGElement>;
+      delete proto.pauseAnimations;
+      delete proto.unpauseAnimations;
+    }
   });
   it.each([0, 1, 2])("pans empty canvas with mouse button %s", async (button) => {
     const { container } = await open();

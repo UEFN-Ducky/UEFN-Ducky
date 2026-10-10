@@ -1218,6 +1218,11 @@
   }
 }
 
+/* Held on its current frame while the window is in the background (utils/appIdle). */
+:root.app-idle .chat-changes-btn.is-open {
+  animation-play-state: paused;
+}
+
 @keyframes chat-changes-btn-glow {
   0%,
   100% {

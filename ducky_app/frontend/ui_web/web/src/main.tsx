@@ -11,12 +11,16 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { dismissBootSplashAfterPaint } from "./bootSplash";
 import { directConfigFromLocation, isDirectMode, startDirectTransport } from "./remote/directTransport";
+import { installAppIdle } from "./utils/appIdle";
 
 // Phone panel on the panel host: bring up the WebRTC transport before React
 // mounts so the first PanelApi call already has somewhere to go.
 if (isDirectMode()) {
   startDirectTransport(directConfigFromLocation(__PANEL_VERSION__));
 }
+
+// Endless glows hold still while the window sits in the background.
+installAppIdle();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
