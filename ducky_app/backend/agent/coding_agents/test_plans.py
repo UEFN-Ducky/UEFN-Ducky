@@ -558,6 +558,20 @@ class ResolvePlanChatIdTests(unittest.TestCase):
             with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv"}, clear=False):
                 self.assertEqual(_resolve_plan_chat_id(""), "active-conv")
 
+    def test_the_calling_chat_beats_active_conv_and_env(self) -> None:
+        # The shared tool server serves outside agents; only the call identity names the caller.
+        from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
+        from backend.workspace import identity
+
+        token = identity.bind(identity.RunContext(conv_id="codex-chat", coding_agent="codex"))
+        try:
+            with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value="active-conv"):
+                with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv"}, clear=False):
+                    self.assertEqual(_resolve_plan_chat_id(""), "codex-chat")
+                    self.assertEqual(_resolve_plan_chat_id("explicit-id"), "explicit-id")
+        finally:
+            identity.reset(token)
+
     def test_empty_when_no_sources(self) -> None:
         from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 

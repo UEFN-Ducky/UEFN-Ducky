@@ -1894,15 +1894,20 @@ def ducky_verify_task(
 
 
 def _resolve_plan_chat_id(chat_id: str = "") -> str:
-    """Explicit chat_id, else active embedded conv, else DUCKY_CONV_ID env.
+    """Explicit chat_id, else the calling chat, else active embedded conv, else DUCKY_CONV_ID env.
 
-    Coding-agent CLIs (Cursor, Claude Code, …) inherit DUCKY_CONV_ID from
-    mcp_inject so plan tools work without passing chat_id explicitly — same
-    fallback as ``_resolve_sender``.
+    The shared tool server serves every outside agent from one process, so its
+    environment names no chat: the per-call identity does — same order as
+    ``_resolve_sender``. Without it Codex's plan ticks failed "chat_id required".
     """
     cid = (chat_id or "").strip()
     if cid:
         return cid
+    from backend.workspace import identity as run_identity
+
+    ctx = run_identity.current()
+    if ctx is not None and ctx.conv_id:
+        return str(ctx.conv_id).strip()
     try:
         from frontend.ui_web.agent_modes import get_active_conv_id
 
