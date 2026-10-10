@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +81,11 @@ def save_bounds(key: str, x: int, y: int, width: int, height: int) -> None:
 def track(window: Any, key: str) -> None:
     """Save bounds on every move/resize (debounced) and on close — reopening the app
     or the same focus window restores it exactly where it was."""
-    pending: list[threading.Timer | None] = [None]
+    settle = 0.8
+    # Moves and resizes arrive once per mouse move. One timer per drag pushes its
+    # own deadline back; a new Timer thread per event was ~100 thread starts a second.
+    lock = threading.Lock()
+    state = {"due": 0.0, "armed": False}
 
     def snap() -> None:
         try:
@@ -88,14 +93,27 @@ def track(window: Any, key: str) -> None:
         except Exception:
             pass
 
+    def arm(delay: float) -> None:
+        timer = threading.Timer(delay, fire)
+        timer.daemon = True
+        timer.start()
+
+    def fire() -> None:
+        with lock:
+            wait = state["due"] - time.monotonic()
+            if wait > 0.05:
+                arm(wait)
+                return
+            state["armed"] = False
+        snap()
+
     def schedule(*_args: object) -> None:
-        t = pending[0]
-        if t is not None:
-            t.cancel()
-        nt = threading.Timer(0.8, snap)
-        nt.daemon = True
-        pending[0] = nt
-        nt.start()
+        with lock:
+            state["due"] = time.monotonic() + settle
+            if state["armed"]:
+                return
+            state["armed"] = True
+        arm(settle)
 
     try:
         window.events.moved += schedule
