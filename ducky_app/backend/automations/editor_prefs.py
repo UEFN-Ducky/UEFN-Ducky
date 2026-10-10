@@ -30,8 +30,12 @@ def save(prefs: dict[str, Any]) -> dict[str, Any]:
     """Merge the known keys into what is saved; anything else is ignored."""
     from frontend.atomic_json import write_json_atomic
 
-    merged = {**load(), **{key: prefs[key] for key in _KEYS if key in (prefs or {})}}
+    current = load()
+    merged = {**current, **{key: prefs[key] for key in _KEYS if key in (prefs or {})}}
     if len(json.dumps(merged)) > _MAX_BYTES:
         raise ValueError("Editor settings are too large")
-    write_json_atomic(_path(), merged)
+    # The view saves what it just loaded on every mount, resize and zoom; an
+    # unchanged save would still back up, fsync and replace the file.
+    if merged != current:
+        write_json_atomic(_path(), merged)
     return merged
