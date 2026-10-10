@@ -4,6 +4,7 @@ import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
 import { ChatPermissionsButton } from "./ChatPermissionsButton";
+import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
 import { ModelSelector } from "./ModelSelector";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { ComposerAttachmentChips } from "./ComposerAttachmentChips";
@@ -909,11 +910,28 @@ export function ChatPane({
   // API key. Distinct from noModelsAvailable, which single-chat canCompose
   // still uses as-is.
   const modelsUnavailable = noModelsAvailable && !(chat.isGroup && groupUsesExternalOnly);
-  // No model on this chat — send opens Default Model instead of starting a turn.
+  // No model on this chat: it takes the Default Model (agent and model), as a new chat
+  // does. Only when no Default Model is set does send open that setting instead.
   // Not before the chat has loaded: a tab opened before the chat list holds the chat
   // is a stub with no agent or model, and flashed this on Codex and Claude chats.
-  const promptForDefaultModel =
+  const needsModel =
     hydrated && !chat.isGroup && !externalAgent && catalogReady && !(selectedModel || "").trim();
+  const [noDefaultModel, setNoDefaultModel] = useState(false);
+  const keepDuckyAgent = isDucktactoeChat(chat);
+  const adoptDefaultModel = useCallback(async (): Promise<boolean> => {
+    const res = await Promise.resolve(getApi()?.adopt_default_model?.(chat.id, keepDuckyAgent)).catch(() => null);
+    const model = (res?.ok && res.model) || "";
+    setNoDefaultModel(!model);
+    if (!model) return false;
+    setCodingAgent(res?.coding_agent || "ducky");
+    setSelectedModel(model);
+    setSelectedModelDisplayName(model);
+    return true;
+  }, [chat.id, keepDuckyAgent]);
+  useEffect(() => {
+    if (visible && needsModel) void adoptDefaultModel();
+  }, [visible, needsModel, adoptDefaultModel]);
+  const promptForDefaultModel = needsModel && noDefaultModel;
   const showDefaultModelCta = promptForDefaultModel || modelsUnavailable;
   const canSend = canCompose && !agentRunning;
   const canQueue = canCompose && agentRunning;
@@ -1138,6 +1156,13 @@ export function ChatPane({
     }
 
     if (showDefaultModelCta) {
+      // A Default Model set since this chat last looked is taken now; otherwise go set one.
+      if (promptForDefaultModel && !modelsUnavailable) {
+        void adoptDefaultModel().then((adopted) => {
+          if (!adopted) openDefaultModelSettings();
+        });
+        return;
+      }
       openDefaultModelSettings();
       return;
     }

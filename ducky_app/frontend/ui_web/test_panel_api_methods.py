@@ -436,6 +436,7 @@ _PUBLIC_METHODS = frozenset({
     'send_message',
     'set_chat_mcp_plugins',
     'set_conversation_coding_agent',
+    'adopt_default_model',
     'set_conversation_ducky_style',
     'set_conversation_skill_selection',
     'set_conversation_skills',

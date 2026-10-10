@@ -744,6 +744,34 @@ class PanelApiSettingsMixin:
             "provider": conv.provider or "",
         }
 
+    def adopt_default_model(self, conv_id: str, keep_agent: bool = False) -> dict[str, Any]:
+        """A Ducky chat with no model takes the Default Model (agent and model), the way a new
+        chat does. keep_agent: a branded chat that stays on Ducky's own agent takes the first
+        API model instead of a coding-agent default, as when it was created."""
+        from frontend.favorite_models import ResolveOk
+
+        conv = _pa.load_conversation(conv_id)
+        if not conv:
+            return {"ok": False, "error": "conversation not found"}
+        current = {"ok": True, "coding_agent": conv.coding_agent or "ducky", "model": conv.model or "",
+                   "provider": conv.provider or ""}
+        if (conv.model or "").strip() or (conv.coding_agent or "ducky") != "ducky" or conv.is_group:
+            return current
+        result = _pa.resolve_model_selection(None, _pa.PanelSettings.load())
+        if not isinstance(result, ResolveOk) or not result.model:
+            return {"ok": False, "error": getattr(result, "message", "") or "No Default Model is set."}
+        agent, model, provider = result.coding_agent, result.model, result.provider
+        if keep_agent and agent != "ducky":
+            pick = _pa._first_available_api_model()
+            if not pick:
+                return {"ok": False, "error": "The Default Model is a coding agent and this chat stays on Ducky."}
+            (provider, model), agent = pick, "ducky"
+        conv.coding_agent, conv.model = agent, model
+        conv.provider = provider or ("" if agent != "ducky" else conv.provider)
+        _pa.save_conversation(conv)
+        _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, push=self._push, open_tab=False)
+        return {"ok": True, "coding_agent": agent, "model": model, "provider": conv.provider or ""}
+
     def set_conversation_thinking_effort(self, conv_id: str, effort: str = "off") -> dict[str, Any]:
         from backend.agent.thinking_effort import normalize_thinking_effort
         from frontend.ui_web.project_chats import load_conversation, save_conversation

@@ -3336,6 +3336,11 @@ export interface PanelApi {
     model?: string,
     provider?: string,
   ): Promise<{ ok: boolean; coding_agent?: string; model?: string; provider?: string; error?: string }>;
+  /** A Ducky chat with no model takes the Default Model (agent and model), as a new chat does. */
+  adopt_default_model?(
+    conv_id: string,
+    keep_agent?: boolean,
+  ): Promise<{ ok: boolean; coding_agent?: string; model?: string; provider?: string; error?: string }>;
   set_conversation_thinking_effort(
     conv_id: string,
     effort: string,
