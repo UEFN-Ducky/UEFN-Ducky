@@ -1206,6 +1206,49 @@ class PanelApiChatsMixin:
         set_allow_everything(str(conv_id or ""), bool(on))
         return {"ok": True, **allow_state(str(conv_id or ""))}
 
+    def get_agent_permissions(self, conv_id: str, agent: str = "") -> dict[str, Any]:
+        """The chat's approval mode, the modes its agent can use and the rules it allowed."""
+        from backend.tools.panel.permission_prompt import chat_permissions
+
+        return chat_permissions(str(conv_id or ""), str(agent or ""))
+
+    def set_agent_permission_mode(self, conv_id: str, mode: str, agent: str = "") -> dict[str, Any]:
+        """Pick "ask", "edits" or "all" for this chat; its next turn uses it."""
+        from backend.tools.panel import permission_prompt as permissions
+
+        conv_id, agent = str(conv_id or ""), str(agent or "")
+        row = next((m for m in permissions.chat_permissions(conv_id, agent)["modes"] if m["id"] == mode), None)
+        if row is None:
+            raise ValueError(f"Unknown permission mode: {mode!r}")
+        if not row["available"]:
+            raise ValueError(row["reason"])
+        permissions.set_permission_mode(conv_id, mode)
+        state = permissions.chat_permissions(conv_id, agent)
+        if state["mode"] != mode:
+            raise ValueError("Could not save the permission change.")
+        return state
+
+    def remove_agent_permission_rule(self, conv_id: str, rule: str, agent: str = "") -> dict[str, Any]:
+        """Forget one "always allow" rule of this chat."""
+        from backend.tools.panel import permission_prompt as permissions
+
+        conv_id = str(conv_id or "")
+        permissions.forget_rule(conv_id, str(rule or ""))
+        if rule in permissions._rules(conv_id):
+            raise ValueError("Could not save the permission change.")
+        return permissions.chat_permissions(conv_id, str(agent or ""))
+
+    def clear_agent_permission_rules(self, conv_id: str, agent: str = "") -> dict[str, Any]:
+        """Forget every "always allow" rule of this chat; its mode stays."""
+        from backend.tools.panel import permission_prompt as permissions
+
+        conv_id = str(conv_id or "")
+        permissions.clear_rules(conv_id)
+        state = permissions.chat_permissions(conv_id, str(agent or ""))
+        if state["rules"]:
+            raise ValueError("Could not save the permission change.")
+        return state
+
     def list_saved_agent_permissions(self) -> list[dict[str, str]]:
         """All remembered chat approvals, including individual command/file rules."""
         from backend.tools.panel import permission_prompt as permissions

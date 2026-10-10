@@ -826,6 +826,21 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
         pass
 
 
+def _approve_tool_calls(conv_id: str, pending: list[Any]) -> bool:
+    """The chat's approval card for tool calls its approval mode asks about."""
+    from backend.agent.toolsets import effective_tool_name
+    from backend.tools.panel.permission_prompt import approve_ducky_tool
+
+    for rec in pending:
+        args = dict(rec.arguments or {}) if isinstance(rec.arguments, dict) else {}
+        name = effective_tool_name(rec.name, args)
+        if rec.name == "ducky_call_tool" and isinstance(args.get("arguments"), dict):
+            args = dict(args["arguments"])
+        if not approve_ducky_tool(conv_id, name, args):
+            return False
+    return True
+
+
 async def _run_agent_loop(
     conv,
     user_text: str,
@@ -842,6 +857,7 @@ async def _run_agent_loop(
     cancel = session._cancel
     stop_reason = "error"
     runner = AgentRunner(config)
+    runner.set_approval_callback(lambda pending: _approve_tool_calls(conv.id, pending))
     session.set_runner(runner, run_id=run_id)
     _set_active_conv_id(conv.id)
     t_start = time.monotonic()

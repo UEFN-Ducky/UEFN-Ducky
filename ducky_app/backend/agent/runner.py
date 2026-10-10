@@ -136,6 +136,17 @@ def _allows_everything(conv_id: str) -> bool:
         return False
 
 
+def _tool_gate(conv_id: str, name: str) -> str:
+    """"run", "ask" or "refuse" for one call, from the chat's approval mode."""
+    destructive = is_destructive(name)
+    try:
+        from backend.tools.panel.permission_prompt import ducky_tool_gate
+
+        return ducky_tool_gate(str(conv_id or ""), name, destructive=destructive)
+    except Exception:
+        return "refuse" if destructive and not _allows_everything(conv_id) else "run"
+
+
 class _CancelBridge:
     """Unify asyncio + threading cancel signals for Stop button."""
 
@@ -1044,25 +1055,18 @@ class AgentRunner:
                     except (TypeError, ValueError, RecursionError):
                         rec.arguments = {}
                         call.arguments = {}
-            approved_destructive = True
-            destructive = [
-                r
-                for r in pending_records
-                if not blocked[id(r)] and is_destructive(effective_tool_name(r.name, r.arguments))
-            ]
-            if destructive:
-                if self._approval_callback is not None:
-                    yield AgentEvent(
-                        kind="approval_needed",
-                        tools_pending=destructive,
-                        text="Approve destructive tool calls?",
-                    )
-                approved_destructive = allow_destructive_execution(
-                    destructive, self._approval_callback
-                ) or _allows_everything(self.config.conv_id)
-                if not approved_destructive:
-                    for r in destructive:
-                        r.status = "rejected"
+            # File changes and destructive tools follow the chat's approval mode: one card
+            # per call when it asks, a refusal where it never could ask before.
+            for r in pending_records:
+                if blocked[id(r)]:
+                    continue
+                gate = _tool_gate(self.config.conv_id, effective_tool_name(r.name, r.arguments))
+                if gate == "run":
+                    continue
+                if gate == "ask" and self._approval_callback is not None:
+                    yield AgentEvent(kind="approval_needed", tools_pending=[r], text="Approve this tool call?")
+                if gate == "refuse" or not allow_destructive_execution([r], self._approval_callback):
+                    r.status = "rejected"
 
             provider_messages.append(
                 ProviderMessage(

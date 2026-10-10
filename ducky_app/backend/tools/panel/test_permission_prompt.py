@@ -281,3 +281,138 @@ def test_a_chat_save_cannot_drop_a_remembered_approval(monkeypatch, conv) -> Non
     script = 'py -3 -c "\nprint(1)\n"'  # multi-line: covered by "allow everything"
     assert pp.decide("Bash", {"command": script}, conv_id="c1")["behavior"] == "allow"
     assert asked == []
+
+
+def test_a_chat_keeps_its_approval_mode(conv) -> None:
+    assert pp.permission_mode("c1") == "edits"  # the default: edits go ahead, commands ask
+    pp._remember("c1", "Bash:git status")
+    pp.set_permission_mode("c1", "ask")
+    assert pp.permission_mode("c1") == "ask" and not pp.allows_everything("c1")
+    pp.set_permission_mode("c1", "all")
+    assert pp.permission_mode("c1") == "all" and pp.allow_state("c1")["own"]
+    pp.set_permission_mode("c1", "edits")
+    assert pp.permission_mode("c1") == "edits" and not pp.allows_everything("c1")
+    assert pp._rules("c1") == ["Bash:git status"]  # picking a mode never drops a rule
+    assert pp.permission_mode("other") == "edits"
+    with pytest.raises(ValueError):
+        pp.set_permission_mode("c1", "sometimes")
+
+
+def test_allow_everything_from_a_card_wins_and_turning_it_off_returns_to_the_mode(monkeypatch, conv) -> None:
+    pp.set_permission_mode("c1", "ask")
+    _answer(monkeypatch, ["all"])
+    assert pp.decide("Bash", {"command": "npm test"}, conv_id="c1")["behavior"] == "allow"
+    assert pp.permission_mode("c1") == "all"
+    pp.set_allow_everything("c1", False)  # the context panel's Turn off
+    assert pp.permission_mode("c1") == "ask"
+
+
+def test_claude_code_asks_before_edits_only_when_the_chat_asks_before_changes(conv) -> None:
+    assert pp.claude_permission_mode("c1", "acceptEdits") == "acceptEdits"
+    assert pp.claude_permission_mode("c1", "") == "acceptEdits"
+    assert pp.claude_permission_mode("c1", "bypassPermissions") == "bypassPermissions"
+    pp.set_permission_mode("c1", "ask")
+    assert pp.claude_permission_mode("c1", "acceptEdits") == "default"
+    pp.set_permission_mode("c1", "all")  # the approval card tool still refuses local-only plugin pushes
+    assert pp.claude_permission_mode("c1", "acceptEdits") == "acceptEdits"
+
+
+@pytest.mark.parametrize(
+    "mode,tool,destructive,gate",
+    [
+        ("edits", "workspace_write_file", False, "run"),
+        ("edits", "workspace_delete_file", False, "run"),
+        ("edits", "destroy_entity", True, "refuse"),
+        ("edits", "workspace_read_file", False, "run"),
+        ("ask", "workspace_edit_file", False, "ask"),
+        ("ask", "workspace_move_file", False, "ask"),
+        ("ask", "destroy_entity", True, "ask"),
+        ("ask", "workspace_read_file", False, "run"),
+        ("all", "workspace_write_file", False, "run"),
+        ("all", "destroy_entity", True, "run"),
+    ],
+)
+def test_the_embedded_agent_gate_follows_the_mode(conv, mode, tool, destructive, gate) -> None:
+    pp.set_permission_mode("c1", mode)
+    assert pp.ducky_tool_gate("c1", tool, destructive=destructive) == gate
+
+
+def test_ducky_file_edit_card_can_be_always_allowed(monkeypatch, conv) -> None:
+    asked = _answer(monkeypatch, ["always"])
+    assert pp.approve_ducky_tool("c1", "workspace_write_file", {"relative_path": "Verse/game.verse", "content": "x"})
+    question = asked[0]["questions"][0]
+    assert question["prompt"] == "Allow Ducky to edit this file?" and question["detail"] == "Verse/game.verse"
+    assert [o["label"] for o in question["options"]][1] == "Always allow file edits in this chat"
+    assert pp._rules("c1") == ["ducky:edits"]
+    asked.clear()
+    assert pp.approve_ducky_tool("c1", "workspace_edit_file", {"relative_path": "Verse/other.verse"})
+    assert asked == []
+
+
+def test_ducky_delete_and_destructive_cards_never_offer_always(monkeypatch, conv) -> None:
+    asked = _answer(monkeypatch, ["deny"])
+    assert not pp.approve_ducky_tool("c1", "workspace_delete_file", {"relative_path": "Verse/old.verse"})
+    assert not pp.approve_ducky_tool("c1", "destroy_entity", {"entity": "Boss"})
+    for card in asked:
+        assert [o["id"] for o in card["questions"][0]["options"]] == ["once", "all", "deny"]
+    assert asked[1]["questions"][0]["warning"] == "This change is hard to undo."
+    assert pp._rules("c1") == []
+    _answer(monkeypatch, ["all"])
+    assert pp.approve_ducky_tool("c1", "destroy_entity", {})
+    assert pp.permission_mode("c1") == "all"
+
+
+def test_the_popup_lists_rules_and_removes_them(conv) -> None:
+    for rule in ("*", "Bash:git status", "Write:c:/repo/src", "ducky:edits", "WebFetch"):
+        pp._remember("c1", rule)
+    assert pp.allowed_rules("c1") == [
+        {"rule": "Bash:git status", "label": "Bash: git status"},
+        {"rule": "Write:c:/repo/src", "label": "Write: c:/repo/src"},
+        {"rule": "ducky:edits", "label": "Ducky: file edits"},
+        {"rule": "WebFetch", "label": "WebFetch"},
+    ]
+    pp.forget_rule("c1", "Write:c:/repo/src")
+    assert [r["rule"] for r in pp.allowed_rules("c1")] == ["Bash:git status", "ducky:edits", "WebFetch"]
+    pp.clear_rules("c1")
+    assert pp.allowed_rules("c1") == [] and pp.permission_mode("c1") == "all"
+
+
+def test_the_mode_goes_with_its_chat_and_to_a_recycled_twin(conv) -> None:
+    pp.set_permission_mode("c1", "ask")
+    kept = pp.approvals_of("c1")
+    pp.forget_chat("c1")
+    assert pp.permission_mode("c1") == "edits"
+    pp.restore_approvals("twin", kept)
+    assert pp.permission_mode("twin") == "ask"
+
+
+def test_each_agent_shows_the_modes_it_can_honour(monkeypatch, conv) -> None:
+    regs = {
+        "claude_code": {"chat_permission_modes": ("ask", "edits", "all"), "settings_defaults": {"permission_mode": "acceptEdits"}},
+        "old_claude": {"settings_defaults": {"permission_mode": "acceptEdits"}},
+        "codex": {"settings_defaults": {}},
+    }
+    monkeypatch.setattr(pp, "_agent_registration", lambda aid: regs.get(aid, {}))
+    monkeypatch.setattr("backend.agent.coding_agents.base.coding_agent_label",
+                        lambda aid: {"codex": "Codex", "old_claude": "Claude Code"}.get(aid, aid))
+
+    def reasons(agent: str) -> dict[str, str]:
+        return {m["id"]: m["reason"] for m in pp.chat_permissions("c1", agent)["modes"]}
+
+    assert reasons("ducky") == {"ask": "", "edits": "", "all": ""}
+    assert reasons("claude_code") == {"ask": "", "edits": "", "all": ""}
+    assert reasons("old_claude") == {"ask": "Update Claude Code in the Store to use this.", "edits": "", "all": ""}
+    state = pp.chat_permissions("c1", "codex")
+    assert not state["asks"] and {m["reason"] for m in state["modes"]} == {"Codex doesn't ask for approval in Ducky."}
+    assert state["mode"] == "edits" and state["label"] == "Accept edits"
+
+
+def test_a_mode_set_by_the_starting_chat_cannot_be_changed_here(monkeypatch, conv) -> None:
+    monkeypatch.setattr(pp, "_chat_exists", lambda cid: True)
+    pp._remember("lead", "*")
+    pp.note_started_by("member", "lead")
+    state = pp.chat_permissions("member", "ducky")
+    assert state["mode"] == "all" and not state["own"] and state["from_title"] == "the chat that started it"
+    reasons = {m["id"]: m["reason"] for m in state["modes"]}
+    assert reasons["all"] == ""
+    assert reasons["ask"] == reasons["edits"] == "Allow everything is on from the chat that started it. Turn it off there."

@@ -17,6 +17,12 @@ runs it starts (a sub-agent, a group member, a workflow ducky it sent work to: e
 who started it), those too. The one thing it never runs: a push or publish of a local-only
 AI plugin (the owner's rule), which is refused. The chat's context panel shows it and turns
 it off; deleting a chat drops its rows.
+
+Each chat also has an approval mode, picked from the permissions button in its composer:
+"Ask before changes" (file edits ask too), "Accept edits" (the default: edits go ahead,
+commands ask) and "Allow everything" (the ``*`` rule above). Claude Code reads it through
+``claude_permission_mode`` when a turn starts; the embedded Ducky agent through
+``ducky_tool_gate`` before each file change or destructive tool.
 """
 
 from __future__ import annotations
@@ -319,6 +325,259 @@ def allows_everything(conv_id: str) -> bool:
     return bool(allow_source(conv_id))
 
 
+# The approval mode of a chat. "edits" is the default and keeps no row; "all" is the "*"
+# rule (the same switch as an approval card's "Allow everything in this chat"); "ask"
+# keeps its own row next to the chat's rules.
+MODE_ASK = "ask"
+MODE_EDITS = "edits"
+MODE_ALL = "all"
+MODES = (MODE_ASK, MODE_EDITS, MODE_ALL)
+MODE_TEXT: dict[str, tuple[str, str]] = {
+    MODE_ASK: ("Ask before changes", "Asks before editing files or running commands."),
+    MODE_EDITS: ("Accept edits", "Edits files without asking. Asks before commands."),
+    MODE_ALL: ("Allow everything", "Never asks in this chat or the agents it starts."),
+}
+
+
+def _mode_key(conv_id: str) -> str:
+    return f"agent_mode:{conv_id}"
+
+
+def _own_mode(conv_id: str) -> str:
+    """The mode row this chat keeps ("ask"), or '' for the default."""
+    if not conv_id or not _rules_in_db():
+        return ""
+    try:
+        from backend.store.repos import kv
+
+        doc = kv.get_doc(_RULES_TABLE, _mode_key(conv_id))
+    except Exception:
+        return ""
+    return MODE_ASK if doc == MODE_ASK else ""
+
+
+def _store_own_mode(conv_id: str, mode: str) -> None:
+    if not conv_id or not _rules_in_db():
+        return
+    try:
+        from backend.store.repos import kv
+
+        if mode == MODE_ASK:
+            kv.set_doc(_RULES_TABLE, _mode_key(conv_id), MODE_ASK)
+        else:
+            kv.delete_doc(_RULES_TABLE, _mode_key(conv_id))
+    except Exception:
+        pass
+
+
+def permission_mode(conv_id: str) -> str:
+    """This chat's approval mode: "all" while Allow everything covers it (picked here or in
+    the chat that started its run), else "ask" or the default "edits"."""
+    conv_id = (conv_id or "").strip()
+    if allows_everything(conv_id):
+        return MODE_ALL
+    return MODE_ASK if _own_mode(conv_id) == MODE_ASK else MODE_EDITS
+
+
+def set_permission_mode(conv_id: str, mode: str) -> None:
+    """Pick this chat's mode. Its remembered rules stay; Allow everything goes on or off with it."""
+    if mode not in MODES:
+        raise ValueError(f"Unknown permission mode: {mode!r}")
+    conv_id = (conv_id or "").strip()
+    if not conv_id:
+        return
+    set_allow_everything(conv_id, mode == MODE_ALL)
+    _store_own_mode(conv_id, mode)
+
+
+def claude_permission_mode(conv_id: str, configured: str = "") -> str:
+    """Claude Code's ``--permission-mode`` for this chat's next turn: "default" sends file
+    edits to the approval card too; otherwise the mode set in Settings (acceptEdits)."""
+    if permission_mode(conv_id) == MODE_ASK:
+        return "default"
+    return (configured or "").strip() or "acceptEdits"
+
+
+# Ducky's own tools that change project files: "Ask before changes" shows a card first.
+_DUCKY_MOVE_TOOLS = frozenset({"workspace_delete_file", "workspace_move_file"})
+_DUCKY_EDIT_RULE = "ducky:edits"
+
+
+def _ducky_file_tool(tool_name: str) -> bool:
+    from backend.agent.write_claim_guard import WRITE_TOOLS
+
+    return tool_name in WRITE_TOOLS or tool_name in _DUCKY_MOVE_TOOLS
+
+
+def ducky_tool_gate(conv_id: str, tool_name: str, *, destructive: bool) -> str:
+    """What the embedded Ducky agent does before this tool: "run", "ask" (approval card) or
+    "refuse". Under "Ask before changes" it asks before file changes and destructive tools.
+    Otherwise as it always has: file changes run, destructive tools are refused unless the
+    chat allows everything (an unattended workflow run never waits on a card)."""
+    if not destructive and not _ducky_file_tool(tool_name):
+        return "run"
+    mode = permission_mode(conv_id)
+    if mode == MODE_ALL:
+        return "run"
+    if mode == MODE_ASK:
+        return "ask"
+    return "refuse" if destructive else "run"
+
+
+def _ducky_card(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    args = arguments if isinstance(arguments, dict) else {}
+    raw = json.dumps(args, ensure_ascii=False, default=str)[:2000]
+    if _ducky_file_tool(tool_name):
+        path = str(args.get("relative_path") or args.get("path") or args.get("source") or "").strip()
+        if tool_name == "workspace_move_file":
+            verb, detail = "move", f"{path} → {str(args.get('destination') or '').strip()}"
+        else:
+            verb, detail = ("delete" if tool_name == "workspace_delete_file" else "edit"), path
+        rule = _DUCKY_EDIT_RULE if verb == "edit" else ""
+        return {
+            "prompt": f"Allow Ducky to {verb} this file?",
+            "detail": detail or raw,
+            "warning": "",
+            "risky": False,
+            "rule": rule,
+            "rule_label": "file edits" if rule else "",
+        }
+    return {
+        "prompt": f"Allow Ducky to run {tool_name}?",
+        "detail": raw,
+        "warning": "This change is hard to undo.",
+        "risky": True,
+        "rule": "",
+        "rule_label": "",
+    }
+
+
+def approve_ducky_tool(conv_id: str, tool_name: str, arguments: dict[str, Any]) -> bool:
+    """Approval card for one embedded Ducky tool call (skipped when a rule already allows it)."""
+    card = _ducky_card(tool_name, arguments)
+    rule = str(card.get("rule") or "")
+    if rule and rule in _rules(conv_id):
+        return True
+    answer, _note = _ask(card, tool_name or "tool")
+    if answer == _ALLOW_ALL:
+        _remember(conv_id, _ALL_RULE)
+        return True
+    if answer == _ALLOW_ALWAYS and rule:
+        _remember(conv_id, rule)
+        return True
+    return answer == _ALLOW_ONCE
+
+
+def rule_label(rule: str) -> str:
+    """How a remembered rule reads in the permissions pop-up ("Bash: git status")."""
+    if rule == _DUCKY_EDIT_RULE:
+        return "Ducky: file edits"
+    tool, sep, rest = rule.partition(":")
+    return f"{tool}: {rest}" if sep and rest else rule
+
+
+def allowed_rules(conv_id: str) -> list[dict[str, str]]:
+    """What this chat said to always allow, apart from Allow everything (that is the mode)."""
+    return [{"rule": r, "label": rule_label(r)} for r in _rules(conv_id) if r != _ALL_RULE]
+
+
+def forget_rule(conv_id: str, rule: str) -> None:
+    rules = _rules(conv_id)
+    if rule in rules:
+        _store_rules(conv_id, [r for r in rules if r != rule])
+
+
+def clear_rules(conv_id: str) -> None:
+    """Drop every remembered rule; the chat's mode (Allow everything too) stays."""
+    rules = _rules(conv_id)
+    kept = [r for r in rules if r == _ALL_RULE]
+    if kept != rules:
+        _store_rules(conv_id, kept)
+
+
+def _chat_agent(conv_id: str) -> str:
+    try:
+        from backend.store.switch import use_db
+
+        if use_db("chats"):
+            from backend.store.repos import chats
+
+            doc = chats.conv_get(conv_id, with_messages=False) or {}
+            return str(doc.get("coding_agent") or "ducky")
+    except Exception:
+        pass
+    conv = _load_conv(conv_id)
+    return str(getattr(conv, "coding_agent", "") or "ducky") if conv is not None else "ducky"
+
+
+def _agent_registration(agent_id: str) -> dict[str, Any]:
+    try:
+        from backend.uefn_plugins.host import get_coding_agent_registration
+
+        reg = get_coding_agent_registration(agent_id)
+        if reg is None:
+            from backend.agent.coding_agents.base import normalize_coding_agent
+
+            alias = normalize_coding_agent(agent_id)
+            reg = get_coding_agent_registration(alias) if alias != "ducky" else None
+        return reg or {}
+    except Exception:
+        return {}
+
+
+def _agent_modes(agent_id: str) -> tuple[str, ...]:
+    """The modes this agent honours; empty when it never asks inside Ducky."""
+    if agent_id == "ducky":
+        return MODES
+    reg = _agent_registration(agent_id)
+    declared = reg.get("chat_permission_modes")
+    if declared:
+        return tuple(m for m in MODES if m in declared)
+    if "permission_mode" in (reg.get("settings_defaults") or {}):
+        # An older Claude Code plugin: Ducky's approval card and Allow everything work,
+        # but it always accepts edits.
+        return (MODE_EDITS, MODE_ALL)
+    return ()
+
+
+def chat_permissions(conv_id: str, agent: str = "") -> dict[str, Any]:
+    """Everything the chat's permissions pop-up shows. ``agent``: the agent its next turn
+    uses (the composer's pick), else the chat's own."""
+    from backend.agent.coding_agents.base import coding_agent_label
+
+    conv_id = (conv_id or "").strip()
+    agent_id = (agent or "").strip().lower().replace("-", "_") or _chat_agent(conv_id)
+    label = coding_agent_label(agent_id)
+    honoured = _agent_modes(agent_id)
+    allow = allow_state(conv_id)
+    inherited = bool(allow["on"]) and not allow["own"]
+    mode = permission_mode(conv_id)
+    modes: list[dict[str, Any]] = []
+    for mode_id in MODES:
+        name, description = MODE_TEXT[mode_id]
+        if not honoured:
+            reason = f"{label} doesn't ask for approval in Ducky."
+        elif mode_id not in honoured:
+            reason = f"Update {label} in the Store to use this."
+        elif inherited and mode_id != MODE_ALL:
+            reason = f"Allow everything is on from {allow['from_title']}. Turn it off there."
+        else:
+            reason = ""
+        modes.append({"id": mode_id, "label": name, "description": description,
+                      "available": not reason, "reason": reason})
+    return {
+        "mode": mode,
+        "label": MODE_TEXT[mode][0],
+        "own": not inherited,
+        "from_title": str(allow["from_title"]) if inherited else "",
+        "agent": agent_id,
+        "agent_label": label,
+        "asks": bool(honoured),
+        "modes": modes,
+        "rules": allowed_rules(conv_id),
+    }
+
+
 def _holds_local_only_plugin(root: str) -> bool:
     try:
         return any(os.path.isdir(os.path.join(root, f"uefn-plugin-{name}")) for name in _LOCAL_ONLY_NAMES)
@@ -397,19 +656,22 @@ def forget_chat(conv_id: str) -> None:
 
         kv.delete_doc(_RULES_TABLE, _rules_key(conv_id))
         kv.delete_doc(_RULES_TABLE, _started_key(conv_id))
+        kv.delete_doc(_RULES_TABLE, _mode_key(conv_id))
     except Exception:
         pass
 
 
 def approvals_of(conv_id: str) -> dict[str, Any]:
     """What to carry to a recycled chat's twin (read it before the old chat is deleted)."""
-    return {"rules": _rules(conv_id), "started_by": _started_by(conv_id)}
+    return {"rules": _rules(conv_id), "started_by": _started_by(conv_id), "mode": _own_mode(conv_id)}
 
 
 def restore_approvals(conv_id: str, saved: dict[str, Any]) -> None:
     for rule in saved.get("rules") or []:
         _remember(conv_id, str(rule))
     note_started_by(conv_id, str(saved.get("started_by") or ""))
+    if saved.get("mode") == MODE_ASK:
+        _store_own_mode(conv_id, MODE_ASK)
 
 
 def _remember(conv_id: str, rule: str) -> None:
@@ -440,7 +702,7 @@ def _ask(card: dict[str, Any], tool_name: str) -> tuple[str, str]:
                 "id": _ALLOW_ALL,
                 "label": "Allow everything in this chat",
                 "description": "Never ask again in this chat or the agents it starts: pushes, deletes and publishes run too. "
-                "Turn it off in the chat's context panel.",
+                "Turn it off with the chat's permissions button.",
             }
         )
     options.append({"id": _DENY, "label": "Deny", "description": "Don't run it. The agent is told you said no."})

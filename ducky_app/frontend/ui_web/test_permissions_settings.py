@@ -60,6 +60,50 @@ def test_protection_switch_saves_through_the_real_ui_api_without_losing_file_rul
     assert fresh["ai_ignore_patterns"] == ["private/"]
 
 
+def test_chat_permissions_popup_api_picks_modes_and_removes_rules(monkeypatch):
+    from backend.tools.panel import permission_prompt as permissions
+    from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
+    from frontend.ui_web.project_chats import create_conversation
+
+    chat = create_conversation(PanelSettings.load(), "", title="Builder")
+    api = PanelApiChatsMixin()
+    state = api.get_agent_permissions(chat.id, "ducky")
+    assert state["mode"] == "edits" and state["label"] == "Accept edits" and state["rules"] == []
+    assert [m["id"] for m in state["modes"]] == ["ask", "edits", "all"]
+    assert all(m["available"] for m in state["modes"])
+
+    assert api.set_agent_permission_mode(chat.id, "ask", "ducky")["mode"] == "ask"
+    assert api.get_agent_permissions(chat.id)["mode"] == "ask"  # the chat's own agent when none is named
+    all_state = api.set_agent_permission_mode(chat.id, "all", "ducky")
+    assert all_state["mode"] == "all" and permissions.allows_everything(chat.id)
+    # The context panel's Turn off and the pop-up are one switch.
+    assert api.set_agent_allow_everything(chat.id, False)["on"] is False
+    assert api.get_agent_permissions(chat.id, "ducky")["mode"] == "edits"
+    with pytest.raises(ValueError, match="Unknown permission mode"):
+        api.set_agent_permission_mode(chat.id, "never", "ducky")
+
+    permissions._remember(chat.id, "Bash:npm run test")
+    permissions._remember(chat.id, "WebFetch")
+    after = api.remove_agent_permission_rule(chat.id, "WebFetch", "ducky")
+    assert after["rules"] == [{"rule": "Bash:npm run test", "label": "Bash: npm run test"}]
+    api.set_agent_permission_mode(chat.id, "all", "ducky")
+    cleared = api.clear_agent_permission_rules(chat.id, "ducky")
+    assert cleared["rules"] == [] and cleared["mode"] == "all"
+
+
+def test_chat_permissions_popup_api_refuses_a_mode_the_agent_cannot_use(monkeypatch):
+    from backend.tools.panel import permission_prompt as permissions
+    from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
+    from frontend.ui_web.project_chats import create_conversation
+
+    monkeypatch.setattr(permissions, "_agent_registration", lambda _aid: {})
+    chat = create_conversation(PanelSettings.load(), "", title="Codex chat")
+    api = PanelApiChatsMixin()
+    with pytest.raises(ValueError, match="doesn't ask for approval in Ducky"):
+        api.set_agent_permission_mode(chat.id, "all", "codex")
+    assert not permissions.allows_everything(chat.id)
+
+
 def test_permission_revocation_reports_failed_persistence(monkeypatch):
     import pytest
     from backend.tools.panel import permission_prompt as permissions

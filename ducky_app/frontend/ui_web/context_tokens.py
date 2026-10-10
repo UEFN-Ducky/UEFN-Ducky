@@ -840,9 +840,15 @@ def _external_agent_report(
     except Exception:
         reg = {}
     try:
-        from backend.tools.panel.permission_prompt import allow_state
+        from backend.tools.panel.permission_prompt import allow_state, chat_permissions, claude_permission_mode
 
-        agent_info["allow_everything"] = allow_state(str(getattr(conv, "id", "") or ""))
+        conv_key = str(getattr(conv, "id", "") or "")
+        agent_info["allow_everything"] = allow_state(conv_key)
+        state = chat_permissions(conv_key, agent_id)
+        # Same words as the chat's permissions button.
+        agent_info["approvals"] = {"mode": state["mode"], "label": state["label"], "asks": state["asks"]}
+        if "permission_mode" in agent_info and any(m["id"] == "ask" and m["available"] for m in state["modes"]):
+            agent_info["permission_mode"] = claude_permission_mode(conv_key, agent_info["permission_mode"])
     except Exception:
         pass
 

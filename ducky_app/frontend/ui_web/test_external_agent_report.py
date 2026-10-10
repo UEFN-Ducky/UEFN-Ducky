@@ -102,6 +102,29 @@ def test_external_report_uses_real_session_and_usage(monkeypatch):
     assert by_id["agent_internals"] == 4000
 
 
+def test_external_report_shows_the_chats_approval_mode(monkeypatch):
+    from backend.tools.panel import permission_prompt as permissions
+    from frontend.ui_web import context_tokens as ct
+
+    monkeypatch.setattr(
+        "backend.uefn_plugins.host.get_coding_agent_registration",
+        lambda agent_id: {"chat_permission_modes": ["ask", "edits", "all"],
+                          "settings_defaults": {"permission_mode": "acceptEdits"}},
+    )
+    monkeypatch.setattr(ct, "_coding_agent_context_limit", lambda *a, **k: 200_000)
+    conv = SimpleNamespace(
+        id="c-perm", coding_agent="claude_code", upstream_session_id="", coding_agent_stats=None,
+        token_usage=None, messages=[], context_summary="", context_summary_through=0, context_summary_tokens=0,
+    )
+    permissions.set_permission_mode("c-perm", "ask")
+    info = _external_agent_report(conv, _settings(), "claude_code", "sonnet", include_content=False)["agent_info"]
+    assert info["approvals"] == {"mode": "ask", "label": "Ask before changes", "asks": True}
+    assert info["permission_mode"] == "default"  # what the next Claude Code turn starts with
+    permissions.set_permission_mode("c-perm", "edits")
+    info = _external_agent_report(conv, _settings(), "claude_code", "sonnet", include_content=False)["agent_info"]
+    assert info["approvals"]["label"] == "Accept edits" and info["permission_mode"] == "acceptEdits"
+
+
 def test_external_report_before_first_run():
     conv = SimpleNamespace(
         coding_agent="codex",
