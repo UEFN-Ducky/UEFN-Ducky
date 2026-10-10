@@ -108,7 +108,9 @@ function assembleOneProject(
     }
   }
 
-  const rootRaw = chatsByFolder.get("") ?? [];
+  // The all-islands list comes back grouped by island, not in saved order: a reorder
+  // at an island's (or Global Agents') top level must show as saved. Ties keep host order.
+  const rootRaw = [...(chatsByFolder.get("") ?? [])].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   return {
     folders: buildFolderTree(folderRows, chatsByFolder, expandedById),
     rootChats: rootRaw.filter((c) => !(c.isGroup && hubIds.has(c.id))),
