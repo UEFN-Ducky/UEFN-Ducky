@@ -11,9 +11,13 @@ PLAN = {"chat_id": "coord", "status": "open", "progress": {"pending": 3, "in_pro
 
 
 @pytest.fixture(autouse=True)
-def _fresh():
+def _fresh(monkeypatch):
     keeper.reset_for_tests()
-    yield
+    saved: dict[str, str] = {}  # stands in for the app database across "restarts"
+    monkeypatch.setattr(keeper, "_load_parked", lambda cid: saved.get(cid))
+    monkeypatch.setattr(keeper, "_save_parked",
+                        lambda cid, moves: saved.pop(cid, None) if moves is None else saved.__setitem__(cid, moves))
+    yield saved
     keeper.reset_for_tests()
 
 
@@ -142,3 +146,16 @@ def test_two_minute_wake_names_work_members_and_reports(monkeypatch):
     assert _run(240, ["builder"], woke, [plan]) == []
     assert _run(359, [], woke, [plan]) == []
     assert _run(360, [], woke, [plan]) == ["coord"]
+
+
+def test_a_parked_team_stays_parked_after_the_app_restarts(_fresh) -> None:
+    # Each app start used to allow three more wakes of a plan waiting on the user.
+    woke: list[tuple[str, str]] = []
+    assert [m for m in range(0, 60) if _run(m * MIN, [], woke)] == [2, 4, 8]
+    assert "coord" in _fresh
+    keeper.reset_for_tests()  # the app restarts; the database keeps the parking
+    assert [m for m in range(60, 200) if _run(m * MIN, [], woke)] == []
+    # A member working after the restart unparks it, in memory and in the database.
+    _run(200 * MIN, ["builder"], woke)
+    assert "coord" not in _fresh
+    assert _run(202 * MIN, [], woke) == ["coord"]

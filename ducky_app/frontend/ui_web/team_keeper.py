@@ -21,6 +21,7 @@ _TICK_S = 60.0
 _IDLE_S = 120.0  # nobody running this long before a wake
 _MAX_WAIT_S = 3600.0  # wakes that start no work back off up to this
 _PARK_AFTER = 3  # wakes in a row that moved nothing: wait for a change instead
+_PARKED_TABLE = "workspace_state"
 
 WAKE_TEXT = (
     "[Ducky keeper] Your team has had no agent running for {minutes} minutes and the plan "
@@ -149,20 +150,24 @@ def tick(
             _teams.pop(gone, None)
         for plan in plans:
             cid = str(plan.get("chat_id") or "")
-            st = _teams.setdefault(cid, {"quiet_since": now, "wakes": 0.0, "next_wake": 0.0})
+            st = _teams.get(cid)
+            if st is None:
+                st = _teams[cid] = {"quiet_since": now, "wakes": 0.0, "next_wake": 0.0}
+                parked = _load_parked(cid)
+                if parked is not None:
+                    # Parked before a restart: three more wakes per app start added up.
+                    st["moves"], st["wakes"] = parked, float(_PARK_AFTER)
             member_ids, details = _team_context(plan)
             team_busy = busy.intersection(member_ids | {cid}) if member_ids else busy
             if team_busy:
                 st["quiet_since"] = now
                 if team_busy - {cid}:
-                    st["wakes"] = 0.0  # the team is working again: drop the backoff
-                    st["next_wake"] = 0.0
+                    _unpark(cid, st)  # the team is working again: drop the backoff
                 continue
             moves = _moves(plan)
             if st.get("moves") != moves:
                 st["moves"] = moves
-                st["wakes"] = 0.0  # a step moved: the next quiet spell wakes it again
-                st["next_wake"] = 0.0
+                _unpark(cid, st)  # a step moved: the next quiet spell wakes it again
             if st["wakes"] >= _PARK_AFTER:
                 continue
             if automatic_work_blocked(cid) or now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
@@ -174,11 +179,55 @@ def tick(
             except Exception:
                 continue
             st["wakes"] += 1
+            if st["wakes"] >= _PARK_AFTER:
+                _save_parked(cid, moves)
             # A wake that starts no work waits longer each time: 2, 4, 8, 16, 32, 60 minutes.
             st["next_wake"] = now + min(_IDLE_S * (2 ** (st["wakes"] - 1)), _MAX_WAIT_S)
             st["quiet_since"] = now
             woke.append(cid)
     return woke
+
+
+def _unpark(cid: str, st: dict[str, Any]) -> None:
+    if st["wakes"] >= _PARK_AFTER:
+        _save_parked(cid, None)
+    st["wakes"] = 0.0
+    st["next_wake"] = 0.0
+
+
+def _parked_key(cid: str) -> str:
+    return f"team_keeper_parked:{cid}"
+
+
+def _load_parked(cid: str) -> str | None:
+    """The plan fingerprint this coordinator was parked at, kept across restarts."""
+    try:
+        from backend.store.switch import use_db
+
+        if not use_db(_PARKED_TABLE):
+            return None
+        from backend.store.repos import kv
+
+        doc = kv.get_doc(_PARKED_TABLE, _parked_key(cid))
+        return str(doc["moves"]) if isinstance(doc, dict) and "moves" in doc else None
+    except Exception:
+        return None
+
+
+def _save_parked(cid: str, moves: str | None) -> None:
+    try:
+        from backend.store.switch import use_db
+
+        if not use_db(_PARKED_TABLE):
+            return
+        from backend.store.repos import kv
+
+        if moves is None:
+            kv.delete_doc(_PARKED_TABLE, _parked_key(cid))
+        else:
+            kv.set_doc(_PARKED_TABLE, _parked_key(cid), {"moves": moves, "at": time.time()})
+    except Exception:
+        pass  # parking is a token saver; never let it stop the keeper
 
 
 def _loop() -> None:
