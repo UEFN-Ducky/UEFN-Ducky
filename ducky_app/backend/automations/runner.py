@@ -570,6 +570,8 @@ def run_workflow(
         ctx["files"] = files
     ctx["caller_conv_id"] = _caller(caller_conv_id or str(ctx.get("caller_conv_id") or ""))
     ctx["workflow_name"] = str(wf.get("name") or "")
+    if trigger_id:
+        ctx["_trigger_id"] = trigger_id  # the plugin that fired it is here: its trigger node runs
     _prepare_run_ctx(ctx, wf)
     # A chat's ducky started it (not a person in the editor) when it reports to a chat.
     flags = _start_run(asked["_person_started"] and not ctx["caller_conv_id"], asked["_spend_approved"], by_step=True)
@@ -1250,6 +1252,9 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
             return {**_play_node(ntype, cfg, payload), "id": node.get("id"), "type": ntype, "label": label}
         handler = plugin.get_handler(ntype)
         if handler is None:
+            missing = "" if payload.get("_trigger_id") == ntype else _missing_plugin_step(ntype)
+            if missing:
+                return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": missing}
             # Starters / plugin triggers need no handler — just pass the payload on.
             if ntype.startswith("start.") or ntype not in _ACTION_TYPES:
                 return {"ok": True, "id": node.get("id"), "type": ntype, "label": label, "result": dict(payload)}
@@ -1268,6 +1273,24 @@ def _exec_node(node: dict[str, Any], payload: dict[str, Any], inputs: dict[str, 
     except Exception as exc:
         _log.exception("automation node %s failed", ntype)
         return {"ok": False, "id": node.get("id"), "type": ntype, "label": label, "error": str(exc)}
+
+
+def _missing_plugin_step(ntype: str) -> str:
+    """Why a plugin's step can't run here, or '' for a starter, a trigger or a core node.
+
+    A step whose plugin is off, removed or not loaded used to pass as if it had run, so
+    the workflow said done having skipped it (Open in Ducky browser showed nothing)."""
+    if ntype.startswith("start."):
+        return ""
+    from backend.automations.catalog import node_specs
+
+    spec = node_specs().get(ntype)
+    if spec is None:
+        return f"No plugin here runs this step ({ntype}). Install or turn on the plugin it comes from."
+    pid = str(spec.get("plugin_id") or "")
+    if pid and spec.get("role") != "starter":
+        return f"The {pid} plugin hasn't loaded this step ({ntype}) yet. Try again in a moment, or turn it off and on."
+    return ""
 
 
 def _plugin_node_error(node_type: str, error: Any) -> None:

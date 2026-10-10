@@ -190,6 +190,29 @@ def test_emit_skips_when_trigger_config_channel_differs(monkeypatch):
     assert any(s.get("type") == "flow.wait" for s in hit["runs"][0]["steps"])
 
 
+def test_a_plugin_step_with_no_plugin_to_run_it_fails_and_says_so(monkeypatch):
+    """It used to pass as if it had run: the workflow said done having skipped it."""
+    from backend.automations import catalog, runner
+    from backend.automations.store import save_workflow
+
+    def wf(step: str) -> str:
+        return save_workflow({"name": f"Uses {step}", "enabled": True, "graph": {
+            "nodes": [{"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}},
+                      {"id": "p", "type": step, "x": 300, "y": 0, "config": {}, "label": "Plugin step"},
+                      {"id": "w", "type": "flow.wait", "x": 600, "y": 0, "config": {"seconds": 0}}],
+            "edges": [{"source": "s", "target": "p", "kind": "main"}, {"source": "p", "target": "w", "kind": "main"}]}})["id"]
+
+    gone = runner.run_workflow(wf("browser.open"))
+    assert gone["ok"] is False and "Install or turn on the plugin" in gone["error"]
+    assert not any(s.get("type") == "flow.wait" for s in gone["steps"])
+    # On, but its handler isn't registered (yet): a different message, still not skipped.
+    specs = catalog.node_specs()
+    monkeypatch.setattr(catalog, "node_specs", lambda: {**specs, "browser.open": {
+        "type": "browser.open", "role": "action", "plugin_id": "browser"}})
+    loading = runner.run_workflow(wf("browser.open"))
+    assert loading["ok"] is False and "browser plugin hasn't loaded" in loading["error"]
+
+
 def test_one_list_holds_every_workflow_with_what_starts_it():
     from backend.automations.store import get_workflow, list_workflows, save_workflow
 
