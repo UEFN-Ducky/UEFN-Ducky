@@ -81,6 +81,8 @@ def ask_tool_block_reason(name: str, arguments: Any, catalog: Mapping[str, Any],
             or any(stem in f"_{leaf}_" for stem in _BLOCK_SUBSTRINGS)
             or any(word in leaf.split("_") for word in ("edit", "move", "replace", "delegate"))
             or leaf.startswith("ducky_plan_")
+            # Both local skill readers seed packs before returning content.
+            or leaf in {"uefn_skill", "skill_read_subskill"}
             or any(word in leaf for word in ("execute", "python", "script", "command", "shell"))
             or leaf in {"exec", "call_tool", "ducky_call_tool", "workspace_git", "ducky_ask_user"}):
         return reason

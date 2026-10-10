@@ -24,6 +24,8 @@ QUALIFIED_MUTATORS = [
     ("external__ducky_agent_send", {}),
     ("external__ducky_plan_move_node", {}),
     ("docs__get_page_and_edit", {}),
+    ("external__uefn_skill", {}),
+    ("external__skill_read_subskill", {"pack_id": "mock"}),
 ]
 # These names are literal catalog entries, not invented aliases to bare locals.
 QUALIFIED_MUTATORS += [("mcp__uefn__" + name.rsplit("__", 1)[-1], args)
@@ -97,6 +99,7 @@ def test_qualified_mutators_deny_before_side_effects(dispatch, monkeypatch, name
     monkeypatch.setattr("backend.agent.chat_title.require_self_name", dispatch.forbidden)
     monkeypatch.setattr("backend.agent.hammer_guard.note_failure", dispatch.forbidden)
     monkeypatch.setattr(tools, "_record_tool_failure", dispatch.forbidden)
+    monkeypatch.setattr("backend.tools.verse.skill_tool.seed_skill_packs", dispatch.forbidden)
     result = invoke(*qualified_call(name, args, route))
     assert not result.ok and result.error == ASK_REFUSAL
     assert dispatch.reached == []

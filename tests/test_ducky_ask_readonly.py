@@ -222,6 +222,9 @@ def test_public_qualified_mutator_refusal_followup(public, dispatch, monkeypatch
     monkeypatch.setattr(runner, "allow_destructive_execution", dispatch.forbidden)
     monkeypatch.setattr("backend.agent.coding_agents.plans.plan_mutator_block_reason", dispatch.forbidden)
     monkeypatch.setattr("backend.agent.chat_title.require_self_name", dispatch.forbidden)
+    monkeypatch.setattr("backend.tools.verse.skill_tool.seed_skill_packs", dispatch.forbidden)
+    monkeypatch.setattr("backend.agent.hammer_guard.note_failure", dispatch.forbidden)
+    monkeypatch.setattr(tools, "_record_tool_failure", dispatch.forbidden)
     public.run(*qualified_call(name, args, route))
     assert dispatch.reached == []
     assert len(public.seen) == 2
