@@ -289,3 +289,72 @@ def test_runner_launch_wires_snapshots_live_and_into_final_blocks(env, monkeypat
     assert live[0]["before"] == "before\r\nkeep\r\n"
     assert result["blocks"][0]["file_edits"] == live
     assert ledger.get_run("turn", project_root=str(root))["status"] == "done"
+
+
+def plain_project(tmp_path):
+    """A UEFN island folder: not a git repo, binary assets beside text files."""
+    root = tmp_path / "Island"
+    (root / "Content" / "Verse").mkdir(parents=True)
+    (root / "Content" / "Verse" / "game.verse").write_bytes(b"before\r\n")
+    (root / "Content" / "Hero.uasset").write_bytes(b"\x00binary")
+    (root / ".ducky").mkdir()
+    (root / ".ducky" / "plan.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_codex_edit_reported_after_it_landed_in_a_folder_outside_git(env, tmp_path):
+    # Live 1.2.363 test: Codex created release_probe.txt in an island folder; its
+    # file_change arrived after the edit, so there was no card and no Changes entry.
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    tracker = TurnFileChanges(str(root), ctx, ledger)
+    (root / "Content" / "Verse" / "game.verse").write_bytes(b"after\r\n")
+    (root / "release_probe.txt").write_text("probe\n", encoding="utf-8")
+    args = {"paths": [str(root / "Content" / "Verse" / "game.verse"), str(root / "release_probe.txt")]}
+    tracker.process(event("tool", args=args))
+    done = event("tool_done", args=args)
+    tracker.process(done)
+    edits = {Path(edit["path"][4:]).name: edit for edit in done["tool"]["fileEdits"]}
+    assert edits["game.verse"]["before"] == "before\r\n" and edits["game.verse"]["after"] == "after\r\n"
+    assert edits["release_probe.txt"]["kind"] == "create" and edits["release_probe.txt"]["before"] == ""
+    tracker.close("done")
+    run = ledger.get_run("turn", project_root=str(root))
+    assert len(run["entries"]) == 2
+    runtime.reset_for_tests(ProjectWriter.for_root(str(root), journal=ledger))
+    seq = next(entry["seq"] for entry in run["entries"] if entry["path"].endswith("game.verse"))
+    assert ledger.revert_entry("turn", seq, project_root=str(root))["ok"]
+    assert (root / "Content" / "Verse" / "game.verse").read_bytes() == b"before\r\n"
+
+
+def test_a_shell_edit_that_names_no_file_is_still_caught_outside_git(env, tmp_path):
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    tracker = TurnFileChanges(str(root), ctx, ledger)
+    args = {"command": "python -m tools.regenerate"}
+    tracker.process(event("tool", "command_execution", args))
+    (root / "Content" / "Verse" / "game.verse").write_bytes(b"generated\r\n")
+    done = event("tool_done", "command_execution", args)
+    tracker.process(done)
+    assert [Path(edit["path"][4:]).name for edit in done["tool"]["fileEdits"]] == ["game.verse"]
+    assert done["tool"]["fileEdit"]["before"] == "before\r\n"
+
+
+def test_binary_assets_and_ducky_or_build_folders_are_not_edits(env, tmp_path):
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    tracker = TurnFileChanges(str(root), ctx, ledger)
+    (root / "Content" / "Hero.uasset").write_bytes(b"\x00changed")
+    (root / ".ducky" / "plan.json").write_text('{"x": 1}', encoding="utf-8")
+    (root / "Saved").mkdir()
+    (root / "Saved" / "log.txt").write_text("log\n", encoding="utf-8")
+    done = event("tool_done", "command_execution", {"command": "noop"})
+    tracker.process(done)
+    assert done["tool"]["fileEdits"] == []
+    assert ledger.list_runs(project_root=str(root)) == []
+
+
+def test_the_whole_profile_or_a_drive_is_never_snapshotted():
+    from backend.agent.coding_agents.file_changes import _folder_worth_snapshotting
+
+    assert not _folder_worth_snapshotting(Path.home().resolve())
+    assert not _folder_worth_snapshotting(Path(Path.home().anchor))

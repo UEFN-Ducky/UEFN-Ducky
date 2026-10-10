@@ -131,6 +131,98 @@ class _Repository:
         return edits
 
 
+# A folder outside git has no history to diff against, and Codex reports an apply_patch
+# edit only after it landed, so a file first seen then had no "before" (no card, no
+# Changes entry). Its text files are snapshotted when the turn starts instead.
+_FOLDER_SKIP_DIRS = frozenset({
+    ".git", ".ducky", "node_modules", "__pycache__", ".venv", "venv",
+    "Intermediate", "Saved", "DerivedDataCache", "Binaries", "__ExternalActors__", "__ExternalObjects__",
+})
+_BINARY_SUFFIXES = frozenset({
+    ".uasset", ".umap", ".ubulk", ".uexp", ".upk", ".pak", ".utoc", ".ucas",
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".dds", ".exr", ".hdr", ".psd", ".ico", ".webp",
+    ".wav", ".mp3", ".ogg", ".flac", ".mp4", ".mov", ".avi", ".webm",
+    ".fbx", ".obj", ".glb", ".blend", ".abc", ".zip", ".7z", ".rar", ".gz",
+    ".exe", ".dll", ".pdb", ".lib", ".so", ".dylib", ".ttf", ".otf", ".woff", ".woff2",
+    ".bin", ".db", ".sqlite", ".pyc",
+})
+FOLDER_MAX_FILES = 20_000
+FOLDER_MAX_TEXT_BYTES = 64 * 1024 * 1024
+
+
+class _Folder:
+    """Text files of a folder outside git, as they were when the turn started."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.stats: dict[str, tuple[int, int]] = {}
+        self.texts: dict[str, Snapshot] = {}
+        budget = FOLDER_MAX_TEXT_BYTES
+        for rel, stat in self._walk():
+            self.stats[rel] = stat
+            if stat[1] <= MAX_BYTES and stat[1] <= budget:
+                snapshot = _read(root / rel)
+                if snapshot is not None:
+                    self.texts[rel] = snapshot
+                    budget -= stat[1]
+
+    def _walk(self):
+        count = 0
+        stack = [self.root]
+        while stack:
+            try:
+                entries = list(os.scandir(stack.pop()))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in _FOLDER_SKIP_DIRS:
+                            stack.append(Path(entry.path))
+                        continue
+                    if Path(entry.name).suffix.lower() in _BINARY_SUFFIXES:
+                        continue
+                    stat = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                count += 1
+                if count > FOLDER_MAX_FILES:
+                    return
+                yield Path(entry.path).relative_to(self.root).as_posix(), (stat.st_mtime_ns, stat.st_size)
+
+    def changes(self) -> list[tuple[Path, Snapshot, Snapshot]]:
+        now = dict(self._walk())
+        edits = []
+        for rel in sorted(set(now) | set(self.stats)):
+            old, new = self.stats.get(rel), now.get(rel)
+            if old == new:
+                continue
+            path = self.root / rel
+            before = self.texts.get(rel, Snapshot() if old is None else None)
+            after = _read(path) if new is not None else Snapshot()
+            if new is None:
+                self.stats.pop(rel, None)
+                self.texts.pop(rel, None)
+            else:
+                self.stats[rel] = new
+                if after is not None:
+                    self.texts[rel] = after
+            if before is not None and after is not None and before.digest != after.digest:
+                edits.append((path, before, after))
+        return edits
+
+
+def _folder_worth_snapshotting(path: Path) -> bool:
+    """A project folder, not a drive root or the whole user profile."""
+    try:
+        home = Path.home().resolve()
+    except OSError:
+        home = None
+    return path.is_dir() and path.parent != path and path != home
+
+
 def _named_paths(value: Any, key: str = ""):
     if isinstance(value, dict):
         for child_key, child in value.items():
@@ -164,11 +256,14 @@ class TurnFileChanges:
         self.cwd = Path(cwd).resolve()
         self.ctx, self.journal = ctx, journal
         self.repos: dict[Path, _Repository] = {}
+        self.folders: dict[Path, _Folder] = {}
         self.files: dict[Path, Snapshot | None] = {}
         self.roots: set[str] = set()
         self.completed: list[dict[str, Any]] = []
         self._lock = threading.RLock()
         self.discover({"cwd": str(self.cwd)})
+        if not any(self.cwd.is_relative_to(root) for root in self.repos) and _folder_worth_snapshotting(self.cwd):
+            self.folders[self.cwd] = _Folder(self.cwd)
 
     def discover(self, arguments: dict[str, Any]) -> None:
         base = Path(str(arguments.get("cwd") or arguments.get("workdir") or self.cwd))
@@ -181,6 +276,8 @@ class TurnFileChanges:
             if path.is_symlink():
                 continue
             path = path.resolve()
+            if any(path.is_relative_to(folder) for folder in self.folders):
+                continue  # the turn-start folder snapshot already covers it
             # Keep nested repositories distinct from an already discovered parent.
             if any(path.is_relative_to(root) and not any(
                 (parent / ".git").exists() for parent in (path, *path.parents)
@@ -232,6 +329,9 @@ class TurnFileChanges:
             edits = []
             for root, repo in self.repos.items():
                 for path, before, after in repo.changes():
+                    edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
+            for root, folder in self.folders.items():
+                for path, before, after in folder.changes():
                     edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
             for path, before in self.files.items():
                 after = _read(path)
