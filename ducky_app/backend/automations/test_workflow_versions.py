@@ -113,6 +113,7 @@ def test_upgrade_from_schema_nine_preserves_existing_workflows(storage):
     conn = db.connect()
     conn.execute("DROP TABLE workflow_versions")
     conn.execute("ALTER TABLE projects DROP COLUMN kind")  # 0011 re-adds it
+    conn.execute("ALTER TABLE messages DROP COLUMN fmt")  # 0015 re-adds it
     conn.execute("PRAGMA user_version=9")
     db.reset_for_tests()
     assert store.get_workflow(legacy["id"])["name"] == "Before versions"
