@@ -55,10 +55,24 @@ let _api: PanelApi | null = null;
 let _inFlight = false;
 let _started = false;
 const _listeners = new Set<() => void>();
+let _uptimeSec: number | undefined;
+const _uptimeListeners = new Set<() => void>();
+
+/** Everything but the uptime counter, which moves on every poll while UEFN is connected. */
+function statusWithoutUptime(status: ListenerStatus): string {
+  const { uptime_sec: _uptime, ...rest } = status;
+  return JSON.stringify(rest);
+}
 
 function _emit(next: ListenerStatus) {
   const settled = settleListenerStatus(_status, next, _streak);
-  if (settled === _status) return;
+  if (settled.uptime_sec !== _uptimeSec) {
+    _uptimeSec = settled.uptime_sec;
+    _uptimeListeners.forEach((fn) => fn());
+  }
+  // Every poll deserializes a new object. Handing it out when nothing changed re-rendered
+  // the whole app (every subscriber, App included) every 8 s.
+  if (settled === _status || statusWithoutUptime(settled) === statusWithoutUptime(_status)) return;
   _status = settled;
   _listeners.forEach((fn) => fn());
 }
@@ -97,6 +111,28 @@ function _subscribe(listener: () => void) {
 
 function _snapshot(): ListenerStatus {
   return _status;
+}
+
+function _subscribeUptime(listener: () => void) {
+  _uptimeListeners.add(listener);
+  return () => {
+    _uptimeListeners.delete(listener);
+  };
+}
+
+function _uptimeSnapshot(): number | undefined {
+  return _uptimeSec;
+}
+
+const _noSubscribe = () => () => {};
+
+/**
+ * The listener's latest uptime; the status object keeps the value from its last real
+ * change. With `live` false it reads the latest value on render but does not re-render
+ * on every poll (a closed menu has nothing to show).
+ */
+export function useListenerUptimeSec(live = true): number | undefined {
+  return useSyncExternalStore(live ? _subscribeUptime : _noSubscribe, _uptimeSnapshot, _uptimeSnapshot);
 }
 
 /** Refresh outside the poll cadence (e.g. straight after a deploy). */

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
 import { Icons } from "../icons/Icons";
 import type { ListenerStatus } from "../types/panel";
+import { useListenerUptimeSec } from "../hooks/useListenerStatus";
 
 function isFramedWebView(): boolean {
   return typeof window !== "undefined" && !window.pywebview && window.parent !== window;
@@ -72,6 +73,7 @@ export function ConnectionStatusDropdown({
   const isWedged = Boolean(status.wedged);
   const epicOnline = Boolean(status.epic_mcp_online);
   const race = Boolean(status.listener_init_race) && !isOnline;
+  const uptimeSec = useListenerUptimeSec(open) ?? status.uptime_sec;
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -114,7 +116,7 @@ export function ConnectionStatusDropdown({
   const duckyDetail = isWedged
     ? "Wedged — reload_listener once, then stay on workspace_*"
     : isOnline
-      ? `Connected · port ${status.port ?? 4200}${status.uptime_sec ? ` · up ${Math.floor(status.uptime_sec)}s` : ""}`
+      ? `Connected · port ${status.port ?? 4200}${uptimeSec ? ` · up ${Math.floor(uptimeSec)}s` : ""}`
       : race
         ? "Offline — listener init race; stay on workspace_*"
         : "Offline — open UEFN + start listener";
