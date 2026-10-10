@@ -493,3 +493,73 @@ def test_cooldown_does_not_lock_out_unrelated_adapter(broker, fake_clock):
     broker.mod.send(sender_conv_id="sender1", receiver_conv_id="other", body="independent account", expect_reply=False)
     _wait_sent(broker.modes)
     assert broker.modes.sent[0][0] == "other"
+
+
+@pytest.mark.parametrize('sender,receiver', [('stranger', 'sender1'), ('recv1', 'stranger')])
+def test_unrelated_reply_cannot_consume_or_deliver_another_thread(broker, sender, receiver):
+    rid = broker.mod.open_thread('sender1', 'recv1')
+    other = broker.mod.open_thread('stranger', 'other')
+    with pytest.raises(ValueError, match='participants'):
+        broker.mod.send(sender_conv_id=sender, receiver_conv_id=receiver,
+                        body='ff71cd35518a / 19878d4517 / revision abc123',
+                        expect_reply=False, response_id=rid)
+    assert {t.response_id for t in broker.mod._threads.values()} == {rid, other}
+    assert broker.mod.stats()['queued'] == {}
+    assert broker.modes.sent == []
+
+
+def test_plan_revision_handoff_followup_and_reply_keep_attribution(broker):
+    request = 'Master ff71cd35518a / original node 19878d4517 / revision abc123'
+    outcome = broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1',
+                              body=request, expect_reply=True)
+    rid = outcome['response_id']
+    _wait_sent(broker.modes)
+    followup = broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1',
+        body='Inspect the same revision abc123; no new task', expect_reply=False, response_id=rid)
+    assert followup['closed_thread'] is False
+    assert broker.mod.open_threads_for_receiver('recv1')[0].response_id == rid
+    answer = request + ' / PASS with synthetic evidence'
+    result = broker.mod.send(sender_conv_id='recv1', receiver_conv_id='sender1',
+                             body=answer, expect_reply=False, response_id=rid)
+    assert result['closed_thread'] is True
+    _wait_sent(broker.modes, 2)
+    row = broker.mod.read_inbox('sender1')[0]
+    assert (row['from'], row['response_id'], row['body']) == ('recv1', rid, answer)
+    report = next(text for cid, text in broker.modes.sent if cid == 'sender1')
+    assert 'chat recv1' in report and rid in report
+    assert answer in report and '<<<untrusted:peer-agent>>>' in report
+    assert broker.mod.read_inbox('recv1')[0]['body'] == request
+
+
+def test_duplicate_reply_cannot_replay_or_close_new_request(broker):
+    rid = broker.mod.open_thread('sender1', 'recv1')
+    broker.mod.send(sender_conv_id='recv1', receiver_conv_id='sender1', body='old result',
+                    expect_reply=False, response_id=rid)
+    _wait_sent(broker.modes)
+    new = broker.mod.open_thread('sender1', 'recv1')
+    with pytest.raises(ValueError, match='not open'):
+        broker.mod.send(sender_conv_id='recv1', receiver_conv_id='sender1', body='old result',
+                        expect_reply=False, response_id=rid)
+    assert [t.response_id for t in broker.mod.open_threads_for_receiver('recv1')] == [new]
+    assert len(broker.mod.read_inbox('sender1')) == 1
+    assert len(broker.modes.sent) == 1
+
+
+def test_unconfirmed_handoff_keeps_evidence_without_automatic_replay(broker, monkeypatch):
+    attempts = []
+    def fail(conv_id, text, *args, **kwargs):
+        attempts.append((conv_id, text))
+        raise RuntimeError('synthetic offline / delivery outcome unknown')
+    monkeypatch.setattr(broker.modes, 'run_message', fail)
+    body = 'ff71cd35518a / 19878d4517 / revision abc123'
+    result = broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1',
+                             body=body, expect_reply=True)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not broker.mod.stats()['held']:
+        time.sleep(0.01)
+    rows = broker.mod.read_inbox('recv1')
+    assert len(rows) == 1 and rows[0]['status'] == 'held_manual_recovery'
+    assert (rows[0]['from'], rows[0]['response_id'], rows[0]['body']) == ('sender1', result['response_id'], body)
+    broker.mod._kick_delivery('recv1')
+    assert len(attempts) == 1
+    assert broker.mod.open_threads_for_receiver('recv1')[0].response_id == result['response_id']

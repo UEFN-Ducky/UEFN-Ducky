@@ -203,27 +203,34 @@ def send(
 ) -> dict[str, Any]:
     """Fire-and-forget send. Returns {response_id} (empty when no reply expected).
 
-    ``response_id`` set + ``expect_reply=False``  → this IS the reply: closes the
-    thread and routes the body back to the thread's sender.
+    ``response_id`` identifies an open thread. A reply from its receiver to its
+    sender closes it; a follow-up in the original direction leaves it open.
+    Unknown/closed IDs and unrelated participants are rejected before delivery.
     """
     if expect_reply and response_id:
         raise ValueError("pass either expect_reply=true OR response_id (a reply), not both")
 
-    closing: Thread | None = None
-    if response_id and not expect_reply:
-        closing = close_thread(response_id)
-
-    rid = ""
-    if expect_reply:
-        rid = open_thread(sender_conv_id, receiver_conv_id, "")
-
-    envelope = Envelope(
-        sender_conv_id=sender_conv_id,
-        receiver_conv_id=receiver_conv_id,
-        body=body,
-        response_id=rid if expect_reply else (response_id or ""),
-    )
     with _lock:
+        closing: Thread | None = None
+        if response_id:
+            thread = _threads.get(response_id)
+            if thread is None:
+                raise ValueError("response_id is not open; reply was not delivered")
+            participants = (sender_conv_id, receiver_conv_id)
+            if participants == (thread.receiver_conv_id, thread.sender_conv_id):
+                closing = _threads.pop(response_id)
+            elif participants != (thread.sender_conv_id, thread.receiver_conv_id):
+                raise ValueError("response_id participants do not match; message was not delivered")
+
+        rid = open_thread(sender_conv_id, receiver_conv_id, "") if expect_reply else ""
+        envelope = Envelope(
+            sender_conv_id=sender_conv_id,
+            receiver_conv_id=receiver_conv_id,
+            body=body,
+            response_id=rid if expect_reply else (response_id or ""),
+        )
+        # Match, consume and enqueue atomically: racing duplicate replies cannot
+        # both be admitted, or consume a later request between those steps.
         _inbox.setdefault(receiver_conv_id, deque()).append(envelope)
     _kick_delivery(receiver_conv_id)
     return {
