@@ -110,22 +110,17 @@ _DISPATCHER_BLOCKLIST = frozenset(
 
 def _mode_discovery(name: str, catalog: dict[str, Any]) -> dict[str, Any]:
     from backend.agent.run_context import current_mode
-    from backend.agent.toolsets.plan_safe import mode_tool_block_reason, is_plan_safe_tool
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 
     mode = current_mode()
-    if mode == "plan":
-        reason = "" if is_plan_safe_tool(name) else "blocked in Plan mode: tool is not plan-safe (mutator)."
-        return {"allowed": not bool(reason), "mode": mode,
-                "mode_reason": reason or "Allowed in Plan mode.",
-                "hint": reason or "Invoke only with read-only arguments in Plan mode."}
-    if mode != "ask":
+    if mode not in ("ask", "plan"):
         return {}
-    reason = mode_tool_block_reason("ask", name, {}, catalog, discovery=True)
+    reason = mode_tool_block_reason(mode, name, {}, catalog, discovery=True)
     return {
         "allowed": not bool(reason),
-        "mode": "ask",
-        "mode_reason": reason or "Allowed in Ask mode; dispatcher targets are checked at execution.",
-        "hint": reason or "Call with ducky_call_tool(name, arguments) for a verified read target.",
+        "mode": mode,
+        "mode_reason": reason or f"Allowed in {mode.title()} mode; dispatcher targets are checked at execution.",
+        "hint": reason or "Call with ducky_call_tool(name, arguments) for an allowed target.",
     }
 
 
@@ -253,19 +248,18 @@ async def ducky_call_tool(
     Desktop plugins (blender_*) and nested MCP ({prefix}__*) use the same bridge —
     no server id. Discover schemas with ducky_get_tools first. Always pass arguments.
     """
-    from backend.agent.run_context import current_mode, is_plan_only
+    from backend.agent.run_context import current_mode
     from backend.agent.tools import execute_tool, list_mcp_tools
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
-    from backend.agent.toolsets.plan_safe import is_plan_safe_tool
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 
-    if current_mode() == "ask":
-        from backend.agent.toolsets.plan_safe import mode_tool_block_reason
-
+    mode = current_mode()
+    if mode != "agent":
         try:
             catalog = {t.name: t for t in await list_mcp_tools()}
         except Exception:
             catalog = {}
-        reason = mode_tool_block_reason("ask", "ducky_call_tool", {"name": name, "arguments": arguments}, catalog)
+        reason = mode_tool_block_reason(mode, "ducky_call_tool", {"name": name, "arguments": arguments}, catalog)
         if reason:
             return tool_json({"ok": False, "tool": str(name), "error": reason}, pretty=pretty)
     tool_name = (name or "").strip()
@@ -275,16 +269,6 @@ async def ducky_call_tool(
         raise ValueError(f"cannot dispatch meta-tool {tool_name}")
     if tool_name in EXCLUDED_TOOLS:
         raise ValueError(f"tool excluded: {tool_name}")
-    if is_plan_only() and not is_plan_safe_tool(tool_name):
-        return tool_json(
-            {
-                "ok": False,
-                "tool": tool_name,
-                "error": "Plan mode: tool is not plan-safe (mutator).",
-                "hint": "Switch to Agent mode, or use a read/discover tool.",
-            },
-            pretty=pretty,
-        )
     args = arguments if isinstance(arguments, dict) else {}
     # description is for the model/UI only — not passed through.
     _ = (description or "").strip()
