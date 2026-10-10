@@ -563,3 +563,102 @@ def test_unconfirmed_handoff_keeps_evidence_without_automatic_replay(broker, mon
     broker.mod._kick_delivery('recv1')
     assert len(attempts) == 1
     assert broker.mod.open_threads_for_receiver('recv1')[0].response_id == result['response_id']
+
+
+@pytest.fixture
+def delivery_steps(broker, monkeypatch):
+    """Control worker admission while retaining real broker locks and queues."""
+    workers = []
+    class Worker:
+        def __init__(self, *, target, **kwargs):
+            self.target = target
+        def start(self):
+            workers.append(self.target)
+    monkeypatch.setattr(broker.mod, 'threading', SimpleNamespace(Thread=Worker))
+    def drain():
+        for _ in range(30):
+            if not workers:
+                return
+            workers.pop(0)()
+        raise AssertionError('delivery worker loop did not settle')
+    return SimpleNamespace(workers=workers, drain=drain)
+
+
+def test_concurrent_senders_and_duplicate_callbacks_admit_each_envelope_once(broker, delivery_steps):
+    from concurrent.futures import ThreadPoolExecutor
+    barrier = threading.Barrier(8)
+    def send(index):
+        barrier.wait(timeout=5)
+        return broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1',
+            body=f'task-{index}-end', expect_reply=False)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(send, range(8)))
+    assert all(row['queued_for'] == 'recv1' for row in outcomes)
+    assert len(delivery_steps.workers) == 1
+    delivery_steps.drain()
+    assert len(broker.modes.sent) == 1
+    for index in range(8):
+        assert broker.modes.sent[0][1].count(f'task-{index}-end') == 1
+    broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1', body='next batch', expect_reply=False)
+    assert delivery_steps.workers == []  # active chat occupies its capacity
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='first-run')
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='first-run')
+    delivery_steps.drain()
+    assert len(broker.modes.sent) == 2
+    assert 'next batch' in broker.modes.sent[1][1]
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='first-run')
+    assert 'recv1' in broker.mod._active  # old callback cannot retire new batch
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='second-run')
+    delivery_steps.drain()
+    assert len(broker.modes.sent) == 2
+    assert broker.mod.stats()['queued'] == {}
+
+
+def test_busy_receiver_releases_capacity_only_after_terminal_callback(broker, delivery_steps):
+    broker.modes.running.add('recv1')
+    broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1', body='pending', expect_reply=False)
+    delivery_steps.drain()
+    assert broker.modes.sent == []
+    assert broker.mod.stats()['queued'] == {'recv1': 1}
+    assert broker.mod.stats()['held'] == {}
+    broker.modes.running.remove('recv1')
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='busy-run')
+    delivery_steps.drain()
+    assert len(broker.modes.sent) == 1
+    assert 'pending' in broker.modes.sent[0][1]
+
+
+def test_stop_between_worker_start_and_admission_prevents_execution(broker, delivery_steps):
+    broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1', body='cancelled', expect_reply=False)
+    assert len(delivery_steps.workers) == 1
+    broker.mod.on_agent_cancelled_by_user('recv1')
+    delivery_steps.drain()
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='late-terminal')
+    delivery_steps.drain()
+    assert broker.modes.sent == []
+    assert broker.mod.stats()['queued'] == {}
+    assert broker.mod.stats()['stopped'] == ['recv1']
+
+
+def test_uncertain_batch_not_replayed_when_pending_batch_drains(broker, delivery_steps, monkeypatch):
+    attempts = []
+    def uncertain(conv_id, text, *args, **kwargs):
+        attempts.append(text)
+        if len(attempts) == 1:
+            # New, never-admitted work arrives during the uncertain invocation.
+            broker.mod.send(sender_conv_id='sender1', receiver_conv_id=conv_id,
+                            body='new-pending', expect_reply=False)
+            raise RuntimeError('execution outcome unknown')
+        return 'new-run'
+    monkeypatch.setattr(broker.modes, 'run_message', uncertain)
+    broker.mod.send(sender_conv_id='sender1', receiver_conv_id='recv1', body='uncertain-original', expect_reply=False)
+    delivery_steps.drain()
+    assert len(attempts) == 2
+    assert 'uncertain-original' in attempts[0] and 'uncertain-original' not in attempts[1]
+    assert 'new-pending' in attempts[1]
+    assert broker.mod.stats()['held'] == {'recv1': 1}
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='new-run')
+    broker.mod.on_agent_stopped('recv1', 'done', run_id='new-run')
+    delivery_steps.drain()
+    assert len(attempts) == 2
+    assert broker.mod.read_inbox('recv1')[0]['status'] == 'held_manual_recovery'
