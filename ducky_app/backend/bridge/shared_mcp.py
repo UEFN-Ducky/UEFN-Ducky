@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import os
 import secrets
@@ -296,25 +297,28 @@ def _tool_row(tool: Any) -> dict[str, Any]:
             "description": getattr(tool, "description", "") or "",
             "inputSchema": params or {"type": "object"},
         }
-        for key, attr in (("title", "title"), ("outputSchema", "output_schema"), ("annotations", "annotations")):
+        for key, attr in (("title", "title"), ("outputSchema", "output_schema"), ("annotations", "annotations"), ("icons", "icons"), ("_meta", "meta")):
             value = _dump(getattr(tool, attr, None))
+            if isinstance(value, list):
+                value = [_dump(item) for item in value]
             if value:
                 row[key] = value
         return row
     if hasattr(tool, "model_dump"):
         dumped = tool.model_dump(by_alias=True, exclude_none=True)
         schema = dumped.get("inputSchema") or dumped.get("input_schema") or {"type": "object"}
-        return {
-            "name": dumped.get("name") or "",
-            "description": dumped.get("description") or "",
-            "inputSchema": schema,
-        }
+        return {**dumped, "inputSchema": schema}
     schema = getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None)
-    return {
+    row = {
         "name": getattr(tool, "name", "") or "",
         "description": getattr(tool, "description", "") or "",
         "inputSchema": schema if isinstance(schema, dict) else {"type": "object"},
     }
+    for key in ("annotations", "outputSchema", "title", "icons", "_meta"):
+        value = _dump(getattr(tool, key, None))
+        if value is not None:
+            row[key] = value
+    return row
 
 
 def _call_result(raw: Any) -> dict[str, Any]:
@@ -389,9 +393,14 @@ def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
         except Exception:
             pass
     tools = _policy_filtered(_snapshot_tools(mcp))
-    if not tools:
+    if not isinstance(getattr(getattr(mcp, "_tool_manager", None), "_tools", None), dict):
         tools = _run(_async_list_tools(mcp))
     return [_tool_row(t) for t in tools]
+
+
+def _catalog_revision(rows: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(json.dumps(sorted(rows, key=lambda row: row["name"]),
+                                    sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 async def _async_list_tools(mcp: Any) -> list[Any]:
@@ -464,7 +473,8 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
     if method == "prompts/list":
         return {"prompts": []}
     if method == "tools/list":
-        return {"tools": list_tools_for_handshake(mcp)}
+        rows = list_tools_for_handshake(mcp)
+        return {"tools": rows, "_meta": {"revision": _catalog_revision(rows)}}
     if method == "tools/call":
         name = str(params.get("name") or "")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
@@ -485,18 +495,49 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
 def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id: int) -> None:
     ident = identity_from_payload({})
     write_lock = threading.Lock()
+    catalog_lock = threading.Lock()
+    closed = threading.Event()
+    last_revision: str | None = None
 
     def _send(payload: dict[str, Any]) -> None:
         with write_lock:
             write_frame(handle, payload)
 
     def _dispatch(msg: dict[str, Any]) -> None:
+        nonlocal last_revision
         req_id = msg.get("id")
         try:
-            result = _handle_mcp(mcp, msg, ident, conn_id)
-            _send({"op": "mcp", "id": req_id, "result": result})
+            if msg.get("method") == "tools/list":
+                with catalog_lock:
+                    result = _handle_mcp(mcp, msg, ident, conn_id)
+                    _send({"op": "mcp", "id": req_id, "result": result})
+                    last_revision = result["_meta"]["revision"]
+            else:
+                result = _handle_mcp(mcp, msg, ident, conn_id)
+                if req_id is not None:
+                    _send({"op": "mcp", "id": req_id, "result": result})
         except Exception as exc:
             _send({"op": "mcp", "id": req_id, "error": {"code": -32000, "message": str(exc)}})
+
+    def _watch_catalog() -> None:
+        nonlocal last_revision
+        # Observe only the local registry. Never probe/reconnect providers or wait
+        # on the tool execution loop; unavailable registered rows stay visible.
+        while not closed.wait(0.5):
+            try:
+                with catalog_lock:
+                    if last_revision is None:
+                        continue
+                    rows = [_tool_row(t) for t in _policy_filtered(_snapshot_tools(mcp))]
+                    revision = _catalog_revision(rows)
+                    if revision != last_revision:
+                        _send({"op": "mcp", "method": "notifications/tools/list_changed",
+                               "params": {"_meta": {"revision": revision}}})
+                        last_revision = revision
+            except (OSError, EOFError):
+                return
+            except (ValueError, TypeError, RuntimeError):
+                continue  # a concurrent registration is retried on the next tick
 
     try:
         hello = read_frame(handle)
@@ -509,6 +550,7 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
             return
         ident = identity_from_payload(hello.get("identity") if isinstance(hello.get("identity"), dict) else {})
         write_frame(handle, {"op": "hello_ok"})
+        threading.Thread(target=_watch_catalog, daemon=True, name=f"shared-mcp-catalog-{conn_id}").start()
         while True:
             msg = read_frame(handle)
             op = str(msg.get("op") or "")
@@ -530,6 +572,7 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
     except (EOFError, OSError):
         return
     finally:
+        closed.set()
         close_handle(handle)
 
 

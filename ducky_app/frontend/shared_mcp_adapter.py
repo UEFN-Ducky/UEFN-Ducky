@@ -301,6 +301,9 @@ def run(bridge_args: list[str]) -> bool:
                 os._exit(0)  # no daemon could be started: let the IDE restart this server
             if frame.get("op") != "mcp":
                 continue
+            if frame.get("method") == "notifications/tools/list_changed" and "id" not in frame:
+                _emit({"jsonrpc": "2.0", "method": frame["method"], "params": frame.get("params") or {}})
+                continue
             pending.pop(json.dumps(frame.get("id")), None)
             if frame.get("error"):
                 _emit({"jsonrpc": "2.0", "id": frame.get("id"), "error": frame["error"]})
