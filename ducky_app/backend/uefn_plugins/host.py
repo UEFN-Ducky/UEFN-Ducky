@@ -728,11 +728,16 @@ def get_llm_provider_registration(provider_id: str) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
-def resolve_gateway_credential(provider_id: str, raw: str = "") -> str:
+def resolve_gateway_credential(
+    provider_id: str, raw: str = "", *, row: dict[str, Any] | None = None
+) -> str:
     """Saved key, then plugin ``normalize_secret``, then URL default (Ollama).
 
     Hosted providers like UEFN Ducky keep the device key in ``duckyos_account``
     and resolve it here — they must not require a pasted LLM secret.
+
+    ``row``: the gateway's ``llm_providers`` row when the caller already holds one, so
+    this does not rebuild every plugin contribution just to find it.
     """
     from backend.agent.secrets import get_key
 
@@ -749,13 +754,13 @@ def resolve_gateway_credential(provider_id: str, raw: str = "") -> str:
             pass
     if key:
         return key
-    row = None
-    for candidate in get_contributions().get("llm_providers") or []:
-        if not isinstance(candidate, dict):
-            continue
-        if str(candidate.get("id") or "").strip().lower() == name:
-            row = candidate
-            break
+    if row is None:
+        for candidate in get_contributions().get("llm_providers") or []:
+            if not isinstance(candidate, dict):
+                continue
+            if str(candidate.get("id") or "").strip().lower() == name:
+                row = candidate
+                break
     kind = str((row or {}).get("kind") or "").strip().lower()
     if kind == "url" or (reg.get("key_optional") and kind != "secret"):
         return str((row or {}).get("default_url") or "").strip() or "http://localhost:11434"

@@ -50,6 +50,30 @@ def test_has_any_api_key_sees_contributed_key_before_factory():
         assert api.has_any_api_key() is True
 
 
+def test_key_status_rebuilds_plugin_contributions_at_most_twice():
+    # Oct 10 2026: the 15 s key-status poll rebuilt every plugin's contributions 2 + K
+    # times (K = gateways without a saved key), once more per keyless gateway.
+    rows = [{"id": f"gw{i}", "label": f"GW {i}", "secret_key": f"gw{i}", "kind": "secret"} for i in range(6)]
+    keys = {"gw0": "sk-0", "gw1": "sk-1"}
+    builds: list[int] = []
+
+    def _ui_contributions():
+        builds.append(1)
+        return {"llm_providers": rows}
+
+    with (
+        patch("backend.agent.secrets.has_key", lambda name: bool(keys.get(name))),
+        patch("backend.agent.secrets.get_key", lambda name: keys.get(name, "")),
+        patch("backend.uefn_plugins.host.plugins_ready", return_value=True),
+        patch("backend.uefn_plugins.host.ensure_plugins_loaded", return_value=True),
+        patch("backend.uefn_plugins.host.get_ui_contributions", _ui_contributions),
+        patch("backend.uefn_plugins.host.get_llm_provider_registration", return_value={"factory": object()}),
+    ):
+        status = PanelApi.__new__(PanelApi).get_key_status()
+    assert status["gw0"] is True and status["gw5"] is False
+    assert len(builds) <= 2
+
+
 def test_resolve_gateway_credential_uses_normalize_not_localhost():
     from backend.uefn_plugins.host import resolve_gateway_credential
 

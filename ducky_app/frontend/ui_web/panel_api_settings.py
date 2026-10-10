@@ -321,6 +321,8 @@ class PanelApiSettingsMixin:
         # still show after a Store Update even if factory registration races.
         from backend.uefn_plugins.host import resolve_gateway_credential
 
+        # One snapshot for every row: each get_contributions() rebuilds every plugin's
+        # contributions, and resolving a keyless gateway without its row did that again.
         for row in get_contributions().get("llm_providers") or []:
             if not isinstance(row, dict):
                 continue
@@ -335,7 +337,7 @@ class PanelApiSettingsMixin:
                 continue
             cred = ""
             try:
-                cred = resolve_gateway_credential(pid)
+                cred = resolve_gateway_credential(pid, row=row)
             except Exception:
                 cred = ""
             kind = str(row.get("kind") or "").strip().lower()
