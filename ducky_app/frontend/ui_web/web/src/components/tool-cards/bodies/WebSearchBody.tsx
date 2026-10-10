@@ -11,6 +11,7 @@ type WebPayload = {
   title?: string;
   url?: string;
   excerpt?: string;
+  text?: string;
   results?: WebRow[];
   images?: WebImage[];
 };
@@ -20,7 +21,7 @@ function parsePayload(resultText: string): WebPayload | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as WebPayload;
-    return parsed && typeof parsed === "object" ? parsed : null;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
   } catch {
     // The chat transcript caps long tool text. Results sit before the page body,
     // so a cut inside "text" still leaves a readable card.
@@ -103,7 +104,12 @@ export function WebSearchBody({
   const payload = parsePayload(resultText);
   const query = typeof args.query === "string" ? args.query.trim() : String(payload?.query || "").trim();
   const fetchUrl = typeof args.url === "string" ? args.url.trim() : "";
-  const isFetch = toolName === "web_fetch";
+  const isFetch = toolName === "web_fetch" || Boolean(payload?.url && !Array.isArray(payload.results));
+  // Native Codex completions can contain only the echoed query. That is not
+  // an empty result set, nor is it returned page content.
+  const raw = (resultText || "").trim();
+  const excerpt = String(payload?.excerpt || payload?.text || "").trim()
+    || (!payload && raw !== query ? raw : "");
 
   if (payload?.need_permission) {
     return <div className="tool-card-web-note">Waiting for permission to search the web.</div>;
@@ -117,12 +123,15 @@ export function WebSearchBody({
   if (isFetch) {
     const title = String(payload?.title || "").trim() || hostOf(safeWebHref(payload?.url || fetchUrl)) || "Page";
     const url = String(payload?.url || fetchUrl);
-    const excerpt = String(payload?.excerpt || "").trim();
     return (
       <div className="tool-card-web">
         <ResultLink url={url} title={title} />
         {safeWebHref(url) ? <div className="tool-card-web-host">{hostOf(safeWebHref(url))}</div> : null}
-        {excerpt ? <p className="tool-card-web-snippet">{excerpt}</p> : null}
+        {excerpt ? (
+          <p className="tool-card-web-snippet">{excerpt}</p>
+        ) : (
+          <div className="tool-card-web-note">Result details unavailable.</div>
+        )}
       </div>
     );
   }
@@ -135,7 +144,7 @@ export function WebSearchBody({
     <div className="tool-card-web">
       {query ? (
         <div className="tool-card-web-query">
-          Searching the web for <strong>{query}</strong>
+          Search query: <strong>{query}</strong>
         </div>
       ) : null}
       {images.length > 0 ? (
@@ -145,8 +154,13 @@ export function WebSearchBody({
           ))}
         </div>
       ) : null}
+      {excerpt ? <p className="tool-card-web-snippet">{excerpt}</p> : null}
       {rows.length === 0 ? (
-        <div className="tool-card-web-note">No results.</div>
+        !excerpt && images.length === 0 ? (
+          <div className="tool-card-web-note">
+            {Array.isArray(payload?.results) ? "No results." : "Result details unavailable."}
+          </div>
+        ) : null
       ) : (
         <ul className="tool-card-web-list">
           {rows.map((row, index) => {

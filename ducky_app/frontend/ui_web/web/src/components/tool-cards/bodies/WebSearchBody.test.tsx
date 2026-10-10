@@ -6,6 +6,34 @@ import { WebSearchBody } from "./WebSearchBody";
 
 afterEach(() => cleanup());
 
+describe("web completion details", () => {
+  const card = (resultText: string, args: Record<string, unknown> = {}, toolName = "web_search") =>
+    render(<WebSearchBody toolName={toolName} args={args} argsText="" resultText={resultText} isSuccess isError={false} />);
+
+  it.each(["", "{}", "Codex MCP"])("does not mistake missing native result details for empty search: %s", (result) => {
+    const { container } = card(result, { query: "Codex MCP" });
+    expect(container.textContent).toContain("Result details unavailable");
+    expect(container.textContent).not.toContain("No results.");
+    expect(container.textContent).not.toContain("Searching the web");
+  });
+
+  it("reserves No results for an explicit empty search", () => {
+    expect(card('{"ok":true,"results":[]}').container.textContent).toContain("No results.");
+  });
+
+  it.each(["web_fetch", "web_search"])("preserves returned page text and its safe link for %s", (name) => {
+    const { container } = card(JSON.stringify({ url: "https://developers.openai.com/codex/mcp", text: "Connect Codex to MCP servers." }), {}, name);
+    expect(container.textContent).toContain("Connect Codex to MCP servers.");
+    expect(container.querySelector("a")?.href).toBe("https://developers.openai.com/codex/mcp");
+  });
+
+  it("preserves successful plain text without calling it empty", () => {
+    const { container } = card("MCP server configuration reference", { url: "https://example.com" }, "web_fetch");
+    expect(container.textContent).toContain("MCP server configuration reference");
+    expect(container.textContent).not.toContain("No results.");
+  });
+});
+
 describe("WebSearchBody", () => {
   it("shows the query, title, snippet, and link", () => {
     const { container } = render(
