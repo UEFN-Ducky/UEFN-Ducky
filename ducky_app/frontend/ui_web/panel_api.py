@@ -842,6 +842,13 @@ from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin  # noqa: E4
 from frontend.ui_web.panel_api_automations import PanelApiAutomationsMixin  # noqa: E402
 from frontend.ui_web.panel_api_video import PanelApiVideoMixin  # noqa: E402
 
+# Whether the UEFN listener was online at the last status check, for the whole app. HTTP,
+# phone and website requests each build a new PanelApi; kept per instance, every one of
+# their status polls looked like "listener just came online" and re-shipped every skill
+# pack to every IDE every 5 s (two cores busy while Ducky sat idle).
+_listener_online_lock = threading.Lock()
+_listener_was_online = False
+
 
 class PanelApi(
     PanelApiAgentsMixin,
@@ -866,7 +873,6 @@ class PanelApi(
         self._listener_status_state = ListenerStatusState()
         self._last_listener_status: dict[str, Any] | None = None
         self._listener_status_lock = threading.Lock()
-        self._listener_was_online = False
         # Folder the sidebar reports an external OS-file drag is over; read by the
         # pywebview drop handler (see file_drop_import.py).
         self._import_drop_target = ""
@@ -1119,9 +1125,11 @@ class PanelApi(
 
     def _maybe_ship_on_listener_online(self, status: dict[str, Any]) -> None:
         """When UEFN listener flips offline→online, re-ship newest listener/skills/IDE bridges."""
+        global _listener_was_online
         online = bool(status.get("online")) and not bool(status.get("wedged"))
-        was = self._listener_was_online
-        self._listener_was_online = online
+        with _listener_online_lock:
+            was = _listener_was_online
+            _listener_was_online = online
         if online and not was:
             try:
                 from frontend.ship_newest import ship_newest_everywhere_async

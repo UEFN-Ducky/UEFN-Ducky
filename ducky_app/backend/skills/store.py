@@ -1148,10 +1148,14 @@ def _write_pack_license_file(pack_id: str) -> None:
     if not (dest / PACK_FILE).is_file():
         return
     manifest = load_pack_manifest(pid) or {"id": pid, "label": pid}
+    text = _license_text_for_pack({**manifest, "id": pid})
+    path = dest / LICENSE_FILE
     try:
-        (dest / LICENSE_FILE).write_text(
-            _license_text_for_pack({**manifest, "id": pid}), encoding="utf-8"
-        )
+        # Unchanged text is not rewritten: every seed (each skill ship) wrote it again, a
+        # disk write and an antivirus scan per pack for byte-identical text.
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            return
+        path.write_text(text, encoding="utf-8")
     except OSError:
         pass
 
