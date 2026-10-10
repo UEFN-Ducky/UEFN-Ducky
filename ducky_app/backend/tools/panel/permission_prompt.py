@@ -47,9 +47,13 @@ _FILE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 # Change nothing, so they never ask.
 _READ_ONLY_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
 
+# Git takes options before its subcommand: "git -C <folder> push" and "git -c k=v reset --hard"
+# must read as the push and the reset they are.
+_GIT_PREFIX = r"\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?))*\s+"
+
 # Never remembered: each one asks, with the reason on the card.
 _RISKY: tuple[tuple[re.Pattern[str], str], ...] = tuple(
-    (re.compile(pattern, re.IGNORECASE), reason)
+    (re.compile(pattern.replace(r"\bgit\s+", _GIT_PREFIX), re.IGNORECASE), reason)
     for pattern, reason in (
         (r"\bgit\s+push\b", "Pushes commits to a remote."),
         (r"\bgit\s+reset\s+--hard\b", "Discards local changes."),

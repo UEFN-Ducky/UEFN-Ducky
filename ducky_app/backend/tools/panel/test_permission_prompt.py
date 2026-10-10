@@ -60,6 +60,10 @@ def test_plain_command_can_be_always_allowed(monkeypatch, conv) -> None:
         "py build/build_exes.py",
         "py scripts/release.py --publish",
         "cd repo && git push",
+        "git -C C:/repo push origin main",
+        'git -C "C:/My Repo" push',
+        "git -c core.autocrlf=false reset --hard",
+        "git --no-pager -C repo clean -fd",
     ],
 )
 def test_risky_commands_never_offer_always(monkeypatch, conv, command: str) -> None:
