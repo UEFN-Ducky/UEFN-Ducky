@@ -40,14 +40,19 @@ def test_rollup_and_whole_plan_report_once_with_notes(team, notices):
     plans.update_node("coord", "a", assignee="group-a", body_markdown="Section instructions", project_root=team)
     plans.update_node("coord", "a1", status="completed", body_markdown="Core passed", project_root=team)
     plans.update_node("coord", "a2", status="completed", body_markdown="Adapters passed", project_root=team)
-    assert len(notices) == 3
-    assert any("section A Modes" in n["body"] and "Section instructions" in n["body"] for n in notices)
+    # The last step and the section it closed arrive as one notice, step first.
+    assert len(notices) == 2
+    last = notices[-1]["body"]
+    assert "section A Modes" in last and "Section instructions" in last
+    assert last.index("Adapters passed") < last.index("section A Modes")
+    assert last.endswith("Dispatch the next open step at once.")
     doc = plans.update_node("coord", "b", status="completed", project_root=team)
     assert "finished plan" in notices[-1]["body"]
-    assert len(notices) == 4
+    assert notices[-1]["body"].endswith("check the results and report to the user.")
+    assert len(notices) == 3
     assert len(doc["team_reports"]) == 4
     plans.save_plan(doc, project_root=team)
-    assert len(notices) == 4
+    assert len(notices) == 3
 
 
 def test_new_dispatch_acknowledges_retained_reports(team, notices):

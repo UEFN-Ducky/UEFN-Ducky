@@ -19,13 +19,15 @@ def completion_reports(before: dict, after: dict) -> list[dict[str, str]]:
     actor = getattr(context, "conv_id", "") or str(after.get("chat_id") or "")
     who = getattr(context, "ducky_name", "") or actor
     old = {n["id"]: n for n, _ in assigned_nodes(before.get("nodes"))}
-    reports = []
+    steps, sections = [], []
     for node, owner in assigned_nodes(after.get("nodes")):
         status = node.get("status")
         if owner and status in {"completed", "cancelled"} and old.get(node["id"], {}).get("status") not in {"completed", "cancelled"}:
             kind = "section" if node.get("children") else "step"
             body = f"{who} {status} {kind} {node['content']} ({node['id']}).\n{node.get('body_markdown', '')}"
-            reports.append({"sender": actor, "body": body})
+            (sections if node.get("children") else steps).append({"sender": actor, "body": body})
+    # In the order it happened: the step, then the sections it closed, innermost first.
+    reports = steps + sections[::-1]
     if (any(owner for _, owner in assigned_nodes(after.get("nodes")))
             and after.get("status") == "finished" and before.get("status") != "finished"):
         reports.append({"sender": actor, "body": f"{who} finished plan {after.get('title', 'Plan')}.\n{after.get('body_markdown', '')}"})
@@ -33,14 +35,18 @@ def completion_reports(before: dict, after: dict) -> list[dict[str, str]]:
 
 
 def deliver_reports(plan: dict, reports: list[dict]) -> None:
+    """One notice per plan change: every notice is a coordinator turn that re-reads its thread."""
     from backend.agent.a2a_client import send_notice
-    for report in reports:
-        try:
-            send_notice(sender_conv_id=report["sender"], receiver_conv_id=plan["chat_id"],
-                        body="[Team plan] " + report["body"] + "\nDispatch the next open step at once.")
-        except Exception:
-            # Stored reports remain available to the keeper if delivery is unavailable.
-            logging.getLogger(__name__).exception("Could not deliver team plan report")
+    if not reports:
+        return
+    closing = ("Every step is finished: check the results and report to the user."
+               if plan.get("status") == "finished" else "Dispatch the next open step at once.")
+    body = "[Team plan] " + "\n".join(r["body"].rstrip("\n") for r in reports) + "\n" + closing
+    try:
+        send_notice(sender_conv_id=reports[0]["sender"], receiver_conv_id=plan["chat_id"], body=body)
+    except Exception:
+        # Stored reports remain available to the keeper if delivery is unavailable.
+        logging.getLogger(__name__).exception("Could not deliver team plan report")
 
 
 def member_stopped(chat_id: str) -> None:

@@ -681,7 +681,12 @@ def _team(monkeypatch, member_messages):
 
 def test_agent_messages_are_not_announced_as_private_talk(monkeypatch):
     """Agent-to-agent traffic posted hundreds of "the user talked to me" notes per hour."""
-    for marker in ("[ducky:agent-message] from Coordinator: do task 3", "[ducky:agent-notice] Reviewer ran into an error"):
+    for marker in (
+        "[ducky:agent-message] from Coordinator: do task 3",
+        "[ducky:agent-notice] Reviewer ran into an error",
+        "[Team plan] Writer B completed step Create b.txt (b1). Dispatch the next open step at once.",
+        "[Ducky keeper] Your team has had no agent running for 4 minutes",
+    ):
         go, posted, briefed = _team(
             monkeypatch, [{"role": "user", "content": marker}, {"role": "assistant", "content": "done"}]
         )
