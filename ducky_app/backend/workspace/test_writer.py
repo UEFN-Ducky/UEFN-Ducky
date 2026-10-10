@@ -490,3 +490,90 @@ def test_killed_writer_releases_os_lock(project):
                 worker.kill()
             if worker.pid is not None:
                 worker.join(timeout=5)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement sharing semantics")
+def test_atomic_write_waits_for_reader_without_releasing_cas_lock(project, monkeypatch):
+    from backend.workspace import writer as writer_module
+
+    target = project / "Content/Verse/shared.verse"
+    target.write_text("old", encoding="utf-8")
+    observer = RecordingObserver()
+    writer = ProjectWriter.for_root(str(project), observers=[observer])
+    expected = writer_module.content_hash("old")
+    denied = threading.Event()
+    original_replace = os.replace
+    errors = []
+    failures = []
+
+    def replace(src, dst):
+        try:
+            return original_replace(src, dst)
+        except PermissionError as exc:
+            failures.append(exc.winerror)
+            denied.set()
+            raise
+
+    monkeypatch.setattr(writer_module.os, "replace", replace)
+
+    def write():
+        try:
+            writer.write_text("Content/Verse/shared.verse", "new", expected_hash=expected)
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=write)
+    try:
+        with target.open(encoding="utf-8") as reader:
+            thread.start()
+            assert denied.wait(5), "replacement never reached the held reader"
+            assert thread.is_alive()
+            assert reader.read() == "old"
+            # Retrying replacement must not release the writer's CAS mutex.
+            lock = writer._lock_for(os.path.normcase(os.path.realpath(target)))
+            acquired = lock.acquire(blocking=False)
+            if acquired:
+                lock.release()
+            assert not acquired
+            assert observer.calls == []
+    finally:
+        thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert failures and all(code in (5, 32, 33) for code in failures)
+    assert target.read_text(encoding="utf-8") == "new"
+    assert len(observer.calls) == 1
+    assert not list(target.parent.glob(".*.tmp"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement sharing semantics")
+def test_atomic_write_persistent_reader_denial_preserves_original(project):
+    target = project / "Content/Verse/shared.verse"
+    target.write_text("old", encoding="utf-8")
+    observer = RecordingObserver()
+    writer = ProjectWriter.for_root(str(project), observers=[observer])
+    with target.open(encoding="utf-8"):
+        with pytest.raises(PermissionError):
+            writer.write_text("Content/Verse/shared.verse", "new")
+    assert target.read_text(encoding="utf-8") == "old"
+    assert observer.calls == []
+    assert not list(target.parent.glob(".*.tmp"))
+
+
+def test_atomic_write_does_not_retry_unrelated_error(project, monkeypatch):
+    from backend.workspace import writer as writer_module
+
+    target = project / "Content/Verse/shared.verse"
+    target.write_text("old", encoding="utf-8")
+    calls = []
+
+    def replace(src, dst):
+        calls.append((src, dst))
+        raise OSError(28, "disk full")
+
+    monkeypatch.setattr(writer_module.os, "replace", replace)
+    with pytest.raises(OSError, match="disk full"):
+        ProjectWriter.for_root(str(project)).write_text("Content/Verse/shared.verse", "new")
+    assert len(calls) == 1
+    assert target.read_text(encoding="utf-8") == "old"
+    assert not list(target.parent.glob(".*.tmp"))

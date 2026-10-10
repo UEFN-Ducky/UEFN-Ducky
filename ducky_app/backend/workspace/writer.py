@@ -542,7 +542,19 @@ class ProjectWriter:
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(content)
-            os.replace(tmp_name, full)
+            # Windows readers (including scanners) can briefly deny replacement.
+            # Keep the caller's thread/OS CAS locks throughout the retry: the
+            # bytes checked above must still be the bytes this write replaces.
+            deadline = time.monotonic() + 1.0
+            while True:
+                try:
+                    os.replace(tmp_name, full)
+                    break
+                except OSError as exc:
+                    if (os.name != "nt" or getattr(exc, "winerror", None) not in (5, 32, 33)
+                            or time.monotonic() >= deadline):
+                        raise
+                    time.sleep(0.01)
         except Exception:
             try:
                 os.unlink(tmp_name)
