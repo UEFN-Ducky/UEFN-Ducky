@@ -1063,6 +1063,8 @@ class FileChangeJournal:
             return "reverted"
         if op_old == "delete":
             before = self._read_blob(storage, earliest.get("before_blob"))
+            if before is None and earliest.get("before_hash") == content_hash(""):
+                before = ""
             if before is None:
                 raise ValueError("deleted content was not captured (binary or folder)")
             writer.write_text(path, before, op="create", tool="changeset_revert", writer=meta)

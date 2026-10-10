@@ -90,6 +90,7 @@ function toolMeta(intent: ChatMessage, result: ChatMessage | null): ToolCallData
     llmTokens: done?.llmTokens ?? start?.llmTokens,
     hint: done?.hint ?? start?.hint,
     fileEdit: done?.fileEdit ?? start?.fileEdit,
+    fileEdits: done?.fileEdits ?? start?.fileEdits,
   };
 }
 
@@ -163,10 +164,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
     resolveChatTab(childConvId, title, allChats);
 
   const hideRawResult = Boolean(chatList);
-  const fileEdit = !isRunning ? meta.fileEdit : undefined;
+  const fileEdits = !isRunning ? (meta.fileEdits ?? (meta.fileEdit ? [meta.fileEdit] : [])) : [];
   // Any tool with fileEdit meta (workspace_write_file, Cursor Edit/Write/StrReplace, …).
-  const showInlineDiff = Boolean(fileEdit);
-  const hideArgsForFileEdit = showInlineDiff;
+  const showInlineDiff = fileEdits.length > 0;
+  const hideArgsForFileEdit = showInlineDiff && !meta.fileEdits;
   const walkthroughSteps = !isRunning && (meta.name === "ducky_walkthrough_run" || meta.name === "tour_workflow")
     ? walkthroughStepsFromTool(meta)
     : null;
@@ -199,7 +200,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   // Successful writes already have the full diff card — the empty "Edit file 32ms"
   // accordion is a duplicate. Keep the shell for errors / cancel / guard skips.
   const hideShellForFileEdit =
-    showInlineDiff && isSuccess && !isGuardBlocked && !isCancelled;
+    showInlineDiff && isSuccess && !isGuardBlocked && !isCancelled && !meta.fileEdits;
   // Guard-blocked calls are benign skips, not failures — render them muted, not red.
   const shellTone = isRunning
     ? "running"
@@ -248,9 +249,9 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   return (
     <div data-tool-activity-id={toolId} className={`tool-execution-card-wrap${embedded ? " tool-execution-card-wrap--embedded" : ""}`}>
       {/* Diff always mounts above the tool bar — never buried behind expand/accordion. */}
-      {showInlineDiff && fileEdit ? (
-        <ToolFileEditDiff edit={fileEdit} onOpenFile={onOpenFile} />
-      ) : null}
+      {fileEdits.map((edit) => (
+        <ToolFileEditDiff key={edit.path} edit={edit} onOpenFile={onOpenFile} />
+      ))}
       {hideShellForFileEdit ? null : (
       <div
         className={[

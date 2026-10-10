@@ -16,7 +16,7 @@ interface ToolFileEditDiffProps {
 export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: ToolFileEditDiffProps) {
   const collapseScope = useChatCollapseScope();
   const [expanded, setExpanded] = useChatCollapseState(
-    chatCollapseKey(collapseScope, defaultExpanded ? "file-diff-review" : "file-diff"),
+    chatCollapseKey(collapseScope, defaultExpanded ? "file-diff-review" : "file-diff", edit.path),
     defaultExpanded,
   );
   const verseEditor = useVerseEditorOptional();

@@ -571,7 +571,12 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                 if isinstance(llm_tokens_val, int) and llm_tokens_val > 0:
                     tool_done["llmTokens"] = llm_tokens_val
                 stored_edit = block.get("file_edit")
-                if isinstance(stored_edit, dict):
+                stored_edits = block.get("file_edits")
+                if isinstance(stored_edits, list):
+                    tool_done["fileEdits"] = stored_edits
+                    if stored_edits:
+                        tool_done["fileEdit"] = stored_edits[0]
+                elif isinstance(stored_edit, dict):
                     tool_done["fileEdit"] = stored_edit
                 else:
                     try:

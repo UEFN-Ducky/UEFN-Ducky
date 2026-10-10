@@ -871,6 +871,8 @@ export interface ToolCallData {
   llmTokens?: number;
   hint?: string;
   fileEdit?: FileEditData;
+  /** Every changed file, grouped under the tool that changed it. */
+  fileEdits?: FileEditData[];
 }
 
 export interface FileEditData {

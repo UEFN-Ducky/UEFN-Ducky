@@ -55,7 +55,8 @@ function toolNameFromRow(row: Extract<ChatRow, { kind: "tool" }>): string {
 
 /** File-edit diffs must never fold into the "N tools" accordion. */
 function toolHasFileEdit(row: Extract<ChatRow, { kind: "tool" }>): boolean {
-  return Boolean(row.intent.tool?.fileEdit || row.result?.tool?.fileEdit);
+  return Boolean(row.intent.tool?.fileEdit || row.result?.tool?.fileEdit
+    || row.intent.tool?.fileEdits?.length || row.result?.tool?.fileEdits?.length);
 }
 
 /** Tools + thinking coalesce into the accordion; writes/diffs/ask stay standalone. */

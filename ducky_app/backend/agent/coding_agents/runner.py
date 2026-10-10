@@ -479,6 +479,8 @@ class _TurnCheckpoint:
                     }
                     if isinstance(tool.get("fileEdit"), dict):
                         b["file_edit"] = tool["fileEdit"]
+                    if isinstance(tool.get("fileEdits"), list):
+                        b["file_edits"] = tool["fileEdits"]
                     found = True
                     break
             if not found:
@@ -500,6 +502,7 @@ class _TurnCheckpoint:
                             if isinstance(tool.get("fileEdit"), dict)
                             else {}
                         ),
+                        **({"file_edits": tool["fileEdits"]} if isinstance(tool.get("fileEdits"), list) else {}),
                     }
                 )
             self.flush(force=True)
@@ -795,9 +798,13 @@ def _run_coding_agent_message(
         app_version=__version__,
         session_id=session_id,
     )
-    from frontend.ui_web.workspace_bootstrap import build_run_context, record_external_edits
+    from frontend.ui_web.workspace_bootstrap import build_journal, build_run_context, record_external_edits
 
     run_ctx = build_run_context(conv, run_id=rid, model=(model or conv.model or ''), coding_agent=agent_id)
+    from backend.agent.coding_agents.file_changes import TurnFileChanges
+
+    file_changes = TurnFileChanges(cwd, run_ctx, build_journal())
+    push = file_changes.wrap(push)
     from frontend.ui_web.live_agent_runs import set_live_writer
 
     # Native Edit/Write hits disk outside the writer pipeline. The watcher
@@ -851,6 +858,7 @@ def _run_coding_agent_message(
         )
         if not isinstance(result, CodingAgentLaunchResult):
             raise ValueError("Coding agent returned an invalid launch result")
+        file_changes.enrich_blocks(result.blocks)
         result.requested_mode = mode
         # Compatibility inference only, not proof of enforced permissions.
         # Restricted requests and nonempty mismatches never receive a fallback.
@@ -877,6 +885,7 @@ def _run_coding_agent_message(
         ckpt.flush(error="Interrupted", force=True)
         raise
     finally:
+        file_changes.close("done" if "result" in locals() and getattr(result, "ok", False) else "error")
         for path in (mcp_path, prompt_path):
             try:
                 path.unlink(missing_ok=True)
