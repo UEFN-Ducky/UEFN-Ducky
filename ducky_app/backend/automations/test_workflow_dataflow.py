@@ -152,7 +152,9 @@ def test_input_nodes_hand_on_files_as_file_refs():
     out = runner.run_workflow(wid)
     got = out["node_outputs"]["p"]["value"]
     assert {key: got[key] for key in ("kind", "path", "name")} == {"kind": "image", "path": "C:/art/duck.png", "name": "duck.png"}
-    assert got["url"].startswith("http://127.0.0.1:4199/workflow-media/") and got["url"].endswith("/duck.png")  # the editor's thumbnail link
+    from frontend.settings import PANEL_LISTENER_PORT
+
+    assert got["url"].startswith(f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/workflow-media/") and got["url"].endswith("/duck.png")  # the editor's thumbnail link
 
 
 def test_wired_values_reach_a_plugin_node(monkeypatch):

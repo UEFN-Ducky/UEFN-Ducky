@@ -27,7 +27,9 @@ def default_app_data_dir() -> Path:
 
 
 # Listener / bridge port for the packaged panel — not user-configurable in the UI.
-PANEL_LISTENER_PORT = 4200
+# UEFN_DUCKY_PANEL_PORT exists for test sessions (conftest.py), which must never
+# reach the running app at 4199/4200.
+PANEL_LISTENER_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or 4200)
 
 
 def _settings_use_db() -> bool:
@@ -45,7 +47,7 @@ _StoreUnavailable = (OSError, RuntimeError)
 class PanelSettings:
     """User preferences persisted under %LOCALAPPDATA%\\UEFN-Ducky\\panel_settings.json (Windows)."""
 
-    port: int = 4200
+    port: int = PANEL_LISTENER_PORT
     """Always :data:`PANEL_LISTENER_PORT` when using this panel (Apply / Save rewrite disk)."""
 
     antigravity_config_path: str = ""

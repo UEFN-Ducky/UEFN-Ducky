@@ -19,7 +19,8 @@ from pathlib import Path
 
 _STATE = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
-_PANEL_PORT = 4199  # frontend.settings.PANEL_LISTENER_PORT - 1 (this module stays stdlib-only)
+# frontend.settings.PANEL_LISTENER_PORT - 1, read the same way (this module stays stdlib-only).
+_PANEL_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or 4200) - 1
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 # Safe to send again to a fresh daemon. A tools/call is not: it may have run already.
 _RESENDABLE = frozenset({"initialize", "ping", "tools/list", "resources/list", "prompts/list"})
