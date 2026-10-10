@@ -306,17 +306,42 @@ def press_button(hwnd: int, n: int) -> dict[str, Any]:
             "open_popups": [p["title"] for p in list_popups()]}
 
 
+# hwnd -> (title, looks so far, monotonic time of the next look). A known popup that
+# did not match its rule, or stayed open after its button was pressed, is looked at
+# again only after a growing pause: each look is a capture plus a per-pixel scan, and
+# a stuck popup otherwise cost that every pass until someone closed it.
+_retry: dict[int, tuple[str, int, float]] = {}
+_RETRY_MAX_S = 60.0
+
+
+def _back_off(hwnd: int, title: str, now: float) -> None:
+    seen = _retry.get(hwnd)
+    tries = seen[1] + 1 if seen is not None and seen[0] == title else 1
+    _retry[hwnd] = (title, tries, now + min(_RETRY_MAX_S, _GUARD_POLL_S * 2**tries))
+
+
 def answer_known_popups() -> list[dict[str, Any]]:
     """Press the rule's button on every known popup on screen. One pass; cheap when none."""
     done = []
-    for popup in list_popups():
-        if popup["title"].strip().lower() not in KNOWN_POPUPS:
+    now = time.monotonic()
+    on_screen = list_popups()
+    for hwnd in set(_retry) - {p["hwnd"] for p in on_screen}:
+        del _retry[hwnd]
+    for popup in on_screen:
+        title = popup["title"].strip().lower()
+        if title not in KNOWN_POPUPS:
+            continue
+        seen = _retry.get(popup["hwnd"])
+        if seen is not None and seen[0] == title and now < seen[2]:
             continue
         info = describe_popup(popup, save=False)
         if not info.get("known"):
+            _back_off(popup["hwnd"], title, now)
             done.append({"title": popup["title"], "skipped": "layout did not match", "buttons": len(info["buttons"])})
             continue
         result = press_button(popup["hwnd"], info["known"]["press"])
+        if not result.get("closed"):
+            _back_off(popup["hwnd"], title, now)
         done.append({**result, "label": info["known"]["label"]})
     return done
 
@@ -355,7 +380,14 @@ def _log_event(event: dict[str, Any]) -> None:
     try:
         from backend.store.repos import events as events_repo
 
-        events_repo.add("uefn_popup", f"{event.get('title')}: pressed {event.get('label') or event.get('pressed')}", source="popup-guard", payload=event)
+        if event.get("skipped"):
+            message = f"{event.get('title')}: not pressed ({event['skipped']})"
+        else:
+            message = f"{event.get('title')}: pressed {event.get('label') or event.get('pressed')}"
+        now = time.time()
+        events_repo.insert("uefn_popup", ts=now, source="popup-guard", message=message, payload=event)
+        # A popup that stays stuck is logged again on each look; keep the log bounded.
+        events_repo.trim("uefn_popup", older_than=now - 30 * 86400, keep=500)
     except Exception:
         pass
 

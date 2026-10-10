@@ -132,3 +132,60 @@ def test_the_block_ends_with_the_uefn_that_skipped(screen, monkeypatch) -> None:
         popups.answer_known_popups()
     monkeypatch.setattr(popups, "_uefn_pids", lambda: {9999})  # UEFN restarted: level reloads from disk
     assert popups.verse_skip_active() is False
+
+
+def _guard_pass() -> None:
+    """One pass of the background guard's loop."""
+    for event in popups.answer_known_popups():
+        popups._log_event(event)
+
+
+def _popup_events() -> list[dict]:
+    from backend.store.repos import events
+
+    return events.newest("uefn_popup", limit=50)
+
+
+@pytest.fixture()
+def stuck(monkeypatch):
+    """A known popup whose layout never matches its rule (another DPI or theme), on a fake clock."""
+    w, h = _img("verse_validation_errors").size
+    rect = {"left": 0, "top": 0, "right": w, "bottom": h, "width": w, "height": h}
+    grabs: list[int] = []
+    clock = {"now": 1000.0}
+
+    def grab(rect, hwnd=0):
+        grabs.append(hwnd)
+        return _img("verse_validation_errors")  # its blue button is not where Verse Build Errors has it
+
+    class Clock:
+        time = staticmethod(lambda: clock["now"])
+        monotonic = staticmethod(lambda: clock["now"])
+        sleep = staticmethod(lambda _s: None)
+
+    monkeypatch.setattr(popups, "list_popups", lambda: [{"hwnd": 77, "title": "Verse Build Errors", "rect": rect}])
+    monkeypatch.setattr(popups, "_grab", grab)
+    monkeypatch.setattr(popups, "time", Clock)
+    monkeypatch.setattr(popups, "_retry", {})
+    return {"grabs": grabs, "clock": clock}
+
+
+def test_a_popup_that_does_not_match_is_not_captured_again_every_pass(stuck) -> None:
+    for _ in range(10):
+        _guard_pass()
+    assert stuck["grabs"] == [77]
+    assert [e["message"] for e in _popup_events()] == ["Verse Build Errors: not pressed (layout did not match)"]
+
+    stuck["clock"]["now"] += 120  # later it is looked at again, in case it was caught mid-draw
+    _guard_pass()
+    assert stuck["grabs"] == [77, 77]
+
+
+def test_each_answered_popup_is_logged_once(screen) -> None:
+    for _ in range(5):
+        _guard_pass()
+    assert sorted(e["message"] for e in _popup_events()) == [
+        "Data Loss Warning: pressed Skip Rebuild & Continue",
+        "Verse Build Errors: pressed Skip Rebuild",
+        "Verse Validation Errors: pressed Continue",
+    ]
