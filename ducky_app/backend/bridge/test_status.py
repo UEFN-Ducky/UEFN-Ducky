@@ -137,3 +137,30 @@ def test_epic_mcp_offline_includes_setup_steps(monkeypatch):
     assert status["epic_mcp_reason"] == "unreachable"
     assert status["epic_mcp_setup_steps"]
     assert "UEFN MCP offline" in status["status_text"]
+
+
+def test_island_sweep_runs_once_a_minute_whatever_state_the_caller_passes(monkeypatch, tmp_path):
+    # Oct 10 2026: every HTTP poll, agent turn and coding-agent run asked with a fresh (or
+    # no) state, so the once-a-minute island sweep ran every time and rewrote a file in the
+    # Fortnite install about every 8 s.
+    from backend.bridge import status as status_mod
+    from frontend import deploy, project_kind
+
+    _patch_epic(monkeypatch)
+    monkeypatch.setattr("backend.bridge.status.listener_get_health", lambda _port: None)
+    monkeypatch.setattr(status_mod, "_python_sweep_at", {}, raising=False)
+    sweeps: list[str] = []
+    monkeypatch.setattr(deploy, "resolve_uefn_project_root", lambda root: root)
+    monkeypatch.setattr(project_kind, "has_uefnproject", lambda _root: True)
+    monkeypatch.setattr(deploy, "quarantine_project_python", lambda root, deep=False: [])
+    monkeypatch.setattr(deploy, "refresh_inits", lambda root: sweeps.append(str(root)))
+    island = str(tmp_path / "Island")
+
+    for i in range(20):
+        state = ListenerStatusState() if i % 2 else None
+        fetch_listener_status(4200, state=state, version="test", selected_project_root=island)
+    assert len(sweeps) == 1
+
+    other = str(tmp_path / "Other")
+    fetch_listener_status(4200, version="test", selected_project_root=other)
+    assert len(sweeps) == 2  # a newly selected island gets its own sweep at once

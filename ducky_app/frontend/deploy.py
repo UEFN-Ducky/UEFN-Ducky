@@ -590,8 +590,15 @@ def install_toolset_listener_boot() -> str | None:
     except FileNotFoundError:
         return "Toolset listener boot skipped: init_unreal.py missing from EXE"
     boot_path = toolset_py / f"{_TOOLSET_BOOT_MODULE}.py"
-    boot_path.write_text(boot_text, encoding="utf-8")
-    _clear_python_cache(toolset_py)
+    # Only when the text changed: this runs on every island sweep, and rewriting a file in
+    # the Fortnite install (plus dropping its __pycache__) each time made antivirus rescan it.
+    try:
+        current = boot_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        current = None
+    if current != boot_text:
+        boot_path.write_text(boot_text, encoding="utf-8")
+        _clear_python_cache(toolset_py)
     init_path = toolset_py / "init_unreal.py"
     existing = init_path.read_text(encoding="utf-8")
     if _TOOLSET_BOOT_MARKER in existing and f"import {_TOOLSET_BOOT_MODULE}" in existing:

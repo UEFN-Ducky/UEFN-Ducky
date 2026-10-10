@@ -7,6 +7,8 @@ Those POST commands queue on the UEFN Slate tick and were the #1 freeze source
 
 from __future__ import annotations
 
+import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +20,22 @@ from backend.bridge import listener_get_health, post_command_to_listener, second
 _WEDGE_TICK_AGE_SEC = 10.0
 _PYTHON_SWEEP_INTERVAL_SEC = 60.0
 
+# When each island was last swept, for the whole process. Agent turns and the coding-agent
+# runner ask for status with no state of their own; kept per state, every one of those
+# calls swept the island and rewrote a file in the Fortnite install.
+_python_sweep_lock = threading.Lock()
+_python_sweep_at: dict[str, float] = {}
+
+
+def _claim_python_sweep(project_root: str, now: float) -> bool:
+    """True for the one caller that should sweep ``project_root`` now (once a minute)."""
+    key = os.path.normcase(os.path.normpath(project_root.strip()))
+    with _python_sweep_lock:
+        if now - _python_sweep_at.get(key, 0.0) < _PYTHON_SWEEP_INTERVAL_SEC:
+            return False
+        _python_sweep_at[key] = now
+        return True
+
 
 @dataclass
 class ListenerStatusState:
@@ -25,7 +43,6 @@ class ListenerStatusState:
 
     ping_fail_streak: int = 0
     project_cache: dict[str, Any] | None = None
-    last_python_sweep_at: float = 0.0
     python_quarantined: list[str] = field(default_factory=list)
 
 
@@ -264,8 +281,7 @@ def fetch_listener_status(
     coexistence = bool(beta.get("python_and_toolsets"))
     init_race_active = bool(coexistence and not online)
 
-    now = time.time()
-    if selected_project_root and now - st.last_python_sweep_at >= _PYTHON_SWEEP_INTERVAL_SEC:
+    if selected_project_root and _claim_python_sweep(selected_project_root, time.time()):
         try:
             from frontend.deploy import (
                 quarantine_project_python,
@@ -284,9 +300,8 @@ def fetch_listener_status(
                 refresh_inits(root)
             except Exception:
                 pass
-            st.last_python_sweep_at = now
         except Exception:
-            st.last_python_sweep_at = now
+            pass
 
     return {
         "online": online,
