@@ -1,5 +1,5 @@
 import { subscribeLatestChatActivity } from "../navigation/latestChatActivity";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { ModeSelector } from "./ModeSelector";
@@ -31,6 +31,7 @@ import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
 import { useHasApiKey } from "../hooks/useHasApiKey";
 import { buildActivityLines, splitTurnMessages } from "../utils/agentActivity";
 import { getCachedChatComposer, setCachedChatComposer, subscribeComposerDraft, takeComposerDraft } from "../hooks/chatComposerCache";
+import { composerHistoryKey, recordComposer, redoComposer, sameAttachments, undoComposer } from "../hooks/composerHistory";
 import { nextComposerFromChat } from "../hooks/chatComposerHydrate";
 import {
   enqueuePrompt,
@@ -484,6 +485,27 @@ export function ChatPane({
       attachments: toApiAttachments(),
     });
   }, [chat.id, inputText, agentMode, selectedModel, selectedModelDisplayName, codingAgent, attachments, toApiAttachments]);
+
+  // Undo history of the composer (text, caret, attachments). Same guard as the cache
+  // above, and declared before the chat-switch restore below for the same reason.
+  useEffect(() => {
+    if (loadedChatIdRef.current !== chat.id) return;
+    recordComposer(chat.id, inputText, caret, toApiAttachments());
+  }, [chat.id, inputText, caret, attachments, toApiAttachments]);
+
+  /** Ctrl+Z / Ctrl+Y inside the composer. True when the key was a history key. */
+  const handleComposerHistoryKey = (event: KeyboardEvent<HTMLDivElement>): boolean => {
+    const action = composerHistoryKey(event);
+    if (!action) return false;
+    // Always ours in the composer: the browser's own undo cannot follow coded edits.
+    event.preventDefault();
+    const snapshot = action === "undo" ? undoComposer(chat.id) : redoComposer(chat.id);
+    if (!snapshot) return true;
+    setInputText(snapshot.text);
+    setCaret(snapshot.caret);
+    if (!sameAttachments(snapshot.attachments, toApiAttachments())) replaceAttachments(snapshot.attachments);
+    return true;
+  };
 
   useEffect(() => {
     // Server echoes for model/agent changes must not overwrite the local
@@ -1577,6 +1599,7 @@ export function ChatPane({
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {
+                if (handleComposerHistoryKey(e)) return;
                 if (slashMenuOpen) {
                   const count = pickerCount;
                   if (e.key === "ArrowDown") {
