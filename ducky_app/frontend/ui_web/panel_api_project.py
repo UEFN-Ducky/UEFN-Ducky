@@ -30,9 +30,16 @@ class PanelApiProjectMixin:
             "islands": islands_inside(root) if kind == FOLDER else [],
         }
 
+    def _forget_listener_project(self) -> None:
+        """After a switch or removal, status must not fall back to the last project's
+        UEFN name and folder, or carry its stale-tick count into the next one."""
+        state = getattr(self, "_listener_status_state", None)
+        if state is not None:
+            state.project_cache = None
+            state.ping_fail_streak = 0
+
     def set_project_root(self, path: str) -> dict[str, str]:
-        self._listener_project_cache = None
-        self._ping_fail_streak = 0
+        self._forget_listener_project()
         # Central switch (shared with the ducky_set_project MCP tool). background_deploy
         # keeps the one-time deploy off the UI thread so the switch returns instantly.
         return _pa.switch_panel_project(
@@ -42,8 +49,7 @@ class PanelApiProjectMixin:
     def delete_recent_project(self, path: str) -> dict[str, str]:
         from frontend.ui_web.project_switch import delete_panel_project
 
-        self._listener_project_cache = None
-        self._ping_fail_streak = 0
+        self._forget_listener_project()
         return delete_panel_project(path, push_ui=True)
 
     def list_project_files(self, relative_path: str = "") -> dict[str, object]:
