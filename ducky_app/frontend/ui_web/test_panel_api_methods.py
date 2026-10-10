@@ -8,6 +8,10 @@ from frontend.ui_web.panel_api import PanelApi
 _PUBLIC_METHODS = frozenset({
     'add_task_phase',
     'adopt_tab_into_this_focus_window',
+    'agent_broker_call',
+    'agent_inbox',
+    'agent_send',
+    'agent_send_notice',
     'appdata_children',
     'appdata_clear',
     'appdata_clear_caches',
