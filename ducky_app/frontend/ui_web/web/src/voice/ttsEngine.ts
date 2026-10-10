@@ -694,7 +694,17 @@ export const ttsEngine = {
 
   /** Speak a full string (summary / replay / message button). Cancels any queue. */
   speak(text: string, voiceId?: string, rate?: number) {
-    if (getAudioSettings().audioMuted) return;
+    if (getAudioSettings().audioMuted) {
+      // Pressing a speaker button while Ducky's audio was muted did nothing at all.
+      const muted = (text || "").trim();
+      this.cancel();
+      if (!muted) return;
+      activeSourceText = muted;
+      playbackError = "Ducky's audio is muted.";
+      playbackErrorCode = "audio_muted";
+      emitProgress();
+      return;
+    }
     utteranceQueue = [];
     utteranceDraining = false;
     currentSpeaker = "";

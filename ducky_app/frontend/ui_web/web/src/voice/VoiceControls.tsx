@@ -13,6 +13,7 @@ import { useDictation, type VoiceNotice } from "./useDictation";
 import { useIsLiveChat } from "./useLiveChatPresence";
 import { useLiveVoiceMode } from "./useLiveVoiceMode";
 import { VoiceOverlay } from "./VoiceOverlay";
+import { saveAudioSettings } from "./audioSettings";
 import { mapReadAlong } from "./TtsReadAlong";
 import { ttsEngine, type TtsProgress } from "./ttsEngine";
 import {
@@ -560,6 +561,16 @@ export function SpeakMessageButton({
         {error ? (
           <span className="voice-notice voice-notice--error voice-notice--inline" role="alert">
             <span className="voice-notice-text">{error}</span>
+            {progress.errorCode === "audio_muted" ? (
+              <button type="button" className="voice-notice-action" title="Unmute Ducky and read this reply" aria-label="Unmute Ducky"
+                onClick={() => {
+                  void saveAudioSettings({ audioMuted: false }).then(() =>
+                    ttsEngine.speak(text, resolveVoiceId(voiceId), resolveSpeed(speed)),
+                  );
+                }}>
+                <Icons.Speaker />
+              </button>
+            ) : null}
             {progress.errorCode === "voice_missing" ? (
               <button type="button" className="voice-notice-action" title="Download a Windows voice" aria-label="Download a Windows voice"
                 onClick={() => void getApi()?.voice_open_windows_settings?.("voice_download")}>
