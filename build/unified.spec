@@ -281,6 +281,8 @@ a = Analysis(
     + list(_tz_hidden)
     + list(_pty_hidden)
     + list(_v8_hidden)
+    # Compiled plugin builds are disassembled before they ship (uefn_plugins/cpu_check.py).
+    + collect_submodules("iced_x86")
     + list(_PLUGIN_HOST_CODING)
     + [
         "frontend",

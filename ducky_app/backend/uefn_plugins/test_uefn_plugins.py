@@ -1067,6 +1067,43 @@ def test_a_plugin_that_crashed_ducky_is_skipped_until_it_changes_or_is_turned_on
     assert not host.plugin_crashed_ducky("demo", "3")
 
 
+def test_a_registered_plugins_nodes_survive_a_refresh_of_its_rows(monkeypatch, tmp_path) -> None:
+    """Its tools kept working while its workflow nodes lost their handler ("no handler")."""
+    _isolated_appdata(monkeypatch, tmp_path)
+    import types
+
+    from backend.automations import plugin as nodes
+    from backend.uefn_plugins import host
+
+    manifest = {"id": "nodes", "version": "1", "label": "Nodes"}
+
+    def register(api) -> None:
+        api.register_pipeline_node("demo.step", lambda ctx: {"ok": True})
+        # A second loader (the boot load racing the Store's enable worker) refreshes the
+        # rows while this register() is still running: a compiled import is slow.
+        host._load_one("nodes", tmp_path, manifest, register=False)
+
+    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(register=register))
+    try:
+        host._load_one("nodes", tmp_path, manifest)
+        assert nodes.handler_plugin_id("demo.step") == "nodes"
+        host._load_one("nodes", tmp_path, manifest)  # already registered: rows refreshed, register skipped
+        assert nodes.handler_plugin_id("demo.step") == "nodes"
+        host.invalidate_plugin_runtime("nodes")
+        assert nodes.handler_plugin_id("demo.step") == ""
+        # A register() that fails leaves no half-registered nodes behind.
+        monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(
+            register=lambda api: (api.register_pipeline_node("demo.step", lambda ctx: {}), 1 / 0)))
+        try:
+            host._load_one("nodes", tmp_path, manifest)
+        except ZeroDivisionError:
+            pass
+        assert nodes.handler_plugin_id("demo.step") == "" and "nodes" not in host._REGISTERED
+    finally:
+        host._REGISTERED.discard("nodes")
+        nodes.clear_for_plugin("nodes")
+
+
 def _installed(pid: str, version: str) -> None:
     from backend.uefn_plugins.store import appdata_uefn_plugins_dir
 

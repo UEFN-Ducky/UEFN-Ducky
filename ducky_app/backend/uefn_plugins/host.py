@@ -893,6 +893,7 @@ def invalidate_plugin_runtime(plugin_id: str, *, unload_timeout: float = 5.0) ->
                 _log.error("Plugin %s unload() failed: %s", pid, err[0], exc_info=err[0])
     with _LOCK:
         _REGISTERED.discard(pid)
+        _clear_node_handlers(pid)
         _TTS_SYNTHESIZERS.pop(pid, None)
         _TTS_VOICE_LISTERS.pop(pid, None)
         for key in [k for k, v in _LLM_PROVIDER_FACTORIES.items() if v.get("plugin_id") == pid]:
@@ -1681,14 +1682,22 @@ def _image_generator_row(row: Any, pid: str) -> dict[str, Any] | None:
     return out
 
 
-def _strip_contributions_for(pid: str) -> None:
-    """Remove contribution rows for one plugin (so a failed register can retry cleanly)."""
+def _clear_node_handlers(pid: str) -> None:
     try:
         from backend.automations.plugin import clear_for_plugin
 
         clear_for_plugin(pid)
     except Exception:
         pass
+
+
+def _strip_contributions_for(pid: str) -> None:
+    """Remove contribution rows for one plugin (so a failed register can retry cleanly).
+
+    Workflow node handlers stay: they come from register(), like tools, and are dropped
+    only when register() runs again or the runtime goes (invalidate_plugin_runtime). A
+    refresh of the rows skips register() for a plugin that is registered or registering,
+    so clearing them here left its nodes with no handler while its tools kept working."""
     for key, val in _CONTRIBUTIONS.items():
         if key == "agent_tools":
             if isinstance(val, dict):
@@ -2754,7 +2763,12 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
                 return
             register_fn = getattr(mod, register_name, None)
             if callable(register_fn):
-                register_fn(_PluginApi(pid))
+                _clear_node_handlers(pid)  # register() names them all again
+                try:
+                    register_fn(_PluginApi(pid))
+                except BaseException:
+                    _clear_node_handlers(pid)
+                    raise
         finally:
             # A Python error still reaches here; only a crash of the whole process
             # leaves the marker for the next launch to find.
