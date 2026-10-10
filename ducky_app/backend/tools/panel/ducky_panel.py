@@ -1017,7 +1017,7 @@ def ducky_agent_send(
     to: str,
     message: str,
     sender: str = "",
-    expect_reply: bool = True,
+    expect_reply: bool | None = None,
     response_id: str = "",
     pretty: bool = False,
 ) -> str:
@@ -1025,8 +1025,9 @@ def ducky_agent_send(
 
     With `expect_reply=true` you get a `response_id`; finish your turn after sending —
     the reply (or an inactivity notice) arrives later as a `[ducky:agent-message]` turn
-    in YOUR chat. To ANSWER a message that asked for a reply, pass its `response_id`
-    and `expect_reply=false`. Never busy-wait for replies. `sender` is your own chat id
+    in YOUR chat. A new message expects a reply unless you pass `expect_reply=false`. To
+    ANSWER a message that asked for a reply, pass its `response_id` (that makes it an
+    answer; leave `expect_reply` out). Never busy-wait for replies. `sender` is your own chat id
     (external coding agents must pass it; embedded duckies may omit it).
     """
     text = _truncate_text(message.strip(), _MAX_MESSAGE_CHARS)
@@ -1049,12 +1050,15 @@ def ducky_agent_send(
 
     from backend.agent.a2a_client import send
 
+    reply_to = (response_id or "").strip()
+    # Every agent answered with response_id alone, hit "not both" and had to retry.
+    expects = (not reply_to) if expect_reply is None else bool(expect_reply)
     outcome = send(
         sender_conv_id=me,
         receiver_conv_id=target,
         body=text,
-        expect_reply=bool(expect_reply),
-        response_id=(response_id or "").strip(),
+        expect_reply=expects,
+        response_id=reply_to,
     )
     return tool_json({"status": "sent", "sender": me, **outcome}, pretty=pretty)
 

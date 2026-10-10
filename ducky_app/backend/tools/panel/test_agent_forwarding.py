@@ -88,3 +88,21 @@ def test_direct_chat_message_acknowledges_only_when_accepted(monkeypatch, starte
         ack.assert_called_once_with('coord', 'member')
     else:
         ack.assert_not_called()
+
+
+@pytest.mark.parametrize('kwargs,expects', [
+    ({}, True),  # a new message asks for a reply
+    ({'response_id': 'rid1'}, False),  # an answer: no "not both" error to retry around
+    ({'expect_reply': False}, False),
+    ({'response_id': 'rid1', 'expect_reply': True}, True),  # explicit conflict still reaches the broker
+])
+def test_agent_send_infers_a_reply_from_response_id(monkeypatch, kwargs, expects):
+    from backend.tools.panel import ducky_panel
+
+    sent = []
+    monkeypatch.setattr(ducky_panel, 'load_conversation', lambda cid, project_root=None: SimpleNamespace(folder_id=''))
+    monkeypatch.setattr(ducky_panel, '_project_root', lambda: '')
+    monkeypatch.setattr(a2a_client, 'send', lambda **kw: sent.append(kw) or {'response_id': ''})
+    ducky_panel.ducky_agent_send(to='coord', message='done', sender='member', **kwargs)
+    assert sent[0]['expect_reply'] is expects
+    assert sent[0]['response_id'] == kwargs.get('response_id', '')
