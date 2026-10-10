@@ -27,6 +27,25 @@ export type ChatTurnTimerView = {
   label: string | null;
 };
 
+type ChatTurnTimerState = "none" | "running" | "done";
+
+function turnTimerState(chatId: string): ChatTurnTimerState {
+  const timer = getChatTurnTimer(chatId);
+  if (!timer) return "none";
+  return timer.endedAt == null ? "running" : "done";
+}
+
+/**
+ * Whether this chat has a turn clock and whether it runs, without the 250 ms tick.
+ * For a whole chat pane: ticking it re-rendered the pane four times a second for every
+ * running chat, hidden tabs included. ElapsedTimer draws the clock itself.
+ */
+export function useChatTurnTimerState(chatId: string): { hasTimer: boolean; running: boolean } {
+  const read = () => turnTimerState(chatId);
+  const state = useSyncExternalStore(subscribe, read, read);
+  return { hasTimer: state !== "none", running: state === "running" };
+}
+
 /**
  * Live-updating turn duration for a chat. Ticks while running; freezes when idle
  * so the last turn's time stays visible.

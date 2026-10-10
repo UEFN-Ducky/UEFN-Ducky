@@ -26,7 +26,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useLinkedAgents } from "../hooks/useLinkedAgents";
 import { useChatMessages } from "../hooks/useChatMessages";
-import { useChatTurnTimer } from "../hooks/useChatTurnTimer";
+import { useChatTurnTimerState } from "../hooks/useChatTurnTimer";
 import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
 import { useHasApiKey } from "../hooks/useHasApiKey";
 import { buildActivityLines, splitTurnMessages } from "../utils/agentActivity";
@@ -382,7 +382,7 @@ export function ChatPane({
     rewindAndAppendUser,
   } = useChatMessages(chat.id, visible, isAgentRunning);
 
-  const turnTimer = useChatTurnTimer(chat.id);
+  const turnTimer = useChatTurnTimerState(chat.id);
   const linkedAgents = useLinkedAgents(chat.id, messages, allChats);
   // Group roundtables speak in-place — never park the feed on "waiting for linked".
   const waitingLinked = chat.isGroup
@@ -469,7 +469,7 @@ export function ChatPane({
   );
 
   // Keep the footer clock after the turn ends so we can see how long it took.
-  const showIdleTurnTimer = !agentRunning && turnTimer.ms != null && !turnTimer.running;
+  const showIdleTurnTimer = !agentRunning && turnTimer.hasTimer && !turnTimer.running;
   const showFooterActivity = agentRunning || showIdleTurnTimer;
 
   useEffect(() => {
