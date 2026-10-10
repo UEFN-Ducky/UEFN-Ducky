@@ -21,7 +21,7 @@ backend/store/
 
 %LOCALAPPDATA%/UEFN-Ducky/
   ducky.db  ducky.db-wal  ducky.db-shm
-  snapshots/ducky-YYYYMMDD-HHMMSS.db     (VACUUM INTO, keep 3)
+  snapshots/ducky-YYYYMMDD-HHMMSS.db     (VACUUM INTO; daily when the data changed, weekly at least; keep 3)
   legacy/<store>/                        (renamed originals, deleted after 3 clean boots)
 ```
 

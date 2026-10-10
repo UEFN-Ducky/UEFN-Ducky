@@ -367,6 +367,51 @@ def test_bridge_still_checks_the_store_when_nothing_did_today(appdata: Path, mon
     assert calls == ["check"]
 
 
+def _snapshots() -> list[Path]:
+    return sorted(db.snapshot_dir().glob("ducky-*.db"))
+
+
+def _age_snapshots(days: float) -> None:
+    then = time.time() - days * 86400
+    for p in _snapshots():
+        os.utime(p, (then, then))
+
+
+def test_daily_snapshot_waits_while_nothing_changed(appdata: Path) -> None:
+    """Three daily copies of a 181 MB database held 543 MB even on days nothing
+    in it had changed; a copy of unchanged data only pushes out an older restore point."""
+    from backend.store.repos import chats
+    from frontend import appdata_maintenance as am
+
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 1  # first boot
+    _age_snapshots(2)
+    result = am.maintain_appdata(appdata)
+    assert result["db_snapshot"] == 0 and result["db_snapshot_skipped"] == 1
+    assert len(_snapshots()) == 1
+
+    chats.conv_save("proj", {"id": "c1", "title": "new chat"}, messages=[{"role": "user", "content": "hi"}])
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 1
+    assert len(_snapshots()) == 2
+
+    # Unchanged for over a week: one is taken anyway, and retention stays the newest three.
+    _age_snapshots(8)
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 1
+    _age_snapshots(9)
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 1
+    assert len(_snapshots()) == db.KEEP_SNAPSHOTS
+
+
+def test_a_settings_change_alone_is_enough_for_a_new_snapshot(appdata: Path) -> None:
+    from frontend import appdata_maintenance as am
+
+    am.maintain_appdata(appdata)
+    _age_snapshots(2)
+    kv.set_doc("cache_docs", "models", {"list": [1, 2]})  # a cache refresh is not
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 0
+    kv.set_doc("settings", "theme", "dark")
+    assert am.maintain_appdata(appdata)["db_snapshot"] == 1
+
+
 def _join_maintenance() -> None:
     import threading
 

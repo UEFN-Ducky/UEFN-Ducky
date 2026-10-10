@@ -12,6 +12,7 @@ This module is the only place in the tree allowed to import :mod:`sqlite3`
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -466,10 +467,67 @@ def integrity_check(conn: sqlite3.Connection) -> str:
     return str(row[0]) if row else "no result"
 
 
+SNAPSHOT_FINGERPRINT_KEY = "snapshot_fingerprint"
+# Caches, logs and bookkeeping change on their own all day; a change there alone
+# is no reason for another copy of the database.
+_FINGERPRINT_SKIP = frozenset({
+    "meta", "cache_docs", "events", "usage_calls", "verse_diagnostics", "digest_files", "digest_lines",
+    "watch_index", "workspace_state", "captures", "scope_sync",
+})
+
+
+def data_fingerprint(conn: sqlite3.Connection) -> str:
+    """Row count, highest rowid and newest ``updated`` of every table holding the
+    user's data, hashed. Equal fingerprints mean no row was added, removed or
+    stamped as updated in between; search indexes and caches are left out."""
+    tables = conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    virtual = [str(name) for name, sql in tables if str(sql or "").upper().startswith("CREATE VIRTUAL TABLE")]
+    summary: list[list[object]] = []
+    for name, sql in tables:
+        name = str(name)
+        if name in _FINGERPRINT_SKIP or any(name == v or name.startswith(v + "_") for v in virtual):
+            continue
+        columns = {str(r[1]) for r in conn.execute(f'PRAGMA table_info("{name}")')}
+        exprs = ["count(*)"]
+        if "WITHOUT ROWID" not in str(sql or "").upper():
+            exprs.append("max(rowid)")
+        if "updated" in columns:
+            exprs.append("max(updated)")
+        summary.append([name, *conn.execute(f'SELECT {", ".join(exprs)} FROM "{name}"').fetchone()])
+    return hashlib.sha256(json.dumps(summary, default=str).encode("utf-8")).hexdigest()
+
+
 def snapshot(root: Path | None = None, *, label: str = "") -> Path:
-    """``VACUUM INTO`` a consistent copy under ``snapshots/``; keeps the newest N."""
+    """``VACUUM INTO`` a consistent copy under ``snapshots/``; keeps the newest N.
+
+    Records the data fingerprint the copy was taken at (taken just before, so a
+    write landing in between only makes the next check see a change)."""
     root = root or app_root()
-    return _vacuum_into(connect(root), root, label=label)
+    conn = connect(root)
+    fingerprint = data_fingerprint(conn)
+    target = _vacuum_into(conn, root, label=label)
+    with write_txn(conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value, updated) VALUES (?, ?, ?)",
+            (SNAPSHOT_FINGERPRINT_KEY, json.dumps({"name": target.name, "fingerprint": fingerprint}), time.time()),
+        )
+    return target
+
+
+def unchanged_since_snapshot(conn: sqlite3.Connection, newest: Path) -> bool:
+    """True when *newest* is the copy the last fingerprint was recorded for and the data still matches it."""
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (SNAPSHOT_FINGERPRINT_KEY,)).fetchone()
+    if row is None:
+        return False
+    try:
+        saved = json.loads(row[0])
+    except ValueError:
+        return False
+    if not isinstance(saved, dict) or saved.get("name") != newest.name:
+        return False
+    return saved.get("fingerprint") == data_fingerprint(conn)
 
 
 def _vacuum_into(conn: sqlite3.Connection, root: Path, *, label: str = "") -> Path:
@@ -569,7 +627,9 @@ __all__ = [
     "head_version",
     "user_version",
     "integrity_check",
+    "data_fingerprint",
     "snapshot",
+    "unchanged_since_snapshot",
     "newest_snapshot",
     "restore_snapshot",
     "open_checked",

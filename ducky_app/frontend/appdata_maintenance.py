@@ -466,6 +466,10 @@ def maintain_appdata(app_root: Path | None = None, *, count_boot: bool = True) -
 
 
 _SNAPSHOT_EVERY_S = 24 * 3600
+# While the user's data has not changed a new snapshot would only repeat the
+# newest one (and push an older restore point out); after a week one is taken
+# anyway, in case of an edit the fingerprint cannot see.
+_SNAPSHOT_UNCHANGED_MAX_S = 7 * 24 * 3600
 _CHECK_EVERY_S = 24 * 3600
 
 
@@ -488,8 +492,9 @@ def _store_checked_recently(app_root: Path) -> bool:
 
 def _maintain_store(app_root: Path, *, count_boot: bool = True) -> dict[str, int]:
     """ADR 0003: integrity check (restores the newest snapshot on failure) and a
-    daily ``VACUUM INTO`` snapshot. Never raises: maintenance must not take the
-    panel down, and the store logs its own failures."""
+    daily ``VACUUM INTO`` snapshot when the data changed since the last one.
+    Never raises: maintenance must not take the panel down, and the store logs
+    its own failures."""
     out = {"db_checked": 0, "db_snapshot": 0}
     try:
         from backend.store import db as store_db
@@ -507,9 +512,13 @@ def _maintain_store(app_root: Path, *, count_boot: bool = True) -> dict[str, int
         out["db_imported"] = sum(1 for r in ensure_all_stores().values() if r is not None)
         out["legacy_removed"] = _retire_legacy_after_clean_boots(app_root) if count_boot else 0
         newest = store_db.newest_snapshot(app_root)
-        if newest is None or time.time() - newest.stat().st_mtime > _SNAPSHOT_EVERY_S:
-            store_db.snapshot(app_root, label="daily")
-            out["db_snapshot"] = 1
+        age = None if newest is None else time.time() - newest.stat().st_mtime
+        if age is None or age > _SNAPSHOT_EVERY_S:
+            if age is not None and age < _SNAPSHOT_UNCHANGED_MAX_S and store_db.unchanged_since_snapshot(conn, newest):
+                out["db_snapshot_skipped"] = 1
+            else:
+                store_db.snapshot(app_root, label="daily")
+                out["db_snapshot"] = 1
     except Exception:
         _log.exception("ducky.db maintenance failed")
     return out
