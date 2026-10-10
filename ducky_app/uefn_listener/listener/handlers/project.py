@@ -8,6 +8,37 @@ from listener.dispatch import register
 from listener.save_coalesce import save_now
 from listener.serialize import rotator_pyr, serialize
 
+# Other tools log into the same folder: revision control (Lore*.log, hundreds of MB
+# after an hour), CEF (cef3.log), the VS Code plugin (urc*.log), and rotated copies
+# carry a -backup- stamp. None of them hold Output Log lines, and the newest file
+# was one of them about half the time.
+_FOREIGN_LOG_PREFIXES = ("lore", "cef", "urc")
+# Most bytes one call reads: a tail from the end of the log, a stream past its
+# cursor. This runs on the game thread, so a 300 MB log must never be read whole.
+_TAIL_BYTES = 1 << 20
+_STREAM_BYTES = 4 << 20
+
+
+def _editor_log_file(log_dir: str) -> Optional[str]:
+    """The editor's own Output Log in ``log_dir``, or None."""
+    import os
+
+    names = [
+        f
+        for f in os.listdir(log_dir)
+        if f.lower().endswith(".log")
+        and "-backup-" not in f.lower()
+        and not f.lower().startswith(_FOREIGN_LOG_PREFIXES)
+    ]
+    if not names:
+        return None
+    # UEFN names its log after the editor; a plain Unreal project after itself.
+    for name in names:
+        if name.lower() == "unrealeditorfortnite.log":
+            return os.path.join(log_dir, name)
+    names.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
+    return os.path.join(log_dir, names[0])
+
 
 @register("get_editor_log")
 def cmd_get_editor_log(
@@ -16,23 +47,19 @@ def cmd_get_editor_log(
     since_offset: int = 0,
     regex: str = "",
 ) -> dict:
-    """Tail the newest editor .log.
+    """Tail the editor's own .log.
 
     ``since_offset`` is a byte cursor — return only new bytes after that offset
-    (for streaming during a play session). ``regex`` filters lines when set;
+    (for streaming during a play session), at most 4 MB per call; call again from
+    the returned offset for the rest. ``regex`` filters lines when set;
     otherwise ``filter_str`` does a case-insensitive substring match.
     """
     import os
     import re
 
-    log_path = unreal.Paths.project_log_dir()
     log_file = None
     try:
-        log_dir = str(log_path)
-        log_files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
-        if log_files:
-            log_files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
-            log_file = os.path.join(log_dir, log_files[0])
+        log_file = _editor_log_file(str(unreal.Paths.project_log_dir()))
     except Exception:
         pass
 
@@ -44,16 +71,26 @@ def cmd_get_editor_log(
         offset = max(0, int(since_offset or 0))
         if offset > size:
             offset = 0  # log rotated
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(log_file, "rb") as f:
             if offset > 0:
                 f.seek(offset)
-                chunk = f.read()
-                new_offset = f.tell()
-                lines = chunk.splitlines()
+                data = f.read(_STREAM_BYTES)
+                if len(data) == _STREAM_BYTES:
+                    # Capped: end on a whole line so the next call resumes cleanly.
+                    cut = data.rfind(b"\n")
+                    if cut >= 0:
+                        data = data[: cut + 1]
+                new_offset = offset + len(data)
+                lines = data.decode("utf-8", errors="replace").splitlines()
             else:
-                all_lines = f.readlines()
-                new_offset = f.tell()
-                lines = all_lines[-max(1, int(last_n or 100)) :]
+                start = max(0, size - _TAIL_BYTES)
+                f.seek(start)
+                data = f.read(_TAIL_BYTES)
+                new_offset = start + len(data)
+                if start > 0:
+                    data = data[data.find(b"\n") + 1 :]  # the cut left half a line
+                lines = data.decode("utf-8", errors="replace").splitlines()
+                lines = lines[-max(1, int(last_n or 100)) :]
         if regex:
             try:
                 pat = re.compile(regex)
