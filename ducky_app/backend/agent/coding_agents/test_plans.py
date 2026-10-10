@@ -472,6 +472,39 @@ class PlansStoreTests(unittest.TestCase):
         verify = next(n for n in loaded["nodes"] if n["id"] == "v1")
         self.assertEqual(verify["status"], "completed")
 
+    def test_only_a_step_that_starts_with_verify_needs_check_evidence(self) -> None:
+        def leaf(content: str) -> dict:
+            return {"id": "n1", "content": content, "children": []}
+
+        self.assertTrue(plans.is_verify_leaf(leaf("Verify contention and recovery using real write paths.")))
+        self.assertTrue(plans.is_verify_leaf(leaf("3. **Verification**: run the suite")))
+        self.assertFalse(
+            plans.is_verify_leaf(
+                leaf("Show live file ownership. Done when users see its write/verification/review state.")
+            )
+        )
+        plans.create_plan(
+            "chat-build",
+            title="Build",
+            nodes=[{"id": "ui", "content": "Show who owns each file and its verification state", "status": "pending", "children": []}],
+            project_root=self.root,
+        )
+        plans.update_node("chat-build", "ui", status="completed", project_root=self.root)
+
+    def test_the_users_own_tick_completes_a_verify_step(self) -> None:
+        plans.create_plan(
+            "chat-owner",
+            title="Owner",
+            nodes=[{"id": "v1", "content": "Verify: the team's test run", "status": "pending", "children": []}],
+            project_root=self.root,
+        )
+        with self.assertRaises(ValueError):
+            plans.update_node("chat-owner", "v1", status="completed", project_root=self.root)
+        plans.update_node("chat-owner", "v1", status="completed", project_root=self.root, by_user=True)
+        loaded = plans.load_plan("chat-owner", project_root=self.root)
+        assert loaded is not None
+        self.assertEqual(loaded["nodes"][0]["status"], "completed")
+
     def test_ensure_verify_loop_template_idempotent(self) -> None:
         first = plans.ensure_verify_loop_template()
         assert first is not None

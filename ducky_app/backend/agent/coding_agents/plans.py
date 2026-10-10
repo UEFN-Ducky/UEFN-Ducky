@@ -376,6 +376,11 @@ def _rollup_completed_parents(nodes: list[dict[str, Any]] | None) -> None:
             walk(node)
 
 
+# A Verify step starts with the word (after any numbering or markdown). A build step
+# that merely mentions "verification state" in its done-when text is not one.
+_VERIFY_STEP = re.compile(r"^[\W\d_]*(?:verify|verification)\b", re.IGNORECASE)
+
+
 def is_verify_leaf(node: dict[str, Any] | None) -> bool:
     """True for a leaf whose id or content names a Verify step."""
     if not isinstance(node, dict):
@@ -383,16 +388,19 @@ def is_verify_leaf(node: dict[str, Any] | None) -> bool:
     kids = node.get("children") or []
     if isinstance(kids, list) and kids:
         return False
-    blob = f"{node.get('id') or ''} {node.get('content') or ''}".lower()
-    return "verify" in blob or "verification" in blob
+    if "verify" in str(node.get("id") or "").lower():
+        return True
+    return bool(_VERIFY_STEP.match(str(node.get("content") or "")))
 
 
-def _apply_status_gate(node: dict[str, Any], status: str, chat_id: str = "") -> str:
-    """Refuse completed unless descendants are done and Verify leaves have evidence."""
+def _apply_status_gate(node: dict[str, Any], status: str, chat_id: str = "", *, by_user: bool = False) -> str:
+    """Refuse completed unless descendants are done and Verify leaves have evidence.
+
+    *by_user*: the user ticked it in the plan view; their word is the evidence."""
     st = _normalize_status(status)
     if st == "completed" and not _descendants_done(node):
         raise ValueError("cannot complete a subplan while nested subplans are unfinished")
-    if st == "completed" and is_verify_leaf(node):
+    if st == "completed" and not by_user and is_verify_leaf(node):
         from backend.agent.verify_evidence import has_evidence
 
         if not has_evidence(chat_id):
@@ -765,6 +773,7 @@ def update_node(
     project_root: str | None = None,
     template_id: str | None = None,
     assignee: str | None = None,
+    by_user: bool = False,
 ) -> dict[str, Any]:
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
     roots = list(doc.get("nodes") or [])
@@ -792,7 +801,7 @@ def update_node(
     if body_markdown is not None:
         node["body_markdown"] = (body_markdown or "").strip()
     if status is not None:
-        node["status"] = _apply_status_gate(node, status, chat_id)
+        node["status"] = _apply_status_gate(node, status, chat_id, by_user=by_user)
     doc["nodes"] = roots
     return save(doc)
 

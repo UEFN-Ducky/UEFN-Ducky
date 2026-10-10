@@ -1181,6 +1181,7 @@ class PanelApiSettingsMixin:
                 assignee=assignee,
                 project_root=root if not (template_id or "").strip() else None,
                 template_id=(template_id or "").strip() or None,
+                by_user=True,  # the plan view: the user's own tick needs no check-tool run
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
