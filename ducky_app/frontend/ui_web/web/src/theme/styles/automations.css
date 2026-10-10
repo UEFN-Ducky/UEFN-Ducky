@@ -846,7 +846,6 @@
 .aw-tree-folder:hover .aw-tree-actions, .aw-tree-folder:focus-within .aw-tree-actions { opacity: 1; }
 .aw-tree-input { flex: 1; min-width: 0; height: 26px; }
 .aw-list-row[draggable="true"] { cursor: grab; }
-.aw-tree-folder.is-drop-target, .aw-section-head.is-drop-target { background: var(--blue-dim); outline: 1px dashed var(--accent); outline-offset: -1px; }
 @media (hover: none) {
   .aw-tree-actions { opacity: 1; }
 }

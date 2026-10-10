@@ -2448,12 +2448,6 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
 .sidebar-tree-row.is-active { background: var(--tab-active); color: var(--fg); }
 .sidebar-tree-row.is-parent-selected { color: var(--fg); }
 .sidebar-tree-row.is-focused { box-shadow: inset 0 0 0 1px var(--accent); }
-/* Stay planted — DragOverlay is the moving copy; siblings must not shift. */
-.sidebar-tree-row.is-dragging {
-  opacity: 0.45;
-  transform: none !important;
-  transition: none !important;
-}
 .sidebar-tree-row-text {
   flex: 1;
   min-width: 0;
@@ -2871,18 +2865,77 @@ button.sidebar-chat-nest-toggle {
   background: color-mix(in srgb, var(--red) 20%, transparent);
   color: var(--red);
 }
-.drop-before { box-shadow: inset 0 2px 0 0 var(--accent) !important; }
-.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent) !important; }
-.drop-inside {
-  box-shadow: inset 0 0 0 2px var(--accent) !important;
-  background-color: color-mix(in srgb, var(--amber) 10%, transparent) !important;
-  border-radius: var(--radius-sm) !important;
+/* ── Tree drag and drop (tree-dnd): Duckies, Content and Workflows share one look.
+   Only classes change while dragging — nothing changes size, so rows never shift. ── */
+[data-tree-node] { position: relative; }
+.tree-drop-before::before,
+.tree-drop-after::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--sidebar-tree-pad-x, 10px) + var(--sidebar-tree-indent-level, 0px));
+  right: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 3;
 }
-.sidebar-drop-root-active {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  background-color: color-mix(in srgb, var(--amber) 8%, transparent);
+.tree-drop-before::before { top: -1px; }
+.tree-drop-after::after { bottom: -1px; }
+.tree-drop-into {
+  background-color: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent) !important;
+  color: var(--fg) !important;
+}
+.tree-drop-into-block {
+  background-color: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.tree-drop-root {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  background-color: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.tree-drag-source { opacity: 0.45; }
+body.tree-dragging .editor-tab-hover-card { display: none !important; }
+[data-undo-scope]:focus { outline: none; }
+/* The floating copy under the pointer (snapshotted off-screen at drag start). */
+.tree-drag-preview {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 10000;
+}
+.tree-drag-preview-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+.tree-drag-preview-icon svg,
+.tree-drag-preview-icon img { width: 16px; height: 16px; }
+.tree-drag-preview-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-drag-preview-count {
+  min-width: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--accent); color: #fff;
+  font-size: 11px; font-weight: 600; text-align: center; line-height: 18px;
 }
 .sidebar-drag-overlay {
   cursor: grabbing;
@@ -2890,11 +2943,6 @@ button.sidebar-chat-nest-toggle {
   padding: 8px 12px; border-radius: var(--radius-sm);
   background: var(--card); border: 1px solid var(--border);
   box-shadow: var(--shadow-sm); font-size: 12px;
-}
-.sidebar-drag-count {
-  min-width: 18px; padding: 0 5px;
-  border-radius: 9px; background: var(--accent); color: #fff;
-  font-size: 11px; font-weight: 600; text-align: center; line-height: 18px;
 }
 .sidebar-panel-tabs {
   --sidebar-tab-count: 2;

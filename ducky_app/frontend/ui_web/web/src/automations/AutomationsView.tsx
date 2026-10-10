@@ -1629,6 +1629,9 @@ export function AutomationsView() {
     // Typing fields and the code editor keep their own keys (Ctrl+Z undoes text there, not the graph).
     if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), .monaco-editor")) return;
     const key = event.key.toLowerCase();
+    // The Workflows list has its own history (moves): Ctrl+Z there never undoes the canvas.
+    const inListHistory = event.target instanceof Element && !!event.target.closest("[data-undo-scope]");
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && (key === "z" || key === "y") && inListHistory) return;
     if ((event.ctrlKey || event.metaKey) && !event.altKey && (key === "z" || key === "y") && draft) {
       event.preventDefault(); event.stopPropagation();
       goToEdit(history.index + (key === "y" || event.shiftKey ? 1 : -1));
@@ -2306,8 +2309,8 @@ export function AutomationsView() {
         onOpen={(id) => { void openWorkflow(id); const width = rootRef.current?.clientWidth || 0; if (width > 0 && width <= PHONE_EDITOR_W) setListCollapsed(true); }} onCreate={createNew}
         onImportLocal={() => void getApi()?.import_local_workflows?.().then(() => refreshList())}
         emptyFolders={folderLists} onAddFolder={(ownerId, path) => void rememberFolder(ownerId, path)}
-        onMoveWorkflow={(id, ownerId, folder) => void moveWorkflow(id, ownerId, folder)}
-        onMoveFolder={(ownerId, path, newPath) => void moveFolder(ownerId, path, newPath)}
+        onMoveWorkflow={(id, ownerId, folder) => moveWorkflow(id, ownerId, folder)}
+        onMoveFolder={(ownerId, path, newPath) => moveFolder(ownerId, path, newPath)}
         onRenameWorkflow={(id, name) => void updateWorkflow(id, { name })}
         onSetEnabled={(id, enabled) => void updateWorkflow(id, { enabled })}
         onDuplicateWorkflow={(id) => void duplicateWorkflow(id)}

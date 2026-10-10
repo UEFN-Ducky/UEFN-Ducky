@@ -48,6 +48,11 @@ export function endWorkflowListDrag(): void {
   clearWorkflowListDrag();
 }
 
+/** Any sidebar tree drag (Duckies, Content, Workflows): never a tab or window drag. */
+export const TREE_DRAG_MIME = WORKFLOW_LIST_DRAG_MIME;
+export const beginTreeDrag = beginWorkflowListDrag;
+export const endTreeDrag = endWorkflowListDrag;
+
 export function beginEditorTabDrag(tabId: string, groupId: string): void {
   dragSession = {
     tabId,

@@ -9,7 +9,7 @@ import {
   registryLookupKeys,
   setProjectContentRoot,
 } from "../verse-editor/utils/isVerseFile";
-import { ancestorDirPaths, fileNestDropId, parentDirPath, resolveFileMoveTarget, treePathDepth } from "./fileTreeDrag";
+import { ancestorDirPaths, fileMoveDest, parentDirPath, treePathDepth } from "./fileTreeDrag";
 import { fileTreeCreateItems } from "./sidebarContextMenuItems";
 import { resolvePickedFolder } from "../components/ProjectSelector";
 import { parseAskUserQuestions } from "../ask-user/types";
@@ -66,8 +66,8 @@ describe("folder project paths", () => {
 
   it("moves into the root when dropped on empty space", () => {
     setProjectContentRoot(".");
-    expect(resolveFileMoveTarget("src/app.py", false, fileNestDropId("."))).toBe(".");
-    expect(resolveFileMoveTarget("README.md", false, fileNestDropId("."))).toBeNull();
+    expect(fileMoveDest("src/app.py", false, ".")).toBe(".");
+    expect(fileMoveDest("README.md", false, ".")).toBeNull();
   });
 
   it("drops New Verse class from the create menu", () => {

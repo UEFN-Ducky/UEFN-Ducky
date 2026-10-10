@@ -159,15 +159,30 @@ export function resolveEditorDropAt(clientX: number, clientY: number): SidebarEd
   return { groupId: best.groupId, zone: dropZoneFromPointer(best.rect, clientX, clientY) };
 }
 
+/** How far past an editor pane's edge a drop still counts as that pane (tab strip). */
+const EDITOR_EDGE_SLACK = 24;
+
+/** A drop grazing an editor pane's edge (the tab strip at the window top). Never a pane
+ * far away: a drop on other chrome is not an editor drop. */
 function fallbackEditorDrop(p: SidebarDragPoint): SidebarEditorDrop | null {
-  const group = document.querySelector<HTMLElement>("[data-editor-group-id]");
-  const groupId = editorGroupIdOf(group);
-  if (!group || !groupId) return null;
-  const rect = group.getBoundingClientRect();
-  // Clamp into the pane so near-chrome drops (tab strip) still resolve a zone.
-  const x = Math.min(Math.max(p.clientX, rect.left + 1), Math.max(rect.left + 1, rect.right - 1));
-  const y = Math.min(Math.max(p.clientY, rect.top + 1), Math.max(rect.top + 1, rect.bottom - 1));
-  return { groupId, zone: dropZoneFromPointer(rect, x, y) };
+  for (const group of editorGroupRects()) {
+    const rect = group.rect;
+    if (!pointInRect(p, rect, EDITOR_EDGE_SLACK)) continue;
+    // Clamp into the pane so near-chrome drops (tab strip) still resolve a zone.
+    const x = Math.min(Math.max(p.clientX, rect.left + 1), Math.max(rect.left + 1, rect.right - 1));
+    const y = Math.min(Math.max(p.clientY, rect.top + 1), Math.max(rect.top + 1, rect.bottom - 1));
+    return { groupId: group.groupId, zone: dropZoneFromPointer(rect, x, y) };
+  }
+  return null;
+}
+
+/** Live editor target while a tree row is dragged: only once the pointer has left the
+ * tree and every dock rail, and only over an editor pane itself. */
+export function editorDropForTreeDrag(p: SidebarDragPoint, treeRoot: Element | null): SidebarEditorDrop | null {
+  if (p.clientX === 0 && p.clientY === 0 && p.screenX === 0 && p.screenY === 0) return null;
+  if (treeRoot && pointInRect(p, treeRoot.getBoundingClientRect())) return null;
+  if (isOverDockRail(p)) return null;
+  return resolveEditorDropAt(p.clientX, p.clientY);
 }
 
 export function classifySidebarDragOut(p: SidebarDragPoint): SidebarDragOutZone | null {

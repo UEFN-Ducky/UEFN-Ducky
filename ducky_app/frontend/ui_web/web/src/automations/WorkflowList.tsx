@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type Ref } from "react";
 import { getApi } from "../hooks/usePanelApi";
 import type { AutomationSummaryDto, AutomationTemplateDto, PluginScopeStatus, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 import { Icons } from "../icons/Icons";
@@ -6,9 +6,12 @@ import { syncText } from "../plugin-ui/scopeBarText";
 import { ContextMenu, useContextMenuState, type ContextMenuItem } from "../components/ContextMenu";
 import { contextMenuSeparator } from "../utils/sidebarContextMenuItems";
 import { targetRef } from "../ui-targets/registry";
-import { beginWorkflowListDrag, endWorkflowListDrag, WORKFLOW_LIST_DRAG_MIME } from "../utils/editorTabDrag";
+import { useTreeDnd } from "../tree-dnd/useTreeDnd";
+import { buildTreeModel, TREE_ROOT, type DropPolicy, type TreeEntry } from "../tree-dnd/treeMove";
+import { keepTreeFocus } from "../tree-dnd/treeFocus";
+import { useUndoHistoryOptional } from "../navigation/UndoHistoryContext";
 import { WorkflowHoverCard } from "./WorkflowHoverCard";
-import { buildFolderTree, folderName, folderPaths, isInside, joinFolder, normalizeFolder, parentFolder, type FolderNode } from "./workflowFolders";
+import { buildFolderTree, folderName, folderPaths, joinFolder, movedPath, normalizeFolder, parentFolder, type FolderNode } from "./workflowFolders";
 
 export const LOCAL_OWNER: WorkflowOwnerDto = { id: "local", kind: "local", label: "Local" };
 
@@ -59,7 +62,16 @@ function TriggerIcon({ row }: { row: AutomationSummaryDto }) {
   );
 }
 
-type Drag = { kind: "workflow"; items: { id: string; folder: string }[]; owner: string } | { kind: "folder"; path: string; owner: string };
+/** A tree node in the shared drag-and-drop model (tree-dnd). */
+type ListNode =
+  | { kind: "owner"; owner: WorkflowOwnerDto; path: "" }
+  | { kind: "folder"; owner: WorkflowOwnerDto; path: string }
+  | { kind: "row"; owner: WorkflowOwnerDto; row: AutomationSummaryDto };
+const ownerNodeId = (ownerId: string) => `owner:${ownerId}`;
+const folderNodeId = (ownerId: string, path: string) => `wff:${ownerId}::${path}`;
+const rowNodeId = (id: string) => `wf:${id}`;
+/** Moves still being saved, drawn where they are going (no jump back on a refresh). */
+type PendingMoves = { rows: Record<string, string>; folders: Array<{ owner: string; from: string; to: string }> };
 type Editing = { owner: string; path: string; mode: "new" | "rename" };
 type MenuTarget =
   | { kind: "workflow"; row: AutomationSummaryDto; owner: WorkflowOwnerDto }
@@ -82,9 +94,10 @@ type Props = {
   onCreate: (ownerId: string, folder?: string) => void;
   onImportLocal: () => void;
   onAddFolder?: (ownerId: string, path: string) => void;
-  onMoveWorkflow?: (id: string, ownerId: string, folder: string) => void;
+  /** File a workflow in a folder; resolves once the list shows it there. */
+  onMoveWorkflow?: (id: string, ownerId: string, folder: string) => void | Promise<unknown>;
   /** Rename or move a folder; moving it into its parent removes it and keeps the workflows. */
-  onMoveFolder?: (ownerId: string, path: string, newPath: string) => void;
+  onMoveFolder?: (ownerId: string, path: string, newPath: string) => void | Promise<unknown>;
   /** Right-click actions on a workflow. */
   onRenameWorkflow?: (id: string, name: string) => void;
   onDuplicateWorkflow?: (id: string) => void;
@@ -112,9 +125,8 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Editing | null>(null);
   const [renamingId, setRenamingId] = useState("");
-  const [dropAt, setDropAt] = useState("");
-  const [dragging, setDragging] = useState(false);
-  const drag = useRef<Drag | null>(null);
+  const [pending, setPending] = useState<PendingMoves>({ rows: {}, folders: [] });
+  const undoHistory = useUndoHistoryOptional();
   const { menu, open: openMenu, close: closeMenu } = useContextMenuState<MenuTarget>();
   const sections = owners.owners?.length ? owners.owners : [LOCAL_OWNER];
   // No workflows anywhere: a "Make your first workflow" card that creates in the first writable section.
@@ -166,48 +178,168 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
     else onDeleteWorkflow?.(ids[0]);
   };
 
-  const canDrop = (owner: WorkflowOwnerDto, path: string) => {
-    const moving = drag.current;
-    if (!moving || owner.readOnly || moving.owner !== owner.id) return false;
-    if (moving.kind === "workflow") return moving.items.some((item) => item.folder !== path);
-    return !isInside(path, moving.path) && parentFolder(moving.path) !== path;
+  // Moves still being saved show at their destination right away.
+  const shownRows = useMemo(() => {
+    if (!Object.keys(pending.rows).length && !pending.folders.length) return rows;
+    return rows.map((row) => {
+      const ownerId = row.owner?.id || LOCAL_OWNER.id;
+      let folder = pending.rows[row.id] ?? normalizeFolder(row.folder);
+      for (const move of pending.folders) {
+        if (move.owner !== ownerId) continue;
+        const moved = movedPath(folder, move.from, move.to);
+        if (moved !== null) folder = moved;
+      }
+      return folder === normalizeFolder(row.folder) ? row : { ...row, folder };
+    });
+  }, [rows, pending]);
+  const shownEmptyFolders = useMemo(() => {
+    if (!pending.folders.length) return emptyFolders;
+    const out: Record<string, string[]> = { ...emptyFolders };
+    for (const move of pending.folders) {
+      const list = (out[move.owner] || []).map((path) => movedPath(path, move.from, move.to) ?? path);
+      out[move.owner] = [...new Set([...list, move.to])];
+    }
+    return out;
+  }, [emptyFolders, pending.folders]);
+
+  // ── Drag and drop: the shared tree engine (tree-dnd). Workflows are sorted by name,
+  // so a drop only picks the folder (or the owner's top level).
+  const ownerTrees = useMemo(
+    () => sections.map((owner) => {
+      const mine = shownRows.filter((row) => (row.owner?.id || LOCAL_OWNER.id) === owner.id);
+      return { owner, mine, tree: buildFolderTree(mine, shownEmptyFolders[owner.id] || []) };
+    }),
+    [sections, shownRows, shownEmptyFolders],
+  );
+  const { treeModel, nodes } = useMemo(() => {
+    const entries: TreeEntry[] = [];
+    const info = new Map<string, ListNode>();
+    for (const { owner, tree } of ownerTrees) {
+      const ownerId = ownerNodeId(owner.id);
+      entries.push({ id: ownerId, parentId: TREE_ROOT, branch: true });
+      info.set(ownerId, { kind: "owner", owner, path: "" });
+      const walk = (node: FolderNode, parentId: string, depth: number) => {
+        for (const child of node.folders) {
+          const id = folderNodeId(owner.id, child.path);
+          entries.push({ id, parentId, branch: true });
+          info.set(id, { kind: "folder", owner, path: child.path });
+          if (depth < 64) walk(child, id, depth + 1);
+        }
+        for (const row of node.rows) {
+          const id = rowNodeId(row.id);
+          entries.push({ id, parentId, branch: false });
+          info.set(id, { kind: "row", owner, row });
+        }
+      };
+      walk(tree, ownerId, 0);
+    }
+    return { treeModel: buildTreeModel(entries), nodes: info };
+  }, [ownerTrees]);
+  const treeRef = useRef({ treeModel, nodes });
+  treeRef.current = { treeModel, nodes };
+  const closedRef = useRef(closed);
+  closedRef.current = closed;
+  const dropPolicy: DropPolicy = {
+    ordered: false,
+    intoOnly: (id) => nodes.get(id)?.kind === "owner",
+    isExpanded: (id) => {
+      const node = treeRef.current.nodes.get(id);
+      if (!node || node.kind === "row") return true;
+      return !closedRef.current[node.kind === "owner" ? node.owner.id : `${node.owner.id}:${node.path}`];
+    },
+    // Only into a writable owner's folders, and never into another owner (that asks
+    // first, from the folder's menu).
+    acceptsDrop: (parentId, sources) => {
+      const parent = treeRef.current.nodes.get(parentId);
+      if (!parent || parent.kind === "row" || parent.owner.readOnly) return false;
+      return sources.every((source) => treeRef.current.nodes.get(source)?.owner.id === parent.owner.id);
+    },
   };
-  const dropProps = (owner: WorkflowOwnerDto, path: string) => {
-    const key = `${owner.id}:${path}`;
-    return {
-      onDragOver: (event: DragEvent) => {
-        if (!canDrop(owner, path)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = "move";
-        if (dropAt !== key) setDropAt(key);
-      },
-      onDragLeave: (event: DragEvent) => {
-        if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) && dropAt === key) setDropAt("");
-      },
-      onDrop: (event: DragEvent) => {
-        const moving = drag.current;
-        setDropAt("");
-        if (!moving || !canDrop(owner, path)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        drag.current = null;
-        if (moving.kind === "workflow") moving.items.filter((item) => item.folder !== path).forEach((item) => onMoveWorkflow?.(item.id, owner.id, path));
-        else onMoveFolder?.(owner.id, moving.path, joinFolder(path, folderName(moving.path)));
-      },
-    };
+  const dropPolicyRef = useRef(dropPolicy);
+  dropPolicyRef.current = dropPolicy;
+
+  const settle = (work: void | Promise<unknown>, clear: () => void) => {
+    void Promise.resolve(work).catch(() => undefined).finally(clear);
   };
-  const startDrag = (event: DragEvent, value: Drag) => {
-    drag.current = value;
-    setDragging(true);
-    beginWorkflowListDrag();
-    event.stopPropagation();
-    event.dataTransfer.effectAllowed = "move";
-    // Own MIME so the editor does not treat this as dragging a tab into another window.
-    event.dataTransfer.setData(WORKFLOW_LIST_DRAG_MIME, value.kind);
-    event.dataTransfer.setData("text/plain", value.kind === "workflow" ? value.items.map((item) => item.id).join("\n") : value.path);
+  /** File workflows (shown at once), with Ctrl+Z / Ctrl+Y in the Workflows history. */
+  const moveRows = (moves: Array<{ id: string; owner: string; from: string; to: string }>, record = true) => {
+    if (!onMoveWorkflow || !moves.length) return Promise.resolve();
+    setPending((current) => ({ ...current, rows: { ...current.rows, ...Object.fromEntries(moves.map((move) => [move.id, move.to])) } }));
+    const work = Promise.all(moves.map((move) => Promise.resolve(onMoveWorkflow(move.id, move.owner, move.to))));
+    settle(work, () => setPending((current) => {
+      const next = { ...current.rows };
+      for (const move of moves) if (next[move.id] === move.to) delete next[move.id];
+      return { ...current, rows: next };
+    }));
+    if (record && undoHistory) {
+      undoHistory.push("workflows", {
+        label: moves.length > 1 ? `Move ${moves.length} workflows` : "Move workflow",
+        undo: () => moveRows(moves.map((move) => ({ ...move, from: move.to, to: move.from })), false).then(() => undefined),
+        redo: () => moveRows(moves, false).then(() => undefined),
+      });
+    }
+    return work.then(() => undefined);
   };
-  const endDrag = () => { drag.current = null; setDragging(false); endWorkflowListDrag(); setDropAt(""); };
+  const moveFolderTo = (owner: string, from: string, to: string, record = true) => {
+    if (!onMoveFolder || from === to) return Promise.resolve();
+    const entry = { owner, from, to };
+    setPending((current) => ({ ...current, folders: [...current.folders, entry] }));
+    const work = Promise.resolve(onMoveFolder(owner, from, to));
+    settle(work, () => setPending((current) => ({ ...current, folders: current.folders.filter((item) => item !== entry) })));
+    if (record && undoHistory) {
+      undoHistory.push("workflows", {
+        label: `Move ${folderName(from)}`,
+        undo: () => moveFolderTo(owner, to, from, false),
+        redo: () => moveFolderTo(owner, from, to, false),
+      });
+    }
+    return work.then(() => undefined);
+  };
+
+  const dnd = useTreeDnd({
+    getModel: () => treeRef.current.treeModel,
+    getPolicy: () => dropPolicyRef.current,
+    dragSources: (id) => {
+      const node = treeRef.current.nodes.get(id);
+      if (node?.kind !== "row" || !picked.includes(node.row.id)) return [id];
+      return pickedRows().filter((row) => rowOwner(row).id === node.owner.id).map((row) => rowNodeId(row.id));
+    },
+    canDrag: (id) => {
+      const node = treeRef.current.nodes.get(id);
+      if (!node || node.kind === "owner" || node.owner.readOnly) return false;
+      if (node.kind === "row") return canFile;
+      return !!onMoveFolder && !(editing?.mode === "rename" && editing.owner === node.owner.id && editing.path === node.path);
+    },
+    dragData: (sources) => (treeRef.current.nodes.get(sources[0])?.kind === "folder" ? "folder" : "workflow"),
+    labelFor: (id) => {
+      const node = treeRef.current.nodes.get(id);
+      if (!node) return "";
+      return node.kind === "row" ? node.row.name || "Untitled" : node.kind === "folder" ? folderName(node.path) : ownerName(node.owner);
+    },
+    expand: (id) => {
+      const node = treeRef.current.nodes.get(id);
+      if (!node || node.kind === "row") return;
+      const key = node.kind === "owner" ? node.owner.id : `${node.owner.id}:${node.path}`;
+      setClosed((current) => ({ ...current, [key]: false }));
+    },
+    onDrop: ({ sources, target }) => {
+      const dest = treeRef.current.nodes.get(target.parentId);
+      if (!dest || dest.kind === "row") return;
+      const rowMoves: Array<{ id: string; owner: string; from: string; to: string }> = [];
+      for (const source of sources) {
+        const node = treeRef.current.nodes.get(source);
+        if (!node || node.owner.id !== dest.owner.id) continue;
+        if (node.kind === "row") {
+          const from = normalizeFolder(node.row.folder);
+          if (from !== dest.path) rowMoves.push({ id: node.row.id, owner: dest.owner.id, from, to: dest.path });
+        } else if (node.kind === "folder") {
+          void moveFolderTo(dest.owner.id, node.path, joinFolder(dest.path, folderName(node.path)));
+        }
+      }
+      void moveRows(rowMoves);
+      keepTreeFocus("workflows");
+    },
+  });
 
   const commitName = (owner: WorkflowOwnerDto, name: string) => {
     const edit = editing;
@@ -292,7 +424,7 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
   const renderRows = (owner: WorkflowOwnerDto, list: AutomationSummaryDto[], depth: number, visible: boolean) => list.map((row) => {
     if (visible) order.push(row.id);
     return (
-    <li key={row.id}>
+    <li key={row.id} data-tree-node={rowNodeId(row.id)}>
       {renamingId === row.id ? (
         <div className="aw-tree-folder aw-tree-folder--editing" style={{ "--aw-level": depth + 1 } as CSSProperties}>
           <NameInput label="Rename workflow" initial={row.name || ""} placeholder="Workflow name" maxLength={120}
@@ -300,11 +432,10 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
             onCancel={() => setRenamingId("")} />
         </div>
       ) : (
-        <WorkflowHoverCard row={row} icon={<TriggerIcon row={row} />} disabled={dragging || !!dropAt} onOpen={() => { setPicked([]); onOpen(row.id); }}>
-        <button type="button" ref={targetRef(`workflows.list.row.${row.id}`, { route: "workflows", label: row.name || "Untitled" })} data-aw-row={row.id}
+        <WorkflowHoverCard row={row} icon={<TriggerIcon row={row} />} onOpen={() => { setPicked([]); onOpen(row.id); }}>
+        <button type="button" ref={targetRef(`workflows.list.row.${row.id}`, { route: "workflows", label: row.name || "Untitled" })} data-aw-row={row.id} data-tree-row={rowNodeId(row.id)}
           className={"aw-list-row" + (row.id === activeId ? " is-active" : "") + (picked.includes(row.id) ? " is-picked" : "")} aria-current={row.id === activeId ? "true" : undefined} aria-selected={picked.length ? picked.includes(row.id) : undefined}
           style={{ "--aw-level": depth + 1 } as CSSProperties} draggable={canFile && !owner.readOnly}
-          onDragStart={(event) => startDrag(event, { kind: "workflow", owner: owner.id, items: (picked.includes(row.id) ? pickedRows().filter((item) => rowOwner(item).id === owner.id) : [row]).map((item) => ({ id: item.id, folder: normalizeFolder(item.folder) })) })} onDragEnd={endDrag}
           onClick={(event) => clickRow(event, row)} onContextMenu={contextFor({ kind: "workflow", row, owner })}>
           <span className="aw-list-name">{row.name || "Untitled"}</span>
           {/* Laid over the end of the name, so the name gets the whole row. */}
@@ -332,9 +463,9 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
     const renaming = editing?.mode === "rename" && editing.owner === owner.id && editing.path === folder.path;
     const bodyId = `${listId}-${owner.id}-f-${folder.path}`;
     return (
-      <li key={folder.path} className="aw-tree-item">
-        <div className={`aw-tree-folder${dropAt === key ? " is-drop-target" : ""}`} style={{ "--aw-level": depth + 1 } as CSSProperties} {...dropProps(owner, folder.path)}
-          draggable={canFile && !owner.readOnly && !renaming} onDragStart={(event) => startDrag(event, { kind: "folder", path: folder.path, owner: owner.id })} onDragEnd={endDrag}
+      <li key={folder.path} className="aw-tree-item" data-tree-node={folderNodeId(owner.id, folder.path)}>
+        <div className="aw-tree-folder" style={{ "--aw-level": depth + 1 } as CSSProperties} data-tree-row={folderNodeId(owner.id, folder.path)}
+          draggable={!!onMoveFolder && !owner.readOnly && !renaming}
           onContextMenu={renaming ? undefined : contextFor({ kind: "folder", folder, owner })}>
           {renaming ? (
             <>
@@ -370,14 +501,14 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
   };
 
   return (
-    <aside className="aw-list no-drag" ref={listRef} aria-label="Workflows" data-aw-zoom="list" onKeyDown={onListKeyDown}>
+    <aside className="aw-list no-drag" ref={listRef} aria-label="Workflows" data-aw-zoom="list" data-undo-scope="workflows" tabIndex={-1} onKeyDown={onListKeyDown}>
       <div className="aw-list-head">
         <button type="button" ref={targetRef("workflows.list.toggle", { route: "workflows", label: "Fold or unfold the Workflows list" })} className="aw-list-toggle" title={collapsed ? "Expand Workflows" : "Collapse Workflows"} aria-expanded={!collapsed} aria-controls={listId} onClick={onToggleCollapsed}>
           <span className="aw-list-title"><span className="aw-list-icon" aria-hidden="true"><Icons.Workflow /></span><strong>Workflows</strong></span>
           <span className="aw-accordion-chevron" aria-hidden="true"><Icons.ChevronDown /></span>
         </button>
       </div>
-      <div className="aw-list-sections" id={listId} hidden={collapsed}>
+      <div className="aw-list-sections" id={listId} hidden={collapsed} {...dnd.rootProps}>
         {heroShown ? (
           <div ref={targetRef("workflows.empty.hero", { route: "workflows", label: "Make your first workflow" })} className="aw-empty-hero" role="region" aria-label="Make your first workflow">
             <span className="aw-empty-hero-icon" aria-hidden="true"><Icons.Workflow /></span>
@@ -396,16 +527,13 @@ export function WorkflowList({ listId, listRef, owners, rows, activeId, collapse
             ) : null}
           </div>
         ) : null}
-        {sections.map((owner) => {
-          const mine = rows.filter((row) => (row.owner?.id || LOCAL_OWNER.id) === owner.id);
-          const tree = buildFolderTree(mine, emptyFolders[owner.id] || []);
+        {ownerTrees.map(({ owner, mine, tree }) => {
           const open = !closed[owner.id];
           const name = owner.kind === "team" ? owner.label : "Local";
           const bodyId = `${listId}-${owner.id}`;
-          const rootKey = `${owner.id}:`;
           return (
-            <section className={`aw-workflow-section aw-folder aw-folder--${owner.kind}`} key={owner.id} aria-label={ownerName(owner)}>
-              <div className={`aw-section-head${dropAt === rootKey ? " is-drop-target" : ""}`} {...dropProps(owner, "")} onContextMenu={contextFor({ kind: "owner", owner })}>
+            <section className={`aw-workflow-section aw-folder aw-folder--${owner.kind}`} key={owner.id} aria-label={ownerName(owner)} data-tree-node={ownerNodeId(owner.id)}>
+              <div className="aw-section-head" data-tree-row={ownerNodeId(owner.id)} onContextMenu={contextFor({ kind: "owner", owner })}>
                 <button type="button" className="aw-section-toggle" aria-label={ownerName(owner)} aria-expanded={open} aria-controls={bodyId} title={[ownerHelp(owner), folderStatus(owner, nowMs)].filter(Boolean).join("\n")} onClick={() => setClosed((current) => ({ ...current, [owner.id]: open }))}>
                   <span className="aw-accordion-chevron" aria-hidden="true"><Icons.ChevronDown /></span>
                   <span className="aw-folder-icon" aria-hidden="true"><OwnerIcon owner={owner} /></span>

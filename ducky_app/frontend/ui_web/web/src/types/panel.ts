@@ -857,6 +857,8 @@ export interface SidebarChatLayout {
 export interface SidebarLayoutPatch {
   folders: Array<{ id: string; parent_id: string; sort_order: number }>;
   chats: SidebarChatLayout[];
+  /** Which project this layout belongs to (Global Agents is "_no_project"). Empty: the open one. */
+  project_slug?: string;
 }
 
 export interface ToolCallData {
@@ -1947,6 +1949,10 @@ export interface AgentEvent {
   title?: string;
   /** chats_changed: false keeps the sidebar in sync without stealing the open tab. */
   open?: boolean;
+  /** chats_changed: chats deleted or archived (they leave every window's tree at once). */
+  removed_conv_ids?: string[];
+  /** chats_changed: folders and groups deleted. */
+  removed_folder_ids?: string[];
   status?: LinkedAgentStatus;
   /** Group voice: which ducky just finished speaking this turn. */
   author?: MessageAuthorDto;
@@ -3003,7 +3009,7 @@ export interface PanelApi {
     config?: DuckyConfigDto,
   ): Promise<{ id: string; title: string; ducky_style?: string; ducky_name?: string; ducky_personality?: string; file_path?: string; model?: string; provider?: string; coding_agent?: string }>;
   apply_ducky_config(conv_id: string, config: DuckyConfigDto): Promise<{ ok: boolean; error?: string }>;
-  group_create?(name?: string, folder_id?: string): Promise<{ ok?: boolean; id?: string; title?: string; is_group?: boolean; leader_conv_id?: string; group_members?: GroupMemberDto[]; folder_id?: string; error?: string }>;
+  group_create?(name?: string, folder_id?: string, open_tab?: boolean, project_slug?: string): Promise<{ ok?: boolean; id?: string; title?: string; is_group?: boolean; leader_conv_id?: string; group_members?: GroupMemberDto[]; folder_id?: string; error?: string }>;
   group_invite?(
     group_id: string,
     profile_id: string,

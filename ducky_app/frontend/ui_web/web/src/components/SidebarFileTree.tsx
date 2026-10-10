@@ -1,17 +1,3 @@
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCenter,
-  pointerWithin,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type CollisionDetection,
-  type DragEndEvent,
-  type DragOverEvent,
-} from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { SplitResizeHandle } from "./SplitResizeHandle";
 import { DuckyParade } from "./DuckyParade";
 import {
@@ -34,13 +20,12 @@ import { Icons } from "../icons/Icons";
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
 import { registerTargetResolver, cssEscape } from "../ui-targets/resolve";
 import { requestOpenSidebarPanel } from "../navigation/openSidebarPanel";
-import { contentRootPath, isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, workspaceRootDisplayName, ABS_PATH_PREFIX } from "../verse-editor/utils/isVerseFile";
+import { contentRootPath, isVerseFile, isPanelReadOnlyFile, isWritableContentPath, isSystemWorkspaceRootName, registryKey, UEFN_CORE_SECTION_PATH, WORKSPACE_ROOTS_PATH, ABS_PATH_PREFIX } from "../verse-editor/utils/isVerseFile";
 import { useVerseEditorOptional } from "../verse-editor/VerseEditorProvider";
 import { getApi } from "../hooks/usePanelApi";
 import { useWorkspaceTreeData } from "../hooks/useWorkspaceTreeData";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { useUndoHistoryOptional } from "../navigation/UndoHistoryContext";
-import { useScopedClass } from "../utils/scopedCss";
 import type { EditorDropZone, ProjectFileEntry } from "../types/panel";
 import { ContextMenu, useContextMenuState } from "./ContextMenu";
 import {
@@ -54,13 +39,11 @@ import {
   collapseExpandedPathsOneLevel,
   expandExpandedPathsOneLevel,
   fileDragId,
-  fileNestDropId,
+  fileMoveDest,
   isBrowsableTreeDir,
   isDescendantDir,
   parentDirPath,
   parseFileDragId,
-  resolveFileDragOverId,
-  resolveFileMoveTarget,
   revealDirPaths,
   setWorkspaceFolderAbsPaths,
 } from "../utils/fileTreeDrag";
@@ -82,12 +65,13 @@ import {
 } from "../utils/fileTreeFilter";
 import { contentTreeVisibleEntries, isProjectContentRoot } from "../utils/contentTreeProjects";
 import { useProjectFileIndex } from "../hooks/useProjectFileIndex";
-import { useSidebarDragPointerTracking } from "../hooks/useSidebarDragPointerTracking";
-import type { DropPosition } from "../utils/sidebarTree";
 import { SidebarTreeChildren } from "./sidebar/SidebarTreeChildren";
 import { SidebarTreeRow } from "./sidebar/SidebarTreeRow";
-import { computeDropPosition, FileRenameInput, SORTABLE_STATIC } from "./sidebar/sidebarTreeShared";
-import { classifySidebarDragOut, type SidebarDragPoint } from "../utils/sidebarDragOut";
+import { FileRenameInput } from "./sidebar/sidebarTreeShared";
+import { useTreeDnd } from "../tree-dnd/useTreeDnd";
+import { buildTreeModel, TREE_ROOT, type DropPolicy, type TreeEntry } from "../tree-dnd/treeMove";
+import { TreeDropDecor } from "../tree-dnd/treeDropDecor";
+import { keepTreeFocus } from "../tree-dnd/treeFocus";
 import { openVerseTranslatedTab } from "../navigation/openVerseTranslatedTab";
 import { canVisualTranslateFile } from "../navigation/tabTranslatePrefs";
 import { usePluginUiPrefs } from "../hooks/usePluginUiPrefs";
@@ -193,8 +177,53 @@ interface SidebarFileTreeProps {
 }
 
 type DirCache = Map<string, ProjectFileEntry[]>;
-type DropHint = { overId: string; position: DropPosition };
 type EditTarget = { path: string; value: string };
+/** A move shown before the host has done it (see withPendingMoves). */
+type PendingMove = { from: string; to: string; entry: ProjectFileEntry };
+
+function joinTreePath(dir: string, name: string): string {
+  return dir === "." || !dir ? name : `${dir}/${name}`;
+}
+
+function sortListing(entries: ProjectFileEntry[]): ProjectFileEntry[] {
+  return [...entries].sort(
+    (a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}
+
+/**
+ * The listing with moves that are still being saved already applied, so a moved file
+ * shows in its new folder at once and a refresh that lands mid-move can't put it back.
+ */
+export function withPendingMoves(cache: DirCache, moves: readonly PendingMove[]): DirCache {
+  if (!moves.length) return cache;
+  const next = new Map(cache);
+  for (const move of moves) {
+    const from = normTreePath(move.from);
+    const to = normTreePath(move.to);
+    const fromParent = parentDirPath(from);
+    const toParent = parentDirPath(to);
+    if (fromParent !== null && next.has(fromParent)) {
+      next.set(fromParent, (next.get(fromParent) ?? []).filter((entry) => normTreePath(entry.path) !== from));
+    }
+    if (toParent !== null && next.has(toParent)) {
+      const listing = next.get(toParent) ?? [];
+      if (!listing.some((entry) => normTreePath(entry.path) === to)) {
+        next.set(toParent, sortListing([...listing, { ...move.entry, path: to, name: to.split("/").pop() || move.entry.name }]));
+      }
+    }
+    if (move.entry.is_dir) {
+      // A folder's loaded contents move with it.
+      for (const [key, listing] of cache) {
+        const normKey = normTreePath(key);
+        if (normKey !== from && !normKey.startsWith(`${from}/`)) continue;
+        const moved = to + normKey.slice(from.length);
+        next.set(moved, listing.map((entry) => ({ ...entry, path: to + normTreePath(entry.path).slice(from.length) })));
+      }
+    }
+  }
+  return next;
+}
 
 function normTreePath(path: string): string {
   return path.replace(/\\/g, "/");
@@ -247,7 +276,6 @@ const FileRow = memo(function FileRow({
   setEditing,
   editInputRef,
   draggable,
-  dropHint,
   onToggle,
   onOpen,
   onOpenPermanent,
@@ -285,7 +313,6 @@ const FileRow = memo(function FileRow({
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
   editInputRef: RefObject<HTMLInputElement>;
   draggable: boolean;
-  dropHint: DropHint | null;
   onToggle: () => void;
   onOpen: () => void;
   onOpenPermanent: () => void;
@@ -319,13 +346,6 @@ const FileRow = memo(function FileRow({
   const isDir = entry.is_dir;
   const locked = isPanelReadOnlyFile(entry.path) || entry.read_only === true;
   const systemRoot = isDir && isSystemWorkspaceRootName(entry.name);
-  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
-    id,
-    disabled: !draggable || locked,
-    ...SORTABLE_STATIC,
-  });
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  const rowScopeClass = useScopedClass("dnd-row");
   const { menu, open, close } = useContextMenuState<void>();
   const pluginContrib = usePluginContributions();
   const { prefs: translationPrefs } = usePluginUiPrefs("translation");
@@ -339,25 +359,6 @@ const FileRow = memo(function FileRow({
     canVisualTranslateFile(entry.path) &&
     pluginContributesSettingsTab(pluginContrib, "Languages") &&
     !isEnglishLang(uiLang);
-
-  const mergeRowRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      setNodeRef(node);
-      rowRef.current = node;
-    },
-    [setNodeRef],
-  );
-
-  const dropClass =
-    dropHint?.overId === id
-      ? dropHint.position === "before"
-        ? "drop-before"
-        : dropHint.position === "after"
-          ? "drop-after"
-          : dropHint.position === "inside"
-            ? "drop-inside"
-            : ""
-      : "";
 
   const handleClick = (e: React.MouseEvent) => {
     if (isEditing) return;
@@ -505,16 +506,9 @@ const FileRow = memo(function FileRow({
       }
       isActive={isActive}
       isFocused={isFocused}
-      isDragging={isDragging}
-      dropClass={dropClass}
-      rowScopeClass={rowScopeClass}
-      dndTransform={null}
-      dndTransition={undefined}
-      mergeRowRef={mergeRowRef}
       dataAttr="data-file-id"
       dataId={id}
-      attributes={draggable && !locked ? attributes : undefined}
-      listeners={draggable && !locked ? listeners : undefined}
+      draggable={draggable && !locked}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
@@ -539,7 +533,6 @@ const FileRow = memo(function FileRow({
       }}
       diagnosticErrors={diagnosticErrors}
       diagnosticWarnings={diagnosticWarnings}
-      disabled={isDragging}
       placement={hoverPlacement}
       showVisualTranslate={showFileTranslate}
     >
@@ -560,7 +553,6 @@ const FileBranch = memo(function FileBranchImpl({
   editing,
   setEditing,
   editInputRef,
-  dropHint,
   onToggle,
   onOpen,
   onOpenPermanent,
@@ -601,7 +593,6 @@ const FileBranch = memo(function FileBranchImpl({
   editing: EditTarget | null;
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
   editInputRef: RefObject<HTMLInputElement>;
-  dropHint: DropHint | null;
   onToggle: (path: string) => void;
   onOpen: (path: string, name: string) => void;
   onOpenPermanent: (path: string, name: string) => void;
@@ -648,15 +639,16 @@ const FileBranch = memo(function FileBranchImpl({
   const isFocused = focusPath === entry.path;
   const isEditing = editing?.path === entry.path;
   const draggable = isWritableContentPath(entry.path) && entry.read_only !== true;
-  const childSortableIds = children.map((child) => fileDragId(child));
-  const { setNodeRef: setNestRef } = useDroppable({ id: fileNestDropId(entry.path) });
   const diag = entry.is_dir
     ? getFolderDiagnosticSummary?.(entry.path)
     : getFileDiagnosticSummary?.(entry.path);
   const deleteCount = deletePathsForEntry(entry).length;
 
   return (
-    <div className={`sidebar-tree-branch ${entry.is_dir && !expanded ? "sidebar-tree-branch-collapsed" : ""}`}>
+    <div
+      className={`sidebar-tree-branch ${entry.is_dir && !expanded ? "sidebar-tree-branch-collapsed" : ""}`}
+      data-tree-node={fileDragId(entry)}
+    >
       <FileRow
         entry={entry}
         loading={loading}
@@ -667,7 +659,6 @@ const FileBranch = memo(function FileBranchImpl({
         setEditing={setEditing}
         editInputRef={editInputRef}
         draggable={draggable}
-        dropHint={dropHint}
         onToggle={() => onToggle(entry.path)}
         onOpen={() => onOpen(entry.path, entry.name)}
         onOpenPermanent={() => onOpenPermanent(entry.path, entry.name)}
@@ -697,8 +688,7 @@ const FileBranch = memo(function FileBranchImpl({
         displayName={displayName}
       />
       {entry.is_dir ? (
-        <SidebarTreeChildren nestRef={setNestRef}>
-          <SortableContext items={childSortableIds} strategy={verticalListSortingStrategy}>
+        <SidebarTreeChildren>
             {children.map((child) => (
               <FileBranch
                 key={child.path}
@@ -713,7 +703,6 @@ const FileBranch = memo(function FileBranchImpl({
                 editing={editing}
                 setEditing={setEditing}
                 editInputRef={editInputRef}
-                dropHint={dropHint}
                 onToggle={onToggle}
                 onOpen={onOpen}
                 onOpenPermanent={onOpenPermanent}
@@ -743,7 +732,6 @@ const FileBranch = memo(function FileBranchImpl({
                 visiblePaths={visiblePaths}
               />
             ))}
-          </SortableContext>
         </SidebarTreeChildren>
       ) : null}
     </div>
@@ -781,10 +769,13 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
     const expandedPathsRef = useRef(expandedPaths);
     expandedPathsRef.current = expandedPaths;
-    const { rootEntries, workspaceRoots, cache, setCache, error, setError, loadingRoot,
+    const { rootEntries, workspaceRoots, cache: loadedCache, setCache, error, setError, loadingRoot,
       loadingPaths, setLoadingPaths, loadDir, reloadTree } = useWorkspaceTreeData(
       projectSlug, refreshToken, isActive, expandedPathsRef,
     );
+    // Moves still being saved are drawn where they are going (no jump back).
+    const [pendingMoves, setPendingMoves] = useState<PendingMove[]>([]);
+    const cache = useMemo(() => withPendingMoves(loadedCache, pendingMoves), [loadedCache, pendingMoves]);
     const workspaceRootsRef = useRef(workspaceRoots);
     workspaceRootsRef.current = workspaceRoots;
     const cacheRef = useRef(cache);
@@ -795,10 +786,8 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     fileTreeSplitRef.current = fileTreeSplitRatio;
     const fileTreeSplitContainerRef = useRef<HTMLDivElement | null>(null);
     const fileTreeResizeRef = useRef({ height: 0, ratio: 0, delta: 0 });
-    const [activeDragId, setActiveDragId] = useState<string | null>(null);
-    const [dropHint, setDropHint] = useState<DropHint | null>(null);
-    // Highlight state for an in-progress Explorer file drop onto the Content root.
-    const [externalRootActive, setExternalRootActive] = useState(false);
+    // Highlight for an in-progress Explorer file drop (same look as a tree drop).
+    const externalDecorRef = useRef(new TreeDropDecor());
     const lastExtDirRef = useRef<string | null>(null);
     const [editing, setEditing] = useState<EditTarget | null>(null);
     const [selection, setSelection] = useState<ExplorerSelection>(emptySelection);
@@ -811,9 +800,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       useFileTreeClipboard();
     const clipboardRef = useRef(clipboard);
     clipboardRef.current = clipboard;
-    const hoverExpandRef = useRef<{ path: string | null; timer: number }>({ path: null, timer: 0 });
-    const pointerYRef = useRef(0);
-    const dragPointRef = useRef<SidebarDragPoint>({ clientX: 0, clientY: 0, screenX: 0, screenY: 0 });
     const editInputRef = useRef<HTMLInputElement>(null);
     const editSessionRef = useRef<string | null>(null);
     const lastClickedPathRef = useRef<string | null>(null);
@@ -948,8 +934,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       onFolderExpansionChange?.(expandedPaths.size > 0);
     }, [expandedPaths, onFolderExpansionChange]);
 
-    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
     useEffect(() => {
       setExpandedPaths(new Set());
       setSelection(emptySelection());
@@ -1000,8 +984,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       editInputRef.current?.focus();
       editInputRef.current?.select();
     }, [editing]);
-
-    const overIdRef = useRef<string | null>(null);
 
     const ensureLoaded = useCallback(
       async (dirPath: string) => {
@@ -1409,10 +1391,31 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
         const result = await api.rename_project_entry(target.path, nextName);
         await refreshAfterMutation(parentPathRef.current);
         onFileMoved?.(target.path, result.path);
+        keepTreeFocus("files");
+        const record = { path: result.path, oldPath: target.path, oldName: currentName, newName: nextName };
+        undoHistory?.push("files", {
+          label: `Rename ${currentName}`,
+          undo: async () => {
+            const a = getApi();
+            if (!a) return;
+            const back = await a.rename_project_entry(record.path, record.oldName);
+            onFileMoved?.(record.path, back.path);
+            record.oldPath = back.path;
+            await refreshAfterMutation(parentPathRef.current);
+          },
+          redo: async () => {
+            const a = getApi();
+            if (!a) return;
+            const again = await a.rename_project_entry(record.oldPath, record.newName);
+            onFileMoved?.(record.oldPath, again.path);
+            record.path = again.path;
+            await refreshAfterMutation(parentPathRef.current);
+          },
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to rename");
       }
-    }, [editing, onFileMoved, refreshAfterMutation]);
+    }, [editing, onFileMoved, refreshAfterMutation, undoHistory]);
 
     const handleDeleteEntry = useCallback(
       async (entry: ProjectFileEntry) => {
@@ -1435,10 +1438,11 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
           }
           await refreshAfterMutation(parentPathRef.current);
           setSelection(emptySelection());
+          keepTreeFocus("files");
           if (undoHistory && trashed.some((item) => item.token)) {
             const tokens = trashed.map((item) => item.token);
             const pathsCopy = [...paths];
-            undoHistory.push({
+            undoHistory.push("files", {
               label: count === 1 ? `Delete ${entry.name}` : `Delete ${count} items`,
               undo: async () => {
                 const a = getApi();
@@ -1626,9 +1630,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       // projectSlug: the create items depend on the project kind (no Verse class in a folder).
     }, [createFolder, createTextFile, handleNewVerseClass, onToggleHiddenFiles, showHiddenFiles, projectSlug]);
 
-    const rootEntriesRef = useRef(rootEntries);
-    rootEntriesRef.current = rootEntries;
-
     const hasExpandedFolders = useCallback(() => expandedPathsRef.current.size > 0, []);
 
     const contentRootEntriesRef = useRef<ProjectFileEntry[]>([]);
@@ -1680,184 +1681,188 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       ],
     );
 
-    // VS Code: hovering a collapsed folder for ~400ms during a drag expands it.
-    const scheduleAutoExpand = useCallback(
-      (dirPath: string | null) => {
-        if (hoverExpandRef.current.path === dirPath) return;
-        if (hoverExpandRef.current.timer) window.clearTimeout(hoverExpandRef.current.timer);
-        hoverExpandRef.current = { path: dirPath, timer: 0 };
-        if (!dirPath || !isBrowsableTreeDir(dirPath) || expandedPathsRef.current.has(dirPath)) return;
-        hoverExpandRef.current.timer = window.setTimeout(() => {
-          setExpandedPaths((prev) => new Set(prev).add(dirPath));
-          void ensureLoaded(dirPath);
-        }, 400);
+    // ── Drag and drop: the shared tree engine (tree-dnd). The host sorts Content, so
+    // a drop only picks the folder, like the VS Code explorer.
+    const contentDropPath = contentRootEntry?.path ?? contentRootPath();
+    const contentDropPathRef = useRef(contentDropPath);
+    contentDropPathRef.current = contentDropPath;
+
+    const treeModel = useMemo(() => {
+      const entries: TreeEntry[] = [];
+      const visit = (entry: ProjectFileEntry, parentId: string, depth: number) => {
+        const id = fileDragId(entry);
+        entries.push({ id, parentId, branch: entry.is_dir });
+        if (!entry.is_dir || depth > 64) return;
+        for (const child of cache.get(entry.path) ?? []) visit(child, id, depth + 1);
+      };
+      for (const entry of contentDisplayEntries) visit(entry, TREE_ROOT, 0);
+      return buildTreeModel(entries);
+    }, [cache, contentDisplayEntries]);
+    const treeModelRef = useRef(treeModel);
+    treeModelRef.current = treeModel;
+
+    const dropPolicy = useMemo<DropPolicy>(() => ({
+      ordered: false,
+      isExpanded: (id) => filtering || expandedPathsRef.current.has(parseFileDragId(id)?.path ?? ""),
+      acceptsDrop: (parentId, sources) => {
+        const dir = parentId === TREE_ROOT ? contentDropPath : parseFileDragId(parentId)?.path ?? "";
+        if (!dir || !isWritableContentPath(dir) || isPanelReadOnlyFile(dir)) return false;
+        return sources.some((source) => {
+          const parsed = parseFileDragId(source);
+          return parsed ? fileMoveDest(parsed.path, parsed.kind === "dir", dir) !== null : false;
+        });
       },
-      [ensureLoaded],
+    }), [contentDropPath, filtering]);
+    const dropPolicyRef = useRef(dropPolicy);
+    dropPolicyRef.current = dropPolicy;
+
+    /** Move entries now (drawn at once), then refresh; resolves where each one landed. */
+    const runFileMoves = useCallback(
+      async (moves: Array<{ path: string; destDir: string }>): Promise<Array<{ from: string; to: string; destDir: string }>> => {
+        const api = getApi();
+        if (!api?.move_project_entry || !moves.length) return [];
+        const pending: PendingMove[] = [];
+        for (const move of moves) {
+          const entry = lookupCachedEntry(cacheRef.current, move.path);
+          if (entry) pending.push({ from: move.path, to: joinTreePath(move.destDir, entry.name), entry });
+        }
+        setPendingMoves((prev) => [...prev, ...pending]);
+        const done: Array<{ from: string; to: string; destDir: string }> = [];
+        try {
+          for (const move of moves) {
+            const result = await api.move_project_entry(move.path, move.destDir);
+            done.push({ from: move.path, to: result.path, destDir: move.destDir });
+            onFileMoved?.(move.path, result.path);
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Failed to move item");
+        }
+        try {
+          // A refresh already running restarts, so no listing from before the move lands last.
+          await reloadTree(true);
+          onTreeMutated?.();
+        } finally {
+          setPendingMoves((prev) => prev.filter((item) => !pending.includes(item)));
+        }
+        return done;
+      },
+      [onFileMoved, onTreeMutated, reloadTree, setError],
     );
 
-    const collisionDetection = useCallback<CollisionDetection>((args) => {
-      // pointerWithin gives accurate nested-folder targeting; closestCenter fallback still
-      // resolves an `over` far outside the tree, which the drag-out path relies on.
-      const within = pointerWithin(args);
-      return within.length ? within : closestCenter(args);
-    }, []);
-
-    const updateDropHint = useCallback(
-      (overId: string | null) => {
-        overIdRef.current = overId;
-        if (!overId) {
-          setDropHint(null);
-          scheduleAutoExpand(null);
-          return;
+    const dropFiles = useCallback(
+      (sources: readonly string[], parentId: string) => {
+        const destDir = parentId === TREE_ROOT ? contentDropPathRef.current : parseFileDragId(parentId)?.path ?? "";
+        if (!destDir) return;
+        const moves: Array<{ path: string; destDir: string }> = [];
+        for (const source of sources) {
+          const parsed = parseFileDragId(source);
+          if (!parsed || !isWritableContentPath(parsed.path) || isPanelReadOnlyFile(parsed.path)) continue;
+          const dest = fileMoveDest(parsed.path, parsed.kind === "dir", destDir);
+          if (dest) moves.push({ path: parsed.path, destDir: dest });
         }
-        const nestDirPath = overId.startsWith("nest:") ? overId.slice(5) : null;
-        if (nestDirPath !== null) {
-          const nestId = fileNestDropId(nestDirPath);
-          const targetId = fileDragId({ path: nestDirPath, is_dir: true });
-          // Root nest lights the whole tree; nested nests light the folder row.
-          const isRootNest =
-            nestDirPath === WORKSPACE_ROOTS_PATH ||
-            nestDirPath === contentRootPath() ||
-            nestDirPath === (contentRootEntry?.path ?? "");
-          setDropHint({ overId: isRootNest ? nestId : targetId, position: "inside" });
-          scheduleAutoExpand(isRootNest ? null : nestDirPath);
-          return;
+        if (!moves.length) return;
+        if (isBrowsableTreeDir(destDir)) {
+          setExpandedPaths((prev) => (prev.has(destDir) ? prev : new Set(prev).add(destDir)));
         }
-
-        const parsed = parseFileDragId(overId);
-        if (!parsed) {
-          setDropHint(null);
-          scheduleAutoExpand(null);
-          return;
-        }
-
-        const el = document.querySelector(`[data-file-id="${overId}"]`);
-        if (!el) {
-          setDropHint(null);
-          scheduleAutoExpand(null);
-          return;
-        }
-        const rect = el.getBoundingClientRect();
-        const position = computeDropPosition(pointerYRef.current, rect, parsed.kind === "dir");
-        setDropHint({ overId, position });
-        scheduleAutoExpand(parsed.kind === "dir" && position === "inside" ? parsed.path : null);
+        void (async () => {
+          const done = await runFileMoves(moves);
+          keepTreeFocus("files");
+          if (!done.length) return;
+          setSelection(selectOnly(done[done.length - 1].to));
+          const records = done.map((item) => ({ ...item }));
+          undoHistory?.push("files", {
+            label: records.length > 1 ? `Move ${records.length} items` : "Move",
+            undo: async () => {
+              const back = await runFileMoves(
+                [...records].reverse().map((record) => ({
+                  path: record.to,
+                  destDir: parentDirPath(record.from) ?? contentRootPath(),
+                })),
+              );
+              for (const item of back) {
+                const record = records.find((r) => r.to === item.from);
+                if (record) record.from = item.to;
+              }
+            },
+            redo: async () => {
+              const again = await runFileMoves(records.map((record) => ({ path: record.from, destDir: record.destDir })));
+              for (const item of again) {
+                const record = records.find((r) => r.from === item.from);
+                if (record) record.to = item.to;
+              }
+            },
+          });
+        })();
       },
-      [scheduleAutoExpand, contentRootEntry?.path],
+      [runFileMoves, undoHistory],
     );
 
-    const refreshDropHint = useCallback(() => {
-      updateDropHint(overIdRef.current);
-    }, [updateDropHint]);
-
-    useSidebarDragPointerTracking(activeDragId, pointerYRef, dragPointRef, setDropHint, refreshDropHint);
-
-    const handleDragOver = (event: DragOverEvent) => {
-      const overId = event.over ? String(event.over.id) : null;
-      updateDropHint(overId);
-    };
-
-    const handleDragEnd = async (event: DragEndEvent) => {
-      const { active, over } = event;
-      setActiveDragId(null);
-      const hint = dropHint;
-      setDropHint(null);
-      overIdRef.current = null;
-      scheduleAutoExpand(null);
-
-      // Drag left the sidebar: open instead of move. closestCenter keeps `over`
-      // pointing at the nearest row even far outside the tree, so the pointer
-      // position — not `over` — decides this.
-      const dragOutZone = classifySidebarDragOut(dragPointRef.current);
-      if (dragOutZone) {
-        const parsed = parseFileDragId(String(active.id));
-        if (parsed?.kind === "file") {
-          const name = activeLabel || parsed.path.split("/").pop() || parsed.path;
-          if (dragOutZone.kind === "editor") {
-            const placement = { groupId: dragOutZone.groupId, zone: dragOutZone.zone };
-            if (onOpenFileInEditor) onOpenFileInEditor(parsed.path, name, placement);
-            else onFileSelect(parsed.path, name);
-          } else {
-            onDetachFileAt?.(parsed.path, name, {
-              screenX: dragOutZone.screenX,
-              screenY: dragOutZone.screenY,
-            });
-          }
+    const dnd = useTreeDnd({
+      getModel: () => treeModelRef.current,
+      getPolicy: () => dropPolicyRef.current,
+      dragSources: (id) => {
+        const path = parseFileDragId(id)?.path ?? "";
+        const selected = selectionRef.current.selected;
+        if (path && selected.has(path) && selected.size > 1) {
+          return [...selected]
+            .map((item) => {
+              const entry = lookupCachedEntry(cacheRef.current, item);
+              return entry ? fileDragId(entry) : "";
+            })
+            .filter(Boolean);
         }
-        return;
-      }
-
-      if (!over && !hint) return;
-
-      let overId = hint?.overId ?? (over ? String(over.id) : null);
-      if (!overId) return;
-      if (hint) {
-        overId = resolveFileDragOverId(cache, hint.overId, hint.position);
-      } else if (!overId.startsWith("nest:")) {
-        const parsed = parseFileDragId(overId);
-        if (parsed?.kind === "dir") {
-          const el = document.querySelector(`[data-file-id="${overId}"]`);
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            const pos = computeDropPosition(pointerYRef.current, rect, true);
-            overId = resolveFileDragOverId(cache, overId, pos);
-          }
-        }
-      }
-
-      const activeParsed = parseFileDragId(String(active.id));
-      if (!activeParsed) return;
-
-      const destParent = resolveFileMoveTarget(
-        activeParsed.path,
-        activeParsed.kind === "dir",
-        overId,
-      );
-      if (!destParent) return;
-
-      const api = getApi();
-      if (!api?.move_project_entry) return;
-
-      // If the dragged row is part of a multi-selection, move the whole writable set.
-      const sel = selectionRef.current.selected;
-      const sources = sel.has(activeParsed.path) && sel.size > 1 ? [...sel] : [activeParsed.path];
-
-      try {
-        let lastPath = "";
-        for (const src of sources) {
-          if (isPanelReadOnlyFile(src) || !isWritableContentPath(src)) continue;
-          const cached = lookupCachedEntry(cache, src);
-          const srcIsDir = cached?.is_dir ?? (src === activeParsed.path && activeParsed.kind === "dir");
-          if (srcIsDir && (destParent === src || isDescendantDir(src, destParent))) continue;
-          if ((parentDirPath(src) ?? contentRootPath()) === destParent) continue; // no-op move
-          const result = await api.move_project_entry(src, destParent);
-          lastPath = result.path;
-          onFileMoved?.(src, result.path);
-        }
-        await refreshAfterMutation(destParent);
-        if (lastPath) setSelection(selectOnly(lastPath));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to move item");
-      }
-    };
+        return [id];
+      },
+      canDrag: (id) => {
+        const parsed = parseFileDragId(id);
+        if (!parsed || !isWritableContentPath(parsed.path) || isPanelReadOnlyFile(parsed.path)) return false;
+        return lookupCachedEntry(cacheRef.current, parsed.path)?.read_only !== true;
+      },
+      dragData: () => "files",
+      labelFor: (id) => {
+        const path = parseFileDragId(id)?.path ?? "";
+        return lookupCachedEntry(cacheRef.current, path)?.name ?? path.split("/").pop() ?? path;
+      },
+      expand: (id) => {
+        const path = parseFileDragId(id)?.path;
+        if (!path || !isBrowsableTreeDir(path)) return;
+        setExpandedPaths((prev) => (prev.has(path) ? prev : new Set(prev).add(path)));
+        void ensureLoaded(path);
+      },
+      dropOutside: {
+        accepts: (sources) => sources.length === 1 && parseFileDragId(sources[0])?.kind === "file",
+        onEditor: (sources, at) => {
+          const path = parseFileDragId(sources[0])?.path;
+          if (!path) return;
+          const name = path.split("/").pop() || path;
+          if (onOpenFileInEditor) onOpenFileInEditor(path, name, { groupId: at.groupId, zone: at.zone });
+          else onFileSelect(path, name);
+        },
+        onTearOff: (sources, at) => {
+          const path = parseFileDragId(sources[0])?.path;
+          if (!path) return;
+          onDetachFileAt?.(path, path.split("/").pop() || path, at);
+        },
+      },
+      onDrop: ({ sources, target }) => dropFiles(sources, target.parentId),
+    });
 
     // --- Explorer → Content tree file drop (copy). The internal @dnd-kit drag above is
     // pointer-based; these native HTML5 handlers only engage for real OS file drags. The
     // actual copy runs in Python (file_drop_import.py) — only it can see the file paths —
     // so here we just resolve/highlight the destination folder and report it to the backend.
     const applyExternalHint = useCallback((dir: string | null) => {
-      if (!dir) {
-        setDropHint(null);
-        setExternalRootActive(false);
+      const root = dnd.rootRef.current;
+      if (!root || !dir) {
+        externalDecorRef.current.clear();
         return;
       }
-      if (normTreePath(dir) === normTreePath(contentRootPath())) {
-        setDropHint(null);
-        setExternalRootActive(true);
-      } else {
-        setDropHint({ overId: fileDragId({ path: dir, is_dir: true }), position: "inside" });
-        setExternalRootActive(false);
-      }
-    }, []);
+      const isRoot = normTreePath(dir) === normTreePath(contentRootPath());
+      externalDecorRef.current.show(root, {
+        kind: "into",
+        targetId: isRoot ? "" : fileDragId({ path: dir, is_dir: true }),
+      });
+    }, [dnd.rootRef]);
 
     const reportExternalDropTarget = useCallback((dir: string | null) => {
       getApi()?.set_import_drop_target?.(dir ?? "")?.catch?.(() => {});
@@ -1907,51 +1912,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       [applyExternalHint],
     );
 
-    const activeLabel = useMemo(() => {
-      if (!activeDragId) return "";
-      const parsed = parseFileDragId(activeDragId);
-      if (!parsed) return "";
-      const walk = (dirPath: string): string => {
-        const entries = cache.get(dirPath) ?? [];
-        for (const entry of entries) {
-          if (entry.path === parsed.path) return entry.name;
-          if (entry.is_dir) {
-            const nested = walk(entry.path);
-            if (nested) return nested;
-          }
-        }
-        return "";
-      };
-      if (parsed.path === WORKSPACE_ROOTS_PATH) return "Workspace";
-      const rootEntry = rootEntriesRef.current.find((entry) => entry.path === parsed.path);
-      if (rootEntry) return workspaceRootDisplayName(rootEntry);
-      return walk(WORKSPACE_ROOTS_PATH) || parsed.path.split("/").pop() || "";
-    }, [activeDragId, cache]);
-
-    const activeDragIsDir = useMemo(() => {
-      if (!activeDragId) return false;
-      return parseFileDragId(activeDragId)?.kind === "dir";
-    }, [activeDragId]);
-
-    const dragCount = useMemo(() => {
-      if (!activeDragId) return 1;
-      const path = parseFileDragId(activeDragId)?.path;
-      return path && selection.selected.has(path) ? selection.selected.size : 1;
-    }, [activeDragId, selection]);
-
-    const rootSortableIds = useMemo(() => {
-      const ids = filteredContentTreeEntries.map((entry) => fileDragId(entry));
-      if (uefnCoreExpanded || filtering) {
-        ids.push(...filteredUefnCoreFiles.map((file) => fileDragId(file)));
-      }
-      return ids;
-    }, [filteredContentTreeEntries, filteredUefnCoreFiles, filtering, uefnCoreExpanded]);
-
-    const contentDropPath = contentRootEntry?.path ?? WORKSPACE_ROOTS_PATH;
-    const { setNodeRef: setRootDropRef, isOver: rootIsOver } = useDroppable({
-      id: fileNestDropId(contentDropPath),
-    });
-
     if (loadingRoot) {
       return <div className="ui-status-sidebar-muted">Loading workspace…</div>;
     }
@@ -1998,7 +1958,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
       editing,
       setEditing,
       editInputRef,
-      dropHint,
       onToggle: handleToggle,
       onOpen: handleOpen,
       onOpenPermanent: handleOpenPermanent,
@@ -2061,7 +2020,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
           setEditing={setEditing}
           editInputRef={editInputRef}
           draggable={false}
-          dropHint={dropHint}
           onToggle={() => {}}
           onOpen={() => handleOpen(file.path, file.name)}
           onOpenPermanent={() => handleOpenPermanent(file.path, file.name)}
@@ -2096,38 +2054,28 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
 
     return (
       <FileTreeHoverPlacementContext.Provider value={hoverPlacement}>
-      <div className="file-tree-shell" data-undo-scope="files">
+      <div className="file-tree-shell" data-undo-scope="files" tabIndex={-1}>
         {error ? <div className="ui-status-sidebar-error">{error}</div> : null}
         {treeMenu ? (
           <ContextMenu x={treeMenu.x} y={treeMenu.y} onClose={closeTreeMenu} items={treeContextItems} />
         ) : null}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetection}
-          onDragStart={(e) => {
-            setActiveDragId(String(e.active.id));
-            if (e.activatorEvent && "clientY" in e.activatorEvent) {
-              const pe = e.activatorEvent as PointerEvent;
-              pointerYRef.current = pe.clientY;
-              dragPointRef.current = { clientX: pe.clientX, clientY: pe.clientY, screenX: pe.screenX, screenY: pe.screenY };
-            }
-          }}
-          onDragOver={handleDragOver}
-          onDragEnd={(e) => void handleDragEnd(e)}
-          onDragCancel={() => {
-            setActiveDragId(null);
-            setDropHint(null);
-            overIdRef.current = null;
-            scheduleAutoExpand(null);
-          }}
-        >
           <div
-            ref={setRootDropRef}
-            className={`file-tree file-tree-root ${rootIsOver || externalRootActive || dropHint?.overId === fileNestDropId(contentDropPath) ? "sidebar-drop-root-active" : ""} ${useSplitLayout ? "file-tree--split" : ""}`}
-            onDragEnter={handleExternalDragOver}
-            onDragOver={handleExternalDragOver}
-            onDragLeave={handleExternalDragLeave}
-            onDrop={handleExternalDrop}
+            ref={dnd.rootProps.ref}
+            className={`file-tree file-tree-root ${useSplitLayout ? "file-tree--split" : ""}`}
+            onDragStart={dnd.rootProps.onDragStart}
+            onDragEnd={dnd.rootProps.onDragEnd}
+            onDragEnter={(e) => {
+              if (!dnd.handleDragEnter(e)) handleExternalDragOver(e);
+            }}
+            onDragOver={(e) => {
+              if (!dnd.handleDragOver(e)) handleExternalDragOver(e);
+            }}
+            onDragLeave={(e) => {
+              if (!dnd.handleDragLeave(e)) handleExternalDragLeave(e);
+            }}
+            onDrop={(e) => {
+              if (!dnd.handleDrop(e)) handleExternalDrop(e);
+            }}
             onClick={(e) => {
               const el = e.target as HTMLElement;
               if (el.closest("[data-file-id]") || el.closest(".file-tree-section-header-row")) return;
@@ -2139,7 +2087,6 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
               openTreeMenu(e, undefined);
             }}
           >
-            <SortableContext items={rootSortableIds} strategy={verticalListSortingStrategy}>
               {useSplitLayout ? (
                 <div ref={fileTreeSplitContainerRef} className="file-tree-split">
                   <div className="file-tree-pane file-tree-pane--content">
@@ -2203,24 +2150,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
                   ) : null}
                 </>
               )}
-            </SortableContext>
           </div>
-          <DragOverlay>
-            {activeDragId ? (
-              <div className="sidebar-drag-overlay">
-                {activeDragIsDir ? (
-                  <Icons.Folder />
-                ) : activeDragId ? (
-                  <FileTypeIcon path={parseFileDragId(activeDragId)?.path ?? ""} size={14} />
-                ) : (
-                  <Icons.File />
-                )}
-                <span>{activeLabel}</span>
-                {dragCount > 1 ? <span className="sidebar-drag-count">{dragCount}</span> : null}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
       </div>
       </FileTreeHoverPlacementContext.Provider>
     );

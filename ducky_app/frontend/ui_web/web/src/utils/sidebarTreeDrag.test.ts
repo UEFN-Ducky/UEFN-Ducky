@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { FolderItem } from "../types/panel";
-import { dragId, duckiesFoldersForDisplay, flattenLayout, foldersToAutoExpand, globalProjectChats, nestDropId, projectFolderId, resolveDragOverId, crossProjectDropTarget, unwrapProjectFoldersForLayout, wrapProjectsAsFolders } from "./sidebarTree";
+import {
+  duckiesFoldersForDisplay,
+  flattenLayout,
+  foldersToAutoExpand,
+  globalAgentsFolder,
+  projectFolderId,
+  wrapProjectsAsFolders,
+} from "./sidebarTree";
+import { buildDuckiesIndex, duckiesLayoutFor, duckiesPlace, projectNodeId } from "./duckiesTreeModel";
 
 function folder(id: string, name: string, children: FolderItem[] = []): FolderItem {
   return {
@@ -13,25 +21,6 @@ function folder(id: string, name: string, children: FolderItem[] = []): FolderIt
     children,
   };
 }
-
-describe("resolveDragOverId", () => {
-  const roots = [folder("g1", "Roguelike", [folder("f1", "Programming"), folder("f2", "Art")])];
-  const rootChats = [{ id: "c1", name: "Producer", sortOrder: 0 }];
-
-  it("chat before/after a folder nests in the parent (not into the folder)", () => {
-    const active = dragId("chat", "c1");
-    const overFolder = dragId("folder", "f1");
-    expect(resolveDragOverId(roots, rootChats, overFolder, "before", active)).toBe(nestDropId("g1"));
-    expect(resolveDragOverId(roots, rootChats, overFolder, "after", active)).toBe(nestDropId("g1"));
-    expect(resolveDragOverId(roots, rootChats, overFolder, "inside", active)).toBe(nestDropId("f1"));
-  });
-
-  it("folder on a chat row targets the first sibling folder slot", () => {
-    const active = dragId("folder", "f2");
-    const overChat = dragId("chat", "c1");
-    expect(resolveDragOverId(roots, rootChats, overChat, "before", active)).toBe(dragId("folder", "g1"));
-  });
-});
 
 describe("foldersToAutoExpand", () => {
   it("does not force a project accordion back open", () => {
@@ -57,7 +46,7 @@ describe("all-projects folder wraps", () => {
     expect(wrapped[0].children[0].projectSlug).toBe("here");
   });
 
-  it("unwraps only the current project for layout persist", () => {
+  it("saves each project's own layout, never another project's rows", () => {
     const wrapped = wrapProjectsAsFolders(
       [
         { slug: "here", name: "Here", folders: [folder("f0", "Code")], rootChats: [{ id: "c1", name: "A" }] },
@@ -66,12 +55,13 @@ describe("all-projects folder wraps", () => {
       "here",
       new Map(),
     );
-    const unwrapped = unwrapProjectFoldersForLayout(wrapped, [], "here");
-    expect(unwrapped.rootChats.map((c) => c.id)).toEqual(["c1"]);
-    expect(unwrapped.folders.map((f) => f.id)).toEqual(["f0"]);
-    const patch = flattenLayout(unwrapped.folders, unwrapped.rootChats);
-    expect(patch.folders.some((f) => f.id.startsWith("project:"))).toBe(false);
+    const patch = duckiesLayoutFor({ folders: wrapped, rootChats: [] }, "here", "here")!;
+    expect(patch.project_slug).toBe("here");
+    expect(patch.folders.map((f) => f.id)).toEqual(["f0"]);
     expect(patch.chats.map((c) => c.id)).toEqual(["c1"]);
+    const other = duckiesLayoutFor({ folders: wrapped, rootChats: [] }, "other", "here")!;
+    expect(other.chats.map((c) => c.id)).toEqual(["c2"]);
+    expect(other.folders.map((f) => f.id)).toEqual(["f1"]);
   });
 
   it("flattenLayout skips leaked project: folders", () => {
@@ -84,7 +74,7 @@ describe("all-projects folder wraps", () => {
     expect(patch.chats.map((c) => c.id)).toEqual(["c1"]);
   });
 
-  it("keeps the no-island bucket in the data and off the folder list", () => {
+  it("keeps the no-island bucket in the data and off the project list", () => {
     const wrapped = wrapProjectsAsFolders(
       [
         { slug: "_no_project", name: "_no_project", folders: [], rootChats: [{ id: "g1", name: "Verse Coder" }] },
@@ -95,14 +85,12 @@ describe("all-projects folder wraps", () => {
     );
     expect(wrapped.map((f) => f.id)).toContain(projectFolderId("_no_project"));
     expect(duckiesFoldersForDisplay(wrapped).map((f) => f.name)).toEqual(["Roguelike"]);
-    expect(globalProjectChats(wrapped).map((chat) => chat.id)).toEqual(["g1"]);
-    expect(crossProjectDropTarget(nestDropId(projectFolderId("_no_project")), wrapped, [])).toEqual({
-      slug: "_no_project",
-      folderId: "",
-    });
+    expect(globalAgentsFolder(wrapped)?.chats.map((chat) => chat.id)).toEqual(["g1"]);
+    const index = buildDuckiesIndex({ folders: wrapped, rootChats: [] }, "here");
+    expect(duckiesPlace(index, projectNodeId("_no_project"))).toEqual({ slug: "_no_project", folderId: "" });
   });
 
-  it("a drop on another project is not part of the current layout patch", () => {
+  it("a drop on another project's folder targets that project", () => {
     const wrapped = wrapProjectsAsFolders(
       [
         { slug: "here", name: "Here", folders: [], rootChats: [{ id: "c1", name: "A" }] },
@@ -111,17 +99,10 @@ describe("all-projects folder wraps", () => {
       "here",
       new Map(),
     );
-    expect(crossProjectDropTarget(nestDropId("project:other"), wrapped, [])).toEqual({
-      slug: "other",
-      folderId: "",
-    });
-    expect(crossProjectDropTarget(nestDropId("f1"), wrapped, [])).toEqual({
-      slug: "other",
-      folderId: "f1",
-    });
-    const unwrapped = unwrapProjectFoldersForLayout(wrapped, [], "here");
-    const patch = flattenLayout(unwrapped.folders, unwrapped.rootChats);
+    const index = buildDuckiesIndex({ folders: wrapped, rootChats: [] }, "here");
+    expect(duckiesPlace(index, projectNodeId("other"))).toEqual({ slug: "other", folderId: "" });
+    expect(duckiesPlace(index, "folder:f1")).toEqual({ slug: "other", folderId: "f1" });
+    const patch = duckiesLayoutFor({ folders: wrapped, rootChats: [] }, "here", "here")!;
     expect(patch.chats.map((c) => c.id)).toEqual(["c1"]);
-    expect(patch.chats.some((c) => c.id === "c2")).toBe(false);
   });
 });

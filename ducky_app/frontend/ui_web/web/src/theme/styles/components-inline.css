@@ -1519,11 +1519,6 @@ html.window-maximized .window-resize-grip {
   word-break: break-word;
 }
 
-/* ── Sidebar tree rows (DnD vars on ref) ── */
-.sidebar-tree-row.dnd-sortable {
-  transform: var(--dnd-transform);
-  transition: var(--dnd-transition);
-}
 
 .sidebar-rename-input {
   flex: 1;

@@ -1,10 +1,13 @@
 import type { FolderDto, FolderItem, SidebarLayoutPatch } from "../types/panel";
-import { ARCHIVE_FOLDER_ID, isArchiveFolderId } from "./archiveFolder";
+import { isArchiveFolderId } from "./archiveFolder";
 
 export const PROJECT_FOLDER_PREFIX = "project:";
 
-/** Chats with no island open. The Duckies tree already shows these as global agents. */
+/** Chats with no island open. The Duckies tree shows these as Global Agents. */
 export const GLOBAL_PROJECT_SLUG = "_no_project";
+
+/** What the no-island bucket is called in the Duckies tree. */
+export const GLOBAL_AGENTS_LABEL = "Global Agents";
 
 export function isProjectFolderId(id: string): boolean {
   return id.startsWith(PROJECT_FOLDER_PREFIX);
@@ -18,19 +21,14 @@ export function isGlobalProjectFolderId(id: string): boolean {
   return id === projectFolderId(GLOBAL_PROJECT_SLUG);
 }
 
-/** All-projects mode wraps every island, including the no-island bucket. That bucket stays in the data for Global Agents, and stays off the project list. */
+/** Global Agents is drawn at the top of the tree, not in the project list. */
 export function duckiesFoldersForDisplay(folders: FolderItem[]): FolderItem[] {
   return folders.filter((folder) => !isGlobalProjectFolderId(folder.id));
 }
 
-function chatsUnder(folder: FolderItem): FolderItem["chats"] {
-  return [...folder.chats, ...folder.children.flatMap(chatsUnder)];
-}
-
-/** Duckies with no island. These are the Global Agents rows. */
-export function globalProjectChats(folders: FolderItem[]): FolderItem["chats"] {
-  const bucket = findFolderById(folders, projectFolderId(GLOBAL_PROJECT_SLUG));
-  return bucket ? chatsUnder(bucket) : [];
+/** The Global Agents folder (the no-island bucket), when the tree has it. */
+export function globalAgentsFolder(folders: FolderItem[]): FolderItem | null {
+  return folders.find((folder) => isGlobalProjectFolderId(folder.id)) ?? null;
 }
 
 export function findFolderById(folders: FolderItem[], id: string): FolderItem | null {
@@ -68,17 +66,6 @@ export function foldersToAutoExpand(ancestorIds: readonly string[]): string[] {
   return ancestorIds.filter((id) => !isProjectFolderId(id));
 }
 
-export function folderIdForCreate(
-  folderId: string,
-  currentSlug: string,
-  folders: FolderItem[],
-): string {
-  if (!folderId || isProjectFolderId(folderId)) return "";
-  const folder = findFolderById(folders, folderId);
-  if (folder?.projectSlug && currentSlug && folder.projectSlug !== currentSlug) return "";
-  return folderId;
-}
-
 function stampFolderProject(folders: FolderItem[], slug: string): FolderItem[] {
   return folders.map((folder) => ({
     ...folder,
@@ -99,7 +86,7 @@ export function wrapProjectsAsFolders(
   expandedById: Map<string, boolean>,
 ): FolderItem[] {
   const ordered = [...projects].sort((a, b) => {
-    const rank = (slug: string) => (slug === currentSlug ? 0 : slug === "_no_project" ? 1 : 2);
+    const rank = (slug: string) => (slug === currentSlug ? 0 : slug === GLOBAL_PROJECT_SLUG ? 1 : 2);
     const byRank = rank(a.slug) - rank(b.slug);
     if (byRank) return byRank;
     return a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug);
@@ -108,7 +95,7 @@ export function wrapProjectsAsFolders(
     const id = projectFolderId(project.slug);
     const expanded = expandedById.has(id)
       ? expandedById.get(id)!
-      : project.slug === currentSlug || project.slug === "_no_project";
+      : project.slug === currentSlug || project.slug === GLOBAL_PROJECT_SLUG;
     return {
       id,
       name: project.name,
@@ -123,64 +110,6 @@ export function wrapProjectsAsFolders(
       projectSlug: project.slug,
     };
   });
-}
-
-export function unwrapProjectFoldersForLayout(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  currentSlug: string,
-): { folders: FolderItem[]; rootChats: FolderItem["chats"] } {
-  if (!roots.some((folder) => isProjectFolderId(folder.id))) {
-    return { folders: roots, rootChats };
-  }
-  const wrapper = roots.find((folder) => folder.id === projectFolderId(currentSlug));
-  if (!wrapper) return { folders: [], rootChats: [] };
-  return { folders: wrapper.children, rootChats: wrapper.chats };
-}
-
-function findChatInTree(
-  folders: FolderItem[],
-  rootChats: FolderItem["chats"],
-  chatId: string,
-): FolderItem["chats"][number] | undefined {
-  const root = rootChats.find((chat) => chat.id === chatId);
-  if (root) return root;
-  const walk = (items: FolderItem[]): FolderItem["chats"][number] | undefined => {
-    for (const folder of items) {
-      const hit = folder.chats.find((chat) => chat.id === chatId);
-      if (hit) return hit;
-      const nested = walk(folder.children);
-      if (nested) return nested;
-    }
-    return undefined;
-  };
-  return walk(folders);
-}
-
-/** True when this drag id belongs to another project's accordion. */
-export function isForeignSidebarId(
-  rawId: string,
-  folders: FolderItem[],
-  rootChats: FolderItem["chats"],
-  currentSlug: string,
-): boolean {
-  if (!currentSlug) return false;
-  const nest = parseNestDropId(rawId);
-  if (nest !== null) {
-    if (!nest) return false;
-    if (isProjectFolderId(nest)) return nest !== projectFolderId(currentSlug);
-    const folder = findFolderById(folders, nest);
-    return Boolean(folder?.projectSlug && folder.projectSlug !== currentSlug);
-  }
-  const parsed = parseDragId(rawId);
-  if (!parsed) return false;
-  if (parsed.kind === "folder") {
-    if (isProjectFolderId(parsed.id)) return parsed.id !== projectFolderId(currentSlug);
-    const folder = findFolderById(folders, parsed.id);
-    return Boolean(folder?.projectSlug && folder.projectSlug !== currentSlug);
-  }
-  const chat = findChatInTree(folders, rootChats, parsed.id);
-  return Boolean(chat?.projectSlug && chat.projectSlug !== currentSlug);
 }
 
 export function expandFoldersById(folders: FolderItem[], folderIds: ReadonlySet<string>): FolderItem[] {
@@ -233,7 +162,7 @@ export function toggleChatFolderLevels(folders: FolderItem[]): FolderItem[] {
 }
 
 export function chatFolderSiblingNames(folders: FolderItem[], parentId: string): string[] {
-  if (!parentId) return folders.map((f) => f.name);
+  if (!parentId) return folders.filter((f) => !isProjectFolderId(f.id)).map((f) => f.name);
   const parent = findFolderById(folders, parentId);
   return parent ? parent.children.map((c) => c.name) : folders.map((f) => f.name);
 }
@@ -249,7 +178,7 @@ export function insertChatFolder(
 ): FolderItem[] {
   const asChildOf = (parent: string, siblings: FolderItem[]): FolderItem => ({
     ...folder,
-    parentId: parent,
+    parentId: isProjectFolderId(parent) ? "" : parent,
     sortOrder: siblings.reduce((max, f) => Math.max(max, f.sortOrder), 0) + 1,
   });
 
@@ -262,7 +191,9 @@ export function insertChatFolder(
       );
     return walk(folders);
   }
-  return [...folders, asChildOf("", folders)];
+  const own = folders.filter((f) => !isProjectFolderId(f.id));
+  const wrappers = folders.filter((f) => isProjectFolderId(f.id));
+  return [...own, asChildOf("", own), ...wrappers];
 }
 
 export function chatNamesInFolder(
@@ -287,73 +218,6 @@ export function parseDragId(raw: string): { kind: SidebarDragKind; id: string } 
   const kind = raw.slice(0, idx) as SidebarDragKind;
   if (kind !== "folder" && kind !== "chat") return null;
   return { kind, id: raw.slice(idx + 1) };
-}
-
-export function nestDropId(folderId: string): string {
-  return `nest:${folderId || "root"}`;
-}
-
-export function parseNestDropId(raw: string): string | null {
-  if (!raw.startsWith("nest:")) return null;
-  const id = raw.slice(5);
-  return id === "root" ? "" : id;
-}
-
-function projectSlugFromFolderId(id: string): string {
-  return isProjectFolderId(id) ? id.slice(PROJECT_FOLDER_PREFIX.length) : "";
-}
-
-/** Home project of a sidebar row. Empty when the tree is a single island. */
-export function sidebarItemProjectSlug(
-  rawId: string,
-  folders: FolderItem[],
-  rootChats: FolderItem["chats"],
-): string {
-  const nest = parseNestDropId(rawId);
-  if (nest !== null) {
-    if (!nest) return "";
-    const fromProject = projectSlugFromFolderId(nest);
-    if (fromProject) return fromProject;
-    return findFolderById(folders, nest)?.projectSlug || "";
-  }
-  const parsed = parseDragId(rawId);
-  if (!parsed) return "";
-  if (parsed.kind === "folder") {
-    const fromProject = projectSlugFromFolderId(parsed.id);
-    if (fromProject) return fromProject;
-    return findFolderById(folders, parsed.id)?.projectSlug || "";
-  }
-  return findChatInTree(folders, rootChats, parsed.id)?.projectSlug || "";
-}
-
-/** Where a drop lands when the tree is split by project. Null for archive and single-island rows. */
-export function crossProjectDropTarget(
-  overRaw: string,
-  folders: FolderItem[],
-  rootChats: FolderItem["chats"],
-): { slug: string; folderId: string } | null {
-  if (isArchiveFolderId(overRaw)) return null;
-  const nest = parseNestDropId(overRaw);
-  if (nest !== null) {
-    if (!nest || isArchiveFolderId(nest)) return null;
-    const slug = projectSlugFromFolderId(nest) || findFolderById(folders, nest)?.projectSlug || "";
-    if (!slug) return null;
-    return { slug, folderId: isProjectFolderId(nest) ? "" : nest };
-  }
-  const parsed = parseDragId(overRaw);
-  if (!parsed) return null;
-  if (parsed.kind === "folder") {
-    if (isArchiveFolderId(parsed.id)) return null;
-    const slug = projectSlugFromFolderId(parsed.id) || findFolderById(folders, parsed.id)?.projectSlug || "";
-    if (!slug) return null;
-    return { slug, folderId: isProjectFolderId(parsed.id) ? "" : parsed.id };
-  }
-  const ancestors = findChatAncestorFolderIds(folders, rootChats, parsed.id);
-  const parent = ancestors[ancestors.length - 1] || "";
-  if (isArchiveFolderId(parent)) return null;
-  const slug = projectSlugFromFolderId(parent) || findChatInTree(folders, rootChats, parsed.id)?.projectSlug || "";
-  if (!slug) return null;
-  return { slug, folderId: isProjectFolderId(parent) ? "" : parent };
 }
 
 export function buildFolderTree(
@@ -401,6 +265,8 @@ export function buildFolderTree(
   return roots;
 }
 
+/** One project's order and nesting, as saved by apply_sidebar_layout. Project rows
+ *  themselves are never part of it. */
 export function flattenLayout(roots: FolderItem[], rootChats: FolderItem["chats"] = []): SidebarLayoutPatch {
   const folders: SidebarLayoutPatch["folders"] = [];
   const chats: SidebarLayoutPatch["chats"] = [];
@@ -428,18 +294,6 @@ export function flattenLayout(roots: FolderItem[], rootChats: FolderItem["chats"
   return { folders, chats };
 }
 
-export function appendArchiveChatsToLayout(
-  patch: SidebarLayoutPatch,
-  archiveChats: FolderItem["chats"],
-): SidebarLayoutPatch {
-  const chats = [...patch.chats];
-  archiveChats.forEach((chat, chatIndex) => {
-    chat.sortOrder = chatIndex;
-    chats.push({ id: chat.id, folder_id: ARCHIVE_FOLDER_ID, sort_order: chatIndex });
-  });
-  return { folders: patch.folders, chats };
-}
-
 export function flattenFoldersForSelect(roots: FolderItem[], depth = 0): { id: string; label: string }[] {
   const out: { id: string; label: string }[] = [];
   for (const folder of roots) {
@@ -453,306 +307,4 @@ export function flattenFoldersForSelect(roots: FolderItem[], depth = 0): { id: s
     out.push(...flattenFoldersForSelect(folder.children, depth + 1));
   }
   return out;
-}
-
-function cloneTree(roots: FolderItem[]): FolderItem[] {
-  return roots.map((folder) => ({
-    ...folder,
-    chats: folder.chats.map((chat) => ({ ...chat })),
-    children: cloneTree(folder.children),
-  }));
-}
-
-function findFolderParent(
-  roots: FolderItem[],
-  folderId: string,
-  parent: FolderItem | null = null,
-): { parent: FolderItem | null; list: FolderItem[]; index: number } | null {
-  for (let i = 0; i < roots.length; i += 1) {
-    if (roots[i].id === folderId) return { parent, list: roots, index: i };
-    const nested = findFolderParent(roots[i].children, folderId, roots[i]);
-    if (nested) return nested;
-  }
-  return null;
-}
-
-function findChat(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  chatId: string,
-): { list: FolderItem["chats"]; index: number } | null {
-  const rootIdx = rootChats.findIndex((c) => c.id === chatId);
-  if (rootIdx >= 0) return { list: rootChats, index: rootIdx };
-  for (const folder of roots) {
-    const idx = folder.chats.findIndex((c) => c.id === chatId);
-    if (idx >= 0) return { list: folder.chats, index: idx };
-    const nested = findChat(folder.children, [], chatId);
-    if (nested) return nested;
-  }
-  return null;
-}
-
-function isDescendantFolder(roots: FolderItem[], ancestorId: string, candidateId: string): boolean {
-  const ancestor = findFolderParent(roots, ancestorId);
-  if (!ancestor) return false;
-  const node = ancestor.list[ancestor.index];
-  const walk = (folders: FolderItem[]): boolean => {
-    for (const f of folders) {
-      if (f.id === candidateId) return true;
-      if (walk(f.children)) return true;
-    }
-    return false;
-  };
-  return walk(node.children);
-}
-
-function removeFolder(roots: FolderItem[], folderId: string): FolderItem | null {
-  const loc = findFolderParent(roots, folderId);
-  if (!loc) return null;
-  const [removed] = loc.list.splice(loc.index, 1);
-  return removed;
-}
-
-function removeChat(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  chatId: string,
-): { chat: FolderItem["chats"][number] } | null {
-  const loc = findChat(roots, rootChats, chatId);
-  if (!loc) return null;
-  const [removed] = loc.list.splice(loc.index, 1);
-  return { chat: removed };
-}
-
-function getFolderById(roots: FolderItem[], folderId: string): FolderItem | null {
-  for (const folder of roots) {
-    if (folder.id === folderId) return folder;
-    const nested = getFolderById(folder.children, folderId);
-    if (nested) return nested;
-  }
-  return null;
-}
-
-function findFolderByChatList(roots: FolderItem[], list: FolderItem["chats"]): FolderItem | null {
-  for (const folder of roots) {
-    if (folder.chats === list) return folder;
-    const nested = findFolderByChatList(folder.children, list);
-    if (nested) return nested;
-  }
-  return null;
-}
-
-export type DropPosition = "before" | "after" | "inside";
-
-/** Map pointer-based drop hint to an over-id understood by applySidebarDrag. */
-export function resolveDragOverId(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  overRaw: string,
-  position: DropPosition,
-  activeRaw?: string,
-): string {
-  const active = activeRaw ? parseDragId(activeRaw) : null;
-  const parsed = parseDragId(overRaw);
-  if (!parsed) return overRaw;
-
-  if (position === "inside") {
-    if (parsed.kind === "folder") return nestDropId(parsed.id);
-    return overRaw;
-  }
-
-  // Duckies sit above folders — before/after a folder with a chat = parent nest (not into it).
-  if (active?.kind === "chat" && parsed.kind === "folder") {
-    const loc = findFolderParent(roots, parsed.id);
-    return nestDropId(loc?.parent?.id ?? "root");
-  }
-
-  // Folder dropped on a chat row → first sibling-folder slot in that parent.
-  if (active?.kind === "folder" && parsed.kind === "chat") {
-    const chatLoc = findChat(roots, rootChats, parsed.id);
-    if (!chatLoc) return overRaw;
-    if (chatLoc.list === rootChats) {
-      if (roots.length > 0) return dragId("folder", roots[0].id);
-      return nestDropId("root");
-    }
-    const owner = findFolderByChatList(roots, chatLoc.list);
-    if (!owner) return nestDropId("root");
-    if (owner.children.length > 0) return dragId("folder", owner.children[0].id);
-    return nestDropId(owner.id);
-  }
-
-  if (position !== "after") return overRaw;
-
-  if (parsed.kind === "folder") {
-    const loc = findFolderParent(roots, parsed.id);
-    if (!loc) return overRaw;
-    const nextFolder = loc.list[loc.index + 1];
-    if (nextFolder) return dragId("folder", nextFolder.id);
-    return nestDropId(loc.parent?.id ?? "root");
-  }
-
-  const chatLoc = findChat(roots, rootChats, parsed.id);
-  if (!chatLoc) return overRaw;
-  const nextChat = chatLoc.list[chatLoc.index + 1];
-  if (nextChat) return dragId("chat", nextChat.id);
-  // Duckies render above folders (root + nested) — after last chat → first sibling folder.
-  if (chatLoc.list === rootChats) {
-    if (roots.length > 0) return dragId("folder", roots[0].id);
-    return nestDropId("root");
-  }
-  const owner = findFolderByChatList(roots, chatLoc.list);
-  if (!owner) return nestDropId("root");
-  if (owner.children.length > 0) return dragId("folder", owner.children[0].id);
-  return nestDropId(owner.id);
-}
-
-function findChatInArchive(
-  archiveChats: FolderItem["chats"],
-  chatId: string,
-): { list: FolderItem["chats"]; index: number } | null {
-  const index = archiveChats.findIndex((c) => c.id === chatId);
-  if (index < 0) return null;
-  return { list: archiveChats, index };
-}
-
-function removeChatEverywhere(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  archiveChats: FolderItem["chats"],
-  chatId: string,
-): { chat: FolderItem["chats"][number] } | null {
-  const archived = findChatInArchive(archiveChats, chatId);
-  if (archived) {
-    const [removed] = archived.list.splice(archived.index, 1);
-    return { chat: removed };
-  }
-  return removeChat(roots, rootChats, chatId);
-}
-
-export type SidebarDragResult = {
-  folders: FolderItem[];
-  rootChats: FolderItem["chats"];
-  archiveChats: FolderItem["chats"];
-};
-
-export function applySidebarDrag(
-  roots: FolderItem[],
-  rootChats: FolderItem["chats"],
-  activeRaw: string,
-  overRaw: string | null,
-  archiveChats: FolderItem["chats"] = [],
-): SidebarDragResult | null {
-  if (!overRaw || activeRaw === overRaw) return null;
-
-  const active = parseDragId(activeRaw);
-  if (!active) return null;
-
-  const nextRoots = cloneTree(roots);
-  const nextRootChats = rootChats.map((c) => ({ ...c }));
-  const nextArchiveChats = archiveChats.map((c) => ({ ...c }));
-
-  const nestTarget = parseNestDropId(overRaw);
-  if (nestTarget !== null) {
-    if (isArchiveFolderId(nestTarget)) {
-      if (active.kind !== "chat") return null;
-      const removed = removeChatEverywhere(nextRoots, nextRootChats, nextArchiveChats, active.id);
-      if (!removed) return null;
-      nextArchiveChats.push(removed.chat);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-
-    if (active.kind === "folder") {
-      if (nestTarget && (nestTarget === active.id || isDescendantFolder(nextRoots, active.id, nestTarget))) {
-        return null;
-      }
-      const folder = removeFolder(nextRoots, active.id);
-      if (!folder) return null;
-      const parentList = nestTarget ? getFolderById(nextRoots, nestTarget)?.children : nextRoots;
-      if (!parentList) return null;
-      folder.parentId = nestTarget;
-      parentList.push(folder);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-
-    const removed = removeChatEverywhere(nextRoots, nextRootChats, nextArchiveChats, active.id);
-    if (!removed) return null;
-    if (!nestTarget) {
-      nextRootChats.push(removed.chat);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-    const targetFolder = getFolderById(nextRoots, nestTarget);
-    if (!targetFolder) return null;
-    targetFolder.chats.push(removed.chat);
-    return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-  }
-
-  const over = parseDragId(overRaw);
-  if (!over) return null;
-
-  if (over.kind === "folder" && isArchiveFolderId(over.id)) {
-    if (active.kind !== "chat") return null;
-    const removed = removeChatEverywhere(nextRoots, nextRootChats, nextArchiveChats, active.id);
-    if (!removed) return null;
-    nextArchiveChats.push(removed.chat);
-    return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-  }
-
-  if (active.kind === "folder" && over.kind === "folder") {
-    if (active.id === over.id) return null;
-    if (isDescendantFolder(nextRoots, active.id, over.id)) return null;
-    const activeLoc = findFolderParent(nextRoots, active.id);
-    const overLoc = findFolderParent(nextRoots, over.id);
-    if (!activeLoc || !overLoc) return null;
-    const folder = removeFolder(nextRoots, active.id);
-    if (!folder) return null;
-    const sameParent = activeLoc.parent?.id === overLoc.parent?.id && activeLoc.list === overLoc.list;
-    if (sameParent) {
-      const insertAt = activeLoc.index < overLoc.index ? overLoc.index - 1 : overLoc.index;
-      activeLoc.list.splice(insertAt, 0, folder);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-    const parent = getFolderById(nextRoots, over.id);
-    if (!parent) return null;
-    folder.parentId = parent.id;
-    parent.children.push(folder);
-    parent.expanded = true;
-    return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-  }
-
-  const activeInArchive = active.kind === "chat" && findChatInArchive(nextArchiveChats, active.id);
-  const overInArchive = over.kind === "chat" && findChatInArchive(nextArchiveChats, over.id);
-
-  if (active.kind === "chat" && over.kind === "chat") {
-    if (activeInArchive && overInArchive) {
-      const list = nextArchiveChats;
-      const [item] = list.splice(activeInArchive.index, 1);
-      const insertAt = activeInArchive.index < overInArchive.index ? overInArchive.index - 1 : overInArchive.index;
-      list.splice(insertAt, 0, item);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-    const activeLoc = activeInArchive ?? findChat(nextRoots, nextRootChats, active.id);
-    const overLoc = overInArchive ?? findChat(nextRoots, nextRootChats, over.id);
-    if (!activeLoc || !overLoc) return null;
-    if (activeLoc.list === overLoc.list) {
-      const list = activeLoc.list;
-      const [item] = list.splice(activeLoc.index, 1);
-      const insertAt = activeLoc.index < overLoc.index ? overLoc.index - 1 : overLoc.index;
-      list.splice(insertAt, 0, item);
-      return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-    }
-    const removed = removeChatEverywhere(nextRoots, nextRootChats, nextArchiveChats, active.id);
-    if (!removed) return null;
-    overLoc.list.splice(overLoc.index, 0, removed.chat);
-    return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-  }
-
-  if (active.kind === "chat" && over.kind === "folder") {
-    const removed = removeChatEverywhere(nextRoots, nextRootChats, nextArchiveChats, active.id);
-    const target = getFolderById(nextRoots, over.id);
-    if (!removed || !target) return null;
-    target.chats.push(removed.chat);
-    return { folders: nextRoots, rootChats: nextRootChats, archiveChats: nextArchiveChats };
-  }
-
-  return null;
 }

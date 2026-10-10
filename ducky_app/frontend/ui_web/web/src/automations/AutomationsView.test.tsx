@@ -1857,7 +1857,7 @@ describe("folders in the Workflows list", () => {
     fireEvent.dragStart(screen.getByText("Example").closest("button")!, { dataTransfer });
     expect(dataTransfer.setData).toHaveBeenCalledWith("application/x-ducky-workflow-list", "workflow");
     fireEvent.dragOver(folderRow("QA"), { dataTransfer });
-    expect(folderRow("QA").classList.contains("is-drop-target")).toBe(true);
+    expect(folderRow("QA").classList.contains("tree-drop-into")).toBe(true);
     fireEvent.drop(folderRow("QA"), { dataTransfer });
     await waitFor(() => expect(api.set_workflow_folder).toHaveBeenCalledWith("p", "QA"));
     // Its old folder stays until removed; a team folder never takes a Local workflow.

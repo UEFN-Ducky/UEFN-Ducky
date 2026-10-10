@@ -10,7 +10,6 @@ import {
   isPanelReadOnlyFile,
   isWsEncodedPath,
 } from "../verse-editor/utils/isVerseFile";
-import type { DropPosition } from "./sidebarTree";
 
 /** An island's Content pane root. Runtime code uses `contentRootPath()`, which is `.` for
  * a folder project. */
@@ -161,15 +160,6 @@ export function parseFileDragId(raw: string): { kind: FileEntryKind; path: strin
   return { kind, path: raw.slice(idx + 1) };
 }
 
-export function fileNestDropId(dirPath: string): string {
-  return `nest:${dirPath}`;
-}
-
-export function parseFileNestDropId(raw: string): string | null {
-  if (!raw.startsWith("nest:")) return null;
-  return raw.slice(5);
-}
-
 export function parentPath(path: string): string {
   return parentDirPath(path) ?? WORKSPACE_ROOTS_PATH;
 }
@@ -180,82 +170,15 @@ export function isDescendantDir(ancestorPath: string, candidatePath: string): bo
   return candidate === ancestor || candidate.startsWith(`${ancestor}/`);
 }
 
-export function resolveFileDragOverId(
-  cache: Map<string, ProjectFileEntry[]>,
-  overRaw: string,
-  position: DropPosition,
-): string {
-  if (position === "inside") {
-    const parsed = parseFileDragId(overRaw);
-    if (parsed?.kind === "dir") return fileNestDropId(parsed.path);
-    return overRaw;
-  }
-
-  const parsed = parseFileDragId(overRaw);
-  if (!parsed) return overRaw;
-
-  // before/after a directory = sibling slot in its parent (line), never into it.
-  if (parsed.kind === "dir") {
-    return fileNestDropId(parentPath(parsed.path));
-  }
-
-  if (position !== "after") return overRaw;
-
-  const siblings = cache.get(parentPath(parsed.path)) ?? [];
-  const idx = siblings.findIndex((entry) => entry.path === parsed.path);
-  const next = siblings[idx + 1];
-  // Next dir would ingest via file→dir resolve — keep parent nest for between slots.
-  if (next && !next.is_dir) return fileDragId(next);
-  return fileNestDropId(parentPath(parsed.path));
-}
-
-/** Resolve a drag-over target to a destination parent folder path, or null if no move. */
-export function resolveFileMoveTarget(
-  sourcePath: string,
-  sourceIsDir: boolean,
-  overRaw: string,
-): string | null {
+/** Destination folder for moving one entry, or null when the move is not allowed
+ * (read-only, into itself or a folder inside it) or changes nothing. */
+export function fileMoveDest(sourcePath: string, sourceIsDir: boolean, destDir: string): string | null {
   if (isPanelReadOnlyFile(sourcePath)) return null;
-
-  const nestTarget = parseFileNestDropId(overRaw);
-  if (nestTarget !== null) {
-    if (isPanelReadOnlyFile(nestTarget)) return null;
-    const destParent = nestTarget || contentRootPath();
-    if (sourceIsDir && (destParent === sourcePath || isDescendantDir(sourcePath, destParent))) return null;
-    if (parentPath(sourcePath) === destParent) return null;
-    return destParent;
-  }
-
-  const active = { kind: sourceIsDir ? ("dir" as const) : ("file" as const), path: sourcePath };
-  const over = parseFileDragId(overRaw);
-  if (!over) return null;
-  if (isPanelReadOnlyFile(over.path)) return null;
-
-  if (active.kind === "dir" && over.kind === "dir") {
-    if (active.path === over.path || isDescendantDir(active.path, over.path)) return null;
-    if (parentPath(active.path) === parentPath(over.path)) return null;
-    return over.path;
-  }
-
-  if (active.kind === "file" && over.kind === "file") {
-    if (parentPath(active.path) === parentPath(over.path)) return null;
-    return parentPath(over.path);
-  }
-
-  if (active.kind === "file" && over.kind === "dir") {
-    if (parentPath(active.path) === over.path) return null;
-    return over.path;
-  }
-
-  if (active.kind === "dir" && over.kind === "file") {
-    const destParent = parentPath(over.path);
-    if (isPanelReadOnlyFile(destParent)) return null;
-    if (isDescendantDir(active.path, destParent)) return null;
-    if (parentPath(active.path) === destParent) return null;
-    return destParent;
-  }
-
-  return null;
+  const dest = destDir || contentRootPath();
+  if (isPanelReadOnlyFile(dest)) return null;
+  if (sourceIsDir && isDescendantDir(sourcePath, dest)) return null;
+  if (parentPath(sourcePath) === dest) return null;
+  return dest;
 }
 
 /** Map an abs: file path to its ws: workspace root id when possible. */
