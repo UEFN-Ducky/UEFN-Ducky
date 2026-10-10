@@ -136,3 +136,78 @@ def test_create_plan_rejects_invalid_assignment(team):
             {"content": "Work", "assignee": "missing"}
         ], project_root=team)
     assert plans.load_plan("outsider", team) is None
+
+@pytest.mark.parametrize('backend', ['files', 'db'])
+def test_deleted_plan_owner_cannot_hide_valid_assignment(team, monkeypatch, backend):
+    monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
+    plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    plans.create_plan('outsider', title='Live plan', nodes=[
+        {'id': 'live-node', 'content': 'Live work', 'assignee': 'group-a'}
+    ], project_root=team)
+    original = project_chats.load_conversation
+    monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None:
+                        None if cid == 'coord' else original(cid, project_root))
+    view = plans.assigned_plan_view('builder', team, report_ambiguity=True)
+    assert view['assigned_from']['chat_id'] == 'outsider'
+    assert view['assigned_from']['node_id'] == 'live-node'
+
+
+@pytest.mark.parametrize('backend', ['files', 'db'])
+def test_assignment_reload_keeps_canonical_identity_and_project_scope(team, monkeypatch, backend, tmp_path):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    from backend.store import db
+    monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
+    master = plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    plans.update_node('coord', 'a2', assignee='builder', project_root=team)
+    db.close_thread_connections()
+    view = plans.assigned_plan_view('builder', team)
+    assert view['id'] == master['id']
+    assert view['assigned_from']['node_id'] == 'a2'
+    assert view['nodes'][0]['id'] == 'a2'
+    monkeypatch.setenv('PYTHONPATH', str(Path(plans.__file__).resolve().parents[3]))
+    restarted = subprocess.run([sys.executable, '-B', '-c', '''
+import json, sys
+from types import SimpleNamespace
+from backend.agent.coding_agents import plans
+from frontend.ui_web import project_chats
+parents = {'builder': 'group-a', 'group-a': 'team', 'coord': 'team', 'team': ''}
+project_chats.load_conversation = lambda cid, project_root=None: (
+    SimpleNamespace(parent_conv_id=parents[cid]) if cid in parents else None)
+print(json.dumps(plans.assigned_plan_view('builder', sys.argv[1])))
+''', team], capture_output=True, text=True, check=True, timeout=15)
+    assert json.loads(restarted.stdout)['assigned_from'] == view['assigned_from']
+    assert json.loads(restarted.stdout)['id'] == master['id']
+    assert plans.load_plan('builder', team) is None
+    assert plans.assigned_plan_view('builder', str(tmp_path / 'other-project')) is None
+    plans.update_node('coord', 'a2', assignee='', project_root=team)
+    db.close_thread_connections()
+    assert plans.assigned_plan_view('builder', team)['assigned_from']['node_id'] == 'a'
+    plans.delete_plan('coord', team)
+    assert plans.assigned_plan_view('builder', team) is None
+
+
+def test_existing_personal_plan_keeps_precedence(team):
+    from frontend.ui_web import panel_api  # initialize the public API before its mixin
+    from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
+    plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    personal = plans.create_plan('builder', title='Personal', nodes=[
+        {'id': 'own', 'content': 'Own work'}
+    ], project_root=team)
+    view = PanelApiSettingsMixin().get_plan('builder', project_root=team)['plan']
+    assert view['id'] == personal['id']
+    assert 'assigned_from' not in view
+
+@pytest.mark.parametrize('backend', ['files', 'db'])
+def test_deleted_assigned_node_falls_back_without_changing_master(team, monkeypatch, backend):
+    monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
+    master = plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    plans.update_node('coord', 'a2', assignee='builder', project_root=team)
+    plans.update_plan('coord', status='paused', project_root=team)
+    plans.delete_node('coord', 'a2', project_root=team)
+    view = plans.assigned_plan_view('builder', team)
+    assert view['id'] == master['id']
+    assert view['assigned_from']['node_id'] == 'a'
+    assert [n['id'] for n in view['nodes'][0]['children']] == ['a1']

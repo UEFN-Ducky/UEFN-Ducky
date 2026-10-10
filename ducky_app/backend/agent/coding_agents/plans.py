@@ -1116,10 +1116,16 @@ def assigned_plan_view(chat_id: str, project_root: str | None = None, *,
     the coordinator's plan held their work. The view is read-only: edits go to the
     plan's own chat (``assigned_from.chat_id``).
     """
+    from frontend.ui_web.project_chats import load_conversation
+
     ids = _chat_and_group_ids(chat_id, project_root)
     if not ids:
         return None
-    plans = [p for p in list_plans(project_root) if str(p.get("chat_id") or "") != ids[0]]
+    # Stored plans may outlive their owner chats. They are retained records,
+    # not active assignments, and must not shadow a surviving coordinator.
+    plans = [p for p in list_plans(project_root)
+             if str(p.get("chat_id") or "") != ids[0]
+             and load_conversation(str(p.get("chat_id") or ""), project_root=project_root) is not None]
     for wanted in ids:  # the most specific owner wins
         matches = [(p, n) for p in plans for n in _flatten_nodes(p.get("nodes"))
                    if str(n.get("assignee") or "") == wanted]
