@@ -1125,6 +1125,7 @@ def assigned_plan_view(chat_id: str, project_root: str | None = None, *,
     # not active assignments, and must not shadow a surviving coordinator.
     plans = [p for p in list_plans(project_root)
              if str(p.get("chat_id") or "") != ids[0]
+             and p.get("status") != "archived"
              and load_conversation(str(p.get("chat_id") or ""), project_root=project_root) is not None]
     for wanted in ids:  # the most specific owner wins
         matches = [(p, n) for p in plans for n in _flatten_nodes(p.get("nodes"))

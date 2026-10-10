@@ -211,3 +211,51 @@ def test_deleted_assigned_node_falls_back_without_changing_master(team, monkeypa
     assert view['id'] == master['id']
     assert view['assigned_from']['node_id'] == 'a'
     assert [n['id'] for n in view['nodes'][0]['children']] == ['a1']
+
+@pytest.mark.parametrize('backend', ['files', 'db'])
+@pytest.mark.parametrize('binding', ['valid', 'missing', 'deleted_owner', 'ambiguous', 'other_project', 'archived_master'])
+def test_archived_personal_reference_never_masks_canonical_assignment(team, monkeypatch, backend, binding, tmp_path):
+    from frontend.ui_web import panel_api
+    from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
+    monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
+    archived = plans.save_plan({
+        'id': 'original-reference-id', 'kind': 'project', 'chat_id': 'builder',
+        'title': 'Archived assignment reference - use original master subplan',
+        'overview': 'Old prose refers to some-other-master',
+        'body_markdown': 'Obsolete instructions are history only.',
+        'nodes': [], 'todos': [], 'status': 'archived', 'created_at': 1,
+    }, team)
+    master = plans.load_plan('coord', team)
+    if binding != 'missing':
+        master = plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    if binding == 'deleted_owner':
+        original = project_chats.load_conversation
+        monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None:
+                            None if cid == 'coord' else original(cid, project_root))
+    if binding == 'ambiguous':
+        plans.create_plan('outsider', nodes=[{'id': 'other', 'content': 'Other', 'assignee': 'group-a'}], project_root=team)
+    if binding == 'archived_master':
+        plans.update_plan('coord', status='archived', project_root=team)
+    root = str(tmp_path / 'separate-project') if binding == 'other_project' else team
+    if binding == 'other_project':
+        plans.save_plan(archived, root)
+    result = PanelApiSettingsMixin().get_plan('builder', project_root=root)
+    if binding == 'valid':
+        assert result['plan']['id'] == master['id']
+        assert result['plan']['assigned_from']['node_id'] == 'a'
+    else:
+        assert result['plan'] is None
+        if binding == 'ambiguous':
+            assert result['ok'] is False
+            assert 'Multiple plan assignments' in result['error']
+    assert plans.load_plan('builder', team) == archived
+    assert next(p for p in plans.list_plans(team) if p['chat_id'] == 'builder')['status'] == 'archived'
+
+
+@pytest.mark.parametrize('backend', ['files', 'db'])
+def test_archived_master_does_not_conflict_with_live_assignment(team, monkeypatch, backend):
+    monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
+    plans.update_node('coord', 'a', assignee='group-a', project_root=team)
+    plans.update_plan('coord', status='archived', project_root=team)
+    live = plans.create_plan('outsider', nodes=[{'id': 'live', 'content': 'Live', 'assignee': 'group-a'}], project_root=team)
+    assert plans.assigned_plan_view('builder', team, report_ambiguity=True)['id'] == live['id']

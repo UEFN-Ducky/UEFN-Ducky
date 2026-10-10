@@ -984,8 +984,9 @@ class PanelApiSettingsMixin:
 
         root = project_root if project_root is not None else _pa.PanelSettings.load().uefn_project_root
         plan = load_plan(chat_id, project_root=root)
-        if plan is None:
-            # A team member with no plan of its own sees its group's part of the team plan.
+        if plan is None or plan.get("status") == "archived":
+            # Archived personal records remain history, not active assignments.
+            # Resolve only persisted node assignees, never reference prose.
             try:
                 plan = assigned_plan_view(chat_id, project_root=root, report_ambiguity=True)
             except ValueError as exc:
