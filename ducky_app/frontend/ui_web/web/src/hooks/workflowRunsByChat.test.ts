@@ -168,3 +168,38 @@ it("asks for the run snapshot each second only while a workflow runs", () => {
   expect(snapshotDue(24_000, false, 9_500)).toBe(false);
   expect(snapshotDue(24_500, false, 9_500)).toBe(true);
 });
+
+it("keeps only the newest finished runs of a workflow and lets go of the older ones' output", async () => {
+  // A scheduled or looping workflow kept every run and its terminal output until the app closed.
+  const output = "x".repeat(16_000);
+  const events: PanelPushEvent[] = [];
+  for (let i = 0; i < 1000; i += 1) {
+    const run = `r${i}`;
+    events.push(start(run));
+    for (const node of ["a", "b", "c"]) events.push({ type: "workflow_output", id: "wf", run, node, output: `${i}${output}` });
+    events.push({ type: "workflow_run", id: "wf", run, state: "done" });
+  }
+  events.forEach(applyWorkflowEvent);
+  applyWorkflowEvent(start("live"));
+  let renders = 0;
+  const { result } = renderHook(() => { renders += 1; return useWorkflowRuns("wf"); });
+  const finished = () => result.current.filter((run) => run.state !== "running").map((run) => run.run);
+  expect(finished()).toEqual(Array.from({ length: 20 }, (_, i) => `r${980 + i}`));
+  expect(result.current.filter((run) => run.state === "running").map((run) => run.run)).toEqual(["live"]);
+  const replayed: PanelPushEvent[] = [];
+  subscribeWorkflowEvents((event) => replayed.push(event))();
+  expect(replayed.filter((event) => event.type === "workflow_output")).toHaveLength(20 * 3);
+
+  // The run snapshot still lists the old runs for a day; it must not bring them back.
+  api.workflow_run_snapshot.mockResolvedValue({ ok: true, events: [...events, start("live")] });
+  await act(async () => { await refreshWorkflowRuns(); });
+  expect(finished()).toHaveLength(20);
+  const shown = renders;
+  await act(async () => { await refreshWorkflowRuns(); });
+  expect(renders).toBe(shown);
+
+  // Saved history restores no more than the kept runs either.
+  act(() => hydrateWorkflowRunHistory("wf", "Example",
+    Array.from({ length: 30 }, (_, i) => ({ run: `saved${i}`, started: i + 1, ended: i + 2, ok: true, steps: [] }))));
+  expect(finished()).toHaveLength(20);
+});

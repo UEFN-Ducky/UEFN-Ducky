@@ -61,6 +61,28 @@ const EMPTY: ChatWorkflowRun[] = [];
 const runToChat = new Map<string, string>();
 const listeners = new Set<() => void>();
 let installed = false;
+/**
+ * Finished runs kept per workflow, as many as its saved history holds. Every run and its
+ * events (a terminal step's output is up to 16,000 characters) used to stay until the app
+ * closed, so a scheduled or looping workflow grew this all day.
+ */
+const FINISHED_RUNS_KEPT = 20;
+/** Runs let go for age: the run snapshot lists them for a day and must not bring them back. */
+const droppedRuns = new Set<string>();
+
+function dropOldRuns(workflowId: string): void {
+  const finished = [...byRun.values()]
+    .filter((run) => run.workflowId === workflowId && run.state !== "running")
+    .sort((a, b) => a.startedAt - b.startedAt);
+  const old = finished.slice(0, Math.max(0, finished.length - FINISHED_RUNS_KEPT));
+  if (!old.length) return;
+  for (const { run } of old) {
+    droppedRuns.add(run);
+    byRun.delete(run);
+    runToChat.delete(run);
+  }
+  for (const [key, event] of latestEvents) if (droppedRuns.has(String(event.run || ""))) latestEvents.delete(key);
+}
 
 function emit(): void {
   snapshots.clear();
@@ -73,7 +95,7 @@ function stepState(raw: string | undefined): WorkflowStepState {
 
 export function applyWorkflowEvent(event: WorkflowEvent): void {
   const run = String(event.run || "");
-  if (!run || clearedRuns.has(run)) return;
+  if (!run || clearedRuns.has(run) || droppedRuns.has(run)) return;
   const eventKey = [event.id, run, event.type, event.node, event.source, event.type === "workflow_run" ? event.state : ""].join(":");
   const previous = latestEvents.get(eventKey);
   const replayFinish = event.type === "workflow_run" && event.state !== "started" && byRun.get(run)?.state === "running";
@@ -137,6 +159,7 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
       endedAt: now,
     });
     upsertBackgroundJob({ id: `graph-run:${current.workflowId}:${run}`, source: "workflow", title: current.name, phase: state === "error" ? "error" : "done", detail: state === "stopped" ? "Stopped" : event.error || "Finished", cancelable: false });
+    dropOldRuns(current.workflowId);
     emit();
     return;
   }
@@ -212,10 +235,13 @@ async function reconcileWorkflowRuns(): Promise<boolean> {
     for (const card of result.dismissed || []) dismissedCards.add(cardKey(card.chat_id, card.run_id));
     if (dismissedCards.size !== dismissedBefore) emit();
     const states = new Map<string, PanelPushEvent>();
+    const listed = new Set<string>();
     for (const event of result.events) {
       if (event.type === "workflow_run") states.set(`${event.id}:${event.run}`, event);
+      listed.add(String(event.run || ""));
       onEvent(event);
     }
+    for (const run of droppedRuns) if (!listed.has(run)) droppedRuns.delete(run);
     for (const run of runsBefore) {
       if (byRun.get(run.run) !== run || states.has(`${run.workflowId}:${run.run}`)) continue;
       applyWorkflowEvent({ type: "workflow_run", id: run.workflowId, run: run.run, state: "stopped", error: "No longer running" });
@@ -287,7 +313,7 @@ export function hydrateWorkflowRunHistory(workflowId: string, name: string, resu
   let changed = false;
   results.forEach((result, index) => {
     const run = result.run || `saved:${workflowId}:${result.started || 0}:${index}`;
-    if (clearedRuns.has(run)) return;
+    if (clearedRuns.has(run) || droppedRuns.has(run)) return;
     const previous = byRun.get(run);
     if (previous?.state === "running" || JSON.stringify(previous?.result) === JSON.stringify(result)) return;
     const state = previous?.state || (result.error === "Stopped" ? "stopped" : result.ok === false ? "error" : "done");
@@ -306,7 +332,9 @@ export function hydrateWorkflowRunHistory(workflowId: string, name: string, resu
     if (!runToChat.has(run)) runToChat.set(run, result.conv_id || "");
     changed = true;
   });
-  if (changed) emit();
+  if (!changed) return;
+  dropOldRuns(workflowId);
+  emit();
 }
 
 /** Clear completed history while active runs and their Stop controls stay available. */
@@ -371,6 +399,7 @@ export function subscribeWorkflowEvents(listener: (event: PanelPushEvent) => voi
 export function resetWorkflowRunsForTests(): void {
   byRun.clear();
   clearedRuns.clear();
+  droppedRuns.clear();
   dismissedCards.clear();
   runToChat.clear();
   latestEvents.clear();
