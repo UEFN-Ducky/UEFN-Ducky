@@ -90,6 +90,10 @@ class PluginClientPool:
         self._connections: dict[str, PluginConnection] = {}
         self._tools_cache: list[Tool] | None = None
         self._tools_cache_ids: tuple[str, ...] | None = None
+        self._inventories: dict[str, list[Tool]] = {}
+        self._inventory_retry: dict[str, float] = {}
+        self._inventory_failures: dict[str, int] = {}
+        self._inventory_refresh = 0.0
         # namespaced tool name -> its server's annotations (readOnlyHint etc.).
         # Lets the change journal tell a nested read from a nested mutation.
         self._tool_annotations: dict[str, Any] = {}
@@ -416,20 +420,44 @@ class PluginClientPool:
     async def list_all_plugin_tools(self) -> list[Tool]:
         ensure_plugin_prefix_cache()
         ids = tuple(effective_plugin_ids())
-        if self._tools_cache is not None and self._tools_cache_ids == ids:
-            return list(self._tools_cache)
+        now = time.monotonic()
+        for pid in set(self._inventories) | set(self._inventory_retry):
+            if pid not in ids:
+                self._inventories.pop(pid, None)
+                self._inventory_retry.pop(pid, None)
+                self._inventory_failures.pop(pid, None)
+        if (self._tools_cache is not None and self._tools_cache_ids == ids
+                and now < self._inventory_refresh):
+            return [tool.model_copy(deep=True) for tool in self._tools_cache]
         out: list[Tool] = []
-        failed = False
         for pid in ids:
-            try:
-                out.extend(await self.list_tools_for_plugin(pid))
-            except Exception:
-                failed = True
-                continue
-        if not failed:
-            self._tools_cache = out
-            self._tools_cache_ids = ids
-        return list(out)
+            if now >= self._inventory_retry.get(pid, 0):
+                try:
+                    tools = await self.list_tools_for_plugin(pid)
+                except Exception:
+                    failures = min(self._inventory_failures.get(pid, 0) + 1, 5)
+                    self._inventory_failures[pid] = failures
+                    self._inventory_retry[pid] = now + min(2 ** failures, 30)
+                else:
+                    self._inventories[pid] = [tool.model_copy(deep=True) for tool in tools]
+                    self._inventory_failures.pop(pid, None)
+                    self._inventory_retry.pop(pid, None)
+            unavailable = pid in self._inventory_failures
+            for original in self._inventories.get(pid, []):
+                tool = original.model_copy(deep=True)
+                tool.meta = dict(tool.meta or {})
+                tool.meta["ducky_availability"] = {
+                    "state": "unavailable" if unavailable else "available",
+                    "reason": "Server inventory unavailable; retry pending." if unavailable else "",
+                }
+                if unavailable:
+                    tool.description = (original.description or original.name) + " [Currently unavailable: server inventory refresh failed.]"
+                out.append(tool)
+        self._tool_annotations = {tool.name: tool.annotations for tool in out if tool.annotations is not None}
+        self._tools_cache = out
+        self._tools_cache_ids = ids
+        self._inventory_refresh = min([now + 30, *self._inventory_retry.values()])
+        return [tool.model_copy(deep=True) for tool in out]
 
     @_pool_loop_bound
     async def call_tool(self, namespaced_name: str, arguments: dict[str, Any] | None) -> str:
@@ -500,29 +528,14 @@ class PluginClientPool:
                 f"the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from None
         except Exception:
-            # Dead pooled stream (ClosedResourceError etc.): the server restarted
-            # since we cached this session, while status probes open fresh sockets
-            # and still say "online". Self-heal — drop the session, reconnect,
-            # retry ONCE — instead of failing every call until app restart.
-            try:
-                await self._close_connection(conn)
-                session = await self._ensure_session(conn)
-                with _watchdog():
-                    raw = await _invoke(session)
-                self.invalidate_tools_cache()  # server restart may have changed tools
-            except asyncio.TimeoutError:
-                raise RuntimeError(
-                    f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
-                    f"{_TOOL_TIMEOUT_SEC:.0f}s on a fresh session. Use the Ducky "
-                    f"fallback tool for this step; {_TOGGLE_HINT}"
-                ) from None
-            except Exception as e2:
-                detail = str(e2).strip() or type(e2).__name__
-                raise RuntimeError(
-                    f"Nested MCP '{plugin_id}' tool '{original_name}' failed even "
-                    f"after an automatic reconnect: {detail}. Use the Ducky fallback "
-                    f"tool for this step; {_TOGGLE_HINT}"
-                ) from e2
+            # The request may already have executed. Retire the stream for the
+            # next explicit call, but never replay an uncertain mutation.
+            self.invalidate_tools_cache()
+            await self._close_connection(conn)
+            raise RuntimeError(
+                f"Nested MCP '{plugin_id}' tool '{original_name}' connection failed; "
+                "execution may have occurred. Check the result before retrying."
+            ) from None
         conn.last_used = time.time()
         if hasattr(raw, "content"):
             return _content_to_text(raw.content)

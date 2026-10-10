@@ -11,6 +11,7 @@ from backend.mcp_plugins import bridge_proxy
 
 def test_sync_adds_and_removes_proxies() -> None:
     bridge_proxy._PROXY_TOOL_NAMES.clear()
+
     fake_mcp = MagicMock()
     tm = MagicMock()
     tm._tools = {}
@@ -48,4 +49,39 @@ def test_sync_adds_and_removes_proxies() -> None:
         assert "demo__pong" not in tm._tools
         assert asyncio.iscoroutinefunction(tm._tools["demo__ping"])
 
+        pool.list_all_plugin_tools = AsyncMock(side_effect=ConnectionError("offline"))
+        asyncio.run(bridge_proxy.sync_nested_mcp_proxies_async())
+        assert bridge_proxy._PROXY_TOOL_NAMES == {"demo__ping"}
+        assert "demo__ping" in tm._tools
+
+        pool.list_all_plugin_tools = AsyncMock(return_value=[])
+        asyncio.run(bridge_proxy.sync_nested_mcp_proxies_async())
+        assert not bridge_proxy._PROXY_TOOL_NAMES
+
     bridge_proxy._PROXY_TOOL_NAMES.clear()
+
+
+def test_real_proxy_availability_updates_preserve_annotations(monkeypatch):
+    from mcp.server.fastmcp import FastMCP
+    from mcp.types import Tool, ToolAnnotations
+    server = FastMCP("test")
+    monkeypatch.setattr(bridge_proxy, "mcp", server)
+    monkeypatch.setattr(bridge_proxy, "_PROXY_TOOL_NAMES", set())
+    monkeypatch.setattr(bridge_proxy, "_clear_list_tools_cache", lambda: None)
+    tool = Tool(name="demo__ping", description="ping", inputSchema={"type": "object"},
+                annotations=ToolAnnotations(readOnlyHint=True),
+                _meta={"ducky_availability": {"state": "available"}})
+    pool = MagicMock()
+    pool.list_all_plugin_tools = AsyncMock(return_value=[tool])
+    monkeypatch.setattr("backend.mcp_plugins.store.ensure_plugin_prefix_cache", lambda: None)
+    monkeypatch.setattr("backend.mcp_plugins.client_pool.get_plugin_pool", lambda: pool)
+    asyncio.run(bridge_proxy.sync_nested_mcp_proxies_async())
+    registered = server._tool_manager._tools[tool.name]
+    schema = registered.parameters.copy()
+    tool.meta["ducky_availability"]["state"] = "unavailable"
+    tool.description = "ping [Currently unavailable]"
+    asyncio.run(bridge_proxy.sync_nested_mcp_proxies_async())
+    assert registered.meta["ducky_availability"]["state"] == "unavailable"
+    assert registered.annotations.readOnlyHint is True
+    assert registered.parameters == schema
+    assert "unavailable" in registered.description

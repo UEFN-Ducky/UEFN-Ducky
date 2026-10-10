@@ -91,13 +91,15 @@ async def sync_nested_mcp_proxies_async() -> list[str]:
             wanted_tools = await pool.list_all_plugin_tools()
         except Exception as exc:
             _log.warning("nested MCP list failed: %s", exc)
-            wanted_tools = []
+            return []  # An outage is not an authoritative empty inventory.
 
         wanted_names = {t.name for t in wanted_tools}
         # Remove proxies that are no longer enabled / available.
+        changed = False
         for name in list(_PROXY_TOOL_NAMES):
             if name not in wanted_names:
                 _remove_proxy_tool(name)
+                changed = True
 
         existing = _registered_tool_names()
         for tool in wanted_tools:
@@ -106,10 +108,20 @@ async def sync_nested_mcp_proxies_async() -> list[str]:
                 # Collision with a real FastMCP tool — skip.
                 continue
             if name in _PROXY_TOOL_NAMES:
+                registered = getattr(mcp._tool_manager, "_tools", {}).get(name)
+                if registered is not None and hasattr(registered, "parameters"):
+                    registered.description = tool.description or name
+                    registered.annotations = getattr(tool, "annotations", None)
+                    registered.meta = getattr(tool, "meta", None)
+                    changed = True
                 continue
             try:
                 fn = _make_proxy(name, tool.description or name)
                 mcp.tool(name=name)(fn)
+                registered = getattr(mcp._tool_manager, "_tools", {}).get(name)
+                if registered is not None and hasattr(registered, "parameters"):
+                    registered.annotations = getattr(tool, "annotations", None)
+                    registered.meta = getattr(tool, "meta", None)
                 _PROXY_TOOL_NAMES.add(name)
                 existing.add(name)
                 added.append(name)
@@ -117,6 +129,7 @@ async def sync_nested_mcp_proxies_async() -> list[str]:
                 _log.warning("failed to proxy %s: %s", name, exc)
         if added:
             _log.info("nested MCP proxies: +%d (%s)", len(added), ", ".join(added[:8]))
+        if added or changed:
             _clear_list_tools_cache()
     finally:
         _SYNCING = False
