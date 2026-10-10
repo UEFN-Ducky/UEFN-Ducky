@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from frontend.ui_web.terminal.session import _DONE_RE, TerminalSession
+from frontend.ui_web.terminal.session import _DONE_RE, TerminalSession, agent_command_output
 
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
 needs_powershell = pytest.mark.skipif(
@@ -75,9 +75,36 @@ def test_a_negative_windows_exit_code_still_counts_as_done():
     assert match and int(match.group(1)) == -1073741819
 
 
-def test_bash_commands_are_unchanged():
+def test_bash_commands_print_a_begin_mark_the_echo_cannot_spell():
     wrapped = TerminalSession(shell="bash", cwd=".")._wrap_agent_command("ls", background=False)
-    assert wrapped == "ls; echo __DUCKY_DONE__$?__\r\n"
+    assert wrapped == "printf '__DUCKY_%s__\\n' BEGIN; ls; echo __DUCKY_DONE__$?__\r\n"
+    assert "__DUCKY_BEGIN__" not in wrapped and "__DUCKY_BEGIN__" not in _wrapped("ls")
+
+
+def test_the_agent_reads_only_the_command_output_without_escape_codes():
+    # Shaped like a real PowerShell console: PSReadLine colors and redraws the typed
+    # line (cursor moves, then the line again), then the output, then the next prompt.
+    typed = _wrapped("echo hello").rstrip("\r")
+    raw = (
+        "\x1b[1t\x1b[?1004hPS C:\\p> \x1b[?25l\x1b[1;64H\x1b[93mecho\x1b[39;49m"
+        + typed.replace("echo", "\x1b[93mecho\x1b[0m") + "\x1b[2;107H\x1b[?25h"
+        + "\r\n__DUCKY_BEGIN__\r\nhello\r\n\x1b[32mworld\x1b[0m\r\n"
+        + "__DUCKY_DONE__0__\r\n\x1b]0;PowerShell\x07PS C:\\p> "
+    )
+    assert agent_command_output(raw) == "hello\nworld"
+
+
+def test_a_redrawn_progress_line_shows_what_was_written_last():
+    raw = "__DUCKY_BEGIN__\r\n 10%\r 55%\r100% done\r\n__DUCKY_DONE__0__\r\n"
+    assert agent_command_output(raw) == "100% done"
+
+
+def test_an_earlier_command_never_answers_for_a_command_still_running():
+    raw = (
+        "__DUCKY_BEGIN__\r\nold output\r\n__DUCKY_DONE__0__\r\nPS> "
+        "__DUCKY_BEGIN__\r\nstill building...\r\n"
+    )
+    assert agent_command_output(raw) == "still building..."
 
 
 @needs_powershell
@@ -91,7 +118,7 @@ def test_a_real_powershell_terminal_finishes_and_reports_success(tmp_path):
         result = session.run_command("echo ducky-pty-ok", timeout_s=60)
         assert result["ok"], result
         assert result["exit_code"] == 0
-        assert "ducky-pty-ok" in result["output_tail"]
+        assert result["output_tail"] == "ducky-pty-ok", result
         failed = session.run_command(r"Get-Item C:\no\such\path_ducky_xyz", timeout_s=60)
         assert failed["ok"] and failed["exit_code"] == 1, failed
     finally:

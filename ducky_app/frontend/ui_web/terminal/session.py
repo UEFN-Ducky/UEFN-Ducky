@@ -28,6 +28,16 @@ _OUTPUT_CHUNK_CHARS = 8 * 1024
 # Taskbar progress codes (OSC 9;4) never show anything; they stay out of the kept history.
 _PROGRESS_SEQ_RE = re.compile(r"\x1b\]9;4;[0-9;]*(?:\x07|\x1b\\)")
 _DONE_RE = re.compile(r"__DUCKY_DONE__(-?\d+)__")  # Windows exit codes can be negative
+# Printed just before an agent command runs. The typed line only spells it as a format
+# string, so the shell's echo of the command (PSReadLine redraws it several times) never
+# matches; what lies between this and the done marker is the command's own output.
+_BEGIN_MARK = "__DUCKY_BEGIN__"
+_ESCAPE_SEQ_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI: colors, cursor moves, mode switches
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: titles, hyperlinks, progress
+    r"|\x1b[@-Z\\-_]"
+)
+_AGENT_OUTPUT_CHARS = 8000
 # Escape sequences that ask the terminal to REPLY (device attributes ESC[c,
 # status reports ESC[5n/6n, window/cell size reports ESC[14t…21t). Replaying
 # them makes xterm.js answer again, and the answer reaches the shell as typed
@@ -38,6 +48,35 @@ _QUERY_SEQ_RE = re.compile(
     r"|\x1b\[(?:1[4689]|2[01])(?:;[0-9;]*)?t"
 )
 _APPROVAL_TIMEOUT_S = 120.0
+
+
+def plain_terminal_text(raw: str) -> str:
+    """Terminal bytes as an agent should read them: no escape codes, redraws resolved."""
+    text = _ESCAPE_SEQ_RE.sub("", raw or "").replace("\r\n", "\n")
+    lines = []
+    for line in text.split("\n"):
+        # A bare carriage return redraws the line; what was written last is what shows.
+        if "\r" in line:
+            line = next((part for part in reversed(line.split("\r")) if part), "")
+        lines.append("".join(ch for ch in line if ch == "\t" or ch >= " ").rstrip())
+    return "\n".join(lines)
+
+
+def agent_command_output(raw: str) -> str:
+    """The command's own output between the begin and done markers, else the plain tail."""
+    text = plain_terminal_text(raw)
+    begin = text.rfind(_BEGIN_MARK)
+    if begin >= 0:
+        # The latest command: a timed-out one has no done marker yet.
+        text = text[begin + len(_BEGIN_MARK):]
+        done = _DONE_RE.search(text)
+    else:
+        done = None
+        for done in _DONE_RE.finditer(text):
+            pass
+    if done:
+        text = text[:done.start()]
+    return text.strip("\n")[-_AGENT_OUTPUT_CHARS:]
 
 
 def _process_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
@@ -376,11 +415,12 @@ class TerminalSession:
             # Enter in a PowerShell console is a bare carriage return; "\r\n" left a
             # ">>" continuation prompt behind.
             return (
+                'Write-Output ("__DUCKY_{0}__" -f "BEGIN"); '
                 f"$global:LASTEXITCODE = 0; {cmd}; $__duckyOk = $?; "
                 'Write-Output ("__DUCKY_DONE__{0}__" -f $(if ($LASTEXITCODE) { $LASTEXITCODE } '
                 "elseif ($__duckyOk) { 0 } else { 1 }))\r"
             )
-        return f"{cmd}; echo __DUCKY_DONE__$?__\r\n"
+        return f"printf '__DUCKY_%s__\\n' BEGIN; {cmd}; echo __DUCKY_DONE__$?__\r\n"
 
     def run_command(
         self,
@@ -412,13 +452,13 @@ class TerminalSession:
             return {
                 "ok": False,
                 "error": "command timed out",
-                "output_tail": self.read_output_tail(),
+                "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS)),
             }
         self.set_busy(False)
         return {
             "ok": True,
             "exit_code": self._pending_exit_code,
-            "output_tail": self.read_output_tail(),
+            "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS)),
         }
 
     def to_dict(self) -> dict[str, Any]:
