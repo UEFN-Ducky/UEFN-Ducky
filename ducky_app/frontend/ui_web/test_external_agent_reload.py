@@ -100,11 +100,12 @@ def _checkpoint() -> list[dict]:
     ]
 
 
-def test_live_turn_is_not_shown_as_interrupted():
+def test_live_turn_is_not_shown_as_interrupted(monkeypatch):
+    monkeypatch.setattr("frontend.ui_web.live_agent_runs.get_live_run_ids", lambda: frozenset({"run-1"}))
     # Reopening a tab while the agent works used to show "Interrupted before finishing"
     # and "Interrupted: ⚙ … · pending · 0ms" for a run that was still going.
     rows = _messages_to_ui(_conv(_checkpoint()), project_root="", live=True)
-    assert [r["role"] for r in rows] == ["user", "assistant", "tool"]
+    assert [r["role"] for r in rows] == ["user", "assistant", "tool", "assistant"]
     assert rows[2]["tool"]["status"] == "pending"
     assert not any(r.get("incomplete") for r in rows)
 
@@ -113,3 +114,38 @@ def test_dead_turn_still_shows_the_interruption():
     rows = _messages_to_ui(_conv(_checkpoint()), project_root="", live=False)
     assert rows[-1].get("incomplete") is True
     assert any(r["role"] == "error" and "pending" in r["text"] for r in rows)
+
+
+def test_checkpoint_requires_matching_live_run(monkeypatch):
+    monkeypatch.setattr("frontend.ui_web.live_agent_runs.get_live_run_ids", lambda: frozenset({"other-run"}))
+    rows = _messages_to_ui(_conv(_checkpoint()), project_root="", live=True)
+    assert rows[-1]["incomplete"] is True
+    assert rows[-1]["run_id"] == "run-1"
+    assert rows[-1]["live_run"] is False
+
+
+def test_failed_command_is_separate_from_checkpoint_and_stop_reason(monkeypatch):
+    monkeypatch.setattr("frontend.ui_web.live_agent_runs.get_live_run_ids", lambda: frozenset({"run-1"}))
+    messages = _checkpoint()
+    messages[-1]["blocks"][-1].update(status="error", result={"exit_code": 1, "data": "tests failed"})
+    for live in (True, False):
+        rows = _messages_to_ui(_conv(messages), project_root="", live=live)
+        failed = next(row for row in rows if row["role"] == "error")
+        assert failed["tool"]["exitCode"] == 1
+        assert failed["tool"]["status"] == "error"
+        assert rows[-1]["checkpoint"] is True
+        assert rows[-1]["live_run"] is live
+        assert bool(rows[-1]["incomplete"]) is not live
+        assert "error" not in rows[-1]
+    messages[-1]["error"] = "Provider disconnected"
+    rows = _messages_to_ui(_conv(messages), project_root="", live=False)
+    assert rows[-1]["error"] == "Provider disconnected"
+
+
+def test_live_checkpoint_before_queued_user_message(monkeypatch):
+    monkeypatch.setattr("frontend.ui_web.live_agent_runs.get_live_run_ids", lambda: frozenset({"run-1"}))
+    messages = _checkpoint() + [{"role": "user", "content": "next task"}]
+    rows = _messages_to_ui(_conv(messages), project_root="", live=True)
+    checkpoint = next(row for row in rows if row.get("checkpoint"))
+    assert checkpoint["live_run"] is True
+    assert checkpoint["incomplete"] is False

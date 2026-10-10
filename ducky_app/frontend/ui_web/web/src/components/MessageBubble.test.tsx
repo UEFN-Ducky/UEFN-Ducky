@@ -50,3 +50,12 @@ describe("MessageBubble interrupted continue", () => {
     expect(screen.getByRole("button", { name: "Permissions and rules" })).toBeTruthy();
   });
 });
+
+it("a streaming checkpoint has no Interrupted banner or Continue until stopped", () => {
+  const { rerender } = render(<MessageBubble role="assistant" text="partial" incomplete isStreaming onContinue={() => {}} />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  rerender(<MessageBubble role="assistant" text="partial" incomplete onContinue={() => {}} />);
+  expect(screen.getByText("Interrupted before finishing")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+});

@@ -1,3 +1,4 @@
+import { toolExitCode } from "../utils/toolExitCode";
 import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { getAskUserSessionForConv, subscribeAskUser } from "../ask-user";
 import { Icons } from "../icons/Icons";
@@ -78,6 +79,7 @@ function toolMeta(intent: ChatMessage, result: ChatMessage | null): ToolCallData
     name: unwrapped.name,
     arguments: unwrapped.arguments,
     status: done?.status ?? start?.status ?? (result ? (result.role === "success" ? "success" : "error") : "pending"),
+    exitCode: done?.exitCode ?? start?.exitCode,
     durationMs: done?.durationMs ?? start?.durationMs,
     result: done?.result ?? start?.result,
     llmTokens: done?.llmTokens ?? start?.llmTokens,
@@ -224,6 +226,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   // only applies to ordinary tool cards.
   const useCategoryChrome = !isChatTool && !showInlineDiff;
   const durationLabel = formatToolDuration(ms);
+  const exitCode = toolExitCode(meta);
+  const exitLabel = exitCode === undefined ? "" : ` \u00b7 exit ${exitCode}`;
 
   return (
     <div className={`tool-execution-card-wrap${embedded ? " tool-execution-card-wrap--embedded" : ""}`}>
@@ -276,7 +280,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
                       ? "skipped · repeated call"
                       : isSuccess
                         ? `${durationLabel}${tokenSuffix}`
-                        : `error · ${durationLabel}${tokenSuffix}`}
+                        : `failed${exitLabel} · ${durationLabel}${tokenSuffix}`}
             </span>
           </span>
           {showMe ? (

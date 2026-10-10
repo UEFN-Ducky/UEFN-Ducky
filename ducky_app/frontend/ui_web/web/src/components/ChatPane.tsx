@@ -320,6 +320,7 @@ export function ChatPane({
     streamThinking,
     streamStatus,
     agentRunning,
+    activeRunId,
     hasNewBelow,
     isAtBottom,
     reloadMessages,
@@ -382,8 +383,8 @@ export function ChatPane({
 
   // Regroup history only when messages change — not on every text/thinking delta.
   const committedRows = useMemo(
-    () => buildCommittedChatRows(committed, turnMessages, agentRunning),
-    [committed, turnMessages, agentRunning],
+    () => buildCommittedChatRows(committed, turnMessages, agentRunning, activeRunId),
+    [committed, turnMessages, agentRunning, activeRunId],
   );
 
   const rows = useMemo(

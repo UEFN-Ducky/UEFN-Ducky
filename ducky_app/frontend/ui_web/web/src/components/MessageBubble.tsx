@@ -103,7 +103,7 @@ export const MessageBubble = memo(function MessageBubble({
           <ThinkingBlock
             text={thinking}
             isStreaming={isStreaming && !text}
-            interrupted={incomplete}
+            interrupted={incomplete && !isStreaming}
             onStop={isStreaming ? onStop : undefined}
           />
         ) : null}
@@ -117,7 +117,7 @@ export const MessageBubble = memo(function MessageBubble({
           />
         )}
         {isStreaming && text ? <span className="message-bubble-stream-cursor" aria-hidden="true" /> : null}
-        {incomplete ? (
+        {incomplete && !isStreaming ? (
           <div className="message-bubble-interrupted" role="alert">
             <span className="message-bubble-interrupted-icon" aria-hidden="true">⚠</span>
             <span className="message-bubble-interrupted-msg">

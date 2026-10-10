@@ -860,6 +860,7 @@ export interface SidebarLayoutPatch {
 }
 
 export interface ToolCallData {
+  exitCode?: number;
   name: string;
   arguments: Record<string, unknown>;
   status?: "pending" | "success" | "error" | "cancelled" | string;
@@ -880,6 +881,9 @@ export interface FileEditData {
 }
 
 export interface ChatMessage {
+  run_id?: string;
+  checkpoint?: boolean;
+  live_run?: boolean;
   id: number | string;
   role: "user" | "assistant" | "tool" | "success" | "error";
   text: string;

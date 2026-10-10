@@ -24,6 +24,8 @@ export type ChatRow =
       thinking?: string;
       incomplete?: boolean;
       error?: string;
+      run_id?: string;
+      live_run?: boolean;
       author?: ChatMessage["author"];
     }
   | { kind: "tool"; id: string; intent: ChatMessage; result: ChatMessage | null }
@@ -200,6 +202,11 @@ export function groupChatMessages(messages: ChatMessage[]): ChatRow[] {
           result: null,
         });
       }
+    } else if ((msg.role === "error" || msg.role === "success") && msg.tool) {
+      // A paged/reloaded result can arrive without its intent. It is still a
+      // tool outcome, never a turn-level interruption.
+      grouped.push({ kind: "tool", id: uniqueId(String(msg.id)),
+        intent: { ...msg, role: "tool" }, result: msg });
     } else if (msg.role === "error") {
       // Standalone LLM/agent crash (not a tool result). Previously dropped here,
       // so timeouts showed as empty "Done" with no message.
@@ -219,7 +226,9 @@ export function groupChatMessages(messages: ChatMessage[]): ChatRow[] {
         text: msg.text,
         attachments: msg.attachments,
         thinking: msg.thinking,
-        incomplete: msg.incomplete,
+        incomplete: msg.incomplete || msg.checkpoint,
+        run_id: msg.run_id,
+        live_run: msg.live_run,
         error: msg.error,
         author: msg.author,
       });
@@ -259,6 +268,7 @@ export function buildCommittedChatRows(
   committed: ChatMessage[],
   turnMessages: ChatMessage[],
   inFlight: boolean,
+  activeRunId?: string | null,
 ): ChatRow[] {
   const combined = inFlight ? [...committed, ...turnMessages] : committed;
   const grouped = groupChatMessages(combined);
@@ -270,6 +280,10 @@ export function buildCommittedChatRows(
     if (row.kind === "bubble" && row.role === "user") { lastUser = i; break; }
   }
   const settled = grouped.map((row, i) => {
+    if (row.kind === "bubble" && row.incomplete && inFlight) {
+      const sameRun = activeRunId ? row.run_id === activeRunId : row.live_run;
+      return { ...row, incomplete: false, isStreaming: Boolean(sameRun) };
+    }
     if (row.kind !== "tool" || (inFlight && i > lastUser)) return row;
     const status = row.result?.tool?.status ?? row.intent.tool?.status;
     if (row.result || (status && status !== "pending" && status !== "running")) return row;

@@ -284,6 +284,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     hydrated,
     loadError,
     agentRunning: isRunActive(state),
+    activeRunId: state.runId,
     optimisticRunning: state.status !== "idle",
     hasNewBelow: state.hasNewBelow,
     isAtBottom: state.atBottom,

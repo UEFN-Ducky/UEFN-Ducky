@@ -479,8 +479,8 @@ def _tool_result_text(result: dict[str, Any] | None) -> str:
 def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False) -> list[dict[str, Any]]:
     """Stored conversation → flat UI rows.
 
-    ``live``: the conversation's run is still going. Its last assistant message is
-    then the crash-safe checkpoint (``incomplete``) of a turn in progress, not an
+    ``live``: the conversation's run is still going. The checkpoint with a
+    matching live run id is a turn in progress, not an
     interrupted one: no "Interrupted" flag, and tool calls without a result yet stay
     running instead of showing as failed ``· pending ·`` rows.
     """
@@ -492,6 +492,8 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
     conv_dir = get_conversations_dir(root)
     out: list[dict[str, Any]] = []
     i = 0
+    from frontend.ui_web.live_agent_runs import get_live_run_ids
+    live_runs = get_live_run_ids() if live else frozenset()
     last_index = len(conv.messages) - 1
     for index, m in enumerate(conv.messages):
         role = m.get("role", "user")
@@ -506,9 +508,8 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
         if role == "assistant":
             in_flight = (
                 live
-                and index == last_index
                 and bool(m.get("incomplete"))
-                and not str(m.get("error") or "").strip()
+                and (m.get("run_id") in live_runs if m.get("run_id") else index == last_index)
             )
             for block in m.get("blocks") or []:
                 btype = block.get("type")
@@ -561,6 +562,9 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                     "result": _tool_result_text(block_result),
                     "hint": str(block_result.get("hint") or ""),
                 }
+                exit_code = block_result.get("exit_code", block.get("exit_code"))
+                if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+                    tool_done["exitCode"] = exit_code
                 llm_tokens_val = block.get("llm_tokens")
                 if isinstance(llm_tokens_val, int) and llm_tokens_val > 0:
                     tool_done["llmTokens"] = llm_tokens_val
@@ -605,9 +609,13 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                     row_asst["incomplete"] = True
                     if isinstance(m.get("error"), str) and m["error"].strip():
                         row_asst["error"] = m["error"]
+                if m.get("incomplete"):
+                    row_asst["checkpoint"] = True
+                    row_asst["run_id"] = m.get("run_id")
+                    row_asst["live_run"] = in_flight
                 out.append(row_asst)
                 i += 1
-            elif m.get("incomplete") and not in_flight:
+            elif m.get("incomplete"):
                 # Crashed turn whose final step produced no answer/reasoning of
                 # its own (it's all in the interleaved blocks above) — still show
                 # the interruption so it never silently disappears.
@@ -616,7 +624,10 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                     "id": i,
                     "role": "assistant",
                     "text": "",
-                    "incomplete": True,
+                    "incomplete": not in_flight,
+                    "checkpoint": True,
+                    "run_id": m.get("run_id"),
+                    "live_run": in_flight,
                     **({"error": err} if isinstance(err, str) and err.strip() else {}),
                 }
                 if author:

@@ -65,3 +65,19 @@ it("shows search queries when the native action supplies a query list", () => {
   expect(container.textContent).toContain("Codex MCP · MCP configuration");
   expect(container.textContent).toContain("Result details unavailable.");
 });
+
+it("shows a failed command with its exit code on a red tool row", () => {
+  const result: ChatMessage = { id: 2, role: "error", text: "tests failed", tool: { name: "Bash", arguments: { command: "pytest" }, status: "error", exitCode: 1 } };
+  const { container } = render(<ToolExecutionCard intent={{ ...result, role: "tool" }} result={result} externalAgent />);
+  expect(container.querySelector(".tool-execution-card-shell--error")).toBeTruthy();
+  expect(container.textContent).toContain("failed");
+  expect(container.textContent).toContain("exit 1");
+  expect(container.textContent).not.toContain("Interrupted");
+});
+
+it.each(["Exit code: 2\nTwo tests failed", '{"exit_code":2,"output":"failed"}'])("keeps a checkpoint exit code visible from result text: %s", (output) => {
+  const result: ChatMessage = { id: 2, role: "error", text: "", tool: { name: "Bash", arguments: {}, status: "error", result: output } };
+  const { container } = render(<ToolExecutionCard intent={{ ...result, role: "tool" }} result={result} externalAgent />);
+  expect(container.textContent).toContain("exit 2");
+  expect(container.textContent).not.toContain("Interrupted");
+});

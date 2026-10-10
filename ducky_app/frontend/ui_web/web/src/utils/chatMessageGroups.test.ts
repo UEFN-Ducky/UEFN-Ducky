@@ -375,3 +375,24 @@ describe("historical tool state", () => {
     expect(committed[1].tool?.status).toBe("pending");
   });
 });
+
+describe("live checkpoints and failed commands", () => {
+  const checkpoint: ChatMessage = { id: 1, role: "assistant", text: "partial", checkpoint: true, run_id: "run-1", live_run: true };
+  it("renders the matching checkpoint live, then interrupted when the chat stops", () => {
+    expect(buildCommittedChatRows([], [checkpoint], true, "run-1")[0]).toMatchObject({ kind: "bubble", incomplete: false, isStreaming: true });
+    expect(buildCommittedChatRows([checkpoint], [], false)[0]).toMatchObject({ kind: "bubble", incomplete: true });
+  });
+  it("suppresses interruption during a different active run without streaming the old reply", () => {
+    expect(buildCommittedChatRows([checkpoint], [], true, "run-2")[0]).toMatchObject({ incomplete: false, isStreaming: false });
+  });
+  it("keeps orphaned failed tool results in tool rows, including paged history", () => {
+    const failed: ChatMessage = { id: 2, role: "error", text: "command failed", tool: { name: "Bash", arguments: {}, status: "error", exitCode: 1 } };
+    for (const live of [true, false]) {
+      const rows = buildCommittedChatRows([failed, checkpoint], [], live, "run-1");
+      expect(rows[0].kind).toBe("activity");
+      if (rows[0].kind !== "activity") throw new Error("expected tool activity");
+      expect(rows[0].items[0]).toMatchObject({ kind: "tool", result: { tool: { status: "error", exitCode: 1 } } });
+      expect(rows[1]).toMatchObject({ kind: "bubble", error: undefined });
+    }
+  });
+});
