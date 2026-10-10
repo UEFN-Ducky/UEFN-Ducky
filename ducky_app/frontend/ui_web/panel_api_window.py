@@ -937,11 +937,15 @@ class PanelApiWindowMixin:
         shell: str = "bash",
         cwd: str = "",
         title: str = "",
+        push_open: bool = False,
+        conv_id: str = "",
     ) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 
         workdir = _pa._normalize_project_path(cwd) if cwd.strip() else ""
-        return get_terminal_manager().spawn(shell=shell, cwd=workdir or None, title=title)
+        return get_terminal_manager().spawn(
+            shell=shell, cwd=workdir or None, title=title, push_open=push_open, conv_id=conv_id
+        )
 
     def terminal_kill(self, session_id: str) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
@@ -974,14 +978,24 @@ class PanelApiWindowMixin:
         command: str,
         source: str = "",
         conv_id: str = "",
+        agent_run: bool = False,
+        wait: bool = True,
+        background: bool = False,
+        approval_timeout_s: float = 120.0,
+        command_timeout_s: float = 300.0,
+        auto_approve: bool = False,
     ) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 
-        return get_terminal_manager().request_command(
-            session_id.strip(),
-            command,
-            source=source,
-            conv_id=conv_id,
+        mgr = get_terminal_manager()
+        if agent_run:
+            return mgr.run_agent_command(
+                session_id.strip(), command, source=source, conv_id=conv_id,
+                wait=wait, background=background, auto_approve=auto_approve,
+                approval_timeout_s=approval_timeout_s, command_timeout_s=command_timeout_s,
+            )
+        return mgr.request_command(
+            session_id.strip(), command, source=source, conv_id=conv_id,
         )
 
     def terminal_approve_command(self, request_id: str) -> dict[str, Any]:

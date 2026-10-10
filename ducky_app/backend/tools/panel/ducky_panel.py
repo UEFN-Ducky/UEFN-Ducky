@@ -1700,18 +1700,74 @@ def ducky_restore_chat_context(
     return tool_json(result, pretty=pretty)
 
 
+class _PanelTerminalManager:
+    """Outside agents must use the terminals owned by the visible window."""
+
+    def _call(self, method: str, args: dict, timeout: float = 30.0) -> dict:
+        import urllib.request
+
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_api/{method}",
+            data=json.dumps({"args": args}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": f"Ducky window terminal unavailable: {exc}"}
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "Invalid Ducky window terminal response"}
+        result = payload.get("result", payload)
+        return result if isinstance(result, dict) else {"ok": False, "error": "Invalid terminal result"}
+
+    def spawn(self, **kwargs) -> dict:
+        return self._call("terminal_spawn", {**kwargs, "cwd": kwargs.get("cwd") or ""})
+
+    def get_session(self, session_id: str):
+        from types import SimpleNamespace
+
+        for session in self.list_sessions():
+            if session.get("session_id") == session_id:
+                return SimpleNamespace(**session)
+        return None
+
+    def list_sessions(self) -> list:
+        result = self._call("terminal_list", {})
+        if "error" in result:
+            raise RuntimeError(result["error"])
+        return result.get("sessions", [])
+
+    def run_agent_command(self, session_id: str, command: str, **kwargs) -> dict:
+        # The window waits for approval and, for foreground runs, completion.
+        # Do not impose the usual short panel HTTP timeout on those waits.
+        timeout = kwargs["approval_timeout_s"] + 30.0
+        if kwargs.get("wait", True) and not kwargs.get("background", False):
+            timeout += kwargs["command_timeout_s"]
+        return self._call(
+            "terminal_request_command",
+            {"session_id": session_id, "command": command, "agent_run": True, **kwargs},
+            timeout=timeout,
+        )
+
+    def read_output(self, session_id: str, max_chars: int = 8000) -> dict:
+        return self._call("terminal_read_output", {"session_id": session_id, "max_chars": max_chars})
+
+    def kill(self, session_id: str, **_kwargs) -> dict:
+        return self._call("terminal_kill", {"session_id": session_id})
+
+
 def _terminal_manager():
+    from frontend.ui_web.agent_modes import get_panel_push
+
+    push = get_panel_push()
+    if push is None:
+        return _PanelTerminalManager()
     from frontend.ui_web.terminal import get_terminal_manager
 
     mgr = get_terminal_manager()
-    try:
-        from frontend.ui_web.agent_modes import get_panel_push
-
-        push = get_panel_push()
-        if push:
-            mgr.set_push(push)
-    except Exception:
-        pass
+    mgr.set_push(push)
     return mgr
 
 
@@ -1725,7 +1781,7 @@ def ducky_terminal_open(
 ) -> str:
     """Open a visible integrated terminal tab (bash or powershell) in the Ducky panel."""
     mgr = _terminal_manager()
-    result = mgr.spawn(shell=shell, cwd=cwd or None, title=title, push_open=True, conv_id=conv_id.strip())
+    result = mgr.spawn(shell=shell, cwd=cwd or None, title=title, push_open=True, conv_id=_terminal_chat(conv_id))
     return tool_json(result, pretty=pretty)
 
 
@@ -1761,7 +1817,7 @@ def ducky_terminal_run(
         session_id.strip(),
         command,
         source="ducky_terminal_run",
-        conv_id=conv_id.strip(),
+        conv_id=chat,
         background=background,
         wait=wait,
         approval_timeout_s=max(5.0, min(float(approval_timeout_s), 600.0)),
