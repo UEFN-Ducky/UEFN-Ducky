@@ -337,6 +337,20 @@ class ProjectWriter:
         except Exception:  # noqa: BLE001 - bookkeeping only
             log.debug("note_read failed", exc_info=True)
 
+    def preflight_paths(self, op: str, paths: Iterable[str], *, tool: str = "") -> Decision:
+        """Check every canonical path before a composite filesystem operation.
+
+        This reserves nothing: each actual operation must still run its own
+        policy check. It prevents a known later denial from partially applying
+        an otherwise permitted earlier step, not concurrent policy changes.
+        """
+        if op not in PATH_OPS:
+            raise ValueError(f"Unknown path op: {op!r}")
+        canonical = tuple(self._resolve(path)[0] for path in paths)
+        if not canonical:
+            raise ValueError("At least one path is required.")
+        return self._decide(WriteRequest(op=op, paths=canonical, tool=tool, ctx=identity.resolve_context()))
+
     def path_op(
         self,
         op: str,

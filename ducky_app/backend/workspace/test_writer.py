@@ -291,6 +291,33 @@ def test_path_op_argument_validation(project: Path) -> None:
         w.path_op("teleport", "Content/Verse/a.verse", perform=lambda: None)
 
 
+def test_preflight_canonicalizes_without_writing_or_granting_future_permission(project: Path) -> None:
+    from unittest.mock import Mock
+
+    policy = DenyOutside("Content/Verse/Shop/")
+    journal = RecordingJournal()
+    observer = RecordingObserver()
+    w = ProjectWriter.for_root(str(project), policies=[policy], journal=journal, observers=[observer])
+    paths = ("Content/Verse/Shop/./a.verse", "Content/Verse/Shop/b.verse")
+    assert w.preflight_paths("move", paths, tool="workspace_move_file").allow
+    assert policy.requests[-1].paths == ("Content/Verse/Shop/a.verse", "Content/Verse/Shop/b.verse")
+    assert journal.records == [] and observer.calls == []
+    assert not (project / "Content/Verse/Shop").exists()
+    # Preflight is not a capability or reservation: a later denial still wins.
+    policy.allowed = "Content/Verse/Other/"
+    perform = Mock()
+    with pytest.raises(WriteDenied):
+        w.path_op("move", paths[1], source=paths[0], perform=perform)
+    perform.assert_not_called()
+    assert journal.records == [] and observer.calls == []
+
+
+@pytest.mark.parametrize("op,paths", [("teleport", ("Content/a.txt",)), ("move", ())])
+def test_preflight_rejects_invalid_operation_or_empty_paths(project: Path, op, paths) -> None:
+    with pytest.raises(ValueError):
+        ProjectWriter.for_root(str(project)).preflight_paths(op, paths)
+
+
 def test_concurrent_writes_to_one_path_never_interleave(project: Path) -> None:
     obs = RecordingObserver()
     w = ProjectWriter.for_root(str(project), observers=[obs])

@@ -580,9 +580,15 @@ def workspace_move_file(source: str, destination: str, pretty: bool = False) -> 
     require_ai_path_operation(resolve_workspace_path(src), resolve_workspace_path(dst))
     src_parent, _, src_name = src.rpartition("/")
     dst_parent, _, dst_name = dst.rpartition("/")
+    intermediate = "/".join(p for p in (dst_parent, src_name) if p)
+    from backend.workspace.runtime import get_writer
+
+    # A move followed by a rename must not relocate the source before finding
+    # that the final destination is out of lane. Each step also rechecks policy.
+    paths = (src, intermediate, dst) if dst_parent != src_parent else (src, dst)
+    get_writer().preflight_paths("move", paths, tool="workspace_move_file")
     path = src
     if dst_parent != src_parent:
-        intermediate = "/".join(p for p in (dst_parent, src_name) if p)
         require_ai_path_operation(resolve_workspace_path(src), resolve_workspace_path(intermediate))
         path = project_files.move_project_entry(src, dst_parent)["path"]
     if dst_name != src_name:
