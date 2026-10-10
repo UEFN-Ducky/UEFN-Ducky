@@ -154,10 +154,35 @@ def acknowledge_plan_changes(previous: dict, plan: dict, actor_id: str, project_
             acknowledge_reports(coordinator, member)
 
 
+def _plan_work_done(coordinator_id: str, member_id: str) -> bool:
+    """True when the coordinator's plan is finished or holds no open step for this member."""
+    try:
+        from backend.agent.coding_agents import plans
+        from backend.agent.coding_agents.team_plan_events import assigned_nodes
+
+        plan = plans.load_plan(coordinator_id)
+        if not plan:
+            return False
+        if str(plan.get("status") or "") in {"finished", "completed", "archived"}:
+            return True
+        ids = set(plans._chat_and_group_ids(member_id, None))
+        owned = [n for n, owner in assigned_nodes(plan.get("nodes")) if owner in ids and not n.get("children")]
+        return bool(owned) and all(n.get("status") in {"completed", "cancelled"} for n in owned)
+    except Exception:
+        return False
+
+
 def _retry_reports(conv_id: str) -> None:
     """Retry full reports, not the original assignments. Message text cannot disable this."""
     from frontend.ui_web.agent_modes import is_agent_running
 
+    # A member whose plan work is all finished has nothing left to dispatch: the plan's
+    # own notice already told the coordinator, and each retry costs it a whole turn.
+    with _lock:
+        senders = {r.envelope.sender_conv_id for r in _reports.get(conv_id, {}).values()}
+    for sender in senders:
+        if _plan_work_done(conv_id, sender):
+            acknowledge_reports(conv_id, sender)
     with _lock:
         _report_timers.pop(conv_id, None)
         if not _reports.get(conv_id) or conv_id in _stopped:
@@ -425,7 +450,10 @@ def _format_envelope(envelope: Envelope) -> str:
         sender_title=title,
         sender_coding_agent=agent,
         body=envelope.body,
-        response_id=envelope.response_id,
+        # A report answers the receiver's own request. Saying "a reply is expected" made
+        # coordinators acknowledge every report, waking each member for an empty turn.
+        response_id="" if envelope.is_report else envelope.response_id,
+        answers=envelope.response_id if envelope.is_report else "",
         from_leader=leads_receiver(envelope.sender_conv_id, envelope.receiver_conv_id),
     )
 

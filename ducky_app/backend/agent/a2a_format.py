@@ -31,6 +31,7 @@ def format_agent_message(
     body: str,
     response_id: str = "",
     from_leader: bool = False,
+    answers: str = "",
 ) -> str:
     """Render one inbox message for delivery into the receiver's turn.
 
@@ -42,7 +43,14 @@ def format_agent_message(
         "[ducky:agent-message] from "
         + sender_label(sender_conv_id, sender_title, sender_coding_agent)
     )
-    if response_id:
+    if answers:
+        # The answer to the receiver's own request: naming it keeps the attribution,
+        # and asking for a reply to an answer made every report cost two more turns.
+        reply_line = (
+            f"[ducky:agent-message] This answers your request (response_id {answers}). "
+            "No reply is required."
+        )
+    elif response_id:
         reply_line = (
             "[ducky:agent-message] A reply is expected. When you are done, call the "
             f'`ducky_agent_send` tool with to="{sender_conv_id}", '

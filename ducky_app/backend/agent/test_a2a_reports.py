@@ -273,3 +273,27 @@ def test_reports_stop_coming_back_once_the_owner_is_told(reports):
         timer.fire()
     _settle(b)
     assert len(f.modes.sent) == sent
+
+
+def test_a_report_names_the_request_it_answers_and_asks_for_no_reply(reports):
+    # Every report said "A reply is expected", so coordinators answered each one and
+    # woke the member for an empty "acknowledged" turn.
+    _deliver_reports(reports, 1)
+    text = reports.modes.sent[0][1]
+    rid = reports.mod.unanswered_reports('coord')[0]['response_id']
+    assert f'This answers your request (response_id {rid}). No reply is required.' in text
+    assert 'A reply is expected' not in text
+
+
+def test_a_member_whose_plan_work_is_done_is_not_reported_again(reports, monkeypatch):
+    f, b = reports, reports.mod
+    _deliver_reports(f, 2)
+    monkeypatch.setattr(b, '_plan_work_done', lambda coord, member: member == 'member0')
+    b.on_agent_stopped('coord', 'done', run_id='empty0')
+    before = len(f.modes.sent)
+    f.timers[-1].fire()
+    _wait_sent(f.modes, before + 1)
+    _settle(b)
+    text = f.modes.sent[-1][1]
+    assert 'FULL REPORT 1' in text and 'FULL REPORT 0' not in text
+    assert {r['from'] for r in b.unanswered_reports('coord')} == {'member1'}

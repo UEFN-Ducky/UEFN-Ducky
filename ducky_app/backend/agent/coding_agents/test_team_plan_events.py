@@ -151,3 +151,16 @@ def test_failed_save_does_not_acknowledge(team, notices, monkeypatch):
     with pytest.raises(OSError):
         plans.update_node("coord", "a1", body_markdown="unsaved", project_root=team)
     assert acknowledged == []
+
+
+def test_report_retries_stop_once_the_members_steps_are_finished(team, notices, monkeypatch):
+    from backend.agent import a2a_broker
+
+    load = plans.load_plan
+    monkeypatch.setattr(plans, "load_plan", lambda cid, project_root=None: load(cid, project_root=team))
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    assert a2a_broker._plan_work_done("coord", "builder") is False  # a1 still in progress
+    plans.update_node("coord", "a1", status="completed", project_root=team)
+    plans.update_node("coord", "a2", status="cancelled", body_markdown="not needed", project_root=team)
+    assert a2a_broker._plan_work_done("coord", "builder") is True
+    assert a2a_broker._plan_work_done("coord", "outsider") is False  # owns nothing in this plan
