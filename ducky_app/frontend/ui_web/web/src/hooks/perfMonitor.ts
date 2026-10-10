@@ -1,6 +1,6 @@
 /**
  * Lightweight UI-thread stall monitor for the Ducky panel.
- * Reports longtasks and large rAF gaps to Python via PanelApi.report_ui_perf.
+ * Reports long animation frames (or long tasks) to Python via PanelApi.report_ui_perf.
  */
 
 import { getApi } from "./usePanelApi";
@@ -15,13 +15,11 @@ export type UiPerfEntry = {
 };
 
 const FLUSH_INTERVAL_MS = 5000;
-const FRAME_GAP_MS = 250;
 const LONGTASK_MS = 50;
 
 let installed = false;
 let buffer: UiPerfEntry[] = [];
 let peakPending = 0;
-let lastRaf = 0;
 
 function enqueue(entry: UiPerfEntry) {
   buffer.push(entry);
@@ -73,9 +71,14 @@ export function installPerfMonitor() {
   if (installed || typeof window === "undefined") return;
   installed = true;
 
+  // The browser's own long-frame / long-task reports cost nothing while the page is idle.
+  // A requestAnimationFrame sampler kept Chromium producing a frame on every vsync for as
+  // long as the window was visible, which is all day next to UEFN.
   try {
     const Observer = (window as Window & { PerformanceObserver?: typeof PerformanceObserver }).PerformanceObserver;
     if (typeof Observer === "function") {
+      const supported = Observer.supportedEntryTypes ?? [];
+      const type = supported.includes("long-animation-frame") ? "long-animation-frame" : "longtask";
       const obs = new Observer((list) => {
         for (const entry of list.getEntries()) {
           if (entry.duration >= LONGTASK_MS) {
@@ -89,43 +92,16 @@ export function installPerfMonitor() {
         }
       });
       try {
-        obs.observe({ entryTypes: ["longtask"] });
+        obs.observe({ type, buffered: false });
       } catch {
-        // longtask not supported in WebView2 — rely on rAF gaps
+        // entry type not supported here
       }
     }
   } catch {
     // ignore
   }
 
-  // WebView2/Chromium throttles rAF to ~1fps (or stops it) while the window is
-  // hidden or fully occluded — those gaps are throttling, not UI jank. Skip the
-  // measurement across any hidden period so raf_gap only reports real stalls.
-  let skipNextGap = false;
-  document.addEventListener("visibilitychange", () => {
-    skipNextGap = true;
-  });
-
-  const tick = (now: number) => {
-    if (lastRaf > 0 && !skipNextGap && !document.hidden) {
-      const gap = now - lastRaf;
-      if (gap >= FRAME_GAP_MS) {
-        enqueue({
-          kind: "ui_frame",
-          name: "raf_gap",
-          duration_ms: gap,
-          peak_pending: peakPending,
-        });
-      }
-    }
-    skipNextGap = document.hidden;
-    lastRaf = now;
-    window.requestAnimationFrame(tick);
-  };
-  window.requestAnimationFrame(tick);
-
-  // The rAF loop above already costs nothing while hidden — Chromium throttles
-  // it — but the flush timer would keep waking to look at an empty buffer.
+  // Don't wake to look at an empty buffer while the window is hidden.
   const stopFlush = setVisibleInterval(() => {
     if (buffer.length) flush();
   }, FLUSH_INTERVAL_MS);
