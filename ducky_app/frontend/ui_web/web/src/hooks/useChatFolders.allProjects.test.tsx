@@ -28,6 +28,7 @@ it("keeps a recent project that has no duckies", async () => {
     window.dispatchEvent(new Event("pywebviewready"));
   });
   await waitFor(() => expect(result.current.foldersLoaded).toBe(true));
-  expect(result.current.folders.map((folder) => folder.id)).toEqual(["project:here", "project:empty_island"]);
+  // Global Agents is always there, even empty, so duckies can be dropped into it.
+  expect(result.current.folders.map((folder) => folder.id)).toEqual(["project:here", "project:_no_project", "project:empty_island"]);
   expect(result.current.folders.every((folder) => folder.chats.length === 0 && folder.children.length === 0)).toBe(true);
 });

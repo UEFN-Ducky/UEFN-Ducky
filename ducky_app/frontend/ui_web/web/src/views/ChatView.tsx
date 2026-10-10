@@ -169,6 +169,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     setArchiveChats,
     load,
     foldersLoaded,
+    removeRows,
   } = useChatFolders(sidebarRefresh, projectSlug);
   const runningChatIds = useRunningAgents();
   // Brand-new duckies open before list_all_conversations returns — keep them in
@@ -995,7 +996,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     [openTab, expandFolder, allChats, archiveChats],
   );
 
-  useChatsChanged(load, handleRemoteConversation);
+  useChatsChanged(load, handleRemoteConversation, removeRows);
 
   const [focusWindowTab, setFocusWindowTab] = useState<{ focusId: string; title: string } | null>(null);
 
