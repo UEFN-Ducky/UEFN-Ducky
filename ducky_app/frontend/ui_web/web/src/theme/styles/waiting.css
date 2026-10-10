@@ -1,0 +1,162 @@
+/* "Waiting for your answer": the marker chats wear instead of the running spinner, the
+   header list's "Waiting for you" section, and the terminal command card (same family as
+   the question cards in ask-user.css). */
+
+.chat-waiting-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--amber, #e0af68) 70%, #000);
+  border-radius: 50%;
+  background: var(--amber, #e0af68);
+  color: #1a1408;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-waiting-marker:hover {
+  background: color-mix(in srgb, var(--amber, #e0af68) 85%, #fff);
+}
+
+.chat-waiting-marker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chat-waiting-marker--sidebar,
+.chat-waiting-marker--folder {
+  width: var(--sidebar-tree-leading, 22px);
+  height: var(--sidebar-tree-leading, 22px);
+  font-size: 13px;
+}
+
+.chat-waiting-marker--tab {
+  width: calc(16px * var(--tab-scale, 1));
+  height: calc(16px * var(--tab-scale, 1));
+  font-size: calc(10px * var(--tab-scale, 1));
+}
+
+.editor-tab-icon.is-waiting {
+  opacity: 1;
+  overflow: visible;
+}
+
+.chat-waiting-marker--chip {
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  cursor: default;
+}
+
+.group-member-chip-avatar-wrap .chat-waiting-marker--chip {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  pointer-events: none;
+}
+
+.editor-tab-hover-card-status--waiting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+/* Header background activity list */
+.bg-activity-waiting-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.bg-activity-waiting {
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bg-activity-waiting-row {
+  align-items: center;
+  cursor: pointer;
+}
+
+.bg-activity-waiting-row:hover,
+.bg-activity-waiting-row:focus-visible {
+  background: var(--hover);
+}
+
+.bg-activity-waiting-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 10px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--input-bg, var(--bg-elevated, var(--bg))) 94%, transparent);
+}
+
+/* Terminal command card */
+.terminal-approval-badge {
+  min-width: 1.75rem;
+}
+
+.terminal-approval-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.terminal-approval-where {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.terminal-approval-option {
+  align-items: center;
+}
+
+.terminal-approval-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.terminal-approval-option.is-selected:disabled {
+  opacity: 1;
+}
+
+.terminal-approval-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger, #e55);
+}
+
+.terminal-approval-card--compact {
+  gap: 8px;
+}
+
+.terminal-approval-card--compact .ask-user-prompt {
+  font-size: 13px;
+}
+
+.terminal-approval-card--compact .ask-user-detail {
+  max-height: 120px;
+}
+
+.terminal-approval-card--compact .ask-user-option {
+  padding: 7px 10px;
+}

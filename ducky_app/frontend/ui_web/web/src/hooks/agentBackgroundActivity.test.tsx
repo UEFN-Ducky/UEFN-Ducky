@@ -11,6 +11,12 @@ vi.mock("./useAgentEventBus", () => ({
 }));
 vi.mock("../navigation/openChatReference", () => ({ requestOpenChatTab: mocks.open }));
 vi.mock("./workflowRunsByChat", () => ({ subscribeWorkflowEvents: () => () => {}, refreshWorkflowRuns: vi.fn(), stopWorkflowRun: vi.fn() }));
+// The tray's command cards listen on the bus too; this file's bus mock holds one listener.
+vi.mock("../terminal/terminalApprovals", () => {
+  const none: unknown[] = [];
+  return { subscribeTerminalApprovals: () => () => {}, listTerminalApprovals: () => none,
+    terminalApprovalChoices: () => none, answerTerminalApproval: vi.fn() };
+});
 import { applyAgentBackgroundEvent, openAgentBackgroundJob, subscribeAgentBackgroundActivity } from "./agentBackgroundActivity";
 import { _resetBackgroundActivityForTests, getBackgroundJobs, countWorkingBackgroundJobs, upsertBackgroundJob } from "./backgroundActivity";
 import { useToolActivityTarget, requestToolActivity } from "../navigation/toolActivity";

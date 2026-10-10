@@ -46,6 +46,8 @@ import { ConversationScrollPeek } from "./ConversationScrollPeek";
 import { AskUserForm } from "../ask-user";
 import type { AskUserSession } from "../ask-user";
 import { settleAskUser } from "../ask-user";
+import { ChatTerminalApprovals } from "../terminal/TerminalApprovalCard";
+import { subscribePendingCard } from "../navigation/pendingCard";
 
 import type { AgentMode, ChatPlan, ChatTab, LinkedAgent, MessageAttachmentDto, PlanProgress } from "../types/panel";
 
@@ -559,6 +561,14 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
     }, []);
 
     useImperativeHandle(ref, () => ({ scrollToLatest: followLatest }), [followLatest]);
+    // "Waiting for your answer" marker or tray entry: show this chat's first unanswered card.
+    useEffect(() => subscribePendingCard(convId, () => {
+      followLatest();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const card = contentElRef.current?.querySelector<HTMLElement>("[data-pending-card]");
+        card?.scrollIntoView?.({ block: "nearest" });
+      }));
+    }), [convId, followLatest]);
     useEffect(() => { onAtBottomChange(followingRef.current); }, [scrollerReady, onAtBottomChange]);
     useEffect(() => () => { if (followFrameRef.current) cancelAnimationFrame(followFrameRef.current); }, []);
 
@@ -962,6 +972,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
                 <div
                   className="virtual-chat-message-list-row virtual-chat-ask-row"
                   data-ask-session={askSession.id}
+                  data-pending-card="question"
                 >
                   <div className="virtual-chat-ask-panel">
                     <AskUserForm
@@ -976,6 +987,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
                   </div>
                 </div>
               ) : null}
+              <ChatTerminalApprovals convId={convId} />
               <div className="virtual-chat-message-list-footer">
                 {showActivityPanel ? (
                   <AgentActivityPanel

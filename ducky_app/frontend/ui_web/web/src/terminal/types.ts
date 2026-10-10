@@ -19,7 +19,16 @@ export interface PendingTerminalCommand {
   cwd?: string;
   conv_id?: string;
   source?: string;
+  /** What "Always allow … in this chat" names; empty = not offered (pushes, deletes, chains). */
+  rule_label?: string;
+  /** Pushes or publishes a local-only AI plugin: no "Allow everything". */
+  local_only?: boolean;
+  /** Unix seconds when the agent asked. */
+  created_at?: number;
 }
+
+/** once / always (this command in this chat) / all (everything in this chat) / deny. */
+export type TerminalApprovalChoice = "once" | "always" | "all" | "deny";
 
 export interface TerminalSpawnResult {
   ok: boolean;

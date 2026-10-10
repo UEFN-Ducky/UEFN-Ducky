@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmModalProvider } from "./contexts/ConfirmModalContext";
-import { TerminalCommandApprovalProvider } from "./terminal/TerminalCommandApproval";
+import { installTerminalApprovals } from "./terminal/terminalApprovals";
 import { EditorWorkspaceBridgeProvider } from "./contexts/EditorWorkspaceBridge";
 import { QuickOpenBridgeProvider } from "./contexts/QuickOpenBridge";
 import { AskAiBridgeProvider } from "./contexts/AskAiBridge";
@@ -61,7 +61,6 @@ import { PluginCrashBanner } from "./plugin-ui/PluginCrashBanner";
 import { installPluginFaultGuards } from "./plugin-ui/pluginCrashGuard";
 import { useHydratePluginUiPrefs } from "./hooks/usePluginUiPrefs";
 import { installModelsCatalogAutoRefresh } from "./hooks/modelsCatalogCache";
-import { AskUserHost } from "./ask-user";
 import { UiRpcBridge } from "./ui-targets/UiRpcBridge";
 import { WalkthroughHost } from "./walkthrough";
 import { ShowMeLayer } from "./showme/ShowMeLayer";
@@ -135,6 +134,8 @@ export default function App() {
   // (which pops the Windows "open with" dialog). Runs in focus windows too.
   useOsFileDropGuard();
   useEffect(() => installPluginFaultGuards(), []);
+  // Agent command cards (in their chat, or the header list) in every window, focus ones too.
+  useEffect(() => { installTerminalApprovals(); }, []);
   if (focusId) {
     return <FocusView focusId={focusId} />;
   }
@@ -235,7 +236,6 @@ export default function App() {
 
   return (
     <ConfirmModalProvider>
-    <TerminalCommandApprovalProvider>
     <EditorWorkspaceBridgeProvider>
     <AskAiBridgeProvider>
     <ProblemsDuckyBridgeProvider>
@@ -261,7 +261,6 @@ export default function App() {
       <PluginPrefsHydrate />
       <PluginShellBootBridge />
       <UiRpcBridge />
-      <AskUserHost />
       <WalkthroughHost />
       <ShowMeLayer />
       <GatewaySetupNotice />
@@ -316,7 +315,6 @@ export default function App() {
     </ProblemsDuckyBridgeProvider>
     </AskAiBridgeProvider>
     </EditorWorkspaceBridgeProvider>
-    </TerminalCommandApprovalProvider>
     </ConfirmModalProvider>
   );
 }

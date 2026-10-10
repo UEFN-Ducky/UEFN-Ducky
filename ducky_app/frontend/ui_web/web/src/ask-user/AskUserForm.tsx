@@ -19,7 +19,7 @@ type Props = {
   author?: MessageAuthorDto;
   /** When false, number/Enter shortcuts are not bound (other chats may be asking too). */
   captureKeys?: boolean;
-  /** Inline chat card shows ×; modal uses its own floating close. */
+  /** Inline chat card shows × (only when every question is optional). */
   showDismiss?: boolean;
   onComplete: (result: AskUserResult) => void;
 };

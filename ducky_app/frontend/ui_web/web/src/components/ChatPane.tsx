@@ -65,6 +65,7 @@ import {
   subscribeAskUser,
   type AskUserSession,
 } from "../ask-user";
+import { useHasTerminalApprovals } from "../terminal/TerminalApprovalCard";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { CtrlWheelZoomRoot } from "./CtrlWheelZoomRoot";
 import { useChatColumnWidth } from "../hooks/useChatColumnWidth";
@@ -242,6 +243,8 @@ export function ChatPane({
     setAskSession(getAskUserSessionForConv(chat.id));
     return subscribeAskUser(() => setAskSession(getAskUserSessionForConv(chat.id)));
   }, [chat.id]);
+  // A terminal command card waiting in this chat keeps the conversation (and the card) shown.
+  const hasCommandCards = useHasTerminalApprovals(chat.id);
   const cachedComposer = getCachedChatComposer(chat.id);
   const initialCodingAgent = chat.codingAgent || "ducky";
   const initialComposer =
@@ -1423,7 +1426,7 @@ export function ChatPane({
                     Retry
                   </button>
                 </div>
-              ) : isEmpty && !(askSession && visible) ? (
+              ) : isEmpty && !(askSession && visible) && !hasCommandCards ? (
                 <ChatPaneEmptyState
                   hasApiKey={externalAgent || hasApiKey}
                   selectedModel={selectedModel}

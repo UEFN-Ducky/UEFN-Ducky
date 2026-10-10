@@ -19,7 +19,9 @@ import {
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { refreshWorkflowRuns, stopWorkflowRun, subscribeWorkflowEvents } from "../hooks/workflowRunsByChat";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
+import { useWaitingItems } from "../hooks/waitingChats";
 import { DropdownPanel } from "./DropdownPanel";
+import { WaitingForYouSection } from "./WaitingForYouSection";
 
 function phaseClass(phase: string): string {
   if (phase === "done" || phase === "ready") return "is-ok";
@@ -99,9 +101,12 @@ export function BackgroundActivityDropdown() {
     if (open) { syncReadyGraphJobs([], jobsRef.current); void refreshWorkflowRuns(); }
   }, [open]);
 
-  const title = working
-    ? `${working} running in the background`
-    : "Background activity";
+  // Chats (or agents with no chat) blocked on a question or command card.
+  const waiting = useWaitingItems().length;
+  const title = [
+    waiting ? `${waiting} waiting for your answer` : "",
+    working ? `${working} running in the background` : "",
+  ].filter(Boolean).join(" · ") || "Background activity";
 
   return (
     <div className="connection-status-root no-drag">
@@ -116,6 +121,12 @@ export function BackgroundActivityDropdown() {
         onClick={() => setOpen((v) => !v)}
       >
         <Icons.Inbox />
+        {waiting ? (
+          <span className="bg-activity-waiting-count">
+            <span className="chat-waiting-marker chat-waiting-marker--chip" aria-hidden="true">?</span>
+            {waiting} waiting
+          </span>
+        ) : null}
         {nowCount ? <span className="bg-activity-running-count">{nowCount} running</span> : null}
       </button>
       <DropdownPanel
@@ -127,6 +138,7 @@ export function BackgroundActivityDropdown() {
       >
         <div className="connection-status-menu bg-activity-menu" role="dialog" aria-label="Background activity">
           {actionError ? <p role="alert">{actionError}</p> : null}
+          <WaitingForYouSection onOpenChat={() => setOpen(false)} />
           <div className="connection-status-menu-head">Now</div>
           {live.length === 0 ? (
             <p className="bg-activity-empty">Nothing running. You can keep working.</p>

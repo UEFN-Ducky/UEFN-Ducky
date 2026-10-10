@@ -85,6 +85,13 @@ export async function stopAgentBackgroundJob(job: BackgroundJob): Promise<void> 
   endAgentJobs(job.convId, "Stopped");
 }
 
+/** Chat titles the tray last loaded (its "Waiting for you" rows name the chat). */
+const chatTitles = new Map<string, string>();
+
+export function chatTitleFor(convId: string): string {
+  return chatTitles.get(convId) || "";
+}
+
 /** Mounted once by the header, independent of which chat panes are open. */
 export function subscribeAgentBackgroundActivity(): () => void {
   const titles = new Map<string, string>();
@@ -100,7 +107,10 @@ export function subscribeAgentBackgroundActivity(): () => void {
       const chats = await api?.list_all_conversations?.(true).catch(() => null);
       if (!active || !chats) return;
       existing = new Set(chats.map((chat) => chat.id));
-      for (const chat of chats) titles.set(chat.id, chat.title);
+      for (const chat of chats) {
+        titles.set(chat.id, chat.title);
+        chatTitles.set(chat.id, chat.title);
+      }
       for (const job of getBackgroundJobs()) {
         const title = titles.get(job.convId || "");
         if (job.source === "agent" && title) {

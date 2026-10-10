@@ -12,6 +12,7 @@
 @import "../../verse-editor/verse-editor.css";
 @import "./terminal.css";
 @import "./ask-user.css";
+@import "./waiting.css";
 @import "./provider-usage.css";
 @import "./changes.css";
 @import "./automations.css";

@@ -22,7 +22,6 @@ import { QuickOpenBridgeProvider, useRegisterQuickOpenHandlers, type QuickOpenHa
 import { AskAiBridgeProvider, useRegisterAskAiHandlers, type AskAiPayload } from "../contexts/AskAiBridge";
 import { ProblemsDuckyBridgeProvider, useRegisterProblemsDuckyHandlers } from "../contexts/ProblemsDuckyBridge";
 import { useProblemsToDuckyHandlers } from "../hooks/useProblemsToDuckyHandlers";
-import { TerminalCommandApprovalProvider } from "../terminal/TerminalCommandApproval";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { TerminalsSettingsProvider } from "../contexts/TerminalsSettingsContext";
 import { useChatFolders } from "../hooks/useChatFolders";
@@ -670,7 +669,6 @@ export function FocusView({ focusId }: FocusViewProps) {
         <ThemeProvider />
         <PanelApiGate>
           <ConfirmModalProvider>
-          <TerminalCommandApprovalProvider>
             <AppHeaderActionsProvider>
               <AskAiBridgeProvider>
               <ProblemsDuckyBridgeProvider>
@@ -682,7 +680,6 @@ export function FocusView({ focusId }: FocusViewProps) {
               </ProblemsDuckyBridgeProvider>
               </AskAiBridgeProvider>
             </AppHeaderActionsProvider>
-          </TerminalCommandApprovalProvider>
           </ConfirmModalProvider>
         </PanelApiGate>
       </DuckyCatalogProvider>

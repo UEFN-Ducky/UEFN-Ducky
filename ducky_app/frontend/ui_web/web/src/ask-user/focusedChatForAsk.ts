@@ -1,6 +1,6 @@
 /**
  * Which chat pane is focused / visible — used to bind orphan ask_user calls
- * (empty conv_id) into the chat dock instead of the modal.
+ * (empty conv_id) into the chat instead of the header activity list.
  */
 let focusedChatId = "";
 

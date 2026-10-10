@@ -1,7 +1,8 @@
 /**
  * Promise broker for ducky_ask_user.
- * Sessions are concurrent per chat (conv_id). True orphans (no chat open) share one modal queue.
- * Group hubs match member asks via groupIds and show the oldest first.
+ * Sessions are concurrent per chat (conv_id) and show only in that chat (and the group hubs
+ * named in groupIds, oldest first). True orphans (no chat open) share one queue, answered one
+ * at a time from "Waiting for you" in the header's background activity list.
  */
 import type { MessageAuthorDto } from "../types/panel";
 import { getFocusedChatForAsk } from "./focusedChatForAsk";
@@ -15,7 +16,7 @@ export type AskUserSession = {
   id: string;
   questions: AskUserQuestion[];
   title: string;
-  /** Owning chat; empty → modal fallback. */
+  /** Owning chat; empty → answered from the header activity list. */
   convId: string;
   /** How many other asks wait behind this one (orphans or group queue). */
   queueAhead: number;
@@ -43,7 +44,7 @@ type Pending = {
 
 /** Active sessions keyed by id (includes chat-scoped + current orphan). */
 const sessions = new Map<string, Pending>();
-/** Orphan asks waiting behind the one currently shown in the modal. */
+/** Orphan asks waiting behind the one currently shown in the header activity list. */
 let orphanQueue: Pending[] = [];
 let orphanActiveId: string | null = null;
 let nextId = 1;
@@ -85,7 +86,7 @@ export function subscribeAskUser(cb: () => void): () => void {
   };
 }
 
-/** All live sessions (chat-scoped + current orphan modal). */
+/** All live sessions (chat-scoped + the current orphan). */
 export function listAskUserSessions(): AskUserSession[] {
   const out: AskUserSession[] = [];
   for (const p of sessions.values()) {
@@ -126,7 +127,7 @@ export function countAskUserSessionsForConv(convId: string): number {
   return n;
 }
 
-/** Current orphan (modal) session, if any. */
+/** Current orphan session (no chat), if any. */
 export function getAskUserSession(): AskUserSession | null {
   if (!orphanActiveId) return null;
   const p = sessions.get(orphanActiveId);
@@ -173,7 +174,7 @@ export function dropAnsweredAskUser(requestId: string): void {
 /**
  * Show ask-user UI. Resolves when the user finishes the batch (or errors).
  * With convId (or focused chat): docked above that chat's composer.
- * Only when no chat is available: queued in the orphan modal.
+ * Only when no chat is available: queued for the header activity list.
  */
 export function runAskUser(
   rawQuestions: unknown,

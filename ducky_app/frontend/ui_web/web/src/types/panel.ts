@@ -2029,6 +2029,12 @@ export interface AgentEvent {
   request_id?: string;
   command?: string;
   source?: string;
+  /** terminal_command_pending: what "Always allow … in this chat" names ('' = not offered). */
+  rule_label?: string;
+  /** terminal_command_pending: a local-only AI plugin push (no "Allow everything"). */
+  local_only?: boolean;
+  /** terminal_command_pending: unix seconds when the agent asked. */
+  created_at?: number;
   channel_id?: string;
   /** open_coding_agent_login: Settings → LLMs → this provider's detail slide. */
   provider_id?: string;
@@ -4101,7 +4107,10 @@ export interface PanelApi {
     source?: string,
     conv_id?: string,
   ): Promise<Record<string, unknown>>;
-  terminal_approve_command(request_id: string): Promise<Record<string, unknown>>;
+  /** scope: once, always (this command in the chat that asked) or all (everything in it). */
+  terminal_approve_command(request_id: string, scope?: "once" | "always" | "all"): Promise<Record<string, unknown>>;
+  /** Agent commands still waiting for an answer (cards to show again after a reload). */
+  terminal_pending_commands?(): Promise<Array<Record<string, unknown>>>;
   terminal_reject_command(request_id: string, reason?: string): Promise<Record<string, unknown>>;
   terminal_read_output(session_id: string, max_chars?: number): Promise<Record<string, unknown>>;
   exit_all(): Promise<boolean>;
