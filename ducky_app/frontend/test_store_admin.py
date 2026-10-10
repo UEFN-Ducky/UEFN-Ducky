@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -74,30 +78,91 @@ def test_actions_check_snapshot_vacuum_export_and_clear(tmp_path: Path) -> None:
     assert store_admin.action("bogus")["ok"] is False
 
 
-def test_restore_is_staged_and_applied_on_next_open(tmp_path: Path, monkeypatch) -> None:
-    # Own AppData: the session-wide ducky.db can still be open on a worker
-    # thread from an earlier test, and Windows then refuses the replace
-    # (WinError 32) even after this thread's connections are closed.
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    db.reset_for_tests()
+def _stage_restore_in_first_boot() -> str:
+    _appdata()
+    kv.set_doc("cache_docs", "marker", "before")
+    snap = store_admin.action("snapshot")["snapshot"]
+    kv.set_doc("cache_docs", "marker", "after")
+    staged = store_admin.action("restore", snap)
+    assert staged["ok"] and staged["restart_required"]
+    assert store_admin.overview()["restore_pending"] is True
+    assert kv.get_doc("cache_docs", "marker") == "after"  # staging is not a live restore
+    return snap
+
+
+def _verify_restore_in_second_boot(snap: str) -> None:
+    root = _appdata()
+    assert kv.get_doc("cache_docs", "marker") == "before"
+    assert not (root / store_admin.RESTORE_PENDING_NAME).exists()
+    assert any(p.name.startswith("ducky.db.replaced-") for p in root.iterdir())
+    assert store_admin.action("restore", "ducky-nope.db")["ok"] is False
+    store_admin.action("restore", snap)
+    assert store_admin.action("cancel_restore")["ok"] and store_admin.overview()["restore_pending"] is False
+
+
+def test_restore_is_staged_and_applied_on_next_open(tmp_path: Path) -> None:
+    # A process-global AppData redirect is visible to surviving test workers.
+    # reset_for_tests closes only the calling thread's handles, so it cannot
+    # simulate a restart while another worker holds the redirected Windows DB.
+    # Use actual process exit/open, with the restore root ONLY in child envs.
+    env = os.environ.copy()
+    for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME",
+                "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "TEMP", "TMP"):
+        directory = tmp_path / "restore-process" / key
+        directory.mkdir(parents=True, exist_ok=True)
+        env[key] = str(directory)
+    for key in ("DUCKY_CACHE_SMOKE", "DUCKY_TESTS_REAL_APPDATA"):
+        env.pop(key, None)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    app = Path(__file__).resolve().parents[1]
+    env["PYTHONPATH"] = str(app)
+    stage = subprocess.run(
+        [sys.executable, "-B", "-c", "import json; from frontend.test_store_admin import _stage_restore_in_first_boot; print(json.dumps(_stage_restore_in_first_boot()))"],
+        cwd=app, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert stage.returncode == 0, stage.stdout + stage.stderr
+    snapshot = json.loads(stage.stdout)
+    restored = subprocess.run(
+        [sys.executable, "-B", "-c", "import sys; from frontend.test_store_admin import _verify_restore_in_second_boot; _verify_restore_in_second_boot(sys.argv[1])", snapshot],
+        cwd=app, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert restored.returncode == 0, restored.stdout + restored.stderr
+
+
+def test_restore_boots_leave_parent_worker_and_appdata_untouched(tmp_path: Path) -> None:
+    parent_env = {key: os.environ.get(key) for key in ("LOCALAPPDATA", "APPDATA", "HOME", "TEMP")}
+    parent_path = db.db_path()
+    opened, release = threading.Event(), threading.Event()
+    errors: list[BaseException] = []
+    paths: list[Path] = []
+
+    def worker() -> None:
+        try:
+            conn = db.connect()
+            paths.append(db.db_path())
+            opened.set()
+            assert release.wait(60)
+            # Our own handle remains usable; the child test must not close it.
+            assert conn.execute("SELECT 1").fetchone()[0] == 1
+            paths.append(db.db_path())
+        except BaseException as exc:
+            errors.append(exc)
+            opened.set()
+        finally:
+            db.close_thread_connections()
+
+    thread = threading.Thread(target=worker, name="store-restore-parent-reader")
+    thread.start()
     try:
-        root = _appdata()
-        kv.set_doc("cache_docs", "marker", "before")
-        snap = store_admin.action("snapshot")["snapshot"]
-        kv.set_doc("cache_docs", "marker", "after")
-        staged = store_admin.action("restore", snap)
-        assert staged["ok"] and staged["restart_required"]
-        assert store_admin.overview()["restore_pending"] is True
-        # "next boot": drop this process's connections and open again
-        db.reset_for_tests()
-        assert kv.get_doc("cache_docs", "marker") == "before"
-        assert not (root / store_admin.RESTORE_PENDING_NAME).exists()
-        assert any(p.name.startswith("ducky.db.replaced-") for p in root.iterdir())
-        assert store_admin.action("restore", "ducky-nope.db")["ok"] is False
-        store_admin.action("restore", snap)
-        assert store_admin.action("cancel_restore")["ok"] and store_admin.overview()["restore_pending"] is False
+        assert opened.wait(10) and not errors
+        test_restore_is_staged_and_applied_on_next_open(tmp_path)
+        assert {key: os.environ.get(key) for key in parent_env} == parent_env
     finally:
-        db.reset_for_tests()
+        release.set()
+        thread.join(10)
+    assert not thread.is_alive() and not errors
+    assert paths == [parent_path, parent_path]
 
 
 def test_retire_legacy_and_import_now() -> None:
