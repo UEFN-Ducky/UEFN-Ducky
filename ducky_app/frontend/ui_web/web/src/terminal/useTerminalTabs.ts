@@ -26,6 +26,11 @@ function dtoToTab(dto: TerminalSessionDto): EditorTab {
   };
 }
 
+function sameParkedTab(a: EditorTab, b: EditorTab): boolean {
+  return a.id === b.id && a.name === b.name && a.terminalSessionId === b.terminalSessionId
+    && a.terminalShell === b.terminalShell && a.terminalWsUrl === b.terminalWsUrl && a.terminalCwd === b.terminalCwd;
+}
+
 function sessionRecordToDto(session: Record<string, unknown>): TerminalSessionDto | null {
   const sessionId = String(session.session_id || "").trim();
   const wsUrl = String(session.ws_url || "").trim();
@@ -47,9 +52,10 @@ export function useTerminalTabs(
   const [parkedTabs, setParkedTabs] = useState<EditorTab[]>([]);
   const [, bump] = useState(0);
 
+  // Nothing renders from the session map, so remembering one needs no re-render (the
+  // parked-shell poll remembers every live shell every few seconds).
   const rememberSession = useCallback((dto: TerminalSessionDto) => {
     sessionsRef.current.set(dto.session_id, dto);
-    bump((n) => n + 1);
   }, []);
 
   const unparkSession = useCallback((sessionId: string) => {
@@ -228,7 +234,10 @@ export function useTerminalTabs(
         for (const id of [...byId.keys()]) {
           if (!liveIds.has(id) && !openIds.has(id)) byId.delete(id);
         }
-        return [...byId.values()];
+        const next = [...byId.values()];
+        // Same shells as last poll: keep the old list so the chat view does not re-render.
+        if (next.length === prev.length && next.every((tab, i) => sameParkedTab(tab, prev[i]!))) return prev;
+        return next;
       });
     };
     void syncParked();
