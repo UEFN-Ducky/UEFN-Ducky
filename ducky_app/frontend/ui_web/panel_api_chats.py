@@ -845,11 +845,66 @@ class PanelApiChatsMixin:
             group = _pa.load_conversation(group_id) or group
             if moved:
                 _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
+        # Read observations only; never persist runtime or duplicate plan state.
+        import time
+        from frontend.ui_web.project_chats import conversation_project_slug, project_root_for_slug
+        from backend.agent.coding_agents.plans import load_plan_view
+        from frontend.ui_web.agent_modes import get_panel_push
+
+        members = group_members(group) if is_group_conversation(group) else []
+        try:
+            # A bridge process has no authoritative view of panel sessions.
+            running = self.list_running_agents() if get_panel_push() is not None else None
+            if not isinstance(running, list) or not all(isinstance(cid, str) for cid in running):
+                running = None
+        except Exception:
+            running = None
+        observed_at = time.time()
+        enriched = []
+        for member in members:
+            row = dict(member)
+            observation: dict[str, Any] = {
+                "observed_at": observed_at, "runtime": "unknown", "assignment": None,
+                "group_id": group.id, "role": "unknown", "project_slug": None,
+            }
+            row["observation"] = observation
+            enriched.append(row)
+            try:
+                cid = str(member.get("member_conv_id") or "")
+                conv = _pa.load_conversation(cid)
+                if conv is None or getattr(conv, "parent_conv_id", "") != group.id:
+                    continue
+                slug = conversation_project_slug(cid)
+                if not slug or slug != conversation_project_slug(group.id):
+                    continue
+                observation["project_slug"] = slug
+                observation["role"] = "leader" if cid == getattr(group, "leader_conv_id", "") else "member"
+                if running is not None:
+                    observation["runtime"] = "running" if cid in running else "idle"
+                root = "" if slug == "_no_project" else project_root_for_slug(slug)
+                if root is None:
+                    continue  # Unknown stored project: never use the active island.
+                plan = load_plan_view(cid, project_root=root)
+                if not plan:
+                    continue
+                source = plan.get("assigned_from") or {}
+                node_id = source.get("node_id")
+                node = next((n for n in plan.get("nodes", []) if n.get("id") == node_id), None)
+                if node_id and node is None:
+                    continue
+                observation["assignment"] = {
+                    "plan_id": plan.get("id"), "chat_id": plan.get("chat_id"),
+                    "node_id": node_id, "title": (node or plan).get("content", plan.get("title", "")),
+                    "status": (node or plan).get("status", "unknown"),
+                }
+            except Exception:
+                # Ambiguous/deleted assignments and unavailable stores stay unknown.
+                pass
         return {
             "ok": True,
             "is_group": is_group_conversation(group),
             "leader_conv_id": (getattr(group, "leader_conv_id", None) or "").strip(),
-            "members": group_members(group) if is_group_conversation(group) else [],
+            "members": enriched,
         }
 
     def list_agent_profiles(self) -> dict[str, Any]:

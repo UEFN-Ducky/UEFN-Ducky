@@ -19,6 +19,7 @@ import { modelFromFavorites } from "./ducky/duckyProfileForm";
 import { EditorTabHoverCardShell } from "./editor/EditorTabHoverCardShell";
 import {
   aiTypeLabel,
+  memberObservationLines,
   resolveNestedGroupHoverRows,
   shortModelLabel,
 } from "./groupMemberHover";
@@ -131,6 +132,38 @@ export function GroupMemberStrip({
   const modelEditWrapRef = useRef<HTMLDivElement>(null);
   const laneEditWrapRef = useRef<HTMLDivElement>(null);
   const chatById = useMemo(() => new Map(allChats.map((c) => [c.id, c])), [allChats]);
+  const [observedMembers, setObservedMembers] = useState<{ groupId: string; rows: GroupMemberDto[] } | null>(null);
+  const [observationNow, setObservationNow] = useState(Date.now());
+  const observationRequest = useRef(0);
+  const refreshObservations = useCallback(async () => {
+    const request = ++observationRequest.current;
+    try {
+      const result = await getApi()?.group_members?.(groupId);
+      if (request !== observationRequest.current) return;
+      setObservedMembers({ groupId, rows: result?.ok ? result.members || [] : [] });
+    } catch {
+      if (request === observationRequest.current) setObservedMembers({ groupId, rows: [] });
+    }
+    setObservationNow(Date.now());
+  }, [groupId]);
+  useEffect(() => {
+    void refreshObservations();
+    const tick = window.setInterval(() => setObservationNow(Date.now()), 15000);
+    return () => { observationRequest.current += 1; window.clearInterval(tick); };
+  }, [refreshObservations, members]);
+  useEffect(() => subscribeAgentEvents(event => {
+    const ids = new Set([groupId, ...members.map(m => m.member_conv_id)]);
+    if (observedMembers?.groupId === groupId) {
+      for (const row of observedMembers.rows) {
+        const owner = row.observation?.assignment?.chat_id;
+        if (owner) ids.add(owner);
+      }
+    }
+    if (event.conv_id && ids.has(event.conv_id) &&
+        ["plan_updated", "plan_assignment_changed", "agent_started", "agent_stopped"].includes(event.type)) {
+      void refreshObservations();
+    }
+  }), [groupId, members, observedMembers, refreshObservations]);
 
   const refreshProfiles = useCallback(() => {
     const api = getApi();
@@ -511,8 +544,8 @@ export function GroupMemberStrip({
                   disabled={editing || laneEditing}
                   cardHeight={
                     nestedGroup
-                      ? Math.min(360, 88 + Math.max(1, nestedRoster.length) * 26 + 48)
-                      : Math.min(280, 120 + (blurb ? 48 : 0) + (contextTokens > 0 ? 36 : 0))
+                      ? Math.min(520, 248 + Math.max(1, nestedRoster.length) * 26 + 48)
+                      : Math.min(440, 280 + (blurb ? 48 : 0) + (contextTokens > 0 ? 36 : 0))
                   }
                   card={
                     <>
@@ -606,6 +639,10 @@ export function GroupMemberStrip({
                         </div>
                       ) : null}
                       <div className="editor-tab-hover-card-status">
+                        {memberObservationLines({ ...m, observation: observedMembers?.groupId === groupId
+                          ? observedMembers.rows.find(row => row.member_conv_id === m.member_conv_id)?.observation
+                          : undefined }, groupId, observationNow).map(line => <div key={line}>{line}</div>)}
+                        <button type="button" onClick={() => void refreshObservations()}>Refresh observation</button>
                         {nestedGroup
                           ? "Click → open subgroup · one rep speaks here"
                           : "Click name → their work · model badge → LLM · lane badge → write lane"}

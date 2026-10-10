@@ -7,6 +7,23 @@ import {
 } from "../utils/folderContextSummary";
 import { modelFromFavorites } from "./ducky/duckyProfileForm";
 
+/** A roster read is a snapshot, not a heartbeat or proof of task completion. */
+export function memberObservationLines(member: GroupMemberDto, groupId: string, now: number): string[] {
+  const o = member.observation;
+  if (!o || o.group_id !== groupId) return ["Runtime: unknown", "Assignment: unknown"];
+  const age = now / 1000 - o.observed_at;
+  const stale = !Number.isFinite(age) || age < 0 || age > 60;
+  const task = o.assignment;
+  return [
+    `Group: ${o.group_id} · Role: ${o.role}`,
+    `Project: ${o.project_slug || "unknown"}`,
+    stale ? "Runtime: unknown (stale observation)" : `Runtime: ${o.runtime} (snapshot; not task completion)`,
+    `Observed: ${Number.isFinite(o.observed_at) ? new Date(o.observed_at * 1000).toLocaleTimeString() : "unknown"}`,
+    task ? `${stale ? "Last observed assignment" : "Assignment"}: ${task.title} [${task.status}] · plan ${task.plan_id}${task.node_id ? ` · node ${task.node_id}` : ""}` : "Assignment: unknown",
+    "Heartbeat, blocker and review verdict: unknown",
+  ];
+}
+
 export type GroupHoverRow = {
   id: string;
   name: string;

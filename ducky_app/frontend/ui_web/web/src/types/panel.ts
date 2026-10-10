@@ -88,7 +88,17 @@ export interface VerseTemplateDto {
   files?: VerseTemplateFileDto[];
 }
 
+export interface GroupMemberObservation {
+  observed_at: number;
+  runtime: "running" | "idle" | "unknown";
+  group_id: string;
+  project_slug: string | null;
+  role: "leader" | "member" | "unknown";
+  assignment: { plan_id: string; chat_id: string; node_id: string | null; title: string; status: string } | null;
+}
+
 export interface GroupMemberDto {
+  observation?: GroupMemberObservation;
   member_conv_id: string;
   profile_id: string;
   /** Role / profile handle (unique for @mentions). */
