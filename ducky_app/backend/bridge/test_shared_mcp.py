@@ -448,6 +448,34 @@ def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_pa
         thread.join(timeout=6)
 
 
+def test_reconnects_keep_one_idle_timer(monkeypatch, tmp_path) -> None:
+    """Every disconnect started a 15-minute idle timer thread that was never
+    cancelled, so a team run piled up one sleeping thread per agent turn."""
+
+    def idle_timers() -> list[threading.Thread]:
+        return [
+            t for t in threading.enumerate()
+            if isinstance(t, threading.Timer) and t.function is shared_mcp._idle_expired and t.is_alive()
+        ]
+
+    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        for n in range(30):
+            sock = _hello(f"turn-{n}")
+            shared_mcp.write_frame(sock, {"op": "bye"})
+            shared_mcp.read_frame(sock)
+            shared_mcp.close_handle(sock)
+        deadline = time.monotonic() + 3
+        while len(idle_timers()) > 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert len(idle_timers()) <= 1, f"{len(idle_timers())} idle timers alive"
+        assert shared_mcp.serving()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+        shared_mcp.reset_for_tests()
+
+
 def test_an_adapter_never_stops_a_newer_daemon(monkeypatch) -> None:
     """An agent still on the old exe killing a newer daemon cut every newer agent off."""
     from frontend import shared_mcp_adapter as ad

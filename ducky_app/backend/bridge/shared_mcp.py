@@ -35,6 +35,9 @@ _loop: asyncio.AbstractEventLoop | None = None
 _clients = 0
 # Bumped on every connect: an idle timer started before a reconnect must not stop us.
 _idle_gen = 0
+# The one pending idle timer. Each agent turn connects and disconnects, and a new
+# 15-minute timer thread per disconnect piled up dozens of sleeping threads.
+_idle_timer: threading.Timer | None = None
 _clients_lock = threading.Lock()
 _stop = threading.Event()
 _ready = threading.Event()
@@ -649,6 +652,14 @@ def _acquire_single_instance() -> Any | None:
     return fh
 
 
+def _cancel_idle_timer() -> None:
+    """Caller holds ``_clients_lock``."""
+    global _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
+
+
 def _idle_expired(gen: int) -> None:
     """Stop only if nobody has connected since this idle timer started."""
     with _clients_lock:
@@ -700,19 +711,21 @@ def serve_daemon(mcp: Any) -> None:
             with _clients_lock:
                 _clients += 1
                 _idle_gen += 1
+                _cancel_idle_timer()
             cid = conn_seq
 
             def _run_client(h: socket.socket = conn, n: int = cid) -> None:
-                global _clients
+                global _clients, _idle_timer
                 try:
                     _client_loop(mcp, h, token, key, n)
                 finally:
                     with _clients_lock:
                         _clients -= 1
                         if _clients <= 0 and not _stop.is_set():
-                            idle = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(_idle_gen,))
-                            idle.daemon = True
-                            idle.start()
+                            _cancel_idle_timer()
+                            _idle_timer = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(_idle_gen,))
+                            _idle_timer.daemon = True
+                            _idle_timer.start()
 
             threading.Thread(target=_run_client, daemon=True, name=f"shared-mcp-{cid}").start()
     finally:
@@ -820,6 +833,8 @@ def reset_for_tests() -> None:
     _ready_info.clear()
     _clients = 0
     _idle_gen = 0
+    with _clients_lock:
+        _cancel_idle_timer()
     _shared_serving = False
     _inflight.clear()
     if _listen_sock is not None:
