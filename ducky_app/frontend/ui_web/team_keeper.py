@@ -15,7 +15,7 @@ import time
 from typing import Any, Callable
 
 _TICK_S = 60.0
-_IDLE_S = 600.0  # nobody running this long before a wake
+_IDLE_S = 120.0  # nobody running this long before a wake
 _MAX_WAIT_S = 3600.0  # wakes that start no work back off up to this
 
 WAKE_TEXT = (
@@ -82,6 +82,31 @@ def _wake(chat_id: str, text: str) -> None:
     run_message(chat_id, text, "agent", model, queue_if_busy=True)
 
 
+def _team_context(plan: dict[str, Any]) -> tuple[set[str], str]:
+    from backend.agent.coding_agents.plans import _chat_and_group_ids
+    from backend.agent.coding_agents.team_plan_events import assigned_nodes
+    from frontend.ui_web.project_chats import list_all_conversation_metadata
+
+    nodes = list(assigned_nodes(plan.get("nodes")))
+    owners = {owner for _, owner in nodes if owner}
+    members = {}
+    for conv in list_all_conversation_metadata(plan.get("project_root")) if owners else []:
+        cid = str(getattr(conv, "id", ""))
+        if not getattr(conv, "is_group", False) and owners.intersection(_chat_and_group_ids(cid, plan.get("project_root"))):
+            members[cid] = getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or cid
+    open_names = [f"{n['content']} ({n['id']})" for n, _ in nodes
+                  if n.get("status") not in {"completed", "cancelled"} and not n.get("children")]
+    from backend.agent.a2a_broker import unanswered_reports
+
+    reports = [r["body"] for r in plan.get("team_reports", [])]
+    reports += [r["body"] for r in unanswered_reports(str(plan.get("chat_id") or ""))]
+    detail = "\nOpen steps: " + ("; ".join(open_names) or "see plan")
+    detail += "\nIdle members: " + ("; ".join(f"{name} ({cid})" for cid, name in members.items()) or "none listed")
+    if reports:
+        detail += "\nReports awaiting next dispatch:\n" + "\n".join(reports)
+    return set(members) | owners, detail
+
+
 def tick(
     *,
     now: float | None = None,
@@ -109,22 +134,24 @@ def tick(
         for plan in plans:
             cid = str(plan.get("chat_id") or "")
             st = _teams.setdefault(cid, {"quiet_since": now, "wakes": 0.0, "next_wake": 0.0})
-            if busy:
+            member_ids, details = _team_context(plan)
+            team_busy = busy.intersection(member_ids | {cid}) if member_ids else busy
+            if team_busy:
                 st["quiet_since"] = now
-                if busy - {cid}:
+                if team_busy - {cid}:
                     st["wakes"] = 0.0  # the team is working again: drop the backoff
                     st["next_wake"] = 0.0
                 continue
             if automatic_work_blocked(cid) or now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
                 continue
             minutes = int((now - st["quiet_since"]) // 60)
-            text = WAKE_TEXT.format(minutes=minutes, open_steps=_open_steps(plan))
+            text = WAKE_TEXT.format(minutes=minutes, open_steps=_open_steps(plan)) + details
             try:
                 wake(cid, text)
             except Exception:
                 continue
             st["wakes"] += 1
-            # A wake that starts no work waits longer each time: 10, 20, 40, 60 minutes.
+            # A wake that starts no work waits longer each time: 2, 4, 8, 16, 32, 60 minutes.
             st["next_wake"] = now + min(_IDLE_S * (2 ** (st["wakes"] - 1)), _MAX_WAIT_S)
             st["quiet_since"] = now
             woke.append(cid)

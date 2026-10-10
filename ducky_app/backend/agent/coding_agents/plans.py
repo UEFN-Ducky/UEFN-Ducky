@@ -26,7 +26,7 @@ PLAN_PROTOCOL = (
 _NODE_STATUSES = frozenset({"pending", "in_progress", "completed", "cancelled"})
 _DONE = frozenset({"completed", "cancelled"})
 _NODE_KINDS = frozenset({"step", "subplan"})
-_STARTED_NODE = frozenset({"in_progress", "completed"})
+_STARTED_NODE = frozenset({"in_progress", "completed", "cancelled"})
 
 # Agents sometimes dump sibling XML tool params into ``overview`` (wrong close
 # tag / slurped ``<parameter name="nodes">…``). Recover the tree + scrub prose.
@@ -589,12 +589,23 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
     plan["updated_at"] = time.time()
     _rollup_completed_parents(plan.get("nodes"))
     _roll_plan_status(plan)
+    from backend.agent.coding_agents.team_plan_events import completion_reports, deliver_reports
+
+    reports = completion_reports(previous, plan)
+    previous_nodes = {n["id"]: n for n in _flatten_nodes(previous.get("nodes"))}
+    started = any(n.get("status") == "in_progress" and
+                  previous_nodes.get(n["id"], {}).get("status") != "in_progress"
+                  for n in _flatten_nodes(plan.get("nodes")))
+    pending = [] if started else list(previous.get("team_reports") or [])
+    plan["team_reports"] = (pending + reports)[-20:]
     if _use_db():
         _repo(project_root).plan_put(_project_id(project_root), _safe_id(chat_id), "project", plan)
         _push_assignment_invalidated(previous, plan, project_root)
+        deliver_reports(plan, reports)
         return plan
     write_json_atomic(_plan_path(chat_id, project_root), plan)
     _push_assignment_invalidated(previous, plan, project_root)
+    deliver_reports(plan, reports)
     return plan
 
 
@@ -780,6 +791,10 @@ def update_node(
     _, _, node = _walk_find(roots, node_id)
     if node is None:
         raise ValueError("node not found")
+    if doc.get("kind") != "template" and _is_done_node(node):
+        if (content is not None or kind is not None or body_markdown is not None
+                or assignee is not None or (status is not None and status != node.get("status"))):
+            _refuse_if_done_node(node)
     # Who owns a step is bookkeeping like its status: allowed while the plan plays.
     if assignee is not None:
         owner = assignee.strip()
@@ -787,7 +802,7 @@ def update_node(
             node["assignee"] = owner
         else:
             node.pop("assignee", None)
-    structure_touch = content is not None or kind is not None or body_markdown is not None
+    structure_touch = content is not None or kind is not None
     if structure_touch and doc.get("kind") != "template":
         _refuse_if_structure_locked(doc)
         _refuse_if_done_node(node)
@@ -1279,6 +1294,7 @@ def list_plans(project_root: str | None = None) -> list[dict[str, Any]]:
                 "status": str(doc.get("status") or "open"),
                 "template_id": doc.get("template_id"),
                 "nodes": doc.get("nodes") or [],
+                "team_reports": doc.get("team_reports") or [],
                 "project_root": root,
                 "project_name": _project_display_name(root),
                 "chat_title": chat_title,

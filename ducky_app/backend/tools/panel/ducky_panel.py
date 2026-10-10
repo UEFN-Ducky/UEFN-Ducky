@@ -1976,6 +1976,15 @@ def ducky_create_plan(
     Legacy ``todos`` (flat {id?, content, status?}) become root nodes.
     chat_id defaults to the active conversation. One plan per chat; hierarchy is inside nodes.
     Parents cannot be completed until nested subplans are done. Rearrange with ducky_plan_move_node.
+
+    Team plans: give each group one section assigned to its group's chat id, never
+    several steps to one group. Members see that section in their own plan panel.
+    Finish every assignment: completed, or cancelled with the reason; set notes
+    (body_markdown) and status in one call, preserving original notes. Notes,
+    status and owner are bookkeeping allowed while playing; finished steps stay
+    frozen. Content, adding, moving and deleting steps require a pause. The plan
+    automatically tells the coordinator who finished what, with notes, and reports
+    members stopping mid-step. The coordinator must dispatch the next step at once.
     """
     from backend.agent.coding_agents.plans import create_plan, outline_numbers, push_plan_updated, todo_progress
 
@@ -2121,7 +2130,16 @@ def ducky_plan_add_node(
     body_markdown: str = "",
     pretty: bool = False,
 ) -> str:
-    """Add a step or subplan node. kind=step|subplan. parent_id empty = root. template_id edits a template."""
+    """Add a step or subplan node. kind=step|subplan. parent_id empty = root. template_id edits a template.
+    Team plans: give each group one section assigned to its group's chat id, never
+    several steps to one group. Members see that section in their own plan panel.
+    Finish every assignment: completed, or cancelled with the reason; set notes
+    (body_markdown) and status in one call, preserving original notes. Notes,
+    status and owner are bookkeeping allowed while playing; finished steps stay
+    frozen. Content, adding, moving and deleting steps require a pause. The plan
+    automatically tells the coordinator who finished what, with notes, and reports
+    members stopping mid-step. The coordinator must dispatch the next step at once.
+    """
     from backend.agent.coding_agents.plans import add_node, outline_numbers, push_plan_updated, todo_progress
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""
@@ -2165,9 +2183,18 @@ def ducky_plan_update_node(
 ) -> str:
     """Update a node's content, status, kind, body_markdown and/or assignee.
 
-    Status and assignee updates are allowed after start. ``assignee`` is the chat or
+    Status, notes and assignee updates are allowed after start. ``assignee`` is the chat or
     group id that owns this part (``""`` clears it): that group's chats then show this
     part as their plan instead of "No plan".
+
+    Team plans: give each group one section assigned to its group's chat id, never
+    several steps to one group. Members see that section in their own plan panel.
+    Finish every assignment: completed, or cancelled with the reason; set notes
+    (body_markdown) and status in one call, preserving original notes. Notes,
+    status and owner are bookkeeping allowed while playing; finished steps stay
+    frozen. Content, adding, moving and deleting steps require a pause. The plan
+    automatically tells the coordinator who finished what, with notes, and reports
+    members stopping mid-step. The coordinator must dispatch the next step at once.
     """
     from backend.agent.coding_agents.plans import (
         attach_next_tick,

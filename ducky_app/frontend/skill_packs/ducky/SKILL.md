@@ -113,6 +113,20 @@ Follow the app `PLAN_PROTOCOL` (Diagnose → Fix → Verify; tick
 Templates | Project Plans. Plan mode: outline only. Agent mode: follow and
 check off.
 
+### Team plans
+
+Give each group one section assigned to the group's chat id, never several steps
+assigned to the same group. Members see that section in their own plan panel.
+Every assignment ends finished: tick `completed` when Done-when is met, or cross
+out `cancelled` with the reason. Set the notes (`body_markdown`) and status in one
+`ducky_plan_update_node` call, preserving the original notes. Notes, status and
+owner are bookkeeping allowed while playing; a finished step stays frozen.
+Content, adding, moving and deleting steps require pausing the plan.
+The plan automatically tells its coordinator who finished each step, section or
+plan, with the notes; it also reports a member stopping mid-step. The coordinator
+must dispatch the next open step at once. After two idle minutes the keeper wakes
+the coordinator with the open steps, idle members and reports awaiting dispatch.
+
 ## Show the user (Show me)
 
 When the user asks where something is or how to find or open it (a setting, a

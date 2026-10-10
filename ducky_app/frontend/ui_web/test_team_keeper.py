@@ -29,26 +29,26 @@ def _run(now: float, running: list[str], woke: list[tuple[str, str]], plans=None
 def test_a_quiet_team_with_open_work_wakes_its_coordinator() -> None:
     woke: list[tuple[str, str]] = []
     assert _run(0, ["builder"], woke) == []  # working
-    assert _run(9 * MIN, [], woke) == []  # quiet for 9 minutes: not yet
-    assert _run(10 * MIN, [], woke) == ["coord"]
-    assert "4 open steps" in woke[0][1] and "10 minutes" in woke[0][1]
+    assert _run(1 * MIN, [], woke) == []  # quiet for 1 minute: not yet
+    assert _run(2 * MIN, [], woke) == ["coord"]
+    assert "4 open steps" in woke[0][1] and "2 minutes" in woke[0][1]
 
 
 def test_wakes_that_start_no_work_back_off_and_real_work_resets_it() -> None:
     woke: list[tuple[str, str]] = []
     times = []
-    for minute in range(0, 141):
+    for minute in range(0, 33):
         if _run(minute * MIN, [], woke):
             times.append(minute)
-    assert times == [10, 20, 40, 80, 140]  # waits 10, 20, 40, then at most 60 minutes
+    assert times == [2, 4, 8, 16, 32]  # waits 2, 4, 8, 16 minutes
     # The coordinator answering a wake on its own is not progress: the backoff holds.
-    _run(141 * MIN, ["coord"], woke)
-    assert _run(199 * MIN, [], woke) == []
-    assert _run(200 * MIN, [], woke) == ["coord"]
-    # A member working is progress: the next wake is 10 quiet minutes away again.
-    _run(201 * MIN, ["builder"], woke)
-    assert _run(210 * MIN, [], woke) == []
-    assert _run(211 * MIN, [], woke) == ["coord"]
+    _run(33 * MIN, ["coord"], woke)
+    assert _run(63 * MIN, [], woke) == []
+    assert _run(64 * MIN, [], woke) == ["coord"]
+    # A member working is progress: the next wake is 2 quiet minutes away again.
+    _run(65 * MIN, ["builder"], woke)
+    assert _run(66 * MIN, [], woke) == []
+    assert _run(67 * MIN, [], woke) == ["coord"]
 
 
 def test_any_running_agent_keeps_the_keeper_quiet() -> None:
@@ -84,7 +84,7 @@ def test_a_failed_wake_is_retried_next_tick() -> None:
         raise RuntimeError("panel busy")
 
     keeper.tick(now=0, plans=[PLAN], running=[], wake=_boom)
-    assert keeper.tick(now=10 * MIN, plans=[PLAN], running=[], wake=_boom) == []
+    assert keeper.tick(now=2 * MIN, plans=[PLAN], running=[], wake=_boom) == []
     assert keeper.tick(now=11 * MIN, plans=[PLAN], running=[], wake=lambda c, t: None) == ["coord"]
     assert calls == ["coord"]
 
@@ -105,6 +105,25 @@ def test_keeper_respects_broker_cooldown_and_explicit_stop(monkeypatch, stopped)
         broker.on_agent_stopped("coord", "error", detail='{"error":{"type":"rate_limit_error"}}')
     woke = []
     assert _run(0, [], woke) == []
-    assert _run(10 * MIN, [], woke) == []
+    assert _run(2 * MIN, [], woke) == []
     assert _run(20 * MIN, [], woke) == []
     assert woke == []
+
+
+def test_two_minute_wake_names_work_members_and_reports(monkeypatch):
+    from types import SimpleNamespace
+    from frontend.ui_web import project_chats
+    from backend.agent.coding_agents import plans
+    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda _: [SimpleNamespace(id="builder", title="Builder", is_group=False)])
+    monkeypatch.setattr(plans, "_chat_and_group_ids", lambda cid, root: [cid, "group-a"])
+    plan = {**PLAN, "nodes": [{"id": "section", "content": "Modes", "assignee": "group-a", "children": [
+        {"id": "next", "content": "Next adapter", "status": "pending"}]}],
+        "team_reports": [{"body": "Builder completed previous adapter"}]}
+    woke = []
+    assert _run(0, ["unrelated"], woke, [plan]) == []
+    assert _run(119, ["unrelated"], woke, [plan]) == []
+    assert _run(120, ["unrelated"], woke, [plan]) == ["coord"]
+    assert all(t in woke[0][1] for t in ["Next adapter (next)", "Builder (builder)", "completed previous adapter"])
+    assert _run(240, ["builder"], woke, [plan]) == []
+    assert _run(359, [], woke, [plan]) == []
+    assert _run(360, [], woke, [plan]) == ["coord"]
