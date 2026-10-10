@@ -95,3 +95,43 @@ def test_fast_agent_publishes_before_slow_agent(monkeypatch):
         time.sleep(0.02)
     release.set()
     assert fast_row is not None, "fast agent never published while slow one was probing"
+
+
+def test_opening_chats_and_settings_does_not_reprobe_every_cli(monkeypatch):
+    """Each probe spawns the CLI (`claude --version`, `auth status`); a version or login
+    changes about once a day, and every real change already expires the cache."""
+    from types import SimpleNamespace
+
+    calls = {"a": 0, "b": 0}
+
+    class _Counting:
+        def __init__(self, aid):
+            self.aid = aid
+
+        def detect(self, _settings):
+            calls[self.aid] += 1
+            return base.CodingAgentInfo(id=self.aid, label=self.aid, enabled=True, available=True, status="ok")
+
+    monkeypatch.setattr(base, "listed_external_coding_agents", lambda: ["a", "b"])
+    monkeypatch.setattr(base, "get_adapter", lambda aid: _Counting(aid))
+    monkeypatch.setattr(
+        base, "_instant_detect_payload", lambda: {"agents": [{"id": a} for a in ("a", "b")], "checking": True}
+    )
+    clock = [1000.0]
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _reset_detect()
+
+    def list_agents():
+        base.detect_all()
+        deadline = time.monotonic() + 5
+        while base._detect_refresh_inflight and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    for _ in range(20):  # chat switches, Settings and the Setup wizard over a minute
+        list_agents()
+        clock[0] += 3.0
+    assert calls == {"a": 1, "b": 1}
+    base.invalidate_detect_cache()  # a key, setting or plugin change
+    list_agents()
+    list_agents()
+    assert calls == {"a": 2, "b": 2}

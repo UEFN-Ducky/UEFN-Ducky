@@ -350,12 +350,15 @@ def list_coding_agents(settings: Any | None = None) -> list[CodingAgentInfo]:
     return out
 
 
-# Short-TTL cache for detect_all. Plugin detect() can run `claude auth status`
+# TTL cache for detect_all. Plugin detect() can run `claude auth status`
 # / `--version` with 20s timeouts — that must NEVER run on the pywebview
 # thread (it queued get_models_catalog behind it and the picker sat empty).
 # Settings/key writes expire the TTL; the last payload stays so the next
 # list_coding_agents returns immediately while a worker re-probes.
-_DETECT_TTL_SEC = 5.0
+# Every chat switch and Settings open lists the agents, and each probe spawns
+# the CLIs; a CLI's version or login changes about once a day, and every change
+# made in Ducky (settings, keys, plugins, login, Detect) expires the cache.
+_DETECT_TTL_SEC = 600.0
 _detect_lock = threading.Lock()
 _detect_cache: dict[str, Any] | None = None
 _detect_cache_at = 0.0
