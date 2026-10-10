@@ -1,5 +1,7 @@
 """The embedded Ducky agent follows the chat's approval mode (the composer's permissions button)."""
 import json
+import threading
+import time
 
 import pytest
 
@@ -40,6 +42,26 @@ def test_ask_before_changes_shows_a_card_before_a_file_edit(public, cards, choic
     assert len(shown) == 1 and shown[0]["questions"][0]["detail"] == "Verse/game.verse"
     assert public.executed == ([("workspace_write_file", EDIT)] if runs else [])
     assert public.conv.messages[-1]["content"] == "Evidence answer"
+
+
+def test_stop_works_while_an_approval_card_waits(public, monkeypatch):
+    release = threading.Event()
+
+    def stop_instead_of_answering(questions, title=""):
+        public.session._cancel.set()  # the person presses Stop with the card still up
+        release.wait(10)
+        return json.dumps({"ok": True, "answers": {"agent_permission": {"selected": ["once"], "text": "", "skipped": False}}})
+
+    monkeypatch.setattr("backend.tools.panel.panel_ui.ducky_ask_user", stop_instead_of_answering)
+    permissions.set_permission_mode(public.conv.id, "ask")
+    started = time.monotonic()
+    try:
+        public.run("workspace_write_file", EDIT, mode="agent")
+        assert time.monotonic() - started < 8
+        assert public.executed == []
+        assert any(e["type"] == "agent_stopped" and e["reason"] == "cancelled" for e in public.events)
+    finally:
+        release.set()
 
 
 def test_a_destructive_tool_is_still_refused_without_a_card_by_default(public, cards):

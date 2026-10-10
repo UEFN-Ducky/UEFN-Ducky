@@ -332,6 +332,40 @@ class AgentRunner:
     def set_approval_callback(self, cb: ApprovalCallback | None) -> None:
         self._approval_callback = cb
 
+    async def _approve(self, rec: ToolCallRecord, bridge: _CancelBridge) -> bool | None:
+        """The approval card's answer for one call, or None when the turn is stopped first.
+        The card waits on its own thread so Stop works while it is up; an answer given
+        after Stop is dropped."""
+        loop = asyncio.get_running_loop()
+        answer: asyncio.Future[bool] = loop.create_future()
+        ctx = contextvars.copy_context()  # the card belongs to this run's chat
+
+        def settle(ok: bool, error: BaseException | None) -> None:
+            if answer.done():
+                return
+            if error is not None:
+                answer.set_exception(error)
+            else:
+                answer.set_result(ok)
+
+        def wait_for_card() -> None:
+            ok, error = False, None
+            try:
+                ok = bool(ctx.run(allow_destructive_execution, [rec], self._approval_callback))
+            except BaseException as exc:  # handed to the turn, which raises it
+                error = exc
+            try:
+                loop.call_soon_threadsafe(settle, ok, error)
+            except RuntimeError:
+                pass  # the turn already ended
+
+        threading.Thread(target=wait_for_card, daemon=True, name="approval-card").start()
+        while not answer.done():
+            if bridge.is_set():
+                return None
+            await asyncio.wait({answer}, timeout=0.25)
+        return answer.result()
+
     def cancel(self) -> None:
         self._cancel.set()
 
@@ -1063,9 +1097,14 @@ class AgentRunner:
                 gate = _tool_gate(self.config.conv_id, effective_tool_name(r.name, r.arguments))
                 if gate == "run":
                     continue
+                approved: bool | None = False
                 if gate == "ask" and self._approval_callback is not None:
                     yield AgentEvent(kind="approval_needed", tools_pending=[r], text="Approve this tool call?")
-                if gate == "refuse" or not allow_destructive_execution([r], self._approval_callback):
+                    approved = await self._approve(r, bridge)
+                    if approved is None:
+                        yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
+                        return
+                if not approved:
                     r.status = "rejected"
 
             provider_messages.append(
