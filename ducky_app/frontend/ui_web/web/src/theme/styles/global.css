@@ -343,6 +343,17 @@ body.native-caption-input-ready .app-header .drag-region {
   padding: 0 4px;
   font-size: 9px;
 }
+.connection-status-btn.bg-activity-trigger {
+  width: auto;
+  min-width: 28px;
+  gap: 5px;
+  padding: 0 6px;
+}
+.bg-activity-running-count {
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--fg);
+}
 .bg-activity-menu {
   width: 100%;
   max-height: min(70vh, 480px);

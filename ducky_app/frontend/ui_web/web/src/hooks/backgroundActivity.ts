@@ -13,6 +13,12 @@ export type BackgroundJob = {
   phase: BackgroundJobPhase;
   ts: number;
   cancelable?: boolean;
+  convId?: string;
+  toolId?: string;
+  runId?: string;
+  terminalId?: string;
+  startedAt?: number;
+  endedAt?: number;
 };
 
 const STORAGE_KEY = "uefn-background-activity";
@@ -96,10 +102,17 @@ export function upsertBackgroundJob(patch: Partial<BackgroundJob> & { id: string
     percent: patch.percent !== undefined ? patch.percent : prev?.percent,
     phase: patch.phase || prev?.phase || "working",
     ts: typeof patch.ts === "number" ? patch.ts : now,
+    convId: patch.convId ?? prev?.convId,
+    toolId: patch.toolId ?? prev?.toolId,
+    runId: patch.runId ?? prev?.runId,
+    terminalId: patch.terminalId ?? prev?.terminalId,
+    startedAt: patch.startedAt ?? prev?.startedAt,
+    endedAt: patch.endedAt ?? prev?.endedAt,
     cancelable: patch.cancelable !== undefined ? Boolean(patch.cancelable) : prev?.cancelable,
   };
   const rest = snapshot.jobs.filter((j) => j.id !== id);
-  snapshot = { jobs: [next, ...rest].slice(0, MAX_ITEMS) };
+  const all = [next, ...rest];
+  snapshot = { jobs: [...all.filter((j) => j.phase === "working"), ...all.filter((j) => j.phase !== "working").slice(0, MAX_ITEMS)] };
   emit();
   return next;
 }

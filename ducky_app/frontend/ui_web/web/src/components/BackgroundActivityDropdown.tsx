@@ -1,3 +1,5 @@
+import { subscribeAgentBackgroundActivity, openAgentBackgroundJob } from "../hooks/agentBackgroundActivity";
+import { formatElapsedMs } from "../hooks/chatTurnTimer";
 import { useEffect, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import {
@@ -36,6 +38,17 @@ export function BackgroundActivityDropdown() {
   const { jobs } = useBackgroundActivity();
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const stop = subscribeAgentBackgroundActivity();
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => { stop(); clearInterval(timer); };
+  }, []);
+  const openJob = (job: BackgroundJob) => {
+    setOpen(false);
+    if (job.source === "agent") void openAgentBackgroundJob(job).catch((error) => setActionError(String(error)));
+    else openGraphJob(job);
+  };
   const [open, setOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const cancel = async (job: BackgroundJob) => {
@@ -81,7 +94,7 @@ export function BackgroundActivityDropdown() {
       <button
         ref={anchorRef}
         type="button"
-        className={`no-drag connection-status-btn${open ? " is-active" : ""}${nowCount ? " has-store-update" : ""}`}
+        className={`no-drag connection-status-btn bg-activity-trigger${open ? " is-active" : ""}${nowCount ? " has-store-update" : ""}`}
         title={title}
         aria-label="Background activity"
         aria-expanded={open}
@@ -89,7 +102,7 @@ export function BackgroundActivityDropdown() {
         onClick={() => setOpen((v) => !v)}
       >
         <Icons.Inbox />
-        {nowCount ? <span className="store-job-badge bg-activity-badge">{nowCount > 8 ? "8+" : nowCount}</span> : null}
+        {nowCount ? <span className="bg-activity-running-count">{nowCount} running</span> : null}
       </button>
       <DropdownPanel
         anchorRef={anchorRef}
@@ -108,15 +121,17 @@ export function BackgroundActivityDropdown() {
               <div
                 key={job.id}
                 className={`connection-status-menu-row ${phaseClass(job.phase)}`}
-                role={!!workflowIdFromJobId(job.id) ? "button" : undefined}
-                onClick={!!workflowIdFromJobId(job.id) ? () => openGraphJob(job) : undefined}
+                role={(!!job.convId || !!workflowIdFromJobId(job.id)) ? "button" : undefined}
+                tabIndex={job.convId || workflowIdFromJobId(job.id) ? 0 : undefined}
+                onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) { event.preventDefault(); openJob(job); } }}
+                onClick={(!!job.convId || !!workflowIdFromJobId(job.id)) ? () => openJob(job) : undefined}
               >
                 <span className="connection-status-menu-dot" aria-hidden />
                 <div className="connection-status-menu-text">
                   <span className="connection-status-menu-label">{job.title}</span>
                   <span className="connection-status-menu-detail">
                     {job.percent != null ? `${Math.round(job.percent)}% · ` : ""}
-                    {job.detail || job.source}
+                    {job.detail || job.source}{job.startedAt ? ` \u00b7 ${formatElapsedMs(Math.max(0, now - job.startedAt))}` : ""}
                   </span>
                   {job.percent != null ? (
                     <progress
@@ -142,15 +157,18 @@ export function BackgroundActivityDropdown() {
             <span>Earlier</span>
             {past.length ? (
               <button type="button" className="bg-activity-link" onClick={() => clearFinishedBackgroundJobs()}>
-                Clear
+                Clear finished
               </button>
             ) : null}
           </div>
           {past.length === 0 ? (
-            <p className="bg-activity-empty">No recent downloads or installs.</p>
+            <p className="bg-activity-empty">No recent activity.</p>
           ) : (
             past.map((job) => (
-              <div key={job.id} className={`connection-status-menu-row ${phaseClass(job.phase)}`}>
+              <div key={job.id} className={`connection-status-menu-row ${phaseClass(job.phase)}`}
+                role={job.convId ? "button" : undefined} tabIndex={job.convId ? 0 : undefined}
+                onClick={job.convId ? () => openJob(job) : undefined}
+                onKeyDown={(event) => { if (job.convId && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openJob(job); } }}>
                 <span className="connection-status-menu-dot" aria-hidden />
                 <div className="connection-status-menu-text">
                   <span className="connection-status-menu-label">{job.title}</span>
@@ -161,7 +179,7 @@ export function BackgroundActivityDropdown() {
                   className="bg-activity-dismiss"
                   title="Dismiss"
                   aria-label="Dismiss"
-                  onClick={() => dismissBackgroundJob(job.id)}
+                  onClick={(event) => { event.stopPropagation(); dismissBackgroundJob(job.id); }}
                 >
                   ×
                 </button>

@@ -541,6 +541,7 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                         "role": "tool",
                         "text": tool_line,
                         "tool": {
+                            "id": str(block.get("id") or ""),
                             "name": name,
                             "arguments": args,
                             "status": "pending",
@@ -555,6 +556,7 @@ def _messages_to_ui(conv, project_root: str | None = None, *, live: bool = False
                 done_role = "success" if status == "success" else "error"
                 block_result = block.get("result") if isinstance(block.get("result"), dict) else {}
                 tool_done: dict[str, Any] = {
+                    "id": str(block.get("id") or ""),
                     "name": name,
                     "arguments": args,
                     "status": status,

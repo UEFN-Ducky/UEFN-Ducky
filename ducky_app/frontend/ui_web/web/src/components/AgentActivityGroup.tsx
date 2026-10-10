@@ -1,4 +1,5 @@
-import { memo, useMemo } from "react";
+import { toolActivityId, useToolActivityTarget } from "../navigation/toolActivity";
+import { memo, useMemo, useEffect } from "react";
 import { Icons } from "../icons/Icons";
 import {
   chatCollapseKey,
@@ -97,6 +98,7 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
   liveLinkedAgents = [],
   externalAgent = false,
 }: AgentActivityGroupProps) {
+  const target = useToolActivityTarget(convId);
   const collapseScope = useChatCollapseScope();
   const openKey = chatCollapseKey(collapseScope, "activity-group");
 
@@ -106,6 +108,8 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
   );
 
   const [open, setOpen] = useChatCollapseState(openKey, false);
+  const targetInside = !!target && items.some((i) => i.kind === "tool" && toolActivityId(i.intent.tool) === target.toolId);
+  useEffect(() => { if (targetInside) setOpen(true); }, [target, targetInside, setOpen]);
   const toolCount = items.reduce((n, i) => n + (i.kind === "tool" ? 1 : 0), 0);
   const label = activityGroupLabel(items, live);
   const speaker = speakerParts(author);

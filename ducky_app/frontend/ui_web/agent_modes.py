@@ -771,6 +771,7 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
         raw_result = {}
     result_text = _cap_ui_result(_tool_result_text(raw_result))
     tool_payload: dict[str, Any] = {
+        "id": str(getattr(rec, "id", "") or ""),
         "name": rec.name,
         "arguments": args,
         "status": status,
@@ -877,6 +878,7 @@ async def _run_agent_loop(
                         "text": f"⚙ {_tool_line(rec.name, dict(rec.arguments or {}))}",
                         "conv_id": conv.id,
                         "tool": {
+                            "id": str(getattr(rec, "id", "") or ""),
                             "name": rec.name,
                             "arguments": dict(rec.arguments or {}),
                             "status": "pending",

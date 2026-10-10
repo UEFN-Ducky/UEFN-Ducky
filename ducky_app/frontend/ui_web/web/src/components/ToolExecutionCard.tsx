@@ -1,3 +1,6 @@
+import { formatElapsedMs } from "../hooks/chatTurnTimer";
+import { getBackgroundJobs } from "../hooks/backgroundActivity";
+import { toolActivityId, useToolActivityTarget } from "../navigation/toolActivity";
 import { toolExitCode } from "../utils/toolExitCode";
 import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { getAskUserSessionForConv, subscribeAskUser } from "../ask-user";
@@ -76,6 +79,8 @@ function toolMeta(intent: ChatMessage, result: ChatMessage | null): ToolCallData
       : {},
   );
   return {
+    id: start?.id ?? done?.id,
+    startedAt: start?.startedAt ?? done?.startedAt,
     name: unwrapped.name,
     arguments: unwrapped.arguments,
     status: done?.status ?? start?.status ?? (result ? (result.role === "success" ? "success" : "error") : "pending"),
@@ -101,9 +106,17 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   externalAgent = false,
   embedded = false,
 }: ToolExecutionCardProps) {
+  const target = useToolActivityTarget(convId);
+  const toolId = toolActivityId(intent.tool);
   const meta = toolMeta(intent, result);
+  const [now, setNow] = useState(Date.now);
   const isCancelled = meta.status === "cancelled";
   const isRunning = meta.status === "pending" || meta.status === "running";
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isRunning]);
   const isSuccess = meta.status === "success" || result?.role === "success";
   const isChatTool = isChatToolName(meta.name);
   const category = useMemo(() => resolveToolCategory(meta.name), [meta.name]);
@@ -171,6 +184,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const collapseScope = useChatCollapseScope();
   const [expanded, setExpanded] = useChatCollapseState(chatCollapseKey(collapseScope, "tool-card"), false);
 
+  useEffect(() => { if (target?.toolId === toolId) setExpanded(true); }, [target, toolId, setExpanded]);
+
   const replayWalkthrough = (e: MouseEvent | KeyboardEvent) => {
     e.stopPropagation();
     if (!walkthroughSteps?.length || walkthroughBusy) return;
@@ -208,6 +223,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const tokenSuffix =
     !isRunning && !isGuardBlocked && llmTokens > 0 ? ` · ${fmtCompactTokens(llmTokens)} tok` : "";
   const ms = meta.durationMs ?? 0;
+  const startedAt = meta.startedAt ?? getBackgroundJobs().find((j) => j.convId === convId && j.toolId === toolId)?.startedAt;
   const relPath = meta.arguments?.relative_path ?? meta.arguments?.path;
   const runningSubtitle = liveAsk
     ? "paused — answer in chat, then Submit…"
@@ -230,7 +246,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const exitLabel = exitCode === undefined ? "" : ` \u00b7 exit ${exitCode}`;
 
   return (
-    <div className={`tool-execution-card-wrap${embedded ? " tool-execution-card-wrap--embedded" : ""}`}>
+    <div data-tool-activity-id={toolId} className={`tool-execution-card-wrap${embedded ? " tool-execution-card-wrap--embedded" : ""}`}>
       {/* Diff always mounts above the tool bar — never buried behind expand/accordion. */}
       {showInlineDiff && fileEdit ? (
         <ToolFileEditDiff edit={fileEdit} onOpenFile={onOpenFile} />
@@ -273,7 +289,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
               {isRunning && isChatTool && linkedAgent
                 ? `waiting for ${linkedAgent.title}…`
                 : isRunning
-                  ? runningSubtitle
+                  ? `${runningSubtitle}${startedAt ? ` \u00b7 ${formatElapsedMs(Math.max(0, now - startedAt))}` : ""}`
                   : isCancelled
                     ? "canceled"
                     : isGuardBlocked

@@ -311,7 +311,7 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
       if (state.stream.trim()) {
         flushed.push({ id: optId(seq++), role: "assistant", text: state.stream, ...author });
       }
-      const toolRow: ChatMessage = { id: optId(seq++), role: "tool", text: event.text ?? "", tool: event.tool, ...author };
+      const toolRow: ChatMessage = { id: optId(seq++), role: "tool", text: event.text ?? "", tool: event.tool ? { ...event.tool, startedAt: event.tool.startedAt ?? Date.now() } : undefined, ...author };
       return reset(state, {
         status: "running",
         messages: [...state.messages, ...flushed, toolRow],

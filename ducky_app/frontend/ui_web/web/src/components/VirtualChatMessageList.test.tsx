@@ -1,3 +1,4 @@
+import { requestToolActivity } from "../navigation/toolActivity";
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
@@ -435,4 +436,21 @@ describe("chat scroll intent during layout changes", () => {
     view.resize(245000);
     expect(view.scrollTo).toHaveBeenCalledWith({ top: 245000, behavior: "auto" });
   });
+});
+
+
+it("opens an offscreen tool's chunk when activity is requested before history loads", () => {
+  const rows = buildHistory(40);
+  const activity = rows.find((row) => row.kind === "activity");
+  if (!activity || activity.kind !== "activity") throw new Error("missing activity");
+  const tool = activity.items.find((item) => item.kind === "tool");
+  if (!tool || tool.kind !== "tool") throw new Error("missing tool");
+  tool.intent.tool!.id = "offscreen-call";
+  const props = { ...listProps([]), convId: "offscreen-chat" };
+  requestToolActivity(props.convId, "offscreen-call");
+  const view = render(<VirtualChatMessageList {...props} />);
+  view.rerender(<VirtualChatMessageList {...props} rows={rows} />);
+  expect(view.container.textContent).toContain("q0");
+  expect(view.container.textContent).not.toContain("q39");
+  cleanup();
 });

@@ -860,6 +860,8 @@ export interface SidebarLayoutPatch {
 }
 
 export interface ToolCallData {
+  id?: string;
+  startedAt?: number;
   exitCode?: number;
   name: string;
   arguments: Record<string, unknown>;
@@ -1881,6 +1883,7 @@ export interface LinkedAgent {
 
 export interface AgentEvent {
   type:
+    | "agent_started"
     | "text_delta"
     | "thinking"
     | "tool"

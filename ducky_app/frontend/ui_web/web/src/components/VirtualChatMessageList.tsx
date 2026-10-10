@@ -1,3 +1,4 @@
+import { toolActivityId, useToolActivityTarget } from "../navigation/toolActivity";
 import {
   createContext,
   forwardRef,
@@ -793,6 +794,35 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       if (followingRef.current) scrollToBottom();
       applyWindow();
     }, [chunks.length, scrollerReady, ensureHeights, applyWindow, scrollToBottom]);
+
+    const toolTarget = useToolActivityTarget(convId);
+    const handledToolTarget = useRef(0);
+    useEffect(() => {
+      if (!toolTarget || handledToolTarget.current === toolTarget.serial) return;
+      let index = -1;
+      for (let i = turns.length - 1; i >= 0; i--) {
+        if (turns[i].responses.some((row) => row.kind === "tool"
+          ? toolActivityId(row.intent.tool) === toolTarget.toolId
+          : row.kind === "activity" && row.items.some((item) => item.kind === "tool" && toolActivityId(item.intent.tool) === toolTarget.toolId))) {
+          index = i; break;
+        }
+      }
+      if (index < 0) return; // History may still be loading.
+      handledToolTarget.current = toolTarget.serial;
+      const chunk = Math.floor(index / CHUNK_TURNS);
+      followingRef.current = false;
+      const scroller = scrollerElRef.current;
+      if (scroller) scroller.scrollTop = heightsRef.current.slice(0, chunk).reduce((a, b) => a + b, 0);
+      setWin({ start: Math.max(0, chunk - 1), end: Math.min(chunks.length - 1, chunk + 1) });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (handledToolTarget.current !== toolTarget.serial) return;
+          const nodes = contentElRef.current?.querySelectorAll<HTMLElement>("[data-tool-activity-id]");
+          const node = Array.from(nodes || []).reverse().find((el) => el.dataset.toolActivityId === toolTarget.toolId);
+          node?.scrollIntoView?.({ block: "center" });
+        });
+      });
+    }, [toolTarget, turns, chunks.length]);
 
     const { topPad, bottomPad } = useMemo(() => {
       void padTick;

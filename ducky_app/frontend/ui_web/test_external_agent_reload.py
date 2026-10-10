@@ -47,6 +47,7 @@ def test_external_turn_blocks_rebuild_step_rows():
     assert rows[1]["text"] == "Checking the device first."
     assert rows[2]["tool"]["name"] == "mcp__uefn__wire_verse_device_ref"
     assert rows[3]["tool"]["result"] == "wired"
+    assert rows[2]["tool"]["id"] == rows[3]["tool"]["id"] == "t1"
     assert rows[4]["text"] == "Wired and saved."
 
 
@@ -149,3 +150,12 @@ def test_live_checkpoint_before_queued_user_message(monkeypatch):
     checkpoint = next(row for row in rows if row.get("checkpoint"))
     assert checkpoint["live_run"] is True
     assert checkpoint["incomplete"] is False
+
+
+def test_live_tool_completion_preserves_call_identity():
+    from frontend.ui_web.agent_modes import _push_tool_done
+    pushed = []
+    rec = SimpleNamespace(id="call-42", name="exec_command", arguments={"cmd": "pytest"},
+                          status="success", duration_ms=1, result={"ok": True, "data": "passed"})
+    _push_tool_done(pushed.append, "conv-x", rec)
+    assert pushed[-1]["tool"]["id"] == "call-42"
