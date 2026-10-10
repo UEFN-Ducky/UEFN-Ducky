@@ -116,25 +116,30 @@ def test_large_top_level_fields_and_odd_shapes_round_trip() -> None:
     assert len({r[-1] for r in refs}) == 2 and len(refs) == 3
 
 
-def test_rows_saved_before_the_upgrade_still_load(tmp_path, monkeypatch) -> None:
-    """A database at schema 14 (every body inline) opens, migrates and reads the same."""
+def _saved_before_the_upgrade(monkeypatch, chats: dict[str, list[dict]]) -> None:
+    """Write *chats* into a database at schema 14 (every body inline), then reopen at head."""
     real_files = db.migration_files
     old_files = [(n, p) for n, p in real_files() if n <= 14]
     db.reset_for_tests()
     monkeypatch.setattr(db, "migration_files", lambda: old_files)
     conn = db.connect()
     assert db.user_version(conn) == 14
-    old = [_user("before"), _assistant(_tool_text("old"))]
     with db.write_txn(conn):
-        conn.execute("INSERT INTO conversations(id, project_id) VALUES ('legacy', ?)", (PROJECT,))
-        for seq, message in enumerate(old):
-            body = _json(message)
-            conn.execute(
-                "INSERT INTO messages(conv_id, seq, hash, role, text, body) VALUES ('legacy', ?, ?, ?, ?, ?)",
-                (seq, repo._hash(body), message["role"], repo.message_search_text(message), body),
-            )
+        for conv_id, messages in chats.items():
+            conn.execute("INSERT INTO conversations(id, project_id) VALUES (?, ?)", (conv_id, PROJECT))
+            for seq, message in enumerate(messages):
+                body = _json(message)
+                conn.execute(
+                    "INSERT INTO messages(conv_id, seq, hash, role, text, body) VALUES (?, ?, ?, ?, ?, ?)",
+                    (conv_id, seq, repo._hash(body), message["role"], repo.message_search_text(message), body),
+                )
     db.reset_for_tests()
     monkeypatch.setattr(db, "migration_files", real_files)
+
+
+def test_rows_saved_before_the_upgrade_still_load(monkeypatch) -> None:
+    old = [_user("before"), _assistant(_tool_text("old"))]
+    _saved_before_the_upgrade(monkeypatch, {"legacy": old})
 
     conn = db.connect()
     assert db.user_version(conn) == db.head_version()
@@ -232,3 +237,88 @@ def test_values_a_copy_cannot_track_are_serialised_every_time() -> None:
     stats = repo.conv_save(PROJECT, _doc("c9"), messages=messages)
     assert stats["updated"] == 1
     assert repo.messages_get("c9")[0]["tag"] == "b"
+
+
+# --------------------------------------------------------------------------- compacting older rows
+
+
+def _old_chats() -> dict[str, list[dict]]:
+    shared = _tool_text("shared")
+    return {
+        "old1": [_user("q"), _assistant(_tool_text("one"), shared), _user("small"), _assistant(_tool_text("two"))],
+        "old2": [_assistant(shared), _assistant(_tool_text("three"))],
+    }
+
+
+def _fmts() -> dict[tuple[str, int], int]:
+    rows = db.connect().execute("SELECT conv_id, seq, fmt FROM messages").fetchall()
+    return {(c, s): f for c, s, f in rows}
+
+
+def test_older_rows_are_compacted_and_read_back_identical(monkeypatch) -> None:
+    chats = _old_chats()
+    _saved_before_the_upgrade(monkeypatch, chats)
+    conn = db.connect()
+    hashes = conn.execute("SELECT id, hash, text FROM messages ORDER BY id").fetchall()
+
+    result = repo.compact_stored_messages(batch=2, pause_s=0)
+
+    assert result["compacted"] == 4
+    big = {("old1", 1), ("old1", 3), ("old2", 0), ("old2", 1)}
+    assert {k for k, f in _fmts().items() if f == repo.FMT_PARTS} == big
+    assert _count("SELECT count(*) FROM message_parts") == 4  # the shared read is stored once
+    assert conn.execute("SELECT id, hash, text FROM messages ORDER BY id").fetchall() == hashes
+    for conv_id, messages in chats.items():
+        assert _json(repo.messages_get(conv_id)) == _json(messages)
+    assert repo.search_messages(PROJECT, "goblin_three")[0]["conv_id"] == "old2"
+    conn.execute("INSERT INTO message_fts(message_fts) VALUES('integrity-check')")
+    # Done: the next boot has nothing left to look at.
+    assert repo.compact_stored_messages(batch=2, pause_s=0) == {"compacted": 0, "scanned": 0}
+
+
+def test_compaction_picks_up_where_it_stopped(monkeypatch) -> None:
+    chats = _old_chats()
+    _saved_before_the_upgrade(monkeypatch, chats)
+    real = repo._write_parts
+    calls: list[int] = []
+
+    def fail_in_second_batch(conn, message_id, parts):
+        calls.append(message_id)
+        if len(calls) == 3:
+            raise RuntimeError("app closed")
+        return real(conn, message_id, parts)
+
+    monkeypatch.setattr(repo, "_write_parts", fail_in_second_batch)
+    try:
+        repo.compact_stored_messages(batch=2, pause_s=0)
+    except RuntimeError:
+        pass
+    # The first batch stayed done; the interrupted one rolled back whole.
+    assert sorted(f for f in _fmts().values()) == [0, 0, 0, 0, 1, 1]
+    for conv_id, messages in chats.items():
+        assert _json(repo.messages_get(conv_id)) == _json(messages)
+
+    monkeypatch.setattr(repo, "_write_parts", real)
+    assert repo.compact_stored_messages(batch=2, pause_s=0)["compacted"] == 2
+    assert sorted(f for f in _fmts().values()) == [0, 0, 1, 1, 1, 1]
+    for conv_id, messages in chats.items():
+        assert _json(repo.messages_get(conv_id)) == _json(messages)
+
+
+def test_compaction_leaves_a_row_that_was_saved_meanwhile(monkeypatch) -> None:
+    chats = _old_chats()
+    _saved_before_the_upgrade(monkeypatch, chats)
+    edited = [*chats["old2"]]
+    edited[1] = _assistant(_tool_text("edited"))
+    real = repo._compact_stored
+
+    def save_while_reading(body):
+        out = real(body)
+        if "goblin_three" in body:
+            repo.conv_save(PROJECT, _doc("old2"), messages=edited)  # the chat goes on meanwhile
+        return out
+
+    monkeypatch.setattr(repo, "_compact_stored", save_while_reading)
+    repo.compact_stored_messages(batch=10, pause_s=0)
+    assert _json(repo.messages_get("old2")) == _json(edited)
+    assert _json(repo.messages_get("old1")) == _json(chats["old1"])

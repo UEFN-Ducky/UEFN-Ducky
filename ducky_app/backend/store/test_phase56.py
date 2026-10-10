@@ -367,6 +367,28 @@ def test_bridge_still_checks_the_store_when_nothing_did_today(appdata: Path, mon
     assert calls == ["check"]
 
 
+def _join_maintenance() -> None:
+    import threading
+
+    for t in threading.enumerate():
+        if t.name == "appdata-maintenance":
+            t.join(30)
+
+
+def test_panel_boot_compacts_older_chat_rows_after_maintenance(appdata: Path, monkeypatch) -> None:
+    from backend.store.repos import chats
+    from frontend import appdata_maintenance as am
+
+    calls: list[str] = []
+    monkeypatch.setattr(chats, "compact_stored_messages", lambda **kw: calls.append("compact") or {"compacted": 0})
+    am.start_appdata_maintenance_async(appdata, count_boot=False)  # a bridge: one turn, leaves it to the panel
+    _join_maintenance()
+    assert calls == []
+    am.start_appdata_maintenance_async(appdata)
+    _join_maintenance()
+    assert calls == ["compact"]
+
+
 def test_backups_age_out_in_database_mode(appdata: Path) -> None:
     """In database mode nothing pruned backups/, so one-time migration copies
     (a 172 MB ducky.db.bak and a 128 MB copied data tree) stayed forever."""

@@ -273,6 +273,77 @@ def _conv_parts(conn, conv_id: str) -> Callable[[str], str | None]:
     return part_text
 
 
+# --------------------------------------------------------------------------- older rows
+
+COMPACT_CURSOR_KEY = "messages_compacted_to"
+
+
+def _compact_stored(body: str) -> tuple[str, dict[str, str]] | None:
+    """The compact form of a stored ``fmt`` 0 body, only if it reads back as the same JSON."""
+    try:
+        message = json.loads(body)
+    except ValueError:
+        return None
+    stored, fmt, parts = _compact(message, body)
+    if fmt != FMT_PARTS:
+        return None
+    try:
+        again = _decode_parts(json.loads(stored), parts.get)
+    except ValueError:
+        return None
+    if _dumps(again) != _dumps(message):
+        return None
+    return stored, parts
+
+
+def compact_stored_messages(*, batch: int = 40, pause_s: float = 0.05) -> dict[str, int]:
+    """Give rows saved before message parts existed the compact form, a few rows per
+    transaction so chats keep saving meanwhile.
+
+    Resumable: ``meta`` keeps the last row id finished. Rows added after the pass
+    started are compact already. A row is replaced only when it still holds what
+    was read and its compact form reads back as the same message; its search
+    text is left as it is.
+    """
+    conn = db.connect()
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (COMPACT_CURSOR_KEY,)).fetchone()
+    try:
+        cursor = int(row[0]) if row else 0
+    except ValueError:
+        cursor = 0
+    end = int(conn.execute("SELECT coalesce(max(id), 0) FROM messages").fetchone()[0])
+    compacted = scanned = 0
+    while cursor < end:
+        rows = conn.execute(
+            "SELECT id, hash, body FROM messages WHERE id>? AND id<=? AND fmt=? AND length(body)>=? "
+            "ORDER BY id LIMIT ?",
+            (cursor, end, FMT_PLAIN, PART_MIN_CHARS, batch),
+        ).fetchall()
+        todo: list[tuple[int, str, str, dict[str, str]]] = []
+        for row_id, h, body in rows:
+            scanned += 1
+            done = _compact_stored(str(body))
+            if done is not None:
+                todo.append((int(row_id), str(h), *done))
+        with db.write_txn(conn):
+            for row_id, h, stored, parts in todo:
+                now = conn.execute("SELECT hash FROM messages WHERE id=? AND fmt=?", (row_id, FMT_PLAIN)).fetchone()
+                if now is None or str(now[0]) != h:
+                    continue  # saved again since it was read; that save wrote the compact form
+                _write_parts(conn, row_id, parts)
+                conn.execute("UPDATE messages SET body=?, fmt=? WHERE id=?", (stored, FMT_PARTS, row_id))
+                compacted += 1
+            cursor = int(rows[-1][0]) if rows else end
+            conn.execute(
+                "INSERT INTO meta(key, value, updated) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated=excluded.updated",
+                (COMPACT_CURSOR_KEY, str(cursor), time.time()),
+            )
+        if pause_s and cursor < end:
+            time.sleep(pause_s)
+    return {"compacted": compacted, "scanned": scanned}
+
+
 # --------------------------------------------------------------------------- saved rows
 #
 # Finding the one or two messages a save changed by serialising and hashing all

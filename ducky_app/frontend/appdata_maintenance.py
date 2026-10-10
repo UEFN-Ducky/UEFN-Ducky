@@ -515,6 +515,28 @@ def _maintain_store(app_root: Path, *, count_boot: bool = True) -> dict[str, int
     return out
 
 
+def compact_chat_history() -> dict[str, int]:
+    """Give chat rows saved before compact storage existed the compact form.
+
+    Runs after the boot snapshot, a few rows per transaction; picks up where it
+    stopped on the next boot. Never raises.
+    """
+    try:
+        from backend.store.switch import use_db
+
+        if not use_db("chats"):
+            return {}
+        from backend.store.repos import chats
+
+        result = chats.compact_stored_messages()
+        if result.get("compacted"):
+            _log.info("ducky.db: %s older chat messages stored compact", result["compacted"])
+        return result
+    except Exception:
+        _log.exception("compacting older chat messages failed")
+        return {}
+
+
 def start_appdata_maintenance_async(app_root: Path | None = None, *, count_boot: bool = True) -> None:
     """Run maintenance in a background thread (panel / bridge startup)."""
 
@@ -523,6 +545,10 @@ def start_appdata_maintenance_async(app_root: Path | None = None, *, count_boot:
             maintain_appdata(app_root, count_boot=count_boot)
         except Exception:
             _log.exception("AppData maintenance failed")
+        if count_boot:
+            # The panel only: one process at a time is enough, and a bridge lives
+            # for a single turn.
+            compact_chat_history()
 
     threading.Thread(target=_run, daemon=True, name="appdata-maintenance").start()
 
