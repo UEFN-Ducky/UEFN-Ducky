@@ -59,7 +59,13 @@ _server_lock = threading.Lock()
 _root: Path | None = None
 _event_cv = threading.Condition()
 _event_seq = 0
-_event_backlog: deque[tuple[int, dict[str, object]]] = deque(maxlen=4000)
+# (seq, event, approximate size). Capped by size too: tool events carry whole file
+# texts (write arguments, before/after of an edit), and a burst of big edits stayed
+# pinned here for as long as the app sat idle afterwards.
+_event_backlog: deque[tuple[int, dict[str, object], int]] = deque()
+_event_backlog_bytes = 0
+_EVENT_BACKLOG_MAX = 4000
+_EVENT_BACKLOG_MAX_BYTES = 8 * 1024 * 1024
 # Appearance fonts downloaded once into AppData (frontend.ui_web.font_cache).
 _FONT_RE = re.compile(r"^__fonts/([a-z0-9][a-z0-9-]{0,63})/(font\.css|\d{1,3}\.woff2)$")
 _CUSTOM_DUCKY_RE = re.compile(r"^duckies/custom/([a-z0-9][a-z0-9_-]{0,63})\.png$", re.IGNORECASE)
@@ -254,14 +260,43 @@ def publish_panel_events(events: list[dict[str, object]]) -> None:
     Each panel/focus window long-polls with its own cursor, so background-agent
     streaming never competes with pywebview's JS-API completion callbacks.
     """
-    global _event_seq
+    global _event_seq, _event_backlog_bytes
     if not events:
         return
     with _event_cv:
         for event in events:
             _event_seq += 1
-            _event_backlog.append((_event_seq, dict(event)))
+            row = dict(event)
+            size = _event_size(row)
+            _event_backlog.append((_event_seq, row, size))
+            _event_backlog_bytes += size
+        # The newest event always stays, however big, so pollers still receive it.
+        while len(_event_backlog) > 1 and (
+            len(_event_backlog) > _EVENT_BACKLOG_MAX or _event_backlog_bytes > _EVENT_BACKLOG_MAX_BYTES
+        ):
+            _event_backlog_bytes -= _event_backlog.popleft()[2]
         _event_cv.notify_all()
+
+
+def _event_size(event: dict[str, object]) -> int:
+    """About how many bytes the event takes as JSON, without serializing it."""
+    size = 0
+    stack: list[object] = [event]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            size += len(value) + 2
+        elif isinstance(value, dict):
+            size += 2
+            for key, item in value.items():
+                size += len(str(key)) + 4
+                stack.append(item)
+        elif isinstance(value, (list, tuple)):
+            size += 2 + len(value)
+            stack.extend(value)
+        else:
+            size += 24
+    return size
 
 
 def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dict[str, object]]]:
@@ -272,7 +307,7 @@ def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dic
             if remaining <= 0:
                 return _event_seq, []
             _event_cv.wait(remaining)
-        rows = [(seq, event) for seq, event in _event_backlog if seq > since][0:500]
+        rows = [(seq, event) for seq, event, _size in _event_backlog if seq > since][0:500]
         if not rows:
             return _event_seq, []
         cursor = rows[-1][0]

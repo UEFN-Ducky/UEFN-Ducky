@@ -108,6 +108,24 @@ def test_publish_panel_events_reaches_pollers():
     assert any(e.get("type") == "chats_changed" and e.get("conv_id") == "c1" for e in events)
 
 
+def test_big_file_edits_do_not_stay_pinned_in_the_event_backlog(monkeypatch):
+    import json
+    from collections import deque
+
+    monkeypatch.setattr(httpd, "_event_backlog", deque())
+    monkeypatch.setattr(httpd, "_event_backlog_bytes", 0, raising=False)
+    text = "x" * 200_000
+    for n in range(300):  # an agent rewriting a 200 KB file 300 times, then the app goes quiet
+        httpd.publish_panel_events([{"type": "tool_done", "conv_id": "c1", "name": "workspace_write_file",
+                                     "arguments": {"content": text}, "fileEdit": {"before": text, "after": text, "n": n}}])
+    kept = [event for _seq, event, *_rest in httpd._event_backlog]
+    assert sum(len(json.dumps(event)) for event in kept) <= 8 * 1024 * 1024
+    last = httpd._event_seq
+    cursor, events = httpd._poll_panel_events(last - 5, timeout=0.0)
+    assert cursor == last
+    assert [e["fileEdit"]["n"] for e in events] == [295, 296, 297, 298, 299]
+
+
 def test_http11_for_cloudflare_origin():
     assert httpd._HTTP_PROTOCOL == "HTTP/1.1"
 
