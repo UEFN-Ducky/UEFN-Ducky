@@ -41,12 +41,20 @@ class LegacyAdapter(ModeAdapter):
 @pytest.fixture
 def harness(monkeypatch, tmp_path):
     from backend import bridge
-    from backend.bridge import status
+    from backend.bridge import shared_mcp, status
     from backend.uefn_plugins import host
     from backend.workspace import ai_ignore
     from frontend.settings import PanelSettings
     from frontend.ui_web import agent_modes, project_chats, workspace_bootstrap
-    from backend.agent.coding_agents import mcp_inject
+    from backend.agent.coding_agents import mcp_inject, readiness
+
+    # Mode propagation tests use fake adapters; the real cold-server gate is
+    # exercised independently in coding_agents/test_readiness.py.
+    monkeypatch.setattr(readiness, "launch_with_ready_tools", lambda adapter, **kw: adapter.launch(**kw))
+    def unexpected_daemon_access(*args, **kwargs):
+        pytest.fail("Mode harness must not start or probe the shared daemon")
+    monkeypatch.setattr(shared_mcp, "start_daemon_from_app", unexpected_daemon_access)
+    monkeypatch.setattr(shared_mcp, "_daemon_answers", unexpected_daemon_access)
 
     settings = PanelSettings.load()
     settings.uefn_project_root = str(tmp_path)
