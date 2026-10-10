@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
 import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
+import { getDirectTransport } from "../remote/directTransport";
 import { enqueueComposerDraft } from "../hooks/chatComposerCache";
 import { requestOpenPlanTab } from "../navigation/openPlanTab";
 import type {
@@ -134,31 +135,46 @@ export function PlanPane({
   const [duckyModal, setDuckyModal] = useState<DuckyProfileModalMode | null>(null);
 
   const planProjectArg = projectRoot !== undefined ? projectRoot : undefined;
+  const loadRevision = useRef(0);
+
+  // Invalidate old reads at the committed tab/project boundary.
+  useLayoutEffect(() => {
+    setPlan(null);
+    setProgress(null);
+    setDraft(null);
+    return () => { loadRevision.current += 1; };
+  }, [chatId, planProjectArg]);
 
   const reloadPlan = useCallback(async () => {
     const api = getApi();
     if (!api?.get_plan) return;
-    const res = await api.get_plan(chatId, planProjectArg ?? null);
-    setPlan(res.plan ?? null);
-    setProgress(res.progress ?? null);
-    if (!res.ok) throw new Error(res.error || "Could not load plan");
+    const revision = ++loadRevision.current;
+    try {
+      const res = await api.get_plan(chatId, planProjectArg ?? null);
+      if (revision !== loadRevision.current) return;
+      setPlan(res.plan ?? null);
+      setProgress(res.progress ?? null);
+      setError(res.ok ? null : res.error || "Could not load plan");
+    } catch (err) {
+      if (revision === loadRevision.current) setError(String(err));
+    }
   }, [chatId, planProjectArg]);
 
   useEffect(() => {
-    let cancelled = false;
     setTemplateMsg(null);
     setFocusNodeId(null);
     setHighlightNodeId(null);
-    void reloadPlan()
-      .then(() => {
-        if (!cancelled) setError(null);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-      });
+    void reloadPlan();
+    const refresh = () => { void reloadPlan(); };
+    window.addEventListener("online", refresh);
+    window.addEventListener("pywebviewready", refresh);
+    const unsubscribe = getDirectTransport()?.onStatus((status) => {
+      if (status.state === "live") refresh();
+    });
     return () => {
-      cancelled = true;
+      unsubscribe?.();
+      window.removeEventListener("online", refresh);
+      window.removeEventListener("pywebviewready", refresh);
     };
   }, [reloadPlan]);
 
@@ -199,15 +215,9 @@ export function PlanPane({
   useAgentEventSubscription(
     chatId,
     (event: AgentEvent) => {
-      if (event.type === "plan_assignment_changed") {
-        void reloadPlan().then(() => setError(null)).catch((e) => setError(String(e)));
-        return;
-      }
-      if (event.type !== "plan_updated") return;
-      if (event.plan) {
-        setPlan(event.plan);
-        setProgress(event.progress ?? null);
-      }
+      if (event.conv_id !== chatId) return;
+      // Bodies may be archived or from another project; resolve the selected view.
+      if (event.type === "plan_assignment_changed" || event.type === "plan_updated") void reloadPlan();
     },
     [reloadPlan],
   );
@@ -219,7 +229,7 @@ export function PlanPane({
   useAgentEventSubscription(
     sourceChatId,
     (event: AgentEvent) => {
-      if (!sourceChatId || event.type !== "plan_updated") return;
+      if (!sourceChatId || event.conv_id !== sourceChatId || event.type !== "plan_updated") return;
       void reloadPlan().catch(() => undefined);
     },
     [reloadPlan],
