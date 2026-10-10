@@ -33,6 +33,15 @@ def test_workflow_caller_cannot_poison_cache(host):
     assert catalog.build_workflow_tool_catalog()["tools"][0]["parameters"]
 
 
+def test_workflow_refreshes_inventory_metadata(host):
+    before = catalog.build_workflow_tool_catalog()
+    host[0].meta = {"ducky_availability": {"state": "unavailable", "reason": "Retry pending."}}
+    after = catalog.build_workflow_tool_catalog()
+    assert after["revision"] != before["revision"]
+    assert after["tools"][0]["connection_state"] == "unavailable"
+    assert after["tools"][0]["reason"] == "Retry pending."
+
+
 def test_settings_catalog_preserves_schema_state_and_ranked_paging(monkeypatch):
     monkeypatch.setattr(catalog, "plugin_destructive_tool_names", lambda: set())
     monkeypatch.setattr(catalog, "is_plugin_tool", lambda n: "__" in n)

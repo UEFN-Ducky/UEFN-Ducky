@@ -110,9 +110,15 @@ _DISPATCHER_BLOCKLIST = frozenset(
 
 def _mode_discovery(name: str, catalog: dict[str, Any]) -> dict[str, Any]:
     from backend.agent.run_context import current_mode
-    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason, is_plan_safe_tool
 
-    if current_mode() != "ask":
+    mode = current_mode()
+    if mode == "plan":
+        reason = "" if is_plan_safe_tool(name) else "blocked in Plan mode: tool is not plan-safe (mutator)."
+        return {"allowed": not bool(reason), "mode": mode,
+                "mode_reason": reason or "Allowed in Plan mode.",
+                "hint": reason or "Invoke only with read-only arguments in Plan mode."}
+    if mode != "ask":
         return {}
     reason = mode_tool_block_reason("ask", name, {}, catalog, discovery=True)
     return {
@@ -188,126 +194,52 @@ async def ducky_get_tools(
     pattern: str = "",
     limit: int = 20,
     pretty: bool = False,
+    offset: int = 0,
 ) -> str:
-    """Discover MCP tool schemas (Cursor GetMcpTools-style). Prefer name= or pattern=
-    over empty catalog. Full schemas are NOT in the system prompt — call this, then
-    ducky_call_tool(name, arguments). Floor tools (workspace_*, status, ask_user) are
-    already in tools[] and need no discovery.
+    """Discover full MCP schemas by canonical name/alias or ranked search tokens.
+    Search returns total, next_offset and a content revision; use offset to page.
+    Known unavailable tools stay visible. Discovery does not prove call readiness.
     """
-    from backend.agent.tools import _slim_description, _slim_tool_schema, list_mcp_tools
+    from backend.agent.tools import list_mcp_tools, resolve_invented_tool_name
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
+    from backend.agent.toolsets.tool_index import search_tool_catalog, tool_catalog_row, catalog_revision
 
     n = (name or "").strip()
     p = (pattern or "").strip()
     lim = max(1, min(int(limit or 20), 50))
-
+    tools = [t for t in await list_mcp_tools() if t.name not in EXCLUDED_TOOLS]
+    by_name = {t.name: t for t in tools}
+    revision = catalog_revision(tools)
     if not n and not p:
-        tools = await list_mcp_tools()
-        count = sum(
-            1
-            for t in tools
-            if str(getattr(t, "name", "") or "") not in EXCLUDED_TOOLS
-        )
-        return tool_json(
-            {
-                "count": count,
-                "hint": (
-                    "Pass name= or pattern= — empty catalog dumps stall the IDE. "
-                    "Then invoke an allowed tool with ducky_call_tool(name, arguments)."
-                ),
-            },
-            pretty=pretty,
-        )
+        return tool_json({
+            "count": len(tools), "total": len(tools), "revision": revision,
+            "hint": "Pass name= or pattern= ? empty catalog dumps stall the IDE. Then invoke only if allowed in the current mode.",
+        }, pretty=pretty)
 
-    tools = await list_mcp_tools()
-    by_name = {
-        str(getattr(t, "name", "") or ""): t
-        for t in tools
-        if str(getattr(t, "name", "") or "") not in EXCLUDED_TOOLS
-    }
+    def describe(row: dict[str, Any]) -> dict[str, Any]:
+        row.update({"hint": "Call with ducky_call_tool(name, arguments). Always pass arguments.",
+                    **_mode_discovery(row["name"], by_name)})
+        if row["connection_state"] == "unavailable":
+            row["hint"] = "Known tool is currently unavailable; wait for provider recovery before calling. " + row.get("mode_reason", "")
+        return row
 
     if n:
-        t = by_name.get(n)
-        if t is None:
-            import re as _re
+        canonical = n if n in by_name else resolve_invented_tool_name(n, set(by_name))
+        if canonical:
+            return tool_json({**describe(tool_catalog_row(by_name[canonical])), "revision": revision}, pretty=pretty)
+        close = search_tool_catalog(tools, n, limit=10)
+        return tool_json({
+            "ok": False, "error": f"tool not found in current catalog: {n}",
+            "close_matches": [row["name"] for row in close["matches"]],
+            "revision": revision, **_discovery_miss_context(),
+        }, pretty=pretty)
 
-            q = n.lower()
-            close = sorted(
-                (tn for tn in by_name if q in tn.lower() or tn.lower() in q),
-                key=len,
-            )[:10]
-            if not close:
-                toks = [tok for tok in _re.split(r"[^a-z0-9]+", q) if len(tok) >= 3]
-                if toks:
-                    close = sorted(
-                        (
-                            tn
-                            for tn in by_name
-                            if any(tok in tn.lower() for tok in toks)
-                        ),
-                        key=len,
-                    )[:10]
-            return tool_json(
-                {
-                    "ok": False,
-                    "error": f"tool not found in current catalog: {n}",
-                    "close_matches": close,
-                    **_discovery_miss_context(),
-                },
-                pretty=pretty,
-            )
-        return tool_json(
-            {
-                "name": t.name,
-                "description": _slim_description(t.description or "") or t.name,
-                "inputSchema": _slim_tool_schema(t),
-                "hint": "Call with ducky_call_tool(name, arguments). Always pass arguments.",
-                **_mode_discovery(t.name, by_name),
-            },
-            pretty=pretty,
-        )
-
-    if p:
-        q = p.lower()
-        scored: list[tuple[int, dict[str, Any]]] = []
-        for tname, t in by_name.items():
-            desc = str(getattr(t, "description", "") or "")
-            hay = f"{tname} {desc}".lower()
-            if q not in hay and not all(tok in hay for tok in q.split()):
-                continue
-            score = (2 if q in tname.lower() else 0) + (1 if q in desc.lower() else 0)
-            scored.append(
-                (
-                    score,
-                    {
-                        "name": tname,
-                        "description": _truncate_desc(desc),
-                        **_mode_discovery(tname, by_name),
-                    },
-                )
-            )
-        scored.sort(key=lambda item: (-item[0], item[1]["name"]))
-        matches = [row for _, row in scored[:lim]]
-        guidance = {"hint": "Fetch one schema with ducky_get_tools(name=…) then invoke it only if allowed in the current mode."}
-        if not matches:
-            guidance = _discovery_miss_context()
-        return tool_json(
-            {
-                "pattern": p,
-                "matches": matches,
-                "count": len(matches),
-                **guidance,
-            },
-            pretty=pretty,
-        )
-
-    return tool_json(
-        {
-            "count": len(by_name),
-            "hint": "Pass name= or pattern= — empty catalog dumps stall the IDE.",
-        },
-        pretty=pretty,
-    )
+    page = search_tool_catalog(tools, p, offset=offset, limit=lim)
+    page["matches"] = [describe(row) for row in page["matches"]]
+    guidance = {"hint": "Invoke a discovered tool only if allowed in the current mode and available. Use next_offset for more matches."}
+    if not page["total"]:
+        guidance = _discovery_miss_context()
+    return tool_json({"pattern": p, **page, **guidance}, pretty=pretty)
 
 
 @mcp.tool()
@@ -377,9 +309,9 @@ async def ducky_call_tool(
 
 
 @mcp.tool()
-async def ducky_find_tools(query: str, limit: int = 20, pretty: bool = False) -> str:
+async def ducky_find_tools(query: str, limit: int = 20, pretty: bool = False, offset: int = 0) -> str:
     """Alias for ducky_get_tools(pattern=query). Prefer ducky_get_tools."""
-    return await ducky_get_tools(pattern=query, limit=limit, pretty=pretty)
+    return await ducky_get_tools(pattern=query, limit=limit, pretty=pretty, offset=offset)
 
 
 @mcp.tool()

@@ -31,12 +31,18 @@ def tool_catalog_row(tool: Any) -> dict[str, Any]:
     if hasattr(annotations, "model_dump"):
         annotations = annotations.model_dump(mode="json", exclude_none=True)
     aliases = get("aliases") or []
+    meta = get("meta") or get("_meta") or {}
+    availability = meta.get("ducky_availability", {}) if isinstance(meta, dict) else {}
+    if not isinstance(availability, dict):
+        availability = {}
     return copy.deepcopy({
         "name": str(get("name", "")), "description": str(get("description") or ""),
         "inputSchema": schema, "annotations": annotations,
         "aliases": [a for a in aliases if isinstance(a, str)] if isinstance(aliases, (list, tuple)) else [],
-        "provider": get("provider"), "connection_state": get("connection_state") or "unknown",
-        "reason": get("reason") or "", "source_revision": get("revision"),
+        "provider": get("provider"),
+        "connection_state": get("connection_state") or availability.get("state") or "unknown",
+        "reason": get("reason") or availability.get("reason") or "",
+        "source_revision": get("revision"), "_meta": meta,
     })
 
 
