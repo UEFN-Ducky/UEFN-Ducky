@@ -43,6 +43,15 @@ class Envelope:
     response_id: str = ""
     is_notice: bool = False
     enqueued_at: float = field(default_factory=time.time)
+    is_report: bool = False
+    redelivery: bool = False
+
+
+@dataclass
+class UnansweredReport:
+    envelope: Envelope
+    redeliveries: int = 0
+    noticed: bool = False
 
 
 @dataclass
@@ -72,6 +81,108 @@ _stopped: set[str] = set()
 _timers: dict[str, tuple[object, Any]] = {}
 _completed_runs: set[str] = set()
 _uncertain_chats: set[str] = set()
+_reports: dict[str, dict[str, UnansweredReport]] = {}
+_report_timers: dict[str, Any] = {}
+_REPORT_RETRY_S = 30.0
+
+
+def unanswered_reports(conv_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        return [{"response_id": rid, "from": r.envelope.sender_conv_id,
+                 "body": r.envelope.body, "redeliveries": r.redeliveries}
+                for rid, r in _reports.get(conv_id, {}).items()]
+
+
+def acknowledge_reports(coordinator_id: str, member_id: str) -> None:
+    """Only an actual outgoing message or successful plan action acknowledges work."""
+    with _lock:
+        reports = _reports.get(coordinator_id, {})
+        for rid in [rid for rid, r in reports.items() if r.envelope.sender_conv_id == member_id]:
+            reports.pop(rid)
+        if not reports:
+            _reports.pop(coordinator_id, None)
+            timer = _report_timers.pop(coordinator_id, None)
+            if timer is not None:
+                timer.cancel()
+
+
+def _owner_report_notice(conv_id: str, reports: list[UnansweredReport]) -> None:
+    from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
+    from frontend.ui_web.agent_modes import notify_context_changed
+
+    conv = load_conversation(conv_id)
+    if conv is None:
+        return
+    names = [f"{_conv_meta(r.envelope.sender_conv_id)[0] or r.envelope.sender_conv_id} "
+             f"({r.envelope.response_id})" for r in reports]
+    append_message(conv, {"role": "assistant", "content":
+        "[Ducky notice for owner] These reports have been delivered again three times without action: "
+        + "; ".join(names), "ts": time.time()})
+    save_conversation(conv)
+    notify_context_changed(conv_id)
+
+
+def acknowledge_plan_changes(previous: dict, plan: dict, actor_id: str, project_root=None) -> None:
+    """A coordinator's committed change acknowledges only reports of that step's owners."""
+    coordinator = str(plan.get("chat_id") or "")
+    if not actor_id or actor_id != coordinator:
+        return
+
+    def rows(nodes, owner="", parent=""):
+        result = {}
+        for node in nodes or []:
+            assigned = node.get("assignee") or owner
+            result[node["id"]] = ({k: v for k, v in node.items() if k != "children"}, assigned, parent)
+            result.update(rows(node.get("children"), assigned, node["id"]))
+        return result
+
+    before, after = rows(previous.get("nodes")), rows(plan.get("nodes"))
+    owners = set()
+    for nid in before.keys() | after.keys():
+        if before.get(nid) != after.get(nid):
+            for row in (before.get(nid), after.get(nid)):
+                if row and row[1]:
+                    owners.add(row[1])
+    if not owners:
+        return
+    from backend.agent.coding_agents.plans import _chat_and_group_ids
+
+    with _lock:
+        members = {r.envelope.sender_conv_id for r in _reports.get(coordinator, {}).values()}
+    for member in members:
+        if owners.intersection(_chat_and_group_ids(member, project_root)):
+            acknowledge_reports(coordinator, member)
+
+
+def _retry_reports(conv_id: str) -> None:
+    """Retry full reports, not the original assignments. Message text cannot disable this."""
+    from frontend.ui_web.agent_modes import is_agent_running
+
+    with _lock:
+        _report_timers.pop(conv_id, None)
+        if not _reports.get(conv_id) or conv_id in _stopped:
+            return
+        if is_agent_running(conv_id) or conv_id in _active or automatic_work_blocked(conv_id, queued=True):
+            _schedule_reports(conv_id)
+            return
+        queue = _inbox.setdefault(conv_id, deque())
+        queued = {e.response_id for e in queue if e.redelivery}
+        for rid, report in _reports[conv_id].items():
+            if rid not in queued:
+                e = report.envelope
+                queue.append(Envelope(e.sender_conv_id, conv_id, e.body, response_id=rid,
+                                      is_report=True, redelivery=True))
+    _kick_delivery(conv_id)
+
+
+def _schedule_reports(conv_id: str) -> None:
+    with _lock:
+        if not _reports.get(conv_id) or conv_id in _report_timers or conv_id in _stopped:
+            return
+        timer = threading.Timer(_REPORT_RETRY_S, _retry_reports, args=(conv_id,))
+        timer.daemon = True
+        _report_timers[conv_id] = timer
+    timer.start()
 
 
 def _account_key(conv_id: str) -> str:
@@ -228,10 +339,12 @@ def send(
             receiver_conv_id=receiver_conv_id,
             body=body,
             response_id=rid if expect_reply else (response_id or ""),
+            is_report=bool(closing),
         )
         # Match, consume and enqueue atomically: racing duplicate replies cannot
         # both be admitted, or consume a later request between those steps.
         _inbox.setdefault(receiver_conv_id, deque()).append(envelope)
+        acknowledge_reports(sender_conv_id, receiver_conv_id)
     _kick_delivery(receiver_conv_id)
     return {
         "response_id": rid,
@@ -336,8 +449,16 @@ def _kick_delivery(conv_id: str) -> None:
                 queue = _inbox.get(conv_id)
                 if not queue or automatic_work_blocked(conv_id, queued=True):
                     return
-                batch = list(queue)
+                batch = [e for e in queue if not e.redelivery or
+                         e.response_id in _reports.get(conv_id, {})]
                 queue.clear()
+                if not batch:
+                    return
+                for e in batch:
+                    if e.is_report:
+                        report = _reports.setdefault(conv_id, {}).setdefault(e.response_id, UnansweredReport(e))
+                        if e.redelivery:
+                            report.redeliveries += 1
                 _active[conv_id] = {"envelopes": batch}
                 _delivering.add(conv_id)
                 ring = _ring.setdefault(conv_id, [])
@@ -345,7 +466,8 @@ def _kick_delivery(conv_id: str) -> None:
                 del ring[:-_RING_MAX]
             # Once handed to run_message, an empty result or exception is NOT
             # proof of non-execution. Never automatically requeue this batch.
-            started = run_message(conv_id, "\n\n".join(_format_envelope(e) for e in batch),
+            heading = "Reports you have not acted on\n\n" if any(e.redelivery for e in batch) else ""
+            started = run_message(conv_id, heading + "\n\n".join(_format_envelope(e) for e in batch),
                                   "agent", "", queue_if_busy=True)
             if not started:
                 raise RuntimeError("Delivery unconfirmed")
@@ -622,6 +744,20 @@ def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "", run_id: str
 
     # Anything queued while it was busy → deliver now.
     with _lock:
+        notices = [r for r in _reports.get(conv_id, {}).values() if r.redeliveries >= 3 and not r.noticed]
+        for report in notices:
+            report.noticed = True
+    if notices:
+        try:
+            _owner_report_notice(conv_id, notices)
+        except Exception:
+            # A notification failure must not suppress report delivery or permanently
+            # consume the one owner notice. Retry it at the next completed turn.
+            with _lock:
+                for report in notices:
+                    report.noticed = False
+    _schedule_reports(conv_id)
+    with _lock:
         has_queue = bool(_inbox.get(conv_id))
     if has_queue:
         _kick_delivery(conv_id)
@@ -642,6 +778,9 @@ def on_agent_cancelled_by_user(conv_id: str) -> None:
         timer = _timers.pop(conv_id, None)
         if timer is not None:
             timer[1].cancel()
+        report_timer = _report_timers.pop(conv_id, None)
+        if report_timer is not None:
+            report_timer.cancel()
     title, agent = _conv_meta(conv_id)
     for thread in open_threads_for_receiver(conv_id):
         close_thread(thread.response_id)
@@ -658,6 +797,7 @@ def on_agent_cancelled_by_user(conv_id: str) -> None:
 def stats() -> dict[str, Any]:
     with _lock:
         return {
+            "unanswered_reports": {cid: unanswered_reports(cid) for cid in _reports},
             "held": {k: len(v) for k, v in _held.items() if v},
             "stopped": sorted(_stopped),
             "cooldowns": dict(_cooldowns),

@@ -527,7 +527,7 @@ def _emit_assistant(
     original_push = push
     push = lambda event: original_push({**event, **mode_metadata})
     text = (reply or "").strip()
-    if not text and not blocks:
+    if not text and not blocks and not ok:
         text = (
             f"{agent_id} finished with no captured reply."
             + (f"\n\n{error}" if error else "")

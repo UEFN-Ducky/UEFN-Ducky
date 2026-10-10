@@ -898,12 +898,28 @@ def ducky_send_chat_message(
             # must never kill a long task just because it outlasted the wait.
             cancel_on_timeout=False,
         )
+        if outcome.get("run_id"):
+            _acknowledge_chat_message(conv_id)
         return tool_json(outcome, pretty=pretty)
 
     # An agent must not cancel the chat it messages: a busy one gets this when its turn ends.
     started = run_message(conv_id, text, mode_norm, "", queue_if_busy=True)
+    if started:
+        _acknowledge_chat_message(conv_id)
     status = "queued" if started == "queued" else "running"
     return tool_json({"status": status, "conv_id": conv_id}, pretty=pretty)
+
+
+def _acknowledge_chat_message(receiver: str) -> None:
+    from backend.workspace.identity import resolve_context
+    from backend.agent.a2a_client import acknowledge_reports
+
+    context = resolve_context()
+    if context is not None and context.conv_id:
+        try:
+            acknowledge_reports(context.conv_id, receiver)
+        except RuntimeError:
+            pass  # The message was accepted; a lost acknowledgement leaves its report pending.
 
 
 def _resolve_sender(sender: str) -> str:
@@ -1031,7 +1047,7 @@ def ducky_agent_send(
     if target == me:
         raise ValueError("cannot send an agent message to yourself")
 
-    from backend.agent.a2a_broker import send
+    from backend.agent.a2a_client import send
 
     outcome = send(
         sender_conv_id=me,
@@ -1052,7 +1068,7 @@ def ducky_agent_inbox(conv_id: str = "", pretty: bool = False) -> str:
     me = _resolve_sender(conv_id)
     if not me:
         raise ValueError("conv_id required — pass your own chat id.")
-    from backend.agent.a2a_broker import read_inbox
+    from backend.agent.a2a_client import read_inbox
 
     return tool_json({"conv_id": me, "messages": read_inbox(me)}, pretty=pretty)
 
@@ -1083,7 +1099,7 @@ def ducky_agent_stop(conv_id: str, cascade: bool = False, pretty: bool = False) 
     Open reply threads it owed are closed and senders get a receiver-cancelled notice.
     """
     from frontend.ui_web.agent_modes import cancel_agent, is_agent_running, linked_children_of
-    from backend.agent.a2a_broker import on_agent_cancelled_by_user
+    from backend.agent.a2a_client import on_agent_cancelled_by_user
 
     target = conv_id.strip()
     if load_conversation(target, project_root=_project_root()) is None:
@@ -1369,7 +1385,7 @@ def ducky_spawn_chat(
             parent=caller or hub_id,
         )
         if outcome.get("status") == "timeout" and caller:
-            from backend.agent.a2a_broker import on_agent_stopped, open_thread
+            from backend.agent.a2a_client import on_agent_stopped, open_thread
             from frontend.ui_web.agent_modes import is_agent_running
 
             rid = open_thread(caller, conv_id, deliver_result=True)
@@ -1385,7 +1401,7 @@ def ducky_spawn_chat(
 
     response_id = ""
     if caller:
-        from backend.agent.a2a_broker import open_thread
+        from backend.agent.a2a_client import open_thread
 
         response_id = open_thread(caller, conv_id, deliver_result=True)
     run_message(conv_id, text, mode_norm, "", parent=caller or hub_id)
@@ -1541,7 +1557,7 @@ def ducky_recycle_member(
     response_id = ""
     caller = _resolve_sender(sender)
     if caller:
-        from backend.agent.a2a_broker import open_thread
+        from backend.agent.a2a_client import open_thread
 
         response_id = open_thread(caller, new_conv.id, deliver_result=True)
     run_message(new_conv.id, spawn_text, mode_norm, "", parent=parent_id, started_by=kept_starter)

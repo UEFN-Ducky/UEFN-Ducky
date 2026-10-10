@@ -100,7 +100,7 @@ def finalize_cli_turn(
         upstream_session_id=new_session,
         reply_text=reply,
         streamed=streamed,
-        output_tail=proc.raw_tail,
+        output_tail="",  # JSON events are diagnostics, never an assistant reply.
         status="done",
         usage=usage,
         blocks=blocks,

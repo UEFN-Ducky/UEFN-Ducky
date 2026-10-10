@@ -815,6 +815,7 @@ def _coalesce_agent_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 # Mixins import this module as `_pa` for helpers/globals. Load them after those
 # names exist so the circular import sees a complete helper surface.
+from frontend.ui_web.panel_api_agents import PanelApiAgentsMixin  # noqa: E402
 from frontend.ui_web.panel_api_window import PanelApiWindowMixin  # noqa: E402
 from frontend.ui_web.panel_api_store import PanelApiStoreMixin  # noqa: E402
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin  # noqa: E402
@@ -825,6 +826,7 @@ from frontend.ui_web.panel_api_video import PanelApiVideoMixin  # noqa: E402
 
 
 class PanelApi(
+    PanelApiAgentsMixin,
     PanelApiWindowMixin,
     PanelApiStoreMixin,
     PanelApiChatsMixin,
