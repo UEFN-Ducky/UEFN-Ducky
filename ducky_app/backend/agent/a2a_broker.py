@@ -18,6 +18,8 @@ messages so nothing here needs disk.
 
 from __future__ import annotations
 
+import json
+import re
 import threading
 import time
 import uuid
@@ -62,6 +64,49 @@ _threads: dict[str, Thread] = {}
 # drains the queue again but never fires a self-notice).
 _delivering: set[str] = set()
 _delivery_inflight: set[str] = set()
+_delivery_again: set[str] = set()
+_active: dict[str, dict[str, Any]] = {}
+_held: dict[str, list[Envelope]] = {}
+_cooldowns: dict[str, float] = {}
+_stopped: set[str] = set()
+_timers: dict[str, tuple[object, Any]] = {}
+_completed_runs: set[str] = set()
+_uncertain_chats: set[str] = set()
+
+
+def _account_key(conv_id: str) -> str:
+    from frontend.ui_web.project_chats import load_conversation
+
+    conv = load_conversation(conv_id)
+    if conv is None:
+        return "chat:" + conv_id
+    agent = str(getattr(conv, "coding_agent", "") or "ducky")
+    # Outside CLIs currently expose one configured login per adapter, not a
+    # stable account ID. Do not lock out unrelated adapters/providers.
+    if agent != "ducky":
+        return "cli:" + agent
+    provider = str(getattr(conv, "provider", "") or "")
+    return "provider:" + provider if provider else "chat:" + conv_id
+
+
+def cooldown_remaining(conv_id: str, *, now: float | None = None) -> float:
+    key = _account_key(conv_id)
+    with _lock:
+        return max(0.0, _cooldowns.get(key, 0.0) - (time.time() if now is None else now))
+
+
+def automatic_work_blocked(conv_id: str, *, now: float | None = None, queued: bool = False) -> bool:
+    remaining = cooldown_remaining(conv_id, now=now)
+    with _lock:
+        return bool(remaining or conv_id in _stopped or
+                    (not queued and (_held.get(conv_id) or conv_id in _uncertain_chats)))
+
+
+def resume_by_user(conv_id: str) -> None:
+    """A user continuation clears Stop, never silently replays held envelopes."""
+    with _lock:
+        _stopped.discard(conv_id)
+        _uncertain_chats.discard(conv_id)
 
 
 def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
@@ -69,7 +114,10 @@ def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
     now = time.time()
     removed = 0
     with _lock:
-        stale = [rid for rid, t in _threads.items() if (now - t.created_at) > max_age_s]
+        protected = set(_active) | {c for c, rows in _held.items() if rows} | {c for c, rows in _inbox.items() if rows}
+        stale = [rid for rid, t in _threads.items() if (now - t.created_at) > max_age_s
+                 and t.receiver_conv_id not in protected
+                 and not cooldown_remaining(t.receiver_conv_id, now=now)]
         for rid in stale:
             _threads.pop(rid, None)
             removed += 1
@@ -111,8 +159,10 @@ def open_thread(
 ) -> str:
     """Register a reply-expected thread; idempotent per sender→receiver pair."""
     with _lock:
+        held_threads = {e.response_id for rows in _held.values() for e in rows if e.response_id}
         for t in _threads.values():
-            if t.sender_conv_id == sender_conv_id and t.receiver_conv_id == receiver_conv_id:
+            if (t.sender_conv_id == sender_conv_id and t.receiver_conv_id == receiver_conv_id
+                    and t.response_id not in held_threads):
                 t.deliver_result = t.deliver_result or deliver_result
                 return t.response_id
         rid = response_id or mint_response_id()
@@ -131,19 +181,16 @@ def open_threads_for_receiver(receiver_conv_id: str) -> list[Thread]:
 
 
 def read_inbox(conv_id: str) -> list[dict[str, Any]]:
-    """Full recent inbox (delivered ring + still-queued), oldest first."""
+    """Recent inbox, including originals held for manual recovery."""
     with _lock:
         items = list(_ring.get(conv_id, [])) + list(_inbox.get(conv_id, ()))
-    return [
-        {
-            "from": e.sender_conv_id,
-            "response_id": e.response_id,
-            "is_notice": e.is_notice,
-            "enqueued_at": e.enqueued_at,
-            "body": e.body,
-        }
-        for e in items
-    ]
+        known = {id(e) for e in items}
+        items.extend(e for e in _held.get(conv_id, []) if id(e) not in known)
+        held = {id(e) for e in _held.get(conv_id, [])}
+    return [{"from": e.sender_conv_id, "response_id": e.response_id,
+             "is_notice": e.is_notice, "enqueued_at": e.enqueued_at, "body": e.body,
+             "status": "held_manual_recovery" if id(e) in held else "received"}
+            for e in items]
 
 
 def send(
@@ -257,54 +304,58 @@ def _format_envelope(envelope: Envelope) -> str:
 
 
 def _kick_delivery(conv_id: str) -> None:
-    """Deliver queued envelopes as one turn once the receiver is idle."""
+    """Deliver once; cooldown queues stay owned by this existing RAM broker."""
     with _lock:
+        if automatic_work_blocked(conv_id, queued=True):
+            _retry_queue_later(conv_id)
+            return
         if conv_id in _delivery_inflight:
+            _delivery_again.add(conv_id)
+            return
+        if conv_id in _active:
             return
         _delivery_inflight.add(conv_id)
 
     def _worker() -> None:
         from frontend.ui_web.agent_modes import is_agent_running, run_message, wait_for_idle
-
+        batch = []
         try:
             sweep_quiet_threads()
-            # Busy receivers keep the queue; their agent_stopped re-kicks delivery.
             if is_agent_running(conv_id):
                 wait_for_idle(conv_id, 1.0)
                 if is_agent_running(conv_id):
                     return
             with _lock:
                 queue = _inbox.get(conv_id)
-                if not queue:
+                if not queue or automatic_work_blocked(conv_id, queued=True):
                     return
                 batch = list(queue)
                 queue.clear()
+                _active[conv_id] = {"envelopes": batch}
+                _delivering.add(conv_id)
                 ring = _ring.setdefault(conv_id, [])
                 ring.extend(batch)
                 del ring[:-_RING_MAX]
-                _delivering.add(conv_id)
-            text = "\n\n".join(_format_envelope(e) for e in batch)
-            started = ""
-            try:
-                # Never interrupt: this check can't see turns running in another process
-                # (the MCP bridge vs the app), so a busy receiver holds the text instead.
-                started = run_message(conv_id, text, "agent", "", queue_if_busy=True)
-            except Exception:
-                started = ""
+            # Once handed to run_message, an empty result or exception is NOT
+            # proof of non-execution. Never automatically requeue this batch.
+            started = run_message(conv_id, "\n\n".join(_format_envelope(e) for e in batch),
+                                  "agent", "", queue_if_busy=True)
             if not started:
-                # Lost the race (another turn started) — re-queue for the next stop.
-                with _lock:
+                raise RuntimeError("Delivery unconfirmed")
+        except Exception:
+            with _lock:
+                active = _active.get(conv_id)
+                if batch and active and active["envelopes"] is batch:
+                    _held.setdefault(conv_id, []).extend(batch)
+                    _active.pop(conv_id, None)
                     _delivering.discard(conv_id)
-                    existing = _inbox.setdefault(conv_id, deque())
-                    batch_ids = {id(e) for e in batch}
-                    for envelope in reversed(batch):
-                        existing.appendleft(envelope)
-                    ring = _ring.get(conv_id, [])
-                    if ring:
-                        _ring[conv_id] = [e for e in ring if id(e) not in batch_ids]
         finally:
             with _lock:
                 _delivery_inflight.discard(conv_id)
+                again = conv_id in _delivery_again and bool(_inbox.get(conv_id))
+                _delivery_again.discard(conv_id)
+            if again:
+                _kick_delivery(conv_id)
 
     threading.Thread(target=_worker, daemon=True, name=f"a2a-deliver-{conv_id[:8]}").start()
 
@@ -407,41 +458,87 @@ def _escalate_failure_to_group_leaders(
         send_notice(sender_conv_id=conv_id, receiver_conv_id=leader_id, body=body)
 
 
-_ACCOUNT_LIMIT_MARKERS = (
-    "usage limit",
-    "rate limit",
-    "insufficient_quota",
-    "quota exceeded",
-    "credit balance",
-    "more credits",
-)
+_ACCOUNT_LIMIT_CODES = {"rate_limit_error", "rate_limit_exceeded", "insufficient_quota"}
 _LIMIT_RETRY_S = 900.0
 
 
 def account_limited(text: str) -> bool:
-    """True when an agent failed because the AI account is out of credits or rate limited."""
-    low = (text or "").lower()
-    return any(marker in low for marker in _ACCOUNT_LIMIT_MARKERS)
+    """Classify a CURRENT terminal diagnostic, never conversation history.
+
+    Classification does not establish that execution never happened.
+    """
+    value = (text or "").strip()
+    try:
+        obj = json.loads(value)
+    except (ValueError, TypeError):
+        obj = None
+    if isinstance(obj, dict):
+        error = obj.get("error", obj)
+        if isinstance(error, dict):
+            if error.get("type") in _ACCOUNT_LIMIT_CODES or error.get("code") in _ACCOUNT_LIMIT_CODES:
+                return True
+            value = str(error.get("message") or "")
+    low = value.lower().replace("’", "'").strip()
+    if low in _ACCOUNT_LIMIT_CODES or low in {"rate limit exceeded", "quota exceeded", "usage limit reached", "out of credits"}:
+        return True
+    return bool(re.fullmatch(r"you(?:'ve| have) hit your usage limit[.!]?(?:\s+(?:visit https://\S+ to purchase more credits|try again(?: at| in)? .+))?", low))
 
 
 def _retry_queue_later(conv_id: str) -> None:
     """Deliver this chat's queued messages after a pause instead of failing them now."""
     with _lock:
-        if not _inbox.get(conv_id):
+        if conv_id in _timers or conv_id in _stopped:
             return
-    timer = threading.Timer(_LIMIT_RETRY_S, _kick_delivery, args=(conv_id,))
-    timer.daemon = True
+        delay = cooldown_remaining(conv_id)
+        if delay <= 0:
+            return
+        token = object()
+
+        def retry(cid: str) -> None:
+            with _lock:
+                current = _timers.get(cid)
+                if current is None or current[0] is not token:
+                    return
+                _timers.pop(cid, None)
+            if cooldown_remaining(cid):
+                _retry_queue_later(cid)
+                return
+            _kick_delivery(cid)
+            from frontend.ui_web import agent_modes
+            drain = getattr(agent_modes, "_deliver_pending_agent_messages", None)
+            if drain is not None and not automatic_work_blocked(cid, queued=True):
+                drain(cid)
+
+        timer = threading.Timer(delay, retry, args=(conv_id,))
+        timer.daemon = True
+        _timers[conv_id] = (token, timer)
     timer.start()
 
 
-def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "") -> None:
+def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "", run_id: str = "") -> None:
     """Turn-lifecycle hook: drain this chat's queue + notify owed senders."""
     was_delivery = False
     with _lock:
+        if run_id:
+            if run_id in _completed_runs:
+                return
+            _completed_runs.add(run_id)
         was_delivery = conv_id in _delivering
         _delivering.discard(conv_id)
+        active = _active.pop(conv_id, None)
+        if reason == "error" and account_limited(detail):
+            _uncertain_chats.add(conv_id)
+            key = _account_key(conv_id)
+            if _cooldowns.get(key, 0) <= time.time():
+                _cooldowns[key] = time.time() + _LIMIT_RETRY_S
+            if active:
+                _held.setdefault(conv_id, []).extend(active["envelopes"])
+            _retry_queue_later(conv_id)
+            return
 
-    owed = open_threads_for_receiver(conv_id)
+    with _lock:
+        held_threads = {e.response_id for e in _held.get(conv_id, []) if e.response_id}
+    owed = [t for t in open_threads_for_receiver(conv_id) if t.response_id not in held_threads]
 
     # Spawn threads: a clean turn end IS the reply — hand the sender the
     # receiver's answer instead of a turn-ended notice.
@@ -471,13 +568,6 @@ def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "") -> None:
     notice_detail = detail
     if notice_reason in ("timed-out", "errored", "user-stopped"):
         notice_detail = _failure_detail(conv_id, detail)
-
-    if notice_reason == "errored" and account_limited(notice_detail):
-        # The whole team shares one AI account. Notices woke every sender and
-        # leader into the same limit: a burst of failed turns, each sending more
-        # notices. Threads stay open; queued work is retried after a pause.
-        _retry_queue_later(conv_id)
-        return
 
     already_notified: set[str] = set()
     response_id_for_escalate = ""
@@ -528,7 +618,15 @@ def on_agent_cancelled_by_user(conv_id: str) -> None:
     """User stopped this chat outright: drop undelivered envelopes, close threads
     the stopped chat owed, and tell each sender (receiver-cancelled)."""
     with _lock:
+        _stopped.add(conv_id)
         _inbox.pop(conv_id, None)
+        _held.pop(conv_id, None)
+        _uncertain_chats.discard(conv_id)
+        _active.pop(conv_id, None)
+        _delivering.discard(conv_id)
+        timer = _timers.pop(conv_id, None)
+        if timer is not None:
+            timer[1].cancel()
     title, agent = _conv_meta(conv_id)
     for thread in open_threads_for_receiver(conv_id):
         close_thread(thread.response_id)
@@ -545,6 +643,9 @@ def on_agent_cancelled_by_user(conv_id: str) -> None:
 def stats() -> dict[str, Any]:
     with _lock:
         return {
+            "held": {k: len(v) for k, v in _held.items() if v},
+            "stopped": sorted(_stopped),
+            "cooldowns": dict(_cooldowns),
             "queued": {k: len(v) for k, v in _inbox.items() if v},
             "open_threads": [
                 {

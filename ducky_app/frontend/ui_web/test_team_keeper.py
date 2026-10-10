@@ -87,3 +87,24 @@ def test_a_failed_wake_is_retried_next_tick() -> None:
     assert keeper.tick(now=10 * MIN, plans=[PLAN], running=[], wake=_boom) == []
     assert keeper.tick(now=11 * MIN, plans=[PLAN], running=[], wake=lambda c, t: None) == ["coord"]
     assert calls == ["coord"]
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_keeper_respects_broker_cooldown_and_explicit_stop(monkeypatch, stopped):
+    from backend.agent import a2a_broker as broker
+    monkeypatch.setattr(broker, "_stopped", set(), raising=False)
+    monkeypatch.setattr(broker, "_cooldowns", {}, raising=False)
+    monkeypatch.setattr(broker, "_held", {}, raising=False)
+    monkeypatch.setattr(broker, "_uncertain_chats", set(), raising=False)
+    monkeypatch.setattr(broker, "_account_key", lambda cid: "test-account", raising=False)
+    monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
+    monkeypatch.setattr(broker, "send_notice", lambda **kw: None)
+    if stopped:
+        broker.on_agent_cancelled_by_user("coord")
+    else:
+        broker.on_agent_stopped("coord", "error", detail='{"error":{"type":"rate_limit_error"}}')
+    woke = []
+    assert _run(0, [], woke) == []
+    assert _run(10 * MIN, [], woke) == []
+    assert _run(20 * MIN, [], woke) == []
+    assert woke == []

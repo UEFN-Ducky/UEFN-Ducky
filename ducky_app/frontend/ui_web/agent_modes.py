@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import uuid
+from functools import wraps
 from collections.abc import Callable
 from typing import Any
 
@@ -137,8 +138,6 @@ import urllib.request as _urlreq
 _forward_queue: _queue.Queue[dict[str, Any]] = _queue.Queue(maxsize=4000)
 _forward_started = False
 _forward_lock = threading.Lock()
-
-
 
 
 def _panel_event_url() -> str:
@@ -304,39 +303,75 @@ class AgentSession:
         self.run_id: str = ""
 
     def set_runner(self, runner: AgentRunner | None, *, run_id: str) -> None:
-        if self.run_id != run_id:
-            return
-        self._runner = runner
+        with _admission_lock:
+            if self.run_id != run_id:
+                return
+            self._runner = runner
 
     def clear_runner(self, *, run_id: str) -> None:
-        if self.run_id == run_id:
-            self._runner = None
+        with _admission_lock:
+            if self.run_id == run_id:
+                self._runner = None
 
     def prepare_run(self, run_id: str) -> None:
-        self.cancel()
+        from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
+        admission = getattr(_admission_context, "current", None)
+        if admission:
+            _check_admission(*admission)
+        if not admission:
+            self.cancel()
         old = self._thread
         if old is not None and old.is_alive():
             old.join(SESSION_JOIN_TIMEOUT)
-        self._cancel = threading.Event()
-        old_rid = self.run_id
-        self.run_id = run_id
-        from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
-
-        if old_rid and old_rid != run_id:
-            discard_live_run_id(old_rid)
-        add_live_run_id(run_id)
+        with _admission_lock:
+            if admission:
+                _check_admission(*admission)
+            self._admission = admission
+            self._cancel = threading.Event()
+            old_rid = self.run_id
+            self.run_id = run_id
+            if old_rid and old_rid != run_id:
+                discard_live_run_id(old_rid)
+            add_live_run_id(run_id)
 
     def start(self, target: Callable[[], None], run_id: str) -> None:
+        admission = getattr(_admission_context, "current", None)
+        if admission:
+            _check_admission(*admission)
         if self.run_id != run_id:
             self.prepare_run(run_id)
-        self._thread = threading.Thread(target=target, daemon=True, name=f"agent-{run_id[:8]}")
+        admission = admission or getattr(self, "_admission", None)
+        if admission:
+            _check_admission(*admission)
+        def run() -> None:
+            try:
+                if admission:
+                    _check_admission(*admission)
+                target()
+            except _AdmissionCancelled:
+                pass
+            finally:
+                discard_live_run_id(run_id)
+                if admission:
+                    _release_admission(*admission)
+        worker = threading.Thread(target=run, daemon=True, name=f"agent-{run_id[:8]}")
         from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
 
-        add_live_run_id(run_id)
         try:
-            self._thread.start()
+            with _admission_lock:
+                if admission:
+                    _check_admission(*admission)
+                if self.run_id != run_id:
+                    raise _AdmissionCancelled()
+                self._thread = worker
+                add_live_run_id(run_id)
+                if admission:
+                    admission[1]["transferred"] = True
+            worker.start()
         except Exception:
             discard_live_run_id(run_id)
+            if admission:
+                _release_admission(*admission)
             raise
 
     def cancel(self) -> None:
@@ -356,9 +391,96 @@ _quiet_runs: set[str] = set()
 PHONE_PUSH_MIN_SECONDS = 20.0
 _run_started: dict[str, float] = {}
 
+# Briefing appends and local run admission use the same short critical section.
+# Provider work, joins and user callbacks never run under this lock.
+_admission_lock = threading.RLock()
+_admission_changed = threading.Condition(_admission_lock)
+_admission_context = threading.local()
+_admissions: dict[str, dict[str, Any]] = {}
+
+
+class _AdmissionCancelled(Exception):
+    pass
+
+
+def _reserve_admission(conv_id: str) -> dict[str, Any] | None:
+    with _admission_lock:
+        if is_agent_running(conv_id):
+            return None
+        token: dict[str, Any] = {"transferred": False}
+        _admissions[conv_id] = token
+        return token
+
+
+def _release_admission(conv_id: str, token: dict[str, Any]) -> None:
+    with _admission_changed:
+        if _admissions.get(conv_id) is token:
+            _admissions.pop(conv_id, None)
+            _admission_changed.notify_all()
+
+
+def _check_admission(conv_id: str, token: dict[str, Any]) -> None:
+    with _admission_lock:
+        if _admissions.get(conv_id) is not token:
+            raise _AdmissionCancelled()
+
+
+def append_if_idle(conv_id: str, append: Callable[[], bool | None]) -> bool:
+    """Atomically append stored context only when no turn has been admitted."""
+    with _admission_lock:
+        if is_agent_running(conv_id):
+            return False
+        return append() is not False
+
+
+def _with_admission(fn):
+    @wraps(fn)
+    def admitted(conv_id, user_text, mode, model, **kwargs):
+        if not kwargs.get("_local") and _in_bridge_process():
+            return fn(conv_id, user_text, mode, model, **kwargs)
+        queue = kwargs.get("queue_if_busy", False) and not kwargs.get("force", False)
+        from backend.agent.a2a_broker import automatic_work_blocked, resume_by_user
+        if queue and automatic_work_blocked(conv_id, queued=True):
+            _queue_pending(conv_id, user_text)
+            return "queued"
+        if is_agent_running(conv_id):
+            if queue:
+                _queue_pending(conv_id, user_text)
+                return "queued"
+            cancel_agent(conv_id)
+            wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT)
+        token = _reserve_admission(conv_id)
+        if token is None:
+            if queue:
+                _queue_pending(conv_id, user_text)
+                return "queued"
+            _resolve_push(kwargs.get("push"))({"type": "error", "conv_id": conv_id,
+                                               "text": "Agent already running for this chat"})
+            return ""
+        previous = getattr(_admission_context, "current", None)
+        _admission_context.current = (conv_id, token)
+        try:
+            with _admission_lock:
+                _check_admission(conv_id, token)
+                if queue and automatic_work_blocked(conv_id, queued=True):
+                    _queue_pending(conv_id, user_text)
+                    return "queued"
+                if not queue:
+                    resume_by_user(conv_id)
+            return fn(conv_id, user_text, mode, model, **kwargs)
+        except _AdmissionCancelled:
+            return ""
+        finally:
+            _admission_context.current = previous
+            if not token["transferred"]:
+                _release_admission(conv_id, token)
+    return admitted
 
 
 def is_agent_running(conv_id: str) -> bool:
+    with _admission_lock:
+        if conv_id in _admissions:
+            return True
     session = _sessions.get(conv_id)
     if session is None or session._thread is None:
         return False
@@ -374,7 +496,9 @@ def linked_children_of(conv_id: str) -> list[str]:
 
 
 def list_running_agents() -> list[str]:
-    return [cid for cid in _sessions if is_agent_running(cid)]
+    with _admission_lock:
+        candidates = set(_sessions) | set(_admissions)
+        return [cid for cid in candidates if is_agent_running(cid)]
 
 
 def live_changeset_run_ids() -> frozenset[str]:
@@ -481,13 +605,22 @@ def _push_agent_stopped(
 
 
 def wait_for_idle(conv_id: str, timeout: float = SESSION_JOIN_TIMEOUT) -> bool:
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    with _admission_changed:
+        while conv_id in _admissions:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            _admission_changed.wait(remaining)
     session = _sessions.get(conv_id)
     if session is None or session._thread is None:
         return True
     if not session._thread.is_alive():
         return True
-    session._thread.join(max(0.05, float(timeout)))
-    return not session._thread.is_alive()
+    if session._thread is threading.current_thread():
+        return False
+    session._thread.join(max(0.0, deadline - time.monotonic()))
+    return not is_agent_running(conv_id)
 
 
 def join_running_agents(timeout: float = 0.5) -> None:
@@ -565,21 +698,33 @@ def cancel_agent(conv_id: str | None = None) -> None:
     else:
         with _sessions_lock:
             targets = list(_sessions.keys())
+        with _admission_lock:
+            targets = list(set(targets) | set(_admissions))
 
     for cid in targets:
-        session = _sessions.get(cid)
-        if session is not None:
-            session.cancel()
-        # Drop A2A inbox so cancel does not immediately kick a new run from
-        # queued agent-to-agent messages (panel Stop must match ducky_agent_stop).
-        with _pending_lock:
-            _pending_agent_messages.pop(cid, None)
+        with _admission_lock:
+            cancelling = {"transferred": False, "cancelling": True}
+            _admissions[cid] = cancelling
+            session = _sessions.get(cid)
+            runner = None
+            if session is not None:
+                session._cancel.set()
+                runner = session._runner
         try:
+            if runner is not None:
+                try:
+                    runner.cancel()
+                except Exception:
+                    pass
+            with _pending_lock:
+                _pending_agent_messages.pop(cid, None)
             from backend.agent.a2a_broker import on_agent_cancelled_by_user
 
             on_agent_cancelled_by_user(cid)
         except Exception:
             pass
+        finally:
+            _release_admission(cid, cancelling)
 
 
 def _session(conv_id: str) -> AgentSession:
@@ -1095,19 +1240,30 @@ def run_message_and_wait(
 _pending_agent_messages: dict[str, list[str]] = {}
 _pending_lock = threading.Lock()
 
+def _queue_pending(conv_id: str, text: str) -> None:
+    with _pending_lock:
+        _pending_agent_messages.setdefault(conv_id, []).append(text)
+    from backend.agent.a2a_broker import _retry_queue_later
+    _retry_queue_later(conv_id)
+
 
 def _deliver_pending_agent_messages(conv_id: str) -> None:
+    from backend.agent.a2a_broker import automatic_work_blocked
+    if automatic_work_blocked(conv_id, queued=True):
+        return
     with _pending_lock:
         if not _pending_agent_messages.get(conv_id):
             return
 
     def _worker() -> None:
-        wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT)
+        if not wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT):
+            return
+        if automatic_work_blocked(conv_id, queued=True):
+            return
         with _pending_lock:
             texts = _pending_agent_messages.pop(conv_id, [])
         if texts:
-            # Still busy (another turn started)? queue_if_busy holds them for its end.
-            run_message(conv_id, "\n\n".join(texts), "agent", "", queue_if_busy=True, _local=True)
+            run_message(conv_id, "\n\n".join(texts), "agent", "", queue_if_busy=True)
 
     threading.Thread(target=_worker, daemon=True, name=f"a2a-pending-{conv_id[:8]}").start()
 
@@ -1115,20 +1271,34 @@ def _deliver_pending_agent_messages(conv_id: str) -> None:
 def _make_broker_tap(push: PushFn, conv_id: str) -> PushFn:
     """Feed turn-lifecycle events to the A2A broker (inbox drain + owed-reply notices)."""
 
+    seen: set[str] = set()
+    terminal_lock = threading.Lock()
+
     def tapped(event: dict[str, Any]) -> None:
         push(event)
         if event.get("conv_id") != conv_id or event.get("type") != "agent_stopped":
             return
+        rid = str(event.get("run_id") or "")
+        with terminal_lock:
+            if rid in seen:
+                return
+            seen.add(rid)
         try:
-            from backend.agent.a2a_broker import on_agent_stopped
+            from backend.agent.a2a_broker import on_agent_stopped, automatic_work_blocked, stats
 
             on_agent_stopped(
                 conv_id,
                 str(event.get("reason") or "done"),
                 detail=str(event.get("detail") or event.get("text") or ""),
+                run_id=rid,
             )
+            if stats().get("held", {}).get(conv_id):
+                push({"type": "error", "conv_id": conv_id, "run_id": rid,
+                      "text": "Agent work is held for manual recovery because prior execution is uncertain. It will not be replayed automatically."})
+            if automatic_work_blocked(conv_id, queued=True):
+                return
         except Exception:
-            pass
+            return
         _deliver_pending_agent_messages(conv_id)
 
     return tapped
@@ -1173,6 +1343,7 @@ def last_user_payload(conv) -> tuple[str, Any, list[dict[str, Any]]] | None:
     return None
 
 
+@_with_admission
 def run_message(
     conv_id: str,
     user_text: str,
@@ -1216,25 +1387,16 @@ def run_message(
                 return ""
             return str(resp.get("run_id") or "")
         # Panel unreachable — fall back to running the turn locally in the bridge.
+        return run_message(conv_id, user_text, mode, model, push=push,
+                           attachments=attachments, force=force, parent=parent,
+                           resume=resume, started_by=started_by,
+                           queue_if_busy=queue_if_busy, _local=True)
 
     push = _make_broker_tap(_resolve_push(push), conv_id)
     conv = load_conversation(conv_id)
     if not conv:
         push({"type": "error", "text": "Conversation not found", "conv_id": conv_id})
         return ""
-    if queue_if_busy and is_agent_running(conv_id) and not force:
-        with _pending_lock:
-            _pending_agent_messages.setdefault(conv_id, []).append(user_text)
-        return "queued"
-    # Cursor-style Stop → follow-up: UI goes idle immediately while the old
-    # thread is still unwinding. Cancel + join so the new turn can start with
-    # full prior context (partial assistant reply already persisted on cancel).
-    if is_agent_running(conv_id) and not force:
-        cancel_agent(conv_id)
-        wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT)
-        if is_agent_running(conv_id):
-            push({"type": "error", "text": "Agent already running for this chat", "conv_id": conv_id})
-            return ""
     _note_run_starter(conv_id, parent, started_by)
 
     run_id = str(uuid.uuid4())
@@ -1410,7 +1572,9 @@ def run_message(
         user_msg: dict[str, Any] = {"role": "user", "content": content, "text": user_text, "ts": ts}
         if stored_attachments:
             user_msg["attachments"] = stored_attachments
-        append_message(conv, user_msg)
+        with _admission_lock:
+            _check_admission(*_admission_context.current)
+            append_message(conv, user_msg)
         if len(conv.messages) == 1:
             from backend.agent.chat_title import start_auto_title
 
@@ -1440,8 +1604,7 @@ def run_message(
 
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
-        with _sessions_lock:
-            session.prepare_run(run_id)
+        session.prepare_run(run_id)
         base_push = _wrap_push_for_linked_child(
             push, parent_conv_id=parent_conv_id, child_conv_id=conv_id, child_title=child_title
         )
@@ -1498,11 +1661,7 @@ def run_message(
         session.start(work_external, run_id)
         return run_id
 
-    with _sessions_lock:
-        if is_agent_running(conv_id) and not force:
-            push({"type": "error", "text": "Agent already running for this chat", "conv_id": conv_id})
-            return ""
-        session.prepare_run(run_id)
+    session.prepare_run(run_id)
     base_push = _wrap_push_for_linked_child(
         push, parent_conv_id=parent_conv_id, child_conv_id=conv_id, child_title=child_title
     )

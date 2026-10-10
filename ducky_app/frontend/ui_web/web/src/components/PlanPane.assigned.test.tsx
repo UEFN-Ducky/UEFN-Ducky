@@ -1,23 +1,22 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-type Listener = (event: { type: string; conv_id?: string; plan?: unknown }) => void;
-const listeners = vi.hoisted(() => [] as Array<{ convId: string; handler: Listener }>);
-vi.mock("../hooks/useAgentEventBus", () => ({
-  useAgentEventSubscription: (convId: string, handler: Listener) => {
-    listeners.push({ convId, handler });
-  },
-  subscribeAgentEvents: () => () => {},
+// Keep the real subscription, conversation filter and scheduled event delivery.
+// Stub only the transport so this rendered test never polls a running app.
+vi.mock("../remote/directTransport", () => ({ getDirectTransport: () => ({ onEvent: () => {} }) }));
+vi.mock("../hooks/perfMonitor", () => ({
+  installPerfMonitor: () => {}, noteFrameDelivery: () => {}, notePendingDepth: () => {},
 }));
 const openPlan = vi.hoisted(() => vi.fn());
 vi.mock("../navigation/openPlanTab", () => ({ requestOpenPlanTab: openPlan }));
 const api = vi.hoisted(() => ({ get_plan: vi.fn() }));
-vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 // Always mounted (closed); it needs the ducky catalog provider this test does not set up.
 vi.mock("./ducky/DuckyProfileModal", () => ({ DuckyProfileModal: () => null }));
 
 import { PlanPane } from "./PlanPane";
+import { pushLocalAgentEvent } from "../hooks/useAgentEventBus";
 
 const assigned = {
   id: "p1",
@@ -40,11 +39,33 @@ const assigned = {
 
 afterEach(() => {
   cleanup();
-  listeners.length = 0;
   vi.clearAllMocks();
 });
 
 describe("PlanPane for a team member", () => {
+  it("discovers, reassigns and clears assignments through member-scoped invalidation", async () => {
+    api.get_plan.mockResolvedValue({ ok: true, plan: null, progress: null });
+    render(<PlanPane chatId="builder" chatName="Builder" />);
+    await screen.findByText("No plan for this chat yet.");
+    const emit = async (convId: string) => act(async () => {
+      pushLocalAgentEvent({ type: "plan_assignment_changed", conv_id: convId });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    api.get_plan.mockClear();
+    await emit("outsider");
+    expect(api.get_plan).not.toHaveBeenCalled();
+    api.get_plan.mockResolvedValue({ ok: true, plan: assigned, progress: null });
+    await emit("builder");
+    await screen.findByText("Open full plan");
+    expect(screen.queryByText("Edit")).toBeNull();
+    api.get_plan.mockResolvedValue({ ok: true, plan: { ...assigned, title: "New assignment" }, progress: null });
+    await emit("builder");
+    await screen.findByRole("heading", { name: "New assignment" });
+    api.get_plan.mockResolvedValue({ ok: true, plan: null, progress: null });
+    await emit("builder");
+    await screen.findByText("No plan for this chat yet.");
+  });
+
   it("shows its group's part of the team plan, read-only, instead of No plan", async () => {
     api.get_plan.mockResolvedValue({
       ok: true,
@@ -67,9 +88,7 @@ describe("PlanPane for a team member", () => {
     render(<PlanPane chatId="builder" chatName="Builder" />);
     await screen.findByText("Open full plan");
     api.get_plan.mockClear();
-    for (const { convId, handler } of listeners) {
-      if (convId === "coord") handler({ type: "plan_updated", conv_id: "coord" });
-    }
+    act(() => pushLocalAgentEvent({ type: "plan_updated", conv_id: "coord" }));
     await waitFor(() => expect(api.get_plan).toHaveBeenCalledWith("builder", null));
   });
 });

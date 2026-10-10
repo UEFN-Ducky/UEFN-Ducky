@@ -36,3 +36,21 @@ def test_a_person_pressing_stop_drops_held_agent_messages(monkeypatch) -> None:
     monkeypatch.setattr(am, "_pending_agent_messages", {"c2": ["held"]})
     am.cancel_agent("c2")
     assert "c2" not in am._pending_agent_messages
+
+
+def test_terminal_quota_tap_retains_pending_until_cooldown(monkeypatch):
+    from backend.agent import a2a_broker as broker
+    monkeypatch.setattr(broker, "_cooldowns", {}, raising=False)
+    monkeypatch.setattr(broker, "_stopped", set(), raising=False)
+    monkeypatch.setattr(broker, "_uncertain_chats", set(), raising=False)
+    monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
+    monkeypatch.setattr(am, "_pending_agent_messages", {"limited": ["queued work"]})
+    calls = []
+    monkeypatch.setattr(am, "_deliver_pending_agent_messages", lambda cid: calls.append(cid))
+    tap = am._make_broker_tap(lambda event: None, "limited")
+    event = {"type": "agent_stopped", "conv_id": "limited", "reason": "error",
+             "detail": '{"error":{"code":"insufficient_quota"}}'}
+    tap(event)
+    tap(event)
+    assert calls == []
+    assert am._pending_agent_messages == {"limited": ["queued work"]}

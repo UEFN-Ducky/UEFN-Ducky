@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import threading
 import time
 import uuid
@@ -483,15 +484,21 @@ def broadcast_group_briefing(
         mid = str(m.get("member_conv_id") or "").strip()
         if not mid or m.get("is_group") or mid in skip or _agent_running(mid):
             continue
-        member = load_conversation(mid, project_root=project_root)
-        if member is None:
-            continue
-        append_message(
-            member,
-            {"role": "user", "content": body, "ts": time.time(), "group_briefing": True},
-            project_root=project_root,
-        )
-        count += 1
+        from frontend.ui_web.agent_modes import append_if_idle
+
+        def append_briefing() -> bool:
+            # Reload under the admission lock so an intervening completed turn
+            # cannot be overwritten by a stale pre-lock conversation snapshot.
+            member = load_conversation(mid, project_root=project_root)
+            if member is None or _agent_running(mid):
+                return False
+            append_message(member,
+                           {"role": "user", "content": body, "ts": time.time(), "group_briefing": True},
+                           project_root=project_root)
+            return True
+
+        if append_if_idle(mid, append_briefing):
+            count += 1
     return count
 
 
@@ -532,7 +539,17 @@ def _agent_running(conv_id: str) -> bool:
         return False
 
 
-def announce_private_member_talk(
+_announcement_lock = threading.RLock()
+_announced_turns: dict[tuple[str, str], str] = {}
+
+
+def announce_private_member_talk(member_conv_id: str, *, push: PushFn | None = None,
+                                project_root: str | None = None) -> bool:
+    with _announcement_lock:
+        return _announce_private_member_talk(member_conv_id, push=push, project_root=project_root)
+
+
+def _announce_private_member_talk(
     member_conv_id: str,
     *,
     push: PushFn | None = None,
@@ -566,10 +583,14 @@ def announce_private_member_talk(
                 if isinstance(content, str) and content.strip():
                     reply = content.strip()
             continue
-        if role == "user" and reply:
+        if role == "user":
+            if not reply:
+                return False
+            if msg.get("group_briefing"):
+                return False
             plain = _message_plain_text(msg)
             if not plain:
-                continue
+                return False
             # Only a person's private talk is news for the group. Agent-to-agent
             # messages and notices are team traffic: announcing each one posted a
             # "the user talked to me" note on the hub and a briefing into every
@@ -579,6 +600,10 @@ def announce_private_member_talk(
             user_text = plain
             break
     if not user_text or not reply:
+        return False
+    signature = hashlib.sha256(repr((len(member.messages), user_text, reply)).encode()).hexdigest()
+    announcement_key = (str(project_root or ""), mid)
+    if _announced_turns.get(announcement_key) == signature:
         return False
 
     sync_group_members_from_folder(group, project_root=project_root)
@@ -611,6 +636,7 @@ def announce_private_member_talk(
         project_root=project_root,
         side_chat_announce=True,
     )
+    _announced_turns[announcement_key] = signature
     if push is not None:
         push({"type": "text_delta", "text": note, "conv_id": group_id})
         push(

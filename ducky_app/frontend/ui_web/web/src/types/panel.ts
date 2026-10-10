@@ -1892,6 +1892,7 @@ export interface AgentEvent {
     | "file_deleted"
     | "delegation_warning"
     | "plan_updated"
+    | "plan_assignment_changed"
     | "discord_message"
     | "ui_rpc_request"
     | "ui_rpc_settled"
@@ -3338,6 +3339,7 @@ export interface PanelApi {
     project_root?: string | null,
   ): Promise<{
     ok: boolean;
+    error?: string;
     plan: ChatPlan | null;
     progress: PlanProgress;
     outline?: PlanOutlineRow[];

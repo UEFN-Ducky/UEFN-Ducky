@@ -141,6 +141,7 @@ export function PlanPane({
     const res = await api.get_plan(chatId, planProjectArg ?? null);
     setPlan(res.plan ?? null);
     setProgress(res.progress ?? null);
+    if (!res.ok) throw new Error(res.error || "Could not load plan");
   }, [chatId, planProjectArg]);
 
   useEffect(() => {
@@ -198,13 +199,17 @@ export function PlanPane({
   useAgentEventSubscription(
     chatId,
     (event: AgentEvent) => {
+      if (event.type === "plan_assignment_changed") {
+        void reloadPlan().then(() => setError(null)).catch((e) => setError(String(e)));
+        return;
+      }
       if (event.type !== "plan_updated") return;
       if (event.plan) {
         setPlan(event.plan);
         setProgress(event.progress ?? null);
       }
     },
-    [],
+    [reloadPlan],
   );
 
   // A team member's chat shows its group's part of the coordinator's plan: read-only,

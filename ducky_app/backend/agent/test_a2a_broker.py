@@ -21,6 +21,9 @@ class FakeAgentModes(ModuleType):
     def is_agent_running(self, conv_id: str) -> bool:
         return conv_id in self.running
 
+    def pending_work_held(self, conv_id: str) -> bool:
+        return False
+
     def wait_for_idle(self, conv_id: str, timeout: float = 1.0) -> bool:
         return conv_id not in self.running
 
@@ -83,6 +86,8 @@ def broker(monkeypatch):
         is_group=False,
     )
     monkeypatch.setitem(sys.modules, "frontend.ui_web.agent_modes", fake_modes)
+    import frontend.ui_web
+    monkeypatch.setattr(frontend.ui_web, "agent_modes", fake_modes, raising=False)
     monkeypatch.setitem(sys.modules, "frontend.ui_web.project_chats", fake_chats)
     monkeypatch.setitem(sys.modules, "frontend.ui_web.group_orchestrator", fake_groups)
     module = importlib.import_module("backend.agent.a2a_broker")
@@ -91,13 +96,36 @@ def broker(monkeypatch):
 
 
 def _wait_sent(modes: FakeAgentModes, count: int = 1, timeout: float = 5.0) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if len(modes.sent) >= count:
             return
         modes.delivered.wait(0.05)
         modes.delivered.clear()
     raise AssertionError(f"expected {count} deliveries, got {modes.sent!r}")
+
+
+@pytest.mark.parametrize("diagnostic", [
+    '{"error":{"type":"rate_limit_error"}}',
+    '{"error":{"code":"rate_limit_exceeded"}}',
+    '{"error":{"code":"insufficient_quota"}}',
+])
+def test_current_structured_account_diagnostic(broker, diagnostic):
+    assert broker.mod.account_limited(diagnostic)
+
+
+def test_success_prose_is_not_account_diagnostic(broker):
+    assert not broker.mod.account_limited("Implemented rate limit tests successfully")
+
+
+def test_historical_prose_does_not_suppress_disk_failure(broker, monkeypatch):
+    broker.chats.convs["recv1"].messages = [{"role": "assistant", "content": "Implemented rate limit tests successfully"}]
+    broker.mod.open_thread("sender1", "recv1")
+    notices = []
+    monkeypatch.setattr(broker.mod, "send_notice", lambda **kw: notices.append(kw))
+    broker.mod.on_agent_stopped("recv1", "error", detail="disk error")
+    assert len(notices) == 1
+    assert "disk error" in notices[0]["body"]
 
 
 def test_send_expect_reply_delivers_formatted_turn(broker):
@@ -341,6 +369,7 @@ def test_the_team_is_found_in_its_own_project_when_another_project_is_open(broke
 def test_an_account_limit_does_not_wake_the_team(broker, monkeypatch):
     """Out of credits, each notice woke another agent into the same limit."""
     _wire_hub_to_producer(broker)
+    monkeypatch.setattr(broker.mod.time, "time", lambda: 1000.0)
     broker.chats.convs["recv1"].messages = [
         {"role": "assistant", "content": '{"type":"error","message":"You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits"}'}
     ]
@@ -355,7 +384,8 @@ def test_an_account_limit_does_not_wake_the_team(broker, monkeypatch):
     broker.mod._inbox.setdefault("recv1", broker.mod.deque()).append(
         broker.mod.Envelope(sender_conv_id="sender1", receiver_conv_id="recv1", body="next task")
     )
-    broker.mod.on_agent_stopped("recv1", "error", detail="")
+    # Current terminal diagnostic, not a historical assistant row.
+    broker.mod.on_agent_stopped("recv1", "error", detail=broker.chats.convs["recv1"].messages[-1]["content"])
     time.sleep(0.3)
     assert broker.modes.sent == []  # neither the sender nor the group leader was woken
     assert [t.response_id for t in broker.mod.open_threads_for_receiver("recv1")] == [rid]
@@ -367,3 +397,99 @@ def test_an_ordinary_error_still_notifies(broker):
     broker.mod.on_agent_stopped("recv1", "error", detail="Codex exited with code 1")
     _wait_sent(broker.modes, 1)
     assert broker.modes.sent[0][0] == "sender1" and rid in broker.modes.sent[0][1]
+
+
+@pytest.fixture
+def fake_clock(broker, monkeypatch):
+    clock = SimpleNamespace(now=1000.0, timers=[])
+    monkeypatch.setattr(broker.mod.time, "time", lambda: clock.now)
+
+    class Timer:
+        def __init__(self, delay, fn, args=()):
+            self.delay, self.fn, self.args = delay, fn, args
+            self.cancelled = False
+            clock.timers.append(self)
+        def start(self): pass
+        def cancel(self): self.cancelled = True
+        def fire(self): self.fn(*self.args)
+    monkeypatch.setattr(broker.mod.threading, "Timer", Timer)
+    return clock
+
+
+def test_cooldown_retains_never_admitted_work_and_thread_for_900_seconds(broker, fake_clock):
+    broker.mod.on_agent_stopped("recv1", "error", detail='{"error":{"code":"insufficient_quota"}}', run_id="limited")
+    outcome = broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="queued", expect_reply=True)
+    original_deadline = broker.mod._cooldowns.copy()
+    broker.mod.on_agent_stopped("recv1", "error", detail="rate_limit_error", run_id="limited")
+    assert len(fake_clock.timers) == 1
+    assert broker.mod._cooldowns == original_deadline
+    fake_clock.now += 301
+    broker.mod.sweep_quiet_threads()
+    assert broker.mod.open_threads_for_receiver("recv1")[0].response_id == outcome["response_id"]
+    broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="more", expect_reply=False)
+    assert broker.modes.sent == []
+    fake_clock.now = 1900
+    fake_clock.timers[0].fire()
+    _wait_sent(broker.modes)
+    fake_clock.timers[0].fire()
+    assert len(broker.modes.sent) == 1
+    assert "queued" in broker.modes.sent[0][1] and "more" in broker.modes.sent[0][1]
+
+
+@pytest.mark.parametrize("blocks", [[], [{"type": "tool_use", "name": "write_file"}]])
+def test_admitted_quota_original_is_held_indefinitely(broker, fake_clock, blocks):
+    broker.chats.convs["recv1"].messages[-1]["blocks"] = blocks
+    outcome = broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="original", expect_reply=True)
+    _wait_sent(broker.modes)
+    broker.mod.on_agent_stopped("recv1", "error", detail="rate_limit_error", run_id="run")
+    held = broker.mod.read_inbox("recv1")[0]
+    assert held["status"] == "held_manual_recovery"
+    assert held["response_id"] == outcome["response_id"] and held["from"] == "sender1"
+    fake_clock.now += 900
+    fake_clock.timers[0].fire()
+    assert len(broker.modes.sent) == 1
+    broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="new queued task", expect_reply=False)
+    _wait_sent(broker.modes, 2)
+    assert "original" not in broker.modes.sent[1][1]
+    assert broker.mod.stats()["held"] == {"recv1": 1}
+
+
+def test_cancel_invalidates_timer_and_reply_ownership(broker, fake_clock, monkeypatch):
+    monkeypatch.setattr(broker.mod, "send_notice", lambda **kw: None)
+    broker.mod.on_agent_stopped("recv1", "error", detail="rate_limit_error", run_id="limited")
+    broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1", body="cancel me", expect_reply=True)
+    broker.mod.on_agent_cancelled_by_user("recv1")
+    assert fake_clock.timers[0].cancelled
+    fake_clock.now += 900
+    fake_clock.timers[0].fire()
+    assert broker.modes.sent == []
+    assert broker.mod.open_threads_for_receiver("recv1") == []
+    assert broker.mod.stats()["queued"] == {}
+
+
+def test_later_turn_cannot_complete_or_reuse_held_reply_thread(broker, fake_clock, monkeypatch):
+    original = broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1",
+                               body="uncertain original", expect_reply=True)
+    _wait_sent(broker.modes)
+    broker.mod.on_agent_stopped("recv1", "error", detail="insufficient_quota", run_id="original")
+    fake_clock.now += 900
+    fake_clock.timers[0].fire()
+    new = broker.mod.send(sender_conv_id="sender1", receiver_conv_id="recv1",
+                          body="separate task", expect_reply=True)
+    assert new["response_id"] != original["response_id"]
+    _wait_sent(broker.modes, 2)
+    notices = []
+    monkeypatch.setattr(broker.mod, "send_notice", lambda **kw: notices.append(kw))
+    broker.mod.on_agent_stopped("recv1", "done", run_id="separate")
+    assert len(notices) == 1
+    assert original["response_id"] not in notices[0]["body"]
+    assert broker.mod._threads[original["response_id"]].noticed is False
+    assert broker.mod.stats()["held"] == {"recv1": 1}
+
+
+def test_cooldown_does_not_lock_out_unrelated_adapter(broker, fake_clock):
+    broker.mod.on_agent_stopped("recv1", "error", detail="rate_limit_error")
+    broker.chats.convs["other"] = SimpleNamespace(coding_agent="codex", messages=[], ducky_name="Other", title="Other")
+    broker.mod.send(sender_conv_id="sender1", receiver_conv_id="other", body="independent account", expect_reply=False)
+    _wait_sent(broker.modes)
+    assert broker.modes.sent[0][0] == "other"

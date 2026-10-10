@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
+
+
+@pytest.fixture(autouse=True)
+def _panel_owner(monkeypatch):
+    from frontend.ui_web import agent_modes
+    monkeypatch.setattr(agent_modes, "_in_bridge_process", lambda: False)
 
 from frontend.settings import PanelSettings
 from frontend.ui_web.group_orchestrator import (
@@ -651,6 +659,7 @@ def test_hub_persist_does_not_cap_images(monkeypatch, tmp_path):
 
 def _team(monkeypatch, member_messages):
     import frontend.ui_web.group_orchestrator as go
+    monkeypatch.setattr(go, "_announced_turns", {}, raising=False)
 
     member = SimpleNamespace(id="m1", parent_conv_id="g1", messages=member_messages, is_group=False)
     group = SimpleNamespace(id="g1", is_group=True)
@@ -695,4 +704,75 @@ def test_a_briefing_never_lands_in_a_chat_mid_turn(monkeypatch):
     go, posted, briefed = _team(monkeypatch, [])
     monkeypatch.setattr(go, "_agent_running", lambda cid: cid == "m2")
     assert go.broadcast_group_briefing("g1", "Builder: finished the doors", skip_member_ids={"m1"}) == 1
+    assert briefed == ["m3"]
+
+
+@pytest.mark.parametrize("reason", ["done", "error", "cancelled"])
+@pytest.mark.parametrize("synthetic", [
+    {"role": "user", "content": "[group-briefing] note", "group_briefing": True},
+    {"role": "user", "content": "[ducky:agent-message] perform task"},
+    {"role": "user", "content": "[ducky:agent-notice] stopped"},
+    {"role": "user", "content": ""},
+])
+def test_actual_stop_never_pairs_old_user_with_synthetic_reply(monkeypatch, reason, synthetic):
+    from frontend.ui_web import agent_modes as am
+    go, posted, briefed = _team(monkeypatch, [
+        {"role": "user", "content": "Original real question"},
+        {"role": "assistant", "content": "Original answer"},
+        synthetic,
+        {"role": "assistant", "content": "Synthetic answer"},
+    ])
+    monkeypatch.setattr(am, "_notify_phone", lambda *args: None)
+    monkeypatch.setattr(am, "close_changeset_run", lambda *args: None)
+    events = []
+    am._push_agent_stopped(events.append, "m1", "synthetic", reason)
+    assert events[0]["reason"] == reason
+    assert posted == [] and briefed == []
+
+
+def test_actual_done_broadcasts_real_talk_only_once_under_concurrency(monkeypatch):
+    from frontend.ui_web import agent_modes as am
+    go, posted, briefed = _team(monkeypatch, [
+        {"role": "user", "content": "A real new question"},
+        {"role": "assistant", "content": "A real answer"},
+    ])
+    monkeypatch.setattr(am, "_notify_phone", lambda *args: None)
+    monkeypatch.setattr(am, "close_changeset_run", lambda *args: None)
+    barrier = threading.Barrier(3)
+    def stop():
+        barrier.wait(timeout=2)
+        am._push_agent_stopped(lambda e: None, "m1", "real", "done")
+    workers = [threading.Thread(target=stop) for _ in range(2)]
+    for worker in workers: worker.start()
+    barrier.wait(timeout=2)
+    for worker in workers:
+        worker.join(2)
+        assert not worker.is_alive()
+    assert len(posted) == 1
+    assert briefed == ["m2", "m3"]
+
+
+def test_new_unanswered_user_turn_prevents_old_reply_rebroadcast(monkeypatch):
+    go, posted, briefed = _team(monkeypatch, [
+        {"role": "user", "content": "Older question"},
+        {"role": "assistant", "content": "Older reply"},
+        {"role": "user", "content": "New question"},
+    ])
+    assert not go.announce_private_member_talk("m1")
+    assert posted == [] and briefed == []
+
+
+def test_briefing_load_to_append_race_observes_real_admission(monkeypatch):
+    from frontend.ui_web import agent_modes as am
+    monkeypatch.setattr(am, "_admissions", {}, raising=False)
+    monkeypatch.setattr(am, "_sessions", {})
+    go, posted, briefed = _team(monkeypatch, [])
+    original = go.load_conversation
+    def load(cid, project_root=None):
+        conv = original(cid, project_root)
+        if cid == "m2":
+            am._reserve_admission(cid)
+        return conv
+    monkeypatch.setattr(go, "load_conversation", load)
+    assert go.broadcast_group_briefing("g1", "Briefing", skip_member_ids={"m1"}) == 1
     assert briefed == ["m3"]

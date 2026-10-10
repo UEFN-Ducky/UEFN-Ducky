@@ -24,6 +24,8 @@ NODES = [
 
 @pytest.fixture()
 def team(tmp_path, monkeypatch):
+    from frontend.ui_web import agent_modes
+    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: lambda event: None)
     monkeypatch.setenv("DUCKY_STORE_BACKEND_PLANS", "files")
     convs = {
         "builder": SimpleNamespace(parent_conv_id="group-a"),
@@ -76,3 +78,61 @@ def test_the_coordinators_own_plan_is_never_replaced(team) -> None:
     plans.update_node("coord", "b", assignee="team", project_root=team)
     # coord sits in "team", but its own plan is not offered back to it as a view.
     assert plans.assigned_plan_view("coord", project_root=team) is None
+
+
+def test_unknown_assignee_is_rejected_without_changing_plan(team):
+    before = plans.load_plan("coord", project_root=team)
+    with pytest.raises(ValueError, match="assignee"):
+        plans.update_node("coord", "a", assignee="missing", project_root=team)
+    assert plans.load_plan("coord", project_root=team) == before
+
+
+def test_deleted_member_and_deleted_group_do_not_resolve(team, monkeypatch):
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    original = project_chats.load_conversation
+    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None:
+                        None if cid == "builder" else original(cid, project_root))
+    assert plans.assigned_plan_view("builder", team) is None
+    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None:
+                        None if cid == "group-a" else original(cid, project_root))
+    assert plans.assigned_plan_view("builder", team) is None
+
+
+def test_multiple_matching_plans_refuse_instead_of_latest_save(team):
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    plans.create_plan("outsider", title="Second", nodes=[
+        {"id": "other", "content": "Other work", "assignee": "group-a"}
+    ], project_root=team)
+    assert plans.assigned_plan_view("builder", team) is None
+    with pytest.raises(ValueError, match="Multiple plan assignments"):
+        plans.assigned_plan_view("builder", team, report_ambiguity=True)
+
+
+def test_assignment_invalidation_is_scoped_and_contains_no_plan_body(team, monkeypatch):
+    from frontend.ui_web import agent_modes
+
+    events = []
+    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: events.append)
+    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda root: [
+        SimpleNamespace(id=cid) for cid in ("builder", "group-a", "coord", "outsider")
+    ])
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    assert events == [
+        {"type": "plan_assignment_changed", "conv_id": "builder"},
+        {"type": "plan_assignment_changed", "conv_id": "group-a"},
+    ]
+    events.clear()
+    plans.update_node("coord", "a", assignee="outsider", project_root=team)
+    assert {e["conv_id"] for e in events} == {"builder", "group-a", "outsider"}
+    assert all(set(e) == {"type", "conv_id"} for e in events)
+    events.clear()
+    plans.update_node("coord", "a", assignee="", project_root=team)
+    assert events == [{"type": "plan_assignment_changed", "conv_id": "outsider"}]
+
+
+def test_create_plan_rejects_invalid_assignment(team):
+    with pytest.raises(ValueError, match="assignee"):
+        plans.create_plan("outsider", nodes=[
+            {"content": "Work", "assignee": "missing"}
+        ], project_root=team)
+    assert plans.load_plan("outsider", team) is None

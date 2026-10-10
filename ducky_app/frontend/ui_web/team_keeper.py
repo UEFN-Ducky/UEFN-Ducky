@@ -90,6 +90,8 @@ def tick(
     wake: Callable[[str, str], None] | None = None,
 ) -> list[str]:
     """One check. Returns the coordinator chats it woke (arguments are for tests)."""
+    from backend.agent.a2a_broker import automatic_work_blocked
+
     now = time.time() if now is None else now
     if plans is None:
         plans = kept_plans()
@@ -113,7 +115,7 @@ def tick(
                     st["wakes"] = 0.0  # the team is working again: drop the backoff
                     st["next_wake"] = 0.0
                 continue
-            if now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
+            if automatic_work_blocked(cid) or now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
                 continue
             minutes = int((now - st["quiet_since"]) // 60)
             text = WAKE_TEXT.format(minutes=minutes, open_steps=_open_steps(plan))

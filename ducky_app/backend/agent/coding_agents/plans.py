@@ -158,7 +158,7 @@ def _normalize_node(raw: Any, *, fallback_id: str | None = None) -> dict[str, An
     }
     assignee = str(raw.get("assignee") or "").strip()
     if assignee:
-        node["assignee"] = assignee[:80]  # chat or group id that owns this part
+        node["assignee"] = assignee  # exact chat or group identity
     return node
 
 
@@ -535,13 +535,33 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
         raise ValueError("chat_id required")
     if not _resolve_project_root(project_root):
         raise ValueError("project_root required for project plans")
+    from frontend.ui_web.project_chats import load_conversation
+
+    # Read without load_plan's repair-and-save path: saving a healed document
+    # must not recursively try to heal the previous stored version again.
+    if _use_db():
+        previous = _repo(project_root).plan_get(_project_id(project_root), _safe_id(chat_id)) or {}
+    else:
+        try:
+            previous = json.loads(_plan_path(chat_id, project_root).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+    previous = _normalize_plan_doc(previous if isinstance(previous, dict) else {}, kind="project")
+    previous_assignments = {n["id"]: n.get("assignee") for n in _flatten_nodes(previous.get("nodes"))}
+    for node in _flatten_nodes(plan.get("nodes")):
+        assignee = node.get("assignee")
+        if assignee and previous_assignments.get(node["id"]) != assignee:
+            if load_conversation(assignee, project_root=project_root) is None:
+                raise ValueError("assignee must identify an existing chat or group")
     plan["updated_at"] = time.time()
     _rollup_completed_parents(plan.get("nodes"))
     _roll_plan_status(plan)
     if _use_db():
         _repo(project_root).plan_put(_project_id(project_root), _safe_id(chat_id), "project", plan)
+        _push_assignment_invalidated(previous, plan, project_root)
         return plan
     write_json_atomic(_plan_path(chat_id, project_root), plan)
+    _push_assignment_invalidated(previous, plan, project_root)
     return plan
 
 
@@ -727,7 +747,7 @@ def update_node(
     if assignee is not None:
         owner = assignee.strip()
         if owner:
-            node["assignee"] = owner[:80]
+            node["assignee"] = owner
         else:
             node.pop("assignee", None)
     structure_touch = content is not None or kind is not None or body_markdown is not None
@@ -1077,16 +1097,19 @@ def _chat_and_group_ids(chat_id: str, project_root: str | None) -> list[str]:
     for _ in range(8):
         if not cur or cur in ids:
             break
-        ids.append(cur)
         try:
             conv = load_conversation(cur, project_root=project_root)
         except Exception:
             conv = None
+        if conv is None:
+            break
+        ids.append(cur)
         cur = (getattr(conv, "parent_conv_id", None) or "").strip() if conv is not None else ""
     return ids
 
 
-def assigned_plan_view(chat_id: str, project_root: str | None = None) -> dict[str, Any] | None:
+def assigned_plan_view(chat_id: str, project_root: str | None = None, *,
+                       report_ambiguity: bool = False) -> dict[str, Any] | None:
     """The part of a team plan assigned to this chat or to a group it belongs to.
 
     Team members have no plan of their own, so their Plan pane said "No plan" while
@@ -1098,6 +1121,14 @@ def assigned_plan_view(chat_id: str, project_root: str | None = None) -> dict[st
         return None
     plans = [p for p in list_plans(project_root) if str(p.get("chat_id") or "") != ids[0]]
     for wanted in ids:  # the most specific owner wins
+        matches = [(p, n) for p in plans for n in _flatten_nodes(p.get("nodes"))
+                   if str(n.get("assignee") or "") == wanted]
+        if len(matches) > 1:
+            # There is no authorized plan binding to break this tie. Do not use
+            # save time as authority, nor silently fall back to a broader group.
+            if report_ambiguity:
+                raise ValueError("Multiple plan assignments match this chat. The coordinator must clear the conflicting assignments.")
+            return None
         for plan in plans:
             for node in _flatten_nodes(plan.get("nodes")):
                 if str(node.get("assignee") or "") != wanted:
@@ -1192,8 +1223,12 @@ def delete_plan(chat_id: str, project_root: str | None = None) -> bool:
     cid = (chat_id or "").strip()
     if not cid:
         raise ValueError("chat_id required")
+    previous = load_plan(cid, project_root) or {}
     if _use_db():
-        return _repo(project_root).plan_delete(_project_id(project_root), _safe_id(cid))
+        deleted = _repo(project_root).plan_delete(_project_id(project_root), _safe_id(cid))
+        if deleted:
+            _push_assignment_invalidated(previous, {"chat_id": cid}, project_root)
+        return deleted
     path = _plan_path(cid, project_root)
     if not path.is_file():
         return False
@@ -1201,6 +1236,7 @@ def delete_plan(chat_id: str, project_root: str | None = None) -> bool:
         path.unlink()
     except OSError:
         return False
+    _push_assignment_invalidated(previous, {"chat_id": cid}, project_root)
     return True
 
 
@@ -1523,6 +1559,30 @@ def save_plan_as_template(chat_id: str, project_root: str | None = None) -> dict
         body_markdown=str(src.get("body_markdown") or ""),
         nodes=_normalize_nodes(src.get("nodes")),
     )
+
+
+def _push_assignment_invalidated(before: dict[str, Any], after: dict[str, Any],
+                                 project_root: str | None) -> None:
+    """Invalidate affected panes without sending the owner's private plan body."""
+    assigned = {str(n.get("assignee")) for doc in (before, after)
+                for n in _flatten_nodes(doc.get("nodes")) if n.get("assignee")}
+    if not assigned:
+        return
+    try:
+        from frontend.ui_web.project_chats import list_all_conversation_metadata
+        from frontend.ui_web.agent_modes import _resolve_push
+
+        recipients = set(assigned)
+        for conv in list_all_conversation_metadata(project_root):
+            cid = str(getattr(conv, "id", ""))
+            if assigned.intersection(_chat_and_group_ids(cid, project_root)):
+                recipients.add(cid)
+        push = _resolve_push(None)
+        for cid in sorted(recipients - {str(after.get("chat_id") or "")}):
+            push({"type": "plan_assignment_changed", "conv_id": cid})
+    except Exception:
+        # Saving the authoritative document must not depend on a UI connection.
+        pass
 
 
 def push_plan_updated(plan: dict[str, Any]) -> None:

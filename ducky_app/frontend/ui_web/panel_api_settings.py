@@ -987,7 +987,9 @@ class PanelApiSettingsMixin:
         if plan is None:
             # A team member with no plan of its own sees its group's part of the team plan.
             try:
-                plan = assigned_plan_view(chat_id, project_root=root)
+                plan = assigned_plan_view(chat_id, project_root=root, report_ambiguity=True)
+            except ValueError as exc:
+                return {"ok": False, "plan": None, "error": str(exc)}
             except Exception:
                 plan = None
         outline = [
