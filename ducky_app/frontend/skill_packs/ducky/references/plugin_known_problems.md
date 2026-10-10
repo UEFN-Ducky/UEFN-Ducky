@@ -63,3 +63,4 @@ Check these before you tell the user a plugin works.
 | `ducky_plugin_test` skips the panel checks when the app window isn't open. | Ask the user to open Ducky, test again. |
 | Store installs don't update when `version` stays the same. | Raise `version` before every publish. |
 | A compiled build needs UEFN Ducky 1.2.357 or newer; the Store hides it from older apps. | The build sets `min_app_version` to at least 1.2.357; never lower it by hand. |
+| A compiled build made outside the build engine (Nuitka or zig run by hand) uses the build PC's CPU features, so on other PCs Ducky dies with illegal instruction `0xC000001D` while loading it. | Build only with the build engine (it compiles and links for baseline x86-64). Before publishing: `objdump -d <file>.pyd \| grep -cE '%(y\|z)mm'` must print `0`. |

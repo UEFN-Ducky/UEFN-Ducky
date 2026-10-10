@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -65,6 +66,11 @@ ESBUILD_URL = (
     f"win32-x64-{ESBUILD_VERSION}.tgz"
 )
 ESBUILD_SHA256 = "7286c3611b6f1f4c4d9ec90adcbc478407ff0d28ead96567f361d53e67613e19"
+# zig builds for the CPU of the machine it runs on. Nuitka pins the compile step to
+# baseline x86-64 but not the link, so zig's own C runtime (memcpy and friends) came
+# out with AVX-512 and BMI2 from the build PC, and Ducky crashed with an illegal
+# instruction (0xC000001D) on every CPU without them. Both steps get the baseline.
+BASELINE_CPU_FLAGS = "-mcpu=x86_64"
 
 # Never compiled, never shipped: repo internals and test code.
 _SKIP_DIR_NAMES = frozenset(
@@ -399,7 +405,8 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
         "--quiet",
         "--no-progressbar",
     ]
-    res = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True)
+    env = dict(os.environ, CFLAGS=BASELINE_CPU_FLAGS, LDFLAGS=BASELINE_CPU_FLAGS)
+    res = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True, env=env)
     warnings = [
         line.strip()
         for line in (res.stderr or "").splitlines()

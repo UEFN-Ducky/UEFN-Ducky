@@ -86,6 +86,13 @@ underscores). No `.py` source ships. UI `.js` / `.css` are minified (vendored
 - **Data files** go in `assets/` or as `.json` / `.txt` next to the module.
   `Path(__file__).parent / "cards.json"` still works after compiling (non-Python
   files in `backend/` are kept beside the compiled module).
+- **It must run on every CPU.** Compile only through UEFN Ducky's build engine
+  (`ducky_plugin_publish`, `ducky_plugin_build`, or a plugin's `scripts/release.py`),
+  never by running Nuitka or zig yourself. zig builds for the CPU of the PC it runs on;
+  the engine compiles *and links* for baseline x86-64 instead. Account 1.0.50 was
+  linked with the build PC's AVX-512 and stopped Ducky opening (illegal instruction
+  `0xC000001D`) on every CPU without it. Before publishing a compiled build, check the
+  `.pyd`: `objdump -d <file>.pyd | grep -cE '%(y|z)mm'` must print `0`.
 - **Not shipped:** `scripts/`, `deploy/`, `tests/`, `test_*.py`, `node_modules/`,
   dot-folders, `*.zip`, `*.bin`. Don't put anything the plugin needs there.
 - **Other runtimes:** `listener/` is left as source because UEFN's own Python
