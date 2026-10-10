@@ -20,6 +20,10 @@ def launch_with_ready_tools(adapter, **kwargs):
             error="Cancelled" if status == "cancelled" else "Ducky's tools didn't start")
     if cancelled():
         return failed("cancelled")
+    if not shared_mcp.enabled():
+        # Shared tools off (the default): the agent's MCP config starts its own Ducky
+        # tool process, so there is no shared server to wait for.
+        return adapter.launch(**kwargs)
     try:
         started = shared_mcp.start_daemon_from_app()
         if not started.get("ok"):

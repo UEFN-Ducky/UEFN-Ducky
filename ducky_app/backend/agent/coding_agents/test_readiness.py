@@ -8,6 +8,20 @@ from backend.agent.coding_agents import readiness
 from backend.bridge import shared_mcp
 
 
+@pytest.fixture(autouse=True)
+def _shared_tools_on(monkeypatch):
+    monkeypatch.setattr(shared_mcp, "enabled", lambda settings=None: True)
+
+
+def test_with_shared_tools_off_the_agent_launches_its_own_tools(monkeypatch):
+    # The default: 1.2.372 waited for a shared server nobody had started, and every
+    # Claude Code, Codex and Cursor turn ended with "Ducky's tools didn't start".
+    monkeypatch.setattr(shared_mcp, "enabled", lambda settings=None: False)
+    monkeypatch.setattr(shared_mcp, "start_daemon_from_app", lambda: pytest.fail("started the shared server"))
+    adapter = SimpleNamespace(launch=lambda **kw: ("launched", kw["session_id"]))
+    assert readiness.launch_with_ready_tools(adapter, session_id="t1") == ("launched", "t1")
+
+
 @pytest.mark.parametrize("agent", ["codex", "claude_code", "cursor"])
 @pytest.mark.parametrize("session", ["", "existing-thread"])
 def test_cold_server_answers_after_eight_seconds_before_first_tool(monkeypatch, agent, session):
