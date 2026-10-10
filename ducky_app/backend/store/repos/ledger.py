@@ -59,6 +59,9 @@ def run_put(project_id: str, run: dict[str, Any]) -> None:
     doc = {k: v for k, v in run.items() if k not in _RUN_DOC_EXCLUDED}
     run_id = str(run["run_id"])
     with db.write_txn(conn):
+        owner = conn.execute("SELECT project_id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if owner is not None and owner["project_id"] != project_id:
+            raise ValueError("Changeset run belongs to another project.")
         conn.execute(
             "INSERT INTO runs(run_id, project_id, conv_id, group_id, started, ended, status, archived, doc) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET project_id=excluded.project_id, "
