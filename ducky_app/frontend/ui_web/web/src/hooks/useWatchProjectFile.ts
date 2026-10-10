@@ -4,7 +4,9 @@ import type { ProjectFileStat } from "../types/panel";
 import { getApi } from "./usePanelApi";
 import { onApiReady } from "./onApiReady";
 
-const DEFAULT_POLL_MS = 1000;
+// Each poll is a bridge call per editor group showing a file; once a second was more than
+// the rest of the idle polling put together. Coming back to the window checks at once.
+const DEFAULT_POLL_MS = 3000;
 
 function fingerprint(stat: ProjectFileStat): string {
   return `${stat.exists}:${stat.mtime_ns}:${stat.size}`;
@@ -52,16 +54,19 @@ export function useWatchProjectFile(
       }
     };
 
+    const onFocus = () => void poll();
     const stop = onApiReady(() => {
       fpRef.current = null;
       void poll();
       stopPoll = setVisibleInterval(() => void poll(), pollMs);
+      window.addEventListener("focus", onFocus);
     });
 
     return () => {
       cancelled = true;
       stop();
       stopPoll?.();
+      window.removeEventListener("focus", onFocus);
       fpRef.current = null;
     };
   }, [relativePath, enabled, pollMs]);
