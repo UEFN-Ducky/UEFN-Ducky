@@ -51,3 +51,28 @@ it("still re-renders the header when a slot changes", () => {
   expect(seen.length).toBe(before + 1);
   expect((seen[seen.length - 1] as { save: { dirty: boolean } }).save.dirty).toBe(true);
 });
+
+it("does not re-render the header when a bridge sends what it already shows", () => {
+  let renders = 0;
+  let setHeaderActions!: ReturnType<typeof useRegisterAppHeaderActions>["setHeaderActions"];
+  function Header() {
+    useAppHeaderActions();
+    renders += 1;
+    return null;
+  }
+  function Bridge() {
+    setHeaderActions = useRegisterAppHeaderActions().setHeaderActions;
+    return null;
+  }
+  render(<AppHeaderActionsProvider><Header /><Bridge /></AppHeaderActionsProvider>);
+  const onSave = () => {};
+  act(() => setHeaderActions({ save: { dirty: false, saving: false, onSave } }));
+  const shown = renders;
+
+  act(() => setHeaderActions({ save: { dirty: false, saving: false, onSave } }));
+  act(() => setHeaderActions({ terminal: null, problems: null }));
+  expect(renders).toBe(shown);
+
+  act(() => setHeaderActions({ save: { dirty: true, saving: false, onSave } }));
+  expect(renders).toBe(shown + 1);
+});

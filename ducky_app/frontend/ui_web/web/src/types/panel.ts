@@ -4051,6 +4051,10 @@ export interface PanelApi {
   terminal_spawn(shell?: string, cwd?: string, title?: string): Promise<Record<string, unknown>>;
   terminal_kill(session_id: string): Promise<Record<string, unknown>>;
   terminal_busy(session_id: string): Promise<{ ok: boolean; busy?: boolean; running?: boolean; error?: string }>;
+  terminal_busy_many(session_ids: string[]): Promise<{
+    ok: boolean;
+    states: Record<string, { ok: boolean; busy?: boolean; running?: boolean; error?: string }>;
+  }>;
   terminal_list(): Promise<{ sessions: Record<string, unknown>[] }>;
   terminal_write(session_id: string, data: string): Promise<Record<string, unknown>>;
   terminal_resize(session_id: string, cols: number, rows: number): Promise<Record<string, unknown>>;

@@ -104,17 +104,25 @@ const EMPTY: AppHeaderActionsState = {
 
 const AppHeaderActionsContext = createContext<AppHeaderActionsContextValue | null>(null);
 
+function sameFields(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]));
+}
+
 export function AppHeaderActionsProvider({ children }: { children: ReactNode }) {
   const [actions, setActions] = useState<AppHeaderActionsState>(EMPTY);
   const [problemsMenuOpen, setProblemsMenuOpen] = useState(false);
 
   const setHeaderActions = useCallback((patch: Partial<AppHeaderActionsState>) => {
+    // A bridge re-sending what the header already shows must not re-render the header
+    // and every other consumer of this context.
     setActions((prev) => {
-      // Bridges re-send their slot whenever their own inputs change (often `null` again);
-      // a copy of the same state re-rendered the whole header.
       const keys = Object.keys(patch) as (keyof AppHeaderActionsState)[];
-      if (keys.every((key) => prev[key] === patch[key])) return prev;
-      return { ...prev, ...patch };
+      return keys.every((key) => sameFields(prev[key], patch[key])) ? prev : { ...prev, ...patch };
     });
   }, []);
 

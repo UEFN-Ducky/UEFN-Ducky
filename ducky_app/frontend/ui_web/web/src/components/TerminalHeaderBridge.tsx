@@ -122,7 +122,19 @@ export function TerminalHeaderBridge({
 
 
 
-  const busyStatuses = useTerminalBusyStatuses(sessionIds);
+  // The parked ones follow the open tabs in terminalTabs.
+
+  const parkedSessionIds = useMemo(
+
+    () => terminalTabs.slice(openTerminalTabs.length).map((t) => t.terminalSessionId!),
+
+    [terminalTabs, openTerminalTabs],
+
+  );
+
+
+
+  const busyStatuses = useTerminalBusyStatuses(sessionIds, parkedSessionIds);
 
 
 

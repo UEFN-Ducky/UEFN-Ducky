@@ -119,14 +119,19 @@ def _process_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
     return children, names
 
 
-def shell_has_foreground_child(shell_pid: int) -> bool:
+ProcessSnapshot = Callable[[], tuple[dict[int, list[int]], dict[int, str]]]
+
+
+def shell_has_foreground_child(shell_pid: int, snapshot: ProcessSnapshot | None = None) -> bool:
     """True when the shell's process tree extends beyond the interactive shell.
 
     Git's ``bin\\bash.exe`` is a shim whose one child is the real bash, so a
     single SAME-NAMED child is collapsed before deciding: idle bash is
     shim→bash (not busy); any other descendant means a command is running.
+
+    ``snapshot`` lets several shells share one walk of every process on the PC.
     """
-    children, names = _process_snapshot()
+    children, names = (snapshot or _process_snapshot)()
     pid = int(shell_pid)
     for _ in range(8):  # bounded walk, shim chains are shallow
         kids = children.get(pid, [])
@@ -321,7 +326,7 @@ class TerminalSession:
         except Exception:
             return False
 
-    def has_running_command(self) -> bool:
+    def has_running_command(self, snapshot: ProcessSnapshot | None = None) -> bool:
         """True when an agent command is pending or the user has a command running."""
         if self.is_busy():
             return True
@@ -330,7 +335,7 @@ class TerminalSession:
         if not pid or not self.is_alive():
             return False
         try:
-            return shell_has_foreground_child(int(pid))
+            return shell_has_foreground_child(int(pid), snapshot)
         except Exception:
             return False
 

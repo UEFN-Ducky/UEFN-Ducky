@@ -462,6 +462,7 @@ _PUBLIC_METHODS = frozenset({
     'stop_verse_lsp',
     'terminal_approve_command',
     'terminal_busy',
+    'terminal_busy_many',
     'terminal_kill',
     'terminal_list',
     'terminal_read_output',

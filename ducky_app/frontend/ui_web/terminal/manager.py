@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import threading
 import uuid
@@ -9,7 +10,13 @@ from typing import Any, Callable
 
 from frontend.settings import PanelSettings
 from frontend.ui_web.terminal.bridge import TerminalBridge
-from frontend.ui_web.terminal.session import _OUTPUT_RING_CHARS, PendingCommand, TerminalSession
+from frontend.ui_web.terminal.session import (
+    _OUTPUT_RING_CHARS,
+    PendingCommand,
+    ProcessSnapshot,
+    TerminalSession,
+    _process_snapshot,
+)
 from frontend.ui_web.terminal.shells import shell_label
 
 _APPROVAL_TIMEOUT_S = 120.0
@@ -159,7 +166,7 @@ class TerminalManager:
             }
         )
 
-    def busy_state(self, session_id: str) -> dict[str, Any]:
+    def busy_state(self, session_id: str, snapshot: ProcessSnapshot | None = None) -> dict[str, Any]:
         """Whether a command (agent or user-typed) is running in the session."""
         session = self.get_session(session_id)
         if not session:
@@ -168,8 +175,18 @@ class TerminalManager:
             "ok": True,
             "session_id": session_id,
             "busy": session.is_busy(),
-            "running": session.has_running_command(),
+            "running": session.has_running_command(snapshot),
         }
+
+    def busy_state_many(self, session_ids: list[str]) -> dict[str, Any]:
+        """busy_state for several sessions at once.
+
+        Telling whether a user-typed command runs walks every process on the PC (~10 ms);
+        the header polls all its terminals every few seconds, so they share one walk.
+        """
+        snapshot = functools.cache(_process_snapshot)
+        ids = dict.fromkeys(str(sid).strip() for sid in session_ids or [] if str(sid).strip())
+        return {"ok": True, "states": {sid: self.busy_state(sid, snapshot) for sid in ids}}
 
     def kill(self, session_id: str, *, push_close: bool = True) -> dict[str, Any]:
         entry = self._pop_session(session_id)

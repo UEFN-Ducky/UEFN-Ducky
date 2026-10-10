@@ -959,6 +959,11 @@ class PanelApiWindowMixin:
 
         return get_terminal_manager().busy_state(session_id.strip())
 
+    def terminal_busy_many(self, session_ids: list[str]) -> dict[str, Any]:
+        from frontend.ui_web.terminal import get_terminal_manager
+
+        return get_terminal_manager().busy_state_many(list(session_ids or []))
+
     def terminal_list(self) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 
