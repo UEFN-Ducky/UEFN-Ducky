@@ -24,6 +24,7 @@ _WRITE_TOOLS = frozenset(
         "Write",
         "Edit",
         "StrReplace",
+        "ApplyPatch",
         "workspace_edit_file",
         "workspace_multi_edit",
         "workspace_replace_lines",
@@ -39,6 +40,7 @@ _TOOL_ALIASES = {
     "searchreplace": "StrReplace",
     "applypatch": "ApplyPatch",
     "apply_patch": "ApplyPatch",
+    "file_change": "ApplyPatch",
     "read": "Read",
 }
 

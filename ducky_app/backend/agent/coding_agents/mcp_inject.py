@@ -217,7 +217,10 @@ FILE_TOOLS_RULE = (
     "in one file), `workspace_replace_lines` (a line range), `workspace_write_file` (new or whole "
     "file), `workspace_move_file`, `workspace_delete_file`; in another project, your own edit/patch tool\n"
     "- git reads: `workspace_git` (status, diff, log, show, ls-files, blame, grep), path= picks the repository\n"
-    "Use your shell only to build, test, run the app and change git (commit, push).\n"
+    "For every file, in any folder, edit with your own edit tool (Codex `apply_patch`, "
+    "Claude Code `Edit`/`Write`, Cursor's edit tool) or Ducky's `workspace_*` edit tools. "
+    "Never edit files by running a script or command that rewrites them. "
+    "Use the shell for builds, tests and git only.\n"
 )
 
 

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from backend.agent.coding_agents.mcp_inject import bootstrap_system_prompt, stamp_mcp_identity
 from backend.workspace.identity import RunContext
@@ -51,3 +54,30 @@ def test_bootstrap_sends_file_reads_to_ducky_tools_not_the_shell() -> None:
     assert "other Ducky projects" in text
     for shell_read in ("Get-Content", "Select-String", "rg", "git grep", "exec_command"):
         assert shell_read in text
+
+
+@pytest.mark.parametrize("native_skills", [False, True])
+@pytest.mark.parametrize("listener_online", [False, True])
+def test_every_agent_bootstrap_requires_edit_tools(native_skills, listener_online) -> None:
+    # runner builds this common prompt before dispatching to any CLI adapter.
+    text = bootstrap_system_prompt(
+        project_root="/tmp/project",
+        listener_online=listener_online,
+        conv_id="chat-a",
+        native_skills=native_skills,
+    )
+    assert "For every file, in any folder" in text
+    for editor in ("Codex `apply_patch`", "Claude Code `Edit`/`Write`", "Cursor's edit tool", "`workspace_*` edit tools"):
+        assert editor in text
+    assert "Never edit files by running a script or command that rewrites them." in text
+    assert "Use the shell for builds, tests and git only." in text
+
+
+def test_team_plan_skill_requires_the_same_edit_tools() -> None:
+    app_root = Path(__file__).resolve().parents[3]
+    skill = (app_root / "frontend/skill_packs/ducky/SKILL.md").read_text(encoding="utf-8")
+    team_rules = " ".join(skill.split("### Team plans", 1)[1].split())
+    for editor in ("Codex `apply_patch`", "Claude Code `Edit`/`Write`", "Cursor's edit tool", "`workspace_*` edit tools"):
+        assert editor in team_rules
+    assert "Never edit files by running a script or command that rewrites them." in team_rules
+    assert "Use the shell for builds, tests and git only." in team_rules
