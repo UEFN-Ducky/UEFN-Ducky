@@ -109,7 +109,13 @@ export function AppHeaderActionsProvider({ children }: { children: ReactNode }) 
   const [problemsMenuOpen, setProblemsMenuOpen] = useState(false);
 
   const setHeaderActions = useCallback((patch: Partial<AppHeaderActionsState>) => {
-    setActions((prev) => ({ ...prev, ...patch }));
+    setActions((prev) => {
+      // Bridges re-send their slot whenever their own inputs change (often `null` again);
+      // a copy of the same state re-rendered the whole header.
+      const keys = Object.keys(patch) as (keyof AppHeaderActionsState)[];
+      if (keys.every((key) => prev[key] === patch[key])) return prev;
+      return { ...prev, ...patch };
+    });
   }, []);
 
   const clearHeaderActions = useCallback(() => {

@@ -48,13 +48,27 @@ export function useVerseProjectDiagnostics(projectPath: string, onChange: () => 
     });
   }, []);
 
+  // The stuck-scan watchdog only runs while a scan does. Ending a scan notifies the
+  // subscribers above, so the tick itself has nothing to report; calling onChange on
+  // every tick re-rendered the whole header every 2 s all day.
   useEffect(() => {
-    const stopWatchdog = setVisibleInterval(() => {
-      fileDiagnosticRegistry.tickScanWatchdog();
-      onChange();
-    }, 2000);
-    return stopWatchdog;
-  }, [onChange]);
+    let stopWatchdog: (() => void) | null = null;
+    const sync = () => {
+      const scanning = fileDiagnosticRegistry.isScanInProgress();
+      if (scanning && !stopWatchdog) {
+        stopWatchdog = setVisibleInterval(() => fileDiagnosticRegistry.tickScanWatchdog(), 2000);
+      } else if (!scanning && stopWatchdog) {
+        stopWatchdog();
+        stopWatchdog = null;
+      }
+    };
+    sync();
+    const unsubscribe = fileDiagnosticRegistry.subscribe(sync);
+    return () => {
+      unsubscribe();
+      stopWatchdog?.();
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (event: AgentEvent) => {
