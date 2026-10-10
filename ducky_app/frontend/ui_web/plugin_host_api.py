@@ -21,8 +21,6 @@ from backend.skills.store import appdata_dir
 
 log = logging.getLogger("uefn.plugin_host_api")
 
-_CACHE_LOCK = threading.Lock()
-_CACHE: dict[str, dict[str, Any]] = {}
 _PREFS_LOCK = threading.Lock()
 
 
@@ -122,7 +120,7 @@ def _unseal(value: Any, encrypted: bool, account: str) -> dict[str, Any]:
 
 
 def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
-    """Read plugin cache. Always prefer disk over process memory.
+    """Read plugin cache. Always read the store, never process memory.
 
     Coding agents (Cursor / Claude CLI) call MCP tools in a *separate* process
     that writes the same JSON files. Sticky in-memory hits made the panel UI
@@ -130,7 +128,6 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
     """
     pid = _safe_plugin_id(plugin_id)
     k = _safe_key(key)
-    mem_key = f"{pid}:{k}"
     data: dict[str, Any] = {}
     if _use_db():
         try:
@@ -138,10 +135,7 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
             if closed:
                 return {}
             value, encrypted = _repo().get(pid, k, **mine)
-            data = _unseal(value, encrypted, mine["account"])
-            with _CACHE_LOCK:
-                _CACHE[mem_key] = data
-            return dict(data)
+            return dict(_unseal(value, encrypted, mine["account"]))
         except (OSError, RuntimeError):
             pass
     path = cache_dir(pid) / f"{k}.json"
@@ -152,8 +146,6 @@ def cache_get(plugin_id: str, key: str) -> dict[str, Any]:
                 data = raw
         except (OSError, json.JSONDecodeError, ValueError):
             data = {}
-    with _CACHE_LOCK:
-        _CACHE[mem_key] = data
     return dict(data)
 
 
@@ -164,14 +156,11 @@ def cache_set(plugin_id: str, key: str, data: dict[str, Any], *, sensitive: bool
     pid = _safe_plugin_id(plugin_id)
     k = _safe_key(key)
     payload = data if isinstance(data, dict) else {}
-    mem_key = f"{pid}:{k}"
     if _use_db():
         mine, closed = _where(pid)
         if closed:
             raise _closed_error(pid)
         _repo().set(pid, k, None, encrypted_b64=_seal(payload, mine["account"]), **mine)
-        with _CACHE_LOCK:
-            _CACHE[mem_key] = dict(payload)
         return
     if sensitive:
         raise RuntimeError("sensitive plugin data needs the database backend")
@@ -181,8 +170,6 @@ def cache_set(plugin_id: str, key: str, data: dict[str, Any], *, sensitive: bool
     tmp = target.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
     tmp.replace(target)
-    with _CACHE_LOCK:
-        _CACHE[mem_key] = dict(payload)
 
 
 def cache_clear(plugin_id: str, key: str = "") -> dict[str, Any]:
@@ -203,59 +190,41 @@ def cache_clear(plugin_id: str, key: str = "") -> dict[str, Any]:
             mine, closed = _where(pid)
             if closed:
                 return {"ok": False, "error": str(_closed_error(pid)), "cleared": []}
-            with _CACHE_LOCK:
-                if not raw:
-                    cleared = repo.delete_prefix(pid, "", **mine)
-                    for mk in [m for m in _CACHE if m.startswith(f"{pid}:")]:
-                        del _CACHE[mk]
-                elif raw.endswith("*"):
-                    pre = re.sub(r"[^\w.\-]+", "_", raw[:-1].strip(), flags=re.UNICODE).strip("._-")
-                    if not pre:
-                        raise ValueError("prefix required")
-                    cleared = repo.delete_prefix(pid, pre, **mine)
-                    for mk in [m for m in _CACHE if m.startswith(f"{pid}:{pre}")]:
-                        del _CACHE[mk]
-                else:
-                    k = _safe_key(raw)
-                    _CACHE.pop(f"{pid}:{k}", None)
-                    if repo.delete(pid, k, **mine):
-                        cleared.append(k)
+            if not raw:
+                cleared = repo.delete_prefix(pid, "", **mine)
+            elif raw.endswith("*"):
+                pre = re.sub(r"[^\w.\-]+", "_", raw[:-1].strip(), flags=re.UNICODE).strip("._-")
+                if not pre:
+                    raise ValueError("prefix required")
+                cleared = repo.delete_prefix(pid, pre, **mine)
+            else:
+                k = _safe_key(raw)
+                if repo.delete(pid, k, **mine):
+                    cleared.append(k)
             return {"ok": True, "cleared": cleared}
         except (OSError, RuntimeError):
             pass
-    with _CACHE_LOCK:
-        if not raw:
-            prefix = f"{pid}:"
-            for mk in [m for m in _CACHE if m.startswith(prefix)]:
-                del _CACHE[mk]
-            if root.is_dir():
-                for path in root.glob("*.json"):
+    if not raw:
+        if root.is_dir():
+            for path in root.glob("*.json"):
+                cleared.append(path.stem)
+                path.unlink(missing_ok=True)
+    elif raw.endswith("*"):
+        # Sanitize prefix (same alphabet as _safe_key) without requiring non-empty stem.
+        pre = re.sub(r"[^\w.\-]+", "_", raw[:-1].strip(), flags=re.UNICODE).strip("._-")
+        if not pre:
+            raise ValueError("prefix required")
+        if root.is_dir():
+            for path in root.glob("*.json"):
+                if path.stem.startswith(pre):
                     cleared.append(path.stem)
                     path.unlink(missing_ok=True)
-        elif raw.endswith("*"):
-            # Sanitize prefix (same alphabet as _safe_key) without requiring non-empty stem.
-            pre = re.sub(r"[^\w.\-]+", "_", raw[:-1].strip(), flags=re.UNICODE).strip("._-")
-            if not pre:
-                raise ValueError("prefix required")
-            mem_prefix = f"{pid}:{pre}"
-            for mk in [m for m in _CACHE if m.startswith(mem_prefix)]:
-                del _CACHE[mk]
-                cleared.append(mk.split(":", 1)[1])
-            if root.is_dir():
-                for path in root.glob("*.json"):
-                    if path.stem.startswith(pre):
-                        cleared.append(path.stem)
-                        path.unlink(missing_ok=True)
-            # de-dupe while preserving order
-            cleared = list(dict.fromkeys(cleared))
-        else:
-            k = _safe_key(raw)
-            mem_key = f"{pid}:{k}"
-            _CACHE.pop(mem_key, None)
-            path = root / f"{k}.json"
-            if path.is_file():
-                path.unlink(missing_ok=True)
-                cleared.append(k)
+    else:
+        k = _safe_key(raw)
+        path = root / f"{k}.json"
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            cleared.append(k)
     return {"ok": True, "cleared": cleared}
 
 

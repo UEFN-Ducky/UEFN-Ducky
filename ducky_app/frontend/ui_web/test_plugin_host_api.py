@@ -106,6 +106,31 @@ if __name__ == "__main__":
     main()
 
 
+def test_plugin_cache_docs_are_not_kept_in_process_memory(monkeypatch, tmp_path) -> None:
+    """Every read goes to the store anyway, so a copy of each doc in memory was dead weight."""
+    import gc
+    import tracemalloc
+
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_PLUGIN_KV", "files")
+    monkeypatch.setattr(pha, "cache_dir", lambda pid: tmp_path / pid)
+    pha.cache_set("translation", "warm", {"Hello": "Hola"})
+    assert pha.cache_get("translation", "warm") == {"Hello": "Hola"}
+    gc.collect()
+    tracemalloc.start()
+    try:
+        base = tracemalloc.get_traced_memory()[0]
+        for n in range(50):  # 50 languages' dictionaries, 100 KB each
+            pha.cache_set("translation", f"lang{n}", {"words": "x" * 100_000, "n": n})
+            assert pha.cache_get("translation", f"lang{n}")["n"] == n
+        gc.collect()
+        grown = tracemalloc.get_traced_memory()[0] - base
+    finally:
+        tracemalloc.stop()
+    assert grown < 1024 * 1024
+    assert sorted(pha.cache_clear("translation", "lang*")["cleared"]) == sorted(f"lang{n}" for n in range(50))
+    assert pha.cache_get("translation", "lang7") == {}
+
+
 def test_self_check(monkeypatch) -> None:
     """Collected wrapper: this file was a `main()` self-check pytest never ran (store test plan, step 0).
 
