@@ -83,6 +83,14 @@ SignTool=ducky
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+; An update replaces the whole payload. Without this, files an older version shipped
+; and this one does not stay in _internal forever (1.2.340-1.2.344 left a second,
+; unused ffmpeg copy of ~133 MB on every PC that updated). Nothing in _internal is
+; user data (that lives in %LOCALAPPDATA%\UEFN-Ducky), and PrepareToInstall has
+; closed every Ducky process before this runs.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 ; Whole one-dir payload. recursesubdirs+createallsubdirs keeps _internal/ intact —
 ; the EXEs cannot start without the files beside them.
