@@ -715,6 +715,43 @@ def test_no_key_yet_is_read_only_and_never_writes_plaintext(who: _Who) -> None:
     assert plugin_kv.get("brainrot-tcg", "ui", account=cy, scope="personal") == (None, False)
 
 
+def test_rewritten_big_docs_are_not_kept_open_in_memory(monkeypatch) -> None:
+    import gc
+    import json
+    import tracemalloc
+
+    from backend.agent import secrets as sec
+    from backend.uefn_plugins import data_crypto
+
+    local = data_crypto._LOCAL
+    data_crypto.open_text(data_crypto.seal_text("{}", local), local)  # one-time row sealing first
+    calls = []
+    real = sec.unprotect_bytes
+    monkeypatch.setattr(sec, "unprotect_bytes", lambda *a: calls.append(1) or real(*a))
+    gc.collect()
+    tracemalloc.start()
+    try:
+        base = tracemalloc.get_traced_memory()[0]
+        for n in range(20):  # one big team doc saved and read 20 times: a new ciphertext each save
+            doc = json.dumps({"save": n, "cards": "x" * 300_000})
+            sealed = data_crypto.seal_text(doc, local)
+            assert data_crypto.open_text(sealed, local) == doc
+            assert data_crypto.open_text(sealed, local) == doc
+        del doc, sealed
+        gc.collect()
+        grown = tracemalloc.get_traced_memory()[0] - base
+    finally:
+        tracemalloc.stop()
+    assert grown < 8 * 1024 * 1024  # every old version kept: about 14 MB
+    assert len(calls) == 20  # the current version is still read from memory
+
+    # A small row read again skips the DPAPI call too.
+    calls.clear()
+    small = data_crypto.seal_text('{"tab": "cards"}', local)
+    assert data_crypto.open_text(small, local) == data_crypto.open_text(small, local) == '{"tab": "cards"}'
+    assert len(calls) == 1
+
+
 def test_ids_and_paths_cannot_climb() -> None:
     assert scopes.valid_asset_path("assets/cards/pip.png")
     for bad in ("../x", "a/../b", ".hidden", "a//b", "A.png", "a\\b", "x" * 257):

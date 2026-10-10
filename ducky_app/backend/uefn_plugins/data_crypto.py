@@ -164,6 +164,7 @@ def on_login_change(before: dict[str, Any], after: dict[str, Any]) -> None:
             del _KEYS[acct]
         _LAST_TRY.clear()
         _open.cache_clear()
+        _open_big.cache_clear()
     from backend.uefn_plugins import team_keys
 
     team_keys.on_login_change(keep)
@@ -194,18 +195,37 @@ def seal_text(text: str, account: str) -> str:
     return PREFIX + base64.b64encode(protect_bytes(text.encode("utf-8"), _entropy(account))).decode("ascii")
 
 
-@functools.lru_cache(maxsize=8192)
-def _open(stored: str, entropy: bytes) -> str:
-    # ponytail: memo by ciphertext (DPAPI salts every write, so a hit is the same row
-    # unchanged); ~0.3 ms per DPAPI call otherwise, 8192 entries max.
+# Sealed rows longer than this are big docs, memoized apart from the small rows.
+_BIG_CHARS = 64 * 1024
+
+
+def _unseal(stored: str, entropy: bytes) -> str:
     from backend.agent.secrets import unprotect_bytes
 
     return unprotect_bytes(base64.b64decode(stored[len(PREFIX):]), entropy).decode("utf-8")
 
 
+@functools.lru_cache(maxsize=512)
+def _open(stored: str, entropy: bytes) -> str:
+    # ponytail: memo by ciphertext (DPAPI salts every write, so a hit is the same row
+    # unchanged); ~0.3 ms per DPAPI call otherwise, 512 small rows max.
+    return _unseal(stored, entropy)
+
+
+@functools.lru_cache(maxsize=4)
+def _open_big(stored: str, entropy: bytes) -> str:
+    # A big doc is rewritten whole on every save, each save a new ciphertext: a few
+    # slots keep the current versions quick to read (a 500 KB doc takes ~80 ms to
+    # unseal) without keeping every old version and its plaintext until restart.
+    return _unseal(stored, entropy)
+
+
 def open_text(stored: str, account: str) -> str:
     """Plaintext of a sealed value; raises :class:`Locked` or ``OSError`` (wrong key)."""
-    return _open(stored, _entropy(account))
+    entropy = _entropy(account)
+    if len(stored) > _BIG_CHARS:
+        return _open_big(stored, entropy)
+    return _open(stored, entropy)
 
 
 def seal_bytes(data: bytes, account: str) -> bytes:
@@ -257,4 +277,5 @@ def reset_for_tests() -> None:
         _LAST_TRY.clear()
         _MIGRATED.clear()
         _open.cache_clear()
+        _open_big.cache_clear()
     team_keys.reset_for_tests()
