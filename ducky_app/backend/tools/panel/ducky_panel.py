@@ -1663,7 +1663,11 @@ def ducky_reset_chat_context(
 ) -> str:
     """Reset selected context segments on any panel chat (sub-agent, user chat, etc.).
 
-    segments: all | conversation | system | mcp_tools | rules | skill
+    segments: all | conversation | system | mcp_tools | rules | skill | session
+
+    ``conversation`` deletes the chat's messages. ``session`` only starts the chat's
+    coding agent (Codex, Claude Code, Cursor) on a fresh thread for its next task and
+    keeps every message; it refuses while that agent is working.
     """
     from frontend.ui_web.context_control import reset_context
 

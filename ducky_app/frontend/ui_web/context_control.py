@@ -17,13 +17,18 @@ from frontend.ui_web.context_omit import (
 )
 
 
+# Start the chat's coding agent on a fresh thread, keeping every message. A team member
+# resumed one Codex thread for every task, so each turn re-read its whole history.
+SESSION_SEGMENT = "session"
+
+
 def _normalize_segments(segments: list[str]) -> set[str]:
     out: set[str] = set()
     for seg in segments or []:
         key = str(seg or "").strip().lower()
         if not key:
             continue
-        if key not in VALID_SEGMENT_IDS:
+        if key not in VALID_SEGMENT_IDS and key != SESSION_SEGMENT:
             raise ValueError(f"Unknown context segment: {seg!r}")
         out.add(key)
     if not out:
@@ -164,7 +169,19 @@ def reset_context(
 
     from frontend.ui_web.agent_modes import cancel_agent, is_agent_running, wait_for_idle
 
-    if is_agent_running(conv.id):
+    if SESSION_SEGMENT in seg_set:
+        # Between tasks only: never stop a working agent to give it a new session.
+        if is_agent_running(conv.id):
+            raise ValueError("This chat's agent is working; start a fresh session after its turn ends.")
+        from backend.agent.prompt_cache import invalidate_conv_cache
+
+        conv.upstream_session_id = ""
+        conv.coding_agent_stats = None
+        invalidate_conv_cache(conv)
+        cleared.append(SESSION_SEGMENT)
+        seg_set.discard(SESSION_SEGMENT)
+
+    if seg_set and is_agent_running(conv.id):
         cancel_agent(conv.id)
         wait_for_idle(conv.id, 2.0)
 
