@@ -27,7 +27,7 @@ _OUTPUT_RING_CHARS = 512 * 1024
 _OUTPUT_CHUNK_CHARS = 8 * 1024
 # Taskbar progress codes (OSC 9;4) never show anything; they stay out of the kept history.
 _PROGRESS_SEQ_RE = re.compile(r"\x1b\]9;4;[0-9;]*(?:\x07|\x1b\\)")
-_DONE_RE = re.compile(r"__DUCKY_DONE__(\d+)__")
+_DONE_RE = re.compile(r"__DUCKY_DONE__(-?\d+)__")  # Windows exit codes can be negative
 # Escape sequences that ask the terminal to REPLY (device attributes ESC[c,
 # status reports ESC[5n/6n, window/cell size reports ESC[14t…21t). Replaying
 # them makes xterm.js answer again, and the answer reaches the shell as typed
@@ -366,10 +366,20 @@ class TerminalSession:
         cmd = command.rstrip("\r\n")
         if background:
             if self.shell == "powershell":
-                return f"{cmd}\r\n"
+                return f"{cmd}\r"
             return f"({cmd}) &\r\n"
         if self.shell == "powershell":
-            return f"{cmd}; Write-Output \"__DUCKY_DONE__$LASTEXITCODE__\"\r\n"
+            # "$LASTEXITCODE__" inside a string is a variable named LASTEXITCODE__ (an
+            # underscore is a name character), so the marker printed no code and every
+            # PowerShell command waited until it timed out. A cmdlet sets no
+            # $LASTEXITCODE at all: report $? then, and clear a stale code first.
+            # Enter in a PowerShell console is a bare carriage return; "\r\n" left a
+            # ">>" continuation prompt behind.
+            return (
+                f"$global:LASTEXITCODE = 0; {cmd}; $__duckyOk = $?; "
+                'Write-Output ("__DUCKY_DONE__{0}__" -f $(if ($LASTEXITCODE) { $LASTEXITCODE } '
+                "elseif ($__duckyOk) { 0 } else { 1 }))\r"
+            )
         return f"{cmd}; echo __DUCKY_DONE__$?__\r\n"
 
     def run_command(
