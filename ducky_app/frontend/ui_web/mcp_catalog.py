@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from typing import Any
 
 from backend.agent.toolsets import is_plan_safe_tool
@@ -22,6 +23,7 @@ from backend.agent.tool_router import CORE_TOOLS
 from backend.agent.toolsets.mcp_plugins import plugin_destructive_tool_names
 from backend.agent.tools import is_host_only_tool, list_mcp_tools
 from backend.mcp_plugins.registry import is_plugin_tool
+from backend.agent.toolsets.tool_index import catalog_revision, search_tool_catalog, tool_catalog_row
 
 
 def _tool_in_plan(name: str) -> bool:
@@ -71,8 +73,10 @@ def _schema_parameters(schema: dict[str, Any] | None) -> list[dict[str, Any]]:
     return params
 
 
-def build_mcp_catalog(*, apply_filters: bool = True) -> dict[str, Any]:
-    return _catalog_from_tools(asyncio.run(list_mcp_tools(apply_filters=apply_filters)))
+def build_mcp_catalog(*, apply_filters: bool = True, query: str = "", offset: int = 0,
+                      limit: int | None = None) -> dict[str, Any]:
+    return _catalog_from_tools(asyncio.run(list_mcp_tools(apply_filters=apply_filters)),
+                               query=query, offset=offset, limit=limit)
 
 
 def build_server_catalog(server_id: str) -> dict[str, Any]:
@@ -98,7 +102,11 @@ def build_server_catalog(server_id: str) -> dict[str, Any]:
     return {"ok": True, **_catalog_from_tools(list(tools or []))}
 
 
-def _catalog_from_tools(tools: list[Any]) -> dict[str, Any]:
+def _catalog_from_tools(tools: list[Any], *, query: str = "", offset: int = 0,
+                        limit: int | None = None) -> dict[str, Any]:
+    page = search_tool_catalog(tools, query, offset=offset, limit=limit)
+    metadata = {r["name"]: r for r in page["matches"]}
+    by_name = {t.name: t for t in tools}
     by_cat = _tool_category_map()
     categories: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
@@ -117,7 +125,8 @@ def _catalog_from_tools(tools: list[Any]) -> dict[str, Any]:
     except Exception:
         pass
 
-    for tool in sorted(tools, key=lambda t: t.name):
+    for name in metadata:
+        tool = by_name[name]
         if is_plugin_tool(tool.name):
             prefix = tool.name.split("__", 1)[0]
             cat_id, cat_label = f"plugin_{prefix}", f"MCP plugin: {prefix}"
@@ -131,6 +140,7 @@ def _catalog_from_tools(tools: list[Any]) -> dict[str, Any]:
         in_core = tool.name in CORE_TOOLS
         destructive = tool.name in DESTRUCTIVE_TOOLS or tool.name in plugin_destructive
         row = {
+            **metadata[name],
             "name": tool.name,
             "description": (tool.description or tool.name).strip(),
             "category_id": cat_id,
@@ -179,7 +189,8 @@ def _catalog_from_tools(tools: list[Any]) -> dict[str, Any]:
     plan_count = sum(1 for r in rows if r["in_plan"])
 
     return {
-        "total": len(rows),
+        "total": page["total"], "count": len(rows), "offset": page["offset"],
+        "next_offset": page["next_offset"], "revision": page["revision"],
         "agent_tools": agent_count,
         "plan_tools": plan_count,
         "categories": ordered_categories,
@@ -207,9 +218,10 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
     mcp = _ensure_mcp()
     tools = list(mcp._tool_manager.list_tools())
     ready = plugins_ready()
-    key = (len(tools), ready)
+    key = (catalog_revision(tools), ready,
+           tuple((t.name, bool(getattr(t, "is_async", False) or inspect.iscoroutinefunction(getattr(t, "fn", None)))) for t in tools))
     if _WORKFLOW_CACHE.get("key") == key:
-        return dict(_WORKFLOW_CACHE["rows"])
+        return copy.deepcopy(_WORKFLOW_CACHE["rows"])
 
     by_cat = _tool_category_map()
     uefn_owner: dict[str, str] = {}
@@ -239,6 +251,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
             cat_id, cat_label = by_cat.get(tool.name, ("other", "Other MCP tools"))
         schema = dict(getattr(tool, "parameters", None) or {"type": "object", "properties": {}})
         row = {
+            **tool_catalog_row(tool),
             "name": tool.name,
             "description": (tool.description or tool.name).strip(),
             "category_id": cat_id,
@@ -258,6 +271,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
     ordered = [categories[c] for c in order if c in categories]
     ordered += sorted((b for c, b in categories.items() if c not in order), key=lambda c: c["label"])
     out = {
+        "revision": key[0],
         "total": len(rows),
         "agent_tools": sum(1 for r in rows if r["in_agent"]),
         "plan_tools": sum(1 for r in rows if r["in_plan"]),
@@ -267,7 +281,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
     }
     _WORKFLOW_CACHE["key"] = key
     _WORKFLOW_CACHE["rows"] = out
-    return dict(out)
+    return copy.deepcopy(out)
 
 
 def _merge_installed_plugin_tools(full: dict[str, Any]) -> None:
