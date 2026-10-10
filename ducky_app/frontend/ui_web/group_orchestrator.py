@@ -647,16 +647,6 @@ def _announce_private_member_talk(
                 "text": note,
             }
         )
-    try:
-        broadcast_group_briefing(
-            group_id,
-            note,
-            from_name=member_display_name(speaker),
-            project_root=project_root,
-            skip_member_ids={mid},
-        )
-    except Exception:
-        pass
     return True
 
 def _member_aliases(member: dict[str, Any]) -> list[str]:

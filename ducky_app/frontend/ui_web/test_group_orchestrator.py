@@ -689,14 +689,20 @@ def test_agent_messages_are_not_announced_as_private_talk(monkeypatch):
         assert posted == [] and briefed == []
 
 
-def test_a_persons_private_talk_is_still_announced(monkeypatch):
+def test_a_persons_private_talk_stays_on_hub_only(monkeypatch):
     go, posted, briefed = _team(
         monkeypatch, [{"role": "user", "content": "Can you also check the doors?"}, {"role": "assistant", "content": "Yes"}]
     )
     monkeypatch.setattr(go, "_agent_running", lambda cid: False)
+    def forbidden(*args, **kwargs):
+        pytest.fail("Private talk must never call broadcast_group_briefing")
+    monkeypatch.setattr(go, "broadcast_group_briefing", forbidden)
     assert go.announce_private_member_talk("m1") is True
     assert len(posted) == 1 and "check the doors" in posted[0]
-    assert briefed == ["m2", "m3"]
+    assert briefed == []
+    assert go.announce_private_member_talk("m1") is False
+    assert len(posted) == 1
+    assert briefed == []
 
 
 def test_a_briefing_never_lands_in_a_chat_mid_turn(monkeypatch):
@@ -730,7 +736,7 @@ def test_actual_stop_never_pairs_old_user_with_synthetic_reply(monkeypatch, reas
     assert posted == [] and briefed == []
 
 
-def test_actual_done_broadcasts_real_talk_only_once_under_concurrency(monkeypatch):
+def test_actual_done_posts_one_hub_note_without_broadcast_under_concurrency(monkeypatch):
     from frontend.ui_web import agent_modes as am
     go, posted, briefed = _team(monkeypatch, [
         {"role": "user", "content": "A real new question"},
@@ -749,7 +755,7 @@ def test_actual_done_broadcasts_real_talk_only_once_under_concurrency(monkeypatc
         worker.join(2)
         assert not worker.is_alive()
     assert len(posted) == 1
-    assert briefed == ["m2", "m3"]
+    assert briefed == []
 
 
 def test_new_unanswered_user_turn_prevents_old_reply_rebroadcast(monkeypatch):
