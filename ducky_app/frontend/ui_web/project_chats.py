@@ -715,8 +715,8 @@ def load_conversation(conv_id: str, project_root: str | None = None) -> Conversa
 
 
 def load_conversation_meta(conv_id: str, project_root: str | None = None) -> Conversation | None:
-    """The chat without its messages, for names and settings. A coordinator's chat can
-    hold hundreds of messages; parsing them all to read its title took tens of ms."""
+    """The chat for its names and settings; the row store skips its messages. A
+    coordinator's chat can hold hundreds; parsing them all to read a title took tens of ms."""
     if _use_db():
         doc = _repo().conv_get(conv_id, with_messages=False)
         return Conversation.from_dict(doc) if doc is not None else None
