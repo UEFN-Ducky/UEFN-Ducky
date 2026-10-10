@@ -492,6 +492,40 @@ def test_later_turn_cannot_complete_or_reuse_held_reply_thread(broker, fake_cloc
     assert broker.mod.stats()["held"] == {"recv1": 1}
 
 
+def test_finished_runs_are_remembered_only_for_recent_turns(broker, monkeypatch):
+    from backend.agent.coding_agents import team_plan_events
+    stopped = []
+    monkeypatch.setattr(team_plan_events, "member_stopped", stopped.append)
+    for n in range(5000):
+        broker.mod.on_agent_stopped("recv1", "done", run_id=f"run-{n}")
+    assert len(stopped) == 5000
+    assert len(broker.mod._completed_runs) <= 2000
+    broker.mod.on_agent_stopped("recv1", "done", run_id="run-4999")  # a late duplicate callback
+    assert len(stopped) == 5000
+
+
+def test_delivered_mail_of_quiet_chats_does_not_stay_forever(broker, monkeypatch):
+    from backend.agent.coding_agents import team_plan_events
+    monkeypatch.setattr(team_plan_events, "member_stopped", lambda conv_id: None)
+    for n in range(50):
+        broker.mod.send(sender_conv_id="sender1", receiver_conv_id=f"chat{n}", body="report " * 500, expect_reply=False)
+    _wait_sent(broker.modes, 50)
+    deadline = time.monotonic() + 5
+    while broker.mod._delivery_inflight and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(broker.mod._ring) == 50
+    for n in range(50):
+        broker.mod.on_agent_stopped(f"chat{n}", "done", run_id=f"turn-{n}")
+    broker.mod.sweep_quiet_threads()
+    assert len(broker.mod._ring) == 50  # recent mail stays readable
+    for rows in broker.mod._ring.values():
+        for envelope in rows:
+            envelope.enqueued_at -= 2 * 3600
+    broker.mod.sweep_quiet_threads()
+    assert broker.mod._ring == {}
+    assert broker.mod.read_inbox("chat0") == []
+
+
 def test_cooldown_does_not_lock_out_unrelated_adapter(broker, fake_clock):
     broker.mod.on_agent_stopped("recv1", "error", detail="rate_limit_error")
     broker.chats.convs["other"] = SimpleNamespace(coding_agent="codex", messages=[], ducky_name="Other", title="Other")

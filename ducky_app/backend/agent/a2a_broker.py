@@ -31,6 +31,12 @@ from backend.agent.a2a_format import format_agent_message, format_agent_notice
 
 _RING_MAX = 20
 _QUIET_SWEEP_S = 300.0
+# Delivered mail stays re-readable this long; a quiet chat's copy then goes, even
+# for a chat that was deleted.
+_RING_KEEP_S = 3600.0
+# A turn's end can be reported more than once, but never thousands of turns late:
+# the newest run ids are enough, not every turn since the app started.
+_COMPLETED_RUNS_MAX = 2000
 
 _lock = threading.RLock()
 
@@ -80,6 +86,7 @@ _cooldowns: dict[str, float] = {}
 _stopped: set[str] = set()
 _timers: dict[str, tuple[object, Any]] = {}
 _completed_runs: set[str] = set()
+_completed_order: deque[str] = deque()
 _uncertain_chats: set[str] = set()
 _reports: dict[str, dict[str, UnansweredReport]] = {}
 _report_timers: dict[str, Any] = {}
@@ -249,7 +256,8 @@ def resume_by_user(conv_id: str) -> None:
 
 
 def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
-    """Drop abandoned reply-expected threads and empty inbox/ring keys."""
+    """Drop abandoned reply-expected threads, empty inbox/ring keys and quiet chats'
+    delivered mail older than an hour."""
     now = time.time()
     removed = 0
     with _lock:
@@ -268,6 +276,13 @@ def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
                 bucket = mapping.get(cid)
                 if not bucket:
                     mapping.pop(cid, None)
+        # A delivered ring is never empty, so the loop above never dropped one.
+        for cid in [c for c in _ring if c not in live_convs and c not in protected]:
+            kept = [e for e in _ring[cid] if now - e.enqueued_at <= _RING_KEEP_S]
+            if kept:
+                _ring[cid] = kept
+            else:
+                _ring.pop(cid, None)
     return removed
 
 
@@ -725,6 +740,9 @@ def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "", run_id: str
             if run_id in _completed_runs:
                 return
             _completed_runs.add(run_id)
+            _completed_order.append(run_id)
+            while len(_completed_order) > _COMPLETED_RUNS_MAX:
+                _completed_runs.discard(_completed_order.popleft())
     try:
         from backend.agent.coding_agents.team_plan_events import member_stopped
         member_stopped(conv_id)
