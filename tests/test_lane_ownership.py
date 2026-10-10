@@ -145,12 +145,12 @@ def test_actual_text_tools_obey_lane_before_disk_and_journal(protected_project, 
     target = root / rel
     before = target.read_bytes()
     calls = {
-        "write": lambda: system.workspace_write_file(rel, "changed\n"),
-        "edit": lambda: wc.workspace_edit_file(rel, "user edit", "changed"),
-        "multi_edit": lambda: wc.workspace_multi_edit(rel, [
+        "write": lambda: system.workspace_write_file(rel, content="changed\n"),
+        "edit": lambda: wc.workspace_edit_file(rel, old_text="user edit", new_text="changed"),
+        "multi_edit": lambda: wc.workspace_multi_edit(rel, edits=[
             {"old_text": "user edit", "new_text": "changed"},
             {"old_text": "second line", "new_text": "changed too"}]),
-        "replace_lines": lambda: wc.workspace_replace_lines(rel, 1, 1, "changed"),
+        "replace_lines": lambda: wc.workspace_replace_lines(rel, start_line=1, end_line=1, new_text="changed"),
     }
     token = identity.bind(identity.RunContext(conv_id="owner", lane=(rel,) if allowed else ()))
     try:
