@@ -1524,7 +1524,7 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
     name = (method or "").strip()
     if name not in RPC_ALLOWLIST:
         return {"ok": False, "error": "method not allowed"}
-    from frontend.ui_web.panel_api import PanelApi
+    from frontend.ui_web.panel_api import shared_panel_api
 
     raw = args if isinstance(args, dict) else {}
     if name == "remote_snapshot":
@@ -1561,7 +1561,7 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
         note_report(raw)
         return {"ok": True, "result": True}
     try:
-        result = call_panel_method(PanelApi(), name, raw)
+        result = call_panel_method(shared_panel_api(), name, raw)
     except TypeError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
@@ -1603,9 +1603,9 @@ def _remote_snapshot() -> dict[str, Any]:
     """One disk read for the browser cache. Nothing is stored on the site."""
     import json as _json
 
-    from frontend.ui_web.panel_api import PanelApi
+    from frontend.ui_web.panel_api import shared_panel_api
 
-    api = PanelApi()
+    api = shared_panel_api()
     convs = list(api.list_all_conversations())
     messages: dict[str, Any] = {}
     groups: dict[str, Any] = {}

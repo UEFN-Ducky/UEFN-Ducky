@@ -336,12 +336,13 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # Keep the early logo splash up through heavy imports — create the pump Tk later
     # by converting that same splash root (avoids a second Tcl interpreter).
     t_import_api = time.perf_counter()
-    from frontend.ui_web.panel_api import PanelApi
+    from frontend.ui_web.panel_api import shared_panel_api
 
     _boot_trace("import_panel_api", t_import_api)
 
     t_api_init = time.perf_counter()
-    api = PanelApi()
+    # The window's PanelApi also serves HTTP, phone, website and MCP calls in this process.
+    api = shared_panel_api()
     _boot_trace("panel_api_init", t_api_init)
     try:
         from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters

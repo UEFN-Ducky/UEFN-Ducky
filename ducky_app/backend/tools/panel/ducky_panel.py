@@ -685,9 +685,9 @@ def ducky_create_chat(folder_id: str = "", title: str = "", pretty: bool = False
 
 
 def _panel_api():
-    from frontend.ui_web.panel_api import PanelApi
+    from frontend.ui_web.panel_api import shared_panel_api
 
-    return PanelApi()
+    return shared_panel_api()
 
 
 @mcp.tool()

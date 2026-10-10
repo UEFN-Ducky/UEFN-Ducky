@@ -849,6 +849,28 @@ from frontend.ui_web.panel_api_video import PanelApiVideoMixin  # noqa: E402
 _listener_online_lock = threading.Lock()
 _listener_was_online = False
 
+_shared_api_lock = threading.Lock()
+_shared_api: PanelApi | None = None
+
+
+def shared_panel_api() -> PanelApi:
+    """The one PanelApi of this process: the Ducky window's own, or, in a process without
+    a window (the MCP bridge or shared daemon), the first one a call needed.
+
+    HTTP, phone, website and MCP group calls used to build a PanelApi each. Every one
+    re-read the 120 KB model catalog, started a catalog refresh, owned verse-lsp
+    processes nothing could stop later, and began with blank listener state, so an idle
+    status poll swept the island and rewrote a file in the Fortnite install every 8 s.
+    """
+    global _shared_api
+    api = _shared_api
+    if api is not None:
+        return api
+    with _shared_api_lock:
+        if _shared_api is None:
+            _shared_api = PanelApi()
+        return _shared_api
+
 
 class PanelApi(
     PanelApiAgentsMixin,
