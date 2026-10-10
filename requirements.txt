@@ -32,3 +32,5 @@ pywinpty>=2.0.13; platform_system == "Windows"
 toon_format @ git+https://github.com/toon-format/toon-python.git
 # Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
 mini-racer==0.14.1
+# Compiled plugins: disassemble a build to prove every PC's CPU runs it (cpu_check.py).
+iced-x86==1.21.0

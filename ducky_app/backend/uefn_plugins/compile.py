@@ -421,6 +421,18 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     return pyds[0], warnings
 
 
+def _assert_runs_on_every_cpu(pyd: Path) -> None:
+    """Refuse a build with instructions some PCs lack: loading it would close Ducky there."""
+    from backend.uefn_plugins.cpu_check import problems
+
+    found = problems(pyd.read_bytes())
+    if found:
+        raise CompileError(
+            f"{pyd.name} uses instructions that some PCs don't have, so Ducky would close on them "
+            "(illegal instruction). Build it only with this build engine. Found:\n" + "\n".join(found)
+        )
+
+
 def _esbuild_minify(esbuild: Path, infile: Path) -> tuple[bytes, str]:
     """Minify one web asset. Returns (bytes, warning). Falls back to the original on error."""
     try:
@@ -546,6 +558,8 @@ def build_plugin(
         _progress(progress, 0.6, "Compiling backend with Nuitka…")
         pyd, nuitka_warn = _run_nuitka(kpy, work, mod_name)
         warnings.extend(nuitka_warn)
+        _progress(progress, 0.75, "Checking it runs on every CPU…")
+        _assert_runs_on_every_cpu(pyd)
 
         smoke = _smoke_import(pyd, mod_name, register_name) if smoke_test else ""
         if smoke:
