@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 import types
 import unittest
 from pathlib import Path
@@ -113,6 +114,65 @@ class SessionTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             niagara._make_renderer(None, {"type": "component"})
         self.assertIn("publish", str(ctx.exception))
+
+
+class _FakeContext:
+    """A system conversion context: finalize may fail, cleanup is counted."""
+
+    def __init__(self, fail_finalize: bool = False):
+        self.fail_finalize = fail_finalize
+        self.cleaned = 0
+
+    def finalize(self):
+        if self.fail_finalize:
+            raise RuntimeError("compile failed")
+
+    def cleanup(self):
+        self.cleaned += 1
+
+
+class SessionLifetimeTests(unittest.TestCase):
+    """An open session pins its NiagaraSystem and conversion data; none may outlive its use."""
+
+    def setUp(self):
+        niagara._SESSIONS.clear()
+
+    def tearDown(self):
+        niagara._SESSIONS.clear()
+
+    def _open(self, key: str, ctx: _FakeContext, idle_s: float = 0.0) -> dict:
+        at = time.time() - idle_s
+        sess = {"key": key, "system": object(), "ctx": ctx, "emitters": {}, "opened": at, "used": at}
+        niagara._SESSIONS[key] = sess
+        return sess
+
+    def test_a_failed_finalize_still_closes_the_session(self):
+        self._open("/P/Fx/NS_X", _FakeContext(fail_finalize=True))
+        with self.assertRaises(RuntimeError):
+            niagara.finalize_niagara_system("/P/Fx/NS_X")
+        self.assertEqual(niagara._SESSIONS, {})
+
+    def test_a_session_left_open_and_unused_is_discarded(self):
+        old, fresh = _FakeContext(), _FakeContext()
+        self._open("/P/Fx/NS_Old", old, idle_s=31 * 60)
+        self._open("/P/Fx/NS_New", fresh)
+
+        caps = niagara.niagara_capabilities()
+
+        self.assertEqual(caps["expired_sessions"], ["/P/Fx/NS_Old"])
+        self.assertEqual(caps["open_sessions"], ["/P/Fx/NS_New"])
+        self.assertEqual((old.cleaned, fresh.cleaned), (1, 0))
+
+    def test_the_session_being_used_is_never_the_one_discarded(self):
+        ctx = _FakeContext()
+        sess = self._open("/P/Fx/NS_X", ctx, idle_s=31 * 60)
+        sess["emitters"]["Sparks"] = object()
+
+        niagara._open_emitter("/P/Fx/NS_X", "Sparks")
+
+        self.assertIn("/P/Fx/NS_X", niagara._SESSIONS)
+        self.assertEqual(ctx.cleaned, 0)
+        self.assertGreater(sess["used"], time.time() - 5)
 
 
 class DynamicInputBudgetTests(unittest.TestCase):

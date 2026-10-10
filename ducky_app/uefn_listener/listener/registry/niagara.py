@@ -134,6 +134,9 @@ _JUNK_NAME_RE = re.compile(
 # has no find-emitter, so an emitter can only take further modules while its
 # session is open (see add_niagara_module).
 _SESSIONS: Dict[str, dict] = {}
+# Each session pins its NiagaraSystem and conversion data. One nobody has used for
+# this long (finalize=false and never finished) is discarded by the next Niagara call.
+_SESSION_IDLE_S = 30 * 60
 
 # User.* parameters this listener linked during assembly, per system. The engine's
 # exposed-parameter store is protected in UEFN, so this is the only in-editor
@@ -341,6 +344,7 @@ def niagara_capabilities() -> dict:
             "max_dynamic_nodes_per_module": _MAX_DYNAMIC_NODES,
             "max_modules_per_call": _MAX_MODULES_PER_EMITTER_CALL,
         },
+        "expired_sessions": _expire_idle_sessions(),
         "open_sessions": sorted(_SESSIONS),
         "notes": [
             "Emitter / stock-module / renderer assembly IS available: add_niagara_emitter, "
@@ -588,17 +592,33 @@ def _session_alive(sess: dict) -> bool:
         return True
 
 
+def _expire_idle_sessions(keep: str = "") -> List[str]:
+    """Discard sessions unused for ``_SESSION_IDLE_S`` (never ``keep``, the one in use now)."""
+    now = time.time()
+    stale = [
+        sess
+        for key, sess in list(_SESSIONS.items())
+        if key != keep and now - sess.get("used", sess["opened"]) > _SESSION_IDLE_S
+    ]
+    for sess in stale:
+        _abandon_session(sess)
+    return sorted(sess["key"] for sess in stale)
+
+
 def _open_session(system_path: str) -> dict:
     """Reuse the open conversion session for a system, or start one."""
     key = _package_path(system_path)
+    _expire_idle_sessions(keep=key)
     sess = _SESSIONS.get(key)
     if sess is not None and _session_alive(sess):
+        sess["used"] = time.time()
         return sess
     system = _system_asset(system_path)
     ctx = _fx_call("create_system_conversion_context", system)
     if ctx is None:
         raise RuntimeError(f"create_system_conversion_context returned None for {key}")
-    sess = {"key": key, "system": system, "ctx": ctx, "emitters": {}, "opened": time.time()}
+    now = time.time()
+    sess = {"key": key, "system": system, "ctx": ctx, "emitters": {}, "opened": now, "used": now}
     _SESSIONS[key] = sess
     return sess
 
@@ -621,17 +641,24 @@ def _finalize_session(sess: dict) -> dict:
     session is dropped. A finalized emitter cannot be reopened (UEFN's system
     conversion context exposes no find-emitter).
     """
-    sess["ctx"].finalize()
-    unreal.EditorAssetLibrary.save_loaded_asset(sess["system"], only_if_is_dirty=False)
-    _SESSIONS.pop(sess["key"], None)
+    try:
+        sess["ctx"].finalize()
+        unreal.EditorAssetLibrary.save_loaded_asset(sess["system"], only_if_is_dirty=False)
+    finally:
+        # Closed even when finalize or save fails: staged changes are never replayed,
+        # and a session left behind would pin the system for the rest of the editor run.
+        _SESSIONS.pop(sess["key"], None)
     return {"finalized": True, "saved": True}
 
 
 def _open_emitter(system_path: str, emitter_name: str):
     """The (session, emitter context) pair for an emitter still open for edits."""
     key = _package_path(system_path)
+    _expire_idle_sessions(keep=key)
     sess = _SESSIONS.get(key)
     em = sess["emitters"].get(emitter_name) if sess is not None and _session_alive(sess) else None
+    if em is not None:
+        sess["used"] = time.time()
     if em is None:
         open_emitters = sorted(sess["emitters"]) if sess is not None else []
         raise ValueError(
@@ -1040,6 +1067,7 @@ def add_niagara_renderer(
 def finalize_niagara_system(system_path: str) -> dict:
     """Compile and save the open conversion session for a system."""
     key = _package_path(system_path)
+    _expire_idle_sessions(keep=key)
     sess = _SESSIONS.get(key)
     if sess is None:
         return {"system_path": key, "finalized": False, "note": "No open conversion session."}
