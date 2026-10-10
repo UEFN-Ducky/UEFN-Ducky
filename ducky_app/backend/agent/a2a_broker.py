@@ -345,6 +345,8 @@ def send(
     """
     if expect_reply and response_id:
         raise ValueError("pass either expect_reply=true OR response_id (a reply), not both")
+    # Read the teams before taking the lock: it walks every chat.
+    needs_action = bool(response_id) and _answer_needs_action(sender_conv_id, receiver_conv_id)
 
     with _lock:
         closing: Thread | None = None
@@ -371,7 +373,7 @@ def send(
             receiver_conv_id=receiver_conv_id,
             body=body,
             response_id=rid if expect_reply else (response_id or ""),
-            is_report=bool(closing),
+            is_report=bool(closing) and needs_action,
         )
         # Match, consume and enqueue atomically: racing duplicate replies cannot
         # both be admitted, or consume a later request between those steps.
@@ -402,12 +404,8 @@ def send_notice(
     _kick_delivery(receiver_conv_id)
 
 
-def leads_receiver(sender_conv_id: str, receiver_conv_id: str) -> bool:
-    """True when the sender leads a group that holds the receiver, directly or through
-    nested groups (a coordinator over group hubs). Authority only flows down: a member
-    reporting to its leader is still fenced as data."""
-    if not sender_conv_id or not receiver_conv_id or sender_conv_id == receiver_conv_id:
-        return False
+def _groups_by_member() -> dict[str, list[Any]] | None:
+    """Chat id → the groups that list it as a member, or None when the chats can't be read."""
     try:
         import importlib
 
@@ -421,24 +419,61 @@ def leads_receiver(sender_conv_id: str, receiver_conv_id: str) -> bool:
             convs = list(chats.list_all_conversation_metadata())
         groups = [c for c in convs if getattr(c, "is_group", False)]
     except Exception:
-        return False
+        return None
     containing: dict[str, list[Any]] = {}
     for group in groups:
         for member in group_members(group):
             mid = str(member.get("member_conv_id") or "")
             if mid:
                 containing.setdefault(mid, []).append(group)
+    return containing
+
+
+def _enclosing_groups(containing: dict[str, list[Any]], conv_id: str) -> list[Any]:
+    """Every group holding the chat, directly or through nested groups."""
     seen: set[str] = set()
-    frontier = [receiver_conv_id]
+    found: list[Any] = []
+    frontier = [conv_id]
     while frontier:
         for group in containing.get(frontier.pop(), []):
             if group.id in seen:
                 continue
             seen.add(group.id)
-            if (getattr(group, "leader_conv_id", "") or "") == sender_conv_id:
-                return True
+            found.append(group)
             frontier.append(group.id)  # this group may sit inside a parent group
-    return False
+    return found
+
+
+def _leads(containing: dict[str, list[Any]], sender_conv_id: str, receiver_conv_id: str) -> bool:
+    return any((getattr(g, "leader_conv_id", "") or "") == sender_conv_id
+               for g in _enclosing_groups(containing, receiver_conv_id))
+
+
+def leads_receiver(sender_conv_id: str, receiver_conv_id: str) -> bool:
+    """True when the sender leads a group that holds the receiver, directly or through
+    nested groups (a coordinator over group hubs). Authority only flows down: a member
+    reporting to its leader is still fenced as data."""
+    if not sender_conv_id or not receiver_conv_id or sender_conv_id == receiver_conv_id:
+        return False
+    containing = _groups_by_member()
+    return bool(containing) and _leads(containing, sender_conv_id, receiver_conv_id)
+
+
+def _answer_needs_action(sender_conv_id: str, receiver_conv_id: str) -> bool:
+    """Whether an answer is repeated until its receiver acts on it.
+
+    Repeats are for a leader whose turn ended without acting on a member's report. Between
+    two members of one team, or from a leader down to its member, the answer is delivered
+    once: there the only thing that stops a repeat is an acknowledgement turn."""
+    containing = _groups_by_member()
+    if not containing:
+        return True
+    if _leads(containing, receiver_conv_id, sender_conv_id):
+        return True
+    if _leads(containing, sender_conv_id, receiver_conv_id):
+        return False
+    sender_teams = {g.id for g in _enclosing_groups(containing, sender_conv_id)}
+    return not sender_teams.intersection(g.id for g in _enclosing_groups(containing, receiver_conv_id))
 
 
 def _format_envelope(envelope: Envelope) -> str:

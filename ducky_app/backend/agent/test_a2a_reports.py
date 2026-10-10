@@ -297,3 +297,54 @@ def test_a_member_whose_plan_work_is_done_is_not_reported_again(reports, monkeyp
     text = f.modes.sent[-1][1]
     assert 'FULL REPORT 1' in text and 'FULL REPORT 0' not in text
     assert {r['from'] for r in b.unanswered_reports('coord')} == {'member1'}
+
+
+def _writers_team(f):
+    from types import SimpleNamespace
+
+    chats = f.chats
+    for cid in ('coord', 'writerA', 'writerB'):
+        chats.convs[cid] = SimpleNamespace(ducky_name=cid, title=cid, coding_agent='codex', messages=[],
+                                           parent_conv_id='', is_group=False)
+    chats.convs['team'] = SimpleNamespace(
+        id='team', is_group=True, leader_conv_id='coord', title='Team', ducky_name='Team', coding_agent='ducky',
+        members=[{'member_conv_id': 'coord'}, {'member_conv_id': 'writerA'}, {'member_conv_id': 'writerB'}],
+    )
+    chats.list_all_conversation_metadata = lambda project_root=None: list(chats.convs.values())
+
+
+@pytest.mark.parametrize('asker, answerer', [('writerB', 'writerA'), ('writerA', 'coord')])
+def test_oct10_a_teammates_or_leaders_answer_is_delivered_once(reports, asker, answerer):
+    # Live team r8: Writer B asked Writer A something, A answered "No reply is required",
+    # and B got it back as "Reports you have not acted on" every half minute after the
+    # plan was finished, until B sent A an acknowledgement that woke A for nothing.
+    f, b = reports, reports.mod
+    _writers_team(f)
+    rid = b.send(sender_conv_id=asker, receiver_conv_id=answerer, body='Waiting for your word',
+                 expect_reply=True)['response_id']
+    _wait_sent(f.modes, 1)
+    _settle(b)
+    out = b.send(sender_conv_id=answerer, receiver_conv_id=asker, body='Word is maple', expect_reply=False,
+                 response_id=rid)
+    assert out['closed_thread'] is True
+    b.on_agent_stopped(answerer, 'done')
+    _wait_sent(f.modes, 2)
+    _settle(b)
+    b.on_agent_stopped(asker, 'done')
+    assert not b.unanswered_reports(asker)
+    assert asker not in b._report_timers
+
+
+def test_oct10_a_members_answer_to_its_leader_still_waits_for_action(reports):
+    f, b = reports, reports.mod
+    _writers_team(f)
+    rid = b.send(sender_conv_id='coord', receiver_conv_id='writerA', body='Do a1', expect_reply=True)['response_id']
+    _wait_sent(f.modes, 1)
+    _settle(b)
+    out = b.send(sender_conv_id='writerA', receiver_conv_id='coord', body='a1 done', expect_reply=False,
+                 response_id=rid)
+    assert out['closed_thread'] is True
+    b.on_agent_stopped('writerA', 'done')
+    _wait_sent(f.modes, 2)
+    _settle(b)
+    assert [r['from'] for r in b.unanswered_reports('coord')] == ['writerA']
