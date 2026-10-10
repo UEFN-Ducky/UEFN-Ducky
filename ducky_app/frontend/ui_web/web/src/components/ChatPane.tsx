@@ -887,8 +887,10 @@ export function ChatPane({
   // still uses as-is.
   const modelsUnavailable = noModelsAvailable && !(chat.isGroup && groupUsesExternalOnly);
   // No model on this chat — send opens Default Model instead of starting a turn.
+  // Not before the chat has loaded: a tab opened before the chat list holds the chat
+  // is a stub with no agent or model, and flashed this on Codex and Claude chats.
   const promptForDefaultModel =
-    !chat.isGroup && !externalAgent && catalogReady && !(selectedModel || "").trim();
+    hydrated && !chat.isGroup && !externalAgent && catalogReady && !(selectedModel || "").trim();
   const showDefaultModelCta = promptForDefaultModel || modelsUnavailable;
   const canSend = canCompose && !agentRunning;
   const canQueue = canCompose && agentRunning;
