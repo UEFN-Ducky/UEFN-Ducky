@@ -35,8 +35,14 @@ PRIVACY_NOTE = (
     "Never your chats, files, name, email or keys."
 )
 
-# States a launch can end in without being a crash.
+# States a launch can be in without having crashed while starting.
 _QUIET_STATES = {"ok", "handoff", "closed"}
+# States only a deliberate exit writes. A launch left at "ok" never exited on purpose.
+_CLEAN_ENDS = {"handoff", "closed"}
+NO_TRACE = (
+    "No crash trace: Ducky ended outside Python code (WebView2, a DLL, running out of "
+    "memory) or was ended from Task Manager."
+)
 # sent = the user sent it; kept = not sent (they chose not to, or sending failed).
 _REPORT_ID = re.compile(r"^(?:sent|kept)-\d{8}-\d{6}$")
 
@@ -190,11 +196,31 @@ def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
     return "\n\n".join(([note] if note else []) + out)
 
 
-def build_report(previous: dict[str, Any], native: str) -> dict[str, str] | None:
-    """The form body for a launch that crashed or never finished starting; None if it was fine."""
+def _pc_restarted_since(when: float) -> bool:
+    """True when Windows started after *when*: a launch the PC's restart ended is no crash."""
+    if os.name != "nt" or when <= 0:
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+        booted = time.time() - kernel32.GetTickCount64() / 1000.0
+    except Exception:
+        return False
+    return booted > when
+
+
+def build_report(previous: dict[str, Any], native: str, *, restarted: bool = False) -> dict[str, str] | None:
+    """The form body for a launch that crashed or never finished starting; None if it was fine.
+
+    A launch still at ``ok`` never exited on purpose (every exit marks ``closed``): it
+    ended in a crash Python never saw, unless the PC restarted (*restarted*)."""
     state = str(previous.get("state") or "")
     native = (native or "").strip()
-    if not previous or (state in _QUIET_STATES and not native):
+    if not previous or (state in _CLEAN_ENDS and not native):
+        return None
+    if state == "ok" and not native and restarted:
         return None
     started = float(previous.get("started") or 0.0)
     stages = previous.get("stages") or []
@@ -204,6 +230,8 @@ def build_report(previous: dict[str, Any], native: str) -> dict[str, str] | None
         what = f"Ducky crashed {when} (last stage: {last})"
     elif state == "fatal":
         what = f"Ducky showed a startup error (last stage: {last})"
+    elif state == "ok":
+        what = "Ducky closed by itself while running"
     else:
         what = f"Ducky closed while starting, last stage reached: {last}"
     lines = [
@@ -219,6 +247,8 @@ def build_report(previous: dict[str, Any], native: str) -> dict[str, str] | None
         lines += ["", "Error:", str(previous["error"])]
     if native:
         lines += ["", "Crash traceback:", trim_native(native)]
+    elif state == "ok":
+        lines.append(NO_TRACE)
     return {
         "formId": FORM_ID,
         "message": f"Crash report: {what}",
@@ -245,7 +275,7 @@ def why_summary(body: dict[str, Any]) -> str:
             break
     for line in log:
         lowered = line.lower()
-        if "fatal exception" in lowered or line.startswith(("ImportError", "RuntimeError", "OSError", "MemoryError")):
+        if line == NO_TRACE or "fatal exception" in lowered or line.startswith(("ImportError", "RuntimeError", "OSError", "MemoryError")):
             out.append(line.strip())
             break
     return "\n".join(out)
@@ -416,7 +446,8 @@ def begin(version: str) -> None:
         # Leave this process unarmed so its later stage/mark calls are no-ops too.
         _state.clear()
         return
-    body = build_report(previous, native) if previous else None
+    restarted = _pc_restarted_since(float(previous.get("started") or 0.0)) if previous else False
+    body = build_report(previous, native, restarted=restarted) if previous else None
     if body:
         # Clear the record first: if the pop-up itself fails, the next launch must not ask again.
         try:

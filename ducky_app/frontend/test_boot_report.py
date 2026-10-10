@@ -35,6 +35,7 @@ def crash(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(boot_report, "_ask_to_send", ask)
     monkeypatch.setattr(boot_report, "_send", send)
+    monkeypatch.setattr(boot_report, "_pc_restarted_since", lambda when: calls.get("restarted", False))
     return calls
 
 
@@ -55,8 +56,37 @@ def test_after_a_crash_the_user_is_asked_and_the_report_is_sent_only_on_send(cra
     assert "import_panel_api" in report["error_log"]
     assert [r["sent"] for r in boot_report.list_reports()] == [True]
     boot_report.mark("ok")
+    boot_report.mark("closed")
     boot_report.begin("1.2.360")
     assert len(crash["asked"]) == 1  # a good launch asks nothing
+
+
+def test_a_running_ducky_that_vanished_without_a_trace_is_reported(crash) -> None:
+    # A fail-fast crash, WebView2 taking the process down, or Task Manager: the window
+    # was up, nothing exited on purpose, and Python wrote no crash dump.
+    _crashed_launch("create_window", "window_shown")
+    boot_report.mark("ok")
+    boot_report.begin("1.2.360")
+    (body,) = crash["asked"]
+    assert "closed by itself while running" in body["message"]
+    assert "window_shown" in body["error_log"]
+    assert boot_report.NO_TRACE in boot_report.why_summary(body)
+
+
+def test_a_launch_the_pc_restart_ended_is_not_a_crash(crash) -> None:
+    _crashed_launch("window_shown")
+    boot_report.mark("ok")
+    crash["restarted"] = True
+    boot_report.begin("1.2.360")
+    assert crash["asked"] == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="boot time is read on Windows")
+def test_restart_check_compares_against_windows_boot_time() -> None:
+    import time
+
+    assert boot_report._pc_restarted_since(1.0)  # Windows booted after 1970
+    assert not boot_report._pc_restarted_since(time.time())
 
 
 def test_dont_send_sends_nothing_and_keeps_the_report_for_support(crash) -> None:

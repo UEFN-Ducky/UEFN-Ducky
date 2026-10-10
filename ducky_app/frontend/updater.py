@@ -532,6 +532,16 @@ def _verify_sha256(path: Path, expected_hex: str) -> str | None:
     return None
 
 
+def _mark_closed() -> None:
+    """Exiting for the installer is on purpose: the next launch must not report a crash."""
+    try:
+        from frontend import boot_report
+
+        boot_report.mark("closed")
+    except Exception:
+        pass
+
+
 def _shutdown_after_delay() -> None:
     """Reap the panel and IDE bridge workers so the installer can replace files."""
 
@@ -546,6 +556,7 @@ def _shutdown_after_delay() -> None:
             kill_uefn_ducky_processes(include_self=False)
         except Exception:
             pass
+        _mark_closed()
         # Root cause of stuck "Updating…" lock: PowerShell/taskkill can fail and
         # leave the panel alive with Cancel disabled. Always die so Setup can
         # replace the EXE and the overlay cannot strand the user.
@@ -564,6 +575,7 @@ def _exit_self_after_delay() -> None:
             release_panel_process()
         except Exception:
             pass
+        _mark_closed()
         os._exit(0)
 
     threading.Timer(_SHUTDOWN_DELAY_S, _exit).start()
