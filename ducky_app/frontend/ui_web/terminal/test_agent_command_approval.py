@@ -46,7 +46,9 @@ def test_without_it_the_popup_asks(monkeypatch) -> None:
     mgr, session, events = _manager(monkeypatch)
     out = mgr.run_agent_command("s1", "npm test", conv_id="c1", approval_timeout_s=1)
     assert out == {"ok": False, "error": "command not approved (timed out)"}
-    assert [e["type"] for e in events] == ["terminal_command_pending"] and session.ran == []
+    # The timed-out question closes its pop-up in every window.
+    assert [e["type"] for e in events] == ["terminal_command_pending", "terminal_command_decided"]
+    assert events[1]["request_id"] == events[0]["request_id"] and session.ran == []
 
 
 class _Exits(_Session):
@@ -99,6 +101,11 @@ def test_allow_on_the_popup_runs_it_once_for_the_waiting_agent(monkeypatch) -> N
     assert mgr.approve_command(events[0]["request_id"])["ok"]
     worker.join(5)
     assert result["ok"] is True and session.ran == ["npm test"]
+    decided = [e for e in events if e.get("type") == "terminal_command_decided"]
+    assert [e["request_id"] for e in decided] == [events[0]["request_id"]]
+    # A second answer (another window, or a pop-up replayed after a reload) changes nothing.
+    assert mgr.approve_command(events[0]["request_id"])["ok"] is False
+    assert len([e for e in events if e.get("type") == "terminal_command_decided"]) == 1
 
 
 def test_the_done_marker_is_found_when_split_across_two_reads() -> None:

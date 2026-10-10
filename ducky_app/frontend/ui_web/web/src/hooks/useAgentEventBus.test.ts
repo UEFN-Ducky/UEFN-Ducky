@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../types/panel";
-import { coalesceAgentEvents, nextEventPollRetryMs, remoteGoneIsLive } from "./useAgentEventBus";
+import { coalesceAgentEvents, nextEventPollRetryMs, remoteGoneIsLive, replayedCount } from "./useAgentEventBus";
 
 describe("nextEventPollRetryMs", () => {
   it("doubles from 500ms and caps at 8s", () => {
@@ -49,5 +49,17 @@ describe("coalesceAgentEvents", () => {
     ];
 
     expect(coalesceAgentEvents(events)).toEqual([events[1], events[2], events[3]]);
+  });
+});
+
+describe("replayedCount", () => {
+  it("marks the backlog that existed when the page loaded as history", () => {
+    // Loaded at server event 700: the first page (201..700) is all history.
+    expect(replayedCount(700, 500, 700)).toBe(500);
+    // The next page straddles the mark: 701.. are live.
+    expect(replayedCount(705, 5, 700)).toBe(0);
+    expect(replayedCount(702, 4, 700)).toBe(2);
+    // A page loaded on an empty backlog replays nothing.
+    expect(replayedCount(3, 3, 0)).toBe(0);
   });
 });

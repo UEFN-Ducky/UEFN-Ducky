@@ -34,7 +34,9 @@ function _setRunning(next: Set<string>) {
 
 function _applyEvent(event: AgentEvent) {
   const convId = event.conv_id;
-  if (!convId) return;
+  // A finished turn's replayed start+stop made a "Took 0ms" clock; the API sync
+  // that runs on load already knows which chats are running.
+  if (!convId || event.replayed) return;
   const signal = agentEventRunningSignal(event);
   if (!signal) return;
   const has = _runningIds.has(convId);

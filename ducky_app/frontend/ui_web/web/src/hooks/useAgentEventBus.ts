@@ -104,6 +104,17 @@ function fanOut(event: AgentEvent) {
 let busInstalled = false;
 let httpPollStarted = false;
 let httpCursor = 0;
+/** Newest server event when this page first polled; the backlog up to it is history. */
+let replayUntil = -1;
+
+/**
+ * How many events at the start of a poll batch were already in the backlog when this
+ * page loaded. A batch is contiguous and ends at `cursor`.
+ */
+export function replayedCount(cursor: number, count: number, until: number): number {
+  const first = cursor - count + 1;
+  return Math.max(0, Math.min(count, until - first + 1));
+}
 
 const EVENT_POLL_RETRY_MIN_MS = 500;
 const EVENT_POLL_RETRY_MAX_MS = 8000;
@@ -130,11 +141,18 @@ function startHttpEventPoll() {
           cache: "no-store",
         });
         if (!response.ok) throw new Error(`event poll ${response.status}`);
-        const body = (await response.json()) as { cursor?: number; events?: AgentEvent[] };
+        const body = (await response.json()) as { cursor?: number; events?: AgentEvent[]; head?: number };
+        if (replayUntil < 0) replayUntil = typeof body.head === "number" ? body.head : 0;
+        const history =
+          typeof body.cursor === "number" && Array.isArray(body.events)
+            ? replayedCount(body.cursor, body.events.length, replayUntil)
+            : 0;
         if (typeof body.cursor === "number") httpCursor = body.cursor;
         retryMs = EVENT_POLL_RETRY_MIN_MS;
         if (Array.isArray(body.events)) {
-          for (const event of body.events) {
+          for (const [index, raw] of body.events.entries()) {
+            // Turns that ended before this page loaded must not look like live runs.
+            const event = index < history ? { ...raw, replayed: true } : raw;
             const kind = String(event?.type || "");
             if (remoteGoneIsLive(catchUpDone, kind) && window.parent !== window) {
               window.parent.postMessage({ type: "ud-remote-gone" }, "*");

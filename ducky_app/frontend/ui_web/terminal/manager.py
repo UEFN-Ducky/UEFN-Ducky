@@ -388,7 +388,16 @@ class TerminalManager:
 
     def _take_pending(self, request_id: str) -> PendingCommand | None:
         with self._lock:
-            return self._pending.pop(request_id, None)
+            pending = self._pending.pop(request_id, None)
+        if pending is not None:
+            # Every window (and a page replaying the backlog after a reload) drops
+            # its Allow pop-up: the question was answered here, or timed out.
+            self._emit({
+                "type": "terminal_command_decided",
+                "request_id": pending.request_id,
+                "conv_id": pending.conv_id,
+            })
+        return pending
 
     def _pop_session(self, session_id: str) -> "_SessionEntry | None":
         with self._lock:

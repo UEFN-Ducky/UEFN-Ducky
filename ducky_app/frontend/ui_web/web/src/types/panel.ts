@@ -1906,6 +1906,7 @@ export interface AgentEvent {
     | "terminal_open"
     | "terminal_close"
     | "terminal_command_pending"
+    | "terminal_command_decided"
     | "tab_claimed"
     | "tab_focus_request"
     | "file_renamed"
@@ -1934,6 +1935,8 @@ export interface AgentEvent {
   success?: boolean;
   conv_id?: string;
   run_id?: string;
+  /** Already in the server backlog when this page loaded: history, not a live run. */
+  replayed?: boolean;
   /** On an error event: true when the backend kept the partial reasoning/answer. */
   kept_partial?: boolean;
   reason?: "cancelled" | "done" | "error" | string;

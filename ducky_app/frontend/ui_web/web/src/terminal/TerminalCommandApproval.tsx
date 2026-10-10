@@ -18,6 +18,12 @@ export function TerminalCommandApprovalProvider({ children }: { children: React.
 
   useEffect(() => {
     return subscribeAgentEvents((event) => {
+      if (event.type === "terminal_command_decided" && event.request_id) {
+        // Answered here, in another window, or timed out: never ask again.
+        const done = event.request_id;
+        setQueue((prev) => prev.filter((item) => item.request_id !== done));
+        return;
+      }
       if (!isPendingEvent(event)) return;
       const item: PendingTerminalCommand = {
         request_id: event.request_id!,
@@ -28,13 +34,13 @@ export function TerminalCommandApprovalProvider({ children }: { children: React.
         conv_id: event.conv_id,
         source: event.source,
       };
-      setQueue((prev) => [...prev, item]);
+      setQueue((prev) => (prev.some((x) => x.request_id === item.request_id) ? prev : [...prev, item]));
     });
   }, []);
 
   const current = queue[0] ?? null;
 
-  const advance = () => setQueue((prev) => prev.slice(1));
+  const advance = (requestId: string) => setQueue((prev) => prev.filter((x) => x.request_id !== requestId));
 
   const handleAllow = async () => {
     if (!current || busy) return;
@@ -43,7 +49,7 @@ export function TerminalCommandApprovalProvider({ children }: { children: React.
       await getApi()?.terminal_approve_command(current.request_id);
     } finally {
       setBusy(false);
-      advance();
+      advance(current.request_id);
     }
   };
 
@@ -54,7 +60,7 @@ export function TerminalCommandApprovalProvider({ children }: { children: React.
       await getApi()?.terminal_reject_command(current.request_id);
     } finally {
       setBusy(false);
-      advance();
+      advance(current.request_id);
     }
   };
 

@@ -869,8 +869,11 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         since = max(0, int((query.get("since") or ["0"])[0]))
                     except (TypeError, ValueError):
                         since = 0
+                    # head: the newest event when the poll arrived. A page that just
+                    # loaded replays the backlog up to its first head as history, not live.
+                    head = _event_seq
                     cursor, events = _poll_panel_events(since)
-                    self._send_json(200, {"cursor": cursor, "events": events})
+                    self._send_json(200, {"cursor": cursor, "events": events, "head": head})
                     return
                 if parsed.path == "/__window_stream":
                     query = parse_qs(parsed.query)
