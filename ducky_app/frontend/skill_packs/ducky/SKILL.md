@@ -126,11 +126,16 @@ Every assignment ends finished: tick `completed` when Done-when is met, or cross
 out `cancelled` with the reason. Set the notes (`body_markdown`) and status in one
 `ducky_plan_update_node` call, preserving the original notes. Notes, status and
 owner are bookkeeping allowed while playing; a finished step stays frozen.
+A section completes itself when its last step does: put your result in that
+step's notes and never tick or annotate the finished section.
 Content, adding, moving and deleting steps require pausing the plan.
 The plan automatically tells its coordinator who finished each step, section or
-plan, with the notes; it also reports a member stopping mid-step. The coordinator
-must dispatch the next open step at once. After two idle minutes the keeper wakes
-the coordinator with the open steps, idle members and reports awaiting dispatch.
+plan, with the notes, in one notice per change; it also reports a member stopping
+mid-step. The coordinator must dispatch the next open step at once. A member's
+report needs no reply: never send acknowledgements, they only wake the member for
+an empty turn. After two idle minutes the keeper wakes the coordinator with the
+open steps, idle members and reports awaiting dispatch; three wakes that change
+nothing park it until a step moves or a member works.
 
 ## Show the user (Show me)
 

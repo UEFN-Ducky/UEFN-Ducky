@@ -1952,7 +1952,9 @@ def ducky_create_plan(
     Team plans: give each group one section assigned to its group's chat id, never
     several steps to one group. Members see that section in their own plan panel.
     Finish every assignment: completed, or cancelled with the reason; set notes
-    (body_markdown) and status in one call, preserving original notes. Notes,
+    (body_markdown) and status in one call, preserving original notes. A section
+    completes itself when its last step does, so put your result in that step's
+    notes; never tick or annotate the finished section. Notes,
     status and owner are bookkeeping allowed while playing; finished steps stay
     frozen. Content, adding, moving and deleting steps require a pause. The plan
     automatically tells the coordinator who finished what, with notes, and reports
@@ -2106,7 +2108,9 @@ def ducky_plan_add_node(
     Team plans: give each group one section assigned to its group's chat id, never
     several steps to one group. Members see that section in their own plan panel.
     Finish every assignment: completed, or cancelled with the reason; set notes
-    (body_markdown) and status in one call, preserving original notes. Notes,
+    (body_markdown) and status in one call, preserving original notes. A section
+    completes itself when its last step does, so put your result in that step's
+    notes; never tick or annotate the finished section. Notes,
     status and owner are bookkeeping allowed while playing; finished steps stay
     frozen. Content, adding, moving and deleting steps require a pause. The plan
     automatically tells the coordinator who finished what, with notes, and reports
@@ -2162,7 +2166,9 @@ def ducky_plan_update_node(
     Team plans: give each group one section assigned to its group's chat id, never
     several steps to one group. Members see that section in their own plan panel.
     Finish every assignment: completed, or cancelled with the reason; set notes
-    (body_markdown) and status in one call, preserving original notes. Notes,
+    (body_markdown) and status in one call, preserving original notes. A section
+    completes itself when its last step does, so put your result in that step's
+    notes; never tick or annotate the finished section. Notes,
     status and owner are bookkeeping allowed while playing; finished steps stay
     frozen. Content, adding, moving and deleting steps require a pause. The plan
     automatically tells the coordinator who finished what, with notes, and reports
@@ -2193,18 +2199,37 @@ def ducky_plan_update_node(
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     if plan.get("kind") != "template":
         push_plan_updated(plan)
-    return tool_json(
-        attach_next_tick(
-            {
-                "ok": True,
-                "plan": plan,
-                "progress": todo_progress(plan) if plan.get("kind") != "template" else None,
-                "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
-            },
-            plan if plan.get("kind") != "template" else None,
-        ),
-        pretty=pretty,
-    )
+    result: dict[str, Any] = {
+        "ok": True,
+        "plan": plan,
+        "progress": todo_progress(plan) if plan.get("kind") != "template" else None,
+        "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
+    }
+    closed = _sections_closed_by(plan.get("nodes"), node_id) if status in ("completed", "cancelled") else []
+    if closed:
+        # Members then tried to tick or annotate their finished section and were refused.
+        names = ", ".join(f"{n.get('content')} ({n.get('id')})" for n in closed)
+        result["sections_completed"] = [n.get("id") for n in closed]
+        result["note"] = (f"{names} completed itself with this step. The note on this step is its "
+                          "record: do not tick or annotate the section.")
+    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None), pretty=pretty)
+
+
+def _sections_closed_by(nodes: Any, node_id: str) -> list[dict[str, Any]]:
+    """The finished sections above ``node_id``, innermost first."""
+    def path(items: Any, trail: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        for node in items or []:
+            if not isinstance(node, dict):
+                continue
+            if node.get("id") == node_id:
+                return trail
+            found = path(node.get("children"), [*trail, node])
+            if found is not None:
+                return found
+        return None
+
+    above = path(nodes, []) or []
+    return [n for n in reversed(above) if n.get("status") == "completed"]
 
 
 @mcp.tool()

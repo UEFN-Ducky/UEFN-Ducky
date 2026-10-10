@@ -164,3 +164,21 @@ def test_report_retries_stop_once_the_members_steps_are_finished(team, notices, 
     plans.update_node("coord", "a2", status="cancelled", body_markdown="not needed", project_root=team)
     assert a2a_broker._plan_work_done("coord", "builder") is True
     assert a2a_broker._plan_work_done("coord", "outsider") is False  # owns nothing in this plan
+
+
+def test_the_last_tick_says_the_section_closed_itself_and_its_note_is_refused_clearly(team, notices, monkeypatch):
+    # Oct 10 2026: writers finished their step, then tried to annotate the section that had
+    # already closed itself and got a bare refusal: one wasted call each.
+    import json as _json
+
+    from backend.tools.panel import ducky_panel
+
+    monkeypatch.setattr(ducky_panel, "_project_root", lambda: team)
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    first = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a1", status="completed", chat_id="coord"))
+    assert "note" not in first
+    last = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a2", status="completed", chat_id="coord"))
+    assert last["sections_completed"] == ["a"]
+    assert "completed itself with this step" in last["note"]
+    refused = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a", body_markdown="Done.", chat_id="coord"))
+    assert refused["ok"] is False and "completed itself when its last step did" in refused["error"]

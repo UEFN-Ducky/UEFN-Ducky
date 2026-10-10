@@ -794,6 +794,11 @@ def update_node(
     if doc.get("kind") != "template" and _is_done_node(node):
         if (content is not None or kind is not None or body_markdown is not None
                 or assignee is not None or (status is not None and status != node.get("status"))):
+            if node.get("children") and node.get("status") == "completed":
+                raise ValueError(
+                    "completed steps can't be edited: this section completed itself when its last "
+                    "step did, and the notes on its steps are its record. Nothing more to tick."
+                )
             _refuse_if_done_node(node)
     # Who owns a step is bookkeeping like its status: allowed while the plan plays.
     if assignee is not None:
