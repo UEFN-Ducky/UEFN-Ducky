@@ -657,10 +657,13 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     args = None
                     if isinstance(payload, dict):
                         args = payload.get("args", payload)
-                    from frontend.duckyos_account import call_panel_method, remote_denied
+                    from frontend.duckyos_account import call_panel_method, note_remote_activity, remote_denied
                     from frontend.ui_web.panel_api import shared_panel_api
 
                     on_this_pc = host_is_local(self._request_host())
+                    if not on_this_pc:
+                        # A phone in use may open Remote View next, which asks through the mailbox.
+                        note_remote_activity()
                     if not method or remote_denied(method, on_this_pc=on_this_pc):
                         self._send_json(403, {"ok": False, "error": "method not allowed"})
                         return
@@ -889,6 +892,9 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     if host_is_local(host) or not consume_remote_login_token(token):
                         self.send_error(403)
                         return
+                    from frontend.duckyos_account import note_remote_activity
+
+                    note_remote_activity()
                     cookie = issue_remote_cookie(host)
                     self.send_response(302)
                     self.send_header("Location", "/")

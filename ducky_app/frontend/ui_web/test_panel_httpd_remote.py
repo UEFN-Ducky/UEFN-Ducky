@@ -259,54 +259,86 @@ def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
         httpd._window_viewers.clear()
 
 
-def test_phone_and_website_cannot_start_verse_lsp(remote_auth, monkeypatch, tmp_path):
-    """verse-lsp listens on the PC's 127.0.0.1: a remote browser cannot reach it, so a
-    start from the phone only left a language server running on the PC for nobody."""
-    import json
-    import urllib.error
-    import urllib.request
-
+@pytest.fixture
+def panel_server(remote_auth, monkeypatch, tmp_path):
     from frontend.ui_web import panel_api
 
-    calls: list[str] = []
     monkeypatch.setattr(panel_api, "_shared_api", None)
     monkeypatch.setattr(panel_api.PanelApi, "__init__", lambda self: None)
-    for name in ("get_verse_lsp_status", "start_verse_lsp", "stop_verse_lsp"):
-        monkeypatch.setattr(
-            panel_api.PanelApi, name, lambda self, *a, _n=name, **k: calls.append(_n) or {"running": True}
-        )
     monkeypatch.setattr(httpd, "_server", None)
     monkeypatch.setattr(httpd, "_root", None)
     monkeypatch.setattr(httpd, "PANEL_UI_HTTP_PORT", 0)
     monkeypatch.setattr(httpd, "verify_panel_dist", lambda _root: None)
     httpd.start_panel_ui_server(tmp_path)
     server = httpd._server
-    port = server.server_address[1]
-    remote = "u-abc.app.uefnducky.org"
-    cookie = f"{httpd._COOKIE_NAME}={httpd.issue_remote_cookie(remote)}"
-
-    def post(method: str, host: str) -> int:
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/__panel_api/{method}",
-            data=json.dumps({"args": ["C:/Island", "w-phone"]}).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Host": host, "Cookie": cookie},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status
-        except urllib.error.HTTPError as err:
-            return err.code
-
     try:
-        for method in ("start_verse_lsp", "stop_verse_lsp", "get_verse_lsp_status"):
-            assert post(method, remote) == 403
-        assert calls == []
-        # A browser on this PC can reach the socket, so it keeps working.
-        assert post("start_verse_lsp", f"127.0.0.1:{port}") == 200
-        assert calls == ["start_verse_lsp"]
+        yield server.server_address[1]
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _ask(port: int, path: str, host: str, cookie: str = "", body: object = None) -> int:
+    import json
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=None if body is None else json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Host": host, "Cookie": cookie},
+    )
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    try:
+        with urllib.request.build_opener(_NoRedirect()).open(req, timeout=10) as resp:
+            return resp.status
+    except urllib.error.HTTPError as err:
+        return err.code
+
+
+def test_phone_and_website_cannot_start_verse_lsp(panel_server, monkeypatch):
+    """verse-lsp listens on the PC's 127.0.0.1: a remote browser cannot reach it, so a
+    start from the phone only left a language server running on the PC for nobody."""
+    from frontend.ui_web import panel_api
+
+    calls: list[str] = []
+    for name in ("get_verse_lsp_status", "start_verse_lsp", "stop_verse_lsp"):
+        monkeypatch.setattr(
+            panel_api.PanelApi, name, lambda self, *a, _n=name, **k: calls.append(_n) or {"running": True}
+        )
+    remote = "u-abc.app.uefnducky.org"
+    cookie = f"{httpd._COOKIE_NAME}={httpd.issue_remote_cookie(remote)}"
+    args = {"args": ["C:/Island", "w-phone"]}
+    for method in ("start_verse_lsp", "stop_verse_lsp", "get_verse_lsp_status"):
+        assert _ask(panel_server, f"/__panel_api/{method}", remote, cookie, args) == 403
+    assert calls == []
+    # A browser on this PC can reach the socket, so it keeps working.
+    assert _ask(panel_server, "/__panel_api/start_verse_lsp", f"127.0.0.1:{panel_server}", body=args) == 200
+    assert calls == ["start_verse_lsp"]
+
+
+def test_a_phone_in_use_keeps_the_mailbox_quick(panel_server, monkeypatch):
+    """Remote View from a phone asks through the site mailbox, which eases off while quiet."""
+    from frontend import duckyos_account as acc
+    from frontend.ui_web import panel_api
+
+    woke: list[int] = []
+    monkeypatch.setattr(acc, "note_remote_activity", lambda: woke.append(1))
+    monkeypatch.setattr(panel_api.PanelApi, "list_folders", lambda self: [], raising=False)
+    remote = "u-abc.app.uefnducky.org"
+    token = httpd.mint_remote_login_token()
+    assert _ask(panel_server, f"/__remote_login?t={token}", remote) == 302
+    assert woke == [1]
+    cookie = f"{httpd._COOKIE_NAME}={httpd.issue_remote_cookie(remote)}"
+    assert _ask(panel_server, "/__panel_api/list_folders", remote, cookie, {}) == 200
+    assert woke == [1, 1]
+    # The Ducky window's own calls say nothing about a phone.
+    assert _ask(panel_server, "/__panel_api/list_folders", f"127.0.0.1:{panel_server}", body={}) == 200
+    assert woke == [1, 1]
 
 
 def test_remote_view_viewer_cannot_start_verse_lsp():

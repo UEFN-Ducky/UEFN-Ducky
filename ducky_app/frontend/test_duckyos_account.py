@@ -416,6 +416,104 @@ def test_rpc_waiter_idle_while_remote_access_off() -> None:
     assert polls == []
 
 
+def test_mailbox_pause_eases_off_only_after_quiet_minutes() -> None:
+    from frontend.duckyos_account import rpc_idle_pause
+
+    assert rpc_idle_pause(0) == rpc_idle_pause(120) == 1.0
+    steps = [rpc_idle_pause(s) for s in range(0, 3600, 5)]
+    assert steps == sorted(steps)  # gentle: never jumps back while it stays quiet
+    assert 1.0 < rpc_idle_pause(200) < 4.0
+    assert rpc_idle_pause(300) == rpc_idle_pause(8 * 3600) == 4.0
+
+
+def test_mailbox_asks_less_while_quiet_and_fast_again_after_a_request() -> None:
+    """Remote access asked the site every ~2 s all day, even when nothing came for hours."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    acc.stop_rpc_waiter()
+    if acc._RPC_THREAD is not None:
+        acc._RPC_THREAD.join(timeout=10)
+    clock = [1000.0]
+    pauses: list[float] = []
+    asks: list[float] = []
+
+    def pause(seconds: float) -> None:
+        pauses.append(round(seconds, 2))
+        clock[0] += seconds
+        if len(pauses) >= 200:
+            acc._RPC_STOP.set()
+
+    def poll() -> bool:
+        asks.append(clock[0])
+        clock[0] += 1.0  # the ask itself
+        return len(asks) == 150  # one request after a long quiet spell
+
+    with (
+        patch.object(acc, "time", SimpleNamespace(monotonic=lambda: clock[0])),
+        patch.object(acc, "_load_blob", return_value={"device_key": "dky_v1_x"}),
+        patch.object(acc, "_remote_access_on", return_value=True),
+        patch.object(acc, "_poll_desktop_rpc_once", side_effect=poll),
+        patch.object(acc, "_rpc_pause", side_effect=pause),
+    ):
+        acc.start_rpc_waiter()
+        acc._RPC_THREAD.join(timeout=10)
+    acc.stop_rpc_waiter()
+    assert not acc._RPC_THREAD.is_alive()
+    gaps = [round(b - a, 6) for a, b in zip(asks, asks[1:])]
+    assert gaps[0] == 2.0  # fast right after start
+    assert max(gaps) <= 5.0  # a phone opened after a quiet hour waits a few seconds at most
+    assert gaps[140] == 5.0  # eased off after a few quiet minutes
+    # The request on ask 150 brings the next ask straight away, then the fast rate again.
+    assert gaps[149] == 1.0
+    assert gaps[150] == 2.0
+
+
+def test_opening_remote_view_ends_a_quiet_pause_at_once() -> None:
+    import time
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    acc.stop_rpc_waiter()
+    if acc._RPC_THREAD is not None:
+        acc._RPC_THREAD.join(timeout=10)
+    asks: list[float] = []
+
+    def poll() -> bool:
+        asks.append(time.monotonic())
+        time.sleep(0.05)  # the ask itself, so the quiet time is past the easing below
+        return False
+
+    with (
+        patch.object(acc, "_load_blob", return_value={"device_key": "dky_v1_x"}),
+        patch.object(acc, "_remote_access_on", return_value=True),
+        patch.object(acc, "_poll_desktop_rpc_once", side_effect=poll),
+        # Already eased off to a long pause, to show the wake does not wait it out.
+        patch.object(acc, "_RPC_FAST_FOR_S", 0.0),
+        patch.object(acc, "_RPC_EASE_S", 0.001),
+        patch.object(acc, "_RPC_SLOW_PAUSE_S", 30.0),
+    ):
+        acc.start_rpc_waiter()
+        try:
+            deadline = time.monotonic() + 5
+            while not asks and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert len(asks) == 1
+            time.sleep(0.3)
+            woke = time.monotonic()
+            acc.note_remote_activity()
+            while len(asks) < 2 and time.monotonic() < deadline + 5:
+                time.sleep(0.02)
+            assert len(asks) >= 2 and asks[1] - woke < 1.0
+        finally:
+            acc.stop_rpc_waiter()
+            acc._RPC_THREAD.join(timeout=10)
+    assert not acc._RPC_THREAD.is_alive()
+
+
 def test_name_allowed_matches_filter() -> None:
     from frontend.duckyos_account import _role_has, name_allowed
 

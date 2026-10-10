@@ -262,9 +262,11 @@ class PanelApiStoreMixin:
         _save_panel_settings(s)
         if s.remote_access:
             start_remote_tunnel()
-            from frontend.duckyos_account import publish_device_presence
+            from frontend.duckyos_account import note_remote_activity, publish_device_presence
 
             publish_device_presence(live=True)
+            # Turned on to be used now: answer the phone's first request quickly.
+            note_remote_activity()
         else:
             from frontend.ui_web.panel_httpd import kick_all_remote
             from frontend.duckyos_account import publish_device_presence

@@ -1170,8 +1170,8 @@ class _KeepAlive:
     """Reuse site connections instead of a new TCP + TLS handshake per request.
 
     urllib sends ``Connection: close`` and drops the socket after every call.
-    Remote access asks the site's mailbox every ~2 s all day, so that was about
-    1,500 handshakes an hour for empty answers. Redirects, proxies and HTTP
+    Remote access asks the site's mailbox every few seconds all day, so that was up
+    to 1,500 handshakes an hour for empty answers. Redirects, proxies and HTTP
     errors still go through urllib's own handlers.
     """
 
@@ -1393,6 +1393,17 @@ _PRESENCE_INTERVAL_S = 90.0
 _RPC_STOP = __import__("threading").Event()
 _RPC_THREAD: Any = None
 _RPC_LOCK = __import__("threading").Lock()
+# Ends a quiet pause between mailbox asks at once (phone or Remote View opened, stop).
+_RPC_WAKE = threading.Event()
+_RPC_ACTIVE_AT = 0.0
+# Remote access asks the site's mailbox for work all day. Right after any request it
+# asks again ~1 s later; once nothing has come for a few minutes it eases off to one
+# ask every ~5 s (the pause plus the ask itself), so a phone or Remote View opened
+# after a quiet hour still connects in a few seconds.
+_RPC_FAST_PAUSE_S = 1.0
+_RPC_SLOW_PAUSE_S = 4.0
+_RPC_FAST_FOR_S = 120.0
+_RPC_EASE_S = 180.0
 RPC_ALLOWLIST = frozenset(
     {
         "list_folders",
@@ -1812,6 +1823,29 @@ def _poll_desktop_rpc_once() -> bool:
     return True
 
 
+def rpc_idle_pause(quiet_s: float) -> float:
+    """Seconds to wait before the next mailbox ask when nothing came for ``quiet_s``."""
+    if quiet_s <= _RPC_FAST_FOR_S:
+        return _RPC_FAST_PAUSE_S
+    eased = min(1.0, (quiet_s - _RPC_FAST_FOR_S) / _RPC_EASE_S)
+    return _RPC_FAST_PAUSE_S + (_RPC_SLOW_PAUSE_S - _RPC_FAST_PAUSE_S) * eased
+
+
+def note_remote_activity() -> None:
+    """A phone, Remote View or the website is in use: ask the mailbox at the fast rate again."""
+    global _RPC_ACTIVE_AT
+    now = time.monotonic()
+    was_easing = now - _RPC_ACTIVE_AT > _RPC_FAST_FOR_S
+    _RPC_ACTIVE_AT = now
+    if was_easing:
+        _RPC_WAKE.set()
+
+
+def _rpc_pause(seconds: float) -> None:
+    if _RPC_WAKE.wait(seconds):
+        _RPC_WAKE.clear()
+
+
 def start_rpc_waiter() -> None:
     """Daemon thread: while logged in, long-poll the website mailbox."""
     global _RPC_THREAD
@@ -1821,20 +1855,27 @@ def start_rpc_waiter() -> None:
         if not (_load_blob().get("device_key") or _load_blob().get("session_value")):
             return
         _RPC_STOP.clear()
+        _RPC_WAKE.clear()
 
         def _loop() -> None:
+            global _RPC_ACTIVE_AT
+            _RPC_ACTIVE_AT = time.monotonic()
             while not _RPC_STOP.is_set():
                 # The site offers Open only for a Live PC, and a PC is Live only
                 # with remote access on. Polling without it cost uefnducky.org a
                 # plugin call per second per signed-in PC for nothing.
                 if not _remote_access_on():
-                    _RPC_STOP.wait(5.0)
+                    _rpc_pause(5.0)
                     continue
+                failed = False
                 try:
-                    if not _poll_desktop_rpc_once():
-                        _RPC_STOP.wait(1.0)
+                    if _poll_desktop_rpc_once():
+                        _RPC_ACTIVE_AT = time.monotonic()
+                        continue
                 except Exception:
-                    _RPC_STOP.wait(2.0)
+                    failed = True
+                pause = rpc_idle_pause(time.monotonic() - _RPC_ACTIVE_AT)
+                _rpc_pause(max(2.0, pause) if failed else pause)
 
         _RPC_THREAD = __import__("threading").Thread(
             target=_loop, daemon=True, name="duckyos-rpc-wait"
@@ -1844,6 +1885,7 @@ def start_rpc_waiter() -> None:
 
 def stop_rpc_waiter() -> None:
     _RPC_STOP.set()
+    _RPC_WAKE.set()
 
 
 def notify_desktop_agent_done(
