@@ -829,7 +829,9 @@ def _run_coding_agent_message(
             push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
             return {"ok": False, "error": err, "run_id": rid}
         ckpt.seed()
-        result = adapter.launch(
+        from backend.agent.coding_agents.readiness import launch_with_ready_tools
+
+        result = launch_with_ready_tools(adapter,
             prompt=prompt_text,
             system_prompt=system_prompt,
             cwd=cwd,

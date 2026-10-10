@@ -709,7 +709,7 @@ _spawned_at = 0.0
 _SPAWN_HOLD_S = 45.0
 
 
-def _daemon_answers() -> bool:
+def _daemon_answers(timeout_s: float = 3.0) -> bool:
     state = read_state() or {}
     if not state.get("token") or not state.get("port"):
         return False
@@ -717,7 +717,7 @@ def _daemon_answers() -> bool:
         sock = connect_and_hello(
             token=str(state["token"]),
             key=state.get("key") if isinstance(state.get("key"), dict) else {},
-            timeout_s=3.0,
+            timeout_s=timeout_s,
             host=str(state.get("host") or "127.0.0.1"),
             port=int(state["port"]),
         )
