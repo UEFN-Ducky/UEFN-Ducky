@@ -90,6 +90,20 @@ export async function recordExternalFileChange(
 
 
 
+/** A phone or the website gets no answer here: verse-lsp listens on the PC's own
+ * 127.0.0.1, which a browser elsewhere cannot reach, so the PC refuses to start it. */
+function offPcStatus(): VerseLspStatusDto {
+  return {
+    available: false,
+    lsp_path: "",
+    source: "",
+    running: false,
+    ws_url: "",
+    project_root: "",
+    error: "Verse checks run only in the Ducky window on your PC.",
+  };
+}
+
 export async function getLspStatus(): Promise<VerseLspStatusDto> {
 
   const api = getApi();
@@ -97,7 +111,7 @@ export async function getLspStatus(): Promise<VerseLspStatusDto> {
   if (!api) return { available: false, lsp_path: "", source: "", running: false, ws_url: "", project_root: "", error: "no api" };
 
   try {
-    const status = await api.get_verse_lsp_status(LSP_CLIENT_ID);
+    const status = (await api.get_verse_lsp_status(LSP_CLIENT_ID)) ?? offPcStatus();
     verseLspLog("api", "get_verse_lsp_status", status);
     return status;
   } catch (e) {
@@ -140,7 +154,7 @@ export async function startLsp(projectRoot?: string): Promise<VerseLspStatusDto>
 
   try {
 
-    const status = await api.start_verse_lsp(projectRoot, LSP_CLIENT_ID);
+    const status = (await api.start_verse_lsp(projectRoot, LSP_CLIENT_ID)) ?? offPcStatus();
 
     verseLspLog("api", "start_verse_lsp result", status);
 

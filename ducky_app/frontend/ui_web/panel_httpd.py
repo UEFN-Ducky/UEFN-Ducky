@@ -657,10 +657,11 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     args = None
                     if isinstance(payload, dict):
                         args = payload.get("args", payload)
-                    from frontend.duckyos_account import REMOTE_DENY, call_panel_method
+                    from frontend.duckyos_account import call_panel_method, remote_denied
                     from frontend.ui_web.panel_api import shared_panel_api
 
-                    if not method or method in REMOTE_DENY:
+                    on_this_pc = host_is_local(self._request_host())
+                    if not method or remote_denied(method, on_this_pc=on_this_pc):
                         self._send_json(403, {"ok": False, "error": "method not allowed"})
                         return
                     try:

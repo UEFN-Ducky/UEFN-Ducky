@@ -1469,6 +1469,17 @@ REMOTE_DENY = frozenset(
     }
 )
 
+# verse-lsp talks over a 127.0.0.1 WebSocket that a phone or the website cannot reach,
+# so starting one for them only leaves a language server running on the PC for nobody.
+# Every remote page also brings a new window id, and enough of those push the Ducky
+# window's own session out of the pool. A browser on this PC can reach the socket.
+OFF_PC_DENY = frozenset({"get_verse_lsp_status", "start_verse_lsp", "stop_verse_lsp"})
+
+
+def remote_denied(method: str, *, on_this_pc: bool = False) -> bool:
+    """True when a panel call from outside the Ducky window must be refused."""
+    return method in REMOTE_DENY or (not on_this_pc and method in OFF_PC_DENY)
+
 
 def _presence_project_label() -> str:
     try:

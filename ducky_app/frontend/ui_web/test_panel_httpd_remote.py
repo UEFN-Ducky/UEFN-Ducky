@@ -257,3 +257,66 @@ def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
         assert not any(e.get("type") == "remote_gone" for e in catchup)
     finally:
         httpd._window_viewers.clear()
+
+
+def test_phone_and_website_cannot_start_verse_lsp(remote_auth, monkeypatch, tmp_path):
+    """verse-lsp listens on the PC's 127.0.0.1: a remote browser cannot reach it, so a
+    start from the phone only left a language server running on the PC for nobody."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from frontend.ui_web import panel_api
+
+    calls: list[str] = []
+    monkeypatch.setattr(panel_api, "_shared_api", None)
+    monkeypatch.setattr(panel_api.PanelApi, "__init__", lambda self: None)
+    for name in ("get_verse_lsp_status", "start_verse_lsp", "stop_verse_lsp"):
+        monkeypatch.setattr(
+            panel_api.PanelApi, name, lambda self, *a, _n=name, **k: calls.append(_n) or {"running": True}
+        )
+    monkeypatch.setattr(httpd, "_server", None)
+    monkeypatch.setattr(httpd, "_root", None)
+    monkeypatch.setattr(httpd, "PANEL_UI_HTTP_PORT", 0)
+    monkeypatch.setattr(httpd, "verify_panel_dist", lambda _root: None)
+    httpd.start_panel_ui_server(tmp_path)
+    server = httpd._server
+    port = server.server_address[1]
+    remote = "u-abc.app.uefnducky.org"
+    cookie = f"{httpd._COOKIE_NAME}={httpd.issue_remote_cookie(remote)}"
+
+    def post(method: str, host: str) -> int:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/__panel_api/{method}",
+            data=json.dumps({"args": ["C:/Island", "w-phone"]}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Host": host, "Cookie": cookie},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+
+    try:
+        for method in ("start_verse_lsp", "stop_verse_lsp", "get_verse_lsp_status"):
+            assert post(method, remote) == 403
+        assert calls == []
+        # A browser on this PC can reach the socket, so it keeps working.
+        assert post("start_verse_lsp", f"127.0.0.1:{port}") == 200
+        assert calls == ["start_verse_lsp"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_remote_view_viewer_cannot_start_verse_lsp():
+    """Remote View forwards a viewer's calls through the Ducky window by this list."""
+    from frontend.duckyos_account import remote_denied
+    from frontend.ui_web.panel_api_window import PanelApiWindowMixin
+
+    denied = PanelApiWindowMixin.remote_deny_methods(object())
+    assert {"start_verse_lsp", "stop_verse_lsp", "get_verse_lsp_status"} <= set(denied)
+    assert remote_denied("start_verse_lsp")
+    assert not remote_denied("start_verse_lsp", on_this_pc=True)
+    assert remote_denied("pick_project_path", on_this_pc=True)
+    assert not remote_denied("scan_verse_diagnostics")

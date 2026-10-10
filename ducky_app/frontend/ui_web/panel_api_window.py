@@ -298,9 +298,10 @@ class PanelApiWindowMixin:
         return rtc_connect(args if isinstance(args, dict) else {})
 
     def remote_deny_methods(self) -> list[str]:
-        from frontend.duckyos_account import REMOTE_DENY
+        """What a Remote View viewer may not call; it is never on this PC."""
+        from frontend.duckyos_account import OFF_PC_DENY, REMOTE_DENY
 
-        return sorted(REMOTE_DENY)
+        return sorted(REMOTE_DENY | OFF_PC_DENY)
 
     def direct_rtc_report(self, payload: object = None) -> None:
         from frontend.remote_direct import note_report
