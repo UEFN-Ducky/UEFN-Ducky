@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import time
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -383,7 +384,7 @@ def test_concurrent_writes_to_one_path_never_interleave(project: Path) -> None:
         t.start()
     for t in threads:
         t.join()
-    assert errors == []
+    assert errors == [], "\n".join("".join(traceback.format_exception(exc)) for exc in errors)
     final = (project / "Content" / "Verse" / "race.verse").read_text(encoding="utf-8")
     assert final in (a, b)
     assert len(obs.calls) == rounds * 2
@@ -539,7 +540,7 @@ def test_atomic_write_waits_for_reader_without_releasing_cas_lock(project, monke
     finally:
         thread.join(5)
     assert not thread.is_alive()
-    assert errors == []
+    assert errors == [], "\n".join("".join(traceback.format_exception(exc)) for exc in errors)
     assert failures and all(code in (5, 32, 33) for code in failures)
     assert target.read_text(encoding="utf-8") == "new"
     assert len(observer.calls) == 1
