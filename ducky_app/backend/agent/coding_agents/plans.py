@@ -6,6 +6,7 @@ import json
 import re
 import time
 import uuid
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,30 @@ def _resolve_project_root(project_root: str | None = None) -> str:
     if project_root is None:
         return (PanelSettings.load().uefn_project_root or "").strip()
     return (project_root or "").strip()
+
+
+def _serialize_plan_edit(edit):
+    """Serialize in-process read/validate/modify/save, not just the final write.
+
+    Reuse the application's keyed reentrant locks. These are not cross-process
+    transactions or conflict detection for callers saving whole stale documents.
+    """
+    @wraps(edit)
+    def locked(chat_id, *args, **kwargs):
+        from frontend.ui_web.project_chats import _conversation_lock
+
+        template_id = (kwargs.get("template_id") or "").strip()
+        if template_id:
+            key = f"plan-template:{_templates_dir(create=False).resolve()}:{_safe_id(template_id)}"
+        else:
+            root = _resolve_project_root(kwargs.get("project_root"))
+            # Resolve the default once so a project switch cannot split the key
+            # from the document actually loaded/saved during this mutation.
+            kwargs["project_root"] = root
+            key = f"plan:{_project_id(root)}:{_safe_id(chat_id)}"
+        with _conversation_lock(key):
+            return edit(chat_id, *args, **kwargs)
+    return locked
 
 
 def _plans_dir(project_root: str | None = None, *, create: bool = True) -> Path:
@@ -601,6 +626,7 @@ def create_plan(
     return save_plan(plan, project_root)
 
 
+@_serialize_plan_edit
 def update_plan(
     chat_id: str,
     *,
@@ -676,6 +702,7 @@ def update_plan(
     return save_plan(plan, project_root)
 
 
+@_serialize_plan_edit
 def add_node(
     chat_id: str,
     *,
@@ -726,6 +753,7 @@ def add_node(
     return save(doc)
 
 
+@_serialize_plan_edit
 def update_node(
     chat_id: str,
     node_id: str,
@@ -769,6 +797,7 @@ def update_node(
     return save(doc)
 
 
+@_serialize_plan_edit
 def delete_node(
     chat_id: str,
     node_id: str,
@@ -792,6 +821,7 @@ def delete_node(
     return save(doc)
 
 
+@_serialize_plan_edit
 def move_node(
     chat_id: str,
     node_id: str,
