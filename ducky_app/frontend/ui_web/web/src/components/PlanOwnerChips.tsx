@@ -75,12 +75,20 @@ export function PlanOwnerChips({ ownerId, activeOnly = false, nodeId }: { ownerI
       const label = ownerActivity(event);
       if (event.conv_id && label !== undefined) setActivity(old => ({ ...old, [event.conv_id!]: label }));
     });
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => { alive = false; unsubscribe(); window.clearInterval(timer); };
+    return () => { alive = false; unsubscribe(); };
   }, [ownerId]);
   const assigned = nodeId ? owner.members?.filter(member => member.observation?.assignment?.node_id === nodeId) : undefined;
   const roster = assigned?.length ? assigned : owner.members || [];
   const chips: Owner[] = [owner, ...roster.map(member => ({ id: member.member_conv_id, name: member.name || member.ducky_name || member.member_conv_id, style: member.ducky_style }))];
+  // Only a running chip shows a clock. A plan renders one of these per assigned step, and
+  // each used to re-render every second whether anyone was working or not.
+  const ticking = chips.some(chip => running.has(chip.id) && getChatTurnTimer(chip.id)?.startedAt);
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [ticking]);
   return <div className="plan-owner-chips" aria-label="Plan owners">
     {chips.filter(chip => !activeOnly || running.has(chip.id)).map(chip => {
       const isRunning = running.has(chip.id);
