@@ -75,6 +75,7 @@ def capture(monkeypatch):
     serialize.actor_guid = lambda a: str(a.get_actor_guid() or "")
     lookup = types.ModuleType("listener.lookup")
     lookup.find_actor = lambda ident: actors.get(ident)
+    lookup.invalidate = lambda: None
     pkg.serialize = serialize
     pkg.lookup = lookup
 
@@ -448,6 +449,44 @@ def test_a_snapshot_that_raises_costs_the_diff_not_the_record(capture, monkeypat
     )
     side = capture.after("execute_python", {"code": "x"}, {}, cap, ok=True)
     assert side is not None and side["created"] == []
+
+
+def test_a_spawn_is_seen_through_the_per_tick_actor_index(capture, monkeypatch) -> None:
+    """The real lookup caches the level's actors for the whole tick, and before, the
+    command and after all run in that one tick: the after-snapshot must not reuse
+    the before list, or a script's spawns are never seen."""
+    level_actors = [FakeActor(label="A", path="/Game/Map.Map:PersistentLevel.A", guid="A")]
+
+    class ActorSubsystem:
+        def get_all_level_actors(self):
+            return list(level_actors)
+
+    unreal = types.ModuleType("unreal")
+    unreal.EditorActorSubsystem = ActorSubsystem
+    unreal.get_editor_subsystem = lambda _cls: ActorSubsystem()
+    monkeypatch.setitem(sys.modules, "unreal", unreal)
+    spec = importlib.util.spec_from_file_location("listener.lookup", Path(__file__).resolve().parent / "lookup.py")
+    lookup = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(lookup)
+    monkeypatch.setitem(sys.modules, "listener.lookup", lookup)
+    monkeypatch.setattr(sys.modules["listener"], "lookup", lookup)
+
+    def snapshot(limit=50, scope="devices", fields=None, **_kw):
+        # Reads the level through the index, as the real actor_state_snapshot does.
+        rows = [{"guid": a.guid, "path": a.path, "label": a.label} for a in lookup.actor_list()]
+        return {"actors": rows, "count": len(rows), "scope": scope}
+
+    monkeypatch.setattr(sys.modules["listener.registry.device_graph"], "actor_state_snapshot", snapshot)
+
+    lookup.invalidate()  # top of the tick
+    cap = capture.before("execute_python", {"code": "spawn B"})
+    level_actors.append(FakeActor(label="B", path="/Game/Map.Map:PersistentLevel.B", guid="B"))
+    side = capture.after("execute_python", {"code": "spawn B"}, {}, cap, ok=True)
+
+    assert [t["guid"] for t in side["created"]] == ["B"]
+    assert side["summary"] == "+1 actors"
+    assert side["revertable"] == "auto"
 
 
 def test_wire_verse_device_ref_records_the_previous_target(capture) -> None:

@@ -144,8 +144,13 @@ _OPAQUE_DIFF_LIMIT = 200
 
 def _level_snapshot() -> Optional[dict]:
     """Every actor in the level, keyed for comparison. None when it cannot be taken."""
+    from listener import lookup
     from listener.registry.device_graph import actor_state_snapshot
 
+    # The snapshot walks lookup's actor list, which is cached for the whole tick, and
+    # both brackets run in the same tick as the command. Read the level afresh, or the
+    # after-snapshot reuses the before list and never sees what the script spawned.
+    lookup.invalidate()
     snap = actor_state_snapshot(limit=_OPAQUE_SNAPSHOT_LIMIT, scope="all", fields=["guid"])
     if not isinstance(snap, dict) or snap.get("skipped"):
         return None
