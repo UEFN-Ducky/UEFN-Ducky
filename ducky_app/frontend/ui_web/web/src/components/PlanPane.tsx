@@ -1,3 +1,4 @@
+import { PlanOwnerChips } from "./PlanOwnerChips";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
@@ -634,6 +635,7 @@ export function PlanPane({
             {viewPlan?.title || plan?.title || chatName || "Plan"}
           </h2>
         )}
+        {!editing && assignedFrom?.assignee ? <PlanOwnerChips ownerId={assignedFrom.assignee} /> : null}
         {!editing && plan ? (
           <nav className="plan-pane-nest-crumb" aria-label="Plan location">
             <span className="plan-pane-nest-crumb-label">Path</span>

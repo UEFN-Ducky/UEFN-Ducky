@@ -685,6 +685,7 @@ export type PlanTodoStatus = "pending" | "in_progress" | "completed" | "cancelle
 export type PlanNodeKind = "step" | "subplan";
 
 export interface PlanNode {
+  assignee?: string;
   id: string;
   content: string;
   status: PlanTodoStatus;

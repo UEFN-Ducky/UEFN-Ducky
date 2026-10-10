@@ -52,6 +52,7 @@ export function isNodeDone(node: Pick<PlanNode, "status"> | null | undefined): b
 }
 
 export function nodeKind(node: PlanNode): "step" | "subplan" {
+  if (node.children?.length) return "subplan";
   if (node.kind === "step" || node.kind === "subplan") return node.kind;
   return node.children?.length ? "subplan" : "step";
 }

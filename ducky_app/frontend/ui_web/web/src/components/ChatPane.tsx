@@ -1,3 +1,4 @@
+import { subscribeLatestChatActivity } from "../navigation/latestChatActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
@@ -895,6 +896,13 @@ export function ChatPane({
         ? "chat-pane-send-btn chat-pane-send-btn--has-text-can-send"
         : "chat-pane-send-btn chat-pane-send-btn--has-text-no-send"
       : "chat-pane-send-btn";
+
+  useEffect(() => subscribeLatestChatActivity(chat.id, () => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToLatest();
+      onAtBottomChange(true);
+    });
+  }), [chat.id, onAtBottomChange]);
 
   const dispatchSend = useCallback(
     (

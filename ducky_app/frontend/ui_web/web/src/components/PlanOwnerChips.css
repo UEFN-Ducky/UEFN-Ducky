@@ -1,0 +1,4 @@
+﻿.plan-owner-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 12px 8px; }
+.plan-owner-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border: 1px solid var(--border-color, #555); border-radius: 12px; padding: 3px 8px; background: transparent; color: inherit; cursor: pointer; font-size: 11px; }
+.plan-owner-chip[data-running="true"] { border-color: var(--accent-color, #75baff); }
+.plan-owner-activity { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }

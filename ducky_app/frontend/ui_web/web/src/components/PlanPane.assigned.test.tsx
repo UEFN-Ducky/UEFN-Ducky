@@ -48,6 +48,7 @@ describe("PlanPane for a team member", () => {
     api.get_plan.mockResolvedValue({ ok: true, plan: assigned });
     render(<PlanPane chatId="builder" />);
     await screen.findByText("Open full plan");
+    expect(screen.getByRole("button", { name: /group-a/ })).toBeTruthy();
     api.get_plan.mockClear();
     await act(async () => {
       pushLocalAgentEvent({ type: "plan_updated", conv_id: "builder", plan: {

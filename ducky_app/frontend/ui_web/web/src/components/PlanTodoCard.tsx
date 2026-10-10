@@ -1,3 +1,4 @@
+import { PlanOwnerChips } from "./PlanOwnerChips";
 import { useMemo, useState } from "react";
 import type { ChatPlan, PlanNode, PlanProgress, PlanTodoStatus } from "../types/panel";
 import { progressForPlan } from "../utils/planOutlineNav";
@@ -20,15 +21,16 @@ export interface PlanTodoCardProps {
   highlightNodeId?: string | null;
 }
 
-type OutlineRow = { label: string; node: PlanNode; depth: number };
+type OutlineRow = { label: string; node: PlanNode; depth: number; owner?: string };
 
-function flattenOutline(nodes: PlanNode[] | undefined, prefix = ""): OutlineRow[] {
+function flattenOutline(nodes: PlanNode[] | undefined, prefix = "", inheritedOwner?: string): OutlineRow[] {
   const out: OutlineRow[] = [];
   (nodes || []).forEach((node, i) => {
     const label = prefix ? `${prefix}.${i + 1}` : `${i + 1}`;
     const depth = prefix ? prefix.split(".").length : 0;
-    out.push({ label, node, depth });
-    if (node.children?.length) out.push(...flattenOutline(node.children, label));
+    const owner = node.assignee || inheritedOwner;
+    out.push({ label, node, depth, owner });
+    if (node.children?.length) out.push(...flattenOutline(node.children, label, owner));
   });
   return out;
 }
@@ -180,9 +182,9 @@ export function PlanTodoCard({
       )}
       {embedded || expanded ? (
         <div className="plan-todo-card-body">
-          {outline.map(({ label, node, depth }) => (
+          {outline.map(({ label, node, depth, owner }) => (
+            <div key={node.id}>
             <TodoRow
-              key={node.id}
               label={label}
               content={node.content}
               status={node.status}
@@ -193,6 +195,10 @@ export function PlanTodoCard({
               highlighted={highlightNodeId === node.id}
               onSelect={onSelectNode ? () => onSelectNode(node) : undefined}
             />
+            {!isTemplate && owner && (node.assignee || node.status === "in_progress") ? (
+              <PlanOwnerChips ownerId={owner} activeOnly={!node.assignee} nodeId={node.id} />
+            ) : null}
+            </div>
           ))}
           {!outline.length ? <div className="plan-todo-empty">No steps yet.</div> : null}
         </div>

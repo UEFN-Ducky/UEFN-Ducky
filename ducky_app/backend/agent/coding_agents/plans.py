@@ -880,6 +880,7 @@ def move_node(
         insert_at = max(0, min(int(index), len(kids)))
         kids.insert(insert_at, moved)
         parent_node["children"] = kids
+        parent_node["kind"] = "subplan"
     else:
         insert_at = max(0, min(int(index), len(roots)))
         roots.insert(insert_at, moved)
