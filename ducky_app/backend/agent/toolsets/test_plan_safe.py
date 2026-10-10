@@ -118,3 +118,18 @@ def test_meshy_plan_safe_reads_only():
     assert not is_plan_safe_tool("meshy_rig")
     assert is_plan_safe_tool("meshy_discover_search")
     assert is_plan_safe_tool("meshy_discover_get")
+
+
+def test_ask_answers_questions_about_the_level_and_ducky_but_changes_nothing():
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+
+    reads = ["ducky_get_status", "get_all_actors", "get_actor_properties", "search_assets",
+             "get_level_info", "ducky_terminal_read_output", "ducky_read_chat", "get_verse_api"]
+    writes = ["set_actor_properties", "save_current_level", "select_actors", "spawn_actor",
+              "ducky_terminal_run", "ducky_send_chat_message", "execute_python", "save_asset"]
+    catalog = {name: _T(name) for name in reads + writes}
+    for mode in ("ask", "plan"):
+        for name in reads:
+            assert mode_tool_block_reason(mode, name, {}, catalog) == "", (mode, name)
+        for name in writes:
+            assert mode_tool_block_reason(mode, name, {}, catalog), (mode, name)

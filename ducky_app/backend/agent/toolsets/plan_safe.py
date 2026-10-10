@@ -18,7 +18,19 @@ ASK_READ_TOOLS = frozenset({
     "web_search", "web_fetch", "ducky_get_tools", "ducky_find_tools",
     "ducky_get_plan", "ducky_list_plans", "ducky_get_plan_template",
     "ducky_list_plan_templates",
-    "code_list_errors", "ducky_get_errors",
+    "code_list_errors", "ducky_get_errors", "ducky_read_tool_spill",
+    # Ducky state: each reads settings, chats or terminal buffers and changes nothing.
+    "ducky_get_status", "ducky_get_local_project", "ducky_list_projects",
+    "ducky_list_chats", "ducky_read_chat", "ducky_terminal_list",
+    "ducky_terminal_read_output",
+    # Level and assets: each sends one listener read command (no save, select or spawn).
+    "ping", "get_project_info", "get_level_info", "get_viewport_camera",
+    "get_all_actors", "get_selected_actors", "get_actor_properties",
+    "list_actor_components", "list_assets", "search_assets", "get_asset_info",
+    "get_selected_assets", "does_asset_exist", "get_log", "get_editor_log",
+    # Verse API digests on disk.
+    "list_verse_digests", "list_verse_types", "list_verse_devices",
+    "list_verse_modules", "search_verse_digest", "get_verse_api",
 })
 _OPAQUE_PARAMETERS = frozenset({"code", "script", "python", "command", "commands", "operation", "operations"})
 PLAN_BOOKKEEPING_TOOLS = frozenset({
