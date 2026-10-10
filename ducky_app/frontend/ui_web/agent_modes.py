@@ -244,8 +244,14 @@ def notify_chats_changed(
     *,
     push: PushFn | None = None,
     open_tab: bool = True,
+    removed_conv_ids: list[str] | None = None,
+    removed_folder_ids: list[str] | None = None,
 ) -> None:
-    """Tell the React panel to reload the sidebar (new chat/folder from MCP tools)."""
+    """Tell the React panel to reload the sidebar (new chat/folder from MCP tools).
+
+    Deleted or archived chats and deleted folders are named, so every open window
+    drops those rows at once instead of showing them until its next reload.
+    """
     event: dict[str, Any] = {"type": "chats_changed"}
     if conv_id:
         event["conv_id"] = conv_id
@@ -253,6 +259,10 @@ def notify_chats_changed(
         event["folder_id"] = folder_id
     if not open_tab:
         event["open"] = False
+    if removed_conv_ids:
+        event["removed_conv_ids"] = [str(cid) for cid in removed_conv_ids if cid]
+    if removed_folder_ids:
+        event["removed_folder_ids"] = [str(fid) for fid in removed_folder_ids if fid]
     _resolve_push(push)(event)
 
 
