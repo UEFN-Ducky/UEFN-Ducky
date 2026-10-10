@@ -143,14 +143,12 @@ def _resolve_component_class(spec: str):
         return _load_class(_BUILTIN_COMPONENT_PATHS[s])
     if "/" in s:
         return _load_class(s)
-    base = _load_class(_COMPONENT_CLASS_PATH)
-    matches = []
-    for cls in _iter_verse_classes():
-        try:
-            if cls.get_name() == s and _class_is_component(cls, base):
-                matches.append(cls)
-        except Exception:
-            continue
+    # Names resolve from the session's class list: walking every UClass per call is
+    # tens of thousands of wrappers on the game thread. Rescan once on a miss, since
+    # a Verse build may have added the class after the list was taken.
+    matches = [r for r in _component_class_rows() if r["class"] == s]
+    if not matches:
+        matches = [r for r in _component_class_rows(refresh=True) if r["class"] == s]
     if not matches:
         aliases = sorted(_BUILTIN_COMPONENT_PATHS)
         raise ValueError(
@@ -160,9 +158,9 @@ def _resolve_component_class(spec: str):
         )
     if len(matches) > 1:
         raise ValueError(
-            f"Ambiguous component class {s!r}: " + ", ".join(m.get_path_name() for m in matches)
+            f"Ambiguous component class {s!r}: " + ", ".join(r["class_path"] for r in matches)
         )
-    return matches[0]
+    return _load_class(matches[0]["class_path"])
 
 
 def _class_is_component(cls, component_base) -> bool:
@@ -453,19 +451,10 @@ def get_entity_info(entity: str) -> dict:
     return info
 
 
-def list_scene_component_classes(search: str = "", offset: int = 0, limit: int = 50) -> dict:
-    """List Verse component classes addable to entities: built-ins, project Verse components, and asset-generated ones.
-
-    The full (unfiltered) class list is scanned once per session via
-    ``unreal.ObjectIterator`` and cached — new component classes only appear
-    after a Verse recompile.
-    """
-    _subsystem()
-    limit = max(0, min(int(limit), _HARD_LIST_CAP))
-    q = (search or "").strip().lower()
-
+def _component_class_rows(refresh: bool = False) -> List[dict]:
+    """Every component class addable to entities, from one ObjectIterator walk per session."""
     global _component_classes_cache
-    if _component_classes_cache is None:
+    if _component_classes_cache is None or refresh:
         base = _load_class(_COMPONENT_CLASS_PATH)
         rows = []
         for cls in _iter_verse_classes():
@@ -483,8 +472,21 @@ def list_scene_component_classes(search: str = "", offset: int = 0, limit: int =
                 continue
         rows.sort(key=lambda r: (r["kind"], r["class_path"]))
         _component_classes_cache = rows
+    return _component_classes_cache
 
-    rows = _component_classes_cache
+
+def list_scene_component_classes(search: str = "", offset: int = 0, limit: int = 50) -> dict:
+    """List Verse component classes addable to entities: built-ins, project Verse components, and asset-generated ones.
+
+    The full (unfiltered) class list is scanned once per session via
+    ``unreal.ObjectIterator`` and cached — new component classes only appear
+    after a Verse recompile.
+    """
+    _subsystem()
+    limit = max(0, min(int(limit), _HARD_LIST_CAP))
+    q = (search or "").strip().lower()
+
+    rows = _component_class_rows()
     if q:
         rows = [r for r in rows if q in r["class_path"].lower()]
     total = len(rows)
