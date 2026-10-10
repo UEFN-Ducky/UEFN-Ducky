@@ -593,13 +593,13 @@ def _spawn_kwargs_from_conv(conv: Any) -> dict[str, Any]:
 
 
 def build_recycle_spawn_message(handoff: str, continue_message: str = "") -> str:
-    """Compose the first message for a recycled subagent twin."""
-    body = (handoff or "").strip() or "(no handoff text — inspect archived predecessor if needed)"
+    """Compose the continuation for a fresh session in the same member chat."""
+    body = (handoff or "").strip() or "(no handoff text; inspect this chat history if needed)"
     follow = (continue_message or "").strip()
     parts = [
-        "You are a FRESH version of a prior subagent. Your predecessor was archived after "
-        "writing the handoff below. Continue from it — do not redo completed work.\n\n"
-        "## Handoff from predecessor\n"
+        "You are continuing in a FRESH session of this same member chat. All history is preserved. "
+        "Continue from the handoff below; do not redo completed work.\n\n"
+        "## Handoff from previous session\n"
         f"{body}",
     ]
     if follow:
@@ -1418,8 +1418,10 @@ def ducky_recycle_member(
     sender: str = "",
     pretty: bool = False,
 ) -> str:
-    """Retire a bloated group member: handoff → hard-delete → invite fresh twin into same group.
+    """Refresh a group member: handoff, then reset only its session in the same chat.
 
+    Never delete or replace the chat. Preserve every message, group membership,
+    approvals and plan assignment; the next task starts a fresh agent session.
     Target must be a group member (parent = group hub). For ordinary follow-ups use
     ``ducky_send_chat_message``. Alias: ``ducky_recycle_subagent``.
     """
@@ -1441,19 +1443,11 @@ def ducky_recycle_member(
             "Seat agents with ducky_group_invite / ducky_spawn_chat(group_id=…)."
         )
 
-    from frontend.ui_web.agent_modes import notify_chats_changed, run_message, run_message_and_wait
-    from frontend.ui_web.group_orchestrator import (
-        group_members,
-        member_color_for_index,
-        normalize_member,
-        sync_group_members_from_folder,
-    )
+    from frontend.ui_web.agent_modes import run_message, run_message_and_wait
+    from frontend.ui_web.context_control import reset_context
+    from backend.tools.panel.permission_prompt import approvals_of
 
-    was_leader = (getattr(parent_conv, "leader_conv_id", None) or "").strip() == old_id
-    from backend.tools.panel.permission_prompt import approvals_of, restore_approvals
-
-    kept_approvals = approvals_of(old_id)  # "Allow everything" and who started it go to the twin
-    kept_starter = str(kept_approvals.get("started_by") or "")
+    kept_starter = str(approvals_of(old_id).get("started_by") or "")
     mode_norm = (mode or "agent").lower()
     handoff_timeout = max(30.0, min(float(timeout_sec), 600.0))
     handoff_outcome = run_message_and_wait(
@@ -1473,77 +1467,30 @@ def ducky_recycle_member(
     if not handoff_text:
         handoff_text = str(handoff_outcome.get("error") or "empty handoff")
 
-    prior_folder = (old.folder_id or "").strip()
-    persona = _spawn_kwargs_from_conv(old)
-    if not str(persona.get("model") or "").strip():
-        raise ValueError(
-            "Recycle needs a model on the old chat — set one on the member or profile."
-        )
-    title = (old.title or str(persona.get("ducky_name") or "") or "Member").strip()[:120]
+    # Session reset refuses a still-running handoff; history is never discarded.
+    reset_context(old_id, ["session"], project_root=root)
     old_title = old.title
-
-    delete_conversation(old_id, project_root=root)
-
-    new_conv = create_conversation(
-        folder_id=prior_folder or (parent_conv.folder_id or ""),
-        title=title,
-        project_root=root,
-        parent_conv_id=parent_id,
-        **persona,
-    )
-    restore_approvals(new_conv.id, kept_approvals)
-
-    # Refresh hub roster: drop old id, add twin; restore leader if needed.
-    group = load_conversation(parent_id, project_root=root) or parent_conv
-    sync_group_members_from_folder(group, project_root=root)
-    group = load_conversation(parent_id, project_root=root) or group
-    members = [m for m in group_members(group) if m.get("member_conv_id") != old_id]
-    if not any(m.get("member_conv_id") == new_conv.id for m in members):
-        members.append(
-            normalize_member(
-                {
-                    "member_conv_id": new_conv.id,
-                    "profile_id": str(getattr(new_conv, "profile_id", None) or ""),
-                    "name": title,
-                    "ducky_name": str(getattr(new_conv, "ducky_name", None) or ""),
-                    "ducky_style": str(getattr(new_conv, "ducky_style", None) or ""),
-                    "model": str(getattr(new_conv, "model", None) or ""),
-                    "coding_agent": str(getattr(new_conv, "coding_agent", None) or ""),
-                    "tts_voice": str(getattr(new_conv, "tts_voice", None) or ""),
-                    "tts_speed": float(getattr(new_conv, "tts_speed", None) or 0.0),
-                    "color": member_color_for_index(len(members)),
-                },
-                index=len(members),
-            )
-        )
-    group.group_members = members
-    if was_leader or not (getattr(group, "leader_conv_id", None) or "").strip():
-        group.leader_conv_id = new_conv.id
-    elif (getattr(group, "leader_conv_id", None) or "").strip() == old_id:
-        group.leader_conv_id = new_conv.id
-    save_conversation(group, root)
-
-    notify_chats_changed(new_conv.id, new_conv.title, new_conv.folder_id)
+    member = load_conversation(old_id, project_root=root) or old
     spawn_text = build_recycle_spawn_message(handoff_text, continue_message)
     base = {
         "status": "recycled",
         "old_conv_id": old_id,
         "old_title": old_title,
-        "conv_id": new_conv.id,
-        "title": new_conv.title,
-        "folder_id": new_conv.folder_id,
-        "ducky": new_conv.ducky_name or "",
+        "conv_id": member.id,
+        "title": member.title,
+        "folder_id": member.folder_id,
+        "ducky": member.ducky_name or "",
         "parent_conv_id": parent_id,
         "group_id": parent_id,
         "handoff_status": handoff_outcome.get("status"),
         "handoff_chars": len(handoff_text),
-        "coding_agent": getattr(new_conv, "coding_agent", None) or "ducky",
-        "model": new_conv.model or "",
+        "coding_agent": getattr(member, "coding_agent", None) or "ducky",
+        "model": member.model or "",
     }
     if wait_for_reply:
         is_external = str(base.get("coding_agent") or "ducky") != "ducky"
         outcome = run_message_and_wait(
-            new_conv.id,
+            member.id,
             spawn_text,
             mode_norm,
             # External CLIs: wait until done (0 = no wall-clock limit).
@@ -1559,8 +1506,8 @@ def ducky_recycle_member(
     if caller:
         from backend.agent.a2a_client import open_thread
 
-        response_id = open_thread(caller, new_conv.id, deliver_result=True)
-    run_message(new_conv.id, spawn_text, mode_norm, "", parent=parent_id, started_by=kept_starter)
+        response_id = open_thread(caller, member.id, deliver_result=True)
+    run_message(member.id, spawn_text, mode_norm, "", parent=parent_id, started_by=kept_starter)
     return tool_json({**base, "status": "running", "response_id": response_id}, pretty=pretty)
 
 
