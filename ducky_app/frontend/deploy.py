@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime, packaged_data_root
@@ -194,6 +195,47 @@ def _should_skip_core_copy(*, pinned: bool, dest: Path, src_recency: float) -> b
     return abs(dest_recency - src_recency) <= 0.001 or (not pinned and dest_recency > src_recency)
 
 
+def _mirror_overlay(src: Path, dest: Path) -> bool:
+    """Make *dest* match *src*, copying only files whose bytes differ. True if anything changed.
+
+    The overlay used to be deleted and re-copied on every ship even when nothing
+    had changed. Bytecode caches are skipped like the copy always did, and the
+    package ``__init__.py`` added for plugins that ship none is kept.
+    """
+    changed = False
+    wanted: set[Path] = set()
+    for child in src.rglob("*"):
+        rel = child.relative_to(src)
+        if "__pycache__" in rel.parts or child.suffix == ".pyc":
+            continue
+        wanted.add(rel)
+        target = dest / rel
+        if child.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        try:
+            if target.is_file() and target.read_bytes() == child.read_bytes():
+                continue
+        except OSError:
+            pass
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(child, target)
+        changed = True
+    for child in sorted(dest.rglob("*"), reverse=True):
+        rel = child.relative_to(dest)
+        if rel in wanted or "__pycache__" in rel.parts or child.suffix == ".pyc" or rel == Path("__init__.py"):
+            continue
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink()
+            changed = True
+        except OSError:
+            pass
+    return changed
+
+
 def _overlay_plugin_listeners(listener_root: Path) -> bool:
     """Copy enabled plugins' ``listener/`` folders into ``listener/plugins/<id>/``.
 
@@ -246,9 +288,11 @@ def _overlay_plugin_listeners(listener_root: Path) -> bool:
         wanted.add(pkg_name)
         dest = plugins_pkg / pkg_name
         try:
-            if dest.exists():
-                shutil.rmtree(dest, ignore_errors=True)
-            shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            if dest.exists() and not dest.is_dir():
+                dest.unlink()
+            dest.mkdir(parents=True, exist_ok=True)
+            if _mirror_overlay(src, dest):
+                changed = True
             # Ensure importable as listener.plugins.<pkg_name>
             pkg_init = dest / "__init__.py"
             if not pkg_init.is_file():
@@ -256,7 +300,7 @@ def _overlay_plugin_listeners(listener_root: Path) -> bool:
                     '"""Plugin listener handlers — import side effects register commands."""\n',
                     encoding="utf-8",
                 )
-            changed = True
+                changed = True
         except OSError:
             continue
 
@@ -299,6 +343,43 @@ def overlay_plugin_listeners_to_appdata(*, reload: bool = True) -> bool:
     return changed
 
 
+_STAGING_PREFIX = "listener.tmp."
+_STAGING_MAX_AGE_S = 3600.0
+
+
+def _sweep_orphan_staging(dest: Path) -> int:
+    """Remove ``listener.tmp.<pid>.<tid>`` staging trees that killed processes left.
+
+    A panel or bridge killed mid-copy left its tree behind, and the pid in the
+    name means no later run ever reuses it. A tree is kept only while its
+    process is alive and it is under an hour old (another startup copying right
+    now); the hour also covers a pid Windows has since given to another process.
+    """
+    from frontend.open_files import panel_process_alive
+
+    removed = 0
+    try:
+        trees = [p for p in dest.parent.iterdir() if p.name.startswith(_STAGING_PREFIX)]
+    except OSError:
+        return 0
+    now = time.time()
+    for tree in trees:
+        try:
+            pid = int(tree.name[len(_STAGING_PREFIX):].split(".", 1)[0])
+        except ValueError:
+            pid = 0
+        try:
+            age = now - tree.stat().st_mtime
+        except OSError:
+            continue
+        if pid and age < _STAGING_MAX_AGE_S and panel_process_alive(pid):
+            continue
+        shutil.rmtree(tree, ignore_errors=True)
+        if not tree.exists():
+            removed += 1
+    return removed
+
+
 def sync_listener_to_appdata(*, force: bool = False) -> Path | None:
     """Copy the listener source to ``%LOCALAPPDATA%/UEFN-Ducky/listener`` — NEWEST WINS.
 
@@ -315,6 +396,7 @@ def sync_listener_to_appdata(*, force: bool = False) -> Path | None:
     if src is None:
         return None
     dest = appdata_listener_dir()
+    _sweep_orphan_staging(dest)
 
     pinned = bool((os.environ.get("UEFN_DUCKY_LISTENER_SRC") or "").strip())
     src_recency = _source_recency(src)

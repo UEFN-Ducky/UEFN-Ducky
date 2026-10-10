@@ -326,3 +326,73 @@ def test_missing_verse_mangled_name_forces_copy(tmp_path, monkeypatch) -> None:
     assert "def verse_mangled_name" in (
         destination / "listener" / "verse_editable_editor.py"
     ).read_text(encoding="utf-8")
+
+
+def test_listener_sync_sweeps_staging_trees_left_by_killed_processes(tmp_path, monkeypatch) -> None:
+    """A panel or bridge killed mid-copy left its listener.tmp.<pid>.<tid> tree
+    behind; the name is unique per process, so nothing ever removed it."""
+    import os
+    import time
+
+    from frontend import open_files
+
+    source = _listener_source(tmp_path)
+    destination = tmp_path / "appdata" / "listener"
+    monkeypatch.setattr(deploy, "_source_listener_dir", lambda: source)
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: destination)
+    alive = {os.getpid(), 4242}
+    monkeypatch.setattr(open_files, "panel_process_alive", lambda pid: pid in alive)
+
+    def staging(name: str, *, age_s: float = 0.0) -> Path:
+        tree = destination.parent / name
+        (tree / "listener").mkdir(parents=True)
+        (tree / "listener" / "config.py").write_text("partial\n", encoding="utf-8")
+        if age_s:
+            old = time.time() - age_s
+            os.utime(tree, (old, old))
+        return tree
+
+    dead = staging("listener.tmp.999999.1")
+    reused_pid_old = staging("listener.tmp.4242.7", age_s=2 * 3600)
+    in_progress = staging(f"listener.tmp.{os.getpid()}.12345")
+    assert deploy.sync_listener_to_appdata() == destination
+    assert not dead.exists() and not reused_pid_old.exists()
+    assert in_progress.is_dir()
+    late = staging("listener.tmp.888888.2")
+    assert deploy.sync_listener_to_appdata() == destination  # the core is current: skip path
+    assert not late.exists()
+
+
+def test_plugin_listener_overlays_are_not_rewritten_when_unchanged(tmp_path, monkeypatch) -> None:
+    """Every ship deleted and re-copied each enabled plugin's listener overlay,
+    even when not one byte had changed."""
+    from backend.uefn_plugins import store as plugin_store
+
+    source = _listener_source(tmp_path)
+    destination = tmp_path / "appdata" / "listener"
+    plugins = tmp_path / "uefn_plugins"
+    handlers = plugins / "anim-tools" / "listener"
+    handlers.mkdir(parents=True)
+    (handlers / "__init__.py").write_text("from . import cmds\n", encoding="utf-8")
+    (handlers / "cmds.py").write_text("X = 1\n", encoding="utf-8")
+    (handlers / "gone.py").write_text("Y = 1\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "_source_listener_dir", lambda: source)
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: destination)
+    monkeypatch.setattr(plugin_store, "appdata_uefn_plugins_dir", lambda: plugins)
+    monkeypatch.setattr(plugin_store, "get_enabled_plugin_ids", lambda: ["anim-tools"])
+    monkeypatch.setattr(plugin_store, "load_plugin_manifest", lambda pid: {"id": pid})
+
+    assert deploy.sync_listener_to_appdata() == destination
+    overlay = destination / "listener" / "plugins" / "anim_tools"
+    before = {p.name: p.stat().st_ino for p in (overlay, overlay / "cmds.py", overlay / "__init__.py")}
+    assert deploy.sync_listener_to_appdata() == destination
+    assert deploy._overlay_plugin_listeners(destination) is False
+    after = {p.name: p.stat().st_ino for p in (overlay, overlay / "cmds.py", overlay / "__init__.py")}
+    assert after == before
+
+    (handlers / "cmds.py").write_text("X = 2\n", encoding="utf-8")
+    (handlers / "gone.py").unlink()
+    assert deploy._overlay_plugin_listeners(destination) is True
+    assert (overlay / "cmds.py").read_text(encoding="utf-8") == "X = 2\n"
+    assert not (overlay / "gone.py").exists()
+
