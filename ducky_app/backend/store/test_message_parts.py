@@ -161,3 +161,74 @@ def test_fts_entry_is_kept_when_only_the_body_changes() -> None:
         raw.execute("INSERT INTO message_fts(message_fts) VALUES('integrity-check')")
     finally:
         raw.close()
+
+
+# --------------------------------------------------------------------------- saves touch only what changed
+
+
+def _count_message_dumps(monkeypatch) -> list[dict]:
+    dumped: list[dict] = []
+    real = repo._dumps
+
+    def spy(value):
+        if isinstance(value, dict) and "role" in value:
+            dumped.append(value)
+        return real(value)
+
+    monkeypatch.setattr(repo, "_dumps", spy)
+    return dumped
+
+
+def _transcript(n: int) -> list[dict]:
+    return [_user(f"question {i}") if i % 2 == 0 else _assistant(_tool_text(f"r{i}")) for i in range(n)]
+
+
+def test_a_save_serialises_and_writes_only_the_messages_that_changed(monkeypatch) -> None:
+    messages = _transcript(30)
+    repo.conv_save(PROJECT, _doc("c6"), messages=messages)
+    dumped = _count_message_dumps(monkeypatch)
+    # The runner changes messages in place: a new tool call on one, a longer result on another.
+    messages[5]["blocks"].append({"type": "tool_call", "name": "run_terminal", "status": "running", "arguments": {}})
+    messages[7]["blocks"][0]["result"]["text"] += "\nmore output"
+    stats = repo.conv_save(PROJECT, _doc("c6"), messages=messages)
+    assert (stats["inserted"], stats["updated"], stats["deleted"]) == (0, 2, 0)
+    assert len(dumped) == 2
+    assert _json(repo.messages_get("c6")) == _json(messages)
+
+
+def test_an_unchanged_copy_from_the_panel_writes_and_serialises_nothing(monkeypatch) -> None:
+    messages = _transcript(20)
+    repo.conv_save(PROJECT, _doc("c7"), messages=messages)
+    dumped = _count_message_dumps(monkeypatch)
+    fresh = json.loads(_json(messages))  # the panel sends its own copy of the same chat
+    stats = repo.conv_save(PROJECT, _doc("c7"), messages=fresh)
+    assert (stats["inserted"], stats["updated"], stats["deleted"]) == (0, 0, 0)
+    assert dumped == []
+
+
+def test_a_row_another_process_rewrote_is_checked_and_saved_again() -> None:
+    messages = _transcript(6)
+    repo.conv_save(PROJECT, _doc("c8"), messages=messages)
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute("UPDATE messages SET hash='elsewhere', body='{}', fmt=0 WHERE conv_id='c8' AND seq=3")
+    stats = repo.conv_save(PROJECT, _doc("c8"), messages=messages)
+    assert stats["updated"] == 1
+    assert _json(repo.messages_get("c8")) == _json(messages)
+
+
+def test_values_a_copy_cannot_track_are_serialised_every_time() -> None:
+    class Tag:
+        def __init__(self) -> None:
+            self.name = "a"
+
+        def __str__(self) -> str:
+            return self.name
+
+    tag = Tag()
+    messages = [{"role": "user", "content": "q", "tag": tag}]
+    repo.conv_save(PROJECT, _doc("c9"), messages=messages)
+    tag.name = "b"  # changes in place, where == on the object cannot see it
+    stats = repo.conv_save(PROJECT, _doc("c9"), messages=messages)
+    assert stats["updated"] == 1
+    assert repo.messages_get("c9")[0]["tag"] == "b"

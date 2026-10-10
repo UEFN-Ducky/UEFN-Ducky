@@ -16,8 +16,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 import zlib
+from collections import OrderedDict
 from typing import Any, Callable
 
 from backend.store import db
@@ -271,6 +273,75 @@ def _conv_parts(conn, conv_id: str) -> Callable[[str], str | None]:
     return part_text
 
 
+# --------------------------------------------------------------------------- saved rows
+#
+# Finding the one or two messages a save changed by serialising and hashing all
+# of them made every in-flight checkpoint cost the whole transcript. For the
+# chats saved most recently this remembers, per seq, the row hash written and a
+# copy of the message's dicts and lists (sharing its strings and numbers, which
+# cannot change in place). A message equal to its copy, whose row still has that
+# hash in the database, is unchanged and is not serialised again. Copies keep
+# the strings alive, so only a few chats and a bounded amount are kept.
+
+_SAVED_MAX_CHATS = 8
+_SAVED_MAX_CHARS = 32 * 1024 * 1024
+_SHARED_TYPES = (str, int, float, bool, type(None))
+_saved_lock = threading.Lock()
+_saved: OrderedDict[str, tuple[dict[int, tuple[str, Any, int]], int]] = OrderedDict()
+
+
+class _NotShareable(Exception):
+    pass
+
+
+def _copy_containers(value: Any) -> Any:
+    kind = type(value)
+    if kind is dict:
+        return {k: _copy_containers(v) for k, v in value.items()}
+    if kind is list:
+        return [_copy_containers(v) for v in value]
+    if kind in _SHARED_TYPES:
+        return value
+    raise _NotShareable
+
+
+def _shell(message: Any) -> Any | None:
+    """A copy to compare the next save against, or None when it could not be told
+    apart reliably (a value of another type might change in place)."""
+    try:
+        return _copy_containers(message)
+    except (_NotShareable, RecursionError, RuntimeError):
+        return None
+
+
+def _unchanged(shell: Any, message: Any) -> bool:
+    try:
+        return bool(shell == message)
+    except Exception:
+        return False
+
+
+def _saved_rows(conv_id: str) -> dict[int, tuple[str, Any, int]]:
+    with _saved_lock:
+        entry = _saved.get(conv_id)
+        return entry[0] if entry is not None else {}
+
+
+def _remember_rows(conv_id: str, rows: dict[int, tuple[str, Any, int]], chars: int) -> None:
+    with _saved_lock:
+        _saved.pop(conv_id, None)
+        _saved[conv_id] = (rows, chars)
+        total = sum(c for _, c in _saved.values())
+        while len(_saved) > 1 and (len(_saved) > _SAVED_MAX_CHATS or total > _SAVED_MAX_CHARS):
+            _, (_, dropped) = _saved.popitem(last=False)
+            total -= dropped
+
+
+def _forget_rows(conv_id: str) -> None:
+    with _saved_lock:
+        _saved.pop(conv_id, None)
+
+
 # --------------------------------------------------------------------------- conversations
 
 
@@ -343,6 +414,7 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
     conn = db.connect()
     state = {k: v for k, v in doc.items() if k not in _STATE_EXCLUDED}
     stats = {"inserted": 0, "updated": 0, "deleted": 0, "bytes": 0}
+    remember: tuple[dict[int, tuple[str, Any, int]], int] | None = None
     with db.write_txn(conn):
         snap_hash = _snapshot_put(conn, "skill_index", str(doc.get("skill_snapshot") or ""))
         values = {col: doc.get(col) for col in _COLUMNS}
@@ -382,31 +454,53 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
             ),
         )
         if messages is not None:
-            stats.update(_sync_messages(conn, doc["id"], messages))
+            counts, rows, chars = _sync_messages(conn, doc["id"], messages)
+            stats.update(counts)
+            remember = (rows, chars)
             conn.execute("UPDATE conversations SET message_count=? WHERE id=?", (len(messages), doc["id"]))
+    if remember is not None:
+        _remember_rows(doc["id"], *remember)  # only once the rows are committed
     return stats
 
 
-def _sync_messages(conn, conv_id: str, messages: list[dict[str, Any]]) -> dict[str, int]:
+def _sync_messages(
+    conn, conv_id: str, messages: list[dict[str, Any]]
+) -> tuple[dict[str, int], dict[int, tuple[str, Any, int]], int]:
+    """Write the messages whose row differs; returns counts and what to remember."""
     existing = {
         int(r[0]): (str(r[1]), int(r[2]))
         for r in conn.execute("SELECT seq, hash, id FROM messages WHERE conv_id=?", (conv_id,))
     }
+    known = _saved_rows(conv_id)
+    remembered: dict[int, tuple[str, Any, int]] = {}
+    chars = 0
     inserted = updated = deleted = nbytes = 0
     for seq, message in enumerate(messages):
-        body = _dumps(message)
-        h = _hash(body)
         row = existing.get(seq)
+        last = known.get(seq)
+        if last is not None and row is not None and last[0] == row[0] and _unchanged(last[1], message):
+            remembered[seq] = last
+            chars += last[2]
+            continue
+        # Serialise the copy, not the live message, so the hash describes exactly
+        # what is remembered even if another thread is still adding to it.
+        shell = _shell(message)
+        source = message if shell is None else shell
+        body = _dumps(source)
+        h = _hash(body)
+        if shell is not None:
+            remembered[seq] = (h, shell, len(body))
+            chars += len(body)
         if row is not None and row[0] == h:
             continue
         nbytes += len(body)
-        body, fmt, parts = _compact(message, body)
+        body, fmt, parts = _compact(source, body)
         params = (
             h,
-            str(message.get("role") or "") if isinstance(message, dict) else "",
-            float(message.get("ts") or 0.0) if isinstance(message, dict) else 0.0,
-            str(message.get("run_id") or "") if isinstance(message, dict) else "",
-            message_search_text(message) if isinstance(message, dict) else "",
+            str(source.get("role") or "") if isinstance(source, dict) else "",
+            float(source.get("ts") or 0.0) if isinstance(source, dict) else 0.0,
+            str(source.get("run_id") or "") if isinstance(source, dict) else "",
+            message_search_text(source) if isinstance(source, dict) else "",
             body,
             fmt,
         )
@@ -430,7 +524,8 @@ def _sync_messages(conn, conv_id: str, messages: list[dict[str, Any]]) -> dict[s
     if len(existing) > len(messages):
         conn.execute("DELETE FROM messages WHERE conv_id=? AND seq>=?", (conv_id, len(messages)))
         deleted = len(existing) - len(messages)
-    return {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes}
+    counts = {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes}
+    return counts, remembered, chars
 
 
 def messages_get(conv_id: str) -> list[dict[str, Any]]:
@@ -452,6 +547,7 @@ def messages_get(conv_id: str) -> list[dict[str, Any]]:
 
 
 def conv_delete(conv_id: str) -> bool:
+    _forget_rows(conv_id)
     conn = db.connect()
     with db.write_txn(conn):
         conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
