@@ -414,10 +414,33 @@ def _is_sync_tool(mcp: Any, name: str) -> bool:
     return tool is not None and getattr(tool, "is_async", True) is False
 
 
+def _calling_mode(ident: Any) -> str:
+    """Read the host-written turn checkpoint, never a client-supplied mode."""
+    from frontend.ui_web.project_chats import load_conversation
+
+    conv_id = getattr(ident, "conv_id", "")
+    run_id = getattr(ident, "run_id", "")
+    external = getattr(ident, "coding_agent", "ducky") in {"codex", "claude_code", "cursor"}
+    if conv_id and run_id:
+        conv = load_conversation(conv_id)
+        for message in reversed(getattr(conv, "messages", []) or []):
+            if message.get("role") == "assistant" and message.get("run_id") == run_id:
+                # Older Agent checkpoints predate requested_mode.
+                return message.get("requested_mode") or "agent"
+    if external:
+        raise ValueError("Cannot determine calling chat mode: no matching host turn checkpoint")
+    return "agent"
+
+
 async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any) -> dict[str, Any]:
     from backend.agent import hammer_guard
     from backend.workspace import identity
 
+    from backend.agent.run_context import set_mode, reset_mode
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+
+    mode = await asyncio.to_thread(_calling_mode, ident)
+    mode_token = set_mode(mode)
     token = identity.bind(ident)
     shared = identity.mark_shared()
     hammer = hammer_guard.bind_conversation(getattr(ident, "conv_id", "") or "")
@@ -429,6 +452,11 @@ async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any)
                 await asyncio.to_thread(wait_until_plugins_loaded, 45.0)
             except Exception:
                 pass
+        if mode != "agent":
+            catalog = {tool.name: tool for tool in await _async_list_tools(mcp)}
+            reason = mode_tool_block_reason(mode, name, arguments, catalog)
+            if reason:
+                return {"content": [{"type": "text", "text": reason}], "isError": True}
         if _is_sync_tool(mcp, name):
             # A sync tool runs on a worker thread. On this loop it held up every agent
             # sharing the daemon, and one that waits on another agent (run_workflow,
@@ -443,6 +471,7 @@ async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any)
         hammer_guard.reset_conversation(hammer)
         identity.reset_shared(shared)
         identity.reset(token)
+        reset_mode(mode_token)
 
 
 def _run(coro: Any) -> Any:
