@@ -5,7 +5,7 @@ Stages (see ``docs/architecture/write-pipeline.md``):
 1. resolve   - confine the path to the project and apply the shared path guards
 2. identity  - who is writing (``RunContext`` → ``DUCKY_*`` env → the user)
 3. policy    - ``WritePolicy`` chain; a denial raises before any disk change
-4. lock      - one ``threading.Lock`` per project path; optional compare-and-swap
+4. lock      - thread and OS file locks per absolute path; optional compare-and-swap
 5. read      - previous content and hash
 6. write     - temp file + ``os.replace`` (atomic)
 7. journal   - ``ChangeJournal.record`` (never fails a landed write)
@@ -17,11 +17,14 @@ pipeline still owns policy, locking, journal and notification for them.
 
 from __future__ import annotations
 
+import errno
+import hashlib
 import logging
 import os
 import threading
 import time
 import uuid
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
@@ -266,7 +269,7 @@ class ProjectWriter:
         ctx = identity.resolve_context()
         writer_meta = dict(writer) if writer is not None else identity.current_writer(tool=tool)
         request = WriteRequest(op=op, paths=(canonical,), tool=tool, ctx=ctx)
-        with self._lock_for(canonical):
+        with self._lock_many((full,)):
             if tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT):
                 from backend.workspace.ai_ignore import require_ai_mutation
                 require_ai_mutation(os.path.join(root, normalize_rel(rel)))
@@ -381,7 +384,7 @@ class ProjectWriter:
         if source:
             src_rel, _src_full, _ = self._resolve(source)
         policy_paths = (src_rel, dst_rel) if op in _SOURCE_MUTATED else (dst_rel,)
-        lock_paths = (src_rel, dst_rel) if src_rel else (dst_rel,)
+        lock_paths = (_src_full, dst_full) if src_rel else (dst_full,)
         ctx = identity.resolve_context()
         writer_meta = dict(writer) if writer is not None else identity.current_writer(tool=tool)
         request = WriteRequest(op=op, paths=policy_paths, tool=tool, ctx=ctx)
@@ -574,7 +577,7 @@ class ProjectWriter:
     # -- locks -------------------------------------------------------------
 
     def _lock_for(self, canonical: str) -> threading.Lock:
-        key = canonical.lower()
+        key = os.path.normcase(canonical)
         with self._locks_guard:
             lock = self._locks.get(key)
             if lock is None:
@@ -582,21 +585,46 @@ class ProjectWriter:
                 self._locks[key] = lock
             return lock
 
-    def _lock_many(self, paths: Iterable[str]) -> _MultiLock:
-        keys = sorted({p.lower() for p in paths if p})
-        return _MultiLock([self._lock_for(k) for k in keys])
+    @contextmanager
+    def _lock_many(self, paths: Iterable[str]):
+        # Absolute real paths make window/tool-server roots and aliases agree.
+        keys = sorted({os.path.normcase(os.path.realpath(p)) for p in paths if p})
+        with ExitStack() as stack:
+            for key in keys:
+                stack.enter_context(self._lock_for(key))
+                stack.enter_context(_process_file_lock(key))
+            yield
 
 
-class _MultiLock:
-    """Acquire several locks in a stable order (sorted keys) to avoid deadlocks."""
+@contextmanager
+def _process_file_lock(path: str):
+    """Lock a stable sidecar, never the target inode replaced by atomic writes.
 
-    def __init__(self, locks: list[threading.Lock]) -> None:
-        self._locks = locks
+    Sidecars stay on disk: unlinking them could split waiters across two locks.
+    Closing the handle (including process death) releases the OS lock.
+    """
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
+    lock_dir = os.path.join(base, "UEFN-Ducky", "locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    name = hashlib.sha256(path.encode("utf-8")).hexdigest() + ".lock"
+    with open(os.path.join(lock_dir, name), "a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
 
-    def __enter__(self) -> None:
-        for lock in self._locks:
-            lock.acquire()
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as exc:
+                    if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        raise OSError(f"Cannot acquire write lock for {path}: {exc}") from exc
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Write refused: timed out waiting for file lock: {path}") from exc
+                    time.sleep(0.01)
+        else:
+            import fcntl
 
-    def __exit__(self, *exc: object) -> None:
-        for lock in reversed(self._locks):
-            lock.release()
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield

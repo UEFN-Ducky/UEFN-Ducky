@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
+import time
 import threading
 from pathlib import Path
 from typing import Any
@@ -388,3 +390,103 @@ def test_concurrent_writes_to_one_path_never_interleave(project: Path) -> None:
     # Every observed "before" is a complete prior version, never a torn read.
     for record, _ in obs.calls:
         assert record.before in ("", a, b)
+
+
+def _increment_process(root, barrier, results):
+    """Independent writer; retry CAS refusals until 100 increments land."""
+    from backend.workspace.paths import content_hash
+
+    writer = ProjectWriter.for_root(root)
+    target = Path(root) / "Content/Verse/counter.verse"
+    original = writer._atomic_write
+
+    def slow_write(*args, **kwargs):
+        # Widen the compare/write race so the test fails without the OS lock.
+        time.sleep(0.002)
+        return original(*args, **kwargs)
+
+    writer._atomic_write = slow_write
+    refusals = []
+    for index in range(100):
+        before = target.read_text(encoding="utf-8")
+        if index == 0:
+            barrier.wait(timeout=15)
+        for attempt in range(1000):
+            try:
+                writer.write_text("Content/Verse/counter.verse", str(int(before) + 1),
+                                  expected_hash=content_hash(before))
+                break
+            except StaleWrite as exc:
+                refusals.append(str(exc))
+                before = target.read_text(encoding="utf-8")
+        else:
+            raise AssertionError("CAS retries exhausted")
+    results.put(refusals)
+
+
+def _hold_writer_process(root, acquired):
+    writer = ProjectWriter.for_root(root)
+
+    def hold(*args, **kwargs):
+        acquired.set()
+        time.sleep(120)
+
+    writer._atomic_write = hold
+    writer.write_text("Content/Verse/counter.verse", "never landed")
+
+
+def _single_writer_process(root, started):
+    started.set()
+    ProjectWriter.for_root(root).write_text("Content/Verse/counter.verse", "recovered")
+
+
+def test_two_processes_preserve_200_writes_and_explain_refusals(project):
+    target = project / "Content/Verse/counter.verse"
+    target.write_text("0", encoding="utf-8")
+    ctx = multiprocessing.get_context("spawn")
+    barrier, results = ctx.Barrier(2), ctx.Queue()
+    workers = [ctx.Process(target=_increment_process, args=(str(project), barrier, results))
+               for _ in range(2)]
+    try:
+        for worker in workers:
+            worker.start()
+        refusals = results.get(timeout=30) + results.get(timeout=30)
+        for worker in workers:
+            worker.join(timeout=10)
+            assert worker.exitcode == 0
+        assert target.read_text(encoding="utf-8") == "200"
+        assert refusals  # The first reads deliberately share one baseline.
+        assert all("changed on disk since it was read" in reason
+                   and "expected" in reason and "found" in reason
+                   and "Re-read the file" in reason for reason in refusals)
+    finally:
+        for worker in workers:
+            if worker.is_alive():
+                worker.kill()
+            worker.join(timeout=5)
+        results.close()
+
+
+def test_killed_writer_releases_os_lock(project):
+    ctx = multiprocessing.get_context("spawn")
+    acquired, started = ctx.Event(), ctx.Event()
+    holder = ctx.Process(target=_hold_writer_process, args=(str(project), acquired))
+    waiter = ctx.Process(target=_single_writer_process, args=(str(project), started))
+    holder.start()
+    try:
+        assert acquired.wait(timeout=15)
+        waiter.start()
+        assert started.wait(timeout=15)
+        waiter.join(timeout=0.3)
+        assert waiter.is_alive(), "second process bypassed the held write lock"
+        holder.kill()
+        holder.join(timeout=5)
+        waiter.join(timeout=15)
+        assert waiter.exitcode == 0
+        assert (project / "Content/Verse/counter.verse").read_text(encoding="utf-8") == "recovered"
+    finally:
+        for worker in (holder, waiter):
+            if worker.is_alive():
+                worker.kill()
+            if worker.pid is not None:
+                worker.join(timeout=5)
