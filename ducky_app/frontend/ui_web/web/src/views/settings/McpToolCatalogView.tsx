@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { McpCategoryDto, McpToolDto } from "../../types/panel";
+import type { McpCategoryDto, McpDiagnosticsDto, McpToolDto } from "../../types/panel";
+import { getApi } from "../../hooks/usePanelApi";
 
 const BADGE_META: Record<string, { label: string; color: string; title: string }> = {
   agent: {
     label: "Agent",
     color: "var(--green)",
-    title: "Exposed to the in-panel Ducky agent (chat).",
+    title: "Eligible for the in-panel Agent catalog. This does not prove runtime model exposure.",
   },
   plan: {
     label: "Plan",
@@ -30,9 +31,63 @@ const BADGE_META: Record<string, { label: string; color: string; title: string }
   mcp_only: {
     label: "MCP only",
     color: "var(--muted)",
-    title: "On the MCP server for IDE agents, but not given to the in-panel Ducky agent.",
+    title: "Excluded from the in-panel Agent catalog. IDE model exposure is not observed here.",
   },
 };
+
+/** The same sanitized report returned by ducky_get_tools(diagnostics=true). */
+export function McpDiagnosticsView({ serverId, refreshKey }: { serverId: string; refreshKey?: unknown }) {
+  const [mode, setMode] = useState<McpDiagnosticsDto["mode"]>("agent");
+  const [report, setReport] = useState<McpDiagnosticsDto | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setReport(null);
+    setUnavailable(false);
+    const api = getApi();
+    if (!api?.get_mcp_diagnostics) {
+      setUnavailable(true);
+      return;
+    }
+    void api.get_mcp_diagnostics(serverId, mode).then((value) => {
+      if (active) setReport(value);
+    }).catch(() => { if (active) setUnavailable(true); });
+    return () => { active = false; };
+  }, [serverId, mode, refreshKey, refresh]);
+  const count = (value: number | null) => value === null ? "Unknown" : value;
+  const stage = (value: boolean | null) => value === null ? "Unknown" : value ? "Yes" : "No";
+  return (
+    <section aria-label="MCP diagnostics" className="mcp-plugin-setup">
+      <h3>Connection and mode diagnostics</h3>
+      <label>Policy preview mode{" "}
+        <select aria-label="Policy preview mode" value={mode} onChange={(e) => setMode(e.target.value as McpDiagnosticsDto["mode"])}>
+          <option value="agent">Agent</option><option value="ask">Ask</option><option value="plan">Plan</option>
+        </select>
+      </label>{" "}
+      <button type="button" onClick={() => setRefresh((n) => n + 1)}>Refresh observations</button>
+      <p>This preview does not change the chat mode or connect to a server.</p>
+      {unavailable ? <p role="status">Diagnostics unavailable. Runtime status is unknown.</p> : !report ? <p role="status">Reading cached observations…</p> : <>
+        <p>Correlation ID: <code>{report.correlation_id}</code></p>
+        <p>{report.scope}</p>
+        <p>Stage totals — Catalog tools: {count(report.stage_counts.catalog_tools)} · Started servers: {count(report.stage_counts.started_servers)} · Connected servers: {count(report.stage_counts.connected_servers)} · Model-exposed tools: {count(report.stage_counts.model_exposed_tools)}</p>
+        {report.observation_error ? <p role="status">Observations unavailable. Runtime status is unknown.</p> : null}
+        {report.servers.map((row) => <div key={row.server_id}>
+          <p><strong>{row.server_id}</strong> — {row.status}</p>
+          <p>Catalog tools: {count(row.counts.catalog)} · Policy-blocked: {count(row.counts.policy_blocked)} · Unexposed by local filter: {count(row.counts.unexposed_by_filter)}</p>
+          <p>Started: {stage(row.stages.started)} · Connected: {stage(row.stages.connected)} · Model-exposed: {stage(row.stages.model_exposed)}</p>
+          <p>Recent error: {row.recent_error === "inventory_refresh_failed" ? "Inventory refresh failed" : row.recent_error === "http_connection_failed" ? "HTTP connection failed" : "Unobserved"}</p>
+          <p>{row.guidance}</p>
+          {row.tools.some((tool) => tool.status !== "unknown") ? <details><summary>Tool exclusions and mode reasons</summary><ul>
+            {row.tools.filter((tool) => tool.status !== "unknown").map((tool) => <li key={tool.name}><code>{tool.name}</code>: {tool.status}{tool.mode_reason ? ` — ${tool.mode_reason}` : ""}</li>)}
+          </ul></details> : null}
+          {row.tools_truncated ? <p>Showing up to 50 tool details. Counts include all observed tools.</p> : null}
+        </div>)}
+        <p>{report.stage_note}</p><p>{report.policy_guidance}</p>
+      </>}
+    </section>
+  );
+}
 
 const BADGE_MODIFIER: Record<string, string> = {
   "var(--green)": "skills-mcp-badge--green",

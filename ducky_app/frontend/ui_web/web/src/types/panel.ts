@@ -3952,6 +3952,7 @@ export interface PanelApi {
   ): Promise<SkillPackImportResultDto>;
   get_mcp_tools_catalog(): Promise<McpCatalogDto>;
   get_mcp_server_tools?(server_id: string): Promise<McpCatalogDto & { ok?: boolean; error?: string }>;
+  get_mcp_diagnostics?(server_id: string, mode: "agent" | "ask" | "plan"): Promise<McpDiagnosticsDto>;
   /** Host tools a workflow Call tool node can run — no nested MCP connections. */
   get_workflow_tools_catalog?: () => Promise<McpCatalogDto>;
   list_mcp_plugins(): Promise<McpPluginListDto>;
@@ -4458,6 +4459,27 @@ export interface McpCategoryDto {
   id: string;
   label: string;
   tools: McpToolDto[];
+}
+
+export interface McpDiagnosticsDto {
+  correlation_id: string;
+  stage_counts: { catalog_tools: number | null; started_servers: number | null; connected_servers: number | null; model_exposed_tools: number | null };
+  mode: "agent" | "ask" | "plan";
+  scope: string;
+  stage_note: string;
+  policy_guidance: string;
+  observation_error: "observation_unavailable" | null;
+  servers: Array<{
+    server_id: string;
+    enabled: boolean | null;
+    status: "missing" | "disabled" | "offline" | "connected" | "unknown";
+    stages: { started: boolean | null; connected: boolean | null; model_exposed: boolean | null };
+    counts: { catalog: number | null; policy_blocked: number | null; unexposed_by_filter: number | null };
+    recent_error: "inventory_refresh_failed" | "http_connection_failed" | "unobserved";
+    guidance: string;
+    tools: Array<{ name: string; status: "unexposed" | "policy-blocked" | "unknown"; mode_reason: string }>;
+    tools_truncated: boolean;
+  }>;
 }
 
 export interface McpCatalogDto {

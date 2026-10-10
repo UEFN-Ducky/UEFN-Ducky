@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import re
+import sys
+import time
+import uuid
 from typing import Any
 
 from backend.agent.toolsets import is_plan_safe_tool
@@ -77,6 +82,124 @@ def build_mcp_catalog(*, apply_filters: bool = True, query: str = "", offset: in
                       limit: int | None = None) -> dict[str, Any]:
     return _catalog_from_tools(asyncio.run(list_mcp_tools(apply_filters=apply_filters)),
                                query=query, offset=offset, limit=limit)
+
+
+def _diagnostic_observations() -> dict[str, Any]:
+    """Read process-local snapshots only; never construct a pool or load plugins.
+
+    The pool has no timestamped health/exposure API. These caches are observations,
+    not an atomic readiness check, and a bridge process may have no observations.
+    """
+    from backend.agent.builtin_toolsets import builtin_group_rows, builtin_group_for_tool
+    from backend.mcp_plugins import client_pool
+    from backend.mcp_plugins.store import list_mcp_servers
+    from backend.uefn_plugins.host import plugins_ready, uefn_plugin_tool_group_rows
+
+    servers = [*builtin_group_rows(), *list_mcp_servers()]
+    complete = plugins_ready()
+    if complete:
+        servers.extend(uefn_plugin_tool_group_rows())
+    pool = client_pool._pool  # Existing cache only: get_plugin_pool would start a loop.
+    inventories = {sid: list(rows) for sid, rows in dict(getattr(pool, "_inventories", {})).items()}
+    failures = set(dict(getattr(pool, "_inventory_failures", {})))
+    http_failures = {sid for sid, until in dict(getattr(pool, "_failed_until", {})).items() if until > time.time()}
+    connections = dict(getattr(pool, "_connections", {}))
+    connected = {sid for sid, conn in connections.items()
+                 if not getattr(pool, "_closing", False) and not conn.retired
+                 and conn.session is not None and conn.owner is not None and conn.owner.alive}
+    server = sys.modules.get("backend.server")
+    manager = getattr(getattr(server, "mcp", None), "_tool_manager", None)
+    if manager is not None:
+        registered = list(manager.list_tools())
+        for row in servers:
+            if row.get("kind") == "builtin":
+                inventories[row["id"]] = [t for t in registered if builtin_group_for_tool(t.name) == row["id"]]
+            elif row.get("kind") == "uefn_plugin":
+                names = set(row.get("tool_names") or [])
+                inventories[row["id"]] = [t for t in registered if t.name in names]
+    return {"servers": servers, "inventories": inventories, "failures": failures,
+            "http_failures": http_failures, "connected": connected, "complete": complete}
+
+
+def _diagnostic_identity(value: str) -> str:
+    # Keep valid canonical identities; never echo arbitrary URLs, paths or text.
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
+        return value
+    return "redacted-" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def build_mcp_diagnostics(server_id: str = "", mode: str = "agent") -> dict[str, Any]:
+    """Shared, sanitized Settings/agent report. No connection or tool invocation."""
+    from backend.agent.run_context import validate_mode
+    from backend.agent.toolsets.plan_safe import mode_tool_block_reason
+
+    mode = validate_mode(mode)
+    sid = str(server_id or "").strip()
+    observation_error = False
+    try:
+        observed = _diagnostic_observations()
+    except Exception:
+        # Configuration/provider exceptions can include credentials. Do not echo them.
+        observed = {"servers": [], "inventories": {}, "failures": set(), "complete": False}
+        observation_error = True
+    servers = [r for r in observed["servers"] if not sid or r["id"] == sid]
+    if sid and not servers:
+        servers = [{"id": sid, "enabled": None, "absent": True}]
+    report_rows = []
+    guidance = {
+        "missing": "Check the server ID and configured MCP servers before adding anything.",
+        "disabled": "Enable this server in MCP settings only if you intend to use it.",
+        "offline": "Review connection settings, then retry once after the server recovers. Cached tools are not proof of readiness.",
+        "unknown": "No runtime readiness evidence here. Use the existing connection test when appropriate; do not retry in a loop.",
+        "connected": "An initialized local session owner is active. This is not a live health test or proof of model exposure.",
+    }
+    for server in servers:
+        identity = server["id"]
+        status = "unknown"
+        if server.get("absent") and observed["complete"]:
+            status = "missing"
+        elif server.get("enabled") is False:
+            status = "disabled"
+        elif identity in observed["failures"] or identity in observed.get("http_failures", set()):
+            status = "offline"
+        elif identity in observed.get("connected", set()):
+            status = "connected"
+        tools = observed["inventories"].get(identity)
+        by_name = {t.name: t for t in tools or []}
+        tool_rows = []
+        blocked = excluded = 0
+        for name in sorted(by_name):
+            reason = mode_tool_block_reason(mode, name, {}, by_name, discovery=True)
+            filtered = name in EXCLUDED_TOOLS or server.get("enabled") is False
+            blocked += bool(reason)
+            excluded += filtered
+            tool_rows.append({
+                "name": _diagnostic_identity(name),
+                "status": "unexposed" if filtered else "policy-blocked" if reason else "unknown",
+                "mode_reason": reason,
+            })
+        report_rows.append({
+            "server_id": _diagnostic_identity(identity), "enabled": server.get("enabled"), "status": status,
+            "stages": {"started": None, "connected": True if identity in observed.get("connected", set()) else None, "model_exposed": None},
+            "counts": {"catalog": len(by_name) if tools is not None else None,
+                       "policy_blocked": blocked if tools is not None else None,
+                       "unexposed_by_filter": excluded if tools is not None else None},
+            "recent_error": "http_connection_failed" if identity in observed.get("http_failures", set()) else "inventory_refresh_failed" if identity in observed["failures"] else "unobserved",
+            "guidance": guidance[status], "tools": tool_rows[:50], "tools_truncated": len(tool_rows) > 50,
+        })
+    return {
+        "correlation_id": uuid.uuid4().hex, "mode": mode, "servers": report_rows,
+        "stage_counts": {
+            "catalog_tools": sum(r["counts"]["catalog"] for r in report_rows) if report_rows and all(r["counts"]["catalog"] is not None for r in report_rows) else None,
+            "started_servers": None,
+            "connected_servers": len(report_rows) if report_rows and all(r["stages"]["connected"] is True for r in report_rows) else None,
+            "model_exposed_tools": None,
+        },
+        "observation_error": "observation_unavailable" if observation_error else None,
+        "scope": "Process-local cached observations; no connections were attempted. Error age is unobserved.",
+        "stage_note": "Unobserved stages stay unknown. Connected means an initialized local session owner is active, not a live health test. Catalog presence and policy eligibility do not prove runtime exposure. Unexposed means excluded by the local configuration/filter only.",
+        "policy_guidance": "Use verified read tools in Ask/Plan. Request Agent mode for approved mutations; do not bypass a mode block.",
+    }
 
 
 def build_server_catalog(server_id: str) -> dict[str, Any]:

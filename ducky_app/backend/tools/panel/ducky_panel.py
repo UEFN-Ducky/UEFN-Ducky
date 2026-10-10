@@ -190,14 +190,24 @@ async def ducky_get_tools(
     limit: int = 20,
     pretty: bool = False,
     offset: int = 0,
+    diagnostics: bool = False,
+    server_id: str = "",
 ) -> str:
     """Discover full MCP schemas by canonical name/alias or ranked search tokens.
     Search returns total, next_offset and a content revision; use offset to page.
     Known unavailable tools stay visible. Discovery does not prove call readiness.
+    diagnostics=true returns sanitized cached MCP status without connecting; server_id
+    optionally selects one server. It uses the caller's mode, never a policy override.
     """
     from backend.agent.tools import list_mcp_tools, resolve_invented_tool_name
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
     from backend.agent.toolsets.tool_index import search_tool_catalog, tool_catalog_row, catalog_revision
+
+    if diagnostics:
+        from frontend.ui_web.mcp_catalog import build_mcp_diagnostics
+        from backend.agent.run_context import current_mode
+
+        return tool_json(build_mcp_diagnostics(server_id, current_mode()), pretty=pretty)
 
     n = (name or "").strip()
     p = (pattern or "").strip()

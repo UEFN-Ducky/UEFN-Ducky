@@ -1325,6 +1325,12 @@ class PanelApiStoreMixin:
 
         return build_server_catalog(str(server_id or ""))
 
+    def get_mcp_diagnostics(self, server_id: str = "", mode: str = "agent") -> dict[str, Any]:
+        """Read cached observations; mode selects a policy preview, not a run mode."""
+        from frontend.ui_web.mcp_catalog import build_mcp_diagnostics
+
+        return build_mcp_diagnostics(server_id, mode)
+
     def test_mcp_plugin(self, plugin_id: str) -> dict[str, Any]:
         return self.test_mcp_server(plugin_id)
 

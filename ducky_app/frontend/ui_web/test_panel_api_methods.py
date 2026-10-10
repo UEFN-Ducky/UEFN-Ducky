@@ -177,6 +177,7 @@ _PUBLIC_METHODS = frozenset({
     'get_log',
     'get_mcp_config',
     'get_mcp_server_tools',
+    'get_mcp_diagnostics',
     'get_mcp_tools_catalog',
     'get_memory_entry',
     'get_memory_settings',

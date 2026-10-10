@@ -1,0 +1,23 @@
+{
+  "correlation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "stage_counts": {"catalog_tools": 2, "started_servers": null, "connected_servers": null, "model_exposed_tools": null},
+  "mode": "ask",
+  "observation_error": null,
+  "scope": "Process-local cached observations; no connections were attempted. Error age is unobserved.",
+  "stage_note": "Unobserved stages stay unknown. Connected means an initialized local session owner is active, not a live health test. Catalog presence and policy eligibility do not prove runtime exposure. Unexposed means excluded by the local configuration/filter only.",
+  "policy_guidance": "Use verified read tools in Ask/Plan. Request Agent mode for approved mutations; do not bypass a mode block.",
+  "servers": [{
+    "server_id": "docs",
+    "enabled": true,
+    "status": "offline",
+    "stages": {"started": null, "connected": null, "model_exposed": null},
+    "counts": {"catalog": 2, "policy_blocked": 1, "unexposed_by_filter": 0},
+    "recent_error": "inventory_refresh_failed",
+    "guidance": "Review connection settings, then retry once after the server recovers. Cached tools are not proof of readiness.",
+    "tools": [
+      {"name": "docs__read_page", "status": "unknown", "mode_reason": ""},
+      {"name": "docs__write_page", "status": "policy-blocked", "mode_reason": "blocked in Ask mode: tool is not a verified read operation"}
+    ],
+    "tools_truncated": false
+  }]
+}

@@ -24,7 +24,7 @@ import {
 } from "../../navigation/useSettingsHistory";
 import type { McpCatalogDto, McpPluginDto, McpPluginTestResultDto } from "../../types/panel";
 import { filterMcpCategories, mcpCatalogForPlugin } from "./mcpCatalogForPlugin";
-import { McpToolSplitView } from "./McpToolCatalogView";
+import { McpDiagnosticsView, McpToolSplitView } from "./McpToolCatalogView";
 import { McpConnectionEditor } from "./McpConnectionEditor";
 import { targetRef } from "../../ui-targets/registry";
 
@@ -727,6 +727,7 @@ export function McpPluginsSection() {
             {selectedServer.description?.trim() ? (
               <p className="catalog-slide-detail-overview">{selectedServer.description.trim()}</p>
             ) : null}
+            <McpDiagnosticsView key={`${selectedServer.id}:${selectedServer.enabled}`} serverId={selectedServer.id} refreshKey={serverTools} />
             {selectedServer.enable_blocked_by_port || selectedServer.port_conflict ? (
               <p className="catalog-slide-detail-overview skills-mcp-load-error" role="status">
                 {selectedServer.enable_blocked_by_port
