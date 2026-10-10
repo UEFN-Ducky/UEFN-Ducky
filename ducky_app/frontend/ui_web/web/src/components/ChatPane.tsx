@@ -132,6 +132,55 @@ interface ChatPaneProps {
   onEngage?: () => void;
 }
 
+/** Live plan state shared by the chat dock and its finished-plan card. */
+export function useChatPlan(chatId: string) {
+  const [chatPlan, setChatPlan] = useState<ChatPlan | null>(null);
+  const [chatPlanProgress, setChatPlanProgress] = useState<PlanProgress | null>(null);
+  const request = useRef(0);
+  const reloadPlan = useCallback(async () => {
+    const version = ++request.current;
+    const api = getApi();
+    if (!api?.get_plan) return;
+    try {
+      const res = await api.get_plan(chatId);
+      if (version !== request.current) return;
+      setChatPlan(res.plan ?? null);
+      setChatPlanProgress(res.progress ?? null);
+    } catch {
+      // Keep the last resolved view until a later event can refresh it.
+    }
+  }, [chatId]);
+
+  useEffect(() => {
+    setChatPlan(null);
+    setChatPlanProgress(null);
+    void reloadPlan();
+    return () => { request.current += 1; };
+  }, [reloadPlan]);
+
+  useAgentEventSubscription(chatId, (event) => {
+    if (event.conv_id !== chatId) return;
+    if (event.type === "plan_assignment_changed") void reloadPlan();
+    if (event.type === "plan_updated") {
+      if (chatPlan?.assigned_from?.chat_id) {
+        void reloadPlan();
+      } else {
+        request.current += 1;
+        setChatPlan(event.plan ?? null);
+        setChatPlanProgress(event.progress ?? null);
+      }
+    }
+  }, [reloadPlan, chatPlan?.assigned_from?.chat_id]);
+
+  const sourceChatId = chatPlan?.assigned_from?.chat_id || "";
+  useAgentEventSubscription(sourceChatId, (event) => {
+    if (!sourceChatId || sourceChatId === chatId || event.conv_id !== sourceChatId) return;
+    if (event.type === "plan_updated" || event.type === "plan_assignment_changed") void reloadPlan();
+  }, [chatId, reloadPlan]);
+
+  return { chatPlan, chatPlanProgress, setChatPlan, setChatPlanProgress };
+}
+
 export function ChatPane({
   chat,
   visible,
@@ -231,8 +280,7 @@ export function ChatPane({
   const [slashRefsOn, setSlashRefsOn] = useState(true);
   const [slashStatus, setSlashStatus] = useState("");
   const [modelPickerSignal, setModelPickerSignal] = useState(0);
-  const [chatPlan, setChatPlan] = useState<ChatPlan | null>(null);
-  const [chatPlanProgress, setChatPlanProgress] = useState<PlanProgress | null>(null);
+  const { chatPlan, chatPlanProgress, setChatPlan, setChatPlanProgress } = useChatPlan(chat.id);
   const planAllDone = useMemo(() => {
     if (!chatPlan) return true;
     if (chatPlanProgress) {
@@ -576,31 +624,6 @@ export function ChatPane({
     return () => window.clearTimeout(id);
   }, [visible, contextPanelOpen, inputText, refreshContextUsage]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const api = getApi();
-    if (!api?.get_plan) {
-      setChatPlan(null);
-      setChatPlanProgress(null);
-      return;
-    }
-    void api
-      .get_plan(chat.id)
-      .then((res) => {
-        if (cancelled) return;
-        setChatPlan(res.plan ?? null);
-        setChatPlanProgress(res.progress ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setChatPlan(null);
-        setChatPlanProgress(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [chat.id]);
-
   useAgentEventSubscription(
     chat.id,
     useCallback(
@@ -615,11 +638,6 @@ export function ChatPane({
               setLeaderConvId(res.leader_conv_id || "");
             }
           });
-          return;
-        }
-        if (event.type === "plan_updated") {
-          setChatPlan(event.plan ?? null);
-          setChatPlanProgress(event.progress ?? null);
           return;
         }
         if (event.type === "context_changed") {
