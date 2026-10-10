@@ -42,6 +42,8 @@ import { contextMenuSeparator } from "../utils/sidebarContextMenuItems";
 
 import { LiveChatDot } from "../voice/LiveChatMark";
 import { useLiveChatIds } from "../voice/useLiveChatPresence";
+import { useWaitingChatIds } from "../hooks/waitingChats";
+import { WaitingMarker } from "./WaitingMarker";
 
 import { TruncatedText } from "./TruncatedText";
 
@@ -165,6 +167,7 @@ export function EditorTabs({
       : "en";
   // Translation plugin on + non-English UI language → offer Translate on file/chat tabs.
   const liveChatIds = useLiveChatIds();
+  const waitingChatIds = useWaitingChatIds();
   const translationReady =
     pluginContributesSettingsTab(pluginContrib, "Languages") && !isEnglishLang(uiLang);
   const canVisualTranslateTab =
@@ -433,17 +436,24 @@ export function EditorTabs({
             const diagnosticWarnings = diagnosticSummary?.warnings ?? 0;
 
             const tabLive = tab.kind === "chat" && tab.chatId ? liveChatIds.has(tab.chatId) : false;
+            // A question or command card waits in this chat: a marker in place of its icon.
+            const tabWaitingId = tab.kind === "chat" && tab.chatId && waitingChatIds.has(tab.chatId) ? tab.chatId : "";
             const tabIcon = (
               <div
                 className={`editor-tab-icon${
                   tab.kind === "chat" &&
                   tab.chatId &&
+                  !tabWaitingId &&
                   completionAlertChatIds?.has(tab.chatId)
                     ? " chat-completion-alert"
                     : ""
-                }${tabLive ? " is-live-chat" : ""}`}
+                }${tabLive ? " is-live-chat" : ""}${tabWaitingId ? " is-waiting" : ""}`}
               >
-                <EditorTabGlyph tab={tab} diagnosticErrors={diagnosticErrors} diagnosticWarnings={diagnosticWarnings} />
+                {tabWaitingId ? (
+                  <WaitingMarker convId={tabWaitingId} name={tab.name} variant="tab" />
+                ) : (
+                  <EditorTabGlyph tab={tab} diagnosticErrors={diagnosticErrors} diagnosticWarnings={diagnosticWarnings} />
+                )}
                 {tabLive ? <LiveChatDot className="live-chat-dot--tab" /> : null}
               </div>
             );

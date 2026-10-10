@@ -68,7 +68,9 @@ import {
   shouldShowChat,
   shouldShowFolder,
 } from "../utils/duckyTreeFilter";
-import { anyRunningUnderFolder } from "../utils/duckyTreeBusy";
+import { anyRunningUnderFolder, firstUnderFolder } from "../utils/duckyTreeBusy";
+import { useChatWaiting, useWaitingChatIds } from "../hooks/waitingChats";
+import { WaitingMarker } from "./WaitingMarker";
 import type { EditorDropZone } from "../types/panel";
 import { classifySidebarDragOut, type SidebarDragPoint } from "../utils/sidebarDragOut";
 import { formatRelativeTime } from "../utils/formatRelativeTime";
@@ -240,6 +242,8 @@ const ChatRow = memo(function ChatRow({
   const showChatTranslate =
     pluginContributesSettingsTab(pluginContrib, "Languages") && !isEnglishLang(uiLang);
   const live = useIsLiveChat(chat.id);
+  // A question or command card waiting here: a marker instead of the spinner.
+  const waiting = useChatWaiting(chat.id);
 
   const mergeRowRef = (node: HTMLDivElement | null) => {
     setNodeRef(node);
@@ -278,10 +282,12 @@ const ChatRow = memo(function ChatRow({
               </button>
             ) : null}
             <span
-              className={`sidebar-tree-row-icon sidebar-tree-row-icon--chat${hasCompletionAlert && !isRunning ? " chat-completion-alert" : ""}${chat.isLeader ? " sidebar-tree-row-icon--leader" : ""}${live ? " is-live-chat" : ""}`}
+              className={`sidebar-tree-row-icon sidebar-tree-row-icon--chat${hasCompletionAlert && !isRunning && !waiting ? " chat-completion-alert" : ""}${chat.isLeader ? " sidebar-tree-row-icon--leader" : ""}${live ? " is-live-chat" : ""}`}
               title={live ? "Live chat" : chat.isLeader ? "Group leader" : undefined}
             >
-              {isRunning ? (
+              {waiting ? (
+                <WaitingMarker convId={chat.id} name={chat.name} variant="sidebar" />
+              ) : isRunning ? (
                 <span className="sidebar-agent-spinner" title="Agent working" />
               ) : (
                 <DuckyAvatar
@@ -291,7 +297,7 @@ const ChatRow = memo(function ChatRow({
                 />
               )}
               {live ? <LiveChatDot className="live-chat-dot--sidebar" /> : null}
-              {chat.isLeader && !isRunning ? (
+              {chat.isLeader && !isRunning && !waiting ? (
                 <span className="sidebar-leader-badge" title="Group leader" aria-label="Group leader">
                   <Icons.Star />
                 </span>
@@ -502,6 +508,7 @@ function FolderHeader({
   isActive,
   isFocused = false,
   hasRunningInside,
+  waitingChatId = "",
   editing,
   setEditing,
   editInputRef,
@@ -522,6 +529,8 @@ function FolderHeader({
   isActive: boolean;
   isFocused?: boolean;
   hasRunningInside: boolean;
+  /** A chat it stands for (a group's hub, or one hidden inside) waits on the user: open that one. */
+  waitingChatId?: string;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
   editInputRef: React.RefObject<HTMLInputElement>;
@@ -587,7 +596,9 @@ function FolderHeader({
             >
               <Icons.ChevronDown />
             </button>
-            {hasRunningInside ? (
+            {waitingChatId ? (
+              <WaitingMarker convId={waitingChatId} variant="folder" />
+            ) : hasRunningInside ? (
               <span className="sidebar-agent-spinner" title="Ducky working inside" aria-label="Ducky working inside" />
             ) : folder.groupHubId ? (
               <span className="sidebar-tree-row-icon sidebar-tree-row-icon--group" title="Group">
@@ -767,6 +778,14 @@ const FolderGroup = memo(function FolderGroupImpl({
   // Show activity on the folder row when collapsed so nested work isn't invisible.
   const hasRunningInside =
     !expanded && anyRunningUnderFolder(folder, runningChatIds, childrenByParent);
+  // The group's hub (hidden from the tree) or, folded, a chat inside waits on the user.
+  const waitingIds = useWaitingChatIds();
+  const waitingChatId =
+    hubId && waitingIds.has(hubId)
+      ? hubId
+      : !expanded && waitingIds.size
+        ? firstUnderFolder(folder, waitingIds, childrenByParent)
+        : "";
 
   const childFolderIds = childFolders.map((c) => dragId("folder", c.id));
   const chatIds = childChats.map((c) => dragId("chat", c.id));
@@ -788,6 +807,7 @@ const FolderGroup = memo(function FolderGroupImpl({
         isActive={isActive}
         isFocused={focusId === folderRowId}
         hasRunningInside={hasRunningInside}
+        waitingChatId={waitingChatId}
         editing={editing}
         setEditing={setEditing}
         editInputRef={editInputRef}

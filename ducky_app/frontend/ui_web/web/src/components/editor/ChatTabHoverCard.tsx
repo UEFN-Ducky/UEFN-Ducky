@@ -27,6 +27,8 @@ import { LiveChatDot, LiveChatPill } from "../../voice/LiveChatMark";
 import { stopLiveChat } from "../../voice/liveSpeakService";
 import { useIsLiveChat } from "../../voice/useLiveChatPresence";
 import { ElapsedTimer } from "../ElapsedTimer";
+import { WAITING_LABEL } from "../WaitingMarker";
+import { useChatWaiting } from "../../hooks/waitingChats";
 import { EditorTabHoverCardShell } from "./EditorTabHoverCardShell";
 
 const MODE_LABELS: Record<AgentMode, string> = {
@@ -67,6 +69,7 @@ export function ChatTabHoverCard({
 }: ChatTabHoverCardProps) {
   const catalog = useDuckyCatalogOptional();
   const composer = getCachedChatComposer(chat.id);
+  const waiting = useChatWaiting(chat.id);
   const pluginContrib = usePluginContributions();
   const { prefs, setPref } = usePluginUiPrefs("translation");
   const languagesOn = pluginContributesSettingsTab(pluginContrib, "Languages");
@@ -167,7 +170,12 @@ export function ChatTabHoverCard({
               Linked file: {chat.filePath.replace(/\\/g, "/").split("/").pop()}
             </div>
           ) : null}
-          {isRunning ? (
+          {waiting ? (
+            <div className="editor-tab-hover-card-status editor-tab-hover-card-status--waiting">
+              <span className="chat-waiting-marker chat-waiting-marker--chip" aria-hidden="true">?</span>
+              <span>{WAITING_LABEL}</span>
+            </div>
+          ) : isRunning ? (
             <div className="editor-tab-hover-card-status editor-tab-hover-card-status--running">
               <span className="sidebar-agent-spinner" aria-hidden="true" />
               <span>Agent working</span>

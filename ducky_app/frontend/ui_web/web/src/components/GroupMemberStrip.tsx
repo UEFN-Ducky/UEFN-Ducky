@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { requestReloadDuckies } from "../hooks/useChatsChanged";
 import { getApi } from "../hooks/usePanelApi";
+import { useWaitingChatIds } from "../hooks/waitingChats";
+import { WaitingMarker } from "./WaitingMarker";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import type { AgentProfileDto, ChatTab, ChangesetRunDto, FolderItem, GroupMemberDto, LaneCheckResult } from "../types/panel";
 import { conflictCountsByConv } from "../utils/changesetGrouping";
@@ -114,6 +116,8 @@ export function GroupMemberStrip({
 }: Props) {
   const catalog = useDuckyCatalogOptional();
   const labelFor = catalog?.labelFor ?? ((id?: string | null) => id || "Ducky");
+  // Members waiting on a question or command card wear the same marker as their sidebar row.
+  const waitingIds = useWaitingChatIds();
   const [profiles, setProfiles] = useState<AgentProfileDto[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelEditId, setModelEditId] = useState("");
@@ -686,6 +690,9 @@ export function GroupMemberStrip({
                         <span className="sidebar-leader-badge" title="Group leader" aria-label="Group leader">
                           <Icons.Star />
                         </span>
+                      ) : null}
+                      {m.member_conv_id && waitingIds.has(m.member_conv_id) ? (
+                        <WaitingMarker convId={m.member_conv_id} variant="chip" interactive={false} />
                       ) : null}
                       </span>
                       <span className="group-member-chip-name">{duckyName}</span>
