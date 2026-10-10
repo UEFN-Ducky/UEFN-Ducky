@@ -210,6 +210,78 @@ def test_edit_matches_crlf_files_read_back_as_lf(project) -> None:
     assert path.read_bytes() == b"uno\r\ndos\r\nthree\r\n"
 
 
+def _stale_test_edit(kind, path, replacement):
+    if kind == "edit":
+        return wc.workspace_edit_file(path, "baseline", replacement)
+    if kind == "multi_edit":
+        return wc.workspace_multi_edit(path, [{"old_text": "baseline", "new_text": replacement},
+                                               {"old_text": "tail", "new_text": "changed tail"}])
+    return wc.workspace_replace_lines(path, 1, 1, replacement)
+
+
+@pytest.mark.parametrize("kind", ["edit", "multi_edit", "replace_lines"])
+@pytest.mark.parametrize("alias", ["src/./shared.txt", "src\\shared.txt"])
+def test_same_baseline_concurrent_edits_admit_exactly_one(project, monkeypatch, kind, alias):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from backend.workspace.writer import StaleWrite
+
+    root, journal = project
+    path = root / "src/shared.txt"
+    path.write_text("baseline\ntail\n", encoding="utf-8")
+    barrier = threading.Barrier(2)
+    original_read = wc._current_text
+    def same_baseline(rel):
+        text = original_read(rel)
+        barrier.wait(timeout=5)
+        return text
+    monkeypatch.setattr(wc, "_current_text", same_baseline)
+    def edit(item):
+        rel, text = item
+        try:
+            _stale_test_edit(kind, rel, text)
+            return text, None
+        except StaleWrite as exc:
+            return text, exc
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(edit, [("src/shared.txt", "winner A"), (alias, "winner B")]))
+    successes = [text for text, error in outcomes if error is None]
+    failures = [error for _, error in outcomes if error is not None]
+    assert len(successes) == len(failures) == 1
+    assert "changed" in str(failures[0]).lower()
+    assert path.read_text(encoding="utf-8").splitlines()[0] == successes[0]
+    assert len(journal.records) == 1
+    assert journal.records[0].before == "baseline\ntail\n"
+    assert journal.records[0].after.encode("utf-8") == path.read_bytes()
+    assert not list(path.parent.glob(".shared.txt.*.tmp"))
+
+
+@pytest.mark.parametrize("kind", ["edit", "multi_edit", "replace_lines"])
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_intervening_human_edit_survives_stale_tool_update(project, monkeypatch, kind, newline):
+    from unittest.mock import Mock
+    from backend.workspace.writer import StaleWrite
+
+    root, journal = project
+    path = root / "src/shared.txt"
+    path.write_bytes(newline.join([b"baseline", b"tail", b""]))
+    human = newline.join([b"human change", b"tail", b""])
+    original_read = wc._current_text
+    def human_changes_after_read(rel):
+        before = original_read(rel)
+        path.write_bytes(human)
+        return before
+    monkeypatch.setattr(wc, "_current_text", human_changes_after_read)
+    observer = Mock()
+    runtime.get_writer().add_observer(observer)
+    with pytest.raises(StaleWrite):
+        _stale_test_edit(kind, "src/shared.txt", "agent replacement")
+    assert path.read_bytes() == human
+    assert journal.records == []
+    observer.on_write.assert_not_called()
+    assert not list(path.parent.glob(".shared.txt.*.tmp"))
+
+
 def test_move_and_delete_use_the_undoable_project_operations(project, monkeypatch) -> None:
     from frontend.ui_web import project_files
 
