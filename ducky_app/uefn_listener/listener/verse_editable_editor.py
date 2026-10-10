@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import unreal
@@ -83,6 +84,11 @@ _VERSE_SEARCH_DIRS_CACHE: Optional[List[str]] = None
 _FIELD_SNIPPET_CACHE: Dict[str, Tuple[str, str]] = {}
 # struct_key -> resolved Verse class object path (avoids search_all_assets(True) per call).
 _STRUCT_CLASS_PATH_CACHE: Dict[str, str] = {}
+# When a missing struct last forced a full registry rescan. Until Verse builds the
+# struct every retry misses again, and each rescan walks every mounted content path
+# on the game thread, so it runs at most once a minute (a refresh clears this).
+_STRUCT_RESCAN_AT: Optional[float] = None
+_STRUCT_RESCAN_EVERY_S = 60.0
 
 _SCRIPT_PROP_RE = re.compile(r"__verse_0x[0-9A-Fa-f]{8}_(.+)")
 # Tight name match for T3D / export-text (the capture regex is greedy).
@@ -1102,7 +1108,7 @@ def _computed_hashes_from_verse() -> Dict[str, str]:
 
 def list_verse_property_hashes(refresh: bool = False) -> dict:
     """Compute ``__verse_0x…`` names from @editable field names. ``refresh`` only clears caches."""
-    global _VERSE_SEARCH_DIRS_CACHE
+    global _VERSE_SEARCH_DIRS_CACHE, _STRUCT_RESCAN_AT
     if refresh:
         _WIRING_READY_ACTORS.clear()
         _VERSE_SOURCE_CACHE.clear()
@@ -1110,6 +1116,7 @@ def list_verse_property_hashes(refresh: bool = False) -> dict:
         _SCRIPT_PROPS_CACHE.clear()
         _FIELD_SNIPPET_CACHE.clear()
         _STRUCT_CLASS_PATH_CACHE.clear()
+        _STRUCT_RESCAN_AT = None
         _VERSE_SEARCH_DIRS_CACHE = None
     hashes = _computed_hashes_from_verse()
     return {"properties": hashes, "count": len(hashes), "source": "computed"}
@@ -1419,6 +1426,7 @@ def _find_verse_struct_class_path(struct_key: str) -> Optional[str]:
 
 def _resolve_verse_struct_class(struct_key: str) -> Any:
     """Load a Verse struct class by key, cached per struct_key for the session."""
+    global _STRUCT_RESCAN_AT
     cached_path = _STRUCT_CLASS_PATH_CACHE.get(struct_key)
     if cached_path:
         cls = unreal.load_class(None, cached_path)
@@ -1427,8 +1435,10 @@ def _resolve_verse_struct_class(struct_key: str) -> Any:
         _STRUCT_CLASS_PATH_CACHE.pop(struct_key, None)
 
     path = _find_verse_struct_class_path(struct_key)
-    if not path:
-        # Registry may not have indexed this project subtree yet — one-time fallback.
+    now = time.monotonic()
+    if not path and (_STRUCT_RESCAN_AT is None or now - _STRUCT_RESCAN_AT >= _STRUCT_RESCAN_EVERY_S):
+        # Registry may not have indexed this project subtree yet.
+        _STRUCT_RESCAN_AT = now
         unreal.AssetRegistryHelpers.get_asset_registry().search_all_assets(True)
         path = _find_verse_struct_class_path(struct_key)
     if not path:

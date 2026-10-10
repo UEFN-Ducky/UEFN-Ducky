@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pytest
+
 _SRC = (Path(__file__).resolve().parent / "verse_editable_editor.py").read_text(
     encoding="utf-8"
 )
@@ -246,3 +248,62 @@ def test_set_currency_config_entries_writes_extra_keys():
     body = _SRC[start : start + 1800]
     assert 'if key in ("name", "CurrencyName", "display_order", "DisplayOrder")' in body
     assert "_mangled_name(str(key))" in body
+
+
+def _load_struct_resolver():
+    """``_resolve_verse_struct_class`` for a struct Verse has not built yet, on a fake clock."""
+    rescans: List[bool] = []
+    clock = {"now": 1000.0}
+
+    class _Registry:
+        def search_all_assets(self, synchronous: bool) -> None:
+            rescans.append(synchronous)
+
+    class _Unreal:
+        class AssetRegistryHelpers:
+            @staticmethod
+            def get_asset_registry() -> _Registry:
+                return _Registry()
+
+        @staticmethod
+        def load_class(_outer: Any, _path: str) -> None:
+            return None
+
+    class _Clock:
+        time = staticmethod(lambda: clock["now"])
+        monotonic = staticmethod(lambda: clock["now"])
+
+    ns: dict = {
+        "Any": Any, "Dict": Dict, "List": List, "Optional": Optional, "unreal": _Unreal, "time": _Clock,
+        "_WIRING_READY_ACTORS": set(), "_VERSE_SOURCE_CACHE": {}, "_FIELD_TYPE_CACHE": {},
+        "_SCRIPT_PROPS_CACHE": {}, "_FIELD_SNIPPET_CACHE": {}, "_VERSE_SEARCH_DIRS_CACHE": None,
+    }
+    # The struct cache and anything else the module keeps for it, as declared there.
+    for line in re.findall(r"^_STRUCT_\w+.*= .*$", _SRC, flags=re.M):
+        exec(line, ns)
+    ns["_find_verse_struct_class_path"] = lambda _key: None
+    ns["_computed_hashes_from_verse"] = lambda: {}
+    _exec_fn("_resolve_verse_struct_class", ns)
+    _exec_fn("list_verse_property_hashes", ns)
+    return ns, rescans, clock
+
+
+def test_a_missing_struct_rescans_the_registry_at_most_once_a_minute():
+    ns, rescans, clock = _load_struct_resolver()
+    resolve = ns["_resolve_verse_struct_class"]
+
+    for _ in range(3):
+        with pytest.raises(ValueError, match="Recompile Verse"):
+            resolve("player_level_threshold")
+    assert rescans == [True]
+
+    clock["now"] += 61
+    with pytest.raises(ValueError):
+        resolve("player_level_threshold")
+    assert rescans == [True, True]
+
+    # A refresh (after a Verse build) lets the next miss rescan straight away.
+    ns["list_verse_property_hashes"](refresh=True)
+    with pytest.raises(ValueError):
+        resolve("player_level_threshold")
+    assert rescans == [True, True, True]
