@@ -259,3 +259,20 @@ def test_archived_master_does_not_conflict_with_live_assignment(team, monkeypatc
     plans.update_plan('coord', status='archived', project_root=team)
     live = plans.create_plan('outsider', nodes=[{'id': 'live', 'content': 'Live', 'assignee': 'group-a'}], project_root=team)
     assert plans.assigned_plan_view('builder', team, report_ambiguity=True)['id'] == live['id']
+
+
+def test_a_finished_part_never_hides_the_members_new_work(team):
+    # Oct 10 2026: a writer's section in a finished plan made its next assignment
+    # "ambiguous", so its chat showed no plan while it had work to do.
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
+    plans.update_node("coord", "a1", status="completed", project_root=team)
+    plans.update_node("coord", "a2", status="completed", project_root=team)
+    plans.create_plan("outsider", title="Next round", nodes=[
+        {"id": "next", "content": "Next work", "assignee": "group-a"}
+    ], project_root=team)
+    view = plans.assigned_plan_view("builder", team, report_ambiguity=True)
+    assert view["assigned_from"]["chat_id"] == "outsider" and view["title"] == "Next work"
+    # Its new part done too: nothing to act on, so the latest part is shown, not an error.
+    plans.update_node("outsider", "next", status="completed", project_root=team)
+    view = plans.assigned_plan_view("builder", team, report_ambiguity=True)
+    assert view["assigned_from"]["chat_id"] == "outsider"

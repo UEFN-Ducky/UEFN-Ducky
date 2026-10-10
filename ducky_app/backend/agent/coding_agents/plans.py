@@ -1209,38 +1209,45 @@ def assigned_plan_view(chat_id: str, project_root: str | None = None, *,
     for wanted in ids:  # the most specific owner wins
         matches = [(p, n) for p in plans for n in _flatten_nodes(p.get("nodes"))
                    if str(n.get("assignee") or "") == wanted]
-        if len(matches) > 1:
+        # Work still to do outranks finished parts: a member's section in a finished
+        # plan made every later assignment "ambiguous", so its chat showed no plan.
+        live = [(p, n) for p, n in matches
+                if p.get("status") not in ("finished", "completed")
+                and n.get("status") not in ("completed", "cancelled")]
+        if len(live) > 1:
             # There is no authorized plan binding to break this tie. Do not use
             # save time as authority, nor silently fall back to a broader group.
             if report_ambiguity:
                 raise ValueError("Multiple plan assignments match this chat. The coordinator must clear the conflicting assignments.")
             return None
-        for plan in plans:
-            for node in _flatten_nodes(plan.get("nodes")):
-                if str(node.get("assignee") or "") != wanted:
-                    continue
-                title = str(plan.get("title") or "Plan")
-                return {
-                    "id": str(plan.get("plan_id") or ""),
-                    "kind": "project",
+        if live:
+            chosen = live
+        else:
+            # Only finished parts: nothing to act on, so the latest one is shown read-only.
+            chosen = sorted(matches, key=lambda m: float(m[0].get("updated_at") or 0), reverse=True)[:1]
+        for plan, node in chosen:
+            title = str(plan.get("title") or "Plan")
+            return {
+                "id": str(plan.get("plan_id") or ""),
+                "kind": "project",
+                "chat_id": str(plan.get("chat_id") or ""),
+                "title": str(node.get("content") or title),
+                "overview": f"Part of the plan “{title}”.",
+                "body_markdown": str(node.get("body_markdown") or ""),
+                "status": str(plan.get("status") or "open"),
+                "nodes": [node],
+                "todos": [
+                    {"id": n["id"], "content": n["content"], "status": n["status"]}
+                    for n in _flatten_nodes([node])
+                ],
+                "updated_at": plan.get("updated_at"),
+                "assigned_from": {
                     "chat_id": str(plan.get("chat_id") or ""),
-                    "title": str(node.get("content") or title),
-                    "overview": f"Part of the plan “{title}”.",
-                    "body_markdown": str(node.get("body_markdown") or ""),
-                    "status": str(plan.get("status") or "open"),
-                    "nodes": [node],
-                    "todos": [
-                        {"id": n["id"], "content": n["content"], "status": n["status"]}
-                        for n in _flatten_nodes([node])
-                    ],
-                    "updated_at": plan.get("updated_at"),
-                    "assigned_from": {
-                        "chat_id": str(plan.get("chat_id") or ""),
-                        "node_id": str(node.get("id") or ""),
-                        "plan_title": title,
-                        "assignee": wanted,
-                    },
-                }
+                    "node_id": str(node.get("id") or ""),
+                    "plan_title": title,
+                    "assignee": wanted,
+                },
+            }
     return None
 
 
