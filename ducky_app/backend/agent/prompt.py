@@ -323,10 +323,10 @@ def get_system_prompt_parts(
     cid = (conv_id or "").strip()
     if cid:
         try:
-            from backend.agent.coding_agents.plans import format_plan_prompt_block, load_plan
+            from backend.agent.coding_agents.plans import format_plan_prompt_block, load_plan_view
 
             plan_block = format_plan_prompt_block(
-                load_plan(cid, project_root or None)
+                load_plan_view(cid, project_root or None)
             )
         except Exception:
             plan_block = ""

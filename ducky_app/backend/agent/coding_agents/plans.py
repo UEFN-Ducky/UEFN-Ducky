@@ -1034,6 +1034,8 @@ def format_plan_tick_nudge_for_tool(tool_name: str) -> str:
 def attach_next_tick(payload: dict[str, Any], plan: dict[str, Any] | None) -> dict[str, Any]:
     """Add next_tick + tick_now onto a plan-tool JSON payload."""
     out = dict(payload)
+    if plan and plan.get("assigned_from"):
+        return out  # Read-only views must not suggest implicit own-chat writes.
     tick = next_tick_dict(plan)
     if tick:
         out["next_tick"] = tick
@@ -1062,6 +1064,20 @@ def format_plan_prompt_block(
             + (f", {prog['in_progress']} in progress" if prog["in_progress"] else "")
         ),
     ]
+    assignment = plan.get("assigned_from")
+    if isinstance(assignment, dict):
+        lines[0] = "## Shared plan assignment (read-only view)"
+        lines.extend([
+            f"Canonical plan `{plan.get('id')}`; assigned node `{assignment.get('node_id')}`; assignee `{assignment.get('assignee')}`.",
+            f"Read the full tree with ducky_get_plan(chat_id={json.dumps(assignment.get('chat_id'))}).",
+            "This view does not transfer plan mutation ownership from the coordinator.",
+        ])
+        for i, (lab, node) in enumerate(outline_numbers(nodes)):
+            if i >= max_nodes:
+                lines.append("…(truncated — read the full canonical plan)")
+                break
+            lines.append(f"- {lab} [{node.get('status', 'pending')}] `{node['id']}` — {str(node.get('content') or '')[:160]}")
+        return "\n".join(lines) + "\n"
     nudge = format_plan_tick_nudge(plan)
     if nudge:
         lines.append(nudge)
@@ -1106,6 +1122,14 @@ def _chat_and_group_ids(chat_id: str, project_root: str | None) -> list[str]:
         ids.append(cur)
         cur = (getattr(conv, "parent_conv_id", None) or "").strip() if conv is not None else ""
     return ids
+
+
+def load_plan_view(chat_id: str, project_root: str | None = None) -> dict[str, Any] | None:
+    """Resolve an active read view without redirecting raw storage or mutations."""
+    own = load_plan(chat_id, project_root)
+    if own is not None and own.get("status") != "archived":
+        return own
+    return assigned_plan_view(chat_id, project_root, report_ambiguity=True)
 
 
 def assigned_plan_view(chat_id: str, project_root: str | None = None, *,

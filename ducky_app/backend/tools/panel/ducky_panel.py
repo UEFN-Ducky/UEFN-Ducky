@@ -2025,13 +2025,16 @@ def ducky_update_plan(
 @mcp.tool()
 def ducky_get_plan(chat_id: str = "", pretty: bool = False) -> str:
     """Load the project Plan for this conversation (or chat_id). Returns outline numbering 1, 1.1, 1.1.1, …"""
-    from backend.agent.coding_agents.plans import attach_next_tick, load_plan, outline_numbers, todo_progress
+    from backend.agent.coding_agents.plans import attach_next_tick, load_plan_view, outline_numbers, todo_progress
 
     cid = _resolve_plan_chat_id(chat_id)
     if not cid:
         return tool_json({"ok": False, "error": "chat_id required (no active conversation)"}, pretty=pretty)
     root = _project_root()
-    plan = load_plan(cid, project_root=root)
+    try:
+        plan = load_plan_view(cid, project_root=root)
+    except ValueError as exc:
+        return tool_json({"ok": False, "plan": None, "error": str(exc)}, pretty=pretty)
     if not plan:
         return tool_json(
             {"ok": True, "plan": None, "progress": todo_progress(None), "outline": []},
