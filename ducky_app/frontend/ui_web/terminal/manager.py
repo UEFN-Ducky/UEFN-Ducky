@@ -20,6 +20,9 @@ from frontend.ui_web.terminal.session import (
 from frontend.ui_web.terminal.shells import shell_label
 
 _APPROVAL_TIMEOUT_S = 120.0
+# Terminals one chat may keep open. Each holds a shell, a conhost and a socket bridge,
+# and an agent that opens one per turn in different folders piled them up all day.
+_MAX_CHAT_SHELLS = 6
 _manager: "TerminalManager | None" = None
 _manager_lock = threading.Lock()
 
@@ -83,6 +86,7 @@ class TerminalManager:
                     "shell_fallback": False,
                     "reused": True,
                 }
+        closed = self._make_room(conv_id) if conv_id else []
         entry: _SessionEntry | None = None
         with self._lock:
             session = TerminalSession(
@@ -131,7 +135,7 @@ class TerminalManager:
                 else:
                     bridge.stop()
                     return {"ok": False, "error": str(exc)}
-            entry = _SessionEntry(session=session, bridge=bridge, reuse_key=reuse_key)
+            entry = _SessionEntry(session=session, bridge=bridge, reuse_key=reuse_key, chat=conv_id)
             self._sessions[session.id] = entry
 
         result = {
@@ -140,6 +144,8 @@ class TerminalManager:
             "tab_id": f"terminal:{session.id}",
             "shell_fallback": shell_fallback,
         }
+        if closed:
+            result["closed"] = closed
         if push_open and not session.hidden:
             self._emit_open(session, conv_id, activate)
         return result
@@ -151,6 +157,27 @@ class TerminalManager:
             if session.is_alive() and not session.has_running_command():
                 return session
         return None
+
+    def _make_room(self, conv_id: str) -> list[str]:
+        """Close the chat's oldest idle terminals so a new one keeps it within the cap.
+
+        A terminal running a command or waiting on an Allow pop-up is never closed, and
+        when every one is busy the new terminal opens anyway. A person's own terminals
+        belong to no chat and are never counted."""
+        with self._lock:
+            mine = [e.session for e in self._sessions.values() if e.chat == conv_id]
+            asked = {p.session_id for p in self._pending.values()}
+        excess = len(mine) - _MAX_CHAT_SHELLS + 1
+        if excess <= 0:
+            return []
+        snapshot = functools.cache(_process_snapshot)
+        idle = [s for s in mine if s.id not in asked and not s.has_running_command(snapshot)]
+        # Terminals whose shell already ended go first, then the oldest (open order).
+        idle.sort(key=lambda s: s.is_alive())
+        closed = [s.id for s in idle[:excess]]
+        for session_id in closed:
+            self.kill(session_id)
+        return closed
 
     def _emit_open(self, session: TerminalSession, conv_id: str, activate: bool) -> None:
         self._emit(
@@ -460,7 +487,7 @@ class TerminalManager:
 
 
 class _SessionEntry:
-    __slots__ = ("session", "bridge", "reuse_key")
+    __slots__ = ("session", "bridge", "reuse_key", "chat")
 
     def __init__(
         self,
@@ -468,11 +495,14 @@ class _SessionEntry:
         session: TerminalSession,
         bridge: TerminalBridge,
         reuse_key: tuple[str, str, str] | None = None,
+        chat: str = "",
     ) -> None:
         self.session = session
         self.bridge = bridge
         # (chat, shell asked for, folder): an agent opening the same again gets this one.
         self.reuse_key = reuse_key
+        # The chat whose agent opened it; "" for a terminal a person opened.
+        self.chat = chat
 
 
 def get_terminal_manager() -> TerminalManager:
