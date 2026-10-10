@@ -602,9 +602,13 @@ def load_pack_manifest(pack_id: str) -> dict[str, Any] | None:
         kind = "plugin"
     else:
         kind = "custom"
+    # The cache is keyed by the kind known before SKILL.md is read: a Store pack
+    # is only told apart from a custom one by its frontmatter, which the stamp
+    # already covers. Keying it by "store" meant Store packs never hit the cache.
+    cache_kind = kind
     for root in _pack_roots(pack_id):
         if (root / PACK_FILE).is_file():
-            cached = _manifest_cache_get(pack_id, root, kind)
+            cached = _manifest_cache_get(pack_id, root, cache_kind)
             if cached is not None:
                 return cached
             # Store-installed packs live in AppData as custom until we read source=.
@@ -623,7 +627,7 @@ def load_pack_manifest(pack_id: str) -> dict[str, Any] | None:
                     manifest["license"] = DEFAULT_COMMERCIAL_LICENSE
                 if "allow_redistribute" not in manifest:
                     manifest["allow_redistribute"] = False
-            _manifest_cache_put(pack_id, root, kind, manifest)
+            _manifest_cache_put(pack_id, root, cache_kind, manifest)
             return manifest
     return None
 
