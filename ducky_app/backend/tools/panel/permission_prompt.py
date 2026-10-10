@@ -551,7 +551,7 @@ def chat_permissions(conv_id: str, agent: str = "") -> dict[str, Any]:
     honoured = _agent_modes(agent_id)
     allow = allow_state(conv_id)
     inherited = bool(allow["on"]) and not allow["own"]
-    mode = permission_mode(conv_id)
+    mode = MODE_ALL if allow["on"] else (MODE_ASK if _own_mode(conv_id) == MODE_ASK else MODE_EDITS)
     modes: list[dict[str, Any]] = []
     for mode_id in MODES:
         name, description = MODE_TEXT[mode_id]
