@@ -211,6 +211,31 @@ def test_unchanged_files_are_not_reread_every_poll(env, monkeypatch):
     assert rows[hw._canon_watch_key("Content/Verse/f7.verse")]["content"] == "edited by a human\n"
 
 
+def test_scan_does_not_resolve_every_file_each_poll(env, monkeypatch):
+    """Each poll used to realpath every watched file twice (a file handle each on
+    Windows), so an idle island cost ~2% of a core. The walk is already under the
+    resolved island, so the keys need no resolving."""
+    root, _journal, _writer, verse = env
+    for i in range(100):
+        (verse / f"m{i}.verse").write_text(f"m {i}\n", encoding="utf-8", newline="\n")
+    watch = HumanWatch()
+    island = Path(hw.island_root(str(root)))
+    expected = {"Content/Verse/a.verse", *(f"Content/Verse/m{i}.verse" for i in range(100))}
+
+    calls: list[str] = []
+    real = os.path.realpath
+
+    def counting(path, *args, **kwargs):
+        calls.append(str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", counting)
+    for _ in range(2):
+        calls.clear()
+        assert set(watch._scan(island)) == expected
+        assert len(calls) <= 1, f"{len(calls)} realpath calls in one poll"
+
+
 def test_scan_forgets_files_that_disappear(env):
     """The read cache must not pin deleted files in memory forever."""
     root, _journal, _writer, verse = env

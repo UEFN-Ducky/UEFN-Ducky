@@ -17,7 +17,7 @@ from typing import Any
 from backend.workspace import identity
 from backend.workspace.diff_workers import line_delta
 from backend.workspace.journal import FileChangeJournal, OUTCOME_OK
-from backend.workspace.paths import content_hash, island_root, normalize_rel, rel_from_root
+from backend.workspace.paths import content_hash, island_root, normalize_rel
 from backend.workspace.policy import ALLOW
 from backend.workspace.writer import TEXT_READ_MAX_BYTES, WriteRecord
 
@@ -158,7 +158,10 @@ class HumanWatch:
                     if ext not in WATCH_EXT:
                         continue
                     full = os.path.join(dirpath, name)
-                    rel = _canon_watch_key(rel_from_root(full, island_s) or "")
+                    # The walk starts under the already-resolved island, so a plain
+                    # relpath is the key. Resolving it with realpath cost two file
+                    # handles per file per poll on Windows for the same answer.
+                    rel = _canon_watch_key(os.path.relpath(full, island_s).replace(os.sep, "/"))
                     if not rel:
                         continue
                     try:
