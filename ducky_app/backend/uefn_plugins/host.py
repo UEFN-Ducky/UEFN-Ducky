@@ -2161,8 +2161,13 @@ def _plugin_load_worker() -> None:
 def ensure_plugins_loaded_async(on_done: Callable[[], None] | None = None) -> None:
     """Start first plugin load on a daemon thread (no-op if already loaded/in flight)."""
     if on_done is not None:
+        # One entry per function: every panel object queues its own bound ready hook, and
+        # each poll during boot queued another, so plugins-ready fired ~30 app-wide
+        # "plugins changed" pushes and the panel refetched 500 KB of contributions each time.
+        key = getattr(on_done, "__func__", on_done)
         with _LOAD_CALLBACKS_LOCK:
-            _LOAD_CALLBACKS.append(on_done)
+            if all(getattr(cb, "__func__", cb) is not key for cb in _LOAD_CALLBACKS):
+                _LOAD_CALLBACKS.append(on_done)
     if _LOADED:
         _flush_load_callbacks()
         return
