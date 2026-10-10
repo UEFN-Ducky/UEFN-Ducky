@@ -81,6 +81,11 @@ def normalize_glob(pattern: str) -> str:
     p = p.rstrip("/")
     while "//" in p:
         p = p.replace("//", "/")
+    # Interior current-directory segments name the same resource too. Keep
+    # overlap checks canonical before deciding whether this is a directory.
+    p = "/".join(seg for seg in p.split("/") if seg != ".")
+    if not p:
+        raise LaneGlobError("empty lane pattern")
     last = p.rsplit("/", 1)[-1]
     looks_like_dir = not any(ch in _WILDCARDS for ch in p) and "." not in last
     if looks_like_dir:

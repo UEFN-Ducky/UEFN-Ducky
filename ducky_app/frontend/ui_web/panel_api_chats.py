@@ -749,20 +749,25 @@ class PanelApiChatsMixin:
         from backend.workspace import events, lanes as lane_engine
         from frontend.ui_web.group_orchestrator import group_members, normalize_member
 
-        group = _pa.load_conversation(group_id)
-        if not group or not getattr(group, "is_group", False):
-            return {"ok": False, "error": "Not a group chat"}
-        mid = (member_conv_id or "").strip()
-        try:
-            rows, warnings = lane_engine.set_member_lane(
-                group_members(group), mid, write_allowed, set_by=(set_by or "user"), now=time.time(), force=bool(force)
-            )
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        next_members = [normalize_member(row, index=i) for i, row in enumerate(rows)]
-        group.group_members = next_members
-        _pa.save_conversation(group)
-        lane_engine.invalidate_lane_cache(mid)
+        from frontend.ui_web.project_chats import _conversation_lock
+
+        # Use the same reentrant group lock as save_conversation so competing
+        # lane updates cannot both validate an obsolete roster snapshot.
+        with _conversation_lock(group_id):
+            group = _pa.load_conversation(group_id)
+            if not group or not getattr(group, "is_group", False):
+                return {"ok": False, "error": "Not a group chat"}
+            mid = (member_conv_id or "").strip()
+            try:
+                rows, warnings = lane_engine.set_member_lane(
+                    group_members(group), mid, write_allowed, set_by=(set_by or "user"), now=time.time(), force=bool(force)
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            next_members = [normalize_member(row, index=i) for i, row in enumerate(rows)]
+            group.group_members = next_members
+            _pa.save_conversation(group)
+            lane_engine.invalidate_lane_cache(mid)
         _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
         lane = next((m.get("write_allowed") for m in next_members if m.get("member_conv_id") == mid), None)
         events.emit(events.LaneChangedEvent(group.id, mid, None if lane is None else tuple(lane)).to_dict())
