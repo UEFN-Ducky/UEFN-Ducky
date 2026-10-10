@@ -31,6 +31,28 @@ def test_pool_is_lazy_and_matches_serial_results():
     assert all(not child.is_alive() for child in children)
 
 
+def test_idle_pool_closes_and_a_later_diff_reopens_it(monkeypatch):
+    """After the first large diff the two worker processes stayed up for the
+    rest of the session."""
+    monkeypatch.setattr(dw, "_IDLE_CLOSE_SEC", 0.3, raising=False)
+    workers = dw.DiffWorkers()
+    before = "".join(f"Line {n}\n" for n in range(2000))
+    after = before.replace("Line 7\n", "Changed\n")
+    try:
+        assert workers.compare(before, after) == serial_delta(before, after)
+        children = list(workers._pool._pool)
+        deadline = time.monotonic() + 10
+        while workers._pool is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert workers._pool is None, "idle diff workers kept running"
+        for child in children:
+            child.join(5)
+        assert all(not child.is_alive() for child in children)
+        assert workers.compare(before, after) == serial_delta(before, after)
+    finally:
+        workers.close()
+
+
 def test_service_uses_workers_only_when_enabled_and_large(monkeypatch):
     monkeypatch.setattr(dw, "_workers", None)
     assert dw.line_delta("a\n", "b\n") == (1, 1)

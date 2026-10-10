@@ -18,6 +18,9 @@ from backend.workspace.paths import line_delta as _local_delta
 
 _MIN_COMBINED_CHARS = 256 * 1024
 _JOB_TIMEOUT_SEC = 120.0
+# Large diffs are rare: two worker processes kept for the rest of the session
+# after the first one cost far more than starting them again.
+_IDLE_CLOSE_SEC = 120.0
 
 
 class DiffWorkers:
@@ -28,6 +31,9 @@ class DiffWorkers:
         self._slots = threading.BoundedSemaphore(self.max_workers * 2)
         self._stopped = threading.Event()
         self._pool: Any = None
+        self._active = 0
+        self._idle_due = 0.0
+        self._idle_armed = False
 
     def compare(self, before: str, after: str) -> tuple[int, int]:
         while not self._slots.acquire(timeout=0.1):
@@ -42,19 +48,59 @@ class DiffWorkers:
                     # exit to stop pure CPU work without private executor APIs.
                     self._pool = multiprocessing.get_context("spawn").Pool(self.max_workers)
                 result = self._pool.apply_async(_local_delta, (before, after))
-            deadline = time.monotonic() + _JOB_TIMEOUT_SEC
-            while not self._stopped.is_set():
-                try:
-                    return result.get(timeout=0.1)
-                except multiprocessing.TimeoutError:
-                    if time.monotonic() >= deadline:
-                        # A crashed/replaced Pool worker can leave an unresolved
-                        # result. Bound the wait and retire the entire old pool.
-                        self.close()
-                        raise TimeoutError("large text comparison exceeded its time limit") from None
-            raise CancelledError("text comparison workers stopped")
+                self._active += 1
+            try:
+                deadline = time.monotonic() + _JOB_TIMEOUT_SEC
+                while not self._stopped.is_set():
+                    try:
+                        return result.get(timeout=0.1)
+                    except multiprocessing.TimeoutError:
+                        if time.monotonic() >= deadline:
+                            # A crashed/replaced Pool worker can leave an unresolved
+                            # result. Bound the wait and retire the entire old pool.
+                            self.close()
+                            raise TimeoutError("large text comparison exceeded its time limit") from None
+                raise CancelledError("text comparison workers stopped")
+            finally:
+                self._job_done()
         finally:
             self._slots.release()
+
+    def _job_done(self) -> None:
+        with self._lock:
+            self._active -= 1
+            self._idle_due = time.monotonic() + _IDLE_CLOSE_SEC
+            if self._idle_armed or self._pool is None:
+                return
+            self._idle_armed = True
+        self._arm_idle(_IDLE_CLOSE_SEC)
+
+    def _arm_idle(self, delay: float) -> None:
+        timer = threading.Timer(delay, self._close_if_idle)
+        timer.daemon = True
+        timer.start()
+
+    def _close_if_idle(self) -> None:
+        """Retire a pool with no work for _IDLE_CLOSE_SEC; the next large diff starts another."""
+        with self._lock:
+            pool = self._pool
+            if pool is None or self._stopped.is_set():
+                self._idle_armed = False
+                return
+            wait = self._idle_due - time.monotonic()
+            if self._active or wait > 0.05:
+                delay: float | None = wait if wait > 0.05 else _IDLE_CLOSE_SEC
+            else:
+                self._pool = None
+                self._idle_armed = False
+                delay = None
+        if delay is not None:
+            self._arm_idle(delay)
+            return
+        # Idle workers exit on their own (a frozen build's worker then removes its
+        # unpacked files) rather than being terminated like at app exit.
+        pool.close()
+        pool.join()
 
     def close(self) -> None:
         with self._lock:
