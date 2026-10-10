@@ -1067,6 +1067,78 @@ def test_a_plugin_that_crashed_ducky_is_skipped_until_it_changes_or_is_turned_on
     assert not host.plugin_crashed_ducky("demo", "3")
 
 
+def _installed(pid: str, version: str) -> None:
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
+
+    folder = appdata_uefn_plugins_dir() / pid
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "plugin.json").write_text(json.dumps({"id": pid, "version": version}), encoding="utf-8")
+
+
+def _fake_store(monkeypatch, latest: dict[str, str]) -> list[str]:
+    import frontend.duckyos_account as account
+
+    installs: list[str] = []
+    items = [{"slug": slug, "latest_version": version} for slug, version in latest.items()]
+    monkeypatch.setattr(account, "store_catalog", lambda: {"ok": True, "items": items})
+
+    def install(slug, *, version=None, replace=True, is_update=False):
+        assert is_update and replace
+        installs.append(slug)
+        _installed(slug, latest[slug])
+        return {"ok": True, "kind": "plugin"}
+
+    monkeypatch.setattr(account, "store_download_and_install", install)
+    return installs
+
+
+def test_a_plugin_that_crashed_ducky_updates_itself_when_the_store_has_a_fix(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    monkeypatch.setattr(host, "_notify_uefn_plugins_changed", lambda: None)
+    _installed("account", "1.0.50")
+    _crash_marker(host, "account", "1.0.50", 4242)
+    assert host.plugin_crashed_ducky("account", "1.0.50")
+    installs = _fake_store(monkeypatch, {"account": "1.0.51"})
+
+    assert host.heal_crashed_plugins() == ["account"]
+    assert installs == ["account"]
+    assert host._read_crashed() == {}
+
+
+def test_a_crashed_plugin_with_no_newer_version_stays_skipped(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    _installed("account", "1.0.50")
+    _crash_marker(host, "account", "1.0.50", 4242)
+    host.plugin_crashed_ducky("account", "1.0.50")
+    installs = _fake_store(monkeypatch, {"account": "1.0.50"})
+
+    assert host.heal_crashed_plugins() == []
+    assert installs == [] and host.plugin_crashed_ducky("account", "1.0.50")
+
+
+def test_a_crash_record_for_a_plugin_already_updated_is_dropped_without_a_download(monkeypatch, tmp_path) -> None:
+    _isolated_appdata(monkeypatch, tmp_path)
+    from backend.uefn_plugins import host
+
+    monkeypatch.setattr(host, "_crash_checked", False)
+    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    _installed("account", "1.0.51")
+    _crash_marker(host, "account", "1.0.50", 4242)
+    host.plugin_crashed_ducky("account", "1.0.50")
+    installs = _fake_store(monkeypatch, {"account": "1.0.52"})
+
+    assert host.heal_crashed_plugins() == []
+    assert installs == [] and host._read_crashed() == {}
+
+
 def test_a_load_running_in_another_live_ducky_process_is_not_a_crash(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
     from backend.uefn_plugins import host

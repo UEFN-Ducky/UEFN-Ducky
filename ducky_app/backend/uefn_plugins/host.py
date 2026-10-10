@@ -2112,6 +2112,7 @@ def _run_first_plugin_load() -> None:
         reevaluate_team_plugins()
     except Exception:
         _log.debug("team-plugin reevaluation at boot failed", exc_info=True)
+    _start_crash_heal()
     _log.info(
         "UEFN plugins ready: register phase %.0fms%s",
         (time.perf_counter() - t_register) * 1000.0,
@@ -2706,7 +2707,8 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
                 pid,
                 RuntimeError(
                     f"UEFN Ducky closed while loading {label} {version}, so it was skipped to let "
-                    "Ducky open. Update the plugin, or turn it off and on in Settings → Plugins to try again."
+                    "Ducky open. Ducky installs a newer version by itself as soon as the Store has one; "
+                    "or turn it off and on in Settings → Plugins to try again."
                 ),
             )
             return
@@ -2839,6 +2841,75 @@ def clear_plugin_crash(pid: str) -> None:
         crashed = _read_crashed()
         if crashed.pop(pid, None) is not None:
             _write_crashed(crashed)
+
+
+def heal_crashed_plugins() -> list[str]:
+    """Update each plugin skipped for crashing Ducky when the Store has a newer version.
+
+    The person can't be expected to find the Update button: the plugin that broke may be
+    the one they sign in with, and the fix is usually already on the Store. The update
+    installs and loads in this session (the Store's update path reloads the plugin).
+    Returns the plugin ids that were updated.
+    """
+    crashed = _read_crashed()
+    if not crashed:
+        return []
+    from backend.uefn_plugins.plugin_version import plugin_version_newer
+    from backend.uefn_plugins.store import load_plugin_manifest
+
+    still_skipped: dict[str, str] = {}
+    for pid, bad in crashed.items():
+        installed = str((load_plugin_manifest(pid) or {}).get("version") or "")
+        if installed and installed == bad:
+            still_skipped[pid] = bad
+        else:
+            clear_plugin_crash(pid)  # updated or removed since: the record is stale
+    if not still_skipped:
+        return []
+    try:
+        from frontend.duckyos_account import store_catalog, store_download_and_install
+
+        catalog = store_catalog()
+    except Exception:
+        _log.debug("crashed-plugin update: Store catalog unavailable", exc_info=True)
+        return []
+    latest = {
+        str(item.get("slug") or ""): str(item.get("latest_version") or "")
+        for item in catalog.get("items") or []
+        if isinstance(item, dict)
+    }
+    healed: list[str] = []
+    for pid, bad in still_skipped.items():
+        newer = latest.get(pid, "")
+        if not newer or not plugin_version_newer(newer, bad):
+            continue
+        try:
+            result = store_download_and_install(pid, replace=True, is_update=True)
+        except Exception:
+            _log.warning("Could not update %s after it crashed Ducky", pid, exc_info=True)
+            continue
+        if not (isinstance(result, dict) and result.get("ok")):
+            _log.warning("Could not update %s after it crashed Ducky: %s", pid, (result or {}).get("error"))
+            continue
+        clear_plugin_crash(pid)
+        healed.append(pid)
+        _log.warning("Plugin %s %s crashed Ducky; updated it to %s", pid, bad, newer)
+        try:
+            from frontend.error_log import record_activity
+
+            record_activity("plugins", f"{pid} {bad} closed Ducky while loading; updated it to {newer}")
+        except Exception:
+            pass
+    if healed:
+        _notify_uefn_plugins_changed()
+    return healed
+
+
+def _start_crash_heal() -> None:
+    """Fetch fixed versions of crashed plugins off the boot path (the app window owns it)."""
+    if os.environ.get("UEFN_DUCKY_MCP_BRIDGE") == "1" or not _read_crashed():
+        return
+    threading.Thread(target=heal_crashed_plugins, name="uefn-plugin-crash-heal", daemon=True).start()
 
 
 def _load_marker_begin(pid: str, version: str) -> Path | None:
