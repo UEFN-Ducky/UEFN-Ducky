@@ -1,17 +1,77 @@
 """Single FastMCP instance shared by all tool modules."""
 
 from mcp.server.fastmcp import FastMCP
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+
+import anyio
 
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 from backend.agent.hard_rules import AGENT_HARD_RULES
 
 
 class ProtectedFastMCP(FastMCP):
-    async def list_tools(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # SDK lifespan runs once per connection, including dedicated stdio.
+        # Preserve caller lifespan data and keep all watcher tasks inside it.
+        self._catalog_watch = ContextVar("catalog_watch", default=None)
+        original_lifespan = self._mcp_server.lifespan
+
+        @asynccontextmanager
+        async def lifespan(server):
+            async with original_lifespan(server) as context:
+                async with anyio.create_task_group() as tasks:
+                    token = self._catalog_watch.set((tasks, set()))
+                    try:
+                        yield context
+                    finally:
+                        tasks.cancel_scope.cancel()
+                        self._catalog_watch.reset(token)
+
+        self._mcp_server.lifespan = lifespan
+        original_options = self._mcp_server.create_initialization_options
+
+        def initialization_options(*args, **kwargs):
+            options = original_options(*args, **kwargs)
+            if options.capabilities.tools is not None:
+                options.capabilities.tools.listChanged = True
+            return options
+
+        self._mcp_server.create_initialization_options = initialization_options
+
+    async def _catalog_tools(self):
         from backend.workspace.ai_ignore import current_policy, SAFE_TOOLS
 
         available = await super().list_tools()
         return [t for t in available if t.name in SAFE_TOOLS] if current_policy().strict else available
+
+    async def _watch_catalog(self, session, revision):
+        from backend.bridge.shared_mcp import _catalog_revision, _tool_row
+
+        try:
+            while True:
+                await anyio.sleep(0.5)
+                current = _catalog_revision([_tool_row(t) for t in await self._catalog_tools()])
+                if current != revision:
+                    await session.send_tool_list_changed()
+                    revision = current
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            return  # A disconnected client must not affect other sessions.
+
+    async def list_tools(self):
+        available = await self._catalog_tools()
+        watch = self._catalog_watch.get()
+        if watch is not None:
+            from backend.bridge.shared_mcp import _catalog_revision, _tool_row
+
+            session = self._mcp_server.request_context.session
+            tasks, sessions = watch
+            if session not in sessions:
+                sessions.add(session)
+                tasks.start_soon(self._watch_catalog, session,
+                                 _catalog_revision([_tool_row(t) for t in available]))
+        return available
 
     async def call_tool(self, name, arguments):
         from backend.agent.run_context import current_mode
