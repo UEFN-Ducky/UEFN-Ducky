@@ -13,6 +13,7 @@ type WebPayload = {
   excerpt?: string;
   text?: string;
   results?: WebRow[];
+  sources?: WebRow[];
   images?: WebImage[];
 };
 
@@ -102,9 +103,16 @@ export function WebSearchBody({
   isError,
 }: ToolCardBodyProps) {
   const payload = parsePayload(resultText);
-  const query = typeof args.query === "string" ? args.query.trim() : String(payload?.query || "").trim();
-  const fetchUrl = typeof args.url === "string" ? args.url.trim() : "";
-  const isFetch = toolName === "web_fetch" || Boolean(payload?.url && !Array.isArray(payload.results));
+  const action = args.action && typeof args.action === "object" && !Array.isArray(args.action)
+    ? args.action as Record<string, unknown> : {};
+  const query = typeof args.query === "string" ? args.query.trim()
+    : typeof action.query === "string" ? action.query.trim()
+    : Array.isArray(action.queries) ? action.queries.filter((q) => typeof q === "string").join(" · ")
+    : String(payload?.query || "").trim();
+  const fetchUrl = typeof args.url === "string" ? args.url.trim() : typeof action.url === "string" ? action.url.trim() : "";
+  const isFind = action.type === "find_in_page";
+  const isFetch = toolName === "web_fetch" || action.type === "open_page" || isFind || Boolean(payload?.url && !Array.isArray(payload.results));
+  const pattern = typeof action.pattern === "string" ? action.pattern : "";
   // Native Codex completions can contain only the echoed query. That is not
   // an empty result set, nor is it returned page content.
   const raw = (resultText || "").trim();
@@ -120,29 +128,18 @@ export function WebSearchBody({
     return <div className="tool-card-web-note tool-card-web-note--error">{message}</div>;
   }
 
-  if (isFetch) {
-    const title = String(payload?.title || "").trim() || hostOf(safeWebHref(payload?.url || fetchUrl)) || "Page";
-    const url = String(payload?.url || fetchUrl);
-    return (
-      <div className="tool-card-web">
-        <ResultLink url={url} title={title} />
-        {safeWebHref(url) ? <div className="tool-card-web-host">{hostOf(safeWebHref(url))}</div> : null}
-        {excerpt ? (
-          <p className="tool-card-web-snippet">{excerpt}</p>
-        ) : (
-          <div className="tool-card-web-note">Result details unavailable.</div>
-        )}
-      </div>
-    );
-  }
-
-  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  const title = String(payload?.title || "").trim() || hostOf(safeWebHref(payload?.url || fetchUrl)) || "Page";
+  const url = String(payload?.url || fetchUrl);
+  const rows = Array.isArray(payload?.results) && payload.results.length ? payload.results
+    : Array.isArray(payload?.sources) ? payload.sources : [];
   const images = (Array.isArray(payload?.images) ? payload.images : []).filter((image) =>
     safeImageSrc(String(image?.thumb || "")),
   );
   return (
     <div className="tool-card-web">
-      {query ? (
+      {isFetch ? <ResultLink url={url} title={title} /> : null}
+      {isFind && pattern ? <div className="tool-card-web-query">Find in page: <strong>{pattern}</strong></div> : null}
+      {query && !isFetch ? (
         <div className="tool-card-web-query">
           Search query: <strong>{query}</strong>
         </div>
@@ -158,7 +155,7 @@ export function WebSearchBody({
       {rows.length === 0 ? (
         !excerpt && images.length === 0 ? (
           <div className="tool-card-web-note">
-            {Array.isArray(payload?.results) ? "No results." : "Result details unavailable."}
+            {!isFetch && Array.isArray(payload?.results) ? "No results." : "Result details unavailable."}
           </div>
         ) : null
       ) : (

@@ -39,3 +39,29 @@ it("renders a real empty search without suppressing its success status", () => {
   expect(container.textContent).toContain("No results.");
   expect(container.querySelector(".tool-execution-card-shell--success")).not.toBeNull();
 });
+
+it.each([
+  ["search", "Search web"], ["open_page", "Open page"], ["find_in_page", "Find in page"],
+])("renders normalized %s completion with available sources and content", (type, label) => {
+  const url = "https://developers.openai.com/codex/mcp";
+  const { container } = card("success", JSON.stringify({ sources: [{ title: "Codex MCP", url }], text: "MCP configuration reference" }),
+    { action: { type, url, query: "Codex MCP", pattern: "MCP" } });
+  expect(container.querySelector(".tool-execution-card-toggle-name")?.textContent).toBe(label);
+  expect(container.textContent).toContain("MCP configuration reference");
+  expect(container.querySelector('a[href="https://developers.openai.com/codex/mcp"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("No results.");
+  if (type === "find_in_page") expect(container.textContent).toContain("Find in page: MCP");
+});
+
+it("does not call missing find details an empty search or activate an unsafe URL", () => {
+  const { container } = card("success", "{}", { action: { type: "find_in_page", url: "javascript:alert(1)", pattern: "MCP" } });
+  expect(container.textContent).toContain("Result details unavailable.");
+  expect(container.textContent).not.toContain("No results.");
+  expect(container.querySelector("a")).toBeNull();
+});
+
+it("shows search queries when the native action supplies a query list", () => {
+  const { container } = card("success", "{}", { action: { type: "search", queries: ["Codex MCP", "MCP configuration"] } });
+  expect(container.textContent).toContain("Codex MCP · MCP configuration");
+  expect(container.textContent).toContain("Result details unavailable.");
+});

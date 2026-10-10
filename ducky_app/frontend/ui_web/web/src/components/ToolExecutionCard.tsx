@@ -22,7 +22,7 @@ import {
   linkedAgentFromToolResult,
   pendingLinkedFromChatTool,
 } from "../utils/linkedAgents";
-import { formatToolDuration, humanToolLabel } from "../utils/agentActivity";
+import { formatToolDuration, humanToolLabel, webToolLabel } from "../utils/agentActivity";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
 
@@ -216,8 +216,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
         : "running…";
 
   const displayName =
-    isWebLookup && !isRunning
-      ? (meta.name === "web_fetch" ? "Read page" : "Web lookup")
+    isWebLookup
+      ? webToolLabel(meta.name, meta.arguments || {}, isRunning)
       : category.label?.(meta.name) ?? humanToolLabel(meta.name);
 
   // Chat tools + inline file diffs keep their specialized chrome; category accent

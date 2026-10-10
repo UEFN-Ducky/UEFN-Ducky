@@ -103,6 +103,17 @@ export function humanToolLabel(toolName: string): string {
   return TOOL_ACTIVITY_LABELS[toolName] ?? TOOL_ACTIVITY_LABELS[bare] ?? bare.replace(/_/g, " ");
 }
 
+export function webToolLabel(name: string, args: Record<string, unknown>, running: boolean): string {
+  const action = args.action;
+  const type = action && typeof action === "object" && !Array.isArray(action)
+    ? (action as Record<string, unknown>).type : undefined;
+  if (type === "open_page" || name === "web_fetch") return running ? "Opening page" : "Open page";
+  if (type === "find_in_page") return running ? "Finding in page" : "Find in page";
+  if (type === "search") return running ? "Searching the web" : "Search web";
+  // Legacy native events lack the action, even for open/find operations.
+  return "Web lookup";
+}
+
 // What a shell command is doing, in a few words: the status line never shows the raw
 // command (`"C:\Windows\...\powershell.exe" -Command ...`); the tool card still has it.
 const SHELL_ACTIVITY: Array<[RegExp, string]> = [
@@ -133,7 +144,7 @@ export function shellActivityText(command: string, description?: unknown): strin
   return "Running a command";
 }
 
-function toolLineText(msg: ChatMessage): string {
+function toolLineText(msg: ChatMessage, completed = false): string {
   const rawArgs = msg.tool?.arguments ?? {};
   const unwrapped = unwrapCodingAgentTool(
     msg.tool?.name ?? "",
@@ -144,7 +155,8 @@ function toolLineText(msg: ChatMessage): string {
   const name = unwrapped.name;
   const args = unwrapped.arguments;
   if (name) {
-    const label = humanToolLabel(name);
+    const label = name === "web_search" || name === "web_fetch"
+      ? webToolLabel(name, args, !completed) : humanToolLabel(name);
     const path = args.relative_path ?? args.path;
     if (typeof path === "string" && path.trim()) {
       return `${label} · ${path.trim().replace(/\\/g, "/")}`;
@@ -194,7 +206,8 @@ export function buildActivityLines(
     const hasResult = next && (next.role === "success" || next.role === "error");
     lines.push({
       id: String(msg.id),
-      text: prefixSpeaker(msg.author, toolLineText(msg)),
+      text: prefixSpeaker(msg.author, toolLineText(hasResult && next.tool && (msg.tool?.name === "web_search" || msg.tool?.name === "web_fetch")
+        ? { ...msg, tool: next.tool } : msg, Boolean(hasResult))),
       status: hasResult ? (next.role === "success" ? "success" : "error") : "pending",
     });
     if (hasResult) i++;

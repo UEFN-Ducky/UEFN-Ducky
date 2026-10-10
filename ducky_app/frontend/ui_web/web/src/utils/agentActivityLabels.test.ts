@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { activityPanelTitle, buildActivityLines, formatToolDuration, humanToolLabel, shellActivityText } from "./agentActivity";
 import type { ChatMessage } from "../types/panel";
 
+it("uses completion action details in the activity feed", () => {
+  const intent = { id: 1, role: "tool", tool: { name: "web_search", arguments: {}, status: "pending" } } as ChatMessage;
+  const done = { id: 2, role: "success", tool: { name: "web_search", arguments: { action: { type: "find_in_page" } }, status: "success" } } as ChatMessage;
+  expect(buildActivityLines([intent, done], "")[0].text).toBe("Find in page");
+  expect(buildActivityLines([intent], "")[0].text).toBe("Web lookup");
+});
+
 describe("humanToolLabel / formatToolDuration", () => {
   it("uses friendly names from the tool-card prototype", () => {
     expect(humanToolLabel("get_all_actors")).toBe("Query Actors");
