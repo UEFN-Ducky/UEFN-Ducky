@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PS1 = ROOT / "release" / "installer" / "ducky.ps1"
@@ -85,7 +89,19 @@ def _server(mode: str) -> ThreadingHTTPServer:
     return server
 
 
-def _env(server: ThreadingHTTPServer | None, tmp_path: Path, **extra: str) -> tuple[dict[str, str], Path]:
+@pytest.fixture
+def closed_panel_port() -> Iterator[int]:
+    # Hold a bound, non-listening socket for the whole test. Picking a free port
+    # and closing it would race another listener or a client's ephemeral source
+    # port: TCP can connect to itself when source and destination are identical.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
+        if os.name == "nt":
+            reserved.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        reserved.bind(("127.0.0.1", 0))
+        yield reserved.getsockname()[1]
+
+
+def _env(panel_port: int, tmp_path: Path, **extra: str) -> tuple[dict[str, str], Path]:
     marker = tmp_path / "launched.txt"
     fake_exe = tmp_path / "not-the-app.cmd"
     # Append, so a start-loop would show up as more than one line.
@@ -93,10 +109,7 @@ def _env(server: ThreadingHTTPServer | None, tmp_path: Path, **extra: str) -> tu
     env = os.environ.copy()
     env["DUCKY_EXE"] = str(fake_exe)
     env["DUCKY_SESSION_FILE"] = str(tmp_path / "cli-session.json")
-    if server is not None:
-        env["DUCKY_PANEL_PORT"] = str(server.server_address[1])
-    else:
-        env["DUCKY_PANEL_PORT"] = "59991"
+    env["DUCKY_PANEL_PORT"] = str(panel_port)
     env.update(extra)
     return env, marker
 
@@ -122,7 +135,7 @@ def _quiet_after(server: ThreadingHTTPServer) -> None:
 
 def test_cli_streams_reply_without_launching_the_app(tmp_path: Path) -> None:
     server = _server("done")
-    env, marker = _env(server, tmp_path)
+    env, marker = _env(server.server_address[1], tmp_path)
     try:
         proc = _run(["hello", "from", "cli"], env, timeout=30)
         assert proc.returncode == 0, proc.stderr
@@ -147,7 +160,7 @@ def test_cli_streams_reply_without_launching_the_app(tmp_path: Path) -> None:
 
 def test_reply_error_exits_and_stops_polling(tmp_path: Path) -> None:
     server = _server("error")
-    env, marker = _env(server, tmp_path)
+    env, marker = _env(server.server_address[1], tmp_path)
     try:
         proc = _run(["hi"], env, timeout=20)
         assert proc.returncode == 1
@@ -161,7 +174,7 @@ def test_reply_error_exits_and_stops_polling(tmp_path: Path) -> None:
 
 def test_missing_reply_exits_without_a_tight_loop(tmp_path: Path) -> None:
     server = _server("empty")
-    env, marker = _env(server, tmp_path, DUCKY_REPLY_TIMEOUT_SEC="1")
+    env, marker = _env(server.server_address[1], tmp_path, DUCKY_REPLY_TIMEOUT_SEC="1")
     try:
         started = time.monotonic()
         proc = _run(["hi"], env, timeout=15)
@@ -177,8 +190,8 @@ def test_missing_reply_exits_without_a_tight_loop(tmp_path: Path) -> None:
         server.shutdown()
 
 
-def test_closed_port_starts_the_app_once_then_exits(tmp_path: Path) -> None:
-    env, marker = _env(None, tmp_path, DUCKY_START_TIMEOUT_SEC="1")
+def test_closed_port_starts_the_app_once_then_exits(tmp_path: Path, closed_panel_port: int) -> None:
+    env, marker = _env(closed_panel_port, tmp_path, DUCKY_START_TIMEOUT_SEC="1")
     started = time.monotonic()
     proc = _run(["hi"], env, timeout=15)
     elapsed = time.monotonic() - started
@@ -188,8 +201,8 @@ def test_closed_port_starts_the_app_once_then_exits(tmp_path: Path) -> None:
     assert elapsed < 8
 
 
-def test_status_and_mode_do_not_start_the_app(tmp_path: Path) -> None:
-    env, marker = _env(None, tmp_path)
+def test_status_and_mode_do_not_start_the_app(tmp_path: Path, closed_panel_port: int) -> None:
+    env, marker = _env(closed_panel_port, tmp_path)
     status = _run(["status"], env, timeout=15)
     assert status.returncode == 0, status.stderr
     assert "not running" in status.stdout
@@ -201,7 +214,7 @@ def test_status_and_mode_do_not_start_the_app(tmp_path: Path) -> None:
 
 def test_repl_exit_does_not_poll(tmp_path: Path) -> None:
     server = _server("done")
-    env, marker = _env(server, tmp_path)
+    env, marker = _env(server.server_address[1], tmp_path)
     try:
         proc = _run([], env, timeout=20, stdin="exit\n")
         assert proc.returncode == 0, proc.stderr
