@@ -4,7 +4,7 @@ import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { requestReloadDuckies } from "../hooks/useChatsChanged";
 import { getApi } from "../hooks/usePanelApi";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
-import type { AgentProfileDto, ChatTab, FolderItem, GroupMemberDto, LaneCheckResult } from "../types/panel";
+import type { AgentProfileDto, ChatTab, ChangesetRunDto, FolderItem, GroupMemberDto, LaneCheckResult } from "../types/panel";
 import { conflictCountsByConv } from "../utils/changesetGrouping";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { parseLaneText, shortLaneLabel, validateLaneGlobs } from "../utils/laneGlob";
@@ -20,6 +20,7 @@ import { EditorTabHoverCardShell } from "./editor/EditorTabHoverCardShell";
 import {
   aiTypeLabel,
   memberObservationLines,
+  memberFileLines,
   resolveNestedGroupHoverRows,
   shortModelLabel,
 } from "./groupMemberHover";
@@ -29,9 +30,9 @@ export { parseLaneText, shortLaneLabel, validateLaneGlobs } from "../utils/laneG
 
 /** Tooltip for the lane badge. */
 export function laneTitle(lane: string[] | null | undefined): string {
-  if (lane == null) return "No write lane — click to set one";
-  if (lane.length === 0) return "Read-only — this ducky cannot write project files";
-  return `Write lane:\n${lane.join("\n")}`;
+  const configured = lane == null ? "No write lane configured" : lane.length === 0
+    ? "Configured lane: Read-only" : `Configured lane:\n${lane.join("\n")}`;
+  return `${configured}\nCurrent enforcement coverage: unknown; native shells are not guaranteed to honor this lane.`;
 }
 
 type Props = {
@@ -120,8 +121,11 @@ export function GroupMemberStrip({
   const [laneText, setLaneText] = useState("");
   const [laneCheck, setLaneCheck] = useState<LaneCheckResult | null>(null);
   const [laneSaving, setLaneSaving] = useState(false);
-  /** conv id → live file conflicts (running runs) for the red dot. */
-  const [conflicts, setConflicts] = useState<Record<string, number>>({});
+  /** Journal snapshots do not establish current file ownership. */
+  const [fileSnapshot, setFileSnapshot] = useState<{ groupId: string; runs: ChangesetRunDto[] | null; readAt: number } | null>(null);
+  const fileRequest = useRef(0);
+  const scopedFiles = fileSnapshot?.groupId === groupId ? fileSnapshot : null;
+  const conflicts = conflictCountsByConv(scopedFiles?.runs || []);
   const [busy, setBusy] = useState(false);
   const [leaderId, setLeaderId] = useState(leaderConvId);
   useEffect(() => setLeaderId(leaderConvId), [leaderConvId]);
@@ -248,28 +252,31 @@ export function GroupMemberStrip({
     return () => clearTimeout(timer);
   }, [groupId, laneEditId, laneText]);
 
-  const refreshConflicts = useCallback(() => {
-    const api = getApi();
-    if (!api?.list_changesets) return;
-    void api
-      .list_changesets("", groupId, 50)
-      .then((runs) => setConflicts(conflictCountsByConv(Array.isArray(runs) ? runs : [])))
-      .catch(() => undefined);
+  const refreshConflicts = useCallback(async () => {
+    const request = ++fileRequest.current;
+    let runs: ChangesetRunDto[] | null = null;
+    try {
+      const result = await getApi()?.list_changesets?.("", groupId, 50);
+      if (Array.isArray(result)) runs = result.filter(run => run.group_id === groupId);
+    } catch { /* Unavailable is not an empty journal. */ }
+    if (request === fileRequest.current) setFileSnapshot({ groupId, runs, readAt: Date.now() });
   }, [groupId]);
 
   useEffect(() => {
-    refreshConflicts();
+    void refreshConflicts();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribeAgentEvents((event) => {
       if (event.type !== "file_guard" && event.type !== "agent_stopped" && event.type !== "files_reverted") return;
+      if (event.conv_id && event.conv_id !== groupId && !members.some(m => m.member_conv_id === event.conv_id)) return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(refreshConflicts, 500);
+      timer = setTimeout(() => void refreshConflicts(), 500);
     });
     return () => {
+      fileRequest.current += 1;
       if (timer) clearTimeout(timer);
       unsubscribe();
     };
-  }, [refreshConflicts]);
+  }, [refreshConflicts, groupId, members]);
 
   const profileById = useMemo(() => {
     const map = new Map<string, AgentProfileDto>();
@@ -545,7 +552,7 @@ export function GroupMemberStrip({
                   cardHeight={
                     nestedGroup
                       ? Math.min(520, 248 + Math.max(1, nestedRoster.length) * 26 + 48)
-                      : Math.min(440, 280 + (blurb ? 48 : 0) + (contextTokens > 0 ? 36 : 0))
+                      : Math.min(620, 460 + (blurb ? 48 : 0) + (contextTokens > 0 ? 36 : 0))
                   }
                   card={
                     <>
@@ -579,7 +586,7 @@ export function GroupMemberStrip({
                       ) : null}
                       {!nestedGroup && m.write_allowed != null ? (
                         <div className="editor-tab-hover-card-lane">
-                          Lane: {m.write_allowed.length > 0 ? m.write_allowed.join(", ") : "read-only"}
+                          Configured lane: {m.write_allowed.length > 0 ? m.write_allowed.join(", ") : "read-only"}
                         </div>
                       ) : null}
                       {nestedGroup && nestedRoster.length > 0 ? (
@@ -642,7 +649,8 @@ export function GroupMemberStrip({
                         {memberObservationLines({ ...m, observation: observedMembers?.groupId === groupId
                           ? observedMembers.rows.find(row => row.member_conv_id === m.member_conv_id)?.observation
                           : undefined }, groupId, observationNow).map(line => <div key={line}>{line}</div>)}
-                        <button type="button" onClick={() => void refreshObservations()}>Refresh observation</button>
+                        {memberFileLines(scopedFiles?.runs ?? null, m.member_conv_id, scopedFiles?.readAt ?? 0, observationNow).map(line => <div key={line}>{line}</div>)}
+                        <button type="button" onClick={() => { void refreshObservations(); void refreshConflicts(); }}>Refresh observation</button>
                         {nestedGroup
                           ? "Click → open subgroup · one rep speaks here"
                           : "Click name → their work · model badge → LLM · lane badge → write lane"}
@@ -701,7 +709,7 @@ export function GroupMemberStrip({
                         title={laneTitle(m.write_allowed)}
                         onClick={() => (laneEditing ? setLaneEditId("") : openLaneEditor(m))}
                       >
-                        {shortLaneLabel(m.write_allowed)}
+                        Configured: {shortLaneLabel(m.write_allowed)}
                       </button>
                     ) : null}
                     {!nestedGroup ? (
@@ -712,7 +720,7 @@ export function GroupMemberStrip({
                     {conflictCount > 0 ? (
                       <span
                         className="group-member-chip-conflict"
-                        title={`${conflictCount} live file conflict${conflictCount === 1 ? "" : "s"} — see Context → Files`}
+                        title={`${conflictCount} recorded file conflict${conflictCount === 1 ? "" : "s"} in runs reported running${observationNow - (scopedFiles?.readAt ?? 0) > 60000 ? " (stale snapshot)" : ""} — see Context → Files`}
                       />
                     ) : null}
                     <button
@@ -764,7 +772,7 @@ export function GroupMemberStrip({
                       spellCheck={false}
                     />
                     <div className="group-member-lane-hint">
-                      One glob per line; a bare folder means folder/**. Save with no lines = read-only. Clear = unrestricted.
+                      One glob per line; a bare folder means folder/**. Save with no lines = configured read-only. Clear = no configured restriction. Enforcement coverage is unknown; native shells may bypass lanes.
                     </div>
                     {laneCheck?.errors.length ? (
                       <ul className="group-member-lane-problems group-member-lane-problems--error">

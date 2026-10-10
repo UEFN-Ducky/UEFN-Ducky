@@ -1,0 +1,65 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { ChangesetRunDto } from "../types/panel";
+const api = vi.hoisted(() => ({ list_changesets: vi.fn() }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
+vi.mock("../hooks/useAgentEventBus", () => ({ subscribeAgentEvents: () => () => {} }));
+import { GroupMemberStrip } from "./GroupMemberStrip";
+import { memberFileLines } from "./groupMemberHover";
+const members = ["Builder", "Designer"].map(name => ({ name, profile_id: "", member_conv_id: name.toLowerCase(), write_allowed: [] as string[] }));
+const props = { groupId: "project-a-group", members, onMembersChange: vi.fn(), onOpenMember: vi.fn() };
+const run = (group = props.groupId): ChangesetRunDto => ({ schema_version: 1, group_id: group, conv_id: "builder", run_id: "recorded-run", started: 1, status: "running", entries: [{ seq: 1, ts: 2, path: "src/file.ts", op: "write", tool: "write", before_hash: "", after_hash: "", in_lane: false, conflict: { kind: "concurrent_writer" }, outcome: "blocked" }] });
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it("shows recorded evidence for its member, configured lane changes and existing navigation", async () => {
+  api.list_changesets.mockResolvedValue([run()]);
+  const view = render(<GroupMemberStrip {...props} />);
+  fireEvent.focus(screen.getByTitle("Open Builder's work"));
+  await screen.findByText("Recorded owner: builder · run recorded-run");
+  expect(screen.getByText("Recorded path: src/file.ts · write · outcome blocked")).toBeTruthy();
+  expect(screen.getByTitle(/1 recorded file conflict/)).toBeTruthy();
+  expect(screen.getAllByTitle(/native shells/)).toHaveLength(2);
+  fireEvent.click(screen.getByTitle("Open Builder's work"));
+  expect(props.onOpenMember).toHaveBeenCalledWith(expect.objectContaining({ id: "builder" }));
+  view.rerender(<GroupMemberStrip {...props} members={[{ ...members[0], write_allowed: ["src/**"] }, members[1]]} />);
+  expect(screen.getByText("Configured: src/")).toBeTruthy();
+  expect(screen.getByText("Configured: src/").getAttribute("title")).toContain("Configured lane:\nsrc/**");
+  fireEvent.focus(screen.getByTitle("Open Designer's work"));
+  const designerHistory = await screen.findByText("File history: no records returned");
+  expect(designerHistory.parentElement?.textContent).not.toContain("Recorded owner:");
+});
+it("rejects late other-project responses and unrelated group records", async () => {
+  let finish!: (value: ChangesetRunDto[]) => void;
+  api.list_changesets.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const view = render(<GroupMemberStrip {...props} />);
+  api.list_changesets.mockResolvedValue([run()]);
+  view.rerender(<GroupMemberStrip {...props} groupId="project-b-group" />);
+  await waitFor(() => expect(api.list_changesets).toHaveBeenCalledWith("", "project-b-group", 50));
+  await act(async () => finish([run()]));
+  fireEvent.focus(screen.getByTitle("Open Builder's work"));
+  await screen.findByText("File history: no records returned");
+  expect(screen.queryByTitle(/recorded file conflict/)).toBeNull();
+});
+it("marks failed refresh unavailable and prevents an older response restoring conflicts", async () => {
+  api.list_changesets.mockResolvedValue([run()]);
+  render(<GroupMemberStrip {...props} />);
+  fireEvent.focus(screen.getByTitle("Open Builder's work"));
+  await screen.findByText(/Recorded owner:/);
+  let finish!: (value: ChangesetRunDto[]) => void;
+  api.list_changesets.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByText("Refresh observation"));
+  api.list_changesets.mockRejectedValue(new Error("unavailable"));
+  fireEvent.click(screen.getByText("Refresh observation"));
+  await screen.findByText("File history: unavailable");
+  await act(async () => finish([run()]));
+  expect(screen.queryByTitle(/recorded file conflict/)).toBeNull();
+  expect(screen.queryByText(/Recorded owner:/)).toBeNull();
+});
+it("labels stale journal evidence and never infers a task or current authorship", () => {
+  const lines = memberFileLines([run()], "builder", 1000, 62000);
+  expect(lines).toContain("File history: latest returned entry (stale snapshot)");
+  expect(lines).toContain("Recorded task binding and review verdict: unknown");
+  expect(lines).toContain("Current file state, external activity and enforced locks: unknown");
+  expect(memberFileLines(null, "builder", 0, 0)[0]).toBe("File history: unavailable");
+  expect(memberFileLines([], "builder", 0, 0)[0]).toBe("File history: no records returned");
+});

@@ -25,9 +25,17 @@ describe("lane badge", () => {
   });
 
   it("tooltip lists every glob", () => {
-    expect(laneTitle(["a/**", "b.verse"])).toBe("Write lane:\na/**\nb.verse");
+    expect(laneTitle(["a/**", "b.verse"])).toContain("a/**\nb.verse");
     expect(laneTitle([])).toContain("Read-only");
     expect(laneTitle(null)).toContain("No write lane");
+  });
+
+  it("describes configured permissions without claiming native-shell enforcement", () => {
+    expect(laneTitle([])).not.toContain("cannot write project files");
+    for (const lane of [null, [], ["a/**"]]) {
+      expect(laneTitle(lane)).toContain("enforcement");
+      expect(laneTitle(lane)).toContain("native shells");
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { parseFavoriteSelection } from "../hooks/favoriteModelsCatalog";
-import type { AgentProfileDto, ChatTab, FolderItem, GroupMemberDto } from "../types/panel";
+import type { AgentProfileDto, ChatTab, ChangesetRunDto, FolderItem, GroupMemberDto } from "../types/panel";
 import {
   findFolderByHubId,
   summarizeFolderContext,
@@ -21,6 +21,27 @@ export function memberObservationLines(member: GroupMemberDto, groupId: string, 
     `Observed: ${Number.isFinite(o.observed_at) ? new Date(o.observed_at * 1000).toLocaleTimeString() : "unknown"}`,
     task ? `${stale ? "Last observed assignment" : "Assignment"}: ${task.title} [${task.status}] · plan ${task.plan_id}${task.node_id ? ` · node ${task.node_id}` : ""}` : "Assignment: unknown",
     "Heartbeat, blocker and review verdict: unknown",
+  ];
+}
+
+/** Only recorded journal facts; no inferred task binding or present authorship. */
+export function memberFileLines(runs: ChangesetRunDto[] | null, convId: string, readAt: number, now: number): string[] {
+  const limits = "Current file state, external activity and enforced locks: unknown";
+  if (runs === null) return ["File history: unavailable", limits];
+  const records = runs.filter(run => run.conv_id === convId)
+    .flatMap(run => (run.entries || []).map(entry => ({ run, entry })))
+    .sort((a, b) => b.entry.ts - a.entry.ts);
+  const latest = records[0];
+  if (!latest) return ["File history: no records returned", limits];
+  const { run, entry } = latest;
+  const stale = !Number.isFinite(readAt) || now < readAt || now - readAt > 60000;
+  return [
+    `File history: latest returned entry${stale ? " (stale snapshot)" : ""}`,
+    `Recorded owner: ${run.conv_id} · run ${run.run_id}`,
+    `Recorded path: ${entry.path} · ${entry.op} · outcome ${entry.outcome || "unknown"}`,
+    `Recorded time: ${Number.isFinite(entry.ts) ? new Date(entry.ts * 1000).toLocaleString() : "unknown"}`,
+    "Recorded task binding and review verdict: unknown",
+    limits,
   ];
 }
 
