@@ -705,6 +705,13 @@ export interface ChatPlan {
   created_at?: number;
   updated_at?: number;
   status?: string;
+  /** Set when this chat has no plan of its own and shows its group's part of a team plan (read-only). */
+  assigned_from?: {
+    chat_id: string;
+    node_id: string;
+    plan_title: string;
+    assignee: string;
+  };
 }
 
 export interface PlanProgress {

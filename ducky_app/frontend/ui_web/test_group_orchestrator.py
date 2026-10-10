@@ -647,3 +647,52 @@ def test_hub_persist_does_not_cap_images(monkeypatch, tmp_path):
     raw = [{"kind": "image", "name": f"{i}.png", "mime": "image/png", "data_base64": png} for i in range(30)]
     go._persist_group_attachments("g1", 1.0, raw)
     assert seen["n"] == 30
+
+
+def _team(monkeypatch, member_messages):
+    import frontend.ui_web.group_orchestrator as go
+
+    member = SimpleNamespace(id="m1", parent_conv_id="g1", messages=member_messages, is_group=False)
+    group = SimpleNamespace(id="g1", is_group=True)
+    others = {"m2": SimpleNamespace(id="m2", is_group=False), "m3": SimpleNamespace(id="m3", is_group=False)}
+    convs = {"m1": member, "g1": group, **others}
+    monkeypatch.setattr(go, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(go, "sync_group_members_from_folder", lambda *a, **k: None)
+    monkeypatch.setattr(
+        go,
+        "group_members",
+        lambda g: [{"member_conv_id": "m1", "name": "Builder"}, {"member_conv_id": "m2"}, {"member_conv_id": "m3"}],
+    )
+    posted: list[str] = []
+    briefed: list[str] = []
+    monkeypatch.setattr(go, "append_group_assistant", lambda g, text, **k: posted.append(text))
+    monkeypatch.setattr(go, "append_message", lambda conv, msg, project_root=None: briefed.append(conv.id))
+    return go, posted, briefed
+
+
+def test_agent_messages_are_not_announced_as_private_talk(monkeypatch):
+    """Agent-to-agent traffic posted hundreds of "the user talked to me" notes per hour."""
+    for marker in ("[ducky:agent-message] from Coordinator: do task 3", "[ducky:agent-notice] Reviewer ran into an error"):
+        go, posted, briefed = _team(
+            monkeypatch, [{"role": "user", "content": marker}, {"role": "assistant", "content": "done"}]
+        )
+        assert go.announce_private_member_talk("m1") is False
+        assert posted == [] and briefed == []
+
+
+def test_a_persons_private_talk_is_still_announced(monkeypatch):
+    go, posted, briefed = _team(
+        monkeypatch, [{"role": "user", "content": "Can you also check the doors?"}, {"role": "assistant", "content": "Yes"}]
+    )
+    monkeypatch.setattr(go, "_agent_running", lambda cid: False)
+    assert go.announce_private_member_talk("m1") is True
+    assert len(posted) == 1 and "check the doors" in posted[0]
+    assert briefed == ["m2", "m3"]
+
+
+def test_a_briefing_never_lands_in_a_chat_mid_turn(monkeypatch):
+    """A row appended under a live reply split it into separate bubbles."""
+    go, posted, briefed = _team(monkeypatch, [])
+    monkeypatch.setattr(go, "_agent_running", lambda cid: cid == "m2")
+    assert go.broadcast_group_briefing("g1", "Builder: finished the doors", skip_member_ids={"m1"}) == 1
+    assert briefed == ["m3"]

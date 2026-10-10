@@ -407,6 +407,33 @@ def _escalate_failure_to_group_leaders(
         send_notice(sender_conv_id=conv_id, receiver_conv_id=leader_id, body=body)
 
 
+_ACCOUNT_LIMIT_MARKERS = (
+    "usage limit",
+    "rate limit",
+    "insufficient_quota",
+    "quota exceeded",
+    "credit balance",
+    "more credits",
+)
+_LIMIT_RETRY_S = 900.0
+
+
+def account_limited(text: str) -> bool:
+    """True when an agent failed because the AI account is out of credits or rate limited."""
+    low = (text or "").lower()
+    return any(marker in low for marker in _ACCOUNT_LIMIT_MARKERS)
+
+
+def _retry_queue_later(conv_id: str) -> None:
+    """Deliver this chat's queued messages after a pause instead of failing them now."""
+    with _lock:
+        if not _inbox.get(conv_id):
+            return
+    timer = threading.Timer(_LIMIT_RETRY_S, _kick_delivery, args=(conv_id,))
+    timer.daemon = True
+    timer.start()
+
+
 def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "") -> None:
     """Turn-lifecycle hook: drain this chat's queue + notify owed senders."""
     was_delivery = False
@@ -444,6 +471,13 @@ def on_agent_stopped(conv_id: str, reason: str, *, detail: str = "") -> None:
     notice_detail = detail
     if notice_reason in ("timed-out", "errored", "user-stopped"):
         notice_detail = _failure_detail(conv_id, detail)
+
+    if notice_reason == "errored" and account_limited(notice_detail):
+        # The whole team shares one AI account. Notices woke every sender and
+        # leader into the same limit: a burst of failed turns, each sending more
+        # notices. Threads stay open; queued work is retried after a pause.
+        _retry_queue_later(conv_id)
+        return
 
     already_notified: set[str] = set()
     response_id_for_escalate = ""

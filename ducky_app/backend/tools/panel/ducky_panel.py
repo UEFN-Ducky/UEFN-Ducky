@@ -2172,8 +2172,14 @@ def ducky_plan_update_node(
     kind: str = "",
     body_markdown: str = "",
     pretty: bool = False,
+    assignee: str | None = None,
 ) -> str:
-    """Update a node's content, status, kind, and/or body_markdown. Status-only updates allowed after start."""
+    """Update a node's content, status, kind, body_markdown and/or assignee.
+
+    Status and assignee updates are allowed after start. ``assignee`` is the chat or
+    group id that owns this part (``""`` clears it): that group's chats then show this
+    part as their plan instead of "No plan".
+    """
     from backend.agent.coding_agents.plans import (
         attach_next_tick,
         outline_numbers,
@@ -2193,6 +2199,7 @@ def ducky_plan_update_node(
             body_markdown=body_markdown if body_markdown else None,
             project_root=_project_root() if not (template_id or "").strip() else None,
             template_id=(template_id or "").strip() or None,
+            assignee=assignee,
         )
     except ValueError as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)

@@ -148,7 +148,7 @@ def _normalize_node(raw: Any, *, fallback_id: str | None = None) -> dict[str, An
             if n:
                 children.append(n)
     body = str(raw.get("body_markdown") or "").strip()
-    return {
+    node = {
         "id": nid,
         "content": content[:500],
         "status": _normalize_status(raw.get("status")),
@@ -156,6 +156,10 @@ def _normalize_node(raw: Any, *, fallback_id: str | None = None) -> dict[str, An
         "body_markdown": body,
         "children": children,
     }
+    assignee = str(raw.get("assignee") or "").strip()
+    if assignee:
+        node["assignee"] = assignee[:80]  # chat or group id that owns this part
+    return node
 
 
 def _parse_nodes_json(raw: Any) -> list[Any] | None:
@@ -712,12 +716,20 @@ def update_node(
     body_markdown: str | None = None,
     project_root: str | None = None,
     template_id: str | None = None,
+    assignee: str | None = None,
 ) -> dict[str, Any]:
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
     roots = list(doc.get("nodes") or [])
     _, _, node = _walk_find(roots, node_id)
     if node is None:
         raise ValueError("node not found")
+    # Who owns a step is bookkeeping like its status: allowed while the plan plays.
+    if assignee is not None:
+        owner = assignee.strip()
+        if owner:
+            node["assignee"] = owner[:80]
+        else:
+            node.pop("assignee", None)
     structure_touch = content is not None or kind is not None or body_markdown is not None
     if structure_touch and doc.get("kind") != "template":
         _refuse_if_structure_locked(doc)
@@ -1054,6 +1066,65 @@ def format_plan_prompt_block(
         "If diagnosis changes the approach, update the tree first — never thrash off-plan."
     )
     return "\n".join(lines) + "\n"
+
+
+def _chat_and_group_ids(chat_id: str, project_root: str | None) -> list[str]:
+    """This chat, then the group it sits in, then that group's group, and so on."""
+    from frontend.ui_web.project_chats import load_conversation
+
+    ids: list[str] = []
+    cur = (chat_id or "").strip()
+    for _ in range(8):
+        if not cur or cur in ids:
+            break
+        ids.append(cur)
+        try:
+            conv = load_conversation(cur, project_root=project_root)
+        except Exception:
+            conv = None
+        cur = (getattr(conv, "parent_conv_id", None) or "").strip() if conv is not None else ""
+    return ids
+
+
+def assigned_plan_view(chat_id: str, project_root: str | None = None) -> dict[str, Any] | None:
+    """The part of a team plan assigned to this chat or to a group it belongs to.
+
+    Team members have no plan of their own, so their Plan pane said "No plan" while
+    the coordinator's plan held their work. The view is read-only: edits go to the
+    plan's own chat (``assigned_from.chat_id``).
+    """
+    ids = _chat_and_group_ids(chat_id, project_root)
+    if not ids:
+        return None
+    plans = [p for p in list_plans(project_root) if str(p.get("chat_id") or "") != ids[0]]
+    for wanted in ids:  # the most specific owner wins
+        for plan in plans:
+            for node in _flatten_nodes(plan.get("nodes")):
+                if str(node.get("assignee") or "") != wanted:
+                    continue
+                title = str(plan.get("title") or "Plan")
+                return {
+                    "id": str(plan.get("plan_id") or ""),
+                    "kind": "project",
+                    "chat_id": str(plan.get("chat_id") or ""),
+                    "title": str(node.get("content") or title),
+                    "overview": f"Part of the plan “{title}”.",
+                    "body_markdown": str(node.get("body_markdown") or ""),
+                    "status": str(plan.get("status") or "open"),
+                    "nodes": [node],
+                    "todos": [
+                        {"id": n["id"], "content": n["content"], "status": n["status"]}
+                        for n in _flatten_nodes([node])
+                    ],
+                    "updated_at": plan.get("updated_at"),
+                    "assigned_from": {
+                        "chat_id": str(plan.get("chat_id") or ""),
+                        "node_id": str(node.get("id") or ""),
+                        "plan_title": title,
+                        "assignee": wanted,
+                    },
+                }
+    return None
 
 
 def list_plans(project_root: str | None = None) -> list[dict[str, Any]]:

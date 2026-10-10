@@ -336,3 +336,34 @@ def test_the_team_is_found_in_its_own_project_when_another_project_is_open(broke
     broker.chats.list_all_conversation_metadata = lambda project_root=None: []  # the open project has none of them
     broker.chats.iter_conversations_by_project = lambda: [("ExampleProject1", c) for c in team]
     assert broker.mod.leads_receiver("coord", "builder")
+
+
+def test_an_account_limit_does_not_wake_the_team(broker, monkeypatch):
+    """Out of credits, each notice woke another agent into the same limit."""
+    _wire_hub_to_producer(broker)
+    broker.chats.convs["recv1"].messages = [
+        {"role": "assistant", "content": '{"type":"error","message":"You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits"}'}
+    ]
+    timers: list[tuple] = []
+
+    def _timer(delay, fn, args=()):
+        timers.append((delay, fn, args))
+        return SimpleNamespace(daemon=False, start=lambda: None)
+
+    monkeypatch.setattr(broker.mod.threading, "Timer", _timer)
+    rid = broker.mod.open_thread("sender1", "recv1")
+    broker.mod._inbox.setdefault("recv1", broker.mod.deque()).append(
+        broker.mod.Envelope(sender_conv_id="sender1", receiver_conv_id="recv1", body="next task")
+    )
+    broker.mod.on_agent_stopped("recv1", "error", detail="")
+    time.sleep(0.3)
+    assert broker.modes.sent == []  # neither the sender nor the group leader was woken
+    assert [t.response_id for t in broker.mod.open_threads_for_receiver("recv1")] == [rid]
+    assert timers and timers[0][0] == broker.mod._LIMIT_RETRY_S and timers[0][2] == ("recv1",)
+
+
+def test_an_ordinary_error_still_notifies(broker):
+    rid = broker.mod.open_thread("sender1", "recv1")
+    broker.mod.on_agent_stopped("recv1", "error", detail="Codex exited with code 1")
+    _wait_sent(broker.modes, 1)
+    assert broker.modes.sent[0][0] == "sender1" and rid in broker.modes.sent[0][1]

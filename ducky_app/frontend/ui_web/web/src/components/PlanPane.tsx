@@ -207,6 +207,19 @@ export function PlanPane({
     [],
   );
 
+  // A team member's chat shows its group's part of the coordinator's plan: read-only,
+  // refreshed when that plan changes, edited from the plan's own chat.
+  const assignedFrom = plan?.assigned_from;
+  const sourceChatId = assignedFrom?.chat_id || "";
+  useAgentEventSubscription(
+    sourceChatId,
+    (event: AgentEvent) => {
+      if (!sourceChatId || event.type !== "plan_updated") return;
+      void reloadPlan().catch(() => undefined);
+    },
+    [reloadPlan],
+  );
+
   const planLocked = isPlanStructureLocked(plan, progress);
   const planPaused = isPlanPaused(plan);
   const planFinished = isPlanFinished(plan);
@@ -526,6 +539,17 @@ export function PlanPane({
                   Cancel
                 </button>
               </>
+            ) : assignedFrom ? (
+              <button
+                type="button"
+                className="plan-pane-btn plan-pane-btn--accent"
+                onClick={() =>
+                  requestOpenPlanTab({ chatId: assignedFrom.chat_id, title: assignedFrom.plan_title })
+                }
+                title="This chat's part of a team plan. Open the whole plan to edit it."
+              >
+                Open full plan
+              </button>
             ) : plan ? (
               <>
                 <button

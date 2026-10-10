@@ -459,7 +459,11 @@ def broadcast_group_briefing(
     project_root: str | None = None,
     skip_member_ids: set[str] | None = None,
 ) -> int:
-    """Append a short [group-briefing] note to every leaf member chat in the group."""
+    """Append a short [group-briefing] note to every leaf member chat in the group.
+
+    A member whose agent is mid-turn is skipped: a row appended under a live reply
+    split that reply into separate bubbles. The note stays on the group hub.
+    """
     text = (summary or "").strip()
     if not text:
         return 0
@@ -477,7 +481,7 @@ def broadcast_group_briefing(
     count = 0
     for m in group_members(group):
         mid = str(m.get("member_conv_id") or "").strip()
-        if not mid or m.get("is_group") or mid in skip:
+        if not mid or m.get("is_group") or mid in skip or _agent_running(mid):
             continue
         member = load_conversation(mid, project_root=project_root)
         if member is None:
@@ -514,6 +518,18 @@ def _message_plain_text(msg: dict[str, Any]) -> str:
     if isinstance(content, str):
         return content.strip()
     return ""
+
+
+_AGENT_TRAFFIC = ("[ducky:agent-message]", "[ducky:agent-notice]")
+
+
+def _agent_running(conv_id: str) -> bool:
+    try:
+        from frontend.ui_web.agent_modes import is_agent_running
+
+        return bool(is_agent_running(conv_id))
+    except Exception:
+        return False
 
 
 def announce_private_member_talk(
@@ -554,7 +570,11 @@ def announce_private_member_talk(
             plain = _message_plain_text(msg)
             if not plain:
                 continue
-            if is_group_turn_prompt(plain):
+            # Only a person's private talk is news for the group. Agent-to-agent
+            # messages and notices are team traffic: announcing each one posted a
+            # "the user talked to me" note on the hub and a briefing into every
+            # other member's chat, hundreds per hour on a busy team.
+            if is_group_turn_prompt(plain) or plain.startswith(_AGENT_TRAFFIC):
                 return False
             user_text = plain
             break

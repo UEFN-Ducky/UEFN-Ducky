@@ -975,10 +975,21 @@ class PanelApiSettingsMixin:
         )
 
     def get_plan(self, chat_id: str, project_root: str | None = None) -> dict[str, Any]:
-        from backend.agent.coding_agents.plans import load_plan, outline_numbers, todo_progress
+        from backend.agent.coding_agents.plans import (
+            assigned_plan_view,
+            load_plan,
+            outline_numbers,
+            todo_progress,
+        )
 
         root = project_root if project_root is not None else _pa.PanelSettings.load().uefn_project_root
         plan = load_plan(chat_id, project_root=root)
+        if plan is None:
+            # A team member with no plan of its own sees its group's part of the team plan.
+            try:
+                plan = assigned_plan_view(chat_id, project_root=root)
+            except Exception:
+                plan = None
         outline = [
             {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
             for lab, n in outline_numbers((plan or {}).get("nodes"))
@@ -1151,6 +1162,7 @@ class PanelApiSettingsMixin:
         template_id: str = "",
         kind: str = "",
         body_markdown: str | None = None,
+        assignee: str | None = None,
     ) -> dict[str, Any]:
         from backend.agent.coding_agents.plans import outline_numbers, push_plan_updated, todo_progress, update_node
 
@@ -1163,6 +1175,7 @@ class PanelApiSettingsMixin:
                 status=status if status else None,
                 kind=kind if kind else None,
                 body_markdown=body_markdown,
+                assignee=assignee,
                 project_root=root if not (template_id or "").strip() else None,
                 template_id=(template_id or "").strip() or None,
             )

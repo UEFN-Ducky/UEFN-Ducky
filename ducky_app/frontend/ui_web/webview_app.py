@@ -271,6 +271,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 start_scheduler()
             except Exception:
                 pass
+            try:
+                from frontend.ui_web.team_keeper import start_team_keeper
+
+                start_team_keeper()
+            except Exception:
+                pass
 
         def _presence_bg() -> None:
             try:
