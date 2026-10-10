@@ -108,7 +108,7 @@ raise SystemExit(code)
 '''
 
 
-def test_automation_session_sends_zero_requests_to_fake_owner():
+def test_automation_session_sends_zero_requests_to_fake_owner(tmp_path):
     requests = []
 
     class OwnerStandIn(BaseHTTPRequestHandler):
@@ -136,7 +136,14 @@ def test_automation_session_sends_zero_requests_to_fake_owner():
             assert port not in (4199, 4200)
             # Pretend the launching app lives at our fake listener. The child
             # bootstrap must discard that inherited address as well as 4200.
-            env = dict(os.environ, UEFN_DUCKY_PANEL_PORT=str(port + 1))
+            # The parent suite can still have database workers using its own
+            # per-test AppData. Give the child a separate baseline so those
+            # parent writes cannot look like a leak from the child session.
+            child_appdata = tmp_path / "child-appdata"
+            (child_appdata / "Roaming").mkdir(parents=True)
+            env = dict(os.environ, UEFN_DUCKY_PANEL_PORT=str(port + 1),
+                       LOCALAPPDATA=str(child_appdata),
+                       APPDATA=str(child_appdata / "Roaming"))
             result = subprocess.run([sys.executable, "-c", _AUTOMATION_PROOF, str(port),
                 "ducky_app/backend/automations/test_automations.py",
                 "ducky_app/backend/automations/test_workflow_functions.py",
