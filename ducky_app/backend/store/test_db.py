@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import sqlite3
 import threading
 import time
@@ -291,3 +292,95 @@ def test_content_addressed_fixtures_hash_to_their_own_filenames() -> None:
         assert content_hash(text) == path.stem, (
             f"{path.name} does not hash to its own name — line endings mangled on checkout?"
         )
+
+
+def _run_in_thread(fn) -> None:
+    t = threading.Thread(target=fn)
+    t.start()
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+
+def _is_open(conn: sqlite3.Connection) -> bool:
+    try:
+        conn.total_changes  # works from any thread; raises once closed
+        return True
+    except sqlite3.ProgrammingError:
+        return False
+
+
+def test_finished_threads_do_not_leave_connections_open(monkeypatch) -> None:
+    """Every short-lived thread that read the store (one per panel HTTP request,
+    per pywebview call, per model warm) left its connection — three file
+    handles and its page cache — open until a full garbage collection. An idle
+    panel piled up hundreds per hour."""
+    db.connect()
+    made: list[sqlite3.Connection] = []
+    real_connect = db.sqlite3.connect
+
+    def counting_connect(*a, **k):
+        conn = real_connect(*a, **k)
+        made.append(conn)
+        return conn
+
+    monkeypatch.setattr(db.sqlite3, "connect", counting_connect)
+    gc.disable()  # the leak only ever cleared on a full collection
+    try:
+        for _ in range(50):
+            _run_in_thread(lambda: db.connect().execute("SELECT count(*) FROM settings").fetchone())
+        # A burst of threads alive at the same time, then one more after they finish.
+        barrier = threading.Barrier(20)
+
+        def burst() -> None:
+            barrier.wait(timeout=5)
+            db.connect().execute("SELECT 1").fetchone()
+
+        threads = [threading.Thread(target=burst) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        _run_in_thread(lambda: db.connect().execute("SELECT 1").fetchone())
+        still_open = sum(1 for c in made if _is_open(c))
+    finally:
+        gc.enable()
+    # A handful stay open for reuse by the next new thread; the rest are closed.
+    assert still_open <= 5, f"{still_open} connections of finished threads are still open"
+
+
+def test_short_lived_threads_reuse_a_configured_connection(monkeypatch) -> None:
+    """pywebview runs every JS call on a new thread (~60 a minute while idle);
+    each one opened ducky.db again and re-ran the PRAGMA setup."""
+    db.connect()
+    calls: list[int] = []
+    real_connect = db.sqlite3.connect
+    monkeypatch.setattr(db.sqlite3, "connect", lambda *a, **k: (calls.append(1), real_connect(*a, **k))[1])
+    seen: list[int] = []
+    for _ in range(50):
+        _run_in_thread(lambda: seen.append(int(db.connect().execute("SELECT count(*) FROM settings").fetchone()[0])))
+    assert seen == [0] * 50
+    assert len(calls) <= 1, f"50 short-lived threads opened {len(calls)} connections"
+
+
+def test_reused_connection_is_never_handed_over_mid_transaction() -> None:
+    db.connect()
+    left_open: list[sqlite3.Connection] = []
+
+    def abandon() -> None:
+        conn = db.connect()
+        conn.execute("BEGIN IMMEDIATE")
+        left_open.append(conn)
+
+    _run_in_thread(abandon)
+    got: list[sqlite3.Connection] = []
+    _run_in_thread(lambda: got.append(db.connect()))
+    assert got[0] is not left_open[0]
+    assert not _is_open(left_open[0])  # closed, so its transaction rolled back
+
+
+def test_worker_thread_connections_use_a_small_page_cache() -> None:
+    """Every long-lived worker kept its own 32 MB page cache, so the same chat
+    pages were held once per thread that ever read them."""
+    sizes: list[int] = []
+    _run_in_thread(lambda: sizes.append(int(db.connect().execute("PRAGMA cache_size").fetchone()[0])))
+    assert sizes and sizes[0] >= -4096, f"worker connection cache_size={sizes[0]} (KiB when negative)"

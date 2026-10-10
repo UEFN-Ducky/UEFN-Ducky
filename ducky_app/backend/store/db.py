@@ -29,6 +29,12 @@ SIDECAR_NAMES = (DB_NAME + "-wal", DB_NAME + "-shm")
 SNAPSHOT_DIR_NAME = "snapshots"
 KEEP_SNAPSHOTS = 3
 BUSY_TIMEOUT_MS = 5000
+# Connections of finished threads kept open for the next new thread to adopt.
+_IDLE_KEEP = 4
+# Page cache per connection, KiB. Worker threads get a small one: each kept its
+# own copy of every page it read, so the same chats sat in memory once per thread.
+_MAIN_CACHE_KIB = 32768
+_WORKER_CACHE_KIB = 2048
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 _MIGRATION_RE = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
@@ -55,6 +61,8 @@ _guard = threading.Lock()
 _log = logging.getLogger("uefn_ducky.store")
 _migrated: set[str] = set()
 _conn_keys: dict[str, str] = {}  # str(path) -> resolved connection-cache key
+_owned_lock = threading.Lock()
+_owned: list[tuple[threading.Thread, str, sqlite3.Connection]] = []  # (owner, key, conn)
 
 
 # --------------------------------------------------------------------------- paths
@@ -189,7 +197,17 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
     conn = cache.get(key)
     if conn is not None:
         return conn
-    conn = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
+    conn = _reclaim_finished(key if key in _migrated else None)
+    if conn is not None:
+        cache[key] = conn
+        _thread_local.conns = cache
+        return conn
+    # check_same_thread=False only so a finished thread's connection can be
+    # closed or handed to the next new thread; each connection still has one
+    # owning thread at a time.
+    conn = sqlite3.connect(
+        str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None, check_same_thread=False
+    )
     conn.row_factory = sqlite3.Row
     if os.environ.get("DUCKY_DB_TRACE"):
         _install_trace(conn, path)
@@ -206,7 +224,69 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
         raise
     cache[key] = conn
     _thread_local.conns = cache
+    with _owned_lock:
+        _owned.append((threading.current_thread(), key, conn))
     return conn
+
+
+def _thread_alive(thread: threading.Thread) -> bool:
+    try:
+        return thread.is_alive()
+    except RuntimeError:  # a finished thread Python did not start (dummy thread)
+        return False
+
+
+def _reusable(conn: sqlite3.Connection) -> bool:
+    try:
+        return not conn.in_transaction
+    except sqlite3.ProgrammingError:  # already closed
+        return False
+
+
+def _close_quietly(conn: sqlite3.Connection) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _reclaim_finished(key: str | None, *, keep: int = _IDLE_KEEP) -> sqlite3.Connection | None:
+    """Close or reuse the connections of threads that have finished.
+
+    A thread's connection is never closed when the thread ends, and it sits in
+    a reference cycle, so it stayed open (three file handles plus its page
+    cache) until a full garbage collection. Panel requests, pywebview calls and
+    model warms each run on a new thread, so an idle panel piled up hundreds an
+    hour, and each new thread paid for a fresh open and PRAGMA setup.
+
+    Returns a finished thread's connection to *key*, now owned by the calling
+    thread, when one is free. Up to *keep* others stay open for the next new
+    thread; the rest, and any left mid-transaction, are closed.
+    """
+    me = threading.current_thread()
+    picked: sqlite3.Connection | None = None
+    stale: list[sqlite3.Connection] = []
+    with _owned_lock:
+        live: list[tuple[threading.Thread, str, sqlite3.Connection]] = []
+        idle: list[tuple[threading.Thread, str, sqlite3.Connection]] = []
+        for entry in _owned:
+            if _thread_alive(entry[0]):
+                live.append(entry)
+            elif _reusable(entry[2]):
+                idle.append(entry)
+            else:
+                stale.append(entry[2])
+        for i in range(len(idle) - 1, -1, -1):
+            if key is not None and idle[i][1] == key:
+                picked = idle.pop(i)[2]
+                live.append((me, key, picked))
+                break
+        cut = max(len(idle) - keep, 0)
+        stale.extend(entry[2] for entry in idle[:cut])
+        _owned[:] = live + idle[cut:]
+    for conn in stale:
+        _close_quietly(conn)
+    return picked
 
 
 def _install_trace(conn: sqlite3.Connection, path: Path) -> None:
@@ -232,7 +312,8 @@ def _configure(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA cache_size=-32768")
+    main = threading.current_thread() is threading.main_thread()
+    conn.execute(f"PRAGMA cache_size=-{_MAIN_CACHE_KIB if main else _WORKER_CACHE_KIB}")
     assert_capabilities(conn)
 
 
@@ -248,6 +329,9 @@ def assert_capabilities(conn: sqlite3.Connection) -> None:
 
 def close_thread_connections() -> None:
     cache: dict[str, sqlite3.Connection] = getattr(_thread_local, "conns", None) or {}
+    closing = {id(conn) for conn in cache.values()}
+    with _owned_lock:
+        _owned[:] = [entry for entry in _owned if id(entry[2]) not in closing]
     for conn in cache.values():
         try:
             # Drop the WAL while we still own it. Closing alone leaves ducky.db-wal
@@ -265,6 +349,7 @@ def close_thread_connections() -> None:
 def reset_for_tests() -> None:
     """Drop cached connections and the migrated-path memo (tests only)."""
     close_thread_connections()
+    _reclaim_finished(None, keep=0)
     with _guard:
         _migrated.clear()
         _conn_keys.clear()
