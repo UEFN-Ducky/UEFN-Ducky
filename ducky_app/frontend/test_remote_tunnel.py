@@ -154,6 +154,104 @@ def test_a_failing_tunnel_backs_off_and_sweeps_orphans_once(monkeypatch):
     assert waits == [3.0, 6.0, 12.0, 24.0, 48.0, 60.0, 60.0, 60.0]
 
 
+def _sleeper() -> "subprocess.Popen[bytes]":
+    import subprocess
+    import sys
+
+    return subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def test_a_child_in_the_job_ends_when_the_job_handle_closes():
+    job = rt._new_kill_on_close_job()
+    assert job
+    child = _sleeper()
+    try:
+        assert rt._put_in_job(job, child.pid)
+        assert child.poll() is None
+        rt._kernel32().CloseHandle(job)
+        job = 0
+        child.wait(timeout=10)
+    finally:
+        if job:
+            rt._kernel32().CloseHandle(job)
+        if child.poll() is None:
+            child.kill()
+
+
+def test_cloudflared_ends_when_ducky_crashes_even_inside_a_job(tmp_path):
+    """Windows does not end a child with its parent: a crashed or force-closed Ducky
+    left cloudflared running, keeping the site routed to a dead panel. Ducky is often
+    started inside a job of its own (a terminal, an IDE), so cloudflared's job nests."""
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    import psutil
+
+    fake_ducky = textwrap.dedent(
+        """
+        import sys, threading, time
+        from pathlib import Path
+        sys.stdin.readline()  # until the test has put this process in a job
+        from frontend import remote_tunnel as rt
+        rt._append_cloudflared_log = lambda text: None
+        threading.Thread(
+            target=rt._run_cloudflared,
+            args=(Path(sys.executable), ["-c", "import time; time.sleep(60)"]),
+            daemon=True,
+        ).start()
+        deadline = time.monotonic() + 10
+        while rt._PROC is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        print(rt._PROC.pid if rt._PROC else 0, flush=True)
+        time.sleep(60)
+        """
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(Path(rt.__file__).resolve().parents[1]),
+        "LOCALAPPDATA": str(tmp_path),
+        "APPDATA": str(tmp_path),
+    }
+    outer = rt._kernel32().CreateJobObjectW(None, None)
+    assert outer
+    ducky = subprocess.Popen(
+        [sys.executable, "-c", fake_ducky],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    cloudflared = None
+    try:
+        assert rt._put_in_job(outer, ducky.pid)
+        assert ducky.stdin is not None and ducky.stdout is not None
+        ducky.stdin.write("go\n")
+        ducky.stdin.flush()
+        pid = int(ducky.stdout.readline().strip() or 0)
+        assert pid > 0, "fake cloudflared never started"
+        cloudflared = psutil.Process(pid)
+        assert cloudflared.is_running()
+        ducky.kill()  # TerminateProcess: no exit handlers run, like a crash
+        ducky.wait(timeout=10)
+        try:
+            cloudflared.wait(timeout=10)
+        except psutil.TimeoutExpired:
+            pass
+        assert not cloudflared.is_running(), "cloudflared outlived a crashed Ducky"
+    finally:
+        if ducky.poll() is None:
+            ducky.kill()
+        if cloudflared is not None and cloudflared.is_running():
+            cloudflared.kill()
+        rt._kernel32().CloseHandle(outer)
+
+
 def test_named_reason_survives_quick_status():
     rt._set_status(named_reason="cloudflare 403: zone", mode="quick", running=True, error="")
     try:

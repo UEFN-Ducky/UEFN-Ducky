@@ -6,6 +6,7 @@ logged in and Settings → Account → Remote access is on (default off).
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import queue
@@ -44,6 +45,17 @@ _LOG_MAX = 1_000_000
 _RETRY_S = 3.0
 _RETRY_MAX_S = 60.0
 _HEALTHY_RUN_S = 30.0
+
+# Windows does not end a child with its parent, so a crashed or force-closed Ducky left
+# cloudflared running and the site routing to a dead panel. A job set to end its
+# processes when its last handle closes does: only Ducky holds that handle, and Windows
+# closes it when Ducky's process ends for any reason.
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SET_QUOTA = 0x0100
+_KILL_JOB: int | None = None
+_KILL_JOB_LOCK = threading.Lock()
 
 
 def remote_tunnel_status() -> dict[str, Any]:
@@ -166,6 +178,109 @@ def _remove_tunnel() -> None:
         pass
 
 
+@functools.cache
+def _kernel32() -> Any:
+    import ctypes
+    from ctypes import wintypes
+
+    # A private loader, so these signatures never clash with ctypes.windll users elsewhere.
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k.SetInformationJobObject.restype = wintypes.BOOL
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    k.AssignProcessToJobObject.restype = wintypes.BOOL
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    k.CloseHandle.restype = wintypes.BOOL
+    return k
+
+
+def _new_kill_on_close_job() -> int:
+    """A job whose processes Windows ends when its last handle closes; 0 when it can't."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _Basic(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _Io(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_ulonglong)
+            for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+            )
+        ]
+
+    class _Extended(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _Basic),
+            ("IoInfo", _Io),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    k = _kernel32()
+    # No security attributes: the handle is not inheritable, so no child of Ducky can
+    # keep the job (and cloudflared) alive after Ducky is gone.
+    job = k.CreateJobObjectW(None, None)
+    if not job:
+        return 0
+    info = _Extended()
+    info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not k.SetInformationJobObject(
+        job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        k.CloseHandle(job)
+        return 0
+    return int(job)
+
+
+def _put_in_job(job: int, pid: int) -> bool:
+    k = _kernel32()
+    handle = k.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
+    if not handle:
+        return False
+    try:
+        return bool(k.AssignProcessToJobObject(job, handle))
+    finally:
+        k.CloseHandle(handle)
+
+
+def _end_with_ducky(proc: Any) -> bool:
+    """Have Windows end ``proc`` when Ducky's process ends, a crash included."""
+    global _KILL_JOB
+    pid = getattr(proc, "pid", None)
+    if os.name != "nt" or not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        with _KILL_JOB_LOCK:
+            if _KILL_JOB is None:
+                _KILL_JOB = _new_kill_on_close_job()
+            job = _KILL_JOB
+        # When Ducky itself runs inside a job (started from a terminal, an IDE or an
+        # installer), Windows 8 and later nest this one inside it. Where that is
+        # refused, a normal exit still ends cloudflared through kill_cloudflared.
+        return bool(job) and _put_in_job(job, pid)
+    except Exception:
+        return False
+
+
 def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
     """Run until stop or exit. Returns last hostname seen on stderr."""
     global _PROC
@@ -181,6 +296,7 @@ def _run_cloudflared(exe: Path, args: list[str], named_host: str = "") -> str:
         errors="replace",
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+    _end_with_ducky(proc)
     with _LOCK:
         _PROC = proc
     try:
@@ -387,8 +503,8 @@ def start_remote_tunnel() -> None:
 def kill_cloudflared() -> None:
     """App exit: end cloudflared now, without waiting for the tunnel thread.
 
-    Windows does not end a child with its parent, so an exit that skipped this
-    left cloudflared running and the site routing to a dead panel.
+    An exit that skips this (a crash, a force close) is covered by the job
+    cloudflared runs in, which Windows ends with Ducky's process.
     """
     _STOP.set()
     with _LOCK:
