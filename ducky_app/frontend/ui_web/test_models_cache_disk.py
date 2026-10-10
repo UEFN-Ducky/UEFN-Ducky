@@ -277,3 +277,63 @@ def test_refresh_only_announces_a_real_change(monkeypatch):
     pa.kick_model_refresh()
     _wait_refresh_done()
     assert announced == [1]
+
+
+def test_new_panel_objects_do_not_each_reload_and_refresh_the_catalog(monkeypatch):
+    # Oct 10 2026: every HTTP / phone / website request built a PanelApi, and each one
+    # re-read the 120 KB catalog and asked every gateway for its models (~13 a minute idle).
+    loads: list[int] = []
+    warms: list[int] = []
+    monkeypatch.setattr(pa, "_models_booted", False, raising=False)
+    monkeypatch.setattr(pa, "_models_refresh_started_at", 0.0, raising=False)
+    monkeypatch.setattr(pa, "_models_updated_hook", None)
+    monkeypatch.setattr(pa, "_load_model_cache_from_disk", lambda: loads.append(1))
+    monkeypatch.setattr(pa, "_warm_model_cache", lambda: warms.append(1))
+    monkeypatch.setattr(pa.PanelApi, "_start_plugins_load_async", lambda self: None)
+    for _ in range(50):
+        pa.PanelApi()
+        _wait_refresh_done()
+    assert loads == [1]
+    assert warms == [1]
+
+
+def test_empty_picker_polls_start_one_warm_but_a_key_save_still_warms(monkeypatch):
+    from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
+
+    warms: list[int] = []
+    monkeypatch.setattr(pa, "_models_refresh_started_at", 0.0, raising=False)
+    monkeypatch.setattr(pa, "_model_cache", {})
+    monkeypatch.setattr(pa, "_seed_empty_model_caches_from_disk", lambda: None)
+    monkeypatch.setattr(pa, "_notify_models_updated", lambda: None)
+    monkeypatch.setattr(pa, "_warm_model_cache", lambda: warms.append(1))
+    for _ in range(20):
+        assert PanelApiSettingsMixin().get_models_catalog(False)["models"] == []
+        _wait_refresh_done()
+    assert warms == [1]
+    pa.kick_model_refresh()  # key save, Store enable, plugins ready
+    _wait_refresh_done()
+    assert warms == [1, 1]
+
+
+def test_unchanged_warm_does_not_rewrite_the_catalog(monkeypatch):
+    # Oct 10 2026: every warm rewrote the 120 KB models_cache row even when no gateway's
+    # list had changed (~90 MB an hour of ducky.db WAL while idle).
+    writes: list[dict] = []
+    models = [ModelInfo(id="gpt-a"), ModelInfo(id="gpt-b")]
+    monkeypatch.setattr(pa, "_model_cache", {})
+    monkeypatch.setattr(pa, "_write_models_cache_doc", lambda payload: writes.append(payload))
+    monkeypatch.setattr(pa, "_contributed_provider_ids", lambda: {"openai"})
+    with (
+        patch("frontend.ui_web.panel_api.all_providers", return_value=()),
+        patch("backend.agent.providers.all_providers", return_value=()),
+        patch("backend.uefn_plugins.host.get_contributions", return_value={"llm_providers": [{"id": "openai"}]}),
+        patch("backend.uefn_plugins.host.resolve_gateway_credential", return_value="sk-test"),
+        patch("backend.agent.model_fetch.fetch_models", lambda _p, _c: list(models)),
+    ):
+        for _ in range(3):
+            pa._warm_model_cache()
+        assert len(writes) == 1
+        models.append(ModelInfo(id="gpt-c"))
+        pa._warm_model_cache()
+    assert len(writes) == 2
+    assert [m["id"] for m in writes[-1]["openai"]] == ["gpt-a", "gpt-b", "gpt-c"]

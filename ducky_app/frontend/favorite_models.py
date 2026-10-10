@@ -231,12 +231,12 @@ def _available_api_models() -> dict[str, set[str]]:
     panel until those calls timed out (~120s).
     """
     try:
-        from frontend.ui_web.panel_api import cached_api_model_ids, kick_model_refresh
+        from frontend.ui_web.panel_api import cached_api_model_ids, kick_model_refresh_if_stale
     except Exception:
         return {}
     out = cached_api_model_ids()
     if not out:
-        kick_model_refresh()
+        kick_model_refresh_if_stale()
     return out
 
 

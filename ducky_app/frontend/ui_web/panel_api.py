@@ -135,6 +135,11 @@ _MODELS_CACHE_FILE = "models_cache.json"
 _models_refresh_lock = threading.Lock()
 _models_refresh_inflight = False
 _models_refresh_again = False
+_models_refresh_started_at = 0.0  # time.monotonic() of the last warm; 0 = none yet
+# A warm asks every gateway for its list; callers that fire on their own schedule rather
+# than on a change (a new panel object, an empty picker) wait this long between them.
+_MODELS_REFRESH_MIN_INTERVAL_S = 600.0
+_models_booted = False
 _models_updated_hook: Any = None
 
 
@@ -215,9 +220,11 @@ def kick_model_refresh() -> None:
         _models_refresh_again = False
 
     def _run() -> None:
-        global _models_refresh_inflight, _models_refresh_again
+        global _models_refresh_inflight, _models_refresh_again, _models_refresh_started_at
         try:
             while True:
+                with _models_refresh_lock:
+                    _models_refresh_started_at = time.monotonic()
                 before = _models_fingerprint()
                 try:
                     _warm_model_cache()
@@ -239,6 +246,29 @@ def kick_model_refresh() -> None:
                 _models_refresh_again = False
 
     threading.Thread(target=_run, daemon=True, name="refresh-models").start()
+
+
+def kick_model_refresh_if_stale() -> None:
+    """Kick a warm only when none ran in the last ``_MODELS_REFRESH_MIN_INTERVAL_S``.
+
+    For kicks that are not news (boot, a picker that found no models). Key saves,
+    Store enables and plugins-ready call ``kick_model_refresh`` and always warm.
+    """
+    with _models_refresh_lock:
+        last = _models_refresh_started_at
+    if last and time.monotonic() - last < _MODELS_REFRESH_MIN_INTERVAL_S:
+        return
+    kick_model_refresh()
+
+
+def _models_boot_once() -> bool:
+    """True for the first caller in this process: it seeds the catalog from disk and warms."""
+    global _models_booted
+    with _models_refresh_lock:
+        if _models_booted:
+            return False
+        _models_booted = True
+        return True
 
 
 def _seed_empty_model_caches_from_disk() -> None:
@@ -659,6 +689,7 @@ def _warm_model_cache() -> None:
         resolve_gateway_credential,
     )
 
+    before = _models_fingerprint()
     changed = False
     # Contributed ids first — factory register can lag a Store install, and
     # all_providers() would skip the new gateway until restart.
@@ -691,7 +722,9 @@ def _warm_model_cache() -> None:
                 changed = True
         except Exception:
             pass
-    if changed:
+    # Gateways return the same lists almost every time; rewriting the 120 KB catalog row on
+    # every warm put ~90 MB an hour through ducky.db's WAL while Ducky sat idle.
+    if changed and _models_fingerprint() != before:
         _save_model_cache_to_disk()
 
 
@@ -908,7 +941,11 @@ class PanelApi(
         self._pending_panel_pushes: list[dict[str, Any]] = []
         self._pending_panel_push_lock = threading.Lock()
         self._verse_editor = VerseEditorApi()
-        _load_model_cache_from_disk()
+        # Once per process: every HTTP, phone and website request used to build a PanelApi,
+        # and each one re-read the 120 KB catalog and asked every gateway for its models.
+        models_boot = _models_boot_once()
+        if models_boot:
+            _load_model_cache_from_disk()
         try:
             trim_errors()
         except Exception:
@@ -923,7 +960,8 @@ class PanelApi(
             set_detect_updated_hook(lambda: self._push_panel({"type": "coding_agents_updated"}))
         except Exception:
             pass
-        kick_model_refresh()
+        if models_boot:
+            kick_model_refresh_if_stale()
 
     def _notify_plugins_ready(self) -> None:
         try:

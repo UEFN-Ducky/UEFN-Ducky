@@ -1659,7 +1659,7 @@ class PanelApiSettingsMixin:
             _pa.kick_model_refresh()
         cached = _pa._model_cache.get(prov, [])
         if not cached:
-            _pa.kick_model_refresh()
+            _pa.kick_model_refresh_if_stale()
         return _pa.serialize_model_rows(prov, cached)
 
     def get_models_catalog(self, refresh: bool = False) -> dict[str, Any]:
@@ -1675,7 +1675,7 @@ class PanelApiSettingsMixin:
                 empty = False
             rows.extend(_pa.serialize_model_rows(prov, models))
         if empty:
-            _pa.kick_model_refresh()
+            _pa.kick_model_refresh_if_stale()
         return {
             "models": rows,
             "default_model": str(getattr(settings, "default_model", "") or ""),
