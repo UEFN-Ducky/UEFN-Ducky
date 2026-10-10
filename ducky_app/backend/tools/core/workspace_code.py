@@ -465,14 +465,21 @@ def workspace_find(pattern: str = "*", path: str = ".", max_results: int = 200, 
 # ----------------------------------------------------------------------------- edits
 
 
-def _write_edit(relative_path: str, before: str, after: str, tool: str, extra: dict[str, Any], pretty: bool = False) -> str:
+def _write_edit(
+    relative_path: str, before: str, after: str, tool: str, extra: dict[str, Any], pretty: bool = False,
+    *, create: bool = False,
+) -> str:
     from backend.workspace.paths import content_hash
     from backend.workspace.runtime import get_writer
 
     # Edits work on the file as read (\n lines); a CRLF file is saved back as CRLF.
-    if _uses_crlf(relative_path):
+    if not create and _uses_crlf(relative_path):
         after = after.replace("\r\n", "\n").replace("\n", "\r\n")
-    result = get_writer().write_text(relative_path, after, expected_hash=content_hash(before), tool=tool)
+    # create: the file must still be missing when the write lands (never overwrites).
+    result = get_writer().write_text(
+        relative_path, after, op="create" if create else "write",
+        expected_hash=None if create else content_hash(before), tool=tool,
+    )
     payload: dict[str, Any] = {
         "path": result.abs_path,
         "relative_path": result.path,
@@ -502,8 +509,9 @@ def _apply_edit(text: str, old_text: str, new_text: str, replace_all: bool, labe
     if not old_text:
         lines = len(text.splitlines())
         raise ValueError(
-            f"{label}old_text is required. To add text at the end, use workspace_replace_lines with "
-            f"start_line={lines + 1}, end_line={lines}; to create or overwrite a whole file use workspace_write_file."
+            f"{label}old_text is required on a file that has text. To add text at the end, use "
+            f"workspace_replace_lines with start_line={lines + 1}, end_line={lines}; to replace the whole "
+            "file use workspace_write_file."
         )
     # The text is read with \n line breaks whatever the file uses on disk.
     old_text, new_text = old_text.replace("\r\n", "\n"), new_text.replace("\r\n", "\n")
@@ -533,11 +541,20 @@ def workspace_edit_file(
     """Replace exact text in a project file (an editor's find and replace). Use this instead of rewriting the whole file or editing through a shell.
 
     old_text must match the file exactly, spaces and line breaks included, and appear once
-    (add surrounding lines to make it unique, or pass replace_all=true). To add lines at the
-    end, use workspace_replace_lines instead. Same write rules, history and change journal
-    as workspace_write_file.
+    (add surrounding lines to make it unique, or pass replace_all=true). An empty old_text
+    creates the file with new_text, or fills it when it is empty. To add lines at the end of
+    a file that has text, use workspace_replace_lines. Same write rules, history and change
+    journal as workspace_write_file.
     """
     relative_path = path_arg(relative_path, path)
+    if not old_text:
+        # Agents told "add this line, creating the file if needed" send exactly this.
+        full = resolve_workspace_path(relative_path)
+        require_ai_access(full)
+        if not os.path.exists(full):
+            return _write_edit(relative_path, "", new_text, "workspace_edit_file", {"created": True}, pretty, create=True)
+        if os.path.isfile(full) and _current_text(relative_path) == "":
+            return _write_edit(relative_path, "", new_text, "workspace_edit_file", {"replacements": 1}, pretty)
     text = _current_text(relative_path)
     updated, count = _apply_edit(text, old_text, new_text, replace_all)
     return _write_edit(relative_path, text, updated, "workspace_edit_file", {"replacements": count}, pretty)

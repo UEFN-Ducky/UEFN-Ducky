@@ -187,6 +187,21 @@ def test_empty_old_text_says_how_to_append(project) -> None:
         wc.workspace_edit_file("README.md", old_text="", new_text="tail")
 
 
+def test_empty_old_text_creates_or_fills_an_empty_file(project) -> None:
+    # Live team run r9: both writers were told to add a line with this tool, "creating the
+    # file if missing"; it refused, and their newline workaround left a blank first line.
+    root, journal = project
+    out = _call(wc.workspace_edit_file, "shared.txt", old_text="", new_text="A was here\n")
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "A was here\n"
+    assert out["created"] is True and journal.records[-1].tool == "workspace_edit_file"
+    (root / "empty.txt").write_text("", encoding="utf-8")
+    _call(wc.workspace_edit_file, "empty.txt", old_text="", new_text="first\n")
+    assert (root / "empty.txt").read_text(encoding="utf-8") == "first\n"
+    with pytest.raises(ValueError, match="has text"):
+        wc.workspace_edit_file("shared.txt", old_text="", new_text="again")
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "A was here\n"
+
+
 def test_replace_lines_appends_on_a_new_line(project) -> None:
     root, _ = project
     path = root / "tail.txt"
