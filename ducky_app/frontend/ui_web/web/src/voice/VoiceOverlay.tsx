@@ -8,6 +8,7 @@ import {
   type LiveVoiceState,
   type LiveVoiceUiStatus,
 } from "./liveChats";
+import { isAudioMuted, saveAudioSettings, subscribeAudioSettings } from "./audioSettings";
 import { LiveVoicePickers } from "./LiveVoicePickers";
 import { runSpeechErrorAction, speechErrorActionLabel } from "./speechErrors";
 import { ttsEngine, type TtsProgress } from "./ttsEngine";
@@ -101,11 +102,22 @@ export function VoiceOverlay({
 
   useEffect(() => ttsEngine.onProgress(setTts), []);
 
+  // "Mute all audio" silences every reply; the panel kept saying "Speaking…" with no sound.
+  const [soundMuted, setSoundMuted] = useState<boolean>(() => isAudioMuted());
+  useEffect(() => {
+    setSoundMuted(isAudioMuted());
+    const unsubscribe = subscribeAudioSettings(() => setSoundMuted(isAudioMuted()));
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   if (!open) return null;
 
   const loadingVoice = tts.loading;
   const micMuted = muted || state.muted || state.status === "muted";
-  const label = statusLabel(state.status, loadingVoice, micMuted);
+  const label =
+    soundMuted && state.status === "speaking" ? "Sound is muted" : statusLabel(state.status, loadingVoice, micMuted);
   const pickers = showPickers && Boolean(setVoiceId && setSpeed);
   const busyOrb =
     state.status === "thinking" ||
@@ -148,6 +160,15 @@ export function VoiceOverlay({
               </div>
               {heard ? <div className="voice-overlay-heard">“{heard}”</div> : null}
               {state.nextSpeaker ? <div className="voice-overlay-next">{state.nextSpeaker}</div> : null}
+              {soundMuted ? (
+                <div className="voice-overlay-next" role="alert">
+                  Ducky&apos;s audio is muted, so replies won&apos;t play.
+                  <button type="button" className="voice-btn" title="Unmute Ducky" aria-label="Unmute Ducky"
+                    onClick={() => void saveAudioSettings({ audioMuted: false })}>
+                    <Icons.Speaker />
+                  </button>
+                </div>
+              ) : null}
               {loadingVoice && tts.loadingMessage ? (
                 <div className="voice-overlay-next" role="status">{tts.loadingMessage}</div>
               ) : null}
