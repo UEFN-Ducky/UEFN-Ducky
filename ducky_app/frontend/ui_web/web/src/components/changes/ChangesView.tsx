@@ -1431,7 +1431,9 @@ export function ChangesView({
         <section className="changes-manual">
           <div className="changes-manual-head">
             <strong>Ducky could not undo these</strong>
-            <span>Plugin commands with no known inverse. They stay in the history until you undo them in UEFN.</span>
+            {manual.some((row) => row.path.includes("://")) ? (
+              <span>Plugin commands with no known inverse. They stay in the history until you undo them in UEFN.</span>
+            ) : null}
             <span className="changes-run-actions">
               <IconBtn title="Copy" onClick={copyManual}>
                 <Icons.Copy />

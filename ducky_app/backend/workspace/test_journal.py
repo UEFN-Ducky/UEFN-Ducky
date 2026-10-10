@@ -738,3 +738,43 @@ def test_revert_create_reports_skipped_when_file_is_gone(env) -> None:
     assert result["ok"] is False
     assert result["reverted"] == []
     assert result["skipped_modified"] == [{"seq": 1, "path": "Content/Verse/new.verse"}]
+
+
+def test_an_outside_agent_file_beside_content_is_listed_for_by_hand_never_a_false_conflict(tmp_path: Path) -> None:
+    # Codex's apply_patch wrote release_probe.txt at the island root. The island's
+    # writer is rooted at Content/, where "release_probe.txt" is a different (missing)
+    # file: revert used to report that file as "edited after this change".
+    import time as _time
+
+    from backend.workspace.paths import content_hash
+    from backend.workspace.policy import ALLOW
+    from backend.workspace.writer import WriteRecord
+
+    island = tmp_path / "Proj"
+    content = island / "Content"
+    content.mkdir(parents=True)
+    probe = island / "release_probe.txt"
+    probe.write_text("probe\n", encoding="utf-8")
+    storage = tmp_path / "store"
+    journal = FileChangeJournal(lambda _r: storage)
+    writer = ProjectWriter.for_root(str(content), journal=journal)
+    runtime.reset_for_tests(writer)
+    ctx = RunContext(run_id="codex-run", conv_id="codex-chat", coding_agent="codex")
+    try:
+        journal.record(WriteRecord(
+            op="write", path="release_probe.txt", from_path="", before="", after="probe\n",
+            before_hash="", after_hash=content_hash("probe\n"), existed_before=False,
+            tool="file_change", writer=ctx.as_writer(tool="file_change"), ctx=ctx, ts=_time.time(),
+            lines_added=1, lines_removed=0, decision=ALLOW, project_root=str(island),
+            abs_path=str(probe),
+        ))
+        result = journal.revert_run("codex-run", project_root=str(island))
+    finally:
+        runtime.reset_for_tests(None)
+    assert result["skipped_modified"] == [] and result["reverted"] == []
+    assert [row["path"] for row in result["manual"]] == ["release_probe.txt"]
+    assert "by hand" in result["manual"][0]["reason"]
+    assert probe.read_text(encoding="utf-8") == "probe\n"
+    run = journal.get_run("codex-run", project_root=str(island))
+    assert validate("changeset_run", run) == []
+    assert run["entries"][0]["abs_path"] == str(probe) and not run["entries"][0]["reverted"]

@@ -1263,7 +1263,7 @@ export interface ChangesetRunDto {
 /** An editor change with no computable inverse: the user has to undo it by hand. */
 export interface ChangesetManualRow {
   seq: number;
-  /** The uefn:// target slot, never a file path. */
+  /** The uefn:// target slot, or a file Ducky may not write in this project. */
   path: string;
   /** The target id or asset path, for the copy-out list. */
   target: string;

@@ -321,6 +321,17 @@ def _disk_rel(newest: Mapping[str, Any], earliest: Mapping[str, Any], key: str) 
     return key
 
 
+def _same_path(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+# Files an outside agent changed where this project's writer never writes.
+OUTSIDE_WRITER_REASON = (
+    "Outside the folders Ducky may change in this project (an island: Content/ and .ducky/), "
+    "so restore it by hand."
+)
+
+
 @runtime_checkable
 class ChangeJournal(Protocol):
     def record(self, record: WriteRecord) -> dict[str, Any]:
@@ -804,6 +815,14 @@ class FileChangeJournal:
             if outcome == "manual":
                 manual.append(self._manual_row(path, newest, earliest))
                 continue
+            if outcome == "outside":
+                name = str(newest.get("path") or path)
+                manual.append({
+                    "seq": int(newest["seq"]), "path": name, "command": str(newest.get("tool") or ""),
+                    "label": name, "target": str(newest.get("abs_path") or name),
+                    "reason": OUTSIDE_WRITER_REASON, "summary": "",
+                })
+                continue
             if "://" not in path:
                 try:
                     self._confirm_file_restored(writer, _disk_rel(newest, earliest, path), earliest)
@@ -1038,7 +1057,17 @@ class FileChangeJournal:
                 earliest, meta=meta, origin=origin, storage=storage, remap=remap,
             )
         path = _disk_rel(newest, earliest, path)
-        full = writer.abs_path(path)
+        recorded = str(newest.get("abs_path") or "")
+        try:
+            full = writer.abs_path(path)
+        except ValueError:
+            if recorded:
+                return "outside"
+            raise
+        if recorded and not _same_path(recorded, full):
+            # An outside agent wrote it (Codex beside an island's Content/, say): this
+            # writer would read and restore a different file, so it never guesses.
+            return "outside"
         op_new = newest["op"]
         if op_new in _TEXT_OPS or op_new == "delete":
             current = self._disk_hash(full)
@@ -1814,6 +1843,7 @@ class FileChangeJournal:
             "seq": len(run["entries"]) + 1,
             "ts": record.ts or self._clock(),
             "path": record.path,
+            "abs_path": record.abs_path or None,
             "op": record.op,
             "from_path": record.from_path or None,
             "trash_token": record.trash_token or None,

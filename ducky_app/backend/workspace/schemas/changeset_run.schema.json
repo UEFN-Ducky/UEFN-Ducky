@@ -78,6 +78,10 @@
         "seq": { "type": "integer", "minimum": 1 },
         "ts": { "type": "number" },
         "path": { "type": "string", "minLength": 1 },
+        "abs_path": {
+          "description": "Where the file was written. Revert refuses to guess when the writer resolves path elsewhere.",
+          "type": ["string", "null"]
+        },
         "op": { "enum": ["create", "write", "rename", "move", "copy", "import", "restore", "delete", "editor"] },
         "from_path": { "type": ["string", "null"] },
         "trash_token": { "type": ["string", "null"] },
