@@ -206,7 +206,7 @@ def test_mcp_project_writer_entry_is_not_duplicated(env):
         runtime.get_writer().write_text("file.txt", "MCP edit\n", tool="workspace_write_file")
     finally:
         identity.reset(token)
-    done = event("tool_done", "workspace_write_file")
+    done = event("tool_done", "workspace_write_file", {"relative_path": "file.txt", "content": "MCP edit\n"})
     tracker.process(done)
     assert done["tool"]["fileEdit"]["after"] == "MCP edit\n"
     assert len(ledger.get_run("turn", project_root=str(root))["entries"]) == 1
@@ -218,7 +218,7 @@ def test_edit_and_commit_in_same_command_is_still_recorded(env):
     (root / "file.txt").write_text("committed edit\n", encoding="utf-8")
     git(root, "add", "file.txt")
     git(root, "commit", "-m", "edit")
-    done = event("tool_done", "command_execution")
+    done = event("tool_done", "command_execution", {"command": "git commit -am edit"})
     tracker.process(done)
     assert done["tool"]["fileEdit"]["before"] == "before\r\nkeep\r\n"
 
@@ -253,7 +253,7 @@ def test_runner_launch_wires_snapshots_live_and_into_final_blocks(env, monkeypat
     def launch(**kwargs):
         kwargs["push"](event("tool", "command_execution"))
         (root / "file.txt").write_bytes(b"native edit\r\n")
-        kwargs["push"](event("tool_done", "command_execution"))
+        kwargs["push"](event("tool_done", "command_execution", {"command": "rewrite file.txt"}))
         return CodingAgentLaunchResult(ok=True, effective_mode="agent", blocks=[{
             "type": "tool_call", "id": "call", "name": "command_execution", "status": "success",
         }])
@@ -358,3 +358,46 @@ def test_the_whole_profile_or_a_drive_is_never_snapshotted():
 
     assert not _folder_worth_snapshotting(Path.home().resolve())
     assert not _folder_worth_snapshotting(Path(Path.home().anchor))
+
+
+def test_two_agents_in_one_folder_each_get_only_their_own_file(env, tmp_path):
+    # Oct 10 2026 team test: Writer A's turn showed Writer B's new file under a
+    # find_workflows call, and B's showed A's under a plan tick. Reverting A's turn
+    # would have deleted B's file.
+    from backend.workspace.identity import RunContext
+
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    a = TurnFileChanges(str(root), ctx, ledger)
+    b = TurnFileChanges(str(root), RunContext(run_id="turn-b", conv_id="chat-b", coding_agent="codex"), ledger)
+    a_file, b_file = root / "Content" / "team_a.txt", root / "Content" / "team_b.txt"
+    b_file.write_text("beta\n", encoding="utf-8")  # B's apply_patch lands first
+    read = event("tool_done", "uefn/find_workflows", {"task": "write team_a"}, id="a-read")
+    a.process(read)
+    assert read["tool"]["fileEdits"] == []
+    a_file.write_text("alpha\n", encoding="utf-8")
+    a_patch = event("tool_done", "file_change", {"paths": [str(a_file)], "path": str(a_file)}, id="a-patch")
+    a.process(a_patch)
+    b_patch = event("tool_done", "file_change", {"paths": [str(b_file)], "path": str(b_file)}, id="b-patch")
+    b.process(b_patch)
+    tick = event("tool_done", "uefn/ducky_plan_update_node", {"node_id": "b1", "status": "completed"}, id="b-tick")
+    b.process(tick)
+    assert [Path(e["path"][4:]).name for e in a_patch["tool"]["fileEdits"]] == ["team_a.txt"]
+    assert [Path(e["path"][4:]).name for e in b_patch["tool"]["fileEdits"]] == ["team_b.txt"]
+    assert tick["tool"]["fileEdits"] == []
+    paths = {e["path"] for e in ledger.get_run("turn", project_root=str(root))["entries"]}
+    assert paths == {"Content/team_a.txt"}
+
+
+def test_a_listed_folder_claims_nothing_and_a_shell_command_claims_what_it_wrote(env, tmp_path):
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    tracker = TurnFileChanges(str(root), ctx, ledger)
+    (root / "Content" / "other.txt").write_text("someone else\n", encoding="utf-8")
+    listing = event("tool_done", "uefn/workspace_list_dir", {"path": "Content", "cwd": str(root)}, id="ls")
+    tracker.process(listing)
+    assert listing["tool"]["fileEdits"] == []
+    (root / "Content" / "Verse" / "game.verse").write_bytes(b"built\r\n")
+    build = event("tool_done", "command_execution", {"command": "python build.py"}, id="build")
+    tracker.process(build)
+    assert [Path(e["path"][4:]).name for e in build["tool"]["fileEdits"]] == ["game.verse"]

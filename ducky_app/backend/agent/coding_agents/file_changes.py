@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 MAX_BYTES = 2 * 1024 * 1024
 _PATH_KEYS = {"path", "paths", "file_path", "filePath", "target_file", "relative_path",
               "cwd", "workdir", "directory", "root"}
+_FOLDER_KEYS = {"cwd", "workdir", "directory", "root"}
+_SHELL_KEYS = ("command", "cmd", "script")
+# Each agent's own file tools (Codex, Claude Code, Cursor): they write files by definition.
+_NATIVE_EDIT_TOOLS = {"file_change", "apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit",
+                      "edit", "write", "edit_file", "write_file", "delete_file"}
 
 
 @dataclass(frozen=True)
@@ -296,6 +301,28 @@ class TurnFileChanges:
             if root not in self.repos:
                 self.repos[root] = _Repository(root)
 
+    def _reach(self, tool_name: str, arguments: Any):
+        """Which changed files one tool call may claim as its own edits.
+
+        A shell command can write anything. An edit tool (Codex file_change, Claude
+        Edit/Write, Ducky's workspace_* tools) claims only the files it names; a folder
+        it names (cwd, a listed directory) claims nothing. Any other call claims nothing.
+        """
+        if not isinstance(arguments, dict):
+            arguments = {}
+        if any(isinstance(arguments.get(key), str) and arguments[key].strip() for key in _SHELL_KEYS):
+            return lambda _path: True
+        base = Path(str(arguments.get("cwd") or arguments.get("workdir") or self.cwd))
+        if not base.is_absolute():
+            base = self.cwd / base
+        named = set()
+        for name in _named_paths({k: v for k, v in arguments.items() if k not in _FOLDER_KEYS}):
+            path = Path(name)
+            named.add(os.path.normcase(str((path if path.is_absolute() else base / path).resolve())))
+        if not named and tool_name in _NATIVE_EDIT_TOOLS:
+            return lambda _path: True  # the agent's own edit tool, reported without its paths
+        return lambda path: os.path.normcase(str(Path(path).resolve())) in named
+
     def _record(self, root: Path, path: Path, before: Snapshot, after: Snapshot, tool: str) -> dict[str, Any]:
         relative = path.relative_to(root).as_posix()
         added, removed = line_delta(before.text, after.text)
@@ -327,15 +354,21 @@ class TurnFileChanges:
             if event["type"] != "tool_done":
                 return
             edits = []
+            # Snapshots always advance; only what this call could have written is its edit.
+            # Another agent working in the same folder at the same time was credited to
+            # whatever call ended next (a plan tick "created" the other writer's file).
+            owns = self._reach(str(tool.get("name") or ""), tool.get("arguments") or {})
             for root, repo in self.repos.items():
                 for path, before, after in repo.changes():
-                    edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
+                    if owns(path):
+                        edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
             for root, folder in self.folders.items():
                 for path, before, after in folder.changes():
-                    edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
+                    if owns(path):
+                        edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
             for path, before in self.files.items():
                 after = _read(path)
-                if before is not None and after is not None and before.digest != after.digest:
+                if before is not None and after is not None and before.digest != after.digest and owns(path):
                     edits.append(self._record(path.parent, path, before, after, str(tool.get("name") or "tool")))
                 self.files[path] = after
             # These snapshots are authoritative, including no-change and skip cases.
