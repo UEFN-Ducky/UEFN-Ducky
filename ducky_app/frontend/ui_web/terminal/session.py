@@ -181,6 +181,8 @@ class PendingCommand:
     # The agent that asked runs it itself and waits for the exit code.
     runner_waits: bool = False
     timeout_s: float = 300.0
+    # An Allow pop-up was shown for it (not when the chat allows everything).
+    asked: bool = False
 
 
 class TerminalSession:

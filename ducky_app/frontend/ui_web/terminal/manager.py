@@ -234,6 +234,7 @@ class TerminalManager:
             background=background,
             runner_waits=runner_waits and not background,
             timeout_s=float(timeout_s),
+            asked=bool(push_pending),
         )
         with self._lock:
             self._pending[request_id] = pending
@@ -389,7 +390,7 @@ class TerminalManager:
     def _take_pending(self, request_id: str) -> PendingCommand | None:
         with self._lock:
             pending = self._pending.pop(request_id, None)
-        if pending is not None:
+        if pending is not None and pending.asked:
             # Every window (and a page replaying the backlog after a reload) drops
             # its Allow pop-up: the question was answered here, or timed out.
             self._emit({
