@@ -47,12 +47,21 @@ class ProtectedFastMCP(FastMCP):
         return [t for t in available if t.name in SAFE_TOOLS] if current_policy().strict else available
 
     async def _watch_catalog(self, session, revision):
-        from backend.bridge.shared_mcp import _catalog_revision, _tool_row
+        from backend.bridge.shared_mcp import (
+            _catalog_marker, _catalog_revision, _policy_filtered, _snapshot_tools, _tool_row,
+        )
 
+        # Holding the marked objects keeps them alive, so their ids stay unique.
+        marked = None
         try:
             while True:
                 await anyio.sleep(0.5)
+                # Rebuild and hash the rows only when a registered tool moved.
+                marker = _catalog_marker(_policy_filtered(_snapshot_tools(self)))
+                if marked is not None and marker[1] == marked[1]:
+                    continue
                 current = _catalog_revision([_tool_row(t) for t in await self._catalog_tools()])
+                marked = marker
                 if current != revision:
                     await session.send_tool_list_changed()
                     revision = current

@@ -403,6 +403,22 @@ def _catalog_revision(rows: list[dict[str, Any]]) -> str:
                                     sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def _catalog_marker(tools: list[Any]) -> tuple[list[Any], tuple[int, ...]]:
+    """Every object the catalog rows are read from, and their identities.
+
+    The catalog watchers run twice a second per connected client, and rebuilding
+    plus hashing every row costs ~13 ms at 1,000 tools. Registered tools and their
+    fields are replaced, never edited in place, so the same objects in the same
+    order mean the same catalog. A watcher keeps the objects of its last check
+    alive, so a new object can never reuse one of their ids.
+    """
+    objects: list[Any] = []
+    for tool in tools:
+        objects.append(tool)
+        objects.extend((getattr(tool, "__dict__", None) or {}).values())
+    return objects, tuple(map(id, objects))
+
+
 async def _async_list_tools(mcp: Any) -> list[Any]:
     listed = await mcp.list_tools()
     return list(listed or [])
@@ -552,17 +568,24 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
         nonlocal last_revision
         # Observe only the local registry. Never probe/reconnect providers or wait
         # on the tool execution loop; unavailable registered rows stay visible.
+        # Holding the marked objects keeps them alive, so their ids stay unique.
+        marked: tuple[list[Any], tuple[int, ...]] | None = None
         while not closed.wait(0.5):
             try:
                 with catalog_lock:
                     if last_revision is None:
                         continue
-                    rows = [_tool_row(t) for t in _policy_filtered(_snapshot_tools(mcp))]
+                    tools = _policy_filtered(_snapshot_tools(mcp))
+                    marker = _catalog_marker(tools)
+                    if marked is not None and marker[1] == marked[1]:
+                        continue
+                    rows = [_tool_row(t) for t in tools]
                     revision = _catalog_revision(rows)
                     if revision != last_revision:
                         _send({"op": "mcp", "method": "notifications/tools/list_changed",
                                "params": {"_meta": {"revision": revision}}})
                         last_revision = revision
+                    marked = marker
             except (OSError, EOFError):
                 return
             except (ValueError, TypeError, RuntimeError):

@@ -104,3 +104,97 @@ def test_existing_stdio_client_receives_changes_and_updated_catalog(monkeypatch,
         stdin.close()
         reader.close()
     assert not relay.is_alive()
+
+
+def test_shared_watchers_skip_an_unchanged_catalog(monkeypatch, tmp_path):
+    """Each connected adapter rebuilt and hashed the whole catalog twice a second
+    (~13 ms a tick at 1,000 tools) even when nothing had changed."""
+    import socket
+    import time
+
+    from backend.bridge.test_shared_mcp import _hello, _rpc
+
+    mcp = FakeMcp()
+    server = _serve(mcp, monkeypatch, tmp_path)
+    rows: list[str] = []
+    real_row = shared_mcp._tool_row
+
+    def counting_row(tool):
+        rows.append(getattr(tool, "name", ""))
+        return real_row(tool)
+
+    monkeypatch.setattr(shared_mcp, "_tool_row", counting_row)
+    clients = [_hello(f"run-{n}") for n in range(3)]
+    try:
+        for sock in clients:
+            _rpc(sock, "tools/list")
+        time.sleep(1.2)  # every watcher has looked at least once
+        rows.clear()
+        time.sleep(1.6)  # three more ticks per client, nothing changed
+        assert rows == [], f"{len(rows)} rows rebuilt for an unchanged catalog"
+
+        mcp._tool_manager._tools["late"] = SimpleNamespace(
+            name="late", description="late", inputSchema={"type": "object"}
+        )
+        for sock in clients:
+            notice = shared_mcp.read_frame(sock)
+            assert notice["method"] == "notifications/tools/list_changed"
+        for sock in clients:
+            sock.settimeout(1.2)
+            try:
+                extra = shared_mcp.read_frame(sock)
+            except (TimeoutError, socket.timeout):
+                extra = None
+            assert extra is None, f"a second notice for one change: {extra}"
+    finally:
+        for sock in clients:
+            try:
+                shared_mcp.write_frame(sock, {"op": "bye"})
+            except OSError:
+                pass
+            shared_mcp.close_handle(sock)
+        shared_mcp.request_stop()
+        server.join(timeout=5)
+
+
+def test_dedicated_watcher_skips_an_unchanged_catalog(monkeypatch):
+    import anyio
+
+    from backend.server import ProtectedFastMCP
+    from backend.workspace import ai_ignore
+
+    monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=False))
+    mcp = ProtectedFastMCP("watch-test")
+    for n in range(200):
+        mcp.add_tool(lambda value=0: value, name=f"tool_{n}")
+    initial = shared_mcp._catalog_revision(
+        [shared_mcp._tool_row(t) for t in asyncio.run(mcp.list_tools())]
+    )
+    ticks: list[float] = []
+    rebuilt_at: list[int] = []
+    sent: list[int] = []
+    real_revision = shared_mcp._catalog_revision
+    real_sleep = anyio.sleep
+
+    def counting_revision(rows):
+        rebuilt_at.append(len(ticks))
+        return real_revision(rows)
+
+    async def fake_sleep(delay):
+        ticks.append(delay)
+        if len(ticks) == 21:
+            mcp.add_tool(lambda other=0: other, name="late")
+        if len(ticks) > 25:
+            raise anyio.ClosedResourceError
+        await real_sleep(0)
+
+    class Session:
+        async def send_tool_list_changed(self):
+            sent.append(len(ticks))
+
+    monkeypatch.setattr(shared_mcp, "_catalog_revision", counting_revision)
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
+    anyio.run(mcp._watch_catalog, Session(), initial)
+    idle = [tick for tick in rebuilt_at if tick <= 20]
+    assert len(idle) <= 1, f"rebuilt on {len(idle)} of 20 idle ticks"
+    assert sent == [21]
