@@ -236,6 +236,75 @@ def test_scan_does_not_resolve_every_file_each_poll(env, monkeypatch):
         assert len(calls) <= 1, f"{len(calls)} realpath calls in one poll"
 
 
+def test_project_switch_journals_nothing(tmp_path, monkeypatch):
+    """Switching the panel project used to diff the new island against the old
+    island's file map, so ~4 s later every file of both became a You row."""
+    from frontend.ui_web import live_agent_runs
+
+    roots: dict[str, str] = {}
+    for name in ("ProjA", "ProjB"):
+        verse = tmp_path / name / "Content" / "Verse"
+        verse.mkdir(parents=True)
+        for i in range(3):
+            (verse / f"{name.lower()}{i}.verse").write_text(f"{name} {i}\n", encoding="utf-8", newline="\n")
+        roots[name] = os.path.realpath(tmp_path / name)
+    current = {"root": roots["ProjA"]}
+    journal = FileChangeJournal(lambda r: tmp_path / f"store-{tmp_path.name}-{Path(r).name}")
+    writer = ProjectWriter(
+        root_resolver=lambda: current["root"],
+        path_resolver=lambda rel: os.path.join(current["root"], rel),
+        journal=journal,
+    )
+    runtime.reset_for_tests(writer)
+    hw.reset_for_tests()
+    live_agent_runs.reset_for_tests()
+    monkeypatch.setattr(hw, "STABLE_POLLS", 2)
+    try:
+        watch = HumanWatch()
+        watch.tick()  # seed A
+        current["root"] = roots["ProjB"]
+        _flush(watch, 3)
+        assert journal.list_runs(project_root=roots["ProjB"]) == []
+        assert journal.list_runs(project_root=roots["ProjA"]) == []
+
+        # B is watched for real after the switch, and back on A nothing moved.
+        (tmp_path / "ProjB" / "Content" / "Verse" / "projb0.verse").write_text(
+            "edited\n", encoding="utf-8", newline="\n"
+        )
+        _flush(watch, 2)
+        runs = journal.list_runs(project_root=roots["ProjB"])
+        assert [e["path"] for r in runs for e in r["entries"]] == ["Content/Verse/projb0.verse"]
+        current["root"] = roots["ProjA"]
+        _flush(watch, 3)
+        assert journal.list_runs(project_root=roots["ProjA"]) == []
+    finally:
+        runtime.reset_for_tests(None)
+        hw.reset_for_tests()
+        live_agent_runs.reset_for_tests()
+
+
+def test_many_edits_in_one_poll_save_the_index_once(env, monkeypatch):
+    root, journal, _writer, verse = env
+    for i in range(5):
+        (verse / f"e{i}.verse").write_text(f"e {i}\n", encoding="utf-8", newline="\n")
+    watch = HumanWatch()
+    watch.tick()
+    for i in range(5):
+        (verse / f"e{i}.verse").write_text(f"edited {i}\n", encoding="utf-8", newline="\n")
+    saves: list[int] = []
+    real_save = hw._save_saved
+
+    def counting(storage, seen):
+        saves.append(len(seen))
+        return real_save(storage, seen)
+
+    monkeypatch.setattr(hw, "_save_saved", counting)
+    _flush(watch, 2)
+    runs = journal.list_runs(project_root=str(root))
+    assert sum(len(r["entries"]) for r in runs) == 5
+    assert len(saves) == 1, f"index rewritten {len(saves)} times for one poll"
+
+
 def test_scan_forgets_files_that_disappear(env):
     """The read cache must not pin deleted files in memory forever."""
     root, _journal, _writer, verse = env

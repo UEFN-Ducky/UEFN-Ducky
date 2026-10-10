@@ -76,6 +76,7 @@ class HumanWatch:
         # rel -> (mtime_ns, size, body, hash): lets _scan skip re-reading files
         # that have not been touched since the previous poll.
         self._reads: dict[str, tuple[int, int, str, str]] = {}
+        self._island = ""
 
     def loop(self, poll_s: float) -> None:
         while True:
@@ -90,6 +91,13 @@ class HumanWatch:
         if writer is None or journal is None or not root:
             return
         island = Path(island_root(root))
+        if str(island) != self._island:
+            # The panel switched projects. Diffing the new island against the old
+            # one's file map turned every file of both into a "You" row, so start
+            # over from the new island's own saved index.
+            self._island = str(island)
+            self._seen, self._pending, self._reads = {}, {}, {}
+            self._seeded = False
         storage = _storage(journal, root)
         if not self._seeded:
             self._seen = _canon_seen(_load_saved(storage))
@@ -109,27 +117,33 @@ class HumanWatch:
         current = self._scan(island)
         now = time.time()
         paths = set(self._seen) | set(current) | set(self._pending)
-        for rel in paths:
-            old = self._seen.get(rel)
-            new = current.get(rel)
-            fp = _fp(new)
-            pending = self._pending.get(rel)
-            if _same(old, new) and pending is None:
-                continue
-            if pending is None or pending.get("fp") != fp:
-                self._pending[rel] = {"fp": fp, "polls": 1, "new": new, "old": old}
-                continue
-            pending["polls"] = int(pending.get("polls") or 0) + 1
-            pending["new"] = new
-            if int(pending["polls"]) < STABLE_POLLS:
-                continue
-            self._pending.pop(rel, None)
-            self._commit(journal, writer, root, rel, old, new, now)
-            if new is None:
-                self._seen.pop(rel, None)
-            else:
-                self._seen[rel] = new
-            _save_saved(storage, self._seen)
+        committed = False
+        try:
+            for rel in paths:
+                old = self._seen.get(rel)
+                new = current.get(rel)
+                fp = _fp(new)
+                pending = self._pending.get(rel)
+                if _same(old, new) and pending is None:
+                    continue
+                if pending is None or pending.get("fp") != fp:
+                    self._pending[rel] = {"fp": fp, "polls": 1, "new": new, "old": old}
+                    continue
+                pending["polls"] = int(pending.get("polls") or 0) + 1
+                pending["new"] = new
+                if int(pending["polls"]) < STABLE_POLLS:
+                    continue
+                self._pending.pop(rel, None)
+                self._commit(journal, writer, root, rel, old, new, now)
+                if new is None:
+                    self._seen.pop(rel, None)
+                else:
+                    self._seen[rel] = new
+                committed = True
+        finally:
+            # One index write per poll, not one full rewrite per changed file.
+            if committed:
+                _save_saved(storage, self._seen)
 
     def _scan(self, island: Path) -> dict[str, dict[str, Any]]:
         """Current contents of every watched file, re-reading only what changed.
