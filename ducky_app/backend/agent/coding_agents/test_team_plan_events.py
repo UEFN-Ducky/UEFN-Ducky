@@ -99,3 +99,50 @@ def test_team_plan_tool_and_skill_documentation():
         assert "preserving original notes" in doc and "at once" in doc
     skill = (root / "frontend/skill_packs/ducky/SKILL.md").read_text(encoding="utf-8")
     assert "Team plans" in skill and "two idle minutes" in skill
+
+
+@pytest.mark.parametrize("database", [False, True])
+def test_acknowledgement_after_durable_save(team, notices, monkeypatch, database):
+    from backend.agent import a2a_client
+    from backend.workspace import identity
+    import copy
+    previous = plans.load_plan("coord", project_root=team)
+    saved = []
+    if database:
+        monkeypatch.setattr(plans, "_use_db", lambda: True)
+        monkeypatch.setattr(plans, "_repo", lambda _: SimpleNamespace(
+            plan_get=lambda *args: copy.deepcopy(previous),
+            plan_put=lambda *args: saved.append(copy.deepcopy(args[-1]))))
+    else:
+        original_write = plans.write_json_atomic
+        def write(path, doc):
+            original_write(path, doc)
+            saved.append(copy.deepcopy(doc))
+        monkeypatch.setattr(plans, "write_json_atomic", write)
+    monkeypatch.setattr(identity, "resolve_context", lambda: SimpleNamespace(conv_id="coord"))
+    acknowledged = []
+    def ack(operation, before, after, actor, root):
+        assert operation == "acknowledge_plan_changes"
+        assert saved and saved[-1] == after
+        assert before["nodes"] == previous["nodes"]
+        acknowledged.append((actor, root))
+    monkeypatch.setattr(a2a_client, "_call", ack)
+    plans.update_node("coord", "a1", body_markdown="Coordinator acted", project_root=team)
+    assert acknowledged == [("coord", team)]
+    monkeypatch.setattr(identity, "resolve_context", lambda: SimpleNamespace(conv_id="builder"))
+    plans.update_node("coord", "a1", body_markdown="Member acted", project_root=team)
+    assert len(acknowledged) == 1
+
+
+def test_failed_save_does_not_acknowledge(team, notices, monkeypatch):
+    from backend.agent import a2a_client
+    from backend.workspace import identity
+    monkeypatch.setattr(identity, "resolve_context", lambda: SimpleNamespace(conv_id="coord"))
+    acknowledged = []
+    monkeypatch.setattr(a2a_client, "acknowledge_plan_changes", lambda *args: acknowledged.append(args))
+    def fail(*args):
+        raise OSError("disk unavailable")
+    monkeypatch.setattr(plans, "write_json_atomic", fail)
+    with pytest.raises(OSError):
+        plans.update_node("coord", "a1", body_markdown="unsaved", project_root=team)
+    assert acknowledged == []

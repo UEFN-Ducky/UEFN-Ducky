@@ -600,11 +600,11 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
     plan["team_reports"] = (pending + reports)[-20:]
     if _use_db():
         _repo(project_root).plan_put(_project_id(project_root), _safe_id(chat_id), "project", plan)
-        _push_assignment_invalidated(previous, plan, project_root)
-        deliver_reports(plan, reports)
-        return plan
-    write_json_atomic(_plan_path(chat_id, project_root), plan)
+    else:
+        write_json_atomic(_plan_path(chat_id, project_root), plan)
     _push_assignment_invalidated(previous, plan, project_root)
+    from backend.agent.a2a_client import acknowledge_saved_plan
+    acknowledge_saved_plan(previous, plan, project_root)
     deliver_reports(plan, reports)
     return plan
 
