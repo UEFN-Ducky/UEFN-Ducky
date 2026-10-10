@@ -1,6 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { ChatPlan, PlanProgress } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
+import { progressForPlan } from "../utils/planOutlineNav";
 import { PlanTodoCard } from "./PlanTodoCard";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 
@@ -15,9 +16,8 @@ interface ChatPlanPopupProps {
 }
 
 function count(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
-  if (progress) return { done: progress.completed, total: progress.total };
-  const todos = plan.todos || [];
-  return { done: todos.filter((t) => t.status === "completed").length, total: todos.length };
+  const counts = progress ?? progressForPlan(plan);
+  return { done: counts.completed, total: counts.total };
 }
 
 /** Collapsible plan pill. Active: docked above the composer. Finished: under its turn in history. */

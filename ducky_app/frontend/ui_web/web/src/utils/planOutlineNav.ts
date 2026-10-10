@@ -57,7 +57,7 @@ export function progressForNodes(nodes: PlanNode[] | undefined): PlanProgress {
     else if (s === "in_progress") in_progress += 1;
     else pending += 1;
   }
-  return { total: flat.length, completed, cancelled, in_progress, pending };
+  return { total: flat.length - cancelled, completed, cancelled, in_progress, pending };
 }
 
 function flashEl(el: HTMLElement): void {
@@ -115,4 +115,9 @@ export function scrollPlanToNode(
       break;
     }
   }
+}
+
+/** Same non-cancelled denominator as backend todo_progress, including legacy plans. */
+export function progressForPlan(plan: ChatPlan): PlanProgress {
+  return progressForNodes(plan.nodes?.length ? plan.nodes : plan.todos);
 }

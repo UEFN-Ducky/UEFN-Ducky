@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ChatPlan, PlanNode, PlanProgress, PlanTodoStatus } from "../types/panel";
+import { progressForPlan } from "../utils/planOutlineNav";
 import { nodeKind } from "../utils/planLock";
 
 export interface PlanTodoCardProps {
@@ -43,14 +44,8 @@ function nodesFromPlan(plan: ChatPlan): PlanNode[] {
 }
 
 function countProgress(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
-  if (progress) {
-    return { done: progress.completed, total: progress.total };
-  }
-  const flat = flattenOutline(nodesFromPlan(plan));
-  return {
-    done: flat.filter((r) => r.node.status === "completed").length,
-    total: flat.length,
-  };
+  const counts = progress ?? progressForPlan(plan);
+  return { done: counts.completed, total: counts.total };
 }
 
 function TodoRow({

@@ -895,7 +895,7 @@ def _load_editable(
 
 
 def todo_progress(plan: dict[str, Any] | None) -> dict[str, int]:
-    """Progress over all nodes in the outline tree (not just leaves)."""
+    """Progress over non-cancelled nodes (including parents); report cancellations separately."""
     flat = _flatten_nodes((plan or {}).get("nodes") if plan else None)
     if not flat and plan:
         flat = [
@@ -903,7 +903,7 @@ def todo_progress(plan: dict[str, Any] | None) -> dict[str, int]:
             for t in (plan.get("todos") or [])
             if isinstance(t, dict)
         ]
-    total = len(flat)
+    total = sum(1 for t in flat if str(t.get("status")) != "cancelled")
     completed = sum(1 for t in flat if str(t.get("status")) == "completed")
     cancelled = sum(1 for t in flat if str(t.get("status")) == "cancelled")
     in_progress = sum(1 for t in flat if str(t.get("status")) == "in_progress")
