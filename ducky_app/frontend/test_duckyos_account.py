@@ -597,7 +597,7 @@ def test_session_route_401_keeps_the_paired_pc() -> None:
         patch.object(acc, "_unpair_this_pc", side_effect=lambda: unpaired.append("unpair")),
         patch.object(acc, "_clear_expired_auth", side_effect=lambda: unpaired.append("clear")),
         patch.object(acc, "_drop_website_session"),
-        patch("urllib.request.urlopen", side_effect=_401("https://uefnducky.org/api/v1/auth/me")),
+        patch.object(acc, "_site_urlopen", side_effect=_401("https://uefnducky.org/api/v1/auth/me")),
     ):
         try:
             acc.api_request("GET", "/api/v1/auth/me", prefer_bearer=False)
@@ -610,7 +610,7 @@ def test_session_route_401_keeps_the_paired_pc() -> None:
     with (
         patch.object(acc, "_load_blob", return_value=dict(blob)),
         patch.object(acc, "_unpair_this_pc", side_effect=lambda: unpaired.append("unpair")),
-        patch("urllib.request.urlopen", side_effect=_401("https://uefnducky.org/api/v1/plugins/uefn-ducky/collect/desktop-devices")),
+        patch.object(acc, "_site_urlopen", side_effect=_401("https://uefnducky.org/api/v1/plugins/uefn-ducky/collect/desktop-devices")),
     ):
         try:
             acc.api_request("POST", "/api/v1/plugins/uefn-ducky/collect/desktop-devices", {})
@@ -722,7 +722,7 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
         ):
             who = acc.account_key()
             # Refused: nothing shows, and the Ducky AI default the plugin saved is gone.
-            with patch("urllib.request.urlopen", side_effect=refused()):
+            with patch.object(acc, "_site_urlopen", side_effect=refused()):
                 acc._check_ducky_ai(who)
             assert surfaces() == hidden
             s = PanelSettings.load()
@@ -731,36 +731,115 @@ def test_ducky_ai_exists_only_for_an_account_holding_its_permission() -> None:
             # A refusal stands: the site is not asked again (no polling).
             assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is False
             # Granted (a 2xx answer): every surface shows.
-            with patch("urllib.request.urlopen", return_value=_Granted(b'{"ok":true,"payload":{"subscribed":true}}')):
+            with patch.object(acc, "_site_urlopen", return_value=_Granted(b'{"ok":true,"payload":{"subscribed":true}}')):
                 acc._check_ducky_ai(who)
             assert surfaces() == shown and changed.call_count == 2
             # Offline or any error: hidden again (fail closed).
-            with patch("urllib.request.urlopen", side_effect=OSError("offline")):
+            with patch.object(acc, "_site_urlopen", side_effect=OSError("offline")):
                 acc._check_ducky_ai(who)
             assert surfaces() == hidden and changed.call_count == 3
             # No answer is asked again only after the retry wait, not on every look.
             assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is False
             # Another account on this PC starts hidden and is asked about at once.
-            with patch("urllib.request.urlopen", return_value=_Granted(b'{"ok":true}')):
+            with patch.object(acc, "_site_urlopen", return_value=_Granted(b'{"ok":true}')):
                 acc._check_ducky_ai(who)
             assert acc.ducky_ai_allowed() is True
             acc._load_blob.return_value = {**blob, "email": "b@b.co"}
             with patch.object(acc, "_check_ducky_ai"):
                 assert acc.ducky_ai_allowed() is False and acc._AI["busy"] is True
             # A website sign-in carries the permission list: the site is never asked.
-            with patch("urllib.request.urlopen", side_effect=AssertionError("no request")):
+            with patch.object(acc, "_site_urlopen", side_effect=AssertionError("no request")):
                 acc._load_blob.return_value = {**blob, "session_value": "s", "permissions": ["uefn-ducky.brain"]}
                 assert acc.ducky_ai_allowed() is True
                 acc._load_blob.return_value = {**blob, "session_value": "s", "permissions": ["uefn-ducky.app"]}
                 assert acc.ducky_ai_allowed() is False
             # Signed out: hidden, and no request goes out.
             acc._load_blob.return_value = {}
-            with patch("urllib.request.urlopen", side_effect=AssertionError("no request")):
+            with patch.object(acc, "_site_urlopen", side_effect=AssertionError("no request")):
                 assert surfaces() == hidden
     finally:
         s = PanelSettings.load()
         s.default_model, s.agent_provider, s.agent_model = before
         s.save()
+
+
+def test_mailbox_polls_reuse_one_connection() -> None:
+    """Remote access asks the site's mailbox every ~2 s all day. Each ask used to
+    open a new TCP + TLS connection (about 1,500 handshakes an hour)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    connections: list[int] = []
+    paths: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def setup(self) -> None:
+            super().setup()
+            connections.append(1)
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            paths.append(self.path)
+            body = b'{"ok":true,"payload":{"pending":false}}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    blob = {"base_url": f"http://127.0.0.1:{server.server_port}", "device_key": "dky_v1_x"}
+    try:
+        with patch.object(acc, "_load_blob", return_value=dict(blob)):
+            results = [acc._poll_desktop_rpc_once() for _ in range(30)]
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert results == [False] * 30
+    assert len(paths) == 30 and all(p.endswith("/collect/desktop-rpc-wait") for p in paths)
+    assert len(connections) == 1, f"{len(connections)} connections for 30 polls"
+
+
+def test_a_connection_the_site_closed_is_replaced_not_an_error() -> None:
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            body = b'{"ok":true,"payload":{"pending":false}}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.close_connection = True  # hang up without saying so
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    blob = {"base_url": f"http://127.0.0.1:{server.server_port}", "device_key": "dky_v1_x"}
+    try:
+        with patch.object(acc, "_load_blob", return_value=dict(blob)):
+            assert [acc._poll_desktop_rpc_once() for _ in range(5)] == [False] * 5
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":
