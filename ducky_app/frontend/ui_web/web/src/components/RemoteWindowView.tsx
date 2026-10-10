@@ -26,6 +26,7 @@ import {
   type ViewPanZoom,
 } from "./remoteWindowMath";
 import { getDirectTransport } from "../remote/directTransport";
+import { setVisibleInterval } from "../utils/visibleInterval";
 
 export { contentRect } from "./remoteWindowMath";
 
@@ -149,10 +150,10 @@ function useWindowViews(enabled: boolean): WindowViewRow[] {
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 4000);
+    const stop = setVisibleInterval(() => void load(), 4000);
     return () => {
       live = false;
-      window.clearInterval(id);
+      stop();
     };
   }, [enabled]);
   return rows;
@@ -435,8 +436,7 @@ export function RemoteWindowSelect({
     if (!isRemote()) return;
     void load();
     const ms = busy ? 800 : 2000;
-    const id = window.setInterval(() => void load(), ms);
-    return () => window.clearInterval(id);
+    return setVisibleInterval(() => void load(), ms);
   }, [busy, load]);
 
   const runUeFn = useCallback(

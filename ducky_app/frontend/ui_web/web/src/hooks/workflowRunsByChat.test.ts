@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { getBackgroundJobs, _resetBackgroundActivityForTests, upsertBackgroundJob } from "./backgroundActivity";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { applyWorkflowEvent, clearWorkflowRunHistory, hydrateWorkflowRunHistory, refreshWorkflowRuns, resetWorkflowRunsForTests, subscribeWorkflowEvents, useWorkflowRuns, useChatWorkflowRuns, dismissWorkflowRun } from "./workflowRunsByChat";
+import { applyWorkflowEvent, clearWorkflowRunHistory, hydrateWorkflowRunHistory, refreshWorkflowRuns, resetWorkflowRunsForTests, snapshotDue, subscribeWorkflowEvents, useWorkflowRuns, useChatWorkflowRuns, dismissWorkflowRun } from "./workflowRunsByChat";
 import type { PanelPushEvent } from "../types/panel";
 
 const api = vi.hoisted(() => ({ workflow_run_snapshot: vi.fn(), dismiss_workflow_run: vi.fn() }));
@@ -159,4 +159,12 @@ it("does not restore dismissed finished activity on repeated polling", async () 
   _resetBackgroundActivityForTests();
   await refreshWorkflowRuns();
   expect(getBackgroundJobs()).toEqual([]);
+});
+
+it("asks for the run snapshot each second only while a workflow runs", () => {
+  // An idle panel fetched it every second forever; runs report themselves by push.
+  expect(snapshotDue(10_000, true, 9_500)).toBe(true);
+  expect(snapshotDue(10_000, false, 9_500)).toBe(false);
+  expect(snapshotDue(24_000, false, 9_500)).toBe(false);
+  expect(snapshotDue(24_500, false, 9_500)).toBe(true);
 });

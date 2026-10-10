@@ -3,7 +3,8 @@ import { setVisibleInterval } from "../utils/visibleInterval";
 import { getApi } from "./usePanelApi";
 import { onApiReady } from "./onApiReady";
 
-const DEFAULT_POLL_MS = 1500;
+// Outside changes only (UEFN, Explorer, git); Ducky's own writes arrive as events.
+const DEFAULT_POLL_MS = 3000;
 
 /**
  * Polls per-directory fingerprints and fires when any watched folder changes on disk

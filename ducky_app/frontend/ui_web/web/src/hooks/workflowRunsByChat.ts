@@ -6,6 +6,7 @@ import { subscribePanelPush } from "./usePanelPushBus";
 import { getApi } from "./usePanelApi";
 import { getBackgroundJobs, upsertBackgroundJob } from "./backgroundActivity";
 import { workflowIdFromJobId } from "./graphActivity";
+import { setVisibleInterval } from "../utils/visibleInterval";
 
 /**
  * The workflow a chat's ducky is running, step by step, for the card above the plan.
@@ -244,6 +245,21 @@ export async function stopWorkflowRun(workflowId: string, runId = ""): Promise<v
   if (!result.stopped && !refreshed) throw new Error("Could not refresh the workflow status");
 }
 
+/** Runs report themselves by push; the snapshot only catches what a push missed. */
+const LIVE_SNAPSHOT_MS = 1000;
+const IDLE_SNAPSHOT_MS = 15000;
+let lastSnapshotAt = 0;
+
+function anyRunLive(): boolean {
+  return [...byRun.values()].some((run) => run.state === "running")
+    || getBackgroundJobs().some((job) => job.phase === "working" && !!workflowIdFromJobId(job.id));
+}
+
+/** Fetch the snapshot each second only while a run is live; idle panels asked every second forever. */
+export function snapshotDue(now: number, live: boolean, last: number): boolean {
+  return live || now - last >= IDLE_SNAPSHOT_MS;
+}
+
 function install(): void {
   if (installed) return;
   installed = true;
@@ -251,10 +267,13 @@ function install(): void {
   subscribeAgentEvents(onEvent);
   const hydrate = async () => {
     if (!listeners.size && !eventListeners.size) return;
+    const now = Date.now();
+    if (!snapshotDue(now, anyRunLive(), lastSnapshotAt)) return;
+    lastSnapshotAt = now;
     await refreshWorkflowRuns();
   };
   void hydrate();
-  window.setInterval(() => void hydrate(), 1000);
+  setVisibleInterval(() => void hydrate(), LIVE_SNAPSHOT_MS);
 }
 
 function subscribe(listener: () => void): () => void {
