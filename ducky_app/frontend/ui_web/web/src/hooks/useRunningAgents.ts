@@ -15,7 +15,7 @@ function _emit() {
   for (const l of _listeners) l();
 }
 
-function _setRunning(next: Set<string>) {
+function _setRunning(next: Set<string>, at = Date.now()) {
   if (next.size === _runningIds.size) {
     let same = true;
     for (const id of next) {
@@ -28,7 +28,7 @@ function _setRunning(next: Set<string>) {
   }
   const prev = _runningIds;
   _runningIds = next;
-  syncChatTurnTimersFromRunningSet(prev, next);
+  syncChatTurnTimersFromRunningSet(prev, next, at);
   _emit();
 }
 
@@ -44,13 +44,13 @@ function _applyEvent(event: AgentEvent) {
     if (has) return;
     const next = new Set(_runningIds);
     next.add(convId);
-    _setRunning(next);
+    _setRunning(next, event.received_at ?? Date.now());
     return;
   }
   if (!has) return;
   const next = new Set(_runningIds);
   next.delete(convId);
-  _setRunning(next);
+  _setRunning(next, event.received_at ?? Date.now());
 }
 
 async function _syncFromApi() {

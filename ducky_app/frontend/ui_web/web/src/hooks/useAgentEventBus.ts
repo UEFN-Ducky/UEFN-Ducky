@@ -152,7 +152,9 @@ function startHttpEventPoll() {
         if (Array.isArray(body.events)) {
           for (const [index, raw] of body.events.entries()) {
             // Turns that ended before this page loaded must not look like live runs.
-            const event = index < history ? { ...raw, replayed: true } : raw;
+            // Live ones carry their arrival time: a minimized window delivers them later
+            // in one batch, and the turn clock read their start and stop as "Took 0ms".
+            const event = index < history ? { ...raw, replayed: true } : { ...raw, received_at: Date.now() };
             const kind = String(event?.type || "");
             if (remoteGoneIsLive(catchUpDone, kind) && window.parent !== window) {
               window.parent.postMessage({ type: "ud-remote-gone" }, "*");
@@ -191,7 +193,8 @@ export function installAgentEventBus() {
   // `events` DataChannel; there is no panel server on this origin to poll.
   const direct = getDirectTransport();
   if (direct) {
-    direct.onEvent((event) => {
+    direct.onEvent((arrived) => {
+      const event = { ...arrived, received_at: Date.now() };
       const kind = String(event?.type || "");
       if (PANEL_PUSH_TYPES.has(kind)) {
         try {

@@ -1937,6 +1937,8 @@ export interface AgentEvent {
   run_id?: string;
   /** Already in the server backlog when this page loaded: history, not a live run. */
   replayed?: boolean;
+  /** When this page received it (ms). Delivery can lag while the window is minimized. */
+  received_at?: number;
   /** On an error event: true when the backend kept the partial reasoning/answer. */
   kept_partial?: boolean;
   reason?: "cancelled" | "done" | "error" | string;
