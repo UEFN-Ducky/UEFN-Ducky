@@ -34,21 +34,36 @@ def test_a_quiet_team_with_open_work_wakes_its_coordinator() -> None:
     assert "4 open steps" in woke[0][1] and "2 minutes" in woke[0][1]
 
 
-def test_wakes_that_start_no_work_back_off_and_real_work_resets_it() -> None:
+def test_wakes_that_start_no_work_back_off_then_park_and_real_work_resets_it() -> None:
     woke: list[tuple[str, str]] = []
     times = []
-    for minute in range(0, 33):
+    for minute in range(0, 240):
         if _run(minute * MIN, [], woke):
             times.append(minute)
-    assert times == [2, 4, 8, 16, 32]  # waits 2, 4, 8, 16 minutes
-    # The coordinator answering a wake on its own is not progress: the backoff holds.
-    _run(33 * MIN, ["coord"], woke)
-    assert _run(63 * MIN, [], woke) == []
-    assert _run(64 * MIN, [], woke) == ["coord"]
+    # Waits 2, then 4 minutes; three wakes that moved nothing park it (no hourly wakes
+    # forever for a plan whose last open step is the user's).
+    assert times == [2, 4, 8]
+    # The coordinator answering on its own is not progress: it stays parked.
+    _run(240 * MIN, ["coord"], woke)
+    assert _run(300 * MIN, [], woke) == []
     # A member working is progress: the next wake is 2 quiet minutes away again.
-    _run(65 * MIN, ["builder"], woke)
-    assert _run(66 * MIN, [], woke) == []
-    assert _run(67 * MIN, [], woke) == ["coord"]
+    _run(301 * MIN, ["builder"], woke)
+    assert _run(302 * MIN, [], woke) == []
+    assert _run(303 * MIN, [], woke) == ["coord"]
+
+
+def test_a_step_that_moves_unparks_the_keeper() -> None:
+    woke: list[tuple[str, str]] = []
+    plan = {**PLAN, "nodes": [{"id": "s1", "content": "Build", "status": "in_progress"}, {"id": "s2", "content": "Ship", "status": "pending"}]}
+    times = [m for m in range(0, 120) if _run(m * MIN, [], woke, plans=[plan])]
+    assert times == [2, 4, 8]
+    # The user ticks a step (or hands it to someone): the team has news, so it wakes again.
+    moved = {**plan, "nodes": [{"id": "s1", "content": "Build", "status": "completed"}, {"id": "s2", "content": "Ship", "status": "pending"}]}
+    assert _run(120 * MIN, [], woke, plans=[moved]) == ["coord"]
+    # A note alone is not a move.
+    noted = {**moved, "nodes": [{"id": "s1", "content": "Build", "status": "completed", "body_markdown": "x"}, {"id": "s2", "content": "Ship", "status": "pending"}]}
+    later = [m for m in range(121, 240) if _run(m * MIN, [], woke, plans=[noted])]
+    assert later == [122, 126]  # 2 and 4 minutes on, then parked again
 
 
 def test_any_running_agent_keeps_the_keeper_quiet() -> None:

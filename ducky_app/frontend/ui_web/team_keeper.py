@@ -5,7 +5,10 @@ reply on the way, or the AI account ran out of credits, the whole team stopped u
 person noticed and nudged it. The keeper is that nudge, inside Ducky.
 
 A plan is kept going while it has started, is not paused or finished, still has open
-steps, and its chat leads a group. Pausing the plan stops the keeper for it.
+steps, and its chat leads a group. Pausing the plan stops the keeper for it. Three wakes
+in a row that move nothing (no member works, no step changes status or owner) park it
+until something does: a plan waiting on the user's own step was woken every hour, and
+each wake re-read the coordinator's whole thread.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from typing import Any, Callable
 _TICK_S = 60.0
 _IDLE_S = 120.0  # nobody running this long before a wake
 _MAX_WAIT_S = 3600.0  # wakes that start no work back off up to this
+_PARK_AFTER = 3  # wakes in a row that moved nothing: wait for a change instead
 
 WAKE_TEXT = (
     "[Ducky keeper] Your team has had no agent running for {minutes} minutes and the plan "
@@ -29,8 +33,8 @@ WAKE_TEXT = (
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 _stop = threading.Event()
-# coordinator chat id -> {"quiet_since": t, "wakes": n, "next_wake": t}
-_teams: dict[str, dict[str, float]] = {}
+# coordinator chat id -> {"quiet_since": t, "wakes": n, "next_wake": t, "moves": plan fingerprint}
+_teams: dict[str, dict[str, Any]] = {}
 
 
 def _open_steps(plan: dict[str, Any]) -> int:
@@ -41,6 +45,18 @@ def _open_steps(plan: dict[str, Any]) -> int:
 def _started(plan: dict[str, Any]) -> bool:
     prog = plan.get("progress") or {}
     return int(prog.get("completed") or 0) + int(prog.get("in_progress") or 0) > 0
+
+
+def _moves(plan: dict[str, Any]) -> str:
+    """What counts as the plan moving: the plan's status and each step's status and owner."""
+    parts = [str(plan.get("status") or "")]
+    stack = list(plan.get("nodes") or [])
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            parts.append(f"{node.get('id')}:{node.get('status')}:{node.get('assignee') or ''}")
+            stack.extend(node.get("children") or [])
+    return "|".join(sorted(parts))
 
 
 def _team_leaders(project_root: str | None) -> set[str]:
@@ -141,6 +157,13 @@ def tick(
                 if team_busy - {cid}:
                     st["wakes"] = 0.0  # the team is working again: drop the backoff
                     st["next_wake"] = 0.0
+                continue
+            moves = _moves(plan)
+            if st.get("moves") != moves:
+                st["moves"] = moves
+                st["wakes"] = 0.0  # a step moved: the next quiet spell wakes it again
+                st["next_wake"] = 0.0
+            if st["wakes"] >= _PARK_AFTER:
                 continue
             if automatic_work_blocked(cid) or now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
                 continue
