@@ -221,6 +221,7 @@ export function ChoiceDropdown(props: ChoiceDropdownProps) {
           ref={menuRef}
           id={listId + "-dialog"}
           role="dialog"
+          data-dropdown-keep
           aria-label={ariaLabel || "Options"}
           onPointerDown={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}

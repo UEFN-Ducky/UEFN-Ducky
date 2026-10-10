@@ -72,6 +72,7 @@ export function TerminalHeaderDropdown({
       const target = e.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-dropdown-keep]")) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
