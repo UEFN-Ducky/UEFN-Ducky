@@ -123,6 +123,72 @@ def test_window_unavailable_never_creates_local_terminal(forwarded, monkeypatch)
     assert result["ok"] is False and "window terminal unavailable" in result["error"]
 
 
+def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
+    """Agents that call ducky_terminal_open every turn stacked a new shell each time
+    (a 60-80 MB PowerShell, a conhost and a socket bridge) until the tabs were closed."""
+    from frontend.ui_web.terminal import manager as manager_mod
+
+    spawned = []
+
+    class FakeSession:
+        def __init__(self, *, shell, cwd, title="", hidden=False, spawn_argv=None, env_extra=None):
+            self.id = f"t{len(spawned) + 1}"
+            self.shell, self.cwd, self.title, self.hidden = shell, cwd, title or shell, hidden
+            self.port, self.ws_url, self._exit_code = 0, "", None
+            self.alive, self.running = True, False
+
+        def spawn(self):
+            spawned.append(self)
+
+        def is_alive(self):
+            return self.alive
+
+        def has_running_command(self):
+            return self.running
+
+        def to_dict(self):
+            return {"session_id": self.id, "shell": self.shell, "cwd": self.cwd, "alive": self.alive}
+
+    class FakeBridge:
+        port, ws_url = 1, "ws://127.0.0.1:1"
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(manager_mod, "TerminalSession", FakeSession)
+    monkeypatch.setattr(manager_mod, "TerminalBridge", FakeBridge)
+    mgr, events, chat = TerminalManager(), [], ["chat-1"]
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
+    monkeypatch.setattr(agent_modes, "get_panel_push", lambda: events.append)
+    monkeypatch.setattr(tools, "tool_json", lambda value, **kw: json.dumps(value))
+    monkeypatch.setattr(tools, "_terminal_chat", lambda conv: chat[0])
+
+    def open_id(shell="powershell", cwd=str(tmp_path)):
+        out = json.loads(tools.ducky_terminal_open(shell=shell, cwd=cwd))
+        assert out["ok"], out
+        return out["session_id"]
+
+    assert {open_id() for _ in range(5)} == {"t1"}
+    assert len(spawned) == 1
+    assert [e["type"] for e in events] == ["terminal_open"] * 5  # each call still shows the tab
+    # Busy, dead, another shell, folder or chat: a new terminal, as before.
+    spawned[0].running = True
+    assert open_id() == "t2"
+    spawned[1].alive = False
+    assert open_id() == "t3"
+    assert open_id(shell="bash") == "t4"
+    assert open_id(cwd=str(tmp_path.parent)) == "t5"
+    chat[0] = "chat-2"
+    assert open_id() == "t6"
+    assert len(mgr._sessions) == 6
+
+
 def test_window_process_uses_local_manager(forwarded, monkeypatch):
     push = Mock()
     monkeypatch.setattr(agent_modes, "get_panel_push", lambda: push)

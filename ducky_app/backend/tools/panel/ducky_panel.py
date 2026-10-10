@@ -1746,9 +1746,15 @@ def ducky_terminal_open(
     conv_id: str = "",
     pretty: bool = False,
 ) -> str:
-    """Open a visible integrated terminal tab (bash or powershell) in the Ducky panel."""
+    """Open a visible integrated terminal tab (bash or powershell) in the Ducky panel.
+
+    In a chat, an idle terminal it already opened with the same shell and folder is
+    shown again instead of a new one (the result says reused=true)."""
     mgr = _terminal_manager()
-    result = mgr.spawn(shell=shell, cwd=cwd or None, title=title, push_open=True, conv_id=_terminal_chat(conv_id))
+    result = mgr.spawn(
+        shell=shell, cwd=cwd or None, title=title, push_open=True,
+        conv_id=_terminal_chat(conv_id), reuse_idle=True,
+    )
     return tool_json(result, pretty=pretty)
 
 

@@ -939,12 +939,14 @@ class PanelApiWindowMixin:
         title: str = "",
         push_open: bool = False,
         conv_id: str = "",
+        reuse_idle: bool = False,
     ) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 
         workdir = _pa._normalize_project_path(cwd) if cwd.strip() else ""
         return get_terminal_manager().spawn(
-            shell=shell, cwd=workdir or None, title=title, push_open=push_open, conv_id=conv_id
+            shell=shell, cwd=workdir or None, title=title, push_open=push_open, conv_id=conv_id,
+            reuse_idle=reuse_idle,
         )
 
     def terminal_kill(self, session_id: str) -> dict[str, Any]:

@@ -52,13 +52,30 @@ class TerminalManager:
         command: list[str] | None = None,
         env_extra: dict[str, str] | None = None,
         activate: bool = True,
+        reuse_idle: bool = False,
     ) -> dict[str, Any]:
+        """``reuse_idle``: hand back this chat's idle live terminal with the same shell
+        and folder instead of a new one. Agents that open a terminal every turn used
+        to stack a shell, a conhost and a socket bridge per call."""
         shell_norm = shell_label(shell)
         workdir = (cwd or _default_cwd()).strip() or "."
         if not os.path.isdir(workdir):
             workdir = os.getcwd()
         argv = [str(a) for a in command] if command else None
         extra = {str(k): str(v) for k, v in (env_extra or {}).items() if k} or None
+        reuse_key = (conv_id, shell_norm, workdir) if conv_id and not argv and not hidden and not extra else None
+        if reuse_idle and reuse_key is not None:
+            idle = self._idle_session(reuse_key)
+            if idle is not None:
+                if push_open:
+                    self._emit_open(idle, conv_id, activate)
+                return {
+                    "ok": True,
+                    **idle.to_dict(),
+                    "tab_id": f"terminal:{idle.id}",
+                    "shell_fallback": False,
+                    "reused": True,
+                }
         entry: _SessionEntry | None = None
         with self._lock:
             session = TerminalSession(
@@ -107,7 +124,7 @@ class TerminalManager:
                 else:
                     bridge.stop()
                     return {"ok": False, "error": str(exc)}
-            entry = _SessionEntry(session=session, bridge=bridge)
+            entry = _SessionEntry(session=session, bridge=bridge, reuse_key=reuse_key)
             self._sessions[session.id] = entry
 
         result = {
@@ -117,19 +134,30 @@ class TerminalManager:
             "shell_fallback": shell_fallback,
         }
         if push_open and not session.hidden:
-            self._emit(
-                {
-                    "type": "terminal_open",
-                    "session_id": session.id,
-                    "shell": session.shell,
-                    "title": session.title,
-                    "cwd": session.cwd,
-                    "ws_url": session.ws_url,
-                    "conv_id": conv_id,
-                    "activate": bool(activate),
-                }
-            )
+            self._emit_open(session, conv_id, activate)
         return result
+
+    def _idle_session(self, reuse_key: tuple[str, str, str]) -> TerminalSession | None:
+        with self._lock:
+            candidates = [e.session for e in self._sessions.values() if e.reuse_key == reuse_key]
+        for session in candidates:
+            if session.is_alive() and not session.has_running_command():
+                return session
+        return None
+
+    def _emit_open(self, session: TerminalSession, conv_id: str, activate: bool) -> None:
+        self._emit(
+            {
+                "type": "terminal_open",
+                "session_id": session.id,
+                "shell": session.shell,
+                "title": session.title,
+                "cwd": session.cwd,
+                "ws_url": session.ws_url,
+                "conv_id": conv_id,
+                "activate": bool(activate),
+            }
+        )
 
     def busy_state(self, session_id: str) -> dict[str, Any]:
         """Whether a command (agent or user-typed) is running in the session."""
@@ -415,11 +443,19 @@ class TerminalManager:
 
 
 class _SessionEntry:
-    __slots__ = ("session", "bridge")
+    __slots__ = ("session", "bridge", "reuse_key")
 
-    def __init__(self, *, session: TerminalSession, bridge: TerminalBridge) -> None:
+    def __init__(
+        self,
+        *,
+        session: TerminalSession,
+        bridge: TerminalBridge,
+        reuse_key: tuple[str, str, str] | None = None,
+    ) -> None:
         self.session = session
         self.bridge = bridge
+        # (chat, shell asked for, folder): an agent opening the same again gets this one.
+        self.reuse_key = reuse_key
 
 
 def get_terminal_manager() -> TerminalManager:
