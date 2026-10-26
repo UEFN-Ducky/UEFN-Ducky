@@ -94,12 +94,14 @@ async function dispatch(method: string, params: Record<string, unknown>, request
       return await asGuidedUi(() => runAgentWalkthrough(params.steps));
     }
     if (method === "open_plugin_panel") {
-      // ducky_plugin_test opens each panel of the plugin it tests.
+      // ducky_plugin_test opens each panel of the plugin it tests; background: an agent's
+      // plugin work (the Browser) loads the tab hidden behind the person's tab.
       const pluginId = String(params.plugin_id ?? "");
       const panelId = String(params.panel_id ?? "");
       if (!pluginId || !panelId) return { error: "plugin_id and panel_id required" };
-      requestOpenPluginUiTab(pluginId, panelId, String(params.title ?? "") || undefined);
-      return { ok: true, tab: `plugin:${pluginId}:${panelId}` };
+      const background = params.background === true;
+      requestOpenPluginUiTab(pluginId, panelId, String(params.title ?? "") || undefined, { background });
+      return { ok: true, tab: `plugin:${pluginId}:${panelId}`, background };
     }
     if (method === "ask_user") {
       const rawIds = params.group_ids;

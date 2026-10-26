@@ -1,6 +1,7 @@
 export { PluginWebviewPane } from "./PluginWebviewPane";
 export type { PluginChatOverlayProps } from "./PluginWebviewPane";
-export { registerOpenPluginUiTab, requestOpenPluginUiTab } from "./openPluginUiTab";
+export { markBackgroundMount, registerOpenPluginUiTab, requestOpenPluginUiTab } from "./openPluginUiTab";
+export type { OpenPluginUiTabOptions } from "./openPluginUiTab";
 export {
   pluginUiTabId,
   pluginUiInstanceTabId,

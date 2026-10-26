@@ -26,6 +26,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,10 @@ class _Pane:
     visible: bool = True
     # Coalesce bounds floods: only one UI-thread apply in flight at a time.
     apply_queued: bool = False
+    # An agent works in this pane while its tab is off screen: until this time.monotonic()
+    # it draws under Ducky's own page (render_behind), at its last on-screen pixel size.
+    behind_until: float = 0.0
+    last_size: tuple[int, int] = (0, 0)
     # Keep delegate refs alive for the lifetime of the control (pythonnet GC).
     _handlers: list[Any] = field(default_factory=list)
 
@@ -905,11 +910,29 @@ def _apply_bounds(pane: _Pane) -> None:
         control.Anchor = AnchorStyles.Top | AnchorStyles.Left
         control.Location = Point(int(round(ox + x * sx)), int(round(oy + y * sy)))
         control.Size = Size(max(int(round(w * sx)), 1), max(int(round(h * sy)), 1))
-        control.Visible = bool(pane.visible and w > 2 and h > 2)
+        shown = bool(pane.visible and w > 2 and h > 2)
+        behind = not shown and pane.behind_until > time.monotonic()
+        if shown:
+            pane.last_size = (int(control.Size.Width), int(control.Size.Height))
+        elif behind:
+            # A hidden view stops drawing (scripts wait, video pauses, no pictures): an agent's
+            # pane draws full size under Ducky's own page instead, never on top or focused.
+            bw, bh = pane.last_size
+            if min(bw, bh) <= 2:
+                bw, bh = (int(host.ClientSize.Width), int(host.ClientSize.Height)) if host is not None else (1280, 800)
+            control.Location = Point(ox, oy)
+            control.Size = Size(max(bw, 320), max(bh, 240))
+        control.Visible = shown or behind
         from frontend.ui_web.webview_memory import update_control
 
         update_control(control, active=bool(control.Visible and form.Visible) and str(form.WindowState) != "Minimized")
-        if control.Visible:
+        if behind:
+            try:
+                form.Controls.SetChildIndex(control, form.Controls.Count - 1)
+            except Exception:
+                pass
+            control.SendToBack()
+        elif control.Visible:
             try:
                 # Sibling of the app WebView2 — must stay above it or content is black.
                 form.Controls.SetChildIndex(control, 0)
@@ -1307,6 +1330,24 @@ def set_bounds(
     pane.apply_queued = True
     _ui(pane.window, lambda: _apply_bounds(pane))
     return {"ok": True}
+
+
+def render_behind(pane_id: str, seconds: float = 60.0) -> dict[str, Any]:
+    """Keep a pane drawing for *seconds* while its tab is off screen, for an agent that reads,
+    clicks or takes a picture of it: under Ducky's own page, so nothing moves for the person.
+    A pane on screen stays as it is. Calls extend the time; it hides again after."""
+    with _lock:
+        pane = _panes.get((pane_id or "").strip())
+    if pane is None:
+        return {"ok": False, "error": "pane not open"}
+    wait = max(1.0, min(float(seconds or 0.0), 600.0))
+    pane.behind_until = max(pane.behind_until, time.monotonic() + wait)
+    if pane.window is not None:
+        _ui(pane.window, lambda: _apply_bounds(pane))
+        timer = threading.Timer(wait + 0.5, lambda: _ui(pane.window, lambda: _apply_bounds(pane)))
+        timer.daemon = True
+        timer.start()
+    return {"ok": True, "on_screen": bool(pane.visible and pane.css_bounds[2] > 2)}
 
 
 def navigate(pane_id: str, url: str) -> dict[str, Any]:

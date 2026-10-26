@@ -41,6 +41,39 @@ function readPluginPrefs(pluginId: string): Record<string, unknown> {
   }
 }
 
+/** One write at a time per plugin, so two quick saves never drop each other's key. */
+const prefWrites = new Map<string, Promise<void>>();
+
+/** Save one key into the app's copy of the plugin's prefs. Ducky writes some keys itself
+ * (the Browser's agentSites, from the person's answer in a chat): sending the page's whole
+ * local copy wiped them on its next save (every page the Browser loaded). */
+function savePrefOnDisk(pluginId: string, id: string, value: unknown): void {
+  const api = getApi();
+  if (!api?.plugin_prefs_set) return;
+  const run = (prefWrites.get(pluginId) ?? Promise.resolve()).then(async () => {
+    let disk: Record<string, unknown> | null = null;
+    try {
+      const all = await api.plugin_prefs_get_all?.();
+      if (all?.ok) disk = { ...(all.prefs?.[pluginId] ?? {}) };
+    } catch {
+      /* fall back to the page's copy */
+    }
+    const slot = disk ?? readPluginPrefs(pluginId);
+    if (value === undefined) delete slot[id];
+    else slot[id] = value;
+    await api.plugin_prefs_set!(pluginId, slot).catch(() => undefined);
+    if (!disk) return;
+    try {  // the page's copy catches up with what Ducky wrote
+      const raw = localStorage.getItem(pluginPrefsKey());
+      const all = raw ? (JSON.parse(raw) as Record<string, Record<string, unknown>>) : {};
+      localStorage.setItem(pluginPrefsKey(), JSON.stringify({ ...all, [pluginId]: slot }));
+    } catch {
+      /* the next hydrate brings it */
+    }
+  });
+  prefWrites.set(pluginId, run.catch(() => undefined));
+}
+
 function writePluginPref(pluginId: string, id: string, value: unknown): void {
   try {
     const key = pluginPrefsKey();
@@ -61,10 +94,7 @@ function writePluginPref(pluginId: string, id: string, value: unknown): void {
     }
     const next = { ...base, [pluginId]: slot };
     localStorage.setItem(key, JSON.stringify(next));
-    const api = getApi();
-    if (api?.plugin_prefs_set) {
-      void api.plugin_prefs_set(pluginId, slot).catch(() => undefined);
-    }
+    savePrefOnDisk(pluginId, id, slot[id]);
     window.dispatchEvent(
       new CustomEvent("uefn-plugin-prefs", { detail: { pluginId } }),
     );

@@ -133,6 +133,22 @@ export function openOrFocusTab(tabId: string, openLocally: () => void): Promise<
   return run;
 }
 
+/** An agent's open: add the tab here without showing it, and do nothing when it is already
+ *  open in this or another window. The person stays on the tab they are on. */
+export async function openInBackground(tabId: string, openLocally: () => void): Promise<void> {
+  if (localOpenTabIds.has(tabId)) return;
+  try {
+    const owner = await Promise.race([
+      getApi()?.get_tab_owner?.(tabId) ?? Promise.resolve(""),
+      new Promise<string>((resolve) => setTimeout(() => resolve(""), FOCUS_LOOKUP_TIMEOUT_MS)),
+    ]);
+    if (owner && owner !== WINDOW_ID) return;
+  } catch {
+    /* open it here */
+  }
+  openLocally();
+}
+
 async function focusElsewhereOrOpen(tabId: string, openLocally: () => void): Promise<void> {
   const api = getApi();
   if (api) {

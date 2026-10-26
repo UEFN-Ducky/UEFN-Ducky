@@ -331,3 +331,66 @@ def test_devtools_refuses_sites_the_person_uses(monkeypatch) -> None:
         assert not bo.script_allowed(f"http://127.0.0.1:{PANEL_UI_HTTP_PORT}/")  # never Ducky's own UI
     finally:
         bo._panes.pop("ev", None)
+
+
+def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> None:
+    """An agent's pane whose tab is off screen draws full size under Ducky's own page, never on
+    top and never focused, and hides again when its time is up."""
+    import sys
+    import types
+    from types import SimpleNamespace
+
+    import frontend.ui_web.browser_overlay as bo
+
+    drawing = types.ModuleType("System.Drawing")
+    drawing.Point = lambda x, y: (x, y)
+    drawing.Size = lambda w, h: SimpleNamespace(Width=w, Height=h)
+    forms = types.ModuleType("System.Windows.Forms")
+    forms.AnchorStyles = SimpleNamespace(Top=1, Left=4)
+    for name, module in {"System": types.ModuleType("System"), "System.Drawing": drawing,
+                         "System.Windows": types.ModuleType("System.Windows"), "System.Windows.Forms": forms}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    timers: list[float] = []
+    monkeypatch.setattr(bo.threading, "Timer", lambda s, fn: SimpleNamespace(daemon=True, start=lambda: timers.append(s)))
+
+    class _Control:
+        def __init__(self) -> None:
+            self.Visible = False
+            self.Size = SimpleNamespace(Width=1, Height=1)
+            self.Location = (0, 0)
+            self.calls: list[str] = []
+
+        def Focus(self) -> None:
+            self.calls.append("focus")
+
+        def BringToFront(self) -> None:
+            self.calls.append("front")
+
+        def SendToBack(self) -> None:
+            self.calls.append("back")
+
+    class _Controls(list):
+        def SetChildIndex(self, control: object, index: int) -> None:
+            pass
+
+    control = _Control()
+    host = SimpleNamespace(ClientSize=SimpleNamespace(Width=1600, Height=900), Left=0, Top=0)
+    form = SimpleNamespace(webview=host, Visible=True, WindowState="Normal", Controls=_Controls([host, control]))
+    pane = bo._Pane(pane_id="p", window=SimpleNamespace(native=form), control=control, ready=True)
+    pane.visible, pane.css_bounds, pane.last_size = False, (0.0, 0.0, 0.0, 0.0), (1200, 700)
+    bo._panes["p"] = pane
+    try:
+        assert bo.render_behind("p", 30)["on_screen"] is False
+        assert control.Visible is True and (control.Size.Width, control.Size.Height) == (1200, 700)
+        assert control.calls == ["back"] and timers == [30.5]
+
+        pane.behind_until = 0.0  # time is up: hidden again
+        bo._apply_bounds(pane)
+        assert control.Visible is False and "focus" not in control.calls
+
+        pane.visible, pane.css_bounds, pane.css_viewport = True, (10.0, 10.0, 800.0, 600.0), (1600.0, 900.0)
+        bo._apply_bounds(pane)  # the person shows the tab: on top as before
+        assert control.Visible is True and control.calls[-2:] == ["front", "focus"] and pane.last_size == (800, 600)
+        assert bo.render_behind("missing")["ok"] is False
+    finally:
+        bo._panes.pop("p", None)

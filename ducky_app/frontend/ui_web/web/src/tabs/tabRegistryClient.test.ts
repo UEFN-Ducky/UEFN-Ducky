@@ -19,7 +19,7 @@ vi.mock("../hooks/useAgentEventBus", () => ({
 }));
 vi.mock("../utils/visibleInterval", () => ({ setVisibleInterval: () => () => {} }));
 
-const { openOrFocusTab, reportOpenTabs, reportOpenTabsNow, installTabRegistryListener } = await import("./tabRegistryClient");
+const { openInBackground, openOrFocusTab, reportOpenTabs, reportOpenTabsNow, installTabRegistryListener } = await import("./tabRegistryClient");
 
 beforeEach(() => {
   focusTab.mockReset();
@@ -108,4 +108,19 @@ it("opens locally when the registry lookup stalls instead of wedging later opens
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("an agent's background open never focuses anything and skips a tab open in any window", async () => {
+  const open = vi.fn();
+  reportOpenTabsNow(["plugin:browser:browser"]);
+  await openInBackground("plugin:browser:browser", open);
+  expect(open).not.toHaveBeenCalled();
+  reportOpenTabsNow([]);
+  getTabOwner.mockResolvedValue("focus-1");
+  await openInBackground("plugin:browser:browser", open);
+  expect(open).not.toHaveBeenCalled();
+  getTabOwner.mockResolvedValue("");
+  await openInBackground("plugin:browser:browser", open);
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(focusTab).not.toHaveBeenCalled();
 });

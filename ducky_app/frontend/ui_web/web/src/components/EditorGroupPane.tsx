@@ -11,6 +11,7 @@ import { ProviderUsageReport } from "./usage/ProviderUsageReport";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { SettingsView } from "../views/SettingsView";
 import { PluginWebviewPane } from "../plugin-ui";
+import { backgroundMountVersion, subscribeBackgroundMounts, wantsBackgroundMount } from "../plugin-ui/openPluginUiTab";
 import { DucktactoeChatShell } from "../plugin-ui/DucktactoeChatShell";
 import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
 import { VerseTranslatedPane } from "./VerseTranslatedPane";
@@ -243,15 +244,17 @@ export const EditorGroupPane = memo(function EditorGroupPane({
   // Keep only visited, still-open chats and plugin panels alive. Restored tabs load
   // on first use, and closing a tab (or moving it to another window) releases its
   // pane, observers, rendered history, or plugin iframe.
+  // A plugin tab an agent opened in the background is loaded hidden too, so its panel runs.
   const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<string>>(() => new Set());
+  const mountVersion = useSyncExternalStore(subscribeBackgroundMounts, backgroundMountVersion);
   useEffect(() => {
     setVisitedTabs((previous) => {
       const next = new Set(groupTabs
-        .filter((tab) => keepsAlive(tab) && (tab.id === group.activeTabId || previous.has(tab.id)))
+        .filter((tab) => keepsAlive(tab) && (tab.id === group.activeTabId || previous.has(tab.id) || wantsBackgroundMount(tab.id)))
         .map((tab) => tab.id));
       return next.size === previous.size && [...next].every((id) => previous.has(id)) ? previous : next;
     });
-  }, [groupTabs, group.activeTabId]);
+  }, [groupTabs, group.activeTabId, mountVersion]);
 
   const renderContent = (activeTab: EditorTab | undefined, visible = true) => {
     if (!activeTab) {

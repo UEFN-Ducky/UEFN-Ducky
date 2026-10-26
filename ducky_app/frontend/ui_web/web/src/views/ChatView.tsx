@@ -76,7 +76,9 @@ import { isEnglishLang } from "./settings/translationLanguages";
 import {
   clearBrowserPaneBounds,
   clearBoundDucktactoeChat,
+  markBackgroundMount,
   orphanedPluginTabs,
+  type OpenPluginUiTabOptions,
   parsePluginUiTabId,
   pluginUiInstanceTabId,
   registerOpenPluginUiTab,
@@ -86,7 +88,7 @@ import {
 } from "../plugin-ui";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { usePluginContributions } from "../hooks/usePluginContributions";
-import { installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openOrFocusTab, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
+import { installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openInBackground, openOrFocusTab, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
 import { useAppearance } from "../theme/AppearanceContext";
 import { setExternalTabDropHandler } from "../utils/editorTabDrag";
 import { DEFAULT_TERMINAL_SHELL, type TerminalShell } from "../terminal/types";
@@ -409,7 +411,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
 
   const pluginContrib = usePluginContributions();
   const openPluginUiTab = useCallback(
-    (pluginId: string, panelId: string, title?: string) => {
+    (pluginId: string, panelId: string, title?: string, options?: OpenPluginUiTabOptions) => {
       // Duck-Tac-Toe: open the branded chat (board lives as an aside inside chat).
       if (
         pluginId.trim().toLowerCase() === "ducktactoe" &&
@@ -427,6 +429,12 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
         (p) => p.plugin_id === pluginId && p.id === panelId,
       );
       const name = title || panel?.title || panelId;
+      if (options?.background) {
+        // An agent's open: loaded hidden behind the person's tab (or already open somewhere).
+        markBackgroundMount(id);
+        void openInBackground(id, () => openTab({ id, kind: "plugin", name }, { activate: false }));
+        return;
+      }
       void openOrFocusTab(id, () =>
         openTab({ id, kind: "plugin", name }, { activate: true }),
       );
