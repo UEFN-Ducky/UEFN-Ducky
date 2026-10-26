@@ -3,8 +3,10 @@
 Enabled servers from ducky.db are proxied as ``prefix__tool`` on the shared
 ``uefn-ducky`` server so Cursor/Claude only need one MCP connection.
 
-A server row with ``on_demand: true`` is not listed: its tools stay findable via
-``ducky_get_tools`` and callable via ``ducky_call_tool`` (both reach the pool directly).
+Nested servers are on demand unless their row says ``on_demand: false`` (Epic's
+``unreal__*`` is always listed): their tools stay findable via ``ducky_get_tools`` and
+callable via ``ducky_call_tool`` (both reach the pool directly). Listing them all sent
+every schema to every agent, and Codex refuses a server whose tools/list passes 2048.
 """
 
 from __future__ import annotations
@@ -64,15 +66,20 @@ def _remove_proxy_tool(name: str) -> None:
 
 
 def on_demand_server_ids() -> set[str]:
-    """Enabled nested servers whose row says ``on_demand: true``."""
+    """Nested servers left out of tools/list: all but Epic and rows with ``on_demand: false``."""
+    from backend.mcp_plugins.epic import EPIC_MCP_SERVER_ID
     from backend.mcp_plugins.store import load_mcp_config
 
     servers = load_mcp_config().get("mcpServers") or {}
-    return {sid for sid, block in servers.items() if isinstance(block, dict) and block.get("on_demand") is True}
+    return {
+        sid
+        for sid, block in servers.items()
+        if isinstance(block, dict) and sid != EPIC_MCP_SERVER_ID and block.get("on_demand") is not False
+    }
 
 
 def set_server_on_demand(server_id: str, on_demand: bool) -> dict[str, Any]:
-    """Server setting: list this server's tools (False, default) or keep them on demand."""
+    """Server setting: list this server's tools (False) or keep them on demand (True, default)."""
     from backend.mcp_plugins.store import load_mcp_config, normalize_server_id, save_mcp_config
 
     sid = normalize_server_id(server_id)
@@ -81,9 +88,9 @@ def set_server_on_demand(server_id: str, on_demand: bool) -> dict[str, Any]:
     if not isinstance(block, dict):
         return {"ok": False, "error": f"unknown MCP server: {sid}"}
     if on_demand:
-        block["on_demand"] = True
-    else:
         block.pop("on_demand", None)
+    else:
+        block["on_demand"] = False
     save_mcp_config(cfg)
     schedule_sync_nested_proxies()
     return {"ok": True, "server_id": sid, "on_demand": bool(on_demand)}

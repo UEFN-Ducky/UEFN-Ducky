@@ -103,6 +103,18 @@ def test_on_demand_server_is_not_listed_but_still_callable(monkeypatch):
     pool.call_tool.assert_awaited_with("site__ops_health", {})
 
 
+def test_nested_servers_on_demand_by_default_except_epic(monkeypatch):
+    cfg = {"mcpServers": {"unreal-mcp": {}, "site": {}, "pinned": {"on_demand": False}, "old": {"on_demand": True}}}
+    monkeypatch.setattr("backend.mcp_plugins.store.load_mcp_config", lambda: cfg)
+    monkeypatch.setattr("backend.mcp_plugins.store.save_mcp_config", lambda c: None)
+    monkeypatch.setattr(bridge_proxy, "schedule_sync_nested_proxies", lambda: None)
+    assert bridge_proxy.on_demand_server_ids() == {"site", "old"}
+    bridge_proxy.set_server_on_demand("site", False)
+    assert bridge_proxy.on_demand_server_ids() == {"old"}
+    bridge_proxy.set_server_on_demand("pinned", True)
+    assert bridge_proxy.on_demand_server_ids() == {"old", "pinned"}
+
+
 def test_real_proxy_availability_updates_preserve_annotations(monkeypatch):
     from mcp.server.fastmcp import FastMCP
     from mcp.types import Tool, ToolAnnotations
