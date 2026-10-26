@@ -8,7 +8,7 @@ def test_instructions_are_a_short_pointer():
     text = mcp.instructions or ""
     assert len(text) < 600
     assert "UEFN Ducky" in text
-    assert "Store plugins" in text
+    assert "Store-plugin tools" in text and "ducky_call_tool" in text  # not listed: found and run through Ducky
     assert "pretty=false" in text
 
 
