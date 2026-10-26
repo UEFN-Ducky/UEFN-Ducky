@@ -39,7 +39,7 @@ class ToolCallResult:
             payload["error"] = self.error
             if self.hint:
                 payload["hint"] = self.hint
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _with_plan_tick_nudge(name: str, result: ToolCallResult) -> ToolCallResult:
@@ -500,14 +500,14 @@ def compact_tool_result_for_api(tool_name: str, payload_json: str) -> str:
     data = obj.get("data")
     if isinstance(data, (dict, list)):
         obj = dict(obj)
-        obj["data"] = json.dumps(data, ensure_ascii=False)
+        obj["data"] = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     limit = tool_result_max(tool_name)
-    out = json.dumps(obj, ensure_ascii=False)
+    out = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
     for key in ("data", "error"):
         if len(out) <= limit:
             return out
         if shrink_str_field(obj, key, len(out) - limit):
-            out = json.dumps(obj, ensure_ascii=False)
+            out = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
     if len(out) <= limit:
         return out
     stub: dict[str, Any]
@@ -515,7 +515,7 @@ def compact_tool_result_for_api(tool_name: str, payload_json: str) -> str:
         stub = {"ok": True, "tool": obj.get("tool", tool_name), "data": TRUNC_MARK}
     else:
         stub = {"ok": obj.get("ok"), "tool": obj.get("tool", tool_name), "error": "result too large"}
-    return json.dumps(stub, ensure_ascii=False)
+    return json.dumps(stub, ensure_ascii=False, separators=(",", ":"))
 
 # Catalog / docs: tools that never talk to the live UEFN editor listener.
 # execute_tool does NOT pre-block on listener health — each tool hits the listener

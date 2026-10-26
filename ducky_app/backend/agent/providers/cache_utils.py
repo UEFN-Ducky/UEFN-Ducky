@@ -210,15 +210,17 @@ def parse_gemini_usage(usage_metadata: Any) -> dict[str, int]:
 
 
 def parse_openai_usage(usage: Any) -> dict[str, int]:
+    """Normalize Chat Completions and Responses usage, including cache writes."""
     if usage is None:
         return {}
-    cached = 0
-    details = getattr(usage, "prompt_tokens_details", None)
-    if details is not None:
-        cached = int(getattr(details, "cached_tokens", 0) or 0)
+
+    def get(obj: Any, key: str, default: Any = None) -> Any:
+        return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+
+    details = get(usage, "prompt_tokens_details") or get(usage, "input_tokens_details")
     return {
-        "input_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
-        "output_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
-        "cache_read_tokens": cached,
-        "cache_write_tokens": 0,
+        "input_tokens": int(get(usage, "prompt_tokens", get(usage, "input_tokens", 0)) or 0),
+        "output_tokens": int(get(usage, "completion_tokens", get(usage, "output_tokens", 0)) or 0),
+        "cache_read_tokens": int(get(details, "cached_tokens", 0) or 0),
+        "cache_write_tokens": int(get(details, "cache_write_tokens", 0) or 0),
     }

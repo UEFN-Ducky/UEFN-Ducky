@@ -302,7 +302,7 @@ def _cap_envelope(tool_name: str, obj: dict[str, Any], *, fmt: ToolResultFormat)
     tools = _tool_helpers()
     limit = tools.tool_result_max(tool_name)
     serialize = (
-        (lambda o: json.dumps(o, ensure_ascii=False))
+        (lambda o: json.dumps(o, ensure_ascii=False, separators=(",", ":")))
         if fmt == "json"
         else _encode_toon
     )
@@ -410,7 +410,7 @@ def format_rejected_tool_result(error: str = "User rejected destructive action",
     payload = {"ok": False, "error": error}
     active = fmt or tool_result_format()
     if active == "json":
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return _encode_toon(payload)
 
 

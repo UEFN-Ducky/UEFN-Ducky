@@ -10,8 +10,25 @@ from backend.agent.providers.cache_utils import (
     anthropic_messages_with_cache,
     anthropic_tools_with_cache,
     parse_gemini_usage,
+    parse_openai_usage,
     provider_cache_markers_enabled,
 )
+
+
+def test_openai_usage_preserves_both_api_formats_and_cache_accounting():
+    expected = {"input_tokens": 1000, "output_tokens": 30,
+                "cache_read_tokens": 600, "cache_write_tokens": 200}
+    for usage in (
+        {"prompt_tokens": 1000, "completion_tokens": 30,
+         "prompt_tokens_details": {"cached_tokens": 600, "cache_write_tokens": 200}},
+        {"input_tokens": 1000, "output_tokens": 30,
+         "input_tokens_details": {"cached_tokens": 600, "cache_write_tokens": 200}},
+        SimpleNamespace(input_tokens=1000, output_tokens=30,
+                        input_tokens_details=SimpleNamespace(cached_tokens=600, cache_write_tokens=200)),
+    ):
+        assert parse_openai_usage(usage) == expected
+    assert parse_openai_usage(None) == {}
+    assert parse_openai_usage(SimpleNamespace()) == dict.fromkeys(expected, 0)
 
 
 def test_provider_cache_markers_require_contribution():
