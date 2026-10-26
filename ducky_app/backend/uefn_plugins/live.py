@@ -23,10 +23,15 @@ A follower (Follow on the Live list) gets the host's view, scroll and tab clicks
 
 A group is a room named after its host's PC (``h:<device id>``): Start live goes into the
 biggest group a teammate is live in, or hosts this PC's own when nobody is; Join goes into
-a chosen one, both from the scope bar's Live list (:func:`groups`). Presence carries each
-PC's room, so everyone works out the same groups. Two PCs that started live at about the
-same time each host a group of one until a roster shows them the other's: then the one
-with the higher device id joins the other's (:func:`merge_lone_groups`).
+a chosen one (:func:`team_groups`). Being in a group is one membership per team copy, not
+per plugin (:func:`join_team`): every plugin of the copy here is in it, a plugin switched
+to the copy, enabled or opened later joins on its own, closing a tab ends nothing, and
+Leave takes them all out (:func:`leave_team`). Each plugin's group is still worked out on
+its own (:func:`groups`, its leader, its data); they are all in the same room. Presence
+carries each PC's room, at its top and per plugin, so everyone works out the same groups.
+Two PCs that started live at about the same time each host a group of one until a roster
+shows them the other's: then the one with the higher device id joins the other's
+(:func:`merge_lone_groups`).
 
 Plugins may add their own short-lived messages (``live.send`` / ``api.live.send``) and
 join named rooms (``api.live.join(room)``). Topics under ``ducky.`` are the host's.
@@ -75,9 +80,8 @@ OUTBOX_EVERY_S = 0.25  # this PC's new writes are looked for this often while li
 HOLD_MAX_S = 90.0  # a change the group's leader hasn't sent for this PC by then goes out from here
 ECHO_KEEP = 8  # versions of an item this PC sent its group that it still knows as its own
 ROOM_KEY = "live_room:"  # workspace_state: where each plugin is live here (read by every process)
-CHOICE_KEY = "live_choice:"  # workspace_state: the group the person went live in ("start" or a room)
+TEAM_CHOICE_KEY = "live_team:"  # workspace_state: the group the person went live in on a team copy
 START = "start"  # the choice Start live: a teammate's group, else this PC's own
-TAB_CLOSED_S = 10.0  # the plugin's tab closed this long ago (a tab moved between panes reopens at once)
 LONE_GRACE_S = 60.0  # a groupmate gone from the roster this long (a crash, a restart) counts as left
 _ANCHOR_RE = re.compile(r"^[^\x00-\x1f]{1,400}$")
 _VIEW_RE = re.compile(r"^[A-Za-z0-9._:-]{0,64}$")
@@ -86,12 +90,14 @@ _ROOM_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 HOST_PREFIX = "h:"
 # What this app's live speaks, said in presence with the room: from 2 (RELAY_V) the group runs
 # through its leader (asks, shared values, data); from 3 (DATA_V) every plugin's data goes to
-# the group, not only a plugin's that asks for it. An app from before 2 (1.2.433 and older)
-# relays nothing: it never leads a group someone up to date is in, its changes are its own to
-# send, and its screen doesn't follow the group (the Live menu says who needs to update).
-PROTOCOL = 3
+# the group, not only a plugin's that asks for it; from 4 (TEAM_V) one Live covers every
+# plugin of the team copy. An app from before 2 (1.2.433 and older) relays nothing: it never
+# leads a group someone up to date is in, its changes are its own to send, and its screen
+# doesn't follow the group (the Live menu says who needs to update).
+PROTOCOL = 4
 RELAY_V = 2
 DATA_V = 3
+TEAM_V = 4
 RELAY_SINCE = (1, 2, 434)  # the first app version whose groups run through a leader (no "v" yet)
 LEGACY_MAX = 500
 
@@ -103,16 +109,26 @@ class _State:
         self.account, self.space, self.room, self.since = account, space, room, since
 
 
+class _Team:
+    __slots__ = ("room", "since")
+
+    def __init__(self, room: str, since: float) -> None:
+        self.room, self.since = room, since
+
+
 _lock = threading.Lock()
+_team_lock = threading.RLock()  # one team copy's plugins are moved by one thread at a time
 _live: dict[str, _State] = {}  # plugin -> where it is live on this PC
+_teams: dict[tuple[str, str], _Team] = {}  # (account, space) -> the group this PC is live in on that team copy
+_own: set[str] = set()  # plugins in a room of their own naming (api.live.join(room)), outside their team's group
 _holds: dict[str, dict[str, tuple[float, str, float]]] = {}  # plugin -> anchor -> (pressed at, view, renewed)
 _told_holds: dict[tuple[str, str], list[dict[str, Any]]] = {}  # (space, plugin) -> teammates' holds the panels have
 _sent: dict[tuple[str, bool], collections.deque[float]] = {}
 _listeners: dict[str, dict[str, list[Callable[..., Any]]]] = {}
 _kept: set[str] = set()  # folder plugins restarted while live with their panels kept loaded
 _join_reload: dict[str, float] = {}  # plugin -> until when its join's pull reloads its panels
-_merging: set[str] = set()  # plugins moving from a group of one into a teammate's
-_company: dict[str, tuple[float, frozenset[str]]] = {}  # plugin -> (last roster with others in this PC's group, them)
+_moving: set[tuple[str, str]] = set()  # team copies whose plugins a background join is moving
+_company: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}  # team copy -> (last roster with others, them)
 _ItemKey = tuple[str, str, str, str, str]  # (account, space, plugin, kind, key)
 _sent_shas: dict[_ItemKey, collections.deque[str]] = {}  # versions of an item this PC sent its group
 _relayed: dict[_ItemKey, dict[str, str]] = {}  # a groupmate's change this PC took on as leader: sha, who made it
@@ -153,6 +169,10 @@ def _device() -> str:
 def host_room(device: str = "") -> str:
     """The room of the group this PC hosts (another PC's with ``device``)."""
     return HOST_PREFIX + (device or _device())
+
+
+def team_of(plugin: str) -> tuple[str, str] | None:
+    return _team(plugin)
 
 
 def _team(plugin: str) -> tuple[str, str] | None:
@@ -209,10 +229,17 @@ def is_live(plugin: str) -> bool:
 
 
 def spaces_live() -> set[tuple[str, str]]:
-    """``(account, space)`` of every team copy a plugin is live in here (the scheduler runs
-    their rounds every few seconds)."""
+    """``(account, space)`` of every team copy this PC is live on (the scheduler runs their
+    rounds every few seconds)."""
     with _lock:
-        return {(st.account, st.space) for st in _live.values()}
+        return {(st.account, st.space) for st in _live.values()} | set(_teams)
+
+
+def team_room(account: str, space: str) -> dict[str, Any] | None:
+    """What presence says at its top while this PC is live on that team copy."""
+    with _lock:
+        team = _teams.get((account, space))
+    return None if team is None else {"room": team.room, "since": team.since, "v": PROTOCOL}
 
 
 def room_of(plugin: str, account: str, space: str) -> dict[str, Any] | None:
@@ -257,26 +284,51 @@ def _beat_soon(account: str, space: str) -> None:
     threading.Thread(target=work, name="live-beat", daemon=True).start()
 
 
-def _teammates_group(plugin: str, account: str, space: str) -> str:
-    """The room of the biggest group a teammate is live in for ``plugin`` ('' for none)."""
+def _teammates_group(account: str, space: str) -> str:
+    """The room of the biggest group a teammate is live in on the team copy ('' for none)."""
     mine = host_room()
     try:
-        found = [g for g in groups(plugin, account, space) if g["room"] != mine]
+        found = [g for g in team_groups(account, space) if g["room"] != mine]
     except Exception:  # noqa: BLE001 — no roster yet: this PC hosts its own
-        _log.debug("live groups of %s failed", plugin, exc_info=True)
+        _log.debug("live groups of %s failed", space, exc_info=True)
         return ""
     found.sort(key=lambda g: -len(g["members"]))
     return str(found[0]["room"]) if found else ""
 
 
-def join(plugin: str, room: str = "", *, reload_panels: bool = True) -> dict[str, Any]:
-    """``plugin`` goes live in ``room``: a teammate's group (``h:<their device>``) or any
-    room a plugin names. No room (Start live): the biggest group a teammate is live in,
-    else this PC hosts its own. Joining another room leaves the one it was in. A teammate's
-    group is joined up to date: this PC pulls first, and that pull reloads the panels
-    (``reload_panels``) so the page opens on the group's data."""
-    from backend.uefn_plugins import spaces
+def _enabled(plugin: str) -> bool:
+    from backend.uefn_plugins.host import is_plugin_enabled
 
+    return is_plugin_enabled(plugin)
+
+
+def _team_plugins(account: str, space: str) -> tuple[list[str], str]:
+    """The plugins here that go live with the team copy (enabled, showing its data, able to go
+    live), and why none can."""
+    from backend.store.repos import plugin_data as repo
+
+    if _in_bridge():
+        return [], "Live runs in the UEFN Ducky window."
+    out: list[str] = []
+    why = "No plugin here shows this team's data."
+    for plugin in sorted(p for p, s in repo.links(account).items() if s == space):
+        with _lock:
+            own = plugin in _own
+        if own or not _enabled(plugin):
+            continue
+        ok, reason = supported(plugin)
+        if ok and _team(plugin) == (account, space):
+            out.append(plugin)
+        elif not ok:
+            why = reason
+    return out, why
+
+
+def join(plugin: str, room: str = "", *, reload_panels: bool = True) -> dict[str, Any]:
+    """``plugin`` goes live. No room (Start live) or a teammate's group (``h:<their device>``):
+    this PC goes live on the plugin's team copy, every plugin of it with it
+    (:func:`join_team`). Any other room is the plugin's own (``api.live.join(room)``), for it
+    alone. Returns the plugin's :func:`status`."""
     room = str(room or "")
     if room and not _ROOM_RE.match(room):
         return {"ok": False, "error": "A room name is letters, digits, . _ : - (up to 64)."}
@@ -284,16 +336,91 @@ def join(plugin: str, room: str = "", *, reload_panels: bool = True) -> dict[str
     if not ok:
         return {"ok": False, "error": why}
     account, space = _team(plugin)  # type: ignore[misc]
-    room = room or _teammates_group(plugin, account, space) or host_room()
+    if room and not room.startswith(HOST_PREFIX):
+        with _lock:
+            _own.add(plugin)
+        got = _join_plugin(plugin, account, space, room, time.time(), reload_panels=reload_panels)
+        if not got.get("ok"):
+            with _lock:
+                _own.discard(plugin)
+    else:
+        with _lock:
+            _own.discard(plugin)
+        got = join_team(account, space, room, reload_panels=reload_panels)
+    return {"ok": True, **status(plugin)} if got.get("ok") else got
+
+
+def join_team(account: str, space: str, room: str = "", *, reload_panels: bool = True) -> dict[str, Any]:
+    """This PC goes live on the team copy: every plugin of it here (:func:`_team_plugins`)
+    joins ``room``, a teammate's group (``h:<their device>``), all with one ``since``. No
+    room (Start live): the biggest group a teammate is live in, else this PC hosts its own.
+    Joining another group leaves the one it was in. A teammate's group is joined up to date:
+    each plugin pulls first, and that pull reloads its panels (``reload_panels``) so the page
+    opens on the group's data. Plugins that come to the copy later join on their own
+    (:func:`catch_up`). Returns :func:`team_status`."""
+    room = str(room or "")
+    if room and not (room.startswith(HOST_PREFIX) and _ROOM_RE.match(room)):
+        return {"ok": False, "error": "A group is named after its host's PC (h:<device id>)."}
+    plugins, why = _team_plugins(account, space)
+    if not plugins:
+        return {"ok": False, "error": why}
+    room = room or _teammates_group(account, space) or host_room()
+    key = (account, space)
+    with _team_lock:
+        with _lock:
+            old = _teams.get(key)
+            if old is None or old.room != room:
+                _teams[key] = _Team(room, time.time())
+                _company.pop(key, None)
+        failed = _reconcile(account, space, reload_panels=reload_panels)
+        with _lock:
+            joined = any((st.account, st.space, st.room) == (account, space, room) for p, st in _live.items()
+                         if p not in _own)
+            if not joined:
+                _teams.pop(key, None)
+    if not joined:
+        _team_changed(account, space)
+        return {"ok": False, "error": failed or "Couldn't go live."}
+    if old is None or old.room != room:
+        _team_changed(account, space)  # presence says it with the plugins' beat (_join_plugin)
+    return {"ok": True, **team_status(account, space)}
+
+
+def _reconcile(account: str, space: str, *, reload_panels: bool = True) -> str:
+    """Every plugin of the team copy here is in this PC's group on it, and none is while this
+    PC isn't live there (a plugin in a room of its own stays in it). Returns why one
+    couldn't go live ('' when every one did)."""
+    key = (account, space)
+    with _team_lock:
+        with _lock:
+            team = _teams.get(key)
+            here = {p: st.room for p, st in _live.items() if (st.account, st.space) == key and p not in _own}
+        want = _team_plugins(account, space)[0] if team is not None else []
+        failed = ""
+        for plugin in want:
+            if team is not None and here.get(plugin) != team.room:
+                got = _join_plugin(plugin, account, space, team.room, team.since, reload_panels=reload_panels)
+                if not got.get("ok"):
+                    failed = str(got.get("error") or "")
+        for plugin in sorted(set(here) - set(want)):
+            leave(plugin)
+    return failed
+
+
+def _join_plugin(plugin: str, account: str, space: str, room: str, since: float, *,
+                 reload_panels: bool) -> dict[str, Any]:
+    """``plugin`` goes into ``room`` on its team copy, leaving the one it was in."""
+    from backend.uefn_plugins import spaces
+
     with _lock:
         old = _live.get(plugin)
     if old is not None and (old.account, old.space, old.room) == (account, space, room):
-        return {"ok": True, **status(plugin)}
+        return {"ok": True}
     if old is not None:
         leave(plugin)
     teammates = room != host_room()
     with _lock:
-        _live[plugin] = _State(account, space, room, time.time())
+        _live[plugin] = _State(account, space, room, since)
         if teammates and reload_panels:
             _join_reload[plugin] = time.time() + JOIN_RELOAD_S
     try:
@@ -301,141 +428,166 @@ def join(plugin: str, room: str = "", *, reload_panels: bool = True) -> dict[str
     except Exception as exc:  # noqa: BLE001 — not live after all; say why
         with _lock:
             _live.pop(plugin, None)
+            _join_reload.pop(plugin, None)
         return {"ok": False, "error": f"Couldn't go live: {exc}"}
     _publish_room(plugin, _live.get(plugin))
     _outbox_start()
     _pull_now(account, space, plugin)
     _beat_soon(account, space)
     peers_changed(account, space, plugin)
-    return {"ok": True, **status(plugin)}
+    return {"ok": True}
+
+
+def catch_up(account: str, space: str) -> None:
+    """A roster came in: while this PC is live on the team copy, a plugin that came to it
+    since (switched to the copy, enabled) joins the group and one that went leaves it; while
+    it isn't, it goes back into the group the person went live in before a restart, while
+    that group is still live (:func:`remember_team`). Joins go in the background (they call
+    the team service)."""
+    if _in_bridge():
+        return
+    key = (account, space)
+    with _lock:
+        live_now = key in _teams
+        here = {p for p, st in _live.items() if (st.account, st.space) == key and p not in _own}
+    if live_now:
+        if set(_team_plugins(account, space)[0]) == here:
+            return
+
+        def job() -> None:
+            _reconcile(account, space)
+    else:
+        choice = _remembered_team(account, space, team_groups(account, space))
+        if not choice:
+            return
+
+        def job() -> None:
+            join_team(account, space, "" if choice == START else choice)
+    with _lock:
+        if key in _moving:
+            return  # a join is already on its way (rosters come often)
+        _moving.add(key)
+
+    def work() -> None:
+        try:
+            job()
+        except Exception:  # noqa: BLE001 — the next roster tries again
+            _log.debug("live catch-up of %s failed", space, exc_info=True)
+        finally:
+            with _lock:
+                _moving.discard(key)
+
+    threading.Thread(target=work, name="live-catch-up", daemon=True).start()
 
 
 def merge_lone_groups(account: str, space: str) -> list[str]:
-    """A roster came in: each plugin this PC hosts a group of one in, while a teammate is
-    live in another group of it, joins theirs: the biggest, and of groups of one the host
-    with the lowest device id, so of two PCs that started live together only the one with
-    the higher id moves. Their panels stay as they are (both were live on the team copy).
-    Returns the plugins that moved."""
+    """A roster came in: while this PC hosts a group of one on the team copy and a teammate
+    is live in another group of it, this PC joins theirs: the biggest, and of groups of one
+    the host with the lowest device id, so of two PCs that started live together only the
+    one with the higher id moves. Its panels stay as they are (both were live on the team
+    copy). Returns the plugins that moved."""
     me = _device()
+    key = (account, space)
     with _lock:
-        hosting = [p for p, st in _live.items() if (st.account, st.space) == (account, space) and st.room == host_room(me)]
-    moved: list[str] = []
-    for plugin in hosting:
+        team = _teams.get(key)
+        plugins = sorted(p for p, st in _live.items() if (st.account, st.space) == key and p not in _own)
+    if team is None or team.room != host_room(me):
+        return []
+    try:
+        found = team_groups(account, space)
+    except Exception:  # noqa: BLE001 — the next roster tries again
+        _log.debug("live groups of %s failed", space, exc_info=True)
+        return []
+    mine = next((g for g in found if g["mine"]), None)
+    if mine is None or len(mine["members"]) > 1:
+        return []  # someone is in this PC's group: it stays
+    others = sorted((g for g in found if not g["mine"] and g["room"].startswith(HOST_PREFIX)),
+                    key=lambda g: (-len(g["members"]), g["hostDevice"]))
+    if not others:
+        return []
+    target = others[0]
+    if len(target["members"]) == 1 and target["hostDevice"] > me:
+        return []  # two groups of one: the other PC (higher id) comes here
+    with _lock:
+        if key in _moving:
+            return []  # the move is already on its way (rosters come often)
+        _moving.add(key)
+
+    def move(room: str = str(target["room"])) -> None:
         try:
-            found = groups(plugin, account, space)
-        except Exception:  # noqa: BLE001 — the next roster tries again
-            _log.debug("live groups of %s failed", plugin, exc_info=True)
-            continue
-        mine = next((g for g in found if g["mine"]), None)
-        if mine is None or len(mine["members"]) > 1:
-            continue  # someone is in this PC's group: it stays
-        others = sorted((g for g in found if not g["mine"] and g["room"].startswith(HOST_PREFIX)),
-                        key=lambda g: (-len(g["members"]), g["hostDevice"]))
-        if not others:
-            continue
-        target = others[0]
-        if len(target["members"]) == 1 and target["hostDevice"] > me:
-            continue  # two groups of one: the other PC (higher id) comes here
-        with _lock:
-            if plugin in _merging:
-                continue  # the move is already on its way (rosters come often)
-            _merging.add(plugin)
-        moved.append(plugin)
+            join_team(account, space, room, reload_panels=False)
+        finally:
+            with _lock:
+                _moving.discard(key)
 
-        def move(plugin: str = plugin, room: str = str(target["room"])) -> None:
-            try:
-                join(plugin, room, reload_panels=False)
-            finally:
-                with _lock:
-                    _merging.discard(plugin)
-
-        threading.Thread(target=move, name="live-merge", daemon=True).start()
-    return moved
+    threading.Thread(target=move, name="live-merge", daemon=True).start()
+    return plugins
 
 
 def end_lone_groups(account: str, space: str, *, now: float | None = None) -> list[str]:
-    """A roster came in: Live ends here for each plugin whose group had someone else in it
-    and now has only this PC, at once when they left it (they're still on the roster) and
-    after :data:`LONE_GRACE_S` when they vanished from it (a crash, a restart: they may be
-    back). The panel stays where it is and syncs as before. A group this PC just started,
-    that nobody joined yet, stays. Returns the plugins whose Live ended."""
+    """A roster came in: Live ends here on the team copy when this PC's group had someone
+    else in it and now has only this PC, at once when they left it (they're still on the
+    roster) and after :data:`LONE_GRACE_S` when they vanished from it (a crash, a restart:
+    they may be back). The panels stay where they are and sync as before. A group this PC
+    just started, that nobody joined yet, stays. Returns the plugins whose Live ended."""
     from backend.store.repos import space_vcs
 
     now = time.time() if now is None else now
+    key = (account, space)
     with _lock:
-        here = [p for p, st in _live.items() if (st.account, st.space) == (account, space)]
+        team = _teams.get(key)
+        plugins = sorted(p for p, st in _live.items() if (st.account, st.space) == key and p not in _own)
+    if team is None:
+        return []
     roster = space_vcs.presence_get(account, space)["roster"]
     people = roster.get("people") if isinstance(roster, dict) else None
     listed = {str(p.get("device") or "") for p in people if isinstance(p, dict)} if isinstance(people, list) else set()
-    ended: list[str] = []
-    for plugin in here:
-        try:
-            mine = next((g for g in groups(plugin, account, space) if g["mine"]), None)
-        except Exception:  # noqa: BLE001 — the next roster looks again
-            _log.debug("live groups of %s failed", plugin, exc_info=True)
-            continue
-        others = frozenset(m["device"] for m in (mine or {}).get("members") or [] if not m["me"])
-        with _lock:
-            if others:
-                _company[plugin] = (now, others)
-                continue
-            seen = _company.get(plugin)
-        if seen is None:
-            continue
-        at, devices = seen
-        if not devices & listed and now - at < LONE_GRACE_S:
-            continue  # gone from the roster: maybe back in a moment
-        ended.append(plugin)
-        leave(plugin, why="alone")
-    return ended
+    try:
+        mine = next((g for g in team_groups(account, space) if g["mine"]), None)
+    except Exception:  # noqa: BLE001 — the next roster looks again
+        _log.debug("live groups of %s failed", space, exc_info=True)
+        return []
+    others = frozenset(m["device"] for m in (mine or {}).get("members") or [] if not m["me"])
+    with _lock:
+        if others:
+            _company[key] = (now, others)
+            return []
+        seen = _company.get(key)
+    if seen is None:
+        return []
+    at, devices = seen
+    if not devices & listed and now - at < LONE_GRACE_S:
+        return []  # gone from the roster: maybe back in a moment
+    leave_team(account, space, why="alone")
+    return plugins
 
 
-def tab_closed(plugin: str, *, wait: float = TAB_CLOSED_S) -> None:
-    """The window says a tab of ``plugin`` closed: once none of its tabs is open
-    :data:`TAB_CLOSED_S` later (moving a tab between panes reopens it at once), Live ends
-    here and isn't gone back into when the tab opens again."""
-
-    def check() -> None:
-        try:
-            from backend.uefn_plugins.panel_presence import panel_state
-
-            if panel_state(plugin)["open"]:
-                return
-        except Exception:  # noqa: BLE001 — unsure: stays live
-            return
-        if is_live(plugin):
-            leave(plugin, why="tab_closed")
-        else:
-            remember(plugin, "")
-
-    timer = threading.Timer(max(0.0, wait), check)
-    timer.daemon = True
-    timer.start()
-
-
-def remember(plugin: str, choice: str) -> None:
-    """The group the person went live in (``start``, or a teammate's room), so the bar goes
-    back into it after a restart; '' forgets it (Leave, End, the tab closed, alone)."""
+def remember_team(account: str, space: str, choice: str) -> None:
+    """The group the person went live in on the team copy (``start``, or a teammate's room),
+    so this PC goes back into it after a restart (:func:`catch_up`); '' forgets it (Leave,
+    alone)."""
     from backend.store.repos import kv
 
     try:
         if choice:
-            kv.set_doc("workspace_state", CHOICE_KEY + plugin, {"choice": str(choice)})
+            kv.set_doc("workspace_state", TEAM_CHOICE_KEY + space, {"account": account, "choice": str(choice)})
         else:
-            kv.delete_doc("workspace_state", CHOICE_KEY + plugin)
+            kv.delete_doc("workspace_state", TEAM_CHOICE_KEY + space)
     except Exception:  # noqa: BLE001 — the person goes live again by hand
-        _log.debug("remembering the live choice of %s failed", plugin, exc_info=True)
+        _log.debug("remembering the live choice of %s failed", space, exc_info=True)
 
 
-def _remembered(plugin: str, groups_: list[dict[str, Any]]) -> str:
-    """What the bar goes back into: ``start``, or a teammate's room while it is still live."""
+def _remembered_team(account: str, space: str, groups_: list[dict[str, Any]]) -> str:
+    """What this PC goes back into: ``start``, or a teammate's room while it is still live."""
     from backend.store.repos import kv
 
     try:
-        doc = kv.get_doc("workspace_state", CHOICE_KEY + plugin)
+        doc = kv.get_doc("workspace_state", TEAM_CHOICE_KEY + space)
     except Exception:  # noqa: BLE001
         return ""
-    choice = str(doc.get("choice") or "") if isinstance(doc, dict) else ""
+    if not isinstance(doc, dict) or doc.get("account") != account:
+        return ""
+    choice = str(doc.get("choice") or "")
     if choice == START or any(g["room"] == choice for g in groups_):
         return choice
     return ""
@@ -475,17 +627,58 @@ def _reload_kept(plugin: str) -> None:
         _log.debug("reload after live of %s failed", plugin, exc_info=True)
 
 
+def leave_live(plugin: str) -> dict[str, Any]:
+    """Leave, from a plugin (its bar, its page, its backend): out of its own room when it is
+    in one (back into its team's group, while this PC is live there), else this PC leaves its
+    team copy's group, every plugin with it."""
+    with _lock:
+        own = plugin in _own
+        _own.discard(plugin)
+        st = _live.get(plugin)
+    if own:
+        leave(plugin)
+        if st is not None:
+            _reconcile(st.account, st.space)
+        return {"ok": True}
+    team = (st.account, st.space) if st is not None else _team(plugin)
+    return leave_team(*team) if team is not None else leave(plugin)
+
+
+def leave_team(account: str, space: str, *, why: str = "", forget: bool = True) -> dict[str, Any]:
+    """This PC stops being live on the team copy: every plugin of it leaves the group (a
+    plugin in a room of its own stays in it). ``why``: ``alone`` when Live ended by itself
+    (the menu says so). ``forget``: no going back in after a restart."""
+    key = (account, space)
+    with _team_lock:
+        with _lock:
+            had = _teams.pop(key, None)
+            _company.pop(key, None)
+            plugins = sorted(p for p, st in _live.items() if (st.account, st.space) == key and p not in _own)
+        if forget:
+            remember_team(account, space, "")
+        for plugin in plugins:
+            leave(plugin, why=why)
+    if had is not None or plugins:
+        _beat_soon(account, space)
+        _team_changed(account, space, ended=why)
+    return {"ok": True}
+
+
+def _team_changed(account: str, space: str, *, ended: str = "") -> None:
+    """The title bar's Live menu reads the team copy again (``ended``: why Live ended by itself)."""
+    with _lock:
+        on = (account, space) in _teams
+    _push({"type": "live_team", "account": account, "space": space, "on": on, **({"ended": ended} if ended else {})})
+
+
 def leave(plugin: str, *, why: str = "") -> dict[str, Any]:
-    """``plugin`` stops being live here. ``why``: ``tab_closed`` or ``alone`` when Live ended
-    by itself (the bar says so, and doesn't go back in after a restart)."""
+    """``plugin`` stops being live here (its team copy's group goes on: :func:`leave_team`
+    ends that). ``why``: ``alone`` when Live ended by itself (the bar says so)."""
     from backend.uefn_plugins import spaces
 
-    if why:
-        remember(plugin, "")
     with _lock:
         st = _live.pop(plugin, None)
         _join_reload.pop(plugin, None)
-        _company.pop(plugin, None)
         _led_by.pop(plugin, None)
         _my_states.pop(plugin, None)
         _their_states.pop(plugin, None)
@@ -506,8 +699,15 @@ def leave(plugin: str, *, why: str = "") -> dict[str, Any]:
 
 
 def leave_all() -> None:
+    """The team service went (sign-out, its plugin unloaded): nothing is live, and each team
+    copy's choice is kept for when it is back (:func:`catch_up`)."""
+    with _lock:
+        teams = list(_teams)
+    for key in teams:
+        leave_team(*key, forget=False)
     with _lock:
         plugins = list(_live)
+        _own.clear()
     for plugin in plugins:
         leave(plugin)
 
@@ -849,6 +1049,14 @@ def groups(plugin: str, account: str, space: str) -> list[dict[str, Any]]:
         rooms.setdefault(mine["room"], []).append(
             {"name": "You", "user": "", "device": me, "label": "", "me": True, "since": mine["since"], "v": PROTOCOL,
              "older": False})
+    return _shaped(rooms, mine["room"] if mine else "", _MEMBER_KEYS)
+
+
+_MEMBER_KEYS = ("name", "user", "device", "label", "me", "since", "v", "older")
+
+
+def _shaped(rooms: dict[str, list[dict[str, Any]]], mine: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Each room's group with its leader (:func:`groups`): this PC's first, then the biggest."""
     out = []
     for room, members in rooms.items():
         members.sort(key=lambda m: (m["since"], m["device"]))
@@ -856,11 +1064,59 @@ def groups(plugin: str, account: str, space: str) -> list[dict[str, Any]]:
         leaders = [m for m in members if not m["older"]] or members  # an older app relays nothing
         host = next((m for m in leaders if m["device"] == host_device), leaders[0])
         out.append({"room": room, "host": host["name"], "hostDevice": host["device"], "hostIsMe": host["me"],
-                    "members": [{k: m[k] for k in ("name", "user", "device", "label", "me", "since", "v", "older")}
-                                for m in members],
-                    "mine": mine is not None and mine["room"] == room})
+                    "members": [{k: m[k] for k in keys} for m in members], "mine": room == mine})
     out.sort(key=lambda g: (not g["mine"], -len(g["members"]), g["host"].lower()))
     return out
+
+
+def team_groups(account: str, space: str) -> list[dict[str, Any]]:
+    """The live groups on a team copy, every plugin together (:func:`groups` has one
+    plugin's), worked out the same way. A teammate's room is what their presence says at
+    its top; an app from before one Live covered every plugin says it per plugin only (its
+    newest counts, and ``partial`` says so). Members also carry ``plugin``: the plugin they
+    have on screen ('' for none)."""
+    from backend.store.repos import space_vcs
+    from backend.uefn_plugins.ledger import person
+    from backend.uefn_plugins.vcs_engine import other_pc
+
+    me = _device()
+    roster = space_vcs.presence_get(account, space)["roster"]
+    people = roster.get("people") if isinstance(roster, dict) else None
+    rooms: dict[str, list[dict[str, Any]]] = {}
+    for p in people if isinstance(people, list) else []:
+        if not isinstance(p, dict) or str(p.get("device") or "") in ("", me):
+            continue
+        rows = p.get("plugins") if isinstance(p.get("plugins"), dict) else {}
+        top = p.get("live")
+        live = top if isinstance(top, dict) and top.get("room") else None
+        partial = live is None
+        if live is None:
+            per = [r["live"] for r in rows.values()
+                   if isinstance(r, dict) and isinstance(r.get("live"), dict) and r["live"].get("room")]
+            live = max(per, key=_since_of, default=None)
+        if live is None:
+            continue
+        viewing = next((str(pid) for pid, r in sorted(rows.items()) if isinstance(r, dict) and r.get("viewing")), "")
+        pc = other_pc(account, space, p.get("user"), p["device"])  # this account on another PC
+        rooms.setdefault(str(live["room"]), []).append({
+            "name": f"You on {pc}" if pc else person(p.get("user_name"), p.get("user"), fallback="A teammate"),
+            "user": str(p.get("user") or ""), "device": str(p["device"]), "label": str(p.get("label") or ""),
+            "me": False, "since": _since_of(live), "v": _version_of(live), "older": _older(p, live),
+            "plugin": viewing, "partial": partial})
+    with _lock:
+        team = _teams.get((account, space))
+    if team is not None:
+        rooms.setdefault(team.room, []).append(
+            {"name": "You", "user": "", "device": me, "label": "", "me": True, "since": team.since, "v": PROTOCOL,
+             "older": False, "plugin": "", "partial": False})
+    return _shaped(rooms, team.room if team else "", (*_MEMBER_KEYS, "plugin", "partial"))
+
+
+def _since_of(row: dict[str, Any]) -> float:
+    try:
+        return float(row.get("since") or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _older(person: dict[str, Any], row: dict[str, Any]) -> bool:
@@ -905,10 +1161,12 @@ def _note_legacy(account: str, space: str, plugin: str, who: dict[str, str], top
     peers_changed(account, space, plugin)
 
 
-def status(plugin: str) -> dict[str, Any]:
+def status(plugin: str, *, come_along: bool = True) -> dict[str, Any]:
     """What the bar shows: ``supported``, ``on``, ``room``, ``state``, ``peers`` (name, user,
     device, label, path: ``direct`` | ``forwarded`` | ``none``), ``groups`` and ``rejoin``
-    (what the bar goes back into while not live: ``start``, a teammate's room, or '')."""
+    (what this PC goes back into on the team copy while not live: ``start``, a teammate's
+    room, or ''). A plugin of a team copy this PC is live on joins its group as it is read
+    (``come_along``: switched to that copy, enabled, opened)."""
     from backend.uefn_plugins import spaces
 
     ok, why = supported(plugin)
@@ -916,6 +1174,8 @@ def status(plugin: str) -> dict[str, Any]:
     if st is not None and not ok:
         leave(plugin)
         st = None
+    if st is None and ok and come_along:
+        st = _come_along(plugin)
     out: dict[str, Any] = {"supported": ok, "reason": why, "on": st is not None,
                            "room": st.room if st else "", "state": "off", "peers": [], "groups": [], "rejoin": ""}
     team = _team(plugin) if ok else None
@@ -924,7 +1184,10 @@ def status(plugin: str) -> dict[str, Any]:
             out["groups"] = groups(plugin, *team)
         except Exception:  # noqa: BLE001 — no list this read
             _log.debug("live groups of %s failed", plugin, exc_info=True)
-        out["rejoin"] = _remembered(plugin, out["groups"])
+        try:
+            out["rejoin"] = _remembered_team(*team, team_groups(*team))
+        except Exception:  # noqa: BLE001
+            _log.debug("live rejoin of %s failed", plugin, exc_info=True)
     if st is None:
         return out
     try:
@@ -935,6 +1198,73 @@ def status(plugin: str) -> dict[str, Any]:
     out["peers"] = [dict(p) for p in got.get("peers") or [] if isinstance(p, dict)][:32]
     out["connecting"], out["unlinked"] = _unlinked(st, out["peers"], out["groups"])
     return out
+
+
+def _come_along(plugin: str) -> _State | None:
+    """A plugin of a team copy this PC is live on that isn't in its group (switched to that
+    copy, enabled, opened) joins it now."""
+    team = _team(plugin)
+    with _lock:
+        if team is None or team not in _teams or plugin in _own:
+            return None
+    _reconcile(*team)
+    with _lock:
+        return _live.get(plugin)
+
+
+def team_status(account: str, space: str) -> dict[str, Any]:
+    """What the title bar's Live menu shows of a team copy: ``on``, ``room``, ``since``,
+    ``groups`` (:func:`team_groups`), ``plugins`` (this PC's in the group), ``state``,
+    ``connecting`` / ``unlinked`` (by name: nothing reaches them yet / any more) and
+    ``rejoin``."""
+    from backend.uefn_plugins import spaces
+
+    with _lock:
+        team = _teams.get((account, space))
+        plugins = sorted(p for p, st in _live.items() if (st.account, st.space) == (account, space) and p not in _own)
+    out: dict[str, Any] = {"on": team is not None, "room": team.room if team else "",
+                           "since": team.since if team else 0.0, "groups": [], "plugins": plugins,
+                           "state": "off", "connecting": [], "unlinked": [], "rejoin": ""}
+    try:
+        out["groups"] = team_groups(account, space)
+    except Exception:  # noqa: BLE001 — no list this read
+        _log.debug("live groups of %s failed", space, exc_info=True)
+    if team is None:
+        out["rejoin"] = _remembered_team(account, space, out["groups"])
+        return out
+    peers: dict[str, dict[str, Any]] = {}
+    states: list[str] = []
+    for plugin in plugins:
+        try:
+            got = spaces.provider().live_state(account, space, plugin) or {}
+        except Exception:  # noqa: BLE001 — live, peers unknown for now
+            got = {}
+        states.append(str(got.get("state") or "live"))
+        for p in got.get("peers") or []:
+            if isinstance(p, dict) and (str(p.get("device") or "") not in peers or p.get("path") in ("direct", "forwarded")):
+                peers[str(p.get("device") or "")] = dict(p)
+    out["state"] = "live" if "live" in states or not states else states[0]
+    out["connecting"], out["unlinked"] = _unlinked(_State(account, space, team.room, team.since),
+                                                   list(peers.values()), out["groups"])
+    return out
+
+
+def overview() -> dict[str, Any]:
+    """Every team copy this PC has plugins on, for the title bar's Live menu: ``teams``
+    (:func:`team_status` with ``account``, ``space``, ``label``, ``supported`` and ``reason``),
+    live ones first, and ``on``: live on one of them."""
+    from backend.store.repos import plugin_data as repo
+    from backend.uefn_plugins import scopes
+
+    account = scopes.account_id()
+    teams = []
+    for space in sorted(set(repo.links(account).values())):
+        plugins, why = _team_plugins(account, space)
+        label = str(repo.sync_get(account, space).get("label") or "") or "Team"
+        teams.append({"account": account, "space": space, "label": label, "supported": bool(plugins),
+                      "reason": "" if plugins else why, **team_status(account, space)})
+    teams.sort(key=lambda t: (not t["on"], t["label"].lower()))
+    return {"ok": True, "on": any(t["on"] for t in teams), "teams": teams}
 
 
 def _unlinked(st: _State, peers: list[dict[str, Any]], groups_: list[dict[str, Any]],
@@ -1478,8 +1808,10 @@ def peers_changed(account: str, space: str, plugin: str, *, ended: str = "") -> 
     if room_of(plugin, account, space) is None and not is_live(plugin):
         _push({"type": "live_peers", "plugin": plugin, "on": False, "peers": [], **({"ended": ended} if ended else {})})
         return
-    st = status(plugin)
+    st = status(plugin, come_along=False)
     _push({"type": "live_peers", "plugin": plugin, "on": st["on"], "state": st["state"], "peers": st["peers"]})
+    if not ended:
+        _team_changed(account, space)  # who the menu reaches moved
 
 
 def forget(plugin: str, *, keep_live: bool = False) -> None:
@@ -1502,8 +1834,10 @@ def reset_for_tests() -> None:
         _listeners.clear()
         _kept.clear()
         _join_reload.clear()
-        _merging.clear()
+        _moving.clear()
         _company.clear()
+        _teams.clear()
+        _own.clear()
         _sent_shas.clear()
         _relayed.clear()
         _led_by.clear()
@@ -1527,7 +1861,7 @@ class LiveApi:
         return join(self.plugin_id, room)
 
     def leave(self) -> dict[str, Any]:
-        return leave(self.plugin_id)
+        return leave_live(self.plugin_id)
 
     def send(self, topic: str, data: Any, to: str = "") -> dict[str, Any]:
         return send(self.plugin_id, topic, data, to=to)

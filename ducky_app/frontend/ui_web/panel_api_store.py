@@ -967,22 +967,50 @@ class PanelApiStoreMixin:
     # -- live editing on a team copy (backend.uefn_plugins.live)
 
     def plugin_live_join(self, plugin_id: str, room: str = "") -> dict[str, Any]:
-        """Start live (no room: a teammate's group, else this PC's own) or Join a group; the
-        bar goes back into it after a restart, until Leave or the tab closes."""
+        """Start live (no room: a teammate's group, else this PC's own) or Join a group from a
+        plugin: this PC goes live on its team copy, every plugin with it, and goes back in
+        after a restart until Leave. A room of the plugin's own is for it alone."""
         from backend.uefn_plugins import live
 
-        pid = str(plugin_id or "")
-        out = live.join(pid, str(room or ""))
-        if out.get("ok"):
-            live.remember(pid, str(room or "") or live.START)
+        pid, room = str(plugin_id or ""), str(room or "")
+        out = live.join(pid, room)
+        team = live.team_of(pid)
+        if out.get("ok") and team is not None and (not room or room.startswith(live.HOST_PREFIX)):
+            live.remember_team(*team, room or live.START)
         return out
 
     def plugin_live_leave(self, plugin_id: str) -> dict[str, Any]:
+        """Leave from a plugin: this PC leaves its team copy's group (a room of the plugin's
+        own: only that)."""
         from backend.uefn_plugins import live
 
-        pid = str(plugin_id or "")
-        live.remember(pid, "")
-        return live.leave(pid)
+        return live.leave_live(str(plugin_id or ""))
+
+    def live_overview(self) -> dict[str, Any]:
+        """The title bar's Live menu: every team copy this PC has plugins on, who is live in
+        which group of it, and where this PC is."""
+        from backend.uefn_plugins import live
+
+        try:
+            return live.overview()
+        except Exception as exc:
+            return {"ok": False, "on": False, "teams": [], "error": str(exc)}
+
+    def live_team_join(self, account: str = "", space: str = "", room: str = "") -> dict[str, Any]:
+        """Start live (no room) or Join a teammate's group on a team copy: every plugin of it
+        here goes in, and this PC goes back in after a restart until Leave."""
+        from backend.uefn_plugins import live
+
+        account, space, room = str(account or ""), str(space or ""), str(room or "")
+        out = live.join_team(account, space, room)
+        if out.get("ok"):
+            live.remember_team(account, space, room or live.START)
+        return out
+
+    def live_team_leave(self, account: str = "", space: str = "") -> dict[str, Any]:
+        from backend.uefn_plugins import live
+
+        return live.leave_team(str(account or ""), str(space or ""))
 
     def plugin_live_send(self, plugin_id: str, topic: str, data: object = None, to: str = "",
                          fast: bool = False) -> dict[str, Any]:

@@ -2873,9 +2873,10 @@ def _lock_marks(account: str, space: str) -> dict[str, frozenset[tuple[str, bool
     return {p: frozenset(v) for p, v in marks.items()}
 
 
-def _roster_marks(roster: Any) -> dict[str, frozenset[tuple[str, str, bool, tuple[str, ...]]]]:
-    """Per plugin, who is in it and what they edit (a roster's people): to tell its bar."""
-    marks: dict[str, set[tuple[str, str, bool, tuple[str, ...]]]] = {}
+def _roster_marks(roster: Any) -> dict[str, frozenset[tuple[str, str, bool, tuple[str, ...], str]]]:
+    """Per plugin, who is in it, what they edit and the live group they're in (a roster's
+    people): to tell its bar."""
+    marks: dict[str, set[tuple[str, str, bool, tuple[str, ...], str]]] = {}
     people = roster.get("people") if isinstance(roster, Mapping) else None
     for p in people if isinstance(people, list) else []:
         plugins = p.get("plugins") if isinstance(p, Mapping) else None
@@ -2886,9 +2887,30 @@ def _roster_marks(roster: Any) -> dict[str, frozenset[tuple[str, str, bool, tupl
                 continue
             editing = tuple(sorted({str(e.get("unitName") or "") for e in here.get("editing") or []
                                     if isinstance(e, Mapping)}))
+            live = here.get("live")
+            room = str(live.get("room") or "") if isinstance(live, Mapping) else ""
             marks.setdefault(str(plugin), set()).add(
-                (str(p.get("user") or ""), str(p.get("device") or ""), bool(here.get("viewing")), editing))
+                (str(p.get("user") or ""), str(p.get("device") or ""), bool(here.get("viewing")), editing, room))
     return {p: frozenset(v) for p, v in marks.items()}
+
+
+def _team_marks(roster: Any) -> frozenset[tuple[str, str, str]]:
+    """Who is live in which group on the team copy and what they have on screen: to tell the
+    title bar's Live menu."""
+    marks: set[tuple[str, str, str]] = set()
+    people = roster.get("people") if isinstance(roster, Mapping) else None
+    for p in people if isinstance(people, list) else []:
+        if not isinstance(p, Mapping):
+            continue
+        plugins = p.get("plugins") if isinstance(p.get("plugins"), Mapping) else {}
+        rooms = {str(r["live"].get("room") or "") for r in plugins.values()
+                 if isinstance(r, Mapping) and isinstance(r.get("live"), Mapping)}
+        top = p.get("live")
+        room = str(top.get("room") or "") if isinstance(top, Mapping) else ",".join(sorted(rooms - {""}))
+        viewing = ",".join(sorted(str(k) for k, r in plugins.items() if isinstance(r, Mapping) and r.get("viewing")))
+        if room:
+            marks.add((str(p.get("device") or ""), room, viewing))
+    return frozenset(marks)
 
 
 def _moved(before: Mapping[str, Any], after: Mapping[str, Any]) -> set[str]:
@@ -2896,17 +2918,21 @@ def _moved(before: Mapping[str, Any], after: Mapping[str, Any]) -> set[str]:
 
 
 def _roster_came(account: str, space: str, old: Any, roster: Mapping[str, Any]) -> None:
-    """A fresh roster: the bars of plugins whose people moved read their status again,
-    panels hear what teammates hold now, Live ends where everyone else left this PC's
-    group (:func:`live.end_lone_groups`), and a group of one this PC hosts joins a
-    teammate's (:func:`live.merge_lone_groups`)."""
+    """A fresh roster: the bars of plugins whose people moved read their status again (and
+    the title bar's Live menu when who is live where moved), panels hear what teammates hold
+    now, Live ends where everyone else left this PC's group (:func:`live.end_lone_groups`),
+    a group of one this PC hosts joins a teammate's (:func:`live.merge_lone_groups`), and
+    plugins that came to a team copy this PC is live on join it (:func:`live.catch_up`)."""
     _tell_bars(_moved(_roster_marks(old), _roster_marks(roster)))
     try:
         from backend.uefn_plugins import live
 
+        if _team_marks(old) != _team_marks(roster):
+            live._team_changed(account, space)
         live.roster_holds(account, space, roster)
         live.end_lone_groups(account, space)
         live.merge_lone_groups(account, space)
+        live.catch_up(account, space)
     except Exception:  # noqa: BLE001 — the next roster tells them
         _log.debug("teammates' holds failed", exc_info=True)
 
@@ -3254,9 +3280,11 @@ def presence_blob(account: str, space: str, plugins: Iterable[str], *, now: floa
                         and not scopes.is_local_key(plugin, _unit_name(a["unit"]))],
             "locks": sorted(lk["name"] or _unit_name(lk["unit"]) for lk in mine if lk["plugin_id"] == plugin),
         }
+    team_live = None
     try:
         from backend.uefn_plugins import live
 
+        team_live = live.team_room(account, space)  # the group this PC is in on the copy, every plugin with it
         for plugin, row in out.items():
             room = live.room_of(plugin, account, space)
             if room is not None:
@@ -3272,7 +3300,8 @@ def presence_blob(account: str, space: str, plugins: Iterable[str], *, now: floa
         from frontend import __version__ as ver
     except Exception:  # noqa: BLE001 — presence never fails a beat
         ver = ""
-    return {"label": device_label(), "app": "open", "ver": str(ver), "plugins": out}
+    return {"label": device_label(), "app": "open", "ver": str(ver), "plugins": out,
+            **({"live": team_live} if team_live else {})}
 
 
 def beat(account: str, space: str, backend: Any, plugins: Iterable[str], *, force: bool = False,

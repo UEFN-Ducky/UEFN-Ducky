@@ -7,10 +7,10 @@ panel API methods a plugin's pages call. The test joins them like the services w
 - the live link: a frame goes to the PCs live in the sender's room, or to one PC (``to``),
   and arrives as the provider's ``deliver``.
 
-What is checked is what the people see: Start live puts them in one group, shared values and
-live states go both ways through the leader, a groupmate's change reaches the group at once
-and goes to the server from the leader under its maker's name, and the group passes on when
-its host leaves and ends for the last one in it.
+What is checked is what the people see: Start live puts them in one group, every plugin of the
+team copy with it, shared values and live states go both ways through the leader, a
+groupmate's change reaches the group at once and goes to the server from the leader under its
+maker's name, and the group passes on when its host leaves and ends for the last one in it.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="DPAPI")
 
 APP = Path(__file__).resolve().parents[2]  # ducky_app
-SPACE, PLUGIN = "spaceT", "cards"
+SPACE, PLUGIN, NOTES = "spaceT", "cards", "notes"
 AUTH = b"ducky-live-pcs"
 WAIT_S = 20.0
 LEDGER_METHODS = ("capabilities", "heads", "push", "pull", "fetch", "history", "revert", "lock", "unlock",
@@ -44,7 +44,8 @@ LEDGER_METHODS = ("capabilities", "heads", "push", "pull", "fetch", "history", "
 
 
 def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: str = "") -> None:
-    """A PC: signs in as ``name``, has ``cards`` on the team copy, and does what the test says.
+    """A PC: signs in as ``name``, has ``cards`` and ``notes`` on the team copy, and does what
+    the test says.
     ``app``: an older app. "1.2.434" runs its group through a leader like this one, but its
     presence names no version. "1.2.433" is from before that: its team service says its
     version, its live changes say nothing of who made them, and it never holds a change for a
@@ -55,9 +56,11 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
     from frontend.ui_web import panel_api  # noqa: F401  (panel_api_store loads with it)
     from frontend.ui_web.panel_api_store import PanelApiStoreMixin
 
+    from frontend.ui_web.panel_api_window import PanelApiWindowMixin
+
     from backend.store.repos import plugin_data as repo
     from backend.store.repos import space_vcs
-    from backend.uefn_plugins import data_crypto, live, scopes, spaces, sync_scheduler, vcs_engine
+    from backend.uefn_plugins import data_crypto, host, live, scopes, spaces, sync_scheduler, vcs_engine
     from backend.uefn_plugins.ledger import OutgoingChangeset
     from backend.uefn_plugins.scopes import PluginData
 
@@ -113,24 +116,26 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
             return True
 
         def live_join(self, account: str, space_id: str, plugin: str, room: str) -> None:
-            rpc("room", room)
+            rpc("room", plugin, room)
 
         def live_leave(self, account: str, space_id: str, plugin: str) -> None:
-            rpc("room", "")
+            rpc("room", plugin, "")
 
         def live_send(self, account: str, space_id: str, plugin: str, topic: str, data: Any, *, to: str = "",
                       fast: bool = False) -> int:
             if app == "1.2.433" and topic == live.DATA:
                 data = {k: v for k, v in data.items() if k != "by"}
-            return int(rpc("send", topic, json.loads(json.dumps(data)), to))
+            return int(rpc("send", plugin, topic, json.loads(json.dumps(data)), to))
 
         def live_state(self, account: str, space_id: str, plugin: str) -> dict[str, Any]:
-            return {"state": "live", "peers": rpc("peers")}
+            return {"state": "live", "peers": rpc("peers", plugin)}
 
     spaces.install_for_tests(Provider())
-    repo.link_set(account, PLUGIN, SPACE)
+    for pid in (PLUGIN, NOTES):
+        repo.link_set(account, pid, SPACE)
+        space_vcs.head_put(account, SPACE, pid, engine="v2")
     repo.sync_put(account, SPACE, label="Alpha", synced_at=time.time())
-    space_vcs.head_put(account, SPACE, PLUGIN, engine="v2")
+    live._enabled = host.is_plugin_enabled = lambda plugin: True
     scopes.data_live = lambda plugin: plugin == PLUGIN
     scopes.data_live_asked = lambda plugin: plugin == PLUGIN  # its manifest says "data_live": true, like IMK's
     live._push = lambda event: None
@@ -138,17 +143,18 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
         frontend.__version__ = app if app == "1.2.433" else ""
         room_of = live.room_of
         live.room_of = lambda *a: None if (r := room_of(*a)) is None else {k: v for k, v in r.items() if k != "v"}
+        live.team_room = lambda *a: None  # its presence says the room per plugin only
     if app == "1.2.433":
         live.hold_since = lambda *a, **k: None
         live.leads = live._leads_group = lambda *a, **k: False
     rounds = threading.Lock()
 
-    def sync() -> dict[str, Any]:
+    def sync(plugin: str = PLUGIN) -> dict[str, Any]:
         with rounds:
-            return vcs_engine.run(account, SPACE, PLUGIN, remote, force=True)
+            return vcs_engine.run(account, SPACE, plugin, remote, force=True)
 
     def beat() -> dict[str, Any]:
-        return vcs_engine.beat(account, SPACE, remote, [PLUGIN], force=True)
+        return vcs_engine.beat(account, SPACE, remote, [PLUGIN, NOTES], force=True)
 
     def later(fn: Callable[[], Any]) -> None:
         def run() -> None:
@@ -159,7 +165,7 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
 
         threading.Thread(target=run, daemon=True).start()
 
-    sync_scheduler.wake = lambda a, s, p=None: later(sync)
+    sync_scheduler.wake = lambda a, s, p=None: later(lambda: sync(p or PLUGIN))
 
     def events() -> None:
         while True:
@@ -169,9 +175,9 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
                 return
             if msg[0] == "frame":
                 try:
-                    live.deliver(account, SPACE, PLUGIN, msg[1], msg[2], msg[3])
+                    live.deliver(account, SPACE, msg[1], msg[2], msg[3], msg[4])
                 except Exception as exc:  # noqa: BLE001
-                    print(f"{name}: deliver {msg[2]} failed: {exc!r}", flush=True)
+                    print(f"{name}: deliver {msg[3]} failed: {exc!r}", flush=True)
             elif msg[0] == "rebeat":
                 later(beat)
 
@@ -187,10 +193,18 @@ def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: st
         r = repo.get(account, SPACE, PLUGIN, "doc", k)
         return None if r is None else {"dirty": int(r["dirty"]), "rev": int(r["rev"])}
 
+    def close_tab(plugin: str) -> None:  # every tab of the plugin, as the window reports it
+        tab = f"plugin:{plugin}:main"
+        PanelApiWindowMixin.report_plugin_panel(None, "main", tab, visible=True, open=True)  # type: ignore[arg-type]
+        PanelApiWindowMixin.report_plugin_panel(None, "main", tab, visible=False, open=False)  # type: ignore[arg-type]
+
     commands: dict[str, Callable[..., Any]] = {
-        "start": lambda: api.plugin_live_join(PLUGIN),
-        "leave": lambda: api.plugin_live_leave(PLUGIN),
-        "status": lambda: api.plugin_live_status(PLUGIN),
+        "start": lambda plugin=PLUGIN: api.plugin_live_join(plugin),
+        "leave": lambda plugin=PLUGIN: api.plugin_live_leave(plugin),
+        "status": lambda plugin=PLUGIN: api.plugin_live_status(plugin),
+        "overview": api.live_overview,
+        "close_tab": close_tab,
+        "reload": host.invalidate_plugin_runtime,
         "put": data.put,
         "put_file": lambda k, b64: data.put_file(k, base64.b64decode(b64)),
         "get_file": lambda k: base64.b64encode(data.get_file(k) or b"").decode(),
@@ -231,7 +245,8 @@ class PC:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.device = self.user = self.room = self.person = ""
+        self.device = self.user = self.person = ""
+        self.rooms: dict[str, str] = {}  # plugin -> the live room it is in
         self.presence: Any = None
         self.ctl: Any = None
         self.evt: Any = None
@@ -312,20 +327,21 @@ class Hub:
                         other.tell("rebeat")
             return got
         if kind == "room":
-            pc.room = str(req[1])
+            pc.rooms[str(req[1])] = str(req[2])
             return None
         if kind == "peers":
-            return [{**p.who(), "path": "direct"} for p in self._room(pc)]
+            return [{**p.who(), "path": "direct"} for p in self._room(pc, str(req[1]))]
         if kind == "send":
-            topic, data, to = req[1], req[2], req[3]
-            targets = [p for p in self._room(pc) if not to or p.device == to]
+            plugin, topic, data, to = req[1], req[2], req[3], req[4]
+            targets = [p for p in self._room(pc, plugin) if not to or p.device == to]
             for p in targets:
-                p.tell("frame", pc.who(), topic, data)
+                p.tell("frame", plugin, pc.who(), topic, data)
             return len(targets)
         raise ValueError(f"unknown request {kind}")
 
-    def _room(self, pc: PC) -> list[PC]:
-        return [p for p in self.pcs.values() if p is not pc and pc.room and p.room == pc.room]
+    def _room(self, pc: PC, plugin: str) -> list[PC]:
+        room = pc.rooms.get(plugin)
+        return [p for p in self.pcs.values() if p is not pc and room and p.rooms.get(plugin) == room]
 
     def start(self, name: str, *, app: str = "", account: str = "") -> PC:
         pc = self.pcs[name] = PC(name)
@@ -529,3 +545,30 @@ def test_one_account_on_two_pcs_streams_like_two_people_and_history_names_the_pc
     assert main("sync")["pushed"] == 1  # the main PC leads: it sends it
     (entry,) = until(lambda: [e for e in lap("history") if ["doc", "card.pip"] in e["items"]], "the change in history")
     assert (entry["by"], entry["device"], "via" in entry) == ("Tas", "Lap-PC", False)  # Tas on the laptop
+
+
+def test_one_start_live_covers_every_plugin_and_closing_a_tab_or_a_reload_keeps_it(hub: Hub) -> None:
+    """Live is the team copy's: Start live from Cards puts Notes in the group too, someone in
+    another plugin is still in it, and neither a closed tab nor a plugin reload ends it."""
+    ana, ben = hub.start("Ana"), hub.start("Ben")
+    room = ana("start")["room"]
+    assert room == f"h:{ana.device}"
+    assert ana("status", NOTES)["on"] and ana("status", NOTES)["room"] == room
+    hub.speak()
+    until(lambda: any(g["room"] == room for g in ben("overview")["teams"][0]["groups"]), "Ben to see Ana's group")
+    assert ben("start", NOTES)["room"] == room  # from another plugin: the same group
+    assert ben("status")["on"] and ben("status")["room"] == room
+    def with_ben() -> dict[str, Any] | None:
+        t = ana("overview")["teams"][0]
+        return t if len(t["groups"][0]["members"]) == 2 else None
+
+    team = until(with_ben, "Ana's menu to show Ben in her group")
+    assert team["on"] and [m["name"] for m in team["groups"][0]["members"]] == ["You", "Ben"]
+    ben("close_tab", PLUGIN)
+    ben("reload", NOTES)
+    time.sleep(0.5)
+    assert ben("status")["on"] and ben("status", NOTES)["on"]
+    ana("share", "clip", "intro")  # the group still runs through Ana
+    until(lambda: ben("shared").get("clip", {}).get("value") == "intro", "Ben to get Ana's value")
+    ben("leave", NOTES)  # Leave from either plugin: out of the group, every plugin with it
+    assert not ben("status")["on"] and not ben("status", NOTES)["on"]

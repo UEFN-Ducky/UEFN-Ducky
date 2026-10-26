@@ -24,7 +24,7 @@ from backend.store.repos import space_vcs
 from backend.uefn_plugins import data_crypto, live, rtc, scopes, spaces, vcs_engine
 from backend.uefn_plugins.scopes import PluginData
 
-SPACE, PLUGIN = "spaceT", "cards"
+SPACE, PLUGIN, OTHER = "spaceT", "cards", "notes"
 ALEX = {"name": "Alex", "user": "u_alex", "device": "d_alex", "label": "ALEX-PC"}
 
 
@@ -81,6 +81,7 @@ def team(monkeypatch: pytest.MonkeyPatch):
     from backend.uefn_plugins import sync_scheduler
 
     monkeypatch.setattr(sync_scheduler, "wake", lambda a, s, p=None: woke.append((a, s, p)))
+    monkeypatch.setattr(live, "_enabled", lambda plugin: True)
     live.reset_for_tests()
     yield {"account": account, "impl": impl, "pushed": pushed, "beats": beats, "woke": woke}
     live.reset_for_tests()
@@ -179,7 +180,9 @@ def test_live_is_for_a_team_copy_with_a_provider_that_has_it(team: dict[str, Any
     assert impl.joined == [(SPACE, PLUGIN, f"h:{me}")]
     assert team["beats"] == [(account, SPACE)]  # presence says so now, not at the next beat
     assert team["woke"] == [(account, SPACE, PLUGIN)]  # joined up to date: a pull now
-    assert team["pushed"][-1]["type"] == "live_peers" and team["pushed"][-1]["on"] is True
+    told = [e for e in team["pushed"] if e["type"] == "live_peers"]
+    assert told[-1]["on"] is True
+    assert team["pushed"][-1] == {"type": "live_team", "account": account, "space": SPACE, "on": True}
 
 
 def test_presence_carries_the_room_and_leaving_drops_it(team: dict[str, Any]) -> None:
@@ -191,7 +194,7 @@ def test_presence_carries_the_room_and_leaving_drops_it(team: dict[str, Any]) ->
     assert status["live"]["on"] is True and status["live"]["room"] == "level-2"
     live.join(PLUGIN, "level-3")  # another room: the first one is left
     assert team["impl"].joined[-2:] == [(SPACE, PLUGIN, None), (SPACE, PLUGIN, "level-3")]
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     assert "live" not in vcs_engine.presence_blob(account, SPACE, [PLUGIN])["plugins"][PLUGIN]
     assert spaces.scope_status(PLUGIN)["live"]["on"] is False
 
@@ -232,7 +235,7 @@ def test_groups_are_named_by_their_host_with_who_is_in_them(team: dict[str, Any]
     assert mine["mine"] and mine["host"] == "iliya" and not mine["hostIsMe"]
     assert [m["name"] for m in mine["members"]] == ["iliya", "Cy", "You"] and mine["members"][2]["me"]
     # Hosting: this PC's own group, once nobody else is live.
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     _roster(account)
     assert live.join(PLUGIN)["ok"]
     mine = live.status(PLUGIN)["groups"][0]
@@ -301,18 +304,20 @@ def test_the_host_leaving_passes_the_group_to_whoever_was_in_it_longest(team: di
     assert mine["hostIsMe"] and mine["room"] == "h:d_iliya"
 
 
-def test_live_ends_when_everyone_else_left_and_the_panel_keeps_syncing(team: dict[str, Any]) -> None:
+def test_live_ends_when_everyone_else_left_and_the_panels_keep_syncing(team: dict[str, Any]) -> None:
     account = team["account"]
     _roster(account, _on("d_iliya", "iliya", "h:d_iliya", 10))
     live.join(PLUGIN, "h:d_iliya")
-    live.remember(PLUGIN, "h:d_iliya")
+    live.remember_team(account, SPACE, "h:d_iliya")
     assert live.end_lone_groups(account, SPACE) == []  # iliya is here
     # iliya is still on the roster but not live any more: they left, so Live ends at once.
     _roster(account, {"device": "d_iliya", "user_name": "iliya", "plugins": {PLUGIN: {"viewing": True}}})
     team["pushed"].clear()
     assert live.end_lone_groups(account, SPACE) == [PLUGIN]
     assert live.is_live(PLUGIN) is False and live.status(PLUGIN)["rejoin"] == ""
-    assert team["pushed"][-1] == {"type": "live_peers", "plugin": PLUGIN, "on": False, "peers": [], "ended": "alone"}
+    assert {"type": "live_peers", "plugin": PLUGIN, "on": False, "peers": [], "ended": "alone"} in team["pushed"]
+    assert team["pushed"][-1] == {"type": "live_team", "account": account, "space": SPACE, "on": False,
+                                  "ended": "alone"}
     assert repo.link_get(account, PLUGIN) == SPACE  # still on the team copy: sync goes on
 
 
@@ -329,42 +334,110 @@ def test_a_groupmate_gone_from_the_roster_gets_a_grace_and_a_fresh_group_stays(t
     assert live.end_lone_groups(account, SPACE, now=now + live.LONE_GRACE_S + 1) == [PLUGIN]
 
 
-def test_closing_the_plugins_tab_ends_live_and_it_isnt_gone_back_into(team: dict[str, Any],
-                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    from backend.uefn_plugins import panel_presence
-
-    state = {"open": True}
-    monkeypatch.setattr(panel_presence, "panel_state", lambda plugin: {"open": state["open"]})
-    live.join(PLUGIN)
-    live.remember(PLUGIN, live.START)
-    assert live.status(PLUGIN)["rejoin"] == live.START  # a restart goes back in
-    live.tab_closed(PLUGIN, wait=0.05)  # moved between panes: open again at once
-    time.sleep(0.3)
-    assert live.is_live(PLUGIN)
-    state["open"] = False
-    live.tab_closed(PLUGIN, wait=0.05)
-    deadline = time.monotonic() + 5
-    while live.is_live(PLUGIN) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert live.is_live(PLUGIN) is False and live.status(PLUGIN)["rejoin"] == ""
+def _second_plugin(account: str) -> None:
+    repo.link_set(account, OTHER, SPACE)
+    space_vcs.head_put(account, SPACE, OTHER, engine="v2")
 
 
-def test_a_remembered_teammates_group_is_gone_back_into_only_while_it_is_live(team: dict[str, Any]) -> None:
+def test_one_live_covers_every_plugin_of_the_team_copy(team: dict[str, Any]) -> None:
+    """Start live from one plugin puts every plugin of the team copy here in the same group
+    with one since (each works out the same leader); Leave, from either, takes them all out."""
+    account, impl = team["account"], team["impl"]
+    _second_plugin(account)
+    try:
+        got = live.join(PLUGIN)
+        me = live.host_room()
+        assert got["ok"] and sorted(impl.joined) == [(SPACE, PLUGIN, me), (SPACE, OTHER, me)]
+        assert live.room_of(PLUGIN, account, SPACE)["since"] == live.room_of(OTHER, account, SPACE)["since"]
+        blob = vcs_engine.presence_blob(account, SPACE, [PLUGIN, OTHER])
+        assert blob["live"]["room"] == me and blob["live"]["v"] == live.PROTOCOL  # at its top, and per plugin
+        assert blob["plugins"][OTHER]["live"]["room"] == me
+        live.leave_live(OTHER)
+        assert not live.is_live(PLUGIN) and not live.is_live(OTHER) and live.spaces_live() == set()
+        assert "live" not in vcs_engine.presence_blob(account, SPACE, [PLUGIN, OTHER])
+    finally:
+        repo.link_set(account, OTHER, scopes.PERSONAL)
+
+
+def test_a_plugin_that_comes_to_the_team_copy_later_joins_the_group(team: dict[str, Any],
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled later: the next roster brings it in. Switched to Local: it alone leaves. Back
+    on the team copy: it joins as soon as it is read."""
     account = team["account"]
-    live.remember(PLUGIN, "h:d_iliya")
+    on = {OTHER: False}
+    monkeypatch.setattr(live, "_enabled", lambda plugin: on.get(plugin, True))
+    _second_plugin(account)
+    try:
+        live.join(PLUGIN)
+        assert not live.is_live(OTHER)  # not enabled here
+        on[OTHER] = True
+        live.catch_up(account, SPACE)  # the next roster
+        deadline = time.monotonic() + 5
+        while not live.is_live(OTHER) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert live.room_of(OTHER, account, SPACE)["room"] == live.host_room()
+        repo.link_set(account, OTHER, scopes.PERSONAL)
+        assert live.status(OTHER)["on"] is False and live.is_live(PLUGIN)
+        repo.link_set(account, OTHER, SPACE)
+        assert live.status(OTHER)["on"] is True
+    finally:
+        repo.link_set(account, OTHER, scopes.PERSONAL)
+
+
+def test_closing_a_plugins_tab_keeps_this_pc_live(team: dict[str, Any]) -> None:
+    """Live is the team copy's, not a tab's: every tab of the plugin closing ends nothing."""
+    from frontend.ui_web import panel_api  # noqa: F401 — the window mixin imports through it
+    from frontend.ui_web.panel_api_window import PanelApiWindowMixin
+
+    live.join(PLUGIN)
+    tab = f"plugin:{PLUGIN}:main"
+    PanelApiWindowMixin.report_plugin_panel(None, "main", tab, visible=True, open=True)  # type: ignore[arg-type]
+    PanelApiWindowMixin.report_plugin_panel(None, "main", tab, visible=False, open=False)  # type: ignore[arg-type]
+    time.sleep(0.2)
+    assert live.is_live(PLUGIN) and live.team_status(team["account"], SPACE)["on"]
+
+
+def test_the_menus_groups_cover_every_plugin_and_say_what_each_person_has_on_screen(team: dict[str, Any]) -> None:
+    account = team["account"]
+    cy = {**_on("d_cy", "Cy", "h:d_cy", 10, plugin=OTHER), "live": {"room": "h:d_cy", "since": 10, "v": live.PROTOCOL}}
+    _roster(account, cy, _on("d_mo", "Mo", "h:d_cy", 20))  # Mo's app says it per plugin only
+    (g,) = live.team_groups(account, SPACE)
+    assert [(m["name"], m["plugin"], m["partial"]) for m in g["members"]] == [("Cy", OTHER, False),
+                                                                             ("Mo", PLUGIN, True)]
+    assert live.join(PLUGIN)["room"] == "h:d_cy"  # Start live: their group, whatever plugin they're in
+    got = live.overview()
+    (t,) = got["teams"]
+    assert got["on"] and (t["space"], t["label"], t["on"], t["room"]) == (SPACE, "Alpha", True, "h:d_cy")
+    assert t["plugins"] == [PLUGIN] and [m["name"] for m in t["groups"][0]["members"]] == ["Cy", "Mo", "You"]
+
+
+def test_a_remembered_group_is_gone_back_into_after_a_restart_while_it_is_live(team: dict[str, Any]) -> None:
+    account = team["account"]
+    live.remember_team(account, SPACE, "h:d_iliya")
     _roster(account)
     assert live.status(PLUGIN)["rejoin"] == ""  # their group ended
+    live.catch_up(account, SPACE)
+    time.sleep(0.1)
+    assert not live.is_live(PLUGIN)
     _roster(account, _on("d_iliya", "iliya", "h:d_iliya", 10))
     assert live.status(PLUGIN)["rejoin"] == "h:d_iliya"
-    live.remember(PLUGIN, "")
+    live.catch_up(account, SPACE)  # the first roster after a restart: back in
+    _wait_room("h:d_iliya")
+    assert live.status(PLUGIN)["room"] == "h:d_iliya"
+    live.leave_live(PLUGIN)  # Leave: not again
     assert live.status(PLUGIN)["rejoin"] == ""
+    live.remember_team(account, SPACE, live.START)  # Start live before the restart
+    _roster(account)
+    live.catch_up(account, SPACE)
+    _wait_room(live.host_room())
+    assert live.status(PLUGIN)["room"] == live.host_room()
 
 
-def test_a_space_is_live_while_one_of_its_plugins_is(team: dict[str, Any]) -> None:
+def test_a_space_is_live_while_this_pc_is_live_on_it(team: dict[str, Any]) -> None:
     assert live.spaces_live() == set()
     live.join(PLUGIN)
     assert live.spaces_live() == {(team["account"], SPACE)}
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     assert live.spaces_live() == set()
 
 
@@ -528,7 +601,7 @@ def test_a_write_never_goes_live_a_commit_tells_the_group_to_pull(team: dict[str
     assert impl.sent == []  # half a change (a doc without its picture) never reaches anyone
     live.committed(account, SPACE, PLUGIN)
     assert impl.sent == [(PLUGIN, live.CHANGE, {}, "", False)]
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     live.committed(account, SPACE, PLUGIN)  # not live: the group's next round brings it
     assert len(impl.sent) == 1
 
@@ -644,7 +717,7 @@ def test_a_live_folder_plugins_pages_show_a_teammates_pull_at_once_unless_this_p
     before = folder_files.reload_epoch(PLUGIN)
     live.hold(PLUGIN, "#name", False)  # let go: the reload it waited with happens now
     assert folder_files.reload_epoch(PLUGIN) == before + 1 and folder_files.reload_reason(PLUGIN) == "live ended"
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     assert folder_files.reload_epoch(PLUGIN) == before + 1  # nothing left waiting
 
 
@@ -913,7 +986,7 @@ def test_a_pc_that_says_no_version_relays_like_1_2_434_until_what_it_sends_says_
     live.deliver(account, SPACE, PLUGIN, CY, live.NAV, {"anchor": "#video"})
     (g,) = live.status(PLUGIN)["groups"]
     assert g["members"][0]["older"] and g["hostIsMe"]  # 1.2.433's never do: this PC leads now
-    assert [e["type"] for e in live_data["pushed"]] == ["live_peers", "live_message"]  # the bar reads it again
+    assert [e["type"] for e in live_data["pushed"]] == ["live_peers", "live_team", "live_message"]  # read again
 
 
 def test_each_pc_has_a_live_state_everyone_in_the_group_sees(team: dict[str, Any]) -> None:
@@ -942,7 +1015,7 @@ def test_each_pc_has_a_live_state_everyone_in_the_group_sees(team: dict[str, Any
     assert live.member_states(PLUGIN) == [] and pushed[-1]["state"] is None
     live.set_my_state(PLUGIN, None)  # cleared: it must arrive
     assert impl.sent[-1] == (PLUGIN, live.STATE, {"s": None}, "", False)
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     assert live.member_states(PLUGIN) == []
 
 
@@ -996,7 +1069,7 @@ def test_the_leader_orders_shared_values_and_sends_them_again_for_latecomers(tea
     assert live.share(PLUGIN, "bad key!", 1)["ok"] is False
     assert live.share(PLUGIN, "big", "y" * 9000)["ok"] is False
     assert live.share(PLUGIN, "clip", None)["ok"] and "clip" not in live.shared(PLUGIN)
-    live.leave(PLUGIN)
+    live.leave_live(PLUGIN)
     assert live.shared(PLUGIN) == {}
 
 

@@ -69,8 +69,8 @@ await call("prefs.get", { id: "highScore" });
 | `files.get` | `{ path }` | `{ ok, b64 }` |
 | `files.list` | `{ prefix? }` | `{ files: [{ path, size, sha256 }] }` |
 | `files.delete` | `{ path }` | `{ ok, deleted }` |
-| `live.join` | `{ room? }` | `{ ok, on, room, state, peers, groups }` — go live on the team copy (no room: host this PC's own group; a group's `room` joins it) |
-| `live.leave` | — | `{ ok }` |
+| `live.join` | `{ room? }` | `{ ok, on, room, state, peers, groups }` — go live on the team copy, every plugin with it (no room: a teammate's group, else this PC's own; a group's `room` joins it; any other room is this plugin's own) |
+| `live.leave` | — | `{ ok }` — this PC leaves the group, every plugin with it (a room of the plugin's own: only that) |
 | `live.state` | — | `{ supported, reason, on, room, state, peers }` |
 | `live.send` | `{ topic, data, to? }` (JSON ≤ 16 KB, ≤ 30/s) | `{ ok, sent }` — to teammates live in the room (`to`: one PC's device id); `ducky.*` topics are the host's |
 

@@ -430,16 +430,11 @@ class PanelApiWindowMixin:
 
     def report_plugin_panel(self, window_id: str = "", tab_id: str = "", visible: bool = True, open: bool = True) -> None:  # noqa: A002
         """A plugin panel tab was shown, hidden or closed (agents are told when it is off screen;
-        a plugin whose tabs all closed stops being live)."""
-        from backend.uefn_plugins.panel_presence import note_panel, tab_plugin
+        Live goes on: it is the whole team copy's, not a tab's)."""
+        from backend.uefn_plugins.panel_presence import note_panel
 
         try:
             note_panel(window_id or "main", str(tab_id or ""), visible=bool(visible), open_=bool(open))
-            plugin_id = tab_plugin(str(tab_id or ""))
-            if not open and plugin_id:
-                from backend.uefn_plugins import live
-
-                live.tab_closed(plugin_id)
         except Exception:
             pass
 

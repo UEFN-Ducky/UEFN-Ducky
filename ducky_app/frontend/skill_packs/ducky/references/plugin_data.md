@@ -129,9 +129,11 @@ code for it; these rules decide how well it works for people editing together.
   everyone gets, never a rewrite.
 - **Live.** On a team copy, the bar's Live menu lists the live groups by host: Start
   live goes into the biggest group a teammate is live in (or starts one), Join picks one
-  (peer to peer). When the host leaves, whoever has been in the group longest leads it;
-  closing the plugin's tab leaves, and someone left alone drops out of Live but keeps
-  syncing. While a plugin is live its copy
+  (peer to peer). Being live covers every plugin on that team copy: one Start live puts
+  them all in the group, a plugin switched to the copy or enabled later joins on its own,
+  closing a tab leaves nothing, and Leave takes them all out. When the host leaves,
+  whoever has been in the group longest leads it; someone left alone drops out of Live but
+  keeps syncing. While a plugin is live its copy
   syncs every few seconds, and each change a member commits makes the group pull it at
   once (`plugin_scope_changed` reason `synced`, as above). Each change also goes to the
   group the moment it is written, and **the group syncs through its leader**: the leader
