@@ -122,6 +122,47 @@ def test_list_tools_skips_wait_when_plugins_ready() -> None:
     assert listed == ["ok"]
 
 
+def test_tools_list_sends_core_tools_only() -> None:
+    """Store-plugin tools stay off the wire (found via ducky_get_tools); host-disk tools stay."""
+    from backend.bridge import plugin_gate as bridge_plugin_gate
+    from backend.server import mcp
+    from mcp.types import ListToolsRequest as LT
+
+    tools = [SimpleNamespace(name=n) for n in ("ping", "discord_send_message", "skill_read_subskill", "unreal__call_tool")]
+
+    async def fake_list(_req):
+        return SimpleNamespace(root=SimpleNamespace(tools=list(tools)))
+
+    async def fake_call(_req):
+        return SimpleNamespace()
+
+    bridge_plugin_gate._installed = False
+    server = mcp._mcp_server
+    prev_list = server.request_handlers.get(LT)
+    prev_call = server.request_handlers.get(CallToolRequest)
+    server.request_handlers[LT] = fake_list
+    server.request_handlers[CallToolRequest] = fake_call
+    owned = frozenset({"discord_send_message", "skill_read_subskill"})
+    try:
+        with (
+            patch("backend.uefn_plugins.host.store_plugin_tool_names", return_value=owned),
+            patch("backend.uefn_plugins.host.plugins_ready", return_value=True),
+        ):
+            bridge_plugin_gate.install_bridge_plugin_gate(mcp)
+            result = asyncio.run(server.request_handlers[LT](ListToolsRequest()))
+            from backend.bridge.shared_mcp import _policy_filtered
+
+            shared = [t.name for t in _policy_filtered(list(tools))]
+    finally:
+        server.request_handlers[LT] = prev_list
+        server.request_handlers[CallToolRequest] = prev_call
+        bridge_plugin_gate._installed = False
+
+    want = ["ping", "skill_read_subskill", "unreal__call_tool"]
+    assert [t.name for t in result.root.tools] == want
+    assert shared == want
+
+
 def test_cap_ui_result_truncates() -> None:
     from frontend.ui_web.agent_modes import UI_TOOL_RESULT_MAX, _cap_ui_result
 

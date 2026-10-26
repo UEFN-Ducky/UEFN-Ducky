@@ -1325,6 +1325,12 @@ def plugin_tool_names() -> frozenset[str]:
         return frozenset(_PLUGIN_TOOL_NAMES)
 
 
+def store_plugin_tool_names() -> frozenset[str]:
+    """Every tool a Store plugin registered, without waiting for plugins to load."""
+    with _LOCK:
+        return frozenset(_PLUGIN_TOOL_NAMES) | frozenset(_PLUGIN_TOOL_OWNER)
+
+
 def plugin_for_tool(name: str) -> str:
     """Owning plugin id for an MCP tool, or ``ducky`` for core host tools."""
     n = (name or "").strip()

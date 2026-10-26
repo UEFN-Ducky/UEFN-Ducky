@@ -410,9 +410,12 @@ def _snapshot_tools(mcp: Any) -> list[Any]:
 
 
 def _policy_filtered(tools: list[Any]) -> list[Any]:
-    """The filter ProtectedFastMCP.list_tools applies; the snapshot never calls it."""
+    """What a client's tools/list gets: ProtectedFastMCP's policy filter plus the lean list."""
     if not tools:
         return tools
+    from backend.bridge.plugin_gate import lean_tool_list
+
+    tools = lean_tool_list(tools)
     try:
         from backend.workspace.ai_ignore import SAFE_TOOLS, current_policy
 

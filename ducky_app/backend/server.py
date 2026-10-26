@@ -204,7 +204,8 @@ mcp = ProtectedFastMCP(
     # them here sent them twice every session.
     instructions=(
         "UEFN Ducky — tools for UEFN (Unreal Editor for Fortnite), project files and the Ducky app.\n"
-        "Store plugins add more tools here (blender_*, discord_*, …): if listed, call them.\n"
+        "Store-plugin tools (blender_*, discord_*, …) and nested servers ({prefix}__*) are not listed:\n"
+        "find them with ducky_get_tools and run them with ducky_call_tool(name, arguments).\n"
         "Desktop-plugin tools do not need the UEFN listener.\n"
         "Keep responses compact (pretty=false) and page big lists (offset/limit/fields).\n"
         "Not sure which tool fits? skill_search, or ducky_get_tools."

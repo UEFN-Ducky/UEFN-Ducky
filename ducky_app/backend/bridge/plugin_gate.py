@@ -39,6 +39,24 @@ def clear_mcp_tool_cache(mcp: Any) -> None:
     bump_catalog_revision()
 
 
+def lean_tool_list(tools: list[Any]) -> list[Any]:
+    """What tools/list sends a client: Ducky's own tools, never Store-plugin tools.
+
+    Plugin tools (and on-demand nested servers, see bridge_proxy) are found with
+    ``ducky_get_tools`` and run with ``ducky_call_tool``, so the list a client loads stays
+    the same size however many plugins are installed. Sending every schema grew past
+    Codex's 2048-tool limit, and Codex then refused the whole server.
+    """
+    try:
+        from backend.tools.support.plugin_gate import HOST_DISK_TOOLS
+        from backend.uefn_plugins.host import store_plugin_tool_names
+
+        hidden = store_plugin_tool_names() - HOST_DISK_TOOLS
+    except Exception:
+        return tools
+    return [t for t in tools if getattr(t, "name", "") not in hidden]
+
+
 def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S) -> None:
     """Wrap ListTools / CallTool handlers so they wait for plugin register()."""
     global _installed
@@ -79,7 +97,12 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
             except Exception:
                 pass
             clear_mcp_tool_cache(mcp)
-        return await orig_list(req)
+        # The SDK caches the full list for tools/call first, so a hidden tool still runs.
+        result = await orig_list(req)
+        listed = getattr(result, "root", result)
+        if isinstance(getattr(listed, "tools", None), list):
+            listed.tools = lean_tool_list(listed.tools)
+        return result
 
     async def call_tool_after_plugins(req: Any) -> Any:
         await asyncio.to_thread(wait_until_plugins_loaded, timeout)
