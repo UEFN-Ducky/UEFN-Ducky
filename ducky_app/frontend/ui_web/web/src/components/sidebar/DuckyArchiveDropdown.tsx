@@ -35,9 +35,11 @@ export function buildArchiveTree(chats: ArchiveChat[]): ArchiveNode[] {
   const out: ArchiveNode[] = [];
   for (const chat of chats) {
     const parent = (chat.parentConvId || "").trim();
-    if (parent && ids.has(parent)) continue;
+    if (parent && parent !== chat.id && ids.has(parent)) continue;
     out.push(node(chat));
   }
+  // A parent loop has no root: list it anyway, or the badge counts chats nobody can see.
+  for (const chat of chats) if (!seen.has(chat.id)) out.push(node(chat));
   return out;
 }
 

@@ -864,7 +864,12 @@ def archive_tree(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         count = sum(1 + n["inside_count"] for n in inside)
         return {**r, "inside_count": count, "inside": inside}
 
-    return [node(r) for r in rows if not (r.get("parent_conv_id") and r["parent_conv_id"] in ids)]
+    child_ids = {k["id"] for v in kids.values() for k in v}
+    out = [node(r) for r in rows if r["id"] not in child_ids]
+    # A parent loop (a group archived inside its own ducky) has no root: list it anyway,
+    # or the badge counts chats the Archive never shows.
+    out += [node(r) for r in rows if r["id"] not in seen]
+    return out
 
 
 @mcp.tool()

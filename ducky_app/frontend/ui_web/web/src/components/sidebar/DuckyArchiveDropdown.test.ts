@@ -22,6 +22,17 @@ it("lists archived duckies as one list, each group with what was archived with i
   expect(group.children[1].children.map((n) => n.chat.id)).toEqual(["m2"]);
 });
 
+it("lists chats in a parent loop or parented to themselves", () => {
+  const loop = [
+    { id: "x", name: "X", parentConvId: "y" },
+    { id: "y", name: "Y", parentConvId: "x" },
+    { id: "self", name: "Self", parentConvId: "self" },
+  ];
+  const nodes = buildArchiveTree(loop);
+  const all = (ns: typeof nodes): string[] => ns.flatMap((n) => [n.chat.id, ...all(n.children)]);
+  expect(all(nodes).sort()).toEqual(["self", "x", "y"]);
+});
+
 it("counts everything a group takes along", () => {
   expect(archivedInsideCount(chats, "g")).toBe(3);
   expect(archivedInsideCount(chats, "inner")).toBe(1);
