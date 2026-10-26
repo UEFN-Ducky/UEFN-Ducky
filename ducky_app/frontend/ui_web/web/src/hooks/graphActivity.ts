@@ -1,5 +1,4 @@
 import type { AutomationSummaryDto, PanelPushEvent } from "../types/panel";
-import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
 import { holdGuidedUi } from "../ui-targets/guidedBusy";
 import {
   dismissBackgroundJob,
@@ -25,8 +24,9 @@ export function workflowIdFromJobId(jobId: string): string {
   return "";
 }
 
-/** Where to look once the workflow is open: nodes to bring into view (and select), a caption. */
-export type GraphFocusTarget = { nodes?: string[]; select?: boolean; note?: string };
+/** Where to look once the workflow is open: nodes to bring into view (and select), a caption.
+ *  ``quiet``: an agent's, so an editor on another workflow stays where it is. */
+export type GraphFocusTarget = { nodes?: string[]; select?: boolean; note?: string; quiet?: boolean };
 export type GraphFocus = GraphFocusTarget & { id: string };
 
 let pendingFocus: GraphFocus | null = null;
@@ -40,19 +40,17 @@ export function requestFocusGraph(id: string, target: GraphFocusTarget = {}): vo
   }
 }
 
-/** Chat saved, showed or deleted a workflow. Only a show (show_workflow, a tour) opens the
- *  Workflows tab; a save or delete refreshes an editor that is already open and never pulls
- *  you away from the tab you are on. */
+/** Chat saved, showed or deleted a workflow. None of them opens the Workflows tab or moves
+ *  an open editor off the workflow the person is on: the chat card's Show me does that when
+ *  they press it. A save refreshes that workflow if it is the open one; a show is kept, so
+ *  opening Workflows lands on its nodes. */
 export function applyGraphFocusPush(event: PanelPushEvent): void {
   if (event.type !== "graph_focus") return;
   const id = String(event.id || "").trim();
   if (!id) return;
   const show = event.action === "show";
-  if (show) {
-    // Ducky is working in the editor: its first-open tour waits for another time.
-    holdGuidedUi();
-    requestOpenWorkflowsTab();
-  }
+  // Ducky is working in the editor: its first-open tour waits for another time.
+  if (show) holdGuidedUi();
   if (event.action === "deleted") {
     if (pendingFocus?.id === id) pendingFocus = null;
     if (typeof window !== "undefined") {
@@ -61,7 +59,7 @@ export function applyGraphFocusPush(event: PanelPushEvent): void {
     return;
   }
   const nodes = Array.isArray(event.nodes) ? event.nodes.map(String).filter(Boolean) : [];
-  requestFocusGraph(id, { ...(nodes.length ? { nodes } : {}), ...(event.select ? { select: true } : {}), ...(event.note ? { note: String(event.note) } : {}) });
+  requestFocusGraph(id, { ...(nodes.length ? { nodes } : {}), ...(event.select ? { select: true } : {}), ...(event.note ? { note: String(event.note) } : {}), quiet: true });
   // A save is only for an editor already open: opening Workflows later shows what you left there.
   if (!show) pendingFocus = null;
 }

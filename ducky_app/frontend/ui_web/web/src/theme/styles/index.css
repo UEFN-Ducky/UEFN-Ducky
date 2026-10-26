@@ -8,6 +8,7 @@
 @import "./chat.css";
 @import "./workspace-dock.css";
 @import "./rich-content.css";
+@import "./tool-inline-view.css";
 @import "./components-inline.css";
 @import "../../verse-editor/verse-editor.css";
 @import "./terminal.css";

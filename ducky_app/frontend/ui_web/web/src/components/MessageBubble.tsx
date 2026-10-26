@@ -10,6 +10,7 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { AttachmentStrip } from "./EditableUserMessage";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
+import { MediaLightbox } from "./MediaLightbox";
 import { openPanelRoute } from "../navigation/openPanelRoute";
 import { TourOffer } from "../walkthrough/TourOffer";
 import { useIntroTyping } from "../walkthrough/introTyping";
@@ -56,18 +57,27 @@ function sendToMediaKit(action: "open" | "export", a: MessageAttachmentDto) {
 
 /** A video, sound or motion scene an agent made: plays right under the reply. */
 function ReplyMediaCard({ media }: { media: MessageAttachmentDto }) {
+  const [big, setBig] = useState(false);
   const url = media.media_url;
   if (!url) return null;
   const isMp4 = media.kind === "video" && /\.mp4$/i.test(media.name);
   return (
     <div className={`message-bubble-media-card message-bubble-media-card--${media.kind}`}>
       {media.kind === "video" ? <video src={url} controls preload="metadata" /> : null}
+      {media.kind === "video" ? (
+        <MediaLightbox items={[{ kind: "video", name: media.name, url }]} index={big ? 0 : null} onClose={() => setBig(false)} />
+      ) : null}
       {media.kind === "audio" ? <audio src={url} controls preload="metadata" /> : null}
       {media.kind === "motion" ? (
         // No same-origin: the scene's script can't reach the app; the server also sends a self-only CSP.
         <iframe src={url} sandbox="allow-scripts" title={media.name} loading="lazy" />
       ) : null}
       <div className="message-bubble-media-actions">
+        {media.kind === "video" ? (
+          <button type="button" onClick={() => setBig(true)}>
+            Open big
+          </button>
+        ) : null}
         <button type="button" onClick={() => sendToMediaKit("open", media)}>
           Open in Media Kit
         </button>

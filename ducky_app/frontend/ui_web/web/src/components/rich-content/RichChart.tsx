@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
+import { EnlargeableGraphic } from "../MediaLightbox";
 
 // ```chart fences hold a JSON spec drawn here as SVG; ```svg fences are shown
 // after sanitizeSvg. Colors are rich-c-<name> classes over Appearance variables.
@@ -538,14 +539,19 @@ export function sanitizeSvg(text: string): string | null {
 export function useRichGraphic(text: string, language?: string): ReactNode | null {
   return useMemo(() => {
     const lang = language?.toLowerCase();
+    // Every chart and picture in the chat opens big from the button in its corner.
     if (lang === "chart") {
       const spec = parseChartSpec(text);
-      return spec ? <RichChart spec={spec} /> : null;
+      return spec ? <EnlargeableGraphic name={spec.title || "Chart"}><RichChart spec={spec} /></EnlargeableGraphic> : null;
     }
     if (lang === "svg") {
       const markup = sanitizeSvg(text);
       // Sanitized above: allowlisted tags only, no handlers or outside URLs.
-      return markup ? <figure className="rich-chart rich-chart--svg" dangerouslySetInnerHTML={{ __html: markup }} /> : null;
+      return markup ? (
+        <EnlargeableGraphic name="Picture">
+          <figure className="rich-chart rich-chart--svg" dangerouslySetInnerHTML={{ __html: markup }} />
+        </EnlargeableGraphic>
+      ) : null;
     }
     return null;
   }, [text, language]);

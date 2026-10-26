@@ -14,6 +14,10 @@ import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { walkthroughStepsFromTool } from "./tool-cards/bodies/WalkthroughBody";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
 import { isPictureSearch, resolveToolCategory, webToolIcon } from "./tool-cards/toolCategories";
+import { ToolInlineView, ToolOpenChip, openTargetFor } from "./tool-cards/ToolInlineView";
+import { bareToolName, hasViewContent, toolViewSpec } from "./tool-cards/toolView";
+import { useToolOwners } from "../hooks/useToolView";
+import { usePluginContributions } from "../hooks/usePluginContributions";
 import { runAgentWalkthrough } from "../walkthrough/agentWalkthrough";
 import type { ChatMessage, ChatTab, LinkedAgent, ToolCallData } from "../types/panel";
 import {
@@ -185,6 +189,15 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
     () => (isRunning ? null : showMeRequestFromTool(meta.name, meta.arguments || {})),
     [isRunning, meta.name, meta.arguments],
   );
+  // A plugin's tool: its Open button, and what the call made drawn on the card.
+  const bareName = bareToolName(meta.name);
+  const owner = useToolOwners([bareName])[bareName] ?? null;
+  const pluginContrib = usePluginContributions();
+  const viewSpec = useMemo(
+    () => (isRunning || !isSuccess ? null : toolViewSpec(meta.name, meta.arguments || {}, meta.result)),
+    [isRunning, isSuccess, meta.name, meta.arguments, meta.result],
+  );
+  const openTarget = useMemo(() => openTargetFor(viewSpec, owner, pluginContrib), [viewSpec, owner, pluginContrib]);
   const playShowMeAgain = (e: MouseEvent | KeyboardEvent) => {
     e.stopPropagation();
     if (showMe) void replayShowMe(showMe);
@@ -332,6 +345,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
               <span>Show me</span>
             </span>
           ) : null}
+          {openTarget ? <ToolOpenChip target={openTarget} /> : null}
           {walkthroughSteps?.length ? (
             <span
               className="tool-execution-card-replay"
@@ -374,6 +388,12 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
               <div className="status-dot online tool-execution-card-waiting-dot" />
               Waiting for linked chat &ldquo;{linkedAgent.title}&rdquo;… Parent continues when it finishes or you stop it.
             </div>
+          </div>
+        ) : null}
+
+        {viewSpec && hasViewContent(viewSpec) && !captureBody && !isGuardBlocked ? (
+          <div className="tool-execution-card-body tool-execution-card-body--view">
+            <ToolInlineView spec={viewSpec} />
           </div>
         ) : null}
 

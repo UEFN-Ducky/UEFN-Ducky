@@ -7,6 +7,7 @@ import {
   useChatCollapseState,
 } from "../hooks/useChatCollapseState";
 import { ToolExecutionCard } from "./ToolExecutionCard";
+import { ToolViewStrip } from "./tool-cards/ToolInlineView";
 import type { ActivityItem } from "../utils/chatMessageGroups";
 import type { ChatTab, LinkedAgent, MessageAuthorDto } from "../types/panel";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
@@ -160,6 +161,7 @@ export const AgentActivityGroup = memo(function AgentActivityGroup({
           ))}
         </div>
       ) : null}
+      {!open ? <ToolViewStrip items={items} /> : null}
       {open ? (
         <div className="agent-activity-group-body">
           {items.map((item) =>

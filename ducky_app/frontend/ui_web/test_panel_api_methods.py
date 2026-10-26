@@ -60,6 +60,7 @@ _PUBLIC_METHODS = frozenset({
     'cancel_agent',
     'cancel_update',
     'capture_list_shield',
+    'chat_tool_view',
     'claim_tab',
     'get_tab_owner',
     'classify_project_file',

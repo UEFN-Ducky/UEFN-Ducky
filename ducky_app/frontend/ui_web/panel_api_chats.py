@@ -113,6 +113,13 @@ class PanelApiChatsMixin:
         except Exception:  # noqa: BLE001 - the list still shows what is already in it
             pass
 
+    def chat_tool_view(self, tool_names: list[str] | None = None, paths: list[str] | None = None) -> dict[str, Any]:
+        """A tool card's plugin (name, panel to open) and links for the media files its
+        result names, so the card plays them in the chat."""
+        from backend.uefn_plugins.chat_view import chat_tool_view
+
+        return chat_tool_view(tool_names, paths)
+
     def list_folders(self, all_projects: bool = False) -> list[dict[str, str | float]]:
         """The one Duckies list's folders (``all_projects`` is ignored: there is one list)."""
         del all_projects

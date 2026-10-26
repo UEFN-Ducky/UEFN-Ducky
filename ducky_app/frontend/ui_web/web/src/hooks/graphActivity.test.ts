@@ -59,7 +59,7 @@ describe("graphActivity", () => {
     expect(workflowIdFromJobId("graph-run:abc:171000")).toBe("abc");
   });
 
-  it("a chat save refreshes an open editor but never switches to the Workflows tab", () => {
+  it("a chat save or show never switches to the Workflows tab", () => {
     let opened = 0;
     const stop = registerOpenWorkflowsTab(() => {
       opened += 1;
@@ -69,8 +69,8 @@ describe("graphActivity", () => {
     expect(opened).toBe(0);
     expect(takePendingGraphFocus()).toBe(""); // opening Workflows later doesn't jump to it
     applyGraphFocusPush({ type: "graph_focus", id: "p2", action: "show" });
-    expect(opened).toBe(1); // asked to show it: that opens the tab
-    expect(takePendingGraphFocus()).toBe("p2");
+    expect(opened).toBe(0); // the chat card's Show me opens it when the person presses it
+    expect(takePendingGraphFocusTarget()).toMatchObject({ id: "p2", quiet: true }); // opening Workflows lands there
     stop();
   });
 
@@ -88,7 +88,7 @@ describe("graphActivity", () => {
 
   it("carries the nodes and caption an agent is showing", () => {
     applyGraphFocusPush({ type: "graph_focus", id: "p1", action: "show", nodes: ["a", "b"], select: true, note: "This checks the score" });
-    expect(takePendingGraphFocusTarget()).toEqual({ id: "p1", nodes: ["a", "b"], select: true, note: "This checks the score" });
+    expect(takePendingGraphFocusTarget()).toEqual({ id: "p1", nodes: ["a", "b"], select: true, note: "This checks the score", quiet: true });
     expect(takePendingGraphFocusTarget()).toBeNull();
   });
 });

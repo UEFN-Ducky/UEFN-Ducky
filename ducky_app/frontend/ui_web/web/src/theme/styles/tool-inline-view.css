@@ -1,0 +1,373 @@
+/* A tool's result drawn in the chat (tool-cards/ToolInlineView): the plugin's Open button,
+   what the call made (videos, pictures, sounds), its own blocks; plus the big view. */
+
+/* Open chip in a tool card's header row, beside Show me. */
+.tool-execution-card-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 9px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-execution-card-open:hover,
+.tool-execution-card-open:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 16%, transparent);
+  outline: none;
+}
+
+.tool-execution-card-open-icon,
+.tool-view-strip-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tool-execution-card-open-icon img,
+.tool-execution-card-open-icon svg,
+.tool-view-strip-chip-icon img,
+.tool-view-strip-chip-icon svg {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.tool-execution-card-body--view {
+  padding-top: 0;
+}
+
+.tool-inline-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 4px;
+  font-family: var(--font-ui);
+}
+
+.tool-inline-view-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-inline-view-blocks {
+  font-size: 13px;
+}
+
+.tool-inline-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  max-width: 640px;
+}
+
+.tool-inline-media-grid--single {
+  grid-template-columns: minmax(0, 480px);
+}
+
+.tool-inline-media {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 60%, #000);
+  overflow: hidden;
+}
+
+.tool-inline-media--video {
+  grid-column: 1 / -1;
+  max-width: 480px;
+}
+
+.tool-inline-media--video video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.tool-inline-media--image {
+  display: block;
+  aspect-ratio: 4 / 3;
+  cursor: zoom-in;
+}
+
+.tool-inline-media-grid--single .tool-inline-media--image {
+  aspect-ratio: auto;
+  max-height: 320px;
+}
+
+.tool-inline-media--image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tool-inline-media-grid--single .tool-inline-media--image img {
+  object-fit: contain;
+  max-height: 320px;
+}
+
+.tool-inline-media--image:hover,
+.tool-inline-media--image:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 60%, transparent);
+  outline: none;
+}
+
+.tool-inline-media--audio {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.tool-inline-media--audio audio {
+  width: 100%;
+}
+
+.tool-inline-media-name {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-inline-media-enlarge,
+.enlargeable-graphic-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #fff 25%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.tool-inline-media-enlarge svg,
+.enlargeable-graphic-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tool-inline-media--video:hover .tool-inline-media-enlarge,
+.tool-inline-media-enlarge:focus-visible,
+.enlargeable-graphic:hover .enlargeable-graphic-button,
+.enlargeable-graphic-button:focus-visible {
+  opacity: 1;
+}
+
+.tool-inline-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-inline-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.tool-inline-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-inline-file svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.tool-inline-file:hover {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 55%, transparent);
+}
+
+/* Under a folded tools group: Open per plugin, then what the latest calls made. */
+.tool-view-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.tool-view-strip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-view-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-view-strip-chip:hover,
+.tool-view-strip-chip:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, #4c8dff) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c8dff) 16%, transparent);
+  outline: none;
+}
+
+.tool-view-strip-spin {
+  display: inline-flex;
+  animation: spin-slow 0.8s linear infinite;
+}
+
+:root.app-idle .tool-view-strip-spin {
+  animation-play-state: paused;
+}
+
+/* A chart or SVG in the chat: the enlarge button sits in its corner. */
+.enlargeable-graphic {
+  position: relative;
+}
+
+/* The big view. */
+.media-lightbox.modal-panel {
+  --modal-panel-width: min(1200px, 94vw);
+  max-width: 94vw;
+}
+
+.media-lightbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.media-lightbox-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  max-height: 78vh;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 50%, #000);
+  overflow: hidden;
+}
+
+.media-lightbox-stage img,
+.media-lightbox-stage video {
+  display: block;
+  max-width: 100%;
+  max-height: 78vh;
+  object-fit: contain;
+}
+
+.media-lightbox-stage audio {
+  width: min(560px, 90%);
+  margin: 48px 0;
+}
+
+.media-lightbox-graphic {
+  width: 100%;
+  max-height: 78vh;
+  padding: 12px;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.media-lightbox-graphic .enlargeable-graphic-button {
+  display: none;
+}
+
+.media-lightbox-step {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, #fff 25%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.media-lightbox-step svg {
+  width: 18px;
+  height: 18px;
+}
+
+.media-lightbox-step--prev {
+  left: 10px;
+}
+
+.media-lightbox-step--next {
+  right: 10px;
+}
+
+.media-lightbox-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.media-lightbox-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.media-lightbox-save svg {
+  width: 13px;
+  height: 13px;
+}

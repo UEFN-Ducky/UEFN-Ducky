@@ -855,9 +855,12 @@ export function AutomationsView() {
 
   useEffect(() => {
     // An agent saved, ran or is showing a workflow: open it, then bring what it touched into view.
+    // An agent's (quiet) never moves the person off another workflow they have open.
     const open = (focus: GraphFocus) => {
       if (!focus.id) return;
       void refreshList();
+      const current = liveDraft.current?.id;
+      if (focus.quiet && current && current !== focus.id) return;
       void openWorkflow(focus.id);
       if (focus.nodes?.length || focus.note) setPendingShow(focus);
       else setLogOpen(true);
@@ -887,7 +890,7 @@ export function AutomationsView() {
       window.removeEventListener("ducky:focus-graph", onFocus);
       window.removeEventListener("ducky:graph-deleted", onDeleted);
     };
-  }, [openWorkflow, refreshList, setDraft]);
+  }, [liveDraft, openWorkflow, refreshList, setDraft]);
 
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const savesPending = useRef(0);

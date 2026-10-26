@@ -1450,6 +1450,8 @@ OFF_PC_DENY = frozenset(
         "sandbox_open_folder",
         "ducky_health_snapshot",
         "ducky_self_care_run",
+        # Links to files on this PC are for this PC's windows (they point at 127.0.0.1).
+        "chat_tool_view",
     }
 )
 

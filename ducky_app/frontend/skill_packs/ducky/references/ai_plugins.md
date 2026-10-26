@@ -225,6 +225,29 @@ Push a live update to your panels: `from frontend.ui_web.verse_editor.panel_even
 import push_agent_event` then `push_agent_event({"type": "<id>_changed", …})`; the
 panel subscribes with `plugin.subscribe`.
 
+### In the chat: a tool's card shows what it made
+
+A call to your tool draws a card in the chat with your plugin's name and an **Open** button
+for your panel (the person opens the tab when they want it; agents never pull it to the
+front). Pictures, videos and sounds whose full paths are in your result play right on the
+card, and pressing one opens it big. Nothing to do for that: return the file paths.
+
+Say more with a `chat_view` object in the dict your tool returns:
+
+```python
+return {"ok": True, "path": out, "chat_view": {
+    "title": "Trailer 2 · 0:15",                    # the card's caption
+    "media": [out, cover],                             # files to show first, in order
+    "blocks": [{"type": "key_value", "pairs": [{"key": "Clips", "value": "12"}]}],
+    "open": {"panel": "main", "label": "Open in Media Kit"},  # which panel Open shows
+}}
+```
+
+`blocks` are the chat's rich blocks (`paragraph`, `list`, `table`, `key_value`, `callout`,
+`code`; `code` with `language: "chart"` and a chart spec draws a chart, which opens big
+too). Media must be files on this PC (images, video, audio, PDF, SVG); web addresses are
+not loaded. Don't open your tab from a tool to show a result: the card is the result.
+
 ### Make it findable
 
 Agents find skills and tools with `skill_search` and `ducky_get_tools(pattern=…)`, which

@@ -129,8 +129,9 @@ def panel_note_once(plugin_id: str) -> str:
     where = "is open on a tab that is not showing" if state["open"] else "is not open"
     return (
         f"The {_label(plugin_id)} panel {where}, so its panel code (UI, polling, panel-side tests) "
-        "is paused until it is the visible tab; backend tools work as usual. Show it with "
-        f'ducky_ui_navigate("plugin_panel", "{plugin_id}:{panels[0]}").'
+        "is paused until the person has it on screen; backend tools work as usual. Only if you "
+        f'need the panel itself, ducky_ui_navigate("plugin_panel", "{plugin_id}:{panels[0]}") '
+        "puts an Open button for it in the chat (never pulls it to the front)."
     )
 
 

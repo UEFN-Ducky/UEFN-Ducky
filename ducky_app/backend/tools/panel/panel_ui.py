@@ -78,8 +78,8 @@ def _navigate(route: str, item_id: str = "") -> dict[str, Any]:
     return panel_rpc("navigate", {"route": route, "item_id": item_id})
 
 
-def _open_plugin_panel(item_id: str) -> dict[str, Any]:
-    """``<plugin_id>`` or ``<plugin_id>:<panel_id>``: open that panel and bring its tab up."""
+def _plugin_panel(item_id: str) -> dict[str, Any]:
+    """``<plugin_id>`` or ``<plugin_id>:<panel_id>`` → ``{plugin_id, panel_id, title}`` or an error."""
     from backend.uefn_plugins.host import get_contributions
 
     plugin_id, _, panel_id = (item_id or "").partition(":")
@@ -89,8 +89,16 @@ def _open_plugin_panel(item_id: str) -> dict[str, Any]:
     if not panels:
         return {"error": f"plugin {plugin_id!r} has no panel"}
     panel = next((r for r in panels if r.get("id") == panel_id.strip()), panels[0])
-    out = panel_rpc("open_plugin_panel", {"plugin_id": plugin_id, "panel_id": panel.get("id"),
-                                          "title": str(panel.get("title") or panel.get("id") or "")})
+    return {"plugin_id": plugin_id, "panel_id": str(panel.get("id") or ""),
+            "title": str(panel.get("title") or panel.get("id") or "")}
+
+
+def _open_plugin_panel(item_id: str) -> dict[str, Any]:
+    """Open that panel and bring its tab up (the person pressed something that asks for it)."""
+    panel = _plugin_panel(item_id)
+    if panel.get("error"):
+        return panel
+    out = panel_rpc("open_plugin_panel", panel)
     return out if out.get("error") else {"ok": True, "route": "plugin_panel", "tab": out.get("tab")}
 
 
@@ -262,26 +270,37 @@ def ducky_ui_queue_file_pick(paths: list[str] | None = None, cancel: bool = Fals
 
 @mcp.tool()
 def ducky_ui_navigate(route: str, item_id: str = "", pretty: bool = False) -> str:
-    """Open a panel route so the user doesn't have to hunt for it.
+    """Put an Open button for a part of the app on this call's card in the chat.
 
+    It never switches the person's tab or pulls anything to the front (they may be working
+    in another tab): they press Open when they want it. To take them there and point at a
+    control because they asked where something is, use ducky_ui_show.
     route: one of settings, settings.general, settings.store, settings.llms,
     settings.mcp_plugins, settings.skills, settings.appearance, settings.audio,
     settings.duckies, settings.plans, settings.memory, settings.languages,
     settings.log_errors, settings.app_data, settings.tab, chat, chats, files, plugin_panel, changes,
-    workflows, skills_studio, terminals, plans, project_picker. `changes` opens the
-    project-wide ledger. `workflows` opens the Workflows editor.
-    `item_id`: settings.store → a Store slug opens that plugin's page; settings.tab →
+    workflows, skills_studio, terminals, plans, project_picker. `changes` is the
+    project-wide ledger. `workflows` is the Workflows editor.
+    `item_id`: settings.store → a Store slug (that plugin's page); settings.tab →
     any Settings tab by name (a plugin's own tab like "Meshy", or "Audio");
     settings.llms → a provider id; chat → a chat id; files → a project file path;
-    plugin_panel → "<plugin_id>" or "<plugin_id>:<panel_id>" opens that plugin's panel on
-    screen (its panel code only runs while it is the visible tab).
-    Returns {ok, route}. Needs an open panel; UEFN may be offline.
+    plugin_panel → "<plugin_id>" or "<plugin_id>:<panel_id>" (that plugin's panel; its panel
+    code only runs while the person has it on screen).
+    Returns {ok, route, item_id, in_chat}. UEFN may be offline.
     Example: ducky_ui_navigate("settings.mcp_plugins").
     """
     r = (route or "").strip()
     if r not in _ROUTES:
         return tool_json({"error": f"unknown route: {route}", "routes": list(_ROUTES)}, pretty=pretty)
-    return tool_json(_navigate(r, (item_id or "").strip()), pretty=pretty)
+    item = (item_id or "").strip()
+    out: dict[str, Any] = {"ok": True, "route": r, "item_id": item, "in_chat": True}
+    if r == "plugin_panel":
+        panel = _plugin_panel(item)
+        if panel.get("error"):
+            return tool_json(panel, pretty=pretty)
+        out.update(panel, item_id=f"{panel['plugin_id']}:{panel['panel_id']}")
+    out["note"] = "The Open button is on this call's card in the chat; nothing was pulled to the front."
+    return tool_json(out, pretty=pretty)
 
 
 @mcp.tool()
