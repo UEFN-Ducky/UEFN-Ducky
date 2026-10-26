@@ -18,8 +18,8 @@ Holds (a control someone is pressing) reach everyone, live or not: the group at 
 every teammate through presence (:func:`hold` puts them in this PC's presence, and
 :func:`roster_holds` hands the panels what teammates' presence says). Each hold names the
 view it was pressed in (``v``), so it only greys out the same control on the same screen.
-A follower (Follow on the Live list) gets the host's view, scroll and tab clicks
-(``ducky.view``, ``ducky.nav``).
+A follower (Same screen as the group, in the Live menu) gets the host's view, scroll and
+tab clicks (``ducky.view``, ``ducky.nav``).
 
 A group is a room named after its host's PC (``h:<device id>``): Start live goes into the
 biggest group a teammate is live in, or hosts this PC's own when nobody is; Join goes into
@@ -1251,18 +1251,30 @@ def team_status(account: str, space: str) -> dict[str, Any]:
 
 def overview() -> dict[str, Any]:
     """Every team copy this PC has plugins on, for the title bar's Live menu: ``teams``
-    (:func:`team_status` with ``account``, ``space``, ``label``, ``supported`` and ``reason``),
-    live ones first, and ``on``: live on one of them."""
+    (:func:`team_status` with ``account``, ``space``, ``label``, ``supported`` and ``reason``;
+    members also carry ``pluginLabel``), live ones first, and ``on``: live on one of them."""
     from backend.store.repos import plugin_data as repo
     from backend.uefn_plugins import scopes
 
+    from backend.uefn_plugins.spaces import plugin_label
+
     account = scopes.account_id()
+    labels: dict[str, str] = {}
+
+    def label_of(plugin: str) -> str:
+        if plugin not in labels:
+            labels[plugin] = plugin_label(plugin) or plugin
+        return labels[plugin]
+
     teams = []
     for space in sorted(set(repo.links(account).values())):
         plugins, why = _team_plugins(account, space)
-        label = str(repo.sync_get(account, space).get("label") or "") or "Team"
-        teams.append({"account": account, "space": space, "label": label, "supported": bool(plugins),
-                      "reason": "" if plugins else why, **team_status(account, space)})
+        row = {"account": account, "space": space, "label": str(repo.sync_get(account, space).get("label") or "") or "Team",
+               "supported": bool(plugins), "reason": "" if plugins else why, **team_status(account, space)}
+        for g in row["groups"]:
+            for m in g["members"]:
+                m["pluginLabel"] = label_of(m["plugin"]) if m.get("plugin") else ""
+        teams.append(row)
     teams.sort(key=lambda t: (not t["on"], t["label"].lower()))
     return {"ok": True, "on": any(t["on"] for t in teams), "teams": teams}
 

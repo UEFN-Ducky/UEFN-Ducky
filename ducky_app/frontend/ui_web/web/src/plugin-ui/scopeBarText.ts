@@ -3,7 +3,6 @@ import type {
   PluginFolderShareUnit,
   PluginLiveGroup,
   PluginLivePeer,
-  PluginLiveStatus,
   PluginScopeFolderUnit,
   PluginScopeLock,
   PluginScopePerson,
@@ -441,15 +440,6 @@ export function phraseTab(key: string): ScopeTab {
   if (key === "up_to_date") return "history";
   if (key === "local" || key === "folder_refused" || key === "paused" || key === "key") return "settings";
   return "changes";
-}
-
-/** The live groups dropdown's button: "Live · 2" (groups to join), "Live" (none), the host's
- * name while in their group, "You're live" while hosting. */
-export function liveButtonText(live: PluginLiveStatus | undefined): string {
-  const groups = live?.groups ?? [];
-  const mine = groups.find((g) => g.mine);
-  if (live?.on && mine) return mine.hostIsMe ? "You're live" : mine.host || "Live";
-  return groups.length ? `Live · ${groups.length}` : "Live";
 }
 
 /** A group's name in the dropdown: its host, else (the host left) its first member. */

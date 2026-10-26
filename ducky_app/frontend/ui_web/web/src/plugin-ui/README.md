@@ -165,8 +165,9 @@ window.addEventListener("message", (ev) => {
 
 ### Live editing
 
-On a team copy, the scope bar's **Live** list starts a group (Start live) or joins
-someone's (Join): a group is a room named after its host's PC. It links this PC straight
+On a team copy, the **Live** menu in the title bar starts a group (Start live) or joins
+someone's (Join): a group is a room named after its host's PC, and being in it covers
+every plugin on that team copy (closing a tab leaves nothing; Leave does). It links this PC straight
 to the others in it: peer to peer, through the desktop app's main window, nothing through
 a server but the first hello. With no plugin code:
 
@@ -182,7 +183,7 @@ a server but the first hello. With no plugin code:
   once, everyone else within seconds through presence. The earlier of two presses keeps
   it. `data-live-lock` makes any element holdable, `data-live-nolock` opts a control out;
   links and tabs never hold.
-- **Follow** on the Live list: a member's page goes to the host's screen, scrolls with it
+- **Same screen as the group** in the Live menu: a member's page goes to the host's screen, scrolls with it
   there and clicks the same tabs (`role="tab"`, `a[href^="#"]`, `data-live-nav`); nothing
   else is ever clicked for them. Going there is the plugin's: when the host's
   `data-live-view` isn't this page's, the page gets the window event `ducky-live-goto`

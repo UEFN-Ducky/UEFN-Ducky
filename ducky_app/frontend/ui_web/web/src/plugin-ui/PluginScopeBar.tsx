@@ -11,7 +11,7 @@ import type {
   PluginScopeStatus,
 } from "../types/panel";
 import { FolderShareDialog } from "./FolderShareDialog";
-import { PluginLiveMenu } from "./PluginLiveMenu";
+import { useLiveFollow } from "./liveFollow";
 import { PluginScopeDrawer } from "./PluginScopeDrawer";
 import { installScopeAlerts, onRefusedWrite, rememberPluginLabel, type RefusedWrite } from "./scopeAlerts";
 import {
@@ -21,7 +21,6 @@ import {
   folderNote,
   hasFolders,
   kindTitle,
-  liveButtonText,
   notShared,
   phraseTab,
   resetConfirm,
@@ -67,25 +66,6 @@ type Props = {
   onFollow?: (device: string, leading: boolean, older: string[]) => void;
 };
 
-/** Follow the host's screen in a group this PC joined, per plugin and per viewer (on until
- * turned off). */
-const followKey = (pluginId: string) => `ducky.pluginFollow.${pluginId}`;
-function readFollow(pluginId: string): boolean {
-  try {
-    return localStorage.getItem(followKey(pluginId)) !== "0";
-  } catch {
-    return true;
-  }
-}
-function writeFollow(pluginId: string, on: boolean): void {
-  try {
-    if (on) localStorage.removeItem(followKey(pluginId));
-    else localStorage.setItem(followKey(pluginId), "0");
-  } catch {
-    /* storage off: following stays as it is for this session */
-  }
-}
-
 /** Data that changed for this plugin and isn't told yet; `keys` null: unknown, re-read all. */
 type Pending = { keys: Set<string> | null };
 
@@ -126,8 +106,9 @@ function writeDrawerOpen(pluginId: string, open: boolean): void {
 /**
  * Host-rendered bar above every plugin panel, one row of same-sized controls: whose data
  * this is (a dropdown to change it), one status (it opens the Source control tab that explains
- * it), Send and Get in Manual, the Live dropdown (groups to join, Start live) and Source
- * control, which opens the tabs under the bar. Anything that needs a decision shows on one
+ * it), Send and Get in Manual, and Source control, which opens the tabs under the bar. Live is
+ * the title bar's (one group for every plugin of the team copy); the bar still tells the page
+ * whether it is live and whose screen it follows. Anything that needs a decision shows on one
  * line under the bar. The plugin can't hide or restyle it. Renders nothing while the account
  * has no shared spaces to offer (normal members see no change).
  */
@@ -135,7 +116,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const { confirm } = useConfirmModal();
   const [status, setStatus] = useState<PluginScopeStatus | null>(null);
   const [menu, setMenu] = useState<PluginScopeChoice[] | null>(null);
-  const [open, setOpen] = useState<"" | "copy" | "live">("");
+  const [open, setOpen] = useState<"" | "copy">("");
   const [now, setNow] = useState(() => Date.now());
   const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -147,9 +128,8 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const [switching, setSwitching] = useState<{ team: string; sharing: boolean } | null>(null);
   const [share, setShare] = useState<FirstShare | null>(null);
   const [notice, setNotice] = useState("");
-  const [follow, setFollow] = useState(() => readFollow(pluginId));
+  const follow = useLiveFollow();
   const copyRef = useRef<HTMLButtonElement>(null);
-  const liveRef = useRef<HTMLButtonElement>(null);
   const notify = useRef(onScopeChanged);
   notify.current = onScopeChanged;
   const last = useRef<PluginScopeStatus | null>(null);
@@ -240,9 +220,6 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
       } else if (event.type === "duckyos_account_changed") {
         refreshSoon(undefined);
       } else if (event.type === "live_peers" && event.plugin === pluginId) {
-        if (event.ended === "alone") {
-          setNotice("Live ended: everyone else left the group. Your changes keep syncing with the team as before.");
-        }
         refreshSoon(undefined);
       }
     });
@@ -257,11 +234,10 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
     };
   }, [refresh, refreshSoon, pluginId]);
 
-  // Live editing: the pane tells the page, and a remembered group is joined again by itself.
+  // Live editing: the pane tells the page.
   const liveNotify = useRef(onLiveState);
   liveNotify.current = onLiveState;
   const liveOn = Boolean(status?.live?.on);
-  const liveSupported = Boolean(status?.live?.supported);
   useEffect(() => {
     liveNotify.current?.(liveOn);
   }, [liveOn]);
@@ -293,18 +269,6 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
     const again = window.setTimeout(() => refreshSoon(undefined), LIVE_LINK_RECHECK_MS);
     return () => window.clearTimeout(again);
   }, [connecting, refreshSoon]);
-  // Once per team copy (a restart, a switch to another team or project copy): the group the
-  // person went live in is gone back into while it is still live (the app remembers it until
-  // Leave, the tab closing, or everyone else leaving).
-  const autoLive = useRef("");
-  const liveCopy = scopeKey(status);
-  const rejoin = status?.live?.rejoin ?? "";
-  useEffect(() => {
-    if (!liveSupported || liveOn || !rejoin || autoLive.current === liveCopy) return;
-    autoLive.current = liveCopy;
-    void getApi()?.plugin_live_join?.(pluginId, rejoin === "start" ? "" : rejoin)?.then(() => refreshSoon(undefined)).catch(() => {});
-  }, [liveSupported, liveOn, liveCopy, rejoin, pluginId, refreshSoon]);
-
   // Shown again: what came while hidden is read once, and the panel hears it once.
   useEffect(() => {
     if (!active) return;
@@ -443,7 +407,6 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const toSend = typeof status.pending === "number" ? status.pending : (changes.outgoing ?? []).length;
   const conflicts = status.conflicts?.length || status.conflict || 0;
   const badge = shared ? toSend + (changes.incoming ?? 0) + conflicts + notShared(status).count : 0;
-  const liveGroup = live?.groups?.find((g) => g.mine);
 
   const toggleCopy = async () => {
     if (open === "copy") {
@@ -537,16 +500,11 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
     act(async () => (api?.plugin_scope_pull ? api.plugin_scope_pull(pluginId) : api?.plugin_scope_sync?.(pluginId, true)), true);
   const push = () => act(async () => api?.plugin_scope_push?.(pluginId));
 
-  /** Join a teammate's live group (its room), or Start live (a teammate's group, else this
-   * PC's own); the app remembers it for this plugin on this PC. */
+  /** Join a teammate's live group from their row in People: this PC goes live on the team
+   * copy, every plugin with it (the title bar's Live menu shows it). */
   const joinLive = async (room?: string) => {
     setOpen("");
-    autoLive.current = scopeKey(status);
     await act(async () => api?.plugin_live_join?.(pluginId, room || ""));
-  };
-  const leaveLive = async () => {
-    setOpen("");
-    await act(async () => api?.plugin_live_leave?.(pluginId));
   };
 
   const askRelease = async () => {
@@ -681,27 +639,6 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
           </button>
         ) : null}
         <span className="plugin-scope-bar__spacer" />
-        {canLive && canSync ? (
-          <>
-            <button ref={liveRef} type="button" aria-haspopup="menu" aria-expanded={open === "live"}
-              className={`plugin-scope-btn plugin-scope-btn--live${live?.on ? " is-on" : ""}`}
-              onClick={() => setOpen(open === "live" ? "" : "live")}
-              title={live?.on ? "Who you're live with" : "Join someone live, or start live"}>
-              <span className={`plugin-scope-dot plugin-scope-dot--${live?.on || live?.groups?.length ? "live" : "off"}`} aria-hidden />
-              <span className="plugin-scope-btn__label">{liveButtonText(live)}</span>
-              {live?.on && liveGroup ? <span className="plugin-scope-btn__count">{liveGroup.members.length}</span> : null}
-              <span className="plugin-scope-caret" aria-hidden>▾</span>
-            </button>
-            <DropdownPanel anchorRef={liveRef} open={open === "live"} onClose={() => setOpen("")} width={300}>
-              <PluginLiveMenu pluginId={pluginId} status={status} busy={busy} onJoin={(room) => void joinLive(room)}
-                onLeave={() => void leaveLive()} follow={follow}
-                onFollow={(on) => {
-                  setFollow(on);
-                  writeFollow(pluginId, on);
-                }} />
-            </DropdownPanel>
-          </>
-        ) : null}
         {shared ? (
           <button type="button" className={`plugin-scope-btn${drawerOpen ? " is-on" : ""}`} aria-expanded={drawerOpen}
             aria-controls={drawerId} onClick={() => showPanel()}>
@@ -713,7 +650,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
       {notes.length ? <div className="plugin-scope-notes">{notes}</div> : null}
       {shared && drawerOpen ? (
         <PluginScopeDrawer id={drawerId} pluginId={pluginId} status={status} tab={tab} onTab={setTab}
-          onJoin={canLive ? (room) => void joinLive(room) : undefined}
+          onJoin={canLive && canSync ? (room) => void joinLive(room) : undefined}
           onChanged={(changed) => refresh(changed ? { keys: null } : null)} />
       ) : null}
       {share ? (

@@ -2333,6 +2333,8 @@ export interface PanelPushEvent {
     | "live_holds"
     /** A groupmate's live state in `plugin` (`from`, `state`; null: gone). */
     | "live_member_state"
+    /** Who is live where on the team copy `space` moved, or this PC's Live there (`on`, `ended`). */
+    | "live_team"
     /** One of the group's shared values in `plugin` changed (`key`, `value`, `by`). */
     | "live_shared";
   provider?: string;
@@ -2371,8 +2373,10 @@ export interface PanelPushEvent {
   /** live_peers: live in this plugin, and with whom. */
   on?: boolean;
   peers?: PluginLivePeer[];
-  /** live_peers: Live ended by itself ("alone": everyone else left the group; "tab_closed"). */
+  /** live_peers / live_team: Live ended by itself ("alone": everyone else left the group). */
   ended?: string;
+  /** live_team: the team copy. */
+  space?: string;
   /** live_holds: the controls teammates are pressing. */
   holds?: PluginLiveHold[];
   /** plugin_write_refused: the unit, its name, who holds it and since when (epoch seconds).
@@ -2501,9 +2505,56 @@ export interface PluginLiveStatus {
   unlinked?: string[];
   /** The plugin's live groups in the team, this PC's first. */
   groups?: PluginLiveGroup[];
-  /** What the bar goes back into while not live (after a restart): "start" (Start live), a
-   * teammate's room still live, or "" (Leave, the tab closed, or everyone else left). */
+  /** What this PC goes back into on the team copy while not live (after a restart): "start"
+   * (Start live), a teammate's room still live, or "" (Leave, or everyone else left). */
   rejoin?: string;
+}
+
+/** One person in a live group of a team copy (backend/uefn_plugins/live.py `team_groups`). */
+export interface LiveTeamMember {
+  name: string;
+  user?: string;
+  device?: string;
+  label?: string;
+  me?: boolean;
+  /** On an older UEFN Ducky whose screen doesn't follow the group. */
+  older?: boolean;
+  /** Live in one plugin only: an app from before one Live covered every plugin. */
+  partial?: boolean;
+  /** The plugin they have on screen, and its name ("" for none). */
+  plugin?: string;
+  pluginLabel?: string;
+}
+
+export interface LiveTeamGroup extends Omit<PluginLiveGroup, "members"> {
+  members: LiveTeamMember[];
+}
+
+/** One team copy in the title bar's Live menu (live.py `overview`). */
+export interface LiveTeam {
+  account: string;
+  space: string;
+  label: string;
+  /** A plugin here can go live on it; `reason` says why not. */
+  supported: boolean;
+  reason?: string;
+  on: boolean;
+  room?: string;
+  state?: string;
+  /** This PC's plugins in the group. */
+  plugins?: string[];
+  groups: LiveTeamGroup[];
+  /** People in this PC's group with no link yet (just joined), and with none after that. */
+  connecting?: string[];
+  unlinked?: string[];
+  rejoin?: string;
+}
+
+export interface LiveOverview {
+  ok?: boolean;
+  on?: boolean;
+  teams?: LiveTeam[];
+  error?: string;
 }
 
 export interface PluginScopeStatus {
@@ -4568,6 +4619,11 @@ export interface PanelApi {
   plugin_scope_status?(plugin_id: string): Promise<PluginScopeStatus>;
   plugin_live_join?(plugin_id: string, room?: string): Promise<PluginLiveStatus & { ok?: boolean; error?: string }>;
   plugin_live_leave?(plugin_id: string): Promise<{ ok?: boolean }>;
+  /** The title bar's Live menu: every team copy this PC has plugins on, and who is live where. */
+  live_overview?(): Promise<LiveOverview>;
+  /** Start live (no room) or Join a teammate's group on a team copy: every plugin of it goes in. */
+  live_team_join?(account: string, space: string, room?: string): Promise<LiveTeam & { ok?: boolean; error?: string }>;
+  live_team_leave?(account: string, space: string): Promise<{ ok?: boolean }>;
   plugin_live_send?(plugin_id: string, topic: string, data: unknown, to?: string, fast?: boolean): Promise<{ ok?: boolean; error?: string; sent?: number }>;
   plugin_live_status?(plugin_id: string): Promise<PluginLiveStatus>;
   /** The page's live script presses (on) or lets go of a control; every teammate greys it out. */

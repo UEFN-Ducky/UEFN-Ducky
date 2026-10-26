@@ -127,7 +127,7 @@ code for it; these rules decide how well it works for people editing together.
 - **History.** Every change is kept with who made it and when. The bar's Details shows
   it; restoring an item, or the whole plugin to an earlier change, is a new change that
   everyone gets, never a rewrite.
-- **Live.** On a team copy, the bar's Live menu lists the live groups by host: Start
+- **Live.** On a team copy, the Live menu in the title bar lists the live groups by host: Start
   live goes into the biggest group a teammate is live in (or starts one), Join picks one
   (peer to peer). Being live covers every plugin on that team copy: one Start live puts
   them all in the group, a plugin switched to the copy or enabled later joins on its own,

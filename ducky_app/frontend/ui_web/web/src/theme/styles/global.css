@@ -430,6 +430,37 @@ body.native-caption-input-ready .app-header .drag-region {
   gap: 5px;
   padding: 0 6px;
 }
+/* Live in the title bar: grey while this PC isn't live, green while it is, pulsing while it
+   links to someone; the amber corner dot: someone can't be reached or needs to update. */
+.connection-status-btn.live-trigger {
+  width: auto;
+  min-width: 28px;
+  gap: 4px;
+  padding: 0 6px;
+}
+.connection-status-btn.live-trigger.is-live {
+  color: var(--success, #3ecf8e);
+}
+.connection-status-btn.live-trigger.is-connecting > svg {
+  animation: live-trigger-pulse 1.2s ease-in-out infinite;
+}
+@keyframes live-trigger-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connection-status-btn.live-trigger.is-connecting > svg {
+    animation: none;
+  }
+}
+.live-trigger-count {
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--fg);
+}
+.live-menu__error {
+  margin: 4px 4px 0;
+}
 .bg-activity-running-count {
   font-size: 11px;
   white-space: nowrap;
@@ -1696,14 +1727,14 @@ body.native-caption-input-ready .app-header .drag-region {
   :root {
     --app-header-height: 44px;
   }
-  .app-header :is(.icon-btn, .window-control-btn, .connection-status-btn:not(.bg-activity-trigger)),
+  .app-header :is(.icon-btn, .window-control-btn, .connection-status-btn:not(.bg-activity-trigger, .live-trigger)),
   .app-header .choice-dropdown--light .choice-dropdown-trigger {
     width: 36px;
     min-width: 36px;
     height: 36px;
     border-radius: 8px;
   }
-  .app-header .connection-status-btn.bg-activity-trigger {
+  .app-header .connection-status-btn:is(.bg-activity-trigger, .live-trigger) {
     min-width: 36px;
     height: 36px;
     border-radius: 8px;

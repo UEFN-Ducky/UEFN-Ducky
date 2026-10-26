@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { _resetBackgroundActivityForTests, getBackgroundJobs } from "../hooks/backgroundActivity";
+import { writeLiveFollow } from "./liveFollow";
 import { PluginScopeBar } from "./PluginScopeBar";
 
 const api = vi.hoisted(() => ({
@@ -598,211 +599,74 @@ describe("plugin scope bar", () => {
   });
 
   describe("live groups", () => {
+    // Live itself is the title bar's (LiveHeaderDropdown): the bar tells the page whether it
+    // is live and whose screen it follows, and People's rows still Join.
     const ILIYA = { room: "h:d1", host: "iliya", hostDevice: "d1", members: [{ name: "iliya", user: "u1", device: "d1" }] };
     const MO = { room: "h:d2", host: "Mo", hostDevice: "d2",
       members: [{ name: "Mo", user: "u2", device: "d2" }, { name: "Cy", user: "u3", device: "d3" }] };
     const MINE = { room: "h:me", host: "You", hostDevice: "me", hostIsMe: true, mine: true,
       members: [{ name: "You", device: "me", me: true }] };
-    const live = (on: boolean, groups: Record<string, unknown>[] = [], peers: Record<string, unknown>[] = [], rejoin = "") =>
-      sharedStatus({ live: { supported: true, on, room: on ? "h:me" : "", state: on ? "live" : "off", peers, groups, rejoin } });
-    /** The Live button: its name starts with the group's host, "Live" or "You're live". */
-    const liveButton = () => screen.getByRole("button", { name: /^(Live|You're live|iliya|Mo)/ });
-
-    it("lists each group by its host with who's in it; Join goes into that group", async () => {
-      api.plugin_scope_status.mockResolvedValue(live(false, [ILIYA, MO]));
-      api.plugin_live_join.mockResolvedValue({ ok: true });
-      bar();
-      expect((await screen.findByText("Live · 2"))).toBeTruthy();
-      fireEvent.click(liveButton());
-      const menu = await screen.findByRole("menu", { name: "Live in BrainRot TCG" });
-      expect(within(menu).getByText("iliya")).toBeTruthy();
-      expect(within(menu).getByText("2 people")).toBeTruthy();
-      api.plugin_scope_status.mockResolvedValue(live(true, [{ ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", me: true }] }, MO]));
-      fireEvent.click(within(menu).getByRole("menuitem", { name: "Join iliya" }));
-      await waitFor(() => expect(api.plugin_live_join).toHaveBeenCalledWith("brainrot-tcg", "h:d1"));
-      // In a group, the button names its host and how many are in it; no Start live there.
-      await waitFor(() => expect(liveButton().textContent).toBe("iliya2▾"));
-      fireEvent.click(liveButton());
-      expect(await screen.findByRole("menuitem", { name: "Leave" })).toBeTruthy();
-      expect(screen.queryByRole("menuitem", { name: "Start live" })).toBeNull();
-    });
-
-    it("Start live asks the app to go live (a teammate's group, else this PC's own); Leave leaves", async () => {
-      api.plugin_scope_status.mockResolvedValue(live(false));
-      api.plugin_live_join.mockResolvedValue({ ok: true });
-      api.plugin_live_leave.mockResolvedValue({ ok: true });
-      bar();
-      fireEvent.click(await screen.findByRole("button", { name: /^Live/ }));
-      expect(await screen.findByText("Nobody's live in BrainRot TCG yet.")).toBeTruthy();
-      api.plugin_scope_status.mockResolvedValue(live(true, [MINE]));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Start live" }));
-      await waitFor(() => expect(api.plugin_live_join).toHaveBeenCalledWith("brainrot-tcg", ""));
-      expect(await screen.findByText("You're live")).toBeTruthy();
-      fireEvent.click(liveButton());
-      expect(screen.queryByRole("menuitem", { name: "Start live" })).toBeNull();
-      api.plugin_scope_status.mockResolvedValue(live(false));
-      fireEvent.click(await screen.findByRole("menuitem", { name: "Leave" }));
-      await waitFor(() => expect(api.plugin_live_leave).toHaveBeenCalledWith("brainrot-tcg"));
-    });
-
-    it("says so when Live ended because everyone else left", async () => {
-      api.plugin_scope_status.mockResolvedValue(live(true, [MINE]));
-      bar();
-      await screen.findByText("You're live");
-      api.plugin_scope_status.mockResolvedValue(live(false));
-      push.handlers.forEach((fn) => fn({ type: "live_peers", plugin: "brainrot-tcg", on: false, peers: [], ended: "alone" }));
-      expect(await screen.findByText(/^Live ended: everyone else left the group/)).toBeTruthy();
-    });
-
-    it("someone still linking is connecting, not unreachable", async () => {
-      const status = live(true, [{ ...ILIYA, mine: true }], [{ name: "iliya", device: "d1", path: "none" }]);
-      api.plugin_scope_status.mockResolvedValue({ ...status, live: { ...status.live, connecting: ["iliya"] } });
-      bar();
-      fireEvent.click(await screen.findByRole("button", { name: /^iliya/ }));
-      const menu = await screen.findByRole("menu", { name: "Live in BrainRot TCG" });
-      expect(within(menu).getByText("Connecting to iliya…")).toBeTruthy();
-      expect(within(menu).queryByText(/^Can't reach/)).toBeNull();
-    });
-
-    it("lists who's here but not live, and says when a teammate's PC can't be reached", async () => {
-      api.plugin_scope_status.mockResolvedValue({
-        ...live(true, [{ ...ILIYA, mine: true }], [{ name: "iliya", device: "d1", path: "none" }]),
-        people: [
-          { user_name: "Ben", user: "u4", device: "BEN-PC", deviceId: "d4", plugins: { "brainrot-tcg": { viewing: true } } },
-          { user_name: "iliya", user: "u1", device: "Laptop", deviceId: "d1", plugins: { "brainrot-tcg": { viewing: true, live: "h:d1" } } },
-        ],
-      });
-      bar();
-      fireEvent.click(await screen.findByRole("button", { name: /^iliya/ }));
-      const menu = await screen.findByRole("menu", { name: "Live in BrainRot TCG" });
-      expect(within(menu).getByText("Here, not live")).toBeTruthy();
-      expect(within(menu).getByText("Ben")).toBeTruthy();
-      expect(within(menu).getByText(/^Can't reach iliya on this network/)).toBeTruthy();
-      expect(within(menu).getByRole("menuitem", { name: "Leave" })).toBeTruthy();
-    });
-
-    it("says when a group member has no link at all, and while one is still connecting", async () => {
-      const status = live(true, [{ ...MO, mine: true }]);
-      api.plugin_scope_status.mockResolvedValue({ ...status, live: { ...status.live, connecting: ["Cy"], unlinked: ["Mo"] } });
-      bar();
-      fireEvent.click(await screen.findByRole("button", { name: /^Mo/ }));
-      const menu = await screen.findByRole("menu", { name: "Live in BrainRot TCG" });
-      expect(within(menu).getByText(/^Can't reach Mo on this network/)).toBeTruthy();
-      expect(within(menu).getByText("Connecting to Cy…")).toBeTruthy();
-    });
-
-    it("joins the group the app remembers again by itself while it's still live, once", async () => {
-      api.plugin_scope_status.mockResolvedValue(live(false, [MO]));  // iliya's group ended: nothing to go back into
-      api.plugin_live_join.mockResolvedValue({ ok: true });
-      bar();
-      await screen.findByText("Live · 1");
-      await new Promise((r) => setTimeout(r, 300));
-      expect(api.plugin_live_join).not.toHaveBeenCalled();
-      cleanup();
-      api.plugin_scope_status.mockResolvedValue(live(false, [ILIYA, MO], [], "h:d1"));
-      bar();
-      await waitFor(() => expect(api.plugin_live_join).toHaveBeenCalledWith("brainrot-tcg", "h:d1"));
-      await new Promise((r) => setTimeout(r, 600));
-      expect(api.plugin_live_join).toHaveBeenCalledTimes(1);
-    });
-
-    it("Start live comes back by itself; after a switch to another team copy, there too, once", async () => {
-      api.plugin_scope_status.mockResolvedValue(live(false, [], [], "start"));
-      api.plugin_live_join.mockResolvedValue({ ok: true });
-      bar();
-      await waitFor(() => expect(api.plugin_live_join).toHaveBeenCalledWith("brainrot-tcg", ""));
-      api.plugin_scope_status.mockResolvedValue({ ...live(false, [], [], "start"),
-        scope: { kind: "shared", label: "Beta", spaceId: "s2", readOnly: false } });
-      push.handlers.forEach((fn) => fn({ type: "plugin_scope_changed", plugins: ["brainrot-tcg"], switched: true }));
-      push.handlers.forEach((fn) => fn({ type: "duckyos_account_changed" }));
-      await waitFor(() => expect(api.plugin_live_join).toHaveBeenCalledTimes(2));
-      await new Promise((r) => setTimeout(r, 600));
-      expect(api.plugin_live_join).toHaveBeenCalledTimes(2);
-    });
-
-    it("in a teammate's group the page shares the leader's screen until that is turned off", async () => {
-      const inIliyas = live(true, [{ ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] }]);
-      api.plugin_scope_status.mockResolvedValue(inIliyas);
-      const followed = vi.fn();
+    const live = (on: boolean, groups: Record<string, unknown>[] = [], peers: Record<string, unknown>[] = []) =>
+      sharedStatus({ live: { supported: true, on, room: on ? "h:me" : "", state: on ? "live" : "off", peers, groups } });
+    const followBar = (followed: ReturnType<typeof vi.fn>) =>
       render(
         <ConfirmModalProvider>
           <PluginScopeBar pluginId="brainrot-tcg" onScopeChanged={() => {}} onFollow={followed} />
         </ConfirmModalProvider>,
       );
-      await waitFor(() => expect(followed).toHaveBeenLastCalledWith("d1", false, []));
-      fireEvent.click(liveButton());
-      const box = await screen.findByRole("checkbox", { name: /Same screen as the group/ });
-      expect(screen.getByText(/through iliya, who leads the group/)).toBeTruthy();
-      expect((box as HTMLInputElement).checked).toBe(true);
-      fireEvent.click(box);
-      await waitFor(() => expect(followed).toHaveBeenLastCalledWith("", false, []));
-      expect(localStorage.getItem("ducky.pluginFollow.brainrot-tcg")).toBe("0");
+
+    it("has no Live button of its own: Live is the title bar's", async () => {
+      api.plugin_scope_status.mockResolvedValue(live(true, [MINE, ILIYA]));
+      bar();
+      await screen.findByRole("button", { name: /^Source control/ });
+      expect(screen.queryByRole("button", { name: /^(Live|You're live)/ })).toBeNull();
+      expect(api.plugin_live_join).not.toHaveBeenCalled();  // nor does it go live by itself
     });
 
-    it("the host left: whoever has been in the group longest leads it, and Follow follows them", async () => {
+    it("in a teammate's group the page shares the leader's screen until that is turned off", async () => {
+      api.plugin_scope_status.mockResolvedValue(
+        live(true, [{ ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] }]));
+      const followed = vi.fn();
+      followBar(followed);
+      await waitFor(() => expect(followed).toHaveBeenLastCalledWith("d1", false, []));
+      act(() => writeLiveFollow(false));  // Same screen as the group, off in the Live menu
+      await waitFor(() => expect(followed).toHaveBeenLastCalledWith("", false, []));
+      expect(localStorage.getItem("ducky.liveFollow")).toBe("0");
+    });
+
+    it("the host left: whoever has been in the group longest leads it, and the page follows them", async () => {
       const followed = vi.fn();
       const passedOn = { room: "h:d1", host: "Mo", hostDevice: "d2", mine: true,
         members: [{ name: "Mo", device: "d2" }, { name: "You", device: "me", me: true }] };
       api.plugin_scope_status.mockResolvedValue(live(true, [passedOn]));
-      render(
-        <ConfirmModalProvider>
-          <PluginScopeBar pluginId="brainrot-tcg" onScopeChanged={() => {}} onFollow={followed} />
-        </ConfirmModalProvider>,
-      );
+      followBar(followed);
       await waitFor(() => expect(followed).toHaveBeenLastCalledWith("d2", false, []));
-      fireEvent.click(await screen.findByRole("button", { name: /^Mo/ }));
-      expect(await screen.findByRole("checkbox", { name: /Same screen as the group/ })).toBeTruthy();
-      expect(screen.getByText(/through Mo, who leads the group/)).toBeTruthy();
     });
 
     it("leading a group, the page's screen is the group's: nobody to follow", async () => {
       const followed = vi.fn();
       api.plugin_scope_status.mockResolvedValue(live(true, [{ ...MINE, room: "h:d1",
         members: [...MINE.members, { name: "Mo", device: "d2" }] }]));
-      render(
-        <ConfirmModalProvider>
-          <PluginScopeBar pluginId="brainrot-tcg" onScopeChanged={() => {}} onFollow={followed} />
-        </ConfirmModalProvider>,
-      );
+      followBar(followed);
       await waitFor(() => expect(followed).toHaveBeenLastCalledWith("", true, []));
-      fireEvent.click(await screen.findByRole("button", { name: /^You're live/ }));
-      expect(screen.queryByRole("checkbox")).toBeNull();
-      expect(screen.getByText(/^You lead the group: everyone sees your screen/)).toBeTruthy();
     });
 
-    it("a groupmate on an older app: the leader's page does their clicks, and the menu says they need to update", async () => {
+    it("a groupmate on an older app: the leader's page does their clicks", async () => {
       const followed = vi.fn();
       // The room is iliya's, but iliya's app is older: this PC leads it.
       const withOlder = { room: "h:d1", host: "You", hostDevice: "me", hostIsMe: true, mine: true,
         members: [{ name: "iliya", device: "d1", older: true }, { name: "You", device: "me", me: true }] };
       api.plugin_scope_status.mockResolvedValue(live(true, [withOlder]));
-      render(
-        <ConfirmModalProvider>
-          <PluginScopeBar pluginId="brainrot-tcg" onScopeChanged={() => {}} onFollow={followed} />
-        </ConfirmModalProvider>,
-      );
+      followBar(followed);
       await waitFor(() => expect(followed).toHaveBeenLastCalledWith("", true, ["d1"]));
-      fireEvent.click(await screen.findByRole("button", { name: /^You're live/ }));
-      expect(screen.getByText(/^iliya needs to update UEFN Ducky\. Until then their screen doesn't follow the group/)).toBeTruthy();
     });
 
     it("alone in its own group, the page leads nobody", async () => {
       const followed = vi.fn();
       api.plugin_scope_status.mockResolvedValue(live(true, [{ ...MINE, room: "h:d1" }]));
-      render(
-        <ConfirmModalProvider>
-          <PluginScopeBar pluginId="brainrot-tcg" onScopeChanged={() => {}} onFollow={followed} />
-        </ConfirmModalProvider>,
-      );
+      followBar(followed);
       await waitFor(() => expect(followed).toHaveBeenCalled());
       expect(followed).toHaveBeenLastCalledWith("", false, []);
-    });
-
-    it("offers no Live where the team service has none", async () => {
-      api.plugin_scope_status.mockResolvedValue(sharedStatus({ live: { supported: false, on: false } }));
-      bar();
-      await screen.findByRole("button", { name: /^Source control/ });
-      expect(screen.queryByRole("button", { name: /^Live/ })).toBeNull();
     });
 
     it("tells the pane when live goes on and off", async () => {
@@ -823,8 +687,7 @@ describe("plugin scope bar", () => {
       api.plugin_scope_status.mockResolvedValue(live(false, [ILIYA, MO]));
       push.handlers.forEach((fn) => fn({ type: "live_peers", plugin: "brainrot-tcg", on: true, peers: [] }));
       push.handlers.forEach((fn) => fn({ type: "live_peers", plugin: "other", on: true, peers: [] }));
-      expect(await screen.findByText("Live · 2")).toBeTruthy();
-      expect(api.plugin_scope_status).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(api.plugin_scope_status).toHaveBeenCalledTimes(2));
     });
 
     it("People in Source control: Join a teammate's group from their row", async () => {

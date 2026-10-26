@@ -20,7 +20,6 @@ import {
   initials,
   listText,
   groupName,
-  liveButtonText,
   lostText,
   notShared,
   othersHere,
@@ -453,17 +452,6 @@ describe("the bar's status, tabs and live groups", () => {
     expect(phraseTab("paused")).toBe("settings");
     expect(phraseTab("not_synced")).toBe("changes");
     expect(phraseTab("queue")).toBe("changes");
-  });
-
-  it("names the Live button by the group you're in, else how many there are", () => {
-    const iliya = { room: "h:d1", host: "iliya", members: [{ name: "iliya", device: "d1" }] };
-    const mo = { room: "h:d2", host: "Mo", members: [{ name: "Mo", device: "d2" }] };
-    expect(liveButtonText(undefined)).toBe("Live");
-    expect(liveButtonText({ on: false, groups: [] })).toBe("Live");
-    expect(liveButtonText({ on: false, groups: [iliya, mo] })).toBe("Live · 2");
-    expect(liveButtonText({ on: true, groups: [{ ...iliya, mine: true }, mo] })).toBe("iliya");
-    expect(liveButtonText({ on: true, groups: [{ room: "h:me", host: "You", hostIsMe: true, mine: true, members: [{ name: "You", me: true }] }] }))
-      .toBe("You're live");
   });
 
   it("a group is named by its host, else by who's left in it", () => {

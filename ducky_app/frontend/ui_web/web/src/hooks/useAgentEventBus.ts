@@ -27,12 +27,14 @@ const PANEL_PUSH_TYPES = new Set<string>([
   // left on the agent bus they reached no one (main window or floating).
   "plugin_scope_changed",
   // Live groups (backend/uefn_plugins/live.py): a teammate's message, who is live, what
-  // teammates hold, a groupmate's live state and the group's shared values.
+  // teammates hold, a groupmate's live state, the group's shared values, and who is live
+  // where on a team copy (the title bar's Live menu).
   "live_message",
   "live_peers",
   "live_holds",
   "live_member_state",
   "live_shared",
+  "live_team",
   "duckyos_account_changed",
   // A plugin's api.emit_hook / api.set_appearance_profile; the main window acts on them.
   "plugin_hook",

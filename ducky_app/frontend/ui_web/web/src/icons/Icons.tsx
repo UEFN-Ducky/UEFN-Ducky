@@ -76,6 +76,14 @@ export const Icons = {
       <path d="M10 12h4" />
     </svg>
   ),
+  /** Live with the team: a broadcast mark (a dot with waves either side). */
+  Live: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <circle cx="12" cy="12" r="2" />
+      <path d="M16.24 7.76a6 6 0 010 8.48M7.76 16.24a6 6 0 010-8.48" />
+      <path d="M19.07 4.93a10 10 0 010 14.14M4.93 19.07a10 10 0 010-14.14" />
+    </svg>
+  ),
   Inbox: () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />

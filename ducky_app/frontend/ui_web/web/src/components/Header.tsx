@@ -3,6 +3,7 @@ import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
+import { LiveHeaderDropdown } from "./LiveHeaderDropdown";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
@@ -732,6 +733,7 @@ export function Header({
           </button>
         ) : null}
 
+        <LiveHeaderDropdown />
         <BackgroundActivityDropdown />
 
         <div className="app-header-divider" />
