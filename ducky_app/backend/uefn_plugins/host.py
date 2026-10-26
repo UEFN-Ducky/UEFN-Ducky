@@ -1130,7 +1130,7 @@ def _drop_plugin_runtime(pid: str, mod_name: str) -> None:
         try:
             from backend.uefn_plugins import live
 
-            live.forget(pid)
+            live.forget(pid, keep_live=is_plugin_enabled(pid))  # a reload stays live; a disable leaves
         except Exception:  # noqa: BLE001 — nothing live stays for an unloaded plugin's callbacks
             _log.debug("live forget of %s failed", pid, exc_info=True)
         # Drop the plugin's MCP tools from the shared FastMCP server too, or a reinstall

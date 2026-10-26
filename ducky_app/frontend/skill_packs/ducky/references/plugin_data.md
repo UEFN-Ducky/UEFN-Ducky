@@ -133,12 +133,14 @@ code for it; these rules decide how well it works for people editing together.
   closing the plugin's tab leaves, and someone left alone drops out of Live but keeps
   syncing. While a plugin is live its copy
   syncs every few seconds, and each change a member commits makes the group pull it at
-  once (`plugin_scope_changed` reason `synced`, as above). With `"data_live": true` in
-  `plugin.json` each change goes to the group the moment it is written, and **the group
-  syncs through its leader**: the leader sends everyone's changes to source control, each
-  named for who made it (and their ducky), the others never push while it is in reach,
-  and leaving the group goes back to syncing on your own. Use it when the plugin's docs
-  are small (up to 36 KB carried live; bigger ones come with sync). With no plugin code, every
+  once (`plugin_scope_changed` reason `synced`, as above). Each change also goes to the
+  group the moment it is written, and **the group syncs through its leader**: the leader
+  sends everyone's changes to source control, each named for who made it (and their ducky),
+  the others hand theirs to it while it is in reach, and leaving the group goes back to
+  syncing on your own. Docs up to 36 KB (files up to 27 KB) travel live; bigger ones go
+  with sync at once and the group pulls them. `"data_live": false` in `plugin.json` keeps a
+  plugin's changes on sync only. A folder plugin's pages reload for a teammate's pull,
+  except while this person presses or types in them. With no plugin code, every
   panel page then shows members' pointers, names and selections (`data-live-id` on
   elements people point at keeps them on the same thing), and **anything someone presses
   or types in is held for them**: for every teammate on the same screen that control greys

@@ -147,6 +147,18 @@ export function remoteGoneIsLive(catchUpDone: boolean, kind: string): boolean {
   return catchUpDone && kind === "remote_gone";
 }
 
+/** A plugin's own push (``api.emit``-style events carrying its ``plugin_id``, such as
+ * Kanban's ``kanban_changed``): its panels subscribe to it on the panel bus
+ * (``plugin.subscribe``), so it goes there too, as well as to the agent bus. */
+function pluginPush(event: AgentEvent): void {
+  if (typeof (event as { plugin_id?: unknown }).plugin_id !== "string") return;
+  try {
+    window.__uefnPanelPush?.(event as unknown as PanelPushEvent);
+  } catch {
+    /* ignore */
+  }
+}
+
 function startHttpEventPoll() {
   if (httpPollStarted) return;
   httpPollStarted = true;
@@ -187,6 +199,7 @@ function startHttpEventPoll() {
               }
               continue;
             }
+            pluginPush(event);
             fanOut(event);
           }
         }
@@ -222,6 +235,7 @@ export function installAgentEventBus() {
         }
         return;
       }
+      pluginPush(event);
       fanOut(event);
     });
   } else {

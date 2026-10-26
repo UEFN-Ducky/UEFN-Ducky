@@ -242,24 +242,36 @@ def _data_sharing(plugin: str) -> Any:
     return flag
 
 
-_LIVE_DATA: dict[str, tuple[float, bool]] = {}  # manifest path → (mtime, its "data_live")
+_LIVE_DATA: dict[str, tuple[float, bool, bool]] = {}  # manifest path → (mtime, data live, asked for in it)
 
 
 def data_live(plugin: str) -> bool:
-    """The manifest's ``"data_live": true`` (:func:`store.data_live`): changes go to the live
-    group at once over its link. Read per write, so cached by the manifest's mtime."""
+    """Whether the plugin's changes go to the live group at once over its link
+    (:func:`store.data_live`: every shared plugin's, unless its manifest says
+    ``"data_live": false``). Read per write, so cached by the manifest's mtime."""
+    return _manifest_live(plugin)[0]
+
+
+def data_live_asked(plugin: str) -> bool:
+    """The manifest says ``"data_live": true`` itself: apps before every plugin's data went
+    live (live version :data:`live.DATA_V`) send this plugin's for a groupmate too."""
+    return _manifest_live(plugin)[1]
+
+
+def _manifest_live(plugin: str) -> tuple[bool, bool]:
     from backend.uefn_plugins.store import PLUGIN_MANIFEST, data_live as manifest_live, load_plugin_manifest, plugin_dir
 
     try:
         path = plugin_dir(plugin) / PLUGIN_MANIFEST
         mtime = path.stat().st_mtime
     except (OSError, ValueError):
-        return False
+        return False, False
     hit = _LIVE_DATA.get(str(path))
     if hit is None or hit[0] != mtime:
-        hit = (mtime, manifest_live(load_plugin_manifest(plugin) or {}))
+        manifest = load_plugin_manifest(plugin) or {}
+        hit = (mtime, manifest_live(manifest), manifest.get("data_live") is True)
         _LIVE_DATA[str(path)] = hit
-    return hit[1]
+    return hit[1], hit[2]
 
 
 def _live_group(scope: dict[str, Any], plugin: str) -> set[str] | None:

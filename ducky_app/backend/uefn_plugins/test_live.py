@@ -202,11 +202,14 @@ def _roster(account: str, *people: dict[str, Any]) -> None:
 
 def _on(device: str, name: str, room: str, since: float, plugin: str = PLUGIN, *,
         app: str = "") -> dict[str, Any]:
-    """A teammate live in ``room``, on an app as new as this one, or on ``app``: "1.2.433" (its
-    team service says the version, its live row nothing) or "1.2.434" (says nothing at all)."""
-    row = {"room": room, "since": since, **({} if app else {"v": live.PROTOCOL})}
+    """A teammate live in ``room``, on an app as new as this one, or on ``app``: "1.2.438"
+    (live version 2: it relays, and streams only plugins that ask for it), "1.2.434" (relays,
+    says no version at all) or "1.2.433" (relays nothing; its team service says its version)."""
+    v = {"": live.PROTOCOL, "1.2.438": 2}.get(app, 0)
+    row = {"room": room, "since": since, **({"v": v} if v else {})}
     return {"device": device, "user": f"u_{name}", "user_name": name, "label": f"{name.upper()}-PC",
-            **({"ver": app} if app == "1.2.433" else {}), "plugins": {plugin: {"viewing": True, "live": row}}}
+            **({"ver": app} if app in ("1.2.433", "1.2.438") else {}),
+            "plugins": {plugin: {"viewing": True, "live": row}}}
 
 
 def test_groups_are_named_by_their_host_with_who_is_in_them(team: dict[str, Any]) -> None:
@@ -268,7 +271,7 @@ def test_two_lone_hosts_merge_and_only_the_higher_id_moves(team: dict[str, Any],
     vcs_engine._roster_came(account, SPACE, {}, {"people": [lone]})
     _wait_room("h:d_a")
     assert live.status(PLUGIN)["room"] == "h:d_a"
-    assert live.keeps_panels(PLUGIN) is True
+    assert PLUGIN not in live._join_reload  # moved with its panels as they are: no first-pull reload
     assert live.merge_lone_groups(account, SPACE) == []  # not hosting any more
 
 
@@ -421,6 +424,33 @@ def test_an_older_roster_coming_back_last_never_ends_a_group_still_together(team
         assert live.status(PLUGIN)["on"] is True
     finally:
         vcs_engine._roster_asked.pop((account, SPACE), None)
+
+
+def test_a_commit_note_goes_at_most_once_a_second_while_a_round_sends_and_always_at_its_end(
+        team: dict[str, Any]) -> None:
+    live.join(PLUGIN)
+    impl = team["impl"]
+    notes = lambda: [s for s in impl.sent if s[1] == live.CHANGE]  # noqa: E731
+    live.committed(team["account"], SPACE, PLUGIN, throttle=True)
+    live.committed(team["account"], SPACE, PLUGIN, throttle=True)  # the next changeset, a moment later
+    assert len(notes()) == 1
+    live.committed(team["account"], SPACE, PLUGIN)  # the round is done
+    assert len(notes()) == 2
+
+
+def test_a_plugin_reloading_stays_live_and_one_disabled_leaves(team: dict[str, Any],
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reload or an update drops the plugin's runtime and loads it again at once: its group
+    never sees it leave (a teammate left alone would end their Live). A disable does leave."""
+    from backend.uefn_plugins import host
+
+    live.join(PLUGIN)
+    monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: True)
+    host.invalidate_plugin_runtime(PLUGIN)
+    assert live.is_live(PLUGIN) and team["impl"].joined[-1] == (SPACE, PLUGIN, live.host_room())
+    monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: False)
+    host.invalidate_plugin_runtime(PLUGIN)
+    assert not live.is_live(PLUGIN) and team["impl"].joined[-1] == (SPACE, PLUGIN, None)
 
 
 def test_switching_to_local_ends_live(team: dict[str, Any]) -> None:
@@ -588,7 +618,11 @@ def test_a_roster_from_heads_or_a_beat_tells_the_panels_what_teammates_hold(team
 # --------------------------------------------------------------------------- folder plugins
 
 
-def test_a_live_folder_plugin_restarts_for_a_pull_with_its_panels_kept(team: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_live_folder_plugins_pages_show_a_teammates_pull_at_once_unless_this_pc_is_editing_in_them(
+        team: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """A teammate's pull restarts a folder plugin. Its pages reload and show it (they don't
+    merge files themselves), except while this PC presses or types in one of them: then they
+    stay as they are and reload as soon as it lets go, so an edit in progress isn't lost."""
     from backend.store.repos import folder_files
     from backend.uefn_plugins import host
     from frontend.ui_web import agent_modes
@@ -599,17 +633,19 @@ def test_a_live_folder_plugin_restarts_for_a_pull_with_its_panels_kept(team: dic
     monkeypatch.setattr(host, "reload_single_plugin", lambda pid: restarted.append(pid))
     live.join(PLUGIN)
     folder_files.reload_bump(PLUGIN, "pull")
-    host._restart_moved(PLUGIN)
+    host._restart_moved(PLUGIN)  # nothing pressed here: the pages reload
     assert restarted == [PLUGIN]
+    assert told == [{"type": "plugin_scope_changed", "plugins": [PLUGIN], "switched": True}]
+    told.clear()
+    assert live.hold(PLUGIN, "#name", True)["ok"]  # typing in a field
+    folder_files.reload_bump(PLUGIN, "pull")
+    host._restart_moved(PLUGIN)
     assert told == [{"type": "plugin_scope_changed", "plugins": [PLUGIN], "synced": True, "live": True}]
     before = folder_files.reload_epoch(PLUGIN)
-    live.leave(PLUGIN)  # the reload it skipped happens once now
+    live.hold(PLUGIN, "#name", False)  # let go: the reload it waited with happens now
     assert folder_files.reload_epoch(PLUGIN) == before + 1 and folder_files.reload_reason(PLUGIN) == "live ended"
-    told.clear()
-    host._restart_moved(PLUGIN)
-    assert told == [{"type": "plugin_scope_changed", "plugins": [PLUGIN], "switched": True}]
     live.leave(PLUGIN)
-    assert folder_files.reload_epoch(PLUGIN) == before + 1  # nothing skipped: no more reloads
+    assert folder_files.reload_epoch(PLUGIN) == before + 1  # nothing left waiting
 
 
 def test_joining_a_teammates_group_reloads_the_panels_on_its_first_pull(team: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -625,8 +661,9 @@ def test_joining_a_teammates_group_reloads_the_panels_on_its_first_pull(team: di
     host._restart_moved(PLUGIN)  # the join's pull: the page opens on the host's data
     assert told == [{"type": "plugin_scope_changed", "plugins": [PLUGIN], "switched": True}]
     told.clear()
+    live.hold(PLUGIN, "#name", True)  # later pulls while this PC types in a page: kept as it is
     folder_files.reload_bump(PLUGIN, "pull")
-    host._restart_moved(PLUGIN)  # later pulls: kept, the page merges them
+    host._restart_moved(PLUGIN)
     assert told == [{"type": "plugin_scope_changed", "plugins": [PLUGIN], "synced": True, "live": True}]
 
 
@@ -788,6 +825,32 @@ def test_a_groupmate_holds_its_changes_for_the_leader_while_it_is_in_reach(live_
     assert vcs_engine._build(_ctx(account), now=time.time()) == 1  # Cy can't send what never reached it: ours
     going = space_vcs.cs_items_open(account, SPACE, PLUGIN)
     assert ("asset", "art/clip.webm") in going and ("doc", "card.tiny") not in going  # the small one waits for Cy
+
+
+def test_a_member_holds_a_change_only_for_a_leader_whose_app_sends_this_plugins_data(
+        live_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every plugin's data goes live from live version 3 (DATA_V). A leader on version 2
+    (1.2.435-1.2.438) sends only the data of plugins that ask for it in their manifest: for
+    any other, a member that held its change would wait 90 s for nothing."""
+    account, impl = live_data["account"], live_data["impl"]
+    since = time.time() - 60
+    _roster(account, _on("d_cy", "Cy", "h:d_cy", since, app="1.2.438"))
+    live.join(PLUGIN, "h:d_cy")
+    impl.peers = [{**CY, "path": "direct"}]
+    monkeypatch.setattr(scopes, "data_live_asked", lambda plugin: False)
+    assert live.hold_since(account, SPACE, PLUGIN) is None  # this PC sends its own
+    monkeypatch.setattr(scopes, "data_live_asked", lambda plugin: True)  # "data_live": true in the manifest
+    assert live.hold_since(account, SPACE, PLUGIN) is not None
+    monkeypatch.setattr(scopes, "data_live_asked", lambda plugin: False)
+    _roster(account, _on("d_cy", "Cy", "h:d_cy", since))  # Cy updated: live version 3
+    assert live.hold_since(account, SPACE, PLUGIN) is not None
+
+
+def test_every_shared_plugins_data_goes_live_unless_its_manifest_says_no() -> None:
+    from backend.uefn_plugins import store
+
+    assert store.data_live({}) and store.data_live({"data_live": True})
+    assert not store.data_live({"data_live": False}) and not store.data_live({"data_sharing": False})
 
 
 def test_the_new_leader_gets_what_the_old_one_didnt_send(live_data: dict[str, Any]) -> None:

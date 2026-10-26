@@ -761,6 +761,8 @@ def _push_round(ctx: Ctx, *, message: str = "", now: float, pull: bool = True,
 
 
 def _push_loop(ctx: Ctx, errs: _Errors, *, message: str, now: float, pull: bool, quiet_s: float) -> dict[str, Any]:
+    from backend.uefn_plugins import live
+
     pushed = tree = 0
     missing: dict[str, int] = {}
     fresh: set[str] = set()  # pending when this round began on them: no try of them can have committed
@@ -783,6 +785,7 @@ def _push_loop(ctx: Ctx, errs: _Errors, *, message: str, now: float, pull: bool,
             if out.kind == "committed":
                 pushed += 1
                 errs.answered, errs.fails, errs.halves = True, 0, frozenset()
+                live.committed(ctx.account, ctx.space, ctx.plugin, throttle=True)  # the group pulls it now
                 continue
             if out.kind in ("dropped", "locked", "refused"):
                 errs.answered = errs.answered or out.kind != "dropped"

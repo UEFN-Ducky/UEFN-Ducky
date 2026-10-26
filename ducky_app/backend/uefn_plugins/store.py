@@ -124,8 +124,9 @@ def manifest_data_errors(manifest: dict[str, Any]) -> list[str]:
     errors += declaration_errors(manifest)
     errors += _data_local_errors(manifest)
     if "data_live" in manifest and not isinstance(manifest.get("data_live"), bool):
-        errors.append(f'plugin.json "data_live" is {manifest.get("data_live")!r}: use true (teammates live in one '
-                      "group get each change at once, over the group's link) or leave it out.")
+        errors.append(f'plugin.json "data_live" is {manifest.get("data_live")!r}: leave it out (teammates live in '
+                      "one group get each change at once, over the group's link) or use false (changes go with sync "
+                      "only).")
     elif manifest.get("data_live") is True and sharing is False:
         errors.append('plugin.json has "data_live" but "data_sharing": false: nothing is shared, so remove one.')
     if "data_locks" not in manifest:
@@ -157,11 +158,11 @@ def data_locks(manifest: dict[str, Any]) -> dict[str, str]:
 
 
 def data_live(manifest: dict[str, Any]) -> bool:
-    """Manifest ``"data_live": true``: while teammates are live in one group, each change to
-    the plugin's docs and files goes straight to the group over its peer-to-peer link and
-    lands there at once (sync still records it); inside the group the newest change of an
-    item wins and nobody locks anyone out."""
-    return manifest.get("data_live") is True and manifest.get("data_sharing") is not False
+    """While teammates are live in one group, each change to a shared plugin's docs and files
+    goes straight to the group over its peer-to-peer link and lands there at once (sync still
+    records it); inside the group the newest change of an item wins and nobody locks anyone
+    out. Every plugin that shares its data, unless its manifest says ``"data_live": false``."""
+    return manifest.get("data_live") is not False and manifest.get("data_sharing") is not False
 
 
 def data_local(manifest: dict[str, Any]) -> tuple[str, ...]:

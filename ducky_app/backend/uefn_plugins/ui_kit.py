@@ -438,7 +438,7 @@ LIVE_PRESENCE_SCRIPT = r"""<script>(function () {
   var following = "", replaying = false, scrolled = [], sentView = "", viewAt = 0, holdsAsk = "";
   var lead = null, wentTo = "", wentFrom = "", wentAt = 0, scrolledTo = "", peers = {}, reached = {};
   var leading = false, me = Math.random().toString(36).slice(2, 10), seq = 0, leadAt = "", askedAt = "";
-  var appliedAt = 0, selfScrollAt = 0, older = {};
+  var appliedAt = 0, selfScrollAt = 0, older = {}, heard = false;
   var HOLD_AFTER_MS = 1500, HOLD_RENEW_MS = 10000, HOLD_STALE_MS = 30000, VIEW_GAP_MS = 250, VIEW_EVERY_MS = 5000;
   var ECHO_MS = 400, OWN_SCROLL_MS = 1000;
   var CONTROL = 'input,textarea,select,button,[contenteditable=""],[contenteditable="true"],[role="button"],[role="slider"],' +
@@ -661,6 +661,7 @@ LIVE_PRESENCE_SCRIPT = r"""<script>(function () {
     if (!force && v === sentView && t - viewAt < VIEW_GAP_MS) return;
     var d = { v: v, at: marks().join("|").slice(0, 400), scroll: scrollRows() };
     if (asking()) {  // a member: only its own moves, and only to the leader
+      if (!heard) return;  // just joined: the group's screen comes first, never this one's
       var moved = d.at && d.at !== leadAt && d.at !== wentTo && d.at !== askedAt;
       if (!moved && (force || t - appliedAt < ECHO_MS)) return;  // a heartbeat, or the leader's scroll landing here
       askedAt = d.at; d.ask = 1; d.to = following;
@@ -679,6 +680,7 @@ LIVE_PRESENCE_SCRIPT = r"""<script>(function () {
       window.dispatchEvent(new CustomEvent("ducky-live-goto", { detail: { view: at } }));
     }
     leadAt = at;
+    heard = true;
     lead = d;
     catchUp();
   }
@@ -837,7 +839,7 @@ LIVE_PRESENCE_SCRIPT = r"""<script>(function () {
     else if (e.type === "live.follow") {
       if (String(e.device || "") !== following || !!e.leading !== leading) {  // not when only ``older`` moved
         following = String(e.device || ""); leading = !!e.leading;
-        lead = null; wentTo = wentFrom = scrolledTo = leadAt = askedAt = "";
+        lead = null; wentTo = wentFrom = scrolledTo = leadAt = askedAt = ""; heard = false;
       }
       older = {};
       (Array.isArray(e.older) ? e.older : []).forEach(function (o) { older[String(o)] = 1; });

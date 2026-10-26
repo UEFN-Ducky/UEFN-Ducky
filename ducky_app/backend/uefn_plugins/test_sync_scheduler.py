@@ -553,6 +553,36 @@ def test_a_head_event_pulls_within_seconds(team, events) -> None:
 
 
 @dpapi
+def test_a_pull_asked_for_while_another_round_holds_the_space_runs_seconds_later(
+        team, events, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A teammate's commit note (or the Store's head event) wakes a pull; if a round already
+    holds the space (the bar's own sync, a folder look), the pull waits a few seconds instead
+    of being dropped until the next minute's round."""
+    from backend.uefn_plugins import ledger_conformance as conf
+    from backend.uefn_plugins import sync_scheduler as module
+    from backend.uefn_plugins.scopes import PluginData
+
+    clock, start = team.clock, team.clock.now
+    sched = scheduler(clock)
+    assert sched.tick() == ["spaceT"]
+    out = team.ben.push("spaceT", TEAM, conf.changeset(conf.put_item("doc", "card.new", b'{"v":1}')))
+    spaces.remote_event(team.aid, "spaceT", "head", TEAM, {"seq": out.seq})
+    real, calls = module.run_round, []
+
+    def busy_once(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs.get("pull"))
+        if len(calls) == 1:
+            return {"state": "busy", "changed": [], "error": ""}
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "run_round", busy_once)
+    assert ticks(sched, clock, start + 6) == [["spaceT"]] and PluginData(TEAM).get("card.new") is None  # busy
+    assert ticks(sched, clock, start + 12) == [["spaceT"]]  # the wake came back: due again 5 s on
+    assert PluginData(TEAM).get("card.new") == {"v": 1}
+    assert calls[1] == calls[0] == frozenset({TEAM})  # the same pull, asked for again
+
+
+@dpapi
 def test_a_lock_request_is_answered_within_3s(team, events, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 

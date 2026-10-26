@@ -585,12 +585,24 @@ def test_a_round_that_sent_changes_tells_the_live_group_to_pull(pc: PC, monkeypa
     from backend.uefn_plugins import live
 
     told: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(live, "committed", lambda a, s, p: told.append((a, s, p)))
+    monkeypatch.setattr(live, "committed", lambda a, s, p, throttle=False: told.append((a, s, p)))
     pc.data.put("card.pip", {"hp": 1})
     assert pc.run()["pushed"] == 1
-    assert told == [(pc.account, SPACE, PLUGIN)]
+    assert set(told) == {(pc.account, SPACE, PLUGIN)}
+    sent = len(told)
     pc.run()  # nothing to send: nothing to tell
-    assert len(told) == 1
+    assert len(told) == sent
+
+
+def test_the_live_group_hears_of_a_commit_as_it_lands_not_after_the_whole_round(pc: PC, ben: Ben, monkeypatch) -> None:
+    from backend.uefn_plugins import live
+
+    told: list[tuple[bool, int]] = []
+    monkeypatch.setattr(live, "committed", lambda a, s, p, throttle=False: told.append((throttle, ben.head())))
+    pc.data.put("card.pip", {"hp": 1})
+    assert pc.run()["pushed"] == 1
+    # As the changeset committed (from the push loop), and once more when the round was done.
+    assert told == [(True, 1), (False, 1)]
 
 
 def test_auto_locks_go_30_s_after_their_last_change_went_out(pc: PC) -> None:

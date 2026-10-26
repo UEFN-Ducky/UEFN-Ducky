@@ -157,3 +157,21 @@ it("an older app following an up-to-date host: its screen follows, and its click
   expect([laptop.shown(), tas.shown()]).toEqual(["rules", "rules"]);
   expect([laptop.clicks.rules, tas.clicks.rules]).toEqual([1, 1]);  // nobody relays it: never twice
 });
+
+it("someone who joins goes to the group's screen, and the group never goes to theirs", async () => {
+  const laptop = page("iliya", "laptop", "now");
+  await goLive(laptop, { device: "", leading: true, older: [] });
+  await laptop.click("video");  // the group is on Video
+  const tas = page("tas", "mainpc", "now");
+  await tas.click("rules");  // tas was on Rules before joining
+  tell(tas, { type: "live.follow", device: "laptop", leading: false, older: [] });
+  tell(tas, { type: "live.state", on: true });
+  await settle();
+  expect(laptop.shown()).toBe("video");  // the joiner's own screen moved nobody
+  tell(laptop, { type: "live.peers", peers: [{ name: "tas", device: "mainpc", path: "direct" }] });  // the link to tas is up
+  await settle();
+  expect([laptop.shown(), tas.shown()]).toEqual(["video", "video"]);
+  await new Promise((resolve) => setTimeout(resolve, 100));  // past the catch-up's own scroll
+  await tas.click("thumbs");  // from then on, tas's own moves go to the group as before
+  expect([laptop.shown(), tas.shown()]).toEqual(["thumbs", "thumbs"]);
+});

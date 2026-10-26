@@ -43,7 +43,7 @@ LEDGER_METHODS = ("capabilities", "heads", "push", "pull", "fetch", "history", "
 # --------------------------------------------------------------------------- one PC (a child process)
 
 
-def pc_main(address: tuple[str, int], name: str, app: str = "") -> None:
+def pc_main(address: tuple[str, int], name: str, app: str = "", account_name: str = "") -> None:
     """A PC: signs in as ``name``, has ``cards`` on the team copy, and does what the test says.
     ``app``: an older app. "1.2.434" runs its group through a leader like this one, but its
     presence names no version. "1.2.433" is from before that: its team service says its
@@ -61,8 +61,9 @@ def pc_main(address: tuple[str, int], name: str, app: str = "") -> None:
     from backend.uefn_plugins.ledger import OutgoingChangeset
     from backend.uefn_plugins.scopes import PluginData
 
-    key = f"https://uefnducky.org|{name.lower()}@example.com"
-    user = "u_" + name.lower()
+    who = account_name or name  # one account on two PCs: the same person, two devices
+    key = f"https://uefnducky.org|{who.lower()}@example.com"
+    user = "u_" + who.lower()
     duckyos_account.account_key = lambda blob=None: key
     data_crypto._fetch_adk = lambda: hashlib.sha256(b"adk/" + key.encode()).digest()
     vcs_engine.my_user_id = lambda: user
@@ -72,7 +73,7 @@ def pc_main(address: tuple[str, int], name: str, app: str = "") -> None:
 
     def dial(role: str) -> Any:
         conn = Client(address, authkey=AUTH)
-        conn.send(("hello", name, role, device, user))
+        conn.send(("hello", name, role, device, user, who))
         return conn
 
     svc, evt, ctl = dial("svc"), dial("evt"), dial("ctl")
@@ -131,6 +132,7 @@ def pc_main(address: tuple[str, int], name: str, app: str = "") -> None:
     repo.sync_put(account, SPACE, label="Alpha", synced_at=time.time())
     space_vcs.head_put(account, SPACE, PLUGIN, engine="v2")
     scopes.data_live = lambda plugin: plugin == PLUGIN
+    scopes.data_live_asked = lambda plugin: plugin == PLUGIN  # its manifest says "data_live": true, like IMK's
     live._push = lambda event: None
     if app:
         frontend.__version__ = app if app == "1.2.433" else ""
@@ -229,7 +231,7 @@ class PC:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self.device = self.user = self.room = ""
+        self.device = self.user = self.room = self.person = ""
         self.presence: Any = None
         self.ctl: Any = None
         self.evt: Any = None
@@ -245,7 +247,7 @@ class PC:
         return res
 
     def who(self) -> dict[str, str]:
-        return {"name": self.name, "user": self.user, "device": self.device, "label": f"{self.name}-PC"}
+        return {"name": self.person or self.name, "user": self.user, "device": self.device, "label": f"{self.name}-PC"}
 
     def tell(self, *msg: Any) -> None:
         with self.evt_lock:
@@ -275,11 +277,11 @@ class Hub:
                 conn = self.listener.accept()
             except OSError:
                 return
-            _, name, role, device, user = conn.recv()
+            _, name, role, device, user, person = conn.recv()
             pc = self.pcs[name]
-            pc.device, pc.user = device, user
+            pc.device, pc.user, pc.person = device, user, person
             if role == "svc":
-                pc.ledger = self.server.client(user, device, name=name)
+                pc.ledger = self.server.client(user, device, name=person)
                 threading.Thread(target=self._serve, args=(pc, conn), daemon=True).start()
             elif role == "evt":
                 pc.evt = conn
@@ -325,7 +327,7 @@ class Hub:
     def _room(self, pc: PC) -> list[PC]:
         return [p for p in self.pcs.values() if p is not pc and pc.room and p.room == pc.room]
 
-    def start(self, name: str, *, app: str = "") -> PC:
+    def start(self, name: str, *, app: str = "", account: str = "") -> PC:
         pc = self.pcs[name] = PC(name)
         root = self.tmp / name
         (root / "Roaming").mkdir(parents=True)
@@ -335,10 +337,10 @@ class Hub:
         code = ("import sys, importlib.util; sys.path.insert(0, sys.argv[1]);"
                 "spec = importlib.util.spec_from_file_location('live_pcs', sys.argv[2]);"
                 "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
-                "m.pc_main((sys.argv[3], int(sys.argv[4])), sys.argv[5], sys.argv[6])")
+                "m.pc_main((sys.argv[3], int(sys.argv[4])), sys.argv[5], sys.argv[6], sys.argv[7])")
         host, port = self.listener.address
         pc.proc = subprocess.Popen([sys.executable, "-c", code, str(APP), str(Path(__file__).resolve()), host,
-                                    str(port), name, app], cwd=str(root), env=env)
+                                    str(port), name, app, account], cwd=str(root), env=env)
         deadline = time.monotonic() + 60
         while pc.ctl is None:
             if time.monotonic() > deadline or pc.proc.poll() is not None:
@@ -512,3 +514,18 @@ def test_a_pc_that_says_no_version_still_leads_its_group_like_1_2_434(hub: Hub) 
     assert ana("sync")["pushed"] == 1
     (entry,) = until(lambda: [e for e in ben("history") if ["doc", "card.pip"] in e["items"]], "the change in history")
     assert (entry["by"], entry["via"]) == ("Ben", "Ana")
+
+
+def test_one_account_on_two_pcs_streams_like_two_people_and_history_names_the_pc(hub: Hub) -> None:
+    main, lap = hub.start("Main", account="Tas"), hub.start("Lap", account="Tas")
+    assert main("start")["ok"]
+    _go_live(lap, main)
+    until(lambda: len(_mine(main).get("members", [])) == 2, "the laptop in the main PC's group")
+    assert [m["name"] for m in _mine(lap)["members"] if not m["me"]] == ["You on Main-PC"]
+    assert lap("share", "clip", "c3")["ok"]
+    until(lambda: (main("shared").get("clip") or {}).get("value") == "c3", "the main PC to get the laptop's value")
+    lap("put", "card.pip", {"hp": 4})
+    until(lambda: main("get", "card.pip") == {"hp": 4}, "the main PC to get the laptop's change live")
+    assert main("sync")["pushed"] == 1  # the main PC leads: it sends it
+    (entry,) = until(lambda: [e for e in lap("history") if ["doc", "card.pip"] in e["items"]], "the change in history")
+    assert (entry["by"], entry["device"], "via" in entry) == ("Tas", "Lap-PC", False)  # Tas on the laptop

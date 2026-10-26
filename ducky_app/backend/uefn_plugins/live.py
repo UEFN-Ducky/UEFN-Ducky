@@ -4,11 +4,11 @@ short messages, straight from PC to PC. The spaces provider carries them peer to
 (:meth:`spaces.Provider.live_send`).
 
 Changes go out with sync like any other change, and the moment one is committed this PC
-tells its group (``ducky.change``), whose PCs pull it at once. A plugin with
-``"data_live": true`` goes further: inside the group each change to its docs and files
-travels at once over the link and lands as a pulled copy would (``ducky.data``, see "live
-data" below), the newest change of an item wins and members never lock each other out;
-sync still records every change, and teammates outside the group get it that way.
+tells its group (``ducky.change``), whose PCs pull it at once. Inside the group each change
+to a plugin's docs and files also travels at once over the link and lands as a pulled copy
+would (``ducky.data``, see "live data" below; a manifest's ``"data_live": false`` opts out),
+the newest change of an item wins and members never lock each other out; sync still records
+every change, and teammates outside the group get it that way.
 
 Every plugin gets this with no plugin code: the host script in every panel page
 (``ui_kit.LIVE_PRESENCE_SCRIPT``) sends the pointer, selections and holds, and draws the
@@ -84,11 +84,14 @@ _VIEW_RE = re.compile(r"^[A-Za-z0-9._:-]{0,64}$")
 _TOPIC_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 _ROOM_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 HOST_PREFIX = "h:"
-# What this app's live speaks, said in presence with the room: 2, the group runs through its
-# leader (asks, shared values, data). An app from before that (1.2.433 and older) relays
-# nothing: it never leads a group someone up to date is in, its changes are its own to send,
-# and its screen doesn't follow the group (the Live menu says who needs to update).
-PROTOCOL = 2
+# What this app's live speaks, said in presence with the room: from 2 (RELAY_V) the group runs
+# through its leader (asks, shared values, data); from 3 (DATA_V) every plugin's data goes to
+# the group, not only a plugin's that asks for it. An app from before 2 (1.2.433 and older)
+# relays nothing: it never leads a group someone up to date is in, its changes are its own to
+# send, and its screen doesn't follow the group (the Live menu says who needs to update).
+PROTOCOL = 3
+RELAY_V = 2
+DATA_V = 3
 RELAY_SINCE = (1, 2, 434)  # the first app version whose groups run through a leader (no "v" yet)
 LEGACY_MAX = 500
 
@@ -121,6 +124,8 @@ _shared_sent: dict[str, float] = {}  # plugin -> when the leader last sent them 
 _marks: dict[tuple[str, str, str], float] = {}  # (account, space, plugin) -> newest write sent live
 _outbox: list[threading.Thread] = []
 _legacy: set[str] = set()  # devices whose messages only an app before RELAY_SINCE sends
+_noted: dict[tuple[str, str, str], float] = {}  # (account, space, plugin) -> when the last commit note went
+NOTE_GAP_S = 1.0  # a commit note at most this often while a round still sends
 _beating: dict[tuple[str, str], bool] = {}  # (account, space) -> a beat is going; True: one more after it
 
 
@@ -444,14 +449,17 @@ def panels_kept(plugin: str) -> None:
 
 
 def keeps_panels(plugin: str) -> bool:
-    """Whether a pull restarts ``plugin`` with its panels kept loaded (live: they merge it),
-    or reloads them. The first pull after joining a teammate's group reloads them, so the
-    page opens on the host's data instead of what it showed before the Join."""
+    """Whether a live pull restarts ``plugin`` with its panels kept loaded: only while this PC
+    presses or types in one of them (a reload would take that edit away); they reload as soon
+    as it lets go (:func:`hold`). Otherwise the panels reload and show the teammate's change at
+    once, as they do when Live ends. The first pull after joining a teammate's group always
+    reloads them, so the page opens on the group's data."""
     with _lock:
         if plugin not in _live:
             return False
         until = _join_reload.pop(plugin, 0.0)
-    return time.time() >= until
+        held = bool(_holds.get(plugin))
+    return held and time.time() >= until
 
 
 def _reload_kept(plugin: str) -> None:
@@ -806,7 +814,7 @@ def _share_tick(now: float) -> None:
 def groups(plugin: str, account: str, space: str) -> list[dict[str, Any]]:
     """The live groups of ``plugin`` in the space, from its last roster: ``room``, ``host``
     (name), ``hostDevice``, ``hostIsMe``, ``members`` (``name``, ``user``, ``device``,
-    ``label``, ``me``, ``older``: on an app older than :data:`PROTOCOL`; the first to come
+    ``label``, ``me``, ``v``: its live version, ``older``: on an app that doesn't relay; the first to come
     first) and ``mine``. The host leads the group: the PC the room is named after while it is
     in it, else whoever has been in it longest, which every PC works out the same from the
     roster (no vote, no message); a PC on an older app leads only when nobody up to date is in
@@ -835,11 +843,12 @@ def groups(plugin: str, account: str, space: str) -> list[dict[str, Any]]:
         rooms.setdefault(room, []).append({
             "name": f"You on {pc}" if pc else person(p.get("user_name"), p.get("user"), fallback="A teammate"),
             "user": str(p.get("user") or ""), "device": str(p["device"]), "label": str(p.get("label") or ""),
-            "me": False, "since": since, "older": _older(p, live)})
+            "me": False, "since": since, "v": _version_of(live), "older": _older(p, live)})
     mine = room_of(plugin, account, space)
     if mine is not None:
         rooms.setdefault(mine["room"], []).append(
-            {"name": "You", "user": "", "device": me, "label": "", "me": True, "since": mine["since"], "older": False})
+            {"name": "You", "user": "", "device": me, "label": "", "me": True, "since": mine["since"], "v": PROTOCOL,
+             "older": False})
     out = []
     for room, members in rooms.items():
         members.sort(key=lambda m: (m["since"], m["device"]))
@@ -847,7 +856,7 @@ def groups(plugin: str, account: str, space: str) -> list[dict[str, Any]]:
         leaders = [m for m in members if not m["older"]] or members  # an older app relays nothing
         host = next((m for m in leaders if m["device"] == host_device), leaders[0])
         out.append({"room": room, "host": host["name"], "hostDevice": host["device"], "hostIsMe": host["me"],
-                    "members": [{k: m[k] for k in ("name", "user", "device", "label", "me", "since", "older")}
+                    "members": [{k: m[k] for k in ("name", "user", "device", "label", "me", "since", "v", "older")}
                                 for m in members],
                     "mine": mine is not None and mine["room"] == room})
     out.sort(key=lambda g: (not g["mine"], -len(g["members"]), g["host"].lower()))
@@ -862,7 +871,7 @@ def _older(person: dict[str, Any], row: dict[str, Any]) -> bool:
     from backend.uefn_plugins.plugin_version import parse_plugin_version
 
     try:
-        if int(row.get("v") or 0) >= PROTOCOL:
+        if _version_of(row) >= RELAY_V:
             return False
     except (TypeError, ValueError):
         pass
@@ -870,6 +879,14 @@ def _older(person: dict[str, Any], row: dict[str, Any]) -> bool:
     if ver != (0, 0, 0):
         return ver < RELAY_SINCE
     return str(person.get("device") or "") in _legacy
+
+
+def _version_of(row: dict[str, Any]) -> int:
+    """The live version a presence row says (0: none, an app before 1.2.435)."""
+    try:
+        return int(row.get("v") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _note_legacy(account: str, space: str, plugin: str, who: dict[str, str], topic: str, data: Any) -> None:
@@ -960,8 +977,11 @@ def hold(plugin: str, anchor: str, on: bool, t: float = 0.0, view: str = "") -> 
             mine[anchor] = (t, view, time.time())
         else:
             mine.pop(anchor, None)
+        let_go = not on and not mine
     if is_live(plugin):
         send(plugin, HOLD, {"anchor": anchor, "on": bool(on), "t": t, "v": view})
+    if let_go:
+        _reload_kept(plugin)  # a teammate's pull waited for this PC to let go: its panels show it now
     return {"ok": True}
 
 
@@ -1030,10 +1050,17 @@ def _pull_now(account: str, space: str, plugin: str) -> None:
         _log.debug("live wake failed", exc_info=True)
 
 
-def committed(account: str, space: str, plugin: str) -> None:
-    """This PC's changes to a team copy were just committed: its live group pulls them now."""
+def committed(account: str, space: str, plugin: str, *, throttle: bool = False) -> None:
+    """This PC's changes to a team copy were just committed: its live group pulls them now.
+    Sent as each changeset commits (``throttle``: at most one each :data:`NOTE_GAP_S`), and
+    always once more when the round is done, so the last of them is never left unsaid."""
     if room_of(plugin, account, space) is None:
         return
+    now = time.monotonic()
+    with _lock:
+        if throttle and now - _noted.get((account, space, plugin), float("-inf")) < NOTE_GAP_S:
+            return
+        _noted[(account, space, plugin)] = now
     try:
         from backend.uefn_plugins import spaces
 
@@ -1258,6 +1285,9 @@ def hold_since(account: str, space: str, plugin: str) -> float | None:
     mine = _my_group(plugin, account, space)
     if mine is None or mine["hostIsMe"] or len(mine["members"]) < 2:
         return None
+    leader = next((m for m in mine["members"] if m["device"] == mine["hostDevice"]), {})
+    if int(leader.get("v") or 0) < DATA_V and not scopes.data_live_asked(plugin):
+        return None  # its app sends only the data of plugins that ask for it live: this one's goes from here
     return float(st["since"]) if _in_reach(account, space, plugin, str(mine["hostDevice"])) else None
 
 
@@ -1452,9 +1482,12 @@ def peers_changed(account: str, space: str, plugin: str, *, ended: str = "") -> 
     _push({"type": "live_peers", "plugin": plugin, "on": st["on"], "state": st["state"], "peers": st["peers"]})
 
 
-def forget(plugin: str) -> None:
-    """The plugin unloaded."""
-    leave(plugin)
+def forget(plugin: str, *, keep_live: bool = False) -> None:
+    """The plugin unloaded: its callbacks and holds go, and Live ends for it, unless it is
+    coming straight back (``keep_live``: a reload, an update). Then its group never sees it
+    leave: a teammate left alone in the group would end their Live."""
+    if not keep_live:
+        leave(plugin)
     with _lock:
         _listeners.pop(plugin, None)
         _holds.pop(plugin, None)
@@ -1481,6 +1514,7 @@ def reset_for_tests() -> None:
         _marks.clear()
         _beating.clear()
         _legacy.clear()
+        _noted.clear()
 
 
 class LiveApi:

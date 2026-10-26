@@ -204,7 +204,7 @@ def _ledger_round(account: str, space: str, team: dict[str, Any], *, force: bool
     changed: list[str] = []
     keys: dict[str, list[str]] = {}
     failed: list[tuple[str, str]] = []
-    for plugin, backend in sorted(team.items()):
+    for plugin, backend in sorted(team.items(), key=lambda kv: (kv[0] not in pull, kv[0])):  # asked-for pulls first
         if plugin in importing:
             continue  # it stays on the older copy until its move to the new sync is done
         if not (force or plugin in pull or _ledger_work(account, space, plugin, now)):
@@ -639,6 +639,9 @@ class Scheduler:
             if rec is not None:
                 rec.running = False
                 rec.called_at = max(rec.called_at, called_at)
+                if state == "busy":  # another round held the space: this one's wake and pulls wait for the next tick
+                    rec.wake = True
+                    rec.pull |= set(pull)
                 if ran:
                     rec.sent = started
                     rec.fails = rec.fails + 1 if state in RETRY_STATES else 0

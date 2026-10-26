@@ -11,13 +11,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("every live event the app sends reaches the panel bus plugin panels and bars listen on", async () => {
+it("every live event, and a plugin's own push, reaches the panel bus plugin panels and bars listen on", async () => {
   const events = [
     { type: "live_message", plugin: "imk", topic: "ducky.nav", from: { device: "d1" }, data: { anchor: "#video" } },
     { type: "live_shared", plugin: "imk", key: "player", value: { playing: true }, by: { device: "d1" } },
     { type: "live_peers", plugin: "imk", on: true, peers: [] },
     { type: "live_holds", plugin: "imk", holds: [] },
     { type: "live_member_state", plugin: "imk", from: { device: "d1" }, state: { cam: [0, 0, 1] } },
+    // A plugin's own push (Kanban's after a ducky's edit): its panels subscribe to it there.
+    { type: "kanban_changed", plugin_id: "kanban", board: "b1" },
   ];
   let served = false;
   vi.stubGlobal("fetch", vi.fn(async () => {

@@ -1189,7 +1189,10 @@ def team_history(plugin: str, *, kind: str = "", key: str = "", before: int | No
         entry["device"] = str(entry.pop("device_name", "") or "") or names.get(device, "")
         author, author_pc = str(entry.pop("author", "") or ""), str(entry.pop("author_pc", "") or "")
         if author:  # sent by a live group's leader ("via") for the groupmate who made it
-            entry.update(via=entry.get("by", ""), by=author, device=author_pc or entry["device"])
+            via = str(entry.get("by") or "")
+            entry.update(by=author, device=author_pc or entry["device"])
+            if person(author) != via:  # this account on its other PC: the PC's name says it all
+                entry["via"] = via
     return out
 
 
