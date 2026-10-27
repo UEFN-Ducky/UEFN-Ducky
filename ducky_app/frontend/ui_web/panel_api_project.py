@@ -736,6 +736,10 @@ class PanelApiProjectMixin:
             from frontend.codex_mcp import merge_codex_config
 
             merge_codex_config(path, block)
+        elif ide == _pa.IdeKind.OPENCODE:
+            from frontend.opencode_mcp import merge_opencode_config
+
+            merge_opencode_config(path, block)
         else:
             _pa.merge_uefn_into_config(path, block, dry_run=False)
         for ln in _pa.sync_skill_for_ide(path):

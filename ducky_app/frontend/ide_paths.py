@@ -12,6 +12,7 @@ class IdeKind(str, Enum):
     CLAUDE = "claude"
     ANTIGRAVITY = "antigravity"
     CODEX = "codex"
+    OPENCODE = "opencode"
 
 
 def cursor_mcp_path() -> Path:
@@ -37,6 +38,14 @@ def codex_config_path() -> Path:
     return Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".codex" / "config.toml"
 
 
+def opencode_config_path() -> Path:
+    """OpenCode's global config (``opencode debug paths``: ~/.config/opencode on every OS)."""
+    folder = os.environ.get("OPENCODE_CONFIG_DIR", "").strip()
+    if folder:
+        return Path(folder) / "opencode.json"
+    return Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".config" / "opencode" / "opencode.json"
+
+
 def path_for_ide(kind: IdeKind, antigravity_override: str = "") -> Path:
     if kind == IdeKind.CURSOR:
         return cursor_mcp_path()
@@ -44,4 +53,6 @@ def path_for_ide(kind: IdeKind, antigravity_override: str = "") -> Path:
         return claude_desktop_config_path()
     if kind == IdeKind.CODEX:
         return codex_config_path()
+    if kind == IdeKind.OPENCODE:
+        return opencode_config_path()
     return antigravity_mcp_path(antigravity_override)
