@@ -748,7 +748,8 @@ export function AgentTab() {
 
   const secretKey = selected ? selected.secret_key || selected.id : "";
   const isUrl = selected?.kind === "url";
-  const hosted = !!selected?.key_optional && selected.kind !== "url";
+  // Account-billed gateways (UEFN Ducky) show usage; a key-optional gateway like OpenCode still takes a key.
+  const hosted = selected?.billing === "account";
   const saved = secretKey ? !!keySaved[secretKey] || (hosted && !!keySaved[selected?.id || ""]) : false;
   const status = secretKey ? keyStatus[secretKey] : undefined;
   const testing = !!secretKey && testingKey === secretKey;
@@ -781,7 +782,7 @@ export function AgentTab() {
               >
                 {providers.map((row) => {
                   const key = row.secret_key || row.id;
-                  const hostedRow = !!row.key_optional && row.kind !== "url";
+                  const hostedRow = row.billing === "account";
                   const rowSaved =
                     !!keySaved[key] ||
                     (hostedRow && !!keySaved[row.id]) ||
