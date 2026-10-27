@@ -2930,6 +2930,7 @@ def _roster_came(account: str, space: str, old: Any, roster: Mapping[str, Any]) 
         if _team_marks(old) != _team_marks(roster):
             live._team_changed(account, space)
         live.roster_holds(account, space, roster)
+        live.roster_invites(account, space, roster)
         live.end_lone_groups(account, space)
         live.merge_lone_groups(account, space)
         live.catch_up(account, space)
@@ -3281,10 +3282,12 @@ def presence_blob(account: str, space: str, plugins: Iterable[str], *, now: floa
             "locks": sorted(lk["name"] or _unit_name(lk["unit"]) for lk in mine if lk["plugin_id"] == plugin),
         }
     team_live = None
+    invites: list[dict[str, Any]] = []
     try:
         from backend.uefn_plugins import live
 
         team_live = live.team_room(account, space)  # the group this PC is in on the copy, every plugin with it
+        invites = live.invites_of(account, space, now=now)  # teammates asked into that group
         for plugin, row in out.items():
             room = live.room_of(plugin, account, space)
             if room is not None:
@@ -3301,7 +3304,7 @@ def presence_blob(account: str, space: str, plugins: Iterable[str], *, now: floa
     except Exception:  # noqa: BLE001 — presence never fails a beat
         ver = ""
     return {"label": device_label(), "app": "open", "ver": str(ver), "plugins": out,
-            **({"live": team_live} if team_live else {})}
+            **({"live": team_live} if team_live else {}), **({"invites": invites} if invites else {})}
 
 
 def beat(account: str, space: str, backend: Any, plugins: Iterable[str], *, force: bool = False,

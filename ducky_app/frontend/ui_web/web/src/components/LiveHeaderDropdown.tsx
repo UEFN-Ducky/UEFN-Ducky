@@ -5,8 +5,9 @@ import { Icons } from "../icons/Icons";
 import { LiveMenu } from "../plugin-ui/LiveMenu";
 import { useLiveFollow, writeLiveFollow } from "../plugin-ui/liveFollow";
 import { groupName } from "../plugin-ui/scopeBarText";
-import type { LiveTeam } from "../types/panel";
+import type { LiveTeam, LiveTeamOnline } from "../types/panel";
 import { DropdownPanel } from "./DropdownPanel";
+import { LiveInvitePrompt } from "./LiveInvitePrompt";
 
 /**
  * Live in the title bar, next to the activity list: grey while this PC isn't live, green
@@ -27,7 +28,8 @@ export function LiveHeaderDropdown() {
   }, [open]);
 
   const teams = overview?.teams ?? [];
-  if (isRemote() || !teams.length) return null;
+  if (isRemote()) return null;
+  if (!teams.length) return <LiveInvitePrompt />;
   const live = teams.find((t) => t.on);
   const mine = live?.groups.find((g) => g.mine);
   const others = mine ? mine.members.filter((m) => !m.me) : [];
@@ -40,13 +42,13 @@ export function LiveHeaderDropdown() {
       ? `Live: ${groupsLive} ${groupsLive === 1 ? "group" : "groups"} on your team. Join one, or start live.`
       : "Live: work on the team's data together, seeing each other's pointers";
 
-  const act = async (run: () => Promise<{ ok?: boolean; error?: string } | undefined>) => {
+  const act = async (run: () => Promise<{ ok?: boolean; error?: string } | undefined>, keepOpen = false) => {
     setBusy(true);
     setError("");
     try {
       const out = await run();
       if (out && out.ok === false) setError(out.error || "That didn't work.");
-      else setOpen(false);
+      else if (!keepOpen) setOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -57,9 +59,13 @@ export function LiveHeaderDropdown() {
   const join = (team: LiveTeam, room?: string) =>
     void act(async () => getApi()?.live_team_join?.(team.account, team.space, room || ""));
   const leave = (team: LiveTeam) => void act(async () => getApi()?.live_team_leave?.(team.account, team.space));
+  // The menu stays open: the row turns to Invited, and more people can be asked.
+  const invite = (team: LiveTeam, person: LiveTeamOnline) =>
+    void act(async () => getApi()?.live_team_invite?.(team.account, team.space, person.device), true);
 
   return (
     <div className="connection-status-root no-drag">
+      <LiveInvitePrompt />
       <button
         ref={anchorRef}
         type="button"
@@ -76,7 +82,7 @@ export function LiveHeaderDropdown() {
       </button>
       <DropdownPanel anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} width={320} placement="bottom">
         {error ? <p className="plugin-scope-menu__note plugin-scope-menu__note--warn live-menu__error" role="alert">{error}</p> : null}
-        <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} follow={follow} onFollow={writeLiveFollow} />
+        <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow} />
       </DropdownPanel>
     </div>
   );

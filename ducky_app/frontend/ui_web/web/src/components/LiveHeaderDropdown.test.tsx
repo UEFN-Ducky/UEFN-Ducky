@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { _resetBackgroundActivityForTests, getBackgroundJobs } from "../hooks/backgroundActivity";
 import { _resetLiveOverviewForTests } from "../hooks/useLiveOverview";
 import type { LiveTeam } from "../types/panel";
@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   live_overview: vi.fn(),
   live_team_join: vi.fn(),
   live_team_leave: vi.fn(),
+  live_team_invite: vi.fn(),
 }));
 const remote = vi.hoisted(() => ({ on: false }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => remote.on }));
@@ -105,8 +106,7 @@ describe("Live in the title bar", () => {
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [mine] })));
     render(<LiveHeaderDropdown />);
     fireEvent.click(await waitFor(trigger));
-    const box = await screen.findByRole("checkbox", { name: /Same screen as the group/ });
-    expect(screen.getByText(/through iliya, who leads the group/)).toBeTruthy();
+    const box = await screen.findByRole("checkbox", { name: "Same screen as iliya" });
     expect((box as HTMLInputElement).checked).toBe(true);
     fireEvent.click(box);
     expect(localStorage.getItem("ducky.liveFollow")).toBe("0");
@@ -151,6 +151,52 @@ describe("Live in the title bar", () => {
     const row = getBackgroundJobs().find((j) => j.id === "live-ended:s1");
     expect(row?.title).toBe("Live ended in Alpha");
     expect(row?.detail).toMatch(/^Everyone else left the group/);
+  });
+
+  it("no explainer text: the menu is people only", async () => {
+    api.live_overview.mockResolvedValue(overview(team()));
+    render(<LiveHeaderDropdown />);
+    fireEvent.click(await waitFor(trigger));
+    const menu = await screen.findByRole("menu", { name: "Live" });
+    expect(menu.textContent).not.toMatch(/Live covers every plugin|You lead the group|Tabs, play and scrolling/);
+  });
+
+  it("lists who else is online; Invite asks them and the menu stays open", async () => {
+    const online = [{ name: "Bo", device: "d_bo" }, { name: "Mo", device: "d_mo", live: true, invited: true }];
+    api.live_overview.mockResolvedValue(overview(team({ online })));
+    api.live_team_invite.mockResolvedValue({ ok: true });
+    render(<LiveHeaderDropdown />);
+    fireEvent.click(await waitFor(trigger));
+    const menu = await screen.findByRole("menu", { name: "Live" });
+    expect(within(menu).getByText("Online")).toBeTruthy();
+    expect(within(menu).getByText("Live in another group")).toBeTruthy();
+    expect((within(menu).getByRole("menuitem", { name: "Invited Mo" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Invite Bo" }));
+    await waitFor(() => expect(api.live_team_invite).toHaveBeenCalledWith("acct", "s1", "d_bo"));
+    expect(screen.getByRole("menu", { name: "Live" })).toBeTruthy();
+  });
+
+  it("an invite pops Join with a countdown; Join goes into their group, and it goes by itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.live_overview.mockResolvedValue(overview(team()));
+      api.live_team_join.mockResolvedValue({ ok: true });
+      render(<LiveHeaderDropdown />);
+      await waitFor(trigger);
+      const send = (expires: number) =>
+        act(() => push.handlers.forEach((fn) => fn({ type: "live_invite", account: "acct", space: "s1", room: "h:d_mo", from: "Mo", expires })));
+      send(Date.now() / 1000 + 30);
+      expect(await screen.findByText("Mo invites you to go live.")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Join (30)" }));
+      await waitFor(() => expect(api.live_team_join).toHaveBeenCalledWith("acct", "s1", "h:d_mo"));
+      await waitFor(() => expect(screen.queryByText("Mo invites you to go live.")).toBeNull());
+      send(Date.now() / 1000 + 2);
+      expect(await screen.findByText("Mo invites you to go live.")).toBeTruthy();
+      for (let i = 0; i < 3; i += 1) await act(async () => { vi.advanceTimersByTime(1000); });
+      await waitFor(() => expect(screen.queryByText("Mo invites you to go live.")).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an error joining shows in the menu", async () => {

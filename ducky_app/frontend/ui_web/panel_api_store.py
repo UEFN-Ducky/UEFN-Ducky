@@ -1007,6 +1007,16 @@ class PanelApiStoreMixin:
             live.remember_team(account, space, room or live.START)
         return out
 
+    def live_team_invite(self, account: str = "", space: str = "", device: str = "") -> dict[str, Any]:
+        """Invite a teammate who has the app open into this PC's group on a team copy (starts
+        live first when this PC isn't): their app asks them to join for 30 s."""
+        from backend.uefn_plugins import live
+
+        try:
+            return live.invite(str(account or ""), str(space or ""), str(device or ""))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def live_team_leave(self, account: str = "", space: str = "") -> dict[str, Any]:
         from backend.uefn_plugins import live
 

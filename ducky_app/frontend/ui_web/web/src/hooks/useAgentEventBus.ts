@@ -35,6 +35,7 @@ const PANEL_PUSH_TYPES = new Set<string>([
   "live_member_state",
   "live_shared",
   "live_team",
+  "live_invite",
   "duckyos_account_changed",
   // A plugin's api.emit_hook / api.set_appearance_profile; the main window acts on them.
   "plugin_hook",

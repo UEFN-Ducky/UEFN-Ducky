@@ -83,6 +83,8 @@ ROOM_KEY = "live_room:"  # workspace_state: where each plugin is live here (read
 TEAM_CHOICE_KEY = "live_team:"  # workspace_state: the group the person went live in on a team copy
 START = "start"  # the choice Start live: a teammate's group, else this PC's own
 LONE_GRACE_S = 60.0  # a groupmate gone from the roster this long (a crash, a restart) counts as left
+INVITE_S = 30.0  # an invite to this PC's group stands this long, then the popup goes
+INVITES_MAX = 8  # invites a PC puts in its presence at once
 _ANCHOR_RE = re.compile(r"^[^\x00-\x1f]{1,400}$")
 _VIEW_RE = re.compile(r"^[A-Za-z0-9._:-]{0,64}$")
 _TOPIC_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
@@ -143,6 +145,8 @@ _legacy: set[str] = set()  # devices whose messages only an app before RELAY_SIN
 _noted: dict[tuple[str, str, str], float] = {}  # (account, space, plugin) -> when the last commit note went
 NOTE_GAP_S = 1.0  # a commit note at most this often while a round still sends
 _beating: dict[tuple[str, str], bool] = {}  # (account, space) -> a beat is going; True: one more after it
+_invites: dict[tuple[str, str], dict[str, tuple[str, float]]] = {}  # team copy -> device -> (room, sent at)
+_told_invites: set[tuple[str, float]] = set()  # (inviter's device, sent at) this PC already showed
 
 
 def _push(event: dict[str, Any]) -> None:
@@ -1224,11 +1228,15 @@ def team_status(account: str, space: str) -> dict[str, Any]:
         plugins = sorted(p for p, st in _live.items() if (st.account, st.space) == (account, space) and p not in _own)
     out: dict[str, Any] = {"on": team is not None, "room": team.room if team else "",
                            "since": team.since if team else 0.0, "groups": [], "plugins": plugins,
-                           "state": "off", "connecting": [], "unlinked": [], "rejoin": ""}
+                           "state": "off", "connecting": [], "unlinked": [], "rejoin": "", "online": []}
     try:
         out["groups"] = team_groups(account, space)
     except Exception:  # noqa: BLE001 — no list this read
         _log.debug("live groups of %s failed", space, exc_info=True)
+    try:
+        out["online"] = online(account, space, out["groups"])
+    except Exception:  # noqa: BLE001 — no list this read
+        _log.debug("live online of %s failed", space, exc_info=True)
     if team is None:
         out["rejoin"] = _remembered_team(account, space, out["groups"])
         return out
@@ -1277,6 +1285,128 @@ def overview() -> dict[str, Any]:
         teams.append(row)
     teams.sort(key=lambda t: (not t["on"], t["label"].lower()))
     return {"ok": True, "on": any(t["on"] for t in teams), "teams": teams}
+
+
+# --------------------------------------------------------------------------- invites
+#
+# Teammates with the app open (the team copy's presence roster) and not in this PC's group
+# show in the Live menu with Invite. An invite rides this PC's presence (``invites``: to,
+# room, at) and a forced beat; the team channel wakes the teammate's PC at once, its roster
+# carries the invite, and :func:`roster_invites` pops a Join question there for
+# :data:`INVITE_S`.
+
+
+def online(account: str, space: str, groups_: list[dict[str, Any]] | None = None,
+           *, now: float | None = None) -> list[dict[str, Any]]:
+    """Teammates with the app open on the team copy who aren't in this PC's group: ``name``,
+    ``user``, ``device``, ``live`` (in another group) and ``invited`` (an invite still
+    stands)."""
+    from backend.store.repos import space_vcs
+    from backend.uefn_plugins.ledger import person
+    from backend.uefn_plugins.vcs_engine import other_pc
+
+    now = time.time() if now is None else now
+    groups_ = team_groups(account, space) if groups_ is None else groups_
+    mine = next((g for g in groups_ if g.get("mine")), None)
+    with_me = {str(m.get("device") or "") for m in (mine or {}).get("members") or []}
+    live_somewhere = {str(m.get("device") or "") for g in groups_ for m in g.get("members") or []}
+    with _lock:
+        sent = {d: at for d, (_, at) in _invites.get((account, space), {}).items() if now - at < INVITE_S}
+    roster = space_vcs.presence_get(account, space)["roster"]
+    people = roster.get("people") if isinstance(roster, dict) else None
+    me, out, seen = _device(), [], set()
+    for p in people if isinstance(people, list) else []:
+        device = str(p.get("device") or "") if isinstance(p, dict) else ""
+        if not device or device == me or device in with_me or device in seen:
+            continue
+        seen.add(device)
+        pc = other_pc(account, space, p.get("user"), device)
+        out.append({"name": f"You on {pc}" if pc else person(p.get("user_name"), p.get("user"), fallback="A teammate"),
+                    "user": str(p.get("user") or ""), "device": device,
+                    "live": device in live_somewhere, "invited": device in sent})
+    out.sort(key=lambda r: r["name"].lower())
+    return out
+
+
+def invite(account: str, space: str, device: str) -> dict[str, Any]:
+    """Ask a teammate's PC into this PC's group on the team copy: it gets a Join question
+    for :data:`INVITE_S`. Not live yet: this PC starts live first (the group it lands in is
+    the one offered)."""
+    device = str(device or "")
+    if not device or device == _device() or not _ROOM_RE.match(device):
+        return {"ok": False, "error": "Pick a teammate to invite."}
+    with _lock:
+        team = _teams.get((account, space))
+    if team is None:
+        got = join_team(account, space)
+        if not got.get("ok"):
+            return got
+        remember_team(account, space, START)
+        with _lock:
+            team = _teams.get((account, space))
+        if team is None:
+            return {"ok": False, "error": "Couldn't go live."}
+    now = time.time()
+    with _lock:
+        sent = _invites.setdefault((account, space), {})
+        for d in [d for d, (_, at) in sent.items() if now - at >= INVITE_S]:
+            sent.pop(d)
+        if device not in sent and len(sent) >= INVITES_MAX:
+            return {"ok": False, "error": f"At most {INVITES_MAX} invites at once. Try again in a moment."}
+        sent[device] = (team.room, now)
+    _beat_soon(account, space)
+    return {"ok": True, "expires": now + INVITE_S, **team_status(account, space)}
+
+
+def invites_of(account: str, space: str, *, now: float | None = None) -> list[dict[str, Any]]:
+    """The invites this PC's presence carries now: ``to``, ``room``, ``at``."""
+    now = time.time() if now is None else now
+    with _lock:
+        sent = _invites.get((account, space), {})
+        return [{"to": d, "room": room, "at": at} for d, (room, at) in sorted(sent.items())
+                if now - at < INVITE_S][:INVITES_MAX]
+
+
+def roster_invites(account: str, space: str, roster: Any, *, now: float | None = None) -> list[dict[str, Any]]:
+    """A roster came in: an invite a teammate's presence addresses to this PC, still standing
+    and into a group this PC isn't in, pops a Join question (``live_invite``: account, space,
+    room, ``from``, ``expires`` in this PC's clock). Each invite once. Returns what was told."""
+    from backend.uefn_plugins.ledger import person
+
+    now = time.time() if now is None else now
+    me = _device()
+    with _lock:
+        team = _teams.get((account, space))
+    told: list[dict[str, Any]] = []
+    people = roster.get("people") if isinstance(roster, dict) else None
+    for p in people if isinstance(people, list) else []:
+        device = str(p.get("device") or "") if isinstance(p, dict) else ""
+        rows = p.get("invites") if device and device != me else None
+        for inv in rows[:INVITES_MAX] if isinstance(rows, list) else ():
+            if not isinstance(inv, dict) or str(inv.get("to") or "") != me:
+                continue
+            room = str(inv.get("room") or "")
+            try:
+                at = float(inv.get("at") or 0)
+            except (TypeError, ValueError):
+                continue
+            age = max(0.0, now - at)  # a clock ahead of this one counts as just sent
+            if age >= INVITE_S or not room.startswith(HOST_PREFIX) or not _ROOM_RE.match(room):
+                continue
+            if team is not None and team.room == room:
+                continue
+            with _lock:
+                if (device, at) in _told_invites:
+                    continue
+                if len(_told_invites) >= LEGACY_MAX:
+                    _told_invites.clear()
+                _told_invites.add((device, at))
+            event = {"type": "live_invite", "account": account, "space": space, "room": room,
+                     "from": person(p.get("user_name"), p.get("user"), fallback="A teammate"),
+                     "expires": now + (INVITE_S - age)}
+            told.append(event)
+            _push(event)
+    return told
 
 
 def _unlinked(st: _State, peers: list[dict[str, Any]], groups_: list[dict[str, Any]],
@@ -1861,6 +1991,8 @@ def reset_for_tests() -> None:
         _beating.clear()
         _legacy.clear()
         _noted.clear()
+        _invites.clear()
+        _told_invites.clear()
 
 
 class LiveApi:

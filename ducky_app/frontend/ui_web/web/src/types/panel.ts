@@ -2336,7 +2336,9 @@ export interface PanelPushEvent {
     /** Who is live where on the team copy `space` moved, or this PC's Live there (`on`, `ended`). */
     | "live_team"
     /** One of the group's shared values in `plugin` changed (`key`, `value`, `by`). */
-    | "live_shared";
+    | "live_shared"
+    /** A teammate invites this PC into their live group (`account`, `space`, `room`, `from`, `expires`). */
+    | "live_invite";
   provider?: string;
   /** plugin_hook: the hook id; appearance_profile_requested: the plugin profile id. */
   id?: string;
@@ -2375,8 +2377,11 @@ export interface PanelPushEvent {
   peers?: PluginLivePeer[];
   /** live_peers / live_team: Live ended by itself ("alone": everyone else left the group). */
   ended?: string;
-  /** live_team: the team copy. */
+  /** live_team / live_invite: the team copy. */
   space?: string;
+  /** live_invite: the group asked into, and when the invite runs out (epoch seconds). */
+  room?: string;
+  expires?: number;
   /** live_holds: the controls teammates are pressing. */
   holds?: PluginLiveHold[];
   /** plugin_write_refused: the unit, its name, who holds it and since when (epoch seconds).
@@ -2526,6 +2531,17 @@ export interface LiveTeamMember {
   pluginLabel?: string;
 }
 
+/** A teammate with the app open on the team copy, not in this PC's group (live.py `online`). */
+export interface LiveTeamOnline {
+  name: string;
+  user?: string;
+  device: string;
+  /** Live in another group. */
+  live?: boolean;
+  /** An invite from this PC still stands (30 s). */
+  invited?: boolean;
+}
+
 export interface LiveTeamGroup extends Omit<PluginLiveGroup, "members"> {
   members: LiveTeamMember[];
 }
@@ -2548,6 +2564,7 @@ export interface LiveTeam {
   connecting?: string[];
   unlinked?: string[];
   rejoin?: string;
+  online?: LiveTeamOnline[];
 }
 
 export interface LiveOverview {
@@ -4626,6 +4643,8 @@ export interface PanelApi {
   /** Start live (no room) or Join a teammate's group on a team copy: every plugin of it goes in. */
   live_team_join?(account: string, space: string, room?: string): Promise<LiveTeam & { ok?: boolean; error?: string }>;
   live_team_leave?(account: string, space: string): Promise<{ ok?: boolean }>;
+  /** Ask a teammate's PC into this PC's group (starts live first): their app asks them for 30 s. */
+  live_team_invite?(account: string, space: string, device: string): Promise<{ ok?: boolean; error?: string; expires?: number }>;
   plugin_live_send?(plugin_id: string, topic: string, data: unknown, to?: string, fast?: boolean): Promise<{ ok?: boolean; error?: string; sent?: number }>;
   plugin_live_status?(plugin_id: string): Promise<PluginLiveStatus>;
   /** The page's live script presses (on) or lets go of a control; every teammate greys it out. */

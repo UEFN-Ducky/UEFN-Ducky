@@ -1,4 +1,4 @@
-import type { LiveTeam, LiveTeamGroup, LiveTeamMember } from "../types/panel";
+import type { LiveTeam, LiveTeamGroup, LiveTeamMember, LiveTeamOnline } from "../types/panel";
 import { groupName, initials, listText, personTone } from "./scopeBarText";
 import "./plugin-ui.css";
 
@@ -19,6 +19,8 @@ type Props = {
   /** Join a teammate's group on a team copy (its room); none: Start live there. */
   onJoin: (team: LiveTeam, room?: string) => void;
   onLeave: (team: LiveTeam) => void;
+  /** Ask a teammate who has the app open into this PC's group (starts live first). */
+  onInvite: (team: LiveTeam, person: LiveTeamOnline) => void;
   /** Each plugin's page goes to the leader's screen in a group this PC joined. */
   follow: boolean;
   onFollow: (on: boolean) => void;
@@ -31,7 +33,7 @@ function whereText(members: LiveTeamMember[]): string {
   return members.filter((m) => !m.me && m.pluginLabel).map((m) => `${m.name} in ${m.pluginLabel}`).join(", ");
 }
 
-function TeamSection({ team, heading, busy, onJoin, onLeave, follow, onFollow }: Omit<Props, "teams"> & {
+function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, onFollow }: Omit<Props, "teams"> & {
   team: LiveTeam;
   heading: boolean;
 }) {
@@ -80,16 +82,9 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, follow, onFollow }:
             <label className="plugin-scope-menu__row plugin-scope-menu__check-row">
               <input type="checkbox" checked={follow} onChange={(event) => onFollow(event.target.checked)} />
               <span className="plugin-scope-menu__text">
-                <span className="plugin-scope-menu__name">Same screen as the group</span>
-                <span className="plugin-scope-menu__sub">
-                  Tabs, play and scrolling go both ways, through {groupName(mine)}, who leads the group.
-                </span>
+                <span className="plugin-scope-menu__name">Same screen as {groupName(mine)}</span>
               </span>
             </label>
-          ) : mine?.hostIsMe && mine.members.length > 1 && team.on ? (
-            <div className="plugin-scope-menu__note">
-              You lead the group: everyone sees your screen, and their tab clicks, play and scrolling come through you.
-            </div>
           ) : null}
           {older.length ? (
             <div className="plugin-scope-menu__note plugin-scope-menu__note--warn">
@@ -114,6 +109,25 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, follow, onFollow }:
               them. Changes still sync.
             </div>
           ) : null}
+          {(team.online ?? []).length ? (
+            <>
+              <div className="plugin-scope-menu__head">Online</div>
+              {(team.online ?? []).map((p) => (
+                <div key={p.device} className="plugin-scope-menu__row">
+                  <span className="plugin-scope-faces"><Face name={p.name} id={p.device || p.user || p.name} /></span>
+                  <span className="plugin-scope-menu__text">
+                    <span className="plugin-scope-menu__name">{p.name}</span>
+                    {p.live ? <span className="plugin-scope-menu__sub">Live in another group</span> : null}
+                  </span>
+                  <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--row"
+                    disabled={busy || p.invited} aria-label={p.invited ? `Invited ${p.name}` : `Invite ${p.name}`}
+                    onClick={() => onInvite(team, p)}>
+                    {p.invited ? "Invited" : "Invite"}
+                  </button>
+                </div>
+              ))}
+            </>
+          ) : null}
           {/* Start live goes into a teammate's group when one is live (the biggest), else hosts
               this PC's own: two people who both press it end up together. */}
           {!team.on ? (
@@ -132,8 +146,8 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, follow, onFollow }:
 
 /**
  * The title bar's Live menu: the live groups on each team copy (each named by its host, with
- * who is in it and the plugin each has open), Join / Leave, Same screen as the group, and
- * Start live. Being live covers every plugin on that team copy: people live together see each
+ * who is in it and the plugin each has open), Join / Leave, Same screen as the group, who
+ * else is online with Invite, and Start live. Being live covers every plugin on that team copy: people live together see each
  * other's pointers, and what one presses is greyed out for the others.
  */
 export function LiveMenu({ teams, ...rest }: Props) {
@@ -147,11 +161,6 @@ export function LiveMenu({ teams, ...rest }: Props) {
           <TeamSection team={team} heading={several} {...rest} />
         </div>
       ))}
-      <div className="plugin-scope-menu__sep" />
-      <div className="plugin-scope-menu__note">
-        Live covers every plugin of the team. People live together see each other's pointers and share one screen; what
-        anyone presses is locked for the others until they're done. Leave anytime: your changes keep syncing.
-      </div>
     </div>
   );
 }

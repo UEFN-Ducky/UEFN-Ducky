@@ -253,6 +253,37 @@ def test_start_live_goes_into_a_teammates_group_instead_of_a_second_one(team: di
     assert live.join(PLUGIN)["room"] == "h:d_iliya"  # pressed again: still there, never a group of one
 
 
+def test_online_teammates_can_be_invited_and_the_invite_pops_once_for_30_seconds(team: dict[str, Any]) -> None:
+    """Online = in the roster, not in this PC's group. Invite starts live when not live yet,
+    rides presence, and the invited PC's roster pops one Join question while it stands."""
+    account, me = team["account"], space_vcs.device_id()
+    idle = {"device": "d_bo", "user": "u_bo", "user_name": "Bo", "plugins": {PLUGIN: {"viewing": True}}}
+    _roster(account, _on("d_mo", "Mo", "h:d_mo", 5), idle)
+    people = live.online(account, SPACE)
+    assert [(p["name"], p["live"], p["invited"]) for p in people] == [("Bo", False, False), ("Mo", True, False)]
+    got = live.invite(account, SPACE, "d_bo")
+    assert got["ok"] and live.team_room(account, SPACE)["room"] == "h:d_mo"  # Start live came first
+    assert [i["to"] for i in vcs_engine.presence_blob(account, SPACE, [PLUGIN])["invites"]] == ["d_bo"]
+    assert next(p for p in live.online(account, SPACE) if p["device"] == "d_bo")["invited"] is True
+    assert live.invites_of(account, SPACE, now=time.time() + live.INVITE_S + 1) == []  # runs out
+    assert live.invite(account, SPACE, me)["ok"] is False  # never this PC
+
+    # The other side: Mo invites this PC into Mo's group.
+    live.leave_team(account, SPACE)
+    t = time.time()
+    mo = {**_on("d_mo", "Mo", "h:d_mo", 5), "invites": [{"to": me, "room": "h:d_mo", "at": t - 10},
+                                                       {"to": "d_x", "room": "h:d_mo", "at": t}]}
+    told = live.roster_invites(account, SPACE, {"people": [mo]}, now=t)
+    assert [(e["from"], e["room"], round(e["expires"] - t)) for e in told] == [("Mo", "h:d_mo", 20)]
+    assert [e for e in team["pushed"] if e["type"] == "live_invite"] == told
+    assert live.roster_invites(account, SPACE, {"people": [mo]}, now=t) == []  # once
+    late = {**mo, "invites": [{"to": me, "room": "h:d_mo", "at": t - live.INVITE_S - 1}]}
+    assert live.roster_invites(account, SPACE, {"people": [late]}, now=t) == []  # ran out
+    assert live.join_team(account, SPACE, "h:d_mo")["ok"]
+    here = {**mo, "invites": [{"to": me, "room": "h:d_mo", "at": t + 1}]}
+    assert live.roster_invites(account, SPACE, {"people": [here]}, now=t) == []  # already in that group
+
+
 def _wait_room(room: str) -> None:
     deadline = time.monotonic() + 5
     while live.status(PLUGIN)["room"] != room and time.monotonic() < deadline:
