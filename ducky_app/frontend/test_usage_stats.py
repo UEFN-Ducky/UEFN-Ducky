@@ -20,6 +20,7 @@ def _fresh_module():
     us.registry_override = None
     us._last_uefn_mode = None
     us._install_fresh = False
+    us._update_check_sent = False
     us._stop.set()
     yield
     us.send_override = None
@@ -33,6 +34,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "app.heartbeat": {"uefn_up": True},
     "app.close": {"uptime_s": 5400},
     "update.installed": {"from": "1.2.400", "to": "1.2.401"},
+    "update.check": {"status": "update_available", "channel": "installed", "pack": True},
     "setup.step": {"step": "connect_ai"},
     "setup.first_message": {"within": "later"},
     "setup.plugin": {"plugin_id": "anthropic", "ok": False},
@@ -159,6 +161,37 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5"}
     assert turns[1]["provider"] == "claude" and turns[1]["outcome"] == "error" and turns[1]["tool_calls"] == "0"
     assert not any("Cube" in str(r) for r in rows)
+
+
+def test_turn_outcome_tells_limits_logins_and_closed_apps_from_errors() -> None:
+    cases = [("done", "", "ok"), ("error", "", "error"), ("error", "You've hit your session limit · resets 1pm", "limit"),
+             ("needs_login", "", "login"), ("interrupted", "host exited", "interrupted"), ("weird", "", "other")]
+    for i, (reason, detail, _) in enumerate(cases):
+        us.run_begin(f"r{i}", f"c{i}", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
+        us.run_end(f"r{i}", reason, detail)
+    rows, _ = us._take(100)
+    outcomes = [r["props"]["outcome"] for r in rows if r["name"] == "chat.turn"]
+    assert outcomes == [want for _, _, want in cases]
+
+
+def test_update_check_is_sent_once_per_session() -> None:
+    us.update_checked("paused", "installed", False)
+    us.update_checked("up_to_date", "installed", False)
+    rows, _ = us._take(100)
+    checks = [r["props"] for r in rows if r["name"] == "update.check"]
+    assert checks == [{"status": "paused", "channel": "installed", "pack": "no"}]
+
+
+def test_perf_sample_counts_running_turns(monkeypatch) -> None:
+    monkeypatch.setattr(us, "_meta_get", lambda key: "0")
+    monkeypatch.setattr(us, "_meta_set", lambda key, value: None)
+    us.run_begin("busy", "conv-busy", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
+    us._maybe_perf_sample()
+    rows, _ = us._take(100)
+    sample = next(r["props"] for r in rows if r["name"] == "perf.sample")
+    assert sample["agents"] == "1"
+    assert ev.validate("perf.sample", {"agents_running_n": 0}) == {"agents": "0"}
+    assert ev.validate("perf.sample", {"agents_running_n": 3}) == {"agents": "2-4"}
 
 
 def test_ui_track_accepts_only_ui_events_and_uefn_transitions_count_once() -> None:

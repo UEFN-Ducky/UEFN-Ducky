@@ -716,7 +716,7 @@ def _alert_finished(conv_id: str, reason: str) -> None:
     threading.Thread(target=_send, daemon=True, name="chat-alert").start()
 
 
-def _alert_after_run(conv_id: str, run_id: str, reason: str) -> None:
+def _alert_after_run(conv_id: str, run_id: str, reason: str, detail: str = "") -> None:
     """A run ended: a failure always alerts, a finish only after long work (a quick reply
     was watched), a sub-agent's or a workflow step's never. Clears the run's bookkeeping."""
     quiet = run_id in _quiet_runs
@@ -725,7 +725,7 @@ def _alert_after_run(conv_id: str, run_id: str, reason: str) -> None:
     try:
         from frontend import usage_stats
 
-        usage_stats.run_end(run_id, reason)
+        usage_stats.run_end(run_id, reason, detail)
     except Exception:
         pass
     if quiet:
@@ -763,7 +763,7 @@ def _push_agent_stopped(
         event["detail"] = "Agent errored before finishing its reply"
     push(event)
     close_changeset_run(run_id, reason)
-    _alert_after_run(conv_id, run_id, reason)
+    _alert_after_run(conv_id, run_id, reason, str(event.get("detail") or ""))
     if reason != "done":
         return
     # Private DM with a group member → short note on the group hub for everyone.
@@ -2120,7 +2120,7 @@ def run_message(
                 # cleared these; every external turn left both behind.
                 # Still booked: no _push_agent_stopped above has alerted for this run.
                 if ended.get("reason") and run_id in _run_started:
-                    _alert_after_run(conv_id, run_id, ended["reason"])
+                    _alert_after_run(conv_id, run_id, ended["reason"], str(ended.get("detail") or ""))
                 _run_started.pop(run_id, None)
                 _quiet_runs.discard(run_id)
 

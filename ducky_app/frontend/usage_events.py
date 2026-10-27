@@ -27,6 +27,7 @@ TOOL_CALLS: Buckets = ((0, "0"), (5, "1-5"), (20, "6-20"), (None, "more"))
 NODES: Buckets = ((5, "1-5"), (20, "6-20"), (None, "more"))
 STARTUP_S: Buckets = ((2, "2s"), (5, "5s"), (15, "15s"), (None, "more"))
 IDLE_CPU_PCT: Buckets = ((1, "1pct"), (5, "5pct"), (None, "more"))
+AGENTS_N: Buckets = ((0, "0"), (1, "1"), (4, "2-4"), (None, "more"))
 MEMORY_MB: Buckets = ((500, "500mb"), (1024, "1gb"), (2048, "2gb"), (None, "more"))
 INSTALL_AGE_S: Buckets = ((86400, "day0"), (7 * 86400, "week1"), (30 * 86400, "month1"), (None, "older"))
 
@@ -50,6 +51,11 @@ EVENTS: dict[str, dict[str, Any]] = {
     "app.heartbeat": {"uefn_up": YES_NO},
     "app.close": {"uptime": ("bucket", UPTIME_S, "uptime_s")},
     "update.installed": {"from": ("version",), "to": ("version",)},
+    "update.check": {
+        "status": ("none", "no_release", "up_to_date", "update_available", "paused", "error"),
+        "channel": ("installed", "portable", "dev"),
+        "pack": YES_NO,
+    },
     "setup.step": {"step": ("welcome", "plugins", "connect_ai", "defaults", "done", "closed", "skipped")},
     "setup.first_message": {"within": ("first_session", "later")},
     "setup.plugin": {"plugin_id": ("slug",), "ok": YES_NO},
@@ -61,7 +67,7 @@ EVENTS: dict[str, dict[str, Any]] = {
     "chat.turn": {
         "provider": PROVIDERS,
         "model_family": MODEL_FAMILIES,
-        "outcome": ("ok", "error", "stopped", "stuck", "timeout"),
+        "outcome": ("ok", "error", "stopped", "stuck", "timeout", "limit", "login", "interrupted", "other"),
         "duration": ("bucket", DURATION_S, "duration_s"),
         "tool_calls": ("bucket", TOOL_CALLS, "tool_calls_n"),
     },
@@ -78,6 +84,7 @@ EVENTS: dict[str, dict[str, Any]] = {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),
         "memory": ("bucket", MEMORY_MB, "memory_mb"),
+        "agents": ("bucket", AGENTS_N, "agents_running_n"),
     },
 }
 

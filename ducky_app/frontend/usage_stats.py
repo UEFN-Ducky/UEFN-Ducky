@@ -441,6 +441,20 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         pass
 
 
+_update_check_sent = False
+
+
+def update_checked(status: str, channel: str, pack: bool) -> None:
+    """The session's first update check: why a PC stays on an old build (portable copy,
+    paused feed, feed error, update waiting). A quarter of launches ran builds a week
+    old (Oct 26 2026) and nothing said which."""
+    global _update_check_sent
+    if _update_check_sent:
+        return
+    _update_check_sent = True
+    track("update.check", status=status, channel=channel, pack=pack)
+
+
 def app_closing() -> None:
     """Quit: app.close, then a short bounded flush so the session's rows land."""
     try:
@@ -494,7 +508,19 @@ def run_begin(run_id: str, conv_id: str, *, coding_agent: str = "", provider: st
         pass
 
 
-def run_end(run_id: str, reason: str) -> None:
+_LIMIT_WORDS = ("session limit", "usage limit", "rate limit", "hit your limit", "quota")
+
+
+def _turn_outcome(reason: str, detail: str = "") -> str:
+    """A run's end reason as a chat.turn outcome. A plan limit, a sign-in prompt or a closed app
+    is not a failed turn: all three counted as "error" with 0 tool calls (Oct 26 2026)."""
+    if reason in ("error", "needs_login") and any(w in detail.lower() for w in _LIMIT_WORDS):
+        return "limit"
+    return {"done": "ok", "error": "error", "timeout": "timeout", "cancelled": "stopped", "stopped": "stopped",
+            "needs_login": "login", "interrupted": "interrupted"}.get(reason, "other")
+
+
+def run_end(run_id: str, reason: str, detail: str = "") -> None:
     try:
         with _lock:
             meta = _run_meta.pop(run_id, None)
@@ -503,9 +529,7 @@ def run_end(run_id: str, reason: str) -> None:
                     _conv_run.pop(conv, None)
         if meta is None:
             return
-        outcome = {"done": "ok", "error": "error", "timeout": "timeout", "cancelled": "stopped", "stopped": "stopped"}.get(
-            reason, "error"
-        )
+        outcome = _turn_outcome(reason, detail)
         track(
             "chat.turn",
             provider=meta["provider"],
@@ -596,7 +620,9 @@ def _maybe_perf_sample() -> None:
     if time.time() - last < PERF_SAMPLE_EVERY_S:
         return
     _meta_set(META_PERF_AT, str(time.time()))
-    props: dict[str, Any] = {}
+    # Turns running now: an "idle" CPU sample taken mid-turn is work, not idle (~28% over 5%, Oct 26 2026).
+    with _lock:
+        props: dict[str, Any] = {"agents_running_n": len(_run_meta)}
     if _boot_total_ms:
         props["startup_s"] = float(_boot_total_ms) / 1000.0
     try:

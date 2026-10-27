@@ -257,6 +257,17 @@ def get_app_update_status() -> dict[str, Any]:
     One payload for the panel UI and the updater: remote version compare plus
     installed-vs-portable state. Read-only.
     """
+    result = _app_update_status()
+    try:
+        from frontend import usage_stats
+
+        usage_stats.update_checked(result["feed_status"], result["channel"], bool(result["update_pack"]))
+    except Exception:
+        pass
+    return result
+
+
+def _app_update_status() -> dict[str, Any]:
     from frontend.install_info import get_install_info
 
     install = get_install_info()
