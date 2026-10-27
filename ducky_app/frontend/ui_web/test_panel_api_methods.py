@@ -320,6 +320,7 @@ _PUBLIC_METHODS = frozenset({
     'workflow_sync',
     'list_coding_agents',
     'live_overview',
+    'live_team_invite',
     'live_team_join',
     'live_team_leave',
     'list_conversations',
