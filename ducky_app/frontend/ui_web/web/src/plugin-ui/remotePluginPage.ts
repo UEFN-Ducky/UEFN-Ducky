@@ -11,7 +11,9 @@
  *   frame inherits the site's CSP, which runs `blob:` scripts but no inline ones;
  * - each stylesheet becomes a `<style>` (inline styles are allowed), its `url()`s as
  *   `data:` URLs (fonts may only be `data:` there);
- * - images and media get `blob:` URLs.
+ * - images and media get `blob:` URLs;
+ * - the UI kit's `ducky.js` links `ducky.css` beside its own URL, which a `blob:` script
+ *   doesn't have, so the kit's stylesheet goes in as a `<style data-ducky-kit>` ahead of it.
  *
  * Limits: files a page loads later from script (`fetch("./x.json")`, `img.src = "y.png"`,
  * ES module imports) are not rewritten; plugin pages talk to the host over postMessage.
@@ -141,6 +143,19 @@ export async function buildRemotePluginPage(
       }
       const path = desktopPathFor(src, pagePath);
       if (!path) continue;
+      if (/\/_kit\/ducky\.js(\?|$)/.test(path)) {
+        const cssPath = path.replace(/ducky\.js(\?.*)?$/, "ducky.css");
+        const style = doc.createElement("style");
+        style.setAttribute("data-ducky-kit", "");
+        script.before(style);
+        jobs.push(
+          ok(fetchDesktop, cssPath).then(async (res) => {
+            style.textContent = await inlineCssUrls(await res.text(), cssPath, fetchDesktop);
+          }, () => {
+            /* no kit stylesheet: the page still opens, unstyled */
+          }),
+        );
+      }
       jobs.push(
         ok(fetchDesktop, path).then(async (res) => {
           script.setAttribute("src", blobUrl([await res.arrayBuffer()], "text/javascript"));

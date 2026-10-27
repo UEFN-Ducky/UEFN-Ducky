@@ -44,6 +44,7 @@ describe("buildRemotePluginPage", () => {
     "/plugin-ui/account/ui/account.css": ["text/css", "@font-face{src:url(fonts/a.woff2)} body{color:red}"],
     "/plugin-ui/account/ui/fonts/a.woff2": ["font/woff2", "WOFF"],
     "/plugin-ui/account/ui/logo.png": ["image/png", "PNG"],
+    "/plugin-ui/_kit/ducky.css": ["text/css", ".dk-btn{color:blue}"],
   };
 
   async function build() {
@@ -84,7 +85,11 @@ describe("buildRemotePluginPage", () => {
     expect(scripts[2].hasAttribute("defer")).toBe(true);
     expect(doc.getElementById("cfg")?.textContent).toBe('{"a":1}'); // data blocks stay as they are
     expect(doc.querySelector("link[rel=stylesheet]")).toBeNull();
-    const css = doc.querySelector("style")?.textContent || "";
+    // ducky.js links ducky.css beside its own URL, which a blob: script lacks: it comes inline first.
+    const kit = doc.querySelector("style[data-ducky-kit]");
+    expect(kit?.textContent).toBe(".dk-btn{color:blue}");
+    expect(kit?.nextElementSibling?.getAttribute("src")).toBe(scripts[1].getAttribute("src"));
+    const css = doc.querySelector("style:not([data-ducky-kit])")?.textContent || "";
     expect(css).toContain(`url("data:font/woff2;base64,${btoa("WOFF")}")`);
     expect(css).toContain("body{color:red}");
     expect(doc.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);

@@ -6,13 +6,12 @@
  */
 
 import { useEffect, useMemo, useRef } from "react";
-import { assetUrl } from "../remote/assetBase";
 import "./plugin-ui.css";
 import {
-  PLUGIN_UI_ROUTE_PREFIX,
   PLUGIN_UI_SANDBOX,
   BRIDGE_CHANNEL,
 } from "./constants";
+import { usePluginPage } from "./usePluginPage";
 import {
   handleBridgeRequest,
   shouldForwardPluginPush,
@@ -50,12 +49,7 @@ export function PluginFilePane({ pluginId, panelId, relativePath }: Props) {
     [contrib.ui_panels, pid, pan],
   );
 
-  const src = useMemo(() => {
-    if (!panel?.entry) return null;
-    const entry = panel.entry.replace(/^\/+/, "");
-    const q = new URLSearchParams({ file: relativePath });
-    return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${pid}/${entry}?${q.toString()}`);
-  }, [panel, pid, relativePath]);
+  const { src } = usePluginPage(pid, panel?.entry, panel?.version, `?${new URLSearchParams({ file: relativePath })}`);
 
   usePluginThemePush(iframeRef, src);
   useReloadOnPluginUpdate(iframeRef, panel?.version);

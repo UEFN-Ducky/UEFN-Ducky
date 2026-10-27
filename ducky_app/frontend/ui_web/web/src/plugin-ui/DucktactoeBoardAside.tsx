@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { assetUrl } from "../remote/assetBase";
+import { useEffect, useRef, useState } from "react";
 import "./plugin-ui.css";
-import { PLUGIN_UI_ROUTE_PREFIX, PLUGIN_UI_SANDBOX, BRIDGE_CHANNEL } from "./constants";
+import { PLUGIN_UI_SANDBOX, BRIDGE_CHANNEL } from "./constants";
+import { usePluginPage } from "./usePluginPage";
 import { handleBridgeRequest } from "./bridge";
 import { isBridgeRequest } from "./types";
 import { Icons } from "../icons/Icons";
@@ -26,10 +26,7 @@ export function DucktactoeBoardAside({ hostId, collapsed, onToggle, widthPx }: P
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [missing, setMissing] = useState(false);
 
-  const src = useMemo(
-    () => assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${DUCKTACTOE_PLUGIN_ID}/ui/index.html`),
-    [],
-  );
+  const { src } = usePluginPage(DUCKTACTOE_PLUGIN_ID, "ui/index.html");
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -55,6 +52,7 @@ export function DucktactoeBoardAside({ hostId, collapsed, onToggle, widthPx }: P
   useEffect(() => {
     // Probe once — plugin may be disabled / not installed.
     // Use GET: panel_httpd has no do_HEAD → HEAD always 501 (false "unavailable").
+    if (!src) return;
     let cancelled = false;
     void fetch(src, { method: "GET", cache: "no-store" })
       .then((r) => {
@@ -112,7 +110,7 @@ export function DucktactoeBoardAside({ hostId, collapsed, onToggle, widthPx }: P
           ref={iframeRef}
           className="plugin-ui-iframe ducktactoe-board-aside__iframe"
           title="Duck-Tac-Toe board"
-          src={src}
+          src={src ?? undefined}
           sandbox={PLUGIN_UI_SANDBOX}
         />
       )}

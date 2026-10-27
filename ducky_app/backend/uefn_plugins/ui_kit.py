@@ -353,7 +353,7 @@ JS = """\
   var CHANNEL = "uefn-plugin-ui";
   var root = document.documentElement;
   var me = document.currentScript;
-  if (me && me.src && !document.querySelector("link[data-ducky-kit]")) {
+  if (me && me.src && !document.querySelector("[data-ducky-kit]")) {
     var link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = me.src.replace(/ducky\\.js(\\?.*)?$/, "ducky.css");

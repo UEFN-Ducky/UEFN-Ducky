@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { assetUrl } from "../remote/assetBase";
+import { useEffect, useMemo, useRef } from "react";
 import "./plugin-ui.css";
 import {
   PLUGIN_UI_SANDBOX,
@@ -24,8 +23,7 @@ import { isDucktactoeBoardTab } from "./ducktactoeBoardChat";
 import { PluginSurfaceBoundary } from "./PluginSurfaceBoundary";
 import { PluginScopeBar } from "./PluginScopeBar";
 import { getApi, isRemote } from "../hooks/usePanelApi";
-import { getDirectTransport } from "../remote/directTransport";
-import { buildRemotePluginPage, pluginPageSource } from "./remotePluginPage";
+import { usePluginPage } from "./usePluginPage";
 import { WINDOW_ID } from "../tabs/tabRegistryClient";
 
 export type PluginChatOverlayProps = {
@@ -93,40 +91,8 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
     return findPanel(contrib.ui_panels, parsed.pluginId, parsed.panelId);
   }, [contrib.ui_panels, parsed]);
 
-  // The desktop serves the page itself; with a PC link (the phone panel) the page is
-  // built from the desktop's files over the link: a sandboxed frame never goes through
-  // the panel's Service Worker, so a plain URL would hit the site (remotePluginPage).
-  const source = useMemo(() => {
-    if (!parsed || !panel?.entry) return null;
-    return pluginPageSource(parsed.pluginId, panel.entry, !!getDirectTransport(), assetUrl);
-  }, [parsed, panel]);
-  const [linked, setLinked] = useState<{ path: string; url: string; error: string } | null>(null);
-  const linkPath = source?.kind === "link" ? source.path : "";
-  useEffect(() => {
-    const transport = getDirectTransport();
-    if (!linkPath || !transport) return;
-    let gone = false;
-    let revoke = () => {};
-    setLinked(null);
-    buildRemotePluginPage(linkPath, (p) => transport.fetchBlob(p)).then(
-      (page) => {
-        if (gone) {
-          page.revoke();
-          return;
-        }
-        revoke = page.revoke;
-        setLinked({ path: linkPath, url: page.url, error: "" });
-      },
-      (err: unknown) => {
-        if (!gone) setLinked({ path: linkPath, url: "", error: String((err as Error)?.message || err) });
-      },
-    );
-    return () => {
-      gone = true;
-      revoke();
-    };
-  }, [linkPath, panel?.version]);
-  const src = source?.kind === "local" ? source.url : linked?.path === linkPath ? linked.url || null : null;
+  const page = usePluginPage(parsed?.pluginId ?? "", panel?.entry, panel?.version);
+  const src = page.src;
 
   const showDucktactoeChat =
     !!chatOverlay &&
@@ -282,10 +248,10 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
   if (!parsed) {
     return <div className="plugin-ui-pane plugin-ui-pane--empty">Invalid plugin tab.</div>;
   }
-  if (panel && source?.kind === "link" && !src) {
+  if (panel && page.linked && !src) {
     return (
       <div className="plugin-ui-pane plugin-ui-pane--empty">
-        {linked?.error ? `Couldn't open this page from your PC: ${linked.error}` : "Opening from your PC…"}
+        {page.error ? `Couldn't open this page from your PC: ${page.error}` : "Opening from your PC…"}
       </div>
     );
   }
