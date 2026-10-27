@@ -714,6 +714,24 @@ def _served_by_mcp(name: str) -> bool:
     return not isinstance(tools, dict) or name in tools
 
 
+def _unknown_tool(name: str) -> bool:
+    try:
+        return not _served_by_mcp(name) and not _failed_plugins_note(name)
+    except Exception:
+        return False
+
+
+def _unknown_tool_text(name: str) -> str:
+    """No such tool: name the real ones with the same prefix, else point at the search."""
+    tools = getattr(getattr(_ensure_mcp(), "_tool_manager", None), "_tools", None) or {}
+    prefix = name.split("_", 1)[0] + "_"
+    near = sorted(t for t in tools if t.startswith(prefix))[:25]
+    text = f"{name} is not a tool (nothing to do with UEFN)."
+    if near:
+        return text + " Real tools with that prefix: " + ", ".join(near) + "."
+    return text + ' Find the right one with ducky_get_tools(pattern="<what you need>").'
+
+
 _LISTENER_OFFLINE_HINT = (
     "This tool needs the UEFN editor listener (Deploy + open project). "
     "Do NOT retry it until the listener is online — it will keep failing. "
@@ -1122,6 +1140,14 @@ async def _execute_tool_inner(
     if gone:
         ms = int((time.time() - t0) * 1000)
         return ToolCallResult(ok=False, tool=name, error=gone, hint=_PLUGIN_GONE_HINT, duration_ms=ms)
+
+    # Oct 26 2026: a guessed name (imk_media_search) read "UEFN listener offline", and the
+    # agent told the person Island Media Kit needed UEFN. A name nothing serves says so.
+    if _unknown_tool(name):
+        ms = int((time.time() - t0) * 1000)
+        return ToolCallResult(
+            ok=False, tool=name, error=_unknown_tool_text(name), duration_ms=ms
+        )
 
     # Opt-in listener check: only editor tools. Host tools never probe UEFN.
     if _requires_uefn_listener(name):

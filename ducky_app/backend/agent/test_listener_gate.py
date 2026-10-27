@@ -190,6 +190,25 @@ def test_listener_offline_names_plugins_that_failed_to_load_for_an_unknown_tool(
     assert served.error == "UEFN listener offline on port 4200"
 
 
+def test_a_guessed_tool_name_is_unknown_not_listener_offline(monkeypatch) -> None:
+    # Oct 26 2026: imk_media_search (no such tool) read "UEFN listener offline", and the
+    # agent told the person Island Media Kit needed UEFN.
+    import backend.uefn_plugins.host as host
+
+    probes: list[int] = []
+    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port, timeout=1.0: probes.append(port))
+    monkeypatch.setattr(host, "plugin_load_failures", lambda: {})
+    mcp = MagicMock()
+    mcp._tool_manager._tools = {"imk_project_list": object(), "imk_media_list": object()}
+    monkeypatch.setattr(tools, "_ensure_mcp", lambda: mcp)
+
+    result = asyncio.run(tools.execute_tool("imk_media_search", {"query": "promo"}))
+    assert not result.ok
+    assert "listener" not in result.error.lower()
+    assert "imk_media_list, imk_project_list" in result.error
+    assert probes == []
+
+
 def test_ducky_s_own_workflow_tools_never_wait_for_uefn():
     # Oct 17 2026: a lead's find_workflows was refused with "UEFN listener offline".
     from backend.agent.tools import _requires_uefn_listener
