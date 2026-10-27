@@ -4,6 +4,7 @@ went away if every animation frame succeeded."""
 
 from __future__ import annotations
 
+import gc
 import json
 import sys
 import time
@@ -42,6 +43,11 @@ def tk_root():
     root.withdraw()
     yield root
     root.destroy()
+    # Tk objects must be freed on the thread that made them. Left for a later GC pass, one
+    # ran on a background thread (perf_trace's report loop), Tcl panicked and killed the
+    # test worker with 0x80000003, and the release's test step stalled (Oct 27).
+    del root
+    gc.collect()
 
 
 def _pump(root, seconds: float) -> None:
