@@ -447,6 +447,13 @@ def main() -> None:
         # Wall clock from process entry — webview_app boot traces use this for total_ms.
         os.environ["UEFN_DUCKY_BOOT_T0"] = str(_time.perf_counter())
         _ensure_repo_on_path()
+        # Before panel_httpd reads the port: WinError 10013 (a Windows-reserved port) used to stop startup.
+        try:
+            from frontend.settings import pick_panel_port
+
+            pick_panel_port()
+        except Exception:
+            pass
         _wait_for_previous_version()
         _hand_off_to_newest(bridge=False)
         # Before anything that could crash: send the last launch's crash report, if any,

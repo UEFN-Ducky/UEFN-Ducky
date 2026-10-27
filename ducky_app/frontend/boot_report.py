@@ -62,7 +62,8 @@ _native_file: Any = None
 HEARTBEAT_S = 30.0
 _heartbeat: dict[str, Any] = {"thread": None}
 # The window's page: started = its main script ran; errors = what it hit before that.
-_page: dict[str, Any] = {"started": False, "watching": False, "errors": []}
+# webview = the first window's WebView2 start result ({ok, error}); None until it comes.
+_page: dict[str, Any] = {"started": False, "watching": False, "errors": [], "webview": None}
 
 
 def _dir() -> Path:
@@ -375,6 +376,9 @@ def build_report(
     beat = previous.get("heartbeat")
     if isinstance(beat, dict) and beat.get("at"):
         lines += _heartbeat_lines(beat, ended)
+    trend = _trend_line(previous.get("beats") or [])
+    if trend:
+        lines.append(trend)
     if native:
         lines += ["", "Crash traceback:", trim_native(native)]
     elif state == "ok" and not dumps:
@@ -700,7 +704,11 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
                 sum(procs[p].private for p in proc_table.tree(procs, me.pid) if procs[p].name.lower() == "msedgewebview2.exe") / gb, 2
             )
     except Exception:
+        # Out of commit the process table can fail: still say how big Ducky itself was.
         beat.setdefault("threads", threading.active_count())
+        own = _own_private_bytes()
+        if own:
+            beat["app_gb"] = round(own / gb, 2)
     if agents is not None:
         try:
             beat["agents"] = int(agents())
@@ -709,13 +717,64 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
     return beat
 
 
+def _own_private_bytes() -> int:
+    """This process's private bytes from one GetProcessMemoryInfo call (no process snapshot)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                *[(n, ctypes.c_size_t) for n in (
+                    "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+                    "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage",
+                    "PrivateUsage",
+                )],
+            ]
+
+        pmc = PMC()
+        pmc.cb = ctypes.sizeof(PMC)
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+        if k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+            return int(pmc.PrivateUsage)
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        pass
+    return 0
+
+
+BEATS_KEPT = 10  # the launch's first beat plus the last ~4.5 minutes
+
+
 def heartbeat(agents: Callable[[], int] | None = None) -> None:
     """Write one memory heartbeat into boot.json (the next launch's best clue when a
-    crash leaves no dump)."""
+    crash leaves no dump), and keep the last few so the report can show a trend."""
     if not _state:
         return
-    _state["heartbeat"] = _memory_sample(agents)
+    beat = _memory_sample(agents)
+    _state["heartbeat"] = beat
+    keep = ("at", "free_gb", "app_gb", "webview_gb")
+    beats = _state.get("beats") or []
+    # The launch's first beat stays, so the trend covers the whole run, not just the last minutes.
+    _state["beats"] = [*beats[:1], *beats[1:][-(BEATS_KEPT - 2):], {k: beat[k] for k in keep if k in beat}]
     _write_state()
+
+
+def _trend_line(beats: list[dict[str, Any]]) -> str:
+    """'Memory trend over 4 min: app 0.6 -> 0.7 GB, WebView2 0.4 -> 2.5 GB, free 3.1 -> 0.2 GB.'"""
+    beats = [b for b in beats if isinstance(b, dict) and b.get("at")]
+    if len(beats) < 2:
+        return ""
+    first, last = beats[0], beats[-1]
+    parts = [
+        f"{label} {float(first[key]):.1f} -> {float(last[key]):.1f} GB"
+        for key, label in (("app_gb", "app"), ("webview_gb", "WebView2"), ("free_gb", "free"))
+        if first.get(key) is not None and last.get(key) is not None
+    ]
+    minutes = max(1, round((float(last["at"]) - float(first["at"])) / 60))
+    return f"Memory trend over {minutes} min: " + ", ".join(parts) + "." if parts else ""
 
 
 def start_heartbeat(agents: Callable[[], int] | None = None, every_s: float = HEARTBEAT_S) -> None:
@@ -782,6 +841,23 @@ def page_error(message: str) -> None:
         _page["errors"].append(_scrub(str(message or "").strip())[:300])
 
 
+def webview_ready(ok: bool, error: str = "") -> None:
+    """The main window's WebView2 finished starting, or failed (its InitializationException).
+    Only the first result counts: rebuilds and other windows report elsewhere."""
+    if _page.get("webview") is None:
+        _page["webview"] = {"ok": bool(ok), "error": _scrub(str(error or "").strip())[:300]}
+
+
+def _webview2_runtime() -> str:
+    """The installed WebView2 runtime version, or why there is none."""
+    try:
+        from Microsoft.Web.WebView2.Core import CoreWebView2Environment  # type: ignore[import-not-found]
+
+        return str(CoreWebView2Environment.GetAvailableBrowserVersionString() or "none found")
+    except Exception as exc:
+        return f"none found ({type(exc).__name__})"
+
+
 def watch_page(show: Callable[[dict[str, str]], None], files: Callable[[], list[str]], wait_s: float = STUCK_AFTER_S) -> None:
     """Once the window shows: if its page hasn't started within *wait_s*, this launch is
     stuck; *show* gets the report (the crash pop-up). *files* lists what the page loaded."""
@@ -799,9 +875,10 @@ def watch_page(show: Callable[[dict[str, str]], None], files: Callable[[], list[
     timer.start()
 
 
-def _stuck_cause(files: list[str], errors: list[str]) -> str:
+def _stuck_cause(files: list[str], errors: list[str], webview: dict[str, Any] | None = None, runtime: str = "") -> str:
     """What most likely kept the page from starting: a script that wasn't sent right
-    (the reason it failed) before the page's own error, before nothing at all."""
+    (the reason it failed) before the page's own error, before nothing at all. With nothing
+    asked, *webview* (webview_ready's result, None = never came) says whether WebView2 started."""
     scripts = [f.split(" ") for f in files if f.split(" ")[0].endswith((".js", ".mjs", ".css"))]
     for name, status, *_kind in scripts:
         if status != "200":
@@ -813,7 +890,15 @@ def _stuck_cause(files: list[str], errors: list[str]) -> str:
     if errors:
         return errors[0]
     if not scripts:
-        return "the window never asked for the app's scripts (WebView2 did not load the page)"
+        why = "the window never asked for the app's scripts (WebView2 did not load the page)"
+        if webview is None or not webview.get("ok"):
+            why += ". Reinstalling the Microsoft Edge WebView2 Runtime usually fixes this"
+        on = f", runtime {runtime}" if runtime else ""
+        if webview is not None and not webview.get("ok"):
+            return f"WebView2 could not start: {webview.get('error') or 'no reason given'}{on}; {why}"
+        if webview is None and runtime:
+            return f"WebView2 never finished starting{on}; {why}"
+        return why
     return ""
 
 
@@ -824,7 +909,9 @@ def page_stuck(files: list[str], waited: float) -> dict[str, str] | None:
         return None
     errors = list(_page["errors"])
     lines = [f"The window opened but its page did not start within {waited:.0f} s."]
-    cause = _stuck_cause(files, errors)
+    webview = _page.get("webview")
+    runtime = "" if files or (webview or {}).get("ok") else _webview2_runtime()
+    cause = _stuck_cause(files, errors, webview, runtime)
     if cause:
         lines.insert(0, "Likely cause: " + cause)
     if errors:

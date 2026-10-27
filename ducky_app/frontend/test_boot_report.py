@@ -450,3 +450,54 @@ def test_watch_page_shows_the_report_only_when_the_page_never_started(page) -> N
 def test_stuck_cause(files, cause) -> None:
     got = boot_report._stuck_cause(files, [])
     assert (cause in got) if cause else got == ""
+
+
+def test_stuck_cause_says_webview2_could_not_start() -> None:
+    # Oct 27 2026 (1.2.438): WebView2 0.0 GB and no page files; the report only said 'did not load'.
+    got = boot_report._stuck_cause([], [], {"ok": False, "error": "0x80070005 Access is denied"}, "130.0.2849.80")
+    assert got.startswith("WebView2 could not start: 0x80070005 Access is denied, runtime 130.0.2849.80")
+    assert "never asked for the app's scripts" in got
+
+
+def test_stuck_cause_says_webview2_never_finished_starting() -> None:
+    got = boot_report._stuck_cause([], [], None, "none found (WebView2RuntimeNotFoundException)")
+    assert got.startswith("WebView2 never finished starting, runtime none found")
+
+
+def test_only_the_first_webview_result_counts(page, monkeypatch) -> None:
+    boot_report.begin("1.2.440")
+    boot_report.mark("ok")
+    monkeypatch.setattr(boot_report, "_webview2_runtime", lambda: "130.0.2849.80")
+    boot_report.webview_ready(False, "COMException 0x8007139F")
+    boot_report.webview_ready(True)  # a later rebuild must not hide the first failure
+    body = boot_report.page_stuck([], 60)
+    assert "Likely cause: WebView2 could not start: COMException 0x8007139F, runtime 130.0.2849.80" in body["error_log"]
+
+
+def test_heartbeat_keeps_app_memory_when_the_process_table_fails(monkeypatch) -> None:
+    # Oct 26 2026 (1.2.435): commit 255 of 255 GB, and the report had no app or WebView2 size.
+    import backend.util.proc_table as proc_table
+
+    monkeypatch.setattr(proc_table, "table", lambda: (_ for _ in ()).throw(OSError("out of memory")))
+    beat = boot_report._memory_sample(None)
+    assert beat["app_gb"] > 0 and beat["threads"] >= 1
+
+
+def test_report_shows_the_memory_trend_of_the_whole_run(page, monkeypatch) -> None:
+    boot_report.begin("1.2.440")
+    boot_report.mark("ok")
+    sizes = iter([(0.4, 3.1), *[(0.5 + i * 0.2, 2.0) for i in range(12)], (2.5, 0.2)])
+
+    def sample(_agents):
+        webview, free = next(sizes)
+        sample.at += 30
+        return {"at": sample.at, "free_gb": free, "app_gb": 0.7, "webview_gb": webview}
+
+    sample.at = 1_000_000.0
+    monkeypatch.setattr(boot_report, "_memory_sample", sample)
+    for _ in range(14):
+        boot_report.heartbeat()
+    beats = boot_report._state["beats"]
+    assert len(beats) == boot_report.BEATS_KEPT and beats[0]["webview_gb"] == 0.4
+    body = boot_report.build_report(dict(boot_report._state), "")
+    assert "Memory trend over 6 min: app 0.7 -> 0.7 GB, WebView2 0.4 -> 2.5 GB, free 3.1 -> 0.2 GB." in body["error_log"]

@@ -323,6 +323,20 @@ def test_windows_are_rebuilt_one_at_a_time_main_first(rebuild_env) -> None:
     assert [d for d, _f, _a in env.timers] == [wr._REBUILD_INIT_TIMEOUT_S]  # nothing else queued
 
 
+def test_a_dead_browser_answers_evaluate_js_without_invoking(rebuild_env) -> None:
+    # Oct 24 2026 (1.2.427): 0x80000003 while pywebview injected its JS API into a dying control.
+    class _Chrome:
+        def __init__(self) -> None:
+            self.webview = SimpleNamespace(Invoke=lambda _fn: (_ for _ in ()).throw(AssertionError("invoked")))
+
+    wr.install_evaluate_js_release(_Chrome)
+    main = _Form("main")
+    main.browser = _Chrome()
+    wr.request_browser_rebuild(main)
+    assert main.browser.evaluate_js("window.x", False) is None
+    assert _Chrome().__dict__.get("_ducky_dead") is None  # the new control is not marked
+
+
 def test_a_failed_start_is_retried_then_reported(rebuild_env) -> None:
     env = rebuild_env
     main = _Form("main")

@@ -19,8 +19,19 @@ from pathlib import Path
 
 _STATE = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
+
+
+def _moved_panel_port() -> int:
+    """settings.PANEL_PORT_FILE: the port the app moved to when Windows reserved 4199/4200."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+    try:
+        return int(json.loads((Path(base) / "UEFN-Ducky" / "panel_port.json").read_text(encoding="utf-8"))["port"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
 # frontend.settings.PANEL_LISTENER_PORT - 1, read the same way (this module stays stdlib-only).
-_PANEL_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or 4200) - 1
+_PANEL_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or _moved_panel_port() or 4200) - 1
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 # Safe to send again to a fresh daemon. A tools/call is not: it may have run already.
 _RESENDABLE = frozenset({"initialize", "ping", "tools/list", "resources/list", "prompts/list"})

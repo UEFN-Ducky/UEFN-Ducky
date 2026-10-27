@@ -309,6 +309,15 @@ def _form_label(form: Any) -> str:
 def request_browser_rebuild(form: Any) -> None:
     """Queue a new WebView2 control for this pywebview form (any thread)."""
     global _rebuild_busy
+    # Its browser is gone: no more Invokes into the dying control (0x80000003 on 1.2.427 was
+    # pywebview injecting its JS API into one). The new control gets its own EdgeChrome.
+    dead = getattr(form, "browser", None)
+    if dead is not None:
+        try:
+            dead._ducky_dead = True
+        except Exception:
+            pass
+        release_js_waiters(dead)
     with _rebuild_lock:
         if any(job.form is form for job in _rebuild_queue):
             return
@@ -459,6 +468,8 @@ def install_evaluate_js_release(edge_chrome_cls: Any) -> None:
         return
 
     def evaluate_js(self: Any, script: str, parse_json: bool) -> Any:
+        if self.__dict__.get("_ducky_dead"):
+            return None  # its browser stopped; a rebuild is replacing this control
         Action, Func, Object, String, Task = _net_types()
         done = threading.Semaphore(0)
         out: list[Any] = [None]

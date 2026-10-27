@@ -1215,6 +1215,14 @@ def install_pywebview_chrome_patches() -> None:
         original_nav = edgechromium.EdgeChrome.on_navigation_completed
 
         def on_webview_ready(self, sender, args):
+            try:
+                from frontend import boot_report
+
+                boot_report.webview_ready(
+                    bool(args.IsSuccess), "" if args.IsSuccess else str(args.InitializationException or "")
+                )
+            except Exception:
+                pass
             if args.IsSuccess:
                 try:
                     # Powers -webkit-app-region: drag on our frameless window.

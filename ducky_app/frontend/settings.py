@@ -31,7 +31,60 @@ def default_app_data_dir() -> Path:
 # UEFN_DUCKY_PANEL_PORT exists for test sessions (conftest.py), which must never
 # reach the running app at 4199/4200.
 DEFAULT_PANEL_LISTENER_PORT = 4200
-PANEL_LISTENER_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or DEFAULT_PANEL_LISTENER_PORT)
+# Written only when Windows reserved the default pair (Hyper-V / WSL / Docker port
+# exclusions answer bind with WinError 10013): every process then reads the same moved port.
+PANEL_PORT_FILE = "panel_port.json"
+_WSAEACCES = 10013
+
+
+def _saved_panel_port() -> int:
+    try:
+        port = int(json.loads((default_app_data_dir() / PANEL_PORT_FILE).read_text(encoding="utf-8"))["port"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+    return port if 1025 < port < 65535 else 0
+
+
+PANEL_LISTENER_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or _saved_panel_port() or DEFAULT_PANEL_LISTENER_PORT)
+
+
+def _port_reserved(port: int) -> bool:
+    """True when Windows refuses this loopback port outright (10013); in use (10048) is not reserved."""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+    except OSError as exc:
+        return getattr(exc, "winerror", None) == _WSAEACCES or exc.errno == 13
+    finally:
+        sock.close()
+    return False
+
+
+def pick_panel_port() -> int:
+    """Move the UI + listener pair (port - 1, port) off a range Windows reserved, once, before
+    anything binds. The panel launch calls this; children inherit UEFN_DUCKY_PANEL_PORT and other
+    processes read PANEL_PORT_FILE. Test sessions (env set) keep their port."""
+    global PANEL_LISTENER_PORT
+    if os.environ.get("UEFN_DUCKY_PANEL_PORT"):
+        return PANEL_LISTENER_PORT
+    port = PANEL_LISTENER_PORT
+    if _port_reserved(port - 1) or _port_reserved(port):
+        # ponytail: fixed candidate list (stable across launches so WebView2 storage keeps one
+        # origin); 40 pairs well below the dynamic range clear any one exclusion block.
+        port = next((p for p in range(4300, 8300, 100) if not (_port_reserved(p - 1) or _port_reserved(p))), port)
+        if port != PANEL_LISTENER_PORT:
+            try:
+                path = default_app_data_dir() / PANEL_PORT_FILE
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({"port": port}), encoding="utf-8")
+            except OSError:
+                pass
+    PANEL_LISTENER_PORT = port
+    if port != DEFAULT_PANEL_LISTENER_PORT:
+        os.environ["UEFN_DUCKY_PANEL_PORT"] = str(port)
+    return port
 
 
 def _settings_use_db() -> bool:
