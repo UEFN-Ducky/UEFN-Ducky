@@ -343,6 +343,19 @@ async def ducky_get_tools(
 
 
 @mcp.tool()
+async def ducky_find(query: str, plugin: str = "", limit: int = 10, pretty: bool = False) -> str:
+    """Find the person's own things by name (projects, videos, pictures, cards, pages, files)
+    in every plugin, only in copies they can open (Local and their teams). Call it FIRST when
+    the person names something they have ("the promo", "my logo") — before offering to make
+    or pay for one. Each hit says which plugin and copy holds it and `open_with`: the plugin
+    tool that opens it (call it via ducky_call_tool). `plugin` limits it to one plugin id.
+    """
+    from backend.search.find import find
+
+    return tool_json(await asyncio.to_thread(find, query, plugin=plugin, limit=limit), pretty=pretty)
+
+
+@mcp.tool()
 async def ducky_call_tool(
     name: str,
     arguments: dict[str, Any] | None = None,

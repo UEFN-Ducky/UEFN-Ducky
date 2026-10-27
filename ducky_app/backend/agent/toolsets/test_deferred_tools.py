@@ -23,7 +23,9 @@ def test_floor_core_is_tiny():
     assert "ducky_call_tool" in CORE_TOOLS
     assert "workspace_list_verse_errors" in CORE_TOOLS
     assert "wire_verse_device_ref" not in CORE_TOOLS
-    assert len(CORE_TOOLS) <= 12
+    # 13: ducky_find joined (Oct 26) — the one call that finds what the person already has.
+    assert "ducky_find" in CORE_TOOLS
+    assert len(CORE_TOOLS) <= 13
 
 
 def test_select_tools_ignores_intent_noise():

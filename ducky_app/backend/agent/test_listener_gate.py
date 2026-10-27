@@ -208,6 +208,14 @@ def test_a_guessed_tool_name_is_unknown_not_listener_offline(monkeypatch) -> Non
     assert "imk_media_list, imk_project_list" in result.error
     assert probes == []
 
+    # A guess with no real prefix gets what it means, from tool search.
+    import backend.search.query as search_query
+
+    monkeypatch.setattr(search_query, "search_tools",
+                        lambda text, allowed, limit=5: [{"tool": "imk_media_list"}] if "video" in text else [])
+    result = asyncio.run(tools.execute_tool("find_video", {}))
+    assert "Closest by meaning: imk_media_list." in result.error and "listener" not in result.error.lower()
+
 
 def test_ducky_s_own_workflow_tools_never_wait_for_uefn():
     # Oct 17 2026: a lead's find_workflows was refused with "UEFN listener offline".

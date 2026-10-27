@@ -248,6 +248,19 @@ def test_no_hint_for_chit_chat(chat: str) -> None:
     assert hints.skill_hint(chat) == ""
 
 
+def test_a_keyword_only_hit_is_no_hint_when_the_model_is_loaded(monkeypatch) -> None:
+    # Oct 26 2026: "make aplna to fix best prtiace" hinted tripo-api at keyword rank 1 with no
+    # meaning score at all (not among the 50 closest by meaning).
+    stray = {"match": {"meaning": None, "keyword_rank": 1}}
+    monkeypatch.setattr(hints, "_has_model", lambda: True)
+    assert not hints._relevant(stray)
+    assert hints._relevant({"match": {"meaning": 0.6, "keyword_rank": None}})
+    assert hints._relevant({"match": {"meaning": 0.45, "keyword_rank": 3}})
+    assert not hints._relevant({"match": {"meaning": 0.37, "keyword_rank": 8}})
+    monkeypatch.setattr(hints, "_has_model", lambda: False)
+    assert hints._relevant(stray)  # keywords are all there is
+
+
 def test_a_team_of_ducky_roles_is_searched_as_duckies(monkeypatch) -> None:
     # Oct 21 2026: "Make a small team of 2 Verse Coders and lead it" hinted verse/sys_teams
     # (game teams), and the lead read it before building its team of duckies.

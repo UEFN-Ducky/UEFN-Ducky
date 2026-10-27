@@ -47,6 +47,7 @@ CORE_TOOLS = frozenset(
         "ducky_get_status",
         "ducky_get_tools",
         "ducky_call_tool",
+        "ducky_find",
         "skill_search",
         "ducky_ask_user",
         "ducky_rename_self",
@@ -134,6 +135,7 @@ PLAN_TOOLS = frozenset(
     {
         "ducky_get_status",
         "ducky_get_tools",
+        "ducky_find",
         "ducky_call_tool",
         "ducky_find_tools",
         "skill_search",

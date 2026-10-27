@@ -121,6 +121,36 @@ def _score(items: list[dict], ranker) -> dict:
     return {"n": len(items), "hit@1": round(hits1 / n, 3), "hit@3": round(hits3 / n, 3), "mrr": round(rr / n, 3), "misses": misses}
 
 
+def _hint_score(skills: list[dict], items: list[dict], ctx) -> dict:
+    """What the per-message skill hint does: how many real requests get one (and the
+    expected section among them), and how many chat lines about Ducky itself get one."""
+    from backend.search import hints, query
+
+    def hinted(q: str) -> list[dict]:
+        return [r for r in query.search(hints._focus(q)[:hints.QUERY_CHARS], limit=3, context=ctx, refresh=False)
+                if hints._relevant(r)]
+
+    requests = [(i["q"], i.get("expect") or []) for i in skills] + [(i["q"], []) for i in items if i["hint"]]
+    chat = [i["q"] for i in items if not i["hint"]]
+    got = right = 0
+    wrong: list[str] = []
+    for q, expect in requests:
+        rows = hinted(q)
+        got += bool(rows)
+        right += bool(expect) and any(_skill_key(r) in expect for r in rows)
+        if not rows:
+            wrong.append(f"no hint: {q}")
+    chatty = 0
+    for q in chat:
+        rows = hinted(q)
+        chatty += bool(rows)
+        if rows:
+            wrong.append(f"hinted chat: {q} -> {[_skill_key(r) for r in rows]}")
+    with_expect = max(1, sum(1 for _, e in requests if e))
+    return {"requests_hinted": round(got / max(1, len(requests)), 3), "right_section": round(right / with_expect, 3),
+            "chat_hinted": round(chatty / max(1, len(chat)), 3), "wrong": wrong}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--engine", default="all", choices=("today", "keyword", "hybrid", "all"))
@@ -162,6 +192,7 @@ def main() -> int:
     everything = query.Context(allowed_tools=tool_names)
     skills = _load("skills.jsonl")
     tools = _load("tools.jsonl")
+    hint_items = _load("hints.jsonl")
     # A tool can be hidden in this app's state (Epic's MCP replaces Ducky's own editor tools
     # while it is online); a question whose answers are all hidden cannot be scored.
     skipped_tools = [i["q"] for i in tools if not set(i["expect"]) & {t["name"] for t in catalog}]
@@ -215,6 +246,8 @@ def main() -> int:
             "skills_typed_by_people": _score(user_items, s_rank),
             "tools": _score(tools, t_rank),
         }
+    if "hybrid" in engines:
+        report["hints"] = _hint_score(skills, hint_items, everything)
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
@@ -229,6 +262,13 @@ def main() -> int:
             if args.misses:
                 for miss in res["misses"]:
                     print(f"           miss r={miss['rank']}: {miss['q']!r} want {miss['expect'][:2]} got {miss['got'][:3]}")
+    if "hints" in report:
+        h = report["hints"]
+        print(f"hints    requests hinted {h['requests_hinted']:.3f} (right section {h['right_section']:.3f})  "
+              f"chat hinted {h['chat_hinted']:.3f}")
+        if args.misses:
+            for q in h["wrong"]:
+                print(f"           wrong: {q!r}")
     return 0
 
 

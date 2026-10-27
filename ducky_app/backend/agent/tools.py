@@ -726,10 +726,20 @@ def _unknown_tool_text(name: str) -> str:
     tools = getattr(getattr(_ensure_mcp(), "_tool_manager", None), "_tools", None) or {}
     prefix = name.split("_", 1)[0] + "_"
     near = sorted(t for t in tools if t.startswith(prefix))[:25]
+    try:  # what the guess means, in words: find_video -> imk_media_list
+        from backend.search.query import search_tools
+
+        meant = [r["tool"] for r in search_tools(name.replace("_", " "), set(tools), limit=5) if r["tool"] not in near]
+    except Exception:  # noqa: BLE001 — no index here: the prefix list and the search hint still help
+        meant = []
     text = f"{name} is not a tool (nothing to do with UEFN)."
     if near:
-        return text + " Real tools with that prefix: " + ", ".join(near) + "."
-    return text + ' Find the right one with ducky_get_tools(pattern="<what you need>").'
+        text += " Real tools with that prefix: " + ", ".join(near) + "."
+    if meant:
+        text += " Closest by meaning: " + ", ".join(meant) + "."
+    if not near and not meant:
+        text += ' Find the right one with ducky_get_tools(pattern="<what you need>").'
+    return text
 
 
 _LISTENER_OFFLINE_HINT = (

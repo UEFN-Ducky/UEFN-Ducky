@@ -56,7 +56,8 @@ free ones too. See `plugin_publishing`.
    `plugin.call` RPCs that run the **same** functions. Each action also has a workflow
    node (`contributes.automations.nodes` + `@api.register_pipeline_node`) and a
    template that uses it (`start.chat` → `pipeline.agent` → your node →
-   `pipeline.finish`). Themes too.
+   `pipeline.finish`). Themes too. Every `api.data` doc a person would ask for by name
+   has a `name` field, so `ducky_find` finds it (see "Make the person's things findable").
 5. **Always Ducky's look.** Every panel page links the UI kit
    (`<script src="../../_kit/ducky.js"></script>`) and colors only with Appearance
    variables (`var(--bg)`, `var(--fg)`, `var(--card)`, `var(--border)`,
@@ -190,11 +191,11 @@ Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_l
 | `@api.register_pipeline_node("<id>.<node>")` | Workflow node handler `fn(ctx) -> dict` (alias `register_automation_node`). |
 | `api.register_panel_rpc(name, fn)` | Panel `plugin.call` target. `fn` is called with **keyword** arguments: `fn(**params)`. |
 | `api.call_tool(name, arguments=None)` | Call any Ducky MCP tool in-process, with the same approvals as the agent; returns the parsed result, raises `ValueError` on failure. |
-| `api.data` | Docs and files in the plugin's data scope (`plugin_data`). Tools of a plugin that uses it get `scope` (`local` or the space's name) added to their dict results. |
+| `api.data` | Docs and files in the plugin's data scope (`plugin_data`). Tools of a plugin that uses it get `scope` (`local` or the space's name) added to their dict results. Give each doc a `name` (or `title` / `label`): `ducky_find` then finds it by name for every agent, in Local and the person's teams, with no code of yours. |
 | `api.live.join(room="")` / `.leave()` / `.send(topic, data, to="")` / `.on(topic, fn)` / `.state()` | Live editing on a team copy (`plugin_data`, Live): short messages to teammates live in the group, peer to peer (JSON ≤ 16 KB, ≤ 30/s; `ducky.*` is the host's). `fn(sender, data)`. No room (or a teammate's group, `h:<device>`): this PC goes live on the team copy, every plugin with it (`.leave()` takes them all out); any other room is the plugin's own. Writes through `api.data` reach the group at once and its leader sends them to source control (`"data_live": false` in `plugin.json`: sync only, the group pulls each one as soon as it's committed). |
 | `api.live.share(key, value)` / `.shared()` / `.on_shared(fn)` | The group's value of one of the plugin's components (a player playing, the picked clip: JSON ≤ 8 KB, `None` drops it, 64 keys), through the group's leader so everyone ends on the same one; `fn(key, value, by)`. Never stored or synced. |
 | `api.live.set_my_state(obj)` / `.member_states()` / `.on_member_state(fn)` | Each PC's own live state in the plugin (a camera, the tool in hand: an object ≤ 4 KB, latest wins, `None` clears it); everyone in the group sees everyone's, latecomers within 5 s, `fn(sender, state)` (`state` None: they left). Never stored or synced. |
-| `api.search.upsert(id, title, text, meta=None)` / `.delete(id)` / `.clear()` / `.query(text, limit=10)` | Make the plugin's own records (pages, cards, entries) findable by meaning and keywords. Only this plugin's records in its data scope for the signed-in person; kept on an index rebuild, removed on uninstall. Upserting unchanged text is free, so re-sync everything on start. Expose them to agents through your own tool that calls `api.search.query`. One record per section of a long document. |
+| `api.search.upsert(id, title, text, meta=None)` / `.delete(id)` / `.clear()` / `.query(text, limit=10)` | Make the plugin's own records (pages, cards, entries) findable by meaning and keywords. Only this plugin's records in its data scope for the signed-in person; kept on an index rebuild, removed on uninstall. Upserting unchanged text is free, so re-sync everything on start. `ducky_find` returns them too; add your own tool that calls `api.search.query` only for a search inside your plugin. One record per section of a long document. |
 | `api.changeset.record(command=, kind=, ident=, facet=, before=, inverse=, slot=)` | Changes ledger entry; never raises. |
 | `api.panel_state()` | → `{open, visible, since, panels}`: whether its panel is open and on screen. Panel code runs only while its tab is visible: a tool that needs it says "open the tab first". |
 | `api.encode_image(path)` / `api.resolve_image(image)` | A local image → data URI; `resolve_image` passes http(s) and data URIs through and encodes local paths (for vision APIs). |
@@ -263,6 +264,25 @@ installed; nothing to register. What decides whether they are found:
   under 30 characters.
 - `ducky_plugin_test` ends with a **search** check: each skill file and tool searched by
   its own description. Anything outside the top 5 is listed with what beat it: reword it.
+
+### Make the person's things findable (free)
+
+When the person says "show me the promo" or "open my Dragon card", agents call
+`ducky_find("promo")` first. It searches every enabled plugin's `api.data`, in the
+person's Local copy and every team copy they can still open (never a lost team, never
+`sensitive` docs), and answers which plugin and copy holds it and the tool that opens it.
+Your plugin gets this with no code. What you do:
+
+- **Name every doc a person would ask for:** a `name`, `title` or `label` field with the
+  words they use ("UEFN Ducky Promo", not `p_80a9`). A doc without one is found only by its key.
+- **Key docs as `<kind>.<id>`** (`project.80a9`, `card.pip`) and have a `<prefix>_<kind>_get`
+  tool (`imk_project_get`): `ducky_find` names it as the hit's `open_with`.
+- **Files keep their real names** (`exports/UEFN Ducky Promo.mp4`); `ducky_find` matches file names too.
+- **Long text** (wiki pages, card rules): `api.search.upsert` one record per section; `ducky_find` merges them.
+- **List tools take an optional `query=`** that filters by name, for a look inside one project.
+- **Never write a cross-plugin or "search everything" tool:** `ducky_find` is that tool.
+
+`ducky_plugin_test` warns about a doc prefix whose docs have no name.
 
 ### The panel bridge
 

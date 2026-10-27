@@ -20,8 +20,20 @@ MIN_TEXT = 8
 QUERY_CHARS = 600
 # A hit counts when its meaning score is high, or when keywords and meaning agree.
 # Calibrated on backend/search/eval (agent questions vs everyday chat lines).
-MEANING_ALONE = 0.42
-MEANING_WITH_KEYWORD = 0.28
+MEANING_ALONE = 0.52
+MEANING_WITH_KEYWORD = 0.40
+KEYWORD_RANK = 5
+# Oct 26 (scripts/search_eval.py hints): chat lines hinted 0.75 -> 0.25; requests hinted
+# 1.00 -> 0.96, the losses being typo-only keyword matches like the noise itself.
+
+
+def _has_model() -> bool:
+    try:
+        from backend.search.embedder import get_embedder
+
+        return get_embedder() is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _relevant(row: dict[str, Any]) -> bool:
@@ -29,8 +41,10 @@ def _relevant(row: dict[str, Any]) -> bool:
     meaning = match.get("meaning")
     kw = match.get("keyword_rank")
     if meaning is None:
-        return kw is not None and kw <= 3
-    return meaning >= MEANING_ALONE or (kw is not None and kw <= 10 and meaning >= MEANING_WITH_KEYWORD)
+        # Not even among the 50 closest by meaning: with the model loaded that is a stray
+        # word (Oct 26: "make aplna to fix best prtiace" hinted tripo-api at keyword rank 1).
+        return kw is not None and kw <= 3 and not _has_model()
+    return meaning >= MEANING_ALONE or (kw is not None and kw <= KEYWORD_RANK and meaning >= MEANING_WITH_KEYWORD)
 
 
 def _label(row: dict[str, Any]) -> str:

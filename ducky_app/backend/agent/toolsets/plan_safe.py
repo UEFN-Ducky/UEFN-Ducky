@@ -16,7 +16,7 @@ ASK_READ_TOOLS = frozenset({
     "workspace_tree", "workspace_search", "workspace_find", "workspace_file_outline", "view_image",
     "workspace_list_verse_errors", "workspace_editor_get_state",
     "web_search", "web_fetch", "web_video", "web_github", "sandbox_open", "sandbox_look", "ducky_health",
-    "ducky_get_tools", "ducky_find_tools",
+    "ducky_get_tools", "ducky_find_tools", "ducky_find",
     "ducky_get_plan", "ducky_list_plans", "ducky_get_plan_template",
     "ducky_list_plan_templates",
     "code_list_errors", "ducky_get_errors", "ducky_read_tool_spill",

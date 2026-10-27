@@ -33,3 +33,7 @@
 {"q": "save the level", "expect": ["save_current_level", "save_all_dirty"]}
 {"q": "show the user a part of the app", "expect": ["ducky_ui_show", "ducky_ui_navigate"]}
 {"q": "upload a picture to the site storage", "expect": ["uefn-duckyos-site__storage_upload", "storage_upload"]}
+{"q": "find my promo video", "expect": ["ducky_find", "imk_media_list", "imk_project_list"]}
+{"q": "search the team assets I have access to", "expect": ["ducky_find"]}
+{"q": "list my island media kit projects", "expect": ["imk_project_list", "ducky_find"]}
+{"q": "find the UEFN Ducky Promo project", "expect": ["ducky_find", "imk_project_list"]}

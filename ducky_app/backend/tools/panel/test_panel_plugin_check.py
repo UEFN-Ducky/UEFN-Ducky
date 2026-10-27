@@ -163,3 +163,26 @@ def test_a_write_that_reaches_the_users_data_fails_the_test(tmp_path, monkeypatc
         assert plugin_kv.get("webgpu", "downloads", **real)[0] == [{"name": "Web Engine 5.8.1"}]
     finally:
         db.reset_for_tests()
+
+
+def test_findable_data_names_the_doc_kinds_without_a_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Oct 26 2026: ducky_find matches a doc by its name/title/label; a kind without one is
+    # found only by its key (project.mvbtpazj), so the test says which kinds to name.
+    from backend.uefn_plugins import scopes
+
+    docs: dict[str, Any] = {}
+
+    class _Data:
+        def __init__(self, pid: str) -> None:
+            pass
+
+        def items(self, prefix: str = "") -> dict[str, Any]:
+            return dict(docs)
+
+    monkeypatch.setattr(scopes, "PluginData", _Data)
+    assert check._check_data_names("p")["status"] == "skip"
+    docs.update({"project.a": {"name": "UEFN Ducky Promo"}, "project.b": {"title": "Trailer"},
+                 "job.1": {"state": "done"}, "job.2": {"state": "queued"}, "card.c": {"label": " "}})
+    row = check._check_data_names("p")
+    assert row["status"] == "pass" and row["detail"].startswith("1 of 3 doc kinds")
+    assert [n.split(" ")[0] for n in row["name_these"]] == ["card.*", "job.*"]

@@ -256,10 +256,12 @@ def tool_docs(rows: Iterable[dict[str, Any]], *, source_key: str = "tools") -> l
         lead, _, rest = desc.partition("\n")
         aliases = [a for a in row.get("aliases") or [] if isinstance(a, str)]
         owner = str(row.get("owner_label") or "")
+        about = str(row.get("owner_about") or "")
         params = _schema_params(row.get("inputSchema"))
         body = "\n".join(x for x in (
             words(name.split("__", 1)[-1]),
             rest.strip(),
+            f"{owner.removeprefix('Plugin: ')}: {about}" if about else "",
             ("Also called: " + ", ".join(aliases)) if aliases else "",
             ("Parameters: " + ", ".join(params)) if params else "",
         ) if x)

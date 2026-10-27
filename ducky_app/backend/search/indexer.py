@@ -149,10 +149,23 @@ def _owner_rows(tools: list[Any]) -> list[dict[str, Any]]:
         elif name in plugin_of:
             row["plugin_id"], label = plugin_of[name]
             row["owner_label"] = f"Plugin: {label}"
+            row["owner_about"] = _plugin_about(row["plugin_id"])
         else:
             row["owner_label"] = categories.get(name, ("", "UEFN Ducky"))[1]
         rows.append(row)
     return rows
+
+
+def _plugin_about(plugin_id: str) -> str:
+    """The plugin's own one-line description, so "media kit" or "my trailer" reaches its tools
+    (Oct 26: "search team assets I have" ranked site storage tools over Island Media Kit's)."""
+    try:
+        from backend.uefn_plugins.store import load_plugin_manifest
+
+        about = str((load_plugin_manifest(plugin_id) or {}).get("description") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+    return " ".join(about.split())[:200]
 
 
 def live_tool_rows() -> tuple[list[dict[str, Any]], str] | None:

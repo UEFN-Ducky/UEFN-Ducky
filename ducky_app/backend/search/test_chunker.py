@@ -87,6 +87,16 @@ def test_tool_docs_words_owner_and_params() -> None:
     assert docs[1].origin == "mcp" and docs[1].title == "ping" and docs[1].summary == ""
 
 
+def test_a_plugin_tool_carries_what_its_plugin_is_for() -> None:
+    # Oct 26 2026: "search team assets I have" ranked site storage tools over Island Media Kit's.
+    row = {"name": "imk_media_list", "description": "List a project's media.", "owner_label": "Plugin: Island Media Kit",
+           "owner_about": "Make island trailers from your own recordings", "plugin_id": "island-media-kit"}
+    doc = chunker.tool_docs([row])[0]
+    assert "Island Media Kit: Make island trailers from your own recordings" in doc.body
+    assert "Plugin: Plugin" not in doc.body
+    assert chunker.tool_docs([{**row, "owner_about": ""}])[0].body == "imk media list"
+
+
 def test_embed_text_and_snippet() -> None:
     doc = chunker.record_doc("wiki", "personal", "p1", "Spawner", "How spawners work.", {"url": "x"})
     assert chunker.embed_text(doc).startswith("Spawner")

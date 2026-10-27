@@ -181,6 +181,15 @@ def plugin_ids(account: str, scope: str) -> list[str]:
     return [str(r[0]) for r in out]
 
 
+def scope_ids(account: str) -> list[str]:
+    """Scopes (Local and shared spaces) holding live, non-sensitive rows of the account."""
+    out = db.connect().execute(
+        "SELECT DISTINCT scope_id FROM plugin_data WHERE account_id=? AND deleted=0 AND sensitive=0 ORDER BY scope_id",
+        (account,),
+    ).fetchall()
+    return [str(r[0]) for r in out]
+
+
 def has_rows(account: str, plugin: str, scope: str | None = None) -> bool:
     """Any row of ``plugin`` (tombstones and sensitive ones too) in ``scope``, or in any
     scope of the account."""

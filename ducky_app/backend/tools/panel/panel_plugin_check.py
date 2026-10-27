@@ -569,6 +569,7 @@ def test_plugin(plugin_id: str, repo: str = "") -> dict[str, Any]:
         checks.append({"check": "backend load", "status": "fail" if loads else "pass",
                        **({"errors": loads} if loads else {})})
         checks.append(_check_search(pid))
+        checks.append(_check_data_names(pid))
         report = _report(pid, started, checks)
         if any(t.is_alive() for t in stragglers):
             report["note"] = (
@@ -685,6 +686,37 @@ def _end_sandbox(pid: str, stragglers: list[threading.Thread]) -> None:
         threading.Thread(target=end, name="plugin-test-sandbox", daemon=True).start()
     else:
         end()
+
+
+def _check_data_names(pid: str) -> dict[str, Any]:
+    """Can ``ducky_find`` name this plugin's docs? Docs per key prefix (``project.``) where
+    most have no ``name`` / ``title`` / ``label`` are listed: agents find those only by key.
+    Reads the test's own copy (what the tool calls just wrote). Never fails the test."""
+    import re
+
+    from backend.uefn_plugins.scopes import PluginData
+
+    try:
+        docs = PluginData(pid).items()
+    except Exception as exc:  # noqa: BLE001
+        return {"check": "findable data", "status": "skip", "detail": f"data unreadable ({type(exc).__name__})"}
+    if not docs:
+        return {"check": "findable data", "status": "skip", "detail": "no api.data docs to check"}
+    counts: dict[str, list[int]] = {}
+    for key, value in list(docs.items())[:2000]:
+        prefix = re.split(r"[./:]", key, maxsplit=1)[0]
+        named = isinstance(value, dict) and any(
+            isinstance(value.get(f), str) and value[f].strip() for f in ("name", "title", "label"))
+        seen = counts.setdefault(prefix, [0, 0])
+        seen[0] += 1
+        seen[1] += bool(named)
+    unnamed = {p: n for p, (n, named) in sorted(counts.items()) if named * 2 < n}
+    detail = f"{len(counts) - len(unnamed)} of {len(counts)} doc kinds have names ducky_find can match"
+    if not unnamed:
+        return {"check": "findable data", "status": "pass", "detail": detail}
+    return {"check": "findable data", "status": "pass", "detail": detail, "name_these": [
+        f"{p}.* ({n} docs): if people ask for these by name, add a name, title or label field"
+        for p, n in unnamed.items()]}
 
 
 def _check_search(pid: str) -> dict[str, Any]:
