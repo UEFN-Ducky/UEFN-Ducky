@@ -214,6 +214,7 @@ def test_a_crash_says_how_the_process_ended(monkeypatch) -> None:
     handler(None, SimpleNamespace(ProcessFailedKind=0, ExitCode=-536870904))  # 0xE0000008
     assert errors[-1][0] == "webview_browser_exit_oom" and "exit oom" in errors[-1][1]
     assert wr.exit_reason(SimpleNamespace(ExitCode=0x8000FFFF)) == "x8000ffff"
+    assert wr.exit_reason(SimpleNamespace(ExitCode=0x40010004)) == "killed"
     assert wr.exit_reason(SimpleNamespace()) == ""
 
 

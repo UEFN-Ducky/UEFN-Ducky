@@ -139,7 +139,9 @@ def error_source(reason: str) -> str:
 # CoreWebView2ProcessFailedEventArgs2.ExitCode values worth a name (Windows / Chromium).
 _EXIT_NAMES = {0xE0000008: "oom", 0xC0000005: "access_violation", 0xC0000409: "fast_fail",
                0xC0000374: "heap_corruption", 0xC000001D: "illegal_instruction",
-               0x80000003: "breakpoint", 0xC00000FD: "stack_overflow", 0xC0000017: "no_memory"}
+               0x80000003: "breakpoint", 0xC00000FD: "stack_overflow", 0xC0000017: "no_memory",
+               # DBG_TERMINATE_PROCESS: another program ended it (Task Manager, antivirus, logoff), not a crash.
+               0x40010004: "killed"}
 
 
 def exit_reason(event: Any) -> str:
