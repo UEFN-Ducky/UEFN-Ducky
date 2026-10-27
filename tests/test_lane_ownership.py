@@ -324,6 +324,7 @@ def test_nested_dispatch_reaches_same_actual_write_boundary(protected_project, m
         assert name == "workspace_write_file"
         return [SimpleNamespace(text=system.workspace_write_file(**args))]
     _patch_dispatch(monkeypatch, transport)
+    tools._ensure_mcp()._tool_manager._tools["workspace_write_file"] = SimpleNamespace()
     monkeypatch.setattr("frontend.ui_web.ui_rpc.wait_for_answers", lambda *a: None)
     monkeypatch.setattr("backend.agent.chat_title.require_self_name", lambda *a: None)
     monkeypatch.setattr("backend.agent.coding_agents.plans.plan_mutator_block_reason", lambda *a: None)

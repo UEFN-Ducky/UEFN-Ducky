@@ -70,6 +70,8 @@ def dispatch(monkeypatch, unrestricted_tools):
         reached.append((name, args))
         return [NS(text='{"ok":true,"evidence":"read"}')]
     _patch_dispatch(monkeypatch, transport)
+    # The server serves the catalog (same dict: tests add to it), so no name reads as unknown.
+    tools._ensure_mcp()._tool_manager._tools = catalog
     monkeypatch.setattr(tools, "list_mcp_tools", listing)
     monkeypatch.setattr("backend.mcp_plugins.store.ensure_plugin_prefix_cache", lambda: None)
     monkeypatch.setattr("backend.mcp_plugins.registry.is_plugin_tool", lambda n: "__" in n)
