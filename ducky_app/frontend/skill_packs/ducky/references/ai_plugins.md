@@ -226,6 +226,14 @@ Push a live update to your panels: `from frontend.ui_web.verse_editor.panel_even
 import push_agent_event` then `push_agent_event({"type": "<id>_changed", …})`; the
 panel subscribes with `plugin.subscribe`.
 
+Long work (a download, an install, a big job) gets a row in the header's activity list:
+`from frontend.ui_web.agent_modes import push_ui_event` then
+`push_ui_event({"type": "background_job", "id": "plugin:<plugin id>:<job>", "source": "plugin",
+"title": …, "detail": …, "percent": 0-100 or None, "phase": "working"|"done"|"error", "cancelable": True})`.
+Its Cancel calls your panel RPC `cancel_job(job_id=<that id>)`: register one (plus its
+`<id>_cancel_job` tool). When it ends, `from frontend.notifications import alert` and
+`alert("<Plugin>", "Done.", level="ok"|"error")` for the Windows notification.
+
 ### Many agents at once
 
 A team can call one plugin from many agents at the same time, and `register()` runs in

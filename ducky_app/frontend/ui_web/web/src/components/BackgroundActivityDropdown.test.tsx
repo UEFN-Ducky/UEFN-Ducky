@@ -8,7 +8,7 @@ import { resetWorkflowRunsForTests } from "../hooks/workflowRunsByChat";
 import { runAskUser } from "../ask-user";
 import { _resetAskUserForTests } from "../ask-user/runAskUser";
 
-const api = vi.hoisted(() => ({ stop_workflow: vi.fn(), workflow_run_snapshot: vi.fn() }));
+const api = vi.hoisted(() => ({ stop_workflow: vi.fn(), workflow_run_snapshot: vi.fn(), plugin_call: vi.fn() }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 afterEach(() => {
   cleanup(); _resetBackgroundActivityForTests(); resetWorkflowRunsForTests(); _resetAskUserForTests(); vi.resetAllMocks();
@@ -41,6 +41,18 @@ it("stops a specific concurrent workflow from the header activity tray", async (
   expect(screen.getAllByText("Stop")).toHaveLength(2);
   fireEvent.click(screen.getAllByText("Stop")[0]);
   await waitFor(() => expect(api.stop_workflow).toHaveBeenCalledWith("wf", "second"));
+});
+
+it("Cancel on a plugin's job row calls that plugin's cancel_job", async () => {
+  api.plugin_call.mockResolvedValue({ ok: true });
+  render(<BackgroundActivityDropdown />);
+  act(() => upsertBackgroundJob({
+    id: "plugin:rea:setup", source: "plugin", title: "Reverse Engineer setup",
+    detail: "Downloading Node", percent: 30, phase: "working", cancelable: true,
+  }));
+  fireEvent.click(screen.getByLabelText("Background activity"));
+  fireEvent.click(screen.getByText("Cancel"));
+  await waitFor(() => expect(api.plugin_call).toHaveBeenCalledWith("rea", "cancel_job", { job_id: "plugin:rea:setup" }));
 });
 
 it("refreshes an already ended run without leaving a false Running row or warning", async () => {

@@ -85,6 +85,17 @@ export function BackgroundActivityDropdown() {
       }
       return;
     }
+    // A plugin's own job (`plugin:<plugin id>:<job>`): its backend's cancel_job panel RPC stops it.
+    const pluginJob = /^plugin:([a-z][a-z0-9_-]{0,63}):/.exec(job.id);
+    if (pluginJob) {
+      try {
+        const res = (await getApi()?.plugin_call?.(pluginJob[1], "cancel_job", { job_id: job.id })) as { ok?: boolean; error?: string } | undefined;
+        if (res && res.ok === false && res.error) setActionError(res.error);
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Could not cancel that job");
+      }
+      return;
+    }
     const wid = workflowIdFromJobId(job.id);
     if (!wid) { requestBackgroundJobCancel(job.id); return; }
     try {
