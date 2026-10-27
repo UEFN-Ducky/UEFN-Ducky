@@ -101,6 +101,18 @@ def test_a_timeout_names_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
     assert usage_events.where_of(sources[0]) == "bridge"
 
 
+def test_a_lone_ping_timeout_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    sources: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: sources.append(src))
+    monkeypatch.setattr(bridge, "_last_ping_timeout", 0.0)
+    clock = iter([1000.0, 1500.0, 1560.0])
+    monkeypatch.setattr(bridge.time, "monotonic", lambda: next(clock))
+    bridge._record_bridge_error("Command 'ping' timed out after 2.0s", "ping")  # lone
+    bridge._record_bridge_error("Command 'ping' timed out after 2.0s", "ping")  # 500 s later: lone again
+    bridge._record_bridge_error("Command 'ping' timed out after 2.0s", "ping")  # 60 s later: in a row
+    assert sources == ["bridge_timeout.ping"]
+
+
 class _HeartbeatDone(BaseException):
     pass
 

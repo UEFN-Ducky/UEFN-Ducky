@@ -84,6 +84,23 @@ def _is_expected_offline(message: str) -> bool:
     return "Listener not reachable" in message or "listener offline" in message.lower()
 
 
+_PING_REPEAT_S = 120.0
+_last_ping_timeout = 0.0
+
+
+def _lone_ping_timeout(command: str) -> bool:
+    """A ping that timed out once while the editor was busy (loading, a Verse build) and not
+    again within 2 minutes is not a broken link: bridge_timeout.ping on 3 PCs (Oct 26 2026)
+    were mostly these. A second one in a row is logged."""
+    global _last_ping_timeout
+    if command != "ping":
+        return False
+    now = time.monotonic()
+    lone = now - _last_ping_timeout > _PING_REPEAT_S
+    _last_ping_timeout = now
+    return lone
+
+
 def _record_bridge_error(message: str, command: str = "") -> None:
     """Persist a bridge-side error to the shared appdata error log (best-effort).
 
@@ -91,6 +108,8 @@ def _record_bridge_error(message: str, command: str = "") -> None:
     ``bridge_busy.<command>``): it is also the anonymous error code, and plain "bridge"
     (25-30 a day on 5-8 PCs, Oct 23-24 2026) could not say what the editor was doing."""
     if _is_expected_offline(message):
+        return
+    if "waiting for listener idle" not in message and _lone_ping_timeout(command):
         return
     source = "bridge"
     if command:
