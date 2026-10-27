@@ -106,8 +106,24 @@ def _rpc(handle: int, method: str, params: dict | None = None, req_id: int = 1) 
 
 def test_flag_default_off(monkeypatch) -> None:
     monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
+    monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
     assert shared_mcp.enabled() is False
     assert shared_mcp.enabled(PanelSettings()) is False
+
+
+def test_agent_hosts_share_one_server_each(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
+    monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "2")
+    assert shared_mcp.enabled(PanelSettings()) is True
+    assert shared_mcp.state_path() == tmp_path / "shared_mcp-h2.json"
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "5")
+    assert shared_mcp.state_path() == tmp_path / "shared_mcp-h5.json"
+    # The off switch still wins.
+    monkeypatch.setenv("UEFN_DUCKY_SHARED_MCP", "0")
+    assert shared_mcp.enabled() is False
+    monkeypatch.delenv(shared_mcp.SLOT_ENV)
+    assert shared_mcp.state_path() == tmp_path / "shared_mcp.json"
 
 
 def test_flag_env_on(monkeypatch) -> None:

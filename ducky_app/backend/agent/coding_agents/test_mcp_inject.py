@@ -125,6 +125,21 @@ def test_uefn_server_config_leaves_server_level_always_load_unset(monkeypatch) -
     assert "alwaysLoad" not in servers["uefn"]
 
 
+@pytest.mark.parametrize("folder,online,offline_rules,listener_line", [
+    (False, False, True, "UEFN listener: offline (only live-editor tools wait for it)"),
+    (False, True, False, "UEFN listener: online"),
+    (True, False, False, None),  # a folder project never mentions the listener
+])
+def test_coding_agents_hear_what_still_works_offline(monkeypatch, folder, online, offline_rules, listener_line):
+    monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda root: folder)
+    text = bootstrap_system_prompt(project_root="/tmp/p", listener_online=online, conv_id="chat-a")
+    assert ("No global UEFN gate" in text) is offline_rules
+    if listener_line is None:
+        assert "UEFN listener:" not in text and "### UEFN popups" not in text
+    else:
+        assert listener_line in text and "### UEFN popups" in text
+
+
 def test_bootstrap_names_the_up_front_tools() -> None:
     from backend.agent.coding_agents.core_tools import CORE_TOOLS
 

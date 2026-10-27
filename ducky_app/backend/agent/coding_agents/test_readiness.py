@@ -11,6 +11,7 @@ from backend.bridge import shared_mcp
 @pytest.fixture(autouse=True)
 def _shared_tools_on(monkeypatch):
     monkeypatch.setattr(shared_mcp, "enabled", lambda settings=None: True)
+    monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)  # outside an agent host unless a test says so
 
 
 def test_with_shared_tools_off_the_agent_launches_its_own_tools(monkeypatch):
@@ -54,6 +55,23 @@ def test_dead_server_times_out_without_launch(monkeypatch):
     assert now[0] == 20
     assert not result.ok and result.error == "Ducky's tools didn't start"
     assert result.upstream_session_id == "existing"
+
+
+@pytest.mark.parametrize("outcome", ["dead", "exception"])
+def test_in_an_agent_host_a_missing_server_still_runs_the_turn(monkeypatch, outcome):
+    # The adapter finds no daemon and runs its own tool process: slower, never broken.
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "0")
+    now = [0.0]
+    monkeypatch.setattr(readiness.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(readiness.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    def start():
+        if outcome == "exception":
+            raise OSError("boom")
+        return {"ok": True}
+    monkeypatch.setattr(shared_mcp, "start_daemon_from_app", start)
+    monkeypatch.setattr(shared_mcp, "_daemon_answers", lambda timeout_s: now.__setitem__(0, now[0] + timeout_s))
+    result = readiness.launch_with_ready_tools(SimpleNamespace(launch=lambda **kw: "launched"), session_id="s")
+    assert result == "launched"
 
 
 @pytest.mark.parametrize("outcome", ["disabled", "exception", "cancelled"])

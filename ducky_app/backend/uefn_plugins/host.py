@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import functools
 import importlib.util
 import json
@@ -14,7 +15,7 @@ import threading
 import time
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from backend.process_role import is_app
 from backend.uefn_plugins.plugin_version import format_plugin_version, plugin_version_rank
@@ -142,6 +143,14 @@ _LOAD_FAILURES: dict[str, str] = {}
 _PLUGIN_HOST_ONLY_TOOLS: set[str] = set()
 # Plugins that touched api.data: their tool results name the scope ("space Alpha Studio").
 _DATA_PLUGINS: set[str] = set()
+# How many of one plugin's tool calls run at once (plugin.json "tool_concurrency"). Agents
+# sharing a tool server call the same plugin from many threads; a plugin that holds one
+# connection (Blender's socket, one SQLite handle, a rate-limited API) declares 1.
+DEFAULT_TOOL_CONCURRENCY = 8
+TOOL_SLOT_WAIT_S = 30.0
+_TOOL_CONCURRENCY: dict[str, int] = {}
+_TOOL_SLOTS: dict[str, threading.BoundedSemaphore] = {}
+_HELD_SLOTS = threading.local()  # plugin ids this thread already holds a slot for
 # Plugins that keep declared folders (team_folders): the reload epoch each was loaded at
 # in this process. Their folders are junctions any process can re-point (a switch, a
 # pull, a project change); a moved epoch means this process reloads the plugin before
@@ -1492,7 +1501,7 @@ def _record_plugin_api_tool(
     tool_name: str,
     *,
     intent: str | None = None,
-    listener: bool = True,
+    listener: bool = False,
 ) -> None:
     """Track a tool registered via ``api.tool()`` (survives contribution reloads)."""
     with _LOCK:
@@ -2759,8 +2768,50 @@ def _resolve_contrib_icon(icon: Any, root: Path) -> str | None:
     return raw  # emoji / short label
 
 
+def manifest_tool_concurrency(manifest: dict[str, Any]) -> int:
+    raw = manifest.get("tool_concurrency")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        return DEFAULT_TOOL_CONCURRENCY
+    return min(raw, 64)
+
+
+def _tool_slots(pid: str) -> tuple[threading.BoundedSemaphore, int]:
+    with _LOCK:
+        limit = _TOOL_CONCURRENCY.get(pid, DEFAULT_TOOL_CONCURRENCY)
+        slots = _TOOL_SLOTS.get(pid)
+        if slots is None:
+            slots = _TOOL_SLOTS[pid] = threading.BoundedSemaphore(limit)
+        return slots, limit
+
+
+@contextlib.contextmanager
+def plugin_tool_slot(pid: str) -> Iterator[None]:
+    """Hold one of ``pid``'s tool slots for a call. A call from inside the same plugin's call
+    (same thread) reuses its slot, so a limit of 1 cannot deadlock the plugin on itself."""
+    held: set[str] = getattr(_HELD_SLOTS, "pids", None) or set()
+    if pid in held:
+        yield
+        return
+    slots, limit = _tool_slots(pid)
+    if not slots.acquire(timeout=TOOL_SLOT_WAIT_S):
+        raise ValueError(
+            f"Plugin '{pid}' is busy ({limit} of its calls are running); try again in a moment."
+        )
+    _HELD_SLOTS.pids = held | {pid}
+    try:
+        yield
+    finally:
+        _HELD_SLOTS.pids = held
+        slots.release()
+
+
 def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool = True) -> None:
     contributes = manifest.get("contributes") if isinstance(manifest.get("contributes"), dict) else {}
+    limit = manifest_tool_concurrency(manifest)
+    with _LOCK:
+        if _TOOL_CONCURRENCY.get(pid) != limit:
+            _TOOL_CONCURRENCY[pid] = limit
+            _TOOL_SLOTS.pop(pid, None)  # calls still running release the old semaphore
     # Refresh this plugin's contrib rows (safe to re-run after a failed register).
     _strip_contributions_for(pid)
 
@@ -3997,6 +4048,11 @@ class _PluginApi:
     def __init__(self, plugin_id: str) -> None:
         self.plugin_id = plugin_id
 
+    def is_app(self) -> bool:
+        """True in the app window's process. ``register()`` also runs in every agent host and
+        tool server, so start threads, timers, servers and ports only ``if api.is_app()``."""
+        return is_app()
+
     def log(self, message: str) -> None:
         """One line in Settings → Logs under this plugin (personal data is scrubbed out)."""
         _log.info("[%s] %s", self.plugin_id, message)
@@ -4229,15 +4285,16 @@ class _PluginApi:
         *,
         name: str | None = None,
         intent: str | None = None,
-        listener: bool = True,
+        listener: bool = False,
     ) -> Any:
         """Register an MCP tool on the app's shared FastMCP server.
 
         Auto-gates on plugin enable + per-chat opt-in. Tool names are tracked for
         intent unlock and the Settings → MCPs tab — no manifest listing required.
 
-        Pass ``listener=False`` for host-only tools (plugin cache, Discord, …) so
-        the agent does not require the UEFN editor listener.
+        Pass ``listener=True`` only when the tool cannot start without the UEFN editor open:
+        it is then refused while UEFN is closed. Every other tool runs whatever UEFN's state
+        (a call that does reach the editor still fails fast on its own).
         """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -4286,7 +4343,7 @@ class _PluginApi:
                 # One tool call is one change to a shared copy, made by the calling agent
                 # (an MCP client of the bridge is an agent even without a ducky's name).
                 actor, ducky = caller("user" if is_app() else "agent")
-                with write_group(pid, actor=actor, ducky=ducky, message=tool_name):
+                with plugin_tool_slot(pid), write_group(pid, actor=actor, ducky=ducky, message=tool_name):
                     # A plugin that keeps declared folders: checked once its call marker is down
                     # (a move of its folders either waited for this call or finished first).
                     fresh = _folder_plugin_call(pid, tool_name, wrapper) if pid in _FOLDER_EPOCH else None

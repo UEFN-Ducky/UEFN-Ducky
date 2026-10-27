@@ -128,6 +128,18 @@ FOLDER_PROJECT_NOTE = (
 )
 
 
+# What still works while the UEFN listener is down. Every agent gets it when UEFN is closed
+# (coding agents too): a bare "listener: offline" read as "can't do anything".
+OFFLINE_RULES = """
+- **Listener offline — file work still proceeds:** creating/editing `Verse/**/*.verse` (`workspace_read_file` → `workspace_write_file`) and `workspace_list_verse_errors` work right now. Never ask the user to deploy the listener before doing file edits — do them immediately. Do **not** reply with "I need the Outliner label" or "open UEFN first" when the task is Verse source logic; read `Verse/` and write the file. When UEFN is open, you compile and wire yourself (`workspace_compile_verse`, `wire_verse_device_ref`) — never hand Details-panel steps to the user.
+- **Digest tools work offline** (disk read): `list_verse_digests`, `search_verse_digest`, `get_verse_api`, `list_verse_types`, `list_verse_modules`, `list_verse_devices`. Use them freely while the listener is down.
+- **No global UEFN gate:** only tools that talk to the live editor (spawn/wire/save/materials/…) need the listener. Verse writes, digests, panel tools (`ducky_*`), Blender (`blender_*`), and web lookup (`web_search`, `web_fetch`, `web_video`, `web_github`) run now — never wait for the listener / "UEFN MCP server" / "tools still loading". A request for pictures is one `web_search` call with `images=true`. That call asks in this chat. Do not answer that the listener is offline instead of calling it.
+- **Delegation works offline:** `ducky_group_create` / `ducky_group_invite` / `ducky_spawn_chat` / `ducky_send_chat_message` — call them immediately.
+- Do **not** call `get_project_info` or other *listener* tools until online. `ducky_get_status` / `ducky_get_local_project` answer status questions; `ducky_get_errors` shows recent failures. Call each of these **at most once per turn** — they do not change on their own, so never poll them in a loop waiting for the listener to come online. If offline, say so and move on.
+- **Another project:** full paths reach every project (`ducky_list_projects` gives them); `ducky_set_project` only when the person asks to switch their selected project.
+"""
+
+
 def folder_project_note(project_root: str) -> str:
     """Runtime-context line for a folder project; empty for an island or no project."""
     root = (project_root or "").strip()
@@ -234,10 +246,10 @@ def get_system_prompt_parts(
         epic_line = (
             f"- Epic UEFN MCP: offline ({epic.get('epic_mcp_reason') or 'unreachable'} "
             f"at {epic.get('epic_mcp_url')}). Greetings, questions and file-only work: "
-            "just answer — do not mention Epic MCP, setup, or reconnect steps. Only if "
-            "the user asked for live editor work (Verse build, devices, entities, PIC) "
-            "paste `epic_mcp_setup_steps` from `ducky_get_status` once and stop. Do not "
-            "use pruned Ducky editor tools.\n"
+            "just answer — do not mention Epic MCP, setup, or reconnect steps. When a step "
+            "needs the live editor (Verse build, devices, entities, PIC), do every other part "
+            "first, then paste `epic_mcp_setup_steps` from `ducky_get_status` once for that "
+            "step. Do not use pruned Ducky editor tools.\n"
         )
     beta_line = ""
     try:
@@ -282,16 +294,7 @@ def get_system_prompt_parts(
         f"{folder_note}"
     )
 
-    offline_rules = ""
-    if not listener_online:
-        offline_rules = """
-- **Listener offline — file work still proceeds:** creating/editing `Verse/**/*.verse` (`workspace_read_file` → `workspace_write_file`) and `workspace_list_verse_errors` work right now. Never ask the user to deploy the listener before doing file edits — do them immediately. Do **not** reply with "I need the Outliner label" or "open UEFN first" when the task is Verse source logic; read `Verse/` and write the file. When UEFN is open, you compile and wire yourself (`workspace_compile_verse`, `wire_verse_device_ref`) — never hand Details-panel steps to the user.
-- **Digest tools work offline** (disk read): `list_verse_digests`, `search_verse_digest`, `get_verse_api`, `list_verse_types`, `list_verse_modules`, `list_verse_devices`. Use them freely while the listener is down.
-- **No global UEFN gate:** only tools that talk to the live editor (spawn/wire/save/materials/…) need the listener. Verse writes, digests, panel tools (`ducky_*`), Blender (`blender_*`), and web lookup (`web_search`, `web_fetch`, `web_video`, `web_github`) run now — never wait for the listener / "UEFN MCP server" / "tools still loading". A request for pictures is one `web_search` call with `images=true`. That call asks in this chat. Do not answer that the listener is offline instead of calling it.
-- **Delegation works offline:** `ducky_group_create` / `ducky_group_invite` / `ducky_spawn_chat` / `ducky_send_chat_message` — call them immediately.
-- Do **not** call `get_project_info` or other *listener* tools until online. `ducky_get_status` / `ducky_get_local_project` answer status questions; `ducky_get_errors` shows recent failures. Call each of these **at most once per turn** — they do not change on their own, so never poll them in a loop waiting for the listener to come online. If offline, say so and move on.
-- **Another project:** full paths reach every project (`ducky_list_projects` gives them); `ducky_set_project` only when the person asks to switch their selected project.
-"""
+    offline_rules = OFFLINE_RULES if not listener_online else ""
     if listener_wedged:
         offline_rules += (
             "- **Listener wedged:** Try `reload_listener` once; if still wedged, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**\n"
@@ -367,12 +370,12 @@ def get_system_prompt_parts(
         f"{runtime_context}"
     )
     # Lazy: FastMCP pulls ~800ms+; only needed when building a live agent prompt.
-    from backend.agent.hard_rules import AGENT_HARD_RULES
+    from backend.agent.hard_rules import hard_rules_for
     from backend.server import mcp
 
     # The server instructions are only a pointer now; the hard rules travel here once
     # (the plan protocol is already in the Plans rule of _rules_body).
-    mcp_block = f"{(mcp.instructions or '').strip()}\n\n{AGENT_HARD_RULES}".strip()
+    mcp_block = f"{(mcp.instructions or '').strip()}\n\n{hard_rules_for(project_root)}".strip()
     try:
         from backend.agent.toolsets.desktop_plugins import enabled_desktop_plugins_prompt_block
 

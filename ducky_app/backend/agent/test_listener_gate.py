@@ -141,6 +141,25 @@ def test_desktop_plugin_host_only_tools_skip_listener_gate(monkeypatch) -> None:
     assert health_calls == []
 
 
+def test_plugin_tools_need_uefn_only_when_they_say_so(monkeypatch) -> None:
+    # A plugin author who never thought about UEFN gets a tool that runs with UEFN closed.
+    import backend.uefn_plugins.host as host
+
+    monkeypatch.setattr(host, "ensure_plugins_loaded", lambda *a, **k: None)
+    for name, fresh in (("_API_TOOL_REGISTRY", {}), ("_PLUGIN_TOOL_NAMES", set()), ("_PLUGIN_TOOL_OWNER", {}),
+                        ("_TOOL_LAST_OWNER", {}), ("_PLUGIN_HOST_ONLY_TOOLS", set()),
+                        ("_PLUGIN_INTENT_ROWS", []), ("_CONTRIBUTIONS", {**host._CONTRIBUTIONS, "agent_tools": {}})):
+        monkeypatch.setattr(host, name, fresh)
+    host._record_plugin_api_tool("demo", "demo_list")
+    host._record_plugin_api_tool("demo", "demo_place", listener=True)
+    assert host.is_plugin_host_only_tool("demo_list")
+    assert not host.is_plugin_host_only_tool("demo_place")
+
+
+def test_offline_hint_says_keep_going() -> None:
+    assert "keep going with the rest" in tools._LISTENER_OFFLINE_HINT
+
+
 def test_a_tool_whose_plugin_failed_to_reload_says_so_not_listener_offline(monkeypatch) -> None:
     # Oct 11 2026: a team's plugin failed to reload mid-edit; its tools fell through to the
     # editor gate, read "UEFN listener offline", and six agents chased the listener.

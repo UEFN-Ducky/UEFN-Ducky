@@ -97,6 +97,14 @@ def inject_bootstrap_if_stale(
     )
 
 
+def _team_cache_env(agent_id: str, conv_id: str) -> dict[str, str]:
+    if agent_id != "claude_code":
+        return {}
+    from backend.agent.coding_agents.session_refresh import team_cache_env
+
+    return team_cache_env(conv_id)
+
+
 def _thinking_env(agent_id: str, thinking_effort: str) -> dict[str, str]:
     """Host effort plus optional plugin ``register_coding_agent(thinking_env=…)``."""
     from backend.agent.thinking_effort import normalize_thinking_effort
@@ -308,6 +316,9 @@ def record_coding_agent_usage(
     limit = int(usage.get("context_limit") or 0)
     if limit > 0:
         stats["context_limit"] = limit
+    expires = usage.get("cache_expires_at")
+    if isinstance(expires, (int, float)) and expires > 0:
+        stats["cache_expires_at"] = float(expires)
     if isinstance(cursor, dict):
         stats["usage_cursor"] = cursor
     if isinstance(cost_cursor, dict):
@@ -925,6 +936,11 @@ def _run_coding_agent_message(
             start_fresh(conv)
             push({"type": "status", "text": "Starting a fresh session: the last one got too big.",
                   "conv_id": conv.id, "run_id": rid})
+    cold_compact = False
+    if adapter.capabilities.resume and not fresh_handoff:
+        from backend.agent.coding_agents.session_refresh import needs_cold_compact
+
+        cold_compact = needs_cold_compact(conv)
     session_id = (
         drop_dead_claude_session(conv, agent_id, project_root)
         if adapter.capabilities.resume
@@ -999,7 +1015,9 @@ def _run_coding_agent_message(
         conv_id=conv.id,
         project_root=project_root,
         extra={**_thinking_env(agent_id, getattr(conv, "thinking_effort", "")),
-               "DUCKY_REQUESTED_MODE": mode},
+               "DUCKY_REQUESTED_MODE": mode,
+               **({"DUCKY_COMPACT_FIRST": "1"} if cold_compact else {}),
+               **_team_cache_env(agent_id, conv.id)},
         identity=run_ctx,
     )
 

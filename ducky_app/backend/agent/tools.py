@@ -748,7 +748,8 @@ def _unknown_tool_text(name: str) -> str:
 _LISTENER_OFFLINE_HINT = (
     "This tool needs the UEFN editor listener (Deploy + open project). "
     "Do NOT retry it until the listener is online — it will keep failing. "
-    "Verse file edits, digests, panel tools (ducky_*), and blender_* work without it."
+    "Skip only this step and keep going with the rest of the task: Verse file edits, "
+    "digests, panel tools (ducky_*), and blender_* work without it."
 )
 
 

@@ -11,8 +11,8 @@ from typing import Any
 
 from backend.agent.coding_agents.core_tools import CORE_TOOLS
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
-from backend.agent.hard_rules import AGENT_HARD_RULES
-from backend.agent.prompt import CHAT_REPORT_RULE
+from backend.agent.hard_rules import hard_rules_for
+from backend.agent.prompt import CHAT_REPORT_RULE, OFFLINE_RULES
 from backend.agent.chat_title import self_naming_instruction
 from backend.workspace.identity import RunContext
 from frontend.mcp_block import build_uefn_server_block
@@ -270,7 +270,13 @@ def bootstrap_system_prompt(
     native_skills: bool = False,
 ) -> str:
     root = (project_root or "").strip() or "(no project selected)"
-    online = "online" if listener_online else "offline"
+    folder_note = _folder_project_note(project_root)
+    if folder_note:
+        listener_line = ""  # a folder project never needs the editor
+    elif listener_online:
+        listener_line = "UEFN listener: online\n"
+    else:
+        listener_line = f"UEFN listener: offline (only live-editor tools wait for it){OFFLINE_RULES}"
     persona = ""
     name = (ducky_name or "").strip()
     personality = (ducky_personality or "").strip()
@@ -310,21 +316,16 @@ def bootstrap_system_prompt(
     return (
         "You are running as a coding agent inside UEFN-Ducky.\n"
         f"Project root: {root}\n"
-        f"{_folder_project_note(project_root)}"
-        f"UEFN listener: {online}\n"
+        f"{folder_note}"
+        f"{listener_line}"
         f"Your agent/chat id: {conv_id}\n"
         f"{persona}"
         f"{self_naming_instruction(ducky_name, conv_id)}"
         f"{skills_block}"
-        f"{AGENT_HARD_RULES}"
+        f"{hard_rules_for(project_root)}"
         "Use the `uefn` MCP server tools to drive Unreal Editor for Fortnite.\n"
         "Do not open interactive shells or ask the user to run CLI installers — "
         "use MCP tools and workspace file edits only.\n"
-        # Source-file pins (test_agent_hardening): keep these literals even though
-        # AGENT_HARD_RULES already states them for the running agent.
-        "Validator errors are not a delete list. "
-        "Never restart UEFN. never restart UEFN so you can delete. "
-        "Opening the current island uses ducky_restart_uefn (publish_private).\n"
         "\n## Chat replies\n"
         f"{CHAT_REPORT_RULE}"
         "\n## UEFN tools\n"

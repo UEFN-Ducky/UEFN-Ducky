@@ -379,16 +379,27 @@ def test_hard_rules_offline_is_not_a_delete_queue():
     assert "restart UEFN after" not in AGENT_HARD_RULES
     assert "workspace_*" in AGENT_HARD_RULES
     assert "reload_listener" in AGENT_HARD_RULES
-    inject = (
-        Path(__file__).resolve().parents[2]
-        / "agent"
-        / "coding_agents"
-        / "mcp_inject.py"
-    ).read_text(encoding="utf-8")
-    assert "never restart UEFN so you can delete" in inject
-    assert "Never restart UEFN" in inject
-    assert "Restart only after reload_listener" not in inject
-    assert "Validator errors are not a delete list" in inject
+    # Every island agent (coding agents included) gets these through ISLAND_RULES.
+    from backend.agent.hard_rules import ISLAND_RULES
+
+    assert "never restart UEFN so you can delete" in ISLAND_RULES
+    assert "Never restart UEFN" in ISLAND_RULES
+    assert "Restart only after reload_listener" not in ISLAND_RULES
+    assert "Validator errors are not a delete list" in ISLAND_RULES
+
+
+def test_folder_projects_skip_island_rules(monkeypatch):
+    from backend.agent import hard_rules as hr
+
+    monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda root: root == "C:/repo")
+    assert hr.hard_rules_for("C:/repo") == hr.CORE_RULES
+    assert "UEFN popups" not in hr.CORE_RULES and "### Verse" not in hr.CORE_RULES
+    assert hr.hard_rules_for("C:/Fortnite Projects/Island") == hr.AGENT_HARD_RULES
+    assert "UEFN popups" in hr.AGENT_HARD_RULES
+    # Teams, plans and the offline rule reach every agent.
+    assert "ducky_swarm_create" in hr.CORE_RULES and "Check off the plan" in hr.CORE_RULES
+    assert "UEFN closed is not a blocker" in hr.CORE_RULES
+    assert len(hr.CORE_RULES) < len(hr.AGENT_HARD_RULES) * 0.6
 
 
 def test_listener_delete_directory_still_refuses():

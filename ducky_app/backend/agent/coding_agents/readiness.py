@@ -1,6 +1,7 @@
 """Keep outside agents behind the app-owned shared tool server's readiness gate."""
 from __future__ import annotations
 
+import os
 import time
 
 from backend.agent.coding_agents.base import CodingAgentLaunchResult
@@ -15,14 +16,19 @@ def launch_with_ready_tools(adapter, **kwargs):
     deadline = time.monotonic() + 20.0
     def cancelled():
         return cancel is not None and cancel.is_set()
+    # In an agent host the shared server is only a speed-up: when it doesn't come up, the
+    # agent's adapter finds no daemon and runs its own tool process, so the turn still runs.
+    in_host = (os.environ.get(shared_mcp.SLOT_ENV) or "").strip().isdigit()
     def failed(status="error"):
+        if in_host and status != "cancelled":
+            return adapter.launch(**kwargs)
         return CodingAgentLaunchResult(ok=False, status=status, upstream_session_id=session,
             error="Cancelled" if status == "cancelled" else "Ducky's tools didn't start")
     if cancelled():
         return failed("cancelled")
     if not shared_mcp.enabled():
-        # Shared tools off (the default): the agent's MCP config starts its own Ducky
-        # tool process, so there is no shared server to wait for.
+        # Shared tools off (outside agent hosts, by default): the agent's MCP config starts
+        # its own Ducky tool process, so there is no shared server to wait for.
         return adapter.launch(**kwargs)
     try:
         started = shared_mcp.start_daemon_from_app()

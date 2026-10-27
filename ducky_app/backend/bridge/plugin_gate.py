@@ -57,6 +57,64 @@ def lean_tool_list(tools: list[Any]) -> list[Any]:
     return [t for t in tools if getattr(t, "name", "") not in hidden]
 
 
+# Arguments the server fills in itself; clients never need to see them.
+_HIDDEN_ARGS = frozenset({"pretty"})
+
+
+def lean_schema(node: Any, *, optional: bool = False) -> Any:
+    """The input schema a client is shown: FastMCP noise every listed tool pays for, dropped.
+
+    Drops ``title`` labels, ``additionalProperties: true``, ``default: null``, the ``pretty``
+    argument and the ``null`` branch of an optional argument's ``anyOf``. Structure that
+    tells the model something (``$ref``/``$defs``, typed ``additionalProperties``, enums,
+    real defaults) stays. Calls are still checked against the full registered schema.
+    """
+    if isinstance(node, list):
+        return [lean_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    required = node.get("required")
+    required_names = set(required) if isinstance(required, list) else set()
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "title" and isinstance(value, str):
+            continue
+        if key == "additionalProperties" and value is True:
+            continue
+        if key == "default" and value is None:
+            continue
+        if key == "properties" and isinstance(value, dict):
+            out[key] = {
+                name: lean_schema(prop, optional=name not in required_names)
+                for name, prop in value.items()
+                if name not in _HIDDEN_ARGS
+            }
+        elif key == "required" and isinstance(value, list):
+            kept = [name for name in value if name not in _HIDDEN_ARGS]
+            if kept:
+                out[key] = kept
+        else:
+            out[key] = lean_schema(value)
+    any_of = out.get("anyOf")
+    if optional and isinstance(any_of, list):
+        branches = [branch for branch in any_of if branch != {"type": "null"}]
+        if len(branches) == 1 and isinstance(branches[0], dict):
+            rest = {k: v for k, v in out.items() if k != "anyOf"}
+            return {**branches[0], **rest}
+        if branches and len(branches) < len(any_of):
+            out["anyOf"] = branches
+    return out
+
+
+def advertised_tool(tool: Any) -> Any:
+    """A copy of ``tool`` with its lean schema. Never edits the tool itself: the SDK's
+    tools/call cache holds the listed objects and validates arguments with them."""
+    schema = getattr(tool, "inputSchema", None)
+    if not isinstance(schema, dict) or not hasattr(tool, "model_copy"):
+        return tool
+    return tool.model_copy(update={"inputSchema": lean_schema(schema)})
+
+
 def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S) -> None:
     """Wrap ListTools / CallTool handlers so they wait for plugin register()."""
     global _installed
@@ -101,7 +159,7 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
         result = await orig_list(req)
         listed = getattr(result, "root", result)
         if isinstance(getattr(listed, "tools", None), list):
-            listed.tools = lean_tool_list(listed.tools)
+            listed.tools = [advertised_tool(t) for t in lean_tool_list(listed.tools)]
         return result
 
     async def call_tool_after_plugins(req: Any) -> Any:

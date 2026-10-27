@@ -237,6 +237,13 @@ export function ContextUsagePanel({
           : "cache miss";
   const cacheHitRate = usage.cache_hit_rate ?? 0;
   const cacheHitRateCumulative = usage.cache_hit_rate_cumulative ?? 0;
+  const cacheExpiresAt = usage.cache_expires_at ?? 0;
+  const cacheState =
+    cacheExpiresAt <= 0
+      ? ""
+      : cacheExpiresAt * 1000 > Date.now()
+        ? ` · cache warm until ${new Date(cacheExpiresAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : " · cache expired (next turn re-sends the history)";
   const callCount = Math.max(0, usage.call_count ?? calls.length);
   const costUsd = typeof usage.cost_usd === "number" ? usage.cost_usd : null;
   const used = Math.max(0, usage.used_tokens);
@@ -244,6 +251,20 @@ export function ContextUsagePanel({
   const pct = fmtPercent(used, limit);
   const actionsDisabled = agentRunning || busy;
   const agentInfo = usage.agent_info;
+  const canCompact = agentInfo?.coding_agent === "claude_code" && Boolean(agentInfo?.session_active);
+
+  // Claude Code summarizes its own session on /compact; the next turns then send far less.
+  const compactSession = useCallback(async () => {
+    const api = getApi();
+    if (!api) return;
+    setBusy(true);
+    try {
+      await api.send_message(convId, "/compact", "agent", model);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }, [convId, model, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -467,8 +488,20 @@ export function ContextUsagePanel({
             {callCount} API call{callCount === 1 ? "" : "s"}
             {cacheHitRate > 0 ? ` · ${cacheHitRate}% cache hit (last call)` : ""}
             {cacheHitRateCumulative > 0 ? ` · ${cacheHitRateCumulative}% overall` : ""}
+            {cacheState}
             {agentRunning ? " · updating live" : ""}
           </div>
+          {canCompact && (
+            <button
+              type="button"
+              className="context-usage-panel-reset-all-btn"
+              disabled={actionsDisabled}
+              title="Ask Claude Code to summarize this session, so the next turns send far fewer tokens"
+              onClick={() => void compactSession()}
+            >
+              Compact session
+            </button>
+          )}
           <p className="context-usage-panel-api-hint">
             {callCount} model call{callCount === 1 ? "" : "s"} in this chat — each step re-sends the prompt, so
             Sent adds up (e.g. 6 steps × ~10K ≈ 60K). Context meter above is one snapshot (~16K). Cached prefix

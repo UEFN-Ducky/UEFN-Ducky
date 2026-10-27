@@ -65,6 +65,7 @@ class Sample:
     webview_cpu: float = 0.0
     tool_cpu: float = 0.0
     free_gb: float | None = None
+    tool_servers: int | None = None  # Ducky tool-server processes alive at this sample
 
 
 @dataclass
@@ -167,6 +168,7 @@ def summarize(run: Run) -> dict[str, Any]:
                           "tool_servers": _avg_max([x.tool_cpu for x in s])},
         "min_free_gb": _r(min((x.free_gb for x in s if x.free_gb is not None), default=None), 2),
         "agents_running_max": max((x.agents_running for x in s if x.agents_running is not None), default=None),
+        "tool_servers_max": max((x.tool_servers for x in s if x.tool_servers is not None), default=None),
         "turns_started": len(sessions),
         "tool_calls": len(tools),
         "tool_calls_per_min": round(len(tools) / minutes, 1),
@@ -178,6 +180,34 @@ def summarize(run: Run) -> dict[str, Any]:
 
 DELIVER_LIMIT_S = 15.0
 STOP_LIMIT_S = 15.0
+
+# --budget: what a run may cost before it fails. Agent hosts seat 4 agents each, and each host
+# shares one tool server, so more tool servers than hosts + 1 means a process per agent again.
+BUDGET_OPEN_P95_S = 1.5
+BUDGET_APP_THREADS = 200
+BUDGET_MEMORY_DROP_GB = 4.0
+AGENTS_PER_HOST = 4
+
+
+def budget_failures(summary: dict[str, Any], free_before_gb: float | None) -> list[str]:
+    """One line per missed budget, naming the measure, its value and the limit ([] = all met)."""
+    failures: list[str] = []
+    agents = int(summary.get("agents") or 0)
+    open_p95 = (summary.get("chat_open_s") or {}).get("p95")
+    if open_p95 is not None and open_p95 > BUDGET_OPEN_P95_S:
+        failures.append(f"p95_open {open_p95} s > {BUDGET_OPEN_P95_S} s ({agents} agents)")
+    threads = summary.get("threads_max")
+    if threads is not None and threads > BUDGET_APP_THREADS:
+        failures.append(f"app_threads {threads} > {BUDGET_APP_THREADS} ({agents} agents)")
+    servers = summary.get("tool_servers_max")
+    allowed = -(-agents // AGENTS_PER_HOST) + 1
+    if servers is not None and servers > allowed:
+        failures.append(f"tool_servers {servers} > {allowed} ({agents} agents, {AGENTS_PER_HOST} per host)")
+    low = summary.get("min_free_gb")
+    if free_before_gb is not None and low is not None and free_before_gb - low > BUDGET_MEMORY_DROP_GB:
+        failures.append(f"memory_drop {round(free_before_gb - low, 2)} GB > {BUDGET_MEMORY_DROP_GB} GB "
+                        f"({agents} agents)")
+    return failures
 
 
 def interrupt_table(run: Run) -> dict[str, Any]:
@@ -265,6 +295,7 @@ def render_md(summary: dict[str, Any], extra: dict[str, Any] | None = None) -> s
         f"| Tool servers CPU avg / max | {cpu['tool_servers']['avg']} / {cpu['tool_servers']['max']} % of PC |",
         f"| Min free memory | {summary['min_free_gb']} GB |",
         f"| Agents running at once (max) | {summary['agents_running_max']} |",
+        f"| Tool servers (max) | {summary.get('tool_servers_max')} |",
         f"| Turns started | {summary['turns_started']} |",
         f"| Tool calls / min | {summary['tool_calls_per_min']} ({summary['tool_calls']} total) |",
         f"| Messages delivered / sent | {summary['messages_delivered']} / {summary['messages_sent']} |",
@@ -426,7 +457,7 @@ class CpuMeter:
 
     def sample(self) -> dict[str, float]:
         now = time.monotonic()
-        out = {"app": 0.0, "webview2": 0.0, "tool": 0.0, "agent": 0.0, "other": 0.0, "agents": 0}
+        out = {"app": 0.0, "webview2": 0.0, "tool": 0.0, "agent": 0.0, "other": 0.0, "agents": 0, "tools": 0}
         cur: dict[int, float] = {}
         try:
             procs = [self.root, *self.root.children(recursive=True)]
@@ -442,6 +473,7 @@ class CpuMeter:
                 continue
             out[role] += max(cur[proc.pid] - self.prev.get(proc.pid, cur[proc.pid]), 0.0) / span * 100.0
             out["agents"] += role == "agent"
+            out["tools"] += role == "tool"
         self.prev, self.prev_t = cur, now
         return out
 
@@ -649,7 +681,7 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
         while not stop.wait(5.0):
             cpu = meter.sample()
             s = Sample(t=time.time(), app_cpu=cpu["app"], webview_cpu=cpu["webview2"], tool_cpu=cpu["tool"],
-                       agents_running=cpu["agents"])
+                       agents_running=cpu["agents"], tool_servers=int(cpu["tools"]))
             try:
                 snap = panel.call("ducky_health_snapshot", timeout=30) or {}
                 app = snap.get("app") or {}
@@ -739,6 +771,8 @@ def main() -> int:
     ap.add_argument("--scenario", default="swarm", choices=("swarm", "interrupt", "memory"),
                     help="interrupt: 3 agents, 10 timed messages and 2 Stops; memory: agents hold --memory-mb")
     ap.add_argument("--memory-mb", type=int, default=0, help="STUB_MEMORY_MB per agent (memory scenario: 300)")
+    ap.add_argument("--budget", action="store_true",
+                    help="exit 1 when chat-open p95, app threads, tool servers or memory miss their budget")
     args = ap.parse_args()
     try:
         import psutil  # noqa: F401
@@ -809,12 +843,15 @@ def main() -> int:
         md += "\n" + render_interrupt_md(results["interrupt"])
     if "memory" in results:
         md += "\n" + render_memory_md(results["memory"])
+    failures = budget_failures(results["summary"], before.get("free_gb")) if args.budget else []
+    if args.budget:
+        md += "\n## Budgets\n\n" + ("\n".join(f"- FAIL {f}" for f in failures) or "- PASS: every budget met") + "\n"
     for key, label in (("pc_before", "PC before"), ("pc_after", "PC after"), ("db", "Database rows")):
         md += f"\n## {label}\n\n```json\n{json.dumps(results[key], indent=1, default=str)[:6000]}\n```\n"
     (out / "results.md").write_text(md, encoding="utf-8")
     print(md)
     print(f"wrote {out / 'results.md'}")
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ Check these before you tell the user a plugin works.
 
 | Problem | Do this |
 |---|---|
-| A tool left at the default `listener=True` is refused with "UEFN listener offline" whenever the UEFN editor is closed. | `@api.tool(listener=False)` on every tool that doesn't call `api.listener` or a UEFN tool. |
+| A tool marked `listener=True` is refused with "UEFN listener offline" whenever the UEFN editor is closed. | Mark only tools that call `api.listener` or a UEFN tool; the default (`listener=False`) always runs. |
 | A panel RPC written as `lambda params=None: …` fails: the host calls RPCs with the panel's params as **keyword arguments** (`fn(**params)`). | Name the parameters: `api.register_panel_rpc("list", lambda kind="": list_items(kind))`. |
 | A tool or node that raises on empty input fails `ducky_plugin_test`. | Return `{"ok": False, "error": "…"}` for missing or bad input. |
 | `ducky_plugin_test` calls every tool and node with empty input, and its throwaway copy covers only the plugin's own data: a default that switches the theme, fires a hook, writes project files or calls UEFN really does it. | No acting defaults (`theme: str = ""`), or list the tool in `agent.tools.destructive_tools`. |

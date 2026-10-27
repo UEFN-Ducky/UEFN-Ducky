@@ -410,6 +410,35 @@ def test_reads_reach_another_of_the_persons_projects_by_absolute_path(project, m
     assert read["path"] == want and read["content"] == "def pick():\n    return AGENT_BACKEND"
     # The open project's own paths stay relative.
     assert _call(wc.workspace_find, "*.ts")["files"] == ["src/pkg/util.ts"]
+    # Text output outside the project names the folder once instead of on every line.
+    text = wc.workspace_search("AGENT_BACKEND", path=str(other), output_mode="files")
+    first, *rows = text.splitlines()
+    assert first.endswith(f"Paths are relative to {str(other).replace(chr(92), '/')}/")
+    assert rows == ["lib/media.py  2"]
+    content = wc.workspace_search("pick", path=str(other))
+    assert content.splitlines()[1] == "lib/media.py:3: def pick():"
+    # Inside the project nothing changes.
+    assert "relative to" not in wc.workspace_search("Store", output_mode="files")
+
+
+def test_big_multi_file_reads_spill_and_page_back(project, monkeypatch, tmp_path) -> None:
+    from backend.agent import tool_spills
+
+    root, _ = project
+    monkeypatch.setattr(tool_spills, "tool_spills_dir", lambda for_write=False: _mkdir(tmp_path / "spills"))
+    for i in range(3):
+        (root / f"big{i}.txt").write_text(("x" * 99 + "\n") * 150, encoding="utf-8")
+    small = wc.workspace_read_files(["big0.txt"])
+    assert small.startswith("big0.txt  lines 1-150 of 150")
+    stub = json.loads(wc.workspace_read_files(["big0.txt", "big1.txt", "big2.txt"]))
+    assert stub["truncated"] is True and stub["chars"] > wc.INLINE_RESULT_CHARS
+    page = tool_spills.read_tool_spill(stub["name"], 0, 200)
+    assert page["chunk"].startswith("big0.txt  lines 1-150 of 150") and page["truncated"]
+
+
+def _mkdir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # ---------------------------------------------------------------- git

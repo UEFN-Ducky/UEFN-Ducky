@@ -1,7 +1,11 @@
 """Shared FastMCP daemon on 127.0.0.1 (token + daemon key).
 
-Default-off. Dedicated ``mcp.run()`` stdio is unchanged. Adapters speak MCP
-to the IDE and length-prefixed JSON frames to this process.
+On by default for agents that run in an agent host: the host's agents share one daemon
+(``UEFN_DUCKY_SHARED_MCP_SLOT`` names its state file), so a turn no longer starts its own
+tool process (backend import + 1,000+ tool registrations) and each host keeps its own GIL.
+Elsewhere (the app, IDE clients) it is off unless Settings or ``UEFN_DUCKY_SHARED_MCP`` turn
+it on. Dedicated ``mcp.run()`` stdio is unchanged. Adapters speak MCP to the agent and
+length-prefixed JSON frames to this process.
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 _ENV = "UEFN_DUCKY_SHARED_MCP"
+# Set by the supervisor on each agent host: its agents, their adapters and its daemon all
+# read and write this host's own state file.
+SLOT_ENV = "UEFN_DUCKY_SHARED_MCP_SLOT"
 _STATE_NAME = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
 # Ducky starts a new agent process every turn. A 3 s idle exit made almost every turn
@@ -70,6 +77,8 @@ def enabled(settings: Any | None = None) -> bool:
         return False
     if raw in ("1", "true", "yes", "on"):
         return True
+    if (os.environ.get(SLOT_ENV) or "").strip().isdigit():
+        return True  # an agent host: its agents share one tool server
     if settings is not None:
         return bool(getattr(settings, "shared_mcp", False))
     try:
@@ -117,7 +126,8 @@ def pipe_name() -> str:
 def state_path() -> Path:
     from frontend.settings import default_app_data_dir
 
-    return default_app_data_dir() / _STATE_NAME
+    slot = (os.environ.get(SLOT_ENV) or "").strip()
+    return default_app_data_dir() / (f"shared_mcp-h{slot}.json" if slot.isdigit() else _STATE_NAME)
 
 
 def keys_compatible(left: dict[str, str], right: dict[str, str]) -> bool:
@@ -444,7 +454,12 @@ def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
     tools = _policy_filtered(_snapshot_tools(mcp))
     if not isinstance(getattr(getattr(mcp, "_tool_manager", None), "_tools", None), dict):
         tools = _run(_async_list_tools(mcp))
-    return [_tool_row(t) for t in tools]
+    from backend.bridge.plugin_gate import lean_schema
+
+    rows = [_tool_row(t) for t in tools]
+    for row in rows:
+        row["inputSchema"] = lean_schema(row["inputSchema"])
+    return rows
 
 
 def _catalog_revision(rows: list[dict[str, Any]]) -> str:

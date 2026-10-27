@@ -61,8 +61,8 @@ def register(api) -> None:
         text = f"{len(assets)} textures in {folder}."
         return {"ok": True, "report": report, "text": text}
 
-    # Calls a UEFN tool, so it keeps the listener gate (no listener=False).
-    @api.tool(intent=r"\b(asset audit|audit (my )?assets)\b")
+    # Calls a UEFN tool, so it asks for the listener gate.
+    @api.tool(intent=r"\b(asset audit|audit (my )?assets)\b", listener=True)
     def asset_audit_run(folder: str = "/Game/") -> dict:
         """Count the textures under a content folder and save the report."""
         return run_audit(folder)

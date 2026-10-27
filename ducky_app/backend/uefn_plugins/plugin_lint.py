@@ -29,7 +29,7 @@ import ast
 import difflib
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 UI_SUFFIXES = frozenset({".html", ".htm", ".css", ".js", ".mjs"})
 _SKIP_PARTS = frozenset({"backend", "skills", "scripts", "deploy", ".git", "__pycache__", ".venv", "node_modules"})
@@ -325,6 +325,60 @@ def _call_name(node: ast.AST) -> str:
     return ""
 
 
+# What register() must not start outside `if api.is_app()`: it runs in every agent host and
+# tool server too, so each would run once per process (duplicate syncs, port clashes).
+_BACKGROUND_STARTS = frozenset({"Thread", "Timer", "Popen", "HTTPServer", "ThreadingHTTPServer",
+                                "bind", "start_new_thread", "serve_forever"})
+
+
+def _mentions_is_app(test: ast.AST) -> bool:
+    return any(isinstance(n, (ast.Attribute, ast.Name)) and _call_name(n) == "is_app" for n in ast.walk(test))
+
+
+def _unguarded_starts(node: ast.AST, guarded: bool) -> Iterator[ast.Call]:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+        return  # runs later, when called, not while register() runs
+    if isinstance(node, ast.If) and _mentions_is_app(node.test):
+        for stmt in node.body:
+            yield from _unguarded_starts(stmt, True)
+        for stmt in node.orelse:
+            yield from _unguarded_starts(stmt, guarded)
+        return
+    if isinstance(node, ast.Call) and not guarded and _call_name(node.func) in _BACKGROUND_STARTS:
+        yield node
+    for child in ast.iter_child_nodes(node):
+        yield from _unguarded_starts(child, guarded)
+
+
+def register_background_issues(root: Path) -> list[str]:
+    """register() code that starts background work in every process instead of only the app."""
+    issues: list[str] = []
+    backend = root / "backend"
+    for py in sorted(backend.rglob("*.py")) if backend.is_dir() else []:
+        if py.name.startswith(("test_", "conftest")):
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+            continue
+        for fn in tree.body:
+            if not isinstance(fn, ast.FunctionDef) or fn.name != "register":
+                continue
+            guarded = False
+            for stmt in fn.body:
+                # `if not api.is_app(): return` guards everything after it.
+                if isinstance(stmt, ast.If) and _mentions_is_app(stmt.test) and any(
+                        isinstance(s, ast.Return) for s in stmt.body):
+                    guarded = True
+                    continue
+                for call in _unguarded_starts(stmt, guarded):
+                    issues.append(
+                        f"{py.relative_to(root).as_posix()}:{call.lineno}: register() starts "
+                        f"{_call_name(call.func)} outside `if api.is_app()`; it will run once per agent process."
+                    )
+    return issues
+
+
 def _first_str(call: ast.Call) -> str:
     if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
         return call.args[0].value
@@ -510,6 +564,7 @@ def check_backend(root: Path, manifest: dict[str, Any], plugin_id: str) -> list[
             f"start.chat → pipeline.agent → {node_id} → pipeline.finish."
         )
     issues.extend(found.source_reads)
+    issues.extend(register_background_issues(root))
     return issues
 
 

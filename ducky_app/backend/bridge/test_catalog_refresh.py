@@ -22,7 +22,11 @@ def test_shared_and_dedicated_rows_match_including_unavailable_metadata(monkeypa
                  meta={"connection_state": "unavailable", "reason": "disconnected"})
     monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=False))
     shared = shared_mcp.list_tools_for_handshake(mcp)
+    from backend.bridge.plugin_gate import lean_schema
+
     dedicated = [shared_mcp._tool_row(t) for t in asyncio.run(mcp.list_tools())]
+    for row in dedicated:
+        row["inputSchema"] = lean_schema(row["inputSchema"])
     assert shared == dedicated
     assert shared[0]["_meta"]["connection_state"] == "unavailable"
     monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=True))

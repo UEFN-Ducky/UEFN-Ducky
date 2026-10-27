@@ -50,6 +50,16 @@ READ_LINE_CAP = 2000
 #: One read never returns more text than this (~50k tokens), whatever the line range: a
 #: minified bundle is a few lines of hundreds of KB each.
 READ_CHAR_CAP = 200_000
+#: A multi-file read or a search answers inline up to this much text. Past it the result goes
+#: to a spill file the agent pages with ducky_read_tool_spill: an agent CLI that saves an
+#: oversized result itself puts it where these tools cannot read it back.
+INLINE_RESULT_CHARS = 30_000
+
+
+def _inline_or_spill(tool: str, text: str) -> str:
+    from backend.agent.tool_spills import inline_or_spill
+
+    return inline_or_spill(tool, text, limit=INLINE_RESULT_CHARS)
 
 
 def chat_file_path(raw: str) -> str:
@@ -461,7 +471,7 @@ def workspace_read_files(
     blocks = [f"{f['path']}  ERROR: {f['error']}" if "error" in f else format_read(f["path"], f) for f in files]
     if more:
         blocks.append(f"[{more}]")
-    return "\n\n".join(b.rstrip("\n") for b in blocks)
+    return _inline_or_spill("workspace_read_files", "\n\n".join(b.rstrip("\n") for b in blocks))
 
 
 # Definitions per language: (regex, kind). The name is the last group that matched.
@@ -955,7 +965,7 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else ('es' if word.endswith('ch') else 's')}"
 
 
-def _search_output(found: _Found, mode: str, context: int, fmt: str, pretty: bool) -> str:
+def _search_output(found: _Found, mode: str, context: int, fmt: str, pretty: bool, under: str = "") -> str:
     total, nfiles = sum(found.counts.values()), len(found.counts)
     if fmt == "json":
         out: dict[str, Any] = {"complete": not found.note}
@@ -984,9 +994,15 @@ def _search_output(found: _Found, mode: str, context: int, fmt: str, pretty: boo
     what = f"{_plural(total, 'match')} in {_plural(nfiles, 'file')}" if total else "no matches"
     searched = f" ({found.files_searched} files searched)" if found.files_searched is not None else ""
     head = f"{found.note} Found so far: {what}." if found.note else f"complete: {what}{searched}"
+    if under:
+        head += f" Paths are relative to {under}/"
+
+    def show(path: str) -> str:
+        return path[len(under) + 1:] if under and path.startswith(under + "/") else path
+
     lines = [head]
     if mode == "files":
-        lines += [f"{p}  {c}" for p, c in found.counts.items()]
+        lines += [f"{show(p)}  {c}" for p, c in found.counts.items()]
     elif mode == "content":
         for path, rows in found.rows.items():
             prev = None
@@ -994,7 +1010,7 @@ def _search_output(found: _Found, mode: str, context: int, fmt: str, pretty: boo
                 if context and prev is not None and n != prev + 1:
                     lines.append("--")
                 text, is_match = rows[n]
-                lines.append(f"{path}:{n}: {text}" if is_match else f"{path}-{n}- {text}")
+                lines.append(f"{show(path)}:{n}: {text}" if is_match else f"{show(path)}-{n}- {text}")
                 prev = n
     return "\n".join(lines)
 
@@ -1021,7 +1037,8 @@ def workspace_search(
     output_mode: "content" (matching lines), "files" (just the files, with hit counts) or
     "count" (totals) — "files" first is cheapest on a broad search.
     The first line says "complete: ..." or "INCOMPLETE: ..." (stopped early: narrow and search
-    again before trusting a miss). Then one "path:line: text" per hit ("path-line- text" for
+    again before trusting a miss); outside the open project it also names the folder the
+    paths are relative to. Then one "path:line: text" per hit ("path-line- text" for
     context lines). format="json" returns {complete, note, matches/files, total_hits}.
     """
     if not (pattern or "").strip():
@@ -1050,7 +1067,12 @@ def workspace_search(
                             policy, deadline)
     if found is None:
         found = _walk_search(start, base, root, globs, rx, context, mode, limit, policy, deadline)
-    return _search_output(found, mode, context, (format or "text").strip().lower(), pretty)
+    fmt = (format or "text").strip().lower()
+    # Outside the open project every path is absolute: name the folder once, not on every line.
+    shown = _rel(start, root)
+    under = (shown if os.path.isdir(start) else os.path.dirname(shown).replace("\\", "/")) if os.path.isabs(shown) else ""
+    text = _search_output(found, mode, context, fmt, pretty, under=under.rstrip("/"))
+    return text if fmt == "json" else _inline_or_spill("workspace_search", text)
 
 
 def _git_list(start: str, policy: Any, timeout: float = _SEARCH_SECONDS) -> Optional[list[str]]:

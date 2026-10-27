@@ -927,6 +927,7 @@ def _external_agent_report(
         "total_cache_write": int(usage_report.get("total_cache_write") or 0),
         "cache_hit_rate": float(usage_report.get("cache_hit_rate") or 0),
         "cache_hit_rate_cumulative": float(usage_report.get("cache_hit_rate_cumulative") or 0),
+        "cache_expires_at": float(stats.get("cache_expires_at") or 0) or None,
         "call_count": int(usage_report.get("call_count") or 0),
         "calls": priced_calls,
         "cost_usd": cost_usd,

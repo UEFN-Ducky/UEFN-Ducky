@@ -124,8 +124,8 @@ def register(api) -> None:
         except (ConnectionError, RuntimeError, TimeoutError) as exc:
             return {"ok": False, "error": f"UEFN didn't answer: {exc}"}
 
-    # Talks to UEFN: keep the listener gate (no listener=False).
-    @api.tool()
+    # Talks to UEFN: ask for the listener gate.
+    @api.tool(listener=True)
     def prop_census_count(class_name: str = "StaticMeshActor") -> dict:
         """Count the actors of one class in the open UEFN level."""
         return count(class_name)

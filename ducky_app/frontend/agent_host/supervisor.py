@@ -200,7 +200,8 @@ class Supervisor:
         tag = f"{slot}-{os.urandom(3).hex()}"  # a restarted slot never reuses a pipe name
         name = protocol.pipe_name(tag)
         listener = protocol.listen(tag, key)
-        env = {**os.environ, KEY_ENV: key.hex()}
+        # The slot's agents share one Ducky tool server (backend.bridge.shared_mcp).
+        env = {**os.environ, KEY_ENV: key.hex(), "UEFN_DUCKY_SHARED_MCP_SLOT": str(slot)}
         try:
             # ponytail: no job memory cap here; turn admission (p5-admit) keeps memory in check.
             launched = jobs.Launched(

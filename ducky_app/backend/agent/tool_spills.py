@@ -93,8 +93,8 @@ def spill_tool_result(tool_name: str, text: str) -> str:
     return json.dumps(stub, ensure_ascii=False)
 
 
-def inline_or_spill(tool_name: str, text: str) -> str:
-    if len(text) <= INLINE_MAX:
+def inline_or_spill(tool_name: str, text: str, limit: int = INLINE_MAX) -> str:
+    if len(text) <= limit:
         return text
     return spill_tool_result(tool_name, text)
 

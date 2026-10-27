@@ -51,8 +51,8 @@ free ones too. See `plugin_publishing`.
    `ducky_store_update`) is the user's call: ask first.
 4. **Every user action is an MCP tool and a workflow node.** `@api.tool()` for each
    action (list / get / create / update / delete, not a lone ping). Pass
-   `listener=False` unless the tool talks to the UEFN editor (`api.listener` or a UEFN
-   tool): Ducky refuses `listener=True` tools while UEFN is closed. Panel buttons call
+   `listener=True` only when the tool cannot start without the UEFN editor (`api.listener`
+   or a UEFN tool): Ducky refuses those while UEFN is closed; every other tool always runs. Panel buttons call
    `plugin.call` RPCs that run the **same** functions. Each action also has a workflow
    node (`contributes.automations.nodes` + `@api.register_pipeline_node`) and a
    template that uses it (`start.chat` → `pipeline.agent` → your node →
@@ -166,7 +166,7 @@ Top level: `id`, `"kind": "plugin"`, `version`, `label`, `description`,
 settings), `contributes`, `"backend": {"entry": "backend", "register": "register"}`.
 `"data_sharing"`: `true` (teammates can share its data) or `false` (always Local); a
 Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_local`,
-`team_folders` (`plugin_data`).
+`team_folders` (`plugin_data`), `tool_concurrency` (see "Many agents at once").
 
 | `contributes` key | What | Example in |
 |---|---|---|
@@ -187,7 +187,7 @@ Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_l
 
 | Call | Use |
 |---|---|
-| `@api.tool(name=None, intent=None, listener=True)` | MCP tool. Docstring = description. `listener=False` unless it calls the UEFN editor. Return a dict. |
+| `@api.tool(name=None, intent=None, listener=False)` | MCP tool. Docstring = description. `listener=True` only if it needs the UEFN editor open. Return a dict. |
 | `@api.register_pipeline_node("<id>.<node>")` | Workflow node handler `fn(ctx) -> dict` (alias `register_automation_node`). |
 | `api.register_panel_rpc(name, fn)` | Panel `plugin.call` target. `fn` is called with **keyword** arguments: `fn(**params)`. |
 | `api.call_tool(name, arguments=None)` | Call any Ducky MCP tool in-process, with the same approvals as the agent; returns the parsed result, raises `ValueError` on failure. |
@@ -225,6 +225,22 @@ prefs_plugin_get` then `prefs_plugin_get(api.plugin_id).get("<property id>")`.
 Push a live update to your panels: `from frontend.ui_web.verse_editor.panel_events
 import push_agent_event` then `push_agent_event({"type": "<id>_changed", …})`; the
 panel subscribes with `plugin.subscribe`.
+
+### Many agents at once
+
+A team can call one plugin from many agents at the same time, and `register()` runs in
+every Ducky process (the app, each agent host, each tool server). Five rules:
+
+1. **Background work only in the app:** start threads, timers, servers, ports and
+   subprocesses only `if api.is_app():` (or `if not api.is_app(): return` first).
+   Validate warns about any that `register()` starts unguarded.
+2. **No per-call state in module globals:** take it from the arguments or keep it in
+   `api.data`; two calls run at the same time.
+3. **Short tools:** under about 5 s of CPU per call. Longer work goes in a subprocess or a
+   workflow node, so it never holds the tool server.
+4. **One connection? Say so:** `"tool_concurrency": 1` in plugin.json runs one call at a
+   time (default 8). A call that waits past 30 s answers "plugin busy".
+5. **Small results:** return what the agent needs; Ducky spills big ones to a file.
 
 ### In the chat: a tool's card shows what it made
 

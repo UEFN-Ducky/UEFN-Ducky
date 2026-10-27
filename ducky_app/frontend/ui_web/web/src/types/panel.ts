@@ -2920,6 +2920,8 @@ export interface ContextUsage {
   cache_hit_rate?: number;
   /** Cache hit rate across every logged call (total_cache_read / total_input), vs cache_hit_rate's last-call-only figure. */
   cache_hit_rate_cumulative?: number;
+  /** Unix seconds when the agent's prompt cache goes cold; after it the next turn re-sends the history uncached. */
+  cache_expires_at?: number | null;
   call_count?: number;
   calls?: TokenUsageCall[];
   cost_usd?: number | null;

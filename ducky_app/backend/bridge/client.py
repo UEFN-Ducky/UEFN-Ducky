@@ -305,8 +305,9 @@ def configured_listener_port() -> int:
 def _listener_unreachable_error() -> ConnectionError:
     return ConnectionError(
         f"UEFN listener offline on port {configured_listener_port()}. "
-        "Do NOT retry until online. Verse file edits / workspace_list_verse_errors / digests / "
-        "ducky_* / blender_* work without it. "
+        "Do NOT retry until online. This step needs UEFN open: skip it and keep going with the "
+        "rest. Verse file edits / workspace_list_verse_errors / digests / ducky_* / blender_* "
+        "work without it. "
         "Start listener: Deploy in the panel, or Tools → Execute Python Script → "
         "ducky_app/uefn_listener/launch_listener.py"
     )
@@ -396,8 +397,9 @@ def post_command_to_listener(
     if listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC) is None:
         raise ConnectionError(
             f"UEFN listener offline on port {port}. "
-            "Do NOT retry until the listener is online — Verse file edits, digests, "
-            "panel tools (ducky_*), and blender_* work without it. Use workspace_* for Verse errors."
+            "Do NOT retry until the listener is online. This step needs UEFN open: skip it and "
+            "keep going with the rest — Verse file edits, digests, panel tools (ducky_*), and "
+            "blender_* work without it. Use workspace_* for Verse errors."
         )
     t_lock0 = time.perf_counter()
     try:

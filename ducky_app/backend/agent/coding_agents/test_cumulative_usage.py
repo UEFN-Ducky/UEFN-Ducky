@@ -21,6 +21,16 @@ def recorder(monkeypatch):
     return conv, rows, record
 
 
+def test_cache_expiry_is_kept_with_the_chat_stats(monkeypatch):
+    monkeypatch.setattr(provider_usage_log, "log_call", lambda **kw: None)
+    conv = SimpleNamespace(id="t", token_usage=None, coding_agent_stats={}, messages=[])
+    usage = dict(input_tokens=1, output_tokens=1, cache_read_tokens=5, cache_expires_at=1_800_000_300.0)
+    record_coding_agent_usage(conv, "claude_code", "m", SimpleNamespace(usage=usage))
+    assert conv.coding_agent_stats["cache_expires_at"] == 1_800_000_300.0
+    record_coding_agent_usage(conv, "claude_code", "m", SimpleNamespace(usage=dict(input_tokens=1)))
+    assert "cache_expires_at" not in conv.coding_agent_stats
+
+
 def test_three_turns_only_record_deltas(recorder):
     conv, rows, record = recorder
     record(40, 60, 5)

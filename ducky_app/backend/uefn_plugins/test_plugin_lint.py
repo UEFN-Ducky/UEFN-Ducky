@@ -16,6 +16,31 @@ def _write(root: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def test_register_starts_background_work_only_in_the_app(tmp_path: Path) -> None:
+    from backend.uefn_plugins.plugin_lint import register_background_issues
+
+    _write(tmp_path, "backend/__init__.py", (
+        "import threading\n"
+        "def register(api):\n"
+        "    threading.Thread(target=lambda: None).start()\n"      # warns: every process
+        "    if api.is_app():\n"
+        "        threading.Timer(5, lambda: None).start()\n"       # fine: app only
+        "    def later():\n"
+        "        threading.Thread(target=lambda: None).start()\n"  # fine: runs when called\n"
+        "    api.tool()(later)\n"
+    ))
+    _write(tmp_path, "backend/guarded.py", (
+        "import socket\n"
+        "def register(api):\n"
+        "    if not api.is_app():\n"
+        "        return\n"
+        "    socket.socket().bind(('127.0.0.1', 0))\n"            # fine: after the early return
+    ))
+    issues = register_background_issues(tmp_path)
+    assert issues == ["backend/__init__.py:3: register() starts Thread outside `if api.is_app()`; "
+                      "it will run once per agent process."]
+
+
 def test_color_literals_are_rejected_in_css_html_and_js_but_not_where_they_mean_something_else(tmp_path: Path) -> None:
     _write(tmp_path, "ui/app.css", (
         "#main .red, a[href='#fff'] { color: #fff; background: url(img/#abc.png); }\n"

@@ -27,6 +27,26 @@ def _run(**kw):
     return run
 
 
+def test_budgets_name_each_miss_and_pass_when_met():
+    good = {"agents": 16, "chat_open_s": {"p95": 1.2}, "threads_max": 150, "tool_servers_max": 5, "min_free_gb": 10.0}
+    assert soak.budget_failures(good, free_before_gb=12.0) == []
+    bad = {**good, "chat_open_s": {"p95": 4.2}, "threads_max": 539, "tool_servers_max": 17, "min_free_gb": 3.0}
+    failures = soak.budget_failures(bad, free_before_gb=12.0)
+    assert failures == [
+        "p95_open 4.2 s > 1.5 s (16 agents)",
+        "app_threads 539 > 200 (16 agents)",
+        "tool_servers 17 > 5 (16 agents, 4 per host)",
+        "memory_drop 9.0 GB > 4.0 GB (16 agents)",
+    ]
+    # Unknown measures are not failures.
+    assert soak.budget_failures({"agents": 32}, free_before_gb=None) == []
+
+
+def test_tool_servers_are_counted_per_sample():
+    s = soak.summarize(_run(samples=[soak.Sample(t=1.0, tool_servers=3), soak.Sample(t=2.0, tool_servers=9)]))
+    assert s["tool_servers_max"] == 9
+
+
 def test_percentile_interpolates_and_handles_empty():
     assert soak.percentile([], 95) is None
     assert soak.percentile([5.0], 95) == 5.0

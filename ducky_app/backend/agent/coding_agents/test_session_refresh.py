@@ -22,6 +22,31 @@ def _conv(tokens: int, session: str = "thread-1") -> SimpleNamespace:
     )
 
 
+@pytest.mark.parametrize("tokens,expires,session,want", [
+    (250_000, 900.0, "thread-1", True),    # big and cold: compact first
+    (250_000, 1100.0, "thread-1", False),  # cache still warm
+    (50_000, 900.0, "thread-1", False),    # small: a cold resume is cheap
+    (250_000, 0.0, "thread-1", False),     # no cache info
+    (250_000, 900.0, "", False),           # nothing to resume
+])
+def test_cold_big_sessions_compact_first(tokens, expires, session, want):
+    conv = _conv(tokens, session)
+    conv.coding_agent_stats["cache_expires_at"] = expires
+    assert sr.needs_cold_compact(conv, now=1000.0) is want
+
+
+def test_team_chats_get_the_hour_long_cache(monkeypatch):
+    from backend.agent.coding_agents.runner import _team_cache_env
+
+    monkeypatch.delenv("CLAUDE_CODE_PROMPT_CACHE_TTL", raising=False)
+    monkeypatch.setattr(sr, "_team_chat", lambda conv_id: conv_id == "member")
+    assert _team_cache_env("claude_code", "member") == {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"}
+    assert _team_cache_env("claude_code", "solo") == {}
+    assert _team_cache_env("codex", "member") == {}
+    monkeypatch.setenv("CLAUDE_CODE_PROMPT_CACHE_TTL", "5m")
+    assert _team_cache_env("claude_code", "member") == {}
+
+
 @pytest.fixture
 def in_team(monkeypatch):
     monkeypatch.setattr(sr, "_team_chat", lambda conv_id: True)

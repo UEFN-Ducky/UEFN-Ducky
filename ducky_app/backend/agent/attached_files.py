@@ -17,6 +17,9 @@ _EMBEDDED_DATA = re.compile(r"(?:data:[\w.+/-]+;base64,)?[A-Za-z0-9+/]{400,}={0,
 _WRAP_AT = 1000
 # Share of the model's context window one message's files may fill when pasted whole.
 INLINE_SHARE_OF_CONTEXT = 0.10
+# ...and never more than this (~32 KiB of text): a bigger file is saved and read in parts, not
+# re-sent whole on every later turn (10% of a 1M window was 100K tokens per message).
+INLINE_MAX_TOKENS = 8_000
 _HEAD_LINES = 120
 _HEAD_CHARS = 8000
 _HEADINGS = re.compile(r"^\s{0,3}(#{1,3})\s+(.+)$|<h([1-3])[^>]*>(.*?)</h\3>", re.IGNORECASE | re.MULTILINE)
@@ -70,7 +73,7 @@ def readable_copy_path(full: Path) -> Path:
 
 def inline_token_budget(context_tokens: int) -> int:
     """Tokens of file text one message may paste whole; 0 = the window is unknown."""
-    return int(max(0, context_tokens) * INLINE_SHARE_OF_CONTEXT)
+    return min(int(max(0, context_tokens) * INLINE_SHARE_OF_CONTEXT), INLINE_MAX_TOKENS)
 
 
 def _headings(text: str, limit: int = 40) -> list[str]:

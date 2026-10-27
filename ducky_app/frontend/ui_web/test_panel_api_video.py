@@ -99,9 +99,17 @@ def test_file_limit_follows_the_picked_model(monkeypatch):
     assert (unknown["context_tokens"], unknown["file_max_tokens"]) == (0, 0)
     # A model that can call tools reads a big file in parts: no cap, only a paste-whole share.
     tools = api.get_video_settings("c1", "tools-1")["auto"]
-    assert (tools["file_max_tokens"], tools["file_inline_tokens"]) == (0, 40_000)
+    assert (tools["file_max_tokens"], tools["file_inline_tokens"]) == (0, 8_000)
     coding = api.get_video_settings("c1", "big-1", "codex")["auto"]
     assert coding["file_max_tokens"] == 0
+
+
+def test_pasted_file_text_is_capped_whatever_the_window():
+    from backend.agent.attached_files import INLINE_MAX_TOKENS, inline_token_budget
+
+    assert inline_token_budget(1_000_000) == INLINE_MAX_TOKENS == 8_000
+    assert inline_token_budget(50_000) == 5_000
+    assert inline_token_budget(0) == 0
 
 
 def test_stage_prep_uses_model_frames(monkeypatch):

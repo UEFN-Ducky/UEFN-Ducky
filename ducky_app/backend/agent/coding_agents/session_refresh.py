@@ -14,6 +14,8 @@ import time
 from typing import Any
 
 FRESH_SESSION_TOKENS = 2_000_000
+# Below this a cold resume costs little; compacting would lose more than it saves.
+COLD_COMPACT_TOKENS = 200_000
 _LAST_REPLIES = 5
 _REPLY_CHARS = 1200
 
@@ -45,6 +47,32 @@ def needs_fresh_session(conv: Any) -> bool:
     if _turn_tokens(conv) < FRESH_SESSION_TOKENS:
         return False
     return _team_chat(str(getattr(conv, "id", "") or ""))
+
+
+def team_cache_env(conv_id: str) -> dict[str, str]:
+    """A team chat waits on its teammates longer than Claude's 5-minute prompt cache, so every
+    wake re-sent its whole prompt uncached. A 1 h cache write costs 2x instead of 1.25x and pays
+    for itself on the first hit after a gap over 5 minutes. A value the user set wins."""
+    import os
+
+    if "CLAUDE_CODE_PROMPT_CACHE_TTL" in os.environ or not _team_chat(conv_id):
+        return {}
+    return {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"}
+
+
+def needs_cold_compact(conv: Any, now: float | None = None) -> bool:
+    """The resumed session is big and its prompt cache has expired: the next turn would re-send
+    all of it uncached, so the agent compacts it first (Claude Code honors DUCKY_COMPACT_FIRST)."""
+    if not str(getattr(conv, "upstream_session_id", "") or "").strip():
+        return False
+    stats = getattr(conv, "coding_agent_stats", None)
+    if not isinstance(stats, dict):
+        return False
+    try:
+        expires = float(stats.get("cache_expires_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    return 0 < expires < (time.time() if now is None else now) and _turn_tokens(conv) >= COLD_COMPACT_TOKENS
 
 
 def _last_replies(conv: Any) -> list[str]:
