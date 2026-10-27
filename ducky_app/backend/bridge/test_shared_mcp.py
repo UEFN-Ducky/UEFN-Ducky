@@ -115,7 +115,8 @@ def test_agent_hosts_share_one_server_each(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
     monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "2")
-    assert shared_mcp.enabled(PanelSettings()) is True
+    assert shared_mcp.enabled(PanelSettings()) is False  # opt-in until measured on a real build
+    assert shared_mcp.enabled(PanelSettings(shared_mcp=True)) is True
     assert shared_mcp.state_path() == tmp_path / "shared_mcp-h2.json"
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "5")
     assert shared_mcp.state_path() == tmp_path / "shared_mcp-h5.json"
