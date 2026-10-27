@@ -39,7 +39,7 @@ def test_the_ui_kit_uses_only_appearance_variables_and_no_color_literals(tmp_pat
 def test_panel_pages_get_the_error_reporter_and_pointers_after_head_never_before_the_doctype() -> None:
     from backend.uefn_plugins.webview import with_panel_error_script
 
-    script = (ui_kit.PANEL_ERROR_SCRIPT + ui_kit.LIVE_PRESENCE_SCRIPT).encode()
+    script = (ui_kit.PANEL_SCROLLBAR_STYLE + ui_kit.PANEL_ERROR_SCRIPT + ui_kit.LIVE_PRESENCE_SCRIPT).encode()
     page = b"<!doctype html><html><head><title>x</title></head><body></body></html>"
     out = with_panel_error_script(page)
     assert out.startswith(b"<!doctype html><html><head>" + script)
@@ -47,3 +47,13 @@ def test_panel_pages_get_the_error_reporter_and_pointers_after_head_never_before
     assert bare.startswith(b"<!DOCTYPE html>" + script)
     assert with_panel_error_script(b"<div>hi</div>") == script + b"<div>hi</div>"
     assert with_panel_error_script(b"<html><header>x</header></html>").startswith(b"<html>" + script)
+
+
+def test_every_panel_page_gets_the_apps_hover_only_scrollbars_without_beating_its_own() -> None:
+    style = ui_kit.PANEL_SCROLLBAR_STYLE
+    assert style.startswith("<style>") and "scrollbar-width:thin;scrollbar-color:transparent transparent" in style
+    assert "{scrollbar-color:var(--border-light" in style and ":hover)" in style
+    # Every rule is zero-specificity and steps aside for a page with its own ::-webkit-scrollbar styles.
+    rules = style.split("<style>")[1].split("</style>")[0]
+    assert all(sel.startswith(":where(") for block in rules.split("}") if block for sel in block.split("{")[0].split(","))
+    assert "data-dk-own-scrollbars" in rules and "'::-webkit-scrollbar'" in style

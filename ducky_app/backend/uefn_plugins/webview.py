@@ -166,18 +166,19 @@ _HTML_HEAD_RE = re.compile(rb"<head\b[^>]*>|<html\b[^>]*>|<!doctype\b[^>]*>", re
 
 
 def with_panel_error_script(html: bytes) -> bytes:
-    """``html`` with the panel error reporter (``ui_kit.PANEL_ERROR_SCRIPT``) and the live
-    pointers and names (``ui_kit.LIVE_PRESENCE_SCRIPT``) first: right after ``<head>`` (else
-    ``<html>``, else the doctype, so the page never drops into quirks mode), before any of
-    the plugin's own scripts run."""
-    from backend.uefn_plugins.ui_kit import LIVE_PRESENCE_SCRIPT, PANEL_ERROR_SCRIPT
+    """``html`` with the app's scrollbars (``ui_kit.PANEL_SCROLLBAR_STYLE``), the panel error
+    reporter (``ui_kit.PANEL_ERROR_SCRIPT``) and the live pointers and names
+    (``ui_kit.LIVE_PRESENCE_SCRIPT``) first: right after ``<head>`` (else ``<html>``, else the
+    doctype, so the page never drops into quirks mode), before any of the plugin's own styles
+    and scripts."""
+    from backend.uefn_plugins.ui_kit import LIVE_PRESENCE_SCRIPT, PANEL_ERROR_SCRIPT, PANEL_SCROLLBAR_STYLE
 
     found: dict[bytes, re.Match[bytes]] = {}
     for m in _HTML_HEAD_RE.finditer(html[:8192]):
         found.setdefault(m.group(0)[:5].lower(), m)
     at = next((found[tag] for tag in (b"<head", b"<html", b"<!doc") if tag in found), None)
     cut = at.end() if at is not None else 0
-    return html[:cut] + (PANEL_ERROR_SCRIPT + LIVE_PRESENCE_SCRIPT).encode("utf-8") + html[cut:]
+    return html[:cut] + (PANEL_SCROLLBAR_STYLE + PANEL_ERROR_SCRIPT + LIVE_PRESENCE_SCRIPT).encode("utf-8") + html[cut:]
 
 
 def try_serve_plugin_ui_kit(handler: Any, rel_path: str) -> bool:

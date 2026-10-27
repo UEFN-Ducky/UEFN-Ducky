@@ -383,6 +383,28 @@ JS = """\
 })();
 """
 
+# Put first in every plugin HTML page (webview.py), kit or not: the app's own scrollbars (global.css),
+# thin and hidden until the scrolling area is hovered, so no plugin writes them. Zero specificity
+# (:where) and before the plugin's CSS: a plugin's own scrollbar-width / -color wins. Those
+# properties switch off ::-webkit-scrollbar styling in Chromium, so a page that styles its
+# scrollbars that way gets html[data-dk-own-scrollbars] and these rules step aside (a rule that
+# only hides one, display: none, doesn't count).
+PANEL_SCROLLBAR_STYLE = (
+    "<style>"
+    ":where(html:not([data-dk-own-scrollbars])),:where(html:not([data-dk-own-scrollbars]) *)"
+    "{scrollbar-width:thin;scrollbar-color:transparent transparent}"
+    ":where(html:not([data-dk-own-scrollbars]):hover),:where(html:not([data-dk-own-scrollbars]) *:hover)"
+    "{scrollbar-color:var(--border-light,rgba(128,128,128,.45)) transparent}"
+    "</style>"
+    "<script>(function(){var mine=document.currentScript&&document.currentScript.previousElementSibling;"
+    "function own(rules){for(var i=0;i<rules.length;i++){var r=rules[i];"
+    "if(r.selectorText&&r.selectorText.indexOf('::-webkit-scrollbar')>=0&&r.style.display!=='none')return true;"
+    "if(r.cssRules&&own(r.cssRules))return true}return false}"
+    "function look(){var s=document.styleSheets;for(var i=0;i<s.length;i++){if(s[i].ownerNode===mine)continue;"
+    "try{if(own(s[i].cssRules)){document.documentElement.setAttribute('data-dk-own-scrollbars','');return}}catch(e){}}}"
+    "document.addEventListener('DOMContentLoaded',look);window.addEventListener('load',look)})();</script>"
+)
+
 # Put first in every plugin HTML page (webview.py). At most 20 reports per page load.
 PANEL_ERROR_SCRIPT = (
     "<script>(function(){var C='uefn-plugin-ui',n=0;"
