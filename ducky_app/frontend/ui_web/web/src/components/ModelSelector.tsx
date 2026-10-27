@@ -134,6 +134,8 @@ interface ModelSelectorProps {
   requireVision?: boolean;
   /** API models only: no coding agents (Claude Code, Codex) under the gateways. */
   apiOnly?: boolean;
+  /** Gateways whose own models are left out; one still shows when an extra row is under it. */
+  hideProviders?: string[];
   /** Told when the menu opens or closes. */
   onOpenChange?: (open: boolean) => void;
   /** Close the menu once a model is picked. */
@@ -162,6 +164,7 @@ export function ModelSelector({
   extraRows,
   requireVision = false,
   apiOnly = false,
+  hideProviders,
   onOpenChange,
   closeOnPick = false,
 }: ModelSelectorProps) {
@@ -191,14 +194,25 @@ export function ModelSelector({
   const histCountRef = useRef(0);
   const suppressPopRef = useRef(false);
 
+  const hidden = useMemo(() => new Set((hideProviders ?? []).map(normId)), [hideProviders]);
+
   const visibleModels = useMemo(() => {
-    const base = models.filter((m) => (!requireTools || m.supportsTools) && (!requireVision || m.supportsVision));
+    const base = models.filter(
+      (m) =>
+        (!requireTools || m.supportsTools) &&
+        (!requireVision || m.supportsVision) &&
+        !hidden.has(normId(m.providerKey)),
+    );
     return extraRows?.length ? [...extraRows, ...base] : base;
-  }, [models, requireTools, requireVision, extraRows]);
+  }, [models, requireTools, requireVision, extraRows, hidden]);
 
   const gateways = useMemo(() => {
     let out = buildPickerGateways(contrib.llm_providers, agents, contrib.llm_coding_agents);
     if (apiOnly) out = out.map((g) => ({ ...g, nestedAgents: [], primaryAgentId: null }));
+    if (hidden.size) {
+      const kept = new Set((extraRows ?? []).map((row) => normId(row.providerKey)));
+      out = out.filter((g) => !hidden.has(g.providerKey) || kept.has(g.providerKey));
+    }
     const own: PickerGateway[] = [];
     for (const row of extraRows ?? []) {
       const key = normId(row.providerKey);
@@ -206,7 +220,7 @@ export function ModelSelector({
       own.push({ id: key, label: row.provider, providerKey: key, pluginId: "", order: -1, nestedAgents: [], primaryAgentId: null, showsThinkingEffort: false });
     }
     return [...own, ...out];
-  }, [contrib.llm_providers, contrib.llm_coding_agents, agents, apiOnly, extraRows]);
+  }, [contrib.llm_providers, contrib.llm_coding_agents, agents, apiOnly, extraRows, hidden]);
 
   const syncFromCatalog = useCallback((allModels: CatalogModelRow[]) => {
     setModels(allModels);

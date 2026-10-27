@@ -285,7 +285,7 @@ Panels are sandboxed iframes that talk to the host with `postMessage` on channel
 | `files.dropped` | `{names?}` → `{files: [{path, name, kind, url}]}`: real paths of files just dropped from Explorer on the panel. A DOM `drop` only sees names: call this from your `drop` handler. |
 | `ui.confirm` | `{message, title?, confirm?, cancel?, danger?}` → `{confirmed}`: Ducky's own "are you sure?" dialog. Never `window.confirm` or a bar inside the panel. |
 | `ui.alert` | `{message, title?, ok?}` → `{ok}`: Ducky's own message dialog |
-| `ui.pickModel` | `{purpose?: "chat"\|"video", current?, title?}` → `{model, name}` (`model: ""` when cancelled): Ducky's own model picker |
+| `ui.pickModel` | `{purpose?: "chat"\|"video", current?, title?, extra?, hide?, anchor?}` → `{model, name}` (`model: ""` when cancelled): Ducky's own model picker. `extra`: your own rows `[{id, name, group, note?, vision?}]`; `hide`: gateway ids whose own models are left out (`["uefn_ducky"]`); `anchor`: your button's box, so the menu drops down from it |
 | `models.list` | → `{default_model, models: [{id, name, provider, provider_key, is_local, supports_vision}]}`: the chat models `llm.complete` accepts |
 | `llm.complete` | `{system, user, model?}` → text from the user's chosen model |
 | `audio.recordStart` / `audio.recordStop` / `audio.recordCancel` | → `{id}`; `{id}` → `{b64, mime, seconds, bytes}`; `{id}`: record from the microphone in the host window (panels have no microphone) |

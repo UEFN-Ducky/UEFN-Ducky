@@ -714,6 +714,7 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
       current: typeof params.current === "string" ? params.current : "",
       title: typeof params.title === "string" ? params.title : "",
       extra: params.extra,
+      hide: params.hide,
       anchor: panelBoxOnPage(ctx.iframe, params.anchor),
     });
     return picked ?? { model: "", name: "" };

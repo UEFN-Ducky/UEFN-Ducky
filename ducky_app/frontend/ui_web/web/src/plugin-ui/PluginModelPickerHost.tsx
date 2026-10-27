@@ -9,8 +9,9 @@
  * or Claude Code are offered too, like a workflow node's model picker.
  *
  * `extra` adds the plugin's own rows ({id, name, group, note?, vision?}), each group its own
- * accordion: Play Tester lists Jev under TypeSafe and Ducky AI, tagged "Not for chat". A picked
- * extra row comes back as its id, as given.
+ * accordion: Play Tester lists Jev under TypeSafe, tagged "Not for chat". A picked extra row comes
+ * back as its id, as given. `hide` (gateway ids) leaves those gateways' own models out: Play Tester
+ * hides Ducky AI's chat model, and keeps its own Jev row there only with a Ducky AI plan.
  *
  * With `anchor` (the panel button's box in app coordinates) there is no dialog: the same
  * gateway menu as the chat composer drops down from that button, API models only, and the
@@ -34,6 +35,7 @@ interface PickRequest {
   current: string;
   title: string;
   extra: CatalogModelRow[];
+  hide: string[];
   anchor: PickAnchor | null;
   resolve: (result: ModelPickResult | null) => void;
 }
@@ -85,6 +87,7 @@ export function pickModelFromHost(options: {
   current?: string;
   title?: string;
   extra?: unknown;
+  hide?: unknown;
   anchor?: unknown;
 }): Promise<ModelPickResult | null> {
   if (!openPicker) return Promise.reject(new Error("model picker is not mounted"));
@@ -95,6 +98,7 @@ export function pickModelFromHost(options: {
       current: String(options.current || ""),
       title: String(options.title || ""),
       extra: extraRows(options.extra),
+      hide: Array.isArray(options.hide) ? options.hide.slice(0, 20).map((id) => String(id || "").trim().toLowerCase()).filter(Boolean) : [],
       anchor: anchorBox(options.anchor),
       resolve,
     }),
@@ -134,7 +138,11 @@ export function PluginModelPickerHost() {
   if (!request) return null;
   const rows = [
     ...request.extra,
-    ...(getCachedModels() ?? []).filter((row) => request.purpose !== "video" || row.supportsVision),
+    ...(getCachedModels() ?? []).filter(
+      (row) =>
+        (request.purpose !== "video" || row.supportsVision) &&
+        !request.hide.includes((row.providerKey || "").toLowerCase().replace(/-/g, "_")),
+    ),
   ];
   const finish = (result: ModelPickResult | null) => {
     request.resolve(result);
@@ -162,6 +170,7 @@ export function PluginModelPickerHost() {
           selectedModel={picked}
           setSelectedModel={pick}
           extraRows={request.extra}
+          hideProviders={request.hide}
           requireVision={request.purpose === "video"}
           apiOnly
           closeOnPick
