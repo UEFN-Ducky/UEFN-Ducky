@@ -733,10 +733,13 @@ def _unknown_tool_text(name: str) -> str:
     except Exception:  # noqa: BLE001 — no index here: the prefix list and the search hint still help
         meant = []
     text = f"{name} is not a tool (nothing to do with UEFN)."
-    if near:
-        text += " Real tools with that prefix: " + ", ".join(near) + "."
+    # Meaning first: a big plugin's prefix list is alphabetical (imk_artwork_* hid imk_media_list).
     if meant:
         text += " Closest by meaning: " + ", ".join(meant) + "."
+    if near:
+        more = len(near) - 10 if meant and len(near) > 10 else 0
+        shown = near[:10] if more else near
+        text += " Real tools with that prefix: " + ", ".join(shown) + (f" (+{more} more)" if more else "") + "."
     if not near and not meant:
         text += ' Find the right one with ducky_get_tools(pattern="<what you need>").'
     return text
