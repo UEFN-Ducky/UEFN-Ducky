@@ -5,18 +5,25 @@
  * browsers never route such a frame's loads through the panel's Service Worker. So on
  * the site the page and every file it loads went to the site itself (404, and
  * `frame-ancestors 'none'` blocked the frame). Instead the panel fetches the page and
- * its files over the blob channel and hands the frame one self-contained document:
+ * its files over the blob channel and hands the frame one self-contained document.
  *
- * - every `<script>` (the host's injected ones included) becomes a `blob:` script: the
- *   frame inherits the site's CSP, which runs `blob:` scripts but no inline ones;
+ * The frame inherits the site's CSP: scripts from the site or `blob:`, no inline ones. A
+ * `blob:` URL the panel makes belongs to the panel's origin, which the opaque frame can't
+ * load. So:
+ *
+ * - every `<script>` (the host's injected ones included) becomes the site's
+ *   `plugin-frame.js` (public/) carrying the code in `data-dk-run`; it makes the code a
+ *   `blob:` URL inside the frame and `document.write`s it, so order and timing hold;
+ * - a `data-dk-boot` loader first in `<head>` sends the page's later loads
+ *   (`fetch("./x.json")`, `img.src = "y.png"`, stylesheets, worklets) to the desktop over
+ *   the bridge (`desktop.file`), under a `<base>` in the panel folder;
  * - each stylesheet becomes a `<style>` (inline styles are allowed), its `url()`s as
- *   `data:` URLs (fonts may only be `data:` there);
- * - images and media get `blob:` URLs;
+ *   `data:` URLs (fonts may only be `data:` there); images and media as `data:` URLs;
  * - the UI kit's `ducky.js` links `ducky.css` beside its own URL, which a `blob:` script
  *   doesn't have, so the kit's stylesheet goes in as a `<style data-ducky-kit>` ahead of it.
  *
- * Limits: files a page loads later from script (`fetch("./x.json")`, `img.src = "y.png"`,
- * ES module imports) are not rewritten; plugin pages talk to the host over postMessage.
+ * Limits: ES module imports and `new Worker("x.js")` are not mapped; no plugin uses them.
+ * `location.search` is empty (a file pane's path comes from `plugin.info`).
  */
 
 /** Fetch one desktop path over the link (``DirectTransport.fetchBlob``). */
@@ -107,6 +114,19 @@ async function inlineCssUrls(css: string, cssPath: string, fetchDesktop: FetchDe
   return css.replace(re, (whole, _q, ref: string) => (data.has(ref) ? `url("${data.get(ref)}")` : whole));
 }
 
+/** Where the built page's frame finds the site's loader and its own place on the site. */
+export type FrameUrls = {
+  /** Absolute URL of the panel's ``plugin-frame.js`` (public/). */
+  loader: string;
+  /** Absolute URL of this page under the panel folder: the frame's ``<base>``. */
+  base: string;
+};
+
+async function dataUrl(res: Response): Promise<string> {
+  const type = (res.headers.get("Content-Type") || "application/octet-stream").split(";")[0];
+  return `data:${type};base64,${base64(new Uint8Array(await res.arrayBuffer()))}`;
+}
+
 /**
  * Build the page at ``pagePath`` (``/plugin-ui/<plugin>/<entry>``) as one blob: document.
  * ``makeUrl`` / ``dropUrl`` are the blob URL calls (test seams).
@@ -114,31 +134,38 @@ async function inlineCssUrls(css: string, cssPath: string, fetchDesktop: FetchDe
 export async function buildRemotePluginPage(
   pagePath: string,
   fetchDesktop: FetchDesktop,
+  urls: FrameUrls,
   makeUrl: (blob: Blob) => string = (b) => URL.createObjectURL(b),
   dropUrl: (url: string) => void = (u) => URL.revokeObjectURL(u),
 ): Promise<RemotePluginPage> {
   const made: string[] = [];
-  const blobUrl = (parts: BlobPart[], type: string) => {
-    const url = makeUrl(new Blob(parts, { type }));
-    made.push(url);
-    return url;
-  };
   const revoke = () => made.splice(0).forEach((u) => dropUrl(u));
   try {
     const page = await ok(fetchDesktop, pagePath);
     const doc = new DOMParser().parseFromString(await page.text(), "text/html");
     const jobs: Promise<void>[] = [];
+    const loader = (attrs: Record<string, string>) => {
+      const el = doc.createElement("script");
+      el.setAttribute("src", urls.loader);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      return el;
+    };
 
     for (const script of Array.from(doc.querySelectorAll("script"))) {
       const type = (script.getAttribute("type") || "").trim().toLowerCase();
       if (!JS_TYPES.has(type)) continue; // JSON data blocks and templates stay as they are
-      script.removeAttribute("integrity");
-      script.removeAttribute("crossorigin");
+      const run = (code: string) => {
+        const attrs: Record<string, string> = { "data-dk-run": code };
+        if (type === "module") attrs["data-dk-module"] = "";
+        if (script.hasAttribute("defer")) attrs["data-dk-defer"] = "";
+        const id = script.getAttribute("id");
+        if (id) attrs.id = id;
+        script.replaceWith(loader(attrs));
+      };
       const src = script.getAttribute("src");
       if (src === null) {
         // Inline (the host's error reporter and live script, or the plugin's own).
-        script.setAttribute("src", blobUrl([script.textContent || ""], "text/javascript"));
-        script.textContent = "";
+        run(script.textContent || "");
         continue;
       }
       const path = desktopPathFor(src, pagePath);
@@ -156,11 +183,7 @@ export async function buildRemotePluginPage(
           }),
         );
       }
-      jobs.push(
-        ok(fetchDesktop, path).then(async (res) => {
-          script.setAttribute("src", blobUrl([await res.arrayBuffer()], "text/javascript"));
-        }),
-      );
+      jobs.push(ok(fetchDesktop, path).then(async (res) => run(await res.text())));
     }
 
     for (const link of Array.from(doc.querySelectorAll("link[rel~='stylesheet'][href]"))) {
@@ -177,16 +200,15 @@ export async function buildRemotePluginPage(
       );
     }
 
+    // data: URLs: a blob: URL made here belongs to the panel's origin, and the sandboxed
+    // frame (an opaque origin) can't load it.
     for (const [selector, attr] of MEDIA_ATTRS) {
       for (const el of Array.from(doc.querySelectorAll(`${selector}[${attr}]`))) {
         const path = desktopPathFor(el.getAttribute(attr) || "", pagePath);
         if (!path) continue;
         jobs.push(
           ok(fetchDesktop, path).then(
-            async (res) => {
-              const type = (res.headers.get("Content-Type") || "").split(";")[0];
-              el.setAttribute(attr, blobUrl([await res.arrayBuffer()], type));
-            },
+            async (res) => el.setAttribute(attr, await dataUrl(res)),
             () => {
               /* a missing picture shows as broken, the page still loads */
             },
@@ -203,8 +225,16 @@ export async function buildRemotePluginPage(
     }
 
     await Promise.all(jobs);
+    // First in <head>: a real base (relative URLs and document.baseURI resolve under the
+    // panel folder, where the loader maps them back to the desktop), then the loader's boot.
+    for (const old of Array.from(doc.querySelectorAll("base"))) old.remove();
+    const base = doc.createElement("base");
+    base.setAttribute("href", urls.base);
+    doc.head.prepend(base, loader({ "data-dk-boot": "" }));
     const html = `<!doctype html>\n${doc.documentElement.outerHTML}`;
-    return { url: blobUrl([html], "text/html;charset=utf-8"), revoke };
+    const url = makeUrl(new Blob([html], { type: "text/html;charset=utf-8" }));
+    made.push(url);
+    return { url, revoke };
   } catch (err) {
     revoke();
     throw err;

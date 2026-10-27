@@ -47,6 +47,11 @@ describe("buildRemotePluginPage", () => {
     "/plugin-ui/_kit/ducky.css": ["text/css", ".dk-btn{color:blue}"],
   };
 
+  const URLS = {
+    loader: `https://site.test${SITE_PANEL}plugin-frame.js`,
+    base: `https://site.test${SITE_PANEL}plugin-ui/account/ui/index.html`,
+  };
+
   async function build() {
     const asked: string[] = [];
     const blobs = new Map<string, Blob>();
@@ -58,6 +63,7 @@ describe("buildRemotePluginPage", () => {
         const f = files[path];
         return f ? new Response(f[1], { status: 200, headers: { "Content-Type": f[0] } }) : new Response("", { status: 404 });
       },
+      URLS,
       (blob) => {
         const url = `blob:test/${blobs.size}`;
         blobs.set(url, blob);
@@ -75,24 +81,29 @@ describe("buildRemotePluginPage", () => {
       "/plugin-ui/account/ui/account.css", "/plugin-ui/account/ui/fonts/a.woff2", "/plugin-ui/account/ui/logo.png",
     ]));
     expect(asked.some((p) => p.startsWith(SITE_PANEL))).toBe(false);
+    expect(blobs.size).toBe(1); // only the page: the opaque frame can't load the panel's blob: URLs
     const doc = new DOMParser().parseFromString(await blobs.get(page.url)!.text(), "text/html");
-    const scripts = Array.from(doc.querySelectorAll("script")).filter((s) => s.type !== "application/json");
-    // The site's CSP runs blob: scripts only: nothing inline is left, order kept.
-    expect(scripts.map((s) => s.getAttribute("src")?.startsWith("blob:"))).toEqual([true, true, true]);
-    expect(scripts.every((s) => !(s.textContent || "").trim())).toBe(true);
-    expect(await blobs.get(scripts[0].getAttribute("src")!)!.text()).toBe("window.__hostInjected = 1;");
-    expect(await blobs.get(scripts[1].getAttribute("src")!)!.text()).toBe("window.ducky = {};");
-    expect(scripts[2].hasAttribute("defer")).toBe(true);
+    // A real base under the panel folder, then the loader's boot, first in <head>.
+    expect(doc.head.firstElementChild?.outerHTML).toBe(`<base href="${URLS.base}">`);
+    expect(doc.head.children[1].hasAttribute("data-dk-boot")).toBe(true);
+    const scripts = Array.from(doc.querySelectorAll("script[data-dk-run]"));
+    // Every script is the site's loader carrying its code, in the page's order; nothing inline.
+    expect(Array.from(doc.querySelectorAll("script:not([type='application/json'])")).every(
+      (s) => s.getAttribute("src") === URLS.loader && !(s.textContent || "").trim())).toBe(true);
+    expect(scripts.map((s) => s.getAttribute("data-dk-run"))).toEqual([
+      "window.__hostInjected = 1;", "window.ducky = {};", "console.log('account');",
+    ]);
+    expect(scripts[2].hasAttribute("data-dk-defer")).toBe(true);
     expect(doc.getElementById("cfg")?.textContent).toBe('{"a":1}'); // data blocks stay as they are
     expect(doc.querySelector("link[rel=stylesheet]")).toBeNull();
     // ducky.js links ducky.css beside its own URL, which a blob: script lacks: it comes inline first.
     const kit = doc.querySelector("style[data-ducky-kit]");
     expect(kit?.textContent).toBe(".dk-btn{color:blue}");
-    expect(kit?.nextElementSibling?.getAttribute("src")).toBe(scripts[1].getAttribute("src"));
+    expect(kit?.nextElementSibling?.getAttribute("data-dk-run")).toBe("window.ducky = {};");
     const css = doc.querySelector("style:not([data-ducky-kit])")?.textContent || "";
     expect(css).toContain(`url("data:font/woff2;base64,${btoa("WOFF")}")`);
     expect(css).toContain("body{color:red}");
-    expect(doc.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+    expect(doc.querySelector("img")?.getAttribute("src")).toBe(`data:image/png;base64,${btoa("PNG")}`);
   });
 
   it("revoke drops every blob URL it made", async () => {
@@ -104,7 +115,7 @@ describe("buildRemotePluginPage", () => {
   it("a page the desktop can't find fails and leaves no blob URLs behind", async () => {
     const dropped: string[] = [];
     await expect(buildRemotePluginPage("/plugin-ui/gone/ui/index.html", async () => new Response("", { status: 404 }),
-      () => "blob:x", (u) => dropped.push(u))).rejects.toThrow("404");
+      URLS, () => "blob:x", (u) => dropped.push(u))).rejects.toThrow("404");
     expect(dropped).toEqual([]);
   });
 });

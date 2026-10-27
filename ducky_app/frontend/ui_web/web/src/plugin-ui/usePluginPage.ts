@@ -34,7 +34,9 @@ export function usePluginPage(pluginId: string, entry: string | undefined, versi
     let gone = false;
     let revoke = () => {};
     setBuilt(null);
-    buildRemotePluginPage(linkPath, (p) => transport.fetchBlob(p)).then(
+    const abs = (p: string) => new URL(assetUrl(p), window.location.href).href;
+    const urls = { loader: abs("plugin-frame.js"), base: abs(linkPath.slice(1)) };
+    buildRemotePluginPage(linkPath, (p) => transport.fetchBlob(p), urls).then(
       (page) => {
         if (gone) {
           page.revoke();

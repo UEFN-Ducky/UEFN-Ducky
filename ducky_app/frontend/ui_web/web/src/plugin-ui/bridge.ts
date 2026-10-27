@@ -6,6 +6,7 @@
 
 import { BRIDGE_CHANNEL } from "./constants";
 import { getApi, isRemote } from "../hooks/usePanelApi";
+import { getDirectTransport } from "../remote/directTransport";
 import { pluginPrefsKey } from "../hooks/pluginPrefsStorage";
 import { getPluginThemeVars } from "./pluginTheme";
 import { alertRefusedWrite, refusedFromResult } from "./scopeAlerts";
@@ -565,6 +566,19 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
   }),
   /** Appearance CSS custom properties (no leading --). Live updates: appearance_theme push. */
   "theme.get": () => ({ vars: getPluginThemeVars() }),
+  /** One of this plugin's own files (or the UI kit's) from the desktop, for a page the
+   * phone panel built over the PC link: its later fetches and media (public/plugin-frame.js). */
+  "desktop.file": async (ctx, params) => {
+    const path = new URL(String(params.path || ""), "https://desktop.invalid").pathname;
+    const query = String(params.path || "").split("?")[1];
+    if (!path.startsWith(`/plugin-ui/${ctx.pluginId}/`) && !path.startsWith("/plugin-ui/_kit/")) {
+      throw new Error("not one of this plugin's files");
+    }
+    const transport = getDirectTransport();
+    if (!transport) throw new Error("no PC link");
+    const res = await transport.fetchBlob(query ? `${path}?${query}` : path);
+    return { status: res.status, type: res.headers.get("Content-Type") || "", body: await res.arrayBuffer() };
+  },
   /** Sent by the error reporter the host puts in every panel page: uncaught errors,
    * rejected promises and console.error, kept per plugin for ducky_plugin_errors. */
   "panel.error": async (ctx, params) => {
