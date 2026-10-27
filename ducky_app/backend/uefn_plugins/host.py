@@ -147,7 +147,7 @@ _DATA_PLUGINS: set[str] = set()
 # sharing a tool server call the same plugin from many threads; a plugin that holds one
 # connection (Blender's socket, one SQLite handle, a rate-limited API) declares 1.
 DEFAULT_TOOL_CONCURRENCY = 8
-TOOL_SLOT_WAIT_S = 30.0
+TOOL_SLOT_WAIT_S = 120.0  # a Blender render or a UEFN import can hold a slot for a minute
 _TOOL_CONCURRENCY: dict[str, int] = {}
 _TOOL_SLOTS: dict[str, threading.BoundedSemaphore] = {}
 _HELD_SLOTS = threading.local()  # plugin ids this thread already holds a slot for

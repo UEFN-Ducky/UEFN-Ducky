@@ -95,6 +95,19 @@ def test_extract_mention_skips_self():
     assert self_hit is None
 
 
+def test_the_persons_mention_and_leader_pick_who_answers(monkeypatch):
+    # Feedback (1.2.233): '@member' / '@Leader' in a group chat should talk to that ducky directly.
+    from frontend.ui_web import group_orchestrator as go
+
+    monkeypatch.setattr(go, "pick_member_for_question", lambda *a, **k: MEMBERS[0])
+    group = SimpleNamespace(leader_conv_id="c2", members=MEMBERS)
+    assert go.route_user_message(group, "@Level Designer move the pads", MEMBERS)["name"] == "Level Designer"
+    assert go.route_user_message(group, "@leader split this up", MEMBERS)["name"] == "Level Designer"
+    assert go.route_user_message(group, "hey @Lead, who takes this?", MEMBERS)["name"] == "Level Designer"
+    assert go.route_user_message(group, "mail me at a@leader.com", MEMBERS)["name"] == "Verse Coder"
+    assert go.route_user_message(group, "fix the Verse", MEMBERS)["name"] == "Verse Coder"
+
+
 def test_pick_member_keyword_fallback_without_llm():
     # Force keyword path by giving empty profiles that still have when_to_use
     # tokens matching the question (LLM may fail in test env → fallback).

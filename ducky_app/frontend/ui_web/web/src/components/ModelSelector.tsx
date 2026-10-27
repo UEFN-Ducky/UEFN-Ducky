@@ -578,7 +578,9 @@ export function ModelSelector({
         pluginId={slotGateway?.pluginId || ""}
         model={normalizedSelectedModel}
       />
-      {slotGateway?.showsThinkingEffort !== false ? (
+      {/* Only where a move is kept (a chat, or a caller that saves it): settings pickers like
+          Default Model showed a live slider that snapped back on every drag. */}
+      {slotGateway?.showsThinkingEffort !== false && (onEffortChange || convId) ? (
         <ThinkingEffortFooter
           menu={selectedMenu}
           modelName={currentModelData?.name || ""}

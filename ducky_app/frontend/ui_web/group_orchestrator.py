@@ -1155,6 +1155,28 @@ def pick_member_for_question(
     return best
 
 
+_LEADER_MENTION = re.compile(r"(?<![\w@])@(?:leader|lead)\b", re.IGNORECASE)
+
+
+def route_user_message(
+    group: Any,
+    text: str,
+    members: list[dict[str, Any]],
+    *,
+    profiles: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Who answers the person: the member they @named, the leader for @Leader / @lead,
+    else the router's pick. Mentions used to go through the router like any other text."""
+    named = extract_mention_target(text, members, self_name="")
+    if named is not None:
+        return named[0]
+    if _LEADER_MENTION.search(text or ""):
+        leader = group_leader_member(group, members)
+        if leader is not None:
+            return leader
+    return pick_member_for_question(text, members, profiles=profiles)
+
+
 def member_display_name(member: dict[str, Any]) -> str:
     """Library ducky name (Verse Coder), not avatar style (Artist)."""
     # `name` is the profile/library title; prefer it over legacy ducky_name
@@ -1773,7 +1795,7 @@ def _run_group_turn_body(
         return
 
     # Task turn: one specialist (or nested-group rep), then optional @mention hops.
-    routed = pick_member_for_question(user_text, members, profiles=profiles)
+    routed = route_user_message(group, user_text, members, profiles=profiles)
     pending_from = "User"
     pending_text = user_text
     hops = 0

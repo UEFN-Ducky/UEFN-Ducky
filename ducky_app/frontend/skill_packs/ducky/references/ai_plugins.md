@@ -239,7 +239,7 @@ every Ducky process (the app, each agent host, each tool server). Five rules:
 3. **Short tools:** under about 5 s of CPU per call. Longer work goes in a subprocess or a
    workflow node, so it never holds the tool server.
 4. **One connection? Say so:** `"tool_concurrency": 1` in plugin.json runs one call at a
-   time (default 8). A call that waits past 30 s answers "plugin busy".
+   time (default 8). A call that waits past 2 minutes answers "plugin busy".
 5. **Small results:** return what the agent needs; Ducky spills big ones to a file.
 
 ### In the chat: a tool's card shows what it made

@@ -51,3 +51,23 @@ it("the composer's model picker has a gear that opens the Default Model setting"
   fireEvent.click(await screen.findByRole("button", { name: "Open Default Model settings" }));
   expect(settings.openDefaultModelSettings).toHaveBeenCalledTimes(1);
 });
+
+// Feedback (1.2.387): Settings > Default Model showed the Faster/Smarter slider for Claude, but
+// nothing kept the effort, so every drag snapped back.
+it("shows the effort slider only where a change is kept", async () => {
+  const open = async (props: Record<string, unknown>) => {
+    const { container, unmount } = render(
+      <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined}
+                     codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection {...props} />,
+    );
+    await act(async () => {});
+    fireEvent.click(container.querySelector(".model-selector-btn")!);
+    await act(async () => {});
+    const shown = Boolean(screen.queryByLabelText("Thinking effort"));
+    unmount();
+    return shown;
+  };
+  expect(await open({})).toBe(false);
+  expect(await open({ onEffortChange: () => undefined })).toBe(true);
+  expect(await open({ convId: "chat-1" })).toBe(true);
+});
