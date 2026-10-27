@@ -131,6 +131,25 @@ def _install_crash_dumps() -> None:
             native_crash.start_watch()
     except Exception:
         logging.getLogger(__name__).warning("crash dump filter not installed", exc_info=True)
+    if _managed_handler:
+        return
+    try:
+        # 0x8001010d and friends end the process as an unhandled .NET exception: keep its
+        # managed stack, which the native dump and faulthandler never show.
+        from System import AppDomain, UnhandledExceptionEventHandler  # type: ignore[import-not-found]
+
+        from frontend import boot_report
+
+        def _on_unhandled(_sender, args) -> None:
+            boot_report.managed_exception(str(args.ExceptionObject))
+
+        _managed_handler["handler"] = UnhandledExceptionEventHandler(_on_unhandled)
+        AppDomain.CurrentDomain.UnhandledException += _managed_handler["handler"]
+    except Exception:
+        logging.getLogger(__name__).warning(".NET crash handler not installed", exc_info=True)
+
+
+_managed_handler: dict[str, object] = {}  # keeps the delegate alive for the process
 
 
 def _boot_trace(name: str, t0: float, **meta: object) -> None:
@@ -681,20 +700,24 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     ensure_started()
 
-    # Splash → hidden pump root (same Tk), then tray, then the real window.
+    # The splash Tk belongs to this (main) thread, which blocks in webview.start next: close it
+    # here, and let the pump thread own the hidden Tk root the tray and pop-ups use.
     try:
-        from frontend.early_splash import take_as_pump_root
+        from frontend.early_splash import dismiss as dismiss_early_splash
 
-        tk_root = take_as_pump_root()
+        dismiss_early_splash()
     except Exception:
-        tk_root = None
-    if tk_root is None:
-        tk_root = tk.Tk()
-        tk_root.withdraw()
+        pass
+
+    def _hidden_root():
+        root = tk.Tk()
+        root.withdraw()
+        return root
+
+    tk_root = start_tk_pump(_hidden_root)
     tk_root_holder["root"] = tk_root
     api_holder["tk_root"] = tk_root
     api.bind_tk_root(tk_root)
-    start_tk_pump(tk_root)
 
     if tray_supported():
         try:

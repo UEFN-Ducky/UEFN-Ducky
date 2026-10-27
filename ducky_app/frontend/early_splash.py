@@ -153,42 +153,6 @@ def show() -> Any | None:
     return root
 
 
-def take_as_pump_root() -> Any | None:
-    """Convert the splash Tk into the hidden tray/pump root (one Tcl interpreter)."""
-    global _splash, _photo
-    root = _splash
-    _splash = None
-    _photo = None
-    if root is None:
-        return None
-    try:
-        for child in list(root.winfo_children()):
-            child.destroy()
-    except Exception:
-        pass
-    try:
-        root.unbind("<Button-1>")
-        root.unbind("<B1-Motion>")
-    except Exception:
-        pass
-    try:
-        root.attributes("-transparentcolor", "")
-    except Exception:
-        pass
-    try:
-        root.overrideredirect(False)
-    except Exception:
-        pass
-    try:
-        root.attributes("-topmost", False)
-    except Exception:
-        pass
-    try:
-        root.withdraw()
-    except Exception:
-        pass
-    return root
-
 
 def dismiss() -> None:
     """Close the early splash (idempotent). Call from the same thread as show()."""

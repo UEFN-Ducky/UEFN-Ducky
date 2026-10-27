@@ -318,26 +318,47 @@ def request_app_exit(
     abort_and_quit(api=api, tk_root=tk_root, window_holder=window_holder)
 
 
-def start_tk_pump(tk_root: Any) -> None:
-    """Pump Tk events so tray menu + filedialog callbacks run under pywebview."""
+def start_tk_pump(make_root: Callable[[], Any]) -> Any:
+    """Make the hidden Tk root ON the pump thread and run its mainloop there; return the root.
+
+    Tcl serves a Tk from its own thread only, and accepts other threads' calls only while
+    that thread sits in mainloop. The old pump called update() on the splash root the main
+    thread made while the main thread was blocked in webview.start: every call raised 'main
+    thread is not in main loop', so the pump stopped a second after start and queued work
+    (the stuck-splash crash pop-up, confetti) never ran."""
+    ready = threading.Event()
+    holder: dict[str, Any] = {}
+
+    def _drain(root: Any) -> None:
+        try:
+            while True:
+                fn = _tk_call_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    pass
+        except queue.Empty:
+            pass
+        try:
+            root.after(50, _drain, root)
+        except Exception:
+            pass
 
     def _pump() -> None:
-        while True:
-            # Marshal from bridge threads via after() on THIS thread — never call
-            # tk_root.after from a pywebview JS-API worker.
-            try:
-                while True:
-                    fn = _tk_call_queue.get_nowait()
-                    try:
-                        tk_root.after(0, fn)
-                    except Exception:
-                        pass
-            except queue.Empty:
-                pass
-            try:
-                tk_root.update()
-            except Exception:
-                break
-            time.sleep(0.05)
+        try:
+            root = make_root()
+        except Exception:
+            root = None
+        holder["root"] = root
+        ready.set()
+        if root is None:
+            return
+        _drain(root)
+        try:
+            root.mainloop()
+        except Exception:
+            pass
 
     threading.Thread(target=_pump, name="tk-pump", daemon=True).start()
+    ready.wait(10.0)
+    return holder.get("root")

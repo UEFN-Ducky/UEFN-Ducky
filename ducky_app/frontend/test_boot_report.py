@@ -501,3 +501,13 @@ def test_report_shows_the_memory_trend_of_the_whole_run(page, monkeypatch) -> No
     assert len(beats) == boot_report.BEATS_KEPT and beats[0]["webview_gb"] == 0.4
     body = boot_report.build_report(dict(boot_report._state), "")
     assert "Memory trend over 6 min: app 0.7 -> 0.7 GB, WebView2 0.4 -> 2.5 GB, free 3.1 -> 0.2 GB." in body["error_log"]
+
+
+def test_a_dotnet_exception_goes_into_the_next_report(crash) -> None:
+    boot_report.begin("1.2.440")
+    boot_report.stage("window_shown")
+    boot_report.mark("ok")
+    boot_report.managed_exception("System.Runtime.InteropServices.COMException (0x8001010D)\n   at Form.WndProc")
+    boot_report.begin("1.2.440")  # it died: the next launch reports
+    log = crash["sent"][0]["error_log"]
+    assert ".NET exception:\nSystem.Runtime.InteropServices.COMException (0x8001010D)" in log

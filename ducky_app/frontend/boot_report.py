@@ -368,6 +368,8 @@ def build_report(
         lines.append("Loading when it closed: " + ", ".join(plugins))
     if previous.get("error"):
         lines += ["", "Error:", str(previous["error"])]
+    if previous.get("managed_error"):
+        lines += ["", ".NET exception:", str(previous["managed_error"])]
     for dump in dumps[-3:]:
         lines.append(f"Crash dump {dump.get('name')}: {dump.get('summary')}")
     causes = [str(d["cause"]) for d in dumps if d.get("cause")]
@@ -839,6 +841,15 @@ def page_error(message: str) -> None:
     """An error the page hit before it started (index.html's catcher sends these)."""
     if not _page["started"] and len(_page["errors"]) < 8:
         _page["errors"].append(_scrub(str(message or "").strip())[:300])
+
+
+def managed_exception(text: str) -> None:
+    """A .NET exception nobody caught (AppDomain.UnhandledException): the process ends right
+    after, and faulthandler only sees a native thread. Written at once for the next launch."""
+    if not _state:
+        return
+    _state["managed_error"] = _scrub(str(text or "").strip())[-2000:]
+    _write_state()
 
 
 def webview_ready(ok: bool, error: str = "") -> None:
