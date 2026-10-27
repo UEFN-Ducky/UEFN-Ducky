@@ -1,9 +1,9 @@
 """Shared FastMCP daemon on 127.0.0.1 (token + daemon key).
 
-Off unless Settings or ``UEFN_DUCKY_SHARED_MCP`` turn it on (not yet measured with many
-agents on a real build). When on, each agent host's agents share one daemon
+On by default for agents that run in an agent host: the host's agents share one daemon
 (``UEFN_DUCKY_SHARED_MCP_SLOT`` names its state file), so a turn no longer starts its own
-tool process (backend import + 1,000+ tool registrations) and each host keeps its own GIL. Dedicated ``mcp.run()`` stdio is unchanged. Adapters speak MCP to the agent and
+tool process (backend import + 1,000+ tool registrations) and each host keeps its own GIL.
+``UEFN_DUCKY_SHARED_MCP=0`` turns it off; elsewhere (the app, IDE clients) it follows Settings. Dedicated ``mcp.run()`` stdio is unchanged. Adapters speak MCP to the agent and
 length-prefixed JSON frames to this process.
 """
 
@@ -76,6 +76,8 @@ def enabled(settings: Any | None = None) -> bool:
         return False
     if raw in ("1", "true", "yes", "on"):
         return True
+    if (os.environ.get(SLOT_ENV) or "").strip().isdigit():
+        return True  # an agent host: its agents share one tool server
     if settings is not None:
         return bool(getattr(settings, "shared_mcp", False))
     try:

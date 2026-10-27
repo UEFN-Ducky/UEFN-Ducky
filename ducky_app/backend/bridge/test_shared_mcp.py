@@ -115,8 +115,7 @@ def test_agent_hosts_share_one_server_each(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
     monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "2")
-    assert shared_mcp.enabled(PanelSettings()) is False  # opt-in until measured on a real build
-    assert shared_mcp.enabled(PanelSettings(shared_mcp=True)) is True
+    assert shared_mcp.enabled(PanelSettings()) is True
     assert shared_mcp.state_path() == tmp_path / "shared_mcp-h2.json"
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "5")
     assert shared_mcp.state_path() == tmp_path / "shared_mcp-h5.json"
@@ -236,6 +235,47 @@ def test_concurrent_run_ids_isolated(monkeypatch, tmp_path) -> None:
         shared_mcp.write_frame(b, {"op": "bye"})
         shared_mcp.close_handle(a)
         shared_mcp.close_handle(b)
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+
+
+def test_many_agents_at_once_each_get_their_own_answers(monkeypatch, tmp_path) -> None:
+    # A host's agents share one daemon: 8 clients x 20 calls at the same time, every
+    # answer back to the client that asked, under its own identity, none lost or swapped.
+    mcp = FakeMcp()
+    thread = _serve(mcp, monkeypatch, tmp_path)
+    clients, calls = 8, 20
+    got: dict[str, list[str]] = {}
+    errors: list[BaseException] = []
+
+    def agent(i: int) -> None:
+        run = f"run-{i}"
+        try:
+            sock = _hello(run)
+            texts = []
+            for n in range(calls):
+                reply = _rpc(sock, "tools/call", {"name": "workspace_write_file", "arguments": {}}, n + 1)
+                texts.append((reply.get("content") or [{}])[0].get("text"))
+            got[run] = texts
+            shared_mcp.write_frame(sock, {"op": "bye"})
+            shared_mcp.close_handle(sock)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    try:
+        started = time.monotonic()
+        workers = [threading.Thread(target=agent, args=(i,)) for i in range(clients)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join(timeout=30)
+        assert not errors, errors
+        assert time.monotonic() - started < 20
+        assert set(got) == {f"run-{i}" for i in range(clients)}
+        for run, texts in got.items():
+            assert texts == [f"workspace_write_file:{run}"] * calls
+        assert len(mcp.seen) == clients * calls
     finally:
         shared_mcp.request_stop()
         thread.join(timeout=6)
