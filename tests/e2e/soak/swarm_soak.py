@@ -326,9 +326,11 @@ def refuse_reason(exe: Path, box: Path) -> str:
     if not exe.is_file():
         return f"--exe not found: {exe}"
     local = real_local()
-    if _inside(exe, local) or "program files" in str(exe).lower():
+    # A chat's sandbox (UEFN-Ducky/sandboxes/<chat>) is scratch space, not the installed app.
+    sandboxes = local / "UEFN-Ducky" / "sandboxes"
+    if (_inside(exe, local) and not _inside(exe, sandboxes)) or "program files" in str(exe).lower():
         return f"--exe {exe} is an installed app (use a dist/ build)"
-    if _inside(box, local / "UEFN-Ducky") or box.resolve() == local.resolve():
+    if (_inside(box, local / "UEFN-Ducky") and not _inside(box, sandboxes)) or box.resolve() == local.resolve():
         return f"sandbox folder {box} is the real AppData"
     try:
         import psutil

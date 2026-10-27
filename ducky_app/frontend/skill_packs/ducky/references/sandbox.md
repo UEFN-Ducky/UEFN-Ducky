@@ -43,7 +43,8 @@ Open every picture with `view_image(path)` and describe what you see.
 
 ## Verify a change before you push
 
-"Done" means you saw it work. After changing code:
+"Done" means the tests that cover the change passed. Run them first; only when no test can show
+the change works (a web app or UI with no test, an API with no client test), check it live:
 
 1. Commit nothing yet. `sandbox_worktree(repo_path=<project>, commit="HEAD")` if the change is
    committed locally, else build from the project itself only when it is the one thing changed.
@@ -58,7 +59,9 @@ Open every picture with `view_image(path)` and describe what you see.
 
 ## Ducky test build (UEFN Ducky itself)
 
-To check a change to UEFN Ducky in a real app, beside the person's running Ducky:
+Only for window, startup or packaging changes that tests can't cover: a build takes 15-30 min.
+Run it in the background with a time limit and never poll it in a loop. To check such a change
+in a real app, beside the person's running Ducky:
 
 1. `sandbox_worktree(repo_path="<UEFN-Ducky checkout>", commit="HEAD", name="ducky-test",
    copy_from="<the release checkout, e.g. ducky-rel>", copy=["build/ffmpeg-bundle", "build/search-model",

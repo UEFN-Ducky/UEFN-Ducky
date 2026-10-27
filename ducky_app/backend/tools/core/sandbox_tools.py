@@ -74,7 +74,8 @@ def sandbox_open(pretty: bool = False) -> str:
     runtimes ready, programs running and what happened so far. Creates it the first time.
 
     Use a sandbox for anything you would otherwise do in a scratch folder: try a library or a
-    program, clone and build a repo, reproduce a bug, run a test copy of Ducky. Never the
+    program, clone and build a repo, reproduce a bug, run a test copy of Ducky (only when tests
+    can't cover the change). Never the
     project, never the OS temp folder. Recipe: skill_read_subskill("ducky", "sandbox")."""
     return tool_json(_forward("open"), pretty=pretty)
 

@@ -112,6 +112,17 @@ def test_refuses_installed_app_and_real_appdata(tmp_path, monkeypatch):
     assert soak.refuse_reason(built, tmp_path / "dsbx") == ""
 
 
+def test_allows_exe_and_box_in_a_chat_sandbox(tmp_path, monkeypatch):
+    local = tmp_path / "Local"
+    sandbox = local / "UEFN-Ducky" / "sandboxes" / "chat1"
+    built = sandbox / "repo" / "dist" / "UEFN-Ducky.exe"
+    built.parent.mkdir(parents=True)
+    built.write_bytes(b"")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    assert soak.refuse_reason(built, sandbox / "soakbox") == ""
+    assert "real AppData" in soak.refuse_reason(built, local / "UEFN-Ducky" / "box")
+
+
 def _interrupt_run(lock=False):
     run = soak.Run(started=0.0, ended=600.0, agents=3, index_lock_left=lock)
     moments = ["during a 3-minute command", "during streaming text", "during an ask_user wait",

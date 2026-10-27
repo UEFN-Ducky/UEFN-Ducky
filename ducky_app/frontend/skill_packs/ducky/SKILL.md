@@ -173,9 +173,10 @@ the real code with `web_github` (search, repo, pr, read). Load
 
 Every chat has a sandbox (`sandbox_open`): its own work folder and profile folders where you
 download, install, build, run and study programs without touching the project or the person's
-profile. All scratch work goes there. "Done" means verified: build and run the change in the
-sandbox, check it (`sandbox_look`, `browser_open` + `browser_capture`, `sandbox_mcp`), report with
-evidence, then commit and push from the project. Never deploy. Load
+profile. All scratch work goes there. "Done" means the tests that cover the change passed. Build
+and run a copy in the sandbox only when no test can show it works (`sandbox_look`, `browser_open` +
+`browser_capture`, `sandbox_mcp`); a full Ducky EXE build only for window, startup or packaging
+changes. Then commit and push from the project. Never deploy. Load
 `skill_read_subskill("ducky", "sandbox")` for the recipes (a Ducky test build included).
 
 ## Ducky feels slow
