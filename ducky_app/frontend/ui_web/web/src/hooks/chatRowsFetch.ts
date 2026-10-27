@@ -52,6 +52,18 @@ export async function fetchChatRows(chatId: string, timeoutMs = CHAT_LOAD_TIMEOU
   return rows as ChatMessage[];
 }
 
+const reported = new Set<string>();
+
+/** True the first time this chat hits this load problem in the session. The pane
+ *  reloads after every turn, so one broken chat sent chat_failed 25 times a day from
+ *  one PC (Oct 26 2026) and hid how many chats really fail. */
+export function firstLoadReport(source: string, chatId: string): boolean {
+  const key = `${source}:${chatId}`;
+  if (reported.has(key)) return false;
+  reported.add(key);
+  return true;
+}
+
 /** Rows rendered from a reload that fetched only the newest `limit` rows: what is shown
  *  up to where that page starts, then the page (row ids are stable while a chat only
  *  grows). Null when they don't line up (rewound, compacted, or the page starts before

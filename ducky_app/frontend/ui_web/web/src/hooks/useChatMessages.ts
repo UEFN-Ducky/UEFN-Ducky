@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { AgentEvent, MessageAttachmentDto } from "../types/panel";
 
 import { getCachedChatMessages, setCachedChatMessages } from "./chatMessagesCache";
-import { CHAT_LOAD_TIMEOUT_MS, ChatLoadTimeout, fetchChatRows, spliceTail, withTimeout } from "./chatRowsFetch";
+import { CHAT_LOAD_TIMEOUT_MS, ChatLoadTimeout, fetchChatRows, firstLoadReport, spliceTail, withTimeout } from "./chatRowsFetch";
 import { getApi } from "./usePanelApi";
 import { useAgentEventSubscription } from "./useAgentEventBus";
 import {
@@ -102,6 +102,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     // The source says which (slow, timed out, failed): it is also the anonymous error code,
     // and "chat" alone (102 in a week on 7 PCs) could not tell a slow load from a broken one.
     const report = (source: "chat_slow" | "chat_timeout" | "chat_failed", text: string) => {
+      if (!firstLoadReport(source, chatId)) return;
       void Promise.resolve(api.report_ui_error?.(source, text)).catch(() => undefined);
     };
     try {

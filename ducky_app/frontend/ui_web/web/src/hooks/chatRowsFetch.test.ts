@@ -5,9 +5,16 @@ const api = vi.hoisted(() => ({ load_messages: vi.fn() }));
 vi.mock("./usePanelApi", () => ({ getApi: () => api }));
 
 import type { ChatMessage } from "../types/panel";
-import { fetchChatRows, spliceTail } from "./chatRowsFetch";
+import { fetchChatRows, firstLoadReport, spliceTail } from "./chatRowsFetch";
 
 afterEach(() => vi.resetAllMocks());
+
+it("a chat that keeps failing to load is reported once per kind", () => {
+  expect(firstLoadReport("chat_failed", "chat-a")).toBe(true);
+  expect(firstLoadReport("chat_failed", "chat-a")).toBe(false);
+  expect(firstLoadReport("chat_timeout", "chat-a")).toBe(true);
+  expect(firstLoadReport("chat_failed", "chat-b")).toBe(true);
+});
 
 it("a load that answers with nothing fails instead of handing the chat an undefined list", async () => {
   // Oct 11 2026: the phone app crashed opening a chat ("reading 'length'"): the remote
