@@ -7,8 +7,8 @@ import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
 /**
  * The title bar's Live menu: every team copy this PC has plugins on and who is live where
  * (backend/uefn_plugins/live.py `overview`). Read once, then again when the app says it
- * moved (`live_team`, an account change, a plugin switched to another copy): no timer runs
- * while nothing changes.
+ * moved (`live_team`, an account change, any plugin scope push): no timer runs while
+ * nothing changes.
  */
 
 /** Pushes that land together (a join moves every plugin) make one read. */
@@ -67,7 +67,9 @@ function start(): void {
     if (event.type === "live_team") {
       if (event.ended === "alone" && event.space) sayEnded(event.space);
       refreshLiveOverview();
-    } else if (event.type === "duckyos_account_changed" || (event.type === "plugin_scope_changed" && event.switched)) {
+    } else if (event.type === "duckyos_account_changed" || event.type === "plugin_scope_changed") {
+      // Any scope push, not just a switch: the first read at startup can land before the
+      // account and its team links are in, and then nothing else would read again.
       refreshLiveOverview();
     }
   });

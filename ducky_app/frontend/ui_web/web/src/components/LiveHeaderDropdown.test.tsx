@@ -56,6 +56,16 @@ describe("Live in the title bar", () => {
     expect(phone.container.textContent).toBe("");
   });
 
+  it("shows up when a sync push comes after an empty first read", async () => {
+    api.live_overview.mockResolvedValue(overview());
+    const { container } = render(<LiveHeaderDropdown />);
+    await waitFor(() => expect(api.live_overview).toHaveBeenCalledTimes(1));
+    expect(container.textContent).toBe("");
+    api.live_overview.mockResolvedValue(overview(team()));
+    push.handlers.forEach((fn) => fn({ type: "plugin_scope_changed", plugins: ["kanban"], synced: true }));
+    expect(await waitFor(trigger)).toBeTruthy();
+  });
+
   it("lists each group with who's in which plugin; Join goes into it with every plugin", async () => {
     api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] })));
     api.live_team_join.mockResolvedValue({ ok: true });

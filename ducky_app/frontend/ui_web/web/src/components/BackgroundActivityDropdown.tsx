@@ -153,7 +153,7 @@ export function BackgroundActivityDropdown() {
             {waiting} waiting
           </span>
         ) : null}
-        {nowCount ? <span className="bg-activity-running-count">{nowCount} running</span> : null}
+        {nowCount ? <span className="terminal-header-badge" aria-hidden>{nowCount > 9 ? "9+" : nowCount}</span> : null}
       </button>
       <DropdownPanel
         anchorRef={anchorRef}

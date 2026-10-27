@@ -36,7 +36,7 @@ it("subscribes globally: one row per running chat, saying what it does now", asy
   render(<BackgroundActivityDropdown />);
   await act(async () => {});
   act(() => { mocks.listener!(start()); upsertBackgroundJob({ id: "workflow:test", title: "Workflow", phase: "working" }); });
-  expect(screen.getByText("2 running")).toBeTruthy();
+  expect(screen.getByTitle("2 running in the background")).toBeTruthy();
   fireEvent.click(screen.getByLabelText("Background activity"));
   expect(screen.getByText("Coordinator is working")).toBeTruthy();
   // The tool call itself stays in the chat; the tray names the step.
@@ -44,12 +44,23 @@ it("subscribes globally: one row per running chat, saying what it does now", asy
   act(() => vi.advanceTimersByTime(65_000));
   expect(screen.getAllByText(/Running tests.*1m/).length).toBeGreaterThan(0);
   act(() => mocks.listener!({ ...start(), type: "tool_done", success: false, tool: { ...start().tool!, status: "error", result: "Exit code: 2" } }));
-  expect(screen.getByText("2 running")).toBeTruthy();
+  expect(screen.getByTitle("2 running in the background")).toBeTruthy();
   expect(screen.getAllByText(/^Working/).length).toBeGreaterThan(0);
   act(() => mocks.listener!({ type: "agent_stopped", conv_id: "other", run_id: "run-1", reason: "done" }));
-  expect(screen.getByText("1 running")).toBeTruthy();
+  expect(screen.getByTitle("1 running in the background")).toBeTruthy();
   fireEvent.click(screen.getByText("Clear finished"));
   expect(getBackgroundJobs()).toHaveLength(1);
+});
+
+it("shows how many run as a corner badge, 9+ past nine", async () => {
+  render(<BackgroundActivityDropdown />);
+  await act(async () => {});
+  const badge = () => screen.getByLabelText("Background activity").querySelector(".terminal-header-badge")?.textContent;
+  act(() => { upsertBackgroundJob({ id: "workflow:a", title: "A", phase: "working" }); });
+  expect(badge()).toBe("1");
+  act(() => { for (let i = 0; i < 10; i++) upsertBackgroundJob({ id: `workflow:${i}`, title: `W${i}`, phase: "working" }); });
+  expect(badge()).toBe("9+");
+  expect(screen.queryByText(/running$/)).toBeNull();
 });
 
 it("keeps one row across parallel calls, ignores late stops from another run, and closes it", () => {
@@ -132,7 +143,7 @@ it("counts an archived team's running member once, names it with its group, and 
   mocks.api.list_running_agents.mockResolvedValue(["seat"]);
   render(<BackgroundActivityDropdown />);
   await act(async () => {});
-  expect(screen.getByText("1 running")).toBeTruthy();
+  expect(screen.getByTitle("1 running in the background")).toBeTruthy();
   fireEvent.click(screen.getByLabelText("Background activity"));
   const rows = screen.getAllByText(/ is working$/);
   expect(rows.map((row) => row.textContent)).toEqual(["Live checker · Ship fixer (archived) is working"]);
@@ -156,12 +167,12 @@ it("closes a row the backend no longer runs, keeps one it does, and drops rows o
     mocks.listener!({ type: "text_delta", conv_id: "team", text: "(Side chat) note" });
     mocks.listener!(start());
   });
-  expect(screen.getByText("2 running")).toBeTruthy();
+  expect(screen.getByTitle("2 running in the background")).toBeTruthy();
   mocks.api.list_running_agents.mockResolvedValue(["other"]);
   await act(async () => { vi.advanceTimersByTime(15_000); });
   await act(async () => {});
   expect(getBackgroundJobs().find((j) => j.convId === "team")?.phase).toBe("done");
-  expect(screen.getByText("1 running")).toBeTruthy();
+  expect(screen.getByTitle("1 running in the background")).toBeTruthy();
   mocks.api.list_all_conversations.mockResolvedValue([{ id: "other", title: "Coordinator" }]);
   await act(async () => { mocks.listener!({ type: "chats_changed" } as AgentEvent); });
   await act(async () => {});
