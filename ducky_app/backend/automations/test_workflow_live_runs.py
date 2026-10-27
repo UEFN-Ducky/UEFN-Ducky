@@ -187,6 +187,41 @@ def test_a_command_typed_into_a_local_workflow_runs_without_asking(events, monke
     assert not runner.typed_command_approved("py -3 -u release/publish_app.py")  # only while its step runs
 
 
+def test_a_command_typed_into_the_caller_runs_in_the_called_workflow_without_asking(events, monkeypatch):
+    """Oct 26 2026: Release a site plugin passes its typed release command into Run until
+    it passes as {{command}}; that asked every time and timed out with nobody watching."""
+    from types import SimpleNamespace
+    from backend.tools.panel import ducky_panel_terminal
+
+    asked: list[tuple[str, bool]] = []
+
+    def run_agent_command(session_id, command, **kw):
+        asked.append((command, kw["auto_approve"]))
+        return {"ok": True, "exit_code": 0, "output_tail": ""}
+
+    monkeypatch.setattr(ducky_panel_terminal, "_terminal_manager", lambda: SimpleNamespace(
+        run_agent_command=run_agent_command, get_session=lambda _sid: None))
+
+    def workflow(name: str, nodes: list, chain: list[str]) -> str:
+        edges = [{"source": a, "target": b, "kind": "main"} for a, b in zip(chain, chain[1:])]
+        return str(store.save_workflow({"name": name, "graph": {"nodes": nodes, "edges": edges}})["id"])
+
+    def call(target: str, **args) -> dict:
+        return {"id": "call", "type": "workflow.call", "config": {"workflow_id": target, "args": args}}
+
+    runs = workflow("Run it", [{"id": "in", "type": "flow.input", "config": {}},
+                               _terminal_step("cmd", {"session_id": "t1", "command": "{{command}}"}),
+                               _terminal_step("tag", {"session_id": "t1", "command": "{{command}} --tag {{tag}}"})],
+                    ["in", "cmd", "tag"])
+    middle = workflow("Middle", [{"id": "in", "type": "flow.input", "config": {}}, call(runs, command="{{command}}", tag="{{tag}}")],
+                      ["in", "call"])
+    top = workflow("Release", [{"id": "s", "type": "start.manual", "config": {}},
+                               call(middle, command="py -3 publish.py", tag="{{prompt}}")], ["s", "call"])
+    runner.run_workflow(top, payload={"prompt": "v1"})
+    # Typed two levels up: no card. Built with a value filled in while the run goes: asks.
+    assert asked == [("py -3 publish.py", True), ("py -3 publish.py --tag v1", False)]
+
+
 def test_the_terminal_a_run_opened_is_held_until_the_run_ends(events, monkeypatch):
     """The idle reaper must not close it between steps (Oct 22 2026: closed while an
     Agent step waited, so the release's next steps found no session)."""

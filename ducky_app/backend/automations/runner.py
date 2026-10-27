@@ -65,6 +65,9 @@ _OUTPUT_PARENTS: ContextVar[tuple[tuple[str, str, str], ...]] = ContextVar("work
 # A command typed into a saved Local workflow runs without the Allow/Deny pop-up:
 # saving it there was the approval. One filled in while the run goes still asks.
 _TYPED_COMMAND: ContextVar[str] = ContextVar("workflow_typed_command", default="")
+# A Run workflow step's inputs typed into a Local workflow count as typed in the run it
+# calls: its {{command}} made only of them skips the pop-up too (a release's command).
+_TYPED_ARGS: ContextVar[dict[str, Any]] = ContextVar("workflow_typed_args", default={})
 STOPPED = "Stopped"
 
 
@@ -2493,13 +2496,39 @@ def _typed_command(name: str, cfg: dict[str, Any], raw: dict[str, Any]) -> str:
     if name != "ducky_terminal_run" or (cfg.get("arguments") is None and not cfg.get("arguments_json")):
         return ""
     command = raw.get("command")
-    if not isinstance(command, str) or not command.strip() or _PLACEHOLDER.search(command):
+    if not isinstance(command, str) or not command.strip():
         return ""
+    names = _PLACEHOLDER.findall(command)
+    typed = _TYPED_ARGS.get()
+    if not all(name in typed for name in names):
+        return ""  # filled in while the run goes: it asks
+    if not _running_local():
+        return ""
+    # The filled-in command must still equal this (typed_command_approved): a field a
+    # step changed since the call makes it ask.
+    return str(_template(command, typed)) if names else command
+
+
+def _running_local() -> bool:
     stack = _CALL_STACK.get()
     wf = get_workflow(stack[-1]) if stack else None
-    if wf is None or str((wf.get("owner") or {}).get("kind") or LOCAL) != LOCAL:
-        return ""
-    return command
+    return wf is not None and str((wf.get("owner") or {}).get("kind") or LOCAL) == LOCAL
+
+
+def _typed_args(args: dict[str, Any], wired: dict[str, Any] | None) -> dict[str, Any]:
+    """This Run workflow step's inputs typed into its Local workflow, or passed on whole
+    from ones typed further up; a wired pin or a value filled in while the run goes never counts."""
+    if _FROM_CODE.get() or not _running_local():
+        return {}
+    outer = _TYPED_ARGS.get()
+    typed: dict[str, Any] = {}
+    for key, value in args.items():
+        key = str(key).strip()
+        if not key or key in (wired or {}) or not isinstance(value, str):
+            continue
+        if all(name in outer for name in _PLACEHOLDER.findall(value)):
+            typed[key] = _template(value, outer)
+    return typed
 
 
 def _call_tool(cfg: dict[str, Any], payload: dict[str, Any], node_id: str = "") -> dict[str, Any]:
@@ -2717,6 +2746,7 @@ def _call_workflow(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str
     for key in _PERSON_KEYS:
         ctx.pop(key, None)  # who started the run comes with the run, never as a field
     _prepare_run_ctx(ctx, wf)
+    typed_token = _TYPED_ARGS.set(_typed_args(args, wired))  # read before the stack names the called workflow
     new_hub = ctx.get("group_id") and ctx.get("group_id") != payload.get("group_id")
     ident_token = _bind_hub_identity(ctx) if new_hub else None
     stack_token = _CALL_STACK.set((*stack, wid))
@@ -2735,6 +2765,7 @@ def _call_workflow(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str
     finally:
         _LIVE.reset(live_token)
         _CALL_STACK.reset(stack_token)
+        _TYPED_ARGS.reset(typed_token)
         if ident_token is not None:
             from backend.workspace import identity
 
