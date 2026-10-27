@@ -172,7 +172,7 @@ BUILTIN_NODES: list[dict[str, Any]] = [
         "label": "Run workflow",
         "group": "Functions",
         "role": "action",
-        "description": "Run another workflow like a function: pass its inputs, wait for it, then use what it returns in the next steps. If it has Return nodes and none is reached, this path stops.",
+        "description": "Run another workflow like a function: pass its inputs, wait for it, then use what it returns in the next steps. If it has Return nodes and none is reached, this path stops, unless a step in it ended failed (its tries ran out, a command wasn't allowed): then this step fails with that step's error.",
         "config_fields": [{"id": "workflow_id", "label": "Workflow", "type": "workflow"}],
     },
     {

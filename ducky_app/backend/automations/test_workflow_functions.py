@@ -154,3 +154,68 @@ def test_no_return_reached_stops_the_callers_path():
     assert [s["type"] for s in stopped["steps"]] == ["start.manual", "workflow.call"]
     # Without sharing, the called workflow never sees the caller's score.
     assert runner.run_workflow(outer(part["id"], share=False)["id"], payload={"score": 5})["outputs"] == {}
+
+
+# Oct 26 2026: a release's "Run until it passes" failed all 3 tries, ended at Return to
+# user, and every workflow above it reported OK with its commit and go-live skipped.
+
+def replies(monkeypatch, answers: list) -> list:
+    calls: list = []
+
+    def call(cfg, payload, node_id=""):
+        calls.append(1)
+        answer = answers[min(len(calls), len(answers)) - 1]
+        return answer if isinstance(answer, dict) else {"ok": True, "result": {"text": answer}}
+
+    monkeypatch.setattr(runner, "_call_tool", call)
+    return calls
+
+
+def looper(until: str = 'text.includes("PASS")', tries: int = 3) -> dict:
+    """Repeat a Run step until it passes, then Return to user (its Return is never reached)."""
+    return store.save_workflow({"name": "Looper", "graph": {
+        "nodes": [node("in", "flow.input"), node("r", "flow.repeat", 200, max=tries, expression=until),
+                  {**node("t", "tool.call", 400, name="x"), "label": "Run"},
+                  node("fin", "pipeline.finish", 600, message="FAILED after {{attempts}} tries"),
+                  node("out", "flow.output", 800)],
+        "edges": wire(("in", "r", "main"), ("r", "t", "each"), ("r", "fin", "done")),
+    }})
+
+
+def test_a_called_workflow_that_ended_failed_fails_the_caller(monkeypatch):
+    replies(monkeypatch, [{"ok": False, "error": "command not approved (timed out)"}])
+    fn = looper()
+    out = runner.run_workflow(caller(fn["id"])["id"])
+    assert out["ok"] is False and out["error"] == "Looper: Run: command not approved (timed out)"
+    assert [s["type"] for s in out["steps"]] == ["start.manual", "workflow.call"]  # nothing after the call
+    run = store.get_workflow(fn["id"])["runs"][-1]
+    assert run["ok"] is False and run["error"] == "Run: command not approved (timed out)"
+
+
+def test_a_check_that_never_said_yes_fails_the_caller(monkeypatch):
+    replies(monkeypatch, ["FAIL"])
+    out = runner.run_workflow(caller(looper()["id"])["id"])
+    assert out["ok"] is False and out["error"] == "Looper: Repeat until: not passed after 3 tries"
+
+
+def test_failed_once_then_passed_is_still_a_quiet_stop(monkeypatch):
+    replies(monkeypatch, [{"ok": False, "error": "busy"}, "PASS"])
+    out = runner.run_workflow(caller(looper()["id"])["id"])
+    assert out["ok"] is True and [s["type"] for s in out["steps"]] == ["start.manual", "workflow.call"]
+
+
+def test_repeat_n_times_with_no_check_is_a_quiet_stop(monkeypatch):
+    calls = replies(monkeypatch, ["anything"])
+    out = runner.run_workflow(caller(looper(until="", tries=2)["id"])["id"])
+    assert out["ok"] is True and len(calls) == 2
+
+
+def test_nested_failure_names_every_workflow(monkeypatch):
+    replies(monkeypatch, [{"ok": False, "error": "command not approved (timed out)"}])
+    middle = store.save_workflow({"name": "Middle", "graph": {
+        "nodes": [node("in", "flow.input"), node("call", "workflow.call", 200, workflow_id=looper()["id"]),
+                  node("out", "flow.output", 400)],
+        "edges": wire(("in", "call", "main"), ("call", "out", "main")),
+    }})
+    out = runner.run_workflow(caller(middle["id"])["id"])
+    assert out["ok"] is False and out["error"] == "Middle: Looper: Run: command not approved (timed out)"

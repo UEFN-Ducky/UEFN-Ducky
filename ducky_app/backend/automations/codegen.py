@@ -43,7 +43,7 @@ _FLOW_DOCS = {
     "logic.if": "Checks its condition, then follows the True or the False wire.",
     "flow.foreach": "Runs the Each wire once per item of a list, then follows Done.",
     "flow.repeat": "Runs the Each try wire until Until says yes or the tries run out, then follows Done.",
-    "workflow.call": "Runs another workflow like a function; if it has Return nodes and none is reached, this path stops.",
+    "workflow.call": "Runs another workflow like a function; if it has Return nodes and none is reached, this path stops (or fails, when a Repeat until in it ran out of tries).",
     "fortnite.servers": "Checks Epic's servers (waiting while they are down), then follows True (up) or False (still down).",
     "util.preview": "Shows what is wired in on its card; Use this runs the steps that take it.",
     "code.js": "This node is custom code already.",

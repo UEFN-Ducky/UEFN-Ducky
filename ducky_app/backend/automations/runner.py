@@ -2656,12 +2656,36 @@ def _output_node(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str, 
     return {"ok": True, "result": {_RETURN_KEY: {**earlier, **values}}}
 
 
+def _ended_failed(steps: list[dict[str, Any]], flow: _Dataflow) -> str:
+    """Why a called workflow that reached no Return ended failed, else "": a Repeat until
+    whose last try failed ("<step>: <error>"), or whose check never said yes. A try that
+    failed and then passed, a plain Repeat N times and a deliberate End are not failures."""
+    last: dict[str, int] = {}
+    for index, step in enumerate(steps):
+        if step.get("type") == "flow.repeat":
+            last[str(step.get("id"))] = index  # a loop around it records it once per pass
+    for nid, index in last.items():
+        step = steps[index]
+        result = step.get("result") if isinstance(step.get("result"), dict) else {}
+        label = str(step.get("label") or "Repeat until")
+        if result.get("last_error"):
+            bad = next((s for s in reversed(steps[:index]) if not s.get("ok", True)), None)
+            where = str(bad.get("label") or bad.get("type")) if bad else label
+            return f"{where}: {result['last_error']}"
+        cfg = (flow.nodes.get(nid) or {}).get("config") or {}
+        checked = flow.feeds.get(nid, {}).get("until") or str(cfg.get("expression") or "").strip()
+        if result.get("passed") is False and checked:
+            return f"{label}: not passed after {result.get('attempts')} tries"
+    return ""
+
+
 def _call_workflow(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run another workflow like a function and merge what it returns into this run.
 
     ``share`` runs it on a copy of this run's fields and brings every field back, as
     if its nodes sat here (a group turned into a workflow). If it has Return nodes and
-    none is reached, this path stops, like a path that ended inside the group."""
+    none is reached, this path stops, like a path that ended inside the group, unless
+    it ended failed (a Repeat until ran out of tries): then this step fails."""
     wid = str(cfg.get("workflow_id") or "").strip()
     if not wid:
         return {"ok": False, "error": "Choose the workflow to run."}
@@ -2705,6 +2729,9 @@ def _call_workflow(cfg: dict[str, Any], payload: dict[str, Any], wired: dict[str
         if ok:
             ok, error = flow.run_sinks(ctx)
         steps = list(flow.order)
+        if ok and _RETURN_KEY not in ctx and any(node.get("type") == "flow.output" for node in nodes.values()):
+            error = _ended_failed(steps, flow)
+            ok = not error
     finally:
         _LIVE.reset(live_token)
         _CALL_STACK.reset(stack_token)

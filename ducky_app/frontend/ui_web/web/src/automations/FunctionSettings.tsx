@@ -83,7 +83,7 @@ export function CallSettings({ node, workflows, currentId, onChange, onOpen }: {
     {picked ? <p className="aw-field-hint">
       Its inputs and return values are this node's pins: wire values in on the left and out on the right, or type an input under Inputs.
       {picked.signature?.outputs.length ? <> Next steps can also use {picked.signature.outputs.map((name, i) => <span key={name}>{i ? ", " : ""}<code>{name}</code></span>)} as fields.</> : " It returns nothing yet. Add a Return node to it to give values back."}
-      {" "}If it has Return nodes and none is reached, this path stops here.
+      {" "}If it has Return nodes and none is reached, this path stops here, unless a Repeat until in it ran out of tries: then this step fails with that step's error.
     </p> : null}
   </>;
 }

@@ -216,7 +216,8 @@ def save_workflow(
     config {workflow_id, args:{input_name: "literal or {{field}}"}, share?}; the returned
     values become fields for the next steps (also under "returned"). share=true runs it
     on a copy of this run's fields and brings every field back. If it has flow.output
-    nodes and none is reached, the caller's path stops there.
+    nodes and none is reached, the caller's path stops there; if a Repeat until in it ran
+    out of tries (its last try failed, or its check never said yes), the node fails instead.
 
     Custom code nodes (type code.js) are edited with edit_workflow_node_code, not here; a
     graph sent back without their code keeps it while code_sha matches.
