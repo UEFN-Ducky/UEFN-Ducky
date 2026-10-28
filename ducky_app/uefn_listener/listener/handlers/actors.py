@@ -218,12 +218,16 @@ def cmd_set_actor_transform(
     target = lookup.require_actor(actor_path)
     refuse_if_creative_device_scale(_device_kind(target), scale)
 
-    if location is not None:
-        target.set_actor_location(unreal.Vector(*location), False, False)
-    if rotation is not None:
-        target.set_actor_rotation(rotator_pyr(*rotation), False)
-    if scale is not None:
-        target.set_actor_scale3d(unreal.Vector(*scale))
+    # modify() inside a transaction marks the actor's package dirty: without it the move
+    # is never saved (nor locked and checked in, nor undoable with Ctrl+Z).
+    with unreal.ScopedEditorTransaction("MCP Set Actor Transform"):
+        target.modify()
+        if location is not None:
+            target.set_actor_location(unreal.Vector(*location), False, False)
+        if rotation is not None:
+            target.set_actor_rotation(rotator_pyr(*rotation), False)
+        if scale is not None:
+            target.set_actor_scale3d(unreal.Vector(*scale))
     lookup.invalidate()
     return {"actor": serialize_actor(target)}
 

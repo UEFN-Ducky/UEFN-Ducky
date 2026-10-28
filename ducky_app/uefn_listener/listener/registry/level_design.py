@@ -305,6 +305,13 @@ def get_ground_z(x: float, y: float, from_z: float = 100000.0) -> dict:
     return result
 
 
+def _move(actor, location, transaction: str) -> None:
+    """Move one actor so the editor sees it: modify() marks its package dirty (saved, undoable)."""
+    with unreal.ScopedEditorTransaction(transaction):
+        actor.modify()
+        actor.set_actor_location(location, False, False)
+
+
 def snap_actor_to_ground(actor_path: str, offset_z: float = 0.0) -> dict:
     """Drop an actor so the BOTTOM of its bounds sits on the ground (+ optional offset)."""
     actor = lookup.require_actor(actor_path)
@@ -318,7 +325,7 @@ def snap_actor_to_ground(actor_path: str, offset_z: float = 0.0) -> dict:
     bottom = origin.z - extent.z
     dz = (ground["z"] + float(offset_z)) - bottom
     loc = actor.get_actor_location()
-    actor.set_actor_location(unreal.Vector(loc.x, loc.y, loc.z + dz), False, False)
+    _move(actor, unreal.Vector(loc.x, loc.y, loc.z + dz), "MCP Snap Actor To Ground")
     lookup.invalidate()
     return {
         "actor_path": actor.get_path_name(),
@@ -339,7 +346,7 @@ def snap_actor_to_grid(actor_path: str, grid_size: float = 128.0, axes: str = "x
     for axis in axes.lower():
         if axis in coords:
             coords[axis] = round(coords[axis] / grid) * grid
-    actor.set_actor_location(unreal.Vector(coords["x"], coords["y"], coords["z"]), False, False)
+    _move(actor, unreal.Vector(coords["x"], coords["y"], coords["z"]), "MCP Snap Actor To Grid")
     lookup.invalidate()
     return {
         "actor_path": actor.get_path_name(),
@@ -379,13 +386,15 @@ def align_actors(actor_paths: List[str], axis: str = "x", mode: str = "center", 
 
     value = float(target) if target is not None else feature(actors[0])
     moved = []
-    for actor in actors:
-        delta = value - feature(actor)
-        loc = actor.get_actor_location()
-        coords = [loc.x, loc.y, loc.z]
-        coords["xyz".index(axis)] += delta
-        actor.set_actor_location(unreal.Vector(*coords), False, False)
-        moved.append({"label": actor.get_actor_label(), "delta": float(delta)})
+    with unreal.ScopedEditorTransaction("MCP Align Actors"):
+        for actor in actors:
+            delta = value - feature(actor)
+            loc = actor.get_actor_location()
+            coords = [loc.x, loc.y, loc.z]
+            coords["xyz".index(axis)] += delta
+            actor.modify()
+            actor.set_actor_location(unreal.Vector(*coords), False, False)
+            moved.append({"label": actor.get_actor_label(), "delta": float(delta)})
     lookup.invalidate()
     return {"axis": axis, "mode": mode, "value": value, "moved": moved, "count": len(moved)}
 
@@ -408,12 +417,14 @@ def distribute_actors(actor_paths: List[str], axis: str = "x", spacing: Optional
         gap = (last - first) / (len(actors) - 1)
         positions = [first + i * gap for i in range(len(actors))]
     moved = []
-    for actor, pos in zip(actors, positions):
-        loc = actor.get_actor_location()
-        coords = [loc.x, loc.y, loc.z]
-        coords[idx] = pos
-        actor.set_actor_location(unreal.Vector(*coords), False, False)
-        moved.append({"label": actor.get_actor_label(), axis: float(pos)})
+    with unreal.ScopedEditorTransaction("MCP Distribute Actors"):
+        for actor, pos in zip(actors, positions):
+            loc = actor.get_actor_location()
+            coords = [loc.x, loc.y, loc.z]
+            coords[idx] = pos
+            actor.modify()
+            actor.set_actor_location(unreal.Vector(*coords), False, False)
+            moved.append({"label": actor.get_actor_label(), axis: float(pos)})
     lookup.invalidate()
     return {"axis": axis, "spacing": spacing, "moved": moved, "count": len(moved)}
 
