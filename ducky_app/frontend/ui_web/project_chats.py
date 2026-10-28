@@ -1218,14 +1218,14 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> dic
     repo = _repo()
     project_id = repo.conv_project_id(conv.id) or _project_id(project_root)
     incoming = list(getattr(conv, "messages", None) or [])
-    stored_count, stored_has_assistant = repo.conv_message_summary(conv.id)
     messages: list[dict[str, Any]] | None = incoming
+    stored_count = -1  # read only when a stub may lose rows: counting them is O(n)
     if not incoming:
         messages = None  # nothing to sync (a stub, or a new chat): a metadata save
-    elif stored_count and stored_has_assistant and not any(
-        isinstance(m, dict) and m.get("role") == "assistant" for m in incoming
-    ):
-        messages = None
+    elif not any(isinstance(m, dict) and m.get("role") == "assistant" for m in incoming):
+        stored_count, stored_has_assistant = repo.conv_message_summary(conv.id)
+        if stored_count and stored_has_assistant:
+            messages = None
     if messages is not None and _host_owned(conv.id):  # its turn moved to a host meanwhile
         _refuse_host_messages(conv.id)
         messages = None
@@ -1257,6 +1257,8 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> dic
     try:
         from frontend.perf_trace import trace
 
+        if messages is None and stored_count < 0:
+            stored_count = repo.conv_message_summary(conv.id)[0]
         trace(
             "conv_save",
             conv.id,

@@ -652,12 +652,10 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
     state = {k: v for k, v in doc.items() if k not in _STATE_EXCLUDED}
     values = {col: doc.get(col) for col in _COLUMNS}
     values["is_group"] = 1 if doc.get("is_group") else 0
-    title = account_rows.seal(str(values["title"] or ""), account)
-    sealed_state = account_rows.seal(_dumps(state), account)
     stats = {"inserted": 0, "updated": 0, "deleted": 0, "bytes": 0}
     remember: tuple[dict[int, tuple[str, Any, int]], int] | None = None
     with db.write_txn(conn):
-        owner = conn.execute("SELECT account_id FROM conversations WHERE id=?", (doc["id"],)).fetchone()
+        owner = conn.execute("SELECT account_id, title, state FROM conversations WHERE id=?", (doc["id"],)).fetchone()
         if owner is not None and str(owner[0]) != account:
             _log.warning("skipped saving chat %s: it belongs to another account", doc["id"])
             return {**stats, "skipped": 1}
@@ -666,6 +664,9 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
             # it was deleted: never bring it back.
             _log.info("skipped saving deleted chat %s", doc["id"])
             return {**stats, "skipped": 1}
+        stored = ("", "") if owner is None else (str(owner[1] or ""), str(owner[2] or ""))
+        title = _sealed_as(stored[0], str(values["title"] or ""), account)
+        sealed_state = _sealed_as(stored[1], _dumps(state), account)
         snap_hash = _snapshot_put(conn, "skill_index", str(doc.get("skill_snapshot") or ""))
         conn.execute(
             "INSERT INTO conversations(id, account_id, project_id, folder_id, title, created, updated, sort_order, "
@@ -711,6 +712,18 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
     if remember is not None:
         _remember_rows(doc["id"], *remember)  # only once the rows are committed
     return stats
+
+
+def _sealed_as(stored: str, text: str, account: str) -> str:
+    """*text* sealed, reusing the stored value when it already holds *text*: opened
+    values are memoised, so an unchanged title or state costs no DPAPI call."""
+    # ponytail: a state over open_cached's 256 KB item cap is opened every save; cache it if that shows up.
+    try:
+        if account_rows.is_sealed(stored) and account_rows.open_cached(stored, account) == text:
+            return stored
+    except Exception:  # noqa: BLE001 — a value that won't open is sealed afresh
+        pass
+    return account_rows.seal(text, account)
 
 
 def _sync_messages(
