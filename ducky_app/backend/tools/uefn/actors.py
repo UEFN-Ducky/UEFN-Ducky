@@ -101,7 +101,7 @@ def spawn_actor(
     actor_class: str = "",
     location: Optional[list[float]] = None,
     rotation: Optional[list[float]] = None,
-    select: bool = True,
+    select: bool = False,
     label: str = "",
     folder: str = "",
     tags: Optional[list[str]] = None,
@@ -110,7 +110,8 @@ def spawn_actor(
     """Place a prop, mesh, Blueprint or device by asset_path (…_C). Never a Verse *_device name as actor_class.
 
     Prefer ``label`` + ``folder`` here (same tick) instead of separate
-    set_actor_label / set_actor_folder calls. New actor is selected by default.
+    set_actor_label / set_actor_folder calls. The person's selection is left
+    alone; pass ``select=true`` only when they asked to have the new actor selected.
     Do not pass Verse ``*_device`` names as ``actor_class`` — search under
     ``/Game/Creative`` for the Blueprint path. Fortnite catalog props: spawn the
     Content Drawer ``_C`` class, not a BakeData StaticMesh.

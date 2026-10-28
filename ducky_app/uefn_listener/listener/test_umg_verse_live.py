@@ -62,6 +62,10 @@ def author(monkeypatch):
     open_now: list[str] = []
     mod._ref = lambda obj: f"{obj.path}.{obj.path.rsplit('/', 1)[-1]}"
     mod._open_asset_packages = lambda: set(open_now)
+    # No real Win32 from a test: the person's window is 7 and gets every give-back.
+    editors.given_back = []
+    mod._foreground_window = lambda: 7
+    mod._give_foreground_back = editors.given_back.append
     return mod, editors, open_now
 
 
@@ -74,11 +78,24 @@ def test_opens_the_editor_once_then_remembers(author):
     assert len(editors.calls) == 2
 
 
+def test_the_persons_window_gets_the_keyboard_back_after_the_flash(author):
+    mod, editors, _ = author
+    wbp = _Asset("/Proj/UI/UW_Shop")
+    mod.ensure_verse_fields_live(wbp)
+    assert editors.given_back == [7]
+    mod.ensure_verse_fields_live(wbp)  # remembered: no second flash, nothing to give back
+    assert editors.given_back == [7]
+    editors.fail = True
+    mod.forget_verse_fields_live("/Proj/UI/UW_Shop")
+    assert mod.ensure_verse_fields_live(wbp).startswith("failed:")
+    assert editors.given_back == [7, 7]  # a failed open may still have raised UEFN
+
+
 def test_leaves_an_editor_the_user_has_open(author):
     mod, editors, open_now = author
     open_now.append("/Proj/UI/UW_Shop")
     assert mod.ensure_verse_fields_live(_Asset("/Proj/UI/UW_Shop")) == "already_open"
-    assert editors.calls == []
+    assert editors.calls == [] and editors.given_back == []
 
 
 def test_a_recreated_widget_is_opened_again(author):

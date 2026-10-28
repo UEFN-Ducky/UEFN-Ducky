@@ -813,10 +813,36 @@ def _open_asset_packages() -> set:
     return {_package(str(p)) for p in payload or []}
 
 
+def _foreground_window() -> int:
+    """The OS window that has the keyboard now (0 when unknown)."""
+    try:
+        import ctypes
+
+        return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _give_foreground_back(hwnd: int) -> None:
+    """Opening an asset editor raises UEFN: hand the keyboard back to whoever had it."""
+    if not hwnd:
+        return
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        if int(user32.GetForegroundWindow() or 0) != hwnd and user32.IsWindow(hwnd):
+            user32.SetForegroundWindow(hwnd)  # UEFN is in front now, so Windows allows it
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def ensure_verse_fields_live(wbp) -> str:
     """Open the widget's asset editor once (then close it) so its Verse fields are real.
 
-    Returns "opened", "already_open", "ready" (done earlier this session) or "failed: …".
+    The person may be working in the same editor: the foreground window they had is
+    given back right after. Returns "opened", "already_open", "ready" (done earlier
+    this session) or "failed: …".
     """
     key = _package(_ref(wbp))
     if key in _VERSE_FIELDS_READY:
@@ -824,12 +850,15 @@ def ensure_verse_fields_live(wbp) -> str:
     if key in _open_asset_packages():
         _VERSE_FIELDS_READY.add(key)
         return "already_open"
+    before = _foreground_window()
     try:
         editors = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
         editors.open_editor_for_assets([wbp])
         editors.close_all_editors_for_asset(wbp)
     except Exception as exc:  # noqa: BLE001
         return f"failed: {exc}"[:200]
+    finally:
+        _give_foreground_back(before)
     _VERSE_FIELDS_READY.add(key)
     return "opened"
 

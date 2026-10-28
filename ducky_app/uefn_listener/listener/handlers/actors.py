@@ -108,7 +108,7 @@ def cmd_spawn_actor(
     actor_class: str = "",
     location: Optional[List[float]] = None,
     rotation: Optional[List[float]] = None,
-    select: bool = True,
+    select: bool = False,
     label: str = "",
     folder: str = "",
     tags: Optional[List[str]] = None,
@@ -118,6 +118,8 @@ def cmd_spawn_actor(
     Prefer passing label+folder here instead of separate set_actor_label /
     set_actor_folder calls (3 round-trips → 1). Fortnite catalog: pass the
     Content Drawer Actor Blueprint ``_C`` — not a BakeData StaticMesh.
+    The person's selection is left alone unless ``select`` is true: they may be
+    working in the same editor while an agent places things.
     """
     loc = unreal.Vector(*location) if location else unreal.Vector(0, 0, 0)
     rot = rotator_pyr(*rotation) if rotation else rotator_pyr(0, 0, 0)
@@ -168,7 +170,7 @@ def cmd_spawn_actor(
 
     # The level changed; drop the per-tick index so later lookups see this actor.
     lookup.invalidate()
-    # Select the new actor so it is highlighted and ready to move in the viewport.
+    # Only on request: selecting would replace whatever the person had selected.
     if select:
         try:
             actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)

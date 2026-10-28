@@ -21,6 +21,22 @@ def _img(name: str) -> Image.Image:
     return Image.open(_FIX / f"{name}.png")
 
 
+@pytest.fixture(autouse=True)
+def focus(monkeypatch):
+    """No real Win32 from a test: the person is in window 5 with the pointer at (40, 50)."""
+    from backend.tools.core import uefn_modal
+
+    state = {"given_back": [], "pointer": []}
+    monkeypatch.setattr(uefn_modal, "foreground_window", lambda: 5)
+    monkeypatch.setattr(uefn_modal, "cursor_pos", lambda: (40, 50))
+    monkeypatch.setattr(uefn_modal, "set_cursor_pos", state["pointer"].append)
+    monkeypatch.setattr(uefn_modal, "give_foreground_back",
+                        lambda prev, popup=0: state["given_back"].append((prev, popup)) or True)
+    monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds", lambda: set())
+    monkeypatch.setattr(uefn_modal, "_ducky_windows", set())
+    return state
+
+
 @pytest.mark.parametrize(
     ("name", "count", "primary", "press"),
     [
@@ -267,15 +283,29 @@ def test_the_conflicting_changes_dialog_is_never_pressed(uefn_popup, title) -> N
     assert popups.find_conflict_dialog()["title"] == title
 
 
+def test_a_press_gives_the_person_their_window_and_pointer_back(uefn_popup, focus) -> None:
+    uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")
+    popups.press_button(515, 1)
+    assert focus["pointer"] == [(40, 50)]
+    assert focus["given_back"] == [(5, 515)]
+
+
+def test_the_persons_own_message_box_is_not_pressed(uefn_popup) -> None:
+    uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")
+    assert popups.press_lone_button_popups(skip=frozenset({515})) == []
+    assert uefn_popup["clicks"] == [] and uefn_popup["up"] is not None
+
+
 def test_a_popup_with_a_choice_is_left_to_the_agent(uefn_popup) -> None:
     uefn_popup["show"]("Unable to Launch", "data_loss_warning")
     assert popups.press_lone_button_popups() == []
     assert uefn_popup["clicks"] == [] and uefn_popup["up"] is not None
 
 
-def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0):
+def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0, ducky_left_it: bool = True):
     """The plugin pool wired to a fake UEFN Epic MCP whose call runs on the Slate thread:
-    it cannot answer while a popup is up."""
+    it cannot answer while a popup is up. The popup is already up when the call starts;
+    ``ducky_left_it`` says an earlier Ducky call opened it (else it is the person's)."""
     from types import SimpleNamespace
 
     from mcp.types import TextContent
@@ -290,7 +320,11 @@ def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0):
     monkeypatch.setattr(epic, "probe_epic_mcp", lambda **_k: {"epic_mcp_online": True, "epic_mcp_editor": "uefn"})
     monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
     monkeypatch.setattr(uefn_modal, "_LONE_BUTTON_AFTER_SEC", 0.0)
-    monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", lambda: None)
+    monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", lambda **_: None)
+    monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds",
+                        lambda: {popup_state["up"]["hwnd"]} if popup_state["up"] else set())
+    if ducky_left_it and popup_state["up"]:
+        uefn_modal._ducky_windows.add(popup_state["up"]["hwnd"])
 
     class Session:
         async def call_tool(self, name, args):
@@ -327,6 +361,15 @@ def test_a_hung_epic_call_gets_the_unable_to_refresh_popup_pressed(uefn_popup, m
     assert len(uefn_popup["clicks"]) == 1
     assert "pressed UEFN's popup 'Unable to Refresh' → its only button" in out
     assert "uefn_popup_1.png" in out  # the agent can still read what UEFN said
+
+
+def test_a_hung_epic_call_leaves_the_persons_popup_alone(uefn_popup, monkeypatch) -> None:
+    uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")  # the person's own push said this
+    pool = _epic_pool(monkeypatch, uefn_popup, timeout=0.3, ducky_left_it=False)
+    with pytest.raises(RuntimeError) as err:
+        asyncio.run(pool.call_tool("unreal__call_tool", _GET_SESSION_STATUS))
+    assert uefn_popup["clicks"] == []
+    assert "'Unable to Refresh'" in str(err.value)  # the agent is told, and may ask the person
 
 
 def test_a_timed_out_epic_call_tells_the_agent_to_look_and_press(uefn_popup, monkeypatch) -> None:

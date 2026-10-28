@@ -13,7 +13,9 @@ errors are answered by rule, so an agent never sits behind them:
 
 A call that waits behind any other blocking popup with a single blue button (a
 message box such as "Unable to Refresh" [OK]) gets that button pressed too, from
-the waiting call's watchdog (``press_lone_button_popups``).
+the waiting call's watchdog (``press_lone_button_popups``) — only when a Ducky call
+put it up, never the person's own. Every press gives the person back the window
+they were in and the mouse pointer where it was.
 
 Continuing leaves the open level's Verse devices broken in memory, and saving the
 level then breaks them for good. From that press until Verse builds clean and the
@@ -306,10 +308,15 @@ def press_button(hwnd: int, n: int) -> dict[str, Any]:
     if not 1 <= int(n) <= len(buttons):
         return {"ok": False, "error": f"button {n} not found; this popup shows {len(buttons)}", "title": popup["title"]}
     b = buttons[int(n) - 1]
+    from backend.tools.core import uefn_modal
     from frontend.window_view import inject_pointer
 
+    # The click is a real one: it raises the popup and moves the pointer. The person
+    # may be working right now, so both go back to where they were.
+    person_had, pointer = uefn_modal.foreground_window(), uefn_modal.cursor_pos()
     inject_pointer(int(hwnd), "down", b["nx"], b["ny"])
     inject_pointer(int(hwnd), "up", b["nx"], b["ny"])
+    uefn_modal.set_cursor_pos(pointer)
     closed = False
     deadline = time.time() + 2.0
     while time.time() < deadline:
@@ -317,6 +324,7 @@ def press_button(hwnd: int, n: int) -> dict[str, Any]:
             closed = True
             break
         time.sleep(0.1)
+    uefn_modal.give_foreground_back(person_had, popup=int(hwnd))
     if closed and popup["title"].strip().lower() in ("data loss warning", "verse validation errors"):
         mark_verse_skip()
     return {"ok": True, "title": popup["title"], "pressed": int(n), "closed": closed,
@@ -400,12 +408,12 @@ def is_lone_button_popup(popup: dict[str, Any], buttons: list[dict[str, Any]]) -
     return len(buttons) == 1 and bool(buttons[0].get("primary"))
 
 
-def press_lone_button_popups() -> list[dict[str, Any]]:
+def press_lone_button_popups(*, skip: frozenset[int] = frozenset()) -> list[dict[str, Any]]:
     """Press the only button of each blocking UEFN message box on screen. One pass.
 
     For a call that waits on the editor (``uefn_modal.save_modal_watchdog``). Each
     press keeps the numbered capture in the chat (``path``), so what UEFN said is
-    not lost with the popup.
+    not lost with the popup. Popups in ``skip`` (the person's own) are left alone.
     """
     if not _lone_lock.acquire(blocking=False):
         return []  # another waiting call is pressing right now
@@ -416,6 +424,8 @@ def press_lone_button_popups() -> list[dict[str, Any]]:
         _forget_closed(on_screen)
         for popup in on_screen:
             hwnd, title = popup["hwnd"], popup["title"].strip().lower()
+            if int(hwnd) in skip:
+                continue  # up before the Ducky call began: the person's
             if not is_lone_button_popup(popup, [{"primary": True}]):
                 continue  # not blocking, a known popup, or a title left to the AI
             seen = _retry.get(hwnd)

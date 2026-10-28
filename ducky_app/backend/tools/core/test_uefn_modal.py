@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
+import pytest
+
 from backend.tools.core.uefn_modal import (
     SAVE_LISTENER_COMMANDS,
     is_confirm_button,
     is_save_dialog_title,
 )
+
+
+@pytest.fixture(autouse=True)
+def windows(monkeypatch):
+    """Fake UEFN windows on screen: the watchdog's snapshot reads ``state["up"]``."""
+    from backend.tools.core import uefn_modal
+
+    state = {"up": set()}
+    monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds", lambda: set(state["up"]))
+    monkeypatch.setattr(uefn_modal, "_ducky_windows", set())
+    return state
 
 
 def test_save_dialog_titles():
@@ -83,14 +99,14 @@ def test_watchdog_presses_while_caller_blocks_then_stops(monkeypatch):
     monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
     calls: list[int] = []
 
-    def fake():
+    def fake(**_):
         calls.append(1)
         if len(calls) == 1:
             return {"sent_enter": True, "method": "enter_posted", "window_title": "Save Content"}
         return None
 
     monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", fake)
-    monkeypatch.setattr(uefn_modal, "auto_press_lone_button_popups", lambda: [])  # never real windows
+    monkeypatch.setattr(uefn_modal, "auto_press_lone_button_popups", lambda **_: [])  # never real windows
     seen: list[dict] = []
 
     def until(predicate, timeout=30.0):
@@ -150,14 +166,14 @@ def test_watchdog_block_waits_for_the_press_in_flight(monkeypatch):
     release = threading.Event()
     finished: list[float] = []
 
-    def slow_press():
+    def slow_press(**_):
         entered.set()
         release.wait(30.0)
         finished.append(time.time())
         return {"sent_enter": True, "method": "enter_posted", "window_title": "Save Content"}
 
     monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", slow_press)
-    monkeypatch.setattr(uefn_modal, "auto_press_lone_button_popups", lambda: [])
+    monkeypatch.setattr(uefn_modal, "auto_press_lone_button_popups", lambda **_: [])
 
     with uefn_modal.save_modal_watchdog("slow", poll_sec=0.01):
         assert entered.wait(30.0), "watchdog never started its press"
@@ -166,3 +182,122 @@ def test_watchdog_block_waits_for_the_press_in_flight(monkeypatch):
 
     assert finished, "the in-flight press never completed"
     assert finished[0] <= left_block_at, "the block exited before the press it started finished"
+
+
+# --------------------------------------------------------------------------- the person's popups
+#
+# The person works in the same UEFN. A Save dialog they opened themselves got Enter
+# from the watchdog of whatever Ducky call happened to run (even a read), and every
+# press pulled the dialog to the front.
+
+
+def _skips_seen(monkeypatch, uefn_modal) -> list:
+    monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
+    seen: list = []
+    monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", lambda *, skip: seen.append(skip))
+    monkeypatch.setattr(uefn_modal, "auto_press_lone_button_popups", lambda *, skip: [])
+    return seen
+
+
+def _one_tick(uefn_modal, label="read") -> None:
+    import time
+
+    with uefn_modal.save_modal_watchdog(label, poll_sec=30.0):
+        time.sleep(0.05)  # the first check runs right away
+
+
+def test_a_popup_up_before_the_call_is_the_persons(windows, monkeypatch):
+    from backend.tools.core import uefn_modal
+
+    seen = _skips_seen(monkeypatch, uefn_modal)
+    windows["up"] = {10}  # the person opened Save Content, then the agent asked something
+    _one_tick(uefn_modal)
+    assert seen and seen[0] == frozenset({10})
+
+
+def test_a_popup_an_earlier_ducky_call_left_is_still_pressed(windows, monkeypatch):
+    from backend.tools.core import uefn_modal
+
+    seen = _skips_seen(monkeypatch, uefn_modal)
+    real_hwnds = uefn_modal._uefn_window_hwnds
+    calls = {"n": 0}
+
+    def hwnds():
+        calls["n"] += 1
+        return {1} if calls["n"] == 1 else {1, 20}  # the first call's push opened popup 20
+
+    monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds", hwnds)
+    _one_tick(uefn_modal, "push")
+    monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds", real_hwnds)
+    windows["up"] = {1, 20}
+    _one_tick(uefn_modal, "status")  # waits behind popup 20: Ducky's, so it may press it
+    assert seen[-1] == frozenset({1})
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 callbacks")
+def test_the_dismiss_never_touches_a_skipped_window(monkeypatch):
+    from backend.tools.core import uefn_modal
+
+    posted: list = []
+    gone: set = set()
+
+    def post(hwnd, msg, wparam, lparam):
+        posted.append(hwnd)
+        gone.add(hwnd)
+        return 1
+
+    fake = types.SimpleNamespace(
+        EnumChildWindows=lambda *a: True,
+        IsWindow=lambda h: h not in gone,
+        IsWindowVisible=lambda h: h not in gone,
+        PostMessageW=post,
+        GetForegroundWindow=lambda: 0,
+    )
+    monkeypatch.setattr(uefn_modal, "_user32", lambda: fake)
+    dialog = {"hwnd": 10, "title": "Save Content", "cls": "UnrealWindow", "owned": True}
+    monkeypatch.setattr(uefn_modal, "_enum_uefn_windows", lambda: [dict(dialog)])
+    out = uefn_modal._dismiss_win32(allow_bare_enter=False, skip=frozenset({10}))
+    assert out["reason"] == "no save dialog" and posted == []
+    out = uefn_modal._dismiss_win32(allow_bare_enter=False)
+    assert out["method"] == "enter_posted" and posted == [10, 10]
+
+
+@pytest.fixture()
+def desk(monkeypatch):
+    """A fake desktop for the give-back: which window is in front, which exist."""
+    from backend.tools.core import uefn_modal
+
+    state = {"fg": 0, "alive": {5, 9}, "forced": []}
+    monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
+    monkeypatch.setattr(uefn_modal, "_user32", lambda: types.SimpleNamespace(
+        GetForegroundWindow=lambda: state["fg"],
+        IsWindow=lambda h: h in state["alive"],
+        IsWindowVisible=lambda h: h in state["alive"],
+    ))
+
+    def force(hwnd, *, restore=True):
+        state["forced"].append((hwnd, restore))
+        state["fg"] = hwnd
+        return True
+
+    monkeypatch.setattr(uefn_modal, "_force_foreground", force)
+    return state
+
+
+def test_the_foreground_goes_back_to_the_person_without_unmaximizing(desk):
+    from backend.tools.core import uefn_modal
+
+    desk["fg"] = 9  # UEFN, after the popup closed
+    assert uefn_modal.give_foreground_back(5, popup=77) is True
+    assert desk["forced"] == [(5, False)] and desk["fg"] == 5
+
+
+def test_nothing_is_forced_when_there_is_nothing_to_give_back(desk):
+    from backend.tools.core import uefn_modal
+
+    desk["fg"] = 5
+    assert uefn_modal.give_foreground_back(5) is True  # still in front
+    assert uefn_modal.give_foreground_back(0) is False  # unknown
+    assert uefn_modal.give_foreground_back(77, popup=77) is False  # the popup itself
+    assert uefn_modal.give_foreground_back(4) is False  # closed since
+    assert desk["forced"] == []

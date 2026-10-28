@@ -17,6 +17,11 @@ What was verified against a live UEFN "Save Content" (SPackagesDialog):
 
 The watchdog also presses the one button of any other blocking message box
 (OK / Close, found in a capture by ``uefn_popups``) once a call has waited a while.
+
+The person works in the same UEFN. The watchdog only presses a popup that showed up
+while a Ducky call was in flight; one already on screen when the call started is the
+person's and stays theirs. After a press the foreground goes back to the window that
+had it.
 """
 
 from __future__ import annotations
@@ -95,6 +100,11 @@ _auto_lock = threading.Lock()
 _PID_CACHE_TTL_SEC = 60.0
 _pid_cache: dict[int, tuple[bool, float]] = {}
 
+# UEFN windows that appeared while a Ducky call was in flight. A popup a call left
+# behind (it returned before the press) is still Ducky's when the next call waits on it.
+_ducky_windows: set[int] = set()
+_ducky_windows_lock = threading.Lock()
+
 
 def _norm_button(text: str) -> str:
     t = (text or "").replace("&", "").replace(".", "").strip().lower()
@@ -115,16 +125,19 @@ def is_confirm_button(text: str) -> bool:
     return t in _CONFIRM_EXACT
 
 
-def dismiss_uefn_save_modal(*, allow_bare_enter: bool = False) -> dict[str, Any]:
+def dismiss_uefn_save_modal(
+    *, allow_bare_enter: bool = False, skip: frozenset[int] = frozenset()
+) -> dict[str, Any]:
     """Click Save/Yes/OK on a UEFN confirm dialog, or Enter if that is the default.
 
     ``allow_bare_enter``: only the explicit MCP tool should set this. Auto-heal
-    from a busy save must not send Enter to the main editor.
+    from a busy save must not send Enter to the main editor. ``skip``: windows
+    (hwnds) never to press — the person's own.
     """
     if sys.platform != "win32":
         return {"ok": False, "error": "Windows only", "clicked": False}
     try:
-        return _dismiss_win32(allow_bare_enter=allow_bare_enter)
+        return _dismiss_win32(allow_bare_enter=allow_bare_enter, skip=skip)
     except Exception as exc:
         return {"ok": False, "error": str(exc), "clicked": False}
 
@@ -142,11 +155,12 @@ def find_uefn_save_dialog() -> dict[str, Any] | None:
     return None
 
 
-def auto_dismiss_save_modal() -> dict[str, Any] | None:
+def auto_dismiss_save_modal(*, skip: frozenset[int] = frozenset()) -> dict[str, Any] | None:
     """Cooldown-limited, title-gated press for automatic callers (never bare Enter).
 
     Returns the dismiss info when a dialog was pressed, else None. Safe to call
-    on every poll: with no matching dialog it is one window enumeration.
+    on every poll: with no matching dialog it is one window enumeration. Windows
+    in ``skip`` are never pressed.
     """
     global _last_auto_press_at
     try:
@@ -159,20 +173,20 @@ def auto_dismiss_save_modal() -> dict[str, Any] | None:
     with _auto_lock:
         if time.time() - _last_auto_press_at < _AUTO_COOLDOWN_SEC:
             return None
-        info = dismiss_uefn_save_modal(allow_bare_enter=False)
+        info = dismiss_uefn_save_modal(allow_bare_enter=False, skip=skip)
         if info.get("clicked") or info.get("sent_enter"):
             _last_auto_press_at = time.time()
             return info
     return None
 
 
-def auto_press_lone_button_popups() -> list[dict[str, Any]]:
+def auto_press_lone_button_popups(*, skip: frozenset[int] = frozenset()) -> list[dict[str, Any]]:
     """Press OK on blocking UEFN message boxes (``uefn_popups.press_lone_button_popups``),
-    shaped like a Save press for the watchdog's callers."""
+    shaped like a Save press for the watchdog's callers. Windows in ``skip`` are left alone."""
     try:
         from backend.tools.core.uefn_popups import press_lone_button_popups
 
-        presses = press_lone_button_popups()
+        presses = press_lone_button_popups(skip=skip)
     except Exception:
         return []
     return [
@@ -197,6 +211,9 @@ def save_modal_watchdog(
     lasted ``lone_button_after_sec`` (default ``_LONE_BUTTON_AFTER_SEC``), a
     blocking message box with one button (OK / Close) is pressed too. Yields the
     list of presses made.
+
+    A UEFN window already on screen when the block starts is the person's (unless
+    an earlier Ducky call opened it) and is never pressed.
     """
     events: list[dict[str, Any]] = []
     if sys.platform != "win32":
@@ -204,14 +221,16 @@ def save_modal_watchdog(
         return
     stop = threading.Event()
     lone_after = _LONE_BUTTON_AFTER_SEC if lone_button_after_sec is None else lone_button_after_sec
+    before = _uefn_window_hwnds()
 
     def _run() -> None:
         started = time.monotonic()
         while not stop.is_set():
-            info = auto_dismiss_save_modal()
+            skip = _persons_windows(before)
+            info = auto_dismiss_save_modal(skip=skip)
             presses = [info] if info else []
             if not presses and time.monotonic() - started >= lone_after:
-                presses = auto_press_lone_button_popups()
+                presses = auto_press_lone_button_popups(skip=skip)
             for press in presses:
                 event = {**press, "label": label, "at": time.time()}
                 events.append(event)
@@ -239,6 +258,113 @@ def save_modal_watchdog(
         # the user opened next. stop.wait() returns as soon as the flag is set,
         # so this costs nothing unless a press is genuinely mid-flight.
         thread.join(timeout=_STOP_JOIN_S)
+        # A popup this call opened but did not press stays Ducky's for the next call.
+        _note_ducky_windows(before)
+
+
+def _uefn_window_hwnds() -> set[int]:
+    """Every visible top-level UEFN window now; empty when that cannot be read."""
+    try:
+        return {int(w["hwnd"]) for w in _enum_uefn_windows() if w.get("hwnd")}
+    except Exception:
+        return set()
+
+
+def _note_ducky_windows(before: set[int]) -> None:
+    """Remember the UEFN windows that appeared since ``before`` (a Ducky call was in flight)."""
+    now = _uefn_window_hwnds()
+    if not now:
+        return  # UEFN is gone, or its windows could not be read
+    with _ducky_windows_lock:
+        _ducky_windows.intersection_update(now)  # a closed window's hwnd may be recycled
+        _ducky_windows.update(now - before)
+
+
+def _persons_windows(before: set[int]) -> frozenset[int]:
+    """Of the windows up when a call started, those no Ducky call opened."""
+    with _ducky_windows_lock:
+        return frozenset(before - _ducky_windows)
+
+
+# ---------------------------------------------------------------------------
+# Giving the person their focus back after a press
+# ---------------------------------------------------------------------------
+
+
+def foreground_window() -> int:
+    """The window that has the keyboard now (0 when unknown)."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        return int(_user32().GetForegroundWindow() or 0)
+    except Exception:
+        return 0
+
+
+def give_foreground_back(prev: int, *, popup: int = 0) -> bool:
+    """After a popup press, hand the foreground back to ``prev`` (what the person had).
+
+    Nothing to do when ``prev`` is unknown, gone, the popup itself, or still in front.
+    """
+    if sys.platform != "win32" or not prev or int(prev) == int(popup or 0):
+        return False
+    try:
+        user32 = _user32()
+        if not user32.IsWindow(prev) or not user32.IsWindowVisible(prev):
+            return False
+        if int(user32.GetForegroundWindow() or 0) == int(prev):
+            return True
+        # No SW_RESTORE here: it would un-maximize the person's window.
+        return _force_foreground(prev, restore=False)
+    except Exception:
+        return False
+
+
+def cursor_pos() -> tuple[int, int] | None:
+    """The mouse pointer's screen position, so a click can put it back."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        pt = wintypes.POINT()
+        if _user32().GetCursorPos(ctypes.byref(pt)):
+            return int(pt.x), int(pt.y)
+    except Exception:
+        pass
+    return None
+
+
+def set_cursor_pos(pos: tuple[int, int] | None) -> None:
+    if sys.platform != "win32" or pos is None:
+        return
+    try:
+        _user32().SetCursorPos(int(pos[0]), int(pos[1]))
+    except Exception:
+        pass
+
+
+def _force_foreground(hwnd: Any, *, restore: bool = True) -> bool:
+    """Put ``hwnd`` in front (input briefly attached to the foreground thread)."""
+    import ctypes
+
+    SW_RESTORE = 9
+    user32 = _user32()
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    fg = user32.GetForegroundWindow()
+    fg_tid = user32.GetWindowThreadProcessId(fg, None)
+    our_tid = kernel32.GetCurrentThreadId()
+    attached = False
+    if fg_tid and our_tid and fg_tid != our_tid:
+        attached = bool(user32.AttachThreadInput(our_tid, fg_tid, True))
+    if restore:
+        user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if attached:
+        user32.AttachThreadInput(our_tid, fg_tid, False)
+    return user32.GetForegroundWindow() == hwnd
 
 
 # ---------------------------------------------------------------------------
@@ -375,18 +501,16 @@ def _enum_uefn_windows() -> list[dict[str, Any]]:
     return windows
 
 
-def _dismiss_win32(*, allow_bare_enter: bool) -> dict[str, Any]:
+def _dismiss_win32(*, allow_bare_enter: bool, skip: frozenset[int] = frozenset()) -> dict[str, Any]:
     import ctypes
     from ctypes import wintypes
 
     user32 = _user32()
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     user32.EnumChildWindows.argtypes = [wintypes.HWND, WNDENUMPROC, wintypes.LPARAM]
     user32.EnumChildWindows.restype = wintypes.BOOL
 
     BM_CLICK = 0x00F5
-    SW_RESTORE = 9
     KEYEVENTF_KEYUP = 2
     VK_RETURN = 0x0D
     WM_KEYDOWN = 0x0100
@@ -401,7 +525,9 @@ def _dismiss_win32(*, allow_bare_enter: bool) -> dict[str, Any]:
         user32.GetWindowTextW(hwnd, buf, n + 1)
         return buf.value
 
-    windows = _enum_uefn_windows()
+    # The person's own windows (up before the Ducky call began) are never pressed.
+    windows = [w for w in _enum_uefn_windows() if int(w["hwnd"] or 0) not in skip]
+    person_had = foreground_window()
 
     buttons: list[tuple[Any, str, Any]] = []  # (button_hwnd, label, parent)
     parent_hwnd: Any = None
@@ -419,22 +545,16 @@ def _dismiss_win32(*, allow_bare_enter: bool) -> dict[str, Any]:
         parent_hwnd = win["hwnd"]
         user32.EnumChildWindows(win["hwnd"], child_proc, 0)
 
-    def _force_fg(hwnd) -> bool:
-        fg = user32.GetForegroundWindow()
-        fg_tid = user32.GetWindowThreadProcessId(fg, None)
-        our_tid = kernel32.GetCurrentThreadId()
-        attached = False
-        if fg_tid and our_tid and fg_tid != our_tid:
-            attached = bool(user32.AttachThreadInput(our_tid, fg_tid, True))
-        user32.ShowWindow(hwnd, SW_RESTORE)
-        user32.BringWindowToTop(hwnd)
-        user32.SetForegroundWindow(hwnd)
-        if attached:
-            user32.AttachThreadInput(our_tid, fg_tid, False)
-        return user32.GetForegroundWindow() == hwnd
-
     def _closed(hwnd) -> bool:
         return not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd)
+
+    def _give_back(hwnd) -> None:
+        # The press pulled the dialog to the front: once it is gone, the person
+        # gets back the window they were in.
+        deadline = time.time() + 0.5
+        while time.time() < deadline and not _closed(hwnd):
+            time.sleep(0.05)
+        give_foreground_back(person_had, popup=int(hwnd or 0))
 
     def _enter(hwnd) -> dict[str, Any]:
         # Slate reads the posted key from its own message pump, so the dialog
@@ -450,18 +570,21 @@ def _dismiss_win32(*, allow_bare_enter: bool) -> dict[str, Any]:
                 return {"sent_enter": True, "method": "enter_posted"}
             time.sleep(0.05)
         # Fallback: a real keystroke — but only when this dialog has the keyboard.
-        if not _force_fg(hwnd):
+        if not _force_foreground(hwnd):
+            give_foreground_back(person_had, popup=int(hwnd or 0))
             return {"sent_enter": False, "method": "enter_foreground_denied"}
         user32.keybd_event(VK_RETURN, 0, 0, 0)
         user32.keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP, 0)
+        _give_back(hwnd)
         return {"sent_enter": True, "method": "enter_foreground"}
 
     base = {"ok": True, "uefn_windows": len(windows), "clicked": False, "sent_enter": False}
 
     if buttons:
         hwnd, label, parent = buttons[0]
-        _force_fg(parent or hwnd)
+        _force_foreground(parent or hwnd)
         user32.SendMessageW(hwnd, BM_CLICK, 0, 0)
+        _give_back(parent or hwnd)
         parent_title = ""
         for win in windows:
             if win["hwnd"] == parent:
