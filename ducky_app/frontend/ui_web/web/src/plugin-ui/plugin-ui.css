@@ -343,6 +343,16 @@
   max-height: none;
   border-top: 0;
 }
+.team-modal-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 0;
+}
+.team-modal-sliders input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .team-modal-overview {
   display: flex;
   flex-direction: column;

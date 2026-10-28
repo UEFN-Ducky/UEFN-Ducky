@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import "./plugin-ui.css";
 import { Modal } from "../components/Modal";
+import { getApi } from "../hooks/usePanelApi";
+import type { PanelApi } from "../types/panel";
 import { PluginScopeDrawer, scopeTabs } from "./PluginScopeDrawer";
 import { kindTitle, phraseTab, type ScopeTab } from "./scopeBarText";
 import { useTeamScope, type TeamScope } from "./teamScopeStore";
@@ -13,6 +15,71 @@ type Props = {
   /** The section shown when it opens. */
   initial?: TeamSection;
 };
+
+/** The host's team timing settings (sync_scheduler clamps them; app-wide, every team copy). */
+type TimingKey = "team_send_delay_s" | "team_poll_s";
+const SLIDERS: { key: TimingKey; label: string; min: number; max: number; step: number; fallback: number }[] = [
+  { key: "team_send_delay_s", label: "Send changes after", min: 0, max: 60, step: 5, fallback: 10 },
+  { key: "team_poll_s", label: "Check for teammates' changes every", min: 30, max: 600, step: 30, fallback: 60 },
+];
+/** A drag saves once it settles, not on every step. */
+const SAVE_SETTLE_MS = 400;
+
+/** "0 s", "45 s", "1 min 30 s", "10 min". */
+function secondsText(s: number): string {
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+}
+
+/** Settings' sliders: how long changes collect before they go out together, and how often
+ * teammates' changes are looked for. */
+function TimingSliders() {
+  const [values, setValues] = useState<Record<TimingKey, number> | null>(null);
+  const pending = useRef<Partial<Record<TimingKey, number>>>({});
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void Promise.resolve(getApi()?.get_settings?.()).then((s) => {
+      if (!live) return;
+      const read = (s ?? {}) as Partial<Record<TimingKey, number>>;
+      setValues({
+        team_send_delay_s: read.team_send_delay_s ?? SLIDERS[0].fallback,
+        team_poll_s: read.team_poll_s ?? SLIDERS[1].fallback,
+      });
+    }).catch(() => undefined);
+    return () => {
+      live = false;
+      window.clearTimeout(timer.current);
+    };
+  }, []);
+  if (!values) return null;
+
+  const change = (key: TimingKey, value: number) => {
+    setValues({ ...values, [key]: value });
+    pending.current[key] = value;
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const patch = pending.current;
+      pending.current = {};
+      void getApi()?.save_agent_settings?.(patch as unknown as Parameters<PanelApi["save_agent_settings"]>[0]);
+    }, SAVE_SETTLE_MS);
+  };
+
+  return (
+    <div className="team-modal-sliders">
+      <div className="plugin-scope-subhead">Timing (every team copy)</div>
+      {SLIDERS.map((s) => (
+        <label key={s.key} className="appearance-sounds-row">
+          <span>{s.label}</span>
+          <input type="range" min={s.min} max={s.max} step={s.step} value={values[s.key]}
+            onChange={(e) => change(s.key, Number(e.target.value))} />
+          <span className="appearance-sounds-vol">{secondsText(values[s.key])}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 /** "!" / "↻" / "✓" / "•" before the status phrase. */
 function phraseIcon(scope: TeamScope): string {
@@ -143,9 +210,12 @@ export function TeamModal({ open, onClose, initial = "overview" }: Props) {
           {shown === "overview" ? (
             <Overview scope={scope} onSection={setSection} />
           ) : (
-            <PluginScopeDrawer pluginId={scope.pluginId} status={status} tab={shown} onTab={setSection} hideTabs
+            <>
+              {shown === "settings" ? <TimingSliders /> : null}
+              <PluginScopeDrawer pluginId={scope.pluginId} status={status} tab={shown} onTab={setSection} hideTabs
               onJoin={actions.joinLive ? (room) => void actions.joinLive?.(room) : undefined}
               onChanged={(changed) => actions.refresh(changed)} />
+            </>
           )}
         </div>
       </div>

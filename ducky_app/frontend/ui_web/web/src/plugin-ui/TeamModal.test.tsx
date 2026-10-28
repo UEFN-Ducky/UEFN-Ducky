@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { publishTeamScope, unpublishTeamScope, type TeamScope } from "./teamScopeStore";
 import { TeamModal } from "./TeamModal";
 
-vi.mock("../hooks/usePanelApi", () => ({ getApi: () => ({ plugin_scope_resolve: vi.fn() }), isRemote: () => false }));
+const api = vi.hoisted(() => ({
+  plugin_scope_resolve: vi.fn(),
+  get_settings: vi.fn(async () => ({ team_send_delay_s: 10, team_poll_s: 60 })),
+  save_agent_settings: vi.fn(async () => "Saved"),
+}));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 
 afterEach(() => {
   act(() => unpublishTeamScope("forge"));
@@ -68,6 +73,21 @@ describe("TeamModal", () => {
     expect(within(panel).queryByRole("tablist")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Overview/ }));
     expect(screen.queryByRole("region")).toBeNull();
+  });
+
+  it("Settings has the timing sliders: their values, and a move saves the new value once it settles", async () => {
+    modal(scope());
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    const send = await screen.findByRole("slider", { name: /^Send changes after/ });
+    expect(screen.getByText("10 s")).toBeTruthy();
+    expect(screen.getByText("1 min")).toBeTruthy();
+    fireEvent.change(send, { target: { value: "20" } });
+    fireEvent.change(send, { target: { value: "30" } });
+    fireEvent.change(screen.getByRole("slider", { name: /^Check for teammates' changes every/ }), { target: { value: "90" } });
+    expect(screen.getByText("30 s")).toBeTruthy();
+    expect(screen.getByText("1 min 30 s")).toBeTruthy();
+    await waitFor(() => expect(api.save_agent_settings).toHaveBeenCalledWith({ team_send_delay_s: 30, team_poll_s: 90 }));
+    expect(api.save_agent_settings).toHaveBeenCalledTimes(1);
   });
 
   it("on Local only Overview is offered, and notes with their buttons show there", () => {
