@@ -107,8 +107,11 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     };
     try {
       const shown = stateRef.current.messages.some((m) => typeof m.id === "number");
-      let rows = await fetchChatRows(chatId, CHAT_LOAD_TIMEOUT_MS, shown ? RELOAD_TAIL_ROWS : undefined);
-      if (shown) rows = spliceTail(stateRef.current.messages, rows, RELOAD_TAIL_ROWS) ?? (await fetchChatRows(chatId));
+      // Only the newest page, never the whole chat: an 867-message chat sent in full took
+      // 16 s to open, and every open tab holding its full transcript ran WebView2 out of
+      // memory (Oct 2026). Older rows come one page at a time from loadOlder.
+      const page = await fetchChatRows(chatId, CHAT_LOAD_TIMEOUT_MS, RELOAD_TAIL_ROWS);
+      const rows = shown ? spliceTail(stateRef.current.messages, page, RELOAD_TAIL_ROWS) ?? page : page;
       const tookMs = performance.now() - startedAt;
       if (tookMs > SLOW_CHAT_LOAD_MS) {
         report("chat_slow", `Chat ${chatId.slice(0, 8)} took ${(tookMs / 1000).toFixed(1)}s to load (${rows.length} messages).`);
@@ -131,6 +134,28 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       }
     } finally {
       if (seq === loadSeqRef.current) setHydrated(true);
+    }
+  }, [chatId]);
+
+  // The list reached its top: the page of saved rows before the oldest one shown. Row ids
+  // are message index * 1000 + row, so the chat's first row is id 0 and nothing is older.
+  const olderBusyRef = useRef(false);
+  const noOlderBeforeRef = useRef<number | null>(null);
+  const loadOlder = useCallback(async () => {
+    const oldest = stateRef.current.messages.find((m) => typeof m.id === "number")?.id;
+    if (typeof oldest !== "number" || oldest <= 0 || oldest === noOlderBeforeRef.current || olderBusyRef.current) return;
+    olderBusyRef.current = true;
+    try {
+      const page = await fetchChatRows(chatId, CHAT_LOAD_TIMEOUT_MS, RELOAD_TAIL_ROWS, oldest);
+      dispatch({ type: "older", rows: page });
+      // A short page reached the start of the chat.
+      if (page.length < RELOAD_TAIL_ROWS) {
+        noOlderBeforeRef.current = stateRef.current.messages.find((m) => typeof m.id === "number")?.id as number;
+      }
+    } catch {
+      // The next scroll to the top tries again.
+    } finally {
+      olderBusyRef.current = false;
     }
   }, [chatId]);
 
@@ -301,6 +326,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     hasNewBelow: state.hasNewBelow,
     isAtBottom: state.atBottom,
     reloadMessages: load,
+    loadOlder,
     appendUserMessage,
     continueInterrupted,
     rewindAndAppendUser,

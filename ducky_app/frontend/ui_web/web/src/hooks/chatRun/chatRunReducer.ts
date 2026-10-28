@@ -76,6 +76,8 @@ export type RunAction =
   | { type: "clearStream" }
   | { type: "agentEvent"; event: AgentEvent }
   | { type: "loaded"; rows: ChatMessage[] }
+  /** An older page of saved rows, shown above what is already there. */
+  | { type: "older"; rows: ChatMessage[] }
   | { type: "externalRunning"; running: boolean }
   | { type: "reconcile"; running: boolean }
   | { type: "atBottom"; atBottom: boolean };
@@ -575,6 +577,14 @@ export function chatRunReducer(state: RunState, action: RunAction): RunState {
       return isInFlight(state) || state.stopped
         ? reset(state, { messages: mergeCommitted(state.messages, action.rows) })
         : reset(state, { messages: action.rows, stream: "", thinking: "", statusText: "", hasNewBelow: false });
+
+    case "older": {
+      const first = state.messages.find((m) => typeof m.id === "number")?.id;
+      const add = typeof first === "number"
+        ? action.rows.filter((m) => typeof m.id === "number" && m.id < first)
+        : [];
+      return add.length ? reset(state, { messages: [...add, ...state.messages] }) : state;
+    }
 
     case "externalRunning":
       return state.externalRunning === action.running

@@ -89,6 +89,8 @@ interface VirtualChatMessageListProps {
   /** Resume the last interrupted assistant turn in place. */
   onContinue?: () => void;
   onAtBottomChange: (atBottom: boolean) => void;
+  /** The reader scrolled to the top: show older saved rows above, if there are any. */
+  onReachTop?: () => void;
   onJumpToLatest: () => void;
   onOpenChat: (chat: ChatTab) => void;
   onStopLinked: (childConvId: string) => void;
@@ -105,6 +107,9 @@ interface VirtualChatMessageListProps {
   /** When true, UI language may translate message text (per-chat hover toggle). */
   translateMessages?: boolean;
 }
+
+/** Closer than this to the top asks for older rows. */
+const REACH_TOP_PX = 400;
 
 /** Fixed breathing room below the last turn. */
 const BOTTOM_SPACER_MIN_PX = 24;
@@ -501,6 +506,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       onStop,
       onContinue,
       onAtBottomChange,
+      onReachTop,
       onJumpToLatest,
       onOpenChat,
       onStopLinked,
@@ -541,6 +547,8 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
     const inputHeightRef = useRef(0);
     const scrollPositionRef = useRef({ top: 0, height: 0, viewport: 0 });
     const followFrameRef = useRef(0);
+    const onReachTopRef = useRef(onReachTop);
+    onReachTopRef.current = onReachTop;
 
     const setFollowing = useCallback((following: boolean) => {
       if (!following && followFrameRef.current) {
@@ -682,6 +690,7 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
           if (!followingRef.current && inputDirectionRef.current > 0 && height === inputHeightRef.current && height - scroller.scrollTop - scroller.clientHeight <= AT_BOTTOM_THRESHOLD_PX) setFollowing(true);
           scrollPositionRef.current = { top: scroller.scrollTop, height, viewport: scroller.clientHeight };
           applyWindowRef.current();
+          if (!followingRef.current && scroller.scrollTop < REACH_TOP_PX) onReachTopRef.current?.();
         });
       };
       scroller.addEventListener("wheel", onWheel, { passive: true });
@@ -762,6 +771,25 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       prevTurnsRef.current = next;
       return next;
     }, [rows]);
+
+    // Older rows arrived above the first turn: move the measured heights and the window
+    // down with the turns they belong to, and keep the reader where they were (below).
+    // ponytail: assumes CHUNK_TURNS === 1 (a chunk is a turn).
+    const prevTurnIdsRef = useRef<string[]>(turns.map((t) => t.id));
+    const prependedRef = useRef(0);
+    if (turns.length > 0 && prevTurnIdsRef.current[0] !== turns[0].id) {
+      const prev = prevTurnIdsRef.current;
+      // A page can start mid-turn ("turn-lead-0"): line up on the first turn with a query.
+      const anchor = prev.findIndex((id) => !id.startsWith("turn-lead-"));
+      const at = anchor < 0 ? -1 : turns.findIndex((t) => t.id === prev[anchor]);
+      const added = at - anchor;
+      if (anchor >= 0 && at >= 0 && added > 0) {
+        heightsRef.current.splice(0, anchor, ...new Array<number>(at).fill(ESTIMATE_CHUNK_PX));
+        prependedRef.current += added;
+        setWin((w) => (w.end < 0 ? w : { start: w.start + added, end: w.end + added }));
+      }
+    }
+    prevTurnIdsRef.current = turns.map((t) => t.id);
 
     const chunks = useMemo(() => {
       const out: ChatTurn[][] = [];
@@ -846,6 +874,17 @@ export const VirtualChatMessageList = memo(forwardRef<VirtualChatMessageListHand
       ensureHeights(chunks.length);
       setWin(tailWindow(chunks.length));
     }, [convId]);  
+
+    useLayoutEffect(() => {
+      if (!prependedRef.current) return;
+      prependedRef.current = 0;
+      const scroller = scrollerElRef.current;
+      if (!scroller || followingRef.current) return;
+      // Same distance from the bottom as before the older rows went in above.
+      const { top, height } = scrollPositionRef.current;
+      scroller.scrollTop = scroller.scrollHeight - (height - top);
+      scrollPositionRef.current = { top: scroller.scrollTop, height: scroller.scrollHeight, viewport: scroller.clientHeight };
+    });
 
     useLayoutEffect(() => {
       ensureHeights(chunks.length);

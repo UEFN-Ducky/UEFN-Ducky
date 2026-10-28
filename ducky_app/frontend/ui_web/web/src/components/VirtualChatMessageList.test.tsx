@@ -278,7 +278,7 @@ describe("chat scroll intent during layout changes", () => {
 
   function setup() {
     const ref = createRef<VirtualChatMessageListHandle>();
-    const props = { ...listProps(buildHistory(300)), onAtBottomChange: vi.fn() };
+    const props = { ...listProps(buildHistory(300)), onAtBottomChange: vi.fn(), onReachTop: vi.fn() };
     const rendered = render(<VirtualChatMessageList ref={ref} {...props} />);
     const scroller = document.querySelector<HTMLElement>(".virtual-chat-message-list-scroller")!;
     const content = document.querySelector<HTMLElement>(".virtual-chat-message-list-content")!;
@@ -299,8 +299,33 @@ describe("chat scroll intent during layout changes", () => {
     props.onAtBottomChange.mockClear();
     const scroll = (top: number) => { scroller.scrollTop = top; fireEvent.scroll(scroller); };
     const frame = () => act(() => { vi.advanceTimersByTime(20); });
-    return { ref, rendered, props, scroller, scrollTo, resize, scroll, frame, onAtBottomChange: props.onAtBottomChange };
+    const setHeight = (next: number) => { height = next; };
+    return { ref, rendered, props, scroller, scrollTo, resize, scroll, frame, setHeight, onAtBottomChange: props.onAtBottomChange };
   }
+
+  it("asks for older rows near the top and keeps the reader in place when they arrive", () => {
+    const view = setup();
+    fireEvent.wheel(view.scroller, { deltaY: -300 });
+    view.scroll(100);
+    view.frame();
+    expect(view.props.onReachTop).toHaveBeenCalled();
+    const shownWindow = view.scroller.dataset.chatWindow!.split("-").map(Number);
+
+    const older: ChatRow[] = Array.from({ length: 5 }, (_, t) => [
+      { kind: "bubble" as const, id: `o${t}q`, role: "user" as const, text: `older-q${t}` },
+      { kind: "bubble" as const, id: `o${t}a`, role: "assistant" as const, text: `older-a${t}` },
+    ]).flat();
+    view.setHeight(240024 + 5 * 800);
+    act(() => {
+      view.rendered.rerender(<VirtualChatMessageList {...view.props} rows={[...older, ...view.props.rows]} />);
+    });
+    // Same distance from the bottom as before: 5 new turns (800 px estimates) went in above.
+    expect(view.scroller.scrollTop).toBe(100 + 5 * 800);
+    // The turns that were on screen are still mounted, now 5 chunks further down.
+    const [start, end] = view.scroller.dataset.chatWindow!.split("-").map(Number);
+    expect(start).toBeLessThanOrEqual(shownWindow[0] + 5);
+    expect(end).toBeGreaterThanOrEqual(shownWindow[1] + 5);
+  });
 
   it("releases follow on a tiny upward wheel before resize or scroll callbacks run", () => {
     const view = setup();

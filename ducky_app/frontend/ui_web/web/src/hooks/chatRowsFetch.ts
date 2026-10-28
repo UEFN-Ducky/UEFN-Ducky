@@ -36,16 +36,21 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * local server that answers `/__panel_api`, so ask over plain HTTP first and keep the
  * bridge as the fallback (dev server, or a build without the route).
  */
-export async function fetchChatRows(chatId: string, timeoutMs = CHAT_LOAD_TIMEOUT_MS, limit?: number): Promise<ChatMessage[]> {
+export async function fetchChatRows(
+  chatId: string,
+  timeoutMs = CHAT_LOAD_TIMEOUT_MS,
+  limit?: number,
+  beforeId: number | null = null,
+): Promise<ChatMessage[]> {
   const api = getApi();
   if (!api) return [];
   if (canCallOverHttp()) {
-    const http = await callOverHttp("load_messages", limit ? [chatId, null, limit] : [chatId], timeoutMs);
+    const http = await callOverHttp("load_messages", limit ? [chatId, beforeId, limit] : [chatId], timeoutMs);
     if (http.ok && Array.isArray(http.result)) return http.result as ChatMessage[];
     if (!http.ok && http.timedOut) throw new ChatLoadTimeout();
     // Any other failure: fall through to the bridge.
   }
-  const rows: unknown = await withTimeout(limit ? api.load_messages(chatId, null, limit) : api.load_messages(chatId), timeoutMs);
+  const rows: unknown = await withTimeout(limit ? api.load_messages(chatId, beforeId, limit) : api.load_messages(chatId), timeoutMs);
   // On a phone a relay blip or a 502 answers with nothing at all: that is a failed load
   // (the chat says so and retries), never an empty or missing list to render.
   if (!Array.isArray(rows)) throw new Error("no messages came back (the connection dropped)");
