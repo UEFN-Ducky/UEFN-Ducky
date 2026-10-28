@@ -92,6 +92,46 @@ def test_auto_revive_once_per_offline_spell(monkeypatch) -> None:
     assert runs == [4200, 4200]
 
 
+def test_dead_epic_session_is_dropped_and_tried_once_more(monkeypatch) -> None:
+    from backend.mcp_plugins import client_pool
+
+    tries: list[str] = []
+    forgot: list[str] = []
+
+    class _Pool:
+        def call_tool(self, name, args):
+            tries.append(args["tool_name"])
+            if len(tries) == 1:
+                raise RuntimeError("Nested MCP 'unreal-mcp' session unavailable for tool 'call_tool': boom")
+            return "ok"
+
+        def run_sync(self, value, timeout):
+            return value
+
+        def forget(self, plugin_id):
+            forgot.append(plugin_id)
+
+    monkeypatch.setattr(client_pool, "get_plugin_pool", lambda: _Pool())
+    monkeypatch.setattr(revive, "_SESSION_RETRY_SEC", 0)
+    assert revive._call_epic_tool("EnablePythonInUEFN") == "ok"
+    assert tries == ["EnablePythonInUEFN", "EnablePythonInUEFN"] and len(forgot) == 1
+
+
+def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:
+    from frontend.usage_events import where_of
+
+    logged: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
+    for action in ("uefn_offline", "stale_socket", "python_already_on"):
+        monkeypatch.setattr(revive, "revive_listener", lambda port, a=action: {"ok": False, "action": a, "message": "x"})
+        revive.AutoRevive._run(4200)
+    monkeypatch.setattr(revive, "revive_listener", lambda port: 1 / 0)
+    revive.AutoRevive._run(4200)
+    # UEFN closing mid-try is status, not an error.
+    assert logged == ["listener_revive.stale_socket", "listener_revive.python_already_on", "listener_revive.failed"]
+    assert where_of(logged[0]) == "bridge"
+
+
 def test_auto_revive_idle_while_listener_online() -> None:
     auto = revive.AutoRevive(grace_sec=0)
     assert not auto.observe({"online": True, "epic_mcp_online": True}, 4200, now=1)

@@ -114,12 +114,15 @@ def _log_agent_crash(
     except Exception:
         pass
     try:
+        from frontend import usage_stats
         from frontend.error_log import record_error
 
         ft = f"{first_token_s:.1f}s" if first_token_s is not None else "n/a"
+        # A plan / rate limit is not a crash: chat.turn already counts it as outcome:limit.
         record_error(
             "agent",
             f"turn crashed after {elapsed_s:.1f}s (first token {ft}): {error}",
+            count=usage_stats._turn_outcome("error", error) != "limit",
         )
     except Exception:
         pass
@@ -1059,6 +1062,7 @@ async def _run_agent_loop(
 ) -> str:
     cancel = session._cancel
     stop_reason = "error"
+    err_text = ""
     runner = AgentRunner(config)
     runner.set_approval_callback(lambda pending: _approve_tool_calls(conv.id, pending))
     session.set_runner(runner, run_id=run_id)
@@ -1236,7 +1240,7 @@ async def _run_agent_loop(
             _set_active_conv_id(None)
         # Always close THIS run's ledger. A follow-up in the same chat already
         # replaced session.run_id; gating on it left Revert stuck on "running".
-        _push_agent_stopped(push, conv.id, run_id, stop_reason)
+        _push_agent_stopped(push, conv.id, run_id, stop_reason, detail=err_text)
         with _sessions_lock:
             waiters = _child_waiters.get(conv.id)
             if waiters is not None and not waiters:
@@ -2056,7 +2060,9 @@ def run_message(
 
             def watched_push(event: dict[str, Any]) -> None:
                 if event.get("type") == "agent_stopped" and event.get("run_id", run_id) == run_id:
-                    ended.setdefault("reason", str(event.get("reason") or ""))
+                    if "reason" not in ended:
+                        ended["reason"] = str(event.get("reason") or "")
+                        ended["detail"] = str(event.get("detail") or "")
                 push(event)
 
             try:
@@ -2110,7 +2116,7 @@ def run_message(
                 error_push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
                 # Interrupted: the session id stays on the chat, so the next message resumes it.
                 _push_agent_stopped(error_push, conv_id, run_id, "interrupted" if interrupted else "error",
-                                    detail=str(e) if interrupted else "")
+                                    detail=str(e))
             finally:
                 from frontend.ui_web.live_agent_runs import discard_live_run_id
 
@@ -2269,7 +2275,7 @@ def run_message(
             )
         except Exception as e:
             push({"type": "error", "text": str(e), "conv_id": conv_id})
-            _push_agent_stopped(push, conv_id, run_id, "error")
+            _push_agent_stopped(push, conv_id, run_id, "error", detail=str(e))
         finally:
             run_identity.reset(identity_token)
 

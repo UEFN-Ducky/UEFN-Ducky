@@ -159,6 +159,20 @@ def _with_exit(source: str, exit: str) -> str:
     return f"{source}_{exit}" if exit else source
 
 
+def _record_fail(reason: str, exit: str, message: str) -> None:
+    """A dead WebView2 process for the Errors tab. ``killed`` (another program ended it:
+    logoff, Task Manager, antivirus) is activity, not a crash."""
+    try:
+        from frontend.error_log import record_activity, record_error
+
+        if exit == "killed":
+            record_activity("webview", message)
+        else:
+            record_error(_with_exit(error_source(reason), exit), message)
+    except Exception:
+        pass
+
+
 def _mark_crash_reload() -> None:
     """The page is about to load again after its process died: its next
     get_restore_tabs answers the chats it had open."""
@@ -179,13 +193,8 @@ def recover_core_webview(core: Any, *, reason: str = "", exit: str = "") -> dict
     if now - _last_recover.get(key, 0.0) < _DEBOUNCE_S:
         return {"ok": True, "action": "debounced"}
     _last_recover[key] = now
-    try:
-        from frontend.error_log import record_error
-
-        how = f", exit {exit}" if exit else ""
-        record_error(_with_exit(error_source(reason), exit), f"WebView2 process failed ({reason or 'unknown'}{how}); reloading")
-    except Exception:
-        pass
+    how = f", exit {exit}" if exit else ""
+    _record_fail(reason, exit, f"WebView2 process failed ({reason or 'unknown'}{how}); reloading")
     if should_recover_process_fail(reason.rpartition(":")[2]):
         _mark_crash_reload()
     try:
@@ -229,14 +238,8 @@ def attach_process_failed(
         reason = f"{label}:{kind}" if kind else label
         exit = exit_reason(event)
         if on_browser_exit is not None and is_browser_exit_kind(kind):
-            try:
-                from frontend.error_log import record_error
-
-                how = f", exit {exit}" if exit else ""
-                record_error(_with_exit(error_source(reason), exit),
-                             f"WebView2 browser stopped ({reason}{how}); starting a new one")
-            except Exception:
-                pass
+            how = f", exit {exit}" if exit else ""
+            _record_fail(reason, exit, f"WebView2 browser stopped ({reason}{how}); starting a new one")
             _mark_crash_reload()  # the new control loads the page from scratch
             try:
                 on_browser_exit(reason)

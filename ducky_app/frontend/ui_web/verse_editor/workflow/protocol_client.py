@@ -107,7 +107,11 @@ class VerseWorkflowProtocolClient:
             self._pending[seq] = callback
         payload = json.dumps(message).encode("utf-8")
         header = f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii")
-        sock.sendall(header + payload)
+        try:
+            sock.sendall(header + payload)
+        except OSError:
+            self._closed(sock)
+            raise
 
     def _read_loop(self) -> None:
         sock = self._sock
@@ -121,6 +125,13 @@ class VerseWorkflowProtocolClient:
                 self._handle_data(chunk)
         except OSError:
             pass
+        self._closed(sock)
+
+    def _closed(self, sock: socket.socket) -> None:
+        """The server dropped ``sock`` (UEFN closed or restarted). A deliberate disconnect already
+        cleared ``_sock``, and a newer connection isn't ``sock``: both are left alone."""
+        if self._sock is sock:
+            self.disconnect()
 
     def _handle_data(self, data: bytes) -> None:
         self._raw_data.extend(data)

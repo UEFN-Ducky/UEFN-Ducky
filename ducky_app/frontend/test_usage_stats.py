@@ -174,6 +174,13 @@ def test_turn_outcome_tells_limits_logins_and_closed_apps_from_errors() -> None:
     assert outcomes == [want for _, _, want in cases]
 
 
+def test_overloaded_credit_and_rate_limit_stops_are_limits() -> None:
+    assert us._turn_outcome("error", "Error code: 529 overloaded_error") == "limit"
+    assert us._turn_outcome("error", "Your credit balance is too low") == "limit"
+    assert us._turn_outcome("error", "rate_limit_error: slow down") == "limit"
+    assert us._turn_outcome("error", "Error code: 400 invalid_request_error") == "error"
+
+
 def test_update_check_is_sent_once_per_session() -> None:
     us.update_checked("paused", "installed", False)
     us.update_checked("up_to_date", "installed", False)
@@ -286,8 +293,79 @@ def test_a_failed_tool_call_is_not_counted_again_as_an_error(monkeypatch, tmp_pa
     error_log.record_error("agent", "spawn_actor: no such class", count=False)
     error_log.record_error("agent", "turn crashed after 3.0s")
     rows, _ = us._take(100)
-    assert [r["props"] for r in rows if r["name"] == "error.code"] == [{"code": "agent", "where": "agent"}]
+    from frontend import __version__
+
+    assert [r["props"] for r in rows if r["name"] == "error.code"] == [
+        {"code": "agent", "where": "agent", "kind": "crash", "version": __version__}]
     assert ev.where_of("chat_slow") == ev.where_of("chat_timeout") == "ui"
+
+
+def test_error_kind_comes_from_the_message_but_the_message_never_leaves(monkeypatch, tmp_path) -> None:
+    from frontend import error_log
+
+    assert ev.kind_of("Error code: 400 invalid_request_error") == "bad_request"
+    assert ev.kind_of("session unavailable") == "session_dead"
+    assert ev.kind_of("timed out waiting for listener idle") == "busy"
+    assert ev.kind_of("something odd") == "other"
+    monkeypatch.setattr(error_log, "_use_db", lambda: False)
+    monkeypatch.setattr(error_log, "_path", lambda name: tmp_path / name)
+    monkeypatch.setattr(error_log, "_trim_file", lambda name: None)
+    error_log.record_error("agent stream", "Error code: 400 invalid_request_error in my_secret_project")
+    us.agent_crash("codex")
+    rows, _ = us._take(100)
+    errors = [r["props"] for r in rows if r["name"] == "error.code"]
+    assert errors[0]["kind"] == "bad_request" and errors[0]["code"] == "agent_stream"
+    assert errors[1] == {"code": "agent_crash_codex", "where": "agent", "kind": "crash", "version": errors[0]["version"]}
+    assert "secret" not in str(rows) and "400" not in str(rows)
+
+
+def test_an_uncaught_thread_exception_is_one_error_code(monkeypatch, tmp_path) -> None:
+    import sys
+    import threading
+
+    from frontend import error_log
+
+    monkeypatch.setattr(error_log, "_use_db", lambda: False)
+    monkeypatch.setattr(error_log, "_path", lambda name: tmp_path / name)
+    monkeypatch.setattr(error_log, "_trim_file", lambda name: None)
+    monkeypatch.setattr(error_log, "_crash_hooks_on", False)
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)  # the "previous" hook: stay quiet
+    error_log.install_crash_hooks()
+    ducky_mod: dict[str, Any] = {"__name__": "frontend.fake_panel"}  # a frame Ducky owns
+    exec("def open_tab():\n    raise ValueError('C:/Users/someone/secret.txt is bad')", ducky_mod)
+    t = threading.Thread(target=ducky_mod["open_tab"])
+    t.start()
+    t.join()
+    rows, _ = us._take(100)
+    errors = [r["props"] for r in rows if r["name"] == "error.code"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == "py.valueerror" and errors[0]["kind"] == "crash"
+    assert errors[0]["at"] == "frontend.fake_panel.open_tab"
+    assert "secret" not in str(rows)
+
+
+def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) -> None:
+    from frontend import __version__, error_log
+
+    meta: dict[str, str] = {us.META_LAST_VERSION: "1.2.400"}
+    monkeypatch.setattr(us, "_meta_get", meta.get)
+    monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
+    monkeypatch.setattr(us, "start", lambda: None)
+    monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    us.send_override = lambda body: True
+
+    def unclean() -> list[dict[str, Any]]:
+        rows, _ = us._take(100)
+        us._mem_queue.clear()
+        return [r["props"] for r in rows if r["name"] == "error.code" and r["props"]["code"] == "app_unclean_exit"]
+
+    us.app_opened()
+    us.app_closing()
+    us.app_opened()
+    assert unclean() == []
+    us.app_opened()
+    assert unclean() == [{"code": "app_unclean_exit", "where": "ui", "kind": "crash", "version": __version__}]
 
 
 def test_outside_agents_refusals_fail_and_ducky_call_tool_counts_as_its_tool(monkeypatch) -> None:

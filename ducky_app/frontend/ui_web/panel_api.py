@@ -1159,14 +1159,14 @@ class PanelApi(
 
     def restart_listener(self) -> dict[str, Any]:
         """Header menu button: restart the UEFN listener, or turn Python on in UEFN so it starts."""
-        from backend.bridge.revive import revive_listener
+        from backend.bridge.revive import error_source, revive_listener
 
         try:
             result = revive_listener(PANEL_LISTENER_PORT)
         except Exception as e:
             result = {"ok": False, "action": "failed", "message": str(e)}
         if not result.get("ok"):
-            record_error("listener", str(result.get("message") or "Listener restart failed"))
+            record_error(error_source("listener_restart", result), str(result.get("message") or "Listener restart failed"))
         return result
 
     def _maybe_ship_on_listener_online(self, status: dict[str, Any]) -> None:
@@ -1196,7 +1196,7 @@ class PanelApi(
                 selected_project_root=settings.uefn_project_root,
             )
         except Exception as e:
-            record_error("listener", str(e))
+            record_error("listener_status", str(e))
             return {
                 "online": False,
                 "version": __version__,

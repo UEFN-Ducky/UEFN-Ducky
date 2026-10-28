@@ -52,3 +52,20 @@ def test_pages_match_full_load_ids() -> None:
     assert chat_rows._messages_to_ui(conv, project_root="", before_id=mid, limit=3) == full[-5:-2]
     # before_id without a limit: everything before it.
     assert chat_rows._messages_to_ui(conv, project_root="", before_id=page[0]["id"]) == full[:-200]
+
+
+def test_first_page_of_a_900_message_chat_skips_old_edit_diffs(monkeypatch) -> None:
+    """Old edits rebuild their diff from disk (file read + difflib): the first page of an
+    867-message chat must only pay for the messages it shows, not all of them."""
+    from frontend.ui_web.verse_editor import agent_sync
+
+    diffs: list[str] = []
+    monkeypatch.setattr(agent_sync, "build_file_edit_meta", lambda name, _a, _r: diffs.append(name))
+    conv = _big_conv(900)
+    for m in conv.messages:
+        for block in m.get("blocks", ()):
+            del block["file_edits"]  # older turns stored no diff
+
+    page = chat_rows._messages_to_ui(conv, project_root="", limit=300)
+    assert len(page) == 300 and page[-1]["id"] // 1000 == 899
+    assert 0 < len(diffs) <= 80  # 300 rows ≈ 75 user+assistant pairs, not all 450 edits

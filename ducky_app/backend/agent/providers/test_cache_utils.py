@@ -51,6 +51,27 @@ def _cache(*, enabled: bool = True, extended_ttl: bool = False) -> PromptCachePa
     )
 
 
+def test_thinking_block_never_marked():
+    # A thinking-only assistant turn last in history: the API 400s on cache_control there.
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [{"type": "thinking", "thinking": "x", "signature": "s"}]},
+    ]
+    out = anthropic_messages_with_cache(msgs, _cache())
+    assert "cache_control" not in out[1]["content"][0]
+    assert out[0]["content"][0]["cache_control"]  # falls back to the user text
+    # Long tool loop: the mid marker must not land on a turn's leading thinking block either.
+    long = []
+    for i in range(12):
+        long.append({"role": "assistant", "content": [
+            {"type": "redacted_thinking", "data": "d"} if i % 2 else {"type": "thinking", "thinking": "t", "signature": "s"},
+            {"type": "tool_use", "id": f"t{i}", "name": "n", "input": {}}]})
+        long.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": "r"}]})
+    blocks = [b for m in anthropic_messages_with_cache(long, _cache()) for b in m["content"]]
+    assert sum("cache_control" in b for b in blocks) == 2
+    assert not any("cache_control" in b for b in blocks if b["type"] in ("thinking", "redacted_thinking"))
+
+
 def test_anthropic_messages_with_cache_marks_last_string_message():
     messages = [
         {"role": "user", "content": "first"},

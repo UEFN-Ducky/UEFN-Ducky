@@ -986,15 +986,17 @@ def update_node(
     if node is None:
         raise ValueError("node not found")
     if doc.get("kind") != "template" and _is_done_node(node):
-        if (content is not None or kind is not None or body_markdown is not None
-                or assignee is not None or after is not None or planned_assignee is not None
-                or (status is not None and status != node.get("status"))):
-            if node.get("children") and node.get("status") == "completed":
-                raise ValueError(
-                    "completed steps can't be edited: this section completed itself when its last "
-                    "step did, and the notes on its steps are its record. Nothing more to tick."
-                )
-            _refuse_if_done_node(node)
+        sent = {"content": content, "kind": kind, "body_markdown": body_markdown, "assignee": assignee,
+                "after": after, "planned_assignee": planned_assignee, "status": status}
+        if not _changes_done_node(node, sent):
+            # A resend of what the done step already holds (lost reply, then retry) is a no-op, not a refusal.
+            return save(doc)
+        if node.get("children") and node.get("status") == "completed":
+            raise ValueError(
+                "completed steps can't be edited: this section completed itself when its last "
+                "step did, and the notes on its steps are its record. Nothing more to tick."
+            )
+        _refuse_if_done_node(node)
     # Who owns a step is bookkeeping like its status: allowed while the plan plays.
     if assignee is not None:
         owner = assignee.strip()
@@ -1038,6 +1040,19 @@ def update_node(
                                             owners=_owners_of(roots, node_id), project_root=project_root)
     doc["nodes"] = roots
     return save(doc)
+
+
+def _changes_done_node(node: dict[str, Any], sent: dict[str, Any]) -> bool:
+    """True when any sent field (None = not sent) differs from what ``node`` holds."""
+    for key, value in sent.items():
+        if value is None:
+            continue
+        if key == "after":
+            if _normalize_after(value, own_id=str(node.get("id") or "")) != list(node.get("after") or []):
+                return True
+        elif str(value).strip() != str(node.get(key) or "").strip():
+            return True
+    return False
 
 
 def _set_after(doc: dict[str, Any], node: dict[str, Any], after: list[str] | str) -> None:

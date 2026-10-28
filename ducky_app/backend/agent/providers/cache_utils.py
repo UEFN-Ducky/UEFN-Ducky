@@ -100,10 +100,14 @@ def anthropic_tools_with_cache(
 
 _ANTHROPIC_LOOKBACK_BLOCKS = 20
 _ANTHROPIC_MID_OFFSET = 15
+_UNCACHEABLE_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
 
 
 def _content_block_coords(messages: list[dict[str, Any]]) -> list[tuple[int, int]]:
-    """(message_index, block_index) for every Anthropic content block (str counts as 1)."""
+    """(message_index, block_index) for every cacheable Anthropic content block (str counts as 1).
+
+    Thinking blocks are skipped: the API rejects cache_control on them (400).
+    """
     coords: list[tuple[int, int]] = []
     for mi, msg in enumerate(messages):
         content = msg.get("content")
@@ -112,7 +116,7 @@ def _content_block_coords(messages: list[dict[str, Any]]) -> list[tuple[int, int
                 coords.append((mi, 0))
         elif isinstance(content, list):
             for bi, block in enumerate(content):
-                if isinstance(block, dict):
+                if isinstance(block, dict) and block.get("type") not in _UNCACHEABLE_BLOCK_TYPES:
                     coords.append((mi, bi))
     return coords
 

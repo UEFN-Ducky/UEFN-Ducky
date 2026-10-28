@@ -18,6 +18,7 @@ _EPIC_CALL_TIMEOUT_SEC = 20.0
 # UEFN MCP answers ~30 s before UEFN turns Python on itself, and the boot file then
 # waits ~45 slow loading ticks; give a normal start this long before stepping in.
 AUTO_REVIVE_GRACE_SEC = 60.0
+_SESSION_RETRY_SEC = 2.0
 
 _LAUNCH_HINT = (
     "In UEFN: Tools → Execute Python Script → %LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py, "
@@ -26,11 +27,23 @@ _LAUNCH_HINT = (
 
 
 def _call_epic_tool(tool_name: str) -> str:
-    """Sync nested ``unreal__call_tool`` on the Python toolset. Patchable in tests."""
+    """Sync nested ``unreal__call_tool`` on the Python toolset. Patchable in tests.
+
+    A pooled session can be dead while Epic MCP answers TCP (UEFN switched island under
+    it): "Could not enable Python ... session unavailable" was most auto restart errors
+    (Oct 26-27 2026). Drop that session and try once more on a fresh one."""
     from backend.mcp_plugins.client_pool import get_plugin_pool
+    from backend.mcp_plugins.epic import EPIC_MCP_SERVER_ID
 
     args = {"toolset_name": _PYTHON_TOOLSET, "tool_name": tool_name, "arguments": {}}
     pool = get_plugin_pool()
+    try:
+        return str(pool.run_sync(pool.call_tool("unreal__call_tool", args), timeout=_EPIC_CALL_TIMEOUT_SEC) or "")
+    except RuntimeError as exc:
+        if "session unavailable" not in str(exc):
+            raise
+    pool.forget(EPIC_MCP_SERVER_ID)
+    time.sleep(_SESSION_RETRY_SEC)
     return str(pool.run_sync(pool.call_tool("unreal__call_tool", args), timeout=_EPIC_CALL_TIMEOUT_SEC) or "")
 
 
@@ -151,10 +164,18 @@ class AutoRevive:
             result = revive_listener(port)
         except Exception as exc:
             result = {"ok": False, "message": str(exc)}
-        if not result.get("ok"):
-            try:
-                from frontend.error_log import record_error
+        # UEFN closed between the status poll and the try: status, not an error.
+        if result.get("ok") or result.get("action") == "uefn_offline":
+            return
+        try:
+            from frontend.error_log import record_error
 
-                record_error("listener", f"Auto restart: {result.get('message', '')}")
-            except Exception:
-                pass
+            record_error(error_source("listener_revive", result), f"Auto restart: {result.get('message', '')}")
+        except Exception:
+            pass
+
+
+def error_source(prefix: str, result: dict[str, Any]) -> str:
+    """Error code naming how a revive ended (``listener_revive.stale_socket``): plain
+    "listener" (8 on 4 PCs, Oct 26-27 2026) could not say which step failed."""
+    return f"{prefix}.{result.get('action') or 'failed'}"

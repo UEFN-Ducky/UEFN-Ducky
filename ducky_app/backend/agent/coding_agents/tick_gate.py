@@ -1,11 +1,10 @@
-"""Tick gate: a group member can't complete a plan step while its lane has uncommitted files.
+"""Tick gate: a group member can't complete a plan step while its lane's changed plugin files fail lint.
 
 ``check_tick(chat_id, node)`` is called by the plan store when a member sets a step to
 completed; it returns None (tick) or the refusal text. Only laned chats (group members) are
-gated: the lead and solo chats resolve no lane and always pass. A lane outside git passes.
-Swarm plans commit locally and push once at the end, so only uncommitted files count here.
-When the lane's changed files sit in a plugin (a ``plugin.json`` above them), the static
-``ducky_plugin_validate`` rules run on just those files too.
+gated: the lead and solo chats resolve no lane and always pass. Uncommitted files never refuse
+(the lead stages and commits at the end). When the lane's changed files sit in a plugin (a
+``plugin.json`` above them), the static ``ducky_plugin_validate`` rules run on just those files.
 """
 
 from __future__ import annotations
@@ -221,14 +220,8 @@ def check_tick(chat_id: str, node: Mapping[str, Any] | None = None) -> str | Non
     lane = lane_rules.resolve_lane(chat_id)
     if not lane:  # lead, solo chat, or read-only member: nothing of theirs to commit
         return None
-    dirty = lane_dirty_files(lane)
-    if dirty:
-        listed = ", ".join(dirty[:MAX_SHOWN]) + (f", …and {len(dirty) - MAX_SHOWN} more" if len(dirty) > MAX_SHOWN else "")
-        return (
-            f"Can't tick: {len(dirty)} file{'s' if len(dirty) != 1 else ''} in your lane "
-            f"{'aren' if len(dirty) != 1 else 'isn'}'t committed: {listed}. Commit them (stage these files by "
-            "name), then tick the step again."
-        )
+    # Uncommitted lane files don't refuse: swarm leads stage and commit once at the end, and members
+    # told "nobody commits" looped resending a refused tick (219 refusals on Oct 20 2026).
     issues = lane_plugin_issues(lane)
     if issues:
         more = f" …and {len(issues) - MAX_SHOWN} more." if len(issues) > MAX_SHOWN else ""

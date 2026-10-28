@@ -38,6 +38,8 @@ META_INSTALL_AT = "usage.install_created"
 META_LAST_VERSION = "usage.last_version"
 META_FIRST_MESSAGE = "usage.first_message_done"
 META_PERF_AT = "usage.perf_sampled_at"
+# "1" while the app runs; still "1" at the next start means the last run never reached app_closing.
+META_RUNNING = "usage.running"
 
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
@@ -421,8 +423,16 @@ def app_opened(boot_total_ms: float | None = None) -> None:
     """The panel is up: app.open, an update if the version changed, then the thread."""
     global _opened_at, _boot_total_ms
     try:
+        from frontend import error_log
+
+        error_log.install_crash_hooks()
+    except Exception:
+        pass
+    try:
         _opened_at = time.monotonic()
         _boot_total_ms = boot_total_ms
+        unclean = _meta_get(META_RUNNING) == "1"
+        _meta_set(META_RUNNING, "1")
         if not enabled():
             _mirror(False)
             return
@@ -431,6 +441,8 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         install_id()
         _mirror(True)
         last = _meta_get(META_LAST_VERSION) or ""
+        if unclean:
+            track("error.code", code="app_unclean_exit", where="ui", kind="crash", version=last)
         if last and last != __version__:
             track("update.installed", **{"from": last, "to": __version__})
         if last != __version__:
@@ -458,6 +470,7 @@ def update_checked(status: str, channel: str, pack: bool) -> None:
 def app_closing() -> None:
     """Quit: app.close, then a short bounded flush so the session's rows land."""
     try:
+        _meta_set(META_RUNNING, "0")
         if not enabled():
             return
         uptime = time.monotonic() - _opened_at if _opened_at else 0.0
@@ -508,7 +521,8 @@ def run_begin(run_id: str, conv_id: str, *, coding_agent: str = "", provider: st
         pass
 
 
-_LIMIT_WORDS = ("session limit", "usage limit", "rate limit", "hit your limit", "quota")
+_LIMIT_WORDS = ("session limit", "usage limit", "rate limit", "rate_limit", "hit your limit", "quota",
+                "credit balance", "overloaded")
 
 
 def _turn_outcome(reason: str, detail: str = "") -> str:
@@ -579,13 +593,25 @@ def stuck(coding_agent: str, seconds: float) -> None:
 
 # ----------------------------------------------------------------------------- reliability
 
-def error(source: str) -> None:
-    """An error log line: its source tag becomes the code; the message never leaves."""
-    track("error.code", code=ev.code_of(source), where=ev.where_of(source))
+def _app_version() -> str:
+    try:
+        from frontend import __version__
+
+        return __version__
+    except Exception:
+        return ""
+
+
+def error(source: str, message: str = "", at: str = "", kind: str = "") -> None:
+    """An error log line: its source tag becomes the code and its message one ERROR_KINDS word;
+    the message itself never leaves. ``at``: the Ducky function it came from (a slug)."""
+    track("error.code", code=ev.code_of(source), where=ev.where_of(at or source),
+          kind=kind or ev.kind_of(message), version=_app_version(), at=at)
 
 
 def agent_crash(provider: str) -> None:
-    track("error.code", code="agent_crash_" + (ev.slug(provider) or "other"), where="agent")
+    track("error.code", code="agent_crash_" + (ev.slug(provider) or "other"), where="agent",
+          kind="crash", version=_app_version())
 
 
 def ui_crash(code: str) -> None:

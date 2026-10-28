@@ -88,6 +88,14 @@ def test_expected_offline_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None
     assert logged == ["Command 'device_graph_snapshot' timed out after 2.0s"]
 
 
+def test_manifest_probe_busy_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    sources: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: sources.append(src))
+    bridge._record_bridge_error("Command 'describe_commands' timed out waiting for listener idle", "describe_commands")
+    bridge._record_bridge_error("Command 'describe_commands' timed out after 4.0s", "describe_commands")
+    assert sources == []
+
+
 def test_a_timeout_names_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
     from frontend import usage_events
 

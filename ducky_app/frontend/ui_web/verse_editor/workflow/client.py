@@ -103,6 +103,14 @@ class VerseWorkflowClient(VerseWorkflowProtocolClient):
         self.disconnect()
         self._notify_state()
 
+    def _closed(self, sock: socket.socket) -> None:
+        # Without this a socket UEFN dropped stayed "connected" forever and every compile
+        # failed instantly on it; now the next call reconnects through start().
+        if self._sock is sock:
+            super()._closed(sock)
+            self.connected = False
+            self._notify_state()
+
     def compile_project(self) -> dict[str, Any]:
         _presave_dirty_packages()
         with save_modal_watchdog("compileProject"):

@@ -40,7 +40,8 @@ def test_no_host_falls_back_and_a_host_error_stops_the_turn(external_turns, monk
     assert agent_modes.run_message("a", "second", "agent", "", push=pushed.append)
     assert _wait_for(lambda: agent_modes.list_running_agents() == [])
     assert any(e["type"] == "error" and "agent host stopped" in e["text"] for e in pushed)
-    assert [e["reason"] for e in pushed if e["type"] == "agent_stopped"] == ["error"]
+    stopped = [e for e in pushed if e["type"] == "agent_stopped"]
+    assert [(e["reason"], e["detail"]) for e in stopped] == [("error", "The agent host stopped (eof).")]
 
 
 def test_a_dead_hosts_turn_is_interrupted_with_its_checkpoint_kept(external_turns, monkeypatch):  # noqa: F811

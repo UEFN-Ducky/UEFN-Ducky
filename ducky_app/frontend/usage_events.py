@@ -38,6 +38,9 @@ SETUP_AI_STATES = ("plan", "key", "account", "not_logged_in", "not_installed", "
 MODEL_FAMILIES = ("claude", "gpt", "gemini", "ollama", "ducky_ai", "other")
 YES_NO = ("yes", "no")
 WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
+# What kind of failure an error was, read from its message on the PC (the message never leaves).
+ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "bad_request",
+               "server_error", "memory", "permission", "not_found", "crash", "other")
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
@@ -77,7 +80,8 @@ EVENTS: dict[str, dict[str, Any]] = {
     "plugin.install": {"plugin_id": ("slug",)},
     "plugin.remove": {"plugin_id": ("slug",)},
     "feature.open": {"tab": TABS},
-    "error.code": {"code": ("slug",), "where": WHERE},
+    # at: the Ducky function an uncaught exception came from (backend.bridge.revive._run).
+    "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",)},
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s")},
     "ui.crash": {"code": ("slug",)},
     "perf.sample": {
@@ -225,6 +229,35 @@ def where_of(source: str) -> str:
         return "workflow"
     if has("ui", "panel", "webview", "window", "chat"):
         return "ui"
+    return "other"
+
+
+# First match wins: "timed out waiting for listener idle" is busy, "503 overloaded" a rate limit.
+_KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (kind, re.compile(pattern))
+    for kind, pattern in (
+        ("session_dead", r"session unavailable|taskgroup|session (is )?closed"),
+        ("busy", r"\bbusy\b|waiting for listener idle"),
+        ("timeout", r"timed? ?out\b|timeout"),
+        ("offline", r"not reachable|offline|connection (refused|reset|aborted)|winerror 100(54|61)"),
+        ("rate_limit", r"\b429\b|rate.?limit|overloaded|usage limit"),
+        ("auth", r"\b40[13]\b|unauthori[sz]ed|forbidden|not logged in|authentication|invalid api key"),
+        ("bad_request", r"\b400\b|invalid_request|bad request"),
+        ("server_error", r"\b50[0-4]\b|internal server error|bad gateway"),
+        ("memory", r"memoryerror|out of memory|\boom\b"),
+        ("permission", r"permission denied|access is denied|permissionerror|winerror 5\b"),
+        ("not_found", r"not found|no such file|filenotfounderror|does not exist"),
+        ("crash", r"traceback|crash|exit code|exited with"),
+    )
+)
+
+
+def kind_of(message: str) -> str:
+    """One of ERROR_KINDS for an error message; only this word is reported."""
+    text = (message or "").lower()
+    for kind, rule in _KIND_RULES:
+        if rule.search(text):
+            return kind
     return "other"
 
 

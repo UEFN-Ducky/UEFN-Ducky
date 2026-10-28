@@ -28,12 +28,12 @@ def activity_path() -> Path:
     return default_app_data_dir() / _ACTIVITY_NAME
 
 
-def record_error(source: str, message: str, *, count: bool = True) -> None:
+def record_error(source: str, message: str, *, count: bool = True, at: str = "", kind: str = "") -> None:
     """Append one error. Skips if identical to the most recent entry (dedupe spam).
 
     ``count=False``: the anonymous usage counts already have it some other way (a failed
     tool call is a ``tool.call`` with ok=no), so it is not an ``error.code`` as well."""
-    _append(_ERRORS_NAME, source, message, dedupe=True, count=count)
+    _append(_ERRORS_NAME, source, message, dedupe=True, count=count, at=at, kind=kind)
 
 
 def record_activity(source: str, message: str) -> None:
@@ -92,6 +92,58 @@ def _scrub(text: str) -> str:
     from backend.util.privacy import scrub
 
     return scrub(text)
+
+
+_crash_hooks_on = False
+
+
+def _crash_at(tb) -> str:
+    """The innermost Ducky frame (``backend.``/``frontend.``) as a ``module.function`` slug."""
+    at = ""
+    while tb is not None:
+        mod = str(tb.tb_frame.f_globals.get("__name__") or "")
+        if mod.startswith(("backend.", "frontend.")):
+            at = f"{mod}.{tb.tb_frame.f_code.co_name}"
+        tb = tb.tb_next
+    return re.sub(r"[^a-z0-9_.-]+", "_", at.lower()).strip("_.-")[:64]
+
+
+def install_crash_hooks() -> None:
+    """Uncaught exceptions (main thread and other threads) land in Errors as ``py.<Type>``,
+    then the previous hook runs. Installs once."""
+    global _crash_hooks_on
+    if _crash_hooks_on:
+        return
+    _crash_hooks_on = True
+    import sys
+    import threading
+    import traceback
+
+    from frontend import usage_events as ev
+
+    prev_sys, prev_thread = sys.excepthook, threading.excepthook
+
+    def report(exc_type, exc, tb) -> None:
+        if exc_type is None or issubclass(exc_type, (SystemExit, KeyboardInterrupt)):
+            return
+        try:
+            # The kind from the exception line only: file paths in the traceback could match words.
+            kind = ev.kind_of(f"{exc_type.__name__}: {exc}")
+            record_error("py." + exc_type.__name__, "".join(traceback.format_exception(exc_type, exc, tb)),
+                         at=_crash_at(tb), kind="crash" if kind == "other" else kind)
+        except Exception:
+            pass
+
+    def sys_hook(exc_type, exc, tb) -> None:
+        report(exc_type, exc, tb)
+        prev_sys(exc_type, exc, tb)
+
+    def thread_hook(args) -> None:
+        report(args.exc_type, args.exc_value, args.exc_traceback)
+        prev_thread(args)
+
+    sys.excepthook = sys_hook
+    threading.excepthook = thread_hook
 
 
 def format_entries(entries: list[dict]) -> list[str]:
@@ -158,7 +210,7 @@ def _ingest_listener_file(name: str) -> None:
         pass
 
 
-def _append(name: str, source: str, message: str, *, dedupe: bool, count: bool) -> None:
+def _append(name: str, source: str, message: str, *, dedupe: bool, count: bool, at: str = "", kind: str = "") -> None:
     message = _scrub((message or "").strip())
     if not message:
         return
@@ -166,7 +218,7 @@ def _append(name: str, source: str, message: str, *, dedupe: bool, count: bool) 
         try:
             from frontend import usage_stats
 
-            usage_stats.error(source or "")
+            usage_stats.error(source or "", message, at, kind)
         except Exception:
             pass
     if _use_db():

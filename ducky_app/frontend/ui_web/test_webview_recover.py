@@ -218,6 +218,23 @@ def test_a_crash_says_how_the_process_ended(monkeypatch) -> None:
     assert wr.exit_reason(SimpleNamespace()) == ""
 
 
+def test_a_killed_browser_is_activity_not_an_error(monkeypatch) -> None:
+    """0x40010004 = another program ended WebView2 (logoff, Task Manager): not a crash."""
+    monkeypatch.setattr(wr, "_last_recover", {})
+    monkeypatch.setattr(wr, "_attached", set())
+    errors: list[str] = []
+    activity: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda s, _m: errors.append(s))
+    monkeypatch.setattr("frontend.error_log.record_activity", lambda s, _m: activity.append(s))
+    rebuilds: list[str] = []
+    handler = wr.attach_process_failed(_Core(), label="main", on_browser_exit=rebuilds.append)
+    handler(None, SimpleNamespace(ProcessFailedKind=0, ExitCode=0x40010004))
+    assert errors == [] and activity == ["webview"] and rebuilds == ["main:0"]
+    # The reload path (no rebuild hook) behaves the same.
+    wr.recover_core_webview(_Core(), reason="pane:x:1", exit="killed")
+    assert errors == [] and activity == ["webview", "webview"]
+
+
 def test_a_pane_without_a_rebuild_keeps_the_old_reload(monkeypatch) -> None:
     monkeypatch.setattr(wr, "_last_recover", {})
     monkeypatch.setattr(wr, "_attached", set())

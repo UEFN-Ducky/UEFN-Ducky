@@ -794,7 +794,7 @@ def run_coding_agent_message(
         error = str(exc)
         metadata = {"requested_mode": str(mode), "effective_mode": "", "run_id": rid}
         push({"type": "error", "text": error, "conv_id": conv.id, **metadata})
-        push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, **metadata})
+        push({"type": "agent_stopped", "reason": "error", "detail": error, "conv_id": conv.id, **metadata})
         return {"ok": False, "error": error, **metadata}
     original_push = push
     push = lambda event: original_push({"effective_mode": "", **event, "requested_mode": mode})
@@ -808,7 +808,7 @@ def run_coding_agent_message(
                      "To keep Strict protection, use an embedded Ducky model.")
             discard_live_run_id(rid)
             push({"type": "error", "text": error, "conv_id": conv.id, "run_id": rid})
-            push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
+            push({"type": "agent_stopped", "reason": "error", "detail": error, "conv_id": conv.id, "run_id": rid})
             return {"ok": False, "error": error, "run_id": rid,
                     "requested_mode": mode, "effective_mode": ""}
         add_live_run_id(rid)
@@ -852,7 +852,7 @@ def _run_coding_agent_message(
     except ValueError as exc:
         error = str(exc)
         push({"type": "error", "text": error, "conv_id": conv.id, "run_id": run_id})
-        push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": run_id})
+        push({"type": "agent_stopped", "reason": "error", "detail": error, "conv_id": conv.id, "run_id": run_id})
         return {"ok": False, "error": error, "run_id": run_id}
 
     settings = PanelSettings.load()
@@ -1031,7 +1031,7 @@ def _run_coding_agent_message(
                 "Pick one on this chat or Ducky profile."
             )
             push({"type": "error", "text": err, "conv_id": conv.id, "run_id": rid})
-            push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
+            push({"type": "agent_stopped", "reason": "error", "detail": err, "conv_id": conv.id, "run_id": rid})
             return {"ok": False, "error": err, "run_id": rid}
         ckpt.seed()
         from backend.agent.coding_agents.readiness import launch_with_ready_tools
@@ -1079,7 +1079,7 @@ def _run_coding_agent_message(
         ckpt.flush(error=str(exc), force=True)
         record_coding_agent_usage(conv, agent_id, model, None, push=push)
         push({"type": "error", "text": str(exc), "conv_id": conv.id, "run_id": rid})
-        push({"type": "agent_stopped", "reason": "error", "conv_id": conv.id, "run_id": rid})
+        push({"type": "agent_stopped", "reason": "error", "detail": str(exc), "conv_id": conv.id, "run_id": rid})
         return {"ok": False, "error": str(exc), "run_id": rid}
     except BaseException:
         # Persist partial work without converting cancellation/control flow

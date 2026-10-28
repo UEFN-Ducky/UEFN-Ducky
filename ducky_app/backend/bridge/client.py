@@ -109,6 +109,10 @@ def _record_bridge_error(message: str, command: str = "") -> None:
     (25-30 a day on 5-8 PCs, Oct 23-24 2026) could not say what the editor was doing."""
     if _is_expected_offline(message):
         return
+    # The tool-manifest probe falls back to its cache when the editor is busy: not a failure
+    # (bridge_busy/bridge_timeout.describe_commands, 5 on Oct 26-27 2026).
+    if command == "describe_commands":
+        return
     if "waiting for listener idle" not in message and _lone_ping_timeout(command):
         return
     source = "bridge"

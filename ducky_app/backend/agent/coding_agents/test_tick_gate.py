@@ -1,4 +1,4 @@
-"""Tick gate: uncommitted lane files refuse a member's tick; clean and non-git lanes pass."""
+"""Tick gate: uncommitted lane files never refuse a member's tick; plugin lint failures do."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def _commit_all(root: Path) -> None:
     _git(root, "commit", "-q", "-m", "c")
 
 
-def test_dirty_lane_file_refuses(project: Path) -> None:
+def test_dirty_lane_file_still_ticks(project: Path) -> None:
     _git(project, "init", "-q")
     (project / "pkg" / "a.py").write_text("x = 1\n", encoding="utf-8")
     _commit_all(project)
@@ -55,9 +55,8 @@ def test_dirty_lane_file_refuses(project: Path) -> None:
     (project / "other" / "not_mine.py").write_text("z = 1\n", encoding="utf-8")
     assert lanes.resolve_lane(MEMBER) == ("pkg/**",)
     assert sorted(tick_gate.lane_dirty_files(["pkg/**"])) == ["pkg/a.py", "pkg/new.py"]
-    refusal = tick_gate.check_tick(MEMBER, {"id": "s1"})
-    assert refusal and refusal.startswith("Can't tick: 2 files in your lane aren't committed")
-    assert "pkg/a.py" in refusal and "not_mine" not in refusal
+    # The lead stages and commits at the end: uncommitted files never refuse a member's tick.
+    assert tick_gate.check_tick(MEMBER, {"id": "s1"}) is None
 
 
 def test_clean_committed_lane_ticks(project: Path) -> None:
