@@ -163,6 +163,8 @@ _PUBLIC_METHODS = frozenset({
     'sandbox_stop_program',
     'sandbox_delete',
     'sandbox_open_folder',
+    'sandbox_apps',
+    'sandbox_relaunch',
     'duckyos_open_admin',
     'duckyos_open_site',
     'duckyos_store_catalog',

@@ -6,6 +6,7 @@ import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
 import { LiveHeaderDropdown } from "./LiveHeaderDropdown";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
+import { SandboxAppsDropdown } from "./SandboxAppsDropdown";
 import { LanguageHeaderDropdown } from "./LanguageHeaderDropdown";
 import { PluginSurfaceBoundary } from "../plugin-ui/PluginSurfaceBoundary";
 import { useAppHeaderActions, useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
@@ -698,6 +699,7 @@ export function Header({
               <TerminalHeaderDropdown {...terminalAction} />
             </span>
           ) : null}
+          <SandboxAppsDropdown />
           <button
               ref={workflowsTargetRef}
               type="button"

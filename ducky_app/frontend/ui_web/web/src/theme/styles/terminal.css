@@ -280,6 +280,136 @@
   background: var(--tab-hover);
 }
 
+.sandbox-apps-menu {
+  max-width: calc(100vw - 16px);
+}
+
+.sandbox-apps-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sandbox-apps-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sandbox-apps-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.sandbox-apps-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sandbox-apps-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.sandbox-apps-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sandbox-apps-filter:hover {
+  background: var(--tab-hover);
+}
+
+.sandbox-apps-filter.is-active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--tab-active);
+}
+
+.sandbox-apps-filter-count {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.sandbox-apps-list {
+  max-height: min(480px, 60vh);
+  padding: 6px 0;
+}
+
+.sandbox-app-row {
+  padding: 2px 4px 2px 0;
+  font-size: 13px;
+}
+
+.sandbox-app-row .terminal-header-item-main {
+  gap: 12px;
+  padding: 8px 6px 8px 12px;
+}
+
+.sandbox-app-row .terminal-header-item-close {
+  width: 28px;
+  height: 28px;
+  margin-right: 2px;
+}
+
+.sandbox-app-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  object-fit: cover;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.sandbox-app-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sandbox-app-text .terminal-header-item-name {
+  font-weight: 600;
+}
+
+.sandbox-app-text .terminal-header-item-owner {
+  max-width: none;
+  font-size: 12px;
+}
+
+.sandbox-app-row.is-running .terminal-header-item-owner {
+  color: var(--green);
+}
+
+.sandbox-app-row .terminal-header-item-main:disabled {
+  cursor: default;
+}
+
 .language-header-add-row {
   display: flex;
   align-items: center;

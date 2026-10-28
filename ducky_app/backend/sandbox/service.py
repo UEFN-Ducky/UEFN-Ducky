@@ -312,7 +312,9 @@ def launch(conv_id: str, program: str, args: list[str] | None = None, cwd: str =
                     started=time.time(), ports=port_map, run=run)
     with _lock:
         _programs[run.pid] = prog
-    manifest.record(box, "launch", pid=run.pid, name=prog.name, command=argv, ports=port_map)
+    # program/args/cwd/env too: the Apps menu runs it again later from this record (relaunch).
+    manifest.record(box, "launch", pid=run.pid, name=prog.name, command=argv, ports=port_map,
+                    program=program, args=[str(a) for a in (args or [])], cwd=str(workdir), env=env or {})
     paths.touch(box)
     time.sleep(1.0)
     alive = run.alive()
@@ -483,13 +485,67 @@ def all_programs(procs: Any = None, cpu: dict[int, float] | None = None) -> list
     return [{"conv_id": prog.conv_id, **row} for (_, prog), row in zip(progs, _rows(progs, procs, cpu))]
 
 
+def _launches(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The latest launch event of each app name."""
+    return {str(e["name"]): e for e in events if e.get("kind") == "launch" and e.get("name")}
+
+
+def _events(box: Path) -> list[dict[str, Any]]:
+    return [e for e in manifest.read(box).get("events") or [] if isinstance(e, dict)]
+
+
+def apps() -> dict[str, Any]:
+    """Every app a sandbox launched, in every chat: running ones first, then newest."""
+    _reap()
+    with _lock:
+        running = {(p.conv_id, p.name): (pid, p) for pid, p in _programs.items()}
+    listening = _listening() if running else {}
+    from frontend.ui_web.conversation_attachments import build_chat_attachment_url
+
+    out: list[dict[str, Any]] = []
+    for row in paths.list_sandboxes():
+        conv = row["conv_id"]
+        events = _events(Path(row["path"]))
+        pics = [str(e["picture"]) for e in events if e.get("kind") == "evidence" and e.get("picture")]
+        picture = build_chat_attachment_url(conv, Path(pics[-1]).name) if pics else ""
+        for name, e in _launches(events).items():
+            hit = running.get((conv, name))
+            ports = sorted({*(hit[1].ports.values() if hit else ()),
+                            *(port for pid in (hit[1].run.tree() if hit else ()) for port in listening.get(pid, ()))})
+            out.append({"conv_id": conv, "name": name, "running": bool(hit), "pid": hit[0] if hit else 0,
+                        "ports": ports, "launched": e.get("at") or 0, "picture": picture})
+    out.sort(key=lambda a: (not a["running"], -float(a["launched"])))
+    return {"ok": True, "apps": out}
+
+
+def relaunch(conv_id: str, name: str) -> dict[str, Any]:
+    """Start an app again the way its last launch did (already running: that one)."""
+    with _lock:
+        for pid, prog in _programs.items():
+            if prog.conv_id == conv_id and prog.name == name:
+                return {"ok": True, "pid": pid, "name": name, "ports": prog.ports, "already_running": True}
+    e = _launches(_events(paths.sandbox_dir(conv_id))).get(name) if paths.exists(conv_id) else None
+    if e is None:
+        return {"ok": False, "error": f"No app named {name!r} was launched in this sandbox."}
+    program, args = e.get("program"), e.get("args")
+    if not program:  # launched before the record kept program/args
+        command = [str(c) for c in e.get("command") or []]
+        if not command:
+            return {"ok": False, "error": f"{name} has no recorded command."}
+        program, args = command[0], command[1:]
+    # ponytail: manifest fields are cut at 600 chars / 40 items; a longer command won't replay.
+    return launch(conv_id, str(program), list(args or []), cwd=str(e.get("cwd") or ""), name=name,
+                  ports=list(e.get("ports") or {}), env=e.get("env") or None)
+
+
 def prune(chat_exists: Any = None) -> list[str]:
-    """Delete sandboxes unused for two weeks, or whose chat is gone (none with a running program)."""
+    """Delete sandboxes unused for two weeks, or whose chat is gone (none with a running program,
+    none that launched an app: those stay until the person deletes them in the Apps menu)."""
     with _lock:
         busy = {p.conv_id for p in _programs.values()}
     removed = []
     for conv_id in paths.stale(chat_exists=chat_exists):
-        if conv_id not in busy:
+        if conv_id not in busy and not _launches(_events(paths.sandbox_dir(conv_id))):
             clear(conv_id)
             removed.append(conv_id)
     return removed
@@ -557,7 +613,7 @@ def prune_now_and_then() -> None:
 _CALLS: dict[str, Any] = {
     "open": open_sandbox, "run": run_command, "launch": launch, "look": look, "stop": stop, "clear": clear,
     "http": http, "status": status, "fetch": fetch, "clone": _clone, "worktree": _worktree, "setup": _setup,
-    "mcp": _mcp,
+    "mcp": _mcp, "relaunch": relaunch,
 }
 
 

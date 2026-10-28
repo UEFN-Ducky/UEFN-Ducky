@@ -1193,6 +1193,20 @@ export interface SandboxStatus {
   error?: string;
 }
 
+/** An app a sandbox launched (header Apps menu); stays until its sandbox is deleted. */
+export interface SandboxApp {
+  conv_id: string;
+  name: string;
+  /** The chat that built it ('' when that chat is gone). */
+  chat?: string;
+  running: boolean;
+  pid: number;
+  ports: number[];
+  launched: number;
+  /** The last screenshot an agent took of it ('' when none). */
+  picture: string;
+}
+
 export interface KnownProjectsListing {
   sources: { id: string; label: string; icon?: string }[];
   projects: KnownProject[];
@@ -4750,6 +4764,8 @@ export interface PanelApi {
   sandbox_status?(conv_id: string): Promise<SandboxStatus>;
   sandbox_stop_program?(conv_id: string, pid?: number): Promise<{ ok: boolean; error?: string }>;
   sandbox_delete?(conv_id: string): Promise<{ ok: boolean; error?: string }>;
+  sandbox_apps?(): Promise<{ ok: boolean; apps?: SandboxApp[]; error?: string }>;
+  sandbox_relaunch?(conv_id: string, name: string): Promise<{ ok: boolean; pid?: number; error?: string }>;
   sandbox_open_folder?(conv_id: string): Promise<{ ok: boolean; path?: string; error?: string }>;
   /** Dispatch a plugin panel RPC registered via ``api.register_panel_rpc``. */
   plugin_call?(

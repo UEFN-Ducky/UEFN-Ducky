@@ -1448,6 +1448,8 @@ OFF_PC_DENY = frozenset(
         "sandbox_stop_program",
         "sandbox_delete",
         "sandbox_open_folder",
+        "sandbox_apps",
+        "sandbox_relaunch",
         "ducky_health_snapshot",
         "ducky_self_care_run",
         # Links to files on this PC are for this PC's windows (they point at 127.0.0.1).

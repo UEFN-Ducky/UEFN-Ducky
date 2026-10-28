@@ -207,6 +207,8 @@ def test_cwd_may_name_the_work_folder_or_not():
 
 
 @needs_windows
+@pytest.mark.skipif(os.environ.get("DUCKY_WINDOW_TESTS") != "1",
+                    reason="pops a real 'cap-test' window on the person's screen; DUCKY_WINDOW_TESTS=1 runs it")
 def test_a_window_capture_is_only_the_window():
     """GetWindowRect counts the invisible resize borders: captures showed what was behind them."""
     pytest.importorskip("tkinter")
@@ -292,6 +294,41 @@ def test_clear_deletes_the_sandbox_and_stale_ones_are_pruned():
     assert service.prune() == ["old-chat"]
     assert not old.exists() and keep.exists()
     assert service.prune(chat_exists=lambda cid: cid != "fresh-chat") == ["fresh-chat"]
+    built = paths.sandbox_dir("app-chat", create=True)
+    manifest.record(built, "launch", name="web", command=["node"])
+    (built / ".last_used").write_text(str(int(time.time() - paths.PRUNE_AFTER_S - 10)), encoding="utf-8")
+    assert service.prune(chat_exists=lambda cid: False) == []  # an app it built stays until deleted
+    assert built.exists()
+
+
+@needs_windows
+def test_an_app_is_listed_after_it_stops_and_runs_again():
+    box = paths.sandbox_dir(CONV, create=True)
+    server = _script(box, "serve.py", """
+        import http.server, os, socketserver
+        with socketserver.TCPServer(("127.0.0.1", int(os.environ["PORT"])), http.server.SimpleHTTPRequestHandler) as s:
+            s.serve_forever()
+    """)
+    first = service.launch(CONV, sys.executable, [str(server)], ports=["PORT"], name="web", env={"A": "1"})
+    assert first["ok"], first
+    listed = [a for a in service.apps()["apps"] if a["conv_id"] == CONV and a["name"] == "web"]
+    assert listed and listed[0]["running"] and first["ports"]["PORT"] in listed[0]["ports"]
+    assert service.relaunch(CONV, "web")["already_running"]
+    service.stop(CONV, first["pid"])
+    stopped = next(a for a in service.apps()["apps"] if a["conv_id"] == CONV and a["name"] == "web")
+    assert stopped["running"] is False and stopped["pid"] == 0
+    again = service.call("relaunch", {"conv_id": CONV, "name": "web"})
+    assert again["ok"] and again["pid"] != first["pid"], again
+    assert service._programs[again["pid"]].cwd == str(box / "work")
+    assert service.relaunch(CONV, "nope")["ok"] is False
+
+
+@needs_windows
+def test_an_app_launched_before_the_full_record_still_runs_again():
+    box = paths.sandbox_dir(CONV, create=True)
+    manifest.record(box, "launch", name="old", command=[sys.executable, "-c", "import time; time.sleep(30)"], ports={})
+    out = service.relaunch(CONV, "old")
+    assert out["ok"], out
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -400,6 +437,7 @@ def test_sandbox_and_self_care_panel_calls_are_this_pc_only():
     from frontend.duckyos_account import remote_denied
 
     for method in ("sandbox_call", "sandbox_status", "sandbox_stop_program", "sandbox_delete",
+                   "sandbox_apps", "sandbox_relaunch",
                    "ducky_health_snapshot", "ducky_self_care_run"):
         assert remote_denied(method, on_this_pc=False)
         assert not remote_denied(method, on_this_pc=True)

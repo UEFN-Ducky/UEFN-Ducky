@@ -1965,6 +1965,28 @@ class PanelApiSettingsMixin:
 
         return service.call("stop", {"conv_id": conv_id, "pid": int(pid or 0)})
 
+    def sandbox_apps(self) -> dict[str, Any]:
+        """The header's Apps menu: every app a sandbox launched, in every chat."""
+        from backend.sandbox import service
+        from frontend.ui_web.terminal.manager import _chat_title
+
+        out = service.apps()
+        titles: dict[str, str] = {}
+        for app in out["apps"]:
+            cid = app["conv_id"]
+            if cid not in titles:
+                try:
+                    titles[cid] = _chat_title(cid) or ""
+                except Exception:  # noqa: BLE001 - a deleted chat has no title; the app still lists
+                    titles[cid] = ""
+            app["chat"] = titles[cid]
+        return out
+
+    def sandbox_relaunch(self, conv_id: str, name: str) -> dict[str, Any]:
+        from backend.sandbox import service
+
+        return service.call("relaunch", {"conv_id": conv_id, "name": str(name or "")})
+
     def sandbox_delete(self, conv_id: str) -> dict[str, Any]:
         from backend.sandbox import service
 
