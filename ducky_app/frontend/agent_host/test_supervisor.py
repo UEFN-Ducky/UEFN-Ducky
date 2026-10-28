@@ -1,4 +1,4 @@
-"""Supervisor: one host per 4 agents, hosts die with the app, idle hosts exit."""
+"""Supervisor: one host per ``per_host`` agents, hosts die with the app, idle hosts exit."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ _FAKE_APP = """
 import sys, time
 sys.path.insert(0, sys.argv[1])
 from frontend.agent_host import supervisor
-sup = supervisor.Supervisor(log_dir=__import__("pathlib").Path(sys.argv[2]))
+sup = supervisor.Supervisor(log_dir=__import__("pathlib").Path(sys.argv[2]), per_host=4)
 for i in range(6):
     sup.assign(f"c{i}")
 for h in sup.hosts():
@@ -41,7 +41,7 @@ def _gone(pids: list[int], within_s: float) -> bool:
 
 
 def test_six_agents_get_two_hosts(tmp_path):
-    sup = supervisor.Supervisor(log_dir=tmp_path)
+    sup = supervisor.Supervisor(log_dir=tmp_path, per_host=4)
     try:
         seats = [sup.assign(f"c{i}") for i in range(6)]
         hosts = sup.hosts()
@@ -153,7 +153,7 @@ def test_a_host_crash_only_stops_its_own_chats(tmp_path, monkeypatch):
     marked: list[int] = []
     monkeypatch.setattr(turns, "mark_host_dead", marked.append, raising=False)
     closed: list[str] = []
-    sup = supervisor.Supervisor(log_dir=tmp_path, on_host_closed=lambda h, r: closed.append(r))
+    sup = supervisor.Supervisor(log_dir=tmp_path, on_host_closed=lambda h, r: closed.append(r), per_host=4)
     try:
         for i in range(6):
             sup.assign(f"c{i}")
@@ -176,6 +176,16 @@ def test_a_host_crash_only_stops_its_own_chats(tmp_path, monkeypatch):
         assert marked == [a.slot]
     finally:
         sup.stop_all()
+
+
+def test_defaults_seat_sixteen_per_host_and_env_overrides(monkeypatch):
+    monkeypatch.delenv("DUCKY_AGENTS_PER_HOST", raising=False)
+    assert supervisor._env_int("DUCKY_AGENTS_PER_HOST", 16) == 16
+    assert 1 <= supervisor.MAX_HOSTS <= 8
+    monkeypatch.setenv("DUCKY_AGENTS_PER_HOST", "5")
+    assert supervisor._env_int("DUCKY_AGENTS_PER_HOST", 16) == 5
+    monkeypatch.setenv("DUCKY_AGENTS_PER_HOST", "junk")
+    assert supervisor._env_int("DUCKY_AGENTS_PER_HOST", 16) == 16
 
 
 def test_idle_host_exits_after_timeout(tmp_path):

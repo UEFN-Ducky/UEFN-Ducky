@@ -6,8 +6,9 @@ Every frame is ``{"op": ..., **fields}``, e.g.
 
 ``send`` never blocks the caller (the app's window thread): frames go on a queue and a
 writer thread sends them, packing whatever is queued into one length-prefixed pipe message.
-The reader thread hands each frame to ``on_frame``; the app's handler passes events to the
-push path. A dead host shows as pipe EOF at once, a hung one as a missing heartbeat.
+The reader thread only reads; a handler thread hands each frame to ``on_frame`` in order (the
+app's handler passes events to the push path), so a slow push never stops reads and never looks
+like a missing heartbeat. A dead host shows as pipe EOF at once, a hung one as a missing heartbeat.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ HEARTBEAT_S = 2.0
 DEAD_AFTER_S = 3 * HEARTBEAT_S
 MAX_MESSAGE = 64 * 1024 * 1024
 _TICK_S = 0.1
+_EOF = object()  # the reader's EOF, queued behind the frames read before it
 
 OnFrame = Callable[[dict[str, Any]], None]
 OnClosed = Callable[[str], None]
@@ -39,7 +41,7 @@ def pipe_name(slot: int | str, app_pid: int | None = None) -> str:
 
 
 class Channel:
-    """One end of the pipe. ``on_frame`` runs on the reader thread; ``on_closed(reason)`` runs once."""
+    """One end of the pipe. ``on_frame`` runs on the handler thread; ``on_closed(reason)`` runs once."""
 
     def __init__(
         self,
@@ -60,6 +62,7 @@ class Channel:
         self._heartbeat_s = heartbeat_s
         self._dead_after_s = dead_after_s
         self._out: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
+        self._in: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._closed = threading.Event()
         self.close_reason = ""
@@ -70,7 +73,9 @@ class Channel:
         return self._closed.is_set()
 
     def start(self) -> Channel:
-        for target, name in ((self._read_loop, "reader"), (self._write_loop, "writer"), (self._tick_loop, "tick")):
+        loops = ((self._read_loop, "reader"), (self._handle_loop, "handler"), (self._write_loop, "writer"),
+                 (self._tick_loop, "tick"))
+        for target, name in loops:
             threading.Thread(target=target, name=f"agent-host-{name}", daemon=True).start()
         return self
 
@@ -90,6 +95,7 @@ class Channel:
             self.close_reason = reason
             self._closed.set()
         self._out.put(None)
+        self._in.put(None)
         try:
             self._conn.close()
         except OSError:
@@ -102,9 +108,19 @@ class Channel:
             try:
                 raw = self._conn.recv_bytes(MAX_MESSAGE)
             except (EOFError, OSError):
-                self.close("eof")
+                self._in.put(_EOF)
                 return
             self._last_rx = time.monotonic()
+            self._in.put(raw)
+
+    def _handle_loop(self) -> None:
+        while True:
+            raw = self._in.get()
+            if raw is None:
+                return
+            if raw is _EOF:
+                self.close("eof")
+                return
             try:
                 frames = json.loads(raw)
             except ValueError:

@@ -88,6 +88,29 @@ def test_silent_host_is_seen_by_missing_heartbeat():
     host.close()
 
 
+def test_a_slow_handler_never_looks_like_a_missing_heartbeat():
+    got: list[int] = []
+    reasons: list[str] = []
+
+    def slow(frame):
+        if frame["seq"] == 0:
+            time.sleep(1.2)  # a push stuck on disk, past dead_after_s
+        got.append(frame["seq"])
+
+    app, host = _pair(f"t-{uuid.uuid4().hex[:8]}", host_frame=lambda f: None, app_frame=slow,
+                      app_closed=reasons.append, dead_after_s=0.6)
+    host._heartbeat_s = 0.1
+    for i in range(5):
+        host.send("event", conv_id="c1", seq=i)
+    deadline = time.monotonic() + 5
+    while len(got) < 5 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert got == [0, 1, 2, 3, 4]
+    assert reasons == [] and not app.closed
+    app.close()
+    host.close()
+
+
 def test_killed_host_is_seen_within_1s():
     slot = f"t-{uuid.uuid4().hex[:8]}"
     key = os.urandom(16)

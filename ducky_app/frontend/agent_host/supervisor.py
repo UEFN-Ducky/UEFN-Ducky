@@ -1,7 +1,8 @@
 """App side: start agent-host child processes on demand and keep them in Windows job objects.
 
-One host per ``PER_HOST`` running agents, at most ``MAX_HOSTS``; each has its own GIL, so 16
-agents run on 4 cores instead of one. Every host sits in a job with KILL_ON_JOB_CLOSE (the
+One host per ``PER_HOST`` running agents, at most ``MAX_HOSTS``; each has its own GIL. Turns wait on
+the CLI almost all the time (16 fake agents: 1.6 % of a core, +0.03 MB each), so a host takes 16;
+past ``PER_HOST × MAX_HOSTS`` the least-busy host takes one more. Every host sits in a job with KILL_ON_JOB_CLOSE (the
 sandbox's ``jobs.Launched``), so when the app process ends, for any reason, its hosts end too.
 A host that has had no agents for ``IDLE_EXIT_S`` is told to shut down and then killed.
 
@@ -23,8 +24,17 @@ from backend.sandbox import jobs
 from frontend.agent_host import protocol
 
 KEY_ENV = "UEFN_DUCKY_HOST_KEY"
-PER_HOST = 4
-MAX_HOSTS = 8
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "")))
+    except ValueError:
+        return default
+
+
+PER_HOST = _env_int("DUCKY_AGENTS_PER_HOST", 16)
+MAX_HOSTS = _env_int("DUCKY_MAX_AGENT_HOSTS", min(os.cpu_count() or 8, 8))
 IDLE_EXIT_S = 300.0
 CONNECT_S = 60.0
 _REAP_S = 5.0
@@ -175,7 +185,8 @@ class Supervisor:
     def snapshot(self) -> list[dict[str, Any]]:
         """For ducky_health: one row per host."""
         return [
-            {"slot": h.slot, "pid": h.pid, "agents": len(h.agents), "connected": h.ready.is_set(), "alive": h.alive()}
+            {"slot": h.slot, "pid": h.pid, "agents": len(h.agents), "seats": self.per_host,
+             "connected": h.ready.is_set(), "alive": h.alive()}
             for h in self.hosts()
         ]
 
