@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { publishTeamScope, unpublishTeamScope, type TeamScope } from "../plugin-ui/teamScopeStore";
+import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
+import { OPEN_TEAM_MODAL_EVENT } from "../plugin-ui/scopeActivity";
 import { TeamHeaderButton } from "./TeamHeaderButton";
 
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => ({}), isRemote: () => false }));
@@ -43,6 +45,24 @@ describe("TeamHeaderButton", () => {
     fireEvent.click(button);
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByText("Mindful Path · Island Media Kit")).toBeTruthy();
+  });
+
+  it("the tray's Resolve opens the Team modal on Conflicts", () => {
+    render(<ConfirmModalProvider><TeamHeaderButton /></ConfirmModalProvider>);
+    act(() => publishTeamScope(scope({
+      badge: 1, conflicts: 1,
+      status: {
+        ok: true, visible: true, canChange: false, conflicts: [{ kind: "doc", key: "deck", name: "deck", by: "Ana", reason: "both" }],
+        scope: { kind: "shared", label: "Mindful Path", spaceId: "s1", readOnly: false },
+      },
+    })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => {
+      window.dispatchEvent(new CustomEvent(OPEN_TEAM_MODAL_EVENT, { detail: { section: "conflicts" } }));
+    });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Conflicts/ }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("region", { name: "Source control: Mindful Path" })).toBeTruthy();
   });
 
   it("on Local it still shows, so a team can be picked", () => {

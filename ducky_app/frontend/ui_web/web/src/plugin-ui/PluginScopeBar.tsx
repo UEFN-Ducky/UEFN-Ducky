@@ -12,7 +12,14 @@ import type {
 import { FolderShareDialog } from "./FolderShareDialog";
 import { useLiveFollow } from "./liveFollow";
 import { installScopeAlerts, onRefusedWrite, rememberPluginLabel, type RefusedWrite } from "./scopeAlerts";
-import { publishTeamScope, unpublishTeamScope, type TeamScope, type TeamScopeNote } from "./teamScopeStore";
+import {
+  publishPaneScope,
+  publishTeamScope,
+  unpublishPaneScope,
+  unpublishTeamScope,
+  type TeamScope,
+  type TeamScopeNote,
+} from "./teamScopeStore";
 import {
   bindingText,
   folderRefusal,
@@ -300,10 +307,15 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const view = useRef<TeamScope | null>(null);
   view.current = null;
   useEffect(() => {
+    if (view.current) publishPaneScope(view.current);
+    else unpublishPaneScope(pluginId);
     if (active && view.current) publishTeamScope(view.current);
     else unpublishTeamScope(pluginId);
   });
-  useEffect(() => () => unpublishTeamScope(pluginId), [pluginId]);
+  useEffect(() => () => {
+    unpublishTeamScope(pluginId);
+    unpublishPaneScope(pluginId);
+  }, [pluginId]);
 
   /** A full round now (sends this PC's changes, brings everyone else's), past the minute cap. */
   const syncNow = async () => {

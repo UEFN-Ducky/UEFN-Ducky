@@ -5,7 +5,7 @@ import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { _resetBackgroundActivityForTests, getBackgroundJobs } from "../hooks/backgroundActivity";
 import { writeLiveFollow } from "./liveFollow";
 import { PluginScopeBar } from "./PluginScopeBar";
-import { getTeamScope } from "./teamScopeStore";
+import { getAllTeamScopes, getTeamScope } from "./teamScopeStore";
 import { TeamModal } from "./TeamModal";
 
 const api = vi.hoisted(() => ({
@@ -569,6 +569,17 @@ describe("plugin scope bar", () => {
       }));
       rerender(false);
       expect(getTeamScope()).toBeNull();
+    });
+
+    it("every pane, hidden too, is in the all-panes map until it closes", async () => {
+      api.plugin_scope_status.mockResolvedValue(sharedStatus({ pluginLabel: "Island Media Kit" }, { label: "Mindful Path" }));
+      watch(false);
+      await waitFor(() => expect(getAllTeamScopes()["island-media-kit"]).toMatchObject({
+        plugin: "Island Media Kit", status: { scope: { label: "Mindful Path" } },
+      }));
+      expect(getTeamScope()).toBeNull();
+      cleanup();
+      expect(getAllTeamScopes()["island-media-kit"]).toBeUndefined();
     });
 
     it("tells the pane whether it's a team copy and how many changes are on their way", async () => {

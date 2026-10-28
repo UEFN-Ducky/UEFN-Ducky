@@ -99,3 +99,38 @@ export function subscribeTeamScope(fn: () => void): () => void {
 export function useTeamScope(): TeamScope | null {
   return useSyncExternalStore(subscribeTeamScope, getTeamScope, getTeamScope);
 }
+
+// Every pane, shown or hidden (a round in a hidden tab still gets its tray row). A hidden pane
+// reads no status, so its entry is what it last read.
+let all: Record<string, TeamScope> = {};
+const allListeners = new Set<() => void>();
+
+function emitAll() {
+  for (const fn of allListeners) fn();
+}
+
+/** A pane (active or not) says what it shows. */
+export function publishPaneScope(scope: TeamScope): void {
+  all = { ...all, [scope.pluginId]: scope };
+  emitAll();
+}
+
+/** The pane closed or stopped showing a team bar. */
+export function unpublishPaneScope(pluginId: string): void {
+  if (!(pluginId in all)) return;
+  const { [pluginId]: _gone, ...rest } = all;
+  all = rest;
+  emitAll();
+}
+
+/** Every pane's copy by plugin id (a new object on each change). */
+export function getAllTeamScopes(): Record<string, TeamScope> {
+  return all;
+}
+
+export function subscribeAllTeamScopes(fn: () => void): () => void {
+  allListeners.add(fn);
+  return () => {
+    allListeners.delete(fn);
+  };
+}
