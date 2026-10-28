@@ -310,41 +310,58 @@
   border-radius: 0;
 }
 
-/* Host scope bar: one row of same-sized controls above every plugin panel (whose data, one
-   status, Send and Get, Live, Source control). Decisions sit on one line each under it, and
-   the Source control tabs open under those and scroll on their own, so the panel keeps most
-   of the height. Its dropdowns float over the panel (DropdownPanel). */
-.plugin-scope {
-  flex: 0 1 auto;
+/* The header's Team menu: Settings' left nav, the picked section on the right. */
+.team-modal-body {
+  padding: 0;
+}
+.team-modal-layout {
   display: flex;
-  flex-direction: column;
+  height: min(560px, 70vh);
   min-height: 0;
-  min-width: 0;
-  max-height: 55%;
   font-size: 12px;
   color: var(--fg-dim, #a0a0a0);
 }
-.plugin-scope-bar {
-  flex: 0 0 auto;
+.team-modal-nav {
+  flex: 0 0 180px;
+  padding: 8px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--border, #3a3a3a);
+}
+.team-modal-nav .settings-view-sidebar-tab > span:first-child {
+  flex: 1 1 auto;
+}
+.team-modal-pane {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.team-modal-pane .plugin-scope-panel {
+  flex: 1 1 auto;
+  max-height: none;
+  border-top: 0;
+}
+.team-modal-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.team-modal-status {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  height: 36px;
-  padding: 0 8px;
-  box-sizing: border-box;
-  background: var(--card, #252525);
-  border-bottom: 1px solid var(--border, #3a3a3a);
 }
-.plugin-scope-bar--paused {
-  background: color-mix(in srgb, var(--warn, #d97706) 12%, var(--card, #252525));
-}
-.plugin-scope-bar__spacer {
-  flex: 1 1 auto;
-  min-width: 8px;
+.team-modal-status__actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
-/* Every button of the bar, its dropdowns and its tabs: one height, one look. */
+/* Every scope button, its menus and its tabs: one height, one look. */
 .plugin-scope-btn {
   display: inline-flex;
   flex: none;
@@ -397,13 +414,6 @@
 .plugin-scope-btn--block {
   width: 100%;
 }
-.plugin-scope-btn--copy {
-  max-width: 32%;
-  font-weight: 600;
-}
-.plugin-scope-btn--live.is-on {
-  border-color: var(--green, #3ddc84);
-}
 .plugin-scope-btn__label {
   min-width: 0;
   overflow: hidden;
@@ -428,10 +438,6 @@
   color: #fff;
   background: var(--danger, #e55);
 }
-.plugin-scope-caret {
-  font-size: 10px;
-  color: var(--fg-dim, #a0a0a0);
-}
 .plugin-scope-dot {
   width: 7px;
   height: 7px;
@@ -447,6 +453,27 @@
 }
 .plugin-scope-dot--live {
   background: var(--green, #3ddc84);
+}
+.plugin-scope-dot--warn {
+  background: var(--warn, #d97706);
+}
+.plugin-scope-dot--error {
+  background: var(--danger, #e55);
+}
+
+/* The header's Team button: its dot and count sit on the icon's corners. */
+.app-header-team-btn {
+  position: relative;
+}
+.app-header-team-btn__dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+}
+.app-header-team-btn__count {
+  position: absolute;
+  top: -2px;
+  right: -4px;
 }
 
 /* The status: one phrase that opens the tab explaining it. It shrinks first. */
@@ -470,14 +497,7 @@
   color: var(--danger, #e55);
 }
 
-/* Decisions under the bar, one line each. */
-.plugin-scope-notes {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  background: var(--card, #252525);
-  border-bottom: 1px solid var(--border, #3a3a3a);
-}
+/* Decisions in the Team menu's Overview, one line each. */
 .plugin-scope-note {
   display: flex;
   align-items: center;
@@ -485,20 +505,19 @@
   min-height: 36px;
   padding: 4px 8px 4px 12px;
   box-sizing: border-box;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: var(--radius-sm, 6px);
   color: var(--fg, #e6e6e6);
 }
 .plugin-scope-note > span {
   flex: 1 1 auto;
   min-width: 0;
 }
-.plugin-scope-note + .plugin-scope-note {
-  border-top: 1px solid var(--border, #3a3a3a);
-}
 .plugin-scope-note--warn {
-  box-shadow: inset 3px 0 var(--warn, #d97706);
+  background: color-mix(in srgb, var(--warn, #d97706) 10%, transparent);
 }
 .plugin-scope-note--error {
-  box-shadow: inset 3px 0 var(--danger, #e55);
+  background: color-mix(in srgb, var(--danger, #e55) 10%, transparent);
 }
 
 /* The bar's dropdowns: rows of one height. */

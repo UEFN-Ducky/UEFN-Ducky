@@ -4,6 +4,7 @@ import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
 import { LiveHeaderDropdown } from "./LiveHeaderDropdown";
+import { TeamHeaderButton } from "./TeamHeaderButton";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { SandboxAppsDropdown } from "./SandboxAppsDropdown";
@@ -735,6 +736,7 @@ export function Header({
           </button>
         ) : null}
 
+        <TeamHeaderButton />
         <LiveHeaderDropdown />
         <BackgroundActivityDropdown />
 

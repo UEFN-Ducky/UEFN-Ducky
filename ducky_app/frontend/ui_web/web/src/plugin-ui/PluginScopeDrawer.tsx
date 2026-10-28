@@ -57,7 +57,30 @@ type Props = {
   onTab?: (tab: ScopeTab) => void;
   /** Join a teammate's live group (People). */
   onJoin?: (room: string) => void;
+  /** The Team modal's left nav picks the tab: no tab strip of its own. */
+  hideTabs?: boolean;
 };
+
+export type ScopeTabItem = { id: ScopeTab; label: string; count?: number; alert?: boolean };
+
+/** The tabs a copy has, with what needs looking at in each (the drawer's strip, the Team modal's nav). */
+export function scopeTabs(s: PluginScopeStatus, pluginId: string): ScopeTabItem[] {
+  const api = getApi();
+  const v2 = s.engine ? s.engine === "v2" : s.mode !== undefined || typeof s.head === "number";
+  const outgoing = outgoingRows(s);
+  const pending = typeof s.pending === "number" ? s.pending : outgoing.filter((row) => row.state === "queued").length;
+  const conflicts = s.conflicts ?? [];
+  const people = presence(s.people, pluginId);
+  return [
+    { id: "changes", label: "Changes", count: outgoing.length || pending },
+    { id: "incoming", label: "Incoming", count: (s.changes?.incoming ?? 0) + (s.changes?.blocked ?? []).length },
+    { id: "conflicts", label: "Conflicts", count: conflicts.length, alert: conflicts.length > 0 },
+    ...(s.locks !== undefined ? [{ id: "locks" as const, label: "Locks", count: s.locks.length }] : []),
+    ...(v2 && api?.plugin_scope_history ? [{ id: "history" as const, label: "History" }] : []),
+    ...(s.people !== undefined ? [{ id: "people" as const, label: "People", count: people.filter((p) => !p.me && p.state !== "away").length }] : []),
+    { id: "settings", label: "Settings" },
+  ];
+}
 
 type History = { entries: PluginScopeHistoryEntry[]; more: boolean };
 type Versions = { kind: string; key: string; entries: PluginScopeHistoryEntry[] };
@@ -116,7 +139,7 @@ function Btn({ children, onClick, disabled, primary, label, pressed }: {
  * Incoming (what comes in), Conflicts, Locks, History, People and Settings. Under the scope bar,
  * and on Plugins → a plugin → Data. Anything that changes data for everyone asks first.
  */
-export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownTab, onTab, onJoin }: Props) {
+export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownTab, onTab, onJoin, hideTabs }: Props) {
   const { confirm } = useConfirmModal();
   const [ownTab, setOwnTab] = useState<ScopeTab>("changes");
   const tab = shownTab ?? ownTab;
@@ -335,15 +358,7 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
   const manual = s.mode === "manual";
   const failing = state === "offline" || state === "error";
 
-  const tabs: { id: ScopeTab; label: string; count?: number; alert?: boolean }[] = [
-    { id: "changes", label: "Changes", count: outgoing.length || pending },
-    { id: "incoming", label: "Incoming", count: incoming + blockedIn.length },
-    { id: "conflicts", label: "Conflicts", count: conflicts.length, alert: conflicts.length > 0 },
-    ...(s.locks !== undefined ? [{ id: "locks" as const, label: "Locks", count: locks.length }] : []),
-    ...(v2 && api?.plugin_scope_history ? [{ id: "history" as const, label: "History" }] : []),
-    ...(s.people !== undefined ? [{ id: "people" as const, label: "People", count: people.filter((p) => !p.me && p.state !== "away").length }] : []),
-    { id: "settings", label: "Settings" },
-  ];
+  const tabs = scopeTabs(s, pluginId);
   const shown = tabs.some((t) => t.id === tab) ? tab : "changes";
 
   const changesTab = (
@@ -596,7 +611,7 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
 
   const settingsTab = (
     <>
-      <Row name="Copy shown here" sub={`${scope?.kind === "shared" ? `${label}'s team copy` : "Local: only on this PC"}. Change it with the button at the bar's left.`} />
+      <Row name="Copy shown here" sub={`${scope?.kind === "shared" ? `${label}'s team copy` : "Local: only on this PC"}. Change it in the Team menu's Overview.`} />
       {v2 && !lost && api?.plugin_scope_mode ? (
         <Row name="Sending"
           sub={manual ? "Changes go out and come in only when you send or get them." : "Changes go out and come in by themselves."}
@@ -627,18 +642,20 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
   };
   return (
     <div className="plugin-scope-panel" id={id} role="region" aria-label={`Source control: ${label}`}>
-      <div className="plugin-scope-tabs" role="tablist" aria-label="Source control">
-        {tabs.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={shown === t.id}
-            className={`plugin-scope-tab${shown === t.id ? " is-active" : ""}`} onClick={() => setTab(t.id)}>
-            {t.label}
-            {t.count ? <span className={`plugin-scope-count${t.alert ? " is-alert" : ""}`}>{t.count}</span> : null}
-          </button>
-        ))}
-      </div>
+      {hideTabs ? null : (
+        <div className="plugin-scope-tabs" role="tablist" aria-label="Source control">
+          {tabs.map((t) => (
+            <button key={t.id} type="button" role="tab" aria-selected={shown === t.id}
+              className={`plugin-scope-tab${shown === t.id ? " is-active" : ""}`} onClick={() => setTab(t.id)}>
+              {t.label}
+              {t.count ? <span className={`plugin-scope-count${t.alert ? " is-alert" : ""}`}>{t.count}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
       {error ? <p className="plugin-scope-msg plugin-scope-msg--error" role="alert">{error}</p> : null}
       {note ? <p className="plugin-scope-msg">{note}</p> : null}
-      <div className="plugin-scope-panel__body" role="tabpanel">{body[shown]}</div>
+      <div className="plugin-scope-panel__body" role={hideTabs ? undefined : "tabpanel"}>{body[shown]}</div>
     </div>
   );
 }
