@@ -769,19 +769,6 @@ class PanelApiWindowMixin:
 
         webbrowser.open(u)
 
-    def burst_desktop_confetti(self, client_x: float, client_y: float) -> None:
-        """Fullscreen confetti burst at a point in the main window's client area."""
-        if _pa.sys.platform != "win32" or not self._tk_root:
-            return
-        w = self._resolve_window()
-        if not w:
-            return
-        screen_x = float(w.x) + float(client_x)
-        screen_y = float(w.y) + float(client_y)
-        from frontend.ui_web.confetti_overlay import schedule_desktop_confetti
-
-        schedule_desktop_confetti(self._tk_root, screen_x, screen_y)
-
     def snip_screen(self, conv_id: str = "") -> dict[str, Any]:
         """Open the Windows region snipper and attach the result to the chat.
 

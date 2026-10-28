@@ -325,7 +325,7 @@ def start_tk_pump(make_root: Callable[[], Any]) -> Any:
     that thread sits in mainloop. The old pump called update() on the splash root the main
     thread made while the main thread was blocked in webview.start: every call raised 'main
     thread is not in main loop', so the pump stopped a second after start and queued work
-    (the stuck-splash crash pop-up, confetti) never ran."""
+    (the stuck-splash crash pop-up) never ran."""
     ready = threading.Event()
     holder: dict[str, Any] = {}
 

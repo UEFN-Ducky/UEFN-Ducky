@@ -1,4 +1,3 @@
-import { getApi } from "../hooks/usePanelApi";
 import { readConfettiPalette, readCssVar } from "../theme/readCssVar";
 
 type Particle = {
@@ -76,11 +75,9 @@ export function burstConfettiFromElement(el: HTMLElement | null) {
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
+  // In-page only: the old native fullscreen overlay (magenta colour key) turned whole
+  // screens pink and ate every click wherever the key failed.
   burstConfetti(x, y);
-  const api = getApi();
-  if (api && typeof api.burst_desktop_confetti === "function") {
-    void api.burst_desktop_confetti(x, y);
-  }
 }
 
 function tick() {

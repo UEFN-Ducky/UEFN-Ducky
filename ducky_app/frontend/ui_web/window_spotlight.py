@@ -421,10 +421,10 @@ def _emit(trigger_id: str, payload: dict[str, Any]) -> None:
 
 
 def _virtual_origin() -> tuple[int, int, int, int]:
-    from frontend.ui_web.confetti_overlay import _virtual_screen
-
-    left, top, width, height = _virtual_screen()
-    return int(left), int(top), int(width), int(height)
+    if sys.platform != "win32":
+        return 0, 0, 1920, 1080
+    user32 = ctypes.windll.user32
+    return tuple(int(user32.GetSystemMetrics(i)) for i in (76, 77, 78, 79))  # type: ignore[return-value]
 
 
 def _monitor_of(x: int, y: int) -> tuple[int, int, int, int]:

@@ -3671,7 +3671,6 @@ export interface PanelApi {
   ): Promise<{ ok?: boolean; error?: string; erase_data?: boolean }>;
   install_uefn_plugin_bytes?(b64: string, source?: string): Promise<{ ok?: boolean; error?: string; id?: string }>;
   open_uefn_plugins_folder?(): Promise<void>;
-  burst_desktop_confetti(client_x: number, client_y: number): Promise<void>;
   window_spotlight_replay(args: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; shown?: boolean }>;
   snip_screen?(conv_id?: string): Promise<{
     ok?: boolean;
