@@ -20,7 +20,7 @@ from frontend.ui_web.project_chats import (
     append_message,
     conversation_project_slug,
     create_conversation,
-    delete_conversation,
+    delete_conversation,  # noqa: F401 - test_subagent_recycle patches it here as a guard
     list_conversations,
     load_conversation,
     load_folders,
@@ -1528,7 +1528,10 @@ def _resolve_sender(sender: str) -> str:
 
 @mcp.tool()
 def ducky_agent_list(sender: str = "", pretty: bool = False) -> str:
-    """List live agents (panel chats) you can message: id, name, backend, running state.
+    """List live agents (panel chats) you can message: id, name, backend, running state,
+    and ``active_work``: what every other running chat is changing right now and where
+    (any project: ``project``, ``files``). Check it before starting a change, so you
+    never redo or overwrite another chat's work; ask that chat with ``ducky_agent_send``.
 
     Use before `ducky_agent_send` / reuse via `ducky_send_chat_message`. `sender` is your
     own chat id (external coding agents must pass it; embedded duckies may omit it).
@@ -1589,6 +1592,7 @@ def ducky_agent_list(sender: str = "", pretty: bool = False) -> str:
         {
             "caller": me,
             "agents": rows,
+            "active_work": _active_work(me),
             "my_group_members": my_group_members,
             "my_subagents": my_group_members,  # alias — subagents retired
             "count": len(rows),
@@ -1597,6 +1601,27 @@ def ducky_agent_list(sender: str = "", pretty: bool = False) -> str:
         },
         pretty=pretty,
     )
+
+
+def _active_work(me: str) -> list[dict[str, Any]]:
+    """Other chats' open runs in every project: ``{conv_id, ducky, project, files, seconds_ago}``."""
+    import time
+
+    try:
+        from backend.workspace.journal import FileChangeJournal
+        from backend.workspace.runtime import get_writer
+
+        journal = get_writer().journal
+        if not isinstance(journal, FileChangeJournal):
+            return []
+        rows = journal.active_work(exclude_conv_id=me)
+    except Exception:  # awareness never breaks the list
+        return []
+    return [
+        {"conv_id": r["conv_id"], "ducky": r["ducky_name"], "project": r["project_id"], "files": r["files"],
+         "seconds_ago": max(0, int(time.time() - r["last_ts"]))}
+        for r in rows
+    ]
 
 
 def _owed_reply(me: str, target: str) -> str:

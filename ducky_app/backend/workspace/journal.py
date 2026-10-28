@@ -423,6 +423,7 @@ class FileChangeJournal:
             if run is None:
                 run = self._new_run(run_id, record, writer=writer)
                 run["seen"].update(self._pending_seen.pop(run_id, {}))
+            first_write = not run["entries"]
             conflict = self._detect_conflict(storage, index, run, record)
             entry = self._make_entry(storage, run, record, conflict)
             if record.outcome == OUTCOME_OK:
@@ -441,6 +442,8 @@ class FileChangeJournal:
         warning = self._conflict_warning(record, conflict)
         ctx = record.ctx
         conv_id = ctx.conv_id if ctx else str(writer.get("conv_id") or "")
+        if first_write and not warning and record.outcome == OUTCOME_OK:
+            warning = self._others_here_warning(storage, conv_id, run_id)
         events.emit(
             {
                 "type": events.CHANGESET_ROW,
@@ -1933,6 +1936,37 @@ class FileChangeJournal:
             if other_run is not None and other_run.get("status") in _OPEN_STATUSES:
                 return {"kind": CONFLICT_CONCURRENT, "expected_hash": "", "found_hash": record.before_hash, **other}
         return None
+
+    def active_work(self, *, exclude_conv_id: str = "", project_id: str = "") -> list[dict[str, Any]]:
+        """Other chats' running runs (every project, or *project_id*) and the files they changed
+        in the last ``_CONCURRENT_WINDOW_S``: who is working on what, and where. Never raises."""
+        if not _use_db():
+            return []  # ponytail: database store only; the file ledger is the legacy fallback
+        try:
+            rows = _repo().active_work(self._clock() - _CONCURRENT_WINDOW_S)
+        except Exception:  # noqa: BLE001 - awareness is a courtesy: never fail a write over it
+            log.debug("active work query failed", exc_info=True)
+            return []
+        return [
+            r for r in rows
+            if (not exclude_conv_id or r["conv_id"] != exclude_conv_id) and (not project_id or r["project_id"] == project_id)
+        ]
+
+    def _others_here_warning(self, storage: Path, conv_id: str, run_id: str) -> str:
+        """A chat's first write in a project: name the other chats changing it right now, so
+        nobody redoes or overwrites their work without knowing."""
+        others = [r for r in self.active_work(exclude_conv_id=conv_id, project_id=_pid(storage))
+                  if r["run_id"] != run_id]
+        if not others:
+            return ""
+        parts = []
+        for r in others[:3]:
+            files = ", ".join(os.path.basename(f.rstrip("/")) or f for f in r["files"][:4])
+            parts.append(f"{r['ducky_name'] or 'another chat'} (chat {r['conv_id'][:8]}) on {files}")
+        more = f" and {len(others) - 3} more" if len(others) > 3 else ""
+        return ("Heads-up, also changing this project right now: " + "; ".join(parts) + more
+                + ". Don't redo or overwrite their work: ducky_agent_list shows what each chat is on;"
+                " ask them with ducky_agent_send if you need the same files.")
 
     @staticmethod
     def _conflict_warning(record: WriteRecord, conflict: dict[str, Any] | None) -> str:

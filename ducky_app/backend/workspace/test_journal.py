@@ -176,6 +176,62 @@ def test_concurrent_writer_conflict_only_while_other_run_is_open(env) -> None:
     assert res2.changeset["conflict"] is None
 
 
+def test_a_chats_first_write_names_the_other_chats_changing_the_project(env) -> None:
+    from backend.workspace import journal as journal_mod
+
+    if not journal_mod._use_db():
+        pytest.skip("active work is read from the database store")
+    root, _, journal, writer, clock = env
+
+    def write(run_id: str, path: str):
+        token = as_run(run_id)
+        try:
+            return writer.write_text(path, f"{run_id}\n").warning
+        finally:
+            identity.reset(token)
+
+    assert write("solo", "Content/Verse/a.verse") == ""  # nobody else here
+    warning = write("other", "Content/Verse/b.verse")
+    assert warning.startswith("Heads-up, also changing this project right now: Solo (chat conv-sol) on a.verse")
+    assert "ducky_agent_list" in warning
+    assert write("other", "Content/Verse/c.verse") == ""  # once per run, not on every write
+    assert write("solo", "Content/Verse/d.verse") == ""  # its own run already had its first write
+    journal.end_run("solo", "done", project_root=str(root))
+    journal.end_run("other", "done", project_root=str(root))
+    assert write("late", "Content/Verse/e.verse") == ""  # finished runs are not "right now"
+    warning = write("later", "Content/Verse/f.verse")
+    assert "Late (chat conv-lat) on e.verse" in warning
+    clock["now"] += 601
+    assert write("much-later", "Content/Verse/g.verse") == ""  # their last write is old
+
+
+def test_active_work_lists_running_chats_in_every_project(env, tmp_path) -> None:
+    from backend.workspace import journal as journal_mod
+
+    if not journal_mod._use_db():
+        pytest.skip("active work is read from the database store")
+    root, storage, journal, writer, _ = env
+    token = as_run("here", ducky="Here")
+    try:
+        writer.write_text("Content/Verse/a.verse", "x\n")
+    finally:
+        identity.reset(token)
+    other_root = tmp_path / "Other"
+    (other_root / "Content").mkdir(parents=True)
+    other = FileChangeJournal(lambda _root: tmp_path / "appdata" / "changesets" / "other", clock=journal._clock)
+    other_writer = ProjectWriter.for_root(str(other_root), journal=other, clock=journal._clock)
+    token = as_run("there", ducky="There")
+    try:
+        other_writer.write_text("Content/b.txt", "y\n")
+    finally:
+        identity.reset(token)
+    work = {r["run_id"]: r for r in journal.active_work()}
+    assert work["here"]["project_id"] == "proj" and work["here"]["files"] == ["Content/Verse/a.verse"]
+    assert work["there"]["project_id"] == "other" and work["there"]["ducky_name"] == "There"
+    assert [r["run_id"] for r in journal.active_work(exclude_conv_id="conv-here")] == ["there"]
+    assert [r["run_id"] for r in journal.active_work(project_id="proj")] == ["here"]
+
+
 def test_only_conflicts_that_can_lose_work_are_flagged(env) -> None:
     root, _, _, writer, clock = env
     path = "Content/Verse/shared.verse"

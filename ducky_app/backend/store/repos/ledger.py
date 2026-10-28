@@ -109,6 +109,30 @@ def runs_with_status(project_id: str, statuses: tuple[str, ...]) -> list[dict[st
     return [{"run_id": str(r["run_id"]), "conv_id": str(r["conv_id"])} for r in rows]
 
 
+def active_work(since: float, *, max_files: int = 8) -> list[dict[str, Any]]:
+    """Running runs in *every* project with the files they changed since *since*:
+    ``{run_id, project_id, conv_id, group_id, ducky_name, files, last_ts}``, newest first.
+    One query; what lets a chat see what the others are changing right now, and where."""
+    _close_stale_once()
+    rows = db.connect().execute(
+        "SELECT r.run_id, r.project_id, r.conv_id, r.group_id, json_extract(r.doc, '$.ducky_name') AS ducky, "
+        "e.path, MAX(e.ts) AS ts FROM runs r JOIN run_entries e ON e.run_id = r.run_id "
+        "WHERE r.status='running' AND e.outcome='ok' AND e.ts>=? "
+        "GROUP BY r.run_id, e.path ORDER BY ts DESC",
+        (since,),
+    ).fetchall()
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        run = out.setdefault(str(row["run_id"]), {
+            "run_id": str(row["run_id"]), "project_id": str(row["project_id"]), "conv_id": str(row["conv_id"]),
+            "group_id": str(row["group_id"]), "ducky_name": str(row["ducky"] or ""), "files": [],
+            "last_ts": float(row["ts"]),
+        })
+        if len(run["files"]) < max_files:
+            run["files"].append(str(row["path"]))
+    return list(out.values())
+
+
 def runs_docs(project_id: str) -> list[dict[str, Any]]:
     """Every run document in a project (the old ``glob('runs/*.json')``)."""
     _close_stale_once()
