@@ -650,7 +650,10 @@ def _emit_assistant(
 
     mode_metadata = {"requested_mode": requested_mode, "effective_mode": effective_mode}
     original_push = push
-    push = lambda event: original_push({**event, **mode_metadata})
+
+    def push(event: dict[str, Any]) -> None:
+        original_push({**event, **mode_metadata})
+
     text = (reply or "").strip()
     if not text and not blocks and not ok:
         text = (
@@ -797,7 +800,10 @@ def run_coding_agent_message(
         push({"type": "agent_stopped", "reason": "error", "detail": error, "conv_id": conv.id, **metadata})
         return {"ok": False, "error": error, **metadata}
     original_push = push
-    push = lambda event: original_push({"effective_mode": "", **event, "requested_mode": mode})
+
+    def push(event: dict[str, Any]) -> None:
+        original_push({"effective_mode": "", **event, "requested_mode": mode})
+
     with protection_lock:
         if current_policy().strict:
             error = ("AI_FILE_PROTECTION: Strict protection blocks external coding agents "
@@ -871,7 +877,10 @@ def _run_coding_agent_message(
     project_root = (settings.uefn_project_root or "").strip()
     effective_mode = ""
     original_push = push
-    push = lambda event: original_push({**event, "requested_mode": mode, "effective_mode": effective_mode})
+
+    def push(event: dict[str, Any]) -> None:
+        original_push({**event, "requested_mode": mode, "effective_mode": effective_mode})
+
     ckpt = _TurnCheckpoint(conv, agent_id, rid, project_root=project_root or None,
                            requested_mode=mode)
     push = ckpt.wrap(push)

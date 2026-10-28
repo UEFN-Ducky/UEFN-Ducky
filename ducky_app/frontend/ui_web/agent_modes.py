@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import threading
 import time
 import uuid
@@ -17,7 +16,7 @@ SESSION_JOIN_TIMEOUT = 2.0
 from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
 from frontend.ui_web.token_usage import record_api_call, token_usage_report
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
-from backend.agent.attachments import attachments_from_message_dict, parse_attachment_dicts
+from backend.agent.attachments import parse_attachment_dicts
 from backend.agent.runner import AgentRunner, RunConfig
 from backend.agent.secrets import get_key
 from backend.agent.delegation_guard import append_delegation_warning, fake_delegation_warning
@@ -2112,7 +2111,10 @@ def run_message(
                         blocks=partial.get("blocks"), reply=partial.get("text", ""),
                         error=str(e), requested_mode=m, effective_mode="",
                     )
-                error_push = lambda event: push({**event, "requested_mode": m, "effective_mode": ""})
+
+                def error_push(event: dict[str, Any]) -> None:
+                    push({**event, "requested_mode": m, "effective_mode": ""})
+
                 error_push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
                 # Interrupted: the session id stays on the chat, so the next message resumes it.
                 _push_agent_stopped(error_push, conv_id, run_id, "interrupted" if interrupted else "error",

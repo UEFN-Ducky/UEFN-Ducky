@@ -55,18 +55,15 @@ from frontend.ui_web.project_chats import (
     folder_subtree_ids,
     group_hub_ids_in,
     iter_conversations_by_project,
-    iter_folders_by_project,
     list_all_conversation_metadata,
     list_conversations,
     list_conversations_for_file,
     load_conversation,
     load_folders,
     move_conversation,
-    project_slug_display_name,
     remap_conversation_file_paths,
     rename_folder,
     save_conversation,
-    save_folders,
     set_conversation_ducky_style,
     set_conversation_enabled_skills,
     set_conversation_skill_selection,
@@ -118,7 +115,7 @@ from frontend.ui_web.project_files import (
     EXT_PATH_PREFIX,
 )
 from frontend.ui_web.file_kinds import classify_project_file
-from frontend.ui_web.chat_rows import _messages_to_ui, _tool_result_text  # noqa: F401 — mixins use _pa._messages_to_ui
+from frontend.ui_web.chat_rows import _messages_to_ui, _tool_result_text
 from frontend.ui_web.project_switch import (
     get_panel_project_info,
     list_panel_projects,
@@ -128,6 +125,36 @@ from frontend.ui_web.project_switch import (
 from frontend.ui_web.workspace_search import replace_workspace as _replace_workspace
 from frontend.ui_web.workspace_search import search_workspace as _search_workspace
 from frontend.ui_web.verse_editor.api import shared_verse_editor
+
+# Names the PanelApi mixins (panel_api_*.py) and tests reach through this module as _pa.<name>
+# (one place to monkeypatch them, the stdlib ones included); declared so they read as re-exports.
+__all__ = [
+    "adopt_group_project", "apply_ducky_config", "apply_sidebar_layout", "apply_workspace_env",
+    "archive_agent_profile", "BLANK_PROFILE_ID", "build_uefn_server_block", "cancel_agent",
+    "classify_project_file", "clear_activity", "clear_error_log", "content_entry_exists",
+    "content_entry_needs_uefn_delete", "content_package_rel", "conversation_descendant_ids",
+    "copy_project_entry", "create_conversation", "create_folder", "create_project_file",
+    "create_project_folder", "create_project_verse_file", "custom_duckies_dir", "default_bundled_style",
+    "delete_agent_profile", "delete_conversation", "delete_custom_ducky", "delete_custom_verse_template",
+    "delete_folder", "delete_project_entry", "deploy_listener", "duplicate_agent_profile",
+    "ensure_conversation_file_path", "ensure_group_folder_hubs", "EXT_PATH_PREFIX",
+    "fingerprint_project_dirs", "folder_subtree_ids", "format_entries", "get_custom_verse_template",
+    "get_panel_project_info", "group_hub_ids_in", "IdeKind", "import_external_entries",
+    "is_archive_folder_id", "iter_conversations_by_project", "list_agent_profiles",
+    "list_all_conversation_metadata", "list_archived_agent_profiles", "list_bundled_agent_profile_templates",
+    "list_conversations", "list_conversations_for_file", "list_custom_verse_templates", "_list_ducky_catalog",
+    "list_panel_projects", "list_project_file_paths", "list_project_files", "list_running_agents",
+    "list_workspace_roots", "load_conversation", "load_folders", "logging", "merge_uefn_into_config",
+    "_messages_to_ui", "move_conversation", "move_project_entry", "_normalize_project_path",
+    "notify_chats_changed", "open_project_file", "Path", "path_for_ide", "probe_stdio_mcp", "read_activity",
+    "read_errors", "read_project_file", "remap_conversation_file_paths", "rename_folder",
+    "rename_project_entry", "replace", "_replace_workspace", "resolve_uefn_project_root",
+    "restore_trashed_entry", "run_message", "save_agent_profile", "save_agent_profile_override",
+    "save_conversation", "save_custom_ducky_png", "save_custom_verse_template", "_search_workspace",
+    "set_conversation_ducky_style", "set_conversation_enabled_skills", "set_conversation_skill_selection",
+    "stat_project_file", "switch_panel_project", "sync_skill_for_ide", "sync_skill_on_mcp_update", "sys",
+    "_tool_result_text", "unarchive_agent_profile", "wait_for_idle", "write_external_file",
+]
 
 _MAX_LOG = 2500
 _log_history: list[str] = []
@@ -833,7 +860,11 @@ class PanelApi(
         # Plugins off the splash critical path — window paints, then contribs arrive.
         self._start_plugins_load_async()
         global _models_updated_hook
-        _models_updated_hook = lambda: self._push_panel({"type": "models_updated"})
+
+        def _models_updated() -> None:
+            self._push_panel({"type": "models_updated"})
+
+        _models_updated_hook = _models_updated
         try:
             from backend.agent.coding_agents.base import set_detect_updated_hook
 

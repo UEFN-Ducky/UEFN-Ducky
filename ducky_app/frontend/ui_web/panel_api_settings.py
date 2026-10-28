@@ -402,7 +402,6 @@ class PanelApiSettingsMixin:
     ) -> dict[str, Any]:
         """Invoke uefn-plugin-discord panel_rpc handlers without host registry."""
         import importlib
-        import sys
 
         mod = _pa.sys.modules.get("uefn_plugin_discord")
         if mod is None:
@@ -748,7 +747,6 @@ class PanelApiSettingsMixin:
         self, conv_id: str, coding_agent: str, model: str = "", provider: str = ""
     ) -> dict[str, Any]:
         from backend.agent.coding_agents.base import normalize_coding_agent
-        from frontend.ui_web.project_chats import load_conversation, save_conversation
 
         conv = _pa.load_conversation(conv_id)
         if not conv:
@@ -805,7 +803,6 @@ class PanelApiSettingsMixin:
 
     def set_conversation_thinking_effort(self, conv_id: str, effort: str = "off") -> dict[str, Any]:
         from backend.agent.thinking_effort import normalize_thinking_effort
-        from frontend.ui_web.project_chats import load_conversation, save_conversation
 
         conv = _pa.load_conversation(conv_id)
         if not conv:
@@ -1793,7 +1790,6 @@ class PanelApiSettingsMixin:
         try:
             return usage_report(provider_id=str(provider_id or ""), days=int(days or 7))
         except Exception as exc:
-            import logging
 
             _pa.logging.getLogger(__name__).exception("get_provider_usage failed: %s", exc)
             return {
@@ -1828,7 +1824,6 @@ class PanelApiSettingsMixin:
         try:
             return ducky_usage_report(name, profile_id=pid, days=int(days or 7))
         except Exception as exc:
-            import logging
 
             _pa.logging.getLogger(__name__).exception("get_ducky_usage failed: %s", exc)
             return {
