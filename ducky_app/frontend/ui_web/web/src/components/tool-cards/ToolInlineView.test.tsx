@@ -53,6 +53,7 @@ describe("tool results in the chat", () => {
     expect(view).toMatchObject({ title: "Trailer 2", media: ["C:\\a\\cover.png", "C:\\a\\t.mp4"], openPanel: "main", openLabel: "Open in Media Kit" });
     expect(view?.blocks).toEqual([{ type: "paragraph", text: "12 clips" }]);
     expect(toolViewSpec("imk_project_list", {}, '{"ok":true,"projects":[]}')).toBeNull();
+    expect(toolViewSpec("mcp__uefn__view_image", {}, '{"path":"C:/a/shot.png","media_url":"http://x/shot.png"}')).toBeNull(); // stays in its row
     expect(toolViewSpec("ducky_ui_navigate", { route: "workflows" }, '{"ok":true,"route":"workflows","in_chat":true}')?.navigate)
       .toEqual({ route: "workflows", itemId: "", label: "Workflows" });
     expect(toolViewSpec("ducky_ui_navigate", { route: "workflows" }, '{"ok":true,"route":"workflows"}')).toBeNull(); // an older app moved the tab itself

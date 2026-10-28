@@ -140,6 +140,8 @@ function routeLabel(route: string, itemId: string, title: string): string {
 /** The card's view, or null when it has nothing to add to the plain row. */
 export function toolViewSpec(toolName: string, args: Record<string, unknown>, result: unknown): ToolViewSpec | null {
   const name = bareToolName(toolName);
+  // A picture the agent looked at shows only inside its own row, never under the folded group.
+  if (name === "view_image") return null;
   const parsed = parseToolResult(result);
   const obj = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
   if (name === "ducky_ui_navigate") {
