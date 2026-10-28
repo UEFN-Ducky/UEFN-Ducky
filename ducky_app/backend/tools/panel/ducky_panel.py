@@ -441,6 +441,8 @@ def ducky_get_status(pretty: bool = False) -> str:
     ``epic_mcp_online`` is TCP to the nested unreal-mcp URL (default :8000/mcp).
     If false and the task needs editor Verse / entities / devices / PIC, tell the
     user ``epic_mcp_setup_steps`` — do not fall back to pruned Ducky editor tools.
+    ``island_updates.behind``: another PC pushed to the open island (revision_pull, when the person agrees).
+    ``island_locks``: files of the open island another PC is editing (locked): leave them alone.
     """
     from frontend import __version__
 
@@ -457,6 +459,17 @@ def ducky_get_status(pretty: bool = False) -> str:
         result = attach_plugin_connections(result)
     except Exception:
         result["plugin_connections"] = []
+    try:
+        from frontend.ui_web.verse_editor.urc.island_watch import for_agents, locks_for_agents
+
+        updates = for_agents()
+        if updates:
+            result["island_updates"] = updates
+        locks = locks_for_agents()
+        if locks:
+            result["island_locks"] = locks
+    except Exception:
+        pass
     return tool_json(result, pretty=pretty)
 
 

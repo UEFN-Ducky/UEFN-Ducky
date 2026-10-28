@@ -40,6 +40,11 @@ KNOWN_POPUPS: dict[str, dict[str, Any]] = {
     "verse validation errors": {"buttons": 4, "press": 4, "primary": 2, "label": "Continue"},
 }
 
+# UEFN's dialog when a pull merged a file changed on both PCs (seen live in French, Oct 27;
+# the English title is a guess). The editor waits on the person's choice there: nothing in
+# Ducky ever presses it (read-only: ``find_conflict_dialog``).
+CONFLICT_DIALOG_TITLES: frozenset[str] = frozenset({"conflicting changes", "modifications en conflit"})
+
 _MAIN_TITLE = "unreal editor for fortnite"
 _MIN_BUTTON_W = 36
 _MIN_BUTTON_H = 14
@@ -387,7 +392,7 @@ def is_lone_button_popup(popup: dict[str, Any], buttons: list[dict[str, Any]]) -
     title = str(popup.get("title") or "").strip().lower()
     if not popup.get("blocking") or not popup.get("enabled", True):
         return False  # the modal itself is the one enabled window
-    if not title or title in KNOWN_POPUPS or _LONE_REJECT_RE.search(title):
+    if not title or title in KNOWN_POPUPS or title in CONFLICT_DIALOG_TITLES or _LONE_REJECT_RE.search(title):
         return False
     rect = popup.get("rect") or {}
     if rect.get("width", 0) > _LONE_MAX_W or rect.get("height", 0) > _LONE_MAX_H:
@@ -429,6 +434,14 @@ def press_lone_button_popups() -> list[dict[str, Any]]:
         return done
     finally:
         _lone_lock.release()
+
+
+def find_conflict_dialog() -> dict[str, Any] | None:
+    """UEFN's "Conflicting Changes" dialog when it is on screen, else None. Never presses it."""
+    try:
+        return next((p for p in list_popups() if p["title"].strip().lower() in CONFLICT_DIALOG_TITLES), None)
+    except Exception:
+        return None
 
 
 def blocked_call_hint() -> str:

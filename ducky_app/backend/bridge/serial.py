@@ -35,6 +35,8 @@ HEAVY_MCP_TOOLS = frozenset(
         "distribute_actors",
         "save_current_level",
         "save_all_dirty",
+        "revision_push",
+        "revision_pull",
         # Creative devices
         "set_creative_device_fields",
         "set_device_settings",

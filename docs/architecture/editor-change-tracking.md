@@ -164,3 +164,15 @@ with its code, and honestly says its effect is unknown.
 - **Capture is best-effort.** `before`, `after`, the snapshot and every observer
   swallow their exceptions. A missing row is possible; a command broken by
   bookkeeping is not.
+
+## Locks held by the other PC
+
+Two PCs sharing an island through Unreal Revision Control lock each file an
+editor change touches, until it is checked in. Before `send_command` posts a
+mutating command that is not a creation, `backend/bridge/island_locks.py` reads
+the params that name what it changes (`actor_path(s)`, `asset_path`,
+`material_path`, `directory`, ...). When `island_watch.others_locks` says another
+owner holds files of the open island, one `revision_targets` read asks the
+listener which file each target lives in; a hit is refused before anything is
+sent and recorded as `blocked`. No locks, no named target, or unknown lock info:
+the command goes through unchanged, with no extra round-trip.

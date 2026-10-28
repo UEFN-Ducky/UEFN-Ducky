@@ -9,6 +9,8 @@ EXTENDED_TOOLS = frozenset(
         "ping",
         "reload_listener",
         "save_current_level",
+        "revision_push",
+        "revision_pull",
         "get_project_info",
         "uefn_skill",
         "skill_search",

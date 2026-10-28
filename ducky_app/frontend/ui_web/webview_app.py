@@ -389,6 +389,13 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 start_team_keeper()
             except Exception:
                 pass
+            try:
+                # Another PC pushed to the open island: tell the person (never pulls).
+                from frontend.ui_web.verse_editor.urc import island_watch
+
+                island_watch.start()
+            except Exception:
+                pass
 
         def _presence_bg() -> None:
             try:

@@ -248,6 +248,11 @@ _MUTATIONS: tuple[OpSpec, ...] = (
     _op("landscape_sculpt", KIND_WORLD, ""),
     _op("area_create", KIND_WORLD, "exists", revertable=REVERT_AUTO, creates=True),
     _op("blockout_layout", KIND_WORLD, "exists", revertable=REVERT_AUTO, creates=True),
+    # -- revision control (Lore) ------------------------------------------------
+    _op("revision_check_in", KIND_WORLD, "", revertable=REVERT_NONE,
+        note="saves dirty packages and pushes them to the remote; a pushed change is not undone here"),
+    _op("revision_sync", KIND_WORLD, "", revertable=REVERT_NONE,
+        note="pulls the remote into the island and reloads the map"),
     # -- internal --------------------------------------------------------------
     _op("ducky_revert_creation", KIND_OTHER, "exists", revertable=REVERT_NONE,
         note="the change journal's undo of a creation; never callable by an agent"),
@@ -292,7 +297,8 @@ READ_COMMANDS: frozenset[str] = frozenset(
         "list_widget_classes", "list_named_slots", "list_bindable_properties", "list_verse_field_types",
         "get_widget_class_info",
         "measure_distance", "niagara_capabilities", "pcg_get_graph_info",
-        "ping", "scene_graph_capabilities", "search_assets", "search_unreal_api",
+        "ping", "revision_conflicts", "revision_status", "revision_targets", "scene_graph_capabilities",
+        "search_assets", "search_unreal_api",
         "search_verse_digest", "session_status", "status", "terrain_get_info", "umg_capabilities",
         "validate_uefn_asset", "worldgen_capabilities",
         "get_npc_definition_info", "list_npc_definitions", "npc_author_capabilities",

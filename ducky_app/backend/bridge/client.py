@@ -520,6 +520,22 @@ def _recover_save_timeout(port: int, command: str) -> Optional[dict]:
     }
 
 
+def _island_lock_refusal(command: str, params: Optional[dict], port: int, health: Optional[dict]) -> str:
+    """Why an agent must not run ``command``: the other PC holds what it changes. "" otherwise."""
+    from backend.bridge import island_locks
+
+    def _island() -> str:
+        info = health if health is not None else listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC)
+        return str((info or {}).get("island_dir") or "")
+
+    def _resolve(idents: list) -> dict:
+        with _listener_lock:
+            body = _post_json_locked(port, "revision_targets", {"paths": idents}, timeout=10.0)
+        return ((body.get("result") or {}).get("targets") or {}) if body.get("success") else {}
+
+    return island_locks.refusal(command, params, _island, _resolve)
+
+
 def send_command(command: str, params: Optional[dict] = None, timeout: float = REQUEST_TIMEOUT) -> dict:
     """Send a command to the UEFN listener and return the result.
 
@@ -557,7 +573,8 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
     # Always fail-fast when the configured/cached port is down — never sit on
     # REQUEST_TIMEOUT (30s) discovering or POSTing a dead listener.
     probe = configured_listener_port()
-    if listener_get_health(probe, timeout=_HEALTH_FAIL_FAST_SEC) is not None:
+    health = listener_get_health(probe, timeout=_HEALTH_FAIL_FAST_SEC)
+    if health is not None:
         port = probe
         _discovered_port = probe
     elif _pinned_port is not None:
@@ -573,6 +590,10 @@ def send_command(command: str, params: Optional[dict] = None, timeout: float = R
         except ConnectionError:
             _record_bridge_error(f"Listener not reachable for '{command}' (discovery failed)")
             raise
+    refused = _island_lock_refusal(command, params, port, health)
+    if refused:
+        _record_editor_change(command, params, {}, ok=False, error=f"refused: {refused}")
+        raise RuntimeError(f"UEFN command '{command}' refused: {refused}")
     t_lock0 = time.perf_counter()
     try:
         with _listener_lock:

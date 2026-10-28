@@ -35,6 +35,7 @@ SAVE_LISTENER_COMMANDS: frozenset[str] = frozenset(
         "save_all_dirty",
         "save_asset",
         "save_directory",
+        "revision_check_in",  # saves every dirty package before it checks in
     }
 )
 

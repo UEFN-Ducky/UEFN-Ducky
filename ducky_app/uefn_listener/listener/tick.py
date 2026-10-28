@@ -53,6 +53,8 @@ _HEAVY_COMMANDS: set[str] = set(
         "distribute_actors",
         "save_current_level",
         "save_all_dirty",
+        "revision_check_in",
+        "revision_sync",
         # Heavy reads — registry / full level scans (never share a tick with other work)
         "search_assets",
         "list_assets",

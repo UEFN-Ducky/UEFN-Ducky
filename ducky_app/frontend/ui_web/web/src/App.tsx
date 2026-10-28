@@ -61,6 +61,7 @@ import { persistDockSnapshot, readDockSnapshot } from "./workspace/workspaceDock
 import { PluginShellBootBridge } from "./plugin-ui/shellBoot";
 import { PluginCrashBanner } from "./plugin-ui/PluginCrashBanner";
 import { installScopeAlerts } from "./plugin-ui/scopeAlerts";
+import { installIslandUpdates } from "./hooks/islandUpdates";
 import { installPluginFaultGuards } from "./plugin-ui/pluginCrashGuard";
 import { useHydratePluginUiPrefs } from "./hooks/usePluginUiPrefs";
 import { installModelsCatalogAutoRefresh } from "./hooks/modelsCatalogCache";
@@ -96,7 +97,10 @@ function GraphFocusBridge() {
 
 /** Lock events (a refused agent write, a teammate's ask, a lost lock) whichever panels are open. */
 function ScopeAlertsBridge() {
-  useEffect(() => installScopeAlerts(), []);
+  useEffect(() => {
+    installScopeAlerts();
+    installIslandUpdates(); // another PC pushed to the open island
+  }, []);
   return null;
 }
 

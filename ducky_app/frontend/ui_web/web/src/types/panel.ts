@@ -2352,7 +2352,9 @@ export interface PanelPushEvent {
     /** One of the group's shared values in `plugin` changed (`key`, `value`, `by`). */
     | "live_shared"
     /** A teammate invites this PC into their live group (`account`, `space`, `room`, `from`, `expires`). */
-    | "live_invite";
+    | "live_invite"
+    /** Another PC pushed to the island UEFN has open (`island`, `name`, `behind`, `count`, `detail`); or it is up to date again. */
+    | "island_updates";
   provider?: string;
   /** plugin_hook: the hook id; appearance_profile_requested: the plugin profile id. */
   id?: string;
@@ -2451,6 +2453,10 @@ export interface PanelPushEvent {
   index?: number;
   total?: number;
   setup_phase?: "installing" | "installed" | "skipped" | "error";
+  /** island_updates: the island's folder (`name` its name), whether it lacks remote revisions and how many came from another PC. */
+  island?: string;
+  behind?: boolean;
+  count?: number;
 }
 
 /** Whose plugin data a panel shows (host scope bar). */

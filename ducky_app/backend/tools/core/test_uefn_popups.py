@@ -253,6 +253,20 @@ def test_the_lone_button_pass_presses_ok_and_keeps_the_capture(uefn_popup) -> No
     assert popups.press_lone_button_popups() == []  # nothing left on screen
 
 
+@pytest.mark.parametrize("title", ["Modifications en conflit", "Conflicting Changes"])
+def test_the_conflicting_changes_dialog_is_never_pressed(uefn_popup, title) -> None:
+    # Oct 27: after a pull merged a file changed on both PCs. Only the person answers it, even
+    # if its capture ever showed a single blue button.
+    from backend.tools.core.uefn_modal import is_save_dialog_title
+
+    uefn_popup["show"](title, "unable_to_refresh")
+    assert not popups.is_lone_button_popup(uefn_popup["up"], popups.find_buttons(_img("unable_to_refresh")))
+    assert popups.press_lone_button_popups() == [] and popups.answer_known_popups() == []
+    assert not is_save_dialog_title(title)  # the Save watchdog's Enter never goes to it either
+    assert uefn_popup["clicks"] == [] and uefn_popup["up"] is not None
+    assert popups.find_conflict_dialog()["title"] == title
+
+
 def test_a_popup_with_a_choice_is_left_to_the_agent(uefn_popup) -> None:
     uefn_popup["show"]("Unable to Launch", "data_loss_warning")
     assert popups.press_lone_button_popups() == []
