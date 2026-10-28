@@ -36,13 +36,15 @@ def _spin(stop, busy_ms: float = 100.0) -> None:
             time.sleep((100 - busy_ms) / 1000)
 
 
-def test_a_quarter_busy_thread_is_named_and_a_tenth_is_not():
+def test_a_busy_thread_is_named_and_a_quiet_one_is_not():
     import threading
     import time
 
+    # A spinning thread and a nearly idle one: on a busy PC a 25% spinner got under the 20%
+    # bar (the other processes took its core), so the gap is wide enough for any load.
     stop = threading.Event()
     threads = [threading.Thread(target=_spin, args=(stop, ms), name=name, daemon=True)
-               for name, ms in (("ca-stdout-test", 25.0), ("quiet-test", 10.0))]
+               for name, ms in (("ca-stdout-test", 100.0), ("quiet-test", 2.0))]
     for t in threads:
         t.start()
     try:
@@ -54,11 +56,11 @@ def test_a_quarter_busy_thread_is_named_and_a_tenth_is_not():
         for t in threads:
             t.join()
     row = next(r for r in hot if r["name"] == "ca-stdout-test")
-    assert 0.2 <= row["share"] <= 0.5 and row["where"] == "test_self_health.py:_spin"
+    assert row["share"] >= 0.2 and row["where"] == "test_self_health.py:_spin"
     assert row["stack"][0].startswith("_spin (test_self_health.py:")
     assert all(r["name"] != "quiet-test" for r in hot) and len(hot) <= 5
     snap = _base()
-    snap["app"]["hot_threads"] = [row]
+    snap["app"]["hot_threads"] = [dict(row, share=0.3)]
     warm = [f for f in self_health.findings(snap) if "ca-stdout-test" in f["what"]]
     assert [f["severity"] for f in warm] == ["medium"]
     snap["app"]["hot_threads"] = [dict(row, share=0.8)]
