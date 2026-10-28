@@ -134,6 +134,8 @@ FOLDERS_KEY = "_folders"  # owned.FOLDERS_KEY: concurrent folder adds keep both
 KINDS = ("doc", "asset")  # api.data items; folder files are TREE items (see "folders" below)
 TREE = "tree"
 SWITCH_PULL_S = 600.0  # a switch to a team gets its folder copy for at most this long
+SWITCH_STALL_S = 60.0  # ...and gives up sooner when nothing lands this long (a group missing its last part)
+SWITCH_RETRY_S = 2.0  # a pull that landed nothing tries again after this
 LEAVE_SEND_S = 30.0  # a switch away sends the old copy's changed units for at most this long
 CALL_APPLY_WAIT_S = 60.0  # an agent's call waits this long for its plugin's waiting changes
 PULL_LIMIT = 50
@@ -2431,7 +2433,9 @@ def pull_copy(account: str, space: str, plugin: str, backend: Any, *, label: str
             span = max(1, int(head) - start)
             space_vcs.binding_put(plugin, label, int(100 * max(0, int(seq) - start) / span))
 
+        moved_at = time.monotonic()
         while True:
+            before = int(space_vcs.head_get(account, space, plugin)["seq"])
             out = run(account, space, plugin, backend, push=False, pull=True, force=True, progress=progress)
             if landed is not None:
                 landed["tree"] = int(landed.get("tree") or 0) + int(out.get("tree") or 0)
@@ -2442,6 +2446,16 @@ def pull_copy(account: str, space: str, plugin: str, backend: Any, *, label: str
                 break
             if time.monotonic() >= deadline:
                 return False, f"Getting {label}'s files is taking too long. Nothing changed; try again."
+            if int(head["seq"]) > before:
+                moved_at = time.monotonic()
+            elif time.monotonic() - moved_at >= SWITCH_STALL_S:
+                # Nothing lands: a teammate's upload still waits for its last part (it was cut off).
+                return False, (f"{label}'s files are stuck behind a teammate's upload that didn't finish. "
+                               "Nothing changed; ask them to sync again, then try.")
+            else:
+                space_vcs.binding_put(plugin, label, int(100 * max(0, int(head["seq"]) - start)
+                                                         / max(1, int(head["remote_seq"]) - start)))
+                time.sleep(SWITCH_RETRY_S)  # keeps the bar's row alive, never a hot loop on the server
         stuck = [b for b in space_vcs.blocked(account, space, plugin) if b["kind"] == TREE]
         if stuck:
             return False, f"Some of {label}'s files couldn't be downloaded ({stuck[0]['error']}). Nothing changed."

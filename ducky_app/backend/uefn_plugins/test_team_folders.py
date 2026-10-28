@@ -2191,3 +2191,30 @@ def test_an_ais_own_file_edit_in_a_team_folder_goes_out_as_the_ais(env: Env, mon
     assert tf.note_ai_edit([env.root / "arena.json"], ducky="Builder", at=now) == [PLUGIN]
     assert tf._caller(PLUGIN, now + 1) == ("agent", "Builder")
     assert tf._caller(PLUGIN, now + tf.AGENT_WINDOW_S + 1) == ("user", "")  # long after: the person again
+
+
+def test_a_switch_whose_pull_lands_nothing_stops_soon_instead_of_spinning(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A teammate's upload cut off before its last part holds every changeset after it: the
+    switch's pull lands nothing, so it stops with a reason rather than call the server for 10 minutes."""
+    from backend.store.repos import space_vcs
+    from backend.uefn_plugins import vcs_engine
+
+    head = {"seq": 5, "remote_seq": 9}
+    runs: list[int] = []
+    monkeypatch.setattr(vcs_engine, "SWITCH_STALL_S", 0.05)
+    monkeypatch.setattr(vcs_engine, "SWITCH_RETRY_S", 0.01)
+    monkeypatch.setattr(vcs_engine, "refresh", lambda *a, **k: {"state": "ok"})
+    monkeypatch.setattr(vcs_engine, "run", lambda *a, **k: runs.append(1) or {"state": "ok", "tree": 0})
+    monkeypatch.setattr(space_vcs, "head_get", lambda *a: dict(head))
+    ok, why = vcs_engine.pull_copy(env.account, SPACE, PLUGIN, object(), label="Mindful Path", timeout=30)
+    assert not ok and "didn't finish" in why
+    assert 1 < len(runs) < 20  # it waited between tries, never a hot loop
+    assert space_vcs.binding_get(PLUGIN) is None  # the bar's progress row is gone
+
+    def lands(*a: Any, **k: Any) -> dict[str, Any]:
+        head["seq"] += 1  # each try lands one changeset: it keeps going to the head
+        return {"state": "ok", "tree": 0}
+
+    monkeypatch.setattr(vcs_engine, "run", lands)
+    monkeypatch.setattr(space_vcs, "blocked", lambda *a, **k: [])
+    assert vcs_engine.pull_copy(env.account, SPACE, PLUGIN, object(), label="Mindful Path", timeout=30) == (True, "")
