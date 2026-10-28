@@ -14,6 +14,7 @@ import { FolderShareDialog } from "./FolderShareDialog";
 import { useLiveFollow } from "./liveFollow";
 import { PluginScopeDrawer } from "./PluginScopeDrawer";
 import { installScopeAlerts, onRefusedWrite, rememberPluginLabel, type RefusedWrite } from "./scopeAlerts";
+import { publishTeamScope, unpublishTeamScope, type TeamScope, type TeamScopeNote } from "./teamScopeStore";
 import {
   bindingText,
   DATA_AT_REST,
@@ -326,6 +327,15 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
     return () => window.clearInterval(tick);
   }, [nextTry, active]);
 
+  // The header's Team button and modal show the visible pane's copy (built below each render).
+  const view = useRef<TeamScope | null>(null);
+  view.current = null;
+  useEffect(() => {
+    if (active && view.current) publishTeamScope(view.current);
+    else unpublishTeamScope(pluginId);
+  });
+  useEffect(() => () => unpublishTeamScope(pluginId), [pluginId]);
+
   /** A full round now (sends this PC's changes, brings everyone else's), past the minute cap. */
   const syncNow = async () => {
     setActionError("");
@@ -408,16 +418,20 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const conflicts = status.conflicts?.length || status.conflict || 0;
   const badge = shared ? toSend + (changes.incoming ?? 0) + conflicts + notShared(status).count : 0;
 
+  const loadChoices = async () => {
+    setMenu(null);
+    if (!status.canChange) return;
+    const res = await getApi()?.plugin_scope_choices?.();
+    setMenu(res?.choices ?? []);
+  };
+
   const toggleCopy = async () => {
     if (open === "copy") {
       setOpen("");
       return;
     }
     setOpen("copy");
-    setMenu(null);
-    if (!status.canChange) return;
-    const res = await getApi()?.plugin_scope_choices?.();
-    setMenu(res?.choices ?? []);
+    await loadChoices();
   };
 
   /**
@@ -519,44 +533,48 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const storageNote = storage && storage.level !== "ok" ? (storage.level === "full" ? storage.note : `Storage ${storage.note}`) : "";
   const drawerId = `plugin-scope-drawer-${pluginId}`;
   const phraseIcon = phrase.tone === "error" ? "!" : phrase.tone === "warn" ? "!" : syncing ? "↻" : phrase.key === "up_to_date" ? "✓" : "•";
-  // Lines under the bar: only what needs a decision or explains a refusal.
-  const notes = [
-    notice ? (
-      <div key="notice" className="plugin-scope-note">
-        <span>{notice}</span>
-        <button type="button" className="plugin-scope-btn plugin-scope-btn--ghost" onClick={() => setNotice("")}>Dismiss</button>
-      </div>
-    ) : null,
-    reset && canSettle ? (
-      <div key="reset" className="plugin-scope-note plugin-scope-note--warn">
-        <span>{scope.label}'s {kind} data was reset on the server. Your copy here is read-only until you choose.</span>
-        <button type="button" className="plugin-scope-btn" disabled={busy} onClick={() => void settle("upload")}>Upload my copy</button>
-        <button type="button" className="plugin-scope-btn" disabled={busy} onClick={() => void settle("clear")}>Clear my copy</button>
-      </div>
-    ) : null,
-    phrase.key === "paused" && status.pausedAction ? (
-      <div key="paused" className="plugin-scope-note plugin-scope-note--warn">
-        <span>{phrase.text}</span>
-        <button type="button" className="plugin-scope-btn"
-          onClick={() => void getApi()?.duckyos_open_site?.(status.pausedAction?.path || "/")}>
-          {status.pausedAction.label}
-        </button>
-      </div>
-    ) : null,
-    refused ? (
-      <div key="refused" className={`plugin-scope-note${refused.asked ? "" : " plugin-scope-note--error"}`}>
-        <span>{refused.text}</span>
-        {!refused.asked && refused.write.unit && refused.write.holder && api?.plugin_scope_ask ? (
-          <button type="button" className="plugin-scope-btn" disabled={busy} onClick={() => void askRelease()}>Ask to release</button>
-        ) : null}
-        <button type="button" className="plugin-scope-btn plugin-scope-btn--ghost" onClick={() => setRefused(null)}>Dismiss</button>
-      </div>
-    ) : null,
-    actionError && actionError !== status.error ? (
-      <div key="error" className="plugin-scope-note plugin-scope-note--error"><span>{actionError}</span></div>
-    ) : null,
-    storageNote ? <div key="storage" className="plugin-scope-note plugin-scope-note--warn"><span>{storageNote}</span></div> : null,
-  ].filter(Boolean);
+  // Lines that need a decision or explain a refusal.
+  const notes: TeamScopeNote[] = [];
+  if (notice) notes.push({ key: "notice", text: notice, actions: [{ label: "Dismiss", ghost: true, run: () => setNotice("") }] });
+  if (reset && canSettle) {
+    notes.push({
+      key: "reset", tone: "warn",
+      text: `${scope.label}'s ${kind} data was reset on the server. Your copy here is read-only until you choose.`,
+      actions: [
+        { label: "Upload my copy", disabled: busy, run: () => void settle("upload") },
+        { label: "Clear my copy", disabled: busy, run: () => void settle("clear") },
+      ],
+    });
+  }
+  if (phrase.key === "paused" && status.pausedAction) {
+    const paused = status.pausedAction;
+    notes.push({ key: "paused", tone: "warn", text: phrase.text,
+      actions: [{ label: paused.label, run: () => void getApi()?.duckyos_open_site?.(paused.path || "/") }] });
+  }
+  if (refused) {
+    const canAsk = !refused.asked && refused.write.unit && refused.write.holder && api?.plugin_scope_ask;
+    notes.push({
+      key: "refused", tone: refused.asked ? undefined : "error", text: refused.text,
+      actions: [
+        ...(canAsk ? [{ label: "Ask to release", disabled: busy, run: () => void askRelease() }] : []),
+        { label: "Dismiss", ghost: true, run: () => setRefused(null) },
+      ],
+    });
+  }
+  if (actionError && actionError !== status.error) notes.push({ key: "error", tone: "error", text: actionError });
+  if (storageNote) notes.push({ key: "storage", tone: "warn", text: storageNote });
+
+  view.current = {
+    pluginId, plugin, status, phrase, syncing, busy, switching: Boolean(switching), shared, variant, kind, current,
+    menu, offers, refusal, manual, canSync, failing,
+    canPush: Boolean(api?.plugin_scope_push), canPull: Boolean(api?.plugin_scope_pull),
+    badge, conflicts, notes,
+    actions: {
+      pull, push, syncNow, choose, copyInto, settle, loadChoices,
+      joinLive: canLive && canSync ? joinLive : undefined,
+      refresh: (changed) => refresh(changed ? { keys: null } : null),
+    },
+  };
 
   return (
     <div className="plugin-scope">
@@ -647,7 +665,19 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
           </button>
         ) : null}
       </div>
-      {notes.length ? <div className="plugin-scope-notes">{notes}</div> : null}
+      {notes.length ? (
+        <div className="plugin-scope-notes">
+          {notes.map((n) => (
+            <div key={n.key} className={`plugin-scope-note${n.tone ? ` plugin-scope-note--${n.tone}` : ""}`}>
+              <span>{n.text}</span>
+              {n.actions?.map((a) => (
+                <button key={a.label} type="button" className={`plugin-scope-btn${a.ghost ? " plugin-scope-btn--ghost" : ""}`}
+                  disabled={a.disabled} onClick={a.run}>{a.label}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {shared && drawerOpen ? (
         <PluginScopeDrawer id={drawerId} pluginId={pluginId} status={status} tab={tab} onTab={setTab}
           onJoin={canLive && canSync ? (room) => void joinLive(room) : undefined}

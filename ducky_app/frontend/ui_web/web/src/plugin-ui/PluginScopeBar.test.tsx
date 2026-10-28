@@ -5,6 +5,7 @@ import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { _resetBackgroundActivityForTests, getBackgroundJobs } from "../hooks/backgroundActivity";
 import { writeLiveFollow } from "./liveFollow";
 import { PluginScopeBar } from "./PluginScopeBar";
+import { getTeamScope } from "./teamScopeStore";
 
 const api = vi.hoisted(() => ({
   plugin_scope_status: vi.fn(),
@@ -584,6 +585,19 @@ describe("plugin scope bar", () => {
       await waitFor(() => expect(changed).toHaveBeenCalledTimes(1), { timeout: 3000 });
       expect(changed).toHaveBeenCalledWith(expect.anything(), { reason: "synced", keys: ["project.a", "project.b", "project.c"] });
       expect(api.plugin_scope_status).toHaveBeenCalledTimes(2);
+    });
+
+    it("the visible pane publishes its copy for the header; a hidden one doesn't", async () => {
+      api.plugin_scope_status.mockResolvedValue(sharedStatus({ pluginLabel: "Island Media Kit" }, { label: "Mindful Path" }));
+      const { rerender } = watch(false);
+      await waitFor(() => expect(api.plugin_scope_status).toHaveBeenCalledTimes(1));
+      expect(getTeamScope()).toBeNull();
+      rerender(true);
+      await waitFor(() => expect(getTeamScope()).toMatchObject({
+        pluginId: "island-media-kit", plugin: "Island Media Kit", status: { scope: { label: "Mindful Path" } },
+      }));
+      rerender(false);
+      expect(getTeamScope()).toBeNull();
     });
 
     it("tells the pane whether it's a team copy and how many changes are on their way", async () => {
