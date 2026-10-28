@@ -20,6 +20,7 @@ import {
   workflowIdFromJobId,
 } from "../hooks/graphActivity";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
+import { installScopeActivity } from "../plugin-ui/scopeActivity";
 import { refreshWorkflowRuns, stopWorkflowRun, subscribeWorkflowEvents } from "../hooks/workflowRunsByChat";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
 import { useWaitingItems } from "../hooks/waitingChats";
@@ -46,9 +47,12 @@ export function BackgroundActivityDropdown() {
   jobsRef.current = jobs;
   const [now, setNow] = useState(Date.now);
   useEffect(() => subscribeAgentBackgroundActivity(), []);
+  useEffect(() => installScopeActivity(), []);
   // Agents and workflows alert from the app itself; installs and plugin jobs only run here.
   useEffect(() => onBackgroundJobEnded((job, seconds) => {
     if (isRemote() || job.source === "agent" || job.source === "workflow" || job.source === "message") return;
+    // A routine team sync round never alerts; only its conflicts do.
+    if (job.source === "team" && job.phase === "done") return;
     if (job.phase !== "done" && job.phase !== "error") return;
     void getApi()?.notify_activity?.({ title: job.title, detail: job.detail, phase: job.phase, seconds }).catch(() => false);
   }), []);
