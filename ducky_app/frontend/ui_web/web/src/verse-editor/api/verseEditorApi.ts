@@ -1,6 +1,6 @@
 import { getApi } from "../../hooks/usePanelApi";
 
-import type { VerseLspStatusDto } from "../../types/panel";
+import type { ProjectFileStat, VerseLspStatusDto } from "../../types/panel";
 
 import { verseLspLog, verseLspLogError } from "../lsp/verseLspDebug";
 
@@ -51,7 +51,15 @@ export async function readVerseFile(
 
 
 
-export async function writeVerseFile(path: string, content: string): Promise<void> {
+/** mtime/size fingerprint only (no content): cheap enough to run on every tab switch. */
+export async function statVerseFile(path: string): Promise<ProjectFileStat> {
+  const api = getApi();
+  if (!api?.stat_project_file) throw new Error("Panel API unavailable");
+  return api.stat_project_file(path);
+}
+
+/** Resolves with the backend result, which carries the saved file's `mtime_ns`/`size`. */
+export async function writeVerseFile(path: string, content: string): Promise<unknown> {
 
   const api = getApi();
 
@@ -59,9 +67,11 @@ export async function writeVerseFile(path: string, content: string): Promise<voi
 
   try {
 
-    await api.write_project_file(path, content);
+    const result: unknown = await api.write_project_file(path, content);
 
     verseLspLog("api", "write_project_file ok", { path, chars: content.length });
+
+    return result;
 
   } catch (e) {
 

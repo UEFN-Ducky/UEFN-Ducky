@@ -27,9 +27,15 @@ type TokenizableModel = editor.ITextModel & {
   };
 };
 
-// Cap synchronous tokenization so a very large file can't block the main thread on open;
-// Monaco's on-demand viewport tokenization covers anything past the cap.
+// Tokenize only through the viewport plus this margin synchronously: a 3,000-line Verse file
+// took ~220 ms to tokenize whole. Once the tokenizer exists, Monaco's own background and
+// on-scroll tokenization colours the rest.
+const SYNC_TOKENIZE_MARGIN_LINES = 200;
 const MAX_SYNC_TOKENIZE_LINES = 6000;
+
+// Tokens live on the model, which outlives the editor widget across tab switches. Rebuilding
+// them on every remount threw away the cache and re-tokenized the file each time.
+const tokenizedModels = new WeakSet<editor.ITextModel>();
 
 export function forceFullTokenization(
   monaco: typeof import("monaco-editor"),
@@ -43,6 +49,12 @@ export function forceFullTokenization(
       // Give the view real dimensions first (automaticLayout is off).
       ed.layout();
 
+      if (tokenizedModels.has(model)) {
+        ed.render(true);
+        return;
+      }
+      tokenizedModels.add(model);
+
       // Rebuild the tokenizer against the registered TextMate support. The round-trip is
       // synchronous — no intermediate plaintext paint — and forces resetTokenization even
       // though the id ends up unchanged (a same-id setModelLanguage would no-op).
@@ -54,7 +66,12 @@ export function forceFullTokenization(
 
       // Now tokenize the whole document (the tokenizer exists after the round-trip) and
       // force a repaint so the freshly-computed tokens actually render.
-      const lineCount = Math.min(model.getLineCount(), MAX_SYNC_TOKENIZE_LINES);
+      const visibleEnd = ed.getVisibleRanges().reduce((end, r) => Math.max(end, r.endLineNumber), 1);
+      const lineCount = Math.min(
+        model.getLineCount(),
+        visibleEnd + SYNC_TOKENIZE_MARGIN_LINES,
+        MAX_SYNC_TOKENIZE_LINES,
+      );
       (model as TokenizableModel).tokenization?.forceTokenization?.(lineCount);
       ed.render(true);
     } catch {

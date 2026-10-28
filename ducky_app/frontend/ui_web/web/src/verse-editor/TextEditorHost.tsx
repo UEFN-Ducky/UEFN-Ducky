@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 
 import { useVerseEditor } from "./VerseEditorProvider";
+import type { DiskStat } from "./fileEditorSessions";
 import { MONACO_EMBEDDED_OVERFLOW_OPTIONS } from "./monaco/embeddedEditorOverflow";
 import { setupMonaco } from "./monaco/setupMonaco";
 import { applyVerseMonacoTheme } from "./monaco/verseTheme";
@@ -14,7 +15,7 @@ import {
 import { useMonacoEditorLayout } from "./monaco/useMonacoEditorLayout";
 import { forceFullTokenization } from "./monaco/forceFullTokenization";
 import { useAppearance } from "../theme/AppearanceContext";
-import { readVerseFile, writeVerseFile, recordExternalFileChange } from "./api/verseEditorApi";
+import { readVerseFile, statVerseFile, writeVerseFile, recordExternalFileChange } from "./api/verseEditorApi";
 import { notifyMissingProjectFile } from "./diagnostics/purgeDeletedFile";
 import { toEditorAbsolutePath } from "./lsp/uriUtils";
 import { normPath, isPanelReadOnlyFile, monacoLanguageForPath } from "./utils/isVerseFile";
@@ -90,7 +91,11 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
       if (!container || cancelled) return;
 
       try {
-        const { content, path: canonicalPath } = await readVerseFile(relativePath);
+        const { content, path: canonicalPath } = await fileSessions.readForMount(
+          relativePath,
+          readVerseFile,
+          statVerseFile,
+        );
         if (cancelled) return;
         
 
@@ -280,7 +285,9 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
     [path, fileSessions, setDirty],
   );
 
-  const handleExternalFileChange = useCallback(async () => {
+  const handleExternalFileChange = useCallback(async (stat?: DiskStat) => {
+    // Our own save's mtime: nothing new on disk, skip the full read.
+    if (stat && fileSessions.isDiskEcho(path, stat)) return;
     const ed = editorRef.current;
     const model = ed?.getModel();
     if (!ed || !model || model.isDisposed()) return;
@@ -309,7 +316,7 @@ export function TextEditorHost({ relativePath, projectRoot = "", readOnly = fals
     }
   }, [path, fileSessions, applyDiskContent, setDirty]);
 
-  useWatchProjectFile(path, () => void handleExternalFileChange(), {
+  useWatchProjectFile(path, (stat) => void handleExternalFileChange(stat), {
     enabled: ready && !error,
   });
 

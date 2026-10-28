@@ -8,6 +8,8 @@ import { basename, normPath, registryKey } from "../utils/isVerseFile";
 
 import { followCodeSpeedMultiplier, getFollowCodeSettings } from "./followCodeSettings";
 
+import { minimalEdit } from "./minimalEdit";
+
 
 
 export type OpenFileOptions = { activate?: boolean };
@@ -384,9 +386,16 @@ export class EditorActionQueue {
 
           if (model) {
 
-            if (model.getValue() !== action.text) {
+            const edit = minimalEdit(model.getValue(), action.text);
 
-              ed.executeEdits("agent", [{ range: model.getFullModelRange(), text: action.text }]);
+            if (edit) {
+
+              const from = model.getPositionAt(edit.start);
+              const to = model.getPositionAt(edit.end);
+              ed.executeEdits("agent", [{
+                range: { startLineNumber: from.lineNumber, startColumn: from.column, endLineNumber: to.lineNumber, endColumn: to.column },
+                text: edit.text,
+              }]);
 
             }
 

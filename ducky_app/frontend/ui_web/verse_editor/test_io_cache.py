@@ -24,6 +24,33 @@ def test_big_generated_files_are_capped_by_size() -> None:
     assert cache.get("Content/Generated/big19.json") == "19" * 4_000_000
 
 
+def test_panel_save_returns_the_disk_stat_the_watcher_will_see(monkeypatch, tmp_path) -> None:
+    import types
+
+    from backend.workspace import runtime
+
+    target = tmp_path / "Content" / "a.verse"
+    target.parent.mkdir()
+    pf = io.pf
+    for name in ("_require_writable_content_path", "_require_not_locked", "_require_not_digest"):
+        monkeypatch.setattr(pf, name, lambda *_a: None)
+    monkeypatch.setattr(pf, "_require_under_content", lambda *_a: None)
+    monkeypatch.setattr(pf, "is_editable_text_file", lambda _p: True)
+    monkeypatch.setattr(pf, "_resolve_relative", lambda _p: target)
+    monkeypatch.setattr(pf, "_project_root", lambda: tmp_path)
+
+    class Writer:
+        def write_text(self, rel, content, tool=""):
+            (tmp_path / rel).write_text(content, encoding="utf-8")
+            return types.SimpleNamespace(bytes_written=len(content.encode("utf-8")))
+
+    monkeypatch.setattr(runtime, "get_writer", lambda: Writer())
+    out = io.write_file("Content/a.verse", "hello")
+    st = target.stat()
+    assert out["path"] == "Content/a.verse"
+    assert (out["mtime_ns"], out["size"]) == (st.st_mtime_ns, st.st_size)
+
+
 def test_a_file_used_again_stays_cached() -> None:
     cache = io.ContentCache()
     cache.set("Content/Verse/main.verse", "baseline")

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 
 import { useVerseEditor } from "./VerseEditorProvider";
+import type { DiskStat } from "./fileEditorSessions";
 
 import { setupMonaco } from "./monaco/setupMonaco";
 
@@ -18,7 +19,7 @@ import { forceFullTokenization } from "./monaco/forceFullTokenization";
 
 import { useAppearance } from "../theme/AppearanceContext";
 
-import { readVerseFile, writeVerseFile, recordExternalFileChange } from "./api/verseEditorApi";
+import { readVerseFile, statVerseFile, writeVerseFile, recordExternalFileChange } from "./api/verseEditorApi";
 
 import { refreshOpenFileDiagnosticsNow } from "./diagnostics/refreshOpenFileDiagnostics";
 import { notifyMissingProjectFile } from "./diagnostics/purgeDeletedFile";
@@ -194,7 +195,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
       try {
 
         verseLspLog("editor", "readVerseFile", { path });
-        const { content, path: canonicalPath } = await readVerseFile(path);
+        const { content, path: canonicalPath } = await fileSessions.readForMount(path, readVerseFile, statVerseFile);
         verseLspLog("editor", "readVerseFile ok", { path: canonicalPath, chars: content.length });
 
         if (cancelled) return;
@@ -655,8 +656,10 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
     [path, fileSessions, setDirty, clearHistoryPreview],
   );
 
-  const handleExternalFileChange = useCallback(async () => {
+  const handleExternalFileChange = useCallback(async (stat?: DiskStat) => {
     if (playbackLocked) return;
+    // Our own save's mtime: nothing new on disk, skip the full read.
+    if (stat && fileSessions.isDiskEcho(path, stat)) return;
     const ed = editorRef.current;
     const model = ed?.getModel();
     if (!ed || !model || model.isDisposed()) return;
@@ -696,7 +699,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
     }
   }, [path, fileSessions, playbackLocked, applyDiskContent, setDirty, bumpHistoryRefresh]);
 
-  useWatchProjectFile(path, () => void handleExternalFileChange(), {
+  useWatchProjectFile(path, (stat) => void handleExternalFileChange(stat), {
     enabled: ready && !error && !playbackLocked,
   });
 

@@ -91,7 +91,15 @@ def write_file(relative_path: str, content: str) -> dict[str, object]:
 
     result = get_writer().write_text(rel, content, tool="panel_save")
     _cache.set(rel, content)
-    return {"path": rel, "bytes_written": result.bytes_written}
+    out: dict[str, object] = {"path": rel, "bytes_written": result.bytes_written}
+    # The editor's mtime watcher compares against this, so our own save is not
+    # mistaken for an external change and re-read in full.
+    try:
+        st = target.stat()
+        out.update(mtime_ns=int(st.st_mtime_ns), size=int(st.st_size))
+    except OSError:
+        pass
+    return out
 
 
 def seed_cache(relative_path: str, content: str) -> None:
