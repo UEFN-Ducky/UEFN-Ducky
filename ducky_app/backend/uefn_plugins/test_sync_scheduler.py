@@ -2,7 +2,8 @@
 
 Writes come from another sqlite connection (their own thread), the way the MCP bridge
 process writes: the scheduler only sees them through ``PRAGMA data_version``. Checks:
-a round 5 s after the last write and at most one per 30 s; a round every 60 s while a
+a round 10 s after the last write (60 s after the first of a stream) and at most one
+per 30 s; a burst of writes or folder changes is one round; a round every 60 s while a
 linked panel or the Workflows view is on screen, else every 15 minutes; failed rounds
 retried after 1, 5, then 15 minutes, recorded on the space while the next tick still
 runs; changes queued again without a write keep rounds coming while each sends some;
@@ -123,7 +124,7 @@ def ticks(sched: Scheduler, clock: Clock, *at: float) -> list[list[str]]:
     return out
 
 
-def test_a_write_elsewhere_starts_a_round_5s_after_the_last_write_at_most_every_30s(
+def test_a_write_elsewhere_starts_a_round_10s_after_the_last_write_at_most_every_30s(
     who, clock: Clock, provider: Recorder, events
 ) -> None:
     aid = who.be("ana@x.org")
@@ -132,20 +133,20 @@ def test_a_write_elsewhere_starts_a_round_5s_after_the_last_write_at_most_every_
     assert sched.tick() == ["spaceT"] and provider.rounds == [("spaceT", False)]  # the round at start
 
     write(aid, "spaceT", "card.a", clock, T + 100)
-    assert ticks(sched, clock, T + 100, T + 104.9) == [[], []]
-    assert ticks(sched, clock, T + 105) == [["spaceT"]]
+    assert ticks(sched, clock, T + 100, T + 109.9) == [[], []]
+    assert ticks(sched, clock, T + 110) == [["spaceT"]]
     assert provider.rounds[-1] == ("spaceT", True)  # changes to send beat the provider's minute limit
 
-    # Another write right after: 5 s later would be too soon, the 30 s cap holds it.
-    write(aid, "spaceT", "card.b", clock, T + 106)
-    assert ticks(sched, clock, T + 111, T + 134.9) == [[], []]
-    assert ticks(sched, clock, T + 135) == [["spaceT"]]
+    # Another write right after: 10 s later would be too soon, the 30 s cap holds it.
+    write(aid, "spaceT", "card.b", clock, T + 111)
+    assert ticks(sched, clock, T + 121, T + 139.9) == [[], []]
+    assert ticks(sched, clock, T + 140) == [["spaceT"]]
 
-    # Writes 3 s apart: one round, 5 s after the last of them.
+    # Writes 3 s apart: one round, 10 s after the last of them.
     write(aid, "spaceT", "card.c", clock, T + 300)
     assert ticks(sched, clock, T + 300) == [[]]
     write(aid, "spaceT", "card.d", clock, T + 303)
-    assert ticks(sched, clock, T + 305, T + 307.9, T + 308) == [[], [], ["spaceT"]]
+    assert ticks(sched, clock, T + 305, T + 312.9, T + 313) == [[], [], ["spaceT"]]
     assert provider.rounds.count(("spaceT", True)) == 3
     assert events and events[-1] == {"type": "plugin_scope_changed", "plugins": [], "synced": True}
 
@@ -229,6 +230,56 @@ def test_a_round_that_worked_elsewhere_ends_the_backoff(who, clock: Clock, provi
     elsewhere(lambda: repo.sync_put(aid, "spaceT", state="ok", error="", called_at=T + 100))
     assert ticks(sched, clock, T + 100, T + 400, T + 999) == [[], [], []]
     assert ticks(sched, clock, T + 1000) == [["spaceT"]]
+
+
+def test_a_burst_of_writes_is_one_round_a_stream_waits_at_most_60s_and_sync_now_runs_at_once(
+    who, clock: Clock, provider: Recorder, events
+) -> None:
+    aid = who.be("ana@x.org")
+    link(aid, "spaceT")
+    sched = scheduler(clock)
+    assert sched.tick() == ["spaceT"]
+
+    # 20 writes in 2 s (dragging clips around): one round, 10 s after the last.
+    for n in range(20):
+        write(aid, "spaceT", f"card.{n}", clock, T + 100 + n * 0.1)
+        sched.tick()
+    started = [s for s in range(60) if ticks(sched, clock, T + 102 + s)[0]]
+    assert started == [10] and provider.rounds.count(("spaceT", True)) == 1
+
+    # A write every 3 s that never pauses: the batch still goes 60 s after its first write.
+    rounds = []
+    for s in range(121):
+        if s % 3 == 0:
+            write(aid, "spaceT", f"stream.{s}", clock, T + 500 + s)
+        if ticks(sched, clock, T + 500 + s)[0]:
+            rounds.append(s)
+    assert rounds and 60 <= rounds[0] <= 66 and len(rounds) <= 2
+
+    # Sync now mid-batch: its round runs at once, not at the batch's time.
+    write(aid, "spaceT", "card.now", clock, T + 2000)
+    sched.tick()
+    before = len(provider.rounds)
+    sync_scheduler.run_round(aid, "spaceT", force=True)
+    assert provider.rounds[before:] == [("spaceT", True)]
+
+
+def test_a_folder_change_waits_in_the_batch_instead_of_waking_a_round(
+    who, clock: Clock, provider: Recorder, events
+) -> None:
+    """Before, a folder unit gone quiet woke a round within 5 s: each save its own send."""
+    aid = who.be("ana@x.org")
+    link(aid, "spaceT")
+    sched = scheduler(clock)
+    assert sched.tick() == ["spaceT"]
+    clock.now = T + 100
+    sched._folder_changed("spaceT", changing=True)  # still being edited
+    clock.now = T + 105
+    sched._folder_changed("spaceT", changing=True)
+    clock.now = T + 108
+    sched._folder_changed("spaceT", changing=False)  # quiet now: the batch's time stays
+    assert ticks(sched, clock, T + 108, T + 114.9, T + 115) == [[], [], ["spaceT"]]
+    assert provider.rounds[-1] == ("spaceT", True)
 
 
 def test_a_space_failing_on_this_pc_retries_a_queued_write_on_the_backoff_not_every_30s(
@@ -358,7 +409,7 @@ def test_changes_queued_again_keep_rounds_coming_while_each_sends_some(who, cloc
         # A change the provider keeps skipping: its round sent nothing, so no round follows.
         impl.stuck.add("z")
         write(aid, "spaceT", "z", clock, T + 400)
-        assert ticks(sched, clock, T + 405) == [["spaceT"]]
+        assert ticks(sched, clock, T + 410) == [["spaceT"]]
         assert ticks(sched, clock, T + 411, T + 435, T + 500, T + 900) == [[], [], [], []]
         assert repo.count_dirty(aid, "spaceT") == 1
     finally:

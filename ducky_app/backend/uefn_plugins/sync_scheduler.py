@@ -4,10 +4,12 @@ Before, a shared space synced only while a plugin's scope bar was on screen (a r
 minute) or the Workflows view was open: an agent's edits made with the panel closed
 never went out, and this PC never pulled. This daemon keeps every space in step:
 
-- a write to a shared copy starts a round 5 s after the last write, at most one round
-  per space every 30 s (1 s and 3 s while a plugin is live there: its group pulls each
-  change as soon as it's committed). Writes in any process count: the MCP bridge writes
-  the same database, and ``PRAGMA data_version``, read once a second, says when anyone did;
+- changes go out in batches: a write to a shared copy (or a folder unit changed here)
+  starts a round 10 s after the last write, or 60 s after the first one of a stream that
+  never pauses, at most one round per space every 30 s, live or not (a live space only
+  pulls sooner). Writes in any process count: the MCP bridge writes the same database,
+  and ``PRAGMA data_version``, read once a second, says when anyone did. Sync now and
+  the other rounds the person asks for run at once;
 - a round every 60 s while a linked plugin's panel is visible or the Workflows view is
   open, every 15 minutes otherwise;
 - one round per linked space at start, and again when the account or the provider
@@ -58,10 +60,10 @@ from typing import Any, Callable
 _log = logging.getLogger(__name__)
 
 TICK_S = 1.0
-DEBOUNCE_S = 5.0  # a round this long after the last write to a space
+DEBOUNCE_S = 10.0  # a round this long after the last write to a space
+MAX_WAIT_S = 60.0  # or this long after the first unsent one, when writes never pause
 MIN_GAP_S = 30.0  # at most one round per space this often
-LIVE_DEBOUNCE_S = 1.0  # the same while a plugin is live in the space
-LIVE_GAP_S = 3.0
+LIVE_GAP_S = 3.0  # a teammate's change is pulled this soon while a plugin is live there
 ACTIVE_EVERY_S = 60.0  # while a linked plugin's panel or the Workflows view is on screen
 IDLE_EVERY_S = 15 * 60.0
 RETRY_AFTER_S = (60.0, 5 * 60.0, 15 * 60.0)  # after 1, 2, 3 or more failed rounds in a row
@@ -301,6 +303,8 @@ class _Space:
     state: str = "ok"  # the sync row's state (the provider's last word)
     called_at: float = 0.0  # when the provider last started a round for it, in any process
     written: float = 0.0  # newest change still to send (0: none)
+    changed_at: float = 0.0  # newest folder change seen here by a folder look (they batch like writes)
+    first: float = 0.0  # when the changes still to send were first seen (MAX_WAIT_S counts from it)
     started: float = 0.0  # when this scheduler last started a round for it
     sent: float = 0.0  # start of its last round the provider ran (changes before it went with it)
     fails: int = 0  # failed rounds in a row
@@ -388,9 +392,7 @@ class Scheduler:
         since = now - self._refreshed
         live_now = live.spaces_live()
         holding = live.spaces_holding()
-        # Live: a write is seen within a tick, so the group gets it in a few seconds.
-        soonest = TICK_S if live_now else REFRESH_MIN_S
-        if provider != self._who[1] or since >= REFRESH_EVERY_S or (self._stale and since >= soonest):
+        if provider != self._who[1] or since >= REFRESH_EVERY_S or (self._stale and since >= REFRESH_MIN_S):
             self._refresh(now, provider)
         self._take_wakes()
         due: list[tuple[str, bool, frozenset[str]]] = []
@@ -402,7 +404,7 @@ class Scheduler:
                 rec.holding = (account, space) in holding
                 force = self._due(rec, now)
                 if force is not None:
-                    rec.running, rec.owed, rec.started = True, False, now
+                    rec.running, rec.owed, rec.started, rec.first = True, False, now, 0.0
                     due.append((space, force, frozenset(rec.pull)))
                     rec.pull, rec.wake = set(), False
                 # Live counts as in use: a live PC whose panel is hidden still beats, or its
@@ -466,13 +468,25 @@ class Scheduler:
         try:
             for plugin, backend in spaces.ledgers(account, space, plugins).items():
                 seen = vcs_engine.watch(account, space, plugin, backend)
-                if seen.get("quiet") or vcs_engine.folder_due(account, space, plugin):
-                    wake(account, space, plugin)
+                if vcs_engine.folder_due(account, space, plugin):
+                    wake(account, space, plugin)  # files to fetch again: a pull, not a send
+                # Before, a quiet unit woke a round within 5 s: each save went out on its own.
+                # Now it waits in the batch like a write.
+                if seen.get("waiting") or seen.get("quiet"):
+                    self._folder_changed(space, changing=bool(seen.get("waiting")))
         except Exception:  # noqa: BLE001 — the next look tries again
             _log.debug("looking at the folders in %s failed", space, exc_info=True)
         finally:
             with self._lock:
                 self._folder_running.discard(space)
+
+    def _folder_changed(self, space: str, *, changing: bool) -> None:
+        """A folder look saw units to send. ``changing`` (still being edited) restarts the
+        batch's quiet wait; units only waiting to go start it once."""
+        with self._lock:
+            rec = self.spaces.get(space)
+            if rec is not None and (changing or rec.changed_at <= max(rec.sent, rec.called_at)):
+                rec.changed_at = self.clock()
 
     def _take_wakes(self) -> None:
         """Provider events into the spaces they are about (one for a space not known yet
@@ -550,18 +564,23 @@ class Scheduler:
         must beat the provider's own minute limit), False for a pull it may skip."""
         if rec.running:
             return None
-        unsent = rec.written > max(rec.sent, rec.called_at) or rec.more
+        written = max(rec.written, rec.changed_at)
+        unsent = written > max(rec.sent, rec.called_at) or rec.more
+        if not unsent:
+            rec.first = 0.0
+        elif not rec.first:
+            rec.first = now
         if rec.owed:
             return unsent
         last = max(rec.started, rec.called_at)
-        gap = LIVE_GAP_S if rec.live else MIN_GAP_S
-        if rec.wake and now >= last + min(gap, WAKE_GAP_S):  # a teammate's change, a lock, presence
-            return unsent
+        pull_gap = LIVE_GAP_S if rec.live else MIN_GAP_S
+        if rec.wake and now >= last + min(pull_gap, WAKE_GAP_S):  # a teammate's change, a lock, presence
+            return unsent  # ponytail: a pull takes the batch along early; a pull-only round if that matters
         failing = rec.fails > 0 or rec.state in RETRY_STATES
         wait = RETRY_AFTER_S[min(max(rec.fails, 1), len(RETRY_AFTER_S)) - 1] if failing else 0.0
         slow = rec.state in SLOW_STATES
-        debounce = LIVE_DEBOUNCE_S if rec.live else DEBOUNCE_S
-        if unsent and not slow and now >= max(rec.written + debounce, last + gap, last + wait):
+        settled = now >= written + DEBOUNCE_S or now >= rec.first + MAX_WAIT_S
+        if unsent and not slow and settled and now >= max(last + MIN_GAP_S, last + wait):
             return True
         every = IDLE_EVERY_S if slow else wait or (ACTIVE_EVERY_S if rec.active or rec.hot or rec.live else IDLE_EVERY_S)
         return False if now >= last + every else None
