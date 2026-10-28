@@ -33,6 +33,7 @@ def _world(monkeypatch):
     told: list[tuple[str, str]] = []
     monkeypatch.setattr(keeper, "_member_chat", lambda owner, root: owner)
     monkeypatch.setattr(keeper, "_blocked_reason", lambda member: "")
+    monkeypatch.setattr(keeper, "_reply_mark", lambda member: 0)
     monkeypatch.setattr(keeper, "_said_committed", lambda member: False)
     monkeypatch.setattr(keeper, "_tell_lead", lambda plan, member, work, reason: told.append((member, reason)))
     monkeypatch.setattr("frontend.ui_web.context_limit.over_limit", lambda cid, step=None, project_root=None: None)
@@ -455,6 +456,37 @@ def test_a_block_said_while_waiting_on_a_teammate_is_over_when_the_teammate_fini
     assert _world == []  # the lead heard of no block
     assert [cid for cid, text in woke if cid == "reports"][-1] == "reports"
     assert "`r2` CSV report option" in [text for cid, text in woke if cid == "reports"][-1]
+
+
+def test_the_same_block_said_again_in_a_new_turn_reaches_the_lead(monkeypatch, _world) -> None:
+    # Oct 28 2026: the block was cleared when its point became startable, the member ran again,
+    # hit the same problem in the same words, and was nudged twice and left; its lead never heard.
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, **_: ({"reports", "cli"}, ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: False)
+    said, mark = {"text": ""}, {"n": 0}
+    monkeypatch.setattr(keeper, "_blocked_reason", lambda member: said["text"] if member == "reports" else "")
+    monkeypatch.setattr(keeper, "_reply_mark", lambda member: mark["n"] if member == "reports" else 0)
+
+    def ledger(r1: str, cli: str) -> dict:
+        return {**PLAN, "id": "p4", "title": "Ledger", "nodes": [
+            {"id": "cli", "content": "CLI", "assignee": "cli", "status": cli},
+            {"id": "reports", "content": "Reports", "assignee": "reports", "status": "in_progress", "children": [
+                {"id": "r1", "content": "Text reports", "status": r1},
+                {"id": "r2", "content": "CSV report option", "status": "pending", "after": ["cli"]}]}]}
+
+    woke: list[tuple[str, str]] = []
+    _run(0, [], woke, plans=[ledger("pending", "in_progress")])
+    _run(60, ["reports", "cli"], woke, plans=[ledger("pending", "in_progress")])
+    said["text"], mark["n"] = "r2 needs the recipe seat's fix", 1
+    for minute in range(2, 6):  # r1 done, r2 waits on the CLI
+        _run(minute * MIN, ["cli"], woke, plans=[ledger("completed", "in_progress")])
+    for minute in range(6, 10):  # the CLI is done: r2 can start, the old line is answered
+        _run(minute * MIN, [], woke, plans=[ledger("completed", "completed")])
+    assert _world == []
+    mark["n"] = 2  # its next turn ends blocked again, in the same words
+    for minute in range(10, 16):
+        _run(minute * MIN, [], woke, plans=[ledger("completed", "completed")])
+    assert _world == [("reports", "r2 needs the recipe seat's fix")]
 
 
 def test_a_group_leader_with_its_own_sub_plan_gets_one_task(monkeypatch, _links) -> None:

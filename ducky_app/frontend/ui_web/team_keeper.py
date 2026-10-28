@@ -622,6 +622,17 @@ def _blocked_reason(member: str) -> str:
     return found.group(1).strip()[:500] if found else ""
 
 
+def _reply_mark(member: str) -> int:
+    """How many replies the member has written: a BLOCKED in a newer reply is a new block."""
+    from frontend.ui_web.project_chats import load_conversation
+
+    try:
+        conv = load_conversation(member)
+    except Exception:
+        return 0
+    return sum(1 for m in (conv.messages if conv else []) if m.get("role") == "assistant")
+
+
 def _said_committed(member: str) -> bool:
     """Its last reply reports a commit (a commit word and a hash)."""
     from backend.agent.a2a_broker import _last_assistant_text
@@ -726,21 +737,24 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
                 by_member[member] = (owner, {"section": work["section"], "points": list(work["points"])})
         for member, (owner, work) in by_member.items():
             st = _members.setdefault(member, {"idle_since": now, "tries": 0, "next": 0.0, "moves": moves,
-                                              "task": "", "blocked": "", "cleared": "", "told_done": None})
+                                              "task": "", "blocked": "", "cleared": "", "cleared_mark": 0,
+                                              "told_done": None})
             st["lead"], st["owner"] = lead, owner
             with_work.add(member)
             if member not in _had_work and st["task"]:
                 # Its points only now became startable. A BLOCKED it ended with while it waited
                 # on them is answered: on Oct 15 2026 a member that said "BLOCKED: needs the CLI"
                 # while its point waited on the CLI was reported blocked after the CLI was done.
-                st.update(tries=0, next=0.0, blocked="", cleared=_blocked_reason(member) or st["cleared"])
+                st.update(tries=0, next=0.0, blocked="", cleared=_blocked_reason(member) or st["cleared"],
+                          cleared_mark=_reply_mark(member))
             text = _work_text(work)
             if st["moves"] != moves or (st["blocked"] and st.get("blocked_text") != text):
                 # The plan moved, or someone rewrote the blocked member's points (it isn't running,
                 # so the lead or the person did): whatever blocked it may be solved, so it goes on.
                 # Oct 15 2026 a lead answered a block by rewriting the point without a status
                 # change; that counted as nothing, and the team sat idle with nobody told.
-                st.update(moves=moves, tries=0, next=0.0, cleared=st["blocked"] or st["cleared"], blocked="")
+                st.update(moves=moves, tries=0, next=0.0, cleared=st["blocked"] or st["cleared"], blocked="",
+                          cleared_mark=_reply_mark(member))
             if member in busy or _waiting(member):
                 st["idle_since"] = None  # idle time counts from the first quiet look
                 movable.add(lead)
@@ -773,7 +787,12 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
             if st["blocked"]:
                 continue
             reason = _blocked_reason(member)
-            if reason and reason != st["cleared"]:
+            # A cleared block is only the reply it was cleared on. Oct 28 2026: a member woken
+            # again after other members' ticks cleared its block hit the same problem and said it
+            # in the same words; that read as "already answered", it got two "continue" nudges
+            # and went quiet, and its lead never heard while the rest of the team kept working.
+            stale = reason == st["cleared"] and _reply_mark(member) <= st.get("cleared_mark", 0)
+            if reason and not stale:
                 st["blocked"], st["blocked_text"] = reason, text
                 done = _done_points(work.get("section"))
                 repeat = st.get("told_done") is not None and done <= st["told_done"]
