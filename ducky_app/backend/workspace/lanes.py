@@ -338,6 +338,10 @@ def set_member_lane(
             "Lane may overlap another member's lane (pass force=true to accept): "
             + "; ".join(verdict["warnings"])
         )
+    # The project open now is the one this lane's relative globs mean, for good: switching
+    # the selected project later must not move the team's lane into another project.
+    roots = project_roots()
+    lane_root = roots[0] if roots and lane and any(not _is_abs(g) for g in lane) else ""
     rows: list[dict[str, Any]] = []
     for m in members:
         row = dict(m)
@@ -345,11 +349,24 @@ def set_member_lane(
             row["write_allowed"] = lane
             row["lane_set_by"] = set_by
             row["lane_set_at"] = float(now)
+            row["lane_root"] = lane_root
         rows.append(row)
     return rows, verdict["warnings"]
 
 
-LANE_KEYS = ("write_allowed", "lane_set_by", "lane_set_at")
+def anchor_lane(lane: Sequence[str] | None, root: str) -> tuple[str, ...] | None:
+    """The lane with its project-relative globs made full paths under ``root`` (the team's
+    project), so it means the same files whichever project is selected. Unchanged when
+    ``root`` is unknown or no longer one of the person's projects."""
+    if lane is None:
+        return None
+    r = (root or "").replace("\\", "/").rstrip("/")
+    if not r or not any(r.lower() == known.lower() for known in project_roots()):
+        return tuple(lane)
+    return tuple(g if _is_abs(g) else f"{r}/{g}" for g in lane)
+
+
+LANE_KEYS = ("write_allowed", "lane_set_by", "lane_set_at", "lane_root")
 _setting: ContextVar[frozenset[str]] = ContextVar("lane_setting", default=frozenset())
 
 

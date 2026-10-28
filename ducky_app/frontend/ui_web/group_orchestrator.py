@@ -70,6 +70,8 @@ def normalize_member(raw: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
         "write_allowed": _normalize_lane_field(raw.get("write_allowed")),
         "lane_set_by": str(raw.get("lane_set_by") or "").strip(),
         "lane_set_at": float(raw.get("lane_set_at") or 0.0),
+        # The project the lane's relative globs mean (open when it was set).
+        "lane_root": str(raw.get("lane_root") or "").strip(),
     }
 
 

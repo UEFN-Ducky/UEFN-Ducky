@@ -62,6 +62,26 @@ def test_roster_provider_resolves_member_lane(monkeypatch) -> None:
     assert lane_engine.resolve_lane("hacker") == ("Content/Verse/Shop/**",)
 
 
+def test_a_members_lane_means_the_teams_project_whichever_is_selected(monkeypatch) -> None:
+    from frontend.ui_web import project_chats
+
+    repo, limo = "C:/Repos/Ducky", "C:/Islands/LimoRide"
+    lane_engine.set_project_roots_source(lambda: [limo, repo])  # LimoRide is selected now
+    hub, convs = _world()
+    hub.group_members[1]["lane_root"] = repo
+    monkeypatch.setattr(roster_lanes, "_load", lambda cid: convs.get(cid))
+    assert roster_lanes.lane_for_member("hacker") == (f"{repo}/Content/Verse/Shop/**",)
+    # A lane set before lane_root existed means the project the team's hub chat lives in.
+    del hub.group_members[1]["lane_root"]
+    monkeypatch.setattr(project_chats, "conversation_project_slug",
+                        lambda cid, project_root=None: project_chats.project_slug(repo) if cid == "hub" else None)
+    assert roster_lanes.lane_for_member("hacker") == (f"{repo}/Content/Verse/Shop/**",)
+    # A projectless hub: the lane keeps its old meaning (never widened).
+    monkeypatch.setattr(project_chats, "conversation_project_slug", lambda cid, project_root=None: "_no_project")
+    assert roster_lanes.lane_for_member("hacker") == ("Content/Verse/Shop/**",)
+    assert normalize_member({"member_conv_id": "c", "lane_root": f" {repo} "})["lane_root"] == repo
+
+
 def test_lane_mode_falls_back_to_shadow(monkeypatch) -> None:
     from frontend.settings import PanelSettings
 

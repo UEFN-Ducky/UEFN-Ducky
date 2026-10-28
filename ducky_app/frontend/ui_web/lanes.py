@@ -35,8 +35,25 @@ def lane_for_member(conv_id: str) -> tuple[str, ...] | None:
     for member in group_members(hub):
         if str(member.get("member_conv_id") or "") == conv_id:
             lane = member.get("write_allowed")
-            return None if lane is None else tuple(lane)
+            if lane is None:
+                return None
+            # Relative globs mean the team's project, never whichever one is selected now.
+            return lane_engine.anchor_lane(lane, str(member.get("lane_root") or "") or _hub_project(hub.id))
     return None
+
+
+def _hub_project(hub_id: str) -> str:
+    """The project a team's hub chat is stored under ('' for a projectless or unknown one).
+    Lanes set before ``lane_root`` existed are anchored here."""
+    try:
+        from frontend.ui_web.project_chats import conversation_project_slug, project_slug
+
+        slug = conversation_project_slug(hub_id) or ""
+        if not slug or slug == "_no_project":
+            return ""
+        return next((r for r in lane_engine.project_roots() if project_slug(r) == slug), "")
+    except Exception:  # noqa: BLE001 - unknown: the lane keeps its old meaning
+        return ""
 
 
 class RosterLaneProvider:

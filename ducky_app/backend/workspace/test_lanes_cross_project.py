@@ -64,6 +64,40 @@ def test_a_project_that_left_the_list_covers_nothing() -> None:
     assert not _check(lane, "a/b.txt", other_project=OTHER).allow
 
 
+def test_a_team_keeps_its_lane_when_the_person_selects_another_project() -> None:
+    # Oct 28: the person selected LimoRide while a team worked in the Ducky repo, and every
+    # write of the team was refused (its relative globs then meant LimoRide).
+    rows, _ = lanes.set_member_lane([{"member_conv_id": "m"}], "m", ["ducky_app/backend"], set_by="lead", now=1.0)
+    assert rows[0]["lane_root"] == HOME and rows[0]["write_allowed"] == ["ducky_app/backend/**"]
+    lane = lanes.anchor_lane(rows[0]["write_allowed"], rows[0]["lane_root"])
+    assert lane == (f"{HOME}/ducky_app/backend/**",)
+
+    lanes.set_project_roots_source(lambda: [OTHER, HOME, DUCKYOS])  # the person selected OtherRepo
+    assert _check(lane, "ducky_app/backend/x.py", other_project=HOME).allow
+    assert _check(lane, f"{HOME}/ducky_app/backend/x.py").allow
+    assert not _check(lane, "ducky_app/frontend/x.py", other_project=HOME).allow
+    # A relative write now lands in the selected project: never the team's lane.
+    assert not _check(lane, "ducky_app/backend/x.py").allow
+
+
+def test_lane_root_is_only_kept_for_relative_globs_and_known_projects() -> None:
+    rows, _ = lanes.set_member_lane([{"member_conv_id": "m"}], "m", [f"{DUCKYOS}/plugins"], set_by="lead", now=1.0)
+    assert rows[0]["lane_root"] == ""  # full paths already mean one project
+    rows, _ = lanes.set_member_lane([{"member_conv_id": "m"}], "m", [], set_by="lead", now=1.0)
+    assert rows[0]["lane_root"] == ""  # read-only
+    assert lanes.anchor_lane(None, HOME) is None
+    assert lanes.anchor_lane(("src/**",), "") == ("src/**",)
+    assert lanes.anchor_lane(("src/**",), "C:/Gone") == ("src/**",)  # unknown: old meaning, never wider
+    assert lanes.anchor_lane(("src/**", f"{DUCKYOS}/a/**"), HOME.replace("/", "\\")) == (
+        f"{HOME}/src/**", f"{DUCKYOS}/a/**")
+
+
+def test_lane_root_survives_a_stale_roster_save() -> None:
+    stored, _ = lanes.set_member_lane([{"member_conv_id": "m"}], "m", ["src"], set_by="lead", now=5.0)
+    kept = lanes.keep_stored_lanes([{"member_conv_id": "m", "write_allowed": None}], stored)
+    assert kept[0]["lane_root"] == HOME and kept[0]["write_allowed"] == ["src/**"]
+
+
 # ------------------------------------------------- stored lanes on roster saves
 
 
