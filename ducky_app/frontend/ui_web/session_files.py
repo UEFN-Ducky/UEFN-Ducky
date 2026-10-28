@@ -42,29 +42,37 @@ def _lines_from_write_args(args: dict[str, Any]) -> int:
     return 0
 
 
+def message_stats(message: Any) -> tuple[int, frozenset[str]]:
+    """One message's tool calls and the files its successful writes touched."""
+    if not isinstance(message, dict):
+        return 0, frozenset()
+    tool_call_count = 0
+    file_paths: set[str] = set()
+    for block in message.get("blocks") or []:
+        if not isinstance(block, dict) or block.get("type") != "tool_call":
+            continue
+        tool_call_count += 1
+        if message.get("role") != "assistant":
+            continue
+        if str(block.get("status") or "") != "success":
+            continue
+        name = str(block.get("name") or "")
+        args = block.get("arguments") if isinstance(block.get("arguments"), dict) else {}
+        if name in _WRITE_TOOLS or name in _PATH_TOOLS:
+            path = _path_from_args(args)
+            if path:
+                file_paths.add(path)
+    return tool_call_count, frozenset(file_paths)
+
+
 def session_stats_from_messages(messages: list[Any]) -> dict[str, int]:
     """Count tool calls and unique session files from conversation messages."""
     tool_call_count = 0
     file_paths: set[str] = set()
-
     for message in messages:
-        if not isinstance(message, dict):
-            continue
-        for block in message.get("blocks") or []:
-            if not isinstance(block, dict) or block.get("type") != "tool_call":
-                continue
-            tool_call_count += 1
-            if message.get("role") != "assistant":
-                continue
-            if str(block.get("status") or "") != "success":
-                continue
-            name = str(block.get("name") or "")
-            args = block.get("arguments") if isinstance(block.get("arguments"), dict) else {}
-            if name in _WRITE_TOOLS or name in _PATH_TOOLS:
-                path = _path_from_args(args)
-                if path:
-                    file_paths.add(path)
-
+        count, paths = message_stats(message)
+        tool_call_count += count
+        file_paths |= paths
     return {"tool_call_count": tool_call_count, "file_count": len(file_paths)}
 
 

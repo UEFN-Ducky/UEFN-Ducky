@@ -41,7 +41,18 @@ class PanelApiAutomationsMixin:
         from backend.automations.catalog import list_nodes
         from backend.tools.panel.panel_automations import filter_nodes
 
-        return {"ok": True, "nodes": filter_nodes(list_nodes(), plugin, fields)}
+        nodes = filter_nodes(list_nodes(), plugin, fields)
+        # A plugin's icon once, not on each of its nodes: island-media-kit's 14 KB icon
+        # on 152 nodes was 2.2 MB of a 2.9 MB catalog. Rows read icons[plugin_id].
+        icons: dict[str, str] = {}
+        for node in nodes:
+            pid = str(node.get("plugin_id") or "")
+            icon = str(node.get("icon") or "")
+            if pid and icon.startswith("data:"):
+                icons.setdefault(pid, icon)
+                if icons[pid] == icon:
+                    node["icon"] = ""
+        return {"ok": True, "nodes": nodes, "icons": icons}
 
     def get_workflow_tools_catalog(self) -> dict[str, Any]:
         """Host tools a Call tool node can run. Never connects nested MCP plugins

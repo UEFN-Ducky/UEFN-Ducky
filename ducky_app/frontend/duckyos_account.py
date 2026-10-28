@@ -1746,7 +1746,7 @@ def _remote_snapshot() -> dict[str, Any]:
         cid = str(row.get("id") or "")
         if not cid:
             continue
-        messages[cid] = api.load_messages(cid)
+        messages[cid] = api.load_messages(cid, full_results=True)
         if row.get("is_group"):
             groups[cid] = api.group_members(cid)
     ledger = list(api.list_changesets(limit=50))

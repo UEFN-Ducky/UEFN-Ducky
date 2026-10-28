@@ -112,6 +112,7 @@ def list_changesets(*, conv_id: str = "", group_id: str = "", limit: int = 50, a
         group_id=(group_id or "").strip(),
         limit=max(1, min(500, int(limit))),
         archived=bool(archived),
+        slim=True,  # the detail view and revert read get_changeset
     )
 
 

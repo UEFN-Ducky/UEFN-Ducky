@@ -21,5 +21,10 @@ def test_list_workflow_nodes_panel_method_filters_by_plugin(monkeypatch):
     small = api.list_workflow_nodes(plugin="googledrive")
     assert small["ok"] and len(small["nodes"]) == 10 and len(json.dumps(small)) < 10_000
     assert {r["id"]: r["kind"] for r in small["nodes"]}["gmail.received"] == "trigger"
-    # No args: exactly the catalog the editor always got.
-    assert api.list_workflow_nodes() == {"ok": True, "nodes": catalog.list_nodes()}
+    # No args: the catalog the editor always got, each plugin's icon sent once beside it.
+    full = api.list_workflow_nodes()
+    expected = catalog.list_nodes()
+    icon = "data:image/png;base64," + "A" * 200_000
+    assert full["icons"] == {"googledrive": icon, "other": icon}
+    assert full["nodes"] == [{**n, "icon": ""} if n.get("plugin_id") else n for n in expected]
+    assert len(json.dumps(full)) < 700_000  # two icons, not one per node (11 x 200 KB)

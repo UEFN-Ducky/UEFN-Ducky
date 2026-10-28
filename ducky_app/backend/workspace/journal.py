@@ -337,6 +337,36 @@ OUTSIDE_WRITER_REASON = (
 )
 
 
+# Entry keys only revert and conflict checks read (get_run has them). Blob digests
+# stay: the list's hasDiff reads them (changesetGrouping.ts). Null keys are dropped
+# too; the list reads them with ?? / ||.
+_SLIM_ENTRY_DROP = frozenset(
+    {"abs_path", "trash_token", "before_entry_id", "after_entry_id", "before_hash", "after_hash"}
+)
+_SLIM_EDITOR_DROP = frozenset({"params", "inverse"})
+# The plan-row summary in the list reads these two params (ledgerPresentation.ts).
+_SLIM_PARAMS_KEEP = ("node_id", "status")
+
+
+def _slim_run(run: dict[str, Any]) -> dict[str, Any]:
+    out = {k: v for k, v in run.items() if k not in ("entries", "seen")}
+    entries: list[dict[str, Any]] = []
+    for entry in run.get("entries") or []:
+        row = {k: v for k, v in entry.items() if v is not None and k not in _SLIM_ENTRY_DROP}
+        editor = entry.get("editor")
+        if isinstance(editor, dict):
+            slim_editor = {k: v for k, v in editor.items() if k not in _SLIM_EDITOR_DROP}
+            params = editor.get("params")
+            if isinstance(params, dict):
+                kept = {k: params[k] for k in _SLIM_PARAMS_KEEP if k in params}
+                if kept:
+                    slim_editor["params"] = kept
+            row["editor"] = slim_editor
+        entries.append(row)
+    out["entries"] = entries
+    return out
+
+
 @runtime_checkable
 class ChangeJournal(Protocol):
     def record(self, record: WriteRecord) -> dict[str, Any]:
@@ -528,7 +558,11 @@ class FileChangeJournal:
         group_id: str = "",
         limit: int = 50,
         archived: bool | None = False,
+        slim: bool = False,
     ) -> list[dict[str, Any]]:
+        """Newest runs first. ``slim`` drops what only a run's detail view and revert
+        read (editor params/inverse, abs paths, reads seen): the panel list was 2.2 MB for
+        50 runs, 79% of it editor params. ``get_run`` stays whole."""
         storage = self._storage_for_root(project_root)
         runs_dir = storage / "runs"
         if not _use_db() and not runs_dir.is_dir():
@@ -555,7 +589,7 @@ class FileChangeJournal:
             for _, rid in ranked[:cap]:
                 run = self._load_run(storage, rid)
                 if isinstance(run, dict):
-                    runs.append(run)
+                    runs.append(_slim_run(run) if slim else run)
         return runs
 
     def get_run(self, run_id: str, *, project_root: str) -> dict[str, Any]:

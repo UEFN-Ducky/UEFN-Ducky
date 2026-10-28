@@ -308,6 +308,9 @@ def plugin_icon_data_url(plugin_id: str) -> str:
     return url
 
 
+_DEFAULT_ENABLED_CACHE: dict[str, Any] = {}
+
+
 def get_enabled_plugin_ids() -> list[str]:
     from frontend.settings import PanelSettings
 
@@ -315,8 +318,16 @@ def get_enabled_plugin_ids() -> list[str]:
     raw = getattr(settings, "enabled_uefn_plugins", None)
     if raw is None:
         # Migration: enable every installed plugin that declares default_enabled.
-        out: list[str] = []
         root = appdata_uefn_plugins_dir()
+        try:
+            key = (str(root), root.stat().st_mtime_ns)
+        except OSError:
+            key = None
+        # ponytail: keyed on the folder's mtime (install/remove bumps it); an edit inside
+        # one plugin.json is seen on the next install. The catalog asked 69x per list (1.2 s).
+        if key is not None and _DEFAULT_ENABLED_CACHE.get("key") == key:
+            return list(_DEFAULT_ENABLED_CACHE["ids"])
+        out: list[str] = []
         if root.is_dir():
             for child in sorted(root.iterdir()):
                 if not child.is_dir():
@@ -327,6 +338,8 @@ def get_enabled_plugin_ids() -> list[str]:
                         out.append(normalize_plugin_id(str(m.get("id") or child.name)))
                     except ValueError:
                         continue
+        if key is not None:
+            _DEFAULT_ENABLED_CACHE.update(key=key, ids=list(out))
         return out
     enabled: list[str] = []
     for item in raw:

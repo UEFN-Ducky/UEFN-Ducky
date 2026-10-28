@@ -474,7 +474,17 @@ class PanelApiStoreMixin:
         try:
             from backend.uefn_plugins.store import list_uefn_plugins
 
-            return {"ok": True, "plugins": list_uefn_plugins()}
+            plugins = list_uefn_plugins()
+            # The Store list never reads workflow nodes/templates (86% of a 752 KB list):
+            # counts here; the catalog and template APIs serve the rows themselves.
+            for row in plugins:
+                autos = (row.get("contributes") or {}).get("automations")
+                if isinstance(autos, dict):
+                    row["contributes"] = {
+                        **row["contributes"],
+                        "automations": {k: len(v) if isinstance(v, (list, dict)) else v for k, v in autos.items()},
+                    }
+            return {"ok": True, "plugins": plugins}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "plugins": []}
 

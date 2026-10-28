@@ -10,6 +10,7 @@ import shutil
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from concurrent.futures import Future
 from copy import copy as _shallow
 from pathlib import Path
@@ -223,6 +224,38 @@ def _stats_for(messages: list[Any]) -> dict[str, int]:
     from frontend.ui_web.session_files import session_stats_from_messages
 
     return session_stats_from_messages(messages)
+
+
+# conv id -> {row hash: (tool calls, file paths)}. A save scanned every message of the
+# chat for these counts (55% of a 5,000-message save); now only rows it has not seen.
+# Keyed on the row hash, so rows another writer (an agent host) changed are rescanned.
+_ROW_STATS: OrderedDict[str, dict[str, tuple[int, frozenset[str]]]] = OrderedDict()
+_ROW_STATS_CHATS = 32
+_row_stats_lock = threading.Lock()
+
+
+def _stats_by_hash(conv_id: str, messages: list[Any], hashes: list[str]) -> dict[str, int]:
+    from frontend.ui_web.session_files import message_stats
+
+    if len(hashes) != len(messages):
+        return _stats_for(messages)
+    with _row_stats_lock:
+        known = _ROW_STATS.pop(conv_id, {})
+    rows: dict[str, tuple[int, frozenset[str]]] = {}
+    count = 0
+    paths: set[str] = set()
+    for message, h in zip(messages, hashes):
+        stat = rows.get(h) or known.get(h)
+        if stat is None:
+            stat = message_stats(message)
+        rows[h] = stat
+        count += stat[0]
+        paths |= stat[1]
+    with _row_stats_lock:
+        _ROW_STATS[conv_id] = rows
+        while len(_ROW_STATS) > _ROW_STATS_CHATS:
+            _ROW_STATS.popitem(last=False)
+    return {"tool_call_count": count, "file_count": len(paths)}
 
 
 def _default_folders() -> list[dict[str, Any]]:
@@ -1126,9 +1159,12 @@ def save_conversation(
             if snapshot.messages and _host_owned(conv.id):
                 _refuse_host_messages(conv.id)
                 snapshot.messages = []  # a metadata save; loads read the host's rows
-            fut = _writer().submit(conv.id, (snapshot, project_root))
+            writer = _writer()
+            fut = writer.submit(conv.id, (snapshot, project_root))
             _held(conv)
             if wait:
+                # Write it now: waiting out the batch timer cost the caller 100 ms.
+                writer.flush(conv.id, timeout=60.0)
                 fut.result(timeout=60.0)
             return fut
         path = conversation_path(conv.id, project_root)
@@ -1194,11 +1230,7 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> dic
         _refuse_host_messages(conv.id)
         messages = None
     doc = conv.to_dict()
-    if messages is not None:
-        stats = _stats_for(messages)
-        conv.tool_call_count = doc["tool_call_count"] = stats["tool_call_count"]
-        conv.file_count = doc["file_count"] = stats["file_count"]
-    else:
+    if messages is None:  # a message save counts after the write (_stats_by_hash)
         current = repo.conv_get(conv.id, with_messages=False)
         if current is not None:
             doc["tool_call_count"] = current.get("tool_call_count", doc["tool_call_count"])
@@ -1213,6 +1245,13 @@ def _save_conversation_rows(conv: Conversation, project_root: str | None) -> dic
     if result.get("skipped"):
         _forget_saved(conv.id)
         return result  # the chat was deleted meanwhile; it stays deleted
+    if messages is not None:
+        stats = _stats_by_hash(conv.id, messages, list(result.pop("hashes", None) or []))
+        conv.tool_call_count, conv.file_count = stats["tool_call_count"], stats["file_count"]
+        if (doc["tool_call_count"], doc["file_count"]) != (conv.tool_call_count, conv.file_count):
+            repo.conv_set_counts(conv.id, **stats)
+            doc["tool_call_count"], doc["file_count"] = conv.tool_call_count, conv.file_count
+            key = doc_key(project_id, doc)
     if writer is not None:
         writer.remember(conv.id, key)
     try:

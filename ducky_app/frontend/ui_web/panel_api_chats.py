@@ -82,6 +82,19 @@ def _copy_name(profile: dict[str, Any], members: list[dict[str, Any]]) -> str:
     return f"{base} {n}"
 
 
+# A tool card's preview; past it the card asks load_tool_result for the rest.
+TOOL_RESULT_CAP = 8_000
+
+
+def _cap_tool_results(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        tool = row.get("tool")
+        result = tool.get("result") if isinstance(tool, dict) else None
+        if isinstance(result, str) and len(result) > TOOL_RESULT_CAP:
+            row["tool"] = {**tool, "result": result[:TOOL_RESULT_CAP], "resultTruncated": True,
+                           "resultBytes": len(result.encode("utf-8"))}
+
+
 class PanelApiChatsMixin:
     @staticmethod
     def _folder_sidebar_row(
@@ -1709,7 +1722,7 @@ class PanelApiChatsMixin:
         _pa.notify_chats_changed(open_tab=False)
 
     def load_messages(
-        self, conv_id: str, before_id: int | None = None, limit: int | None = None
+        self, conv_id: str, before_id: int | None = None, limit: int | None = None, full_results: bool = False
     ) -> list[dict[str, Any]]:
         """The one message-load path: conversation as flat UI rows.
 
@@ -1718,6 +1731,10 @@ class PanelApiChatsMixin:
         so a page (``limit`` newest rows, or the ``limit`` rows before
         ``before_id``) converts only the messages it shows, newest first.
         Without arguments the whole conversation comes back, as before.
+
+        A tool result over ``TOOL_RESULT_CAP`` chars is cut, with ``resultTruncated``
+        and ``resultBytes`` on the row (``load_tool_result`` has it whole): 40 rows over
+        32 KB were 22% of a 7 MB chat. ``full_results`` keeps them whole (account mirror).
         """
         started = _pa.time.monotonic()
         try:
@@ -1734,10 +1751,23 @@ class PanelApiChatsMixin:
             # A chat that can't be read must leave a trace, not just a spinner.
             _pa.record_error("chat", f"Chat {str(conv_id)[:8]} couldn't be loaded: {type(exc).__name__}: {exc}")
             raise
+        if not full_results:
+            _cap_tool_results(rows)
         took = _pa.time.monotonic() - started
         if took > 5.0:
             _pa.record_activity("chat", f"Chat {str(conv_id)[:8]} took {took:.1f}s to load ({len(rows)} rows)")
         return rows
+
+    def load_tool_result(self, conv_id: str, row_id: int) -> dict[str, Any]:
+        """The whole result of one tool row that ``load_messages`` cut."""
+        conv = _pa.load_conversation(conv_id)
+        if not conv:
+            return {"ok": False, "error": "Chat not found"}
+        rows = _pa._messages_to_ui(conv, before_id=int(row_id) + 1, limit=1)
+        tool = rows[-1].get("tool") if rows and rows[-1].get("id") == int(row_id) else None
+        if not isinstance(tool, dict):
+            return {"ok": False, "error": "No tool result in that row"}
+        return {"ok": True, "result": str(tool.get("result") or "")}
 
     def send_message(
         self,

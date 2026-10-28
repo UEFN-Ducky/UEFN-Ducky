@@ -619,6 +619,16 @@ def conv_if_settings_newer(conv_id: str, edited: float) -> dict[str, Any] | None
     return conv_get(conv_id, with_messages=False) if newer else None
 
 
+def conv_set_counts(conv_id: str, *, tool_call_count: int, file_count: int) -> None:
+    """The sidebar's two counters, after a save that synced messages."""
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute(
+            "UPDATE conversations SET tool_call_count=?, file_count=? WHERE id=? AND account_id=?",
+            (int(tool_call_count), int(file_count), conv_id, account_rows.current()),
+        )
+
+
 def conv_message_summary(conv_id: str) -> tuple[int, bool]:
     """(message count, any assistant row) without loading bodies."""
     row = db.connect().execute(
@@ -714,6 +724,7 @@ def _sync_messages(
     known = _saved_rows(conv_id)
     digest_of = functools.partial(account_rows.part_digest, key=key)
     remembered: dict[int, tuple[str, Any, int]] = {}
+    hashes: list[str] = []  # each seq's row hash after the save (callers key caches on it)
     chars = 0
     inserted = updated = deleted = nbytes = 0
     for seq, message in enumerate(messages):
@@ -721,6 +732,7 @@ def _sync_messages(
         last = known.get(seq)
         if last is not None and row is not None and last[0] == row[0] and _unchanged(last[1], message):
             remembered[seq] = last
+            hashes.append(last[0])
             chars += last[2]
             continue
         # Serialise the copy, not the live message, so the hash describes exactly
@@ -732,6 +744,7 @@ def _sync_messages(
         if shell is not None:
             remembered[seq] = (h, shell, len(body))
             chars += len(body)
+        hashes.append(h)
         if row is not None and row[0] == h:
             continue
         nbytes += len(body)
@@ -743,7 +756,7 @@ def _sync_messages(
     if len(existing) > len(messages):
         conn.execute("DELETE FROM messages WHERE conv_id=? AND seq>=?", (conv_id, len(messages)))
         deleted = len(existing) - len(messages)
-    counts = {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes}
+    counts = {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes, "hashes": hashes}
     return counts, remembered, chars
 
 
