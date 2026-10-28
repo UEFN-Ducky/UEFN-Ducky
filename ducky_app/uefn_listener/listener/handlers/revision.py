@@ -102,10 +102,13 @@ def cmd_revision_sync(force: bool = False, reload: bool = True) -> dict:
     if release and not unreal.EditorLoadingAndSavingUtils.new_blank_map(False):
         return {"ok": False, "synced": False, "reloaded": False, "seconds": round(time.time() - started, 2),
                 "error": "could not close the map before syncing"}
-    synced = bool(unreal.SourceControl.sync_files(targets, True))
-    error = "" if synced else _last_error() or "sync failed"
-    # Open the map again even after a failed sync: the person must never be left on the blank one.
-    reloaded = bool(unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).load_level(map_path)) if release else False
+    try:
+        synced = bool(unreal.SourceControl.sync_files(targets, True))
+        error = "" if synced else _last_error() or "sync failed"
+    finally:
+        # Open the map again even after a failed (or raising) sync: the person must never be
+        # left on the blank one.
+        reloaded = bool(unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).load_level(map_path)) if release else False
     return {
         "ok": synced,
         "synced": synced,

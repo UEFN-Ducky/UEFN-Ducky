@@ -431,7 +431,10 @@ def wake() -> None:
 
 def _loop() -> None:
     while not _stop.is_set():
-        delay = tick()
+        try:
+            delay = tick()
+        except Exception:  # noqa: BLE001 - one bad round must not end the watch (and the lock guard) for the session
+            delay = _failed("round raised")
         _wake.wait(delay)
         _wake.clear()
 

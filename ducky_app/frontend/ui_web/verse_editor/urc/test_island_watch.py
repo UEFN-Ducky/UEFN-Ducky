@@ -168,6 +168,23 @@ def test_not_a_lore_island(env, tmp_path: Path) -> None:
     assert env.lore.calls == []
 
 
+def test_a_raising_round_does_not_end_the_watch(env, monkeypatch: pytest.MonkeyPatch) -> None:
+    rounds = []
+
+    def tick():
+        rounds.append(1)
+        if len(rounds) == 1:
+            raise KeyError("signature")
+        iw._stop.set()
+        return 0.0
+
+    monkeypatch.setattr(iw, "tick", tick)
+    monkeypatch.setattr(iw._wake, "wait", lambda delay: True)
+    iw._stop.clear()
+    iw._loop()
+    assert len(rounds) == 2 and iw._st["fails"] == 1
+
+
 def test_errors_back_off_then_recover(env) -> None:
     env.lore.remote = {"ok": False, "error": "offline"}
     assert iw.tick() == iw.ACTIVE_S * 2

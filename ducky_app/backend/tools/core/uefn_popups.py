@@ -42,10 +42,15 @@ KNOWN_POPUPS: dict[str, dict[str, Any]] = {
     "verse validation errors": {"buttons": 4, "press": 4, "primary": 2, "label": "Continue"},
 }
 
-# UEFN's dialog when a pull merged a file changed on both PCs (seen live in French, Oct 27;
-# the English title is a guess). The editor waits on the person's choice there: nothing in
-# Ducky ever presses it (read-only: ``find_conflict_dialog``).
-CONFLICT_DIALOG_TITLES: frozenset[str] = frozenset({"conflicting changes", "modifications en conflit"})
+# UEFN's dialog when a pull merged a file changed on both PCs (seen live in French, Oct 27:
+# "Modifications en conflit"). The editor waits on the person's choice there: nothing in
+# Ducky ever presses it (read-only: ``find_conflict_dialog``). Matched on the word's stem,
+# so the English ("Conflicting Changes") and other UI languages never depend on a guess.
+_CONFLICT_TITLE_RE = re.compile(r"conflict|conflit|konflikt")
+
+
+def is_conflict_dialog_title(title: str) -> bool:
+    return bool(_CONFLICT_TITLE_RE.search(str(title or "").strip().lower()))
 
 _MAIN_TITLE = "unreal editor for fortnite"
 _MIN_BUTTON_W = 36
@@ -400,7 +405,7 @@ def is_lone_button_popup(popup: dict[str, Any], buttons: list[dict[str, Any]]) -
     title = str(popup.get("title") or "").strip().lower()
     if not popup.get("blocking") or not popup.get("enabled", True):
         return False  # the modal itself is the one enabled window
-    if not title or title in KNOWN_POPUPS or title in CONFLICT_DIALOG_TITLES or _LONE_REJECT_RE.search(title):
+    if not title or title in KNOWN_POPUPS or is_conflict_dialog_title(title) or _LONE_REJECT_RE.search(title):
         return False
     rect = popup.get("rect") or {}
     if rect.get("width", 0) > _LONE_MAX_W or rect.get("height", 0) > _LONE_MAX_H:
@@ -449,7 +454,7 @@ def press_lone_button_popups(*, skip: frozenset[int] = frozenset()) -> list[dict
 def find_conflict_dialog() -> dict[str, Any] | None:
     """UEFN's "Conflicting Changes" dialog when it is on screen, else None. Never presses it."""
     try:
-        return next((p for p in list_popups() if p["title"].strip().lower() in CONFLICT_DIALOG_TITLES), None)
+        return next((p for p in list_popups() if is_conflict_dialog_title(p["title"])), None)
     except Exception:
         return None
 

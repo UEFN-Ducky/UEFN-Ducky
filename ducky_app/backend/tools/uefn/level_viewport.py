@@ -73,6 +73,16 @@ def _island_root() -> str:
     return island.replace("/", "\\").rstrip("\\") if island else ""
 
 
+def _wake_island_watch() -> None:
+    # The watch re-reads Lore now, so a cleared or new "behind" alert doesn't wait a round.
+    try:
+        from frontend.ui_web.verse_editor.urc import island_watch
+
+        island_watch.wake()
+    except Exception:
+        pass
+
+
 def _remote_state(state: dict) -> dict:
     return {k: state.get(k) for k in ("in_sync", "behind", "ahead")}
 
@@ -171,6 +181,7 @@ def revision_push(description: str, pretty: bool = False) -> str:
             timeout=_REVISION_TIMEOUT,
         )
     state = lore.repo_state(root)
+    _wake_island_watch()
     return tool_json(
         {
             "ok": bool(result.get("ok")),
@@ -241,6 +252,7 @@ def revision_pull(force: bool = False, allow_both_changed: bool = False, pretty:
             pretty=pretty,
         )
     after = lore.repo_state(root)
+    _wake_island_watch()
     out = {
         "ok": bool(result.get("ok")),
         "reloaded": bool(result.get("reloaded")),

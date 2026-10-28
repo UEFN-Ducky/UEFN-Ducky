@@ -228,6 +228,16 @@ def test_sync_failure_reports_the_provider_error(mod) -> None:
     assert mod._state["loaded"] == ["<blank>", "/MyIsland/MyMap"] and out["reloaded"] is True
 
 
+def test_a_raising_sync_still_reopens_the_map(mod, monkeypatch) -> None:
+    def boom(files, silent):
+        raise RuntimeError("provider crashed")
+
+    monkeypatch.setattr(sys.modules["unreal"].SourceControl, "sync_files", staticmethod(boom))
+    with pytest.raises(RuntimeError, match="provider crashed"):
+        mod.cmd_revision_sync()
+    assert mod._state["loaded"] == ["<blank>", "/MyIsland/MyMap"]  # never left on the blank map
+
+
 def test_sync_stops_when_the_map_cannot_be_closed(mod) -> None:
     mod._state["blank_ok"] = False
     out = mod.cmd_revision_sync()

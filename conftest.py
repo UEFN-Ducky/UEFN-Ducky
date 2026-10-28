@@ -256,6 +256,7 @@ def _appdata_per_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Starting the MCP bridge in-process (frontend.launcher) marks the whole process
     # as the bridge; without this every later test would run as if it were one.
     monkeypatch.delenv("UEFN_DUCKY_MCP_BRIDGE", raising=False)
+    monkeypatch.delenv("UEFN_DUCKY_PROCESS_ROLE", raising=False)  # process_role.set_role() sets both
     _reset_store_memos()
     yield
     _join_host_workers()

@@ -269,7 +269,8 @@ def test_the_lone_button_pass_presses_ok_and_keeps_the_capture(uefn_popup) -> No
     assert popups.press_lone_button_popups() == []  # nothing left on screen
 
 
-@pytest.mark.parametrize("title", ["Modifications en conflit", "Conflicting Changes"])
+@pytest.mark.parametrize("title", ["Modifications en conflit", "Conflicting Changes", "Conflicts Detected",
+                                   "Cambios en conflicto", "Änderungskonflikt"])
 def test_the_conflicting_changes_dialog_is_never_pressed(uefn_popup, title) -> None:
     # Oct 27: after a pull merged a file changed on both PCs. Only the person answers it, even
     # if its capture ever showed a single blue button.

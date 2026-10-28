@@ -118,6 +118,24 @@ def test_pull_syncs_when_behind_and_confirms(root) -> None:
     assert out == {"ok": True, "reloaded": True, "seconds": 3.7, "in_sync": True, "behind": 0, "ahead": 0, "error": ""}
 
 
+def test_push_and_pull_wake_the_island_watch(root) -> None:
+    from frontend.ui_web.verse_editor.urc import island_watch
+
+    lore = fake_lore(states=[
+        {"ok": True, "in_sync": False, "behind": 1, "ahead": 0},
+        {"ok": True, "in_sync": True, "behind": 0, "ahead": 0},
+    ])
+    with patch.object(level_viewport, "_lore_cli", return_value=lore), \
+            patch.object(level_viewport, "send_command") as send, \
+            patch.object(island_watch, "wake") as wake:
+        send.return_value = {"ok": True, "synced": True, "reloaded": True, "seconds": 1.0, "error": ""}
+        level_viewport.revision_pull()
+        assert wake.call_count == 1  # the "behind" alert clears now, not a round later
+        send.return_value = {"ok": True, "checked_in": ["a"], "saved": [], "error": ""}
+        level_viewport.revision_push("d")
+        assert wake.call_count == 2
+
+
 def test_pull_with_unsaved_work_asks_instead(root) -> None:
     lore = fake_lore(states=[{"ok": True, "in_sync": False, "behind": 1, "ahead": 0}])
     with patch.object(level_viewport, "_lore_cli", return_value=lore), \
