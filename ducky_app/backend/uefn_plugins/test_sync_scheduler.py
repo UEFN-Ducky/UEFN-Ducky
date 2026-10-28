@@ -264,6 +264,25 @@ def test_a_burst_of_writes_is_one_round_a_stream_waits_at_most_60s_and_sync_now_
     assert provider.rounds[before:] == [("spaceT", True)]
 
 
+def test_team_settings_are_clamped_and_the_scheduler_reads_the_send_delay(
+    who, clock: Clock, provider: Recorder, events, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from frontend import settings
+
+    assert sync_scheduler.clamp_team_settings(999, 5) == (60.0, 30.0)
+    assert sync_scheduler.clamp_team_settings("x", None) == (sync_scheduler.DEBOUNCE_S, sync_scheduler.ACTIVE_EVERY_S)
+    monkeypatch.setattr(settings.PanelSettings, "load",
+                        classmethod(lambda cls, **kw: SimpleNamespace(team_send_delay_s=30, team_poll_s=120)))
+    assert sync_scheduler.team_timing() == (30.0, 120.0)
+
+    aid = who.be("ana@x.org")
+    link(aid, "spaceT")
+    sched = scheduler(clock)
+    assert sched.tick() == ["spaceT"] and (sched.delay, sched.poll) == (30.0, 120.0)
+    write(aid, "spaceT", "card.a", clock, T + 100)
+    assert ticks(sched, clock, T + 100, T + 129.9, T + 130) == [[], [], ["spaceT"]]  # waits 30 s, not 10
+
+
 def test_a_folder_change_waits_in_the_batch_instead_of_waking_a_round(
     who, clock: Clock, provider: Recorder, events
 ) -> None:

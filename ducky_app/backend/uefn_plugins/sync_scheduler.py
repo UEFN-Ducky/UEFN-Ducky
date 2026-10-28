@@ -92,6 +92,33 @@ HOLD_STATES = frozenset({"lost", "unavailable", "reset"})
 FOLDER_FAST_S = 2.0  # a look this often while the panel is on screen or a call ran lately
 FOLDER_SLOW_S = 60.0  # otherwise
 FOLDER_IN_USE_S = 120.0  # a call this recent keeps the plugin in use
+# Settings the Team modal's sliders write (PanelSettings.team_send_delay_s / team_poll_s):
+# DEBOUNCE_S and ACTIVE_EVERY_S above are their defaults.
+TEAM_SEND_DELAY_RANGE = (0.0, 60.0)
+TEAM_POLL_RANGE = (30.0, 600.0)
+
+
+def clamp_team_settings(delay: Any, poll: Any) -> tuple[float, float]:
+    """``(send delay, poll interval)`` in range; a value that isn't a number is its default."""
+    def one(value: Any, lo: float, hi: float, default: float) -> float:
+        try:
+            got = float(value)
+        except (TypeError, ValueError):
+            return default
+        return default if got != got else min(hi, max(lo, got))  # NaN
+
+    return one(delay, *TEAM_SEND_DELAY_RANGE, DEBOUNCE_S), one(poll, *TEAM_POLL_RANGE, ACTIVE_EVERY_S)
+
+
+def team_timing() -> tuple[float, float]:
+    """The settings' send delay and poll interval, clamped (the defaults when unset)."""
+    try:
+        from frontend.settings import PanelSettings
+
+        s = PanelSettings.load()
+    except Exception:  # noqa: BLE001 — no settings store: the defaults
+        return DEBOUNCE_S, ACTIVE_EVERY_S
+    return clamp_team_settings(getattr(s, "team_send_delay_s", DEBOUNCE_S), getattr(s, "team_poll_s", ACTIVE_EVERY_S))
 
 
 def _in_bridge() -> bool:
@@ -377,6 +404,7 @@ class Scheduler:
         self._folder_looks: dict[tuple[str, str], tuple[float, float]] = {}
         self._folder_running: set[str] = set()  # spaces with a look running
         self._migrated: set[str] = set()  # accounts whose folder links were looked at once
+        self.delay, self.poll = DEBOUNCE_S, ACTIVE_EVERY_S  # team_timing(), read at each refresh
 
     def tick(self, now: float | None = None) -> list[str]:
         """Start every round that is due, and a team space's presence and lock look when
@@ -518,6 +546,7 @@ class Scheduler:
         from backend.uefn_plugins import scopes
 
         self._refreshed, self._stale = now, False
+        self.delay, self.poll = team_timing()  # a settings write bumps data_version: seen within 5 s
         account = scopes.account_id() if provider else scopes.LOCAL
         found = {} if account == scopes.LOCAL else _plan(account)
         rows = {space: repo.sync_get(account, space) for space in found}
@@ -558,8 +587,7 @@ class Scheduler:
             for space in [s for s, rec in self.spaces.items() if s not in found and not rec.running]:
                 del self.spaces[space]
 
-    @staticmethod
-    def _due(rec: _Space, now: float) -> bool | None:
+    def _due(self, rec: _Space, now: float) -> bool | None:
         """None: not yet. Otherwise the round's ``force``: True for changes to send (it
         must beat the provider's own minute limit), False for a pull it may skip."""
         if rec.running:
@@ -579,10 +607,10 @@ class Scheduler:
         failing = rec.fails > 0 or rec.state in RETRY_STATES
         wait = RETRY_AFTER_S[min(max(rec.fails, 1), len(RETRY_AFTER_S)) - 1] if failing else 0.0
         slow = rec.state in SLOW_STATES
-        settled = now >= written + DEBOUNCE_S or now >= rec.first + MAX_WAIT_S
+        settled = now >= written + self.delay or now >= rec.first + MAX_WAIT_S
         if unsent and not slow and settled and now >= max(last + MIN_GAP_S, last + wait):
             return True
-        every = IDLE_EVERY_S if slow else wait or (ACTIVE_EVERY_S if rec.active or rec.hot or rec.live else IDLE_EVERY_S)
+        every = IDLE_EVERY_S if slow else wait or (self.poll if rec.active or rec.hot or rec.live else IDLE_EVERY_S)
         return False if now >= last + every else None
 
     def _side(self, account: str, space: str, plugins: list[str]) -> None:
