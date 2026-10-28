@@ -66,6 +66,8 @@ class PanelApiSettingsMixin:
             "web_access": (
                 s.web_access if getattr(s, "web_access", "ask") in ("off", "ask", "on") else "ask"
             ),
+            "team_send_delay_s": int(getattr(s, "team_send_delay_s", 10)),
+            "team_poll_s": int(getattr(s, "team_poll_s", 60)),
             "follow_code_enabled": bool(getattr(s, "follow_code_enabled", False)),
             "follow_code_speed": (
                 s.follow_code_speed
@@ -629,6 +631,12 @@ class PanelApiSettingsMixin:
         for key in ("default_image_provider", "default_mesh_provider"):
             if key in patch:
                 setattr(s, key, str(patch.get(key) or "").strip())
+        if "team_send_delay_s" in patch or "team_poll_s" in patch:
+            from backend.uefn_plugins.sync_scheduler import clamp_team_settings
+
+            s.team_send_delay_s, s.team_poll_s = clamp_team_settings(
+                patch.get("team_send_delay_s", s.team_send_delay_s), patch.get("team_poll_s", s.team_poll_s)
+            )
         if "web_access" in patch:
             access = str(patch.get("web_access") or "ask").strip().lower()
             s.web_access = access if access in ("off", "ask", "on") else "ask"

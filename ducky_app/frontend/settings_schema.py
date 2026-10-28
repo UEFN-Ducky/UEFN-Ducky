@@ -229,6 +229,14 @@ FIELD_META: dict[str, FieldMeta] = {
         enum=("off", "ask", "on"),
         description="Whether duckies may search the public web. ask = confirm once per chat.",
     ),
+    "team_send_delay_s": FieldMeta(
+        "Team send delay (s)", "Team", settable=True,
+        description="Seconds of quiet before a batch of team changes goes out (0–60).",
+    ),
+    "team_poll_s": FieldMeta(
+        "Team sync interval (s)", "Team", settable=True,
+        description="Seconds between checks for teammates' changes (30–600).",
+    ),
     "prompt_caching_enabled": FieldMeta(
         "Legacy provider cache markers fallback", "LLMs", settable=True
     ),

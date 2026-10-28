@@ -289,6 +289,12 @@ class PanelSettings:
     web_access: str = "ask"
     """Public web lookup: off, ask once per chat, or on."""
 
+    team_send_delay_s: int = 10
+    """Team data: seconds of quiet before a batch of changes goes out (0–60)."""
+
+    team_poll_s: int = 60
+    """Team data: seconds between checks for teammates' changes (30–600)."""
+
     prompt_caching_enabled: bool = True
     """Legacy fallback when Anthropic/OpenAI plugin prefs omit promptCaching."""
 
