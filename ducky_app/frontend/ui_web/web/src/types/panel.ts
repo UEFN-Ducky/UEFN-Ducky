@@ -957,6 +957,10 @@ export interface ToolCallData {
   status?: "pending" | "success" | "error" | "cancelled" | string;
   durationMs?: number;
   result?: string;
+  /** `load_messages` cut `result` (the card asks `load_tool_result` for the rest). */
+  resultTruncated?: boolean;
+  /** The whole result's size in bytes, when it was cut. */
+  resultBytes?: number;
   llmTokens?: number;
   hint?: string;
   fileEdit?: FileEditData;
@@ -3545,7 +3549,8 @@ export interface PanelApi {
     error?: string;
   }>;
   list_uefn_plugins?(): Promise<{ ok?: boolean; error?: string; plugins?: UefnPluginDto[] }>;
-  list_workflow_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[] }>;
+  /** `icons[plugin_id]`: a plugin's icon, sent once instead of on each of its nodes. */
+  list_workflow_nodes?(): Promise<{ ok?: boolean; nodes?: AutomationNodeDto[]; icons?: Record<string, string> }>;
   list_generated_images?(): Promise<{
     ok?: boolean;
     images?: Array<{ name: string; media_url?: string; prompt?: string; gateway?: string; model?: string }>;
@@ -3781,6 +3786,8 @@ export interface PanelApi {
   delete_conversation(conv_id: string, keepInside?: boolean): Promise<void>;
   /** `limit`: only the newest rows (before `before_id`); without it the whole chat. */
   load_messages(conv_id: string, before_id?: number | null, limit?: number): Promise<ChatMessage[]>;
+  /** The whole result of a tool row `load_messages` cut. */
+  load_tool_result?(conv_id: string, row_id: number): Promise<{ ok: boolean; result?: string; error?: string }>;
   get_settings(): Promise<PanelSettingsDto>;
   get_appearance(): Promise<AppearanceDto>;
   save_appearance(patch: AppearanceDto): Promise<string>;

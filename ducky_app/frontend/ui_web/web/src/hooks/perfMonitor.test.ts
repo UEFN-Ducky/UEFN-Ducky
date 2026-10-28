@@ -75,6 +75,24 @@ it("still reports a stalled frame to the backend", async () => {
   ]);
 });
 
+it("names the slowest script of a long animation frame", async () => {
+  const { installPerfMonitor } = await import("./perfMonitor");
+  installPerfMonitor();
+  const entry = {
+    name: "long-animation-frame",
+    duration: 180,
+    scripts: [
+      { duration: 20, invoker: "TimerHandler:setTimeout", sourceFunctionName: "tick", sourceURL: "http://127.0.0.1/assets/a.js" },
+      { duration: 150, invoker: "FrameRequestCallback", sourceFunctionName: "deliver", sourceURL: "http://127.0.0.1/assets/index-abc.js?v=1" },
+    ],
+  };
+  FakeObserver.instances[0].callback({ getEntries: () => [entry] });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.report_ui_perf.mock.calls[0][0][0]).toMatchObject({
+    name: "long-animation-frame", duration_ms: 180, source: "FrameRequestCallback deliver @index-abc.js",
+  });
+});
+
 it("falls back to long tasks where long animation frames are not reported", async () => {
   FakeObserver.supportedEntryTypes = ["longtask"];
   try {

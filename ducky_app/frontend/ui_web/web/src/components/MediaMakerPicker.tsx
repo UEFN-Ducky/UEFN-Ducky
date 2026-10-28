@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { getApi } from "../hooks/usePanelApi";
+import { loadWorkflowNodes } from "../automations/workflowNodeCatalog";
 import type { AutomationNodeDto } from "../types/panel";
 import { ChoiceDropdown } from "./ChoiceDropdown";
 
@@ -37,8 +38,9 @@ export function MediaMakerPicker({ kind, label }: { kind: MediaKind; label: stri
     const api = getApi();
     if (!api) return;
     let live = true;
-    void Promise.resolve(api.list_workflow_nodes?.())
-      .then((r) => live && setMakers(makersFrom(r?.nodes || [], kind)))
+    // Fresh: this sits in Settings, where a key just added makes a backend ready.
+    void loadWorkflowNodes(true)
+      .then((nodes) => live && setMakers(makersFrom(nodes, kind)))
       .catch(() => live && setMakers([]));
     void Promise.resolve(api.get_settings?.())
       .then((s) => live && setValue(String(s?.[SETTING[kind]] || "")))

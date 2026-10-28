@@ -145,6 +145,11 @@ export const HTTP_ROUTED_METHODS: ReadonlySet<string> = new Set([
   "workflow_run_snapshot",
   "list_agent_profiles",
   "get_plan",
+  "list_changesets",
+  "list_workflow_nodes",
+  "list_uefn_plugins",
+  "load_messages",
+  "load_tool_result",
 ]);
 
 const _routed = new WeakMap<PanelApi, PanelApi>();

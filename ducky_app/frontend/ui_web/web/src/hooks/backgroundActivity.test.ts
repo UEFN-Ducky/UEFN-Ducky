@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  _flushBackgroundActivityPersistForTests,
   _peekBackgroundJobsForTests,
   _resetBackgroundActivityForTests,
   clearFinishedBackgroundJobs,
@@ -52,6 +53,28 @@ describe("backgroundActivity", () => {
     const jobs = _peekBackgroundJobsForTests();
     expect(jobs.map((j) => j.id)).toEqual(["a"]);
     expect(countWorkingBackgroundJobs(jobs)).toBe(1);
+  });
+});
+
+describe("persistence", () => {
+  it("saves once per burst, not once per upsert", () => {
+    vi.useFakeTimers();
+    const setItem = vi.fn();
+    vi.stubGlobal("sessionStorage", { getItem: () => null, setItem, removeItem() {} });
+    try {
+      for (let i = 0; i < 200; i++) upsertBackgroundJob({ id: `agent:c${i % 50}`, source: "agent", title: "T", detail: `step ${i}`, phase: "working" });
+      expect(setItem).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(setItem.mock.calls[0][1]).jobs).toHaveLength(50);
+      upsertBackgroundJob({ id: "agent:c0", detail: "last" });
+      _flushBackgroundActivityPersistForTests();
+      expect(setItem).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(setItem.mock.calls[1][1]).jobs[0].detail).toBe("last");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });
 

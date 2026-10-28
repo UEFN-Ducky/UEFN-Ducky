@@ -50,28 +50,33 @@ const listeners = new Set<AgentEventListener>();
 const immediateListeners = new Set<AgentEventListener>();
 const pendingEvents: AgentEvent[] = [];
 const MAX_EVENTS_PER_FRAME = 200;
+/** A frame stops delivering after this long; the rest waits for the next frame. */
+const FRAME_BUDGET_MS = 8;
 let deliveryScheduled = false;
 
+/** Joins each run's text/thinking deltas and keeps its latest status. Hundreds of agents
+ *  interleave on one poll, so a run's deltas are rarely adjacent: they merge whenever no
+ *  other event of the same run sits between them (each run keeps its own order). */
 export function coalesceAgentEvents(events: AgentEvent[]): AgentEvent[] {
   const out: AgentEvent[] = [];
+  const lastOfRun = new Map<string, number>();
   for (const event of events) {
-    const previous = out[out.length - 1];
-    const sameRun =
-      previous != null &&
-      previous.conv_id === event.conv_id &&
-      previous.run_id === event.run_id;
+    const key = `${event.conv_id ?? ""}\u0000${event.run_id ?? ""}`;
+    const at = lastOfRun.get(key);
+    const previous = at === undefined ? undefined : out[at];
     if (
-      sameRun &&
+      at !== undefined && previous &&
       (event.type === "text_delta" || event.type === "thinking") &&
       previous.type === event.type
     ) {
-      out[out.length - 1] = { ...previous, text: (previous.text ?? "") + (event.text ?? "") };
+      out[at] = { ...previous, text: (previous.text ?? "") + (event.text ?? "") };
       continue;
     }
-    if (sameRun && event.type === "status" && previous.type === "status") {
-      out[out.length - 1] = event;
+    if (at !== undefined && previous && event.type === "status" && previous.type === "status") {
+      out[at] = event;
       continue;
     }
+    lastOfRun.set(key, out.length);
     out.push(event);
   }
   return out;
@@ -97,10 +102,16 @@ function scheduleDelivery() {
   schedule(() => {
     deliveryScheduled = false;
     const t0 = performance.now();
-    const batch = coalesceAgentEvents(pendingEvents.splice(0, MAX_EVENTS_PER_FRAME));
-    for (const event of batch) deliver(event);
+    // Coalesce everything waiting, then deliver within the frame's count and time budget.
+    const batch = coalesceAgentEvents(pendingEvents.splice(0));
+    let delivered = 0;
+    while (delivered < batch.length && delivered < MAX_EVENTS_PER_FRAME) {
+      deliver(batch[delivered++]);
+      if (performance.now() - t0 >= FRAME_BUDGET_MS) break;
+    }
+    if (delivered < batch.length) pendingEvents.unshift(...batch.slice(delivered));
     const deliveryMs = performance.now() - t0;
-    noteFrameDelivery(deliveryMs, batch.length, pendingEvents.length);
+    noteFrameDelivery(deliveryMs, delivered, pendingEvents.length);
     if (pendingEvents.length > 0) scheduleDelivery();
   });
 }

@@ -12,7 +12,21 @@ export type UiPerfEntry = {
   duration_ms: number;
   pending_depth?: number;
   peak_pending?: number;
+  /** The long frame's slowest script: who called it and where it lives. */
+  source?: string;
 };
+
+type LoafScript = { duration?: number; invoker?: string; sourceFunctionName?: string; sourceURL?: string };
+
+/** "invoker fn @file:line" for a long animation frame's slowest script; undefined for a plain long task. */
+export function stallSource(entry: PerformanceEntry): string | undefined {
+  const scripts = (entry as PerformanceEntry & { scripts?: LoafScript[] }).scripts;
+  if (!Array.isArray(scripts) || !scripts.length) return undefined;
+  const top = scripts.reduce((a, b) => ((b.duration ?? 0) > (a.duration ?? 0) ? b : a));
+  const file = (top.sourceURL || "").split(/[?#]/)[0].split("/").pop() || "";
+  const text = [top.invoker, top.sourceFunctionName, file && `@${file}`].filter(Boolean).join(" ");
+  return text ? text.slice(0, 160) : undefined;
+}
 
 const FLUSH_INTERVAL_MS = 5000;
 const LONGTASK_MS = 50;
@@ -82,11 +96,13 @@ export function installPerfMonitor() {
       const obs = new Observer((list) => {
         for (const entry of list.getEntries()) {
           if (entry.duration >= LONGTASK_MS) {
+            const source = stallSource(entry);
             enqueue({
               kind: "ui_stall",
               name: entry.name || "longtask",
               duration_ms: entry.duration,
               peak_pending: peakPending,
+              ...(source ? { source } : {}),
             });
           }
         }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
-import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
+import { subscribeLiveRefresh } from "../hooks/liveRefresh";
 import { getApi } from "../hooks/usePanelApi";
 import type { ChangesetManualRow, ChangesetRevertResult, ChangesetRunDto, SessionFile } from "../types/panel";
 import {
@@ -52,8 +52,9 @@ interface DiffView {
   json: boolean;
 }
 
+/** Every journal row announces itself (`changeset_row`), so a plain `tool_done` from any
+ *  agent adds nothing but refetches. */
 const LIVE_EVENT_TYPES = new Set([
-  "tool_done",
   "agent_stopped",
   "files_reverted",
   "file_guard",
@@ -105,19 +106,13 @@ export function ChangesetPanel({
   }, [refresh]);
 
   // Any write, stop, revert or guard for this chat (or, on a hub, any member) refreshes.
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeAgentEvents((event) => {
-      if (!LIVE_EVENT_TYPES.has(event.type)) return;
-      if (!isGroup && event.conv_id && event.conv_id !== convId) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), 400);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [convId, isGroup, refresh]);
+  useEffect(
+    () => subscribeLiveRefresh(
+      (event) => LIVE_EVENT_TYPES.has(event.type) && (isGroup || !event.conv_id || event.conv_id === convId),
+      () => void refresh(),
+    ),
+    [convId, isGroup, refresh],
+  );
 
   const filePaths = useMemo(() => changesetFilePaths(runs), [runs]);
   useEffect(() => {

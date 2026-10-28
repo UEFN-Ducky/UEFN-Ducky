@@ -1,5 +1,6 @@
 import { formatElapsedMs } from "../hooks/chatTurnTimer";
 import { getBackgroundJobs } from "../hooks/backgroundActivity";
+import { getApi } from "../hooks/usePanelApi";
 import { toolActivityId, useToolActivityTarget } from "../navigation/toolActivity";
 import { toolExitCode } from "../utils/toolExitCode";
 import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
@@ -33,6 +34,39 @@ import {
 import { formatToolDuration, humanToolLabel, isWebLookupTool, webToolDetail, webToolLabel } from "../utils/agentActivity";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
+
+/** "Show full result (40 KB)" under a result `load_messages` cut; the click reads it whole. */
+function FullResultButton({ convId, rowId, bytes, onLoaded }: {
+  convId: string;
+  rowId: number;
+  bytes?: number;
+  onLoaded: (text: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await getApi()?.load_tool_result?.(convId, rowId);
+      if (res?.ok && typeof res.result === "string") onLoaded(res.result);
+      else setError(res?.error || "Could not load the full result");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const size = bytes ? ` (${Math.max(1, Math.round(bytes / 1024))} KB)` : "";
+  return (
+    <div className="tool-execution-card-hint">
+      <button type="button" className="ds-btn" disabled={busy} onClick={() => void load()}>
+        {busy ? "Loading…" : `Show full result${size}`}
+      </button>
+      {error ? <span role="alert"> {error}</span> : null}
+    </div>
+  );
+}
 
 /** Shell commands that may change files: their row stays above the file cards. */
 const COMMAND_TOOL = /(^|__)(command_execution|bash|shell|powershell|run_terminal_cmd|ducky_terminal_run|sandbox_run)$/i;
@@ -117,6 +151,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const target = useToolActivityTarget(convId);
   const toolId = toolActivityId(intent.tool);
   const meta = toolMeta(intent, result);
+  // The whole result, once the person asked for the rest of a cut one.
+  const [fullResult, setFullResult] = useState<string | null>(null);
+  if (fullResult !== null) meta.result = fullResult;
+  const truncated = fullResult === null && Boolean(result?.tool?.resultTruncated) && typeof result?.id === "number";
   const [now, setNow] = useState(Date.now);
   const isCancelled = meta.status === "cancelled";
   const isRunning = meta.status === "pending" || meta.status === "running";
@@ -519,6 +557,9 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
                   hint={!isRunning ? meta.hint : undefined}
                   onOpenFile={onOpenFile}
                 />
+              ) : null}
+              {truncated && convId && !isRunning && !isCancelled && !isGuardBlocked ? (
+                <FullResultButton convId={convId} rowId={result!.id as number} bytes={result?.tool?.resultBytes} onLoaded={setFullResult} />
               ) : null}
               {!isSuccess && !isRunning && resultText.includes("AI_FILE_PROTECTION:") ? <FileProtectionRecovery /> : null}
             </div>

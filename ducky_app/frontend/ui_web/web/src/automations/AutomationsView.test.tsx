@@ -5,6 +5,7 @@ import { AutomationsView } from "./AutomationsView";
 import { applyWorkflowEvent, resetWorkflowRunsForTests } from "../hooks/workflowRunsByChat";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { setUnsavedWorkflow } from "./unsavedWorkflow";
+import { _resetWorkflowNodesForTests } from "./workflowNodeCatalog";
 import { installAppIdle } from "../utils/appIdle";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
@@ -42,6 +43,7 @@ let owners: WorkflowOwnersDto;
 let saved: AutomationDto;
 let daily: AutomationDto;
 beforeEach(() => {
+  _resetWorkflowNodesForTests();  // each test sets its own node catalog
   class TestPointerEvent extends MouseEvent {
     pointerId: number;
     pointerType: string;

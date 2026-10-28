@@ -27,6 +27,9 @@ const STORAGE_KEY = "uefn-background-activity";
 const MAX_ITEMS = 40;
 const JOB_EVENT = "ducky:background-job";
 const ACTION_EVENT = "ducky:background-job-action";
+/** Hundreds of agents upsert hundreds of times a frame; stringifying every job each time
+ *  was the window's top long task (35 ms per frame at 300 agents). */
+const PERSIST_DELAY_MS = 1000;
 
 type Snapshot = { jobs: BackgroundJob[] };
 
@@ -52,10 +55,18 @@ function writePersisted(jobs: BackgroundJob[]): void {
 
 let snapshot: Snapshot = { jobs: readPersisted() };
 const listeners = new Set<() => void>();
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPersist(): void {
+  if (persistTimer === null) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  writePersisted(snapshot.jobs);
+}
 
 function emit(): void {
   snapshot = { jobs: snapshot.jobs };
-  writePersisted(snapshot.jobs);
+  if (persistTimer === null) persistTimer = setTimeout(flushPersist, PERSIST_DELAY_MS);
   for (const fn of [...listeners]) fn();
 }
 
@@ -192,6 +203,14 @@ function onJobEvent(ev: Event): void {
 
 if (typeof window !== "undefined") {
   window.addEventListener(JOB_EVENT, onJobEvent);
+  // A reload inside the delay keeps the tray rows.
+  window.addEventListener("pagehide", flushPersist);
+  window.addEventListener("beforeunload", flushPersist);
+}
+
+/** ponytail: test-only, writes the pending save now. */
+export function _flushBackgroundActivityPersistForTests(): void {
+  flushPersist();
 }
 
 /** ponytail: test-only peek. */
@@ -202,10 +221,12 @@ export function _peekBackgroundJobsForTests(): BackgroundJob[] {
 /** ponytail: test-only reset. */
 export function _resetBackgroundActivityForTests(): void {
   snapshot = { jobs: [] };
+  emit();
+  if (persistTimer !== null) clearTimeout(persistTimer);
+  persistTimer = null;
   try {
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     /* ignore */
   }
-  emit();
 }

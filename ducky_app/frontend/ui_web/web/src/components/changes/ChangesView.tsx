@@ -2,7 +2,7 @@ import { failedActionCopyText, readableLabel } from './ledgerPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type MouseEvent, type ReactNode } from "react";
 
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
-import { subscribeAgentEvents } from "../../hooks/useAgentEventBus";
+import { subscribeLiveRefresh } from "../../hooks/liveRefresh";
 import { getApi } from "../../hooks/usePanelApi";
 import { copyText } from "../../utils/copyText";
 import { useRunningAgents } from "../../hooks/useRunningAgents";
@@ -52,14 +52,13 @@ import { JsonDiffView } from "./JsonDiffView";
 
 /** Every run in the project, not just this chat's. The server clamps at 500. */
 const RUN_LIMIT = 500;
-const REFRESH_DEBOUNCE_MS = 400;
 const ToolFileEditDiff = lazy(() =>
   import("../ToolFileEditDiff").then((m) => ({ default: m.ToolFileEditDiff })),
 );
 
-/** Any write, editor change, refusal, stop or revert redraws the ledger. */
+/** Any write, editor change, refusal, stop or revert redraws the ledger. Every journal row
+ *  announces itself (`changeset_row`); a plain `tool_done` from any agent only refetched. */
 const LIVE_EVENT_TYPES = new Set([
-  "tool_done",
   "agent_stopped",
   "files_reverted",
   "file_guard",
@@ -341,18 +340,10 @@ export function ChangesView({
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeAgentEvents((event) => {
-      if (!LIVE_EVENT_TYPES.has(event.type)) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void refresh(), REFRESH_DEBOUNCE_MS);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [refresh]);
+  useEffect(
+    () => subscribeLiveRefresh((event) => LIVE_EVENT_TYPES.has(event.type), () => void refresh()),
+    [refresh],
+  );
 
   const duckies = useMemo(() => {
     const seen = new Map<string, string>();

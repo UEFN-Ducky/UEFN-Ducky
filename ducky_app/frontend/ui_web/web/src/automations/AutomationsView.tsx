@@ -7,6 +7,7 @@ import { readDetailsTab, WorkflowInspector, writeDetailsTab, type DetailsTab, ty
 import { blankCodeConfig, CODE_TYPE, dropWires, isCodeNode, wiresDropped } from "./codeNode";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { CanvasMenu } from "./CanvasMenu";
+import { loadWorkflowNodes } from "./workflowNodeCatalog";
 import type {
   AutomationDto,
   AutomationGraphDto,
@@ -636,7 +637,7 @@ export function AutomationsView() {
     const attempt = ++catalogTry.current;
     setCatalogState("loading");
     let nodes: AutomationNodeDto[] = [];
-    try { nodes = (await getApi()?.list_workflow_nodes?.())?.nodes || []; } catch { /* tried again below */ }
+    try { nodes = await loadWorkflowNodes(); } catch { /* tried again below */ }
     if (attempt !== catalogTry.current) return false;
     setCatalog(nodes);
     setCatalogState(nodes.length ? "ready" : "failed");
