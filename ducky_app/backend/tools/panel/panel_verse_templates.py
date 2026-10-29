@@ -106,14 +106,38 @@ def apply_user_verse_template(
 ) -> dict[str, Any]:
     from frontend.verse_template_assets import apply_custom_verse_template
 
-    if not (template_id or "").strip().startswith("custom:"):
-        return {
-            "ok": False,
-            "error": (
-                "Only custom:… templates — for Store/plugin packs use verse_template_apply"
-            ),
-        }
+    tid = (template_id or "").strip()
+    if not tid.startswith("custom:"):
+        return {"ok": False, "error": _store_template_hint(tid)}
     return apply_custom_verse_template(template_id, parent_relative=parent_relative)
+
+
+def _store_template_hint(template_id: str) -> str:
+    """Name the Store plugin that owns ``plugin:<pid>:<id>`` (or that it is off)."""
+    from backend.uefn_plugins.host import get_contributions
+
+    parts = template_id.split(":", 2)
+    pid, bare = (parts[1], parts[2]) if len(parts) == 3 and parts[0] == "plugin" else ("", template_id)
+    rows = [r for r in get_contributions().get("verse_templates") or [] if isinstance(r, dict)]
+    row = next(
+        (r for r in rows if r.get("id") == bare and (not pid or r.get("plugin_id") == pid)),
+        None,
+    )
+    if row is not None:
+        return (
+            f"{template_id} is a Store template from plugin '{row.get('plugin_id')}': "
+            f"call verse_template_apply(template_id='{template_id}') instead "
+            "(this tool applies custom:… templates only)"
+        )
+    if pid:
+        return (
+            f"plugin '{pid}' is off or removed, so {template_id} is unavailable: "
+            f"turn '{pid}' on in the Store, then call verse_template_apply"
+        )
+    return (
+        f"unknown template_id: {template_id}. This tool applies custom:… templates; "
+        "Store packs use verse_template_apply (verse_template_list shows their ids)"
+    )
 
 
 @mcp.tool()

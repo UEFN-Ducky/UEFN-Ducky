@@ -48,6 +48,21 @@ class PlansStoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    def test_add_node_parent_by_title_or_listed_ids(self) -> None:
+        # Oct 29 2026: 22 of 154 ducky_plan_add_node calls failed fast with a bare "parent node not found".
+        nodes = [
+            {"id": "term", "content": "Terminal", "children": [{"id": "t1", "content": "Kind"}]},
+            {"id": "cpu", "content": "Idle CPU", "children": [{"id": "c1", "content": "Timer"}]},
+            {"id": "solo", "content": "Loose step"},
+        ]
+        plans.create_plan("chat-parent", nodes=nodes, project_root=self.root)
+        doc = plans.add_node("chat-parent", content="Poll less", parent_id="idle cpu", project_root=self.root)
+        cpu = plans._walk_find(doc["nodes"], "cpu")[2]
+        self.assertEqual([k["content"] for k in cpu["children"]], ["Timer", "Poll less"])
+        with self.assertRaises(ValueError) as caught:
+            plans.add_node("chat-parent", content="X", parent_id="Fix", project_root=self.root)
+        self.assertIn("parent node not found: 'Fix' (sections: term, cpu; top-level steps: solo)", str(caught.exception))
+
     def test_long_step_notes_are_capped_and_linked(self) -> None:
         plan = plans.create_plan("chat-notes", nodes=[{"id": "s1", "content": "Step"}], project_root=self.root)
         log = "".join(f"line {i}: build output\n" for i in range(500))  # ~10 KB

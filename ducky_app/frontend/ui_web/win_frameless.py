@@ -171,6 +171,7 @@ _WM_NCHITTEST = 0x0084
 _WM_NCACTIVATE = 0x0086
 _WM_GETMINMAXINFO = 0x0024
 _WM_SYSCOMMAND = 0x0112
+_WM_ENDSESSION = 0x0016
 _SC_SIZE = 0xF000
 _HTCAPTION = 2
 _HTCLIENT = 1
@@ -986,6 +987,12 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
         elif msg == _WM_NCACTIVATE:
             if orig:
                 return _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, -1)
+        elif msg == _WM_ENDSESSION and wparam:
+            # Logoff/shutdown kills the process after this returns: only clear the running
+            # flag (one meta write) so the next start doesn't count an app_unclean_exit.
+            from frontend import usage_stats
+
+            usage_stats.app_closing()
     except Exception:
         pass
     if orig:

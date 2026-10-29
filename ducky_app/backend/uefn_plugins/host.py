@@ -139,6 +139,12 @@ _PLUGIN_TOOL_OWNER: dict[str, str] = {}
 # fall through to the editor gate and read "UEFN listener offline").
 _TOOL_LAST_OWNER: dict[str, str] = {}
 _LOAD_FAILURES: dict[str, str] = {}
+# Compiled backends executed in this process: module name -> (module, .pyd path). CPython
+# never unloads an extension, so running one's init again is native UB (Oct 29 2026
+# ACCESS_VIOLATION reloading the Blender .pyd). They stay loaded until Ducky restarts.
+_COMPILED_LOADED: dict[str, tuple[Any, str]] = {}
+# Plugins whose newer compiled version waits for a restart: pid -> message.
+_RESTART_PENDING: dict[str, str] = {}
 # api.tool(listener=False) — host-cache / non-editor tools (skip UEFN listener gate).
 _PLUGIN_HOST_ONLY_TOOLS: set[str] = set()
 # Plugins that touched api.data: their tool results name the scope ("space Alpha Studio").
@@ -1155,9 +1161,10 @@ def _drop_plugin_runtime(pid: str, mod_name: str) -> None:
         _PLUGIN_INTENT_ROWS[:] = [row for row in _PLUGIN_INTENT_ROWS if row[0] != pid]
         for name in list(tool_names):
             _PLUGIN_TOOL_OWNER.pop(name, None)
-        for key in list(sys.modules):
-            if key == mod_name or key.startswith(mod_name + "."):
-                del sys.modules[key]
+        if mod_name not in _COMPILED_LOADED:  # a compiled backend can't be re-executed
+            for key in list(sys.modules):
+                if key == mod_name or key.startswith(mod_name + "."):
+                    del sys.modules[key]
 
 
 def set_active_uefn_agent_plugin_ids(plugin_ids: list[str] | None) -> None:
@@ -3330,6 +3337,9 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         _REGISTERED.add(pid)
         _LOADED_SIGNATURE[pid] = signature
         _LOAD_FAILURES.pop(pid, None)
+        pending = _RESTART_PENDING.pop(pid, None)
+        if pending:
+            _record_plugin_load_error(pid, RuntimeError(pending))
         if folder_epoch is not None:
             _FOLDER_EPOCH[pid] = folder_epoch
             _FOLDER_MOVED.pop(pid, None)
@@ -3693,6 +3703,14 @@ def _compiled_backend_pyd(root: Path, manifest: dict[str, Any], mod_name: str) -
     return matches[-1] if matches else None
 
 
+def _pyd_identity(pyd: Path) -> str:
+    """Path + mtime: a newer build can land under the old file name."""
+    try:
+        return f"{pyd}|{pyd.stat().st_mtime_ns}"
+    except OSError:
+        return str(pyd)
+
+
 def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> Any:
     """Load a plugin's Nuitka-compiled backend extension module.
 
@@ -3703,6 +3721,15 @@ def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> 
     from backend.uefn_plugins.store import plugin_dir
 
     module_name = backend_module_name(pid)
+    loaded = _COMPILED_LOADED.get(module_name)
+    if loaded is not None:
+        mod, loaded_pyd = loaded
+        pyd = _compiled_backend_pyd(root, manifest, module_name)
+        if pyd is not None and _pyd_identity(pyd) != loaded_pyd:
+            label = str(manifest.get("label") or pid)
+            _RESTART_PENDING[pid] = f"Restart UEFN Ducky to finish updating {label}"
+        sys.modules[module_name] = mod
+        return mod
     if module_name in sys.modules:
         return sys.modules[module_name]
 
@@ -3727,6 +3754,7 @@ def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> 
         raise RuntimeError(f"cannot load compiled backend for {pid}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = mod
+    _COMPILED_LOADED[module_name] = (mod, _pyd_identity(pyd))  # before exec: a failed init is still mapped
     spec.loader.exec_module(mod)
     return mod
 

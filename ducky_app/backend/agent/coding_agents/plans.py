@@ -941,7 +941,17 @@ def add_node(
     else:
         sibs, _, parent_node = _walk_find(roots, parent)
         if parent_node is None:
-            raise ValueError("parent node not found")
+            # Agents often pass a section's title instead of its id: take it when exactly one matches.
+            named = [n for n in _flatten_nodes(roots) if str(n.get("content") or "").strip().lower() == parent.lower()]
+            if len(named) != 1:
+                sections = ", ".join(str(n.get("id")) for n in roots if n.get("children")) or "none"
+                steps = ", ".join(str(n.get("id")) for n in roots if not n.get("children")) or "none"
+                raise ValueError(
+                    f"parent node not found: {parent!r} (sections: {sections}; top-level steps: {steps}). "
+                    "Pass a node id from the plan outline, or leave parent_id empty for a top-level step"
+                )
+            parent_node = named[0]
+            parent = str(parent_node.get("id"))
         # A fix for a finished section goes back to the same seat: the section (and any finished
         # section above it) is in progress again, so its owner is woken; its old steps stay frozen.
         # Every follow-up as a new top-level section grew one plan to 22 sections.
