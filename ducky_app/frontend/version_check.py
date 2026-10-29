@@ -252,6 +252,17 @@ def feed_is_paused(payload: dict[str, Any]) -> bool:
     return str(paused or "").strip().lower() in ("true", "1")
 
 
+def _background_update_stuck() -> bool:
+    """The background download keeps failing on this PC (proxy, antivirus, range requests
+    blocked): offer Setup again instead of leaving the copy on an old build for good."""
+    try:
+        from frontend.update_swap import FAILURES_FOR_SETUP, status
+
+        return int(status().get("failures") or 0) >= FAILURES_FOR_SETUP
+    except Exception:
+        return False
+
+
 def get_app_update_status() -> dict[str, Any]:
     """
     One payload for the panel UI and the updater: remote version compare plus
@@ -338,7 +349,7 @@ def _app_update_status() -> dict[str, Any]:
 
         result["feed_status"] = "update_available"
         result["update_available"] = True
-        result["update_pack"] = feed_update(payload) is not None
+        result["update_pack"] = feed_update(payload) is not None and not _background_update_stuck()
         result["installer_url"] = absolute_installer_url(
             _extract_str(payload, "installerUrl") or _extract_str(payload, "installer_url"),
             base_url=update_base_url(),

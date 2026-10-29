@@ -32,7 +32,8 @@ def _quiet(monkeypatch):
     monkeypatch.setattr("frontend.remote_direct.last_report", lambda: {})
     monkeypatch.setattr(us, "_ui", {})
     monkeypatch.setattr(us, "_holders", {"window_holder": {"hidden": False}})
-    monkeypatch.setattr(us, "_state", {"phase": "idle", "version": "", "done": 0, "total": 0, "error": ""})
+    monkeypatch.setattr(us, "_state", {"phase": "idle", "version": "", "done": 0, "total": 0, "error": "", "failures": 0})
+    monkeypatch.setattr(us, "_started_at", time.time() - 3600)
     us.report_ui({"window": "main", "visible": True, "idle_s": 3600, "dirty": 0, "jobs": []})
     return terminals
 
@@ -61,6 +62,35 @@ def test_each_kind_of_work_holds_the_switch(monkeypatch, _quiet) -> None:
         "Daily island check starting soon",
         "a phone or another PC connected",
     ]
+
+
+def test_right_after_a_start_using_ducky_does_not_hold_it(monkeypatch, _quiet) -> None:
+    monkeypatch.setattr(us, "_started_at", time.time())
+    us.report_ui({"window": "main", "visible": True, "idle_s": 1, "dirty": 0, "jobs": []})
+    assert us.idle_reasons() == []
+    # Real work still holds it.
+    _quiet.sessions = [{"id": "t1"}]
+    assert us.idle_reasons() == ["1 terminal open"]
+
+
+def test_repeated_download_failures_bring_back_setup(monkeypatch) -> None:
+    from frontend import version_check
+
+    update = {"version": "9.9.9", "packUrl": "/p", "manifestUrl": "/m", "manifestSha256": "a" * 64}
+    monkeypatch.setattr("frontend.version_check.fetch_remote_payload", lambda: ({"update": update}, None))
+
+    def _fail(u, base_url, progress=None):
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr("frontend.app_stage.stage", _fail)
+    us.check_and_stage()
+    assert not version_check._background_update_stuck()
+    us.check_and_stage()
+    assert version_check._background_update_stuck()
+    monkeypatch.setattr("frontend.app_stage.stage", lambda u, base_url, progress=None: None)
+    monkeypatch.setattr("frontend.app_stage.prune", lambda running="": [])
+    us.check_and_stage()
+    assert not version_check._background_update_stuck()
 
 
 def test_someone_using_ducky_holds_it_unless_the_window_is_hidden(monkeypatch) -> None:

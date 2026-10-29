@@ -23,7 +23,13 @@ from frontend import __version__
 
 _log = logging.getLogger(__name__)
 
-CHECK_AFTER_START_S = 120.0
+# Soon after start, so a restart picks up the newest version (Oct 29: PCs sat days behind).
+CHECK_AFTER_START_S = 15.0
+# Right after a start nobody is mid-task yet: an update ready by then switches even while
+# the window is in use (work, unsaved files and team chats still hold it).
+STARTUP_SWITCH_S = 3 * 60.0
+# Downloads that failed this many times in a row bring back the Setup popup (version_check).
+FAILURES_FOR_SETUP = 2
 CHECK_EVERY_S = 30 * 60.0
 IDLE_TICK_S = 30.0
 # Nobody touched Ducky for this long (or every window is hidden): it may switch.
@@ -46,7 +52,7 @@ _thread: threading.Thread | None = None
 _wake = threading.Event()
 _check_now = threading.Event()
 _started_at = time.time()
-_state: dict[str, Any] = {"phase": "off", "version": "", "done": 0, "total": 0, "error": ""}
+_state: dict[str, Any] = {"phase": "off", "version": "", "done": 0, "total": 0, "error": "", "failures": 0}
 # Per window (the main one is "main"): {at, visible, idle_s, dirty, jobs}.
 _ui: dict[str, dict[str, Any]] = {}
 _holders: dict[str, Any] = {}
@@ -194,6 +200,8 @@ def idle_reasons(now: float | None = None) -> list[str]:
         hidden = bool(_holders.get("window_holder", {}).get("hidden"))
     if "main" not in windows and not hidden:
         reasons.append("Ducky's window (not answering)")
+    elif now - _started_at < STARTUP_SWITCH_S:
+        pass  # just started: switching now is the restart the person already sat through
     elif any(r["visible"] and float(r["idle_s"]) < AWAY_AFTER_S for w, r in windows.items() if w != "main" or not hidden):
         reasons.append("you, using Ducky")
     return reasons
@@ -244,9 +252,10 @@ def check_and_stage() -> dict[str, Any] | None:
         app_stage.stage(update, base_url=update_base_url(), progress=lambda d, t: _set(done=d, total=t))
     except Exception as exc:  # a failed download is retried at the next check
         _log.warning("update %s did not download: %s", version, exc)
-        _set(phase="failed", error=str(exc)[:300])
+        with _lock:
+            _state.update(phase="failed", error=str(exc)[:300], failures=int(_state.get("failures") or 0) + 1)
         return None
-    _set(phase="ready", error="")
+    _set(phase="ready", error="", failures=0)
     app_stage.prune()
     return update
 
