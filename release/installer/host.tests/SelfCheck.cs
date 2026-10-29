@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace DuckySetup.Tests
 {
@@ -30,6 +32,7 @@ namespace DuckySetup.Tests
             Waiting();
             WebFeed();
             WebDownload();
+            StoreErrors();
             Counts();
             Console.WriteLine($"host self-check: {_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;
@@ -216,6 +219,27 @@ namespace DuckySetup.Tests
 
             var files = new[] { @"C:\d\UEFN-Ducky-Setup-1.2.416.exe", @"C:\d\UEFN-Ducky-Setup-1.2.417.exe", @"C:\d\UEFN-Ducky-Setup-1.2.417.exe.part", @"C:\d\UEFN-Ducky-Setup-1.2.415.exe.part" };
             Check(WebRelease.Stale(files, "UEFN-Ducky-Setup-1.2.417.exe").SequenceEqual(new[] { files[0], files[3] }), "other versions' downloads swept, ours kept");
+        }
+
+        static void StoreErrors()
+        {
+            Check(WebRelease.StoreRetryWaits.SequenceEqual(new[] { 1, 3, 9 }), "Store request retried after 1, 3 and 9 s");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.NameResolutionFailure, 0) == "store_unreachable.dns", "dns");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.Timeout, 0) == "store_unreachable.timeout", "timeout");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.TrustFailure, 0) == "store_unreachable.tls"
+                && WebRelease.StoreErrorCode(WebExceptionStatus.SecureChannelFailure, 0) == "store_unreachable.tls", "tls");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.ProxyNameResolutionFailure, 0) == "store_unreachable.proxy"
+                && WebRelease.StoreErrorCode(WebExceptionStatus.RequestProhibitedByProxy, 0) == "store_unreachable.proxy", "proxy");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.ProtocolError, 503) == "store_unreachable.http_503", "http status");
+            Check(WebRelease.StoreErrorCode(WebExceptionStatus.ProtocolError, 0) == "store_unreachable.other"
+                && WebRelease.StoreErrorCode(WebExceptionStatus.ConnectFailure, 0) == "store_unreachable.other"
+                && WebRelease.StoreErrorCode(WebExceptionStatus.UnknownError, 0) == "store_unreachable.other", "other");
+
+            // Try again: a failed or cancelled Store request is asked again, a good one reused.
+            Check(WebRelease.NeedsFetch(null), "first try fetches");
+            Check(WebRelease.NeedsFetch(Task.FromException(new WebException("down"))), "Try again after a failure fetches again");
+            Check(WebRelease.NeedsFetch(Task.FromCanceled(new System.Threading.CancellationToken(true))), "Try again after a cancel fetches again");
+            Check(!WebRelease.NeedsFetch(Task.FromResult(new StoreRelease())), "a good answer is reused");
         }
 
         // Stats.cs: what Setup and the uninstaller report; the Store checks the same names.

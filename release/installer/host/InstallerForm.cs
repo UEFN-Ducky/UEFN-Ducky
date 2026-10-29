@@ -217,9 +217,9 @@ namespace DuckySetup
             try
             {
                 Post(new { type = "progress", percent = 0, status = "Connecting to the UEFN Ducky Store…" });
-                if (_release == null || _release.IsFaulted || _release.IsCanceled)
+                if (WebRelease.NeedsFetch(_release))
                     _release = Task.Run(Web.FetchLatest);
-                var release = await _release;
+                var release = await _release!;
                 path = await Task.Run(() => Web.Download(release, (got, total) => OnUi(() =>
                 {
                     var status = got >= total ? "Checking the download…" : WebRelease.DownloadStatus(got, total);

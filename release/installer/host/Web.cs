@@ -51,31 +51,27 @@ namespace DuckySetup
         public static StoreRelease FetchLatest()
         {
             var baseUrl = BaseUrl;
-            var req = (HttpWebRequest)WebRequest.Create(WebRelease.FeedUrl(baseUrl));
-            req.Method = "POST";
-            req.Accept = "application/json";
-            req.ContentType = "application/json";
-            req.UserAgent = UserAgent();
-            // Collect endpoints want Origin to match the site, like the app's own check.
-            req.Headers["Origin"] = baseUrl;
-            req.Timeout = 20000;
-            req.ReadWriteTimeout = 20000;
-            var body = Encoding.UTF8.GetBytes("{}");
-            req.ContentLength = body.Length;
             string json;
-            try
+            for (var attempt = 0; ; attempt++)
             {
-                using (var s = req.GetRequestStream())
-                    s.Write(body, 0, body.Length);
-                using var resp = (HttpWebResponse)req.GetResponse();
-                using var reader = new StreamReader(resp.GetResponseStream()!, Encoding.UTF8);
-                json = reader.ReadToEnd();
-            }
-            catch (Exception ex) when (ex is WebException || ex is IOException)
-            {
-                throw new SetupFailure(
-                    "store_unreachable",
-                    "Can't reach the UEFN Ducky Store. Check your internet connection and try again. (" + ex.Message + ")", ex);
+                try
+                {
+                    json = PostFeed(baseUrl);
+                    break;
+                }
+                catch (Exception ex) when (ex is WebException || ex is IOException)
+                {
+                    if (attempt < WebRelease.StoreRetryWaits.Length)
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(WebRelease.StoreRetryWaits[attempt]));
+                        continue;
+                    }
+                    var w = ex as WebException;
+                    var http = w?.Response is HttpWebResponse r ? (int)r.StatusCode : 0;
+                    throw new SetupFailure(
+                        WebRelease.StoreErrorCode(w?.Status ?? WebExceptionStatus.UnknownError, http),
+                        "Can't reach the UEFN Ducky Store. Check your internet connection and try again. (" + ex.Message + ")", ex);
+                }
             }
             try
             {
@@ -90,6 +86,26 @@ namespace DuckySetup
             {
                 throw new SetupFailure("store_answer", ex.Message, ex);
             }
+        }
+
+        static string PostFeed(string baseUrl)
+        {
+            var req = (HttpWebRequest)WebRequest.Create(WebRelease.FeedUrl(baseUrl));
+            req.Method = "POST";
+            req.Accept = "application/json";
+            req.ContentType = "application/json";
+            req.UserAgent = UserAgent();
+            // Collect endpoints want Origin to match the site, like the app's own check.
+            req.Headers["Origin"] = baseUrl;
+            req.Timeout = 20000;
+            req.ReadWriteTimeout = 20000;
+            var body = Encoding.UTF8.GetBytes("{}");
+            req.ContentLength = body.Length;
+            using (var s = req.GetRequestStream())
+                s.Write(body, 0, body.Length);
+            using var resp = (HttpWebResponse)req.GetResponse();
+            using var reader = new StreamReader(resp.GetResponseStream()!, Encoding.UTF8);
+            return reader.ReadToEnd();
         }
 
         // Downloads (or reuses) the release's full Setup and returns its path once it

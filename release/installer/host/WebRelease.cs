@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Threading.Tasks;
 
 namespace DuckySetup
 {
@@ -138,6 +140,29 @@ namespace DuckySetup
                 || subject.IndexOf("O=" + SignerOrganization + ",", StringComparison.Ordinal) >= 0
                 || subject.EndsWith("O=" + SignerOrganization, StringComparison.Ordinal);
         }
+
+        // Seconds between tries of the Store's version request: 4 tries in all.
+        public static readonly int[] StoreRetryWaits = { 1, 3, 9 };
+
+        // setup.result code when the Store stayed unreachable, named after why.
+        public static string StoreErrorCode(WebExceptionStatus status, int httpStatus)
+        {
+            switch (status)
+            {
+                case WebExceptionStatus.NameResolutionFailure: return "store_unreachable.dns";
+                case WebExceptionStatus.Timeout: return "store_unreachable.timeout";
+                case WebExceptionStatus.TrustFailure:
+                case WebExceptionStatus.SecureChannelFailure: return "store_unreachable.tls";
+                case WebExceptionStatus.ProxyNameResolutionFailure:
+                case WebExceptionStatus.RequestProhibitedByProxy: return "store_unreachable.proxy";
+                case WebExceptionStatus.ProtocolError when httpStatus > 0:
+                    return "store_unreachable.http_" + httpStatus.ToString(CultureInfo.InvariantCulture);
+                default: return "store_unreachable.other";
+            }
+        }
+
+        // Try again after a failed Store request asks the Store again; a good answer is reused.
+        public static bool NeedsFetch(Task? release) => release == null || release.IsFaulted || release.IsCanceled;
 
         public static bool SameSha(string a, string b) =>
             a.Length == 64 && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
