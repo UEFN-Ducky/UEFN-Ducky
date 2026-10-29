@@ -24,7 +24,7 @@ def test_real_network_session_reconnects_and_shuts_down(monkeypatch, transport):
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)
     port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, loop="asyncio", log_level="critical", access_log=False))
+    server = uvicorn.Server(uvicorn.Config(app, loop="asyncio", ws="websockets-sansio", log_level="critical", access_log=False))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     pool = cp.PluginClientPool(own_loop=True)

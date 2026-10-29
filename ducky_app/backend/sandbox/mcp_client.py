@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import threading
 from pathlib import Path
@@ -57,15 +58,18 @@ async def _session(params: Any, url: str, calls: list[dict[str, Any]], list_tool
                    timeout_s: float) -> dict[str, Any]:
     from mcp import ClientSession
 
+    stack = contextlib.AsyncExitStack()
     if url:
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared._httpx_utils import create_mcp_http_client
 
-        transport = streamablehttp_client(url)
+        http = await stack.enter_async_context(create_mcp_http_client())
+        transport = streamable_http_client(url, http_client=http)
     else:
         from mcp.client.stdio import stdio_client
 
         transport = stdio_client(params)
-    async with transport as streams:
+    async with stack, transport as streams:
         read, write = streams[0], streams[1]
         async with ClientSession(read, write) as client:
             await asyncio.wait_for(client.initialize(), timeout=timeout_s)

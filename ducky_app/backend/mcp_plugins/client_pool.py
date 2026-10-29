@@ -265,10 +265,16 @@ class PluginClientPool:
 
                 async def open_session(stack: AsyncExitStack) -> ClientSession:
                     if ttype == "http":
-                        from mcp.client.streamable_http import streamablehttp_client
+                        import httpx
+                        from mcp.client.streamable_http import streamable_http_client
+                        from mcp.shared._httpx_utils import create_mcp_http_client
 
+                        client = await stack.enter_async_context(create_mcp_http_client(
+                            headers=block.get("headers") or None,
+                            timeout=httpx.Timeout(_TOOL_TIMEOUT_SEC, read=_TOOL_TIMEOUT_SEC),
+                        ))
                         transport = await stack.enter_async_context(
-                            streamablehttp_client(block["url"], **_http_transport_kwargs(block))
+                            streamable_http_client(block["url"], http_client=client)
                         )
                     elif ttype == "sse":
                         from mcp.client.sse import sse_client

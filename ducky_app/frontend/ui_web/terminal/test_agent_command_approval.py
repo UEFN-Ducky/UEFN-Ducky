@@ -161,7 +161,7 @@ def test_a_tab_shown_again_keeps_its_history_through_a_stream_of_progress_codes(
 
     session = TerminalSession(shell="bash", cwd="C:/repo")
     chunks = [b"=== security gate ===\r\n", b"npm-audit: ok\r\n"]
-    chunks += [b"\x1b]9;4;2;%d\x1b\." % (n % 100) for n in range(5000)]
+    chunks += [b"\x1b]9;4;2;%d\x1b\\." % (n % 100) for n in range(5000)]
 
     class _Pty:
         exitstatus = 0
@@ -189,7 +189,7 @@ def test_progress_codes_split_across_reads_stay_out_of_the_history() -> None:
     session = TerminalSession(shell="bash", cwd="C:/repo")
     chunks = [b"HEADER\r\n"]
     for n in range(500):
-        chunks += [b"\x1b]9;4;2;", b"%d\x1b" % (n % 100), b"\."]
+        chunks += [b"\x1b]9;4;2;", b"%d\x1b" % (n % 100), b"\\."]
 
     class _Pty:
         exitstatus = 0
