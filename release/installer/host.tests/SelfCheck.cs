@@ -262,6 +262,7 @@ namespace DuckySetup.Tests
             Check(Stats.FailCode(4, "file_in_use") == "exit_4.file_in_use" && Stats.FailCode(4, "") == "exit_4" && Stats.FailCode(0, "file_in_use") == "ok", "fail codes");
             Check(Stats.Reason("bugs") == "bugs" && Stats.Reason("  slow ") == "slow" && Stats.Reason("hacked") == "none" && Stats.Reason(null) == "none", "reasons");
             Check(Stats.Screen("done") == "done" && Stats.Screen("<b>") == "welcome", "screens");
+            Check(Stats.IsRetry("error") && !Stats.IsRetry("welcome") && !Stats.IsRetry("options") && !Stats.IsRetry(null), "install from the error screen counts as a retry");
             Check(Stats.Os(22631) == "win11" && Stats.Os(19045) == "win10", "Windows version");
 
             Check(Stats.ExePath("\"C:\\Program Files\\UEFN Ducky\\unins000.exe\" /SILENT") ==@"C:\Program Files\UEFN Ducky\unins000.exe", "quoted uninstall command");

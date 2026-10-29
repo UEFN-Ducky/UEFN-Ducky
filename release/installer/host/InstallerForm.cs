@@ -151,6 +151,9 @@ namespace DuckySetup
             var desktop = Truthy(msg, "desktopIcon");
             var isUpgrade = Truthy(msg, "isUpgrade");
             _scope = allUsers ? "machine" : "user";
+            // Try again on the error screen: straight back to the Store request and download.
+            if (Stats.IsRetry(_screen))
+                Usage.Track("setup.step", new Dictionary<string, string> { ["step"] = "retry" });
             _screen = "progress";
             _installStarted = DateTime.UtcNow;
             _cancelled = false;

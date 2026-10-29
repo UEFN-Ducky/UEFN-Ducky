@@ -97,6 +97,9 @@ namespace DuckySetup
             return Array.IndexOf(Screens, s) >= 0 ? s : "welcome";
         }
 
+        // An install started from the error screen is a Try again (setup.step step:retry).
+        public static bool IsRetry(string? screenBefore) => screenBefore == "error";
+
         public static string Os(int build) => build >= 22000 ? "win11" : "win10";
 
         // The program a registry command line runs: "C:\a b\x.exe" /SILENT is C:\a b\x.exe.
