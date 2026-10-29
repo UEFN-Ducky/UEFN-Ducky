@@ -37,6 +37,9 @@ export interface ChatWorkflowStep {
   /** When it last started / finished (ms), for the time a long step has taken. */
   startedAt?: number;
   endedAt?: number;
+  /** Live terminal output of a terminal step (bounded snapshot) and its session. */
+  output?: string;
+  sessionId?: string;
 }
 
 export interface ChatWorkflowRun {
@@ -167,6 +170,18 @@ export function applyWorkflowEvent(event: WorkflowEvent): void {
     });
     if (!runToChat.get(run)) upsertBackgroundJob({ id: `graph-run:${current.workflowId}:${run}`, source: "workflow", title: workflowRunTitle(current.name), phase: state === "error" ? "error" : "done", detail: state === "stopped" ? "Stopped" : event.error || "Finished", cancelable: false });
     dropOldRuns(current.workflowId);
+    emit();
+    return;
+  }
+  if (event.type === "workflow_output") {
+    // A code step's log stays in the Workflows editor; the card shows terminal output.
+    if (event.source === "log" || !event.node) return;
+    const output = String(event.output || "");
+    const sessionId = String(event.session_id || "");
+    const at = current.steps.findIndex((s) => s.node === event.node);
+    const step = current.steps[at];
+    if (!step || (step.output === output && (step.sessionId || "") === sessionId)) return;
+    byRun.set(run, { ...current, steps: current.steps.map((s, i) => (i === at ? { ...s, output, sessionId } : s)) });
     emit();
     return;
   }

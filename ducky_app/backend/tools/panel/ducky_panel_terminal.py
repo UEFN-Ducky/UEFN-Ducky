@@ -130,6 +130,9 @@ def ducky_terminal_run(
     this command, or when the command is typed into the Local workflow running it).
 
     expect_minutes: how long this run should take; shows the person a progress bar."""
+    hidden = hides_output(command)
+    if hidden:
+        return tool_json({"ok": False, "error": hidden, "session_id": session_id.strip()}, pretty=pretty)
     mgr = _terminal_manager()
     chat = _terminal_chat(conv_id)
     # The session lookup is a window round trip (terminal_list): only for a release script.
@@ -161,6 +164,26 @@ def ducky_terminal_run(
         result["asked_in_chat"] = chat or "(no chat: the call carried no chat identity)"
         result["chat_allows_everything"] = bool(chat) and allows_everything(chat)
     return tool_json(early_return_hint(result), pretty=pretty)
+
+
+# Pipes that hold every line back until the command ends: the person watched a blank
+# terminal for minutes (Oct 29 2026, `pytest ... | Select-Object -Last 15`).
+_HIDING_PIPE = re.compile(
+    r"\|\s*(?:select(?:-object)?\s+-(?:last|first)\b|tail\b|head\b|out-null\b|out-string\b|more\b)",
+    re.I,
+)
+
+
+def hides_output(command: str) -> str:
+    """Why ``command`` would keep its output from the person while it runs ("" when it doesn't)."""
+    m = _HIDING_PIPE.search(command or "")
+    if not m:
+        return ""
+    return (
+        f"Refused: `{m.group(0).strip()}` hides the output until the command ends, and the person "
+        "watches it live. Run the command without that pipe; for a long run use background=true "
+        "and ducky_terminal_read_output."
+    )
 
 
 _RELEASE_SCRIPT = re.compile(r"""([^\s"'&|;]*?)[\\/]?\brelease\.(?:py|sh)\b""", re.I)

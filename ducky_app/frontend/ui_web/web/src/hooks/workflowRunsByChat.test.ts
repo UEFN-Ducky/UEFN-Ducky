@@ -97,6 +97,17 @@ it("never hides an active run or a card belonging to another chat", async () => 
   expect(result.current).toHaveLength(1);
 });
 
+it("keeps a terminal step's live output and session on the step, not a code step's log", () => {
+  applyWorkflowEvent({ ...start("t"), plan: [{ node: "tests", label: "Run tests", type: "terminal.run" }] });
+  const { result } = renderHook(() => useChatWorkflowRuns("chat"));
+  act(() => {
+    applyWorkflowEvent({ type: "workflow_step", id: "wf", run: "t", node: "tests", state: "running" });
+    applyWorkflowEvent({ type: "workflow_output", id: "wf", run: "t", node: "tests", session_id: "s1", output: "collecting..." });
+    applyWorkflowEvent({ type: "workflow_output", id: "wf", run: "t", node: "tests", source: "log", session_id: "", output: "a log" });
+  });
+  expect(result.current[0].steps[0]).toMatchObject({ output: "collecting...", sessionId: "s1", state: "running" });
+});
+
 function start(run: string): PanelPushEvent {
   return { type: "workflow_run", id: "wf", run, name: run, state: "started", conv: "chat" };
 }

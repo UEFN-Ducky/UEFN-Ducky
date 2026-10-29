@@ -323,7 +323,7 @@
   list-style: none;
   margin: 6px 0 0;
   padding: 10px 14px 10px 12px;
-  max-height: 260px;
+  max-height: 420px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -334,7 +334,7 @@
 .chat-workflow-run-step {
   position: relative;
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 18px 1fr auto auto;
   column-gap: 10px;
   align-items: center;
   padding: 4px 0;
@@ -445,6 +445,143 @@
   padding-top: 2px;
   font-size: 11px;
   color: var(--danger, #e85d5d);
+}
+
+/* A terminal step: a small toggle, and its live output folding open under the step. */
+.chat-workflow-run-term-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted, var(--fg));
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-workflow-run-term-toggle:hover,
+.chat-workflow-run-term-toggle.is-open {
+  color: var(--accent, #4f8cff);
+  border-color: color-mix(in srgb, var(--accent, #4f8cff) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #4f8cff) 12%, transparent);
+}
+
+.chat-workflow-run-term {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.24s ease, opacity 0.2s ease, margin 0.24s ease;
+}
+
+.chat-workflow-run-term.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin: 6px 0 4px;
+}
+
+.chat-workflow-run-term-inner {
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--bg);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.chat-workflow-run-term:not(.is-open) .chat-workflow-run-term-inner {
+  border-color: transparent;
+}
+
+.chat-workflow-run-term-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px 5px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, var(--fg));
+}
+
+.chat-workflow-run-term-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success, #3fb950);
+  opacity: 0.5;
+}
+
+.chat-workflow-run-term-live.is-live {
+  opacity: 1;
+  animation: chat-workflow-run-blink 1.2s ease-in-out infinite;
+}
+
+.chat-workflow-run-term-open {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-workflow-run-term-open:hover {
+  border-color: color-mix(in srgb, var(--accent, #4f8cff) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #4f8cff) 14%, var(--card));
+}
+
+.chat-workflow-run-term pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font: 11px/1.45 var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  color: var(--fg);
+}
+
+/* A running ducky_terminal_run card: the same output block, open under the card's row. */
+.tool-execution-card-terminal-tail {
+  padding: 0 10px 8px;
+}
+
+.tool-execution-card-terminal-tail .chat-workflow-run-term {
+  animation: chat-terminal-tail-in 0.24s ease;
+}
+
+@keyframes chat-terminal-tail-in {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-execution-card-terminal-tail .chat-workflow-run-term,
+  .chat-workflow-run-term,
+  .chat-workflow-run-term-live.is-live {
+    transition: none;
+    animation: none;
+  }
 }
 
 .chat-pane-plan-dock .chat-plan-popup {

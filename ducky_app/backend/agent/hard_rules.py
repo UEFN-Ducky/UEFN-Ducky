@@ -52,6 +52,10 @@ CORE_RULES = (
     "`ducky_swarm_create` call (validated, all seats or none); never hand-chain "
     "group/spawn/lane tools (`ducky_group_create`, `ducky_spawn_chat`, `ducky_group_set_lane`).\n"
     "- Windows shell: `py -3`. Truncated result → tighter args.\n"
+    "- **Terminal output stays visible (HARD):** the person watches every command live. Never "
+    "pipe one through `Select-Object -Last/-First`, `tail`, `head`, `Out-Null`, `Out-String` or "
+    "`more` (they hold every line back until the end); long runs use `background=true` and "
+    "`ducky_terminal_read_output`.\n"
     "- **AI-made plugins (HARD):** `ducky_plugin_*` only; `ducky_plugin_list` is the "
     'census. Load `skill_read_subskill("ducky", "ai_plugins")` first.\n'
     "\n"

@@ -312,9 +312,26 @@ export function useTerminalTabs(
     [openTerminalTab],
   );
 
+  /** Show a live session as the active tab, knowing only its id (asks the backend when unseen). */
+  const openTerminalSession = useCallback(
+    async (sessionId: string) => {
+      let dto = sessionsRef.current.get(sessionId);
+      if (!dto) {
+        const list = await getApi()?.terminal_list().catch(() => null);
+        const raw = list?.sessions?.find((s) => String((s as Record<string, unknown>).session_id || "") === sessionId);
+        dto = raw ? sessionRecordToDto(raw as Record<string, unknown>) ?? undefined : undefined;
+      }
+      if (!dto) return false;
+      openTerminalTab(dto, { activate: true });
+      return true;
+    },
+    [openTerminalTab],
+  );
+
   return {
     openTerminalTab,
     openTerminalTabBySession,
+    openTerminalSession,
     spawnAndOpen,
     parkTerminalTab,
     killTerminalTab,

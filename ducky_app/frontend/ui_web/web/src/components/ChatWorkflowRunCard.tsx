@@ -9,6 +9,7 @@ import {
   type ChatWorkflowStep,
 } from "../hooks/workflowRunsByChat";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
+import { TerminalGlyph, TerminalTail } from "./TerminalTail";
 
 /** Yes/no gates are instant; the card lists them only when one fails. */
 function shownSteps(run: ChatWorkflowRun): ChatWorkflowStep[] {
@@ -108,6 +109,8 @@ export function ChatWorkflowRunCard({ chatId }: { chatId: string }) {
 
 function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun }) {
   const [open, setOpen] = useState(false);
+  // Per step: the person's choice; unset, a running terminal step shows its output.
+  const [termOpen, setTermOpen] = useState<Record<string, boolean>>({});
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState("");
   const stop = async () => {
@@ -280,6 +283,19 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
                   <StateMark state={s.state} />
                 </span>
                 <span className="chat-workflow-run-label">{s.label}</span>
+                {s.output !== undefined ? (
+                  <button
+                    type="button"
+                    className={`chat-workflow-run-term-toggle${(termOpen[s.node] ?? s.state === "running") ? " is-open" : ""}`}
+                    onClick={() => setTermOpen((m) => ({ ...m, [s.node]: !(m[s.node] ?? s.state === "running") }))}
+                    aria-expanded={termOpen[s.node] ?? s.state === "running"}
+                    title={(termOpen[s.node] ?? s.state === "running") ? "Hide terminal output" : "Show terminal output"}
+                  >
+                    <TerminalGlyph />
+                  </button>
+                ) : (
+                  <span />
+                )}
                 {s.startedAt && (s.state === "running" || s.endedAt) ? (
                   <span className="chat-workflow-run-time">
                     {formatElapsed(
@@ -291,6 +307,13 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
                 {s.error ? (
                   <span className="chat-workflow-run-error">{s.error}</span>
                 ) : null}
+                {s.output !== undefined ? <TerminalTail
+                    output={s.output}
+                    open={termOpen[s.node] ?? s.state === "running"}
+                    live={s.state === "running"}
+                    sessionId={s.sessionId}
+                    label={s.label}
+                  /> : null}
               </li>
             ))}
           </ol>

@@ -56,6 +56,7 @@ import { registerShowChatComposer } from "../navigation/openChatComposer";
 import { registerOpenSettingsEditorTab } from "../navigation/openSettingsTab";
 import { registerOpenChangesTab } from "../navigation/openChangesTab";
 import { registerOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
+import { registerOpenTerminalTab } from "../navigation/openTerminalTab";
 import { emitAppHook } from "../sfx/appHooks";
 import { registerOpenDiscordTab, setDiscordTabOpen } from "../navigation/openDiscordTab";
 import { registerOpenPlanTab, type OpenPlanRequest } from "../navigation/openPlanTab";
@@ -685,7 +686,10 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     reopenTerminalTab,
     parkedTabs,
     restartTerminalTab,
+    openTerminalSession,
   } = useTerminalTabs(editor);
+
+  useEffect(() => registerOpenTerminalTab((sessionId) => void openTerminalSession(sessionId)), [openTerminalSession]);
 
   const [unsavedPrompt, setUnsavedPrompt] = useState<{
     tabId: string;
