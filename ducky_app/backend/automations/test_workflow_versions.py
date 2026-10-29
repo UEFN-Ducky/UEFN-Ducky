@@ -143,6 +143,9 @@ def test_upgrade_from_schema_nine_preserves_existing_workflows(storage):
     conn.execute("ALTER TABLE folders_v3 RENAME TO folders")
     for column in ("author", "author_pc"):  # 0025 adds who a live group's leader sent a change for
         conn.execute(f"ALTER TABLE space_changesets DROP COLUMN {column}")
+    for trigger in ("messages_rev_ai", "messages_rev_ad", "messages_rev_au"):  # 0026 adds the message revision
+        conn.execute(f"DROP TRIGGER {trigger}")
+    conn.execute("ALTER TABLE conversations DROP COLUMN msg_rev")
     conn.execute("PRAGMA user_version=9")
     db.reset_for_tests()
     assert store.get_workflow(legacy["id"])["name"] == "Before versions"
