@@ -60,6 +60,7 @@ import {
 import { useChatReferenceCatalog, useFileRefMatches } from "./useChatReferenceCatalog";
 import { answerAskUserWithMessage } from "../ask-user";
 import { useInnerRefSearch } from "./useInnerRefSearch";
+import { WorkProgressBar, type WorkRow } from "./WorkProgressBar";
 import {
   commandsForScope,
   composerPlaceholder,
@@ -323,7 +324,8 @@ export interface ChatComposerProps {
   slashStatus: string;
   availableCommands: SlashCommand[];
   runSlashCommand: (command: SlashCommand, argument: string) => void;
-  waitingOnAgents: string[];
+  /** What this chat waits on (its own turn, linked or team agents), shown above the draft. */
+  workRows: WorkRow[];
   attachments: Attachments["attachments"];
   readInParts: Attachments["readInParts"];
   removeAttachment: Attachments["removeAttachment"];
@@ -397,7 +399,7 @@ export function ChatComposer({
   slashStatus,
   availableCommands,
   runSlashCommand,
-  waitingOnAgents,
+  workRows,
   attachments,
   readInParts,
   removeAttachment,
@@ -876,12 +878,13 @@ export function ChatComposer({
             )}
             {slashStatus ? <div className="slash-command-status">{slashStatus}</div> : null}
             {queuedNote ? <div className="slash-command-status" role="status">{queuedNote}</div> : null}
-            {waitingOnAgents.length ? (
-              <div className="slash-command-status" role="status">
-                Waiting on {waitingOnAgents.length === 1 ? "agent" : `${waitingOnAgents.length} agents`}:{" "}
-                {waitingOnAgents.join(", ")}
-              </div>
-            ) : null}
+            <WorkProgressBar
+              rows={workRows}
+              onOpen={(id) => {
+                const target = allChats.find((c) => c.id === id);
+                if (target && target.id !== chat.id) onOpenChat(target);
+              }}
+            />
             <ComposerAttachmentChips
               attachments={attachments}
               readInParts={readInParts}

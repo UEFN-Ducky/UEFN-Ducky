@@ -154,7 +154,8 @@ def open_sandbox(conv_id: str) -> dict[str, Any]:
     }
 
 
-def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: float = 600.0) -> dict[str, Any]:
+def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: float = 600.0,
+                expect_minutes: float = 0.0) -> dict[str, Any]:
     """Run ``command`` in the chat's sandbox terminal (visible in the header's terminal list)."""
     why = refusal(command)
     if why:
@@ -185,7 +186,7 @@ def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: floa
         repo_lock.acquire(lock, _chat_label(conv_id), on_wait=waiting)
     session, result = "", None
     try:
-        session, result = _run_in_terminal(mgr, box, conv_id, command, shell, timeout_s, changed)
+        session, result = _run_in_terminal(mgr, box, conv_id, command, shell, timeout_s, changed, expect_minutes)
     finally:
         if lock:
             _release_when_done(mgr, session, lock, result)
@@ -197,7 +198,7 @@ def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: floa
 
 
 def _run_in_terminal(mgr: Any, box: Path, conv_id: str, command: str, shell: str, timeout_s: float,
-                     changed: dict[str, str]) -> tuple[str, Any]:
+                     changed: dict[str, str], expect_minutes: float = 0.0) -> tuple[str, Any]:
     session, result = "", None
     for reuse in (True, False):
         opened = mgr.spawn(shell=shell, cwd=str(box / "work"), title="sandbox", push_open=True, conv_id=conv_id,
@@ -206,7 +207,8 @@ def _run_in_terminal(mgr: Any, box: Path, conv_id: str, command: str, shell: str
         if not session:
             return "", {"ok": False, "error": str(opened.get("error") or "The sandbox terminal did not open.")}
         result = mgr.run_agent_command(session, command, source="sandbox_run", conv_id=conv_id, wait=True,
-                                       command_timeout_s=max(5.0, min(float(timeout_s), 3600.0)), auto_approve=True)
+                                       command_timeout_s=max(5.0, min(float(timeout_s), 3600.0)), auto_approve=True,
+                                       expect_minutes=expect_minutes)
         # The idle-terminal cleanup can close a reused shell just as it is handed out: once more in a new one.
         if not (isinstance(result, dict) and result.get("error") == "session not found"):
             break

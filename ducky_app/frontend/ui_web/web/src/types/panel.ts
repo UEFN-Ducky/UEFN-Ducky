@@ -2098,8 +2098,13 @@ export interface AgentEvent {
     | "model_needed"
     | "model_adopted"
     | "provider_not_connected"
-    | "user_steered";
+    | "user_steered"
+    | "run_expect";
   text?: string;
+  /** run_expect: how long the chat's running sandbox/terminal command should take (ms, 0 = ended). */
+  expected_ms?: number;
+  /** run_expect: expected_ms is the median of this command's past runs, not the agent's own figure. */
+  estimated?: boolean;
   /** user_steered: id of the queued prompt the running turn took in. */
   steer_id?: string;
   /** assistant_done: a group note (a member's work posted to its group), not the end of a turn. */

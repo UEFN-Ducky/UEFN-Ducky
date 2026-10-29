@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   chatTurnElapsedMs,
   formatElapsedMs,
+  formatMinutes,
   getChatTurnTimer,
   markChatTurnIdle,
   markChatTurnRunning,
@@ -15,6 +16,16 @@ describe("formatElapsedMs", () => {
     expect(formatElapsedMs(12_000)).toBe("12s");
     expect(formatElapsedMs(65_000)).toBe("1m 05s");
     expect(formatElapsedMs(3_661_000)).toBe("1h 1m");
+  });
+});
+
+describe("formatMinutes", () => {
+  it("rounds down to whole minutes and never shows seconds", () => {
+    expect(formatMinutes(0)).toBe("<1 min");
+    expect(formatMinutes(59_000)).toBe("<1 min");
+    expect(formatMinutes(61_000)).toBe("1 min");
+    expect(formatMinutes(12.5 * 60_000)).toBe("12 min");
+    expect(formatMinutes(65 * 60_000)).toBe("1 h 05 min");
   });
 });
 

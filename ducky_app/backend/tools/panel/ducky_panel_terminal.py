@@ -122,11 +122,14 @@ def ducky_terminal_run(
     background: bool = False,
     approval_timeout_s: float = 120.0,
     command_timeout_s: float = 300.0,
+    expect_minutes: float = 0,
     pretty: bool = False,
 ) -> str:
     """Run a shell command in a panel terminal after the user approves it on the Allow/Deny
     card in this chat (no card when this chat said "Allow everything" or "Always allow" for
-    this command, or when the command is typed into the Local workflow running it)."""
+    this command, or when the command is typed into the Local workflow running it).
+
+    expect_minutes: how long this run should take; shows the person a progress bar."""
     mgr = _terminal_manager()
     chat = _terminal_chat(conv_id)
     # The session lookup is a window round trip (terminal_list): only for a release script.
@@ -150,6 +153,7 @@ def ducky_terminal_run(
         approval_timeout_s=max(5.0, min(float(approval_timeout_s), 600.0)),
         command_timeout_s=max(5.0, min(float(command_timeout_s), 3600.0)),
         auto_approve=auto,
+        expect_minutes=max(0.0, float(expect_minutes or 0)),
     )
     if not auto and "not approved" in str(result.get("error") or ""):
         # Say whose card it was: a team whose chats allowed everything waited on cards

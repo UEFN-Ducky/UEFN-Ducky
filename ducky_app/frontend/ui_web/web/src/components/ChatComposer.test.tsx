@@ -40,7 +40,7 @@ function Composer({ onSend }: { onSend: (text?: string) => void }) {
     modelPickerSignal: 0, onPickModel: noop, onModelMetaChange: noop,
     showDefaultModelCta: false, pickModelFirst: false, notConnected: null, llmProviders: [],
     heldForModel: 0, noModelText: "", visionBlocked: false, attachmentError: null, displayModelLabel: "m",
-    slashStatus: "", availableCommands: [], runSlashCommand: noop, waitingOnAgents: [],
+    slashStatus: "", availableCommands: [], runSlashCommand: noop, workRows: [],
     attachments: [], readInParts: false, removeAttachment: noop, retryVideo: noop,
     updateAttachmentImage: noop, addFiles: noop, clearAttachments: noop,
     sessionFiles: [], contextPanelOpen: false, onToggleContextPanel: noop, onCloseContextPanel: noop,

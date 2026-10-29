@@ -15,13 +15,22 @@ import { loadRoster } from "./rosterStore";
 /** Names of the running agents a leader's team holds (its group and nested groups), or []
  * when `chatId` leads no group in the sidebar tree. */
 export function runningTeamNames(chatId: string, folders: FolderItem[], running: ReadonlySet<string>): string[] {
-  const names = (f: FolderItem): string[] => [
-    ...f.chats.filter((c) => c.id !== chatId && running.has(c.id)).map((c) => c.name),
-    ...f.children.flatMap(names),
+  return runningTeamChats(chatId, folders, running).map((c) => c.name);
+}
+
+/** Same walk as `runningTeamNames`, keeping each agent's chat id. */
+export function runningTeamChats(
+  chatId: string,
+  folders: FolderItem[],
+  running: ReadonlySet<string>,
+): { convId: string; name: string }[] {
+  const chats = (f: FolderItem): { convId: string; name: string }[] => [
+    ...f.chats.filter((c) => c.id !== chatId && running.has(c.id)).map((c) => ({ convId: c.id, name: c.name })),
+    ...f.children.flatMap(chats),
   ];
   for (const f of folders) {
-    if (f.groupHubId && f.chats.some((c) => c.id === chatId && c.isLeader)) return names(f);
-    const nested = runningTeamNames(chatId, f.children, running);
+    if (f.groupHubId && f.chats.some((c) => c.id === chatId && c.isLeader)) return chats(f);
+    const nested = runningTeamChats(chatId, f.children, running);
     if (nested.length) return nested;
   }
   return [];

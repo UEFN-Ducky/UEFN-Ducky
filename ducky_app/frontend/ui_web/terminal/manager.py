@@ -12,7 +12,7 @@ import uuid
 from typing import Any, Callable
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.terminal import repo_lock
+from frontend.ui_web.terminal import repo_lock, run_durations
 from frontend.ui_web.terminal.bridge import TerminalBridge
 from frontend.ui_web.terminal.session import (
     _OUTPUT_RING_CHARS,
@@ -611,9 +611,13 @@ class TerminalManager:
         command_timeout_s: float = 300.0,
         auto_approve: bool = False,
         steer_pending: Callable[[], bool] | None = None,
+        expect_minutes: float = 0.0,
     ) -> dict[str, Any]:
         """auto_approve: the chat said "Allow everything", so no Allow/Deny card. A command
         the chat said "Always allow" for runs without one too.
+
+        expect_minutes: how long the agent says a waited run takes; the chat's tray row gets
+        it as a run_expect event (else the median of this command's last runs, estimated).
 
         wait (not background): the result is the command's exit code; a command that fails
         is ok=False. When the person writes first (steer_pending, default: the chat's steer
@@ -664,6 +668,11 @@ class TerminalManager:
             }
         done = threading.Event()
         ran: dict[str, Any] = {}
+        expected, estimated = run_durations.expected_ms(source, command, expect_minutes)
+        if expected and conv_id:
+            self._emit({"type": "run_expect", "conv_id": conv_id, "source": source,
+                        "expected_ms": expected, "estimated": estimated})
+        started = time.monotonic()
 
         def work() -> None:
             try:
@@ -671,6 +680,12 @@ class TerminalManager:
             except Exception as exc:
                 ran.update({"ok": False, "error": str(exc)})
             finally:
+                # In the run's own thread: a run returned early (steer) still ends here.
+                if "exit_code" in ran:
+                    run_durations.record(source, command, time.monotonic() - started)
+                if expected and conv_id:
+                    self._emit({"type": "run_expect", "conv_id": conv_id, "source": source,
+                                "expected_ms": 0, "estimated": False})
                 done.set()
 
         threading.Thread(target=work, daemon=True, name=f"terminal-run-{request_id}").start()

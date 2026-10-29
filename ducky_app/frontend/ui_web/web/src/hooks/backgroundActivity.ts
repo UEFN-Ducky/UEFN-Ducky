@@ -21,6 +21,11 @@ export type BackgroundJob = {
   terminalId?: string;
   startedAt?: number;
   endedAt?: number;
+  /** How long the running command should take (ms, 0 = unknown); `estimated`: from its past runs. */
+  expectedMs?: number;
+  estimated?: boolean;
+  /** When that command started (the turn's `startedAt` is the whole turn). */
+  expectStartedAt?: number;
 };
 
 const STORAGE_KEY = "uefn-background-activity";
@@ -121,6 +126,9 @@ export function upsertBackgroundJob(patch: Partial<BackgroundJob> & { id: string
     terminalId: patch.terminalId ?? prev?.terminalId,
     startedAt: patch.startedAt ?? prev?.startedAt,
     endedAt: patch.endedAt ?? prev?.endedAt,
+    expectedMs: patch.expectedMs ?? prev?.expectedMs,
+    estimated: patch.estimated ?? prev?.estimated,
+    expectStartedAt: patch.expectStartedAt ?? prev?.expectStartedAt,
     cancelable: patch.cancelable !== undefined ? Boolean(patch.cancelable) : prev?.cancelable,
     action: patch.action !== undefined ? patch.action || undefined : prev?.action,
   };

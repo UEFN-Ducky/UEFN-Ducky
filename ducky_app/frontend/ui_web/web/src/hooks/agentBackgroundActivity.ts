@@ -16,6 +16,14 @@ export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title
   if (!convId) return;
   const turnId = `agent:${convId}`;
   const turn = getBackgroundJobs().find((j) => j.id === turnId);
+  if (event.type === "run_expect") {
+    // A waited sandbox/terminal run started (expected_ms > 0) or ended (0).
+    if (turn?.phase === "working") {
+      upsertBackgroundJob({ id: turnId, expectedMs: event.expected_ms || 0, estimated: Boolean(event.estimated),
+        expectStartedAt: event.expected_ms ? now : 0, ts: now });
+    }
+    return;
+  }
   if (event.type === "agent_stopped" || event.type === "error") {
     if (!turn || turn.phase !== "working") return;
     if (event.run_id && turn.runId && turn.runId !== event.run_id) return;
@@ -23,7 +31,7 @@ export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title
     const failed = event.type === "error" || event.reason === "error";
     upsertBackgroundJob({ id: turnId, title: turn.title.replace(/ is working$/, stopped ? " stopped" : " finished"),
       phase: failed ? "error" : "done", detail: stopped ? "Stopped" : failed ? "Ended with an error" : "Finished",
-      endedAt: now, ts: now });
+      endedAt: now, expectedMs: 0, ts: now });
     return;
   }
   if (!TURN_EVENTS.has(event.type)) return;
@@ -31,7 +39,7 @@ export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title
   const newRun = Boolean(event.run_id && turn?.runId && turn.runId !== event.run_id);
   if (!turn || turn.phase !== "working" || newRun) {
     upsertBackgroundJob({ id: turnId, source: "agent", title: `${title} is working`, detail: step,
-      convId, runId: event.run_id, phase: "working", startedAt: now, endedAt: 0, ts: now });
+      convId, runId: event.run_id, phase: "working", startedAt: now, endedAt: 0, expectedMs: 0, estimated: false, ts: now });
     return;
   }
   // Text streams in hundreds of deltas: only a new step touches the store.

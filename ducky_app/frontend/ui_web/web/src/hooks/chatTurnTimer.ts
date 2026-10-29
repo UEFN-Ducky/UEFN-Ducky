@@ -87,6 +87,14 @@ export function chatTurnElapsedMs(timer: ChatTurnTimer | null, now = Date.now())
   return Math.max(0, end - timer.startedAt);
 }
 
+/** Coarse elapsed time for long work: "<1 min", "12 min", "1 h 05 min". Never seconds. */
+export function formatMinutes(ms: number): string {
+  const mins = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 60_000) : 0;
+  if (mins < 1) return "<1 min";
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)} h ${(mins % 60).toString().padStart(2, "0")} min`;
+}
+
 export function formatElapsedMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "0ms";
   if (ms < 1000) return `${Math.round(ms)}ms`;

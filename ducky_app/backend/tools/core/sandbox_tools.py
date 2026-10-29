@@ -128,12 +128,15 @@ def sandbox_setup(runtime: str, pretty: bool = False) -> str:
 
 
 @mcp.tool()
-def sandbox_run(command: str, shell: str = "bash", timeout_s: float = 600.0, pretty: bool = False) -> str:
+def sandbox_run(command: str, shell: str = "bash", timeout_s: float = 600.0, expect_minutes: float = 0,
+                pretty: bool = False) -> str:
     """Run a command in the sandbox's own terminal (cwd = its work folder, its own profile
     folders and caches; visible in the header's terminal list) and wait for it. Asks first
     unless the chat allows sandbox commands. For servers and apps that keep running, use
     sandbox_launch instead. Never runs: admin, system installers, registry/PATH changes,
-    scheduled tasks, releases/publishes/deploys, git push."""
+    scheduled tasks, releases/publishes/deploys, git push.
+
+    expect_minutes: how long this run should take; shows the person a progress bar."""
     why = _refused(command) or _approved("Run a command", command)
     if why:
         return tool_json({"ok": False, "error": why}, pretty=pretty)
@@ -141,7 +144,8 @@ def sandbox_run(command: str, shell: str = "bash", timeout_s: float = 600.0, pre
 
     # ponytail: the read hint is ducky_terminal_read_output, not sandbox_look: look reads
     # launched programs only, a sandbox_run lives in a terminal session.
-    return tool_json(early_return_hint(_forward("run", command=command, shell=shell, timeout_s=timeout_s)),
+    return tool_json(early_return_hint(_forward("run", command=command, shell=shell, timeout_s=timeout_s,
+                                                     expect_minutes=max(0.0, float(expect_minutes or 0)))),
                      pretty=pretty)
 
 
