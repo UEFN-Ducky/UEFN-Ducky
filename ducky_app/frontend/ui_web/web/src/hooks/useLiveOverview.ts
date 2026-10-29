@@ -1,14 +1,16 @@
 import { useSyncExternalStore } from "react";
 import type { LiveOverview } from "../types/panel";
 import { upsertBackgroundJob } from "./backgroundActivity";
+import { onApiReady } from "./onApiReady";
 import { getApi } from "./usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
 
 /**
  * The title bar's Live menu: every team copy this PC has plugins on and who is live where
- * (backend/uefn_plugins/live.py `overview`). Read once, then again when the app says it
- * moved (`live_team`, an account change, any plugin scope push): no timer runs while
- * nothing changes.
+ * (backend/uefn_plugins/live.py `overview`). Read once the panel API is ready, then again
+ * when the app says it moved (`live_team`, an account change, any plugin scope push): no
+ * timer runs while nothing changes. Before, the first read ran at mount, before pywebview's
+ * bridge was in, and found no API: the Live button stayed away until a plugin's scope push.
  */
 
 /** Pushes that land together (a join moves every plugin) make one read. */
@@ -20,6 +22,7 @@ let overview: LiveOverview | null = null;
 const listeners = new Set<() => void>();
 let started = false;
 let stopPush: (() => void) | null = null;
+let stopReady: (() => void) | null = null;
 let settle: number | undefined;
 let recheck: number | undefined;
 
@@ -73,7 +76,7 @@ function start(): void {
       refreshLiveOverview();
     }
   });
-  void readLiveOverview();
+  stopReady = onApiReady(() => void readLiveOverview());
 }
 
 function subscribe(fn: () => void): () => void {
@@ -93,6 +96,8 @@ export function useLiveOverview(): LiveOverview | null {
 export function _resetLiveOverviewForTests(): void {
   stopPush?.();
   stopPush = null;
+  stopReady?.();
+  stopReady = null;
   started = false;
   overview = null;
   listeners.clear();

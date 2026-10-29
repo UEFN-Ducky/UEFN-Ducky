@@ -442,6 +442,17 @@ def test_the_menus_groups_cover_every_plugin_and_say_what_each_person_has_on_scr
     assert t["plugins"] == [PLUGIN] and [m["name"] for m in t["groups"][0]["members"]] == ["Cy", "Mo", "You"]
 
 
+def test_the_overview_lists_a_saved_team_copy_before_any_plugin_or_the_provider_is_loaded(
+        team: dict[str, Any]) -> None:
+    """App start: no plugin panel opened yet, so the Live menu has only the saved links."""
+    got = live.overview()
+    (t,) = got["teams"]
+    assert (t["space"], t["label"], t["supported"], got["on"]) == (SPACE, "Alpha", True, False)
+    spaces.reset_for_tests()  # the account plugin (the provider) hasn't loaded either
+    (t,) = live.overview()["teams"]
+    assert t["space"] == SPACE and not t["supported"] and t["reason"]
+
+
 def test_a_remembered_group_is_gone_back_into_after_a_restart_while_it_is_live(team: dict[str, Any]) -> None:
     account = team["account"]
     live.remember_team(account, SPACE, "h:d_iliya")
