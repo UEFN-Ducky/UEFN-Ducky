@@ -88,6 +88,15 @@ def attach(core: Any, window: Any, form: Any, *, hide_others: bool) -> Any:
     return on_requested
 
 
+def keep_menu_events(settings: Any) -> None:
+    """After pywebview's own ``on_webview_ready``: it sets AreDefaultContextMenusEnabled to its
+    debug flag (False in every shipped build), and with default menus off WebView2 never raises
+    ContextMenuRequested, so right-click showed no spelling fixes at all (Oct 29 2026). Once
+    ``attach`` hooked the event it draws or hides every menu itself, so turn them back on."""
+    if settings is not None:
+        settings.AreDefaultContextMenusEnabled = True
+
+
 def pick(token: str, command_id: int) -> bool:
     """The page's answer: run ``command_id`` (a spelling fix, Paste...) or nothing (-1)."""
     with _lock:

@@ -103,6 +103,47 @@ def test_closing_the_menu_runs_nothing(pushed) -> None:
     assert args.SelectedCommandId == -1 and deferral.done
 
 
+def test_keep_menu_events_turns_default_menus_back_on() -> None:
+    settings = SimpleNamespace(AreDefaultContextMenusEnabled=False)
+    nm.keep_menu_events(settings)
+    assert settings.AreDefaultContextMenusEnabled is True
+    nm.keep_menu_events(None)  # no settings: nothing to do
+
+
+@pytest.mark.skipif(__import__("sys").platform != "win32", reason="the chrome patch is Windows only")
+def test_the_menu_event_survives_pywebviews_own_ready_step(monkeypatch) -> None:
+    """Oct 29 2026: shipped builds showed no spelling menu. pywebview's on_webview_ready runs after
+    Ducky's and sets AreDefaultContextMenusEnabled = debug (False), which stops the event."""
+    import types
+
+    from frontend import boot_report
+    from frontend.ui_web import win_frameless as wf
+
+    class EdgeChrome:
+        def on_webview_ready(self, sender, args):
+            sender.CoreWebView2.Settings.AreDefaultContextMenusEnabled = False  # what pywebview does
+
+        def on_navigation_completed(self, sender, args):
+            pass
+
+    platforms = types.ModuleType("webview.platforms")
+    platforms.edgechromium = types.SimpleNamespace(EdgeChrome=EdgeChrome)
+    platforms.winforms = types.SimpleNamespace(BrowserView=types.SimpleNamespace(BrowserForm=object))
+    monkeypatch.setitem(__import__("sys").modules, "webview.platforms", platforms)
+    monkeypatch.setattr(wf, "_make_chrome_browser_form", lambda: type("Form", (), {}))
+    monkeypatch.setattr(wf, "_OriginalBrowserForm", type("Orig", (), {"update_title_bar_theme": lambda self: None}))
+    monkeypatch.setattr(wf.install_pywebview_chrome_patches, "_installed", False, raising=False)
+    monkeypatch.setattr(boot_report, "webview_ready", lambda *a, **k: None)
+    wf.install_pywebview_chrome_patches()
+
+    core = _Core()
+    core.Settings = SimpleNamespace(IsNonClientRegionSupportEnabled=False, AreDefaultContextMenusEnabled=True)
+    sender = SimpleNamespace(CoreWebView2=core)
+    EdgeChrome.on_webview_ready(SimpleNamespace(pywebview_window=None, form=None), sender, SimpleNamespace(IsSuccess=True))
+    assert core.handlers, "the right-click hook attached"
+    assert core.Settings.AreDefaultContextMenusEnabled is True
+
+
 def test_elsewhere_the_store_exe_shows_no_browser_menu_and_dev_keeps_it(pushed) -> None:
     core = _Core()
     nm.attach(core, window=None, form=None, hide_others=True)

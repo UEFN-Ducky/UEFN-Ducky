@@ -1215,6 +1215,7 @@ def install_pywebview_chrome_patches() -> None:
         original_nav = edgechromium.EdgeChrome.on_navigation_completed
 
         def on_webview_ready(self, sender, args):
+            menu_hooked = False
             try:
                 from frontend import boot_report
 
@@ -1245,6 +1246,7 @@ def install_pywebview_chrome_patches() -> None:
                             self.form,
                             hide_others=hides_native_menu(),
                         )
+                        menu_hooked = True
                     except Exception:
                         _log.exception("WebView2 native menu hook failed")
                         apply_shipped_webview2_settings(sender.CoreWebView2.Settings)
@@ -1301,6 +1303,15 @@ def install_pywebview_chrome_patches() -> None:
                 except Exception:
                     pass
             original_ready(self, sender, args)
+            if menu_hooked:
+                # pywebview just turned default menus off outside debug, which also stops the
+                # right-click event the spelling menu hangs on.
+                try:
+                    from frontend.ui_web.webview_native_menu import keep_menu_events
+
+                    keep_menu_events(sender.CoreWebView2.Settings)
+                except Exception:
+                    _log.exception("WebView2 native menu re-enable failed")
 
         def on_navigation_completed(self, sender, args):
             original_nav(self, sender, args)
