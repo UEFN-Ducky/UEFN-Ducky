@@ -11,6 +11,7 @@ import { pluginPrefsKey } from "../hooks/pluginPrefsStorage";
 import { getPluginThemeVars } from "./pluginTheme";
 import { alertRefusedWrite, refusedFromResult } from "./scopeAlerts";
 import { pluginUiTabId, type BridgeRequest, type BridgeResponse } from "./types";
+import { closeDock, dockSnapshot, getDock, openDock, sanitizeTheme, setDock, type DockState } from "./pluginChatDockStore";
 
 export type BridgeContext = {
   pluginId: string;
@@ -918,7 +919,37 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     });
     return { ok: true, types };
   },
+  /**
+   * Ducky's own chat docked in this panel, focused on the plugin:
+   * ``{key?, title?, brief?, conv_id?, place?: "bottom"|"right", size?, expanded?, theme?: {"--var": value}}``
+   * → ``{open, expanded, place, size, conv_id, running}``. `key` picks the conversation (one per key,
+   * remembered); `brief` is what the agent is told about the plugin; `conv_id` binds an existing chat.
+   * Changes come back as the event ``chat.state``.
+   */
+  "chat.open": async (ctx, params) => dockSnapshot(await openDock(paneKey(ctx), ctx.pluginId, params)),
+  /** Change the open dock: ``{expanded?, place?, size?, theme?, open?}``. */
+  "chat.set": (ctx, params) => {
+    const patch: Partial<DockState> = {};
+    if (typeof params.expanded === "boolean") patch.expanded = params.expanded;
+    if (typeof params.open === "boolean") patch.open = params.open;
+    if (params.place === "bottom" || params.place === "right") patch.place = params.place;
+    if (typeof params.size === "number") patch.size = params.size;
+    if (params.theme !== undefined) patch.theme = sanitizeTheme(params.theme);
+    const next = setDock(paneKey(ctx), patch);
+    if (!next) throw new Error("chat.set: call chat.open first");
+    return dockSnapshot(next);
+  },
+  "chat.close": (ctx) => {
+    closeDock(paneKey(ctx));
+    return dockSnapshot(getDock(paneKey(ctx)));
+  },
+  "chat.state": (ctx) => dockSnapshot(getDock(paneKey(ctx))),
 };
+
+/** The dock belongs to the pane that asked (instance tabs have their own). */
+function paneKey(ctx: BridgeContext): string {
+  return ctx.tabId || pluginUiTabId(ctx.pluginId, ctx.panelId);
+}
 
 /** Methods that must not hang the plugin iframe forever (UI-thread risk). */
 const BRIDGE_FAST_TIMEOUT_MS: Record<string, number> = {

@@ -25,6 +25,8 @@ import { PluginScopeBar } from "./PluginScopeBar";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { usePluginPage } from "./usePluginPage";
 import { WINDOW_ID } from "../tabs/tabRegistryClient";
+import { PluginChatDock, useDock } from "./PluginChatDock";
+import { dockSnapshot, dropDock, registerChatLookup } from "./pluginChatDockStore";
 
 export type PluginChatOverlayProps = {
   allChats: ChatTab[];
@@ -93,6 +95,24 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
 
   const page = usePluginPage(parsed?.pluginId ?? "", panel?.entry, panel?.version);
   const src = page.src;
+
+  // Ducky's own chat docked in this pane (bridge `chat.open`); the pane needs the window's chats to show it.
+  const dock = useDock(tabId);
+  const dockShown = !!dock?.open && !!dock.convId && !!chatOverlay;
+  const dockRunning = !!dock && !!chatOverlay?.runningChatIds.has(dock.convId);
+  const allChats = chatOverlay?.allChats;
+  useEffect(() => {
+    if (!allChats) return;
+    // A remembered dock chat that was deleted is replaced (empty list = not loaded yet: trust it).
+    registerChatLookup((id) => allChats.length === 0 || allChats.some((c) => c.id === id));
+  }, [allChats]);
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { channel: BRIDGE_CHANNEL, event: { type: "chat.state", ...dockSnapshot(dock, dockRunning) } },
+      "*",
+    );
+  }, [dock, dockRunning]);
+  useEffect(() => () => dropDock(tabId), [tabId]);
 
   const showDucktactoeChat =
     !!chatOverlay &&
@@ -298,13 +318,18 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
             )
           }
         />
-        <iframe
-          ref={iframeRef}
-          className="plugin-ui-iframe"
-          title={panel.title || panel.id}
-          src={src}
-          sandbox={PLUGIN_UI_SANDBOX}
-        />
+        <div className={`plugin-ui-body${dockShown && dock ? ` plugin-ui-body--dock-${dock.place}` : ""}`}>
+          <iframe
+            ref={iframeRef}
+            className="plugin-ui-iframe"
+            title={panel.title || panel.id}
+            src={src}
+            sandbox={PLUGIN_UI_SANDBOX}
+          />
+          {dockShown && dock && chatOverlay ? (
+            <PluginChatDock tabId={tabId} dock={dock} overlay={chatOverlay} visible={visible} />
+          ) : null}
+        </div>
       </div>
     </PluginSurfaceBoundary>
   );

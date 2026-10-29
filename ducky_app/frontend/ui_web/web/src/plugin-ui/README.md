@@ -73,6 +73,20 @@ await call("prefs.get", { id: "highScore" });
 | `live.leave` | — | `{ ok }` — this PC leaves the group, every plugin with it (a room of the plugin's own: only that) |
 | `live.state` | — | `{ supported, reason, on, room, state, peers }` |
 | `live.send` | `{ topic, data, to? }` (JSON ≤ 16 KB, ≤ 30/s) | `{ ok, sent }` — to teammates live in the room (`to`: one PC's device id); `ducky.*` topics are the host's |
+| `chat.open` | `{ key?, title?, brief?, conv_id?, place?: "bottom"\|"right", size?, expanded?, theme? }` | `{ open, expanded, place, size, conv_id, running }` — Ducky's own chat docked in this panel (see below) |
+| `chat.set` | `{ expanded?, place?, size?, theme?, open? }` | same as `chat.open` — change the open dock |
+| `chat.close` / `chat.state` | — | same — close the dock / read it |
+
+### Docked chat (`chat.*`)
+
+`chat.open` shows Ducky's real chat (messages, tool steps, composer, model picker) inside the
+panel, under it (`place: "bottom"`) or beside it (`"right"`). It starts as one slim line (title,
+a running dot and timer, expand / open as a tab / close) and expands to `size` px; the person can
+drag its edge. The conversation is the plugin's own: one per `key` (remembered, replaced if
+deleted), its agent told it lives in the plugin plus your `brief`, or an existing chat via
+`conv_id`. Recolor it with `theme: { "--dock-bg": …, "--dock-accent": …, "--fg": … }` (CSS
+variables only; values with `url(`, `;` or braces are dropped). Every change comes back as the
+event `{ type: "chat.state", open, expanded, place, size, conv_id, running }`.
 
 ### Plugin data (host data service)
 
