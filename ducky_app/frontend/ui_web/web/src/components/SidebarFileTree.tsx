@@ -83,11 +83,19 @@ import { isEnglishLang } from "../views/settings/translationLanguages";
 import { FileTabHoverCard } from "./editor/FileTabHoverCard";
 import type { EditorTabHoverCardPlacement } from "../hooks/useEditorTabHoverCard";
 import type { DockSide } from "../workspace/workspaceDockStorage";
+import { useLongPressSelect } from "../hooks/useLongPressSelect";
+import { SelectionActionBar } from "./SelectionActionBar";
 
 export const WORKSPACE_TREE_ROOT = WORKSPACE_ROOTS_PATH;
 
 /** Sidebar hover cards open away from the rail (right dock → left of the row). */
 const FileTreeHoverPlacementContext = createContext<EditorTabHoverCardPlacement>("right");
+
+/** Touch selection mode (started by a long-press): a plain tap toggles a row. */
+const FileTouchSelectContext = createContext<{ touchSelecting: boolean; start: () => void }>({
+  touchSelecting: false,
+  start: () => {},
+});
 
 function hoverPlacementForDockSide(dockSide: DockSide = "left"): EditorTabHoverCardPlacement {
   return dockSide === "right" ? "left" : "right";
@@ -360,11 +368,17 @@ const FileRow = memo(function FileRow({
     pluginContributesSettingsTab(pluginContrib, "Languages") &&
     !isEnglishLang(uiLang);
 
+  const touchSelect = useContext(FileTouchSelectContext);
+  const longPress = useLongPressSelect(() => {
+    touchSelect.start();
+    onModSelect({ ctrl: true, shift: false });
+  });
+
   const handleClick = (e: React.MouseEvent) => {
     if (isEditing) return;
     // Ctrl/Meta toggles, Shift range-selects — neither opens or expands (VS Code).
-    if (e.ctrlKey || e.metaKey || e.shiftKey) {
-      onModSelect({ ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+    if (e.ctrlKey || e.metaKey || e.shiftKey || touchSelect.touchSelecting) {
+      onModSelect({ ctrl: e.ctrlKey || e.metaKey || touchSelect.touchSelecting, shift: e.shiftKey });
       return;
     }
     onSelectOnly();
@@ -509,6 +523,7 @@ const FileRow = memo(function FileRow({
       dataAttr="data-file-id"
       dataId={id}
       draggable={draggable && !locked}
+      rowProps={longPress}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
@@ -793,6 +808,14 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
     const [selection, setSelection] = useState<ExplorerSelection>(emptySelection);
     const selectionRef = useRef(selection);
     selectionRef.current = selection;
+    const [touchSelecting, setTouchSelecting] = useState(false);
+    const touchSelect = useMemo(
+      () => ({ touchSelecting, start: () => setTouchSelecting(true) }),
+      [touchSelecting],
+    );
+    useEffect(() => {
+      if (touchSelecting && selection.selected.size === 0) setTouchSelecting(false);
+    }, [touchSelecting, selection.selected.size]);
     useEffect(() => {
       onSelectionCountChange?.(selection.selected.size);
     }, [selection.selected.size, onSelectionCountChange]);
@@ -2054,6 +2077,7 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
 
     return (
       <FileTreeHoverPlacementContext.Provider value={hoverPlacement}>
+      <FileTouchSelectContext.Provider value={touchSelect}>
       <div className="file-tree-shell" data-undo-scope="files" tabIndex={-1}>
         {error ? <div className="ui-status-sidebar-error">{error}</div> : null}
         {treeMenu ? (
@@ -2151,7 +2175,32 @@ export const SidebarFileTree = forwardRef<SidebarFileTreeHandle, SidebarFileTree
                 </>
               )}
           </div>
+          {selection.selected.size > 1 ? (
+            <SelectionActionBar
+              count={selection.selected.size}
+              actions={[
+                {
+                  id: "move",
+                  label: "Move",
+                  title: "Cut the selection; paste it into a folder to move it there",
+                  onClick: () => void cutSelection(),
+                },
+                {
+                  id: "delete",
+                  label: "Delete",
+                  danger: true,
+                  onClick: () => {
+                    const first = [...selectionRef.current.selected][0];
+                    const entry = first ? lookupCachedEntry(cacheRef.current, first) : null;
+                    if (entry) void handleDeleteEntry(entry);
+                  },
+                },
+              ]}
+              onClear={clearSelection}
+            />
+          ) : null}
       </div>
+      </FileTouchSelectContext.Provider>
       </FileTreeHoverPlacementContext.Provider>
     );
   },

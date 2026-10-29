@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { HTMLAttributes, ReactNode, Ref } from "react";
 import { TruncatedText } from "../TruncatedText";
 
 interface SidebarTreeRowProps {
@@ -26,6 +26,8 @@ interface SidebarTreeRowProps {
   onClick?: (e: React.MouseEvent) => void;
   onDoubleClick?: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  /** Extra handlers on the row (touch long-press). */
+  rowProps?: HTMLAttributes<HTMLDivElement>;
 }
 
 export function SidebarTreeRow({
@@ -50,9 +52,11 @@ export function SidebarTreeRow({
   onClick,
   onDoubleClick,
   onContextMenu,
+  rowProps,
 }: SidebarTreeRowProps) {
   return (
     <div
+      {...rowProps}
       ref={rowRef}
       {...{ [dataAttr]: dataId }}
       data-tree-row={treeId ?? dataId}

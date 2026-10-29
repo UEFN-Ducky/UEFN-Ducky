@@ -30,6 +30,7 @@ import {
   dragId,
   expandFoldersById,
   findFolderById,
+  insertChatFolder,
   parseDragId,
 } from "../utils/sidebarTree";
 import {
@@ -37,6 +38,7 @@ import {
   duckiesCreateTarget,
   duckiesDropPolicy,
   duckiesLayoutFor,
+  duckiesPlace,
   duckiesPlaces,
   planDuckiesDrop,
   planDuckiesRestore,
@@ -45,6 +47,8 @@ import {
 } from "../utils/duckiesTreeModel";
 import { duckiesLayoutHold } from "../utils/duckiesLayoutHold";
 import { useTreeDnd } from "../tree-dnd/useTreeDnd";
+import { useLongPressSelect } from "../hooks/useLongPressSelect";
+import { SelectionActionBar, type SelectionAction } from "./SelectionActionBar";
 import { topLevelSources } from "../tree-dnd/treeMove";
 import { keepTreeFocus } from "../tree-dnd/treeFocus";
 import { useUndoHistoryOptional } from "../navigation/UndoHistoryContext";
@@ -156,7 +160,22 @@ type RowSelectionCtx = {
   selected: ReadonlySet<string>;
   /** Right-clicking a row outside the selection selects it (VS Code / Content). */
   onContextSelect: (rowId: string) => void;
+  /** New group holding this chat, or every selected chat when the row is in the selection. */
+  onGroupFromSelection?: (rowId: string) => void;
+  /** Touch selection mode (started by a long-press): a plain tap toggles a row. */
+  touchSelecting?: boolean;
+  onTouchSelectStart?: () => void;
 };
+
+/** Row handlers for touch multi-select: long-press adds the row and starts selection mode. */
+function useRowLongPress(onModSelect?: (mods: SelectMods) => void) {
+  const { onTouchSelectStart } = useContext(RowSelectionContext);
+  return useLongPressSelect(() => {
+    if (!onModSelect) return;
+    onTouchSelectStart?.();
+    onModSelect({ ctrl: true, shift: false });
+  });
+}
 
 const RowSelectionContext = createContext<RowSelectionCtx>({
   selected: new Set<string>(),
@@ -166,6 +185,12 @@ const RowSelectionContext = createContext<RowSelectionCtx>({
 function useRowDeleteCount(rowId: string): number {
   const { selected } = useContext(RowSelectionContext);
   return selected.has(rowId) && selected.size > 1 ? selected.size : 1;
+}
+
+/** Chat rows a "Create group" from this row takes: the selected chats, or just this one. */
+function groupSources(selected: ReadonlySet<string>, rowId: string): string[] {
+  if (!selected.has(rowId)) return [rowId];
+  return [...selected].filter((id) => parseDragId(id)?.kind === "chat");
 }
 
 /** One row from the duckies tree targeted by a delete. */
@@ -261,6 +286,9 @@ const ChatRow = memo(function ChatRow({
   const deleteCount = useRowDeleteCount(id);
   const deleteLabel =
     deleteCount > 1 ? "Delete ALL" : archived ? "Delete permanently" : "Archive";
+  const longPress = useRowLongPress(onModSelect);
+  const groupCount = groupSources(rowSelection.selected, id).length;
+  const canGroup = !archived && !chat.isGroup && Boolean(rowSelection.onGroupFromSelection);
   const { menu, open, close } = useContextMenuState<void>();
   const pluginContrib = usePluginContributions();
   const agentLabels = useMemo(() => {
@@ -367,6 +395,16 @@ const ChatRow = memo(function ChatRow({
               y={menu.y}
               onClose={close}
               items={[
+                ...(canGroup
+                  ? [
+                      {
+                        id: "group-from-selection",
+                        label: groupCount > 1 ? `Create group with these ${groupCount}` : "Create group with this chat",
+                        onClick: () => { close(); rowSelection.onGroupFromSelection?.(id); },
+                      },
+                      contextMenuSeparator("sep-group-from-selection"),
+                    ]
+                  : []),
                 ...(showChatTranslate
                   ? [
                       {
@@ -416,10 +454,11 @@ const ChatRow = memo(function ChatRow({
         dataAttr="data-sidebar-id"
         dataId={id}
         draggable={!archived}
+        rowProps={longPress}
         onClick={(e) => {
           if (isEditing) return;
-          if (onModSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
-            onModSelect({ ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+          if (onModSelect && (e.ctrlKey || e.metaKey || e.shiftKey || rowSelection.touchSelecting)) {
+            onModSelect({ ctrl: e.ctrlKey || e.metaKey || Boolean(rowSelection.touchSelecting), shift: e.shiftKey });
             return;
           }
           if (!muted) onSelect();
@@ -591,6 +630,7 @@ function FolderHeader({
   const rowSelection = useContext(RowSelectionContext);
   // A group goes to Archive first (its popup still offers Delete); a plain folder is just removed.
   const deleteLabel = useRowDeleteCount(id) > 1 ? "Delete ALL" : folder.groupHubId ? "Archive" : "Delete";
+  const longPress = useRowLongPress(onModSelect);
   const { menu, open, close } = useContextMenuState<void>();
 
   const hoverPlacement = useContext(ChatTreeHoverPlacementContext);
@@ -703,12 +743,13 @@ function FolderHeader({
         dataAttr="data-sidebar-id"
         dataId={id}
         draggable
+        rowProps={longPress}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("button")) return;
           if (e.button !== 0) return;
           if (isEditing) return;
-          if (onModSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
-            onModSelect({ ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+          if (onModSelect && (e.ctrlKey || e.metaKey || e.shiftKey || rowSelection.touchSelecting)) {
+            onModSelect({ ctrl: e.ctrlKey || e.metaKey || Boolean(rowSelection.touchSelecting), shift: e.shiftKey });
             return;
           }
           onSelectFolder();
@@ -1061,6 +1102,11 @@ export function SidebarFolderTree({
   const [selection, setSelection] = useState<ExplorerSelection>(emptySelection);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  const [touchSelecting, setTouchSelecting] = useState(false);
+  const startTouchSelect = useCallback(() => setTouchSelecting(true), []);
+  useEffect(() => {
+    if (selection.selected.size === 0) setTouchSelecting(false);
+  }, [selection.selected.size]);
   useEffect(() => {
     onSelectionCountChange?.(selection.selected.size);
   }, [selection.selected.size, onSelectionCountChange]);
@@ -1258,11 +1304,6 @@ export function SidebarFolderTree({
     [onSelectChatFolder],
   );
 
-  const rowSelection = useMemo<RowSelectionCtx>(
-    () => ({ selected: selection.selected, onContextSelect: contextSelectRow }),
-    [selection.selected, contextSelectRow],
-  );
-
   /** Route a row delete through the selection when that row is part of one. */
   const deleteRow = useCallback(
     (kind: "folder" | "chat", id: string, name: string) => {
@@ -1339,6 +1380,55 @@ export function SidebarFolderTree({
       }
     },
     [setFolders, setRootChats],
+  );
+
+  /** "Create group with these N": a new group next to the clicked chat, then the selected
+   *  chats moved into it the way a drag into a group folder moves them. */
+  const groupFromSelection = useCallback(
+    async (rowId: string) => {
+      const api = getApi();
+      if (!api?.group_create) return;
+      const sources = groupSources(selectionRef.current.selected, rowId).filter((id) =>
+        treeIndexRef.current.chats.has(id),
+      );
+      const parentNode = treeIndexRef.current.model.parent.get(rowId);
+      if (!sources.length || parentNode === undefined) return;
+      const place = duckiesPlace(treeIndexRef.current, parentNode);
+      const foreign = place.slug !== currentSlugRef.current ? place.slug : undefined;
+      const res = await api.group_create("Group", place.folderId, false, foreign);
+      const folderId = String(res?.folder_id || "").trim();
+      if (!res?.ok || !res.id || !folderId) return;
+      const title = res.title || "Group";
+      const data: DuckiesTreeData = {
+        ...treeDataRef.current,
+        folders: insertChatFolder(treeDataRef.current.folders, place.folderId, {
+          id: folderId,
+          name: title,
+          expanded: true,
+          chats: [],
+          children: [],
+          groupHubId: res.id,
+          ...(foreign ? { projectSlug: foreign } : {}),
+        }),
+      };
+      const index = buildDuckiesIndex(data, currentSlugRef.current);
+      const target = { parentId: dragId("folder", folderId), index: null, into: true };
+      setSelection(emptySelection());
+      setEditing({ kind: "folder", id: folderId, value: title });
+      await applyPlan(planDuckiesDrop(index, data, sources, target, duckiesDropPolicy(index)));
+    },
+    [applyPlan, setEditing],
+  );
+
+  const rowSelection = useMemo<RowSelectionCtx>(
+    () => ({
+      selected: selection.selected,
+      onContextSelect: contextSelectRow,
+      onGroupFromSelection: (rowId) => void groupFromSelection(rowId),
+      touchSelecting,
+      onTouchSelectStart: startTouchSelect,
+    }),
+    [selection.selected, contextSelectRow, groupFromSelection, touchSelecting, startTouchSelect],
   );
 
   const chatForNode = useCallback((nodeId: string): { id: string; name: string } | null => {
@@ -1455,6 +1545,33 @@ export function SidebarFolderTree({
 
   const projectEmpty = filteredRootChats.length === 0 && filteredFolders.length === 0;
 
+  // 2+ rows selected: a bar with the menu's selection actions (touch has no right-click).
+  const selectedRows = [...selection.selected];
+  const firstChatRow = selectedRows.find((rowId) => parseDragId(rowId)?.kind === "chat");
+  const barActions: SelectionAction[] = [
+    ...(firstChatRow ? [{ id: "group", label: "Create group", onClick: () => void groupFromSelection(firstChatRow) }] : []),
+    {
+      id: "mute",
+      label: "Mute",
+      onClick: () => {
+        for (const rowId of selectedRows) {
+          const parsed = parseDragId(rowId);
+          const convId = parsed?.kind === "chat" ? parsed.id : treeIndex.folders.get(rowId)?.groupHubId;
+          if (convId) setMuted(convId, true);
+        }
+      },
+    },
+    {
+      id: "delete",
+      label: "Delete",
+      danger: true,
+      onClick: () => {
+        const parsed = parseDragId(selectedRows[0] ?? "");
+        if (parsed) deleteRow(parsed.kind, parsed.id, rowNameById.get(selectedRows[0]) ?? "");
+      },
+    },
+  ];
+
   return (
     <ChatTreeHoverPlacementContext.Provider value={hoverPlacement}>
     <RowSelectionContext.Provider value={rowSelection}>
@@ -1536,6 +1653,9 @@ export function SidebarFolderTree({
           ) : null}
         </DuckiesCompactContext.Provider>
       </div>
+      {selectedRows.length > 1 ? (
+        <SelectionActionBar count={selectedRows.length} actions={barActions} onClear={() => setSelection(emptySelection())} />
+      ) : null}
     </>
     </RowSelectionContext.Provider>
     </ChatTreeHoverPlacementContext.Provider>
