@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
+import threading
+import uuid
 from typing import Any
 
 from backend.server import mcp
@@ -783,6 +786,30 @@ def _caller_chat(conv_id: str) -> str:
         return ""
 
 
+def _tell_caller(chat_id: str, workflow_id: str, out: dict[str, Any]) -> None:
+    """A background run ended: one notice to the chat that started it (wakes its ducky when idle)."""
+    if not chat_id:
+        return
+    from backend.automations.store import get_workflow as _get
+
+    name = str((_get(workflow_id) or {}).get("name") or workflow_id)
+    state = "ok" if out.get("ok") else f"failed: {out.get('error') or 'unknown error'}"
+    lines = [f"[Workflow] {name} finished: {state} (run `{out.get('run') or ''}`)."]
+    text = str(out.get("text") or "").strip()
+    if text:
+        lines.append(text[:2000])
+    if out.get("outputs"):
+        lines.append("Outputs: " + json.dumps(out["outputs"], default=str)[:2000])
+    try:
+        from backend.agent.a2a_client import send_notice
+
+        send_notice(sender_conv_id=f"workflow:{workflow_id}", receiver_conv_id=chat_id, body="\n".join(lines))
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Could not tell %s that workflow %s ended", chat_id, workflow_id)
+
+
 @mcp.tool()
 async def run_workflow(
     workflow_id: str,
@@ -792,10 +819,15 @@ async def run_workflow(
     payload: dict[str, Any] | None = None,
     trigger_id: str = "",
     plan_step_id: str = "",
+    wait: bool = False,
     pretty: bool = False,
 ) -> str:
     """Run a workflow now (an open Workflows editor shows it; the user's tab never switches).
     Does not switch the active island.
+
+    Returns at once with {ok, run_id, status:"running"}: the run goes on by itself (only the
+    workflow bar's Stop ends it) and the calling chat gets one "[Workflow] ... finished" message
+    when it ends, so keep talking meanwhile. wait=true blocks and returns the whole result.
 
     A plugin release workflow (its Find the plugin repo step) holds that plugin while it
     runs: a second release run of the same plugin is refused with the running one's id.
@@ -811,24 +843,53 @@ async def run_workflow(
     from backend.automations.runner import public_payload
     from backend.automations.runner import run_workflow as _run
 
-    def start() -> asyncio.Task:
-        # Agents inside the workflow call this MCP server themselves. Keep its
-        # event loop available while the synchronous runner waits for those agents.
-        # to_thread also preserves the caller's identity context variables.
-        return asyncio.create_task(asyncio.to_thread(
-            _run,
-            workflow_id,
-            trigger_id=trigger_id,
-            # Only the app says a person pressed Run (approves code, allows spending).
-            payload=public_payload(payload),
-            prompt=prompt,
-            files=files,
-            caller_conv_id=caller_conv_id,
-        ))
+    loop = asyncio.get_running_loop()
+    run_id = uuid.uuid4().hex[:12]
+    caller = _caller_chat(caller_conv_id)
 
+    def work(done: asyncio.Future) -> None:
+        try:
+            out = _run(
+                workflow_id,
+                trigger_id=trigger_id,
+                # Only the app says a person pressed Run (approves code, allows spending).
+                payload=public_payload(payload),
+                prompt=prompt,
+                files=files,
+                caller_conv_id=caller_conv_id,
+                run_id=run_id,
+            )
+        except Exception as exc:
+            out = {"ok": False, "error": str(exc), "id": workflow_id, "run": run_id}
+        if not wait:
+            _tell_caller(caller, workflow_id, out)
+        try:
+            loop.call_soon_threadsafe(lambda: done.done() or done.set_result(out))
+        except RuntimeError:
+            pass  # the tool server's loop is gone; the run itself already finished
+
+    def start() -> asyncio.Future:
+        # Its own thread, not the tool call: agents inside the workflow call this MCP
+        # server themselves (its loop stays free), and a cancelled or interrupted turn
+        # can't stop the run. copy_context keeps the caller's identity variables.
+        done = loop.create_future()
+        threading.Thread(target=contextvars.copy_context().run, args=(work, done),
+                         name=f"workflow-{workflow_id}-{run_id}", daemon=True).start()
+        return done
+
+    async def result(running: asyncio.Future) -> str:
+        if not wait:
+            return tool_json({"ok": True, "run_id": run_id, "status": "running", "workflow": workflow_id}, pretty=pretty)
+        out = await asyncio.shield(running)
+        if out.get("ok"):
+            _reveal_graph(workflow_id, "saved")
+        return tool_json(_review_hint(out, workflow_id), pretty=pretty)
+
+    if not wait:
+        _reveal_graph(workflow_id, "saved")
     plugin = release_plugin_of(workflow_id, payload)
     if not plugin:
-        out = await start()
+        return await result(start())
     else:
         from backend.tools.panel.panel_ai_plugins import release_busy
 
@@ -839,10 +900,7 @@ async def run_workflow(
             known = _run_ids(workflow_id)
             running = start()
             await _record_release_run(plugin, workflow_id, known, running, caller_conv_id, plan_step_id)
-        out = await running
-    if out.get("ok"):
-        _reveal_graph(workflow_id, "saved")
-    return tool_json(_review_hint(out, workflow_id), pretty=pretty)
+        return await result(running)
 
 
 @mcp.tool()

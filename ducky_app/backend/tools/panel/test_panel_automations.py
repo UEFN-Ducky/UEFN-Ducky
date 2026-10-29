@@ -31,7 +31,7 @@ def test_workflow_runner_keeps_mcp_loop_responsive(monkeypatch):
 
         monkeypatch.setattr("backend.automations.runner.run_workflow", runner)
         monkeypatch.setattr("backend.automations.runner.run_node", runner)
-        for request in (panel.run_workflow("demo", caller_conv_id="calling-chat"),
+        for request in (panel.run_workflow("demo", caller_conv_id="calling-chat", wait=True),
                         panel.run_workflow_node("demo", "build")):
             result = json.loads(await request)
             assert result["ok"] is True
@@ -401,6 +401,7 @@ def test_release_workflow_holds_the_plugin_and_refuses_a_second_run(monkeypatch,
         return {"ok": True, "id": wid, "run": "7f3a"}
 
     monkeypatch.setattr("backend.automations.runner.run_workflow", fake_run)
+    monkeypatch.setattr("backend.agent.a2a_client.send_notice", lambda **kw: None)
 
     async def check():
         first = asyncio.create_task(panel.run_workflow("rel", caller_conv_id="lead", plan_step_id="s1"))
@@ -413,7 +414,68 @@ def test_release_workflow_holds_the_plugin_and_refuses_a_second_run(monkeypatch,
         assert rec["clone"] == "C:/repos/imk" and notes == [("lead", "s1", "Release workflow run `7f3a` started.")]
         second = json.loads(await panel.run_workflow("rel"))
         assert second["ok"] is False and "release workflow 7f3a is running" in second["error"] and len(started) == 1
+        assert json.loads(await first)["status"] == "running"
         finish.set()
-        assert json.loads(await first)["ok"] is True
 
     asyncio.run(check())
+
+
+def _slow_run(monkeypatch):
+    """A workflow whose step waits for ``finish``; the notices its end sends land in ``notices``."""
+    from backend.tools.panel import panel_automations as panel
+
+    finish, ended = threading.Event(), threading.Event()
+    notices: list[dict] = []
+
+    def slow(wid, **kw):
+        finish.wait(10)
+        ended.set()
+        return {"ok": True, "id": wid, "run": kw["run_id"], "text": "Released 1.2.3"}
+
+    monkeypatch.setattr("backend.automations.runner.run_workflow", slow)
+    monkeypatch.setattr("backend.automations.store.get_workflow", lambda wid: {"id": wid, "name": "UEFN Ducky Release", "graph": {}})
+    monkeypatch.setattr("backend.agent.a2a_client.send_notice", lambda **kw: notices.append(kw))
+    monkeypatch.setattr(panel, "_reveal_graph", lambda *a, **k: None)
+    return panel, finish, ended, notices
+
+
+def test_run_workflow_returns_at_once_and_tells_the_caller_when_it_ends(monkeypatch):
+    import time
+
+    panel, finish, ended, notices = _slow_run(monkeypatch)
+
+    async def check():
+        began = time.monotonic()
+        out = json.loads(await panel.run_workflow("rel", caller_conv_id="lead"))
+        assert time.monotonic() - began < 1
+        assert out["ok"] is True and out["status"] == "running" and out["workflow"] == "rel" and out["run_id"]
+        assert notices == [] and not ended.is_set()
+        finish.set()
+        for _ in range(200):
+            if notices:
+                break
+            await asyncio.sleep(0.01)
+        return out["run_id"]
+
+    run_id = asyncio.run(check())
+    assert len(notices) == 1 and notices[0]["receiver_conv_id"] == "lead"
+    assert f"UEFN Ducky Release finished: ok (run `{run_id}`)" in notices[0]["body"]
+    assert "Released 1.2.3" in notices[0]["body"]
+
+
+def test_cancelling_the_callers_turn_leaves_the_run_going(monkeypatch):
+    panel, finish, ended, notices = _slow_run(monkeypatch)
+
+    async def check():
+        call = asyncio.create_task(panel.run_workflow("rel", caller_conv_id="lead", wait=True))
+        await asyncio.sleep(0.05)
+        call.cancel()
+        try:
+            await call
+        except asyncio.CancelledError:
+            pass
+        finish.set()
+
+    asyncio.run(check())
+    assert ended.wait(5)  # the run finished after its caller's turn was cancelled
+    assert notices == []  # wait=true: the caller's own tool result is the report

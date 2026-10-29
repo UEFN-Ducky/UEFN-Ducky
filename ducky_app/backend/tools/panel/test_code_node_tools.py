@@ -296,7 +296,7 @@ def test_an_agents_run_never_counts_as_a_person_pressing_run(monkeypatch):
     """An MCP client can't approve code or spending by sending the app's own run fields."""
     seen: dict = {}
     monkeypatch.setattr(runner, "run_workflow", lambda wid, **kw: seen.update(kw) or {"ok": False, "error": "x"})
-    asyncio.run(panel.run_workflow("w", payload={"_person_started": True, "_spend_approved": True, "topic": "ducks"}))
+    asyncio.run(panel.run_workflow("w", wait=True, payload={"_person_started": True, "_spend_approved": True, "topic": "ducks"}))
     assert seen["payload"] == {"topic": "ducks"}
 
 
@@ -326,16 +326,16 @@ def test_agent_converts_a_terminal_step_and_it_waits_for_a_person_end_to_end(mon
     edited = _call(panel.edit_workflow_node_code, wid, "t", code=generated["code"])
     assert edited["ok"], edited
     assert _node(wid, "t")["type"] == "code.js" and _call(panel.get_workflow_node_code, wid, "t")["approved"] is False
-    refused = _call(panel.run_workflow, wid)
+    refused = _call(panel.run_workflow, wid, wait=True)
     assert refused["ok"] is False and "Review this code" in refused["error"] and ran == []
 
     assert PanelApiAutomationsMixin().run_workflow(wid)["ok"]  # a person presses Test
     assert ran == [("npm test", True)]  # written in approved code: no pop-up
-    assert _call(panel.run_workflow, wid)["ok"]  # approved now, so an agent's run goes too
+    assert _call(panel.run_workflow, wid, wait=True)["ok"]  # approved now, so an agent's run goes too
 
     changed = _call(panel.edit_workflow_node_code, wid, "t", edits=[{"old": '"npm test"', "new": '"npm run build"'}])
     assert changed["ok"], changed
-    again = _call(panel.run_workflow, wid)
+    again = _call(panel.run_workflow, wid, wait=True)
     assert again["ok"] is False and "Review this code" in again["error"]  # an agent's change needs a person again
     assert ran == [("npm test", True), ("npm test", True)]
 
@@ -483,7 +483,7 @@ def test_an_agents_real_test_after_an_edit_says_it_needs_the_users_review():
     graph = store.get_workflow(wid)["graph"]
     graph["edges"].append({"source": "s", "target": "t", "kind": "main"})
     store.save_workflow({"id": wid, "graph": graph})
-    whole = _call(panel.run_workflow, wid)
+    whole = _call(panel.run_workflow, wid, wait=True)
     assert whole["ok"] is False and whole["needs_review"] is True and "Greeting" in whole["hint"]
 
 

@@ -568,10 +568,12 @@ def run_workflow(
     prompt: str = "",
     files: list[Any] | None = None,
     caller_conv_id: str = "",
+    run_id: str = "",
 ) -> dict[str, Any]:
     """Run one workflow. From a chat (a reference, or a ducky calling the tool) the
     caller chat gets the files and the Return to user result; ``prompt`` and
-    ``files`` are what the Chat input node passes on."""
+    ``files`` are what the Chat input node passes on. ``run_id``: the id to use, when
+    the caller hands it out before the run starts (a background run)."""
     wf = get_workflow(workflow_id)
     if wf is None:
         return {"ok": False, "error": "workflow not found", "steps": []}
@@ -608,7 +610,7 @@ def run_workflow(
     end_hooks: list[Callable[[], None]] = []
     end_token = _RUN_END.set(end_hooks)
     wid = str(wf["id"])
-    run_id = uuid.uuid4().hex[:12]
+    run_id = run_id or uuid.uuid4().hex[:12]
     parent = _LIVE.get()  # a Run workflow step's run: this one is part of it
     live_token = _LIVE.set((wid, run_id))
     registry_token = _REGISTRY_RUNS.set((*_REGISTRY_RUNS.get(), (wid, run_id)))
