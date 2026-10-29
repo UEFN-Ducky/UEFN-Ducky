@@ -595,7 +595,7 @@ describe("plugin scope bar", () => {
   });
 
   describe("live groups", () => {
-    // Live itself is the title bar's (LiveHeaderDropdown): the bar tells the page whether it
+    // Live itself is the title bar's (TeamLiveDropdown): the bar tells the page whether it
     // is live and whose screen it follows, and People's rows still Join.
     const ILIYA = { room: "h:d1", host: "iliya", hostDevice: "d1", members: [{ name: "iliya", user: "u1", device: "d1" }] };
     const MO = { room: "h:d2", host: "Mo", hostDevice: "d2",

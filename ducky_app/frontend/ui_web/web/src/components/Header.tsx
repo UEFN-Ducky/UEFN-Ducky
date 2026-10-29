@@ -3,8 +3,7 @@ import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
-import { LiveHeaderDropdown } from "./LiveHeaderDropdown";
-import { TeamHeaderButton } from "./TeamHeaderButton";
+import { TeamLiveDropdown } from "./TeamLiveDropdown";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { SandboxAppsDropdown } from "./SandboxAppsDropdown";
@@ -736,8 +735,7 @@ export function Header({
           </button>
         ) : null}
 
-        <TeamHeaderButton />
-        <LiveHeaderDropdown />
+        <TeamLiveDropdown />
         <BackgroundActivityDropdown />
 
         <div className="app-header-divider" />
