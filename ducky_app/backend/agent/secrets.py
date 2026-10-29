@@ -6,6 +6,7 @@ import json
 import os
 import struct
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -261,9 +262,18 @@ def get_key_fresh(provider: str) -> str | None:
     return value
 
 
+# ((db path, db generation, login writes in this process), stamp, monotonic read time).
+# Every chat save asks who is signed in; the meta read behind it cost 33 ms in the slow 5%
+# of in-reply checkpoints under load. A login written here changes the key at once; one
+# written by another process (the app, seen from a bridge) is seen within STAMP_TTL_S.
+_STAMP: tuple[tuple[str, int, int], tuple[str, str], float] | None = None
+STAMP_TTL_S = 1.0
+
+
 def login_stamp() -> tuple[str, str] | None:
     """``(ducky.db path, meta login_version)``: changes whenever the login row is written,
     in any process. None when keys don't live in ducky.db (then nothing may be cached)."""
+    global _STAMP
     if not (_dpapi_available() and _use_db()):
         return None
     try:
@@ -272,9 +282,21 @@ def login_stamp() -> tuple[str, str] | None:
         from backend.store.repos import secrets as repo
 
         phase1.ensure("secrets")
-        return str(db.db_path()), repo.login_version()
+        memo = (str(db.db_path()), db.generation(), repo.login_writes())
+        now = time.monotonic()
+        hit = _STAMP
+        if hit is not None and hit[0] == memo and now - hit[2] < STAMP_TTL_S:
+            return hit[1]
+        stamp = (memo[0], repo.login_version())
+        _STAMP = (memo, stamp, now)
+        return stamp
     except (OSError, RuntimeError):
         return None
+
+
+def forget_login_stamp() -> None:
+    global _STAMP
+    _STAMP = None
 
 
 def has_key(provider: str) -> bool:

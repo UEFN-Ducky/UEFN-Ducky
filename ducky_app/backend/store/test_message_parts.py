@@ -188,27 +188,30 @@ def _transcript(n: int) -> list[dict]:
     return [_user(f"question {i}") if i % 2 == 0 else _assistant(_tool_text(f"r{i}")) for i in range(n)]
 
 
-def test_a_save_serialises_and_writes_only_the_messages_that_changed(monkeypatch) -> None:
+def test_a_save_writes_only_the_messages_that_changed(monkeypatch) -> None:
     messages = _transcript(30)
-    repo.conv_save(PROJECT, _doc("c6"), messages=messages)
-    dumped = _count_message_dumps(monkeypatch)
+    rev = repo.conv_save(PROJECT, _doc("c6"), messages=messages)["msg_rev"]
     # The runner changes messages in place: a new tool call on one, a longer result on another.
     messages[5]["blocks"].append({"type": "tool_call", "name": "run_terminal", "status": "running", "arguments": {}})
     messages[7]["blocks"][0]["result"]["text"] += "\nmore output"
     stats = repo.conv_save(PROJECT, _doc("c6"), messages=messages)
-    assert (stats["inserted"], stats["updated"], stats["deleted"]) == (0, 2, 0)
-    assert len(dumped) == 2
+    assert stats["path"] == "full" and (stats["inserted"], stats["updated"], stats["deleted"]) == (0, 2, 0)
     assert _json(repo.messages_get("c6")) == _json(messages)
-
-
-def test_an_unchanged_copy_from_the_panel_writes_and_serialises_nothing(monkeypatch) -> None:
-    messages = _transcript(20)
-    repo.conv_save(PROJECT, _doc("c7"), messages=messages)
+    # A delta serialises only from the first changed message on.
+    messages[25]["text"] = "edited"
     dumped = _count_message_dumps(monkeypatch)
+    stats = repo.conv_save(PROJECT, _doc("c6"), messages=messages, dirty_from=25, expect_rev=stats["msg_rev"])
+    assert stats["path"] == "delta" and stats["updated"] == 1 and len(dumped) == 5
+    assert rev < stats["msg_rev"]
+
+
+def test_an_unchanged_copy_from_the_panel_writes_nothing() -> None:
+    messages = _transcript(20)
+    rev = repo.conv_save(PROJECT, _doc("c7"), messages=messages)["msg_rev"]
     fresh = json.loads(_json(messages))  # the panel sends its own copy of the same chat
     stats = repo.conv_save(PROJECT, _doc("c7"), messages=fresh)
     assert (stats["inserted"], stats["updated"], stats["deleted"]) == (0, 0, 0)
-    assert dumped == []
+    assert stats["msg_rev"] == rev
 
 
 def test_a_row_another_process_rewrote_is_checked_and_saved_again() -> None:
@@ -222,23 +225,18 @@ def test_a_row_another_process_rewrote_is_checked_and_saved_again() -> None:
     assert _json(repo.messages_get("c8")) == _json(messages)
 
 
-def test_a_load_opens_only_rows_it_has_not_seen(monkeypatch) -> None:
+def test_a_load_is_the_callers_own_and_sees_other_writers() -> None:
     messages = _transcript(12)
     repo.conv_save(PROJECT, _doc("c10"), messages=messages)
-    opened: list[str] = []
-    real = repo._message
-    monkeypatch.setattr(repo, "_message", lambda body, *a: opened.append(body) or real(body, *a))
     first = repo.messages_get("c10")
-    assert _json(first) == _json(messages) and opened == []  # the save remembered every row
+    assert _json(first) == _json(messages)
     first[3]["text"] = "edited by the caller"  # a loaded copy is the caller's own
     assert _json(repo.messages_get("c10")) == _json(messages)
     conn = db.connect()
     with db.write_txn(conn):  # another process rewrote one row
         conn.execute("UPDATE messages SET hash='elsewhere', body=?, fmt=0 WHERE conv_id='c10' AND seq=4",
                      (account_rows.seal(_json(_user("theirs")), account_rows.current()),))
-    assert repo.messages_get("c10")[4]["text"] == "theirs" and len(opened) == 1
-    repo.messages_get("c10")
-    assert len(opened) == 1  # and that row is remembered too
+    assert repo.messages_get("c10")[4]["text"] == "theirs"
 
 
 def test_values_a_copy_cannot_track_are_serialised_every_time() -> None:

@@ -15,6 +15,16 @@ from backend.store import db
 
 LOGIN_NAME = "duckyos_account"  # frontend.duckyos_account._CREDENTIALS_KEY
 LOGIN_VERSION_KEY = "login_version"
+_login_writes = 0  # login row writes committed by this process: memos of the login key on it
+
+
+def login_writes() -> int:
+    return _login_writes
+
+
+def _wrote_login() -> None:
+    global _login_writes
+    _login_writes += 1
 
 
 def _bump_login_version(conn) -> None:
@@ -51,6 +61,8 @@ def set_blob(name: str, blob: bytes) -> None:
         )
         if name == LOGIN_NAME:
             _bump_login_version(conn)
+    if name == LOGIN_NAME:
+        _wrote_login()
 
 
 def delete(name: str) -> None:
@@ -59,6 +71,8 @@ def delete(name: str) -> None:
         conn.execute("DELETE FROM secrets WHERE name=?", (name,))
         if name == LOGIN_NAME:
             _bump_login_version(conn)
+    if name == LOGIN_NAME:
+        _wrote_login()
 
 
 def replace_all(blobs: dict[str, bytes]) -> None:
@@ -69,6 +83,7 @@ def replace_all(blobs: dict[str, bytes]) -> None:
         for name, blob in blobs.items():
             conn.execute("INSERT INTO secrets(name, blob, updated) VALUES (?, ?, ?)", (name, blob, now))
         _bump_login_version(conn)  # an import or restore may change the login
+    _wrote_login()
 
 
 def has_rows() -> bool:

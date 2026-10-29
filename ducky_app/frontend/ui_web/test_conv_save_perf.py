@@ -52,13 +52,15 @@ def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
         conv.messages.append({"role": "assistant", "content": f"reply {k}", "ts": k, "blocks": [
             {"type": "tool_call", "id": f"n{k}", "name": "workspace_edit_file", "arguments": {"path": f"Content/new{k}.verse"},
              "status": "success", "result": {}}]})
+        conv.mark_dirty(len(conv.messages) - 1)
         started = time.perf_counter()
-        pc._save_conversation_rows(conv, root)
+        assert pc._save_conversation_rows(conv, root, conv)["path"] == "delta"
+        conv._dirty_from = None  # what the chat writer does once the save is written
         ms.append((time.perf_counter() - started) * 1000)
     print(f"conv_save append on 5,000 msgs: p50 {sorted(ms)[20]:.1f} ms, p95 {_p95(ms):.1f} ms")
     assert _p95(ms) < 30.0  # HEAD p95 16.9 ms here; a guard against an O(n) step coming back
     # The counters no longer rescan the chat: rows seen before cost a dict lookup.
-    hashes = _cached_hashes(conv.id)
+    hashes = _db_hashes(conv.id)
     assert len(hashes) == len(conv.messages)
     started = time.perf_counter()
     pc._stats_by_hash(conv.id, conv.messages, hashes)
@@ -68,11 +70,6 @@ def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
     assert (stored["tool_call_count"], stored["file_count"]) == (expected["tool_call_count"], expected["file_count"])
 
 
-def _cached_hashes(conv_id: str) -> list[str]:
-    rows = repo._saved_rows(conv_id)
-    return [rows[s][0] for s in sorted(rows)]
-
-
 def _db_hashes(conv_id: str) -> list[str]:
     from backend.store import db
 
@@ -80,41 +77,31 @@ def _db_hashes(conv_id: str) -> list[str]:
 
 
 def _written_elsewhere(conv, seq: int, message: dict) -> None:
-    """Another process (an agent host) rewrites one row: this process's cache stays as it was."""
-    with repo._saved_lock:
-        mine = repo._saved[conv.id]
+    """Another process (an agent host) rewrites one row."""
     other = list(conv.messages)
     other[seq] = message
-    doc = conv.to_dict()
-    repo.conv_save(repo.conv_project_id(conv.id), doc, messages=other)
-    with repo._saved_lock:
-        repo._saved[conv.id] = mine
+    repo.conv_save(repo.conv_project_id(conv.id), conv.to_dict(), messages=other)
 
 
-def test_a_row_another_writer_changed_is_compared_again(tmp_path, monkeypatch) -> None:
+def test_a_row_another_writer_changed_is_compared_again(tmp_path) -> None:
     root = str(tmp_path)
     conv = _chat(root, 5000)
     pc._save_conversation_rows(conv, root)
     theirs = {"role": "assistant", "content": "the host's redo", "blocks": [], "ts": 7}
     _written_elsewhere(conv, 7, theirs)
-    serialised: list = []
-    real = repo._shell
-    monkeypatch.setattr(repo, "_shell", lambda m: serialised.append(m) or real(m))
-    # This window got the host's row, and adds one: the changed row's hash no longer
-    # matches the cache, so that row is compared again and the host's row survives.
+    # This window got the host's row, and adds one: the host's write moved the rev, so
+    # the save compares every row with the database and the host's row survives.
     conv.messages[7] = dict(theirs)
     conv.messages.append({"role": "user", "content": "next", "ts": 5000})
     pc._save_conversation_rows(conv, root)
-    assert [m.get("content") for m in serialised] == ["the host's redo", "next"]
     assert repo.messages_get(conv.id)[7] == theirs
-    assert _cached_hashes(conv.id) == _db_hashes(conv.id)
-    # A row this window never saw is never vouched for: its own copy of row 3, equal to
-    # what it remembers, is written back over the host's (as a save always did), and
-    # the cache matches the database afterwards.
-    _written_elsewhere(conv, 3, {"role": "assistant", "content": "host again", "blocks": [], "ts": 3})
+    # Row 3 this window didn't change (it still matches its base hash): the host's
+    # newer edit is kept, not written over by this window's old copy.
+    host = {"role": "assistant", "content": "host again", "blocks": [], "ts": 3}
+    _written_elsewhere(conv, 3, host)
     pc._save_conversation_rows(conv, root)
-    assert repo.messages_get(conv.id) == conv.messages
-    assert _cached_hashes(conv.id) == _db_hashes(conv.id)
+    stored = repo.messages_get(conv.id)
+    assert stored[3] == host and stored[:3] + stored[4:] == conv.messages[:3] + conv.messages[4:]
 
 
 def test_counts_follow_rows_another_writer_changed(tmp_path) -> None:

@@ -1226,6 +1226,7 @@ async def _run_agent_loop(
                     )
                     push({"type": "delegation_warning", "text": handoff, "conv_id": conv.id})
                 upsert_in_flight_assistant(conv, assistant_msg, run_id=run_id)
+                save_conversation(conv)
                 stop_reason = "done"
                 push({"type": "assistant_done", "conv_id": conv.id})
                 return stop_reason

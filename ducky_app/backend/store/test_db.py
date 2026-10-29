@@ -32,6 +32,28 @@ def test_connect_creates_wal_database_at_head_version(tmp_path: Path) -> None:
     assert {"meta", "projects", "settings"} <= names
 
 
+def test_a_big_commit_leaves_the_wal_checkpoint_to_the_background(tmp_path: Path, monkeypatch) -> None:
+    due: list[str] = []
+    real = db.checkpoint_passive
+    monkeypatch.setattr(db, "checkpoint_passive", due.append)
+    conn = db.connect()
+    assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 0
+    path = tmp_path / "UEFN-Ducky" / db.DB_NAME
+    with db.write_txn(conn):
+        conn.execute("CREATE TABLE big(x BLOB)")
+    deadline = time.monotonic() + 5
+    while not due and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert due  # the first commit asked the thread; it now sleeps CHECKPOINT_EVERY_S
+    size = path.stat().st_size
+    with db.write_txn(conn):  # ~8 MB, 2,000 pages: SQLite's default copied them back in COMMIT
+        conn.executemany("INSERT INTO big(x) VALUES (?)", [(b"x" * 4000,) for _ in range(2000)])
+    assert path.stat().st_size == size  # COMMIT under the write lock copied nothing back
+    real(str(path))
+    assert path.stat().st_size > size + 4_000_000
+    assert conn.execute("SELECT count(*) FROM big").fetchone()[0] == 2000
+
+
 def test_capabilities_present() -> None:
     conn = db.connect()
     db.assert_capabilities(conn)
@@ -103,6 +125,68 @@ def test_write_txn_commits_and_rolls_back() -> None:
     keys = [r[0] for r in conn.execute("SELECT key FROM settings ORDER BY key")]
     assert keys == ["a"]
     assert conn.in_transaction is False
+
+
+def test_a_waiting_writer_wakes_the_moment_the_holder_commits() -> None:
+    """Same-process writers queue on db's lock instead of SQLite's busy-handler sleeps."""
+    db.connect()
+    holding, done = threading.Event(), threading.Event()
+    released: list[float] = []
+    waits: list[float] = []
+
+    def holder() -> None:
+        conn = db.connect()
+        try:
+            for i in range(20):
+                done.clear()
+                with db.write_txn(conn):
+                    conn.execute("INSERT INTO settings(key, value, updated) VALUES (?, '1', 0)", (f"h{i}",))
+                    holding.set()
+                    time.sleep(0.05)
+                released.append(time.perf_counter())
+                done.wait(timeout=5)
+        finally:
+            db.close_thread_connections()
+
+    def waiter() -> None:
+        conn = db.connect()
+        try:
+            for i in range(20):
+                holding.wait(timeout=5)
+                holding.clear()
+                time.sleep(0.005)  # the holder is inside its transaction now
+                with db.write_txn(conn):
+                    got = time.perf_counter()
+                    conn.execute("INSERT INTO settings(key, value, updated) VALUES (?, '1', 0)", (f"w{i}",))
+                waits.append(got - released[i])
+                done.set()
+        finally:
+            db.close_thread_connections()
+
+    threads = [threading.Thread(target=holder), threading.Thread(target=waiter)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert len(waits) == 20
+    p95 = sorted(waits)[18]
+    assert p95 < 0.005, f"waiter woke {p95 * 1000:.1f} ms after the commit"
+
+
+def test_write_txn_nests_on_one_thread() -> None:
+    """The chat writer joins its batch as savepoints inside one write_txn: a failed inner
+    write rolls back alone, the batch still commits."""
+    conn = db.connect()
+    with db.write_txn(conn):
+        conn.execute("INSERT INTO settings(key, value, updated) VALUES ('outer', '1', 0)")
+        with db.write_txn(conn):
+            conn.execute("INSERT INTO settings(key, value, updated) VALUES ('inner', '1', 0)")
+        with pytest.raises(ValueError), db.write_txn(conn):
+            conn.execute("INSERT INTO settings(key, value, updated) VALUES ('failed', '1', 0)")
+            raise ValueError
+    keys = {r[0] for r in conn.execute("SELECT key FROM settings")}
+    assert {"outer", "inner"} <= keys and "failed" not in keys
+    assert not conn.in_transaction and not db._write_lock._is_owned()
 
 
 def test_data_version_changes_when_another_connection_commits(tmp_path: Path) -> None:
@@ -190,6 +274,9 @@ def test_upgrade_from_previous_schema_does_not_deadlock(tmp_path: Path) -> None:
     conn.execute("ALTER TABLE duckies_history DROP COLUMN account_id")
     conn.execute("ALTER TABLE space_changesets DROP COLUMN author")  # 0025 adds who a leader sent it for
     conn.execute("ALTER TABLE space_changesets DROP COLUMN author_pc")
+    for trigger in ("messages_rev_ai", "messages_rev_ad", "messages_rev_au"):  # 0026 adds the message revision
+        conn.execute(f"DROP TRIGGER {trigger}")
+    conn.execute("ALTER TABLE conversations DROP COLUMN msg_rev")
     conn.execute("PRAGMA user_version=8")
     db.reset_for_tests()
 

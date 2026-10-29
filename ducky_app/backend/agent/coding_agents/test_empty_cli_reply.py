@@ -17,7 +17,7 @@ def test_empty_codex_json_is_not_a_reply_and_usage_survives(monkeypatch):
     assert result.upstream_session_id == 'thread-1'
     saved, events = [], []
     monkeypatch.setattr(project_chats, 'upsert_in_flight_assistant', lambda conv, msg, **kw: saved.append(msg))
-    monkeypatch.setattr(project_chats, 'save_conversation', lambda conv: None)
+    monkeypatch.setattr(project_chats, 'save_conversation', lambda conv, **kw: None)
     monkeypatch.setattr(agent_modes, 'close_changeset_run', lambda *a: None)
     monkeypatch.setattr(group_orchestrator, 'announce_private_member_talk', lambda *a, **kw: None)
     runner._emit_assistant(SimpleNamespace(id='chat'), agent_id='codex', reply=result.reply_text,
@@ -43,7 +43,7 @@ def test_a_coding_agents_reply_shows_the_pictures_it_made_this_turn(monkeypatch)
     monkeypatch.setattr(generated_images, "turn_attachments", lambda conv_id, since: asked.append((conv_id, since)) or [picture])
     saved = []
     monkeypatch.setattr(project_chats, "upsert_in_flight_assistant", lambda conv, msg, **kw: saved.append(msg))
-    monkeypatch.setattr(project_chats, "save_conversation", lambda conv: None)
+    monkeypatch.setattr(project_chats, "save_conversation", lambda conv, **kw: None)
     monkeypatch.setattr(agent_modes, "close_changeset_run", lambda *a: None)
     monkeypatch.setattr(group_orchestrator, "announce_private_member_talk", lambda *a, **kw: None)
     runner._emit_assistant(SimpleNamespace(id="chat"), agent_id="codex", reply="Here is your duck.",

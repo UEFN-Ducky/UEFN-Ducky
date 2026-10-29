@@ -191,7 +191,7 @@ def test_a_model_on_a_gateway_that_isnt_connected_says_which_and_offers_connect(
     monkeypatch.setattr(model_pricing, "resolve_provider_for_model", lambda model, provider: "openai")
     monkeypatch.setattr(host, "resolve_gateway_credential", lambda provider: None)
     monkeypatch.setattr(host, "get_contributions", lambda: {"llm_providers": [{"id": "openai", "label": "OpenAI"}]})
-    monkeypatch.setattr(agent_modes, "save_conversation", lambda c: None)
+    monkeypatch.setattr(agent_modes, "save_conversation", lambda c, **kw: None)
     pushed: list[dict] = []
     assert agent_modes.run_message("chat", "hey", "agent", "", push=pushed.append) == ""
     assert {"type": "provider_not_connected", "conv_id": "chat", "provider": "openai",
@@ -216,7 +216,7 @@ def test_a_ducky_chat_with_no_model_takes_the_fallback_model(monkeypatch):
     fallback = fm.ResolveOk(coding_agent="ducky", model="hosted-ai", provider="hosted",
                             selection=fm.FavoriteSelection(backend="hosted", model_id="hosted-ai"))
     monkeypatch.setattr(fm, "chat_model_choice", lambda settings, keep_agent=False: (fallback, ""))
-    monkeypatch.setattr(agent_modes, "save_conversation", lambda c: None)
+    monkeypatch.setattr(agent_modes, "save_conversation", lambda c, **kw: None)
     monkeypatch.setattr(agent_modes, "notify_chats_changed", lambda *a, **kw: None)
     conv = SimpleNamespace(id="c1", title="Builder", folder_id="", coding_agent="ducky", model="", provider="")
     pushed: list[dict] = []

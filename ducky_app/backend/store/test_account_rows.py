@@ -443,3 +443,57 @@ def test_search_tokens_match_like_the_words_did() -> None:
     assert not hit("needle_goblin") and not hit("gobli") and not hit("wizard")
     assert account_rows.blind_query("!!", key) == ""
     assert account_rows.blind_text("same", key) != account_rows.blind_text("same", b"j" * 32)
+
+
+def test_who_is_signed_in_is_read_once_and_follows_a_sign_in_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from backend.agent import secrets
+    from backend.store.repos import secrets as repo
+    from frontend import duckyos_account
+
+    if sys.platform != "win32":
+        pytest.skip("the login row is DPAPI-sealed")
+    data_crypto.reset_for_tests()
+    secrets.forget_login_stamp()
+    duckyos_account.forget_account_key()
+    assert secrets.login_stamp() is not None  # the login lives in ducky.db: the memo is on
+    reads = [0]
+    real = repo.login_version
+    monkeypatch.setattr(repo, "login_version", lambda: reads.__setitem__(0, reads[0] + 1) or real())
+    assert {account_rows.current() for _ in range(1000)} == {LOCAL}
+    assert reads[0] <= 1, reads[0]
+    login = {"device_key": "d", "email": "ana@example.com", "base_url": "https://uefnducky.org"}
+    secrets.set_key(duckyos_account._CREDENTIALS_KEY, json.dumps(login))
+    assert account_rows.current() == account_id_for("https://uefnducky.org|ana@example.com")
+    secrets.clear_key(duckyos_account._CREDENTIALS_KEY)
+    assert account_rows.current() == LOCAL
+    # Another process's sign-in (the meta row moves, this process's counter doesn't) shows
+    # once the stamp is older than STAMP_TTL_S.
+    monkeypatch.setattr(secrets, "STAMP_TTL_S", 0.0)
+    before = reads[0]
+    account_rows.current()
+    assert reads[0] == before + 1
+    data_crypto.reset_for_tests()
+
+
+def test_the_file_keys_are_looked_for_once_per_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.store import sealed_files
+
+    account_rows.forget()
+    tries = [0]
+
+    def failing(account: str) -> None:
+        tries[0] += 1
+        raise OSError("keys file busy")
+
+    monkeypatch.setattr(sealed_files, "ensure_keypair", failing)
+    for _ in range(1000):
+        account_rows._ensure_file_keys(LOCAL)
+    assert tries[0] == 1  # a failed try waits FILE_KEYS_RETRY_S, not the next call
+    monkeypatch.setattr(sealed_files, "ensure_keypair", lambda account: tries.__setitem__(0, tries[0] + 1))
+    account_rows.forget()  # a login change tries again at once
+    for _ in range(1000):
+        account_rows._ensure_file_keys(LOCAL)
+    assert tries[0] == 2
+    account_rows.forget()

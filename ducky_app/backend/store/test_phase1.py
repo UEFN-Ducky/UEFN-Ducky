@@ -301,3 +301,39 @@ def test_an_import_that_reaches_another_first_import_on_the_same_thread_finishes
     t.join(10)
     assert not t.is_alive(), "once() hung on its own lock"
     assert order == ["inner", "outer"]
+
+
+def test_a_write_that_reaches_a_first_import_while_another_import_runs_finishes(monkeypatch) -> None:
+    """The round-7 hang: the chat writer held _write_lock and asked who is signed in (the
+    secrets import) while another thread's import held phase1._lock and wrote its meta row."""
+    import threading
+
+    importing, writer_in = threading.Event(), threading.Event()
+
+    def slow_import(_root):
+        importing.set()
+        writer_in.wait(2)  # before the fix the writer got in here and then waited on _lock
+        return {"ok": True}
+
+    def writer() -> None:
+        importing.wait(5)
+        conn = db.connect()
+        with db.write_txn(conn):
+            writer_in.set()
+            phase1.once("phase1-test-secrets", lambda _root: {"ok": True})
+
+    # Fresh locks of the same kinds, put back before the fixture's resets: a deadlock
+    # fails this test instead of hanging the session on the real locks.
+    with monkeypatch.context() as m:
+        m.setattr(phase1, "_lock", type(phase1._lock)())
+        m.setattr(db, "_write_lock", type(db._write_lock)())
+        threads = [
+            threading.Thread(target=phase1.once, args=("phase1-test-settings", slow_import), daemon=True),
+            threading.Thread(target=writer, daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(15)
+    assert not any(t.is_alive() for t in threads), "_write_lock / phase1._lock deadlock"
+    assert kv.meta_get("imported:phase1-test-settings") and kv.meta_get("imported:phase1-test-secrets")

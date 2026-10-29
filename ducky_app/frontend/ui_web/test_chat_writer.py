@@ -370,3 +370,106 @@ def test_the_writer_thread_is_named() -> None:
         assert any(t.name == "chat-writer" for t in threading.enumerate())
     finally:
         writer.close()
+
+
+# ------------------------------------------------------------------ checkpoints
+
+
+def _turn(root: str):
+    conv = _chat(root, "turn")
+    conv.messages = [{"role": "user", "content": "go", "ts": 1}]
+    save_conversation(conv, root, wait=True)
+    return conv
+
+
+def _stored_reply(conv_id: str) -> str:
+    return repo.messages_get(conv_id)[-1]["content"]
+
+
+def test_a_burst_of_200_checkpoints_is_at_most_2_writes(tmp_path, monkeypatch) -> None:
+    root = str(tmp_path)
+    conv = _turn(root)
+    calls: list[str] = []
+    real = repo.upsert_run_message
+    monkeypatch.setattr(repo, "upsert_run_message", lambda cid, rid, m, **kw: calls.append(m["content"]) or real(cid, rid, m, **kw))
+    for i in range(200):
+        project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
+    flush_chat_saves()
+    print(f"burst 200 -> {len(calls)} write(s)")
+    assert len(calls) <= 2 and calls[-1] == "step 199"
+    assert _stored_reply(conv.id) == "step 199"
+    assert conv._msg_rev == repo.conv_msg_rev(conv.id)  # the next save goes by delta
+
+
+def test_a_checkpoint_queued_before_a_save_never_overwrites_it(tmp_path) -> None:
+    root = str(tmp_path)
+    conv = _turn(root)
+    project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "working"}, run_id="r1", project_root=root)
+    msgs = list(conv.messages)
+    msgs[-1] = {**msgs[-1], "content": "done"}
+    conv.swap_messages(msgs, len(msgs) - 1)
+    save_conversation(conv, root, wait=True)  # the turn end
+    flush_chat_saves()
+    assert _stored_reply(conv.id) == "done"
+
+
+def test_the_queue_writes_in_submit_order() -> None:
+    order: list[tuple[str, int]] = []
+    writer = ChatWriter(
+        lambda cid, item: order.append(("save", item)),
+        write_checkpoint=lambda cid, item: order.append(("cp", item)),
+        connect=db.connect,
+        interval=5.0,
+    )
+    try:
+        writer.submit("a", 1)
+        writer.submit_checkpoint("a", "r", 2)
+        writer.submit("a", 3)  # newer than the checkpoint: written after it
+        writer.flush()
+        assert order == [("cp", 2), ("save", 3)]
+        order.clear()
+        writer.submit("a", 4)
+        writer.submit_checkpoint("a", "r", 5)  # newer than the save: written after it
+        assert writer.flush("a") is True
+        assert order == [("save", 4), ("cp", 5)]
+    finally:
+        writer.close()
+
+
+def test_close_writes_pending_checkpoints() -> None:
+    written: list[int] = []
+    writer = ChatWriter(lambda cid, item: None, write_checkpoint=lambda cid, item: written.append(item),
+                        connect=db.connect, interval=5.0)
+    writer.submit_checkpoint("a", "r", 7)
+    writer.close()
+    assert written == [7]
+
+
+def test_checkpoint_enqueue_is_cheap_while_the_writer_is_blocked(tmp_path, monkeypatch) -> None:
+    root = str(tmp_path)
+    conv = _turn(root)
+    started, release = threading.Event(), threading.Event()
+    real = repo.upsert_run_message
+
+    def blocked(*a, **kw):
+        started.set()
+        release.wait(10)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(repo, "upsert_run_message", blocked)
+    try:
+        project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "first"}, run_id="r1", project_root=root)
+        project_chats._writer().flush(conv.id, timeout=0.0)  # write it now, so the writer blocks
+        assert started.wait(5)
+        ms: list[float] = []
+        for i in range(200):
+            t0 = time.perf_counter()
+            project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
+            ms.append((time.perf_counter() - t0) * 1000)
+    finally:
+        release.set()
+    flush_chat_saves()
+    ms.sort()
+    print(f"enqueue p50 {ms[100]:.3f} ms, p95 {ms[189]:.3f} ms")
+    assert ms[189] < 1.0
+    assert _stored_reply(conv.id) == "step 199"

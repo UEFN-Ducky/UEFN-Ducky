@@ -176,6 +176,51 @@ class Conversation:
     """When the ducky's style, name, voice or personality was last changed. A running
     turn saves an older copy; save_conversation keeps the newer settings."""
 
+    # Delta-save bookkeeping, never serialised. ``messages`` is a property (set below the
+    # class): reassigning it marks everything dirty.
+    _dirty_from = None
+    """Every message from this index on may have changed since the last save (None =
+    nothing; 0 after a reassign)."""
+    _dirty_rows = frozenset()
+    """``set[int]``: older messages changed in place since the last save
+    (:meth:`mark_dirty`). A save writes those below its tail by row, the tail whole."""
+    _msg_rev = None
+    """``conversations.msg_rev`` this copy last loaded or saved (None = unknown)."""
+    _base_hashes = None
+    """Each row's stored hash when this copy last read or saved it (``conv_save``'s
+    ``base_hashes``; "" or None = unknown). Shared with the save snapshots, which the
+    chat writer updates in place."""
+
+    def mark_dirty(self, index: int) -> None:
+        """Message *index* changed in place or was added; the next save writes it. The last
+        message (an append) starts the tail; an older one is a single row."""
+        if index >= len(self._messages) - 1:
+            cur = self._dirty_from
+            self._dirty_from = index if cur is None else min(cur, index)
+        else:
+            self._dirty_rows = {*self._dirty_rows, index}
+
+    def mark_all_dirty(self) -> None:
+        """The next save re-checks every message."""
+        self._dirty_from, self._dirty_rows = 0, set()
+
+    def swap_messages(self, messages: list[dict[str, Any]], changed_from: int | None) -> None:
+        """Install a copy-on-write edit of the transcript that differs only from
+        *changed_from* on (None = not at all). Unlike ``conv.messages = ...`` it keeps
+        the dirty state instead of marking everything."""
+        self._messages = messages
+        if changed_from is not None:
+            cur = self._dirty_from
+            self._dirty_from = changed_from if cur is None else min(cur, changed_from)
+
+    def take_messages(self, fresh: Conversation) -> None:
+        """Replace the transcript with a just-loaded copy's, and its save state with it."""
+        self._messages = list(fresh.messages)
+        self._dirty_from = fresh._dirty_from
+        self._dirty_rows = set(fresh._dirty_rows)
+        self._msg_rev = fresh._msg_rev
+        self._base_hashes = fresh._base_hashes
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -335,6 +380,20 @@ class Conversation:
             ),
             settings_edited=float(d.get("settings_edited", 0) or 0.0),
         )
+
+
+def _get_messages(self: Conversation) -> list[dict[str, Any]]:
+    return self._messages
+
+
+def _set_messages(self: Conversation, value: list[dict[str, Any]]) -> None:
+    self._messages = value
+    self._dirty_from, self._dirty_rows = 0, set()
+    self._base_hashes = None
+
+
+# After @dataclass so __init__ (and every later ``conv.messages = ...``) goes through it.
+Conversation.messages = property(_get_messages, _set_messages)  # type: ignore[assignment]
 
 
 def _default_folders() -> list[dict[str, Any]]:
@@ -502,6 +561,7 @@ def auto_title(conv: Conversation, first_user_message: str) -> None:
 
 def append_message(conv: Conversation, message: dict[str, Any]) -> None:
     conv.messages.append(message)
+    conv.mark_dirty(len(conv.messages) - 1)
     save_conversation(conv)
 
 

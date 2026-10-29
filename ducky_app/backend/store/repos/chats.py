@@ -22,6 +22,7 @@ import functools
 import hashlib
 import json
 import logging
+import sys
 import threading
 import time
 import zlib
@@ -297,17 +298,38 @@ def _decode_parts(envelope: Any, part_text: Callable[[str], str | None]) -> dict
     return message
 
 
-def _write_parts(conn, message_id: int, parts: dict[str, str], account: str) -> None:
-    """Point the row at exactly *parts*: store new ones (sealed), drop refs it no longer uses."""
+def _seal_part(text: str, account: str) -> tuple[bytes, int]:
+    raw = text.encode("utf-8")
+    return account_rows.seal_blob(zlib.compress(raw, 6), account), len(raw)
+
+
+def _seal_new_parts(conn, parts: dict[str, str], account: str) -> dict[str, tuple[bytes, int]]:
+    """Before the write lock: (sealed blob, size) for the *parts* not stored yet, so the
+    transaction only inserts them. One stored meanwhile is skipped there; one this missed
+    is sealed there."""
+    if not parts:
+        return {}
+    have = {
+        str(r[0])
+        for r in conn.execute(f"SELECT hash FROM message_parts WHERE hash IN ({','.join('?' * len(parts))})", tuple(parts))
+    }
+    return {digest: _seal_part(text, account) for digest, text in parts.items() if digest not in have}
+
+
+def _write_parts(
+    conn, message_id: int, parts: dict[str, str], account: str, sealed: dict[str, tuple[bytes, int]] | None = None
+) -> None:
+    """Point the row at exactly *parts*: store new ones (sealed, from *sealed* when it has
+    them), drop refs it no longer uses."""
     old = {str(r[0]) for r in conn.execute("SELECT hash FROM message_part_refs WHERE message_id=?", (message_id,))}
     for digest, text in parts.items():
         if digest in old:
             continue
         if conn.execute("SELECT 1 FROM message_parts WHERE hash=?", (digest,)).fetchone() is None:
-            raw = text.encode("utf-8")
+            blob = (sealed or {}).get(digest) or _seal_part(text, account)
             conn.execute(
                 "INSERT INTO message_parts(hash, data, size, created) VALUES (?, ?, ?, ?)",
-                (digest, account_rows.seal_blob(zlib.compress(raw, 6), account), len(raw), time.time()),
+                (digest, *blob, time.time()),
             )
         conn.execute("INSERT INTO message_part_refs(message_id, hash) VALUES (?, ?)", (message_id, digest))
     stale = old - parts.keys()
@@ -358,12 +380,17 @@ def _message_parts(conn, message_id: int, account: str) -> Callable[[str], str |
     return _part_reader(packed, account)
 
 
+def _interned(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    return {sys.intern(k): v for k, v in pairs}
+
+
 def _message(body: str, fmt: int, account: str, parts: Callable[[], Callable[[str], str | None]]) -> Any:
-    """One stored row as the message it was saved as; ``ValueError`` when it isn't one."""
+    """One stored row as the message it was saved as; ``ValueError`` when it isn't one.
+    Keys are interned: every row shares one copy of "role", "content", ..."""
     text = account_rows.open_text(body, account)
     if fmt == FMT_PARTS:
-        return _decode_parts(json.loads(text), parts())
-    return json.loads(text)
+        return _decode_parts(json.loads(text, object_pairs_hook=_interned), parts())
+    return json.loads(text, object_pairs_hook=_interned)
 
 
 # --------------------------------------------------------------------------- older rows
@@ -465,73 +492,167 @@ def _seal_stored_parts(conn, account: str, batch: int) -> int:
         cursor = todo[-1][0]
 
 
-# --------------------------------------------------------------------------- saved rows
+# --------------------------------------------------------------------------- opened rows
 #
-# Finding the one or two messages a save changed by serialising and hashing all
-# of them made every in-flight checkpoint cost the whole transcript. For the
-# chats saved most recently this remembers, per seq, the row hash written and a
-# copy of the message's dicts and lists (sharing its strings and numbers, which
-# cannot change in place). A message equal to its copy, whose row still has that
-# hash in the database, is unchanged and is not serialised again. Copies keep
-# the strings alive, so only a few chats and a bounded amount are kept.
+# Opening a row costs a DPAPI call plus its parts, so a load of a long chat cost
+# seconds. This keeps each row's decoded message (its shell) under the row hash it was
+# stored with, so a row another writer changed (a new hash) is opened afresh, never
+# served stale. A load returns new dicts and lists around the shell's strings: every
+# copy of a chat shares one set of strings, and no caller can change the shell. A save
+# adds the rows it synced from the saver's own messages (as main's ``_remember_rows``
+# did), so a load right after it decodes nothing and shares the saver's strings. It
+# holds the last ``_OPENED_MAX_CHATS`` chats loaded or saved and at most
+# ``_OPENED_MAX_BYTES`` of shells as Python allocates them (see :func:`_shell`).
 
-_SAVED_MAX_CHATS = 8
-_SAVED_MAX_CHARS = 32 * 1024 * 1024
-_SHARED_TYPES = (str, int, float, bool, type(None))
-_saved_lock = threading.Lock()
-_saved: OrderedDict[str, tuple[dict[int, tuple[str, Any, int]], int]] = OrderedDict()
-
-
-class _NotShareable(Exception):
-    pass
+_OPENED_MAX_CHATS = 8
+_OPENED_MAX_BYTES = 32 * 1024 * 1024
+_NODE_BYTES = 64  # an object header plus its slot in the parent
+_KEY_BYTES = 48  # a dict entry (hash, key, value) plus spare table room; keys are shared
+_opened_lock = threading.Lock()
+# conv_id -> {seq: (row hash, shell, size)}, least recently loaded chat first.
+_opened: OrderedDict[str, dict[int, tuple[str, Any, int]]] = OrderedDict()
+_opened_size = 0
 
 
 def _copy_containers(value: Any) -> Any:
+    """New dicts and lists around the same (immutable) strings and numbers."""
     kind = type(value)
     if kind is dict:
         return {k: _copy_containers(v) for k, v in value.items()}
     if kind is list:
         return [_copy_containers(v) for v in value]
-    if kind in _SHARED_TYPES:
-        return value
-    raise _NotShareable
+    return value
 
 
-def _shell(message: Any) -> Any | None:
-    """A copy to compare the next save against, or None when it could not be told
-    apart reliably (a value of another type might change in place)."""
+def _shell(value: Any) -> tuple[Any, int] | None:
+    """In one walk: ``_copy_containers(value)`` and an upper bound on what it allocates
+    (``_NODE_BYTES`` per string, number, list and dict, plus string chars, 4 bytes each
+    past ASCII, 8 bytes per list item and ``_KEY_BYTES`` per dict key). None when it holds
+    anything else (a tuple, an object), which would not read back as itself."""
+    size = 0
+
+    def copy(v: Any) -> Any:
+        nonlocal size
+        kind = type(v)
+        if kind is str:
+            size += _NODE_BYTES + (len(v) if v.isascii() else 4 * len(v))
+            return v
+        if v is None or kind in (bool, int, float):
+            size += _NODE_BYTES
+            return v
+        if kind is list:
+            size += _NODE_BYTES + 8 * len(v)
+            return [copy(x) for x in v]
+        if kind is dict:
+            size += _NODE_BYTES + _KEY_BYTES * len(v)
+            out = {}
+            for k, x in v.items():
+                if type(k) is not str:
+                    raise TypeError
+                out[k] = copy(x)
+            return out
+        raise TypeError
+
     try:
-        return _copy_containers(message)
-    except (_NotShareable, RecursionError, RuntimeError):
+        return copy(value), size
+    except TypeError:
         return None
 
 
-def _unchanged(shell: Any, message: Any) -> bool:
-    try:
-        return bool(shell == message)
-    except Exception:
-        return False
+def _opened_touch(conv_id: str) -> None:
+    """A load of *conv_id*: it becomes the most recently loaded chat."""
+    with _opened_lock:
+        if conv_id in _opened:
+            _opened.move_to_end(conv_id)
 
 
-def _saved_rows(conv_id: str) -> dict[int, tuple[str, Any, int]]:
-    with _saved_lock:
-        entry = _saved.get(conv_id)
-        return entry[0] if entry is not None else {}
+def _opened_get(conv_id: str, seq: int, h: str) -> Any | None:
+    """The cached shell itself: callers hand out only ``_copy_containers`` of it."""
+    with _opened_lock:
+        hit = _opened.get(conv_id, {}).get(seq)
+        return None if hit is None or hit[0] != h else hit[1]
 
 
-def _remember_rows(conv_id: str, rows: dict[int, tuple[str, Any, int]], chars: int) -> None:
-    with _saved_lock:
-        _saved.pop(conv_id, None)
-        _saved[conv_id] = (rows, chars)
-        total = sum(c for _, c in _saved.values())
-        while len(_saved) > 1 and (len(_saved) > _SAVED_MAX_CHATS or total > _SAVED_MAX_CHARS):
-            _, (_, dropped) = _saved.popitem(last=False)
-            total -= dropped
+def _opened_drop_chat(conv_id: str) -> None:
+    global _opened_size
+    _opened_size -= sum(entry[2] for entry in _opened.pop(conv_id).values())
 
 
-def _forget_rows(conv_id: str) -> None:
-    with _saved_lock:
-        _saved.pop(conv_id, None)
+def _opened_put(conv_id: str, seq: int, h: str, message: Any, *, add: bool = True) -> None:
+    """Cache a copy of *message* (the caller keeps its own); *add* False only refreshes."""
+    with _opened_lock:
+        hit = _opened.get(conv_id, {}).get(seq)
+        if (hit is None and not add) or (hit is not None and hit[0] == h):
+            return  # nothing to refresh, or already this row
+    _opened_store(conv_id, seq, h, _shell(message), add=add)
+
+
+def _opened_store(conv_id: str, seq: int, h: str, shell: tuple[Any, int] | None, *, add: bool = True) -> None:
+    """Keep *shell* (from :func:`_shell`) as the row; None drops what the cache had there."""
+    global _opened_size
+    shell, size = (None, 0) if shell is None or shell[1] > _OPENED_MAX_BYTES else shell
+    with _opened_lock:
+        rows = _opened.get(conv_id)
+        if rows is None:
+            if not add:
+                return
+            rows = _opened[conv_id] = {}
+            while len(_opened) > _OPENED_MAX_CHATS:
+                _opened_drop_chat(next(iter(_opened)))
+        elif not add and seq not in rows:
+            return
+        old = rows.pop(seq, None)
+        if old is not None:
+            _opened_size -= old[2]
+        if shell is None:
+            return  # not cacheable: a stale entry must not stay
+        _opened_size += size
+        rows[seq] = (h, shell, size)
+        # Over the byte cap: rows go from the least recently loaded chat first (from this
+        # one last, so a chat bigger than the cap keeps what fits).
+        while _opened_size > _OPENED_MAX_BYTES:
+            oldest = next(iter(_opened))
+            if not _opened[oldest]:
+                del _opened[oldest]
+                continue
+            _, (_, _, dropped) = _opened[oldest].popitem()
+            _opened_size -= dropped
+
+
+def _opened_saved(conv_id: str, messages: list[Any], start: int, stats: dict[str, Any]) -> None:
+    """After a save commits: keep the rows it synced (``hashes`` from *start*, the listed
+    ``dirty_hashes``) from the saver's messages, except another writer's (``theirs``)."""
+    theirs = set(stats.get("theirs") or ())
+    synced = [*(stats.get("dirty_hashes") or {}).items(), *enumerate(stats.get("hashes") or (), start)]
+    _opened_touch(conv_id)
+    # Rows already cached under their hash are not walked again. Older chats' rows go
+    # first when over the cap, this chat's last, so *room* is what this chat may hold: a row
+    # past it would be dropped at once, so it is never copied (a chat over the cap re-walked
+    # its uncached rows on every save).
+    with _opened_lock:
+        cached = _opened.get(conv_id, {})
+        room = _OPENED_MAX_BYTES - sum(entry[2] for entry in cached.values())
+        todo: list[tuple[int, str, bool]] = []
+        for seq, h in synced:
+            hit = cached.get(seq)
+            if seq in theirs or seq >= len(messages) or (hit is not None and hit[0] == h):
+                continue
+            room += 0 if hit is None else hit[2]
+            todo.append((seq, h, hit is not None))
+    for seq, h, stale in todo:
+        shell = _shell(messages[seq]) if room > 0 else None
+        if shell is not None:
+            room -= shell[1]
+            if room < 0:
+                shell = None
+        if shell is not None or stale:
+            _opened_store(conv_id, seq, h, shell)  # None drops the stale row
+
+
+def _opened_forget(conv_id: str) -> None:
+    with _opened_lock:
+        if conv_id in _opened:
+            _opened_drop_chat(conv_id)
 
 
 # --------------------------------------------------------------------------- conversations
@@ -639,12 +760,74 @@ def conv_message_summary(conv_id: str) -> tuple[int, bool]:
     return int(row[0]), bool(row[1])
 
 
-def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, Any]] | None) -> dict[str, int]:
+# Delta-save contract (migration 0026). Writers say what changed; the database guards
+# against other writers.
+#
+#   conv_save(project_id, doc, *, messages, dirty_from: int | None = None,
+#             expect_rev: int | None = None, dirty_rows: list[int] | None = None) -> dict
+#
+# - Rows are serialised, hashed, compacted and sealed before the write lock; the
+#   transaction only reads the stored hashes, applies the rules below and writes.
+# - ``dirty_rows``: seqs below ``dirty_from`` this copy changed. On "delta" and "merge"
+#   they are written too (by hash, with ``base_hashes``), and nothing else below the
+#   tail is read; their stored hashes come back as ``dirty_hashes`` ({seq: hash}). The
+#   full path ignores them (it compares every row).
+#
+# - ``conversations.msg_rev`` is bumped by SQLite triggers on every INSERT/UPDATE/DELETE
+#   on ``messages`` (any connection, any process, raw SQL), never by Python.
+# - Delta path: only when ``messages is not None and dirty_from is not None and
+#   expect_rev == stored msg_rev``. Writes ``messages[dirty_from:]`` (by hash, as the
+#   full path does) and deletes rows with ``seq >= len(messages)``; rows below
+#   ``dirty_from`` are not read or compared. ``dirty_from`` is clamped to
+#   ``0..len(messages)``.
+# - Merge path: ``dirty_from > 0`` but a stale ``expect_rev`` (another writer touched the
+#   chat): writes only ``messages[dirty_from:]`` (starting no later than the stored end)
+#   and never deletes, so another writer's older rows and newer tail survive.
+# - Full path: ``dirty_from`` None or 0 with a stale rev, or a new chat: an explicit
+#   reassign. Every message is hashed and compared with its stored row; rows past the
+#   end are deleted.
+# - ``messages_since(conv_id, seq) -> (messages[seq:], msg_rev, count)`` refreshes a
+#   copy's tail without loading the whole chat.
+# - Meta path: ``messages is None``; the transcript and msg_rev are untouched.
+# - Returns the existing stats (inserted, updated, deleted, bytes, skipped when the chat
+#   is another account's or deleted) plus:
+#     ``msg_rev``     the chat's rev after the write; pass it as the next ``expect_rev``
+#     ``path``        "delta" | "merge" | "full" | "meta"
+#     ``hashes``      row hash per seq for ``seq >= hashes_from`` (absent on "meta")
+#     ``hashes_from`` 0 on "full", the first seq written on "delta" / "merge"
+#     ``theirs``      seqs kept as another writer's (see ``base_hashes``)
+# - ``base_hashes`` (optional, on every path): each row's hash when this copy last read
+#   or saved it. A row whose hash is still its base (this copy didn't change it) but
+#   whose stored hash differs is another writer's newer edit and is never written over;
+#   a row both changed goes to this copy. Keep the base from ``messages_get_rev`` /
+#   ``messages_since(..., with_hashes=True)``, and after a save take ``hashes`` as the new
+#   base except at the ``theirs`` seqs (this copy still holds the old content there).
+# - Loading: ``messages_get_rev(conv_id) -> (messages, msg_rev)`` reads both in one
+#   snapshot, so a freshly loaded chat saves by delta at once; ``conv_msg_rev(conv_id)``
+#   reads the rev alone. ``messages_get`` keeps returning the list.
+# - Writers that cannot track changes pass neither keyword and always take the full
+#   path, so the guard is never weaker than today.
+#
+#   conv_save(pid, doc, messages=m, dirty_from=4998, expect_rev=812)
+#     -> {..., "msg_rev": 814, "path": "delta", "hashes_from": 4998}
+
+
+def conv_save(
+    project_id: str,
+    doc: dict[str, Any],
+    *,
+    messages: list[dict[str, Any]] | None,
+    dirty_from: int | None = None,
+    expect_rev: int | None = None,
+    base_hashes: list[str] | None = None,
+    dirty_rows: list[int] | None = None,
+) -> dict[str, Any]:
     """Upsert the row; when *messages* is given, sync rows by content hash.
 
-    Returns counts: rows inserted/updated/deleted for messages. Passing
-    ``messages=None`` leaves the transcript untouched (metadata-only save).
-    A chat of another account is never written (``skipped``).
+    Returns counts: rows inserted/updated/deleted for messages, plus ``msg_rev`` and
+    ``path`` (the contract above). Passing ``messages=None`` leaves the transcript
+    untouched (metadata-only save). A chat of another account is never written
+    (``skipped``).
     """
     account = account_rows.current()
     key = account_rows.ready(account)
@@ -652,10 +835,22 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
     state = {k: v for k, v in doc.items() if k not in _STATE_EXCLUDED}
     values = {col: doc.get(col) for col in _COLUMNS}
     values["is_group"] = 1 if doc.get("is_group") else 0
-    stats = {"inserted": 0, "updated": 0, "deleted": 0, "bytes": 0}
-    remember: tuple[dict[int, tuple[str, Any, int]], int] | None = None
+    stats: dict[str, Any] = {"inserted": 0, "updated": 0, "deleted": 0, "bytes": 0}
+    rows: list[int] = []
+    pre: dict[int, tuple[str, str]] = {}
+    prepped: dict[int, tuple] = {}
+    if messages is not None:
+        n = len(messages)
+        if dirty_from is None:
+            tail = 0
+        else:
+            tail = max(0, min(int(dirty_from), n))
+            rows = sorted({int(s) for s in dirty_rows or () if 0 <= int(s) < tail})
+        pre, prepped = _encode_rows(conn, str(doc["id"]), messages, rows, tail, account, key, base_hashes)
     with db.write_txn(conn):
-        owner = conn.execute("SELECT account_id, title, state FROM conversations WHERE id=?", (doc["id"],)).fetchone()
+        owner = conn.execute(
+            "SELECT account_id, title, state, msg_rev FROM conversations WHERE id=?", (doc["id"],)
+        ).fetchone()
         if owner is not None and str(owner[0]) != account:
             _log.warning("skipped saving chat %s: it belongs to another account", doc["id"])
             return {**stats, "skipped": 1}
@@ -704,13 +899,33 @@ def conv_save(project_id: str, doc: dict[str, Any], *, messages: list[dict[str, 
                 sealed_state,
             ),
         )
+        stats["path"] = "meta"
         if messages is not None:
-            counts, rows, chars = _sync_messages(conn, doc["id"], messages, account, key)
-            stats.update(counts)
-            remember = (rows, chars)
-            conn.execute("UPDATE conversations SET message_count=? WHERE id=?", (len(messages), doc["id"]))
-    if remember is not None:
-        _remember_rows(doc["id"], *remember)  # only once the rows are committed
+            # The rev was read in this write transaction: no other writer can slip in.
+            current = owner is not None and expect_rev is not None and int(owner[3]) == expect_rev
+            if dirty_from is not None and current:
+                path, start = "delta", max(0, min(int(dirty_from), len(messages)))
+            elif dirty_from and owner is not None:
+                # A stale copy: rows below dirty_from are the store's (another writer may have
+                # changed them), and it never truncates. Starting no later than the stored end
+                # leaves no gap.
+                count = _row_count(conn, doc["id"])
+                path, start = "merge", max(0, min(int(dirty_from), len(messages), count))
+            else:
+                path, start = "full", 0  # an explicit reassign: this copy is the transcript
+            listed = [s for s in rows if s < start] if path != "full" else []
+            stats.update(_sync_messages(
+                conn, doc["id"], messages, start, account, key, truncate=path != "merge", base=base_hashes,
+                rows=listed, pre=pre, prepped=prepped,
+            ))
+            stats.update(path=path, hashes_from=start)
+            count = len(messages) if path != "merge" else _row_count(conn, doc["id"])
+            conn.execute("UPDATE conversations SET message_count=? WHERE id=?", (count, doc["id"]))
+        stats["msg_rev"] = int(
+            conn.execute("SELECT msg_rev FROM conversations WHERE id=?", (doc["id"],)).fetchone()[0]
+        )
+    if messages is not None:
+        _opened_saved(str(doc["id"]), messages, stats["hashes_from"], stats)
     return stats
 
 
@@ -726,69 +941,120 @@ def _sealed_as(stored: str, text: str, account: str) -> str:
     return account_rows.seal(text, account)
 
 
-def _sync_messages(
-    conn, conv_id: str, messages: list[dict[str, Any]], account: str, key: bytes
-) -> tuple[dict[str, int], dict[int, tuple[str, Any, int]], int]:
-    """Write the messages whose row differs; returns counts and what to remember."""
-    existing = {
+def _row_count(conn, conv_id: str) -> int:
+    return int(conn.execute("SELECT coalesce(max(seq), -1) + 1 FROM messages WHERE conv_id=?", (conv_id,)).fetchone()[0])
+
+
+def _stored_rows(conn, conv_id: str, rows: list[int], start: int) -> dict[int, tuple[str, int]]:
+    """(hash, id) by seq for the listed *rows* and every row from *start* on."""
+    where = f"seq>=? OR seq IN ({','.join('?' * len(rows))})" if rows else "seq>=?"
+    return {
         int(r[0]): (str(r[1]), int(r[2]))
-        for r in conn.execute("SELECT seq, hash, id FROM messages WHERE conv_id=?", (conv_id,))
+        for r in conn.execute(f"SELECT seq, hash, id FROM messages WHERE conv_id=? AND ({where})", (conv_id, start, *rows))
     }
-    known = _saved_rows(conv_id)
+
+
+def _encode_rows(
+    conn, conv_id: str, messages: list[Any], rows: list[int], tail: int, account: str, key: bytes,
+    base: list[str] | None,
+) -> tuple[dict[int, tuple[str, str]], dict[int, tuple]]:
+    """Before the write lock: (body, hash) for the listed *rows* and ``messages[tail:]``, and
+    the full row write (see :func:`_prep_row`) for those whose stored hash differs now.
+    The transaction re-reads the hashes; a row it needs that isn't here is encoded there."""
+    pre: dict[int, tuple[str, str]] = {}
+    for seq in (*rows, *range(tail, len(messages))):
+        body = _dumps(messages[seq])
+        pre[seq] = (body, _hash(body))
+    stored = _stored_rows(conn, conv_id, rows, tail) if pre else {}
     digest_of = functools.partial(account_rows.part_digest, key=key)
-    remembered: dict[int, tuple[str, Any, int]] = {}
-    hashes: list[str] = []  # each seq's row hash after the save (callers key caches on it)
-    chars = 0
+    prepped: dict[int, tuple] = {}
+    for seq, (body, h) in pre.items():
+        row = stored.get(seq)
+        if row is not None and (row[0] == h or (base is not None and seq < len(base) and base[seq] == h)):
+            continue  # unchanged, or another writer's (theirs): not written
+        prepped[seq] = _prep_row(messages[seq], body, h, account, key, digest_of)
+    return pre, prepped
+
+
+def _sync_messages(
+    conn, conv_id: str, messages: list[dict[str, Any]], start: int, account: str, key: bytes, *,
+    truncate: bool = True, base: list[str] | None = None, rows: list[int] | None = None,
+    pre: dict[int, tuple[str, str]] | None = None, prepped: dict[int, tuple] | None = None,
+) -> dict[str, Any]:
+    """Write the listed *rows* (all below *start*) and ``messages[start:]`` where the stored
+    row's hash differs and (*truncate*) drop rows past the end; other rows below *start* are
+    not read. With *base* (each row's hash when this copy last read it), a row the copy
+    didn't change (its hash is the base) that another writer did is left as theirs
+    (``theirs`` lists those seqs). ``hashes`` is each seq's stored row hash from *start* on
+    (callers key caches on it), ``dirty_hashes`` the same for the listed rows. *pre* /
+    *prepped* are rows :func:`_encode_rows` encoded before the lock."""
+    rows, pre, prepped = rows or [], pre or {}, prepped or {}
+    existing = _stored_rows(conn, conv_id, rows, start)
+    digest_of = functools.partial(account_rows.part_digest, key=key)
+    hashes: list[str] = []
+    dirty_hashes: dict[int, str] = {}
+    theirs: list[int] = []
     inserted = updated = deleted = nbytes = 0
-    for seq, message in enumerate(messages):
+    for seq in (*rows, *range(start, len(messages))):
+        enc = pre.get(seq)
+        if enc is None:
+            body = _dumps(messages[seq])
+            enc = (body, _hash(body))
+        body, h = enc
         row = existing.get(seq)
-        last = known.get(seq)
-        if last is not None and row is not None and last[0] == row[0] and _unchanged(last[1], message):
-            remembered[seq] = last
-            hashes.append(last[0])
-            chars += last[2]
-            continue
-        # Serialise the copy, not the live message, so the hash describes exactly
-        # what is remembered even if another thread is still adding to it.
-        shell = _shell(message)
-        source = message if shell is None else shell
-        body = _dumps(source)
-        h = _hash(body)
-        if shell is not None:
-            remembered[seq] = (h, shell, len(body))
-            chars += len(body)
-        hashes.append(h)
-        if row is not None and row[0] == h:
-            continue
-        nbytes += len(body)
-        _write_row(conn, conv_id, seq, row, source, body, h, account, key, digest_of)
-        if row is not None:
-            updated += 1
+        known = base[seq] if base is not None and seq < len(base) else None
+        got = h
+        if row is not None and row[0] != h and known and h == known:
+            # Unchanged here, changed by another writer since this copy read it: theirs is newer.
+            got = row[0]
+            theirs.append(seq)
+        elif row is None or row[0] != h:
+            nbytes += len(body)
+            prep = prepped.get(seq) or _prep_row(messages[seq], body, h, account, key, digest_of)
+            _write_row(conn, conv_id, seq, row, prep, account, refresh=False)  # conv_save keeps it after commit
+            if row is not None:
+                updated += 1
+            else:
+                inserted += 1
+        if seq < start:
+            dirty_hashes[seq] = got
         else:
-            inserted += 1
-    if len(existing) > len(messages):
-        conn.execute("DELETE FROM messages WHERE conv_id=? AND seq>=?", (conv_id, len(messages)))
-        deleted = len(existing) - len(messages)
-    counts = {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes, "hashes": hashes}
-    return counts, remembered, chars
+            hashes.append(got)
+    if truncate and any(seq >= len(messages) for seq in existing):
+        deleted = conn.execute("DELETE FROM messages WHERE conv_id=? AND seq>=?", (conv_id, len(messages))).rowcount
+    return {"inserted": inserted, "updated": updated, "deleted": deleted, "bytes": nbytes, "hashes": hashes,
+            "dirty_hashes": dirty_hashes, "theirs": theirs}
 
 
-def _write_row(
-    conn, conv_id: str, seq: int, row: tuple[str, int] | None, source: Any, body: str, h: str,
-    account: str, key: bytes, digest_of: Callable[[str], str],
-) -> None:
-    """Write one message row (sealed, big fields as parts, search text); *row* is the
-    existing (hash, id) at *seq*, or None to insert."""
-    body, fmt, parts = _compact(source, body, digest_of)
+def _prep_row(
+    source: Any, body: str, h: str, account: str, key: bytes, digest_of: Callable[[str], str]
+) -> tuple[str, Any, tuple, dict[str, str]]:
+    """Everything a row write needs that reads no database (big fields as parts, the
+    seal, search text), so it runs before the write lock: (body, source, params, parts)."""
+    stored, fmt, parts = _compact(source, body, digest_of)
     params = (
         h,
         str(source.get("role") or "") if isinstance(source, dict) else "",
         float(source.get("ts") or 0.0) if isinstance(source, dict) else 0.0,
         str(source.get("run_id") or "") if isinstance(source, dict) else "",
         account_rows.blind_text(message_search_text(source), key) if isinstance(source, dict) else "",
-        account_rows.seal(body, account),
+        account_rows.seal(stored, account),
         fmt,
     )
+    return body, source, params, parts
+
+
+def _write_row(
+    conn, conv_id: str, seq: int, row: tuple[str, int] | None, prep: tuple, account: str, *,
+    sealed: dict[str, tuple[bytes, int]] | None = None, refresh: bool = True,
+) -> None:
+    """Write one message row from :func:`_prep_row`; *row* is the existing (hash, id) at
+    *seq*, or None to insert. *refresh* False: the caller refreshes the opened cache after
+    the lock (the copy walks the whole message)."""
+    _body, source, params, parts = prep
+    # Refresh only (loads add); a stale entry after a rollback only misses: the hash differs.
+    if refresh:
+        _opened_put(conv_id, seq, params[0], source, add=False)
     if row is not None:
         message_id = row[1]
         conn.execute(
@@ -803,7 +1069,7 @@ def _write_row(
         )
         message_id = int(cur.lastrowid)
     if parts or row is not None:
-        _write_parts(conn, message_id, parts, account)
+        _write_parts(conn, message_id, parts, account, sealed)
 
 
 def upsert_run_message(
@@ -820,10 +1086,13 @@ def upsert_run_message(
     key = account_rows.ready(account)
     conn = db.connect()
     digest_of = functools.partial(account_rows.part_digest, key=key)
-    shell = _shell(message)
-    source = message if shell is None else shell
-    body = _dumps(source)
+    body = _dumps(message)
     h = _hash(body)
+    # Everything but SQL runs before the lock: encode, hash, seal, compress parts. Round 5
+    # held _write_lock ~110 ms per checkpoint, mostly waiting on the GIL mid-Python.
+    prep = _prep_row(message, body, h, account, key, digest_of)
+    sealed = _seal_new_parts(conn, prep[3], account)
+    wrote = False
     with db.write_txn(conn):
         owner = conn.execute("SELECT account_id FROM conversations WHERE id=?", (conv_id,)).fetchone()
         if owner is None or str(owner[0]) != account or _was_deleted(conn, conv_id):
@@ -843,40 +1112,31 @@ def upsert_run_message(
             seq, row = count, None
             count += 1
         if row is None or row[0] != h:
-            _write_row(conn, conv_id, seq, row, source, body, h, account, key, digest_of)
+            _write_row(conn, conv_id, seq, row, prep, account, sealed=sealed, refresh=False)
+            wrote = True
         conn.execute("UPDATE conversations SET updated=?, message_count=? WHERE id=?", (float(updated), count, conv_id))
         if stats:
             conn.execute(
                 "UPDATE conversations SET tool_call_count=?, file_count=? WHERE id=?",
                 (int(stats.get("tool_call_count") or 0), int(stats.get("file_count") or 0), conv_id),
             )
-    _remember_row(conv_id, seq, (h, shell, len(body)) if shell is not None else None)
+    if wrote:
+        _opened_put(conv_id, seq, h, message, add=False)
     return {"seq": seq, "count": count}
 
 
-def _remember_row(conv_id: str, seq: int, entry: tuple[str, Any, int] | None) -> None:
-    """Keep the save cache true for one row written outside :func:`_sync_messages`."""
-    with _saved_lock:
-        cached = _saved.get(conv_id)
-        if cached is None:
-            return
-        rows, chars = cached
-        dropped = rows.pop(seq, None)
-        chars -= dropped[2] if dropped else 0
-        if entry is not None:
-            rows[seq] = entry
-            chars += entry[2]
-        _saved[conv_id] = (rows, chars)
-
-
-def _messages(conn, conv_id: str, account: str) -> list[dict[str, Any]]:
-    """The transcript. A row whose hash is the one remembered for its seq is copied from
-    memory: opening every row (a DPAPI call each, plus its parts) on every load made a
-    running agent's checkpoints cost the whole chat, about a core on a long chat."""
+def _messages(
+    conn, conv_id: str, account: str, start: int = 0, hashes: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """The transcript from seq *start*; *hashes* gets each message's row hash (a copy's
+    base for ``conv_save(base_hashes=...)``). A row whose hash matches an opened copy is
+    read from it."""
+    if hashes is None:
+        hashes = []
     rows = conn.execute(
-        "SELECT seq, hash, body, fmt FROM messages WHERE conv_id=? ORDER BY seq", (conv_id,)
+        "SELECT seq, hash, body, fmt FROM messages WHERE conv_id=? AND seq>=? ORDER BY seq", (conv_id, start)
     ).fetchall()
-    known = _saved_rows(conv_id)
+    _opened_touch(conv_id)
     reader: list[Callable[[str], str | None]] = []
 
     def parts() -> Callable[[str], str | None]:
@@ -885,25 +1145,19 @@ def _messages(conn, conv_id: str, account: str) -> list[dict[str, Any]]:
         return reader[0]
 
     out: list[dict[str, Any]] = []
-    remembered: dict[int, tuple[str, Any, int]] = {}
-    chars = 0
     for seq, h, body, fmt in rows:
-        last = known.get(int(seq))
-        if last is not None and last[0] == str(h):
-            out.append(_copy_containers(last[1]))
-            remembered[int(seq)] = last
-            chars += last[2]
+        shell = _opened_get(conv_id, int(seq), str(h))
+        if shell is not None:
+            out.append(_copy_containers(shell))
+            hashes.append(str(h))
             continue
         try:
             message = _message(str(body), int(fmt), account, parts)
         except ValueError:
             continue
         out.append(message)
-        shell = _shell(message)
-        if shell is not None:
-            remembered[int(seq)] = (str(h), shell, len(str(body)))
-            chars += len(str(body))
-    _remember_rows(conv_id, remembered, chars)
+        hashes.append(str(h))
+        _opened_put(conv_id, int(seq), str(h), message)
     return out
 
 
@@ -913,6 +1167,54 @@ def messages_get(conv_id: str) -> list[dict[str, Any]]:
     if not _owned(conn, conv_id, account):
         return []
     return _messages(conn, conv_id, account)
+
+
+def conv_msg_rev(conv_id: str) -> int | None:
+    """The chat's message revision (migration 0026), or None when it isn't this account's."""
+    row = db.connect().execute(
+        "SELECT msg_rev FROM conversations WHERE id=? AND account_id=?", (conv_id, account_rows.current())
+    ).fetchone()
+    return None if row is None else int(row[0])
+
+
+def messages_get_rev(conv_id: str, *, with_hashes: bool = False) -> tuple:
+    """The transcript and its ``msg_rev`` from one read snapshot, so the caller can save
+    by delta at once (``expect_rev``); *with_hashes* adds each row's hash (the base)."""
+    account = account_rows.current()
+    conn = db.connect()
+    own = not conn.in_transaction
+    if own:
+        conn.execute("BEGIN")
+    try:
+        rev = conv_msg_rev(conv_id)
+        hashes: list[str] = []
+        msgs = [] if rev is None else _messages(conn, conv_id, account, 0, hashes)
+        return (msgs, rev, hashes) if with_hashes else (msgs, rev)
+    finally:
+        if own:
+            conn.execute("COMMIT")
+
+
+def messages_since(conv_id: str, seq: int, *, with_hashes: bool = False) -> tuple:
+    """The messages from *seq* on, the chat's ``msg_rev`` and its row count, from one read
+    snapshot: a copy refreshes its tail without loading the whole chat. ``([], None, 0)``
+    when the chat isn't this account's. *with_hashes* adds the rows' hashes (the base)."""
+    account = account_rows.current()
+    conn = db.connect()
+    own = not conn.in_transaction
+    if own:
+        conn.execute("BEGIN")
+    try:
+        rev = conv_msg_rev(conv_id)
+        if rev is None:
+            return ([], None, 0, []) if with_hashes else ([], None, 0)
+        hashes: list[str] = []
+        msgs = _messages(conn, conv_id, account, max(0, int(seq)), hashes)
+        count = _row_count(conn, conv_id)
+        return (msgs, rev, count, hashes) if with_hashes else (msgs, rev, count)
+    finally:
+        if own:
+            conn.execute("COMMIT")
 
 
 # Deleted chat and folder ids, kept in workspace_state (no new table: an older app must
@@ -942,7 +1244,7 @@ def _mark_deleted(conn, prefix: str, ids: list[str], now: float) -> None:
 def conv_delete(conv_id: str) -> bool:
     """Delete one of the signed-in account's chats (another account's is left alone)."""
     account = account_rows.current()
-    _forget_rows(conv_id)
+    _opened_forget(conv_id)
     conn = db.connect()
     with db.write_txn(conn):
         if not _owned(conn, conv_id, account):

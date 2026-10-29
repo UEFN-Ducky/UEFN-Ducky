@@ -13,6 +13,7 @@ This module is the only place in the tree allowed to import :mod:`sqlite3`
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -39,6 +40,11 @@ BUSY_TIMEOUT_MS = 5000
 # ducky.db-wal is reused, never shrunk, while any process keeps the file open; one big
 # transaction (a re-index, an import) left it at its high-water mark for good.
 WAL_SIZE_LIMIT = 64 * 1024 * 1024
+# SQLite's auto-checkpoint copied the WAL back inside a COMMIT, under _write_lock: up to
+# 643 ms, and every writer of the process queued behind it (in-reply checkpoints p95
+# 97-175 ms). It is off; the wal-checkpoint thread runs PASSIVE outside the lock, at
+# most once per this many seconds after a commit.
+CHECKPOINT_EVERY_S = 1.0
 # Connections of finished threads kept open for the next new thread to adopt. Pooled
 # threads keep their own connection for life; this only covers threads that end.
 _IDLE_KEEP = 16
@@ -152,7 +158,13 @@ def _apply_pending_restore(path: Path) -> None:
     # it); the old WAL travels with it (the app is often killed without a checkpoint, so
     # the WAL holds the latest commits and SQLite replays it when the backup is opened).
     # If any step fails, everything moved is put back: SQLite deletes a WAL left beside a
-    # missing or empty ducky.db, so a half-done swap would lose those commits.
+    # missing or empty ducky.db, so a half-done swap would lose those commits. The
+    # wal-checkpoint thread's connection would hold the file mid-rename: it waits.
+    with _ckpt_open:
+        _swap_in_restore(path, pending, backup)
+
+
+def _swap_in_restore(path: Path, pending: Path, backup: Path) -> None:
     moved: list[tuple[Path, Path]] = []
     try:
         for name in (DB_NAME, *SIDECAR_NAMES):
@@ -634,7 +646,8 @@ def _configure(conn: sqlite3.Connection, first: bool = True) -> None:
         time.sleep(0.02)
     main = threading.current_thread() is threading.main_thread()
     conn.executescript(
-        f"PRAGMA journal_size_limit={WAL_SIZE_LIMIT}; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; "
+        f"PRAGMA journal_size_limit={WAL_SIZE_LIMIT}; PRAGMA wal_autocheckpoint=0; "
+        "PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; "
         f"PRAGMA temp_store=MEMORY; PRAGMA cache_size=-{_MAIN_CACHE_KIB if main else _WORKER_CACHE_KIB};"
     )
     if first:  # the SQLite library is the same for every later connection
@@ -681,20 +694,106 @@ def reset_for_tests() -> None:
 # --------------------------------------------------------------------------- transactions
 
 
+# Writers in this process queue here and wake the moment the holder commits. Waiting
+# on SQLite's lock instead retries only on its busy-handler sleep steps (up to ~100 ms
+# each), which made one-row checkpoints wait seconds behind the chat writer. Other
+# processes still meet the busy timeout. Re-entrant, so a nested write_txn (the chat
+# writer's savepoints) keeps working on its thread.
+#
+# Lock order: _write_lock is taken BEFORE any other lock that a write may wait on
+# (importers.phase1._lock). A chat-writer batch holds it and reaches a first import
+# (who is signed in -> secrets import); an import holding its own lock first and then
+# writing its meta row hung both threads for good.
+_write_lock = threading.RLock()
+_savepoints = itertools.count()
+
+
 @contextmanager
 def write_txn(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """``BEGIN IMMEDIATE`` … ``COMMIT``; rolls back on any exception.
+    """``BEGIN IMMEDIATE`` … ``COMMIT``; rolls back on any exception. Inside an open
+    transaction (the chat writer's batch) it is a SAVEPOINT of that transaction.
 
     Never hold one of these across an HTTP, LLM or listener call.
     """
-    conn.execute("BEGIN IMMEDIATE")
+    if conn.in_transaction:
+        name = f"write_txn_{next(_savepoints)}"
+        with _write_lock:
+            conn.execute(f"SAVEPOINT {name}")
+            try:
+                yield conn
+            except BaseException:
+                conn.execute(f"ROLLBACK TO {name}")
+                conn.execute(f"RELEASE {name}")
+                raise
+            else:
+                conn.execute(f"RELEASE {name}")
+        return
+    with _write_lock:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        else:
+            conn.execute("COMMIT")
+    _checkpoint_soon(conn)
+
+
+_ckpt_cv = threading.Condition()
+_ckpt_open = threading.Lock()  # held while the checkpoint thread has a file open
+_ckpt_due: set[str] = set()
+_ckpt_thread: threading.Thread | None = None
+
+
+def _checkpoint_soon(conn: sqlite3.Connection) -> None:
+    """A commit landed: the wal-checkpoint thread copies the WAL back soon (it is
+    cheap when nothing is new), never inside a COMMIT."""
+    global _ckpt_thread
     try:
-        yield conn
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    else:
-        conn.execute("COMMIT")
+        path = conn.execute("PRAGMA database_list").fetchone()[2]
+    except sqlite3.Error:
+        return
+    if not path:
+        return
+    with _ckpt_cv:
+        if path in _ckpt_due:
+            return
+        _ckpt_due.add(path)
+        if _ckpt_thread is None or not _ckpt_thread.is_alive():
+            _ckpt_thread = threading.Thread(target=_checkpoint_loop, name="wal-checkpoint", daemon=True)
+            _ckpt_thread.start()
+        _ckpt_cv.notify()
+
+
+def _checkpoint_loop() -> None:
+    while True:
+        with _ckpt_cv:
+            while not _ckpt_due:
+                _ckpt_cv.wait()
+            paths = list(_ckpt_due)
+            _ckpt_due.clear()
+        for path in paths:
+            checkpoint_passive(path)
+        time.sleep(CHECKPOINT_EVERY_S)
+
+
+def checkpoint_passive(path: str) -> None:
+    """``wal_checkpoint(PASSIVE)`` on its own short-lived connection: it takes no write
+    lock, so writers keep going, and nothing stays open on a file a restore or a test
+    may move (a staged restore waits for it). ``mode=rw`` never creates a database that
+    was deleted meanwhile."""
+    with _ckpt_open:
+        try:
+            conn = sqlite3.connect(Path(path).as_uri() + "?mode=rw", uri=True, timeout=1.0, isolation_level=None)
+        except sqlite3.Error:
+            return
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        except sqlite3.Error as exc:
+            _log.debug("wal_checkpoint(PASSIVE) %s failed: %s", path, exc)
+        finally:
+            _close_quietly(conn)
 
 
 def data_version(conn: sqlite3.Connection) -> int:

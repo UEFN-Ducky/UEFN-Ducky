@@ -38,7 +38,11 @@ def once(name: str, fn: Callable[[Path], dict[str, Any]]) -> dict[str, Any] | No
     memo = (str(db.db_path()), name)
     if memo in _done:
         return None
-    with _lock:
+    # db._write_lock first (db.py's lock order): a chat-writer batch holds it and reaches
+    # here; taking _lock first and then writing the meta row deadlocked against it.
+    # ponytail: a first import blocks this process's other writers while it runs (once
+    # per database); per-store import locks if that ever shows at boot.
+    with db._write_lock, _lock:
         if memo in _done:
             return None
         if kv.meta_get(_flag(name)) is not None:

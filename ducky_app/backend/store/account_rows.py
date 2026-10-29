@@ -110,20 +110,27 @@ def ready(account: str) -> bytes:
 
 
 _file_keys_done: set[tuple[str, str]] = set()
+# A failed try waits this long: retried on every call, it read the keys file on every
+# chat save and checkpoint.
+FILE_KEYS_RETRY_S = 60.0
+_file_keys_retry: dict[tuple[str, str], float] = {}
 
 
 def _ensure_file_keys(account: str) -> None:
     """The account's file keypair, as soon as its data key is here (once per process), so
     its chat attachments can be sealed whenever another account signs in on this PC."""
     memo = (str(db.db_path()), account)
-    if memo in _file_keys_done or db.connect().in_transaction:
+    if memo in _file_keys_done or _file_keys_retry.get(memo, 0.0) > time.monotonic():
+        return
+    if db.connect().in_transaction:
         return
     try:
         from backend.store import sealed_files
 
         sealed_files.ensure_keypair(account)
         _file_keys_done.add(memo)
-    except Exception:  # noqa: BLE001 — never in the way of a read or write; the next call tries again
+    except Exception:  # noqa: BLE001 — never in the way of a read or write; tried again later
+        _file_keys_retry[memo] = time.monotonic() + FILE_KEYS_RETRY_S
         _log.debug("file keys for this account not made yet", exc_info=True)
 
 
@@ -215,7 +222,11 @@ def forget() -> None:
         _opened.clear()
         _opened_chars = 0
     _file_keys_done.clear()
+    _file_keys_retry.clear()
     sealed_files.forget()
+    from backend.agent.secrets import forget_login_stamp
+
+    forget_login_stamp()
 
 
 # --------------------------------------------------------------------------- search without the words
