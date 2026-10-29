@@ -617,6 +617,61 @@
 .plugin-scope-menu__foot {
   padding: 4px 8px;
 }
+
+/* The header's Team and Live menu: Live / All tabs, one accordion per team copy. */
+.live-menu__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px 6px;
+}
+.live-menu__tab {
+  flex: 1 1 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: var(--radius-sm, 6px);
+  background: none;
+  color: var(--fg-dim, #a0a0a0);
+  font: inherit;
+  cursor: pointer;
+}
+.live-menu__tab.is-active {
+  color: var(--fg, #e6e6e6);
+  background: color-mix(in srgb, var(--accent, #d4a017) 12%, transparent);
+}
+.live-menu__team-head {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.live-menu__team-head:hover {
+  background: color-mix(in srgb, var(--fg, #e6e6e6) 6%, transparent);
+}
+.live-menu__caret {
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.live-menu__caret.is-open {
+  transform: rotate(90deg);
+}
+.live-menu__team-body {
+  padding-left: 12px;
+}
+.team-live-menu__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border, #3a3a3a);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+.team-live-menu__status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .plugin-scope-faces {
   display: inline-flex;
   flex: none;

@@ -135,8 +135,9 @@ describe("Team and Live in the title bar", () => {
     expect((await waitFor(trigger)).className).not.toContain("is-live");
     fireEvent.click(trigger());
     const menu = await screen.findByRole("menu", { name: "Live" });
-    expect(within(menu).getByText("Live in Alpha")).toBeTruthy();
-    expect(within(menu).getByText("2 people")).toBeTruthy();
+    expect(within(menu).getByRole("tab", { name: "Live" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(menu).getByRole("menuitem", { name: /^Alpha/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(within(menu).getAllByText("2 people")).toHaveLength(2); // the team's head and its one group
     expect(within(menu).getByText("iliya in Kanban, Mo in Cards")).toBeTruthy();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Join iliya" }));
     await waitFor(() => expect(api.live_team_join).toHaveBeenCalledWith("acct", "s1", "h:d1"));
@@ -249,6 +250,39 @@ describe("Team and Live in the title bar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("two team copies are two accordions; Live hides the one nobody is live in; All shows both", async () => {
+    api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] }), team({ space: "s2", label: "Beta", online: [{ name: "Bo", device: "d_bo" }] })));
+    render(<TeamLiveDropdown />);
+    fireEvent.click(await waitFor(trigger));
+    const menu = await screen.findByRole("menu", { name: "Live" });
+    expect(within(menu).getByRole("menuitem", { name: /^Alpha/ })).toBeTruthy();
+    expect(within(menu).queryByRole("menuitem", { name: /^Beta/ })).toBeNull();
+    fireEvent.click(within(menu).getByRole("tab", { name: "All" }));
+    const beta = within(menu).getByRole("menuitem", { name: /^Beta/ });
+    expect(beta.getAttribute("aria-expanded")).toBe("false");
+    expect(beta.textContent).toContain("1 person");
+    expect(within(menu).queryByRole("menuitem", { name: "Invite Bo" })).toBeNull();
+    fireEvent.click(beta);
+    expect(beta.getAttribute("aria-expanded")).toBe("true");
+    expect(within(menu).getByRole("menuitem", { name: "Invite Bo" })).toBeTruthy();
+  });
+
+  it("the visible pane's team starts open; Use for this plugin switches another team in", async () => {
+    api.live_overview.mockResolvedValue(overview(team(), team({ space: "s2", label: "Beta" })));
+    render(<TeamLiveDropdown />);
+    const s = scope();
+    act(() => publishTeamScope(s));
+    fireEvent.click(await waitFor(trigger));
+    const menu = await screen.findByRole("menu", { name: "Live" });
+    const alpha = within(menu).getByRole("menuitem", { name: /^Alpha/ });
+    expect(alpha.getAttribute("aria-expanded")).toBe("true");
+    expect(alpha.textContent).toContain("this plugin");
+    expect(within(menu).queryByRole("menuitem", { name: "Use for this plugin" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Beta/ }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Use for this plugin" }));
+    expect(s.actions.choose).toHaveBeenCalledWith({ id: "s2", kind: "shared", label: "Beta" });
   });
 
   it("an error joining shows in the menu", async () => {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { LiveTeam, LiveTeamGroup, LiveTeamMember, LiveTeamOnline } from "../types/panel";
 import { groupName, initials, listText, personTone } from "./scopeBarText";
 import "./plugin-ui.css";
@@ -24,6 +25,10 @@ type Props = {
   /** Each plugin's page goes to the leader's screen in a group this PC joined. */
   follow: boolean;
   onFollow: (on: boolean) => void;
+  /** The visible plugin pane's team copy (a space id, or "personal"); none: no pane can share. */
+  current?: string;
+  /** Show this team's data in the visible plugin pane. */
+  onUse?: (team: LiveTeam) => void;
 };
 
 const size = (g: LiveTeamGroup) => `${g.members.length} ${g.members.length === 1 ? "person" : "people"}`;
@@ -33,7 +38,7 @@ function whereText(members: LiveTeamMember[]): string {
   return members.filter((m) => !m.me && m.pluginLabel).map((m) => `${m.name} in ${m.pluginLabel}`).join(", ");
 }
 
-function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, onFollow }: Omit<Props, "teams"> & {
+function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, onFollow, current, onUse }: Omit<Props, "teams"> & {
   team: LiveTeam;
   heading: boolean;
 }) {
@@ -47,7 +52,14 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
 
   return (
     <>
-      {heading ? <div className="plugin-scope-menu__head">{team.label}</div> : null}
+      {onUse && current !== undefined && current !== team.space ? (
+        <div className="plugin-scope-menu__foot">
+          <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--block" disabled={busy}
+            onClick={() => onUse(team)}>
+            Use for this plugin
+          </button>
+        </div>
+      ) : null}
       {!team.supported ? (
         <div className="plugin-scope-menu__note">{team.reason || "Live isn't available here."}</div>
       ) : (
@@ -144,23 +156,67 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
   );
 }
 
+/** Everyone on a team copy who has the app open: live (in any group) or online. */
+function headCount(team: LiveTeam): number {
+  const ids = new Set<string>();
+  for (const g of team.groups) for (const m of g.members) ids.add(m.device || m.user || m.name);
+  for (const p of team.online ?? []) ids.add(p.device || p.user || p.name);
+  return ids.size;
+}
+
 /**
- * The title bar's Live menu: the live groups on each team copy (each named by its host, with
- * who is in it and the plugin each has open), Join / Leave, Same screen as the group, who
- * else is online with Invite, and Start live. Being live covers every plugin on that team copy: people live together see each
- * other's pointers, and what one presses is greyed out for the others.
+ * The title bar's Team and Live menu. Tabs: Live (team copies where someone is live) and All.
+ * Each team copy is an accordion (the visible pane's one, or the one this PC is live in, starts
+ * open): its live groups (named by host, who is in which plugin) with Join / Leave, Same screen
+ * as the group, who else is online with Invite, Start live, and Use for this plugin. Being live
+ * covers every plugin on that team copy: people live together see each other's pointers, and
+ * what one presses is greyed out for the others.
  */
 export function LiveMenu({ teams, ...rest }: Props) {
+  const anyLive = teams.some((t) => t.groups.length);
+  const [tab, setTab] = useState<"live" | "all">(anyLive ? "live" : "all");
+  const [openTeams, setOpenTeams] = useState<Set<string>>(() => {
+    const first = teams.find((t) => t.space === rest.current) ?? teams.find((t) => t.on) ?? (teams.length === 1 ? teams[0] : undefined);
+    return new Set(first ? [first.space] : []);
+  });
+  const shown = tab === "live" ? teams.filter((t) => t.groups.length) : teams;
   const several = teams.length > 1;
+  const toggle = (space: string) => setOpenTeams((prev) => {
+    const next = new Set(prev);
+    if (!next.delete(space)) next.add(space);
+    return next;
+  });
   return (
     <div className="plugin-scope-menu live-menu" role="menu" aria-label="Live">
-      {!several && teams[0] ? <div className="plugin-scope-menu__head">Live in {teams[0].label}</div> : null}
-      {teams.map((team, i) => (
-        <div key={team.space} className="live-menu__team">
-          {i ? <div className="plugin-scope-menu__sep" /> : null}
-          <TeamSection team={team} heading={several} {...rest} />
-        </div>
-      ))}
+      <div className="live-menu__tabs" role="tablist" aria-label="Show">
+        {([["live", "Live"], ["all", "All"]] as const).map(([id, text]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id}
+            className={`live-menu__tab${tab === id ? " is-active" : ""}`} onClick={() => setTab(id)}>
+            {text}
+          </button>
+        ))}
+      </div>
+      {shown.length ? shown.map((team) => {
+        const isOpen = openTeams.has(team.space);
+        const people = headCount(team);
+        return (
+          <div key={team.space} className="live-menu__team">
+            <button type="button" role="menuitem" className="plugin-scope-menu__row live-menu__team-head" aria-expanded={isOpen}
+              onClick={() => toggle(team.space)}>
+              <span className={`live-menu__caret${isOpen ? " is-open" : ""}`} aria-hidden>▸</span>
+              <span className="plugin-scope-menu__text">
+                <span className="plugin-scope-menu__name">{team.label}</span>
+                <span className="plugin-scope-menu__sub">
+                  {people ? `${people} ${people === 1 ? "person" : "people"}` : "Nobody online"}
+                  {team.space === rest.current ? " · this plugin" : ""}
+                </span>
+              </span>
+              {team.groups.length ? <span className="plugin-scope-dot plugin-scope-dot--live" title="Someone is live" aria-hidden /> : null}
+            </button>
+            {isOpen ? <div className="live-menu__team-body"><TeamSection team={team} heading={several} {...rest} /></div> : null}
+          </div>
+        );
+      }) : <div className="plugin-scope-menu__empty">Nobody's live right now.</div>}
     </div>
   );
 }

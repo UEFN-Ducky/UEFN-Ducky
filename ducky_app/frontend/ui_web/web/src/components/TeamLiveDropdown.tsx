@@ -81,6 +81,11 @@ export function TeamLiveDropdown() {
   // The menu stays open: the row turns to Invited, and more people can be asked.
   const invite = (team: LiveTeam, person: LiveTeamOnline) =>
     void act(async () => getApi()?.live_team_invite?.(team.account, team.space, person.device), true);
+  const use = (team: LiveTeam) => {
+    setOpen(false);
+    const choice = scope?.menu?.find((c) => c.id === team.space) ?? { id: team.space, kind: "shared" as const, label: team.label };
+    void scope?.actions.choose(choice);
+  };
   const settings = () => {
     setOpen(false);
     setModal("overview");
@@ -109,7 +114,8 @@ export function TeamLiveDropdown() {
       <DropdownPanel anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} width={320} placement="bottom">
         {error ? <p className="plugin-scope-menu__note plugin-scope-menu__note--warn live-menu__error" role="alert">{error}</p> : null}
         {teams.length ? (
-          <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow} />
+          <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow}
+            current={scope?.current} onUse={scope ? use : undefined} />
         ) : null}
         {scope ? (
           <div className="plugin-scope-menu__foot team-live-menu__foot">
