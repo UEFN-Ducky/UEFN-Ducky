@@ -2575,9 +2575,9 @@ def _invoke_tool(name: str, arguments: dict[str, Any], node_id: str = "", typed:
     stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
     release_cancel = lambda: None
     if name == "ducky_terminal_run" and _CANCEL.get() is not None:
-        from frontend.ui_web.terminal.manager import get_terminal_manager
+        from backend.tools.panel.ducky_panel_terminal import _terminal_manager
 
-        manager = get_terminal_manager()
+        manager = _terminal_manager()
         session_id = str(arguments.get("session_id") or "")
         release_cancel = _cancel_on_stop(lambda: manager.kill(session_id, push_close=True))
     typed_token = _TYPED_COMMAND.set(typed)
@@ -2615,9 +2615,11 @@ def _tool_output(name: str, result: Any) -> dict[str, Any]:
             out["data"] = parsed
     data = out.get("data")
     if name == "ducky_terminal_open" and isinstance(data, dict) and data.get("ok") and _CANCEL.get() is not None:
-        from frontend.ui_web.terminal.manager import get_terminal_manager
+        # The manager that owns the terminal: the window's, also from the tool server, where
+        # a hold on its own empty manager kept nothing (Oct 28 2026: release terminal closed).
+        from backend.tools.panel.ducky_panel_terminal import _terminal_manager
 
-        manager = get_terminal_manager()
+        manager = _terminal_manager()
         session_id = str(data.get("session_id") or "")
         if session_id:
             _cancel_on_stop(lambda: manager.kill(session_id, push_close=True))

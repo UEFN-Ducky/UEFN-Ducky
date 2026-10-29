@@ -1053,6 +1053,19 @@ class PanelApiWindowMixin:
 
         return get_terminal_manager().kill(session_id.strip())
 
+    def terminal_hold(self, session_id: str) -> dict[str, Any]:
+        """A workflow run in another process (the tool server) keeps its terminal open."""
+        from frontend.ui_web.terminal import get_terminal_manager
+
+        get_terminal_manager().hold(session_id.strip())
+        return {"ok": True}
+
+    def terminal_let_go(self, session_id: str) -> dict[str, Any]:
+        from frontend.ui_web.terminal import get_terminal_manager
+
+        get_terminal_manager().let_go(session_id.strip())
+        return {"ok": True}
+
     def terminal_busy(self, session_id: str) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 

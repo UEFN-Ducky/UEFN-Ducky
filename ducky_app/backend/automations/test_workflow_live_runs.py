@@ -171,6 +171,8 @@ def test_a_command_typed_into_a_local_workflow_runs_without_asking(events, monke
         run_agent_command=run_agent_command,
         spawn=lambda **kw: {"ok": True, "session_id": "t1"},
         get_session=lambda _sid: None,
+        hold=lambda _sid: lambda: None,
+        kill=lambda *a, **k: {"ok": True},
     ))
     session = "{{nodes.terminal.result.data.session_id}}"
     graph = {"nodes": [
@@ -237,11 +239,16 @@ def test_the_terminal_a_run_opened_is_held_until_the_run_ends(events, monkeypatc
         held.append(session_id)
         return lambda: released.append(session_id)
 
-    monkeypatch.setattr(terminal_manager, "get_terminal_manager", lambda: SimpleNamespace(hold=hold, kill=lambda *a, **k: {"ok": True}))
+    # Oct 28 2026: the hold went to the run's own process's manager, not the window's that
+    # owns the terminal, so from the tool server it kept nothing.
+    monkeypatch.setattr(terminal_manager, "get_terminal_manager", lambda: SimpleNamespace(
+        hold=lambda sid: pytest.fail("held on a manager that does not own the terminal")))
     monkeypatch.setattr(ducky_panel_terminal, "_terminal_manager", lambda: SimpleNamespace(
         run_agent_command=lambda session_id, command, **kw: during.append(list(released)) or {"ok": True, "exit_code": 0, "output_tail": ""},
         spawn=lambda **kw: {"ok": True, "session_id": "t1"},
         get_session=lambda _sid: None,
+        hold=hold,
+        kill=lambda *a, **k: {"ok": True},
     ))
     graph = {"nodes": [
         {"id": "s", "type": "start.manual", "config": {}},

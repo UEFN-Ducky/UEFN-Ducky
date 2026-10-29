@@ -83,6 +83,9 @@ class TerminalManager:
         self._reaper_stop = threading.Event()
         # Terminals a running workflow still needs: never closed as idle until it lets go.
         self._held: set[str] = set()
+        # Terminals an agent command was handed to and has not given back yet (a test run
+        # waiting for its repo's lock is not busy yet but is no idle shell either).
+        self._in_command: set[str] = set()
         self._push: Callable[[dict[str, Any]], None] | None = None
         # session id -> {"value", "sent", "at", "timer"}: coalesced terminal_busy pushes.
         self._busy_push: dict[str, dict[str, Any]] = {}
@@ -236,11 +239,12 @@ class TerminalManager:
                 entry.run_owned = True
         self._ensure_reaper()
 
-        def release() -> None:
-            with self._lock:
-                self._held.discard(session_id)
+        return lambda: self.let_go(session_id)
 
-        return release
+    def let_go(self, session_id: str) -> None:
+        """The run that held this terminal (:meth:`hold`) ended."""
+        with self._lock:
+            self._held.discard(session_id)
 
     def close_idle_agent_terminals(
         self,
@@ -263,7 +267,7 @@ class TerminalManager:
         with self._lock:
             agents = [(e.session, e.chat) for e in self._sessions.values() if e.chat or e.run_owned]
             asked = {p.session_id for p in self._pending.values()}
-            held = set(self._held)
+            held = self._held | self._in_command
         snapshot = functools.cache(_process_snapshot)
         closed: list[str] = []
         for session, chat in agents:
@@ -701,21 +705,30 @@ class TerminalManager:
     def _run_command(self, session: TerminalSession, command: str, *, timeout_s: float, conv_id: str = "") -> dict[str, Any]:
         """session.run_command (waited); a test or build run holds its repo's lock until it
         really ends (an early-returned one too), so a second one in that repo waits."""
-        # ponytail: background commands are never locked; their end can't be seen.
-        if not repo_lock.is_heavy(command):
-            return session.run_command(command, background=False, timeout_s=timeout_s)
-        repo = repo_lock.repo_of(str(getattr(session, "cwd", "") or "."))
-
-        def waiting(holder: str) -> None:
-            note = getattr(session, "note", None)
-            if note:
-                note(f"Waiting for {holder}'s test run in this repo")
-
-        repo_lock.acquire(repo, _chat_title(conv_id) or "another terminal", on_wait=waiting)
+        # Oct 28 2026: the release's test step waited minutes for another agent's pytest in
+        # this repo; quiet and not busy yet, the idle reaper closed its terminal under it.
+        sid = str(getattr(session, "id", "") or "")
+        with self._lock:
+            self._in_command.add(sid)
         try:
-            return session.run_command(command, background=False, timeout_s=timeout_s)
+            # ponytail: background commands are never locked; their end can't be seen.
+            if not repo_lock.is_heavy(command):
+                return session.run_command(command, background=False, timeout_s=timeout_s)
+            repo = repo_lock.repo_of(str(getattr(session, "cwd", "") or "."))
+
+            def waiting(holder: str) -> None:
+                note = getattr(session, "note", None)
+                if note:
+                    note(f"Waiting for {holder}'s test run in this repo")
+
+            repo_lock.acquire(repo, _chat_title(conv_id) or "another terminal", on_wait=waiting)
+            try:
+                return session.run_command(command, background=False, timeout_s=timeout_s)
+            finally:
+                repo_lock.release(repo)
         finally:
-            repo_lock.release(repo)
+            with self._lock:
+                self._in_command.discard(sid)
 
     def read_output(self, session_id: str, max_chars: int = 8000) -> dict[str, Any]:
         session = self.get_session(session_id)

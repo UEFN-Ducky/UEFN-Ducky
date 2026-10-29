@@ -61,6 +61,16 @@ def test_open_list_read_close_use_window(forwarded, monkeypatch):
     assert [c[0] for c in forwarded.calls] == ["terminal_spawn", "terminal_list", "terminal_read_output", "terminal_kill"]
 
 
+def test_a_runs_hold_from_the_tool_server_reaches_the_window(forwarded):
+    # Oct 28 2026: a run in the tool server held its own empty manager; the window's
+    # reaper closed the release terminal between steps.
+    let_go = tools._terminal_manager().hold("s1")
+    assert "s1" in forwarded.mgr._held
+    let_go()
+    assert "s1" not in forwarded.mgr._held
+    assert [c[0] for c in forwarded.calls] == ["terminal_hold", "terminal_let_go"]
+
+
 @pytest.mark.parametrize("approve", [True, False])
 def test_popup_allow_and_deny_return_result(forwarded, approve):
     events = []

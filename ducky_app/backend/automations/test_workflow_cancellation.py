@@ -120,6 +120,8 @@ def test_stop_kills_active_terminal_and_child(local_runs, monkeypatch):
     from frontend.ui_web.terminal import manager as terminal_module
     mgr = terminal_module.TerminalManager()
     monkeypatch.setattr(terminal_module, "get_terminal_manager", lambda: mgr)
+    from backend.tools.panel import ducky_panel_terminal
+    monkeypatch.setattr(ducky_panel_terminal, "_terminal_manager", lambda: mgr)  # the window's manager
     terminal = mgr.spawn(shell="powershell", cwd=str(local_runs), hidden=True)
     assert terminal["ok"], terminal
     sid = terminal["session_id"]

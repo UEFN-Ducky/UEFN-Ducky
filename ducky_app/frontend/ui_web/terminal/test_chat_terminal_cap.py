@@ -162,6 +162,26 @@ def test_a_running_workflows_terminal_stays_until_the_run_lets_go(mgr, tmp_path)
     assert mgr.close_idle_agent_terminals(now=later, running=set()) == [release_terminal]
 
 
+def test_a_terminal_waiting_for_its_repos_test_lock_is_not_closed(mgr, tmp_path, monkeypatch):
+    # Oct 28 2026: the release's "Run tests" waited for another agent's pytest in the repo;
+    # quiet and not busy yet, the reaper closed it ("terminal session not running").
+    from frontend.ui_web.terminal import repo_lock
+
+    sid = _open(mgr, tmp_path, "release-hub")["session_id"]
+    shell = mgr.get_session(sid)
+    later = shell.last_activity + manager_module._AGENT_STALE_CLOSE_S + 1
+    reaped: list[list[str]] = []
+
+    def acquire(repo, label, on_wait=None):
+        reaped.append(mgr.close_idle_agent_terminals(now=later, running=set()))
+
+    monkeypatch.setattr(repo_lock, "acquire", acquire)
+    monkeypatch.setattr(shell, "run_command", lambda *a, **k: {"ok": True, "exit_code": 0})
+    assert mgr._run_command(shell, "py -3 -m pytest", timeout_s=5)["ok"]
+    assert reaped == [[]] and sid in mgr._sessions
+    assert mgr.close_idle_agent_terminals(now=later, running=set()) == [sid]  # done: closes as before
+
+
 def test_a_run_s_terminal_with_no_ducky_still_closes_after_the_run(mgr, tmp_path):
     # A workflow with no Agent step has no group chat to own its terminal; it piled up.
     mine = mgr.spawn(shell="powershell", cwd=str(tmp_path))["session_id"]  # a person's own

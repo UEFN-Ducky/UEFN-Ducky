@@ -70,6 +70,12 @@ class _PanelTerminalManager:
     def kill(self, session_id: str, **_kwargs) -> dict:
         return self._call("terminal_kill", {"session_id": session_id})
 
+    def hold(self, session_id: str):
+        # ponytail: a tool server that dies mid-run leaves the hold; the terminal then stays
+        # until the person closes it or Ducky restarts.
+        self._call("terminal_hold", {"session_id": session_id})
+        return lambda: self._call("terminal_let_go", {"session_id": session_id})
+
 
 def _terminal_manager():
     from frontend.ui_web.agent_modes import get_panel_push
