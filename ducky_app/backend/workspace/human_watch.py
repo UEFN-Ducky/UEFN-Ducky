@@ -28,6 +28,8 @@ WATCH_REL = ("Content/Verse",)
 WATCH_EXT = {".verse", ".json", ".md", ".txt", ".csv"}
 SKIP_DIR = frozenset({"Generated", "_INT", "__ExternalActors__", "__ExternalObjects__"})
 POLL_S = 2.0
+NO_ISLAND_S = 30.0  # nothing to watch: look for an island this often
+RESCAN_S = 60.0  # with change notices, still rescan this often in case one was missed
 STABLE_POLLS = 2
 TOMBSTONE_S = 10.0
 RECENT_WINDOW_S = 60.0
@@ -77,19 +79,65 @@ class HumanWatch:
         # that have not been touched since the previous poll.
         self._reads: dict[str, tuple[int, int, str, str]] = {}
         self._island = ""
+        self._open = False  # the last tick had an island to watch
+        self._notifier: Any = None
+        self._notify_dir = ""
+        self._stop = threading.Event()
 
     def loop(self, poll_s: float) -> None:
-        while True:
+        poll_s = max(0.2, float(poll_s))
+        try:
+            while not self._stop.is_set():
+                try:
+                    self.tick()
+                except Exception:
+                    log.debug("human watch tick failed", exc_info=True)
+                self._wait(poll_s)
+        finally:
+            self._set_notifier("")
+
+    def _wait(self, poll_s: float) -> None:
+        """Sleep until the next tick: until the island changes (Windows change notice),
+        POLL_S while an edit settles or without notices, NO_ISLAND_S with no island.
+        A blind rescan every POLL_S cost ~0.12 ms per watched file (Oct 29 2026 profile)."""
+        if not self._open:
+            self._set_notifier("")
+            self._stop.wait(NO_ISLAND_S)
+            return
+        # ponytail: watches the first WATCH_REL root only; one notifier per root if more are added.
+        notifier = self._set_notifier(os.path.join(self._island, WATCH_REL[0].replace("/", os.sep)))
+        if notifier is None or self._pending:
+            self._stop.wait(poll_s)
+            return
+        deadline = time.monotonic() + RESCAN_S
+        while not self._stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
             try:
-                self.tick()
-            except Exception:
-                log.debug("human watch tick failed", exc_info=True)
-            time.sleep(max(0.2, float(poll_s)))
+                if notifier.wait(min(remaining, poll_s)):
+                    return
+            except OSError:
+                self._set_notifier("")  # retried next wait; until then the plain poll
+                return
+
+    def _set_notifier(self, path: str) -> Any:
+        """The change notifier for *path* ("" closes it); None when it can't watch there."""
+        if path == self._notify_dir and self._notifier is not None:
+            return self._notifier
+        if self._notifier is not None:
+            self._notifier.close()
+        self._notifier, self._notify_dir = None, path
+        if path:
+            self._notifier = _notifier_for(path)
+        return self._notifier
 
     def tick(self) -> None:
         writer, journal, root = _runtime()
         if writer is None or journal is None or not root:
+            self._open = False
             return
+        self._open = True
         island = Path(island_root(root))
         if str(island) != self._island:
             # The panel switched projects. Diffing the new island against the old
@@ -158,28 +206,40 @@ class HumanWatch:
         """
         found: dict[str, dict[str, Any]] = {}
         island_s = str(island)
+        cut = len(island_s.rstrip("\\/")) + 1
         for rel_root in WATCH_REL:
             base = island / rel_root.replace("/", os.sep)
             if not base.is_dir():
                 continue
-            for dirpath, dirnames, filenames in os.walk(base):
-                dirnames[:] = [
-                    name for name in dirnames
-                    if name not in SKIP_DIR and not name.startswith(".")
-                ]
-                for name in filenames:
+            stack = [str(base)]
+            while stack:
+                try:
+                    entries = list(os.scandir(stack.pop()))
+                except OSError:
+                    continue
+                for entry in entries:
+                    name = entry.name
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if name not in SKIP_DIR and not name.startswith("."):
+                                stack.append(entry.path)
+                            continue
+                    except OSError:
+                        continue
                     ext = os.path.splitext(name)[1].lower()
                     if ext not in WATCH_EXT:
                         continue
-                    full = os.path.join(dirpath, name)
-                    # The walk starts under the already-resolved island, so a plain
-                    # relpath is the key. Resolving it with realpath cost two file
+                    full = entry.path
+                    # The walk starts under the already-resolved island, so the path
+                    # past it is the key. Resolving it with realpath cost two file
                     # handles per file per poll on Windows for the same answer.
-                    rel = _canon_watch_key(os.path.relpath(full, island_s).replace(os.sep, "/"))
+                    rel = _canon_watch_key(full[cut:].replace(os.sep, "/"))
                     if not rel:
                         continue
                     try:
-                        st = os.stat(full)
+                        # On Windows this comes with the directory listing: no handle
+                        # per file, which os.stat opened every poll.
+                        st = entry.stat()
                     except OSError:
                         continue
                     if st.st_size > TEXT_READ_MAX_BYTES:
@@ -264,6 +324,52 @@ class HumanWatch:
             outcome=OUTCOME_OK,
         )
         journal.record(record)
+
+
+class _DirNotifier:
+    """FindFirstChangeNotification on one folder tree: wait() is True once something in it
+    was created, deleted, renamed or written since the last True."""
+
+    _FILTER = 0x1 | 0x2 | 0x8 | 0x10  # FILE_NAME | DIR_NAME | SIZE | LAST_WRITE
+
+    def __init__(self, path: str) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # own instance: own argtypes
+        k32.FindFirstChangeNotificationW.restype = wintypes.HANDLE
+        k32.FindFirstChangeNotificationW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.DWORD]
+        k32.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
+        k32.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
+        k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        k32.WaitForSingleObject.restype = wintypes.DWORD
+        handle = k32.FindFirstChangeNotificationW(path, True, self._FILTER)
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._k32, self._handle = k32, handle
+
+    def wait(self, timeout_s: float) -> bool:
+        result = self._k32.WaitForSingleObject(self._handle, max(0, int(timeout_s * 1000)))
+        if result == 0x102:  # WAIT_TIMEOUT
+            return False
+        if result != 0 or not self._k32.FindNextChangeNotification(self._handle):
+            raise OSError("change notification failed")
+        return True
+
+    def close(self) -> None:
+        if self._handle:
+            self._k32.FindCloseChangeNotification(self._handle)
+            self._handle = None
+
+
+def _notifier_for(path: str) -> _DirNotifier | None:
+    """A change notifier for *path*, or None (not Windows, no such folder): then the plain poll."""
+    if os.name != "nt" or not os.path.isdir(path):
+        return None
+    try:
+        return _DirNotifier(path)
+    except OSError:
+        return None
 
 
 def _watch_writer() -> dict[str, Any]:

@@ -321,6 +321,94 @@ def test_many_edits_in_one_poll_save_the_index_once(env, monkeypatch):
     assert len(saves) == 1, f"index rewritten {len(saves)} times for one poll"
 
 
+class _FakeNotifier:
+    def __init__(self) -> None:
+        import threading
+
+        self.changed = threading.Event()
+
+    def wait(self, timeout_s: float) -> bool:
+        if self.changed.wait(timeout_s):
+            self.changed.clear()
+            return True
+        return False
+
+    def close(self) -> None:
+        pass
+
+
+def _run_loop(watch: HumanWatch):
+    import threading
+
+    thread = threading.Thread(target=watch.loop, args=(0.05,), daemon=True)
+    thread.start()
+    return thread
+
+
+def _until(check, timeout_s: float = 5.0) -> bool:
+    import time
+
+    end = time.monotonic() + timeout_s
+    while time.monotonic() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_idle_loop_does_not_rescan_until_a_change_notice(env, monkeypatch):
+    """Oct 29 2026 profile: the blind 2 s rescan was the app's top idle CPU cost."""
+    import time
+
+    root, journal, _writer, verse = env
+    fake = _FakeNotifier()
+    monkeypatch.setattr(hw, "_notifier_for", lambda _path: fake)
+    scans: list[int] = []
+    watch = HumanWatch()
+    real_scan = watch._scan
+    monkeypatch.setattr(watch, "_scan", lambda island: scans.append(1) or real_scan(island))
+    thread = _run_loop(watch)
+    try:
+        assert _until(lambda: len(scans) >= 1)
+        time.sleep(0.5)  # ten poll intervals with nothing changed
+        assert len(scans) == 1, f"{len(scans)} scans while nothing changed"
+
+        (verse / "a.verse").write_text("edited\n", encoding="utf-8", newline="\n")
+        fake.changed.set()
+        assert _until(lambda: journal.list_runs(project_root=str(root)) != [])
+        assert [e["path"] for r in journal.list_runs(project_root=str(root)) for e in r["entries"]] == [
+            "Content/Verse/a.verse"
+        ]
+    finally:
+        watch._stop.set()
+        thread.join(5)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows change notifications")
+def test_real_change_notice_sees_a_file_edit(env):
+    root, journal, _writer, verse = env
+    watch = HumanWatch()
+    thread = _run_loop(watch)
+    try:
+        assert _until(lambda: watch._notifier is not None)
+        (verse / "a.verse").write_text("edited\n", encoding="utf-8", newline="\n")
+        assert _until(lambda: journal.list_runs(project_root=str(root)) != [])
+    finally:
+        watch._stop.set()
+        thread.join(5)
+    assert watch._notifier is None, "the loop closes its notifier on the way out"
+
+
+def test_no_island_waits_thirty_seconds(monkeypatch):
+    monkeypatch.setattr(hw, "_runtime", lambda: (None, None, ""))
+    watch = HumanWatch()
+    waits: list[float] = []
+    monkeypatch.setattr(watch._stop, "wait", lambda t: waits.append(t) or True)
+    watch.tick()
+    watch._wait(2.0)
+    assert waits == [hw.NO_ISLAND_S] and hw.NO_ISLAND_S == 30.0
+
+
 def test_scan_forgets_files_that_disappear(env):
     """The read cache must not pin deleted files in memory forever."""
     root, _journal, _writer, verse = env
