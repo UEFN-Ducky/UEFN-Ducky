@@ -267,6 +267,9 @@ describe("SetupWizard", () => {
 
     openRow("Anthropic");
     expect(screen.getAllByRole("button", { expanded: true })).toHaveLength(1);
+    // Closed bodies stay mounted so they animate shut, but hidden from screen readers.
+    expect(screen.getByLabelText("Ducky AI: Not connected").closest("li")?.querySelector(".setup-wizard-provider-clip")
+      ?.getAttribute("aria-hidden")).toBe("true");
     const claude = screen.getByRole("list", { name: "Anthropic coding agents" });
     expect(within(claude).getByLabelText("Claude Code: Not logged in")).toBeTruthy();
     expect(within(claude).getByRole("button", { name: "Connect" })).toBeTruthy();
@@ -369,6 +372,12 @@ describe("SetupWizard", () => {
     fake.api.duckyos_login.mockReturnValue(new Promise((r) => (approve = r)));
     fake.api.duckyos_get_status.mockResolvedValue({ logged_in: false, browser_pending: true, user_code: "abcd 1234" });
     wizard({ step: "ai" });
+    // Ducky AI is a row like the providers, open while there is none: optional, and what it unlocks.
+    expect(screen.getByRole("button", { name: /^Ducky AI Optional/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(".setup-wizard-provider-logo img")?.getAttribute("src")).toBe("./OnlineMCPIcon.png");
+    expect(screen.getByText(/^Optional\./)).toBeTruthy();
+    expect(screen.getByText(/Team features: source control/)).toBeTruthy();
+    expect(screen.getByText(/The phone app/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Sign in or sign up" }));
     await waitFor(() => expect(fake.api.duckyos_open_site).toHaveBeenCalledWith("/connect?code=ABCD1234"), { timeout: 3000 });
     expect(screen.getByText("Name this PC in your browser (code abcd 1234).")).toBeTruthy();

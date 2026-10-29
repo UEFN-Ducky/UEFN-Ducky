@@ -38,7 +38,9 @@ it("a waited-on agent with 3/5 steps shows a 60% bar, its detail and minutes; cl
   upsertBackgroundJob({ id: "j", convId: "verify", phase: "working", detail: "Running a script", startedAt: NOW - 11.5 * MIN });
   const onOpen = vi.fn();
   render(<WorkProgressBar rows={one({ done: 3, total: 5 })} onOpen={onOpen} />);
-  expect(screen.getByText("· Running a script · 11 min", { exact: false })).toBeTruthy();
+  expect(screen.getByText("Running a script · 11 min")).toBeTruthy();
+  expect(screen.queryByText("Verify")).toBeNull();
+  expect(screen.getByRole("button").title).toBe("Verify");
   expect(bars()).toHaveLength(1);
   expect(bars()[0].value / bars()[0].max).toBeCloseTo(0.6);
   fireEvent.click(screen.getByRole("button"));
@@ -54,7 +56,7 @@ it("an expected 15 min run 12 min in shows ~3 min left and an 80% run bar", () =
   upsertBackgroundJob({ id: "j", convId: "verify", phase: "working", detail: "Running a script",
     startedAt: NOW - 12 * MIN, expectStartedAt: NOW - 12 * MIN, expectedMs: 15 * MIN });
   render(<WorkProgressBar rows={one()} onOpen={() => {}} />);
-  expect(screen.getByText("· Running a script · 12 min · ~3 min left", { exact: false })).toBeTruthy();
+  expect(screen.getByText("Running a script · 12 min · ~3 min left")).toBeTruthy();
   const run = bars()[1];
   expect(run.value / run.max).toBeCloseTo(0.8);
 });
@@ -71,7 +73,7 @@ it("past the expected time says taking longer and caps the run bar at 95%", () =
     expectStartedAt: NOW - 18 * MIN, expectedMs: 15 * MIN });
   render(<WorkProgressBar rows={one()} onOpen={() => {}} />);
   const text = screen.getByText("taking longer than expected · 18 min", { exact: false });
-  expect(text.className).toBe("work-progress__late");
+  expect(text.className).toContain("work-progress__late");
   const run = bars()[1];
   expect(run.value / run.max).toBeCloseTo(0.95);
 });
@@ -89,9 +91,10 @@ it("ticks every 30 s only while shown and clears the interval on unmount", () =>
   const clear = vi.spyOn(window, "clearInterval");
   upsertBackgroundJob({ id: "j", convId: "a", phase: "working", startedAt: NOW });
   const { unmount } = render(<WorkProgressBar rows={[{ convId: "a", name: "A", progress: null }]} onOpen={() => {}} />);
-  expect(screen.getByText("· <1 min", { exact: false })).toBeTruthy();
+  // Just started: no time yet, never "<1 min".
+  expect(screen.queryByText(/min/)).toBeNull();
   act(() => { vi.advanceTimersByTime(MIN); });
-  expect(screen.getByText("· 1 min", { exact: false })).toBeTruthy();
+  expect(screen.getByText("1 min")).toBeTruthy();
   expect(vi.getTimerCount()).toBeGreaterThan(0);
   unmount();
   expect(clear).toHaveBeenCalled();

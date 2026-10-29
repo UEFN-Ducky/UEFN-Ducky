@@ -17,9 +17,8 @@ import { LiveInvitePrompt } from "./LiveInvitePrompt";
  * in its group), pulsing while it links to someone, a dot for the visible pane's team copy
  * (amber when someone live can't be reached or needs to update, red on an error) and the count
  * of what needs looking at (red with a conflict). The menu has the live groups and people per
- * team; Settings opens the Team modal, as does the activity tray (`OPEN_TEAM_MODAL_EVENT`).
- * Shown while any team copy is live-capable or a plugin pane that can share is on screen, on
- * the phone too (every call it makes is allowed off the PC).
+ * team; Settings (always there) opens the Team modal, as does the activity tray
+ * (`OPEN_TEAM_MODAL_EVENT`). Always shown, on the phone too (every call it makes is allowed off the PC).
  */
 export function TeamLiveDropdown() {
   const overview = useLiveOverview();
@@ -43,7 +42,6 @@ export function TeamLiveDropdown() {
   }, []);
 
   const teams = overview?.teams ?? [];
-  if (!teams.length && !scope) return <LiveInvitePrompt />;
   const live = teams.find((t) => t.on);
   const mine = live?.groups.find((g) => g.mine);
   const others = mine ? mine.members.filter((m) => !m.me) : [];
@@ -116,13 +114,11 @@ export function TeamLiveDropdown() {
         {teams.length ? (
           <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow}
             current={scope?.current} onUse={scope ? use : undefined} />
-        ) : null}
-        {scope ? (
-          <div className="plugin-scope-menu__foot team-live-menu__foot">
-            <span className="plugin-scope-menu__sub team-live-menu__status">{teamTitle}</span>
-            <button type="button" className="plugin-scope-btn plugin-scope-btn--row" onClick={settings}>Settings</button>
-          </div>
-        ) : null}
+        ) : <div className="plugin-scope-menu__empty">No team yet.</div>}
+        <div className="plugin-scope-menu__foot team-live-menu__foot">
+          <span className="plugin-scope-menu__sub team-live-menu__status">{teamTitle}</span>
+          <button type="button" className="plugin-scope-btn plugin-scope-btn--row" onClick={settings}>Settings</button>
+        </div>
       </DropdownPanel>
       <TeamModal open={modal !== null} initial={modal ?? "overview"} onClose={() => setModal(null)} />
     </div>

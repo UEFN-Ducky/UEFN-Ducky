@@ -51,7 +51,7 @@ function runEta(job: BackgroundJob | undefined, now: number): RunEta | null {
   return { elapsed, expected, label: `${job.estimated ? "about " : "~"}${time} left`, late: false };
 }
 
-/** Rows above the composer: who this chat waits on, what they do, for how long, how far along. */
+/** Rows above the composer, one line each: what the waited-on chat does, for how long, how far along (its name is the tooltip). */
 export function WorkProgressBar({ rows, onOpen }: { rows: WorkRow[]; onOpen: (convId: string) => void }) {
   const { jobs } = useBackgroundActivity();
   const [now, setNow] = useState(Date.now);
@@ -70,28 +70,28 @@ export function WorkProgressBar({ rows, onOpen }: { rows: WorkRow[]; onOpen: (co
       {rows.slice(0, MAX_ROWS).map((row) => {
         const job = jobs.find((j) => j.phase === "working" && j.convId === row.convId);
         const startedAt = job?.startedAt || getChatTurnTimer(row.convId)?.startedAt;
-        const minutes = startedAt ? formatMinutes(now - startedAt) : "";
+        // Nothing until a whole minute has passed: "<1 min" on a run that just started says nothing.
+        const minutes = startedAt && now - startedAt >= 60_000 ? formatMinutes(now - startedAt) : "";
         const eta = runEta(job, now);
         const meta = (eta?.late ? [job?.detail, eta.label, minutes] : [job?.detail, minutes, eta?.label])
           .filter(Boolean)
           .join(" · ");
         const p = row.progress;
         return (
-          <button key={row.convId} type="button" className="work-progress__row" onClick={() => onOpen(row.convId)}>
-            <span className="work-progress__text">
-              <strong>{row.name}</strong>
-              {meta ? <span className={eta?.late ? "work-progress__late" : undefined}> · {meta}</span> : null}
-              {p ? <span className="work-progress__count">{p.done}/{p.total}</span> : null}
+          <button key={row.convId} type="button" className="work-progress__row" title={row.name} onClick={() => onOpen(row.convId)}>
+            {meta ? <span className={`work-progress__text${eta?.late ? " work-progress__late" : ""}`}>{meta}</span> : null}
+            <span className="work-progress__bars">
+              {/* No value = the native indeterminate bar. */}
+              <progress className="work-progress__bar" max={p?.total || undefined} value={p ? p.done : undefined} />
+              {eta ? (
+                <progress
+                  className="work-progress__bar work-progress__bar--run"
+                  max={eta.expected}
+                  value={Math.min(eta.elapsed, eta.expected * RUN_BAR_CAP)}
+                />
+              ) : null}
             </span>
-            {/* No value = the native indeterminate bar. */}
-            <progress className="work-progress__bar" max={p?.total || undefined} value={p ? p.done : undefined} />
-            {eta ? (
-              <progress
-                className="work-progress__bar work-progress__bar--run"
-                max={eta.expected}
-                value={Math.min(eta.elapsed, eta.expected * RUN_BAR_CAP)}
-              />
-            ) : null}
+            {p ? <span className="work-progress__count">{p.done}/{p.total}</span> : null}
           </button>
         );
       })}

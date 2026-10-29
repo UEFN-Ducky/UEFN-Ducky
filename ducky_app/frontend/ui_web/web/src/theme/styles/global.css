@@ -683,6 +683,28 @@ body.native-caption-input-ready .app-header .drag-region {
 .icon-btn:hover { background: var(--tab-hover); color: var(--fg); }
 .icon-btn:active { background: var(--tab-active); transform: scale(0.95); }
 .icon-btn.has-badge { position: relative; }
+
+/* Tree multi-select bar (SelectionActionBar). */
+.selection-action-bar {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+  background: var(--panel-header); border-top: 1px solid var(--border);
+}
+.selection-action-bar-count { margin-right: auto; font-size: 12px; color: var(--fg-dim); }
+.selection-action-bar-btn {
+  height: 28px; padding: 0 10px; border-radius: var(--radius-sm);
+  background: var(--bg-elevated); border: 1px solid var(--border-light); color: var(--fg);
+  font: inherit; font-size: 12px; cursor: pointer; transition: all 0.2s ease;
+}
+.selection-action-bar-btn:hover { background: var(--bg-hover); border-color: var(--accent); }
+.selection-action-bar-btn:focus-visible { outline: none; border-color: var(--border-focus); }
+.selection-action-bar-btn.is-danger { color: var(--red); }
+.selection-action-bar-btn.is-danger:hover { background: var(--red-dim); border-color: var(--red); }
+@media (pointer: coarse) {
+  /* Touch targets: at least 40 px tall. */
+  .selection-action-bar-btn, .selection-action-bar-clear { height: 40px; min-width: 40px; }
+}
 .icon-btn-badge {
   position: absolute;
   top: -2px;

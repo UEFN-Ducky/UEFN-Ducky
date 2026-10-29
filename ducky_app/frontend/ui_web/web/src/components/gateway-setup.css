@@ -600,47 +600,39 @@
   animation: setup-wizard-spin 0.9s linear infinite;
 }
 
-/* Ducky AI: sign this PC in */
-.setup-wizard-ducky-ai {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0 0 12px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+/* Ducky AI row: what a Ducky account unlocks */
+.setup-wizard-provider-tag {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
-.setup-wizard-ducky-ai.is-connected {
-  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
-  background: color-mix(in srgb, var(--card) 65%, var(--bg));
-}
-
-.setup-wizard-ducky-ai-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.setup-wizard-ducky-ai-text strong {
-  display: inline-flex;
-  align-items: center;
+.setup-wizard-unlocks {
+  display: grid;
   gap: 6px;
-  color: var(--fg);
-  font-size: 14px;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
 }
 
-.setup-wizard-ducky-ai-text .setup-wizard-muted {
-  color: var(--fg-dim);
+.setup-wizard-unlocks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
   font-size: 12px;
 }
 
-.setup-wizard-ducky-ai-extra {
-  color: var(--muted);
-  font-size: 11px;
+.setup-wizard-unlocks li svg {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-dim);
+}
+
+.setup-wizard-unlocks-cta {
+  justify-self: start;
 }
 
 /* Connect AI: one row per provider, open one at a time (like LLMs' provider cards) */
@@ -670,11 +662,13 @@
   width: 100%;
   padding: 10px 14px;
   border: 0;
+  border-bottom: 1px solid transparent;
   background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
   text-align: left;
+  transition: background 160ms ease, border-color 220ms ease;
 }
 
 .setup-wizard-provider-head:hover {
@@ -683,7 +677,7 @@
 
 .setup-wizard-provider.is-open .setup-wizard-provider-head {
   background: var(--panel-header);
-  border-bottom: 1px solid var(--border);
+  border-bottom-color: var(--border);
 }
 
 .setup-wizard-provider-logo {
@@ -714,17 +708,42 @@
 .setup-wizard-provider-caret {
   display: inline-flex;
   color: var(--fg-dim);
-  transition: transform 160ms ease;
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .setup-wizard-provider.is-open .setup-wizard-provider-caret {
   transform: rotate(180deg);
 }
 
+/* Bodies stay mounted: the height slides 0fr → 1fr, both ways. */
+.setup-wizard-provider-clip {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease;
+}
+
+.setup-wizard-provider.is-open > .setup-wizard-provider-clip {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.setup-wizard-provider-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .setup-wizard-provider-body {
   display: grid;
   gap: 8px;
   padding: 12px 14px 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-wizard-provider-clip,
+  .setup-wizard-provider-caret {
+    transition: none;
+  }
 }
 
 .setup-wizard-pill {

@@ -178,6 +178,7 @@ function Overview({ scope, onSection }: { scope: TeamScope; onSection: (s: TeamS
  * status, Update now / Send / Get / Retry, notes) and, on a team copy, every Source control
  * section (Changes, Incoming, Conflicts, Locks, History, People, Settings). It shows and acts on
  * the visible plugin pane's copy ({@link useTeamScope}); the pane's own callbacks do the work.
+ * With no such pane it still opens on the app-wide timing settings.
  */
 export function TeamModal({ open, onClose, initial = "overview" }: Props) {
   const scope = useTeamScope();
@@ -186,7 +187,16 @@ export function TeamModal({ open, onClose, initial = "overview" }: Props) {
     if (open) setSection(initial);
   }, [open, initial]);
 
-  if (!scope) return null;
+  if (!scope) {
+    return (
+      <Modal open={open} onClose={onClose} title="Team" width={560} className="team-modal" bodyClassName="team-modal-body">
+        <div className="team-modal-pane">
+          <p className="plugin-scope-empty">Open a plugin that shares to see whose data it shows and its changes.</p>
+          <TimingSliders />
+        </div>
+      </Modal>
+    );
+  }
   const { status, shared, actions } = scope;
   const label = shared ? status.scope?.label || "Team" : "Local";
   const tabs = shared ? scopeTabs(status, scope.pluginId) : [];

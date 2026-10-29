@@ -60,11 +60,14 @@ const scope = (extra: Partial<TeamScope> = {}): TeamScope => ({
 } as TeamScope);
 
 describe("Team and Live in the title bar", () => {
-  it("shows nothing with no team copy and no sharing pane", async () => {
+  it("is always there: no team copy and no sharing pane still has Settings, which opens the Team modal", async () => {
     api.live_overview.mockResolvedValue(overview());
-    const { container } = render(<TeamLiveDropdown />);
+    render(<TeamLiveDropdown />);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalled());
-    expect(container.textContent).toBe("");
+    fireEvent.click(trigger());
+    expect(screen.getByText("No team yet.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
   it("shows on the phone too, and its menu works there", async () => {
@@ -123,12 +126,12 @@ describe("Team and Live in the title bar", () => {
 
   it("shows up when a sync push comes after an empty first read", async () => {
     api.live_overview.mockResolvedValue(overview());
-    const { container } = render(<TeamLiveDropdown />);
+    render(<TeamLiveDropdown />);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalledTimes(1));
-    expect(container.textContent).toBe("");
     api.live_overview.mockResolvedValue(overview(team()));
     push.handlers.forEach((fn) => fn({ type: "plugin_scope_changed", plugins: ["kanban"], synced: true }));
-    expect(await waitFor(trigger)).toBeTruthy();
+    fireEvent.click(trigger());
+    expect(await screen.findByRole("menuitem", { name: /^Alpha/ })).toBeTruthy();
   });
 
   it("lists each group with who's in which plugin; Join goes into it with every plugin", async () => {

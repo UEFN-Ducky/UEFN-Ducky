@@ -572,6 +572,24 @@ function AgentRow({
   );
 }
 
+/**
+ * A Connect AI row's body. It stays mounted so its height slides open and shut (0fr → 1fr); closed,
+ * it is inert and hidden from screen readers.
+ */
+function RowBody({ open, children }: { open: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.inert = !open;
+  }, [open]);
+  return (
+    <div ref={ref} className="setup-wizard-provider-clip" aria-hidden={!open}>
+      <div className="setup-wizard-provider-inner">
+        <div className="setup-wizard-provider-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function ProviderRow({
   provider,
   agents,
@@ -645,8 +663,7 @@ function ProviderRow({
           <Icons.ChevronDown />
         </span>
       </button>
-      {open ? (
-        <div className="setup-wizard-provider-body">
+      <RowBody open={open}>
           {agents.length ? (
             <section className="setup-wizard-way" aria-label={`${provider.label}: your plan`}>
               <h4>
@@ -699,8 +716,7 @@ function ProviderRow({
               {state ? <p className={`setup-wizard-key-status${state.ok ? "" : " is-error"}`}>{state.text}</p> : null}
             </section>
           ) : null}
-        </div>
-      ) : null}
+      </RowBody>
     </li>
   );
 }
@@ -713,16 +729,26 @@ export function pairPath(code: string): string {
   return `/connect?code=${encodeURIComponent(code.toUpperCase().replace(/\s+/g, ""))}`;
 }
 
-/** Ducky AI: sign this PC in to a Ducky account (or make one), and Ducky AI is ready to chat. */
-function DuckyAiCard({
+/** The Ducky AI row's id in Connect AI's one-open-at-a-time accordion. */
+const DUCKY_AI_ROW = "ducky-ai";
+
+/**
+ * Ducky AI, the first Connect AI row (same look as the providers): optional; signing this PC in to a
+ * Ducky account (or making one) unlocks Ducky AI, team features and the phone app.
+ */
+function DuckyAiRow({
   account,
   onAccount,
   onChanged,
+  open,
+  onToggle,
   recommended = false,
 }: {
   account: DuckyOSAccountStatus;
   onAccount: (next: DuckyOSAccountStatus) => void;
   onChanged: () => void;
+  open: boolean;
+  onToggle: () => void;
   /** No coding CLI on this PC and no key: Ducky AI is the one way in that needs no install. */
   recommended?: boolean;
 }) {
@@ -767,50 +793,74 @@ function DuckyAiCard({
   const signedIn = !!account.logged_in;
   const code = pairing ? account.user_code || "" : "";
   return (
-    <section className={`setup-wizard-ducky-ai${signedIn ? " is-connected" : ""}`} aria-label="Ducky AI">
-      <span className="setup-wizard-chip is-amber" aria-hidden>
-        <Icons.Duck />
-      </span>
-      <div className="setup-wizard-ducky-ai-text">
-        <strong>
-          Ducky AI{" "}
-          <HelpTip
-            label="About Ducky AI"
-            text="Sign in to your Ducky account, or make one in the browser: all you do there is name this PC. Ducky AI is then ready in your chats with no key. The same account opens the phone app, and every PC you connect can be run from one UEFN Ducky."
-          />
-          {recommended && !signedIn ? <span className="setup-wizard-pill is-amber">Recommended: nothing to install</span> : null}
-        </strong>
-        <span className="setup-wizard-muted">
-          {signedIn
-            ? `Signed in${account.email ? ` as ${account.email}` : ""}. This PC is connected.`
-            : code
-              ? `Name this PC in your browser (code ${code}).`
-              : "Sign in or make an account. This PC connects right away."}
+    <li className={`setup-wizard-provider${signedIn ? " is-connected" : ""}${open ? " is-open" : ""}`}>
+      <button type="button" className="setup-wizard-provider-head" aria-expanded={open} onClick={onToggle}>
+        <span className="setup-wizard-provider-logo" aria-hidden>
+          <img src="./OnlineMCPIcon.png" alt="" draggable={false} />
         </span>
-        <span className="setup-wizard-ducky-ai-extra">Also: the phone app, and your other PCs run from this one.</span>
-        {error ? <span className="setup-wizard-agent-note is-error">{error}</span> : null}
-      </div>
-      {signedIn ? (
-        <span className="setup-wizard-pill is-ok" aria-label="Ducky AI: Connected">
-          <Icons.Check /> Connected
+        <span className="setup-wizard-provider-name">
+          Ducky AI <span className="setup-wizard-provider-tag">Optional</span>
         </span>
-      ) : pairing ? (
-        <span className="setup-wizard-foot-right">
-          {code ? (
-            <button type="button" className="setup-wizard-link" onClick={() => openPage(code)}>
-              Open the page again
+        {recommended && !signedIn ? <span className="setup-wizard-pill">Recommended: nothing to install</span> : null}
+        <span
+          className={`setup-wizard-pill${signedIn ? " is-ok" : ""}`}
+          aria-label={`Ducky AI: ${signedIn ? "Connected" : "Not connected"}`}
+        >
+          {signedIn ? (
+            <>
+              <Icons.Check /> Connected
+            </>
+          ) : (
+            "Not connected"
+          )}
+        </span>
+        <span className="setup-wizard-provider-caret" aria-hidden>
+          <Icons.ChevronDown />
+        </span>
+      </button>
+      <RowBody open={open}>
+        <section className="setup-wizard-way" aria-label="Ducky AI: your Ducky account">
+          <p className="setup-wizard-muted">
+            Optional. Skip it if you use your own plan or API key below. A Ducky account on this PC unlocks:
+          </p>
+          <ul className="setup-wizard-unlocks">
+            <li>
+              <Icons.Duck /> Ducky AI in your chats, with no key and nothing to install
+            </li>
+            <li>
+              <Icons.GitBranch /> Team features: source control, shared plugins and going live together
+            </li>
+            <li>
+              <Icons.Check /> The phone app, and your other PCs run from this one
+            </li>
+          </ul>
+          <p className="setup-wizard-muted">
+            {signedIn
+              ? `Signed in${account.email ? ` as ${account.email}` : ""}. This PC is connected.`
+              : code
+                ? `Name this PC in your browser (code ${code}).`
+                : "Sign in or make an account in your browser. This PC connects right away."}
+          </p>
+          {error ? <span className="setup-wizard-agent-note is-error">{error}</span> : null}
+          {signedIn ? null : pairing ? (
+            <span className="setup-wizard-foot-right">
+              {code ? (
+                <button type="button" className="setup-wizard-link" onClick={() => openPage(code)}>
+                  Open the page again
+                </button>
+              ) : null}
+              <button type="button" className="setup-wizard-btn is-ghost" onClick={() => void getApi()?.duckyos_cancel_login?.()}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button type="button" className="setup-wizard-btn is-primary setup-wizard-unlocks-cta" onClick={() => void signIn()}>
+              Sign in or sign up
             </button>
-          ) : null}
-          <button type="button" className="setup-wizard-btn is-ghost" onClick={() => void getApi()?.duckyos_cancel_login?.()}>
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button type="button" className="setup-wizard-btn is-primary" onClick={() => void signIn()}>
-          Sign in or sign up
-        </button>
-      )}
-    </section>
+          )}
+        </section>
+      </RowBody>
+    </li>
   );
 }
 
@@ -818,19 +868,25 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
   const { providers, keySaved, agentsFor, ideFor, ides, account, setAccount, isConnected, otherAgents, refresh } =
     useConnections();
   const [open, setOpen] = useState<string | null>(null);
-  // Start with the first provider that still needs connecting open.
-  const firstOpen = useRef(false);
-  useEffect(() => {
-    if (firstOpen.current || !providers.length) return;
-    firstOpen.current = true;
-    setOpen((providers.find((p) => !isConnected(p)) || providers[0])!.id);
-  });
   // Day-0 uninstalls said "setup was hard" (Oct 27 2026): most new PCs had no coding CLI at all.
   const cliAgents = providers.flatMap(agentsFor);
   const nothingInstalled =
     cliAgents.length > 0 &&
     cliAgents.every((a) => agentConnection(a) === "missing") &&
     !Object.values(keySaved).some(Boolean);
+  // Start with Ducky AI open while there is no provider (or nothing installed), else the first
+  // provider that still needs connecting.
+  const firstOpen = useRef(false);
+  useEffect(() => {
+    if (firstOpen.current) return;
+    if (!providers.length || (nothingInstalled && !account.logged_in)) {
+      setOpen(DUCKY_AI_ROW);
+      return;
+    }
+    firstOpen.current = true;
+    setOpen((providers.find((p) => !isConnected(p)) || providers[0])!.id);
+  });
+  const toggle = (id: string) => setOpen((cur) => (cur === id ? null : id));
 
   return (
     <>
@@ -842,9 +898,15 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
           text="Ducky AI: sign this PC in to your Ducky account. Your plan: log in to Claude Code, Codex, Gemini CLI or Cursor and use the plan you already pay for; Connect also sets up Ducky's tools in that app. API key: paste a key from the provider's website; what you use is billed by that provider."
         />
       </p>
-      <DuckyAiCard account={account} onAccount={setAccount} onChanged={refresh} recommended={nothingInstalled} />
-      {providers.length || otherAgents.length ? (
-        <ul className="setup-wizard-providers">
+      <ul className="setup-wizard-providers">
+        <DuckyAiRow
+          account={account}
+          onAccount={setAccount}
+          onChanged={refresh}
+          open={open === DUCKY_AI_ROW}
+          onToggle={() => toggle(DUCKY_AI_ROW)}
+          recommended={nothingInstalled}
+        />
           {providers.map((p) => {
             const ide = ideFor(p);
             return (
@@ -857,7 +919,7 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
                 saved={!!keySaved[p.secret_key || p.id]}
                 connected={isConnected(p)}
                 open={open === p.id}
-                onToggle={() => setOpen((cur) => (cur === p.id ? null : p.id))}
+                onToggle={() => toggle(p.id)}
                 onSaved={refresh}
               />
             );
@@ -873,8 +935,8 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
               </div>
             </li>
           ) : null}
-        </ul>
-      ) : (
+      </ul>
+      {providers.length || otherAgents.length ? null : (
         <div className="setup-wizard-empty">
           <p>No AI plugin is installed yet.</p>
           <button type="button" className="setup-wizard-link" onClick={onInstallStep}>

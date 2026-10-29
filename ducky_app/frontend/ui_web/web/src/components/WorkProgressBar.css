@@ -2,13 +2,19 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   margin: 8px 20px 0;
 }
 
+/* One line: text · bar · count. Never wider than the composer. */
 .work-progress__row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 6px 10px;
   border: none;
   border-radius: var(--radius-sm);
@@ -25,17 +31,20 @@
 }
 
 .work-progress__text {
-  display: flex;
-  gap: 0;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 60%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.work-progress__text strong {
-  color: var(--text);
-  font-weight: 600;
+.work-progress__bars {
+  display: flex;
+  flex: 1 1 60px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 40px;
 }
 
 .work-progress__late {
@@ -43,8 +52,8 @@
 }
 
 .work-progress__count {
-  margin-left: auto;
-  padding-left: 8px;
+  flex: none;
+  color: var(--text);
 }
 
 .work-progress__more {
