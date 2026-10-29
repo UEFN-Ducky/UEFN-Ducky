@@ -49,6 +49,8 @@ def ensure_all_stores() -> dict[str, Any]:
         from frontend.ui_web.recent_projects import load_recent_projects
 
         for path in load_recent_projects():
+            if path:
+                lift_content_dot_ducky(str(path))
             if path and _has_dot_ducky(path):
                 rep = phase4.ensure_project(str(path))
                 if rep is not None:
@@ -57,6 +59,46 @@ def ensure_all_stores() -> dict[str, Any]:
         _log.exception("per-project fold at boot failed")
     _prune_empty_legacy_parents()
     return out
+
+
+def lift_content_dot_ducky(project: str) -> int:
+    """Move a stray ``<island>/Content/.ducky`` to ``<island>/.ducky``: UEFN submits all of
+    Content, so Ducky's notes there blocked commits. A name already taken goes under
+    ``.ducky/from-content/``. Returns the number of files moved; never raises."""
+    import os
+    import shutil
+
+    from backend.workspace.paths import island_root
+
+    island = island_root(project)
+    src = os.path.join(island, "Content", ".ducky")
+    if not os.path.isdir(src):
+        return 0
+    dst = os.path.join(island, ".ducky")
+    moved = 0
+    for dirpath, _dirs, files in os.walk(src):
+        for name in files:
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, src)
+            target = os.path.join(dst, rel)
+            if os.path.exists(target):
+                target = os.path.join(dst, "from-content", rel)
+            if os.path.exists(target):
+                continue
+            try:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.move(full, target)
+                moved += 1
+            except OSError:
+                _log.warning("could not move %s out of Content", full)
+    for dirpath, _dirs, _files in os.walk(src, topdown=False):
+        try:
+            os.rmdir(dirpath)  # empty folders only
+        except OSError:
+            pass
+    if moved:
+        _log.info("moved %d files from %s to %s", moved, src, dst)
+    return moved
 
 
 def _has_dot_ducky(path: object) -> bool:

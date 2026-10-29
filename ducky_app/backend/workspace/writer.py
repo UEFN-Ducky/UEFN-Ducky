@@ -34,6 +34,7 @@ from backend.workspace.identity import RunContext
 from backend.workspace.journal import ChangeJournal, NullJournal
 from backend.workspace.paths import (
     content_hash,
+    island_root,
     normalize_rel,
     rel_from_root,
     require_not_digest_path,
@@ -74,6 +75,15 @@ def _require_writable(full: str, root: str) -> None:
         require_writable_folder_path(full, root)
     else:
         require_writable_project_path(full)
+
+
+def _beside_content(rel: str, root: str) -> str:
+    """``.ducky/...`` under a ``…/Content`` root becomes the island's own ``.ducky``: UEFN
+    submits everything inside Content, so Ducky's notes must never land there."""
+    if root and os.path.basename(os.path.realpath(root)).lower() == "content" and \
+            (rel == ".ducky" or rel.startswith(".ducky/")):
+        return os.path.join(island_root(root), rel)
+    return rel
 
 # Same cap the panel uses for opening text; larger files are never read for a
 # restore point (they are not something an agent edits as text anyway).
@@ -518,6 +528,7 @@ class ProjectWriter:
         root = self._active_root(rel)
         if root and os.path.basename(os.path.realpath(root)).lower() == "content" and rel.lower().startswith("content/"):
             rel = rel[8:]
+        rel = _beside_content(rel, root)
         require_not_digest_path(rel)
         full = self._path_resolver(rel)
         require_not_digest_path(full)
@@ -542,6 +553,9 @@ class ProjectWriter:
         """The open project, or the person's other Ducky project that holds ``full``."""
         if active and rel_from_root(full, active):
             return active
+        island = island_root(active) if active else ""
+        if island and island != os.path.realpath(active) and rel_from_root(full, island):
+            return island  # the island's .ducky beside Content
         try:
             others = list(self._other_roots())
         except Exception:  # noqa: BLE001 - no recent-project list: the open project only
@@ -566,6 +580,7 @@ class ProjectWriter:
         from backend.workspace.ai_ignore import require_ai_access
 
         root = self._active_root(rel)
+        rel = _beside_content(rel, root)
         ctx = identity.resolve_context()
         guarded = ctx is not None and ctx.source == identity.SOURCE_AGENT
         if guarded:

@@ -206,3 +206,22 @@ def test_agent_crash_and_verse_stats_rows(backend: str) -> None:
     verse_stats.record_tool_failure("wire_verse_device_ref", "stale")
     summary = verse_stats.summarize(days=30)
     assert summary["by_code"] == {"3512": 2} and summary["tool_failures"] == 1
+
+
+def test_content_dot_ducky_moves_beside_content(tmp_path: Path) -> None:
+    from backend.store.importers.boot import lift_content_dot_ducky
+
+    island = tmp_path / "Island"
+    stray = island / "Content" / ".ducky"
+    (stray / "swarms" / "s1").mkdir(parents=True)
+    (stray / "swarms" / "s1" / "swarm.json").write_text("new", encoding="utf-8")
+    (stray / "notes.md").write_text("clash", encoding="utf-8")
+    (island / ".ducky").mkdir()
+    (island / ".ducky" / "notes.md").write_text("keep", encoding="utf-8")
+
+    assert lift_content_dot_ducky(str(island / "Content")) == 2
+    assert not stray.exists()
+    assert (island / ".ducky" / "swarms" / "s1" / "swarm.json").read_text(encoding="utf-8") == "new"
+    assert (island / ".ducky" / "notes.md").read_text(encoding="utf-8") == "keep"
+    assert (island / ".ducky" / "from-content" / "notes.md").read_text(encoding="utf-8") == "clash"
+    assert lift_content_dot_ducky(str(island)) == 0

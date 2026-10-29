@@ -97,3 +97,22 @@ def test_a_move_between_projects_is_refused(roots) -> None:
             "move", os.path.join(roots[1], "Content", "Verse", "a.verse"),
             source="Content/Verse/a.verse", perform=lambda: {},
         )
+
+
+def test_ducky_notes_land_beside_content_never_inside(tmp_path: Path) -> None:
+    island = os.path.realpath(tmp_path / "Island")
+    content = os.path.join(island, "Content")
+    os.makedirs(content)
+
+    def resolve(rel: str) -> str:
+        full = os.path.realpath(rel if os.path.isabs(rel) else os.path.join(content, rel))
+        if os.path.commonpath([full, island]) != island:
+            raise ValueError("outside")
+        return full
+
+    journal = Journal()
+    writer = ProjectWriter(root_resolver=lambda: content, path_resolver=resolve, journal=journal)
+    writer.write_text(".ducky/swarms/s1/swarm.json", "{}", op="create")
+    assert Path(island, ".ducky", "swarms", "s1", "swarm.json").read_text(encoding="utf-8") == "{}"
+    assert not os.path.exists(os.path.join(content, ".ducky"))
+    assert (journal.records[-1].project_root, journal.records[-1].path) == (island, ".ducky/swarms/s1/swarm.json")

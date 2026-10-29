@@ -177,6 +177,9 @@ def ensure_project(project_root: str) -> dict[str, Any] | None:
     root = (project_root or "").strip()
     if not root:
         return None
+    from backend.store.importers.boot import lift_content_dot_ducky
+
+    lift_content_dot_ducky(root)  # every open, not once: an older Ducky may write there again
     from backend.agent.coding_agents.plans import _normalize_plan_doc
     from backend.store import db
     from frontend.ui_web.project_chats import project_slug
