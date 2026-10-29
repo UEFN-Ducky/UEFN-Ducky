@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { readLiveOverview, useLiveOverview } from "../hooks/useLiveOverview";
-import { getApi, isRemote } from "../hooks/usePanelApi";
+import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
 import { LiveMenu } from "../plugin-ui/LiveMenu";
 import { useLiveFollow, writeLiveFollow } from "../plugin-ui/liveFollow";
@@ -18,7 +18,8 @@ import { LiveInvitePrompt } from "./LiveInvitePrompt";
  * (amber when someone live can't be reached or needs to update, red on an error) and the count
  * of what needs looking at (red with a conflict). The menu has the live groups and people per
  * team; Settings opens the Team modal, as does the activity tray (`OPEN_TEAM_MODAL_EVENT`).
- * Shown while any team copy is live-capable or a plugin pane that can share is on screen.
+ * Shown while any team copy is live-capable or a plugin pane that can share is on screen, on
+ * the phone too (every call it makes is allowed off the PC).
  */
 export function TeamLiveDropdown() {
   const overview = useLiveOverview();
@@ -42,7 +43,6 @@ export function TeamLiveDropdown() {
   }, []);
 
   const teams = overview?.teams ?? [];
-  if (isRemote()) return null;
   if (!teams.length && !scope) return <LiveInvitePrompt />;
   const live = teams.find((t) => t.on);
   const mine = live?.groups.find((g) => g.mine);

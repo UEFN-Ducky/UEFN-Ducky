@@ -60,18 +60,21 @@ const scope = (extra: Partial<TeamScope> = {}): TeamScope => ({
 } as TeamScope);
 
 describe("Team and Live in the title bar", () => {
-  it("shows nothing with no team copy and no sharing pane, and nothing on the phone", async () => {
+  it("shows nothing with no team copy and no sharing pane", async () => {
     api.live_overview.mockResolvedValue(overview());
     const { container } = render(<TeamLiveDropdown />);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalled());
     expect(container.textContent).toBe("");
-    cleanup();
-    _resetLiveOverviewForTests();
+  });
+
+  it("shows on the phone too, and its menu works there", async () => {
     remote.on = true;
-    api.live_overview.mockResolvedValue(overview(team()));
-    const phone = render(<TeamLiveDropdown />);
-    await waitFor(() => expect(api.live_overview).toHaveBeenCalledTimes(2));
-    expect(phone.container.textContent).toBe("");
+    api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] })));
+    api.live_team_join.mockResolvedValue({ ok: true });
+    render(<TeamLiveDropdown />);
+    fireEvent.click(await waitFor(trigger));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Join iliya" }));
+    await waitFor(() => expect(api.live_team_join).toHaveBeenCalledWith("acct", "s1", "h:d1"));
   });
 
   it("is one button: green with the live count, the team dot and a red conflict count", async () => {

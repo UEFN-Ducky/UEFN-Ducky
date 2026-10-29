@@ -485,6 +485,10 @@
   top: -2px;
   right: -4px;
 }
+/* The phone's header is narrow: icon only, green and the dot still say live. */
+.app-header--remote .app-header-team-btn .live-trigger-count {
+  display: none;
+}
 
 /* The status: one phrase that opens the tab explaining it. It shrinks first. */
 .plugin-scope-status {

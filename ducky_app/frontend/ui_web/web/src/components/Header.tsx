@@ -659,7 +659,7 @@ export function Header({
       ) : null}
 
       <div className="app-header-trailing">
-        {streaming ? null : (
+        {streaming ? <TeamLiveDropdown /> : (
         <>
         <span className="app-header-editor-actions">
           {showWorkflow && workflowAction ? (
