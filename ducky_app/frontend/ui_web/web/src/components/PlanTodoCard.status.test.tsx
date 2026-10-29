@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => undefined }));
-import { PlanTodoCard, planStatusLine } from "./PlanTodoCard";
+import { PlanTodoCard, planStatusLine, skipReason } from "./PlanTodoCard";
 import type { ChatPlan, PlanNode } from "../types/panel";
 
 afterEach(cleanup);
@@ -33,7 +33,29 @@ describe("plan status line", () => {
   });
 
   it("done", () => {
-    expect(line(plan([step("a", "completed"), step("b", "cancelled")]))).toBe("Done · 1/1");
+    expect(line(plan([step("a", "completed"), step("b", "cancelled")]))).toBe("Done · 2/2");
+  });
+
+  it("a cancelled step shows ✕ and an ⓘ whose popover holds the reason", () => {
+    const notes = "Did steps 1-3.\n\nCancelled (Oct 28): Release run stopped by the user's request at step 4/13.";
+    const { container } = render(<PlanTodoCard plan={plan([step("a", "completed"), step("b", "cancelled", { body_markdown: notes })])} />);
+    const row = container.querySelector('[data-plan-node-id="b"]')!;
+    expect(row.className).toContain("is-cancelled");
+    expect(row.querySelector(".plan-todo-check path")?.getAttribute("d")).toBe("M9 9l6 6M15 9l-6 6");
+    const why = row.querySelector(".plan-todo-why") as HTMLElement;
+    expect(why.textContent).toContain("ⓘ");
+    fireEvent.mouseOver(why);
+    expect(screen.getByRole("tooltip").textContent).toBe("Release run stopped by the user's request at step 4/13.");
+    fireEvent.click(why);
+    expect(why.className).toContain("is-open");
+    expect(screen.getByText("2 of 2 steps completed")).toBeTruthy();
+    expect(container.querySelector('[data-plan-node-id="a"] .plan-todo-why')).toBeNull();
+  });
+
+  it("reason falls back to the notes' first lines, then a stock line", () => {
+    expect(skipReason("**Skipped:** not needed")).toBe("not needed");
+    expect(skipReason("Out of scope\nsee step 2\nthird\nfourth")).toBe("Out of scope\nsee step 2\nthird");
+    expect(skipReason("")).toBe("Not done: no reason given");
   });
 
   it("renders the line in the card and a waiting row shows its blocker in grey", () => {

@@ -5,6 +5,7 @@ import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { ChatPlanPopup } from "./ChatPlanPopup";
 import { PlanLeadLinks } from "./PlanOwnerChips";
+import { countProgress } from "./PlanTodoCard";
 
 /** Live plan state shared by the chat dock and its finished-plan card. */
 export function useChatPlan(chatId: string) {
@@ -60,7 +61,8 @@ export function usePlanAllDone(chatPlan: ChatPlan | null, chatPlanProgress: Plan
   return useMemo(() => {
     if (!chatPlan) return true;
     if (chatPlanProgress) {
-      return chatPlanProgress.total > 0 && chatPlanProgress.completed >= chatPlanProgress.total;
+      const { done, total } = countProgress(chatPlan, chatPlanProgress);
+      return total > 0 && done >= total;
     }
     const todos = chatPlan.todos || [];
     return todos.length > 0 && todos.every((t) => t.status === "completed" || t.status === "cancelled");

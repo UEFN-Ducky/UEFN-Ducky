@@ -1,9 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { ChatPlan, PlanProgress } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
-import { progressForPlan } from "../utils/planOutlineNav";
 import { requestOpenPlanTab } from "../navigation/openPlanTab";
-import { PlanTodoCard } from "./PlanTodoCard";
+import { PlanTodoCard, countProgress } from "./PlanTodoCard";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 
 interface ChatPlanPopupProps {
@@ -16,11 +15,6 @@ interface ChatPlanPopupProps {
   header?: ReactNode;
   /** Lets the sticky query wrapper raise its z-index without a :has() selector. */
   onOpenChange?: (open: boolean) => void;
-}
-
-function count(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
-  const counts = progress ?? progressForPlan(plan);
-  return { done: counts.completed, total: counts.total };
 }
 
 /** Collapsible plan pill. Active: docked above the composer. Finished: under its turn in history. */
@@ -78,7 +72,7 @@ export const ChatPlanPopup = memo(function ChatPlanPopup({
     };
   }, [present]);
   const [stopping, setStopping] = useState(false);
-  const { done, total } = useMemo(() => count(plan, progress), [plan, progress]);
+  const { done, total } = useMemo(() => countProgress(plan, progress), [plan, progress]);
   const allDone = total > 0 && done >= total;
 
   const handleStop = async (e: MouseEvent) => {

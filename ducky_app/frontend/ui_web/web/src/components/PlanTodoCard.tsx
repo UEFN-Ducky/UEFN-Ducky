@@ -46,9 +46,21 @@ function nodesFromPlan(plan: ChatPlan): PlanNode[] {
   }));
 }
 
-function countProgress(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
-  const counts = progress ?? progressForPlan(plan);
-  return { done: counts.completed, total: counts.total };
+/** Cancelled steps count as finished, like the backend's `_DONE`: 13 completed + 1 cancelled of 14 reads 14/14. */
+export function countProgress(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
+  const c = progress ?? progressForPlan(plan);
+  const done = c.completed + (c.cancelled || 0);
+  // Summed from the parts so it holds whether `total` leaves cancelled steps out or not.
+  return { done, total: done + (c.in_progress || 0) + (c.pending || 0) };
+}
+
+/** Why a cancelled step was left: its notes' `Cancelled…` / `Skipped…` paragraph, else their first lines. */
+export function skipReason(notes?: string): string {
+  const text = (notes || "").trim();
+  const lead = /^\s*(?:\*\*)?(?:Cancelled|Skipped)\b[^:\n]*:\s*(?:\*\*)?\s*/i;
+  const para = text.split(/\n\s*\n/).find((p) => lead.test(p));
+  const why = para ? para.replace(lead, "") : text.split("\n").filter((l) => l.trim()).slice(0, 3).join("\n");
+  return why.trim() || "Not done: no reason given";
 }
 
 const isDone = (status: string) => status === "completed" || status === "cancelled";
@@ -126,6 +138,7 @@ function TodoRow({
   clickable,
   highlighted,
   waitsFor,
+  notes,
   onSelect,
 }: {
   label: string;
@@ -138,16 +151,24 @@ function TodoRow({
   highlighted?: boolean;
   /** Outline labels of the hand-offs this row waits for. */
   waitsFor?: string[];
+  notes?: string;
   onSelect?: () => void;
 }) {
   const done = status === "completed" || status === "cancelled";
+  const cancelled = status === "cancelled";
   const active = status === "in_progress";
-  const className = `plan-todo-row${done ? " is-done" : ""}${active ? " is-active" : ""}${
+  const [whyOpen, setWhyOpen] = useState(false);
+  const className = `plan-todo-row${done ? " is-done" : ""}${cancelled ? " is-cancelled" : ""}${active ? " is-active" : ""}${
     clickable ? " is-clickable" : ""
   }${highlighted ? " is-highlight" : ""}${kind === "subplan" ? " is-subplan" : " is-step"}`;
   const check = (
     <span className="plan-todo-check" aria-hidden>
-      {done ? (
+      {cancelled ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9 9l6 6M15 9l-6 6" />
+        </svg>
+      ) : done ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <circle cx="12" cy="12" r="10" />
           <path d="M8 12l2.5 2.5L16 9" />
@@ -174,6 +195,20 @@ function TodoRow({
       </span>
       {check}
       <span className="plan-todo-text">{content}</span>
+      {cancelled ? (
+        // ponytail: CSS hover/focus popover; tap toggles it on phones. Inside the row's button, so a span, not a button.
+        <span
+          className={`plan-todo-why${whyOpen ? " is-open" : ""}`}
+          tabIndex={0}
+          role="note"
+          aria-label="Why this step was not done"
+          onClick={(e) => { e.stopPropagation(); setWhyOpen((v) => !v); }}
+          onBlur={() => setWhyOpen(false)}
+        >
+          ⓘ
+          <span className="plan-todo-why-pop" role="tooltip">{skipReason(notes)}</span>
+        </span>
+      ) : null}
       {waitsFor?.length ? (
         <span className="plan-todo-waits" style={{ opacity: 0.6, marginLeft: 6 }}>
           waits for {waitsFor.join(", ")}
@@ -273,6 +308,7 @@ export function PlanTodoCard({
               clickable={Boolean(onSelectNode)}
               highlighted={highlightNodeId === node.id}
               waitsFor={waits.get(node.id)}
+              notes={node.body_markdown}
               onSelect={onSelectNode ? () => onSelectNode(node) : undefined}
             />
             {isTemplate ? null : nodeKind(node) === "subplan" ? (

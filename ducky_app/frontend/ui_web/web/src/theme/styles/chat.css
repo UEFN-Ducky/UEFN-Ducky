@@ -7205,6 +7205,56 @@
   opacity: 0.65;
 }
 
+/* Skipped: finished, not failed. Muted ✕, dimmed title, no strike. */
+.plan-todo-row.is-cancelled .plan-todo-text {
+  text-decoration: none;
+  opacity: 0.55;
+}
+
+.plan-todo-row.is-cancelled .plan-todo-check {
+  opacity: 0.55;
+}
+
+.plan-todo-why {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: 4px;
+  opacity: 0.6;
+  cursor: help;
+}
+
+.plan-todo-why-pop {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: 280px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 6px;
+  background: var(--bg-elevated, var(--bg, #1e1e1e));
+  color: var(--fg, inherit);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  text-align: left;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.plan-todo-why:hover,
+.plan-todo-why:focus-visible,
+.plan-todo-why.is-open {
+  opacity: 1;
+}
+
+.plan-todo-why:hover .plan-todo-why-pop,
+.plan-todo-why:focus-visible .plan-todo-why-pop,
+.plan-todo-why.is-open .plan-todo-why-pop {
+  display: block;
+}
+
 .plan-todo-row.is-active {
   color: var(--amber, #d4a017);
 }

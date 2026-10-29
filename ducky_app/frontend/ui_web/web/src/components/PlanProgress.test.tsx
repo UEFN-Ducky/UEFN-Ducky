@@ -16,23 +16,24 @@ const nodes: PlanNode[] = [
 ];
 const plan: ChatPlan = { id: "p", chat_id: "c", title: "Plan", nodes, todos: [] };
 
-describe("non-cancelled plan progress", () => {
+describe("plan progress counts cancelled steps as finished", () => {
   it.each(["nodes", "legacy", "server"])("uses the same header and popup counts for %s", source => {
     const value = source === "legacy" ? { ...plan, nodes: [], todos: [nodes[0]!, nodes[0]!.children![0]!, nodes[1]!].map(({ id, content, status }) => ({ id, content, status })) } : plan;
     const progress = source === "server" ? progressForPlan(value) : undefined;
     render(<><PlanTodoCard plan={value} progress={progress} /><ChatPlanPopup plan={value} progress={progress} /></>);
-    expect(screen.getByText("1 of 2 steps")).toBeTruthy();
-    expect(screen.getByText("1/2")).toBeTruthy();
+    expect(screen.getByText("2 of 3 steps")).toBeTruthy();
+    expect(screen.getByText("2/3")).toBeTruthy();
     expect(screen.getByText("Cancelled")).toBeTruthy();
   });
   it("counts a focused subtree without its cancelled step", () => {
     expect(progressForNodes(nodes[0]!.children)).toEqual({ total: 0, completed: 0, cancelled: 1, in_progress: 0, pending: 0 });
     expect(progressForNodes([]).total).toBe(0);
   });
-  it("marks the header and popup finished when all remaining work is completed", () => {
+  it.each(["local", "server"])("shows full progress when every step is completed or cancelled (%s)", (source) => {
     const finished = { ...plan, nodes: [nodes[0]!] };
-    render(<><PlanTodoCard plan={finished} /><ChatPlanPopup plan={finished} /></>);
-    expect(screen.getByText("1 of 1 steps completed")).toBeTruthy();
+    const progress = source === "server" ? progressForPlan(finished) : undefined;
+    render(<><PlanTodoCard plan={finished} progress={progress} /><ChatPlanPopup plan={finished} progress={progress} /></>);
+    expect(screen.getByText("2 of 2 steps completed")).toBeTruthy();
     expect(screen.getByText("Finished")).toBeTruthy();
   });
   it("indents every nesting level, past the old cap of 6", () => {
