@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
 import { useUiTarget } from "../ui-targets/registry";
 
 import { Icons } from "../icons/Icons";
@@ -69,6 +69,8 @@ export type VoiceControlsProps = {
   isGroup?: boolean;
   /** Composer slides the live panel above the textarea; parent renders VoiceOverlay. */
   onLiveChange?: (live: boolean, handlers: LiveVoiceUiHandlers | null) => void;
+  /** Filled with a function the composer calls before sending: stops dictation and drops its draft. */
+  abortDictationRef?: MutableRefObject<(() => void) | null>;
 };
 
 /** Error / tip bubble with an optional one-click fix. Clears itself (see useVoiceNotice). */
@@ -141,6 +143,7 @@ export function VoiceControls({
   duckySpeed,
   isGroup,
   onLiveChange,
+  abortDictationRef,
 }: VoiceControlsProps) {
   const micTargetRef = useUiTarget("chat.composer.mic", {
     kind: "button",
@@ -236,12 +239,44 @@ export function VoiceControls({
     [writeDraft],
   );
 
+  const dictatingRef = useRef(false);
   const dictation = useDictation({
     disabled: disabled || live,
     onInterim: draftInterim,
     onFinal: draftFinal,
-    onSessionChange: (active) => (active ? beginComposerDraft() : endComposerDraft()),
+    onSessionChange: (active) => {
+      dictatingRef.current = active;
+      if (active) beginComposerDraft();
+      else endComposerDraft();
+    },
   });
+
+  // Send, chat switch or hidden window: stop dictating and drop the draft unwritten,
+  // so late words never land in the cleared box or another chat. Live voice keeps its own draft.
+  const abortDictation = dictation.abort;
+  const dropDictation = useCallback(() => {
+    if (!dictatingRef.current) return;
+    draftRef.current = null;
+    abortDictation();
+  }, [abortDictation]);
+
+  useEffect(() => () => dropDictation(), [chatId, dropDictation]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") dropDictation();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [dropDictation]);
+
+  useEffect(() => {
+    if (!abortDictationRef) return;
+    abortDictationRef.current = dropDictation;
+    return () => {
+      abortDictationRef.current = null;
+    };
+  }, [abortDictationRef, dropDictation]);
 
   // ── Live voice: auto-send a finished turn, or write it into the chat box ──
   const autoSendRef = useRef(autoSend);

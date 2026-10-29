@@ -436,6 +436,11 @@ export function ChatComposer({
     return () => window.clearTimeout(t);
   }, [queuedNote, chat.id]);
   const inputBoxRef = useRef<HTMLDivElement>(null);
+  const abortDictationRef = useRef<(() => void) | null>(null);
+  const send = (text?: string) => {
+    abortDictationRef.current?.();
+    onSend(text);
+  };
   const composerTargetRef = useUiTarget("chat.composer", {
     kind: "chat",
     label: "Chat composer",
@@ -947,7 +952,7 @@ export function ChatComposer({
                 if (e.key === "Enter" && !e.shiftKey) {
                   if (enterInsertsNewline()) return;
                   e.preventDefault();
-                  onSend();
+                  send();
                 }
               }}
               placeholder={composerPlaceholder({
@@ -1050,7 +1055,8 @@ export function ChatComposer({
                 }
                 inputText={inputText}
                 setInputText={setInputText}
-                onSend={(text) => onSend(text)}
+                onSend={send}
+                abortDictationRef={abortDictationRef}
                 onDictationEnd={(text) => {
                   setCaret(text.length);
                   requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
@@ -1068,7 +1074,7 @@ export function ChatComposer({
                   hasContent ? (
                     <button
                       type="button"
-                      onClick={() => onSend()}
+                      onClick={() => send()}
                       disabled={!canQueue}
                       title={sendBtnTitle}
                       className={sendBtnClass}
@@ -1079,7 +1085,7 @@ export function ChatComposer({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => onSend()}
+                    onClick={() => send()}
                     disabled={!showDefaultModelCta && !pickModelFirst && !canSend}
                     title={sendBtnTitle}
                     className={sendBtnClass}
