@@ -2188,12 +2188,15 @@ def _strip_contributions_for(pid: str) -> None:
         ]
 
 
-def _record_plugin_load_error(pid: str, exc: BaseException) -> None:
-    """Persist last register failure so Settings can explain 'Backend not loaded'."""
+def _record_plugin_load_error(pid: str, exc: BaseException | str) -> None:
+    """Persist last register failure so Settings can explain 'Backend not loaded'.
+
+    A plain string is a notice for the person and is recorded as written.
+    """
     from backend.util.privacy import scrub
 
     # Shown in Settings and kept for 30 days, so no folders, emails or keys in it.
-    message = scrub(f"{type(exc).__name__}: {exc}")
+    message = scrub(exc if isinstance(exc, str) else f"{type(exc).__name__}: {exc}")
     _LOAD_FAILURES[pid] = message
     try:
         from backend.store.switch import use_db
@@ -3339,7 +3342,7 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         _LOAD_FAILURES.pop(pid, None)
         pending = _RESTART_PENDING.pop(pid, None)
         if pending:
-            _record_plugin_load_error(pid, RuntimeError(pending))
+            _record_plugin_load_error(pid, pending)
         if folder_epoch is not None:
             _FOLDER_EPOCH[pid] = folder_epoch
             _FOLDER_MOVED.pop(pid, None)

@@ -48,10 +48,10 @@ def test_twenty_chats_one_call_counts_only_and_warm_under_5ms(loads) -> None:
     cold = api.plan_progress(ids, project_root="")
     assert cold["ok"] and list(cold["progress"]) == ids
     assert cold["progress"]["c0"] == {"done": 1, "total": 4, "in_progress": 1, "blocked": 1,
-                                      "updated_at": "2026-10-24T10:00:00Z"}
+                                      "updated_at": "2026-10-24T10:00:00Z", "created_at": 0.0}
     text = json.dumps(cold)
     assert "body_markdown" not in text and "nodes" not in text and "xxxx" not in text
-    assert len(text) < 120 * len(ids)
+    assert len(text) < 140 * len(ids)
     assert len(loads) == 20
 
     started = time.perf_counter()

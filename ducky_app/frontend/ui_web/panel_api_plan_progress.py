@@ -46,6 +46,8 @@ def plan_counts(plan: dict[str, Any] | None) -> dict[str, Any]:
         "in_progress": progress["in_progress"],
         "blocked": blocked,
         "updated_at": str((plan or {}).get("updated_at") or ""),
+        # Epoch seconds: the team bar's time-left estimate starts here.
+        "created_at": float((plan or {}).get("created_at") or 0),
     }
 
 

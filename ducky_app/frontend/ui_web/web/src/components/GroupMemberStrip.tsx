@@ -173,14 +173,30 @@ function writeOpen(groupId: string, open: boolean): void {
 
 type Editor = { key: string; kind: "model" | "lane" | "details" | "stop" };
 
-/** The team bar's step count. */
-type BarProgress = { done: number; total: number; pct: number };
+/** The team bar's step count; startedAt = the oldest plan's created_at (epoch s), 0 when unknown. */
+type BarProgress = { done: number; total: number; pct: number; startedAt: number };
 type PlanProgressApi = {
   plan_progress?: (chat_ids: string[]) => Promise<{
     ok?: boolean;
-    progress?: Record<string, { done?: number; total?: number; error?: string }>;
+    progress?: Record<string, { done?: number; total?: number; created_at?: number; error?: string }>;
   }>;
 };
+
+/**
+ * "~12 min left": time so far per finished step, times the steps left. Empty before the first
+ * step finishes, when done, or without a start time.
+ * ponytail: a flat average; per-step timestamps would weigh slow steps if this proves off.
+ */
+export function etaText(done: number, total: number, startedAt: number, nowMs = Date.now()): string {
+  if (!startedAt || done <= 0 || done >= total) return "";
+  const elapsedS = nowMs / 1000 - startedAt;
+  if (elapsedS <= 0) return "";
+  const leftMin = Math.max(1, Math.round((elapsedS / done) * (total - done) / 60));
+  if (leftMin < 60) return `~${leftMin} min left`;
+  const h = Math.floor(leftMin / 60);
+  const m = leftMin % 60;
+  return m ? `~${h} h ${m} min left` : `~${h} h left`;
+}
 /** Last bar value per group: a remount paints it at once instead of a blank. */
 const barProgressCache = new Map<string, BarProgress>();
 /** Full plans per owner chat for the open roster's rows, dropped by that chat's plan events. */
@@ -301,16 +317,21 @@ export function GroupMemberStrip({
       if (!live || !res?.ok) return;
       let done = 0;
       let total = 0;
+      let startedAt = 0;
       for (const id of ids) {
         const p = res.progress?.[id];
         if (!p || p.error) continue;
         done += p.done || 0;
         total += p.total || 0;
+        const created = Number(p.created_at) || 0;
+        if (created && (!startedAt || created < startedAt)) startedAt = created;
       }
       if (!total) return;
-      const next = { done, total, pct: Math.round((done / total) * 100) };
+      const next = { done, total, pct: Math.round((done / total) * 100), startedAt };
       barProgressCache.set(groupId, next);
-      setBarProgress((prev) => (prev && prev.done === next.done && prev.total === next.total ? prev : next));
+      setBarProgress((prev) =>
+        prev && prev.done === next.done && prev.total === next.total && prev.startedAt === next.startedAt ? prev : next,
+      );
     };
     void read();
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1039,6 +1060,10 @@ export function GroupMemberStrip({
               title={teamProgress ? teamProgress.parts.map(progressText).join("\n") : "Team plan progress"}
             >
               {barProgress.done}/{barProgress.total} steps · {barProgress.pct}%
+              {(() => {
+                const eta = etaText(barProgress.done, barProgress.total, barProgress.startedAt);
+                return eta ? ` · ${eta}` : "";
+              })()}
             </span>
           ) : null}
           {conflictTotal ? (

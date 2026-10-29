@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inviteableChats, laneTitle, shortLaneLabel, shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
+import { etaText, inviteableChats, laneTitle, shortLaneLabel, shortModelLabel, shortWhenToUse } from "./GroupMemberStrip";
 import type { ChatTab, GroupMemberDto } from "../types/panel";
 
 describe("shortWhenToUse", () => {
@@ -14,6 +14,20 @@ describe("shortWhenToUse", () => {
     expect(shortWhenToUse(long, 10)).toBe(
       "Mesh and modeling work — building or importing Static Meshes,…",
     );
+  });
+});
+
+describe("etaText", () => {
+  const start = 1_000_000;
+  it("averages time per finished step over the steps left", () => {
+    // 2 steps in 20 min -> 10 min each, 3 left -> 30 min.
+    expect(etaText(2, 5, start, (start + 20 * 60) * 1000)).toBe("~30 min left");
+    expect(etaText(1, 4, start, (start + 50 * 60) * 1000)).toBe("~2 h 30 min left");
+  });
+  it("is empty with no finished step, all done, or no start", () => {
+    expect(etaText(0, 5, start, (start + 60) * 1000)).toBe("");
+    expect(etaText(5, 5, start, (start + 60) * 1000)).toBe("");
+    expect(etaText(2, 5, 0)).toBe("");
   });
 });
 
