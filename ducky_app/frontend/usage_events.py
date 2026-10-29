@@ -73,6 +73,7 @@ EVENTS: dict[str, dict[str, Any]] = {
         "outcome": ("ok", "error", "stopped", "stuck", "timeout", "limit", "login", "interrupted", "other"),
         "duration": ("bucket", DURATION_S, "duration_s"),
         "tool_calls": ("bucket", TOOL_CALLS, "tool_calls_n"),
+        "kind": ERROR_KINDS,  # failed turns only
     },
     "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s")},
     "skill.used": {"skill": ("slug",)},

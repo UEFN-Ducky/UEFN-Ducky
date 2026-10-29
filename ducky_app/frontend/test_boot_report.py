@@ -257,8 +257,17 @@ def test_a_crash_outside_python_threads_says_so() -> None:
 
 def test_only_the_last_dump_of_a_launch_is_reported() -> None:
     text = boot_report.trim_native(_dump(current_at=1, threads=2) + "\n" + _dump(current_at=0, threads=2))
-    assert "1 earlier exception in this launch not shown" in text
     assert text.count("Windows fatal exception") == 1 and "Current thread 0x00000000" in text
+
+
+def test_earlier_dumps_keep_their_fault_and_crashing_frames_in_short() -> None:
+    earlier = _dump(current_at=1, threads=2).replace("access violation", "code 0x8001010d")
+    text = boot_report.trim_native(earlier + "\n" + _dump(current_at=None, threads=40) + "\n" + _dump(current_at=0, threads=2))
+    first = text.splitlines()[0]
+    assert first.startswith("Earlier in this launch (2): code 0x8001010d; ")
+    assert 'worker_1.py", line 0 in step_0' in first and 'line 2 in step_2' in first and "step_3" not in first
+    assert " | access violation" in first  # the middle dump had no Python thread: its fault alone
+    assert len(first) <= 600 and text.count("Windows fatal exception") == 1
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native crash path is Windows")

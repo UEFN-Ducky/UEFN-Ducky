@@ -426,6 +426,20 @@ describe("aiResults (Connect AI at Finish)", () => {
     ]);
   });
 
+  it("recommends Ducky AI when no coding CLI is installed, and not once one is", async () => {
+    const missing = (a: (typeof AGENTS)[number]) => ({ ...a, available: false, logged_in: null, status: "CLI not found" });
+    fake.providers = [OPENAI, ANTHROPIC];
+    fake.api.list_coding_agents.mockResolvedValue({ agents: [missing(AGENTS[0]!), missing(AGENTS[1]!)] });
+    wizard({ step: "ai" });
+    expect(await screen.findByText("Recommended: nothing to install")).toBeTruthy();
+    cleanup();
+
+    fake.api.list_coding_agents.mockResolvedValue({ agents: [AGENTS[0], missing(AGENTS[1]!)] });
+    wizard({ step: "ai" });
+    await waitFor(() => expect(screen.getByLabelText("OpenAI: Connected")).toBeTruthy());
+    expect(screen.queryByText("Recommended: nothing to install")).toBeNull();
+  });
+
   it("reports Ducky AI as not connected when the PC isn't signed in", () => {
     expect(aiResults([], {}, () => [], false)).toEqual([{ provider: "ducky_ai", state: "none" }]);
   });

@@ -83,6 +83,22 @@ def test_a_stub_turn_streams_its_events_and_ends(piped, monkeypatch):
     assert piped.released == ["c1"] and turns.live_turns() == {}
 
 
+def test_a_host_turns_tool_calls_count_in_the_app(piped, monkeypatch):
+    from frontend import usage_stats
+
+    def stub(conv, text, *, model, push, run_id, cancel, mode):
+        push({"type": "tool", "tool": {"id": "t1", "name": "Read"}})
+        push({"type": "tool", "tool": {"id": "t2", "name": "Edit"}})
+        push({"type": "agent_stopped", "reason": "done"})
+
+    _stub_runner(monkeypatch, stub)
+    counted = []
+    monkeypatch.setattr(usage_stats, "turn_tool", counted.append)
+    out = turns.run_in_host("c7", "r7", "hi", model="m", mode="agent", push=lambda e: None,
+                            cancel=threading.Event())
+    assert out == "" and counted == ["r7", "r7"]
+
+
 def test_stop_reaches_the_host_and_ends_the_turn(piped, monkeypatch):
     started = threading.Event()
 

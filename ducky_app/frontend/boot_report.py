@@ -197,6 +197,26 @@ _CRASHED_STACK_MAX = 2000  # the crashing thread: its top frames come first
 _OTHER_STACK_MAX = 1200
 
 
+_EARLIER_MAX = 600
+_CRASHED_TOP = re.compile(r"(?m)^Current thread [^\n]*\n((?:[ \t]+File[^\n]*(?:\n|$)){1,3})")
+
+
+def _earlier_faults(text: str, starts: list[int]) -> str:
+    """One short line per earlier dump of the launch: its fault and the top of the thread that
+    crashed. Reports said only "(2 earlier exceptions in this launch not shown)" (fbr4t8v2n6x1c,
+    Oct 2026), though the first one may name what started the crash."""
+    lines = []
+    for a, b in zip(starts[:-1], starts[1:]):
+        dump = text[a:b].strip()
+        first = dump.splitlines()[0]
+        head = _FAULT_HEAD.sub("", first).lstrip(" :") or first
+        top = _CRASHED_TOP.search(dump)
+        frames = [f.strip() for f in top.group(1).splitlines() if f.strip()] if top else []
+        lines.append("; ".join([head, *frames]))
+    out = f"Earlier in this launch ({len(lines)}): " + " | ".join(lines)
+    return out if len(out) <= _EARLIER_MAX else out[: _EARLIER_MAX - 1] + "…"
+
+
 def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
     """The last crash dump in the native log, cut to about *limit* without losing what matters.
 
@@ -207,10 +227,11 @@ def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
     """
     text = (native or "").strip()
     starts = [m.start() for m in _FAULT_HEAD.finditer(text)]
-    earlier = max(0, len(starts) - 1)
+    # The earlier dumps' fault lines lose their "Windows fatal exception" head, so the last dump
+    # stays the only one a reader (or why_summary) takes for the crash.
+    note = _earlier_faults(text, starts) if len(starts) > 1 else ""
     if starts:
         text = text[starts[-1]:]
-    note = f"({earlier} earlier exception{'s' if earlier != 1 else ''} in this launch not shown)" if earlier else ""
     if starts and "\nCurrent thread " not in text:
         # faulthandler marks the crashing thread "Current thread" when it runs Python.
         note = (note + "\n" if note else "") + "(The crash was in a thread that runs no Python code: native code such as WebView2, .NET or a DLL.)"

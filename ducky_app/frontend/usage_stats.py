@@ -483,6 +483,24 @@ def app_closing() -> None:
         pass
 
 
+def _uefn_window_open() -> bool | None:
+    """Whether a UEFN window is open now; None when the windows can't be read."""
+    try:
+        from backend.tools.core.uefn_modal import _enum_uefn_windows
+
+        return bool(_enum_uefn_windows())
+    except Exception:
+        return None
+
+
+def _lost_reason(mode: str) -> str:
+    """Why an online link went away. All of them said "lost" (31 of 71 on Oct 27 2026), so
+    closing UEFN read the same as the editor hanging."""
+    if mode == "wedged":
+        return "timeout"
+    return "not_running" if _uefn_window_open() is False else "lost"
+
+
 def uefn_mode(mode: str) -> None:
     """The shell's connection mode changed (online / offline / wedged)."""
     global _last_uefn_mode
@@ -492,7 +510,7 @@ def uefn_mode(mode: str) -> None:
         if mode == "online" and prev != "online":
             track("uefn.connect", ok=True)
         elif prev == "online" and mode != "online":
-            track("uefn.connect", ok=False, reason="lost")
+            track("uefn.connect", ok=False, reason=_lost_reason(mode))
     except Exception:
         pass
 
@@ -544,6 +562,9 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
         if meta is None:
             return
         outcome = _turn_outcome(reason, detail)
+        # Why a turn failed, as one ERROR_KINDS word (Oct 27 2026: Codex 0 -> 13 errors, 7 within
+        # 10 s, and nothing said why). The detail itself never leaves.
+        why = {"kind": ev.kind_of(detail)} if outcome == "error" else {}
         track(
             "chat.turn",
             provider=meta["provider"],
@@ -551,6 +572,7 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
             outcome=outcome,
             duration_s=time.monotonic() - float(meta["started"]),
             tool_calls_n=int(meta["tools"]),
+            **why,
         )
     except Exception:
         pass

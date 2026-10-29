@@ -174,6 +174,18 @@ def test_turn_outcome_tells_limits_logins_and_closed_apps_from_errors() -> None:
     assert outcomes == [want for _, _, want in cases]
 
 
+def test_a_failed_turn_says_what_kind_of_failure_and_nothing_else() -> None:
+    cases = [("error", "codex exited with code 1", "crash"), ("error", "Error: not logged in", "auth"),
+             ("error", "spawn C:/Users/x/codex.exe: file not found", "not_found"), ("done", "", None)]
+    for i, (reason, detail, _) in enumerate(cases):
+        us.run_begin(f"k{i}", f"ck{i}", coding_agent="codex", provider="openai", model="gpt-6-luna")
+        us.run_end(f"k{i}", reason, detail)
+    rows, _ = us._take(100)
+    turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
+    assert [t.get("kind") for t in turns] == [want for _, _, want in cases]
+    assert not any("Users" in str(t) or "codex.exe" in str(t) for t in turns)
+
+
 def test_overloaded_credit_and_rate_limit_stops_are_limits() -> None:
     assert us._turn_outcome("error", "Error code: 529 overloaded_error") == "limit"
     assert us._turn_outcome("error", "Your credit balance is too low") == "limit"
@@ -210,7 +222,17 @@ def test_ui_track_accepts_only_ui_events_and_uefn_transitions_count_once() -> No
     us.uefn_mode("wedged")
     rows, _ = us._take(100)
     connects = [r["props"] for r in rows if r["name"] == "uefn.connect"]
-    assert connects == [{"ok": "yes"}, {"ok": "no", "reason": "lost"}]
+    assert connects == [{"ok": "yes"}, {"ok": "no", "reason": "timeout"}]
+
+
+@pytest.mark.parametrize(("window", "reason"), [(False, "not_running"), (True, "lost"), (None, "lost")])
+def test_a_dropped_uefn_link_says_whether_uefn_was_closed(monkeypatch, window, reason) -> None:
+    monkeypatch.setattr(us, "_uefn_window_open", lambda: window)
+    us.uefn_mode("online")
+    us.uefn_mode("offline")
+    rows, _ = us._take(100)
+    connects = [r["props"] for r in rows if r["name"] == "uefn.connect"]
+    assert connects[-1] == {"ok": "no", "reason": reason}
 
 
 def test_debug_state_has_no_event_content() -> None:

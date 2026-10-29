@@ -167,6 +167,15 @@ def on_app_frame(host: Any, frame: dict[str, Any]) -> None:
                 from frontend.ui_web import steer
 
                 steer.delivered(turn.conv_id, str(event.get("steer_id") or ""))
+            if turn is not None and event.get("type") == "tool":
+                # The turn's chat.turn row lives in this process; runner._ingest's count runs in
+                # the host, which has no such row (Oct 27 2026: 258 of 261 turns said 0 tools).
+                try:
+                    from frontend import usage_stats
+
+                    usage_stats.turn_tool(turn.run_id)
+                except Exception:  # noqa: BLE001
+                    pass
             if turn is not None:
                 # ponytail: runs on the host's reader thread; a slow push delays that host's
                 # other chats. Hand off to a queue if that ever shows in the meters.

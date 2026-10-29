@@ -718,10 +718,13 @@ function DuckyAiCard({
   account,
   onAccount,
   onChanged,
+  recommended = false,
 }: {
   account: DuckyOSAccountStatus;
   onAccount: (next: DuckyOSAccountStatus) => void;
   onChanged: () => void;
+  /** No coding CLI on this PC and no key: Ducky AI is the one way in that needs no install. */
+  recommended?: boolean;
 }) {
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState("");
@@ -775,6 +778,7 @@ function DuckyAiCard({
             label="About Ducky AI"
             text="Sign in to your Ducky account, or make one in the browser: all you do there is name this PC. Ducky AI is then ready in your chats with no key. The same account opens the phone app, and every PC you connect can be run from one UEFN Ducky."
           />
+          {recommended && !signedIn ? <span className="setup-wizard-pill is-amber">Recommended: nothing to install</span> : null}
         </strong>
         <span className="setup-wizard-muted">
           {signedIn
@@ -821,6 +825,12 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
     firstOpen.current = true;
     setOpen((providers.find((p) => !isConnected(p)) || providers[0])!.id);
   });
+  // Day-0 uninstalls said "setup was hard" (Oct 27 2026): most new PCs had no coding CLI at all.
+  const cliAgents = providers.flatMap(agentsFor);
+  const nothingInstalled =
+    cliAgents.length > 0 &&
+    cliAgents.every((a) => agentConnection(a) === "missing") &&
+    !Object.values(keySaved).some(Boolean);
 
   return (
     <>
@@ -832,7 +842,7 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
           text="Ducky AI: sign this PC in to your Ducky account. Your plan: log in to Claude Code, Codex, Gemini CLI or Cursor and use the plan you already pay for; Connect also sets up Ducky's tools in that app. API key: paste a key from the provider's website; what you use is billed by that provider."
         />
       </p>
-      <DuckyAiCard account={account} onAccount={setAccount} onChanged={refresh} />
+      <DuckyAiCard account={account} onAccount={setAccount} onChanged={refresh} recommended={nothingInstalled} />
       {providers.length || otherAgents.length ? (
         <ul className="setup-wizard-providers">
           {providers.map((p) => {

@@ -744,6 +744,11 @@
   color: var(--green);
 }
 
+.setup-wizard-pill.is-amber {
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  color: var(--amber);
+}
+
 /* A provider's ways in: your plan first, an API key second */
 .setup-wizard-way {
   display: grid;
