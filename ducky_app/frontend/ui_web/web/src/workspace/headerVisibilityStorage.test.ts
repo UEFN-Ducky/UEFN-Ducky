@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_HIDDEN,
   discordHeaderButtonId,
   headerButtonCatalog,
   isHeaderButtonVisible,
@@ -41,15 +42,26 @@ describe("header visibility", () => {
   });
 
   it("does not re-migrate after hidden is saved", () => {
-    mem.set("uefn-header-visibility", JSON.stringify({ hidden: [] }));
-    expect(normalizeHeaderVisibility({ hidden: [] }).hidden).toEqual([]);
+    mem.set("uefn-header-visibility", JSON.stringify({ hidden: [], applied: DEFAULT_HIDDEN }));
+    expect(normalizeHeaderVisibility({ hidden: [], applied: DEFAULT_HIDDEN }).hidden).toEqual([]);
     expect(readHeaderVisibility().hidden).toEqual([]);
   });
 
+  it("hides Context, Changes and Snip by default, once: turned back on, they stay on", () => {
+    expect(readHeaderVisibility().hidden).toEqual(expect.arrayContaining(DEFAULT_HIDDEN));
+    // An existing install's saved snapshot gets them once.
+    const migrated = normalizeHeaderVisibility({ hidden: ["search"] });
+    expect(migrated).toEqual({ hidden: ["search", ...DEFAULT_HIDDEN], applied: DEFAULT_HIDDEN });
+    const contextOn = withHeaderButtonVisible(migrated, "composer:context", true);
+    expect(isHeaderButtonVisible(normalizeHeaderVisibility(contextOn), "composer:context")).toBe(true);
+    expect(isHeaderButtonVisible(contextOn, "composer:snip")).toBe(false);
+  });
+
   it("toggles a builtin without dropping plugin hides", () => {
-    const start = { hidden: [discordHeaderButtonId()] };
+    const start = { hidden: [discordHeaderButtonId()], applied: DEFAULT_HIDDEN };
     const hiddenSearch = withHeaderButtonVisible(start, "search", false);
     expect(hiddenSearch.hidden).toEqual([discordHeaderButtonId(), "search"]);
+    expect(hiddenSearch.applied).toEqual(DEFAULT_HIDDEN);
     expect(withHeaderButtonVisible(hiddenSearch, "search", true).hidden).toEqual([
       discordHeaderButtonId(),
     ]);

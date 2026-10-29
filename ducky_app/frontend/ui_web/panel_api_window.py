@@ -537,8 +537,13 @@ class PanelApiWindowMixin:
         from frontend.ui_web.workspace_dock import save_header
 
         data = _pa._coerce_mapping(payload, label="header visibility")
-        hidden = data.get("hidden")
-        save_header({"hidden": [str(x) for x in hidden if str(x).strip()] if isinstance(hidden, list) else []})
+
+        def ids(key: str) -> list[str]:
+            raw = data.get(key)
+            return [str(x) for x in raw if str(x).strip()] if isinstance(raw, list) else []
+
+        # applied: default-hidden buttons already hidden once, so turning one back on sticks.
+        save_header({"hidden": ids("hidden"), "applied": ids("applied")})
 
     def restore_focus_windows(self, groups: list | None = None) -> None:
         from frontend.ui_web import focus_windows

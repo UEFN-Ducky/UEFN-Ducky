@@ -3386,8 +3386,8 @@ export interface PanelApi {
     window_id?: string;
     snapshot: Record<string, unknown>;
   }): Promise<void>;
-  get_header_visibility?(): Promise<{ hidden?: string[] }>;
-  save_header_visibility?(payload: { hidden: string[] }): Promise<void>;
+  get_header_visibility?(): Promise<{ hidden?: string[]; applied?: string[] }>;
+  save_header_visibility?(payload: { hidden: string[]; applied?: string[] }): Promise<void>;
   restore_focus_windows(groups?: FocusWindowSnapshot[]): Promise<void>;
   report_editor_state(relative_path: string, state: Record<string, unknown>): Promise<void>;
   /** `wid` = this window's registry id; without it the host closes the ACTIVE window. */

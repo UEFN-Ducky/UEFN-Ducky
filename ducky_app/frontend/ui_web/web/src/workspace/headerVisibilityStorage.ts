@@ -34,7 +34,12 @@ export const BUILTIN_HEADER_BUTTONS: HeaderCatalogEntry[] = [
 
 export type HeaderVisibilitySnapshot = {
   hidden: string[];
+  /** Default-hidden ids already applied once: turned back on, they stay on. */
+  applied?: string[];
 };
+
+/** Hidden until turned on (the composer's right-click menu): Context, Changes (the ledger) and Snip. */
+export const DEFAULT_HIDDEN = ["composer:context", "composer:changes", "composer:snip"];
 
 export function pluginHeaderButtonId(pluginId: string, buttonId: string): string {
   return `plugin:${(pluginId || buttonId).trim().toLowerCase()}:${buttonId}`;
@@ -72,14 +77,28 @@ function readDiscordShowInHeader(): boolean {
 }
 
 function defaultSnapshot(): HeaderVisibilitySnapshot {
-  return { hidden: readDiscordShowInHeader() ? [] : [discordHeaderButtonId()] };
+  return {
+    hidden: [...(readDiscordShowInHeader() ? [] : [discordHeaderButtonId()]), ...DEFAULT_HIDDEN],
+    applied: [...DEFAULT_HIDDEN],
+  };
+}
+
+/** A saved snapshot gets each default it hasn't had yet, once (so a later default reaches existing installs). */
+function withDefaults(snapshot: HeaderVisibilitySnapshot): HeaderVisibilitySnapshot {
+  const applied = snapshot.applied ?? [];
+  const fresh = DEFAULT_HIDDEN.filter((id) => !applied.includes(id));
+  if (!fresh.length) return snapshot;
+  return {
+    hidden: [...snapshot.hidden, ...fresh.filter((id) => !snapshot.hidden.includes(id))],
+    applied: [...applied, ...fresh],
+  };
 }
 
 export function normalizeHeaderVisibility(raw: unknown): HeaderVisibilitySnapshot {
   if (!raw || typeof raw !== "object") return defaultSnapshot();
-  const data = raw as { hidden?: unknown };
+  const data = raw as { hidden?: unknown; applied?: unknown };
   if (!("hidden" in data)) return defaultSnapshot();
-  return { hidden: uniqueIds(data.hidden) };
+  return withDefaults({ hidden: uniqueIds(data.hidden), applied: uniqueIds(data.applied) });
 }
 
 export function persistHeaderVisibility(snapshot: HeaderVisibilitySnapshot): void {
@@ -88,7 +107,7 @@ export function persistHeaderVisibility(snapshot: HeaderVisibilitySnapshot): voi
     window.dispatchEvent(new CustomEvent(HEADER_VISIBILITY_EVENT));
   }
   try {
-    void getApi()?.save_header_visibility?.({ hidden: snapshot.hidden });
+    void getApi()?.save_header_visibility?.({ hidden: snapshot.hidden, applied: snapshot.applied ?? [] });
   } catch {
     /* bridge not ready */
   }
@@ -132,7 +151,7 @@ export function withHeaderButtonVisible(
 ): HeaderVisibilitySnapshot {
   const hidden = snapshot.hidden.filter((item) => item !== id);
   if (!visible) hidden.push(id);
-  return { hidden };
+  return { ...snapshot, hidden };
 }
 
 export function headerButtonCatalog(

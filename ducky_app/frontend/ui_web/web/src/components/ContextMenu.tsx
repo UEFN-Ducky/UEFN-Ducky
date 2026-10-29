@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
@@ -58,15 +58,25 @@ export function ContextMenu({ x, y, items, onClose, tourTarget, keepFocus }: Con
     };
   }, [onClose]);
 
+  // The real size once drawn (switch rows are taller than the guess); the guess places the first frame.
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect?.height) return;
+    setSize((cur) => (cur && cur.w === rect.width && cur.h === rect.height ? cur : { w: rect.width, h: rect.height }));
+  });
+
   const panelW = 220;
   const rowCount = items.filter((item) => !item.separator).length;
   // A long list scrolls inside the window instead of running off it.
   const maxHeight = Math.max(120, window.innerHeight - 16);
-  const height = Math.min(rowCount * 32 + 8, maxHeight);
+  const width = size?.w || panelW;
+  const height = Math.min(size?.h || rowCount * 32 + 8, maxHeight);
   let left = x;
   let top = y;
-  if (left + panelW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - panelW - 8);
-  if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+  if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+  // No room below the pointer: open upward from it, like a native menu; else slide it in.
+  if (top + height > window.innerHeight - 8) top = y - height >= 8 ? y - height : Math.max(8, window.innerHeight - height - 8);
   const withIcons = items.some((item) => item.icon);
 
   return createPortal(
