@@ -98,7 +98,7 @@ def test_always_allow_runs_that_command_again_without_a_card_in_that_chat_only(m
 
     # Another chat, or another command, still asks.
     other = mgr.run_agent_command("s1", "npm test", conv_id="c2", approval_timeout_s=1, command_timeout_s=5)
-    assert other == {"ok": False, "error": "command not approved (timed out)"}
+    assert other == {"ok": False, "error": "command not approved (timed out)", "fail": "timeout"}
     different = mgr.run_agent_command("s1", "npm run build", conv_id="c1", approval_timeout_s=1, command_timeout_s=5)
     assert different["ok"] is False
 

@@ -12,6 +12,16 @@ from backend.mcp_plugins import store
 
 
 @pytest.fixture(autouse=True)
+def _no_nested_sync(monkeypatch):
+    """Server edits start a real nested-MCP sync thread (it spawns the server's command).
+    It outlived the test, opened the next test's ducky.db and held its WAL open, so
+    test_db's corrupt-restore tests failed with WinError 32."""
+    from backend.mcp_plugins import bridge_proxy
+
+    monkeypatch.setattr(bridge_proxy, "schedule_sync_nested_proxies", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_row_store():
     """Each test owns its own server map in ducky.db."""
     from backend.store.importers import phase1
