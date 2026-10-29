@@ -779,8 +779,12 @@ def _refused(result: dict[str, Any]) -> bool:
     return False
 
 
-def _usage_tool_done(name: str, ok: bool, t0: float, ident: Any, arguments: dict[str, Any] | None) -> None:
-    """One anonymous tool.call count for an outside agent's call; never raises."""
+def _usage_tool_done(
+    name: str, ok: bool, t0: float, ident: Any, arguments: dict[str, Any] | None,
+    result: dict[str, Any] | None = None, fail: str = "",
+) -> None:
+    """One anonymous tool.call count for an outside agent's call; never raises.
+    result: the call's answer, for why it failed (its JSON "fail" word, else refused)."""
     try:
         from backend.agent.toolsets import effective_tool_name
         from frontend import usage_stats
@@ -788,9 +792,13 @@ def _usage_tool_done(name: str, ok: bool, t0: float, ident: Any, arguments: dict
         # ducky_call_tool counts as the tool it ran (as for Ducky's own agent), so a failure
         # names the tool that failed.
         args = arguments if isinstance(arguments, dict) else {}
+        if not ok and not fail and result is not None:
+            texts = [str(b.get("text") or "") for b in result.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
+            fail = usage_stats.fail_of(texts[0] if texts else "") or ("refused" if _refused(result) else "")
         usage_stats.tool_done(
             effective_tool_name(name, args), ok=ok, duration_ms=(time.monotonic() - t0) * 1000.0,
             conv_id=str(getattr(ident, "conv_id", "") or ""), args=arguments if isinstance(arguments, dict) else None,
+            fail=fail,
         )
     except Exception:
         pass
@@ -849,10 +857,10 @@ async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any)
         try:
             raw = await _watched(work, name, thread, ident, waits)
         except _CallTimedOut as exc:
-            _usage_tool_done(name, False, t0, ident, arguments)
+            _usage_tool_done(name, False, t0, ident, arguments, fail="timeout")
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
         result = _call_result(raw)
-        _usage_tool_done(name, not bool(result.get("isError")) and not _refused(result), t0, ident, arguments)
+        _usage_tool_done(name, not bool(result.get("isError")) and not _refused(result), t0, ident, arguments, result)
         return result
     finally:
         hammer_guard.reset_conversation(hammer)

@@ -40,6 +40,8 @@ META_FIRST_MESSAGE = "usage.first_message_done"
 META_PERF_AT = "usage.perf_sampled_at"
 # "1" while the app runs; still "1" at the next start means the last run never reached app_closing.
 META_RUNNING = "usage.running"
+# {"stage", "uptime_s"} of this run, rewritten every heartbeat: an unclean exit says when it died.
+META_LAST_SEEN = "usage.last_seen"
 
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
@@ -384,6 +386,7 @@ def _loop() -> None:
             if now - last_beat >= HEARTBEAT_S:
                 last_beat = now
                 track("app.heartbeat", uefn_up=_last_uefn_mode == "online")
+                _note_alive()
                 _maybe_perf_sample()
             due = now - last_flush >= FLUSH_EVERY_S or queued() >= FLUSH_AT_ROWS
             if due and enabled():
@@ -419,6 +422,38 @@ def _os_label() -> str:
         return "other"
 
 
+def _note_alive() -> None:
+    """Save this run's last boot stage and uptime; the next start reads them if it never closed."""
+    try:
+        from frontend import boot_report
+
+        # ponytail: reads boot_report's in-memory record; a public getter if this grows.
+        state = boot_report._state
+        stages = state.get("stages") or []
+        stage = str(stages[-1][0]) if stages else ""
+        started = float(state.get("started") or 0.0)
+    except Exception:
+        stage, started = "", 0.0
+    uptime = time.time() - started if started else (time.monotonic() - _opened_at if _opened_at else 0.0)
+    _meta_set(META_LAST_SEEN, json.dumps({"stage": stage, "uptime_s": round(max(0.0, uptime))}))
+
+
+def _last_seen() -> dict[str, Any]:
+    """The previous run's stage (one of ev.BOOT_STAGES) and uptime_s, as far as it got."""
+    try:
+        seen = json.loads(_meta_get(META_LAST_SEEN) or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(seen, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if seen.get("stage"):
+        out["stage"] = seen["stage"] if seen["stage"] in ev.BOOT_STAGES else "other"
+    if "uptime_s" in seen:
+        out["uptime_s"] = seen["uptime_s"]
+    return out
+
+
 def app_opened(boot_total_ms: float | None = None) -> None:
     """The panel is up: app.open, an update if the version changed, then the thread."""
     global _opened_at, _boot_total_ms
@@ -432,7 +467,9 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         _opened_at = time.monotonic()
         _boot_total_ms = boot_total_ms
         unclean = _meta_get(META_RUNNING) == "1"
+        seen = _last_seen() if unclean else {}
         _meta_set(META_RUNNING, "1")
+        _note_alive()
         if not enabled():
             _mirror(False)
             return
@@ -442,7 +479,7 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         _mirror(True)
         last = _meta_get(META_LAST_VERSION) or ""
         if unclean:
-            track("error.code", code="app_unclean_exit", where="ui", kind="crash", version=last)
+            track("error.code", code="app_unclean_exit", where="ui", kind="crash", version=last, **seen)
         if last and last != __version__:
             track("update.installed", **{"from": last, "to": __version__})
         if last != __version__:
@@ -591,7 +628,22 @@ def turn_tool(run_id: str) -> None:
         pass
 
 
-def tool_done(name: str, *, ok: bool, duration_ms: float, conv_id: str = "", args: dict[str, Any] | None = None) -> None:
+def fail_of(text: str) -> str:
+    """The "fail" word of a tool's JSON answer ({"ok": false, "fail": "exit_nonzero", …}), else ""."""
+    s = (text or "").lstrip()
+    if not s.startswith("{") or '"fail"' not in s:
+        return ""
+    try:
+        data = json.loads(s)
+    except ValueError:
+        return ""
+    return str(data.get("fail") or "") if isinstance(data, dict) else ""
+
+
+def tool_done(
+    name: str, *, ok: bool, duration_ms: float, conv_id: str = "", args: dict[str, Any] | None = None, fail: str = "",
+) -> None:
+    """fail: why a failed call failed (ev.TOOL_FAILS); a failed call without one is "error"."""
     try:
         if not enabled():
             return
@@ -600,7 +652,10 @@ def tool_done(name: str, *, ok: bool, duration_ms: float, conv_id: str = "", arg
             meta = _run_meta.get(rid or "")
             if meta is not None:
                 meta["tools"] = int(meta["tools"]) + 1
-        track("tool.call", tool=name, ok=ok, duration_s=float(duration_ms) / 1000.0)
+        if ok:
+            track("tool.call", tool=name, ok=ok, duration_s=float(duration_ms) / 1000.0)
+        else:
+            track("tool.call", tool=name, ok=ok, duration_s=float(duration_ms) / 1000.0, fail=fail or "error")
         if name in ("skill_read_subskill", "uefn_skill", "skill_search") and isinstance(args, dict):
             pack = args.get("pack_id") or args.get("pack") or args.get("skill") or args.get("name")
             if pack:

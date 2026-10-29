@@ -45,7 +45,7 @@ def test_allow_everything_runs_without_the_popup(monkeypatch) -> None:
 def test_without_it_the_popup_asks(monkeypatch) -> None:
     mgr, session, events = _manager(monkeypatch)
     out = mgr.run_agent_command("s1", "npm test", conv_id="c1", approval_timeout_s=1)
-    assert out == {"ok": False, "error": "command not approved (timed out)"}
+    assert out == {"ok": False, "fail": "timeout", "error": "command not approved (timed out)"}
     # The timed-out question closes its pop-up in every window.
     assert [e["type"] for e in events] == ["terminal_command_pending", "terminal_command_decided"]
     assert events[1]["request_id"] == events[0]["request_id"] and session.ran == []

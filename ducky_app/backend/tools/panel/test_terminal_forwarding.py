@@ -92,7 +92,7 @@ def test_popup_allow_and_deny_return_result(forwarded, approve):
         assert result["exit_code"] == 0 and result["output_tail"] == "done"
         forwarded.session.run_command.assert_called_once()
     else:
-        assert result["error"] == "refused"
+        assert result["error"] == "refused" and result["fail"] == "not_approved"
         forwarded.session.run_command.assert_not_called()
     assert forwarded.calls[-1][2] == 450.0
 
@@ -119,6 +119,33 @@ def test_allow_everything_runs_a_push_in_an_ai_plugin(forwarded, monkeypatch):
     result = json.loads(tools.ducky_terminal_run("s1", "git -C C:/x/uefn-plugin-anthropic push"))
     assert result["ok"] and result["exit_code"] == 0
     assert [c[0] for c in forwarded.calls] == ["terminal_request_command"]
+
+
+@pytest.mark.parametrize("setup,fail,error", [
+    (lambda s: setattr(s.run_command, "return_value", {"ok": True, "exit_code": 1, "output_tail": ""}),
+     "exit_nonzero", "Command failed (exit code 1)."),
+    (lambda s: setattr(s.is_busy, "return_value", True), "busy", "session busy"),
+    (lambda s: setattr(s.run_command, "return_value", {"ok": False, "error": "command timed out"}),
+     "timeout", "command timed out"),
+    (lambda s: setattr(s.run_command, "return_value", {"ok": False, "error": "pty gone"}), "error", "pty gone"),
+])
+def test_a_failed_run_says_what_kind_of_failure(forwarded, monkeypatch, setup, fail, error):
+    # Oct 29 2026: a third of terminal runs counted as failed; a non-zero exit looked like a crash.
+    monkeypatch.setattr(permissions, "allows_everything", lambda chat: True)
+    setup(forwarded.session)
+    result = json.loads(tools.ducky_terminal_run("s1", "npm test"))
+    assert result["ok"] is False and result["fail"] == fail and result["error"] == error
+
+
+def test_a_run_in_a_closed_terminal_is_not_found(forwarded, monkeypatch):
+    monkeypatch.setattr(permissions, "allows_everything", lambda chat: True)
+    result = json.loads(tools.ducky_terminal_run("gone", "npm test"))
+    assert result["ok"] is False and result.get("fail") == "not_found"
+
+
+def test_an_unanswered_card_is_a_timeout(forwarded):
+    result = forwarded.mgr.run_agent_command("s1", "npm test", conv_id="c1", approval_timeout_s=1)
+    assert result == {"ok": False, "fail": "timeout", "error": "command not approved (timed out)"}
 
 
 def test_an_agent_reads_plain_terminal_text(forwarded):

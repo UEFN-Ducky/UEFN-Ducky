@@ -25,6 +25,8 @@ from frontend.ui_web.terminal.session import (
 from frontend.ui_web.terminal.shells import shell_label
 
 _APPROVAL_TIMEOUT_S = 120.0
+# session.run_command's errors -> run_agent_command's "fail" kind (anything else: "error").
+_RUN_FAILS = {"command timed out": "timeout", "session busy": "busy"}
 # Terminals one chat may keep open. Each holds a shell, a conhost and a socket bridge,
 # and an agent that opens one per turn in different folders piled them up all day.
 _MAX_CHAT_SHELLS = 6
@@ -480,13 +482,14 @@ class TerminalManager:
     ) -> dict[str, Any]:
         cmd = (command or "").strip()
         if not cmd:
-            return {"ok": False, "error": "command must not be empty"}
+            return {"ok": False, "fail": "error", "error": "command must not be empty"}
         session = self.get_session(session_id)
         if not session:
-            return {"ok": False, "error": "session not found"}
+            return {"ok": False, "fail": "not_found", "error": "session not found"}
         if session.is_busy() and not background:
             return {
                 "ok": False,
+                "fail": "busy",
                 "error": "session busy",
                 "hint": "Wait for the current command or open another terminal with ducky_terminal_open.",
             }
@@ -579,7 +582,7 @@ class TerminalManager:
         with self._lock:
             pending = self._pending.get(request_id) or self._decided.pop(request_id, None)
         if pending is None:
-            return {"ok": False, "error": "request not found"}
+            return {"ok": False, "fail": "not_found", "error": "request not found"}
         outcome = _wait_or_steer(pending.decided, max(1.0, float(timeout_s)), steer)
         if outcome == "steer":
             with self._lock:
@@ -591,9 +594,9 @@ class TerminalManager:
             pending.decided.wait(5.0)  # answered just now: carry on as if waited
         elif outcome == "timeout":
             self.reject_command(request_id, reason="command not approved (timed out)")
-            return {"ok": False, "error": "command not approved (timed out)"}
+            return {"ok": False, "fail": "timeout", "error": "command not approved (timed out)"}
         if not pending.approved:
-            return {"ok": False, "error": pending.rejection_reason or "command rejected by user"}
+            return {"ok": False, "fail": "not_approved", "error": pending.rejection_reason or "command rejected by user"}
         with self._lock:
             self._pending.pop(request_id, None)
         return {"ok": True, "approved": True}
@@ -658,7 +661,7 @@ class TerminalManager:
             return approval
         session = self.get_session(session_id)
         if session is None:
-            return {"ok": False, "error": "session not found"}
+            return {"ok": False, "fail": "not_found", "error": "session not found"}
         if not runs_here:
             return {
                 "ok": True,
@@ -710,11 +713,13 @@ class TerminalManager:
             "output_tail": str(tail),
         }
         if not out["ok"]:
-            return {**out, "error": str(ran.get("error") or "command failed"), **({"hint": ran["hint"]} if ran.get("hint") else {})}
+            error = str(ran.get("error") or "command failed")
+            fail = _RUN_FAILS.get(error, "error")
+            return {**out, "fail": fail, "error": error, **({"hint": ran["hint"]} if ran.get("hint") else {})}
         code = ran.get("exit_code")
         out["exit_code"] = code
         if code not in (None, 0):
-            return {**out, "ok": False, "error": f"Command failed (exit code {code})."}
+            return {**out, "ok": False, "fail": "exit_nonzero", "error": f"Command failed (exit code {code})."}
         return out
 
     def _run_command(self, session: TerminalSession, command: str, *, timeout_s: float, conv_id: str = "") -> dict[str, Any]:

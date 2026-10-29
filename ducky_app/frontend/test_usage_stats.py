@@ -368,7 +368,11 @@ def test_an_uncaught_thread_exception_is_one_error_code(monkeypatch, tmp_path) -
 
 
 def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) -> None:
-    from frontend import __version__, error_log
+    import time
+
+    from frontend import __version__, boot_report, error_log
+
+    monkeypatch.setattr(boot_report, "_state", {"started": time.time() - 20, "stages": [["launch", 0.0], ["window_shown", 1.2]]})
 
     meta: dict[str, str] = {us.META_LAST_VERSION: "1.2.400"}
     monkeypatch.setattr(us, "_meta_get", meta.get)
@@ -387,7 +391,18 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     us.app_opened()
     assert unclean() == []
     us.app_opened()
-    assert unclean() == [{"code": "app_unclean_exit", "where": "ui", "kind": "crash", "version": __version__}]
+    assert unclean() == [{"code": "app_unclean_exit", "where": "ui", "kind": "crash", "version": __version__,
+                          "stage": "window_shown", "uptime": "1m"}]
+    # The dead run's heartbeat said where it got and how long it ran: a long run, not a start-up crash.
+    meta[us.META_LAST_SEEN] = '{"stage": "page_started", "uptime_s": 5000}'
+    us.app_opened()
+    row = unclean()[-1]
+    assert row["stage"] == "page_started" and row["uptime"] == "2h"
+    # A stage this list doesn't know is "other", never its name.
+    meta[us.META_LAST_SEEN] = '{"stage": "C:/Users/x", "uptime_s": 40000}'
+    us.app_opened()
+    row = unclean()[-1]
+    assert row["stage"] == "other" and row["uptime"] == "more"
 
 
 def test_outside_agents_refusals_fail_and_ducky_call_tool_counts_as_its_tool(monkeypatch) -> None:
@@ -404,3 +419,31 @@ def test_outside_agents_refusals_fail_and_ducky_call_tool_counts_as_its_tool(mon
     monkeypatch.setattr(us, "tool_done", lambda name, *, ok, **_: seen.append((name, ok)))
     shared_mcp._usage_tool_done("ducky_call_tool", False, 0.0, None, {"name": "set_actor_label", "arguments": {}})
     assert seen == [("set_actor_label", False)]
+
+
+def test_a_failed_tool_call_says_why(monkeypatch) -> None:
+    # Oct 29 2026: a third of ducky_terminal_run calls counted as failed; most were a test's exit 1.
+    from backend.bridge import shared_mcp
+
+    assert ev.validate("tool.call", {"tool": "ducky_terminal_run", "ok": False, "fail": "exit_nonzero"})["fail"] == "exit_nonzero"
+    assert "fail" not in ev.validate("tool.call", {"tool": "x", "ok": False, "fail": "Command failed (exit 1)"})
+    seen: list[str] = []
+    monkeypatch.setattr(us, "tool_done", lambda name, *, ok, fail="", **_: seen.append(fail))
+
+    def call(text: str) -> None:
+        result = {"content": [{"type": "text", "text": text}], "isError": False}
+        shared_mcp._usage_tool_done("ducky_terminal_run", False, 0.0, None, {}, result)
+
+    call('{"ok": false, "fail": "exit_nonzero", "exit_code": 1, "error": "Command failed (exit code 1)."}')
+    call('{"ok": false, "error": "cannot complete a Verify leaf"}')
+    call("ERROR: pack_id is required")
+    call("Traceback (most recent call last)")
+    assert seen == ["exit_nonzero", "refused", "refused", ""]
+    monkeypatch.undo()
+    us.tool_done("ducky_terminal_run", ok=False, duration_ms=4000, fail="exit_nonzero")
+    us.tool_done("spawn_actor", ok=False, duration_ms=10)
+    us.tool_done("spawn_actor", ok=True, duration_ms=10, fail="busy")
+    rows, _ = us._take(100)
+    calls = [r["props"] for r in rows if r["name"] == "tool.call"]
+    assert [c.get("fail") for c in calls[-3:]] == ["exit_nonzero", "error", None]
+    assert calls[-3] == {"tool": "ducky_terminal_run", "ok": "no", "duration": "10s", "fail": "exit_nonzero"}

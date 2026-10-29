@@ -21,6 +21,8 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 DURATION_S: Buckets = ((10, "10s"), (60, "1m"), (300, "5m"), (1200, "20m"), (None, "more"))
 TOOL_S: Buckets = ((1, "1s"), (10, "10s"), (60, "1m"), (None, "more"))
+# How long a run lasted before it died (app_unclean_exit): a start-up crash is "1m".
+DIED_AFTER_S: Buckets = ((60, "1m"), (300, "5m"), (1800, "30m"), (7200, "2h"), (28800, "8h"), (None, "more"))
 UPTIME_S: Buckets = ((300, "5m"), (1800, "30m"), (7200, "2h"), (28800, "8h"), (None, "more"))
 STUCK_S: Buckets = ((60, "60s"), (300, "5m"), (1200, "20m"), (None, "more"))
 TOOL_CALLS: Buckets = ((0, "0"), (5, "1-5"), (20, "6-20"), (None, "more"))
@@ -41,6 +43,12 @@ WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
 # What kind of failure an error was, read from its message on the PC (the message never leaves).
 ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "bad_request",
                "server_error", "memory", "permission", "not_found", "crash", "other")
+# boot_report stages (webview_app._boot_trace names); a run's last one is sent with app_unclean_exit.
+BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_import_patches",
+               "import_panel_api", "panel_api_init", "http_server", "create_window",
+               "ready_for_webview_start", "window_shown", "page_started", "other")
+# Why a tool call failed: run_agent_command's "fail" word, refused = answered {"ok": false} / "ERROR".
+TOOL_FAILS = ("exit_nonzero", "busy", "not_approved", "timeout", "not_found", "refused", "error")
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
@@ -75,14 +83,17 @@ EVENTS: dict[str, dict[str, Any]] = {
         "tool_calls": ("bucket", TOOL_CALLS, "tool_calls_n"),
         "kind": ERROR_KINDS,  # failed turns only
     },
-    "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s")},
+    "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s"),
+                  "fail": TOOL_FAILS},  # failed calls only
     "skill.used": {"skill": ("slug",)},
     "workflow.run": {"outcome": ("ok", "error", "stopped"), "nodes": ("bucket", NODES, "nodes_n")},
     "plugin.install": {"plugin_id": ("slug",)},
     "plugin.remove": {"plugin_id": ("slug",)},
     "feature.open": {"tab": TABS},
     # at: the Ducky function an uncaught exception came from (backend.bridge.revive._run).
-    "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",)},
+    # stage, uptime: app_unclean_exit only (the dead run's last boot stage and how long it ran).
+    "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",),
+                   "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s")},
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s")},
     "ui.crash": {"code": ("slug",)},
     "perf.sample": {

@@ -1008,9 +1008,11 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
         # 2026: 604 "failed" project_memory_get were one looping agent). ducky_call_tool counts
         # as the tool it ran, so a failure names the tool that failed.
         if str(raw_result.get("hint") or "") not in ("repeat-call guard", "asked already"):
+            ok = status in ("", "success", "ok")
+            fail = "" if ok else str(raw_result.get("fail") or "") or usage_stats.fail_of(_tool_result_text(raw_result))
             usage_stats.tool_done(
-                effective_tool_name(str(rec.name or "tool"), args), ok=status in ("", "success", "ok"),
-                duration_ms=float(ms), conv_id=conv_id, args=args,
+                effective_tool_name(str(rec.name or "tool"), args), ok=ok,
+                duration_ms=float(ms), conv_id=conv_id, args=args, fail=fail,
             )
     except Exception:
         pass
