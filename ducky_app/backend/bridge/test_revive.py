@@ -12,8 +12,14 @@ def epic(monkeypatch):
     calls: list[str] = []
     state = {"online": True, "python": "false"}
 
-    def call(tool_name: str) -> str:
+    def call(tool_name: str, toolset: str = "", arguments=None) -> str:
         calls.append(tool_name)
+        if tool_name == "execute_tool_script":
+            if state.get("script_refused"):
+                raise RuntimeError("import refused")
+            state["script"] = (arguments or {}).get("script", "")
+            state["started"] = state.get("boots", False)
+            return "started"
         return '{"result":"{\\"returnValue\\":%s}"}' % state["python"]
 
     monkeypatch.setattr(revive, "_call_epic_tool", call)
@@ -21,7 +27,8 @@ def epic(monkeypatch):
     monkeypatch.setattr(revive, "_port_held_by_uefn", lambda port: state.get("held", False))
     monkeypatch.setattr("backend.mcp_plugins.epic.probe_epic_mcp", lambda **_: {"epic_mcp_online": state["online"]})
     monkeypatch.setattr("backend.mcp_plugins.epic.invalidate_epic_mcp_probe", lambda: None)
-    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: None)
+    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: {"status": "ok"} if state.get("started") else None)
+    monkeypatch.setattr(revive, "_BOOT_WAIT_SEC", 0)
     return calls, state
 
 
@@ -47,7 +54,25 @@ def test_python_on_does_not_enable_again(epic) -> None:
     state["python"] = "true"
     out = revive.revive_listener(4200)
     assert out["action"] == "python_already_on" and not out["ok"]
-    assert calls == ["IsPythonEnabledInUEFN"]
+    assert calls == ["IsPythonEnabledInUEFN", "execute_tool_script"]
+
+
+def test_python_on_starts_the_listener_in_the_open_editor(epic) -> None:
+    calls, state = epic
+    state["python"] = "true"
+    state["boots"] = True
+    out = revive.revive_listener(4200)
+    assert out["action"] == "listener_started" and out["ok"]
+    assert calls == ["IsPythonEnabledInUEFN", "execute_tool_script"]
+    assert "from listener.bootstrap import run as boot" in state["script"] and "UEFN-Ducky" in state["script"]
+
+
+def test_a_refused_boot_script_still_says_python_is_on(epic) -> None:
+    _calls, state = epic
+    state["python"] = "true"
+    state["script_refused"] = True
+    out = revive.revive_listener(4200)
+    assert out["action"] == "python_already_on" and not out["ok"]
 
 
 def test_python_on_with_dead_socket_says_restart(epic) -> None:

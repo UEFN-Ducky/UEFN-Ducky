@@ -65,6 +65,24 @@ namespace DuckySetup
         // An engine or uninstaller exit code as an error code ("ok" for 0).
         public static string ExitCode(int code) => code == 0 ? "ok" : code > 0 ? "exit_" + code : "exit_neg";
 
+        // Why the engine failed, from the end of its Inno Setup log ("" when it doesn't say).
+        // exit_4 alone ("a fatal error during installation", 1 of 5 installs on Oct 28 2026)
+        // could not tell a locked file from no permission or a full disk.
+        public static string FailReason(string? log)
+        {
+            var t = (log ?? "").ToLowerInvariant();
+            if (t.Contains("being used by another process") || t.Contains("code 32.") || t.Contains("restartmanager found an application"))
+                return "file_in_use";
+            if (t.Contains("not enough space") || t.Contains("code 112."))
+                return "disk_full";
+            if (t.Contains("access is denied") || t.Contains("code 5."))
+                return "access_denied";
+            return "";
+        }
+
+        // exit_4 plus its reason when the log names one: exit_4.file_in_use.
+        public static string FailCode(int code, string reason) => ExitCode(code) + (code != 0 && reason.Length > 0 ? "." + reason : "");
+
         public static string Outcome(bool ok, bool cancelled) => ok ? "ok" : cancelled ? "cancel" : "fail";
 
         public static string Reason(string? reason)

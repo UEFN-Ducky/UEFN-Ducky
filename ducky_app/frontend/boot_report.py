@@ -198,7 +198,12 @@ _OTHER_STACK_MAX = 1200
 
 
 _EARLIER_MAX = 600
-_CRASHED_TOP = re.compile(r"(?m)^Current thread [^\n]*\n((?:[ \t]+File[^\n]*(?:\n|$)){1,3})")
+# faulthandler heads the crashing thread "Current thread 0x…" in an all-threads dump and
+# "Stack (most recent call first):" when it dumps that thread alone (all_threads=False).
+_CRASHED_HEADS = ("Current thread ", "Stack (most recent call first):")
+_CRASHED_TOP = re.compile(
+    r"(?m)^(?:Current thread [^\n]*|Stack \(most recent call first\):)\n((?:[ \t]+File[^\n]*(?:\n|$)){1,3})"
+)
 
 
 def _earlier_faults(text: str, starts: list[int]) -> str:
@@ -232,8 +237,8 @@ def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
     note = _earlier_faults(text, starts) if len(starts) > 1 else ""
     if starts:
         text = text[starts[-1]:]
-    if starts and "\nCurrent thread " not in text:
-        # faulthandler marks the crashing thread "Current thread" when it runs Python.
+    if starts and not any("\n" + head in text for head in _CRASHED_HEADS):
+        # faulthandler names the crashing thread's stack only when that thread runs Python.
         note = (note + "\n" if note else "") + "(The crash was in a thread that runs no Python code: native code such as WebView2, .NET or a DLL.)"
     if len(text) + len(note) <= limit:
         return "\n\n".join(p for p in (note, text) if p)
@@ -242,7 +247,7 @@ def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
     def cap(block: str, size: int) -> str:
         return block if len(block) <= size else block[:size].rsplit("\n", 1)[0] + "\n  …"
 
-    crashed = {i for i, b in enumerate(blocks) if b.startswith("Current thread")}
+    crashed = {i for i, b in enumerate(blocks) if b.startswith(_CRASHED_HEADS)}
     kept: dict[int, str] = {0: cap(blocks[0], 400)}
     for i in crashed:
         kept[i] = cap(blocks[i], _CRASHED_STACK_MAX)
@@ -682,7 +687,11 @@ def begin(version: str) -> None:
         import faulthandler
 
         _native_file = open(_native_path(), "w", encoding="utf-8")  # noqa: SIM115 — must stay open for the crash handler
-        faulthandler.enable(file=_native_file, all_threads=True)
+        # Only the crashing thread: on Windows faulthandler also fires on first-chance exceptions
+        # COM and .NET handle themselves (0x8001010d), and walking the other threads' frames while
+        # they run crashed the app itself (dump_frame / PyCode_Addr2Line, Oct 28 2026). The app's
+        # own minidump still has every native stack.
+        faulthandler.enable(file=_native_file, all_threads=False)
     except Exception:
         _native_file = None
 
@@ -771,6 +780,14 @@ def _own_private_bytes() -> int:
 BEATS_KEPT = 10  # the launch's first beat plus the last ~4.5 minutes
 
 
+_beat_listeners: list[Callable[[dict[str, Any]], None]] = []
+
+
+def on_heartbeat(fn: Callable[[dict[str, Any]], None]) -> None:
+    """Call *fn* with every heartbeat's memory sample (on the heartbeat thread)."""
+    _beat_listeners.append(fn)
+
+
 def heartbeat(agents: Callable[[], int] | None = None) -> None:
     """Write one memory heartbeat into boot.json (the next launch's best clue when a
     crash leaves no dump), and keep the last few so the report can show a trend."""
@@ -783,6 +800,11 @@ def heartbeat(agents: Callable[[], int] | None = None) -> None:
     # The launch's first beat stays, so the trend covers the whole run, not just the last minutes.
     _state["beats"] = [*beats[:1], *beats[1:][-(BEATS_KEPT - 2):], {k: beat[k] for k in keep if k in beat}]
     _write_state()
+    for fn in list(_beat_listeners):
+        try:
+            fn(beat)
+        except Exception:
+            pass
 
 
 def _trend_line(beats: list[dict[str, Any]]) -> str:

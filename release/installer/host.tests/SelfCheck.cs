@@ -232,6 +232,10 @@ namespace DuckySetup.Tests
             Check(Stats.TookBucket(30) == "1m" && Stats.TookBucket(200) == "5m" && Stats.TookBucket(900) == "20m" && Stats.TookBucket(5000) == "more", "install time buckets");
             Check(Stats.ExitCode(0) == "ok" && Stats.ExitCode(5) == "exit_5" && Stats.ExitCode(-2) == "exit_neg", "exit codes");
             Check(Stats.Outcome(true, true) == "ok" && Stats.Outcome(false, true) == "cancel" && Stats.Outcome(false, false) == "fail", "outcomes");
+            Check(Stats.FailReason("2026-10-28 DeleteFile failed; code 32.\r\nThe process cannot access the file because it is being used by another process.") == "file_in_use", "locked file");
+            Check(Stats.FailReason("CopyFile failed; code 5.\nAccess is denied.") == "access_denied", "no permission");
+            Check(Stats.FailReason("There is not enough space on the disk.") == "disk_full" && Stats.FailReason("") == "" && Stats.FailReason(null) == "", "full disk and nothing said");
+            Check(Stats.FailCode(4, "file_in_use") == "exit_4.file_in_use" && Stats.FailCode(4, "") == "exit_4" && Stats.FailCode(0, "file_in_use") == "ok", "fail codes");
             Check(Stats.Reason("bugs") == "bugs" && Stats.Reason("  slow ") == "slow" && Stats.Reason("hacked") == "none" && Stats.Reason(null) == "none", "reasons");
             Check(Stats.Screen("done") == "done" && Stats.Screen("<b>") == "welcome", "screens");
             Check(Stats.Os(22631) == "win11" && Stats.Os(19045) == "win10", "Windows version");

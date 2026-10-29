@@ -104,6 +104,49 @@ def test_async_attachment_reads_latest_visibility(window, monkeypatch):
     assert window.native.Controls[0].CoreWebView2.MemoryUsageTargetLevel == Level.Low
 
 
+def test_trim_only_when_hidden_idle_big_and_not_too_soon():
+    big = {"webview_gb": 2.5, "agents": 0}
+    t = memory.TRIM_EVERY_S + 1
+    assert memory.should_trim(big, active=False, now=t, last_at=0.0)
+    assert not memory.should_trim(big, active=True, now=t, last_at=0.0)  # the person is looking
+    assert not memory.should_trim({**big, "agents": 1}, active=False, now=t, last_at=0.0)  # a turn runs
+    assert not memory.should_trim({**big, "webview_gb": 1.2}, active=False, now=t, last_at=0.0)
+    assert not memory.should_trim(big, active=False, now=t, last_at=t - 60)  # trimmed a minute ago
+    assert not memory.should_trim({"webview_gb": "?"}, active=False, now=t, last_at=0.0)
+
+
+def test_a_bloated_hidden_window_reloads_once_and_keeps_its_chats(window, monkeypatch):
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    queued, reloaded, marked, activity = [], [], [], []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: marked.append(1))
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: activity.append(src))
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    window.native.Visible = False
+    beat = {"webview_gb": 2.4, "agents": 0}
+    assert memory.trim_if_bloated(window, beat)
+    assert not memory.trim_if_bloated(window, beat)  # the 30-minute gap holds
+    queued.pop()()
+    assert reloaded == [1] and marked == [1] and activity == ["webview"]
+
+
+def test_a_window_shown_before_the_queued_trim_is_left_alone(window, monkeypatch):
+    queued, reloaded = [], []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    window.native.Visible = False
+    assert memory.trim_if_bloated(window, {"webview_gb": 3.0, "agents": 0})
+    window.native.Visible = True
+    queued.pop()()
+    assert reloaded == []
+
+
 def test_closed_window_ignores_queued_attachment(window, monkeypatch):
     queued = []
     monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))

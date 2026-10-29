@@ -14,7 +14,10 @@ import time
 from typing import Any
 
 _PYTHON_TOOLSET = "ValkyrieToolset.ValkyriePythonToolset"
+_PROGRAMMATIC_TOOLSET = "editor_toolset.toolsets.programmatic.ProgrammaticToolset"
 _EPIC_CALL_TIMEOUT_SEC = 20.0
+# The listener answers health within a few ticks of its bootstrap; past this it did not start.
+_BOOT_WAIT_SEC = 20.0
 # UEFN MCP answers ~30 s before UEFN turns Python on itself, and the boot file then
 # waits ~45 slow loading ticks; give a normal start this long before stepping in.
 AUTO_REVIVE_GRACE_SEC = 60.0
@@ -26,8 +29,8 @@ _LAUNCH_HINT = (
 )
 
 
-def _call_epic_tool(tool_name: str) -> str:
-    """Sync nested ``unreal__call_tool`` on the Python toolset. Patchable in tests.
+def _call_epic_tool(tool_name: str, toolset: str = _PYTHON_TOOLSET, arguments: dict[str, Any] | None = None) -> str:
+    """Sync nested ``unreal__call_tool`` (the Python toolset unless told). Patchable in tests.
 
     A pooled session can be dead while Epic MCP answers TCP (UEFN switched island under
     it): "Could not enable Python ... session unavailable" was most auto restart errors
@@ -35,7 +38,7 @@ def _call_epic_tool(tool_name: str) -> str:
     from backend.mcp_plugins.client_pool import get_plugin_pool
     from backend.mcp_plugins.epic import EPIC_MCP_SERVER_ID
 
-    args = {"toolset_name": _PYTHON_TOOLSET, "tool_name": tool_name, "arguments": {}}
+    args = {"toolset_name": toolset, "tool_name": tool_name, "arguments": arguments or {}}
     pool = get_plugin_pool()
     try:
         return str(pool.run_sync(pool.call_tool("unreal__call_tool", args), timeout=_EPIC_CALL_TIMEOUT_SEC) or "")
@@ -62,6 +65,42 @@ def _port_held_by_uefn(port: int) -> bool:
     return editor_of_process(name) == EDITOR_UEFN
 
 
+def _boot_script(listener_dir: str) -> str:
+    """What launch_listener.py does, as a ProgrammaticToolset script."""
+    return (
+        "def run():\n"
+        "    import sys\n"
+        f"    d = {listener_dir!r}\n"
+        "    if d not in sys.path:\n"
+        "        sys.path.insert(0, d)\n"
+        "    from listener.bootstrap import run as boot\n"
+        "    boot()\n"
+        "    return 'started'\n"
+    )
+
+
+def _start_listener_in_editor(port: int) -> bool:
+    """Python is on but the listener never started: the init scripts only run when Python
+    starts, so a hook a Fortnite update wiped stays unrun (python_already_on, 5 on 3 PCs on
+    Oct 28 2026). Run the bootstrap in the open editor and wait for health. False when the
+    script is refused or the listener still does not answer."""
+    from backend.bridge import listener_get_health
+    from frontend.deploy import appdata_listener_dir
+
+    try:
+        _call_epic_tool("execute_tool_script", _PROGRAMMATIC_TOOLSET, {"script": _boot_script(str(appdata_listener_dir()))})
+    except Exception:
+        return False
+    deadline = time.monotonic() + _BOOT_WAIT_SEC
+    while True:
+        health = listener_get_health(port)
+        if health is not None and health.get("status") == "ok":
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1.0)
+
+
 def _refresh_boot_hooks() -> None:
     """Fortnite updates wipe the EditorToolset hook; put it back before Python starts."""
     try:
@@ -76,8 +115,8 @@ def _refresh_boot_hooks() -> None:
 def revive_listener(port: int) -> dict[str, Any]:
     """Restart the listener if it answers, else turn Python on in UEFN through Epic MCP.
 
-    ``action``: ``reloaded`` | ``python_enabled`` | ``python_already_on`` | ``stale_socket`` |
-    ``uefn_offline`` | ``failed``.
+    ``action``: ``reloaded`` | ``python_enabled`` | ``listener_started`` | ``python_already_on`` |
+    ``stale_socket`` | ``uefn_offline`` | ``failed``.
     """
     from backend.bridge import listener_get_health, post_command_to_listener
 
@@ -112,6 +151,8 @@ def revive_listener(port: int) -> dict[str, Any]:
                     "version on, Ducky closes it on every island switch."
                 ),
             }
+        if enabled and _start_listener_in_editor(port):
+            return {"ok": True, "action": "listener_started", "message": "Listener started in the open UEFN."}
         if enabled:
             return {
                 "ok": False,

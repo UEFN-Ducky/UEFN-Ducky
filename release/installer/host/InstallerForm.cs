@@ -24,6 +24,9 @@ namespace DuckySetup
         DateTime _installStarted;
         bool _cancelled;
         bool _reported;
+        // One more try after a locked file: the switches of this install try.
+        string[]? _lastArgs;
+        bool _retried;
         bool _closeTracked;
         string _screen = "welcome";
 
@@ -165,11 +168,19 @@ namespace DuckySetup
                 desktop,
                 nolaunch: true,
                 setTasks: !isUpgrade);
+            _lastArgs = args;
+            _retried = false;
             if (_isWeb)
             {
                 StartWebInstall(args);
                 return;
             }
+            RunEngine(args);
+        }
+
+        // The full Setup's own engine, followed until it (and its elevated copy) ends.
+        void RunEngine(string[] args)
+        {
             System.Diagnostics.Process proc;
             string path;
             try
@@ -236,6 +247,12 @@ namespace DuckySetup
                 return;
             }
             _downloaded = path;
+            RunDownloaded(path, args);
+        }
+
+        // The downloaded Setup waits for its engine itself and exits with the engine's code.
+        void RunDownloaded(string path, string[] args)
+        {
             System.Diagnostics.Process proc;
             try
             {
@@ -287,7 +304,21 @@ namespace DuckySetup
             _poll?.Stop();
             PostProgress();
             _running = null;
-            Report(code == 0, _cancelled ? "cancelled" : Stats.ExitCode(code));
+            var reason = code == 0 || _cancelled ? "" : Stats.FailReason(Engine.ReadLogTail());
+            // A running UEFN Ducky the engine could not close kept a file locked: close it, try once more.
+            if (reason == "file_in_use" && !_retried && _lastArgs != null)
+            {
+                _retried = true;
+                Post(new { type = "progress", percent = 0, status = "Closing UEFN Ducky and trying again…" });
+                Engine.CloseApp();
+                Engine.ClearProgress();
+                if (_isWeb && _downloaded != null)
+                    RunDownloaded(_downloaded, _lastArgs);
+                else
+                    RunEngine(_lastArgs);
+                return;
+            }
+            Report(code == 0, _cancelled ? "cancelled" : Stats.FailCode(code, reason));
             if (code == 0 && _isWeb)
             {
                 Web.Cleanup(_downloaded);

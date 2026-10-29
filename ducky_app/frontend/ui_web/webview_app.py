@@ -613,8 +613,15 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     )
     window_bounds.track(window, "main")
     from frontend.ui_web.webview_memory import install as install_memory_policy
+    from frontend.ui_web.webview_memory import trim_if_bloated
 
     install_memory_policy(window)
+    try:
+        from frontend import boot_report
+
+        boot_report.on_heartbeat(lambda beat: trim_if_bloated(window, beat))
+    except Exception:
+        pass
     window_holder["window"] = window
     api.bind_window(window, on_hide=on_hide, on_exit=on_exit)
     _boot_trace("create_window", t_window)

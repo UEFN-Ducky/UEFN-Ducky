@@ -303,8 +303,10 @@ def test_a_native_crash_in_a_worker_thread_is_named_even_with_many_threads(crash
     assert len(log) <= boot_report.FIELD_MAX
     assert "crashed while starting (last stage: panel_api_init)" in log
     assert "Windows fatal exception: access violation" in log
-    assert "Current thread" in log and "import_compiled_plugin_backend" in log
-    assert "more threads not shown" in log
+    assert "Stack (most recent call first)" in log and "import_compiled_plugin_backend" in log
+    assert "runs no Python code" not in log
+    # Only the crashing thread is dumped: walking running threads crashed the app (Oct 28 2026).
+    assert "a_busy_background_thread_with_a_long_name" not in log
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="process check is Windows")
@@ -510,6 +512,32 @@ def test_report_shows_the_memory_trend_of_the_whole_run(page, monkeypatch) -> No
     assert len(beats) == boot_report.BEATS_KEPT and beats[0]["webview_gb"] == 0.4
     body = boot_report.build_report(dict(boot_report._state), "")
     assert "Memory trend over 6 min: app 0.7 -> 0.7 GB, WebView2 0.4 -> 2.5 GB, free 3.1 -> 0.2 GB." in body["error_log"]
+
+
+def test_a_single_thread_dump_keeps_its_stack_and_earlier_faults() -> None:
+    one = 'Windows fatal exception: code 0x8001010d\n\nStack (most recent call first):\n  File "frontend\\ui_web\\win_frameless.py", line 802 in _chrome_subclass_proc\n'
+    last = 'Windows fatal exception: access violation\n\nStack (most recent call first):\n  File "launcher.py", line 408 in main\n'
+    text = boot_report.trim_native(one + "\n" + last)
+    assert text.startswith("Earlier in this launch (1): code 0x8001010d; File \"frontend\\ui_web\\win_frameless.py\", line 802")
+    assert "runs no Python code" not in text and "launcher.py" in text
+
+
+def test_heartbeat_listeners_get_each_sample_and_a_bad_one_is_skipped(crash, monkeypatch) -> None:
+    boot_report.begin("1.2.448")
+    got: list[float] = []
+    monkeypatch.setattr(boot_report, "_beat_listeners", [lambda b: 1 / 0, lambda b: got.append(b["webview_gb"])])
+    monkeypatch.setattr(boot_report, "_memory_sample", lambda _a: {"at": 1.0, "webview_gb": 2.2})
+    boot_report.heartbeat()
+    assert got == [2.2] and boot_report._state["heartbeat"]["webview_gb"] == 2.2
+
+
+def test_faulthandler_dumps_only_the_crashing_thread(crash, monkeypatch) -> None:
+    import faulthandler
+
+    calls: list[dict] = []
+    monkeypatch.setattr(faulthandler, "enable", lambda **kw: calls.append(kw))
+    boot_report.begin("1.2.448")
+    assert calls and calls[-1]["all_threads"] is False
 
 
 def test_a_dotnet_exception_goes_into_the_next_report(crash) -> None:

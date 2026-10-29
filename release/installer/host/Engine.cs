@@ -25,6 +25,8 @@ namespace DuckySetup
         public static string EngineDir => Path.Combine(WorkRoot, "setup-engine");
         public static string UiDir => Path.Combine(WorkRoot, "setup-ui");
         public static string ProgressPath => Path.Combine(AppDataRoot, "setup-progress.txt");
+        // The engine's own Inno Setup log: what a failed install (exit_4) hit.
+        public static string LogPath => Path.Combine(AppDataRoot, "setup-engine.log");
         public static string EnginePath => Path.Combine(EngineDir, ExeName);
 
         public static string UserDir =>
@@ -124,6 +126,7 @@ namespace DuckySetup
                 "/CLOSEAPPLICATIONS",
                 "/FORCECLOSEAPPLICATIONS",
                 allUsers ? "/ALLUSERS" : "/CURRENTUSER",
+                "/LOG=" + LogPath,
             };
             if (setTasks)
                 list.Add(desktopIcon ? "/TASKS=desktopicon" : "/TASKS=!desktopicon");
@@ -291,8 +294,38 @@ namespace DuckySetup
 
         public static void ClearProgress()
         {
-            try { if (File.Exists(ProgressPath)) File.Delete(ProgressPath); }
-            catch { /* ignore */ }
+            foreach (var file in new[] { ProgressPath, LogPath })
+            {
+                try { if (File.Exists(file)) File.Delete(file); }
+                catch { /* ignore */ }
+            }
+        }
+
+        // The last few KB of the engine's log ("" when there is none).
+        public static string ReadLogTail(int maxBytes = 16 * 1024)
+        {
+            try
+            {
+                using var fs = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                if (fs.Length > maxBytes)
+                    fs.Seek(-maxBytes, SeekOrigin.End);
+                using var reader = new StreamReader(fs);
+                return reader.ReadToEnd();
+            }
+            catch { return ""; }
+        }
+
+        // Ends a running UEFN Ducky whose files the engine could not replace, and waits briefly.
+        public static void CloseApp()
+        {
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(AppExeName)))
+            {
+                using (p)
+                {
+                    try { if (!p.HasExited) { p.Kill(); p.WaitForExit(5000); } }
+                    catch { /* already gone, or elevated */ }
+                }
+            }
         }
 
         public static (int percent, string status)? ReadProgress()
