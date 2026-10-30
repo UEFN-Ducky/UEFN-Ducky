@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getApi, isRemote } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { installPanelPushBus, subscribePanelPush } from "../../hooks/usePanelPushBus";
@@ -321,6 +321,21 @@ export function CodingAgentLoginModal({
   );
 }
 
+/** CLI path / Default args / Detect, tucked away unless a path is set or the CLI is missing. */
+function AgentAdvanced({ initialOpen, children }: { initialOpen: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(initialOpen);
+  return (
+    <details
+      className="coding-agent-advanced"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>Advanced</summary>
+      {open ? children : null}
+    </details>
+  );
+}
+
 function CodingAgentRows({
   rows,
   drafts,
@@ -386,7 +401,14 @@ function CodingAgentRows({
         const isCli = Boolean(agent.capabilities?.needs_cli);
         const help = (agent.install_help || "").trim();
         const note = (detectNote[agent.id] || "").trim();
-        const statusText = note || agent.status;
+        const version = /\bv\d[\w.-]*/.exec(agent.status || "")?.[0] || "";
+        const pill = !agent.available
+          ? "Not found"
+          : agent.logged_in === true
+            ? "Logged in"
+            : agent.logged_in === false
+              ? "Not logged in"
+              : "";
         const detecting = busyId === agent.id;
         const loggingIn = loginId === agent.id;
         const loggingOut = logoutId === agent.id;
@@ -406,14 +428,10 @@ function CodingAgentRows({
                   <span className="llms-provider-dot" title={needsLogin ? "Not logged in" : "Not available"} />
                 )}
                 <span>{agent.label}</span>
-                {agent.logged_in != null ? (
-                  <span
-                    className={`llms-provider-status-text ${loggedIn ? "is-ok" : "is-fail"}`}
-                    style={{ marginLeft: 8, fontSize: 12 }}
-                  >
-                    {loggedIn ? "Logged in" : "Not logged in"}
-                  </span>
+                {pill ? (
+                  <span className={`coding-agent-pill ${pill === "Logged in" ? "is-ok" : "is-fail"}`}>{pill}</span>
                 ) : null}
+                {version ? <span className="coding-agent-version">{version}</span> : null}
               </div>
               <div style={{ flex: 1 }} />
               {agent.can_login && (needsLogin || loggingIn) ? (
@@ -457,19 +475,25 @@ function CodingAgentRows({
                 <span className="general-tab-switch-track" aria-hidden />
               </label>
             </div>
-            <TruncatedText
-              title={statusText}
-              className={`llms-provider-status-text ${agent.available && !note ? "is-ok" : "is-fail"}`}
-            >
-              {detecting ? "Detecting…" : statusText}
-            </TruncatedText>
+            {note ? (
+              <TruncatedText title={note} className="llms-provider-status-text is-fail">
+                {note}
+              </TruncatedText>
+            ) : null}
             {!agent.available && help ? (
               <div className="general-tab-section-desc" style={{ marginTop: 0 }}>
                 {help}
               </div>
             ) : null}
             {isCli || !agent.available ? (
-              <div className="llms-provider-row-main" style={{ width: "100%", gap: 8 }}>
+              <AgentAdvanced
+                // Re-pick open/closed once the real detect result replaces the "Checking…" row.
+                key={loaded ? "ready" : "loading"}
+                initialOpen={Boolean(draft.cli_path.trim()) || !agent.available}>
+                <div className="general-tab-section-desc coding-agent-found">
+                  {detecting ? "Detecting…" : agent.status}
+                </div>
+                <div className="llms-provider-row-main" style={{ width: "100%", gap: 8 }}>
                 {isCli ? (
                   <>
                     <input
@@ -535,7 +559,8 @@ function CodingAgentRows({
                 >
                   {detecting ? "…" : "Detect"}
                 </button>
-              </div>
+                </div>
+              </AgentAdvanced>
             ) : null}
           </div>
         );
