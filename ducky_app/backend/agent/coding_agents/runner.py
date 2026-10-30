@@ -890,7 +890,6 @@ def _run_coding_agent_message(
         # Hooks cannot supply their own identity for this core-owned request.
         return _emit_assistant(*args, **{**kwargs, "requested_mode": mode,
                                        "effective_mode": effective_mode})
-    push({"type": "status", "text": f"Starting {adapter.label}…", "conv_id": conv.id, "run_id": rid})
 
     from backend.bridge import set_port_override
     from backend.bridge.status import fetch_listener_status
