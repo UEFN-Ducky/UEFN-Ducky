@@ -92,8 +92,13 @@ def test_tool_argument_is_stored_only_when_given(monkeypatch):
 @pytest.fixture
 def chat(monkeypatch, settings, window):
     """A member chat and every call the fresh start makes, in order."""
+    from backend.store.repos import kv
     from frontend.ui_web import agent_modes, context_control, project_chats
 
+    docs: dict = {}
+    monkeypatch.setattr(kv, "set_doc", lambda table, key, value: docs.__setitem__((table, key), value))
+    monkeypatch.setattr(kv, "get_doc", lambda table, key: docs.get((table, key)))
+    monkeypatch.setattr(kv, "delete_doc", lambda table, key: docs.pop((table, key), None))
     conv = Conversation(id="m1", model="m", context_limit_tokens=600_000, parent_conv_id="group")
     calls: list[tuple] = []
     world = SimpleNamespace(conv=conv, calls=calls, handoff={"status": "done", "assistant_text": "Built A; next B."},
@@ -134,6 +139,18 @@ def test_over_the_limit_hands_off_resets_then_continues_in_order(chat):
     assert chat.calls[1][1] == ("session",)
     assert chat.calls[2][1].startswith("Started fresh at 612k → ") and chat.calls[2][1].endswith("k tokens")
     assert "Built A; next B." in chat.calls[3][1] and "Task: point B" in chat.calls[3][1]
+
+
+def test_a_prompt_bigger_than_the_limit_hands_off_once_not_every_turn(chat):
+    """Oct 29 2026: a Ducky AI chat (~166k a turn, 77k limit) handed off after every reply."""
+    chat.conv.context_limit_tokens = 77_000
+    chat.used = 166_000
+    assert _start(chat) is True  # the first time over: one handoff
+    for used in (166_000, 170_000, 200_000, 240_000):  # the fresh session is as big, then grows
+        chat.used = used
+        assert cl.over_limit("m1") is None, used
+    chat.used = 166_000 + 77_001  # real growth past the limit since the fresh start
+    assert cl.over_limit("m1") == (243_001, 77_000)
 
 
 def test_under_the_limit_is_untouched(chat):

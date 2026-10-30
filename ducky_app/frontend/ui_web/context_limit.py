@@ -108,7 +108,40 @@ def over_limit(conv_id: str, step: Any = None, project_root: str | None = None) 
         used, limit = used_tokens(conv), resolve_limit(conv, step)
     except Exception:
         return None
-    return (used, limit) if limit > 0 and used > limit else None
+    return (used, limit) if limit > 0 and used - _fresh_base(conv_id, used) > limit else None
+
+
+def _base_key(conv_id: str) -> str:
+    return f"fresh_base:{conv_id}"
+
+
+def _fresh_base(conv_id: str, used: int) -> int:
+    """What a fresh session of this chat costs before any work: its first size after the
+    reset (system prompt, tools, the handoff). Only growth past that counts toward the
+    limit; a chat whose prompt alone is over its limit (a Ducky AI turn is ~166k against
+    77k) handed off after every turn, forever (Oct 29 2026). 0 before any fresh start."""
+    try:
+        from backend.store.repos import kv
+
+        doc = kv.get_doc(_TABLE, _base_key(conv_id))
+        if not isinstance(doc, dict):
+            return 0
+        if doc.get("base") is None:
+            kv.set_doc(_TABLE, _base_key(conv_id), {"base": int(used), "at": time.time()})
+            return int(used)
+        return int(doc.get("base") or 0)
+    except Exception:
+        return 0
+
+
+def _measure_base_next(conv_id: str) -> None:
+    """After a reset: the next check records the fresh session's size as its base."""
+    try:
+        from backend.store.repos import kv
+
+        kv.set_doc(_TABLE, _base_key(conv_id), {"base": None, "at": time.time()})
+    except Exception:
+        pass
 
 
 def _fresh_key(conv_id: str) -> str:
@@ -196,6 +229,7 @@ def start_fresh(conv_id: str, next_text: str, *, used: int = 0, limit: int = 0, 
     except Exception:
         go_on(next_text)
         return False
+    _measure_base_next(conv_id)
     cap = max(4_000, int(limit * HANDOFF_SHARE) * 4)  # chars: about 4 per token
     text = (build_recycle_spawn_message(handoff[:cap], next_text, max_chars=cap + len(next_text) + 1_000)
             if handoff.strip() else next_text)
