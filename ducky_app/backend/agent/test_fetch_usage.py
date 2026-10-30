@@ -163,6 +163,59 @@ def test_fetch_usage_caches_until_force() -> None:
     assert c["windows"][0]["used"] == 2
 
 
+def test_fetch_usage_adds_core_account_switch(tmp_path) -> None:
+    from backend.agent import accounts
+
+    reset_usage_cache()
+    seen: list[str] = []
+
+    def _fn(api_key: str, *, model: str = "", account: str = "") -> dict:
+        seen.append(account)
+        return {"windows": [{"id": "h", "used": len(seen), "limit": 10}]}
+
+    def _old_fn(api_key: str, *, model: str = "") -> dict:  # a plugin that knows no accounts
+        return {"windows": [{"id": "h", "used": 1, "limit": 10}]}
+
+    plugin_switch = {"plugin_id": "openai", "rpc": "own", "value": "a",
+                     "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+
+    def _own_fn(api_key: str, *, model: str = "") -> dict:
+        return {"windows": [{"id": "h", "used": 1, "limit": 10}], "switch": plugin_switch}
+
+    reg = {"fetch_usage": _fn}
+    with (
+        patch.object(accounts, "_data_root", lambda: tmp_path),
+        patch("backend.uefn_plugins.host.get_llm_provider_registration", side_effect=lambda _p: reg),
+        patch("backend.uefn_plugins.host.get_coding_agent_registration", return_value={}),
+    ):
+        assert "switch" not in fetch_usage("openai", "sk")  # 1 account: no toggle
+        assert seen == [""]
+
+        work = accounts.add_account("openai", "Work", "key")
+        team = accounts.add_account("openai", "Team", "key")
+        out = fetch_usage("openai", "sk")
+        assert out["switch"] == {
+            "plugin_id": "", "rpc": "set_gateway_account", "provider": "openai", "value": "default",
+            "options": [{"id": "default", "label": "Default"}, {"id": work, "label": "Work"},
+                        {"id": team, "label": "Team"}],
+        }
+        assert normalize_usage_windows(out)["switch"] == out["switch"]  # survives the clamp
+        assert seen == ["", "default"]
+
+        accounts.set_active_account("openai", work)
+        out = fetch_usage("openai", "sk")  # own cache entry per account
+        assert seen[-1] == work and out["switch"]["value"] == work
+        assert out["windows"][0]["used"] == 3
+
+        reg["fetch_usage"] = _old_fn
+        reset_usage_cache("openai")
+        assert len(fetch_usage("openai", "sk")["switch"]["options"]) == 3  # TypeError fallback
+
+        reg["fetch_usage"] = _own_fn
+        reset_usage_cache("openai")
+        assert fetch_usage("openai", "sk")["switch"]["rpc"] == "own"  # plugin's switch wins
+
+
 def test_fetch_usage_keeps_windows_on_empty_retry() -> None:
     reset_usage_cache()
     n = {"calls": 0}

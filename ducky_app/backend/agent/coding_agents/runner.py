@@ -125,6 +125,16 @@ def _thinking_env(agent_id: str, thinking_effort: str) -> dict[str, str]:
     return out
 
 
+def _account_env(agent_id: str) -> dict[str, str]:
+    """Env that runs the CLI as the picked account; {} for its own login or on any error."""
+    try:
+        from backend.agent.accounts import coding_agent_account_env
+
+        return coding_agent_account_env(agent_id)
+    except Exception:
+        return {}
+
+
 def _normalize_launch_model(agent_id: str, model: str) -> str:
     mid = (model or "").strip()
     try:
@@ -1025,7 +1035,8 @@ def _run_coding_agent_message(
         extra={**_thinking_env(agent_id, getattr(conv, "thinking_effort", "")),
                "DUCKY_REQUESTED_MODE": mode,
                **({"DUCKY_COMPACT_FIRST": "1"} if cold_compact else {}),
-               **_team_cache_env(agent_id, conv.id)},
+               **_team_cache_env(agent_id, conv.id),
+               **_account_env(agent_id)},
         identity=run_ctx,
     )
 

@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import Any, Callable
 
 import frontend.ui_web.panel_api as _pa
+
+
+def _accounts_call(fn: Callable[[str], Any], provider: str) -> dict[str, Any]:
+    """Run one accounts RPC: ``{ok: True, **result}`` or ``{ok: False, error}``."""
+    p = str(provider or "").strip().lower()
+    if not p:
+        return {"ok": False, "error": "provider required"}
+    try:
+        out = fn(p)
+    except (KeyError, ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc.args[0] if exc.args else exc)}
+    return {"ok": True, **(out if isinstance(out, dict) else {})}
 
 
 class PanelApiSettingsMixin:
@@ -1013,6 +1026,79 @@ class PanelApiSettingsMixin:
         kick_detect_refresh()
         return result if isinstance(result, dict) else {"ok": bool(result)}
 
+    # --- Accounts per gateway (API keys or CLI logins), backend.agent.accounts ---
+
+    def list_gateway_accounts(self, provider: str) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: {"accounts": accounts.list_accounts(p),
+                                         "auto_switch": accounts.auto_switch_enabled(p)}, provider)
+
+    def add_gateway_account(self, provider: str, label: str = "", kind: str = "key") -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: {"id": accounts.add_account(p, label, kind)}, provider)
+
+    def rename_gateway_account(self, provider: str, account: str, label: str) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.rename_account(p, account, label), provider)
+
+    def remove_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.remove_account(p, account), provider)
+
+    def reorder_gateway_accounts(self, provider: str, ids: list[str] | None = None) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.reorder_accounts(p, [str(i) for i in ids or ()]), provider)
+
+    def set_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
+        """The model picker's account switch: later turns run as this account."""
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.set_active_account(p, account), provider)
+
+    def set_gateway_account_key(self, provider: str, account: str, key: str = "") -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.set_account_key(p, account, str(key or "")), provider)
+
+    def set_gateway_auto_switch(self, provider: str, on: bool = True) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.set_auto_switch(p, bool(on)), provider)
+
+    def login_gateway_account(self, provider: str, account: str, conv_id: str = "") -> dict[str, Any]:
+        """Open a listed terminal tab running the gateway's ``account_login`` command."""
+        from backend.agent import accounts
+
+        def login(p: str) -> dict[str, Any]:
+            cmd = accounts.account_login(p, account)
+            from frontend.ui_web.terminal import get_terminal_manager
+
+            cwd = (_pa.PanelSettings.load().uefn_project_root or "").strip() or "."
+            spawn = get_terminal_manager().spawn(
+                cwd=cwd, title=f"Login: {p}", push_open=True, hidden=False, conv_id=conv_id,
+                command=cmd["argv"], env_extra=cmd["env"], activate=False,
+                shell="powershell" if os.name == "nt" else "bash",
+            )
+            return {"session_id": str(spawn.get("session_id") or spawn.get("id") or ""),
+                    **({"ok": False, "error": spawn.get("error") or "terminal failed"} if not spawn.get("ok") else {})}
+
+        return _accounts_call(login, provider)
+
+    def logout_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.account_logout(p, account), provider)
+
+    def gateway_account_status(self, provider: str, account: str) -> dict[str, Any]:
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: {"status": accounts.account_status(p, account)}, provider)
+
     def list_tasks(self) -> dict[str, Any]:
         from backend.agent.coding_agents.epic import list_tasks
 
@@ -1775,12 +1861,13 @@ class PanelApiSettingsMixin:
 
     def get_gateway_usage(self, provider: str = "", model: str = "", refresh: bool = False) -> dict[str, Any]:
         """Live quota windows from the selected gateway plugin. Cached ~2 min."""
+        from backend.agent import accounts
         from backend.agent.model_fetch import fetch_usage
-        from backend.agent.secrets import get_key
 
         prov = str(provider or "").strip().lower()
         try:
-            key = str(get_key(prov) or "") if prov else ""
+            # The picked account's key (``default`` = today's secret ``provider``).
+            key = str(accounts.account_key(prov, accounts.active_account(prov)) or "") if prov else ""
             return fetch_usage(prov, key, model=str(model or ""), force=bool(refresh))
         except Exception:
             return {"windows": []}

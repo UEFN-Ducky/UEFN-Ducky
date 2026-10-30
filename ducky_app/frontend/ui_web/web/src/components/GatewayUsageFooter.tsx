@@ -14,10 +14,12 @@ export type UsageWindow = {
   readout?: string;
 };
 
-/** A gateway's account toggle (e.g. Claude Account 1 / Account 2), set through ``plugin_call``. */
+/** A gateway's account toggle, one option per account. ``plugin_id`` "" = core's
+ * ``set_gateway_account(provider, id)``; else the plugin's ``plugin_call(plugin_id, rpc, {account})``. */
 export type UsageSwitch = {
   plugin_id: string;
   rpc: string;
+  provider?: string;
   value: string;
   options: { id: string; label: string }[];
 };
@@ -70,7 +72,11 @@ export function GatewayUsageFooter({
   return (
     <div className="model-selector-usage" onClick={(e) => e.stopPropagation()}>
       {options.length >= 2 ? (
-        <div className="model-selector-cap-switch" role="radiogroup" aria-label="Account">
+        <div
+          className={`model-selector-cap-switch${options.length > 3 ? " is-wrap" : ""}`}
+          role="radiogroup"
+          aria-label="Account"
+        >
           {options.map((o) => {
             const active = o.id === accountSwitch?.value;
             return (

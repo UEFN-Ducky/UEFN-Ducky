@@ -19,6 +19,7 @@ import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { PluginSettingsSections } from "./PluginSettingsSections";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import { AgentApiKeyToggle } from "./AgentApiKeyToggle";
+import { GatewayAccounts } from "./GatewayAccounts";
 import { DuckyModelPicker } from "../../components/ducky/DuckyModelPicker";
 import { MediaMakerPicker } from "../../components/MediaMakerPicker";
 import { unsetDefaultGatewayIcons, type GatewayIcon } from "./defaultModelGateways";
@@ -989,10 +990,21 @@ export function AgentTab() {
                     {!isUrl && saved ? <AgentApiKeyToggle providerId={selected.id} /> : null}
                   </section>
                 ) : null}
+                {!hosted && !isUrl && selected.secret_key ? (
+                  <GatewayAccounts provider={secretKey} kind="key" title="API keys" />
+                ) : null}
 
                 <ProviderIdeHookup pluginId={selected.plugin_id} />
 
                 <ProviderCodingAgents pluginId={selected.plugin_id} />
+                {contrib.llm_coding_agents
+                  .filter((a) => (a.plugin_id || "").trim().toLowerCase() === selected.plugin_id.trim().toLowerCase())
+                  .map((a) => {
+                    const id = String(a.id || "").trim().toLowerCase().replace(/-/g, "_");
+                    return id ? (
+                      <GatewayAccounts key={id} provider={id} kind="login" title={`${a.label || id} logins`} />
+                    ) : null;
+                  })}
 
                 <div
                   ref={targetRef("settings.llms.provider.plugin", {

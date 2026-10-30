@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import patch
 
 from frontend.favorite_models import api_backends, parse_selection
@@ -56,9 +57,12 @@ def test_key_status_rebuilds_plugin_contributions_at_most_twice():
     rows = [{"id": f"gw{i}", "label": f"GW {i}", "secret_key": f"gw{i}", "kind": "secret"} for i in range(6)]
     keys = {"gw0": "sk-0", "gw1": "sk-1"}
     builds: list[int] = []
+    me = threading.get_ident()
 
     def _ui_contributions():
-        builds.append(1)
+        # Plugin-load threads left by earlier tests may call this too; count only the poll's own.
+        if threading.get_ident() == me:
+            builds.append(1)
         return {"llm_providers": rows}
 
     with (
@@ -133,6 +137,29 @@ def test_resolve_gateway_credential_url_defaults_localhost():
         patch("backend.agent.secrets.get_key", return_value=None),
     ):
         assert resolve_gateway_credential("ollama") == "http://localhost:11434"
+
+
+def test_resolve_gateway_credential_uses_the_picked_account_key(tmp_path):
+    from backend.agent import accounts
+    from backend.uefn_plugins.host import resolve_gateway_credential
+
+    keys: dict[str, str] = {}
+    with (
+        patch.object(accounts, "_data_root", lambda: tmp_path),
+        patch("backend.agent.secrets.get_key", keys.get),
+        patch("backend.agent.secrets.set_key", keys.__setitem__),
+        patch("backend.uefn_plugins.host.get_llm_provider_registration", return_value={}),
+    ):
+        keys["openai"] = "sk-personal"
+        work = accounts.add_account("openai", "Work", "key")
+        assert resolve_gateway_credential("openai") == "sk-personal"
+        accounts.set_active_account("openai", work)
+        assert resolve_gateway_credential("openai") == "sk-personal"  # Work has no key yet
+        accounts.set_account_key("openai", work, "sk-work")
+        assert resolve_gateway_credential("openai") == "sk-work"
+        accounts.mark_exhausted("openai", work)
+        assert resolve_gateway_credential("openai") == "sk-personal"  # failover to the next
+        assert resolve_gateway_credential("openai", "sk-typed") == "sk-typed"  # Settings test
 
 
 def test_a_gateway_s_own_model_ids_find_it():

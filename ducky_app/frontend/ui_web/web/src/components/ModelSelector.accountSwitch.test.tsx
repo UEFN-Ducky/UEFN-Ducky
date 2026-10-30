@@ -1,0 +1,72 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+const calls = vi.hoisted(() => ({ setAccount: vi.fn(async () => ({ ok: true })), pluginCall: vi.fn(async () => ({})) }));
+const sw = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
+  get: (_t, key) => {
+    if (key === "then") return undefined;
+    if (key === "get_models_catalog") {
+      return async () => ({ models: [{ id: "ducky-brain", name: "Ducky AI", provider: "uefn_ducky", provider_key: "uefn_ducky" }] });
+    }
+    if (key === "get_gateway_usage") return async () => ({ windows: [], switch: sw.current });
+    if (key === "set_gateway_account") return calls.setAccount;
+    if (key === "plugin_call") return calls.pluginCall;
+    return async () => (/^(list|load)_/.test(String(key)) ? [] : {});
+  },
+}));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false, requireApi: () => api }));
+vi.mock("../hooks/usePluginContributions", () => ({
+  usePluginContributions: () => ({
+    llm_providers: [{ id: "uefn_ducky", label: "Ducky AI", plugin_id: "account" }],
+    llm_coding_agents: [],
+  }),
+}));
+
+import { ModelSelector } from "./ModelSelector";
+import { loadModelsCatalog } from "../hooks/modelsCatalogCache";
+
+const options = [
+  { id: "default", label: "Default" },
+  { id: "a1", label: "Work" },
+  { id: "a2", label: "Spare" },
+];
+
+beforeEach(async () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  calls.setAccount.mockClear();
+  calls.pluginCall.mockClear();
+  await loadModelsCatalog({ force: true });
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+async function openPicker() {
+  const { container } = render(
+    <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined}
+                   codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
+  );
+  await act(async () => {});
+  fireEvent.click(container.querySelector(".model-selector-btn")!);
+  await act(async () => {});
+}
+
+it("core's account switch picks through set_gateway_account", async () => {
+  sw.current = { plugin_id: "", rpc: "set_gateway_account", provider: "uefn_ducky", value: "default", options };
+  await openPicker();
+  fireEvent.click(await screen.findByRole("radio", { name: "Spare" }));
+  await waitFor(() => expect(calls.setAccount).toHaveBeenCalledWith("uefn_ducky", "a2"));
+  expect(calls.pluginCall).not.toHaveBeenCalled();
+});
+
+it("a plugin's own switch still goes through plugin_call", async () => {
+  sw.current = { plugin_id: "anthropic", rpc: "set_claude_account", value: "default", options };
+  await openPicker();
+  fireEvent.click(await screen.findByRole("radio", { name: "Work" }));
+  await waitFor(() => expect(calls.pluginCall).toHaveBeenCalledWith("anthropic", "set_claude_account", { account: "a1" }));
+  expect(calls.setAccount).not.toHaveBeenCalled();
+});

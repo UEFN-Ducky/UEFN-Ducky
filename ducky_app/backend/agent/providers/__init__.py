@@ -9,8 +9,9 @@ always append to Settings → LLM usage — no caller can forget.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Callable
 
 from backend.agent.providers.base import LLMProvider, StreamEvent, StreamEventKind
 
@@ -66,13 +67,73 @@ def all_providers() -> tuple[str, ...]:
     return _BUILTIN_PROVIDERS + gateway_providers()
 
 
-class _UsageTrackingProvider:
-    """Wrap any gateway provider so every key use hits the usage ledger."""
+_QUOTA_RE = re.compile(r"\b429\b|rate[_ ]?limit|insufficient_quota|quota", re.IGNORECASE)
+_OUTPUT_KINDS = (StreamEventKind.TEXT_DELTA, StreamEventKind.TOOL_CALLS, StreamEventKind.THINKING)
 
-    def __init__(self, inner: Any, *, provider: str, model: str) -> None:
+
+def _account_for_key(provider: str, api_key: str) -> str | None:
+    """The account whose saved key this is, when the provider has 2+ accounts."""
+    try:
+        from backend.agent import accounts
+
+        rows = accounts.list_accounts(provider)
+        if len(rows) < 2 or not api_key:
+            return None
+        return next((r["id"] for r in rows if accounts.account_key(provider, r["id"]) == api_key), None)
+    except Exception:
+        return None
+
+
+class _UsageTrackingProvider:
+    """Wrap any gateway provider so every key use hits the usage ledger, and a key out of
+    quota before the reply starts moves the turn to the provider's next account."""
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        provider: str,
+        model: str,
+        account: str | None = None,
+        rebuild: Callable[[str], Any] | None = None,
+        is_quota_error: Callable[[str], bool] | None = None,
+    ) -> None:
         self._inner = inner
         self._provider = provider
         self._model = model
+        self._account = account
+        self._rebuild = rebuild
+        self._is_quota = is_quota_error or (lambda text: bool(_QUOTA_RE.search(text or "")))
+
+    def _quota(self, text: str) -> bool:
+        if self._account is None:
+            return False
+        try:
+            return bool(self._is_quota(str(text or "")))
+        except Exception:
+            return False
+
+    def _switch_account(self, tried: set[str]) -> bool:
+        """Mark this account full; move to the next one with a key not tried this turn."""
+        from backend.agent import accounts
+
+        try:
+            accounts.mark_exhausted(self._provider, self._account)
+            if self._rebuild is None:
+                return False
+            nxt = accounts.pick_account(
+                self._provider,
+                is_full=lambda i: i in tried or not accounts.account_key(self._provider, i),
+            )
+            key = accounts.account_key(self._provider, nxt)
+            if nxt in tried or not key:
+                return False
+            self._inner = self._rebuild(key)
+        except Exception:
+            return False
+        self._account = nxt
+        tried.add(nxt)
+        return True
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -104,16 +165,47 @@ class _UsageTrackingProvider:
             msg_chars = sum(len(getattr(m, "content", "") or "") for m in msgs)
             return len(system) + msg_chars + text_chars
 
+        tried = {self._account} if self._account else set()
+        started = False
         try:
-            async for event in self._inner.stream_turn(**kwargs):
-                if getattr(event, "usage", None):
-                    usage = dict(event.usage)
-                if getattr(event, "kind", None) == StreamEventKind.TEXT_DELTA:
-                    text_chars += len(getattr(event, "text", "") or "")
-                if getattr(event, "kind", None) == StreamEventKind.DONE:
-                    self._log(usage=usage or None, estimate_chars=_estimate())
-                    logged = True
-                yield event
+            while True:
+                quota_event = None
+                stream = self._inner.stream_turn(**kwargs)
+                try:
+                    async for event in stream:
+                        kind = getattr(event, "kind", None)
+                        if not started and kind == StreamEventKind.ERROR and self._quota(event.error):
+                            quota_event = event
+                            break
+                        started = started or kind in _OUTPUT_KINDS
+                        if getattr(event, "usage", None):
+                            usage = dict(event.usage)
+                        if kind == StreamEventKind.TEXT_DELTA:
+                            text_chars += len(getattr(event, "text", "") or "")
+                        if kind == StreamEventKind.DONE:
+                            self._log(usage=usage or None, estimate_chars=_estimate())
+                            logged = True
+                        elif kind == StreamEventKind.ERROR and started and self._quota(event.error):
+                            self._switch_account(set(tried))  # next turn starts on the next account
+                        yield event
+                except Exception as exc:
+                    if not self._quota(str(exc)):
+                        raise
+                    if started:
+                        self._switch_account(set(tried))
+                        raise
+                    if not self._switch_account(tried):
+                        raise
+                    continue
+                finally:
+                    aclose = getattr(stream, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
+                if quota_event is None:
+                    return
+                if not self._switch_account(tried):
+                    yield quota_event
+                    return
         finally:
             if not logged:
                 self._log(usage=usage or None, estimate_chars=_estimate())
@@ -155,8 +247,19 @@ def make_provider(
             "install it from Settings → Store → Gateways"
         )
     factory = reg["factory"]
-    try:
-        inner = factory(api_key, model, thinking_effort=thinking_effort)
-    except TypeError:
-        inner = factory(api_key, model)
-    return _UsageTrackingProvider(inner, provider=name, model=model)  # type: ignore[return-value]
+
+    def build(key: str) -> Any:
+        try:
+            return factory(key, model, thinking_effort=thinking_effort)
+        except TypeError:
+            return factory(key, model)
+
+    quota_fn = reg.get("is_quota_error")
+    return _UsageTrackingProvider(  # type: ignore[return-value]
+        build(api_key),
+        provider=name,
+        model=model,
+        account=_account_for_key(name, api_key),
+        rebuild=build,
+        is_quota_error=quota_fn if callable(quota_fn) else None,
+    )
