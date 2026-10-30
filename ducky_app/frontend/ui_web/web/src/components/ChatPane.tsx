@@ -22,9 +22,6 @@ import { useLinkedAgents } from "../hooks/useLinkedAgents";
 import { useChatMessages } from "../hooks/useChatMessages";
 import { useChatTurnTimerState } from "../hooks/useChatTurnTimer";
 import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
-import { useRunningAgents } from "../hooks/useRunningAgents";
-import { runningTeamChats } from "./team/teamRoster";
-import { subPlanProgress, type WorkRow } from "./WorkProgressBar";
 import { setRoster, useRoster } from "./team/rosterStore";
 import { useHasApiKey } from "../hooks/useHasApiKey";
 import { getCachedChatComposer, setCachedChatComposer, subscribeComposerDraft, takeComposerDraft } from "../hooks/chatComposerCache";
@@ -271,25 +268,6 @@ export function ChatPane({
     ? []
     : linkedAgents.filter((a) => a.status === "running");
   const isWaitingOnLinked = !chat.isGroup && agentRunning && waitingLinked.length > 0;
-  // A leader whose turn ended while its team still works: name who it waits on.
-  const runningIds = useRunningAgents();
-  const waitingOnAgents = useMemo(
-    () => (agentRunning ? [] : runningTeamChats(chat.id, folders, runningIds)),
-    [agentRunning, chat.id, folders, runningIds],
-  );
-  // Above the composer: this chat's own running turn (its plan's progress), then each agent
-  // it waits on (that agent's sub plan in this chat's plan).
-  const workRows = useMemo<WorkRow[]>(() => {
-    const linked = chat.isGroup ? [] : linkedAgents.filter((a) => a.status === "running");
-    const waited = agentRunning ? linked.map((a) => ({ convId: a.childConvId, name: a.title })) : waitingOnAgents;
-    const own = chatPlanProgress?.total
-      ? { done: chatPlanProgress.completed + chatPlanProgress.cancelled, total: chatPlanProgress.total }
-      : null;
-    return [
-      ...(agentRunning ? [{ convId: chat.id, name: chat.name, progress: own }] : []),
-      ...waited.map((a) => ({ ...a, progress: subPlanProgress(chatPlan?.nodes, a.convId) })),
-    ];
-  }, [agentRunning, chat.id, chat.name, chat.isGroup, linkedAgents, waitingOnAgents, chatPlan, chatPlanProgress]);
   // One cached roster per group (shared with the team bar and sidebar); the chat's own
   // copy shows until the store answers.
   const roster = useRoster(chat.isGroup ? chat.id : "");
@@ -1168,7 +1146,6 @@ export function ChatPane({
           slashStatus={slashStatus}
           availableCommands={availableCommands}
           runSlashCommand={runSlashCommand}
-          workRows={workRows}
           attachments={attachments}
           readInParts={readInParts}
           removeAttachment={removeAttachment}
