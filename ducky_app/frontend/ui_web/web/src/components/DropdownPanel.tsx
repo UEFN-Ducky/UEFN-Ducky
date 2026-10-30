@@ -117,8 +117,24 @@ export function DropdownPanel({
       if (target instanceof Element && target.closest("[data-dropdown-keep]")) return;
       onClose();
     };
+    // A click inside a plugin iframe never reaches this document; the window blurs instead.
+    const handleBlur = () => {
+      const active = document.activeElement;
+      if (active && panelRef.current?.contains(active)) return;
+      if (active instanceof Element && active.closest("[data-dropdown-keep]")) return;
+      onClose();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+    };
     document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open, onClose, anchorRef]);
 
   if (!open) return null;

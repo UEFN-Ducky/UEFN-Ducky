@@ -75,7 +75,29 @@ function emit() {
 /** The visible pane says what it shows (only the pane whose `active` is true calls this). */
 export function publishTeamScope(scope: TeamScope): void {
   current = scope;
+  lastPluginId = scope.pluginId;
   emit();
+}
+
+let lastPluginId = "";
+
+/** The visible pane's copy, else the last shown pane's (still open, hidden), else any open pane's. */
+export function getTeamScopeOrLast(): TeamScope | null {
+  return current ?? all[lastPluginId] ?? Object.values(all)[0] ?? null;
+}
+
+function subscribeEither(fn: () => void): () => void {
+  const a = subscribeTeamScope(fn);
+  const b = subscribeAllTeamScopes(fn);
+  return () => {
+    a();
+    b();
+  };
+}
+
+/** The Team modal's copy: it keeps the full settings on a tab without a plugin pane. */
+export function useTeamScopeOrLast(): TeamScope | null {
+  return useSyncExternalStore(subscribeEither, getTeamScopeOrLast, getTeamScopeOrLast);
 }
 
 /** The pane went hidden or stopped showing a team bar: clear it if it was the one shown. */

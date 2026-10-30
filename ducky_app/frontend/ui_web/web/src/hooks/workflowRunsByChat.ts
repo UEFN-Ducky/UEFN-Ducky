@@ -69,6 +69,8 @@ const snapshots = new Map<string, ChatWorkflowRun[]>();
 const EMPTY: ChatWorkflowRun[] = [];
 const runToChat = new Map<string, string>();
 const listeners = new Set<() => void>();
+const NO_CHATS: ReadonlySet<string> = new Set();
+let runningChats: ReadonlySet<string> | null = null;
 let installed = false;
 /**
  * Finished runs kept per workflow, as many as its saved history holds. Every run and its
@@ -95,6 +97,7 @@ function dropOldRuns(workflowId: string): void {
 
 function emit(): void {
   snapshots.clear();
+  runningChats = null;
   for (const listener of listeners) listener();
 }
 
@@ -408,6 +411,28 @@ export function useWorkflowRuns(workflowId: string): ChatWorkflowRun[] {
 export function useChatWorkflowRun(chatId: string): ChatWorkflowRun | null {
   const runs = useChatWorkflowRuns(chatId);
   return runs[runs.length - 1] ?? null;
+}
+
+/** The chat's workflow run still running, or null (a newer finished run does not hide it). */
+export function useRunningChatWorkflow(chatId: string): ChatWorkflowRun | null {
+  const runs = useChatWorkflowRuns(chatId);
+  for (let i = runs.length - 1; i >= 0; i--) if (runs[i].state === "running") return runs[i];
+  return null;
+}
+
+/** Chats whose ducky started a workflow that is still running (sidebar marker only, not Stop). */
+export function useRunningWorkflowChatIds(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribe, () => {
+    if (!runningChats) {
+      const ids = new Set<string>();
+      for (const run of byRun.values()) {
+        const chat = runToChat.get(run.run);
+        if (chat && run.state === "running") ids.add(chat);
+      }
+      runningChats = ids.size ? ids : NO_CHATS;
+    }
+    return runningChats;
+  }, () => NO_CHATS);
 }
 
 /** Replay saved events when an editor opens, then follow every run independently. */

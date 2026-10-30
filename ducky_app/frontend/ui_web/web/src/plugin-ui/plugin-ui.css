@@ -706,8 +706,46 @@
   cursor: pointer;
 }
 .plugin-scope-menu__choice:hover,
-.plugin-scope-menu__choice[aria-checked="true"] {
+.plugin-scope-menu__choice.is-focused,
+.plugin-scope-menu__choice[aria-checked="true"],
+.plugin-scope-menu__choice[aria-selected="true"] {
   background: color-mix(in srgb, var(--accent, #d4a017) 12%, transparent);
+}
+
+/* Team modal Overview: whose data, as one dropdown button. */
+.scope-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 360px;
+  min-height: 40px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #333);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elev, transparent);
+  color: var(--fg, #e6e6e6);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.scope-picker:hover:not(:disabled),
+.scope-picker[aria-expanded="true"] {
+  border-color: var(--accent, #d4a017);
+}
+.scope-picker:disabled {
+  color: var(--muted, #888);
+  cursor: default;
+}
+.scope-picker:focus-visible {
+  outline: 2px solid var(--accent, #d4a017);
+  outline-offset: 1px;
+}
+.scope-picker__chevron {
+  margin-left: auto;
+  color: var(--muted, #888);
 }
 .plugin-scope-menu__text {
   display: flex;

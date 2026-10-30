@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
-import { publishTeamScope, unpublishTeamScope, type TeamScope } from "./teamScopeStore";
+import { publishPaneScope, publishTeamScope, unpublishPaneScope, unpublishTeamScope, type TeamScope } from "./teamScopeStore";
 import { TeamModal } from "./TeamModal";
 
 const api = vi.hoisted(() => ({
@@ -13,7 +13,11 @@ const api = vi.hoisted(() => ({
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 
 afterEach(() => {
-  act(() => unpublishTeamScope("forge"));
+  act(() => {
+    unpublishTeamScope("forge");
+    unpublishPaneScope("forge");
+    unpublishPaneScope("art");
+  });
   cleanup();
 });
 
@@ -51,10 +55,11 @@ describe("TeamModal", () => {
     modal(s);
     expect(screen.getByText("Alpha Studio · Forge")).toBeTruthy();
     expect(s.actions.loadChoices).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("radio", { name: /Alpha Studio/ }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Update now" }));
     expect(s.actions.pull).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("radio", { name: /^Local/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Whose data: Alpha Studio" }));
+    expect(screen.getByRole("option", { name: /Alpha Studio/ }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: /^Local/ }));
     expect(s.actions.choose).toHaveBeenCalledWith(expect.objectContaining({ id: "personal" }));
   });
 
@@ -99,8 +104,30 @@ describe("TeamModal", () => {
       notes: [{ key: "error", tone: "error", text: "That didn't work.", actions: [{ label: "Dismiss", ghost: true, run }] }],
     }));
     expect(screen.queryByRole("button", { name: /^Conflicts/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Settings/ })).toBeTruthy();
     expect(screen.getByText("That didn't work.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(run).toHaveBeenCalled();
+  });
+
+  it("with the plugin pane hidden it keeps that pane's copy and the full nav", () => {
+    const art = scope({ pluginId: "art", plugin: "AI Art Studio", shared: false, variant: "personal", current: "personal",
+      status: { ok: true, visible: true, canChange: true, scope: { kind: "personal", label: "Local", spaceId: "", readOnly: false } } });
+    act(() => {
+      publishPaneScope(art);
+      publishTeamScope(art);
+      unpublishTeamScope("art");
+    });
+    render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
+    expect(screen.getByText("Local · AI Art Studio")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Overview/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Whose data: Local" })).toBeTruthy();
+  });
+
+  it("with no shareable plugin open the nav still has Overview and Settings with the sliders", async () => {
+    render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
+    expect(screen.getByText(/Open a plugin that shares/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    expect(await screen.findByRole("slider", { name: /^Send changes after/ })).toBeTruthy();
   });
 });

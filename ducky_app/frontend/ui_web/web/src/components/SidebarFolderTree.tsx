@@ -61,6 +61,7 @@ import {
 import { anyRunningUnderFolder, firstUnderFolder } from "../utils/duckyTreeBusy";
 import { openWaitingChat, useChatWaiting, useNeedsYou, useWaitingChatIds } from "../hooks/waitingChats";
 import { WaitingMarker } from "./WaitingMarker";
+import { useRunningChatWorkflow, useRunningWorkflowChatIds } from "../hooks/workflowRunsByChat";
 import type { EditorDropZone } from "../types/panel";
 import { formatRelativeTime } from "../utils/formatRelativeTime";
 import {
@@ -311,6 +312,10 @@ const ChatRow = memo(function ChatRow({
   // A question or command card waiting here: a marker instead of the spinner.
   const waiting = useChatWaiting(chat.id);
   const needsYou = useNeedsYou(archived ? null : chat.id);
+  // A workflow this chat started still runs while its agent may be idle.
+  const wfRun = useRunningChatWorkflow(archived ? "" : chat.id);
+  const wfDone = wfRun ? wfRun.steps.filter((s) => s.state === "ok").length : 0;
+  const wfTitle = wfRun ? `Workflow: ${wfRun.name} · step ${Math.min(wfDone + 1, wfRun.steps.length || 1)}/${wfRun.steps.length || 1}` : "";
   // Muted: a small progress row that doesn't open the chat (its agent keeps working).
   const muted = Boolean(chat.muted) && !archived;
   const progress = useMutedProgress(
@@ -347,6 +352,10 @@ const ChatRow = memo(function ChatRow({
                 <WaitingMarker convId={chat.id} name={chat.name} variant="sidebar" />
               ) : isRunning ? (
                 <span className="sidebar-agent-spinner" title="Agent working" />
+              ) : wfRun ? (
+                <span className="sidebar-workflow-spinner" title={wfTitle} aria-label={wfTitle}>
+                  <Icons.Workflow />
+                </span>
               ) : (
                 <DuckyAvatar
                   styleId={chat.duckyStyle}
@@ -355,7 +364,7 @@ const ChatRow = memo(function ChatRow({
                 />
               )}
               {live ? <LiveChatDot className="live-chat-dot--sidebar" /> : null}
-              {chat.isLeader && !isRunning && !waiting ? (
+              {chat.isLeader && !isRunning && !waiting && !wfRun ? (
                 <span className="sidebar-leader-badge" title="Group leader" aria-label="Group leader">
                   <Icons.Star />
                 </span>
@@ -869,8 +878,12 @@ const FolderGroup = memo(function FolderGroupImpl({
   const isActive =
     (hubId ? activeChats.includes(hubId) : isSelectedParent) || selectedIds.has(folderRowId);
   // Show activity on the folder row when collapsed so nested work isn't invisible.
+  // Dot only: Stop (runningCount) stays agent-only.
+  const workflowChatIds = useRunningWorkflowChatIds();
   const hasRunningInside =
-    !expanded && anyRunningUnderFolder(folder, runningChatIds, childrenByParent);
+    !expanded && (anyRunningUnderFolder(folder, runningChatIds, childrenByParent) ||
+      (hubId !== "" && workflowChatIds.has(hubId)) ||
+      (workflowChatIds.size > 0 && anyRunningUnderFolder(folder, workflowChatIds, childrenByParent)));
   // The group's hub (hidden from the tree) or, folded, a chat inside waits on the user.
   const waitingIds = useWaitingChatIds();
   const waitingChatId =

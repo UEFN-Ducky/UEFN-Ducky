@@ -1573,6 +1573,31 @@ html.window-maximized .window-resize-grip {
   animation: spin-slow 0.8s linear infinite;
 }
 
+/* A workflow the chat started is running (its agent may be idle): a still glyph in a dashed amber ring. */
+.sidebar-workflow-spinner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sidebar-tree-leading, 22px);
+  height: var(--sidebar-tree-leading, 22px);
+  color: var(--amber);
+}
+
+.sidebar-workflow-spinner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed var(--amber);
+  animation: spin-slow 2.4s linear infinite;
+}
+
+.sidebar-workflow-spinner svg {
+  width: 60%;
+  height: 60%;
+}
+
 .sidebar-tree-row-icon--leader {
   position: relative;
 }

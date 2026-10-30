@@ -4,8 +4,9 @@ import { Modal } from "../components/Modal";
 import { getApi } from "../hooks/usePanelApi";
 import type { PanelApi } from "../types/panel";
 import { PluginScopeDrawer, scopeTabs } from "./PluginScopeDrawer";
-import { kindTitle, phraseTab, type ScopeTab } from "./scopeBarText";
-import { useTeamScope, type TeamScope } from "./teamScopeStore";
+import { phraseTab, type ScopeTab } from "./scopeBarText";
+import { ScopePicker } from "./ScopePicker";
+import { useTeamScopeOrLast, type TeamScope } from "./teamScopeStore";
 
 export type TeamSection = "overview" | ScopeTab;
 
@@ -92,7 +93,7 @@ function phraseIcon(scope: TeamScope): string {
 /** Overview: whose data the plugin shows (the team picker), its status and buttons, and the
  * notes that need a decision. */
 function Overview({ scope, onSection }: { scope: TeamScope; onSection: (s: TeamSection) => void }) {
-  const { status, phrase, actions, shared, busy, menu, refusal, current } = scope;
+  const { status, phrase, actions, shared, busy, refusal } = scope;
   const label = status.scope?.label || "Local";
   // The teams are read once per open (the actions object is new every render).
   const load = useRef(actions.loadChoices);
@@ -142,73 +143,39 @@ function Overview({ scope, onSection }: { scope: TeamScope; onSection: (s: TeamS
         </div>
       ))}
       <div className="plugin-scope-subhead">Whose data {scope.plugin} shows</div>
-      {!status.canChange ? (
-        <p className="plugin-scope-empty">Open a project to choose whose data it shows.</p>
-      ) : menu === null ? (
-        <p className="plugin-scope-empty">Loading…</p>
-      ) : (
-        <div className="plugin-scope-menu" role="radiogroup" aria-label="Whose data">
-          {/* A folder that can't be shared from this PC: no team to offer, and why. */}
-          {refusal && !shared ? <div className="plugin-scope-menu__note plugin-scope-menu__note--warn">{refusal}</div> : null}
-          {menu.filter((choice) => !(refusal && !shared && choice.kind === "shared")).map((choice) => (
-            <button key={choice.id} type="button" role="radio" aria-checked={choice.id === current} disabled={scope.switching}
-              className="plugin-scope-menu__row plugin-scope-menu__choice" onClick={() => void actions.choose(choice)}>
-              <span className={`plugin-scope-dot plugin-scope-dot--${choice.kind === "shared" ? "shared" : "local"}`} aria-hidden />
-              <span className="plugin-scope-menu__text">
-                <span className="plugin-scope-menu__name">{choice.kind === "shared" ? choice.label : "Local"}</span>
-                <span className="plugin-scope-menu__sub">{choice.kind === "shared" ? `${kindTitle(scope.kind)} copy` : "Only on this PC"}</span>
-              </span>
-              {choice.id === current ? <span className="plugin-scope-menu__check" aria-hidden>✓</span> : null}
-            </button>
-          ))}
-          {scope.offers.map((offer) => (
-            <button key={offer.space} type="button" className="plugin-scope-btn plugin-scope-btn--block" disabled={busy}
-              onClick={() => void actions.copyInto(offer)}>
-              Copy Local into {offer.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <ScopePicker scope={scope} />
     </div>
   );
 }
 
 /**
  * The header's Team menu, in Ducky's modal look with Settings' left nav: Overview (whose data,
- * status, Update now / Send / Get / Retry, notes) and, on a team copy, every Source control
- * section (Changes, Incoming, Conflicts, Locks, History, People, Settings). It shows and acts on
- * the visible plugin pane's copy ({@link useTeamScope}); the pane's own callbacks do the work.
- * With no such pane it still opens on the app-wide timing settings.
+ * status, Update now / Send / Get / Retry, notes), Settings (timing; on a team copy also the
+ * copy's own settings) and, on a team copy, every Source control section (Changes, Incoming,
+ * Conflicts, Locks, History, People). It acts on the visible plugin pane's copy, or the last one
+ * shown while that pane is hidden ({@link useTeamScopeOrLast}); the pane's own callbacks do the work.
  */
 export function TeamModal({ open, onClose, initial = "overview" }: Props) {
-  const scope = useTeamScope();
+  const scope = useTeamScopeOrLast();
   const [section, setSection] = useState<TeamSection>(initial);
   useEffect(() => {
     if (open) setSection(initial);
   }, [open, initial]);
 
-  if (!scope) {
-    return (
-      <Modal open={open} onClose={onClose} title="Team" width={560} className="team-modal" bodyClassName="team-modal-body">
-        <div className="team-modal-pane">
-          <p className="plugin-scope-empty">Open a plugin that shares to see whose data it shows and its changes.</p>
-          <TimingSliders />
-        </div>
-      </Modal>
-    );
-  }
-  const { status, shared, actions } = scope;
-  const label = shared ? status.scope?.label || "Team" : "Local";
-  const tabs = shared ? scopeTabs(status, scope.pluginId) : [];
+  const shared = Boolean(scope?.shared);
+  const label = scope ? (shared ? scope.status.scope?.label || "Team" : "Local") : "";
+  const tabs: { id: TeamSection; label: string; count?: number; alert?: boolean }[] =
+    scope && shared ? scopeTabs(scope.status, scope.pluginId) : [{ id: "settings", label: "Settings" }];
   const shown: TeamSection = section === "overview" || tabs.some((t) => t.id === section) ? section : "overview";
-  const overviewAlert = scope.notes.some((n) => n.tone === "error");
+  const notes = scope?.notes ?? [];
+  const overviewAlert = notes.some((n) => n.tone === "error");
 
   return (
-    <Modal open={open} onClose={onClose} title={`${label} · ${scope.plugin}`} width={860}
+    <Modal open={open} onClose={onClose} title={scope ? `${label} · ${scope.plugin}` : "Team"} width={860}
       className="team-modal" bodyClassName="team-modal-body">
       <div className="team-modal-layout">
         <nav className="settings-view-sidebar-nav team-modal-nav" aria-label="Team">
-          {[{ id: "overview" as const, label: "Overview", count: scope.notes.length, alert: overviewAlert }, ...tabs].map((t) => (
+          {[{ id: "overview" as const, label: "Overview", count: notes.length, alert: overviewAlert }, ...tabs].map((t) => (
             <button key={t.id} type="button" aria-current={shown === t.id ? "page" : undefined}
               className={`settings-view-sidebar-tab${shown === t.id ? " is-active" : ""}`} onClick={() => setSection(t.id)}>
               <span>{t.label}</span>
@@ -218,13 +185,21 @@ export function TeamModal({ open, onClose, initial = "overview" }: Props) {
         </nav>
         <div className="team-modal-pane">
           {shown === "overview" ? (
-            <Overview scope={scope} onSection={setSection} />
+            scope ? (
+              <Overview scope={scope} onSection={setSection} />
+            ) : (
+              <div className="team-modal-overview">
+                <p className="plugin-scope-empty">Open a plugin that shares to see whose data it shows and its changes.</p>
+              </div>
+            )
           ) : (
             <>
               {shown === "settings" ? <TimingSliders /> : null}
-              <PluginScopeDrawer pluginId={scope.pluginId} status={status} tab={shown} onTab={setSection} hideTabs
-              onJoin={actions.joinLive ? (room) => void actions.joinLive?.(room) : undefined}
-              onChanged={(changed) => actions.refresh(changed)} />
+              {scope && shared ? (
+                <PluginScopeDrawer pluginId={scope.pluginId} status={scope.status} tab={shown} onTab={setSection} hideTabs
+                  onJoin={scope.actions.joinLive ? (room) => void scope.actions.joinLive?.(room) : undefined}
+                  onChanged={(changed) => scope.actions.refresh(changed)} />
+              ) : null}
             </>
           )}
         </div>
