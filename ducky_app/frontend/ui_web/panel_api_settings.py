@@ -288,6 +288,7 @@ class PanelApiSettingsMixin:
         Feeds LLMs → Providers and the Default Model catalog. A hung register()
         used to pin this RPC and starve Appearance / create-conversation.
         """
+        from backend.agent.providers import builtin_providers
         from backend.agent.secrets import has_key
         from backend.uefn_plugins.host import (
             ensure_plugins_loaded_async,
@@ -296,8 +297,9 @@ class PanelApiSettingsMixin:
             plugins_ready,
         )
 
-        # Built-in providers always available (no plugin wait).
-        status: dict[str, bool] = {p: has_key(p) for p in _pa.all_providers()}
+        # Built-in providers always available (no plugin wait). Gateways come from the one
+        # contributions snapshot below: all_providers() built (and sync-loaded) another.
+        status: dict[str, bool] = {p: has_key(p) for p in builtin_providers()}
         status["cursor"] = has_key("cursor")
 
         if not plugins_ready():
