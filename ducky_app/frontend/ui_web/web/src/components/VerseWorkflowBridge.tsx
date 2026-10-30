@@ -19,15 +19,15 @@ const BUILD_STATE = {
 function buildIconSrc(buildState: number): string {
   switch (buildState) {
     case BUILD_STATE.Building:
-      return "/verse-workflow/verse-icon-loading.svg";
+      return "./verse-workflow/verse-icon-loading.svg";
     case BUILD_STATE.Errors:
-      return "/verse-workflow/verse-icon-error.svg";
+      return "./verse-workflow/verse-icon-error.svg";
     case BUILD_STATE.Warnings:
-      return "/verse-workflow/verse-icon-warning.svg";
+      return "./verse-workflow/verse-icon-warning.svg";
     case BUILD_STATE.Success:
-      return "/verse-workflow/verse-icon-success.svg";
+      return "./verse-workflow/verse-icon-success.svg";
     default:
-      return "/verse-workflow/verse-icon-build.svg";
+      return "./verse-workflow/verse-icon-build.svg";
   }
 }
 

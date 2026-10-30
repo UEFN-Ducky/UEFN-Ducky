@@ -21,11 +21,13 @@ import {
   MAX_CHUNK_BYTES,
   PROTOCOL_VERSION,
   PartAssembler,
+  REMOTE_RESYNC,
   STREAM_PREFIX,
   compareVersions,
   newSessionId,
   rewriteLoopbackUrls,
   splitText,
+  waitIceGathering,
   type BlobDone,
   type BlobHeader,
   type EventFrame,
@@ -33,7 +35,8 @@ import {
   type SessionDescriptionJson,
 } from "./protocol";
 
-export type DirectState = "idle" | "connecting" | "live" | "failed";
+/** `reconnecting`: the link was live and dropped (a phone that slept); it redials on its own. */
+export type DirectState = "idle" | "connecting" | "live" | "reconnecting" | "failed";
 export type DirectStatus = { state: DirectState; reason: string; desktopVersion: string };
 
 export type DirectConfig = {
@@ -65,6 +68,12 @@ const RPC_TIMEOUT_MS = 30_000;
 const BLOB_WAIT_MS = 30_000;
 const CONNECT_BUDGET_MS = 8_000;
 const ICE_GATHER_MS = 2_500;
+/** Redial backoff after a live link dropped: 1 s, 2 s, 4 s … capped. */
+const REDIAL_MIN_MS = 1_000;
+const REDIAL_MAX_MS = 15_000;
+/** The site's Retry button (a reconnect that keeps failing). */
+export const UD_DIRECT_RETRY = "ud-direct-retry";
+export { REMOTE_RESYNC };
 const LOOPBACK_ORIGINS = ["http://127.0.0.1:4199", "http://localhost:4199"];
 
 
@@ -223,6 +232,12 @@ export class DirectTransport {
   private queuedInvokes: Array<() => void> = [];
   private queuedBlobs: Array<() => void> = [];
   private attempt = 0;
+  /** Went live at least once: a drop after that redials instead of failing. */
+  private wasLive = false;
+  /** A connect() is in flight (offer out, waiting to connect). */
+  private dialing = false;
+  private redialTimer = 0;
+  private redialMs = 0;
   status: DirectStatus = { state: "idle", reason: "", desktopVersion: "" };
   lastEventSeq = 0;
   /** Diagnostics for end-to-end drivers: what happened, in order, with ms since start. */
@@ -245,6 +260,52 @@ export class DirectTransport {
             localBridge("", config.to ?? "")
           : parentBridge();
     installServiceWorkerBlobBridge(this);
+    this.installWakeRedial();
+  }
+
+  /** Screen back on, network back, page restored, or the site's Retry: dial now. */
+  private installWakeRedial() {
+    if (typeof window === "undefined") return;
+    const wake = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      this.redialNow("woke up");
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", wake);
+    window.addEventListener("message", (ev: MessageEvent) => {
+      if (ev.source !== window.parent || window.parent === window) return;
+      const data = ev.data as { type?: string } | null;
+      if (data?.type === UD_DIRECT_RETRY) this.redialNow("retry pressed", true);
+    });
+  }
+
+  /** Redial unless the link is fine. `force` also redials a link that never went live. */
+  redialNow(why: string, force = false): void {
+    const st = this.status.state;
+    const pc = this.pc;
+    if (st === "live" && pc && pc.connectionState === "connected") return;
+    if (!this.wasLive && !force) return;
+    if (this.dialing && st !== "live") return;
+    this.mark(`redial: ${why}`);
+    window.clearTimeout(this.redialTimer);
+    this.redialTimer = 0;
+    this.redialMs = 0;
+    // A live or stalled (disconnected) link is dropped before the new one dials.
+    if (st === "live" || (this.pc && !this.dialing)) this.fail("Link went quiet.");
+    this.retry();
+  }
+
+  /** Next backoff redial; none while the page is hidden (a wake event redials). */
+  private scheduleRedial() {
+    window.clearTimeout(this.redialTimer);
+    this.redialTimer = 0;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    this.redialMs = this.redialMs ? Math.min(this.redialMs * 2, REDIAL_MAX_MS) : REDIAL_MIN_MS;
+    this.redialTimer = window.setTimeout(() => {
+      this.redialTimer = 0;
+      if (this.status.state === "reconnecting" && !this.dialing) this.retry();
+    }, this.redialMs);
   }
 
   // ── lifecycle ────────────────────────────────────────────────────────────
@@ -262,9 +323,13 @@ export class DirectTransport {
   }
 
   async connect(): Promise<void> {
-    if (this.status.state === "connecting") return;
+    if (this.dialing || this.status.state === "live") return;
+    this.dialing = true;
+    window.clearTimeout(this.redialTimer);
+    this.redialTimer = 0;
     this.attempt += 1;
-    this.setStatus("connecting", "");
+    const resuming = this.wasLive;
+    this.setStatus(resuming ? "reconnecting" : "connecting", resuming ? this.status.reason : "");
     const t0 = performance.now();
     this.t0 = t0;
     this.mark(`connect attempt ${this.attempt}`);
@@ -299,15 +364,22 @@ export class DirectTransport {
       const st = pc.connectionState;
       this.mark(`connection ${st}`);
       if (st === "connected") {
+        if (this.pc !== pc) return;
+        this.dialing = false;
+        this.redialMs = 0;
+        this.wasLive = true;
         this.setStatus("live", "");
+        // Events sent while the link was down never arrive: views reload instead.
+        if (resuming) for (const fn of this.eventListeners) fn({ type: REMOTE_RESYNC } as unknown as AgentEvent);
         if (this.rpc?.readyState === "open") this.flushQueued();
         if (this.blob?.readyState === "open") this.flushBlobs();
         this.bridge.report({ connect_ms: Math.round(performance.now() - t0), candidate: "" });
         void this.reportCandidatePair();
       } else if (st === "failed" || st === "closed") {
+        if (this.pc !== pc) return;
         this.fail(this.status.state === "live" ? "Peer connection dropped." : "Peer connection failed.");
-      } else if (st === "disconnected" && this.status.state === "live") {
-        this.setStatus("connecting", "Reconnecting…");
+      } else if (st === "disconnected" && this.status.state === "live" && this.pc === pc) {
+        this.setStatus("reconnecting", "Reconnecting…");
       }
     };
     try {
@@ -329,7 +401,7 @@ export class DirectTransport {
       if (desktopVersion && compareVersions(desktopVersion, this.config.panelVersion) < 0) {
         this.status.desktopVersion = desktopVersion;
       }
-      if (pc.signalingState === "closed") return;
+      if (pc.signalingState === "closed" || this.pc !== pc) return;
       await pc.setRemoteDescription({ type: "answer", sdp: reply.answer.sdp });
       this.mark("answer set");
       this.status.desktopVersion = desktopVersion;
@@ -338,13 +410,16 @@ export class DirectTransport {
         if (this.pc === pc && pc.connectionState !== "connected") this.fail("No peer-to-peer path in time (network may block UDP).");
       }, budget);
     } catch (err) {
-      this.fail(`Signaling failed: ${String((err as Error)?.message || err)}`);
+      if (this.pc === pc) this.fail(`Signaling failed: ${String((err as Error)?.message || err)}`);
     }
   }
 
   private fail(reason: string) {
     if (this.status.state === "failed") return;
-    this.setStatus("failed", reason);
+    // Already torn down (a second state change for the same dead link).
+    if (this.status.state === "reconnecting" && !this.pc && !this.dialing) return;
+    this.dialing = false;
+    this.setStatus(this.wasLive ? "reconnecting" : "failed", reason);
     const pc = this.pc;
     if (pc) {
       // Keep enough to diagnose a failed link from the console alone.
@@ -378,6 +453,7 @@ export class DirectTransport {
       p.reject(new Error(reason));
     }
     this.pending.clear();
+    if (this.wasLive) this.scheduleRedial();
   }
 
   private teardown() {
@@ -402,7 +478,9 @@ export class DirectTransport {
   }
 
   retry(): void {
-    this.status = { ...this.status, state: "idle" };
+    window.clearTimeout(this.redialTimer);
+    this.redialTimer = 0;
+    if (this.status.state === "failed") this.status = { ...this.status, state: "idle" };
     void this.connect();
   }
 
@@ -410,7 +488,7 @@ export class DirectTransport {
   restart(reason: string): void {
     if (this.status.state === "idle") return;
     this.mark(`restart: ${reason}`);
-    if (this.status.state !== "failed") this.fail(reason);
+    if (this.status.state === "live" || this.dialing) this.fail(reason);
     this.retry();
   }
 
@@ -451,6 +529,7 @@ export class DirectTransport {
         else pieces.forEach((data, part) => ch.send(JSON.stringify({ id, part, of: pieces.length, data })));
       };
       if (this.status.state === "live" && this.rpc?.readyState === "open") send();
+      // A redial in progress (or waiting on a wake): the call goes once the link is back.
       else if (this.status.state === "failed") reject(new Error(this.status.reason || "desktop not connected"));
       else {
         this.queuedInvokes.push(send);
@@ -752,21 +831,6 @@ export class DirectStreamSocket {
   }
 }
 
-function waitIceGathering(pc: RTCPeerConnection, maxMs: number): Promise<void> {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => {
-      pc.removeEventListener("icegatheringstatechange", check);
-      resolve();
-    };
-    const check = () => {
-      if (pc.iceGatheringState === "complete") done();
-    };
-    pc.addEventListener("icegatheringstatechange", check);
-    window.setTimeout(done, maxMs);
-  });
-}
-
 function concat(chunks: Uint8Array[]): Uint8Array {
   let n = 0;
   for (const c of chunks) n += c.byteLength;
@@ -777,6 +841,29 @@ function concat(chunks: Uint8Array[]): Uint8Array {
     o += c.byteLength;
   }
   return out;
+}
+
+/** How long the first open waits for the Service Worker before drawing anyway. */
+export const SW_CONTROL_WAIT_MS = 3_000;
+
+/**
+ * Resolves once the Service Worker controls this page (or after `maxMs`). On a first
+ * open, or right after the worker updated, the page starts uncontrolled: pictures it
+ * asks for then (plugin icons, custom duckies) go to the site, 404, and stay broken,
+ * since nothing asks for them again. sw.js claims its clients on activate.
+ */
+export function serviceWorkerControl(maxMs = SW_CONTROL_WAIT_MS): Promise<void> {
+  const sw = typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+  if (!sw || sw.controller) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer);
+      sw.removeEventListener("controllerchange", done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, maxMs);
+    sw.addEventListener("controllerchange", done);
+  });
 }
 
 /**

@@ -10,6 +10,7 @@ import { runSpeechErrorAction, speechErrorActionLabel } from "./speechErrors";
 import { userAwaitsReply } from "./spokenReplyGate";
 import { prewarmSpeech } from "./transcriptionSession";
 import { useDictation, type VoiceNotice } from "./useDictation";
+import { holdAwake } from "./nativeKeepAlive";
 import { useIsLiveChat } from "./useLiveChatPresence";
 import { useLiveVoiceMode } from "./useLiveVoiceMode";
 import { VoiceOverlay } from "./VoiceOverlay";
@@ -246,6 +247,8 @@ export function VoiceControls({
     onFinal: draftFinal,
     onSessionChange: (active) => {
       dictatingRef.current = active;
+      // A phone stays awake while you dictate (the screen used to time out mid-sentence).
+      holdAwake("dictation", active);
       if (active) beginComposerDraft();
       else endComposerDraft();
     },

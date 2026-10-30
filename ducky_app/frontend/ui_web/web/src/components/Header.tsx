@@ -684,7 +684,7 @@ export function Header({
                   disabled={workflowAction.busy}
                   title="Push Verse changes"
                 >
-                  <img src="/verse-workflow/verse-icon-upload.svg" alt="" draggable={false} />
+                  <img src="./verse-workflow/verse-icon-upload.svg" alt="" draggable={false} />
                 </button>
               ) : null}
             </div>

@@ -1796,6 +1796,9 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       const unsubStatus = direct.onStatus((st) => {
         if (closed) return;
         if (st.state === "failed") fail(st.reason || "Desktop connection lost.");
+        // The link dropped under a live picture: start over, so the watch is asked again
+        // once the transport has redialed (the desktop's old session is gone).
+        else if (st.state === "reconnecting" && live) fail("Reconnecting…");
       });
       void direct.invoke("watch_window", [{ hwnd }]).then(
         () => {

@@ -64,7 +64,8 @@ it("retains visited chats by ID, their draft and scroll DOM, without reloading o
   expect(paneA.dataset.visible).toBe("false");
   expect(view.queryByTestId("c")).toBeNull();
   view.rerender(<EditorGroupPane {...props("settings")} />);
-  expect(view.getByText("Settings")).toBeTruthy();
+  // Settings loads on first open (its own chunk), so it shows a beat later.
+  expect(await view.findByText("Settings")).toBeTruthy();
   view.rerender(<EditorGroupPane {...props("chat-a")} />);
   expect(view.getByTestId("a")).toBe(paneA);
   expect(paneA.parentElement?.hidden).toBe(false);

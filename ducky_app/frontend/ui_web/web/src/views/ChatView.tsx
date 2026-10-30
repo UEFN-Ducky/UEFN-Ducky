@@ -103,7 +103,6 @@ import { collectActiveTabIds, collectTabIds, findGroupForTab } from "../utils/ed
 import { formatAskDraft } from "../utils/formatAskDraft";
 import { openChatBesideFile } from "../utils/openChatBesideFile";
 import { enqueueComposerDraft } from "../hooks/chatComposerCache";
-import { syncAskAiMenuItems } from "../verse-editor/monaco/registerAskAiContextMenu";
 import { shouldSplitFollowTabs } from "../verse-editor/queue/followCodeSettings";
 import { VerseEditorProvider, useVerseEditorOptional } from "../verse-editor";
 import { useUiTarget } from "../ui-targets/registry";
@@ -921,13 +920,13 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   useRegisterProblemsDuckyHandlers(problemsDuckyHandlers);
 
   useEffect(() => {
-    syncAskAiMenuItems(
-      allChats.map((c) => ({
-        id: c.id,
-        name: c.name,
-        iconUrl: resolveUrl(c.duckyStyle),
-      })),
-    );
+    const items = allChats.map((c) => ({
+      id: c.id,
+      name: c.name,
+      iconUrl: resolveUrl(c.duckyStyle),
+    }));
+    // Loaded on demand: it pulls Monaco's menu registry into the first bundle otherwise.
+    void import("../verse-editor/monaco/registerAskAiContextMenu").then((m) => m.syncAskAiMenuItems(items));
   }, [allChats, resolveUrl]);
 
   const [filesRefresh, setFilesRefresh] = useState(0);

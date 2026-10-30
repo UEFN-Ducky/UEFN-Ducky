@@ -10,6 +10,7 @@ Delete this file (+ the one-line hooks) to remove the feature.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,28 @@ def plugin_ui_csp(mime: str) -> str | None:
     return None
 
 
+def content_etag(data: bytes) -> str:
+    """Strong ETag for bytes about to be sent. The phone panel's Service Worker caches only
+    responses that carry one, and asks again with If-None-Match, so an unchanged icon
+    costs a 304 instead of its bytes over WebRTC on every open."""
+    return '"' + hashlib.blake2b(data, digest_size=12).hexdigest() + '"'
+
+
+def send_not_modified(handler: Any, etag: str, cors: bool = False) -> bool:
+    """Answer 304 (and return True) when the request's If-None-Match already has ``etag``."""
+    headers = getattr(handler, "headers", None)
+    asked = (headers.get("If-None-Match") if headers is not None else None) or ""
+    tags = {t.strip().removeprefix("W/") for t in asked.split(",") if t.strip()}
+    if not tags or (etag not in tags and "*" not in tags):
+        return False
+    handler.send_response(304)
+    handler.send_header("ETag", etag)
+    if cors:
+        handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.end_headers()
+    return True
+
+
 def send_plugin_ui_error(handler: Any, code: int) -> None:
     """404/403 for plugin-ui with CORS so opaque-origin fetch() sees the status."""
     handler.send_response(code)
@@ -227,10 +250,14 @@ def try_serve_plugin_ui(handler: Any, rel_path: str) -> bool:
 def _send_plugin_ui_bytes(handler: Any, data: bytes, mime: str) -> None:
     # Opaque-origin iframes need CORS to load sibling assets if they ever use fetch;
     # for classic <script src> / <link> same-document loads this is unused but harmless.
+    etag = content_etag(data)
+    if send_not_modified(handler, etag, cors=True):
+        return
     handler.send_response(200)
     handler.send_header("Content-Type", mime)
     handler.send_header("Content-Length", str(len(data)))
     handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("ETag", etag)
     handler.send_header("Access-Control-Allow-Origin", "*")
     csp = plugin_ui_csp(mime)
     if csp:
@@ -277,10 +304,14 @@ def try_serve_user_sound(handler: Any, rel_path: str) -> bool:
         return True
 
     mime = mime_for_path(target.name)
+    etag = content_etag(data)
+    if send_not_modified(handler, etag, cors=True):
+        return True
     handler.send_response(200)
     handler.send_header("Content-Type", mime)
     handler.send_header("Content-Length", str(len(data)))
     handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("ETag", etag)
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.end_headers()

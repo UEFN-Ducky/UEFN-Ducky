@@ -31,6 +31,7 @@ import {
   blobPathAllowed,
   sdpFingerprint,
   splitText,
+  waitIceGathering,
   type BlobRequest,
   type RpcRequest,
   type StreamOpen,
@@ -439,21 +440,6 @@ function openStream(s: Session, open: StreamOpen & { id?: string }): { ok: boole
     }
   };
   return { ok: true, result: { id } };
-}
-
-function waitIceGathering(pc: RTCPeerConnection, maxMs: number): Promise<void> {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => {
-      pc.removeEventListener("icegatheringstatechange", check);
-      resolve();
-    };
-    const check = () => {
-      if (pc.iceGatheringState === "complete") done();
-    };
-    pc.addEventListener("icegatheringstatechange", check);
-    window.setTimeout(done, maxMs);
-  });
 }
 
 export function directPeerSessionCount(): number {

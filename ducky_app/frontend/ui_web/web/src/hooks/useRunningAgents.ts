@@ -5,6 +5,7 @@ import { getApi } from "./usePanelApi";
 import { agentEventRunningSignal } from "./chatRun/runningSignal";
 import { syncChatTurnTimersFromRunningSet } from "./chatTurnTimer";
 import { subscribeAgentEvents } from "./useAgentEventBus";
+import { REMOTE_RESYNC } from "../remote/protocol";
 
 /** Module-level running set so every consumer shares one poll + one event subscription. */
 let _runningIds = new Set<string>();
@@ -33,6 +34,11 @@ function _setRunning(next: Set<string>, at = Date.now()) {
 }
 
 function _applyEvent(event: AgentEvent) {
+  // Phone link back after a drop: starts and stops sent meanwhile never arrived.
+  if (event.type === REMOTE_RESYNC) {
+    void _syncFromApi().catch(() => undefined);
+    return;
+  }
   const convId = event.conv_id;
   // A finished turn's replayed start+stop made a "Took 0ms" clock; the API sync
   // that runs on load already knows which chats are running.

@@ -9,7 +9,7 @@ export function VerseDiagnosticIcon({ errors, warnings, size = 13 }: VerseDiagno
   if (errors > 0) {
     return (
       <img
-        src="/verse-workflow/verse-icon-error.svg"
+        src="./verse-workflow/verse-icon-error.svg"
         alt=""
         width={size}
         height={size}
@@ -21,7 +21,7 @@ export function VerseDiagnosticIcon({ errors, warnings, size = 13 }: VerseDiagno
   if (warnings > 0) {
     return (
       <img
-        src="/verse-workflow/verse-icon-warning.svg"
+        src="./verse-workflow/verse-icon-warning.svg"
         alt=""
         width={size}
         height={size}

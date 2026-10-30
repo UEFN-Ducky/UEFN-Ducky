@@ -6,6 +6,7 @@ import { getCachedChatMessages, setCachedChatMessages } from "./chatMessagesCach
 import { CHAT_LOAD_TIMEOUT_MS, ChatLoadTimeout, fetchChatRows, firstLoadReport, spliceTail, withTimeout } from "./chatRowsFetch";
 import { getApi } from "./usePanelApi";
 import { useAgentEventSubscription } from "./useAgentEventBus";
+import { REMOTE_RESYNC } from "../remote/protocol";
 import {
   chatRunReducer,
   initialRunState,
@@ -268,12 +269,30 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   // dispatch is stable, so this subscription is installed once and never churns.
   const onEvent = useCallback(
     (event: AgentEvent) => {
+      // Phone link back after a drop: this chat's events meanwhile never arrived. Ask
+      // whether its run is still going (else it stays "Running…"), then pull the tail.
+      if (event.type === REMOTE_RESYNC) {
+        void (async () => {
+          const api = getApi();
+          if (stateRef.current.status === "running" && api?.list_running_agents) {
+            try {
+              const live = (await withTimeout(api.list_running_agents(), 5_000)).includes(chatId);
+              dispatch({ type: "reconcile", running: live });
+              if (!live) return; // reconcile bumped reloadToken: that reload pulls the tail
+            } catch {
+              // Load anyway; the reconcile timer still covers the run state.
+            }
+          }
+          void load();
+        })();
+        return;
+      }
       if (event.conv_id && event.conv_id !== chatId) return;
       // A write warning is for the chat that wrote; one with no chat (a disk change) is no chat's.
       if (event.type === "file_guard" && event.conv_id !== chatId) return;
       dispatch({ type: "agentEvent", event });
     },
-    [chatId],
+    [chatId, load],
   );
   useAgentEventSubscription(chatId, onEvent, [onEvent]);
 

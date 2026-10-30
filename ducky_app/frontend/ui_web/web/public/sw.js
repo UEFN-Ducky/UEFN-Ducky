@@ -12,14 +12,16 @@
  * worker strips the scope prefix again before asking the desktop, so the
  * desktop always sees the plain "/plugin-ui/…" path it serves.
  */
-// Keep in sync with BLOB_PREFIXES in src/remote/protocol.ts.
+// Desktop-owned paths: a subset of BLOB_PREFIXES in src/remote/protocol.ts.
+// The built-in duckies/*.png ship with the panel, so the site serves them (cached,
+// before the PC is even connected); only uploaded ones (duckies/custom/) live on the PC.
 const PREFIXES = [
   "plugin-ui/",
   "user-sounds/",
   "tool-captures/",
   "chat-attachments/",
   "generated-images/",
-  "duckies/",
+  "duckies/custom/",
   "model-files/",
   "workflow-media/",
 ];

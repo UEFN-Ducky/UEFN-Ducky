@@ -4,7 +4,6 @@ import type { AgentEvent, ChatPlan, GroupMemberDto, PlanNode } from "../types/pa
 import { getApi } from "../hooks/usePanelApi";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import { useRunningAgents } from "../hooks/useRunningAgents";
-import { getChatTurnTimer } from "../hooks/chatTurnTimer";
 import { getCachedChatMessages } from "../hooks/chatMessagesCache";
 import { agentStepText, buildActivityLines, activityPanelTitle, splitTurnMessages } from "../utils/agentActivity";
 import { requestOpenChatTab } from "../navigation/openChatReference";
@@ -166,7 +165,8 @@ export function PlanOwnerChips({ ownerId, activeOnly = false, nodeId }: { ownerI
   const tracked = useRef(new Set([ownerId]));
   const waiting = useRef(new Map<string, Set<string>>());
   const [activity, setActivity] = useState<Record<string, string>>({});
-  const [now, setNow] = useState(Date.now());
+  // Re-render when a linked agent starts or stops (the waiting set is a ref).
+  const [, setNow] = useState(Date.now());
   const running = useRunningAgents();
   // Group members come from the shared roster store: one group_members call per group for every chip.
   const roster = useRoster(owner.members !== undefined ? ownerId : "");
@@ -202,15 +202,6 @@ export function PlanOwnerChips({ ownerId, activeOnly = false, nodeId }: { ownerI
   const assigned = nodeId ? members?.filter(member => member.observation?.assignment?.node_id === nodeId) : undefined;
   const shown = assigned?.length ? assigned : members || [];
   const chips: Owner[] = [owner, ...shown.map(member => ({ id: member.member_conv_id, name: member.name || member.ducky_name || member.member_conv_id, style: member.ducky_style }))];
-  // Only a running chip shows a clock. A plan renders one of these per assigned step, and
-  // each used to re-render every second whether anyone was working or not.
-  const ticking = chips.some(chip => running.has(chip.id) && getChatTurnTimer(chip.id)?.startedAt);
-  useEffect(() => {
-    if (!ticking) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [ticking]);
   return <div className="plan-owner-chips" aria-label="Plan owners">
     {chips.filter(chip => !activeOnly || running.has(chip.id)).map(chip => {
       const isRunning = running.has(chip.id);
@@ -218,15 +209,12 @@ export function PlanOwnerChips({ ownerId, activeOnly = false, nodeId }: { ownerI
       const lines = cached ? buildActivityLines(splitTurnMessages(cached.messages, isRunning).turnMessages, cached.streamBuffer, cached.streamThinking) : [];
       const awaiting = waiting.current.get(chip.id)?.size || 0;
       const label = isRunning ? awaiting ? "Waiting for reply" : activity[chip.id] || activityPanelTitle(lines, false, 0, undefined, cached?.run?.statusText || "Working") : "Idle";
-      const start = getChatTurnTimer(chip.id)?.startedAt;
-      const seconds = start ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
-      const duration = isRunning && start ? ` ${Math.floor(seconds / 60)}m ${seconds % 60}s` : "";
       return <button key={chip.id} type="button" className="plan-owner-chip" data-running={isRunning} onClick={() => {
         requestLatestChatActivity(chip.id);
         requestOpenChatTab(chip.id, chip.name);
       }} title={`Open ${chip.name} at latest activity`}>
         <DuckyAvatar styleId={chip.style} size={20} />
-        <span>{chip.name}</span><span className="plan-owner-activity">{label}{duration}</span>
+        <span>{chip.name}</span><span className="plan-owner-activity">{label}</span>
       </button>;
     })}
   </div>;

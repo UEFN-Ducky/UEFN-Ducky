@@ -171,7 +171,7 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
                 <span className="agent-activity-panel-thinking-dots" aria-hidden="true" />
               ) : null}
             </span>
-            {quiet || chatId ? (
+            {quiet || (chatId && showIdleTimer) ? (
               <span className="agent-activity-panel-meta">
                 {quiet ? (
                   <span className="agent-activity-panel-quiet" title={QUIET_HINT}>
@@ -179,13 +179,10 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
                     {lastDone ? ` · last: ${lastDone.text}` : ""}
                   </span>
                 ) : null}
-                {chatId ? (
-                  <ElapsedTimer
-                    chatId={chatId}
-                    when={showIdleTimer ? "idle" : "live"}
-                    idlePrefix="Took"
-                    className="elapsed-timer--footer"
-                  />
+                {/* Only "Took X" once done: a clock counting up while it works read like an
+                    estimate of when it ends. */}
+                {chatId && showIdleTimer ? (
+                  <ElapsedTimer chatId={chatId} when="idle" idlePrefix="Took" className="elapsed-timer--footer" />
                 ) : null}
               </span>
             ) : null}

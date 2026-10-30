@@ -34,11 +34,12 @@ it("counts the leaves of the section assigned to an agent", () => {
   expect(subPlanProgress(nodes, "nobody")).toBeNull();
 });
 
-it("a waited-on agent with 3/5 steps shows a 60% bar, its detail and minutes; click opens it", () => {
+it("a waited-on agent with 3/5 steps shows a 60% bar and its detail, never the time spent; click opens it", () => {
   upsertBackgroundJob({ id: "j", convId: "verify", phase: "working", detail: "Running a script", startedAt: NOW - 11.5 * MIN });
   const onOpen = vi.fn();
   render(<WorkProgressBar rows={one({ done: 3, total: 5 })} onOpen={onOpen} />);
-  expect(screen.getByText("Running a script · 11 min")).toBeTruthy();
+  expect(screen.getByText("Running a script")).toBeTruthy();
+  expect(screen.queryByText(/11 min/)).toBeNull();
   expect(screen.queryByText("Verify")).toBeNull();
   expect(screen.getByRole("button").title).toBe("Verify");
   expect(bars()).toHaveLength(1);
@@ -56,7 +57,7 @@ it("an expected 15 min run 12 min in shows ~3 min left and an 80% run bar", () =
   upsertBackgroundJob({ id: "j", convId: "verify", phase: "working", detail: "Running a script",
     startedAt: NOW - 12 * MIN, expectStartedAt: NOW - 12 * MIN, expectedMs: 15 * MIN });
   render(<WorkProgressBar rows={one()} onOpen={() => {}} />);
-  expect(screen.getByText("Running a script · 12 min · ~3 min left")).toBeTruthy();
+  expect(screen.getByText("Running a script · ~3 min left")).toBeTruthy();
   const run = bars()[1];
   expect(run.value / run.max).toBeCloseTo(0.8);
 });
@@ -72,7 +73,8 @@ it("past the expected time says taking longer and caps the run bar at 95%", () =
   upsertBackgroundJob({ id: "j", convId: "verify", phase: "working", startedAt: NOW - 18 * MIN,
     expectStartedAt: NOW - 18 * MIN, expectedMs: 15 * MIN });
   render(<WorkProgressBar rows={one()} onOpen={() => {}} />);
-  const text = screen.getByText("taking longer than expected · 18 min", { exact: false });
+  const text = screen.getByText("taking longer than expected", { exact: false });
+  expect(text.textContent).not.toContain("18 min");
   expect(text.className).toContain("work-progress__late");
   const run = bars()[1];
   expect(run.value / run.max).toBeCloseTo(0.95);
@@ -87,14 +89,13 @@ it("shows three rows then +N more, and nothing when idle", () => {
   expect(container.innerHTML).toBe("");
 });
 
-it("ticks every 30 s only while shown and clears the interval on unmount", () => {
+it("ticks every 30 s only while shown (the time left counts down) and clears the interval on unmount", () => {
   const clear = vi.spyOn(window, "clearInterval");
-  upsertBackgroundJob({ id: "j", convId: "a", phase: "working", startedAt: NOW });
+  upsertBackgroundJob({ id: "j", convId: "a", phase: "working", startedAt: NOW, expectStartedAt: NOW, expectedMs: 5 * MIN });
   const { unmount } = render(<WorkProgressBar rows={[{ convId: "a", name: "A", progress: null }]} onOpen={() => {}} />);
-  // Just started: no time yet, never "<1 min".
-  expect(screen.queryByText(/min/)).toBeNull();
+  expect(screen.getByText("~5 min left")).toBeTruthy();
   act(() => { vi.advanceTimersByTime(MIN); });
-  expect(screen.getByText("1 min")).toBeTruthy();
+  expect(screen.getByText("~4 min left")).toBeTruthy();
   expect(vi.getTimerCount()).toBeGreaterThan(0);
   unmount();
   expect(clear).toHaveBeenCalled();

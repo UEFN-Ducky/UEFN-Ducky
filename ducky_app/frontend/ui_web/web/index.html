@@ -77,6 +77,10 @@
       <img src="./OnlineMCPIcon.png" width="72" height="72" alt="" />
       <div class="boot-splash-spinner" aria-hidden="true"></div>
     </div>
+    <script>
+      // The phone panel sits under the site's own Remote View loading screen: no second logo.
+      if (/[?&]direct=/.test(location.search)) document.getElementById("boot-splash").classList.add("boot-splash--done");
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -8,9 +8,12 @@ import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { requestFocusGraph } from "../hooks/graphActivity";
 import { requestOpenChatTab } from "../navigation/openChatReference";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
+import { getFocusedChatForAsk, onFocusedChatChange } from "../ask-user/focusedChatForAsk";
 
 export const UD_OPEN_TARGET = "ud-open-target";
 export const UD_OPEN_TARGET_ACK = "ud-open-target-ack";
+/** The chat on screen, so the phone page can reopen it after a reload. */
+export const UD_CURRENT_TARGET = "ud-current-target";
 const PARENT_ORIGIN = "https://uefnducky.org";
 const ID = /^[A-Za-z0-9_.:-]{1,80}$/;
 
@@ -70,9 +73,16 @@ export function installOpenFromParent(): () => void {
     }, 250);
   };
   window.addEventListener("message", onMessage);
+  const tellParent = (id: string) => {
+    if (!ID.test(id)) return;
+    window.parent.postMessage({ type: UD_CURRENT_TARGET, kind: "chat", id }, PARENT_ORIGIN);
+  };
+  const stopFocus = onFocusedChatChange(tellParent);
+  tellParent(getFocusedChatForAsk());
   return () => {
     window.removeEventListener("message", onMessage);
     window.clearInterval(timer);
+    stopFocus();
   };
 }
 

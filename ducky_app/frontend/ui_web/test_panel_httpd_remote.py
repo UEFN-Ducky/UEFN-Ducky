@@ -385,6 +385,39 @@ def test_the_pc_link_gets_plugin_pages_and_the_ui_kit_from_the_panel_server(pane
     assert '"/plugin-ui/"' in protocol.read_text(encoding="utf-8")  # the blob channel may carry them
 
 
+def test_plugin_icons_answer_304_when_the_phone_already_has_them(panel_server, monkeypatch, tmp_path):
+    # Oct 29 2026: no ETag on anything the PC served, so the phone panel's Service Worker
+    # (it caches only responses with one) fetched every header icon over WebRTC on every
+    # open. Now each answer carries an ETag and a repeat with If-None-Match is a 304.
+    import urllib.error
+    import urllib.request
+
+    from backend.uefn_plugins import webview
+
+    icon = tmp_path / "icon.svg"
+    icon.write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setattr(webview, "resolve_plugin_ui_file", lambda pid, rel: icon if (pid, rel) == ("forge", "icon.svg") else None)
+    url = f"http://127.0.0.1:{panel_server}/plugin-ui/forge/icon.svg"
+
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"Host": "127.0.0.1"}), timeout=10) as resp:
+        assert resp.status == 200
+        etag = resp.headers["ETag"]
+        assert etag and etag.startswith('"')
+        assert resp.read() == b"<svg/>"
+
+    again = urllib.request.Request(url, headers={"Host": "127.0.0.1", "If-None-Match": etag})
+    try:
+        urllib.request.urlopen(again, timeout=10)
+        raise AssertionError("expected 304")
+    except urllib.error.HTTPError as err:
+        assert err.code == 304
+        assert err.headers["ETag"] == etag
+
+    icon.write_text("<svg id='new'/>", encoding="utf-8")
+    with urllib.request.urlopen(again, timeout=10) as resp:
+        assert resp.status == 200 and resp.headers["ETag"] != etag
+
+
 def test_app_scripts_keep_their_type_when_the_registry_says_text_plain(panel_server, monkeypatch, tmp_path):
     # Oct 17 2026: a PC whose registry maps .js to text/plain never got past the boot
     # splash, because WebView2 refuses a module script that isn't served as JavaScript.

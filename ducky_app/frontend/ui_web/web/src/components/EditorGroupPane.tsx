@@ -8,8 +8,6 @@ import { FileEditorPane } from "./FileEditorPane";
 import { ChatPane } from "./ChatPane";
 import { PlanPane } from "./PlanPane";
 import { ProviderUsageReport } from "./usage/ProviderUsageReport";
-import { TerminalPane } from "../terminal/TerminalPane";
-import { SettingsView } from "../views/SettingsView";
 import { PluginWebviewPane } from "../plugin-ui";
 import { backgroundMountVersion, subscribeBackgroundMounts, wantsBackgroundMount } from "../plugin-ui/openPluginUiTab";
 import { DucktactoeChatShell } from "../plugin-ui/DucktactoeChatShell";
@@ -30,6 +28,10 @@ import {
 } from "../utils/sidebarDragOut";
 
 const ChangesView = lazy(() => import("./changes/ChangesView").then((m) => ({ default: m.ChangesView })));
+// Loaded when first opened: xterm (~280 KB) and Settings (~190 KB) kept the phone parsing
+// them before the first chat could show.
+const TerminalPane = lazy(() => import("../terminal/TerminalPane").then((m) => ({ default: m.TerminalPane })));
+const SettingsView = lazy(() => import("../views/SettingsView").then((m) => ({ default: m.SettingsView })));
 const AutomationsView = lazy(() =>
   import("../automations/AutomationsView").then((m) => ({ default: m.AutomationsView })),
 );
@@ -332,16 +334,22 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     if (activeTab.kind === "terminal" && activeTab.terminalSessionId && activeTab.terminalWsUrl) {
       if (!terminalsEnabled) return null;
       return (
-        <TerminalPane
-          sessionId={activeTab.terminalSessionId}
-          wsUrl={activeTab.terminalWsUrl}
-          visible
-          variant={paneVariant}
-        />
+        <Suspense fallback={null}>
+          <TerminalPane
+            sessionId={activeTab.terminalSessionId}
+            wsUrl={activeTab.terminalWsUrl}
+            visible
+            variant={paneVariant}
+          />
+        </Suspense>
       );
     }
     if (activeTab.kind === "settings") {
-      return <SettingsView />;
+      return (
+        <Suspense fallback={null}>
+          <SettingsView />
+        </Suspense>
+      );
     }
     if (activeTab.kind === "changes") {
       return (

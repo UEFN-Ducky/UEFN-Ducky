@@ -8,7 +8,8 @@ vi.mock("../navigation/openChatReference", () => ({ requestOpenChatTab: (id: str
 vi.mock("../hooks/graphActivity", () => ({ requestFocusGraph: (id: string) => focusGraph(id) }));
 vi.mock("../navigation/openWorkflowsTab", () => ({ requestOpenWorkflowsTab: () => openWorkflows() }));
 
-import { installOpenFromParent, parseOpenTarget, UD_OPEN_TARGET, UD_OPEN_TARGET_ACK } from "./openFromParent";
+import { installOpenFromParent, parseOpenTarget, UD_CURRENT_TARGET, UD_OPEN_TARGET, UD_OPEN_TARGET_ACK } from "./openFromParent";
+import { _resetFocusedChatForAsk, setFocusedChatForAsk } from "../ask-user/focusedChatForAsk";
 
 describe("parseOpenTarget", () => {
   it("takes chats and workflows with a safe id", () => {
@@ -67,6 +68,20 @@ describe("installOpenFromParent", () => {
     expect(focusGraph).toHaveBeenCalledWith("wf1");
     expect(openWorkflows).toHaveBeenCalled();
     stop();
+  });
+
+  it("tells the phone which chat is on screen, so a reload reopens it", () => {
+    const { postMessage } = framed();
+    _resetFocusedChatForAsk();
+    setFocusedChatForAsk("c_before");
+    const stop = installOpenFromParent();
+    expect(postMessage).toHaveBeenCalledWith({ type: UD_CURRENT_TARGET, kind: "chat", id: "c_before" }, "https://uefnducky.org");
+    setFocusedChatForAsk("c_next");
+    expect(postMessage).toHaveBeenLastCalledWith({ type: UD_CURRENT_TARGET, kind: "chat", id: "c_next" }, "https://uefnducky.org");
+    stop();
+    setFocusedChatForAsk("c_after_stop");
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ id: "c_after_stop" }), expect.anything());
+    _resetFocusedChatForAsk();
   });
 
   it("ignores other origins and other senders", () => {

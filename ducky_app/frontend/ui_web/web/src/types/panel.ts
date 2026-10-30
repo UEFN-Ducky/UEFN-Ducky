@@ -2099,7 +2099,9 @@ export interface AgentEvent {
     | "model_adopted"
     | "provider_not_connected"
     | "user_steered"
-    | "run_expect";
+    | "run_expect"
+    /** Phone panel only (local): the link to the PC is back after a drop; reload what was missed. */
+    | "remote_resync";
   text?: string;
   /** run_expect: how long the chat's running sandbox/terminal command should take (ms, 0 = ended). */
   expected_ms?: number;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PlanNode } from "../types/panel";
 import { useBackgroundActivity, type BackgroundJob } from "../hooks/backgroundActivity";
-import { formatMinutes, getChatTurnTimer } from "../hooks/chatTurnTimer";
+import { formatMinutes } from "../hooks/chatTurnTimer";
 import "./WorkProgressBar.css";
 
 export type WorkProgress = { done: number; total: number };
@@ -51,7 +51,9 @@ function runEta(job: BackgroundJob | undefined, now: number): RunEta | null {
   return { elapsed, expected, label: `${job.estimated ? "about " : "~"}${time} left`, late: false };
 }
 
-/** Rows above the composer, one line each: what the waited-on chat does, for how long, how far along (its name is the tooltip). */
+/** Rows above the composer, one line each: what the waited-on chat does, the time left when
+ *  its run has an estimate, how far along (its name is the tooltip). Never the time spent:
+ *  "49 min" read like an estimate and said nothing about when it ends. */
 export function WorkProgressBar({ rows, onOpen }: { rows: WorkRow[]; onOpen: (convId: string) => void }) {
   const { jobs } = useBackgroundActivity();
   const [now, setNow] = useState(Date.now);
@@ -69,13 +71,8 @@ export function WorkProgressBar({ rows, onOpen }: { rows: WorkRow[]; onOpen: (co
     <div className="work-progress" role="status">
       {rows.slice(0, MAX_ROWS).map((row) => {
         const job = jobs.find((j) => j.phase === "working" && j.convId === row.convId);
-        const startedAt = job?.startedAt || getChatTurnTimer(row.convId)?.startedAt;
-        // Nothing until a whole minute has passed: "<1 min" on a run that just started says nothing.
-        const minutes = startedAt && now - startedAt >= 60_000 ? formatMinutes(now - startedAt) : "";
         const eta = runEta(job, now);
-        const meta = (eta?.late ? [job?.detail, eta.label, minutes] : [job?.detail, minutes, eta?.label])
-          .filter(Boolean)
-          .join(" · ");
+        const meta = [job?.detail, eta?.label].filter(Boolean).join(" · ");
         const p = row.progress;
         return (
           <button key={row.convId} type="button" className="work-progress__row" title={row.name} onClick={() => onOpen(row.convId)}>

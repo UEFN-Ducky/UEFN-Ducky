@@ -77,6 +77,52 @@ describe("native keep-alive", () => {
     setLiveVoiceChat("c", false);
   });
 
+  it("dictation alone keeps the phone awake, and live + dictation stays awake until both end", async () => {
+    const plugin = installPlugin();
+    const { setLiveVoiceChat } = await freshLiveChats();
+    const { holdAwake } = await import("./nativeKeepAlive");
+    holdAwake("dictation", true);
+    expect(plugin.start).toHaveBeenCalledTimes(1);
+    setLiveVoiceChat("a", true);
+    holdAwake("dictation", false);
+    expect(plugin.stop).not.toHaveBeenCalled();
+    setLiveVoiceChat("a", false);
+    expect(plugin.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the screen wake lock while awake and asks again when the page comes back", async () => {
+    const release = vi.fn(async () => {});
+    const request = vi.fn(async () => ({ release, addEventListener: () => {} }));
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request } });
+    const { setLiveVoiceChat } = await freshLiveChats();
+    const { holdAwake } = await import("./nativeKeepAlive");
+    holdAwake("dictation", true);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
+    holdAwake("dictation", false);
+    await vi.waitFor(() => expect(release).toHaveBeenCalled());
+    setLiveVoiceChat("a", false);
+    delete (navigator as { wakeLock?: unknown }).wakeLock;
+  });
+
+  it("in the phone's iframe it asks the page (Capacitor ignores iframes) and never calls the plugin", async () => {
+    const plugin = installPlugin();
+    const postMessage = vi.fn();
+    const parentSpy = vi.spyOn(window, "parent", "get").mockReturnValue({ postMessage } as unknown as Window);
+    const { setLiveVoiceChat } = await freshLiveChats();
+    const { holdAwake } = await import("./nativeKeepAlive");
+    holdAwake("dictation", true);
+    setLiveVoiceChat("a", true);
+    holdAwake("dictation", false);
+    setLiveVoiceChat("a", false);
+    expect(postMessage.mock.calls.map((c) => c[0])).toEqual([
+      { type: "ud-keep-awake", on: true },
+      { type: "ud-keep-awake", on: false },
+    ]);
+    expect(postMessage.mock.calls[0][1]).toBe(window.location.origin);
+    expect(plugin.start).not.toHaveBeenCalled();
+    parentSpy.mockRestore();
+  });
+
   it("a Stop with nothing live doesn't block the next start", async () => {
     const plugin = installPlugin();
     const { setLiveVoiceChat } = await freshLiveChats();

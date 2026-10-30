@@ -1374,9 +1374,16 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         self.send_error(404)
                         return
                     data = file_path.read_bytes()
+                    from backend.uefn_plugins.webview import content_etag, send_not_modified
+
+                    etag = content_etag(data)
+                    if send_not_modified(self, etag):
+                        return
                     self.send_response(200)
                     self.send_header("Content-Type", "image/png")
                     self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("ETag", etag)
                     self.end_headers()
                     self.wfile.write(data)
                     return
@@ -1396,7 +1403,13 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     except OSError:
                         self.send_error(404)
                         return
+                    from backend.uefn_plugins.webview import content_etag, send_not_modified
+
+                    etag = content_etag(data)
+                    if send_not_modified(self, etag):
+                        return
                     self.send_response(200)
+                    self.send_header("ETag", etag)
                     self.send_header("Content-Type", media_content_type(file_path))
                     self.send_header("Content-Length", str(len(data)))
                     self.send_header("Cache-Control", "private, max-age=3600")
@@ -1481,7 +1494,13 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     except OSError:
                         self.send_error(404)
                         return
+                    from backend.uefn_plugins.webview import content_etag, send_not_modified
+
+                    etag = content_etag(data)
+                    if send_not_modified(self, etag):
+                        return
                     self.send_response(200)
+                    self.send_header("ETag", etag)
                     self.send_header("Content-Type", media_content_type(file_path))
                     self.send_header("Content-Length", str(len(data)))
                     self.send_header("Cache-Control", "private, max-age=3600")

@@ -32,11 +32,11 @@ describe("plan owners", () => {
   fireEvent.click(screen.getByRole("button", { name: /Group C/ }));
   expect(state.open).toHaveBeenCalledWith("g", "Group C");
  });
- it("updates tool, waiting, elapsed time, and idle from chat events", async () => {
+ it("updates tool, waiting and idle from chat events", async () => {
   roster(); state.running.add("b"); markChatTurnRunning("b", Date.now() - 72000);
   render(<PlanOwnerChips ownerId="g" />); await screen.findByText("Builder");
   emit({ type: "tool", conv_id: "b", tool: { name: "Bash", arguments: { command: "rg test src" } } });
-  expect(screen.getByRole("button", { name: /Builder/ }).textContent).toMatch(/Search.*1m 12s/i);
+  expect(screen.getByRole("button", { name: /Builder/ }).textContent).toMatch(/Search/i);
   emit({ type: "linked_agent", parent_conv_id: "b", child_conv_id: "other", status: "running" });
   await screen.findByText(/Waiting for reply/);
   emit({ type: "linked_agent", parent_conv_id: "b", child_conv_id: "other", status: "done" });
@@ -169,16 +169,16 @@ describe("plan owners", () => {
    vi.useRealTimers();
   }
  });
- it("ticks the elapsed time of a running owner", async () => {
+ it("a running owner shows what it does, never a clock of time spent", async () => {
   roster(); state.running.add("b"); markChatTurnIdle("b"); markChatTurnRunning("b", Date.now() - 5000);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   try {
    render(<PlanOwnerChips ownerId="g" />);
    emit({ type: "chats_changed" });
-   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-   expect(screen.getByRole("button", { name: /Builder/ }).textContent).toMatch(/0m 5s/);
    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-   expect(screen.getByRole("button", { name: /Builder/ }).textContent).toMatch(/0m 8s/);
+   const text = screen.getByRole("button", { name: /Builder/ }).textContent || "";
+   expect(text).toContain("Working");
+   expect(text).not.toMatch(/\d+m \d+s/);
   } finally {
    vi.useRealTimers();
   }

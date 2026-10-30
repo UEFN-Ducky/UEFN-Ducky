@@ -18,6 +18,7 @@ import {
   hideDesktopBridge,
   isDirectMode,
   isRemoteDuckyWindow,
+  serviceWorkerControl,
   startDirectTransport,
 } from "./remote/directTransport";
 import { RemoteDuckyBar } from "./components/RemoteDuckyBar";
@@ -40,20 +41,26 @@ if (isDirectMode()) {
 // Endless glows hold still while the window sits in the background.
 installAppIdle();
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    {remoteDucky ? (
-      <RemoteDuckyBar
-        name={directConfigFromLocation(__PANEL_VERSION__).name || "UEFN Ducky"}
-        chat={new URLSearchParams(window.location.search).get("chat") || ""}
-      />
-    ) : null}
-    <ErrorBoundary label="App">
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>
-);
+function render() {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      {remoteDucky ? (
+        <RemoteDuckyBar
+          name={directConfigFromLocation(__PANEL_VERSION__).name || "UEFN Ducky"}
+          chat={new URLSearchParams(window.location.search).get("chat") || ""}
+        />
+      ) : null}
+      <ErrorBoundary label="App">
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+  // Keep the HTML splash up until the app shell has painted (the desktop also holds it a
+  // moment so the logo reads); the phone panel drops it at once (bootSplash.ts).
+  dismissBootSplashAfterPaint();
+}
 
-// Keep the HTML splash up for ~3.5s (and until the app shell has painted),
-// then fade it out so the logo reads clearly before the UI appears.
-dismissBootSplashAfterPaint();
+// Direct mode: the first pictures must go through the Service Worker (registered by the
+// transport above), so the app draws once it controls the page, or after 3 s anyway.
+if (isDirectMode()) void serviceWorkerControl().then(render);
+else render();

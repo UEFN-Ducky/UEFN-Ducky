@@ -105,7 +105,7 @@ export function UpdateLockOverlay() {
       <div className="update-lock-card">
         <img
           className="update-lock-logo"
-          src="/OnlineMCPIcon.png"
+          src="./OnlineMCPIcon.png"
           width={72}
           height={72}
           alt=""

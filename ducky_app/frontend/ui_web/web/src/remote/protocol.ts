@@ -14,8 +14,11 @@ export const CHANNEL_EVENTS = "events";
 export const CHANNEL_BLOB = "blob";
 export const CHANNEL_INPUT = "input";
 export const STREAM_PREFIX = "stream:";
+/** Local event fanned out once a dropped link is back: views reload what they missed. */
+export const REMOTE_RESYNC = "remote_resync";
 
-/** Paths the desktop will serve over the blob channel. Anything else → 403. */
+/** Paths the desktop will serve over the blob channel. Anything else → 403.
+ *  public/sw.js forwards a subset of these (swPrefixes.test.ts keeps it one). */
 export const BLOB_PREFIXES = [
   "/plugin-ui/",
   "/user-sounds/",
@@ -122,6 +125,46 @@ export function rewriteLoopbackUrls<T>(
     return v;
   };
   return visit(value) as T;
+}
+
+/** Quiet time after the last candidate once a public one is in. */
+export const ICE_SETTLE_MS = 300;
+
+type GatheringPc = Pick<RTCPeerConnection, "iceGatheringState" | "addEventListener" | "removeEventListener">;
+
+/**
+ * Wait until the SDP is worth sending (no trickle): gathering complete, or a public
+ * (srflx/relay) candidate is in and nothing new came for ICE_SETTLE_MS, or `maxMs`.
+ * Host candidates arrive first and STUN answers in ~100–300 ms, so this sends about
+ * 2 s sooner than waiting out the cap, while a phone on mobile data still gets the
+ * public address it needs.
+ */
+export function waitIceGathering(pc: GatheringPc, maxMs: number, settleMs = ICE_SETTLE_MS): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    let settle: ReturnType<typeof setTimeout> | null = null;
+    let publicSeen = false;
+    const done = () => {
+      clearTimeout(cap);
+      if (settle) clearTimeout(settle);
+      pc.removeEventListener("icegatheringstatechange", onState);
+      pc.removeEventListener("icecandidate", onCandidate as EventListener);
+      resolve();
+    };
+    const onState = () => {
+      if (pc.iceGatheringState === "complete") done();
+    };
+    const onCandidate = (ev: { candidate?: { candidate?: string } | null }) => {
+      const line = ev.candidate?.candidate || "";
+      if (/ typ (srflx|relay)/.test(line)) publicSeen = true;
+      if (!publicSeen) return;
+      if (settle) clearTimeout(settle);
+      settle = setTimeout(done, settleMs);
+    };
+    const cap = setTimeout(done, maxMs);
+    pc.addEventListener("icegatheringstatechange", onState);
+    pc.addEventListener("icecandidate", onCandidate as EventListener);
+  });
 }
 
 /** Fingerprint line from an SDP (`a=fingerprint:sha-256 AB:CD…`), or "". */
