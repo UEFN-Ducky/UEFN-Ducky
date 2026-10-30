@@ -1817,33 +1817,13 @@
 .gateway-accounts-track > i { display: block; height: 100%; background: var(--green); }
 .gateway-accounts-track.is-hot > i { background: var(--amber); }
 .gateway-accounts-track.is-max > i { background: var(--red); }
+.gateway-accounts-table td.gateway-accounts-actions { vertical-align: middle; }
 .gateway-accounts-actions { white-space: nowrap; text-align: right; }
 .gateway-accounts-actions > * + * { margin-left: 6px; }
-.gateway-accounts-menu-wrap { position: relative; display: inline-block; }
-.gateway-accounts-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-}
-.gateway-accounts-menu > button {
-  text-align: left;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--fg);
-  cursor: pointer;
-}
-.gateway-accounts-menu > button:hover { background: var(--tab-hover); }
-.gateway-accounts-menu > button.is-danger { color: var(--red); }
+/* Row buttons sit in a table row: compact, and the icon buttons line up with them. */
+.gateway-accounts-actions .settings-btn { padding: 4px 10px; font-size: 12px; vertical-align: middle; }
+.gateway-accounts-actions .icon-btn,
+.gateway-accounts-head .icon-btn { display: inline-flex; vertical-align: middle; }
 .gateway-accounts-keyrow { display: flex; gap: 6px; margin: 6px 0; }
 
 .gateway-accounts-auto {
