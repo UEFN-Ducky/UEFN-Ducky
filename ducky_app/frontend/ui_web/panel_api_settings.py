@@ -1031,8 +1031,28 @@ class PanelApiSettingsMixin:
     def list_gateway_accounts(self, provider: str) -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: {"accounts": accounts.list_accounts(p),
-                                         "auto_switch": accounts.auto_switch_enabled(p)}, provider)
+        def rows(p: str) -> dict[str, Any]:
+            listed = accounts.list_accounts(p)
+            logins = [a["id"] for a in listed if a["kind"] == "login"]
+            status = accounts.login_statuses(p, logins) if logins else {}
+            for a in listed:
+                if a["kind"] == "login":
+                    a["status"] = status.get(a["id"])  # None: still asking the CLI
+                else:
+                    a["has_key"] = bool(accounts.account_key(p, a["id"]))
+            return {"accounts": listed, "auto_switch": accounts.auto_switch_enabled(p),
+                    "default": next(a["id"] for a in listed if a["active"])}
+
+        return _accounts_call(rows, provider)
+
+    def gateway_account_usage(self, provider: str, account_id: str, refresh: bool = False) -> dict[str, Any]:
+        """``{ok, windows, notice?}``: how much one account has left. Never raises."""
+        from backend.agent.model_fetch import fetch_account_usage
+
+        try:
+            return _accounts_call(lambda p: fetch_account_usage(p, str(account_id or ""), force=bool(refresh)), provider)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def add_gateway_account(self, provider: str, label: str = "", kind: str = "key") -> dict[str, Any]:
         from backend.agent import accounts

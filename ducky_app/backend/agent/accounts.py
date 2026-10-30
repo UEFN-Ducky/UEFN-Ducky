@@ -15,6 +15,7 @@ import stat
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Callable
 
@@ -371,6 +372,7 @@ def report_limit(agent_id: str, account_id: str | None = None, reset_at: float |
 
 def account_login(agent_id: str, account_id: str) -> dict:
     """``{argv, env}`` that signs this account in, from the plugin's ``account_login``."""
+    _STATUS.pop((agent_id, account_id), None)  # signing in: ask again next time
     out = _call_hook(agent_id, "account_login", account_id) or {}
     argv = [str(a) for a in out.get("argv") or ()]
     if not argv:
@@ -382,7 +384,39 @@ def account_status(agent_id: str, account_id: str) -> dict:
     return dict(_call_hook(agent_id, "account_status", account_id) or {"loggedIn": False})
 
 
+STATUS_TTL_S = 60.0
+_STATUS: dict[tuple[str, str], tuple[float, dict]] = {}  # (agent, account) -> (monotonic, status)
+_STATUS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="account-status")
+
+
+def login_statuses(agent_id: str, ids: list[str], wait_s: float = 2.0) -> dict[str, dict | None]:
+    """``account_status`` for each id, cached ~60 s, asked in parallel; never waits more
+    than ``wait_s``. An id still being asked gets its last status (None if never asked)."""
+    out: dict[str, dict | None] = {}
+    jobs = {}
+    now = time.monotonic()
+
+    def ask(account_id: str) -> None:
+        try:
+            st = account_status(agent_id, account_id)
+        except Exception:
+            st = {"loggedIn": False}
+        _STATUS[(agent_id, account_id)] = (time.monotonic(), st)
+
+    for i in ids:
+        hit = _STATUS.get((agent_id, i))
+        out[i] = hit[1] if hit else None
+        if not hit or now - hit[0] >= STATUS_TTL_S:
+            jobs[i] = _STATUS_POOL.submit(ask, i)
+    wait(list(jobs.values()), timeout=wait_s)
+    for i, job in jobs.items():
+        if job.done():
+            out[i] = _STATUS[(agent_id, i)][1]
+    return out
+
+
 def account_logout(agent_id: str, account_id: str) -> None:
+    _STATUS.pop((agent_id, account_id), None)
     _call_hook(agent_id, "account_logout", account_id)
 
 

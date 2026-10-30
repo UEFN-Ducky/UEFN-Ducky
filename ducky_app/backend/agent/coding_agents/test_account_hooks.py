@@ -18,10 +18,17 @@ def reg(tmp_path, monkeypatch):
     monkeypatch.setattr(accounts._secrets, "set_key", lambda k, v: keys.__setitem__(k, v))
     monkeypatch.setattr(accounts._secrets, "clear_key", lambda k: keys.pop(k, None))
     accounts._CURRENT.clear()
+    accounts._RUNNING.__dict__.clear()
+    accounts._STATUS.clear()
+    from backend.agent.model_fetch import reset_usage_cache
+
+    reset_usage_cache()
     primary = tmp_path / "codex-home"
     (primary / "skills").mkdir(parents=True)
     calls: list = []
     row = {
+        "account_usage": lambda d: calls.append(("usage", d)) or {
+            "windows": [{"id": "5h", "label": "5-hour limit", "used": 21, "limit": 100}]},
         "account_env": lambda d: {"CODEX_HOME": str(d)},
         "account_login": lambda d: {"argv": ["codex", "login"], "env": {"CODEX_HOME": str(d)}},
         "account_status": lambda d: {"loggedIn": d is not None, "email": "w@x"},
@@ -93,3 +100,63 @@ def test_rpc_round_trip(reg, monkeypatch):
     assert api.list_gateway_accounts("")["ok"] is False
     assert api.remove_gateway_account("codex", work) == {"ok": True}
     assert reg.keys == {}
+
+
+def test_usage_per_account_calls_the_right_hook(reg, monkeypatch):
+    api = PanelApi.__new__(PanelApi)
+    work = api.add_gateway_account("codex", "Work", "login")["id"]
+    out = api.gateway_account_usage("codex", work)
+    assert out == {"ok": True, "windows": [{"id": "5h", "label": "5-hour limit", "used": 21.0, "limit": 100.0}]}
+    folder = reg.tmp / "coding_agents" / "accounts" / "codex" / work
+    assert reg.calls == [("usage", folder)]
+    api.gateway_account_usage("codex", work)  # cached
+    api.gateway_account_usage("codex", "default")
+    assert reg.calls == [("usage", folder), ("usage", None)]  # default = the CLI's own folder
+    assert api.gateway_account_usage("codex", "nope")["ok"] is False
+
+    # An API gateway: the plugin's fetch_usage gets that account's key.
+    seen: list = []
+    gw = {"fetch_usage": lambda key, **kw: seen.append((key, kw.get("account"))) or {
+        "windows": [{"id": "rpm", "label": "Requests", "used": 1, "limit": 10}]}}
+    monkeypatch.setattr(host, "get_llm_provider_registration", lambda n: gw if n == "openai" else None)
+    team = api.add_gateway_account("openai", "Team", "key")["id"]
+    api.set_gateway_account_key("openai", team, "sk-team")
+    assert api.gateway_account_usage("openai", team)["windows"][0]["label"] == "Requests"
+    assert seen == [("sk-team", team)]
+    gw["fetch_usage"] = lambda key, **kw: 1 / 0
+    assert api.gateway_account_usage("openai", "default")["windows"] == []  # plugin error: no bars
+    monkeypatch.setattr("backend.agent.model_fetch.fetch_account_usage", lambda *a, **k: 1 / 0)
+    assert api.gateway_account_usage("openai", team)["ok"] is False  # never raises
+
+
+def test_list_shows_login_status_cached_and_keys(reg, monkeypatch):
+    api = PanelApi.__new__(PanelApi)
+    work = api.add_gateway_account("codex", "Work", "login")["id"]
+    asked: list = []
+    real = accounts.account_status
+    monkeypatch.setattr(accounts, "account_status", lambda a, i: asked.append(i) or real(a, i))
+    listed = api.list_gateway_accounts("codex")
+    assert listed["default"] == "default"
+    status = {a["id"]: a["status"] for a in listed["accounts"]}
+    assert status == {"default": {"loggedIn": False, "email": "w@x"}, work: {"loggedIn": True, "email": "w@x"}}
+    api.list_gateway_accounts("codex")
+    assert sorted(asked) == sorted(["default", work])  # cached: asked once each
+
+    import threading
+
+    gate = threading.Event()
+    accounts._STATUS.clear()
+    monkeypatch.setattr(accounts, "account_status", lambda a, i: gate.wait(5) and {"loggedIn": True})
+    import time
+
+    t0 = time.monotonic()
+    slow = api.list_gateway_accounts("codex")
+    assert time.monotonic() - t0 < 3 and all(a["status"] is None for a in slow["accounts"])
+    gate.set()
+
+    team = api.add_gateway_account("openai", "Team", "key")["id"]
+    api.set_gateway_account("openai", team)
+    api.set_gateway_account_key("openai", team, "sk-team")
+    keys = api.list_gateway_accounts("openai")
+    assert {a["id"]: a["has_key"] for a in keys["accounts"]} == {"default": False, team: True}
+    assert keys["default"] == team

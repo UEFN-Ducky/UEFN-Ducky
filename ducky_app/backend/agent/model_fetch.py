@@ -273,6 +273,34 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = F
     return out
 
 
+def fetch_account_usage(provider: str, account_id: str, *, force: bool = False) -> dict[str, Any]:
+    """Quota windows of one account (Settings' accounts table), cached like the picker's.
+
+    A coding agent's ``account_usage(config_dir)`` hook first; else the gateway's
+    ``fetch_usage`` with that account's key. Raises KeyError for an unknown account."""
+    from backend.agent import accounts
+    from backend.uefn_plugins.host import get_coding_agent_registration
+
+    asked = (provider or "").strip().lower()
+    if not any(a["id"] == account_id for a in accounts.list_accounts(asked)):
+        raise KeyError(f"no account {account_id!r}")
+    hook = (get_coding_agent_registration(asked) or {}).get("account_usage")
+    if callable(hook):
+        cache_key = f"{asked}@{account_id}"
+        hit = _USAGE_CACHE.get(cache_key)
+        if not force and hit and (time.monotonic() - hit[0]) < _USAGE_TTL_S:
+            return hit[1]
+        try:
+            raw = hook(accounts.account_config_dir(asked, account_id))
+        except Exception:
+            raw = None
+        return _usage_or_cached(cache_key, normalize_usage_windows(raw))
+    name, reg = _usage_registration(asked)
+    key = str(accounts.account_key(asked, account_id) or "")
+    out = _fetch_usage(name, reg, asked, key, model="", force=force, account=account_id)
+    return {k: v for k, v in out.items() if k != "switch"}
+
+
 def _fetch_usage(
     name: str, reg: dict[str, Any], asked: str, api_key: str, *, model: str, force: bool, account: str
 ) -> dict[str, Any]:
