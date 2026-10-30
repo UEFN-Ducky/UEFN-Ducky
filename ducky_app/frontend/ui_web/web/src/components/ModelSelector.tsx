@@ -188,8 +188,9 @@ export function ModelSelector({
   const [usageSwitch, setUsageSwitch] = useState<UsageSwitch | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageTick, setUsageTick] = useState(0);
-  // This chat's account label, shown as a chip when its gateway has 2+ accounts ("" = none).
-  const [chatAccount, setChatAccount] = useState("");
+  // This chat's account as its 1-based place in the gateway's list, a small number on the
+  // trigger only when the gateway has 2+ accounts (null = none); the name stays in the tooltip.
+  const [chatAccount, setChatAccount] = useState<{ n: number; label: string } | null>(null);
   const usageForceRef = useRef(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
@@ -453,16 +454,21 @@ export function ModelSelector({
   useEffect(() => {
     const api = getApi();
     if (!convId || !chipProvider || !api?.get_chat_account || !api.list_gateway_accounts) {
-      setChatAccount("");
+      setChatAccount(null);
       return;
     }
     let cancelled = false;
     void Promise.all([api.list_gateway_accounts(chipProvider), api.get_chat_account(convId, chipProvider)]).then(
       ([list, mine]) => {
-        if (!cancelled) setChatAccount(list?.ok && mine?.ok && list.accounts.length >= 2 ? mine.label : "");
+        if (cancelled) return;
+        if (!list?.ok || !mine?.ok || list.accounts.length < 2) return setChatAccount(null);
+        const ids = list.accounts.map((a) => a.id);
+        const at = ids.indexOf(mine.account);
+        const n = (at >= 0 ? at : Math.max(0, ids.indexOf(list.default || ""))) + 1;
+        setChatAccount({ n, label: mine.label || list.accounts[n - 1]?.label || "" });
       },
       () => {
-        if (!cancelled) setChatAccount("");
+        if (!cancelled) setChatAccount(null);
       },
     );
     return () => {
@@ -1161,8 +1167,9 @@ export function ModelSelector({
           </>
         ) : null}
         {chatAccount ? (
-          <span className="model-selector-account-chip" title={`${triggerLabel} · ${chatAccount}`}>
-            {chatAccount}
+          <span className="model-selector-account-num" title={`${triggerLabel} · account ${chatAccount.n}: ${chatAccount.label}`}
+            aria-label={`Account ${chatAccount.n}`}>
+            {chatAccount.n}
           </span>
         ) : null}
       </button>

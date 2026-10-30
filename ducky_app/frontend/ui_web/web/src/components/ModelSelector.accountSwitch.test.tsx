@@ -98,13 +98,14 @@ it("in a chat the switch shows and sets that chat's account only", async () => {
   expect(calls.setAccount).not.toHaveBeenCalled();
 });
 
-it("shows the chat's account chip only when the gateway has 2+ accounts", async () => {
+it("shows the chat's account number (no name) only when the gateway has 2+ accounts", async () => {
   sw.current = {};
   render(
     <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined} convId="chat-1"
                    codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
   );
-  expect(await screen.findByText("Work")).toBeTruthy();
+  expect((await screen.findByLabelText("Account 2")).textContent).toBe("2");
+  expect(screen.queryByText("Work")).toBeNull();
   cleanup();
   calls.accounts = [options[0]];
   render(
@@ -112,7 +113,7 @@ it("shows the chat's account chip only when the gateway has 2+ accounts", async 
                    codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
   );
   await act(async () => {});
-  expect(screen.queryByText("Work")).toBeNull();
+  expect(screen.queryByLabelText(/^Account \d/)).toBeNull();
 });
 
 it("a Claude Code chat uses Claude Code's logins, not the Anthropic API keys", async () => {
@@ -123,7 +124,7 @@ it("a Claude Code chat uses Claude Code's logins, not the Anthropic API keys", a
     <ModelSelector selectedModel="opus" setSelectedModel={() => undefined} convId="chat-1"
                    codingAgent="claude_code" setCodingAgent={() => undefined} preserveSelection />,
   );
-  expect(await screen.findByText("Work")).toBeTruthy();
+  expect(await screen.findByLabelText("Account 2")).toBeTruthy();
   expect(calls.asked.length).toBeGreaterThan(0);
   expect(new Set(calls.asked)).toEqual(new Set(["claude_code"]));
 });
