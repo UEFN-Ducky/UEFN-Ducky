@@ -993,10 +993,6 @@ export function AgentTab() {
                 {!hosted && !isUrl && selected.secret_key ? (
                   <GatewayAccounts provider={secretKey} kind="key" title="API keys" />
                 ) : null}
-
-                <ProviderIdeHookup pluginId={selected.plugin_id} />
-
-                <ProviderCodingAgents pluginId={selected.plugin_id} />
                 {contrib.llm_coding_agents
                   .filter((a) => (a.plugin_id || "").trim().toLowerCase() === selected.plugin_id.trim().toLowerCase())
                   .map((a) => {
@@ -1005,6 +1001,10 @@ export function AgentTab() {
                       <GatewayAccounts key={id} provider={id} kind="login" title={`${a.label || id} logins`} />
                     ) : null;
                   })}
+
+                <ProviderIdeHookup pluginId={selected.plugin_id} />
+
+                <ProviderCodingAgents pluginId={selected.plugin_id} />
 
                 <div
                   ref={targetRef("settings.llms.provider.plugin", {

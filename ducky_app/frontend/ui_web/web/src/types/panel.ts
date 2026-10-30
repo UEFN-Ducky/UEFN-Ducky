@@ -78,12 +78,29 @@ export interface GatewayAccountDto {
   active: boolean;
   /** Epoch seconds the limit resets, or null when usable. */
   exhausted_until: number | null;
+  /** Logins: the CLI's answer, null while it is still being asked. */
+  status?: GatewayAccountStatusDto | null;
+  /** Keys: a key is stored for this account. */
+  has_key?: boolean;
+  /** Keys: masked key, e.g. `sk-…a1b2`, when the backend sends one. */
+  key_hint?: string;
 }
 
 export interface GatewayAccountStatusDto {
   loggedIn: boolean;
   email?: string;
   plan?: string;
+}
+
+/** One usage window of an account (5-hour, weekly, a key's rate limit). */
+export interface UsageWindowDto {
+  id: string;
+  label: string;
+  used: number;
+  limit: number;
+  unit?: string;
+  reset?: string;
+  readout?: string;
 }
 
 export type GatewayAccountResult<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -3800,7 +3817,20 @@ export interface PanelApi {
   update_agent_plugin?(conv_id: string, agent?: string): Promise<ChatPermissionsDto>;
   list_saved_agent_permissions(): Promise<SavedAgentPermissionDto[]>;
   revoke_saved_agent_permission(conv_id: string, rule: string): Promise<{ ok: boolean }>;
-  list_gateway_accounts?(provider: string): Promise<GatewayAccountResult<{ accounts: GatewayAccountDto[]; auto_switch: boolean }>>;
+  list_gateway_accounts?(provider: string): Promise<
+    GatewayAccountResult<{ accounts: GatewayAccountDto[]; auto_switch: boolean; /** Account for new chats. */ default?: string }>
+  >;
+  gateway_account_usage?(
+    provider: string,
+    account: string,
+    refresh?: boolean,
+  ): Promise<GatewayAccountResult<{ windows?: UsageWindowDto[]; notice?: string }>>;
+  /** This chat runs as ``account`` from now on ("" = follow the default). */
+  set_chat_account?(conv_id: string, provider: string, account: string): Promise<GatewayAccountResult>;
+  get_chat_account?(
+    conv_id: string,
+    provider: string,
+  ): Promise<GatewayAccountResult<{ account: string; label: string; follows_default: boolean }>>;
   add_gateway_account?(provider: string, label: string, kind: "key" | "login"): Promise<GatewayAccountResult<{ id: string }>>;
   rename_gateway_account?(provider: string, account: string, label: string): Promise<GatewayAccountResult>;
   remove_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
