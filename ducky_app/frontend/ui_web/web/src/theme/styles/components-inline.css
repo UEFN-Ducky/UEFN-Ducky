@@ -2547,20 +2547,25 @@ html.window-maximized .window-resize-grip {
   min-width: 0;
 }
 
-/* This chat's account, inside the trigger, only when its gateway has 2+ accounts. */
-.model-selector-account-chip {
-  flex-shrink: 1;
-  min-width: 0;
-  max-width: 96px;
-  margin-left: 4px;
-  padding: 1px 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--tab-hover);
+/* This chat's account number, on top of the logo's corner, only when its gateway has 2+ accounts. */
+.model-selector-account-num {
+  position: absolute;
+  top: -4px;
+  left: -2px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
   border-radius: 999px;
+  pointer-events: none;
 }
 
 .model-selector-btn {
