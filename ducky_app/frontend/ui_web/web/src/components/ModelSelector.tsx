@@ -430,11 +430,17 @@ export function ModelSelector({
     () => gateways.find((g) => g.id === navGateway) || null,
     [gateways, navGateway],
   );
-  const usageProvider = (
-    activeGateway?.providerKey ||
-    selectedGateway?.providerKey ||
-    ""
-  ).trim();
+  // A chat on a gateway's coding agent (Claude Code under Anthropic, Codex under OpenAI) uses
+  // that agent's logins, not the gateway's API keys: ask core with the agent id.
+  const accountsOf = (gw: PickerGateway | null | undefined): string => {
+    if (!gw) return "";
+    const agent = normId(codingAgent);
+    const ownsAgent =
+      agent !== "ducky" &&
+      (normId(gw.primaryAgentId || "") === agent || gw.nestedAgents.some((a) => normId(a.id) === agent));
+    return (ownsAgent ? agent : gw.providerKey || "").trim();
+  };
+  const usageProvider = accountsOf(activeGateway) || accountsOf(selectedGateway);
   const glow = effortGlow(selectedMenu, thinkingEffort);
   const usageByProviderRef = useRef<
     Record<string, { windows: UsageWindow[]; notice: UsageNotice | null; switch: UsageSwitch | null; at: number }>
@@ -442,7 +448,7 @@ export function ModelSelector({
 
   // In a chat the bars and switch are that chat's account, so the cache is per chat too.
   const usageCacheKey = convId ? `${usageProvider}@${convId}` : usageProvider;
-  const chipProvider = (selectedGateway?.providerKey || "").trim();
+  const chipProvider = accountsOf(selectedGateway);
 
   useEffect(() => {
     const api = getApi();
@@ -532,7 +538,7 @@ export function ModelSelector({
     const action = (usageNotice?.action || "retry").toLowerCase();
     if (action === "login") {
       void openCodingAgentLoginUi({
-        providerId: usageNotice?.provider_id || usageProvider,
+        providerId: usageNotice?.provider_id || (activeGateway || selectedGateway)?.providerKey || usageProvider,
         title: "Log in to see plan limits",
         body: usageNotice?.message || "",
       });

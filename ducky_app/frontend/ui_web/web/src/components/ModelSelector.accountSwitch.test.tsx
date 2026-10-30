@@ -8,6 +8,11 @@ const calls = vi.hoisted(() => ({
   pluginCall: vi.fn(async () => ({})),
   accounts: [] as { id: string; label: string }[],
   chat: { account: "a1", label: "Work" },
+  asked: [] as string[],
+}));
+const contrib = vi.hoisted(() => ({
+  llm_providers: [{ id: "uefn_ducky", label: "Ducky AI", plugin_id: "account" }] as Record<string, unknown>[],
+  llm_coding_agents: [] as Record<string, unknown>[],
 }));
 const sw = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
@@ -19,8 +24,12 @@ const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
     if (key === "get_gateway_usage") return async () => ({ windows: [], switch: sw.current });
     if (key === "set_gateway_account") return calls.setAccount;
     if (key === "set_chat_account") return calls.setChatAccount;
-    if (key === "list_gateway_accounts") return async () => ({ ok: true, auto_switch: true, accounts: calls.accounts });
-    if (key === "get_chat_account") return async () => ({ ok: true, follows_default: false, ...calls.chat });
+    if (key === "list_gateway_accounts") {
+      return async (p: string) => (calls.asked.push(p), { ok: true, auto_switch: true, accounts: calls.accounts });
+    }
+    if (key === "get_chat_account") {
+      return async (_c: string, p: string) => (calls.asked.push(p), { ok: true, follows_default: false, ...calls.chat });
+    }
     if (key === "gateway_account_usage") {
       return async (_p: string, id: string) => ({
         ok: true,
@@ -32,12 +41,7 @@ const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
   },
 }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false, requireApi: () => api }));
-vi.mock("../hooks/usePluginContributions", () => ({
-  usePluginContributions: () => ({
-    llm_providers: [{ id: "uefn_ducky", label: "Ducky AI", plugin_id: "account" }],
-    llm_coding_agents: [],
-  }),
-}));
+vi.mock("../hooks/usePluginContributions", () => ({ usePluginContributions: () => contrib }));
 
 import { ModelSelector } from "./ModelSelector";
 import { loadModelsCatalog } from "../hooks/modelsCatalogCache";
@@ -55,6 +59,9 @@ beforeEach(async () => {
   calls.setChatAccount.mockClear();
   calls.pluginCall.mockClear();
   calls.accounts = options;
+  calls.asked = [];
+  contrib.llm_providers = [{ id: "uefn_ducky", label: "Ducky AI", plugin_id: "account" }];
+  contrib.llm_coding_agents = [];
   await loadModelsCatalog({ force: true });
 });
 afterEach(() => {
@@ -106,6 +113,19 @@ it("shows the chat's account chip only when the gateway has 2+ accounts", async 
   );
   await act(async () => {});
   expect(screen.queryByText("Work")).toBeNull();
+});
+
+it("a Claude Code chat uses Claude Code's logins, not the Anthropic API keys", async () => {
+  contrib.llm_providers = [{ id: "anthropic", label: "Anthropic", plugin_id: "anthropic" }];
+  contrib.llm_coding_agents = [{ id: "claude_code", label: "Claude Code", plugin_id: "anthropic" }];
+  sw.current = {};
+  render(
+    <ModelSelector selectedModel="opus" setSelectedModel={() => undefined} convId="chat-1"
+                   codingAgent="claude_code" setCodingAgent={() => undefined} preserveSelection />,
+  );
+  expect(await screen.findByText("Work")).toBeTruthy();
+  expect(calls.asked.length).toBeGreaterThan(0);
+  expect(new Set(calls.asked)).toEqual(new Set(["claude_code"]));
 });
 
 it("a plugin's own switch still goes through plugin_call", async () => {
