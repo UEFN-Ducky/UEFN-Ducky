@@ -98,11 +98,11 @@ def test_a_long_call_is_recorded_once_and_still_finishes(quick) -> None:
 def test_a_wait_by_design_is_recorded_but_not_counted_as_stuck(quick, monkeypatch) -> None:
     from backend.store.repos import events
 
-    counted: list[float] = []
-    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds: counted.append(seconds))
+    counted: list[tuple[float, str]] = []
+    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="": counted.append((seconds, tool)))
     mcp = WatchMcp(sync=set())
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 0.6}, _ident()))
-    assert len(counted) == 1
+    assert len(counted) == 1 and counted[0][1] == "slow_render"  # the stat names the call that hung
     monkeypatch.setattr(shared_mcp, "WAITS_BY_DESIGN", frozenset({"slow_render"}))
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 0.6}, _ident()))
     assert len(counted) == 1  # a question or a test suite is not a hang
