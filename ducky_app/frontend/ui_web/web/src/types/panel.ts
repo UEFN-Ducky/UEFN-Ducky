@@ -4392,6 +4392,13 @@ export interface PanelApi {
       provider_id?: string;
       agent_id?: string;
     };
+    /** Account toggle under the bars; picking one calls ``plugin_call(plugin_id, rpc, {account})``. */
+    switch?: {
+      plugin_id: string;
+      rpc: string;
+      value: string;
+      options: Array<{ id: string; label: string }>;
+    };
   }>;
   get_provider_usage(provider_id?: string, days?: number): Promise<ProviderUsageReport>;
   get_ducky_usage(ducky_name?: string, profile_id?: string, days?: number): Promise<DuckyUsageReport>;

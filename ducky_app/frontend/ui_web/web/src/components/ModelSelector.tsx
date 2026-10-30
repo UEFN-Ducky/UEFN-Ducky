@@ -28,7 +28,13 @@ import { usePluginContributions } from "../hooks/usePluginContributions";
 import { useMergedRef, useUiTarget } from "../ui-targets/registry";
 import type { CodingAgentDto } from "../types/panel";
 import { ThinkingEffortFooter } from "./ThinkingEffortFooter";
-import { effortGlow, GatewayUsageFooter, type UsageNotice, type UsageWindow } from "./GatewayUsageFooter";
+import {
+  effortGlow,
+  GatewayUsageFooter,
+  type UsageNotice,
+  type UsageSwitch,
+  type UsageWindow,
+} from "./GatewayUsageFooter";
 import { catalogThinkingMenu, effortInMenu, effortSuffix } from "./thinkingMenu";
 import { openCodingAgentLoginUi } from "../walkthrough/openCodingAgentLogin";
 import { openDefaultModelSettings, openLlmsProviderSettings } from "../navigation/openSettingsTab";
@@ -179,6 +185,7 @@ export function ModelSelector({
   const [openVendor, setOpenVendor] = useState<string | null>(null);
   const [usageWindows, setUsageWindows] = useState<UsageWindow[]>([]);
   const [usageNotice, setUsageNotice] = useState<UsageNotice | null>(null);
+  const [usageSwitch, setUsageSwitch] = useState<UsageSwitch | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageTick, setUsageTick] = useState(0);
   const usageForceRef = useRef(false);
@@ -428,7 +435,7 @@ export function ModelSelector({
   ).trim();
   const glow = effortGlow(selectedMenu, thinkingEffort);
   const usageByProviderRef = useRef<
-    Record<string, { windows: UsageWindow[]; notice: UsageNotice | null; at: number }>
+    Record<string, { windows: UsageWindow[]; notice: UsageNotice | null; switch: UsageSwitch | null; at: number }>
   >({});
 
   useEffect(() => {
@@ -441,6 +448,7 @@ export function ModelSelector({
     if (cached) {
       setUsageWindows(cached.windows);
       setUsageNotice(cached.notice);
+      setUsageSwitch(cached.switch);
       setUsageBusy(false);
       // Reopening shows the last bars at once and asks again once they are a minute old.
       if (!refresh && Date.now() - cached.at < USAGE_RECHECK_MS) return;
@@ -458,9 +466,17 @@ export function ModelSelector({
             : null;
         const nextWindows = windows.length ? windows : cached?.windows ?? [];
         const nextNotice = nextWindows.length ? null : (notice ?? cached?.notice ?? null);
-        usageByProviderRef.current[usageProvider] = { windows: nextWindows, notice: nextNotice, at: Date.now() };
+        const sw = res?.switch as UsageSwitch | undefined;
+        const nextSwitch = sw && Array.isArray(sw.options) && sw.options.length >= 2 ? sw : null;
+        usageByProviderRef.current[usageProvider] = {
+          windows: nextWindows,
+          notice: nextNotice,
+          switch: nextSwitch,
+          at: Date.now(),
+        };
         setUsageWindows(nextWindows);
         setUsageNotice(nextNotice);
+        setUsageSwitch(nextSwitch);
         setUsageBusy(false);
       },
       () => {
@@ -486,12 +502,28 @@ export function ModelSelector({
     setUsageTick((n) => n + 1);
   };
 
+  const onUsageSwitch = (id: string) => {
+    const api = getApi();
+    if (!usageSwitch || !api?.plugin_call) return;
+    setUsageBusy(true);
+    setUsageSwitch({ ...usageSwitch, value: id });
+    void Promise.resolve(api.plugin_call(usageSwitch.plugin_id, usageSwitch.rpc, { account: id })).finally(() => {
+      // The other account's bars, never the last account's cached ones.
+      delete usageByProviderRef.current[usageProvider];
+      setUsageWindows([]);
+      usageForceRef.current = true;
+      setUsageTick((n) => n + 1);
+    });
+  };
+
   const usageFooter = (
     <GatewayUsageFooter
       windows={usageWindows}
       notice={usageNotice}
       busy={usageBusy}
       onAction={onUsageAction}
+      accountSwitch={usageSwitch}
+      onSwitch={onUsageSwitch}
     />
   );
   const slotGateway = activeGateway || selectedGateway;

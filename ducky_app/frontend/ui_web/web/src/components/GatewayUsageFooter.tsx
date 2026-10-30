@@ -14,6 +14,14 @@ export type UsageWindow = {
   readout?: string;
 };
 
+/** A gateway's account toggle (e.g. Claude Account 1 / Account 2), set through ``plugin_call``. */
+export type UsageSwitch = {
+  plugin_id: string;
+  rpc: string;
+  value: string;
+  options: { id: string; label: string }[];
+};
+
 export type UsageNotice = {
   message: string;
   action?: string;
@@ -45,17 +53,42 @@ export function GatewayUsageFooter({
   notice,
   busy = false,
   onAction,
+  accountSwitch,
+  onSwitch,
 }: {
   windows: UsageWindow[] | null | undefined;
   notice?: UsageNotice | null;
   busy?: boolean;
   onAction?: () => void;
+  accountSwitch?: UsageSwitch | null;
+  onSwitch?: (id: string) => void;
 }) {
   const rows = windowRows(windows);
   const msg = (notice?.message || "").trim();
-  if (!rows.length && !msg) return null;
+  const options = accountSwitch?.options ?? [];
+  if (!rows.length && !msg && options.length < 2) return null;
   return (
     <div className="model-selector-usage" onClick={(e) => e.stopPropagation()}>
+      {options.length >= 2 ? (
+        <div className="model-selector-cap-switch" role="radiogroup" aria-label="Account">
+          {options.map((o) => {
+            const active = o.id === accountSwitch?.value;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                className={active ? "is-active" : ""}
+                disabled={busy || active || !onSwitch}
+                onClick={() => onSwitch?.(o.id)}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {rows.map((w) => {
         const pct = pctOf(w);
         const tone = pct >= 99 ? "is-max" : pct >= 80 ? "is-hot" : "";

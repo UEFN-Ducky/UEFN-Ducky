@@ -77,6 +77,22 @@ def test_normalize_notice_when_windows_empty() -> None:
     assert out["notice"]["provider_id"] == "anthropic"
 
 
+def test_normalize_keeps_a_valid_account_switch() -> None:
+    switch = {
+        "plugin_id": "anthropic",
+        "rpc": "set_claude_account",
+        "value": "2",
+        "options": [{"id": "1", "label": "Account 1"}, {"id": "2", "label": "Account 2"}, {"label": "no id"}],
+    }
+    out = normalize_usage_windows({"windows": [{"id": "w", "used": 1, "limit": 100}], "switch": switch})
+    assert out["switch"] == {**switch, "options": switch["options"][:2]}
+    assert normalize_usage_windows({"windows": [], "switch": switch})["switch"]["value"] == "2"
+    # One option, no RPC, or junk: no toggle.
+    assert "switch" not in normalize_usage_windows({"windows": [], "switch": {**switch, "options": switch["options"][:1]}})
+    assert "switch" not in normalize_usage_windows({"windows": [], "switch": {**switch, "rpc": ""}})
+    assert "switch" not in normalize_usage_windows({"windows": [], "switch": "junk"})
+
+
 def test_fetch_usage_missing_hook() -> None:
     reset_usage_cache()
     with (

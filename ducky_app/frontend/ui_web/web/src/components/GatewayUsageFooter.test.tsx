@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { effortGlow, GatewayUsageFooter } from "./GatewayUsageFooter";
@@ -53,6 +53,41 @@ describe("GatewayUsageFooter", () => {
     expect(screen.getByText("100%")).toBeTruthy();
     expect(screen.getByText("1% left")).toBeTruthy();
     expect(screen.getByText("Resets in 2 hr 41 min")).toBeTruthy();
+  });
+
+  it("toggles between accounts", () => {
+    const picked: string[] = [];
+    render(
+      <GatewayUsageFooter
+        windows={[{ id: "weekly", label: "Account 1 · Weekly limit", used: 30, limit: 100 }]}
+        accountSwitch={{
+          plugin_id: "anthropic",
+          rpc: "set_claude_account",
+          value: "1",
+          options: [
+            { id: "1", label: "Account 1" },
+            { id: "2", label: "Account 2" },
+          ],
+        }}
+        onSwitch={(id) => picked.push(id)}
+      />,
+    );
+    const one = screen.getByRole("radio", { name: "Account 1" });
+    const two = screen.getByRole("radio", { name: "Account 2" });
+    expect(one.getAttribute("aria-checked")).toBe("true");
+    expect((one as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(two);
+    expect(picked).toEqual(["2"]);
+  });
+
+  it("shows the toggle even before any bars load", () => {
+    render(
+      <GatewayUsageFooter
+        windows={[]}
+        accountSwitch={{ plugin_id: "a", rpc: "r", value: "2", options: [{ id: "1", label: "A" }, { id: "2", label: "B" }] }}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "B" }).getAttribute("aria-checked")).toBe("true");
   });
 });
 

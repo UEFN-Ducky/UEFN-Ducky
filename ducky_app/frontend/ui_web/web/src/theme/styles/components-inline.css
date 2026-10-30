@@ -2970,6 +2970,35 @@ html.window-maximized .window-resize-grip {
   opacity: 0.6;
   cursor: default;
 }
+.model-selector-cap-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.model-selector-cap-switch button {
+  flex: 1;
+  margin: 0;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.model-selector-cap-switch button:hover:not(:disabled) {
+  background: var(--tab-hover);
+  color: var(--fg);
+}
+.model-selector-cap-switch button.is-active {
+  background: var(--tab-active);
+  color: var(--fg);
+}
+.model-selector-cap-switch button:disabled {
+  cursor: default;
+}
 
 .model-selector-btn.is-open {
   background: var(--tab-active);

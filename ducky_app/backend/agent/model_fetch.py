@@ -151,12 +151,30 @@ def _normalize_usage_notice(raw: Any) -> dict[str, str] | None:
     return notice
 
 
+def _normalize_usage_switch(raw: Any) -> dict[str, Any] | None:
+    """A gateway's account toggle under the bars: ``{plugin_id, rpc, value, options:[{id, label}]}``."""
+    if not isinstance(raw, dict):
+        return None
+    plugin_id = str(raw.get("plugin_id") or "").strip()
+    rpc = str(raw.get("rpc") or "").strip()
+    options = [
+        {"id": str(o.get("id")).strip(), "label": str(o.get("label") or o.get("id")).strip()}
+        for o in raw.get("options") or []
+        if isinstance(o, dict) and str(o.get("id") or "").strip()
+    ]
+    if not plugin_id or not rpc or len(options) < 2:
+        return None
+    return {"plugin_id": plugin_id, "rpc": rpc, "value": str(raw.get("value") or "").strip(), "options": options}
+
+
 def normalize_usage_windows(raw: Any) -> dict[str, Any]:
     """Clamp plugin `fetch_usage` output. Missing/junk → empty windows."""
+    switch = _normalize_usage_switch(raw.get("switch") if isinstance(raw, dict) else None)
+    extra = {"switch": switch} if switch else {}
     notice = _normalize_usage_notice(raw.get("notice") if isinstance(raw, dict) else None)
     rows = raw.get("windows") if isinstance(raw, dict) else None
     if not isinstance(rows, list):
-        return {"windows": [], **({"notice": notice} if notice else {})}
+        return {"windows": [], **({"notice": notice} if notice else {}), **extra}
     out: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -182,7 +200,7 @@ def normalize_usage_windows(raw: Any) -> dict[str, Any]:
         if readout:
             item["readout"] = readout
         out.append(item)
-    result: dict[str, Any] = {"windows": out}
+    result: dict[str, Any] = {"windows": out, **extra}
     if notice and not out:
         result["notice"] = notice
     return result
