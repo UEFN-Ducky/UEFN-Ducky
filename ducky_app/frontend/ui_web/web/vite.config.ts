@@ -13,11 +13,33 @@ function panelVersion(): string {
   }
 }
 
+// Raw ASCII control characters that charset "ascii" leaves in dependencies' string
+// literals (Monaco's "\x01", xterm's C0 table), written as \u00XX: the same string, and
+// the marketplace scan refuses the raw byte. One after a backslash is left for
+// publish_panel.py's check to report (rewriting it would change its meaning).
+// generateBundle: after the minifier, which writes the escape back as the raw byte.
+const escapeControlChars = {
+  name: "escape-control-chars",
+  generateBundle(_: unknown, bundle: Record<string, { type: string; code?: string }>) {
+    for (const chunk of Object.values(bundle)) {
+      if (chunk.type !== "chunk" || !chunk.code) continue;
+      const code = chunk.code;
+      chunk.code = code.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, (c, at: number) =>
+        code[at - 1] === "\\" ? c : "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+      );
+    }
+  },
+};
+
 export default defineConfig(({ mode }) => ({
   define: { __PANEL_VERSION__: JSON.stringify(panelVersion()) },
-  plugins: [react()],
+  plugins: [react(), escapeControlChars],
   base: "./",
   esbuild: {
+    // Every non-ASCII character as \uXXXX: the bundle ships as the phone panel inside
+    // plugin-uefn-ducky, and the marketplace scan refuses raw zero-width / BOM / bidi
+    // characters (dependencies carry them in strings and regexes).
+    charset: "ascii",
     drop: mode === "production" ? ["debugger"] : [],
     pure: mode === "production" ? ["console.log", "console.info", "console.debug"] : [],
   },
@@ -56,5 +78,6 @@ export default defineConfig(({ mode }) => ({
   },
   worker: {
     format: "es",
+    plugins: () => [escapeControlChars],
   },
 }));

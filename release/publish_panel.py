@@ -53,6 +53,30 @@ def build() -> None:
     subprocess.run([npm, "run", "build"], cwd=str(WEB), check=True)
 
 
+# The marketplace's artifact scan (duckyos-security-kernel `is_hidden_char`) refuses any
+# text file with these; it names no file, so find them here before the upload.
+_SCANNED = {".js", ".mjs", ".cjs", ".ts", ".css", ".json", ".html", ".htm", ".md"}
+_HIDDEN = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f​-‍‪-‮⁦-⁩﻿]")
+
+
+def hidden_chars(root: Path) -> list[str]:
+    """`file:line U+XXXX` for each scanned file holding a character the scan refuses."""
+    out = []
+    for f in sorted(root.rglob("*")):
+        if not f.is_file() or f.suffix.lower() not in _SCANNED:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue  # the scan skips non-UTF-8 files too
+        hit = _HIDDEN.search(text)
+        if hit:
+            line = text.count("\n", 0, hit.start()) + 1
+            near = text[max(0, hit.start() - 24):hit.end() + 24]
+            out.append(f"{f.relative_to(root)}:{line} U+{ord(hit.group()):04X} near {near!r}")
+    return out
+
+
 def stage(plugin_dir: Path, ver: str) -> int:
     if not (DIST / "index.html").is_file():
         raise SystemExit(f"{DIST}/index.html missing — run the panel build first")
@@ -91,6 +115,12 @@ def stage(plugin_dir: Path, ver: str) -> int:
         # upload and 404s at runtime, so fail loudly here instead.
         print("panel: these files will NOT be delivered by core:", file=sys.stderr)
         for row in unservable[:20]:
+            print(f"  {row}", file=sys.stderr)
+        return 1
+    hidden = hidden_chars(target)
+    if hidden:
+        print("panel: the marketplace scan will refuse these files (hidden characters):", file=sys.stderr)
+        for row in hidden[:20]:
             print(f"  {row}", file=sys.stderr)
         return 1
     print(f"panel: {ver} ready — release the plugin to publish it:")
