@@ -55,6 +55,21 @@ describe("DropdownPanel closes on any outside interaction", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("while open, window caption surfaces give their clicks to the page", () => {
+    const view = render(<Menu />);
+    const second = render(<Menu />);
+    expect(document.body.classList.contains("dropdown-open")).toBe(true);
+    view.unmount();
+    // Another menu is still open.
+    expect(document.body.classList.contains("dropdown-open")).toBe(true);
+    second.unmount();
+    expect(document.body.classList.contains("dropdown-open")).toBe(false);
+    const sheet = readFileSync(join(process.cwd(), "src/theme/styles/global.css"), "utf8");
+    const rule = sheet.match(/body\.dropdown-open \.drag-region,[^{]*\{[^}]*\}/)?.[0] || "";
+    for (const sel of [".app-header", ".focus-drag-bar", ".app-drag-surface"]) expect(rule).toContain(`body.dropdown-open ${sel}`);
+    expect(rule).toContain("-webkit-app-region: no-drag");
+  });
+
   it("a pointerdown inside the panel does not close it; outside does", () => {
     const onClose = vi.fn();
     render(<Menu onClose={onClose} />);

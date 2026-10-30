@@ -32,6 +32,10 @@ type DropdownCoords = {
   transformOrigin: string;
 };
 
+/** Open panels; while any is open, native caption surfaces hand their clicks to the DOM. */
+let openPanels = 0;
+export const DROPDOWN_OPEN_CLASS = "dropdown-open";
+
 const EDGE = 8;
 const GAP = 8;
 const IDEAL_H = 360;
@@ -102,6 +106,18 @@ export function DropdownPanel({
       window.removeEventListener("scroll", update, true);
     };
   }, [open, anchorRef, placement, minWidth, width, idealHeight]);
+
+  // A click on an `-webkit-app-region: drag` surface is taken by Windows and never reaches the
+  // page; global.css turns those surfaces off while this class is on (WindowDrag still moves the window).
+  useEffect(() => {
+    if (!open) return;
+    openPanels += 1;
+    document.body.classList.add(DROPDOWN_OPEN_CLASS);
+    return () => {
+      openPanels = Math.max(0, openPanels - 1);
+      if (!openPanels) document.body.classList.remove(DROPDOWN_OPEN_CLASS);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

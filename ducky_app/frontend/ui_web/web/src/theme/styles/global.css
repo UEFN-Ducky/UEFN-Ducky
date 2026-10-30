@@ -88,6 +88,14 @@ input, textarea, select, button {
 .app-drag-surface { cursor: default; }
 .pywebview-drag-region { cursor: default; }
 .no-drag { -webkit-app-region: no-drag; }
+/* An open dropdown: caption clicks must reach the DOM so the menu closes (DropdownPanel). */
+body.dropdown-open .drag-region,
+body.dropdown-open .app-header,
+body.dropdown-open .app-drag-surface,
+body.dropdown-open .focus-drag-bar,
+body.dropdown-open .focus-header-reveal-band {
+  -webkit-app-region: no-drag;
+}
 /* Route header input through the DOM only after WindowDrag attaches its
    handlers. Native caption dragging remains available during bridge startup. */
 body.native-caption-input-ready .app-header,
