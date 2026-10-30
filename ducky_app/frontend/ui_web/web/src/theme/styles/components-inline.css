@@ -2522,6 +2522,22 @@ html.window-maximized .window-resize-grip {
   min-width: 0;
 }
 
+/* This chat's account, inside the trigger, only when its gateway has 2+ accounts. */
+.model-selector-account-chip {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 96px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--tab-hover);
+  border-radius: 999px;
+}
+
 .model-selector-btn {
   position: relative; /* anchors the "API" corner tag */
   display: flex;

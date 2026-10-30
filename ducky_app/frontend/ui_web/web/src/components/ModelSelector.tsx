@@ -188,6 +188,8 @@ export function ModelSelector({
   const [usageSwitch, setUsageSwitch] = useState<UsageSwitch | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageTick, setUsageTick] = useState(0);
+  // This chat's account label, shown as a chip when its gateway has 2+ accounts ("" = none).
+  const [chatAccount, setChatAccount] = useState("");
   const usageForceRef = useRef(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const uiTargetRef = useUiTarget(uiTarget, { kind: "dropdown", label: "Model", route: "chat" });
@@ -438,13 +440,37 @@ export function ModelSelector({
     Record<string, { windows: UsageWindow[]; notice: UsageNotice | null; switch: UsageSwitch | null; at: number }>
   >({});
 
+  // In a chat the bars and switch are that chat's account, so the cache is per chat too.
+  const usageCacheKey = convId ? `${usageProvider}@${convId}` : usageProvider;
+  const chipProvider = (selectedGateway?.providerKey || "").trim();
+
+  useEffect(() => {
+    const api = getApi();
+    if (!convId || !chipProvider || !api?.get_chat_account || !api.list_gateway_accounts) {
+      setChatAccount("");
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([api.list_gateway_accounts(chipProvider), api.get_chat_account(convId, chipProvider)]).then(
+      ([list, mine]) => {
+        if (!cancelled) setChatAccount(list?.ok && mine?.ok && list.accounts.length >= 2 ? mine.label : "");
+      },
+      () => {
+        if (!cancelled) setChatAccount("");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [convId, chipProvider, usageTick]);
+
   useEffect(() => {
     if (!isOpen || !usageProvider) return;
     const api = getApi();
     if (!api?.get_gateway_usage) return;
     const refresh = usageForceRef.current;
     usageForceRef.current = false;
-    const cached = usageByProviderRef.current[usageProvider];
+    const cached = usageByProviderRef.current[usageCacheKey];
     if (cached) {
       setUsageWindows(cached.windows);
       setUsageNotice(cached.notice);
@@ -468,16 +494,30 @@ export function ModelSelector({
         const nextNotice = nextWindows.length ? null : (notice ?? cached?.notice ?? null);
         const sw = res?.switch as UsageSwitch | undefined;
         const nextSwitch = sw && Array.isArray(sw.options) && sw.options.length >= 2 ? sw : null;
-        usageByProviderRef.current[usageProvider] = {
-          windows: nextWindows,
-          notice: nextNotice,
-          switch: nextSwitch,
-          at: Date.now(),
+        const apply = (w: UsageWindow[], n: UsageNotice | null, s: UsageSwitch | null) => {
+          usageByProviderRef.current[usageCacheKey] = { windows: w, notice: n, switch: s, at: Date.now() };
+          setUsageWindows(w);
+          setUsageNotice(n);
+          setUsageSwitch(s);
+          setUsageBusy(false);
         };
-        setUsageWindows(nextWindows);
-        setUsageNotice(nextNotice);
-        setUsageSwitch(nextSwitch);
-        setUsageBusy(false);
+        // get_gateway_usage answers for the default account; a chat on another one shows its own.
+        const chatProvider =
+          nextSwitch && !nextSwitch.plugin_id && convId && api.get_chat_account
+            ? nextSwitch.provider || usageProvider
+            : "";
+        if (!chatProvider || !nextSwitch) return apply(nextWindows, nextNotice, nextSwitch);
+        void (async () => {
+          const mine = await api.get_chat_account!(convId!, chatProvider).catch(() => null);
+          if (cancelled) return;
+          if (!mine?.ok || !mine.account || mine.account === nextSwitch.value) {
+            return apply(nextWindows, nextNotice, nextSwitch);
+          }
+          const own = await api.gateway_account_usage?.(chatProvider, mine.account, refresh).catch(() => null);
+          if (cancelled) return;
+          const ownWindows = own?.ok && Array.isArray(own.windows) ? (own.windows as UsageWindow[]) : [];
+          apply(ownWindows, null, { ...nextSwitch, value: mine.account });
+        })();
       },
       () => {
         if (!cancelled) setUsageBusy(false);
@@ -486,7 +526,7 @@ export function ModelSelector({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, usageProvider, usageTick]);
+  }, [isOpen, usageProvider, usageCacheKey, convId, usageTick]);
 
   const onUsageAction = () => {
     const action = (usageNotice?.action || "retry").toLowerCase();
@@ -505,15 +545,19 @@ export function ModelSelector({
   const onUsageSwitch = (id: string) => {
     const api = getApi();
     if (!usageSwitch || !api) return;
+    const provider = usageSwitch.provider || usageProvider;
+    // In a chat core's switch moves only this chat; outside one (Settings) it sets the default.
     const call = usageSwitch.plugin_id
       ? api.plugin_call?.(usageSwitch.plugin_id, usageSwitch.rpc, { account: id })
-      : api.set_gateway_account?.(usageSwitch.provider || usageProvider, id);
+      : convId && api.set_chat_account
+        ? api.set_chat_account(convId, provider, id)
+        : api.set_gateway_account?.(provider, id);
     if (!call) return;
     setUsageBusy(true);
     setUsageSwitch({ ...usageSwitch, value: id });
     void Promise.resolve(call).finally(() => {
       // The other account's bars, never the last account's cached ones.
-      delete usageByProviderRef.current[usageProvider];
+      delete usageByProviderRef.current[usageCacheKey];
       setUsageWindows([]);
       usageForceRef.current = true;
       setUsageTick((n) => n + 1);
@@ -1109,6 +1153,11 @@ export function ModelSelector({
               <Icons.ChevronDown />
             </span>
           </>
+        ) : null}
+        {chatAccount ? (
+          <span className="model-selector-account-chip" title={`${triggerLabel} · ${chatAccount}`}>
+            {chatAccount}
+          </span>
         ) : null}
       </button>
 

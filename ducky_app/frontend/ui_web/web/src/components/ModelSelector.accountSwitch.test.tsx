@@ -2,7 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const calls = vi.hoisted(() => ({ setAccount: vi.fn(async () => ({ ok: true })), pluginCall: vi.fn(async () => ({})) }));
+const calls = vi.hoisted(() => ({
+  setAccount: vi.fn(async () => ({ ok: true })),
+  setChatAccount: vi.fn(async () => ({ ok: true })),
+  pluginCall: vi.fn(async () => ({})),
+  accounts: [] as { id: string; label: string }[],
+  chat: { account: "a1", label: "Work" },
+}));
 const sw = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
   get: (_t, key) => {
@@ -12,6 +18,15 @@ const api = vi.hoisted(() => new Proxy({} as Record<string, unknown>, {
     }
     if (key === "get_gateway_usage") return async () => ({ windows: [], switch: sw.current });
     if (key === "set_gateway_account") return calls.setAccount;
+    if (key === "set_chat_account") return calls.setChatAccount;
+    if (key === "list_gateway_accounts") return async () => ({ ok: true, auto_switch: true, accounts: calls.accounts });
+    if (key === "get_chat_account") return async () => ({ ok: true, follows_default: false, ...calls.chat });
+    if (key === "gateway_account_usage") {
+      return async (_p: string, id: string) => ({
+        ok: true,
+        windows: [{ id: "5h", label: `5-hour ${id}`, used: 10, limit: 100 }],
+      });
+    }
     if (key === "plugin_call") return calls.pluginCall;
     return async () => (/^(list|load)_/.test(String(key)) ? [] : {});
   },
@@ -37,7 +52,9 @@ beforeEach(async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   calls.setAccount.mockClear();
+  calls.setChatAccount.mockClear();
   calls.pluginCall.mockClear();
+  calls.accounts = options;
   await loadModelsCatalog({ force: true });
 });
 afterEach(() => {
@@ -45,9 +62,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openPicker() {
+async function openPicker(convId?: string) {
   const { container } = render(
-    <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined}
+    <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined} convId={convId}
                    codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
   );
   await act(async () => {});
@@ -61,6 +78,34 @@ it("core's account switch picks through set_gateway_account", async () => {
   fireEvent.click(await screen.findByRole("radio", { name: "Spare" }));
   await waitFor(() => expect(calls.setAccount).toHaveBeenCalledWith("uefn_ducky", "a2"));
   expect(calls.pluginCall).not.toHaveBeenCalled();
+});
+
+it("in a chat the switch shows and sets that chat's account only", async () => {
+  sw.current = { plugin_id: "", rpc: "set_gateway_account", provider: "uefn_ducky", value: "default", options };
+  await openPicker("chat-1");
+  const work = await screen.findByRole("radio", { name: "Work" });
+  await waitFor(() => expect(work.getAttribute("aria-checked")).toBe("true"));
+  expect(await screen.findByText("5-hour a1")).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Spare" }));
+  await waitFor(() => expect(calls.setChatAccount).toHaveBeenCalledWith("chat-1", "uefn_ducky", "a2"));
+  expect(calls.setAccount).not.toHaveBeenCalled();
+});
+
+it("shows the chat's account chip only when the gateway has 2+ accounts", async () => {
+  sw.current = {};
+  render(
+    <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined} convId="chat-1"
+                   codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
+  );
+  expect(await screen.findByText("Work")).toBeTruthy();
+  cleanup();
+  calls.accounts = [options[0]];
+  render(
+    <ModelSelector selectedModel="ducky-brain" setSelectedModel={() => undefined} convId="chat-1"
+                   codingAgent="ducky" setCodingAgent={() => undefined} preserveSelection />,
+  );
+  await act(async () => {});
+  expect(screen.queryByText("Work")).toBeNull();
 });
 
 it("a plugin's own switch still goes through plugin_call", async () => {
