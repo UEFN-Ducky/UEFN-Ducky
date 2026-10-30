@@ -22,11 +22,15 @@ from typing import Any, Callable
 
 from frontend import usage_events as ev
 
-FLUSH_EVERY_S = 300.0
-FLUSH_AT_ROWS = 50
+# One batch an hour (and one a minute after start, so the PC shows up today, and one at
+# close): every 5 min was ~12 Store calls an hour per PC. Identical rows go as one with n.
+FLUSH_EVERY_S = 3600.0
+FIRST_FLUSH_S = 60.0
+FLUSH_AT_ROWS = 1000
 HEARTBEAT_S = 90.0
+# Distinct (name, props) rows per batch: the Store's MAX_EVENTS.
 BATCH_MAX = 200
-QUEUE_MAX_ROWS = 2000
+QUEUE_MAX_ROWS = 5000
 QUEUE_MAX_AGE_S = 7 * 86400
 CLOSE_FLUSH_WAIT_S = 1.0
 PERF_SAMPLE_EVERY_S = 86400.0
@@ -51,6 +55,8 @@ _mem_queue: list[dict[str, Any]] = []
 _enabled_cache: tuple[float, bool] | None = None
 _run_meta: dict[str, dict[str, Any]] = {}
 _conv_run: dict[str, str] = {}
+# (conv_id, tool) -> whether that chat's last call of that tool failed: tool.call after_fail.
+_last_failed: dict[tuple[str, str], bool] = {}
 _opened_at = 0.0
 _boot_total_ms: float | None = None
 _install_fresh = False
@@ -311,7 +317,25 @@ def _drop(ids: list[int]) -> None:
             pass
         return
     with _lock:
-        del _mem_queue[: len(ids)]
+        gone = set(ids)
+        _mem_queue[:] = [r for i, r in enumerate(_mem_queue) if i not in gone]
+
+
+def _coalesce(rows: list[dict[str, Any]], ids: list[int]) -> list[tuple[dict[str, Any], list[int]]]:
+    """Identical (name, props) rows as one wire row with n, oldest first; ts is its last,
+    t0 its first (the Store reads sessions from those)."""
+    groups: dict[str, tuple[dict[str, Any], list[int]]] = {}
+    for row, rid in zip(rows, ids):
+        key = row["name"] + json.dumps(row.get("props") or {}, sort_keys=True)
+        got = groups.get(key)
+        if got is None:
+            groups[key] = ({"name": row["name"], "props": row.get("props") or {}, "ts": row["ts"], "t0": row["ts"], "n": 1}, [rid])
+        else:
+            got[0]["n"] += 1
+            got[0]["ts"] = max(got[0]["ts"], row["ts"])
+            got[0]["t0"] = min(got[0]["t0"], row["ts"])
+            got[1].append(rid)
+    return list(groups.values())
 
 
 def track(name: str, **props: Any) -> bool:
@@ -352,29 +376,30 @@ def _send(body: dict[str, Any]) -> bool:
 
 
 def flush() -> bool:
-    """Send the queue in batches; stops at the first batch that does not land."""
+    """Send one batch: the queue merged into at most BATCH_MAX counted rows. True when the
+    queue is empty after it (the Store takes one batch per PC per 30 s, so no second one now)."""
     if not enabled():
         return False
     try:
         from frontend import __version__
     except Exception:
         __version__ = "0.0.0"
-    while True:
-        rows, ids = _take(BATCH_MAX)
-        if not rows:
-            return True
-        body = {"installId": install_id(), "appVersion": __version__, "events": rows}
-        if not _send(body):
-            return False
-        _drop(ids)
-        if len(rows) < BATCH_MAX:
-            return True
+    rows, ids = _take(QUEUE_MAX_ROWS)
+    if not rows:
+        return True
+    groups = _coalesce(rows, ids)
+    batch = groups[:BATCH_MAX]
+    body = {"installId": install_id(), "appVersion": __version__, "events": [g[0] for g in batch]}
+    if not _send(body):
+        return False
+    _drop([i for g in batch for i in g[1]])
+    return len(groups) <= BATCH_MAX
 
 
 # ----------------------------------------------------------------------------- the thread
 
 def _loop() -> None:
-    last_flush = time.monotonic()
+    last_flush = time.monotonic() - FLUSH_EVERY_S + FIRST_FLUSH_S
     last_beat = time.monotonic()
     while not _stop.is_set():
         _wake.wait(5.0)
@@ -391,7 +416,9 @@ def _loop() -> None:
             due = now - last_flush >= FLUSH_EVERY_S or queued() >= FLUSH_AT_ROWS
             if due and enabled():
                 last_flush = now
-                flush()
+                if not flush():
+                    # Rows left (or the Store away): try again in a minute, not an hour.
+                    last_flush = now - FLUSH_EVERY_S + FIRST_FLUSH_S
         except Exception:
             pass
 
@@ -435,7 +462,31 @@ def _note_alive() -> None:
     except Exception:
         stage, started = "", 0.0
     uptime = time.time() - started if started else (time.monotonic() - _opened_at if _opened_at else 0.0)
-    _meta_set(META_LAST_SEEN, json.dumps({"stage": stage, "uptime_s": round(max(0.0, uptime))}))
+    seen: dict[str, Any] = {"stage": stage, "uptime_s": round(max(0.0, uptime))}
+    seen.update(_memory_now())
+    _meta_set(META_LAST_SEEN, json.dumps(seen))
+
+
+def _memory_now() -> dict[str, float]:
+    """This app's RSS and its WebView2 processes' private memory, in MB: an unclean exit
+    says whether the run was out of memory (webview_browser_exit_oom, Oct 29 2026)."""
+    try:
+        import psutil
+
+        me = psutil.Process()
+        out = {"memory_mb": round(me.memory_info().rss / 1048576)}
+        web = 0
+        for child in me.children(recursive=True):
+            try:
+                if child.name().lower() == "msedgewebview2.exe":
+                    web += getattr(child.memory_info(), "private", 0) or child.memory_info().rss
+            except Exception:
+                continue
+        if web:
+            out["webview_mb"] = round(web / 1048576)
+        return out
+    except Exception:
+        return {}
 
 
 def _last_seen() -> dict[str, Any]:
@@ -449,8 +500,9 @@ def _last_seen() -> dict[str, Any]:
     out: dict[str, Any] = {}
     if seen.get("stage"):
         out["stage"] = seen["stage"] if seen["stage"] in ev.BOOT_STAGES else "other"
-    if "uptime_s" in seen:
-        out["uptime_s"] = seen["uptime_s"]
+    for k in ("uptime_s", "memory_mb", "webview_mb"):
+        if k in seen:
+            out[k] = seen[k]
     return out
 
 
@@ -564,6 +616,7 @@ def run_begin(run_id: str, conv_id: str, *, coding_agent: str = "", provider: st
                 "model_family": ev.model_family(model, provider),
                 "started": time.monotonic(),
                 "tools": 0,
+                "fails": 0,
             }
             _conv_run[conv_id] = run_id
             if len(_run_meta) > 500:
@@ -609,21 +662,24 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
             outcome=outcome,
             duration_s=time.monotonic() - float(meta["started"]),
             tool_calls_n=int(meta["tools"]),
+            tool_fails_n=int(meta.get("fails") or 0),
             **why,
         )
     except Exception:
         pass
 
 
-def turn_tool(run_id: str) -> None:
-    """One more tool call in a Claude Code / Codex / Cursor turn. Their calls are counted as
-    tool.call by the shared tool server, a process with no turns, so every such chat.turn
-    said "0 tool calls" (Oct 22 2026: 86% of turns, 20-minute ones included)."""
+def turn_tool(run_id: str, *, failed: bool = False) -> None:
+    """One more tool call in a Claude Code / Codex / Cursor turn (failed=True: one more failed
+    call, already counted). Their calls are counted as tool.call by the shared tool server, a
+    process with no turns, so every such chat.turn said "0 tool calls" (Oct 22 2026: 86% of
+    turns, 20-minute ones included)."""
     try:
         with _lock:
             meta = _run_meta.get(run_id or "")
             if meta is not None:
-                meta["tools"] = int(meta["tools"]) + 1
+                key = "fails" if failed else "tools"
+                meta[key] = int(meta.get(key) or 0) + 1
     except Exception:
         pass
 
@@ -647,15 +703,28 @@ def tool_done(
     try:
         if not enabled():
             return
+        fail = "" if ok else (fail or "error")
         with _lock:
             rid = _conv_run.get(conv_id or "")
             meta = _run_meta.get(rid or "")
             if meta is not None:
                 meta["tools"] = int(meta["tools"]) + 1
-        if ok:
-            track("tool.call", tool=name, ok=ok, duration_s=float(duration_ms) / 1000.0)
-        else:
-            track("tool.call", tool=name, ok=ok, duration_s=float(duration_ms) / 1000.0, fail=fail or "error")
+                if fail and fail != "exit_nonzero":
+                    meta["fails"] = int(meta.get("fails") or 0) + 1
+            after_fail = _last_failed.get((conv_id, name), False) if conv_id else False
+            if conv_id:
+                _last_failed[(conv_id, name)] = not ok
+                if len(_last_failed) > 2000:
+                    for stale in list(_last_failed)[:1000]:
+                        _last_failed.pop(stale, None)
+        props: dict[str, Any] = {"tool": name, "ok": ok, "duration_s": float(duration_ms) / 1000.0}
+        if fail:
+            props["fail"] = fail
+        if after_fail:
+            props["after_fail"] = "yes"
+        if name in ev.COMMAND_TOOLS and isinstance(args, dict):
+            props["cmd"] = ev.cmd_kind(args.get("command"))
+        track("tool.call", **props)
         if name in ("skill_read_subskill", "uefn_skill", "skill_search") and isinstance(args, dict):
             pack = args.get("pack_id") or args.get("pack") or args.get("skill") or args.get("name")
             if pack:
@@ -664,8 +733,8 @@ def tool_done(
         pass
 
 
-def stuck(coding_agent: str, seconds: float) -> None:
-    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds)
+def stuck(coding_agent: str, seconds: float, tool: str = "") -> None:
+    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds, tool=tool)
 
 
 # ----------------------------------------------------------------------------- reliability

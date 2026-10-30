@@ -15,6 +15,7 @@ def _fresh_module():
     us._enabled_cache = None
     us._run_meta.clear()
     us._conv_run.clear()
+    us._last_failed.clear()
     us._mem_queue.clear()
     us.send_override = None
     us.registry_override = None
@@ -113,9 +114,25 @@ def test_track_queues_and_flush_sends_one_batch_then_drops_rows() -> None:
     body = sent[0]
     assert set(body) == {"installId", "appVersion", "events"}
     assert body["installId"] == us.install_id()
-    assert len(body["events"]) == 60
-    assert body["events"][0]["name"] == "tool.call"
-    assert body["events"][0]["props"] == {"tool": "spawn_actor", "ok": "yes", "duration": "1s"}
+    # 60 identical calls go as one counted row (hourly batches, Oct 30 2026).
+    assert len(body["events"]) == 1
+    row = body["events"][0]
+    assert row["name"] == "tool.call" and row["n"] == 60 and row["t0"] <= row["ts"]
+    assert row["props"] == {"tool": "spawn_actor", "ok": "yes", "duration": "1s"}
+    assert us.queued() == 0
+
+
+def test_a_batch_holds_at_most_batch_max_distinct_rows_and_the_rest_waits(monkeypatch) -> None:
+    sent: list[dict[str, Any]] = []
+    us.send_override = lambda body: sent.append(body) or True
+    monkeypatch.setattr(us, "BATCH_MAX", 3)
+    for tab in ("chat", "editor", "terminal", "plan", "chat"):
+        us.track("feature.open", tab=tab)
+    assert us.flush() is False, "one distinct row left for the next flush"
+    assert [e["props"]["tab"] for e in sent[0]["events"]] == ["chat", "editor", "terminal"]
+    assert sent[0]["events"][0]["n"] == 2
+    assert us.queued() == 1
+    assert us.flush() is True and sent[1]["events"][0]["props"]["tab"] == "plan"
     assert us.queued() == 0
 
 
@@ -158,7 +175,7 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert names.count("tool.call") == 2
     assert names.count("skill.used") == 1
     turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
-    assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5"}
+    assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5", "tool_fails": "0"}
     assert turns[1]["provider"] == "claude" and turns[1]["outcome"] == "error" and turns[1]["tool_calls"] == "0"
     assert not any("Cube" in str(r) for r in rows)
 
@@ -300,7 +317,7 @@ def test_a_coding_agent_turn_counts_the_tools_its_cli_ran() -> None:
     us.run_end("run-cli", "done")
     rows, _ = us._take(100)
     turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
-    assert turns == [{"provider": "claude", "model_family": "claude", "outcome": "ok", "duration": "10s", "tool_calls": "6-20"}]
+    assert turns == [{"provider": "claude", "model_family": "claude", "outcome": "ok", "duration": "10s", "tool_calls": "6-20", "tool_fails": "0"}]
     assert not [r for r in rows if r["name"] == "tool.call"]  # the tool server counts those
 
 
@@ -379,6 +396,7 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
     monkeypatch.setattr(us, "start", lambda: None)
     monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    monkeypatch.setattr(us, "_memory_now", lambda: {"memory_mb": 700, "webview_mb": 2600})
     us.send_override = lambda body: True
 
     def unclean() -> list[dict[str, Any]]:
@@ -392,7 +410,7 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     assert unclean() == []
     us.app_opened()
     assert unclean() == [{"code": "app_unclean_exit", "where": "ui", "kind": "crash", "version": __version__,
-                          "stage": "window_shown", "uptime": "1m"}]
+                          "stage": "window_shown", "uptime": "1m", "memory": "1gb", "webview": "more"}]
     # The dead run's heartbeat said where it got and how long it ran: a long run, not a start-up crash.
     meta[us.META_LAST_SEEN] = '{"stage": "page_started", "uptime_s": 5000}'
     us.app_opened()
@@ -419,6 +437,50 @@ def test_outside_agents_refusals_fail_and_ducky_call_tool_counts_as_its_tool(mon
     monkeypatch.setattr(us, "tool_done", lambda name, *, ok, **_: seen.append((name, ok)))
     shared_mcp._usage_tool_done("ducky_call_tool", False, 0.0, None, {"name": "set_actor_label", "arguments": {}})
     assert seen == [("set_actor_label", False)]
+
+
+def test_cmd_kind_names_only_the_sort_of_command() -> None:
+    assert ev.cmd_kind("py -3 -m pytest ducky_app/frontend -q") == "test"
+    assert ev.cmd_kind("cargo test --test usage") == "test"
+    assert ev.cmd_kind("npx tsc --noEmit") == "build"
+    assert ev.cmd_kind("git status --short") == "git"
+    assert ev.cmd_kind("pip install psutil") == "install"
+    assert ev.cmd_kind("py -3 tools/check.py C:/Users/me/secret") == "script"
+    assert ev.cmd_kind("Get-Process") == "other"
+    assert ev.validate("tool.call", {"tool": "ducky_terminal_run", "cmd": "pytest -q"}) == {"tool": "ducky_terminal_run"}
+
+
+def test_new_failure_fields(monkeypatch) -> None:
+    us.run_begin("r1", "c1", coding_agent="ducky")
+    us.tool_done("ducky_terminal_run", ok=False, duration_ms=10, conv_id="c1", args={"command": "pytest -q"}, fail="exit_nonzero")
+    us.tool_done("ducky_terminal_run", ok=True, duration_ms=10, conv_id="c1", args={"command": "pytest -q"})
+    us.tool_done("web_fetch", ok=False, duration_ms=10, conv_id="c1", fail="timeout")
+    us.tool_done("web_fetch", ok=False, duration_ms=10, conv_id="c2", fail="timeout")  # another chat: no after_fail
+    us.stuck("claude_code", 130, tool="unreal__call_tool")
+    us.run_end("r1", "done")
+    rows, _ = us._take(100)
+    calls = [r["props"] for r in rows if r["name"] == "tool.call"]
+    assert calls[0]["cmd"] == "test" and "after_fail" not in calls[0]
+    assert calls[1] == {"tool": "ducky_terminal_run", "ok": "yes", "duration": "1s", "cmd": "test", "after_fail": "yes"}
+    assert "cmd" not in calls[2] and "after_fail" not in calls[3]
+    stuck = next(r["props"] for r in rows if r["name"] == "agent.stuck")
+    assert stuck == {"provider": "claude", "after": "5m", "tool": "unreal__call_tool"}
+    turn = next(r["props"] for r in rows if r["name"] == "chat.turn")
+    assert turn["tool_calls"] == "1-5" and turn["tool_fails"] == "1-5", "the timeout counts, the non-zero exit does not"
+
+
+def test_coding_agent_turn_counts_its_failed_calls() -> None:
+    us.run_begin("r2", "c2", coding_agent="claude_code")
+    us.turn_tool("r2")
+    us.turn_tool("r2", failed=True)
+    assert us._run_meta["r2"]["tools"] == 1 and us._run_meta["r2"]["fails"] == 1
+
+
+def test_unclean_exit_carries_the_last_memory() -> None:
+    assert ev.validate("error.code", {"code": "app_unclean_exit", "memory_mb": 700, "webview_mb": 2600}) == {
+        "code": "app_unclean_exit", "memory": "1gb", "webview": "more"}
+    mem = us._memory_now()
+    assert mem.get("memory_mb", 1) > 0
 
 
 def test_a_failed_tool_call_says_why(monkeypatch) -> None:

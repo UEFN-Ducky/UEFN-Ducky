@@ -49,6 +49,10 @@ BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_im
                "ready_for_webview_start", "window_shown", "page_started", "other")
 # Why a tool call failed: run_agent_command's "fail" word, refused = answered {"ok": false} / "ERROR".
 TOOL_FAILS = ("exit_nonzero", "busy", "not_approved", "timeout", "not_found", "refused", "error")
+# What a terminal command was, from its first words (cmd_kind); the command never leaves.
+CMD_KINDS = ("test", "build", "git", "install", "script", "other")
+# Tools whose tool.call carries cmd.
+COMMAND_TOOLS = frozenset({"ducky_terminal_run", "sandbox_run"})
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
@@ -82,9 +86,13 @@ EVENTS: dict[str, dict[str, Any]] = {
         "duration": ("bucket", DURATION_S, "duration_s"),
         "tool_calls": ("bucket", TOOL_CALLS, "tool_calls_n"),
         "kind": ERROR_KINDS,  # failed turns only
+        # Failed tool calls in the turn; a command that exited non-zero is not one.
+        "tool_fails": ("bucket", TOOL_CALLS, "tool_fails_n"),
     },
+    # fail: failed calls only. cmd: COMMAND_TOOLS only. after_fail: sent only as "yes" (this
+    # chat's last call of the tool failed), so a retry that works reads as a recovery.
     "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s"),
-                  "fail": TOOL_FAILS},  # failed calls only
+                  "fail": TOOL_FAILS, "cmd": CMD_KINDS, "after_fail": ("yes",)},
     "skill.used": {"skill": ("slug",)},
     "workflow.run": {"outcome": ("ok", "error", "stopped"), "nodes": ("bucket", NODES, "nodes_n")},
     "plugin.install": {"plugin_id": ("slug",)},
@@ -93,8 +101,11 @@ EVENTS: dict[str, dict[str, Any]] = {
     # at: the Ducky function an uncaught exception came from (backend.bridge.revive._run).
     # stage, uptime: app_unclean_exit only (the dead run's last boot stage and how long it ran).
     "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",),
-                   "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s")},
-    "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s")},
+                   "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"),
+                   # app_unclean_exit: the dead run's app and WebView2 memory at its last heartbeat.
+                   "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb")},
+    # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
+    "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",)},
     "ui.crash": {"code": ("slug",)},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
@@ -268,6 +279,27 @@ def kind_of(message: str) -> str:
     """One of ERROR_KINDS for an error message; only this word is reported."""
     text = (message or "").lower()
     for kind, rule in _KIND_RULES:
+        if rule.search(text):
+            return kind
+    return "other"
+
+
+_CMD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (kind, re.compile(pattern))
+    for kind, pattern in (
+        ("test", r"\b(pytest|vitest|jest|unittest|cargo (\+\S+ )?(test|nextest)|go test|(npm|pnpm|yarn|bun)( run)? test|dotnet test|ctest)\b"),
+        ("build", r"\b(cargo (\+\S+ )?(build|check|clippy)|tsc|(npm|pnpm|yarn|bun) run build|vite build|msbuild|dotnet build|make|cmake|nuitka|pyinstaller)\b"),
+        ("git", r"^\s*(git|gh)\b"),
+        ("install", r"\b(pip install|uv (pip|add|sync)|(npm|pnpm|yarn|bun) (i|install|add|ci)|winget|choco|cargo install)\b"),
+        ("script", r"^\s*(&\s*)?(py|python3?|node|deno|bun|pwsh|powershell|bash|sh|cmd)\b|\.(py|ps1|js|ts|sh|bat|cmd)\b"),
+    )
+)
+
+
+def cmd_kind(command: Any) -> str:
+    """One of CMD_KINDS for a terminal command; only this word is reported."""
+    text = str(command or "").strip().lower()
+    for kind, rule in _CMD_RULES:
         if rule.search(text):
             return kind
     return "other"

@@ -176,6 +176,17 @@ def on_app_frame(host: Any, frame: dict[str, Any]) -> None:
                     usage_stats.turn_tool(turn.run_id)
                 except Exception:  # noqa: BLE001
                     pass
+            if turn is not None and event.get("type") == "tool_done" and event.get("success") is False:
+                # chat.turn tool_fails; a command that exited non-zero ran fine.
+                try:
+                    from frontend import usage_stats
+
+                    tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
+                    result = tool.get("result") if isinstance(tool.get("result"), str) else ""
+                    if usage_stats.fail_of(result) != "exit_nonzero":
+                        usage_stats.turn_tool(turn.run_id, failed=True)
+                except Exception:  # noqa: BLE001
+                    pass
             if turn is not None:
                 # ponytail: runs on the host's reader thread; a slow push delays that host's
                 # other chats. Hand off to a queue if that ever shows in the meters.

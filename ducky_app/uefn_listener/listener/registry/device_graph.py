@@ -8,6 +8,7 @@ bindings. Capability-guarded and bounded so a busy island does not freeze the ed
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import unreal
@@ -24,6 +25,9 @@ from listener.verse_editable_editor import get_verse_editables
 
 _ACTOR_PATH_RE = re.compile(r"^/[\w\.\-/]+$")
 _MAX_DEVICES = 150
+# The host waits 12 s (live_graph._LISTENER_SNAPSHOT_TIMEOUT_SEC); deep reads stop after
+# this so a big island answers in time (bridge_timeout.device_graph_snapshot, Oct 29 2026).
+_DEEP_BUDGET_S = 6.0
 
 
 def _location_of(actor: Any) -> Optional[dict]:
@@ -163,8 +167,13 @@ def device_graph_snapshot(
     _MAX_DEEP_CREATIVE = 60
     deep_verse = 0
     deep_creative = 0
+    deadline = time.monotonic() + _DEEP_BUDGET_S
+    partial = False
 
     for d in devices:
+        in_time = time.monotonic() < deadline
+        if not in_time and (include_editables or include_events):
+            partial = True
         path = str(d.get("path") or "")
         label = str(d.get("label") or "")
         kind = str(d.get("kind") or "actor")
@@ -187,7 +196,7 @@ def device_graph_snapshot(
         except Exception as exc:
             errors.append({"label": label, "stage": "locate", "error": str(exc)[:200]})
 
-        if include_editables and kind == "verse_script" and path and deep_verse < _MAX_DEEP_VERSE:
+        if in_time and include_editables and kind == "verse_script" and path and deep_verse < _MAX_DEEP_VERSE:
             try:
                 info = get_verse_editables(path, include_wiring_hints=True)
                 node["editables"] = info.get("editables") or {}
@@ -199,7 +208,7 @@ def device_graph_snapshot(
             except Exception as exc:
                 errors.append({"label": label, "stage": "verse_editables", "error": str(exc)[:200]})
 
-        if include_events and kind == "creative_device" and path and deep_creative < _MAX_DEEP_CREATIVE:
+        if in_time and include_events and kind == "creative_device" and path and deep_creative < _MAX_DEEP_CREATIVE:
             try:
                 info = get_device_settings(path, include_events=True)
                 settings = info.get("settings") or {}
@@ -237,6 +246,9 @@ def device_graph_snapshot(
         "edge_count": len(edges),
         "errors": errors,
         "truncated": len(devices) >= cap,
+        # Out of time: later nodes have no editables or settings (and so no edges). Narrow
+        # with label_filter / class_filter for those.
+        "partial": partial,
     }
 
 

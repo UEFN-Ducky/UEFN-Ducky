@@ -761,7 +761,7 @@ def _report_stuck(name: str, seconds: float, work: Any, thread: dict[str, Any], 
             return
         from frontend import usage_stats
 
-        usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""), float(seconds))
+        usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""), float(seconds), tool=name)
     except Exception:  # noqa: BLE001 — a report never breaks the call
         pass
 
