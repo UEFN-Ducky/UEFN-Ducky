@@ -68,6 +68,19 @@ it("shows key rows masked and the missing key", async () => {
   await screen.findByText("sk-…a1b2");
   expect(within(row("Spare")).getByText("No key")).toBeTruthy();
   expect(within(row("Team")).getByText("★ Default")).toBeTruthy();
+  // API keys have no plan limit: no Usage column, no switch-at-limit toggle.
+  expect(screen.queryByRole("columnheader", { name: "Usage" })).toBeNull();
+  expect(screen.queryByText("Switch accounts when one is at its limit")).toBeNull();
+  expect(api.gateway_account_usage).not.toHaveBeenCalled();
+});
+
+it("the ⋯ menu opens outside the scrolling card", async () => {
+  render(<GatewayAccounts provider="anthropic" kind="key" />);
+  await screen.findByText("Team");
+  fireEvent.click(screen.getByRole("button", { name: "More for Team" }));
+  const menu = screen.getByRole("menu");
+  expect(menu.closest(".gateway-accounts-card")).toBeNull();
+  expect(within(menu).getByRole("menuitem", { name: "Replace key" })).toBeTruthy();
 });
 
 it("Make default calls set_gateway_account and moves the star", async () => {

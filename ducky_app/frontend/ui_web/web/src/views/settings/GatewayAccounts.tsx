@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
@@ -58,14 +59,17 @@ function UsageBars({ windows }: { windows: UsageWindow[] | undefined }) {
   );
 }
 
-/** One gateway's API keys or CLI logins as a table: usage left, status, default for new chats. */
+/** One gateway's API keys or CLI logins as a table: status and default for new chats.
+ *  Usage left and switching at a limit belong to subscription logins (Claude Code, Codex);
+ *  API keys are billed per token, so their table has neither. */
 export function GatewayAccounts({ provider, kind, title }: { provider: string; kind: Kind; title?: string }) {
   const { confirm } = useConfirmModal();
   const [accounts, setAccounts] = useState<GatewayAccountDto[]>([]);
   const [defaultId, setDefaultId] = useState("");
   const [autoSwitch, setAutoSwitch] = useState(true);
   const [usage, setUsage] = useState<Record<string, UsageWindow[]>>({});
-  const [menu, setMenu] = useState("");
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const limits = kind === "login";
   // Row whose key is being typed: "new" = the Add API key row.
   const [keyFor, setKeyFor] = useState("");
   const [keyValue, setKeyValue] = useState("");
@@ -85,7 +89,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
       setAccounts(res.accounts);
       setDefaultId(res.default || res.accounts.find((a) => a.active)?.id || "");
       setAutoSwitch(res.auto_switch);
-      if (!api.gateway_account_usage) return;
+      if (!limits || !api.gateway_account_usage) return;
       for (const a of res.accounts) {
         void api
           .gateway_account_usage(provider, a.id, refresh)
@@ -93,7 +97,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           .catch(() => setUsage((m) => ({ ...m, [a.id]: [] })));
       }
     },
-    [provider],
+    [provider, limits],
   );
 
   useEffect(() => onApiReady(() => void load()), [load]);
@@ -101,7 +105,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   /** One RPC, then a fresh list; errors land in the status line. */
   const run = async (call: () => Promise<{ ok: boolean; error?: string }> | undefined, done = "") => {
     setBusy(true);
-    setMenu("");
+    setMenu(null);
     try {
       const res = await call();
       if (!res) throw new Error("Update Ducky to manage accounts.");
@@ -134,7 +138,6 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     void run(() => api()?.reorder_gateway_accounts?.(provider, ids));
   };
   const remove = async (a: GatewayAccountDto) => {
-    setMenu("");
     const ok = await confirm({
       title: "Remove account",
       message: `Remove ${a.label}? Its ${a.kind === "login" ? "login" : "API key"} is forgotten.`,
@@ -202,6 +205,17 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     </div>
   );
 
+  const menuItems = (a: GatewayAccountDto, i: number): ContextMenuItem[] => [
+    { id: "rename", label: "Rename", onClick: () => setRenaming({ id: a.id, label: a.label }) },
+    ...(a.kind === "key" && a.id !== "default"
+      ? [{ id: "key", label: "Replace key", onClick: () => { setKeyValue(""); setKeyFor(a.id); } }]
+      : []),
+    ...(i > 0 ? [{ id: "up", label: "Move up", onClick: () => move(i, -1) }] : []),
+    ...(i < accounts.length - 1 ? [{ id: "down", label: "Move down", onClick: () => move(i, 1) }] : []),
+    ...(a.id !== "default" ? [{ id: "remove", label: "Remove", danger: true, onClick: () => void remove(a) }] : []),
+  ];
+  const menuIndex = menu ? accounts.findIndex((a) => a.id === menu.id) : -1;
+
   const heading = title || "Accounts";
   return (
     <section className="general-tab-section gateway-accounts" aria-label={heading}>
@@ -226,7 +240,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
         >
           {kind === "login" ? "Log in another account" : "Add API key"}
         </button>
-        <button type="button" className="settings-btn" disabled={busy} aria-label="Refresh" onClick={() => void load(true)}>
+        <button type="button" className="icon-btn" disabled={busy} aria-label="Refresh" title="Refresh" onClick={() => void load(true)}>
           <Icons.Refresh />
         </button>
       </div>
@@ -236,13 +250,13 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           <thead>
             <tr>
               <th>Account</th>
-              <th>Usage</th>
+              {limits ? <th>Usage</th> : null}
               <th>Status</th>
               <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
-            {accounts.map((a, i) => {
+            {accounts.map((a) => {
               const isDefault = a.id === defaultId;
               const pill = statusPill(a, isDefault);
               return (
@@ -267,9 +281,11 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
                     <div className="gateway-accounts-muted">{a.kind === "login" ? loginText(a.status) : keyText(a)}</div>
                     {keyFor === a.id ? keyRow : null}
                   </td>
-                  <td>
-                    <UsageBars windows={usage[a.id]} />
-                  </td>
+                  {limits ? (
+                    <td>
+                      <UsageBars windows={usage[a.id]} />
+                    </td>
+                  ) : null}
                   <td>{pill ? <span className={`coding-agent-pill gateway-accounts-pill ${pill.tone}`}>{pill.text}</span> : null}</td>
                   <td className="gateway-accounts-actions">
                     {!isDefault ? (
@@ -292,36 +308,14 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
                         </button>
                       )
                     ) : null}
-                    <span className="gateway-accounts-menu-wrap">
-                      <button type="button" className="settings-btn" disabled={busy} aria-haspopup="menu"
-                        aria-expanded={menu === a.id} aria-label={`More for ${a.label}`}
-                        onClick={() => setMenu((m) => (m === a.id ? "" : a.id))}>
-                        <Icons.MoreHorizontal />
-                      </button>
-                      {menu === a.id ? (
-                        <span className="gateway-accounts-menu" role="menu">
-                          <button type="button" role="menuitem" onClick={() => { setMenu(""); setRenaming({ id: a.id, label: a.label }); }}>
-                            Rename
-                          </button>
-                          {a.kind === "key" && a.id !== "default" ? (
-                            <button type="button" role="menuitem" onClick={() => { setMenu(""); setKeyValue(""); setKeyFor(a.id); }}>
-                              Replace key
-                            </button>
-                          ) : null}
-                          {i > 0 ? (
-                            <button type="button" role="menuitem" onClick={() => move(i, -1)}>Move up</button>
-                          ) : null}
-                          {i < accounts.length - 1 ? (
-                            <button type="button" role="menuitem" onClick={() => move(i, 1)}>Move down</button>
-                          ) : null}
-                          {a.id !== "default" ? (
-                            <button type="button" role="menuitem" className="is-danger" onClick={() => void remove(a)}>
-                              Remove
-                            </button>
-                          ) : null}
-                        </span>
-                      ) : null}
-                    </span>
+                    <button type="button" className="icon-btn" disabled={busy} aria-haspopup="menu"
+                      aria-expanded={menu?.id === a.id} aria-label={`More for ${a.label}`} title="More"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setMenu({ id: a.id, x: r.right - 220, y: r.bottom + 4 });
+                      }}>
+                      <Icons.MoreHorizontal />
+                    </button>
                   </td>
                 </tr>
               );
@@ -329,25 +323,30 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           </tbody>
         </table>
       </div>
+      {menu && menuIndex >= 0 ? (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems(accounts[menuIndex], menuIndex)} onClose={() => setMenu(null)} />
+      ) : null}
       {accounts.length === 1 ? (
         <p className="gateway-accounts-muted">
-          {kind === "login"
+          {limits
             ? "Log in another account to run two chats on two accounts, or to switch when one is full."
-            : "Add another API key to run two chats on two keys, or to switch when one is full."}
+            : "Add another API key to run two chats on two keys."}
         </p>
       ) : null}
-      <label className="gateway-accounts-auto">
-        <input
-          type="checkbox"
-          checked={autoSwitch}
-          disabled={busy}
-          onChange={(e) => {
-            const on = e.target.checked;
-            void run(() => api()?.set_gateway_auto_switch?.(provider, on));
-          }}
-        />
-        Switch accounts when one is at its limit
-      </label>
+      {limits ? (
+        <label className="gateway-accounts-auto">
+          <input
+            type="checkbox"
+            checked={autoSwitch}
+            disabled={busy}
+            onChange={(e) => {
+              const on = e.target.checked;
+              void run(() => api()?.set_gateway_auto_switch?.(provider, on));
+            }}
+          />
+          Switch accounts when one is at its limit
+        </label>
+      ) : null}
       <p role="status" className="gateway-accounts-note">{note}</p>
     </section>
   );
