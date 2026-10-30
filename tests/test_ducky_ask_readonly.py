@@ -41,7 +41,7 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     monkeypatch.setattr(am, "close_changeset_run", lambda *a, **kw: None)
     monkeypatch.setattr(am, "_push_token_usage", lambda *a, **kw: None)
     monkeypatch.setattr(am, "_log_agent_crash", lambda *a, **kw: None)
-    monkeypatch.setattr(host, "resolve_gateway_credential", lambda _: "test-key")
+    monkeypatch.setattr(host, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr(host, "ensure_plugins_loaded", lambda: None)
     monkeypatch.setattr(store, "seed_skill_packs", lambda: None)
     monkeypatch.setattr(store, "build_skill_prompt", lambda *a: "")
