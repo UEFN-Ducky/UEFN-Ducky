@@ -62,7 +62,7 @@ def test_step_one_searches_before_any_model_call(monkeypatch) -> None:
         return payload
 
     monkeypatch.setattr(
-        "backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider: "test-key"
+        "backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider, **_k: "test-key"
     )
     monkeypatch.setattr("backend.agent.runner.make_provider", lambda *a, **k: Provider())
     monkeypatch.setattr("backend.agent.runner.list_mcp_tools", tools)

@@ -129,6 +129,12 @@ def remove_account(provider: str, account_id: str) -> None:
         p.get("exhausted", {}).pop(account_id, None)
         if p.get("active") == account_id:
             p["active"] = DEFAULT
+        chats = data.get("chat_accounts", {})
+        for conv_id, picked in list(chats.items()):
+            if picked.get(provider) == account_id:
+                picked.pop(provider)  # that chat follows the default again
+                if not picked:
+                    chats.pop(conv_id)
         _save(data)
     _secrets.clear_key(_secret_name(provider, account_id))
     _remove_tree(_account_dir(provider, account_id))
@@ -154,6 +160,34 @@ def set_active_account(provider: str, account_id: str) -> None:
         p = _provider(data, provider)
         _find(p, account_id)
         p["active"] = account_id
+        _save(data)
+
+
+def chat_account(provider: str, conv_id: str) -> str | None:
+    """The account this chat picked, or None when it follows the default."""
+    if not conv_id:
+        return None
+    with _LOCK:
+        data = _load()
+        picked = data.get("chat_accounts", {}).get(conv_id, {}).get(provider)
+        ids = {a["id"] for a in _provider(data, provider)["accounts"]}
+    return picked if picked in ids else None
+
+
+def set_chat_account(provider: str, conv_id: str, account_id: str) -> None:
+    """This chat runs as ``account_id`` from now on; ``""`` = follow the default again."""
+    if not conv_id:
+        raise ValueError("conv_id required")
+    with _LOCK:
+        data = _load()
+        chats = data.setdefault("chat_accounts", {})
+        if account_id:
+            _find(_provider(data, provider), account_id)
+            chats.setdefault(conv_id, {})[provider] = account_id
+        else:
+            chats.get(conv_id, {}).pop(provider, None)
+            if not chats.get(conv_id):
+                chats.pop(conv_id, None)
         _save(data)
 
 
@@ -184,15 +218,19 @@ def exhausted_until(provider: str, account_id: str) -> float | None:
         return _until(_provider(_load(), provider), account_id, time.time())
 
 
-def pick_account(provider: str, *, is_full: Callable[[str], bool] | None = None) -> str:
+def pick_account(
+    provider: str, *, conv_id: str = "", is_full: Callable[[str], bool] | None = None
+) -> str:
     """The account to run as now.
 
-    The picked one, unless it is full and auto-switch is on; then the next account in
-    order that isn't; all full → the one whose limit resets first. ``is_full(id)`` adds
-    a live check on top of the recorded exhaustion.
+    The chat's own account (else the default for new chats), unless it is full and
+    auto-switch is on; then the next account in order that isn't; all full → the one
+    whose limit resets first. ``is_full(id)`` adds a live check on top of the recorded
+    exhaustion.
     """
     accounts = list_accounts(provider)
-    start = next(n for n, a in enumerate(accounts) if a["active"])
+    mine = chat_account(provider, conv_id)
+    start = next(n for n, a in enumerate(accounts) if (a["id"] == mine if mine else a["active"]))
     if not auto_switch_enabled(provider):
         return accounts[start]["id"]
     ring = accounts[start:] + accounts[:start]
@@ -278,6 +316,10 @@ def _link_dir(src: Path, dst: Path) -> None:
 # ``dir`` is None for ``default`` (the CLI's own folder).
 
 _CURRENT: dict[str, str] = {}  # agent id -> account its last launch ran as
+# ponytail: agent id -> account per launching thread, so two chats running at once each
+# report their own limit. An adapter reporting from a thread of its own gets _CURRENT
+# (the last launch); key by conv if a plugin ever does that.
+_RUNNING = threading.local()
 
 
 def _agent_reg(agent_id: str) -> dict:
@@ -294,10 +336,13 @@ def _call_hook(agent_id: str, hook: str, account_id: str):
     return fn(account_config_dir(agent_id, account_id))
 
 
-def coding_agent_account_env(agent_id: str) -> dict[str, str]:
-    """Extra launch env that runs the CLI as the account picked now ({} for ``default``)."""
-    account = pick_account(agent_id)
+def coding_agent_account_env(agent_id: str, conv_id: str = "") -> dict[str, str]:
+    """Extra launch env that runs the CLI as this chat's account now ({} for ``default``)."""
+    account = pick_account(agent_id, conv_id=conv_id)
     _CURRENT[agent_id] = account
+    if not hasattr(_RUNNING, "by_agent"):
+        _RUNNING.by_agent = {}
+    _RUNNING.by_agent[agent_id] = account
     reg = _agent_reg(agent_id)
     fn = reg.get("account_env")
     folder = account_config_dir(agent_id, account)
@@ -314,8 +359,9 @@ def coding_agent_account_env(agent_id: str) -> dict[str, str]:
 
 
 def current_account(agent_id: str) -> str:
-    """The account the agent's last launch ran as (else the picked one)."""
-    return _CURRENT.get(agent_id) or active_account(agent_id)
+    """The account this thread's launch runs as (else the last launch's, else the default)."""
+    mine = getattr(_RUNNING, "by_agent", {}).get(agent_id)
+    return mine or _CURRENT.get(agent_id) or active_account(agent_id)
 
 
 def report_limit(agent_id: str, account_id: str | None = None, reset_at: float | None = None) -> None:

@@ -98,7 +98,7 @@ def test_a_model_that_only_repeats_blocked_calls_is_stopped(monkeypatch):
         ran.append(name)
         return ToolCallResult(ok=False, tool=name, error="No memory entry named 'x'")
 
-    monkeypatch.setattr("backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider: "test-key")
+    monkeypatch.setattr("backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr("backend.agent.runner.make_provider", lambda *a, **k: Provider())
     monkeypatch.setattr("backend.agent.runner.list_mcp_tools", tools)
     monkeypatch.setattr("backend.agent.runner.select_tools", lambda *a, **k: [tool])

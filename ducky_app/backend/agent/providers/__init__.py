@@ -97,7 +97,9 @@ class _UsageTrackingProvider:
         account: str | None = None,
         rebuild: Callable[[str], Any] | None = None,
         is_quota_error: Callable[[str], bool] | None = None,
+        conv_id: str = "",
     ) -> None:
+        self._conv_id = conv_id
         self._inner = inner
         self._provider = provider
         self._model = model
@@ -123,6 +125,7 @@ class _UsageTrackingProvider:
                 return False
             nxt = accounts.pick_account(
                 self._provider,
+                conv_id=self._conv_id,
                 is_full=lambda i: i in tried or not accounts.account_key(self._provider, i),
             )
             key = accounts.account_key(self._provider, nxt)
@@ -223,6 +226,7 @@ def make_provider(
     model: str = "",
     *,
     thinking_effort: str = "off",
+    conv_id: str = "",
 ) -> LLMProvider:
     name = (name or "").strip().lower()
     model = (model or "").strip()
@@ -262,4 +266,5 @@ def make_provider(
         account=_account_for_key(name, api_key),
         rebuild=build,
         is_quota_error=quota_fn if callable(quota_fn) else None,
+        conv_id=conv_id,
     )

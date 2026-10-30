@@ -1060,6 +1060,24 @@ class PanelApiSettingsMixin:
 
         return _accounts_call(lambda p: accounts.set_active_account(p, account), provider)
 
+    def set_chat_account(self, conv_id: str, provider: str, account_id: str = "") -> dict[str, Any]:
+        """The model picker in a chat: this chat runs as ``account_id`` ("" = the default)."""
+        from backend.agent import accounts
+
+        return _accounts_call(lambda p: accounts.set_chat_account(p, str(conv_id or ""), str(account_id or "")), provider)
+
+    def get_chat_account(self, conv_id: str, provider: str) -> dict[str, Any]:
+        """``{account, label, follows_default}``: the account this chat runs as."""
+        from backend.agent import accounts
+
+        def get(p: str) -> dict[str, Any]:
+            mine = accounts.chat_account(p, str(conv_id or ""))
+            account = mine or accounts.active_account(p)
+            label = next(a["label"] for a in accounts.list_accounts(p) if a["id"] == account)
+            return {"account": account, "label": label, "follows_default": mine is None}
+
+        return _accounts_call(get, provider)
+
     def set_gateway_account_key(self, provider: str, account: str, key: str = "") -> dict[str, Any]:
         from backend.agent import accounts
 

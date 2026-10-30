@@ -130,6 +130,8 @@ _PUBLIC_METHODS = frozenset({
     'reorder_gateway_accounts',
     'set_gateway_account',
     'set_gateway_account_key',
+    'set_chat_account',
+    'get_chat_account',
     'set_gateway_auto_switch',
     'login_gateway_account',
     'logout_gateway_account',

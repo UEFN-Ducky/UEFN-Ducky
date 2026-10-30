@@ -12,6 +12,7 @@ Run: cd ducky_app; py -3 -m pytest backend/agent/test_accounts_feature.py -v
 from __future__ import annotations
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -48,6 +49,7 @@ def ducky(tmp_path, monkeypatch):
     monkeypatch.setattr(accounts._secrets, "set_key", lambda k, v: saved_keys.__setitem__(k, v))
     monkeypatch.setattr(accounts._secrets, "clear_key", lambda k: saved_keys.pop(k, None))
     accounts._CURRENT.clear()
+    accounts._RUNNING.__dict__.clear()
     reset_usage_cache()
 
     world = SimpleNamespace(keys=saved_keys, tried=[], out_of_quota=set(), tmp=tmp_path)
@@ -78,11 +80,12 @@ def add_key(ducky, label: str, key: str) -> str:
     return out["id"]
 
 
-def chat_turn() -> str:
+def chat_turn(conv_id: str = "") -> str:
     """One chat turn on OpenAI with the key Ducky would use now; returns the reply text."""
 
     async def go():
-        provider = providers.make_provider("openai", host.resolve_gateway_credential("openai"), "gpt")
+        key = host.resolve_gateway_credential("openai", conv_id=conv_id)
+        provider = providers.make_provider("openai", key, "gpt", conv_id=conv_id)
         return "".join([e.text async for e in provider.stream_turn(messages=[], system="") if e.text])
 
     return asyncio.run(go())
@@ -175,3 +178,80 @@ def test_8_removing_an_account_deletes_its_key_and_folder_but_not_shared_files(d
     assert not (ducky.tmp / "coding_agents" / "accounts" / "codex" / login).exists()
     assert (ducky.codex_home / "skills" / "verse.md").read_text() == "my skill"
     assert ducky.settings.remove_gateway_account("openai", "default")["ok"] is False  # the usual one stays
+
+
+def test_9_two_chats_run_on_two_accounts_at_once(ducky):
+    work = ducky.settings.add_gateway_account("codex", "Work", "login")["id"]
+    team = ducky.settings.add_gateway_account("codex", "Team", "login")["id"]
+    assert ducky.settings.set_chat_account("A", "codex", work) == {"ok": True}
+    assert ducky.settings.set_chat_account("B", "codex", team) == {"ok": True}
+    a_launched, b_launched, a_reported = threading.Event(), threading.Event(), threading.Event()
+    seen: dict[str, object] = {}
+
+    def chat_a():  # launches, then its CLI hits the 5-hour limit while B runs
+        seen["env_a"] = runner._account_env("codex", "A")
+        a_launched.set()
+        b_launched.wait(5)
+        accounts.report_limit("codex")
+        a_reported.set()
+
+    def chat_b():  # launched last, still running when A reports
+        a_launched.wait(5)
+        seen["env_b"] = runner._account_env("codex", "B")
+        b_launched.set()
+        a_reported.wait(5)
+        seen["b_runs_as"] = accounts.current_account("codex")
+
+    threads = [threading.Thread(target=chat_a), threading.Thread(target=chat_b)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    folder = ducky.tmp / "coding_agents" / "accounts" / "codex"
+    assert seen["env_a"] == {"CODEX_HOME": str(folder / work)}
+    assert seen["env_b"] == {"CODEX_HOME": str(folder / team)}
+    assert accounts.exhausted_until("codex", work)  # A's limit marked Work only
+    assert accounts.exhausted_until("codex", team) is None
+    assert seen["b_runs_as"] == team
+    assert runner._account_env("codex", "B") == {"CODEX_HOME": str(folder / team)}  # B unaffected
+    assert runner._account_env("codex", "A") == {"CODEX_HOME": str(folder / team)}  # A moves on
+
+    # API keys: each chat's turn uses its own key, a full key moves only that chat on.
+    w, t = add_key(ducky, "Work", "sk-work"), add_key(ducky, "Team", "sk-team")
+    ducky.settings.set_chat_account("A", "openai", w)
+    ducky.settings.set_chat_account("B", "openai", t)
+    replies: dict[str, str] = {}
+    turns = [threading.Thread(target=lambda c=c: replies.__setitem__(c, chat_turn(c))) for c in "AB"]
+    for th in turns:
+        th.start()
+    for th in turns:
+        th.join(10)
+    assert replies == {"A": "reply from sk-work", "B": "reply from sk-team"}
+    ducky.out_of_quota.add("sk-work")
+    assert chat_turn("A") == "reply from sk-team"  # next after Work, same turn
+    assert accounts.exhausted_until("openai", w) and accounts.exhausted_until("openai", t) is None
+    assert chat_turn("B") == "reply from sk-team"
+
+
+def test_10_new_chats_use_the_default_and_the_picker_changes_only_this_chat(ducky):
+    work = add_key(ducky, "Work", "sk-work")
+    team = add_key(ducky, "Team", "sk-team")
+    ducky.settings.set_gateway_account("openai", work)  # Settings: default for new chats
+    assert ducky.settings.get_chat_account("new", "openai") == {
+        "ok": True, "account": work, "label": "Work", "follows_default": True}
+    assert chat_turn("new") == "reply from sk-work"
+
+    assert ducky.settings.set_chat_account("mine", "openai", team) == {"ok": True}  # picker in one chat
+    assert ducky.settings.get_chat_account("mine", "openai")["follows_default"] is False
+    assert chat_turn("mine") == "reply from sk-team"
+    assert chat_turn("other") == "reply from sk-work"  # other chats keep the default
+    assert picker_selected() == work
+
+    assert ducky.settings.set_chat_account("mine", "openai", "") == {"ok": True}  # follow default
+    assert chat_turn("mine") == "reply from sk-work"
+    assert ducky.settings.set_chat_account("mine", "openai", "nope")["ok"] is False
+
+    ducky.settings.set_chat_account("mine", "openai", team)
+    ducky.settings.remove_gateway_account("openai", team)  # removing clears chats on it
+    assert ducky.settings.get_chat_account("mine", "openai")["follows_default"] is True
+    assert "mine" not in accounts._load().get("chat_accounts", {})

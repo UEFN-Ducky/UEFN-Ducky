@@ -774,10 +774,11 @@ class AgentRunner:
     ) -> AsyncIterator[AgentEvent]:
         if bridge is None:
             bridge = _CancelBridge(self._cancel, thread_cancel)
+        conv_id = str(getattr(self.config.conv, "id", "") or "")
         try:
             from backend.uefn_plugins.host import resolve_gateway_credential
 
-            api_key = resolve_gateway_credential(self.config.provider)
+            api_key = resolve_gateway_credential(self.config.provider, conv_id=conv_id)
         except Exception:
             api_key = get_key(self.config.provider) or ""
         if not api_key:
@@ -795,6 +796,7 @@ class AgentRunner:
             api_key,
             self.config.model,
             thinking_effort=self.config.thinking_effort,
+            conv_id=conv_id,
         )
 
         # Skill index is compact (pack/reference lines only); always include it.

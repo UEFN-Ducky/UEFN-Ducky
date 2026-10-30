@@ -930,18 +930,20 @@ def current_model_id(provider_id: Any, model: Any) -> str:
     return str(dict(aliases).get(mid.lower()) or dict(aliases).get(mid) or mid)
 
 
-def _picked_account_key(provider_id: str) -> str:
-    """The key of the account to use now (picked, or the next one while it's full); "" when unset."""
+def _picked_account_key(provider_id: str, conv_id: str = "") -> str:
+    """The key of the account to use now (the chat's or the default, or the next one while
+    it's full); "" when unset."""
     try:
         from backend.agent import accounts
 
-        return str(accounts.account_key(provider_id, accounts.pick_account(provider_id)) or "").strip()
+        picked = accounts.pick_account(provider_id, conv_id=conv_id)
+        return str(accounts.account_key(provider_id, picked) or "").strip()
     except Exception:
         return ""
 
 
 def resolve_gateway_credential(
-    provider_id: str, raw: str = "", *, row: dict[str, Any] | None = None
+    provider_id: str, raw: str = "", *, row: dict[str, Any] | None = None, conv_id: str = ""
 ) -> str:
     """Saved key, then plugin ``normalize_secret``, then URL default (Ollama).
 
@@ -950,13 +952,14 @@ def resolve_gateway_credential(
 
     ``row``: the gateway's ``llm_providers`` row when the caller already holds one, so
     this does not rebuild every plugin contribution just to find it.
+    ``conv_id``: the chat asking, so a chat on its own account gets that account's key.
     """
     from backend.agent.secrets import get_key
 
     name = str(provider_id or "").strip().lower()
     if not name:
         return ""
-    key = str(raw or "").strip() or _picked_account_key(name) or str(get_key(name) or "").strip()
+    key = str(raw or "").strip() or _picked_account_key(name, conv_id) or str(get_key(name) or "").strip()
     reg = get_llm_provider_registration(name) or {}
     norm = reg.get("normalize_secret")
     if callable(norm):
