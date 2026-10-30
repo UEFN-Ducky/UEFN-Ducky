@@ -2999,6 +2999,17 @@ html.window-maximized .window-resize-grip {
 .model-selector-cap-switch button:disabled {
   cursor: default;
 }
+/* Past 3 accounts: rows of up to 3; a short last row stretches. */
+.model-selector-cap-switch.is-wrap {
+  flex-wrap: wrap;
+}
+.model-selector-cap-switch.is-wrap button {
+  flex: 1 1 calc(33.333% - 2px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .model-selector-btn.is-open {
   background: var(--tab-active);

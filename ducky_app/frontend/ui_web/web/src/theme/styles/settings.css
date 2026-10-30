@@ -1775,6 +1775,39 @@
   gap: 12px;
 }
 
+.gateway-accounts-label {
+  font-weight: 600;
+}
+
+.gateway-accounts-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted, inherit);
+}
+
+.gateway-accounts-detail.is-exhausted {
+  color: var(--amber);
+}
+
+.gateway-accounts-actions,
+.gateway-accounts-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.gateway-accounts-footer {
+  margin-top: 8px;
+}
+
+.gateway-accounts-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .llms-provider-label {
   display: flex;
   align-items: center;

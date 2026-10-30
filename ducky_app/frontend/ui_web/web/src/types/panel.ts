@@ -70,6 +70,24 @@ export interface SavedAgentPermissionDto {
   label: string;
 }
 
+/** One login or API key of a gateway (backend.agent.accounts). `default` is today's key / CLI login. */
+export interface GatewayAccountDto {
+  id: string;
+  label: string;
+  kind: "key" | "login";
+  active: boolean;
+  /** Epoch seconds the limit resets, or null when usable. */
+  exhausted_until: number | null;
+}
+
+export interface GatewayAccountStatusDto {
+  loggedIn: boolean;
+  email?: string;
+  plan?: string;
+}
+
+export type GatewayAccountResult<T = object> = ({ ok: true } & T) | { ok: false; error: string };
+
 /** A chat's approval mode: ask before changes, accept edits (default), allow everything. */
 export type ChatPermissionModeId = "ask" | "edits" | "all";
 
@@ -3782,6 +3800,17 @@ export interface PanelApi {
   update_agent_plugin?(conv_id: string, agent?: string): Promise<ChatPermissionsDto>;
   list_saved_agent_permissions(): Promise<SavedAgentPermissionDto[]>;
   revoke_saved_agent_permission(conv_id: string, rule: string): Promise<{ ok: boolean }>;
+  list_gateway_accounts?(provider: string): Promise<GatewayAccountResult<{ accounts: GatewayAccountDto[]; auto_switch: boolean }>>;
+  add_gateway_account?(provider: string, label: string, kind: "key" | "login"): Promise<GatewayAccountResult<{ id: string }>>;
+  rename_gateway_account?(provider: string, account: string, label: string): Promise<GatewayAccountResult>;
+  remove_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
+  reorder_gateway_accounts?(provider: string, ids: string[]): Promise<GatewayAccountResult>;
+  set_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
+  set_gateway_account_key?(provider: string, account: string, key: string): Promise<GatewayAccountResult>;
+  set_gateway_auto_switch?(provider: string, on: boolean): Promise<GatewayAccountResult>;
+  login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id: string }>>;
+  logout_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
+  gateway_account_status?(provider: string, account: string): Promise<GatewayAccountResult<{ status: GatewayAccountStatusDto }>>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;
   move_chats_to_project?(
     conv_ids: string[],
@@ -4392,10 +4421,12 @@ export interface PanelApi {
       provider_id?: string;
       agent_id?: string;
     };
-    /** Account toggle under the bars; picking one calls ``plugin_call(plugin_id, rpc, {account})``. */
+    /** Account toggle under the bars; picking one calls ``plugin_call(plugin_id, rpc, {account})``,
+     *  or core's ``set_gateway_account(provider, account)`` when ``plugin_id`` is "". */
     switch?: {
       plugin_id: string;
       rpc: string;
+      provider?: string;
       value: string;
       options: Array<{ id: string; label: string }>;
     };

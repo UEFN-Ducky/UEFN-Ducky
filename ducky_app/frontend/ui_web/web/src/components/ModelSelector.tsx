@@ -504,10 +504,14 @@ export function ModelSelector({
 
   const onUsageSwitch = (id: string) => {
     const api = getApi();
-    if (!usageSwitch || !api?.plugin_call) return;
+    if (!usageSwitch || !api) return;
+    const call = usageSwitch.plugin_id
+      ? api.plugin_call?.(usageSwitch.plugin_id, usageSwitch.rpc, { account: id })
+      : api.set_gateway_account?.(usageSwitch.provider || usageProvider, id);
+    if (!call) return;
     setUsageBusy(true);
     setUsageSwitch({ ...usageSwitch, value: id });
-    void Promise.resolve(api.plugin_call(usageSwitch.plugin_id, usageSwitch.rpc, { account: id })).finally(() => {
+    void Promise.resolve(call).finally(() => {
       // The other account's bars, never the last account's cached ones.
       delete usageByProviderRef.current[usageProvider];
       setUsageWindows([]);

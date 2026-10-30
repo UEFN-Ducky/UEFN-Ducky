@@ -65,7 +65,9 @@ def get_model_info(provider: str, model_id: str) -> ModelInfo | None:
 
 def reset_usage_cache(provider: str | None = None) -> None:
     if provider:
-        _USAGE_CACHE.pop(provider.strip().lower(), None)
+        prov = provider.strip().lower()
+        for key in [k for k in _USAGE_CACHE if k == prov or k.startswith(prov + "@")]:
+            del _USAGE_CACHE[key]
     else:
         _USAGE_CACHE.clear()
 
@@ -152,19 +154,50 @@ def _normalize_usage_notice(raw: Any) -> dict[str, str] | None:
 
 
 def _normalize_usage_switch(raw: Any) -> dict[str, Any] | None:
-    """A gateway's account toggle under the bars: ``{plugin_id, rpc, value, options:[{id, label}]}``."""
+    """A gateway's account toggle under the bars: ``{plugin_id, rpc, value, options:[{id, label}]}``.
+
+    ``plugin_id`` "" = a core RPC (``set_gateway_account``), which also names its ``provider``."""
     if not isinstance(raw, dict):
         return None
     plugin_id = str(raw.get("plugin_id") or "").strip()
+    provider = str(raw.get("provider") or "").strip().lower()
     rpc = str(raw.get("rpc") or "").strip()
     options = [
         {"id": str(o.get("id")).strip(), "label": str(o.get("label") or o.get("id")).strip()}
         for o in raw.get("options") or []
         if isinstance(o, dict) and str(o.get("id") or "").strip()
     ]
-    if not plugin_id or not rpc or len(options) < 2:
+    if not (plugin_id or provider) or not rpc or len(options) < 2:
         return None
-    return {"plugin_id": plugin_id, "rpc": rpc, "value": str(raw.get("value") or "").strip(), "options": options}
+    out = {"plugin_id": plugin_id, "rpc": rpc, "value": str(raw.get("value") or "").strip(), "options": options}
+    return {**out, "provider": provider} if provider else out
+
+
+def _accounts_of(*providers: str) -> tuple[str, list[dict[str, Any]]]:
+    """The first of ``providers`` with 2+ accounts, and its accounts (else the first, [])."""
+    try:
+        from backend.agent.accounts import list_accounts
+
+        for p in providers:
+            rows = list_accounts(p)
+            if len(rows) > 1:
+                return p, rows
+    except Exception:
+        pass
+    return providers[0], []
+
+
+def _account_switch(provider: str, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Core's picker toggle: one option per account, picking calls ``set_gateway_account``."""
+    if len(rows) < 2:
+        return None
+    return {
+        "plugin_id": "",
+        "rpc": "set_gateway_account",
+        "provider": provider,
+        "value": next((r["id"] for r in rows if r.get("active")), "default"),
+        "options": [{"id": r["id"], "label": r["label"]} for r in rows],
+    }
 
 
 def normalize_usage_windows(raw: Any) -> dict[str, Any]:
@@ -225,10 +258,27 @@ def _usage_registration(provider: str) -> tuple[str, dict[str, Any]]:
 
 
 def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = False) -> dict[str, Any]:
-    """Live quota windows from the gateway plugin. Cached ~2 min; Refresh forces."""
+    """Live quota windows from the gateway plugin. Cached ~2 min per account; Refresh forces.
+
+    A provider (or its coding agent) with 2+ accounts gets core's account ``switch``
+    unless the plugin sent its own."""
     name, reg = _usage_registration(provider)
+    asked = (provider or "").strip().lower()
+    acc_provider, rows = _accounts_of(asked, name) if asked != name else _accounts_of(name)
+    account = next((r["id"] for r in rows if r.get("active")), "")
+    out = _fetch_usage(name, reg, asked, api_key, model=model, force=force, account=account)
+    switch = _account_switch(acc_provider, rows)
+    if switch and not out.get("switch"):
+        out = {**out, "switch": switch}
+    return out
+
+
+def _fetch_usage(
+    name: str, reg: dict[str, Any], asked: str, api_key: str, *, model: str, force: bool, account: str
+) -> dict[str, Any]:
+    cache_key = f"{name}@{account}" if account else name  # switching never shows the old bars
     if not force:
-        hit = _USAGE_CACHE.get(name)
+        hit = _USAGE_CACHE.get(cache_key)
         if hit and (time.monotonic() - hit[0]) < _USAGE_TTL_S:
             return hit[1]
     key = (api_key or "").strip()
@@ -239,20 +289,23 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = F
                 key = str(norm(key) or "").strip()
             except Exception:
                 pass
-        if not key and name != (provider or "").strip().lower():
+        if not key and name != asked:
             from backend.agent.secrets import get_key
 
             key = str(get_key(name) or "").strip()
         fn = reg.get("fetch_usage")
         if not callable(fn):
-            return _usage_or_cached(name, {"windows": []})
+            return _usage_or_cached(cache_key, {"windows": []})
         try:
-            raw = fn(key, model=str(model or ""))
+            raw = fn(key, model=str(model or ""), account=account) if account else fn(key, model=str(model or ""))
         except TypeError:
-            raw = fn(key)
-        return _usage_or_cached(name, normalize_usage_windows(raw))
+            try:
+                raw = fn(key, model=str(model or ""))
+            except TypeError:
+                raw = fn(key)
+        return _usage_or_cached(cache_key, normalize_usage_windows(raw))
     except Exception:
-        return _usage_or_cached(name, {"windows": []})
+        return _usage_or_cached(cache_key, {"windows": []})
 
 
 def _usage_or_cached(name: str, out: dict[str, Any]) -> dict[str, Any]:

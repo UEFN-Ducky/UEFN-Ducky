@@ -80,6 +80,22 @@ describe("GatewayUsageFooter", () => {
     expect(picked).toEqual(["2"]);
   });
 
+  it("wraps five accounts into rows and every one is pickable", () => {
+    const picked: string[] = [];
+    const options = [1, 2, 3, 4, 5].map((n) => ({ id: `a${n}`, label: `Login ${n}` }));
+    render(
+      <GatewayUsageFooter
+        windows={[]}
+        accountSwitch={{ plugin_id: "", rpc: "set_gateway_account", provider: "codex", value: "a1", options }}
+        onSwitch={(id) => picked.push(id)}
+      />,
+    );
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
+    expect(screen.getByRole("radiogroup").className).toContain("is-wrap");
+    for (const n of [2, 3, 4, 5]) fireEvent.click(screen.getByRole("radio", { name: `Login ${n}` }));
+    expect(picked).toEqual(["a2", "a3", "a4", "a5"]);
+  });
+
   it("shows the toggle even before any bars load", () => {
     render(
       <GatewayUsageFooter
