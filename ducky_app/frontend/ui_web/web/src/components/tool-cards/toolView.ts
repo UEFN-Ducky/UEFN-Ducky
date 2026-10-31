@@ -25,6 +25,11 @@ const FULL_PATH = /^(?:[A-Za-z]:[\\/]|\\\\[^\\]|~[\\/])/;
 const MAX_MEDIA = 12;
 const MAX_BLOCKS = 24;
 const BLOCK_TYPES = new Set(["heading", "paragraph", "list", "code", "table", "key_value", "callout", "accordion"]);
+// Search, list and read results name files the agent passed over, not media it made.
+const LOOKUP_TOOLS = new Set([
+  "view_image", "workspace_find", "workspace_search", "workspace_tree", "workspace_list_dir",
+  "workspace_read_file", "workspace_read_files", "workspace_file_outline", "workspace_git",
+]);
 
 const ROUTE_LABELS: Record<string, string> = {
   settings: "Settings",
@@ -140,8 +145,8 @@ function routeLabel(route: string, itemId: string, title: string): string {
 /** The card's view, or null when it has nothing to add to the plain row. */
 export function toolViewSpec(toolName: string, args: Record<string, unknown>, result: unknown): ToolViewSpec | null {
   const name = bareToolName(toolName);
-  // A picture the agent looked at shows only inside its own row, never under the folded group.
-  if (name === "view_image") return null;
+  // A picture the agent looked at shows only inside its own row; a file search shows none.
+  if (LOOKUP_TOOLS.has(name)) return null;
   const parsed = parseToolResult(result);
   const obj = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
   if (name === "ducky_ui_navigate") {

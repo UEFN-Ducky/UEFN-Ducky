@@ -54,6 +54,7 @@ describe("tool results in the chat", () => {
     expect(view?.blocks).toEqual([{ type: "paragraph", text: "12 clips" }]);
     expect(toolViewSpec("imk_project_list", {}, '{"ok":true,"projects":[]}')).toBeNull();
     expect(toolViewSpec("mcp__uefn__view_image", {}, '{"path":"C:/a/shot.png","media_url":"http://x/shot.png"}')).toBeNull(); // stays in its row
+    expect(toolViewSpec("mcp__uefn__workspace_find", {}, '{"files":["C:/repo/assets/mark-1.svg","C:/repo/icon.png"]}')).toBeNull(); // a listing is no gallery
     expect(toolViewSpec("ducky_ui_navigate", { route: "workflows" }, '{"ok":true,"route":"workflows","in_chat":true}')?.navigate)
       .toEqual({ route: "workflows", itemId: "", label: "Workflows" });
     expect(toolViewSpec("ducky_ui_navigate", { route: "workflows" }, '{"ok":true,"route":"workflows"}')).toBeNull(); // an older app moved the tab itself
