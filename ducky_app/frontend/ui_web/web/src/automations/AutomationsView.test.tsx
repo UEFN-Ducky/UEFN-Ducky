@@ -10,7 +10,7 @@ import { installAppIdle } from "../utils/appIdle";
 import type { AutomationDto, WorkflowOwnerDto, WorkflowOwnersDto } from "../types/panel";
 
 const api = vi.hoisted(() => ({ stop_workflow: vi.fn(), list_workflow_versions: vi.fn(), get_workflow_version: vi.fn(), list_workflows: vi.fn(), list_workflow_nodes: vi.fn(), get_workflow: vi.fn(), save_workflow: vi.fn(), run_workflow: vi.fn(), delete_workflow: vi.fn(), workflow_owners: vi.fn(), workflow_sync: vi.fn(), copy_workflow: vi.fn(), set_workflow_run_here: vi.fn(), import_local_workflows: vi.fn(), workflow_open_web: vi.fn(), list_recent_projects: vi.fn(), set_project_root: vi.fn(), list_agent_profiles: vi.fn(), list_all_conversations: vi.fn(), get_mcp_tools_catalog: vi.fn(), get_workflow_tools_catalog: vi.fn(), set_workflow_folder: vi.fn(), move_workflow_folder: vi.fn(), add_workflow_folder: vi.fn(), copy_workflow_folder: vi.fn(), use_workflow_template: vi.fn(), clear_workflow_runs: vi.fn(), run_workflow_node: vi.fn(), get_workflow_node_code: vi.fn(), check_workflow_node_code: vi.fn(), workflow_code_api: vi.fn(), test_workflow_node: vi.fn(), approve_workflow_node_code: vi.fn(), report_plugin_panel: vi.fn() }));
-vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 vi.mock("./AutomationTemplatePicker", () => ({
   AutomationTemplatePicker: ({ open, owners, ownerId, onOwnerChange, onSelect, folder, onFolderChange, saveFolder }: {
     open: boolean;

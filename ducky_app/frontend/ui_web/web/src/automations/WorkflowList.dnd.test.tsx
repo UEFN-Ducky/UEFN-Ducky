@@ -6,7 +6,7 @@ import { useUndoShortcuts } from "../navigation/useUndoShortcuts";
 import type { AutomationSummaryDto, WorkflowOwnerDto } from "../types/panel";
 import { WorkflowList } from "./WorkflowList";
 
-vi.mock("../hooks/usePanelApi", () => ({ getApi: () => ({}) }));
+vi.mock("../hooks/usePanelApi", () => ({ getApi: () => ({}), isRemote: () => false }));
 
 const LOCAL: WorkflowOwnerDto = { id: "local", kind: "local", label: "Local", readOnly: false };
 const SHARED: WorkflowOwnerDto = { id: "spaceA", kind: "shared", label: "Alpha", readOnly: false };
