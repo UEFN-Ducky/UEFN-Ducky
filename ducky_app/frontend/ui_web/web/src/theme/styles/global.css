@@ -872,8 +872,7 @@ body.native-caption-input-ready .app-header .drag-region {
 .app-header .choice-dropdown--light .choice-dropdown-light {
   display: none;
 }
-.app-header-center .plugin-header-menu,
-.app-header-center .header-tools-menu {
+.app-header-center .plugin-header-menu {
   flex-shrink: 0;
   width: auto;
   max-width: none;
@@ -925,44 +924,35 @@ body.native-caption-input-ready .app-header .drag-region {
 .app-header--compact .quick-open-bar {
   height: 28px;
 }
-/* Phones: the editor tab row lives here as a dropdown (MobileTabSwitcher). */
-.app-header-tabs-slot {
+/* Phones: the editor tab row lives in the Ducky menu's Tabs tab (MobileTabSwitcher). */
+.connection-status-open-tabs:empty::after {
+  content: "No open tabs";
+  display: block;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* Phones: the header's tools as one icon row at the top of the Ducky menu. */
+.connection-status-tools {
   display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px;
+  margin: 8px 8px 0;
 }
-.app-header-tabs-slot:empty {
-  display: none;
+.connection-status-tool {
+  width: 40px;
+  height: 40px;
 }
-.mobile-tabs {
-  display: flex;
-  min-width: 0;
-}
-.mobile-tabs-trigger {
-  flex-shrink: 0;
-  color: var(--fg-dim);
-}
-.mobile-tabs-trigger[aria-expanded="true"] {
-  background: var(--tab-active);
-  color: var(--accent);
-}
-.mobile-tabs-trigger .editor-tab-icon {
-  opacity: 1;
+.connection-status-tool svg {
+  width: 20px;
+  height: 20px;
 }
 .mobile-tabs-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.mobile-tabs-caret {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-.mobile-tabs-caret svg {
-  width: 12px;
-  height: 12px;
 }
 .mobile-tabs-menu {
   display: flex;
@@ -1777,9 +1767,6 @@ body.native-caption-input-ready .app-header .drag-region {
   .app-header-center .plugin-header-btn :is(img.plugin-contrib-icon, .plugin-contrib-emoji) {
     width: 20px;
     height: 20px;
-  }
-  .app-header .mobile-tabs-trigger {
-    --tab-scale: 1.25;
   }
 }
 body.layout-sidebar-only .app-header-save-btn {

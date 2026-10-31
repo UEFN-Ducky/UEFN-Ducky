@@ -40,7 +40,6 @@ import { ContextMenu, useContextMenuState, type ContextMenuItem } from "./Contex
 import { targetRef, useUiTarget } from "../ui-targets/registry";
 import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
-import { setHeaderTabsSlot } from "./MobileTabSwitcher";
 import { RemoteWindowSelect } from "./RemoteWindowView";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
 
@@ -137,7 +136,8 @@ function PluginHeaderItem({
   );
 }
 
-function HeaderToolsMenu({
+/** Phones: the header's tools as one icon row at the top of the Ducky menu (less header clutter). */
+function HeaderToolIcons({
   canBack,
   canForward,
   onBack,
@@ -145,7 +145,6 @@ function HeaderToolsMenu({
   showNav,
   layoutTitle,
   onCycleLayout,
-  sidebarEnabled,
   showLeftToggle,
   rightTitle,
   onToggleRight,
@@ -162,6 +161,7 @@ function HeaderToolsMenu({
   onLedger,
   onAutomations,
   showSearch,
+  onDone,
 }: {
   canBack: boolean;
   canForward: boolean;
@@ -170,7 +170,6 @@ function HeaderToolsMenu({
   showNav: boolean;
   layoutTitle: string;
   onCycleLayout: () => void;
-  sidebarEnabled: boolean;
   showLeftToggle: boolean;
   rightTitle: string;
   onToggleRight: () => void;
@@ -187,56 +186,38 @@ function HeaderToolsMenu({
   onLedger?: () => void;
   onAutomations?: () => void;
   showSearch?: boolean;
+  onDone: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const item = (label: string, onClick?: () => void, disabled?: boolean) => (
-    <button
-      type="button"
-      className="plugin-header-menu-item"
-      disabled={disabled || !onClick}
-      onClick={() => {
-        onClick?.();
-        setOpen(false);
-      }}
-    >
-      <span className="plugin-header-menu-item-label">{label}</span>
-    </button>
-  );
-  return (
-    <div className="choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light header-tools-menu no-drag">
+  const item = (label: string, icon: JSX.Element, onClick?: () => void, disabled?: boolean) =>
+    onClick ? (
       <button
-        ref={anchorRef}
         type="button"
-        className={`choice-dropdown-trigger${open ? " is-open" : ""}`}
-        aria-haspopup="true"
-        aria-expanded={open}
-        aria-label="Tools"
-        title="Tools"
-        onClick={() => setOpen((v) => !v)}
+        className="icon-btn connection-status-tool"
+        title={label}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => {
+          onDone();
+          onClick();
+        }}
       >
-        <ChoiceTriggerFace icon={<Icons.Sliders />} />
+        {icon}
       </button>
-      <DropdownPanel open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} minWidth={200}>
-        <div className="plugin-header-menu-list" role="menu">
-          {showNav ? item("Back", onBack, !canBack) : null}
-          {showNav ? item("Forward", onForward, !canForward) : null}
-          {showLeftToggle
-            ? item(layoutTitle, sidebarEnabled ? onCycleLayout : undefined, !sidebarEnabled)
-            : null}
-          {showRightToggle
-            ? item(rightTitle, rightEnabled ? onToggleRight : undefined, !rightEnabled)
-            : null}
-          {showSearch ? item("Search", onSearch) : null}
-          {showWorkflow ? item("Build Verse", onCompile, compileBusy) : null}
-          {showWorkflow && canPush ? item("Push Verse", onPush, compileBusy) : null}
-          {item("Problems", onProblems)}
-          {item("Terminal", onTerminal)}
-          {item("Workflows", onAutomations)}
-          {item("Ledger", onLedger)}
-        </div>
-      </DropdownPanel>
-    </div>
+    ) : null;
+  return (
+    <>
+      {showNav ? item("Back", <Icons.ChevronLeft />, onBack, !canBack) : null}
+      {showNav ? item("Forward", <Icons.ChevronRight />, onForward, !canForward) : null}
+      {showSearch ? item("Search", <Icons.Search />, onSearch) : null}
+      {showLeftToggle ? item(layoutTitle, <Icons.PanelLeft />, onCycleLayout) : null}
+      {showRightToggle ? item(rightTitle, <Icons.PanelRight />, onToggleRight, !rightEnabled) : null}
+      {showWorkflow ? item("Build Verse", <Icons.Play />, onCompile, compileBusy) : null}
+      {showWorkflow && canPush ? item("Push Verse", <Icons.Upload />, onPush, compileBusy) : null}
+      {item("Problems", <Icons.AlertTriangle />, onProblems)}
+      {item("Terminal", <Icons.Terminal />, onTerminal)}
+      {item("Workflows", <Icons.GitBranch />, onAutomations)}
+      {item("Ledger", <Icons.Diff />, onLedger)}
+    </>
   );
 }
 
@@ -506,6 +487,46 @@ export function Header({
   ) : null;
 
   const showWorkflow = !!(workflowAction?.connected && isOnline);
+  // Phones: these tools sit in the Ducky menu, not the header.
+  const phoneTools =
+    compactHeader && !isFocus
+      ? (close: () => void) => (
+          <HeaderToolIcons
+            onDone={close}
+            showNav={showNavButtons}
+            canBack={!!nav?.canBack}
+            canForward={!!nav?.canForward}
+            onBack={() => nav?.back()}
+            onForward={() => nav?.forward()}
+            layoutTitle={layoutToggle.title}
+            onCycleLayout={onCycleLayout}
+            showLeftToggle={showLeftSidebarToggle}
+            rightTitle={rightRailToggle.title}
+            onToggleRight={onToggleRight}
+            rightEnabled={rightSidebarEnabled}
+            showRightToggle={showRightSidebarToggle}
+            showWorkflow={showWorkflow}
+            onCompile={workflowAction?.onCompile}
+            onPush={workflowAction?.onPush}
+            canPush={workflowAction?.canPush}
+            compileBusy={workflowAction?.busy || workflowAction?.buildState === 3}
+            onProblems={problemsAction ? () => setProblemsMenuOpen(true) : undefined}
+            onTerminal={
+              terminalAction
+                ? () => {
+                    const active = terminalAction.terminals.find((t) => t.active);
+                    if (active) terminalAction.onGotoTerminal(active.id);
+                    else terminalAction.onNewTerminal();
+                  }
+                : undefined
+            }
+            onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
+            onAutomations={() => requestOpenWorkflowsTab()}
+            showSearch={showSearch}
+            onSearch={showSearch ? () => openPalette("file") : undefined}
+          />
+        )
+      : undefined;
   // Watching a PC window from the phone: only Ducky and the View menu stay up top.
   const streaming = isRemote() && !!watchWindowId;
   const headerTargetRef = useUiTarget("shell.header", { kind: "button", label: "Top bar", route: "chat" });
@@ -543,6 +564,8 @@ export function Header({
                   if (streaming) onWatchWindowId?.("");
                   handleSettingsToggle();
                 }}
+                tabsTab={compactHeader && !isFocus}
+                tools={phoneTools}
                 extra={
                   !isFocus && isRemote() ? (
                     <ProjectSelector
@@ -585,46 +608,7 @@ export function Header({
           data-header-menu
           onContextMenu={(e) => headerMenu.open(e, null)}
         >
-          {compactHeader ? (
-            <>
-            <span className="app-header-tabs-slot no-drag" ref={setHeaderTabsSlot} />
-            {showSearch ? <QuickOpenBar /> : null}
-            <HeaderToolsMenu
-              showNav={showNavButtons}
-              canBack={!!nav?.canBack}
-              canForward={!!nav?.canForward}
-              onBack={() => nav?.back()}
-              onForward={() => nav?.forward()}
-              layoutTitle={layoutToggle.title}
-              onCycleLayout={onCycleLayout}
-              sidebarEnabled
-              showLeftToggle={showLeftSidebarToggle}
-              rightTitle={rightRailToggle.title}
-              onToggleRight={onToggleRight}
-              rightEnabled={rightSidebarEnabled}
-              showRightToggle={showRightSidebarToggle}
-              showWorkflow={showWorkflow}
-              onCompile={workflowAction?.onCompile}
-              onPush={workflowAction?.onPush}
-              canPush={workflowAction?.canPush}
-              compileBusy={workflowAction?.busy || workflowAction?.buildState === 3}
-              onProblems={problemsAction ? () => setProblemsMenuOpen(true) : undefined}
-              onTerminal={
-                terminalAction
-                  ? () => {
-                      const active = terminalAction.terminals.find((t) => t.active);
-                      if (active) terminalAction.onGotoTerminal(active.id);
-                      else terminalAction.onNewTerminal();
-                    }
-                  : undefined
-              }
-              onLedger={showChanges ? () => requestOpenChangesTab() : undefined}
-              onAutomations={() => requestOpenWorkflowsTab()}
-              showSearch={showSearch}
-              onSearch={showSearch ? () => openPalette("file") : undefined}
-            />
-            </>
-          ) : (
+          {compactHeader ? null : (
             <>
               {navButtons}
               {showSearch ? <QuickOpenBar /> : null}

@@ -4161,6 +4161,12 @@ html.window-maximized .window-resize-grip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Phones: an image chip is just its thumbnail; the file name only took room. */
+@media (max-width: 720px) {
+  .composer-attachment-chip--image .composer-attachment-chip-name {
+    display: none;
+  }
+}
 
 .composer-attachment-chip-remove {
   display: flex;

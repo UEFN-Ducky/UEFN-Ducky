@@ -7,6 +7,7 @@ import { Icons } from "../icons/Icons";
 import type { ListenerStatus } from "../types/panel";
 import { useListenerUptimeSec } from "../hooks/useListenerStatus";
 import { getApi } from "../hooks/usePanelApi";
+import { setHeaderTabsSlot } from "./MobileTabSwitcher";
 
 function isFramedWebView(): boolean {
   return typeof window !== "undefined" && !window.pywebview && window.parent !== window;
@@ -116,6 +117,10 @@ export interface ConnectionStatusDropdownProps {
   readonly?: boolean;
   /** Remote/mobile: recent projects list (replaces the header project dropdown). */
   extra?: ReactNode;
+  /** Phones: a first Tabs tab listing the open editor tabs (MobileTabSwitcher portals into it). */
+  tabsTab?: boolean;
+  /** Phones: the header's tool buttons as one icon row above Settings; `close` shuts the menu. */
+  tools?: (close: () => void) => ReactNode;
 }
 
 /**
@@ -131,10 +136,14 @@ export function ConnectionStatusDropdown({
   onOpenSettings,
   readonly = false,
   extra,
+  tabsTab = false,
+  tools,
 }: ConnectionStatusDropdownProps) {
   const [open, setOpen] = useState(false);
-  // A phone or remote view puts the project list here too, as its own first tab.
-  const [tab, setTab] = useState<"projects" | "connections" | "online">(extra ? "projects" : "connections");
+  // A phone puts its open tabs here as the first tab; a remote view its project list next.
+  const [tab, setTab] = useState<"tabs" | "projects" | "connections" | "online">(
+    tabsTab ? "tabs" : extra ? "projects" : "connections",
+  );
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [restartNote, setRestartNote] = useState("");
   const { duckies, error: duckiesError, reload: reloadDuckies } = useAccountDuckies();
@@ -144,8 +153,9 @@ export function ConnectionStatusDropdown({
   const badge = badgeText(online);
   const showOnline = hasOnlineTab && tab === "online";
   const showProjects = Boolean(extra) && tab === "projects";
-  const showConnections = !showOnline && !showProjects;
-  const hasTabs = hasOnlineTab || Boolean(extra);
+  const showOpenTabs = tabsTab && tab === "tabs";
+  const showConnections = !showOnline && !showProjects && !showOpenTabs;
+  const hasTabs = hasOnlineTab || Boolean(extra) || tabsTab;
 
   useEffect(() => {
     if (open && showOnline) reloadDuckies();
@@ -160,6 +170,7 @@ export function ConnectionStatusDropdown({
 
   const pop = useMenuPop(open);
   const close = useCallback(() => setOpen(false), []);
+  const openTabsRef = useCallback((el: HTMLDivElement | null) => setHeaderTabsSlot(el, close), [close]);
   useDropdownDismiss(open, close, menuRef, triggerRef);
 
   // Closing keeps the last spot so the menu zooms back into the icon.
@@ -211,6 +222,7 @@ export function ConnectionStatusDropdown({
         role="dialog"
         aria-label="Connection status"
       >
+        {tools ? <div className="connection-status-tools">{tools(close)}</div> : null}
         <button
           type="button"
           className="connection-status-menu-settings"
@@ -238,6 +250,17 @@ export function ConnectionStatusDropdown({
         ) : null}
         {hasTabs ? (
           <div className="connection-status-tabs" role="tablist" aria-label="Status">
+            {tabsTab ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={showOpenTabs}
+                className={`connection-status-tab${showOpenTabs ? " is-active" : ""}`}
+                onClick={() => setTab("tabs")}
+              >
+                Tabs
+              </button>
+            ) : null}
             {extra ? (
               <button
                 type="button"
@@ -272,7 +295,9 @@ export function ConnectionStatusDropdown({
             ) : null}
           </div>
         ) : null}
-        {showProjects ? (
+        {showOpenTabs ? (
+          <div className="connection-status-open-tabs" ref={openTabsRef} />
+        ) : showProjects ? (
           extra
         ) : showOnline ? (
           <>

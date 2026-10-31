@@ -166,11 +166,13 @@ export const EditorGroupPane = memo(function EditorGroupPane({
         .filter((t) => terminalsEnabled || t.kind !== "terminal"),
     [group.tabIds, openTabs, terminalsEnabled],
   );
-  // Phones: the focused group's tabs are a dropdown in the header, not a row here. A split
-  // keeps each pane's own row, so every pane shows (and can close) its tabs.
+  // Phones: the focused group's tabs are the Ducky menu's Tabs tab, not a row here (portaled
+  // into it while the menu is open). A split keeps each pane's own row, so every pane shows
+  // (and can close) its tabs.
   const narrow = useNarrowLayout();
   const headerTabsSlot = useHeaderTabsSlot();
-  const tabsInHeader = narrow && !split && isFocused && variant !== "focus" && !!headerTabsSlot && groupTabs.length > 0;
+  const tabsInMenu = narrow && !split && isFocused && variant !== "focus" && groupTabs.length > 0;
+  const tabsInHeader = tabsInMenu && !!headerTabsSlot;
 
   const activeTab = group.activeTabId ? openTabs.find((t) => t.id === group.activeTabId) : undefined;
 
@@ -408,7 +410,7 @@ export const EditorGroupPane = memo(function EditorGroupPane({
         <MobileTabSwitcher tabs={groupTabs} activeTabId={group.activeTabId} onActivate={(tabId) => onActivateTab(group.id, tabId)} onClose={onCloseTab} />,
         headerTabsSlot!,
       ) : null}
-      {variant !== "focus" && !tabsInHeader ? (
+      {variant !== "focus" && !tabsInMenu ? (
         <div className="editor-tab-bar-row editor-group-tab-bar">
           <div className="editor-tab-bar-tabs">
             <EditorTabs

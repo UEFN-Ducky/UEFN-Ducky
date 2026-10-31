@@ -66,6 +66,33 @@ describe("ConnectionStatusDropdown", () => {
     expect(screen.getByText("Ducky MCP")).toBeTruthy();
   });
 
+  it("on a phone opens on a Tabs tab, with the header's tools as icons above Settings", () => {
+    const onSearch = vi.fn();
+    render(
+      <ConnectionStatusDropdown
+        status={status}
+        onOpenSettings={() => {}}
+        extra={<div>RECENT PROJECTS</div>}
+        tabsTab
+        tools={(close) => (
+          <button type="button" aria-label="Search" onClick={() => { close(); onSearch(); }} />
+        )}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /offline/i }));
+    expect(screen.getAllByRole("tab").map((el) => el.textContent)).toEqual(["Tabs", "Projects", "Connections"]);
+    const dialog = screen.getByRole("dialog", { name: "Connection status" });
+    const tools = dialog.querySelector(".connection-status-tools");
+    const settings = dialog.querySelector(".connection-status-menu-settings");
+    expect(tools && settings && tools.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The Tabs tab is the spot the focused editor group portals its tab list into.
+    expect(dialog.querySelector(".connection-status-open-tabs")).toBeTruthy();
+    expect(screen.queryByText("RECENT PROJECTS")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(onSearch).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Connection status" })).toBeNull();
+  });
+
   it("shows UEFN MCP and Unreal MCP by the editor holding Epic's port", () => {
     const url = "http://127.0.0.1:8000/mcp";
     const rows = (extra: Partial<ListenerStatus>) =>

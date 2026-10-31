@@ -867,6 +867,13 @@ export function ChatComposer({
           </div>
 
           <div className="chat-pane-composer-pane chat-pane-composer-pane--type">
+            {/* Always the very top edge of the box, above notices and attachments. */}
+            <ChatInputResizeHandle
+              onDrag={onInputResize}
+              onDragStart={onInputResizeStart}
+              onDragEnd={onInputResizeEnd}
+              onTap={onInputResizeTap}
+            />
             {showDefaultModelCta || pickModelFirst || notConnected ? (
               <ModelSetupNotice
                 state={
@@ -903,12 +910,6 @@ export function ChatComposer({
               onSaveDrawing={(dataUrl) => {
                 if (previewAttachmentId) updateAttachmentImage(previewAttachmentId, dataUrl);
               }}
-            />
-            <ChatInputResizeHandle
-              onDrag={onInputResize}
-              onDragStart={onInputResizeStart}
-              onDragEnd={onInputResizeEnd}
-              onTap={onInputResizeTap}
             />
             <ComposerDraft
               inputRef={textareaMergedRef}
