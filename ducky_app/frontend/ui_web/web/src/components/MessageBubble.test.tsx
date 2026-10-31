@@ -29,7 +29,38 @@ vi.mock("../voice/ttsEngine", () => ({
 const openPanelRoute = vi.fn();
 vi.mock("../navigation/openPanelRoute", () => ({ openPanelRoute: (...a: unknown[]) => openPanelRoute(...a) }));
 
-import { MessageBubble } from "./MessageBubble";
+import { MessageBubble, MotionFrame } from "./MessageBubble";
+import { __setAssetBaseForTest } from "../remote/assetBase";
+
+describe("MotionFrame", () => {
+  afterEach(() => {
+    cleanup();
+    __setAssetBaseForTest(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("loads the scene by src on the desktop", () => {
+    __setAssetBaseForTest("/");
+    const { container } = render(<MotionFrame url="http://127.0.0.1:4199/generated-images/m.html" name="m.html" />);
+    const frame = container.querySelector("iframe");
+    expect(frame?.getAttribute("src")).toBe("http://127.0.0.1:4199/generated-images/m.html");
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+  });
+
+  it("hands the sandboxed frame the scene HTML on the phone (Remote View)", async () => {
+    const base = "/static/plugins/uefn-ducky/panel/";
+    __setAssetBaseForTest(base);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("<p>scene</p>", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { container, findByTitle } = render(<MotionFrame url={`${base}generated-images/m.html`} name="m.html" />);
+    const frame = await findByTitle("m.html");
+    expect(fetchMock).toHaveBeenCalledWith(`${base}generated-images/m.html`);
+    expect(frame.getAttribute("srcdoc")).toBe("<p>scene</p>");
+    expect(frame.getAttribute("src")).toBeNull();
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(container.querySelectorAll("iframe")).toHaveLength(1);
+  });
+});
 
 describe("MessageBubble interrupted continue", () => {
   afterEach(() => cleanup());

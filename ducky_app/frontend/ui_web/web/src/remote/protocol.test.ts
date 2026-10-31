@@ -60,6 +60,20 @@ describe("rewriteLoopbackUrls", () => {
       n: 3,
     });
   });
+
+  it("rewrites loopback URLs inside chat markdown and JSON-as-text tool results", () => {
+    const base = "/static/plugins/uefn-ducky/panel/";
+    const origins = ["http://127.0.0.1:4199", "http://localhost:4199"];
+    const md = "Map:\n![Top](http://127.0.0.1:4199/chat-attachments/c1/s1.png)\n![B](http://127.0.0.1:4199/chat-attachments/c1/s2.png)";
+    expect(rewriteLoopbackUrls(md, origins, base)).toBe(
+      `Map:\n![Top](${base}chat-attachments/c1/s1.png)\n![B](${base}chat-attachments/c1/s2.png)`,
+    );
+    const tool = JSON.stringify({ path: "C:/x/s1.png", media_url: "http://127.0.0.1:4199/chat-attachments/c1/s1.png" });
+    expect(JSON.parse(rewriteLoopbackUrls(tool, origins, base)).media_url).toBe(`${base}chat-attachments/c1/s1.png`);
+    expect(rewriteLoopbackUrls("http://127.0.0.1:41990/x and https://example.com/y", origins, base)).toBe(
+      "http://127.0.0.1:41990/x and https://example.com/y",
+    );
+  });
 });
 
 describe("sdpFingerprint / compareVersions", () => {

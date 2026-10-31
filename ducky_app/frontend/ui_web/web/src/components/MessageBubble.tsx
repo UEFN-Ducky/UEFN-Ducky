@@ -14,6 +14,7 @@ import { MediaLightbox } from "./MediaLightbox";
 import { openPanelRoute } from "../navigation/openPanelRoute";
 import { TourOffer } from "../walkthrough/TourOffer";
 import { useIntroTyping } from "../walkthrough/introTyping";
+import { isSubdirectoryPanel } from "../remote/assetBase";
 
 interface MessageBubbleProps {
   role: string;
@@ -55,6 +56,32 @@ function sendToMediaKit(action: "open" | "export", a: MessageAttachmentDto) {
   );
 }
 
+/**
+ * A motion scene (HTML) in a sandbox without same-origin, so its script can't reach the app.
+ * On the phone (Remote View) a sandboxed frame is never handled by the panel's Service Worker,
+ * so its src would hit the site instead of the PC: the page fetches the scene through the
+ * worker and hands the frame the HTML itself.
+ */
+export function MotionFrame({ url, name }: { url: string; name: string }) {
+  const viaPage = isSubdirectoryPanel();
+  const [doc, setDoc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!viaPage) return;
+    let live = true;
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : ""))
+      .catch(() => "")
+      .then((text) => {
+        if (live) setDoc(text);
+      });
+    return () => {
+      live = false;
+    };
+  }, [url, viaPage]);
+  if (!viaPage) return <iframe src={url} sandbox="allow-scripts" title={name} loading="lazy" />;
+  return doc ? <iframe srcDoc={doc} sandbox="allow-scripts" title={name} /> : null;
+}
+
 /** A video, sound or motion scene an agent made: plays right under the reply. */
 function ReplyMediaCard({ media }: { media: MessageAttachmentDto }) {
   const [big, setBig] = useState(false);
@@ -68,10 +95,7 @@ function ReplyMediaCard({ media }: { media: MessageAttachmentDto }) {
         <MediaLightbox items={[{ kind: "video", name: media.name, url }]} index={big ? 0 : null} onClose={() => setBig(false)} />
       ) : null}
       {media.kind === "audio" ? <audio src={url} controls preload="metadata" /> : null}
-      {media.kind === "motion" ? (
-        // No same-origin: the scene's script can't reach the app; the server also sends a self-only CSP.
-        <iframe src={url} sandbox="allow-scripts" title={media.name} loading="lazy" />
-      ) : null}
+      {media.kind === "motion" ? <MotionFrame url={url} name={media.name} /> : null}
       <div className="message-bubble-media-actions">
         {media.kind === "video" ? (
           <button type="button" onClick={() => setBig(true)}>

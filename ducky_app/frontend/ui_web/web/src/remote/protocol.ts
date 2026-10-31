@@ -102,7 +102,9 @@ export class PartAssembler {
  * to panel-relative paths so the viewer's Service Worker can serve them over
  * the blob channel. `base` is where the panel document lives — "/" on the
  * desktop, the plugin asset directory in direct mode — and keeps every rewritten
- * URL inside the worker's scope. Walks arrays and plain objects.
+ * URL inside the worker's scope. Walks arrays and plain objects, and rewrites
+ * every occurrence inside a string too: chat markdown (`![](http://127.0.0.1:4199/…)`)
+ * and tool results that carry their JSON as text embed these URLs mid-string.
  */
 export function rewriteLoopbackUrls<T>(
   value: T,
@@ -111,10 +113,11 @@ export function rewriteLoopbackUrls<T>(
 ): T {
   const visit = (v: unknown): unknown => {
     if (typeof v === "string") {
+      let s = v;
       for (const origin of loopbackOrigins) {
-        if (v.startsWith(origin + "/")) return base + v.slice(origin.length + 1);
+        if (s.includes(origin + "/")) s = s.split(origin + "/").join(base);
       }
-      return v;
+      return s;
     }
     if (Array.isArray(v)) return v.map(visit);
     if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) {

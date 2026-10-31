@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Icons } from "../../../icons/Icons";
+import { assetUrl } from "../../../remote/assetBase";
 import type { ToolCardBodyProps } from "../toolCardTypes";
 
 export function asScreenshotRecord(value: unknown): Record<string, unknown> | null {
@@ -150,7 +151,7 @@ export function ScreenshotBody({
   const mime = pickMime(data);
   const src = useMemo(() => {
     if (mediaUrl) return mediaUrl;
-    if (fromPath) return fromPath;
+    if (fromPath) return assetUrl(fromPath); // inside the phone panel's worker scope in Remote View
     if (base64) return `data:${mime};base64,${base64}`;
     return "";
   }, [mediaUrl, fromPath, base64, mime]);

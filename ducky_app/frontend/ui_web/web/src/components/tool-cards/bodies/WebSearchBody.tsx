@@ -63,10 +63,12 @@ export function safeImageSrc(raw: string): string {
   return href.startsWith("https:") ? href : "";
 }
 
-/** A frame web_video saved in this chat: served by Ducky itself, never a web address. */
+/** A frame web_video saved in this chat: served by Ducky itself, never a web address.
+ *  Remote View rewrites the loopback origin to the phone panel's directory, so the
+ *  same file also arrives as a same-origin path (`/…/chat-attachments/<chat>/<file>`). */
 export function safeChatMediaSrc(raw: string): string {
   const text = (raw || "").trim();
-  return /^http:\/\/127\.0\.0\.1:\d+\/chat-attachments\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(text) ? text : "";
+  return /^(?:http:\/\/127\.0\.0\.1:\d+)?\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*chat-attachments\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(text) ? text : "";
 }
 
 function hostOf(href: string): string {

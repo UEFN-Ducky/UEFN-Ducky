@@ -535,6 +535,16 @@
   color: var(--chat-body-color, var(--fg-dim));
 }
 
+/* Picture from this chat's folder (markdown image) */
+.rich-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--chat-border-color, var(--border));
+}
+
 /* HR */
 .rich-hr {
   border: none;

@@ -13,6 +13,7 @@ import { RichParagraph } from "./RichParagraph";
 import { RichTableWrap } from "./RichTable";
 import { RichEmphasis } from "./RichEmphasis";
 import { richNodeText, richTextClass, richUrlTransform } from "./richTextColors";
+import { safeChatMediaSrc } from "../tool-cards/bodies/WebSearchBody";
 
 interface MarkdownContentProps {
   text: string;
@@ -53,7 +54,12 @@ function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
       th: ({ children }) => <th className="rich-table-th">{children}</th>,
       td: ({ children }) => <td className="rich-table-td">{children}</td>,
       hr: () => <hr className="rich-hr" />,
-      img: ({ alt }) => (alt ? <span>{alt}</span> : null),
+      // Only pictures Ducky itself serves from this chat's folder; a web address is never requested.
+      img: ({ src, alt }) => {
+        const local = safeChatMediaSrc(String(src || ""));
+        if (local) return <img className="rich-image" src={local} alt={alt || ""} loading="lazy" />;
+        return alt ? <span>{alt}</span> : null;
+      },
     };
   }, [onOpenFile]);
 

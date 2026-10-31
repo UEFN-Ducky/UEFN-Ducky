@@ -176,4 +176,15 @@ describe("MarkdownContent remote images", () => {
     expect(container.textContent).toContain("flag");
     expect(container.innerHTML).not.toContain("evil.example");
   });
+
+  it("shows a picture saved in this chat, on the desktop and rewritten for Remote View", () => {
+    const desk = render(<MarkdownContent text={"![Top](http://127.0.0.1:4199/chat-attachments/c1/s1_top.png)"} />);
+    expect(desk.container.querySelector("img")?.getAttribute("src")).toBe("http://127.0.0.1:4199/chat-attachments/c1/s1_top.png");
+    cleanup();
+    const phone = render(<MarkdownContent text={"![Top](/static/plugins/uefn-ducky/panel/chat-attachments/c1/s1_top.png)"} />);
+    expect(phone.container.querySelector("img")?.getAttribute("src")).toBe("/static/plugins/uefn-ducky/panel/chat-attachments/c1/s1_top.png");
+    cleanup();
+    const other = render(<MarkdownContent text={"![x](http://127.0.0.1:4199/__panel_api/secret.png)"} />);
+    expect(other.container.querySelector("img")).toBeNull();
+  });
 });
