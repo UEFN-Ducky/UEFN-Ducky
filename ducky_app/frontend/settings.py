@@ -338,6 +338,11 @@ class PanelSettings:
     allow_agent_clicks: bool = False
     """When true, the AI may press highlighted panel controls. Off = highlight and wait for you."""
 
+    allow_everything_all_chats: bool = False
+    """When true, every chat and every agent it starts runs as "Allow everything": no permission
+    card ever (commands, sandbox, web, files, tools); questions still come to the person.
+    The person's own switch (Settings → Permissions), never an AI-settable field."""
+
     allow_see_uefn: bool = True
     """When false, hide UEFN viewport / screenshot tools from the AI."""
 

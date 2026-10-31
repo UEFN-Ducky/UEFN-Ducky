@@ -1588,6 +1588,8 @@ export interface PanelSettingsDto {
   ai_ignore_strict?: boolean;
   allow_settings_write?: boolean;
   allow_agent_clicks?: boolean;
+  /** Every chat runs as Allow everything: no permission cards, questions still come. */
+  allow_everything_all_chats?: boolean;
   allow_see_uefn?: boolean;
   allow_see_other_programs?: boolean;
   show_hidden_project_files?: boolean;

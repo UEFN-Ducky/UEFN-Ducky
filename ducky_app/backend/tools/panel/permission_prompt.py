@@ -301,10 +301,26 @@ def allow_source(conv_id: str) -> str:
     return ""
 
 
+_EVERYWHERE_TITLE = "Settings → Permissions"
+
+
+def allows_everywhere() -> bool:
+    """The person's own "Allow everything in every chat" switch (no AI can set it)."""
+    try:
+        from frontend.settings import PanelSettings
+
+        return bool(PanelSettings.load().allow_everything_all_chats)
+    except Exception:
+        return False
+
+
 def allow_state(conv_id: str) -> dict[str, Any]:
-    """For the chat's context panel: on, set here (can be turned off here) or from which chat."""
+    """For the chat's context panel: on, set here (can be turned off here) or from which chat
+    (or from Settings, for every chat)."""
     src = allow_source(conv_id)
     out: dict[str, Any] = {"on": bool(src), "own": bool(src) and src == (conv_id or "").strip(), "from_title": ""}
+    if not out["own"] and allows_everywhere():
+        return {"on": True, "own": False, "from_title": _EVERYWHERE_TITLE}
     if src and not out["own"]:
         title = ""
         try:
@@ -320,8 +336,10 @@ def allow_state(conv_id: str) -> dict[str, Any]:
 
 
 def allows_everything(conv_id: str) -> bool:
-    """"Allow everything" was picked in this chat, or in the chat that started its run."""
-    return bool(allow_source(conv_id))
+    """"Allow everything" was picked in this chat, in the chat that started its run, or for
+    every chat in Settings. Oct 31 2026: chats an outside agent started (a harness race) had
+    no chat to take it from, and their sandbox asked though the person allows everything."""
+    return allows_everywhere() or bool(allow_source(conv_id))
 
 
 def starter_root(conv_id: str) -> str:

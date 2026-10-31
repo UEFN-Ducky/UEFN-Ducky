@@ -177,6 +177,32 @@ def test_allow_everything_turns_off_and_goes_with_its_chat(monkeypatch, conv) ->
     assert pp.allows_everything("twin") and pp._started_by("twin") == "lead"
 
 
+def test_allow_everything_in_every_chat_never_shows_a_permission_card(monkeypatch, conv) -> None:
+    # Oct 31 2026: harness-race chats an outside agent started had no chat to take Allow
+    # everything from, and their sandbox asked though the person allows everything.
+    from types import SimpleNamespace
+
+    from backend.sandbox import policy
+
+    settings = SimpleNamespace(allow_everything_all_chats=False)
+    monkeypatch.setattr("frontend.settings.PanelSettings.load", lambda *a, **k: settings)
+    asked = _answer(monkeypatch, ["deny"])
+    assert not pp.allows_everything("race") and pp.permission_mode("race") == pp.MODE_EDITS
+    settings.allow_everything_all_chats = True
+    assert pp.allows_everything("race") and pp.allows_sandbox("race") and pp.permission_mode("race") == pp.MODE_ALL
+    assert pp.decide("Bash", {"command": "git push --force"}, conv_id="race")["behavior"] == "allow"
+    assert policy.ask_to_run("race", "Start a program", "python -m http.server") == "sandbox"
+    assert asked == []
+    assert pp.allow_state("race") == {"on": True, "own": False, "from_title": "Settings → Permissions"}
+    # A chat's own Allow everything stays its own, so it can still be turned off there.
+    pp.set_allow_everything("own", True)
+    assert pp.allow_state("own")["own"] is True
+    # The switch is the person's: no AI settings tool can turn it on.
+    from frontend.settings_schema import settable_keys
+
+    assert "allow_everything_all_chats" not in settable_keys()
+
+
 @pytest.mark.parametrize("tool", ["Read", "Glob", "Grep", "LS"])
 def test_read_only_tools_never_ask(monkeypatch, conv, tool: str) -> None:
     asked = _answer(monkeypatch, ["deny"])

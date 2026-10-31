@@ -37,6 +37,7 @@ class PanelApiSettingsMixin:
             "ai_ignore_strict": s.ai_ignore_strict,
             "allow_settings_write": bool(s.allow_settings_write),
             "allow_agent_clicks": bool(s.allow_agent_clicks),
+            "allow_everything_all_chats": bool(s.allow_everything_all_chats),
             "allow_see_uefn": bool(s.allow_see_uefn),
             "allow_see_other_programs": bool(s.allow_see_other_programs),
             "show_hidden_project_files": s.show_hidden_project_files,
@@ -496,7 +497,8 @@ class PanelApiSettingsMixin:
         from backend.agent.secrets import set_key
 
         s = _pa.PanelSettings.load()
-        for key in ("allow_settings_write", "allow_agent_clicks", "allow_see_uefn", "allow_see_other_programs"):
+        for key in ("allow_settings_write", "allow_agent_clicks", "allow_see_uefn", "allow_see_other_programs",
+                    "allow_everything_all_chats"):
             if key in patch:
                 setattr(s, key, bool(patch[key]))
         if "usage_stats" in patch:

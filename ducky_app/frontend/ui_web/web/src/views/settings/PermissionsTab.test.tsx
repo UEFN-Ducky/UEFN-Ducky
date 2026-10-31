@@ -63,3 +63,15 @@ it("keeps permissions disabled if loading fails and reports rejected saves", asy
   expect(screen.queryByText("AI access permissions saved.")).toBeNull();
   expect((screen.getByLabelText("Allow AI clicks") as HTMLInputElement).checked).toBe(true);
 });
+
+it("turns Allow everything on for every chat from Settings", async () => {
+  getSettings.mockResolvedValueOnce({ allow_everything_all_chats: false });
+  render(<PermissionsTab />);
+  const everywhere = screen.getByLabelText("Allow everything in every chat") as HTMLInputElement;
+  await waitFor(() => expect(everywhere.disabled).toBe(false));
+  expect(everywhere.checked).toBe(false);
+  fireEvent.click(everywhere);
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ allow_everything_all_chats: true }));
+  await screen.findByText("Every chat allows everything. Questions still come to you.");
+  expect(everywhere.checked).toBe(true);
+});

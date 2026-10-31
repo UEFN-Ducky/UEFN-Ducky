@@ -303,6 +303,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Click Ducky controls", "Account", settable=True,
         description="On: the AI presses the highlighted control. Off: it highlights and waits for you.",
     ),
+    "allow_everything_all_chats": FieldMeta(
+        "Allow everything in every chat", "Account",
+        description="No chat or agent asks for permission; questions still come to you. Only you can turn it on.",
+    ),
     "allow_see_uefn": FieldMeta(
         "See UEFN", "Account", settable=True,
         description="Let the AI look at the UEFN viewport and screenshots when this PC is connected.",

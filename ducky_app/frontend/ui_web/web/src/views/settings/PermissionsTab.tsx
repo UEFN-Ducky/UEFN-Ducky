@@ -28,10 +28,14 @@ export function PermissionsTab() {
   const [usageLoaded, setUsageLoaded] = useState(false);
   const [savingUsage, setSavingUsage] = useState(false);
   const [usageStatus, setUsageStatus] = useState("");
+  const [allowAll, setAllowAll] = useState(false);
+  const [savingAllowAll, setSavingAllowAll] = useState(false);
+  const [allowAllStatus, setAllowAllStatus] = useState("");
   useEffect(() => onApiReady(() => {
     void Promise.resolve(getApi()?.get_settings()).then((settings) => {
       if (!settings) throw new Error("Settings unavailable");
       setAccess(Object.fromEntries(ACCESS_CONTROLS.map((control) => [control.key, settings[control.key] ?? control.defaultValue])) as Record<AccessKey, boolean>);
+      setAllowAll(settings.allow_everything_all_chats ?? false);
       setAccessLoaded(true);
       setUsageStats(settings.usage_stats ?? true);
       setUsageLoaded(true);
@@ -50,6 +54,20 @@ export function PermissionsTab() {
       setUsageStatus(e instanceof Error ? e.message : "Could not save.");
     } finally {
       setSavingUsage(false);
+    }
+  };
+  const saveAllowAll = async (checked: boolean) => {
+    setAllowAll(checked);
+    setSavingAllowAll(true);
+    setAllowAllStatus("Saving…");
+    try {
+      await savePermissionSettings({ allow_everything_all_chats: checked });
+      setAllowAllStatus(checked ? "Every chat allows everything. Questions still come to you." : "Each chat uses its own permissions again.");
+    } catch (e) {
+      setAllowAll(!checked);
+      setAllowAllStatus(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setSavingAllowAll(false);
     }
   };
   const saveAccess = async (key: AccessKey, checked: boolean) => {
@@ -87,7 +105,12 @@ export function PermissionsTab() {
       <hr className="general-tab-divider" />
       <section className="general-tab-section">
         <GeneralSectionHeader icon={<Icons.Settings />} title="Questions and approvals" description="Questions stay pending until you submit an answer. Stop ends the run; it never grants permission." />
-        <p>Tool approvals are requested in the owning chat. Allow once applies to that request; saved approvals apply to that chat. Strict file protection still takes precedence.</p>
+        <SettingsToggleRow id="allow_everything_all_chats" label="Allow everything in every chat"
+          description="No chat or agent asks for permission: commands, sandbox, web, file changes and tools all run. Questions still come to you."
+          checked={allowAll} disabled={!accessLoaded || savingAllowAll}
+          onChange={(checked) => { void saveAllowAll(checked); }} />
+        <p role="status">{allowAllStatus}</p>
+        <p>Otherwise tool approvals are requested in the owning chat. Allow once applies to that request; saved approvals apply to that chat. Strict file protection still takes precedence.</p>
         <SavedPermissionsSection />
       </section>
       <hr className="general-tab-divider" />
